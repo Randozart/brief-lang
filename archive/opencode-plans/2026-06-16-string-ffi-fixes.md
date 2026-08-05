@@ -9,7 +9,7 @@
 ## Architecture Decision
 
 **Native LLVM types throughout, no i64 boxing for non-integer types.**
-Strings are `i8*` (pointer to Brief 2-slot header). Bool is `i1` (SSA) / `i8` (memory). Char is `i32`. Only Int/UInt remain `i64` (they ARE integers).
+Strings are `i8*` (pointer to Briv 2-slot header). Bool is `i1` (SSA) / `i8` (memory). Char is `i32`. Only Int/UInt remain `i64` (they ARE integers).
 
 This eliminates all `inttoptr`/`ptrtoint` round-trips for strings, `trunc/zext` round-trips for bools and chars. Every conversion to/from C is explicit and at the FFI boundary only.
 
@@ -21,11 +21,11 @@ This eliminates all `inttoptr`/`ptrtoint` round-trips for strings, `trunc/zext` 
 **File:** `src/backend/llvm/emit_expr.rs`  
 **What:** New method that maps `Type → native LLVM type string`. Single source of truth.
 
-### Step 1 — String constants → global Brief headers
+### Step 1 — String constants → global Briv headers
 **File:** `src/backend/llvm/mod.rs`  
 **Lines:** 947-950 (string constant emission)  
 **Before:** `[N x i8] c"..."` C-string globals  
-**After:** `<{i64, i64, [N x i8]}>` Brief-header globals (data_ptr, length, chars)  
+**After:** `<{i64, i64, [N x i8]}>` Briv-header globals (data_ptr, length, chars)  
 **Test:** `cargo test --lib` still passes (no semantic change yet — downstream still uses ptrtoint)
 
 ### Step 2 — Update declares
@@ -36,10 +36,10 @@ This eliminates all `inttoptr`/`ptrtoint` round-trips for strings, `trunc/zext` 
 - Add `declare i64 @strlen(i8*) #1`  
 - Line 781: Change `"i8"` to `"i8*"` for `Type::String | Type::Data`
 
-### Step 3 — Cleanup `brief_rt.c`
-**File:** `lib/runtime/brief_rt.c`  
-**Remove:** `__str_concat` function, `safe_cstr` function, `__resolve_brief` helper, debug `fprintf(stderr, "DEBUG...")`  
-**Keep:** `cstr_to_brief` (used internally by `__int_to_str` etc.)
+### Step 3 — Cleanup `briv_rt.c`
+**File:** `lib/runtime/briv_rt.c`  
+**Remove:** `__str_concat` function, `safe_cstr` function, `__resolve_briv` helper, debug `fprintf(stderr, "DEBUG...")`  
+**Keep:** `cstr_to_briv` (used internally by `__int_to_str` etc.)
 
 ### Step 4 — Native string operations in `emit_expr.rs`
 
@@ -57,7 +57,7 @@ This eliminates all `inttoptr`/`ptrtoint` round-trips for strings, `trunc/zext` 
 **4d: FFI param marshaling** (lines 290, 327)  
 - Before: `inttoptr i64 %raw to i8*` (passes header ptr — WRONG)  
 - After: `bitcast i8* %raw to i64*` → `load i64, i64* %hp, align 8` (data_ptr) → `inttoptr i64 %dp to i8*`  
-- BUT: since strings are now `i8*` natively, it's: `bitcast i8* %raw to i64*` → `load i64, i64* %hp` → `inttoptr i64 %dp to i8*` — wait, `%raw` IS already `i8*` (the Brief header pointer). So we just bitcast to `i64*` and load slot 0.
+- BUT: since strings are now `i8*` natively, it's: `bitcast i8* %raw to i64*` → `load i64, i64* %hp` → `inttoptr i64 %dp to i8*` — wait, `%raw` IS already `i8*` (the Briv header pointer). So we just bitcast to `i64*` and load slot 0.
 
 **4e: FFI return marshaling** (line 302 area)  
 - When C returns `i8*`: strlen → malloc → header setup → memcpy → return `i8*`
@@ -77,7 +77,7 @@ This eliminates all `inttoptr`/`ptrtoint` round-trips for strings, `trunc/zext` 
 
 ### Step 7 — Verify compiler builds and tests pass
 ```bash
-cd ~/Desktop/Projects/brief-compiler
+cd ~/Desktop/Projects/briv-compiler
 cargo test --lib
 cargo build --release
 ```
@@ -135,7 +135,7 @@ When parsing `"..."`, scan for `{...}` segments. Parse expressions inside `{}`. 
 | `src/backend/llvm/mod.rs` | String constants (B1), declares (B6) | 15 |
 | `src/backend/llvm/emit_expr.rs` | TypedRegister::llvm(), string ops, native char, FFI marshaling | 200 |
 | `src/backend/llvm/emit_stmt.rs` | Bool load/store native types, guard simplification | 80 |
-| `lib/runtime/brief_rt.c` | Remove dead functions | 30 |
+| `lib/runtime/briv_rt.c` | Remove dead functions | 30 |
 | `src/parser.rs` | String interpolation | 120 |
 | `officina.bv` | Fix frgn→intrinsic, typos, running flag | 30 |
 | officina `lib/std/*.bv` | Delete duplicates, fix syntax | 5 |
@@ -148,7 +148,7 @@ When parsing `"..."`, scan for `{...}` segments. Parse expressions inside `{}`. 
 
 ## Key LLVM IR Patterns
 
-### Brief header layout (constant)
+### Briv header layout (constant)
 ```llvm
 @str.0 = private unnamed_addr constant <{ i64, i64, [5 x i8] }> <{
   i64 ptrtoint (i8* getelementptr inbounds (<{ i64, i64, [5 x i8] }>, <{ i64, i64, [5 x i8] }>* @str.0, i64 0, i32 2) to i64),
@@ -164,7 +164,7 @@ When parsing `"..."`, scan for `{...}` segments. Parse expressions inside `{}`. 
 
 ### Inline concat on i8* (replace __str_concat)
 ```llvm
-; %a and %b are i8* (Brief header pointers)
+; %a and %b are i8* (Briv header pointers)
 ; Extract lengths from slot 1
 %ha = bitcast i8* %a to i64*
 %la_ptr = getelementptr i64, i64* %ha, i64 1
@@ -206,16 +206,16 @@ call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dest_off, i8* %b_chars, i64 %lb, i1 fa
 %v = bitcast i8* %result to i8*  ; or just use %result directly
 ```
 
-### FFI param: Brief string → C string
+### FFI param: Briv string → C string
 ```llvm
-; %str is i8* (Brief header pointer)
+; %str is i8* (Briv header pointer)
 %hp = bitcast i8* %str to i64*
 %data_ptr = load i64, i64* %hp, align 8
 %cstr = inttoptr i64 %data_ptr to i8*
 ; pass %cstr to C function
 ```
 
-### FFI return: C string → Brief string (inline)
+### FFI return: C string → Briv string (inline)
 ```llvm
 ; %cstr is i8* (C string from C function)
 %len = call i64 @strlen(i8* %cstr)
@@ -235,7 +235,7 @@ store i64 %len, i64* %len_slot
 %dest = bitcast i64* %dest_slot2 to i8*
 call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dest, i8* %cstr, i64 %len, i1 false)
 
-; %result is the Brief header pointer (i8*)
+; %result is the Briv header pointer (i8*)
 ```
 
 ---
@@ -243,7 +243,7 @@ call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dest, i8* %cstr, i64 %len, i1 false)
 ## Commits
 
 1. **`feat: native LLVM types for strings (i8*), chars (i32), bools (i1/i8)`**  
-   Compiler core: all emit_expr.rs, emit_stmt.rs, mod.rs changes + brief_rt.c cleanup  
+   Compiler core: all emit_expr.rs, emit_stmt.rs, mod.rs changes + briv_rt.c cleanup  
    Test: `cargo test --lib` commit-verify
 
 2. **`feat: string interpolation "hello {name}" desugaring`**  
@@ -252,7 +252,7 @@ call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dest, i8* %cstr, i64 %len, i1 false)
 
 3. **`fix: officina-cli migration to intrinsics + native types`**  
    All office BV file changes: frgn→intrinsic, stdlib deletion, logic bugfixes  
-   Test: compile officina with `brief-compiler llvm`
+   Test: compile officina with `briv-compiler llvm`
 
 4. **`docs: string concat + native type architecture`**  
    `docs/architecture/features/string-concat.md` with LLVM IR lowering docs  

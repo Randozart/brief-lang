@@ -14,7 +14,7 @@ and stochastic superoptimization.
 
 ### Basic Derivation
 
-```brief
+```briv
 defn add(x: Int, y: Int) -> Int := {
     2, 3 -> 5;
     0, 0 -> 0;
@@ -27,7 +27,7 @@ The compiler synthesizes a body that matches all examples.
 
 ### Reference Function
 
-```brief
+```briv
 defn add_ref(x: Int, y: Int) -> Int { term x + y; };
 defn add(x: Int, y: Int) -> Int := add_ref;
 ```
@@ -35,13 +35,13 @@ defn add(x: Int, y: Int) -> Int := add_ref;
 Reusing `:=` — `:= add_ref` copies the reference function's body directly.
 Combined form verifies against reference:
 
-```brief
+```briv
 defn popcount(x: Int) -> Int := { 0 -> 0; 1 -> 1; } := popcount_ref;
 ```
 
 ### Contracts — `[[post]`, `[pre][post]`, `[pre]]`
 
-```brief
+```briv
 defn popcount(x: Int) -> Int := {
     0 -> 0;
 } [[ #Term >= 0 && #Term < 64 ];
@@ -57,12 +57,12 @@ defn popcount(x: Int) -> Int := {
 
 ### Phase A: Tolerance Syntax
 Each example can specify a tolerance for floating-point comparison:
-```brief
+```briv
     2.0, 3.0 -> [0.01] 5.0;
 ```
 
 ### Phase B: Assertion Build Gate
-Every `brief build` re-verifies the synthesized body against the examples
+Every `briv build` re-verifies the synthesized body against the examples
 using the interpreter. A mismatch aborts the build.
 
 ### Phase C: Enumerative Synthesis
@@ -78,7 +78,7 @@ Returns ite chains (table lookups) that match the examples exactly.
 ### Phase E: Doppelganger Writer
 Original source files are NEVER mutated. The synthesized body is written
 to a shadow `.derive.bv` file, inserted before the derivation block.
-The developer reviews the output, then runs `brief accept` to fold the
+The developer reviews the output, then runs `briv accept` to fold the
 body back into the source.
 
 ### Phase F: MCMC Superoptimizer
@@ -125,10 +125,10 @@ search space instead of growing it.
 
 ## Key Commands
 
-- `brief derive <file>` — synthesize bodies from derivation blocks
-- `brief derive --stochastic <file>` — also run MCMC superoptimizer
-- `brief accept <file>` — fold `.derive.bv` bodies back into source
-- `brief build <file>` — compile with assertion verification
+- `briv derive <file>` — synthesize bodies from derivation blocks
+- `briv derive --stochastic <file>` — also run MCMC superoptimizer
+- `briv accept <file>` — fold `.derive.bv` bodies back into source
+- `briv build <file>` — compile with assertion verification
 
 ## CLI Flags
 

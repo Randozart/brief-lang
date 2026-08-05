@@ -3,17 +3,17 @@
 
 Compares three paths:
   C FFI:  Python → ctypes → C .so → Python
-  Brief:  Python → ctypes → Brief .so → Python
+  Briv:  Python → ctypes → Briv .so → Python
   Native: Pure Python implementation (reference)
 
 Usage:
   python3 bench_glue_cross.py          # runs all variants
   python3 bench_glue_cross.py c        # C only
-  python3 bench_glue_cross.py brief    # Brief only
+  python3 bench_glue_cross.py briv    # Briv only
 
 Requires:
   libstr_prepend_c.so  — compiled from str_prepend.c
-  libpp_types.so       — compiled from pp-types.bv (via brief build)
+  libpp_types.so       — compiled from pp-types.bv (via briv build)
 """
 
 import ctypes
@@ -35,12 +35,12 @@ def load_c_lib():
     lib.c_str_echo.restype = ctypes.c_int64
     return lib
 
-def load_brief_lib():
-    """Load the Brief bridge .so."""
+def load_briv_lib():
+    """Load the Briv bridge .so."""
     path = os.path.join(BRIDGE_DIR, "libpp_types.so")
     lib = ctypes.CDLL(path)
-    lib.brief_test_cstr_roundtrip.argtypes = [ctypes.c_int64, ctypes.c_int64]
-    lib.brief_test_cstr_roundtrip.restype = ctypes.c_int64
+    lib.briv_test_cstr_roundtrip.argtypes = [ctypes.c_int64, ctypes.c_int64]
+    lib.briv_test_cstr_roundtrip.restype = ctypes.c_int64
     return lib
 
 # ── String helpers ─────────────────────────────────────────────────────
@@ -71,10 +71,10 @@ def bench_c(lib, _state, s: str) -> str:
     result_ptr = lib.c_str_echo(s_ptr)
     return from_c_str(result_ptr)
 
-def bench_brief(lib, state, s: str) -> str:
-    """Call via Brief GLUE bridge — brief_test_cstr_roundtrip(state, s)."""
+def bench_briv(lib, state, s: str) -> str:
+    """Call via Briv GLUE bridge — briv_test_cstr_roundtrip(state, s)."""
     s_ptr = c_str(s)
-    result_ptr = lib.brief_test_cstr_roundtrip(state, s_ptr)
+    result_ptr = lib.briv_test_cstr_roundtrip(state, s_ptr)
     return from_c_str(result_ptr)
 
 def bench_native(s: str) -> str:
@@ -120,19 +120,19 @@ def main():
     c_state = ctypes.c_int64(0)
     run_bench("c_str_echo", bench_c, lib_c, c_state, test_string)
 
-    # Brief GLUE
-    print("\n[Brief GLUE]")
-    lib_brief = load_brief_lib()
+    # Briv GLUE
+    print("\n[Briv GLUE]")
+    lib_briv = load_briv_lib()
     # Allocate fresh state buffer per call
-    run_bench("brief_cstr_rt", bench_brief, lib_brief, ctypes.c_int64(0), test_string)
+    run_bench("briv_cstr_rt", bench_briv, lib_briv, ctypes.c_int64(0), test_string)
 
     # Correctness check
     print("\n[Correctness]")
     c_result = bench_c(lib_c, c_state, test_string)
-    b_result = bench_brief(lib_brief, ctypes.c_int64(0), test_string)
+    b_result = bench_briv(lib_briv, ctypes.c_int64(0), test_string)
     n_result = bench_native(test_string)
     print(f"  C:      {c_result!r}")
-    print(f"  Brief:  {b_result!r}")
+    print(f"  Briv:  {b_result!r}")
     print(f"  Native: {n_result!r}")
     if c_result == n_result == b_result:
         print("  ✅ All match")

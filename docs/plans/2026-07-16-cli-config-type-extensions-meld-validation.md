@@ -54,8 +54,8 @@ impl ConfigResolver {
     /// Follow the resolution chain to find config files.
     /// 1. --config-dir CLI flag
     /// 2. BRIEF_CONFIG_DIR env var
-    /// 3. ./.brief/config/ (project-local)
-    /// 4. ~/.config/brief-compiler/active_profile symlink
+    /// 3. ./.briv/config/ (project-local)
+    /// 4. ~/.config/briv-compiler/active_profile symlink
     /// 5. Compile-time baked fallback
     pub fn resolve(config_dir_override: Option<&Path>) -> Self;
 
@@ -77,13 +77,13 @@ fn resolve_config_dir(override_dir: Option<&Path>) -> PathBuf {
         return PathBuf::from(env);
     }
     // 3. Project-local
-    if Path::new(".brief/config").exists() {
-        return PathBuf::from(".brief/config");
+    if Path::new(".briv/config").exists() {
+        return PathBuf::from(".briv/config");
     }
     // 4. User-global active profile
     let user_config = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("brief-compiler");
+        .join("briv-compiler");
     let active = user_config.join("active_profile");
     if active.exists() {
         if let Ok(target) = std::fs::read_link(&active) {
@@ -105,7 +105,7 @@ fn resolve_config_dir(override_dir: Option<&Path>) -> PathBuf {
 #### 1b. Profile directory structure
 
 ```
-~/.config/brief-compiler/
+~/.config/briv-compiler/
 ├── active_profile -> profiles/default    # symlink to active profile dir
 └── profiles/
     └── default/
@@ -117,20 +117,20 @@ fn resolve_config_dir(override_dir: Option<&Path>) -> PathBuf {
 
 The `active_profile` can be either a **symlink** (preferred, Unix) or a **text file** containing the profile directory name (cross-platform fallback).
 
-#### 1c. CLI subcommand — `brief-compiler config`
+#### 1c. CLI subcommand — `briv-compiler config`
 
 New subcommand dispatch in `src/main.rs`:
 
 | Command | Action |
 |---------|--------|
-| `brief-compiler config init [name]` | Create `~/.config/brief-compiler/profiles/<name>/` with default `.toml` files (extracted from baked-in defaults, written to disk). Default name: `"default"`. |
-| `brief-compiler config list` | List profiles in `~/.config/brief-compiler/profiles/` |
-| `brief-compiler config set <name>` | Update `active_profile` symlink/text to point to `profiles/<name>/` |
-| `brief-compiler config show` | Print active profile path and contents of each `.toml` file |
+| `briv-compiler config init [name]` | Create `~/.config/briv-compiler/profiles/<name>/` with default `.toml` files (extracted from baked-in defaults, written to disk). Default name: `"default"`. |
+| `briv-compiler config list` | List profiles in `~/.config/briv-compiler/profiles/` |
+| `briv-compiler config set <name>` | Update `active_profile` symlink/text to point to `profiles/<name>/` |
+| `briv-compiler config show` | Print active profile path and contents of each `.toml` file |
 
 New `--config-dir` flag on `build`:
 ```
-brief-compiler build foo.bv --config-dir ~/my-project/config
+briv-compiler build foo.bv --config-dir ~/my-project/config
 ```
 
 #### 1d. Convert config structs to accept paths
@@ -221,7 +221,7 @@ Currently, `CString` must be defined as a separate type with explicit `meld` to 
 
 ### Core concept
 
-```brief
+```briv
 // Base type (already exists)
 type String : Bits { bytes <~ 8; primitive <~ String; };
 
@@ -231,7 +231,7 @@ type String.c : String { bytes <~ 8; primitive <~ String; };
 // Extension group: defines for all C-family languages at once.
 type String.[c,cpp,cs] : String { bytes <~ 8; primitive <~ String; };
 
-// Melds define how to convert between Brief and foreign representations.
+// Melds define how to convert between Briv and foreign representations.
 meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c .#Size; };
 
 // Custom types can meld directly to standard extension types:
@@ -268,7 +268,7 @@ fn parse_type_identifier(&mut self) -> Result<String, SyntaxError> {
 
 #### 2b. Parser: extension groups `Type.[a,b,c]`
 
-```brief
+```briv
 type String.[c,cpp,cs] : String { bytes <~ 8; };
 ```
 
@@ -443,9 +443,9 @@ for item in &items {
 
 New file: `lib/std/types/ffi.bv`:
 
-```brief
+```briv
 // ── Standard FFI Type Mappings ─────────────────────────────────
-// Maps Brief base types to foreign ABI representations.
+// Maps Briv base types to foreign ABI representations.
 // Imported as part of the prelude when frgn is used.
 
 // C ABI type mappings
@@ -457,7 +457,7 @@ type String.c : String { bytes <~ 8; primitive <~ String; };
 type String.cpp : String { bytes <~ 8; primitive <~ String; };
 type String.cs : String { bytes <~ 8; primitive <~ String; };
 
-// Melds — ABI conversion between Brief and foreign representations
+// Melds — ABI conversion between Briv and foreign representations
 meld Int <:> Int.c;
 meld Float <:> Float.c;
 meld String <:> String.c { Ptr -> String.c.ptr; Size -> String.c .#Size; };
@@ -491,7 +491,7 @@ Auto-imported as part of the prelude (or lazily on first `frgn from`).
 
 ### Syntax
 
-```brief
+```briv
 // Literal path (CWD-relative or absolute)
 frgn strlen(s: String) -> Int from "libc.so.6";
 frgn my_func(x: Int) -> Int from "/usr/lib/libfoo.so";
@@ -536,7 +536,7 @@ impl FromSpec {
                 // Same resolution as resolve_stdlib_root():
                 // 1. BRIEF_STDLIB_PATH/ffi/<name>
                 // 2. exe_dir/../../lib/ffi/<name> (dev layout)
-                // 3. exe_dir/../share/brief/ffi/<name> (installed)
+                // 3. exe_dir/../share/briv/ffi/<name> (installed)
                 resolver.resolve_stdlib_relative_path(&format!("ffi/{}", name))
                     .ok_or_else(|| format!("cannot find compiler-relative path: {}", name))
             }
@@ -646,7 +646,7 @@ impl ImportResolver {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 roots.push(dir.join("../../lib"));
-                roots.push(dir.join("../share/brief"));
+                roots.push(dir.join("../share/briv"));
             }
         }
         roots
@@ -670,7 +670,7 @@ fn emit_frgn_call(
 
     let ext = target.type_suffix();
     if !ext.is_empty() {
-        // Auto-meld each parameter from Brief type to extension type
+        // Auto-meld each parameter from Briv type to extension type
         let converted_args: Vec<TypedRegister> = sig.inputs.iter()
             .zip(args.iter())
             .map(|((_, param_ty), arg)| {
@@ -730,7 +730,7 @@ This uses the existing (but currently unwired) helpers:
 
 ### Current state
 
-`compile_ll_to_binary()` (`src/compile.rs:342`) already compiles `.ll` + `brief_rt.c` via clang. We extend this to handle arbitrary C/C++ sources from `from` clauses.
+`compile_ll_to_binary()` (`src/compile.rs:342`) already compiles `.ll` + `briv_rt.c` via clang. We extend this to handle arbitrary C/C++ sources from `from` clauses.
 
 ### Implementation
 
@@ -820,7 +820,7 @@ fn compile_ll_to_binary(
     extra_objects: &[PathBuf],
 ) -> Result<(), String> {
     let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("lib/runtime/brief_rt.c");
+        .join("lib/runtime/briv_rt.c");
     let rt_str = rt_path.to_string_lossy().to_string();
 
     let mut cmd = Command::new("clang");
@@ -844,13 +844,13 @@ fn compile_ll_to_binary(
 
 #### 4d. Cache directory
 
-Cache path: `~/.cache/brief-compiler/ffi/<content_hash>.o`
+Cache path: `~/.cache/briv-compiler/ffi/<content_hash>.o`
 
 ```rust
 fn get_ffi_cache_dir() -> PathBuf {
     let base = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("~/.cache"))
-        .join("brief-compiler")
+        .join("briv-compiler")
         .join("ffi");
     std::fs::create_dir_all(&base).ok();
     base

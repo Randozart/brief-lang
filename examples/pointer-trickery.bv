@@ -75,5 +75,5 @@ node configure_uart [step < 3][step == 3] {
     };
 };
 
-// Compile:   ./target/release/brief-compiler build examples/pointer-trickery.bv
+// Compile:   ./target/release/briv-compiler build examples/pointer-trickery.bv
 // Expected:  (interpreter runs to completion, result = 3)

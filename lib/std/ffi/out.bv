@@ -1,6 +1,6 @@
 // OUT Library — Observable Output
 //
-// Provides output functions via Brief intrinsics. Intrinsics handle
+// Provides output functions via Briv intrinsics. Intrinsics handle
 // observability natively — the compiler cannot eliminate them.
 //
 // Replaced: sig #out wrappers (frgn-based) with raw intrinsic calls.
@@ -12,7 +12,7 @@
 //   print_str("hello");
 //   putchar(65);
 
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 
 /// Print an integer to stdout.
 defn print_int(n: Int) -> Bool {

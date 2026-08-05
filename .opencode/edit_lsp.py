@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-path = "/home/randozart/Desktop/Projects/brief-compiler/src/lsp.rs"
+path = "/home/randozart/Desktop/Projects/briv-compiler/src/lsp.rs"
 with open(path) as f:
     content = f.read()
 

@@ -1,5 +1,5 @@
-// Call Graph Analysis for Brief self-hosted compiler.
-// Mirrors src/analysis/call_graph.rs functionality in Brief.
+// Call Graph Analysis for Briv self-hosted compiler.
+// Mirrors src/analysis/call_graph.rs functionality in Briv.
 //
 // Builds a transaction-to-transaction call graph from a Program AST
 // and detects cycles. Backends query has_cycle() to choose codegen strategy:

@@ -141,7 +141,7 @@ Float64 accesses MAY ALIAS, preventing GVN load elimination.
 2. **`Within` dead fallback block** (`emit_expr.rs:4474-4536`): Body evaluated
    unconditionally, fallback block never branched to.
 3. **TOCTOU race in GPU temp files** (`gpu.rs:1091-1124`): Fixed filenames
-   `brief_kernel.ll`/`.spv` collide under parallel builds.
+   `briv_kernel.ll`/`.spv` collide under parallel builds.
 4. **Missing socket declarations** (`emit_expr.rs`): `accept`, `socket`, etc.
    called without LLVM `declare` — rejected by LLVM 15+.
 5. **List/tuple literals bypass arena** (`emit_expr.rs:~2753,~2785`): Direct
@@ -173,7 +173,7 @@ pub struct CompilerContext {
     // State layout (immutable after build)
     pub field_index_map: HashMap<String, usize>,
     pub field_types: Vec<String>,
-    pub field_brief_types: Vec<Type>,
+    pub field_briv_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
     pub field_modes: HashMap<String, FieldMode>,
     pub cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
@@ -201,7 +201,7 @@ pub struct CompilerContext {
 
     // Misc
     pub type_universe: Option<TypeUniverse>,
-    pub schema_aliases: HashMap<String, DbriefType>,
+    pub schema_aliases: HashMap<String, DbrivType>,
     pub variant_disc: HashMap<String, (String, u64, usize)>,
     pub exit_condition: Option<Box<Expr>>,
     pub has_natural_exit: bool,
@@ -414,7 +414,7 @@ In `mod.rs:496-505`, add:
 
 In `gpu.rs:1091-1124`, use unique filenames:
 ```rust
-let unique_id = format!("brief_kernel_{}_{}",
+let unique_id = format!("briv_kernel_{}_{}",
     std::process::id(),
     std::thread::current().id().as_u64());
 let ir_path = tmp_dir.join(format!("{}.ll", unique_id));
@@ -702,7 +702,7 @@ The following must never change:
     - Universe builder: resolves operator→intrinsic mappings
     - Type-checker: preserves custom types (via `resolve_operator`)
     - Codegen: emits operator calls (`call i64 @my_fadd(i64, i64)`)
-    - Examples: `brief compile examples/inop-float4.bv` generates valid IR
+    - Examples: `briv compile examples/inop-float4.bv` generates valid IR
 
 ---
 

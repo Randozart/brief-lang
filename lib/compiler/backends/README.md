@@ -1,4 +1,4 @@
-# Brief Compiler Backends
+# Briv Compiler Backends
 
 **Version:** 0.11.0  
 **Status:** 4 backends complete, 3 planned
@@ -54,7 +54,7 @@
 
 ## Usage
 
-```brief
+```briv
 import "compiler/backends/aarch64";
 import "compiler/backends/x86_64";
 import "compiler/backends/rust";
@@ -83,7 +83,7 @@ defn compile_to_c(program: Program) -> String {
 
 All backends implement:
 
-```brief
+```briv
 defn generate_<target>(program: Program) -> OutputType
 ```
 

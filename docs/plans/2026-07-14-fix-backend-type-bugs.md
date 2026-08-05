@@ -65,7 +65,7 @@ crate::ast::BinaryOpKind::Add => {
 
 **Key invariant:** The `is_float`, `ty_str`, and `fast` variables at lines 263-266
 remain unchanged. The `ty_str`/`fast` combo is only used in the `is_float` branch.
-The integer branch hardcodes `i64` because Brief's default integer type is always
+The integer branch hardcodes `i64` because Briv's default integer type is always
 `Int` → `i64`.
 
 ---
@@ -233,7 +233,7 @@ fn emit_user_call(&mut self, out: &mut String, v: &str, name: &str, ...) -> Type
 `.unwrap_or(Type::int())` falls back to the previous behaviour. No existing
 program breaks.
 
-**Why `types.first()`:** Brief supports multiple return values. When we get
+**Why `types.first()`:** Briv supports multiple return values. When we get
 around to implementing that, `types[0]` is the first return type. For now,
 single-return is the only path exercised.
 
@@ -363,7 +363,7 @@ defn main() -> Int {
     term x;
 };
 EOF
-./target/release/brief-compiler build /tmp/type_test.bv 2>&1
+./target/release/briv-compiler build /tmp/type_test.bv 2>&1
 ```
 
 Then inspect the `.ll` file:
@@ -403,7 +403,7 @@ bash benchmarks/build_and_bench.sh --runtime
 |------|-----------|------------|
 | `fsub double -0.0, %x` changes sign of NaN payloads | Very low | IEEE 754 requires `-0.0` for `fsub`. Any NaN-payload-dependent code is already non-portable. |
 | `lower_type(&val.ty)` produces unexpected type for some | Low | `lower_type` has `_ => "i64"` fallback; unknown types stay 64-bit. No regression possible. |
-| `defn_return_types.get(name)` returns wrong type for overloaded defns | Very low | Brief does not currently support function overloading. When it does, the key will include type parameters. |
+| `defn_return_types.get(name)` returns wrong type for overloaded defns | Very low | Briv does not currently support function overloading. When it does, the key will include type parameters. |
 | `call {ret} @fn(...)` ABI mismatch if function was declared with different return type in LLVM `declare` | Medium | The `defn_return_types` is populated from the same AST that generates LLVM declarations. They are always in sync. |
 | Bool variable `store i8` vs `store i64` changes LLVM's DSE behaviour | Low to medium | `i8` stores are narrower; LLVM's DSE handles them correctly (they may even enable better alias analysis). If a performance regression appears, we isolate it. |
 

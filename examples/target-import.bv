@@ -7,7 +7,7 @@
 //   4. Contract-proven MMIO access using volatile_load#/volatile_store#
 //
 // Usage:
-//   brief-compiler --board stm32f407 target-import.bv
+//   briv-compiler --board stm32f407 target-import.bv
 //
 // Without --board, defaults to "stm32f407".
 

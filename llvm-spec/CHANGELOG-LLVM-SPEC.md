@@ -1,4 +1,4 @@
-# Brief LLVM Backend — Change Log & Design Journal
+# Briv LLVM Backend — Change Log & Design Journal
 
 **File:** CHANGELOG-LLVM-SPEC.md  
 **Purpose:** Tracks all architectural decisions, bug fixes, and spec additions that occurred during the llvm-spec audit on 2026-05-29.
@@ -49,7 +49,7 @@
 
 #### Issue 6: C-String Memory Leak in FFI
 - **File:** `07-FFI-TO-DECLARE.md:31-34`
-- **Root cause:** `@brief_string_to_cstr` heap-allocates but never frees — infinite leak in reactor loop.
+- **Root cause:** `@briv_string_to_cstr` heap-allocates but never frees — infinite leak in reactor loop.
 - **Fix:** Documented stack-allocation strategy using `alloca` + `llvm.memcpy` as preferred default. Heap allocation documented with explicit `free` requirement.
 - **Applied to:** `07-FFI-TO-DECLARE.md` (new "C-String Memory Lifecycle" section)
 
@@ -92,7 +92,7 @@
 - **Fallback:** Heap path with bump allocator when inference fails
 
 #### 13-GPU-TARGET.md (Future Roadmap)
-- **Pipeline:** Brief → LLVM IR → `llc -march=nvptx64` → `.ptx` → `ptxas` → SASS
+- **Pipeline:** Briv → LLVM IR → `llc -march=nvptx64` → `.ptx` → `ptxas` → SASS
 - **Four optimizations CUDA cannot do:**
   1. Static bank conflict elimination (SMT solver proves no two threads hit same bank)
   2. Guaranteed memory coalescing (`noalias` across threads → aligned vector loads)

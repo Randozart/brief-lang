@@ -7,11 +7,11 @@
 
 Two orthogonal gaps in the LLVM codegen pipeline that converge on a unified hardware-target system:
 
-1. **LTO gap**: `brief_rt.c` is compiled as machine code (`cc -c -O2`). The Brief IR goes through `opt -O3 → llc`. They're linked as ELF objects. Zero cross-module inlining — `__print_int`, `__wait_for_event`, thread pool primitives are forever opaque calls.
+1. **LTO gap**: `briv_rt.c` is compiled as machine code (`cc -c -O2`). The Briv IR goes through `opt -O3 → llc`. They're linked as ELF objects. Zero cross-module inlining — `__print_int`, `__wait_for_event`, thread pool primitives are forever opaque calls.
 
 2. **MMIO gap**: `let x: Int @ 0x1000 = 0;` is parsed correctly into `StateDecl.address = Some(0x1000)` but the LLVM backend drops it in `build_field_index()` (`src/backend/llvm.rs:1704`). Every `@`-addressed field ends up as a plain `%State` struct member via GEP. No `inttoptr`, no `volatile`, no MMIO. The Verilog, VHDL, AArch64, x86_64, and C backends all use `decl.address` — LLVM is the only outlier.
 
-3. **Hardware handoff gap**: No path from Vivado's `system.xsa`/`xparameters.h` to compiler-visible addresses. The DBVS alias system exists (`src/dbrief/`) but never flows into LLVM codegen.
+3. **Hardware handoff gap**: No path from Vivado's `system.xsa`/`xparameters.h` to compiler-visible addresses. The DBVS alias system exists (`src/dbriv/`) but never flows into LLVM codegen.
 
 ## Architecture: DBVS Schema + Target Binding
 
@@ -42,30 +42,30 @@ Compiler resolves each schema alias → physical address
 ## Phase 1: LTO Closure (LOW RISK ~30 lines)
 
 ### Problem
-`brief_rt.c` is compiled as machine code (`cc -c -O2`), then linked as ELF with the Brief-generated `.o`. The `opt -O3` pass sees only the Brief IR — `__print_int`, `__wait_for_event`, and thread pool barriers are opaque `call @symbol` instructions with zero inlining opportunity.
+`briv_rt.c` is compiled as machine code (`cc -c -O2`), then linked as ELF with the Briv-generated `.o`. The `opt -O3` pass sees only the Briv IR — `__print_int`, `__wait_for_event`, and thread pool barriers are opaque `call @symbol` instructions with zero inlining opportunity.
 
 ### Fix
 Replace `cc -c` with `clang -c -emit-llvm`, merge with `llvm-link` before `opt`:
 
 ```
-Before:  cc -c -O2 brief_rt.c → brief_rt.o
+Before:  cc -c -O2 briv_rt.c → briv_rt.o
          opt -O3 program.ll → program.opt.ll
          llc -filetype=obj program.opt.ll → program.o
-         cc -O2 program.o brief_rt.o → a.out
+         cc -O2 program.o briv_rt.o → a.out
 
-After:   clang -c -emit-llvm -O2 brief_rt.c → brief_rt.bc
-         llvm-link program.bc brief_rt.bc → merged.bc
+After:   clang -c -emit-llvm -O2 briv_rt.c → briv_rt.bc
+         llvm-link program.bc briv_rt.bc → merged.bc
          opt -O3 merged.bc → merged.opt.bc
          llc -filetype=obj merged.opt.bc → merged.o
          cc -O2 merged.o → a.out
 ```
 
-`opt -O3` on the merged module inlines `__print_int`'s `fprintf`, constant-folds FFI call arguments, and eliminates dead code across the Brief↔C boundary.
+`opt -O3` on the merged module inlines `__print_int`'s `fprintf`, constant-folds FFI call arguments, and eliminates dead code across the Briv↔C boundary.
 
 ### Implementation (`src/main.rs`, `run_llvm_compile()`)
 - Detect `clang` and `llvm-link` at pipeline start
-- If available: `clang -c -emit-llvm -O2 brief_rt.c -o brief_rt.bc`
-- Then: `llvm-link program.bc brief_rt.bc -o merged.bc`
+- If available: `clang -c -emit-llvm -O2 briv_rt.c -o briv_rt.bc`
+- Then: `llvm-link program.bc briv_rt.bc -o merged.bc`
 - Then: `opt -O3 merged.bc -o merged.opt.bc`
 - Then: `llc merged.opt.bc -filetype=obj -o program.o`
 - Graceful fallback: if clang/llvm-link not installed, use current `cc` path
@@ -206,7 +206,7 @@ In `resolve_imports()` or the LLVM pipeline entry point, detect `import "*.dbvs"
 
 ### 4b. Target binding
 When `--target <file>.dbv` is provided:
-- Parse the `.dbv` into `DbriefProgram`
+- Parse the `.dbv` into `DbrivProgram`
 - For each schema referenced by the program, cross-reference aliases with the target bindings
 - Resolve: alias_name → physical_address
 - Feed into `mmio_fields`
@@ -245,11 +245,11 @@ When `--target <file>.dbv` is provided:
 - No COBOL backend changes (source-to-source transpiler, no LTO/linking story)
 - No changes to proof engine (operates on logical names regardless of target)
 - No changes to `@ link` trigger system (already correct in `emit_trg_load`)
-- No changes to register/alias semantics in `src/dbrief/` (parser/AST/engine are correct)
+- No changes to register/alias semantics in `src/dbriv/` (parser/AST/engine are correct)
 
 ## Success Criteria
 - All 372 existing tests pass after each phase
 - `print_loop` benchmark compiles and runs with LTO-merged IR
 - `let x: Int @ 0x1000` emits `load volatile i64, i64* inttoptr (i64 4096 to i64*)` in LLVM IR
-- `brief build --hw-handoff system.xsa --target zcu4ev.dbv` produces correct MMIO code
+- `briv build --hw-handoff system.xsa --target zcu4ev.dbv` produces correct MMIO code
 - Same program compiles for `--target sim` with GEP-based struct access

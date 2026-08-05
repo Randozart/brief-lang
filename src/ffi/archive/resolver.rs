@@ -47,11 +47,11 @@ fn std_lib_path() -> Option<PathBuf> {
         if let Some(exe_dir) = exe_path.parent() {
             // Check for typical installation layouts
             let possible_paths = vec![
-                // Development: brief-compiler/target/release/
+                // Development: briv-compiler/target/release/
                 exe_dir.join("../../lib/ffi/bindings"),
                 exe_dir.join("../lib/ffi/bindings"),
-                // Installed: ~/.local/bin/ -> ~/.local/share/brief/ffi/bindings
-                exe_dir.join("../share/brief/ffi/bindings"),
+                // Installed: ~/.local/bin/ -> ~/.local/share/briv/ffi/bindings
+                exe_dir.join("../share/briv/ffi/bindings"),
             ];
 
             for path in possible_paths {
@@ -64,9 +64,9 @@ fn std_lib_path() -> Option<PathBuf> {
 
     // Try OS-specific data directory
     if let Some(data_dir) = dirs::data_dir() {
-        let brief_data = data_dir.join("brief").join("ffi").join("bindings");
-        if brief_data.exists() {
-            return Some(brief_data);
+        let briv_data = data_dir.join("briv").join("ffi").join("bindings");
+        if briv_data.exists() {
+            return Some(briv_data);
         }
     }
 

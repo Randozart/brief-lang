@@ -1,4 +1,4 @@
-# Embedded Brief 2.2 Specification
+# Embedded Briv 2.2 Specification
 
 **Version:** 2.2  
 **Date:** 2026-04-12  
@@ -7,7 +7,7 @@
 ---
 
 ## 1. Introduction
-Embedded Brief 2.2 unifies the logic across **Core Brief (.bv)**, **Rendered Brief (.rbv)**, and **Embedded Brief (.ebv)**. It provides high-velocity hardware primitives for "Silicon Architecting," introducing concepts like vector geometry, cycle-accurate timing, and cross-variant logic sharing.
+Embedded Briv 2.2 unifies the logic across **Core Briv (.bv)**, **Rendered Briv (.rbv)**, and **Embedded Briv (.ebv)**. It provides high-velocity hardware primitives for "Silicon Architecting," introducing concepts like vector geometry, cycle-accurate timing, and cross-variant logic sharing.
 
 ---
 
@@ -33,7 +33,7 @@ In `.ebv` specifically, types can be constrained to specific bit-widths or addre
 Vectors represent physical wide wires or contiguous memory buffers, enabling SIMD operations.
 **Syntax:** `Type[Dim1][Dim2]...[DimN]`
 
-```brief
+```briv
 let bus: UInt[100];                  // 100-lane unsigned bus
 let frame: UInt[3][1920][1080];      // 1080p RGB frame buffer
 ```
@@ -42,7 +42,7 @@ let frame: UInt[3][1920][1080];      // 1080p RGB frame buffer
 Unions represent a logical super-position.
 **Syntax:** `TypeA | TypeB`
 
-```brief
+```briv
 let response: String | Error; 
 ```
 
@@ -52,7 +52,7 @@ let response: String | Error;
 
 ### 3.1 Implicit Lifting
 Operations on vectors are implicitly parallel. The compiler "lifts" the scalar operation to the entire vector geometry.
-```brief
+```briv
 &pixels = pixels * 2; // 100 parallel multiplications (SIMD)
 ```
 
@@ -67,7 +67,7 @@ To modify specific "lanes," use slicing:
 | `vec[start..end:stride]` | Full slice | `(end - start) / stride` |
 | `vec[..]` | Entire dimension | `vec.len` |
 
-```brief
+```briv
 // Modify only the RED channel (first dimension)
 &frame[0] = frame[0] + 5; 
 
@@ -77,7 +77,7 @@ To modify specific "lanes," use slicing:
 
 ### 3.3 Geometry Matching Rule
 An operation `A op B` is valid if `dim(A) == dim(B)`. The compiler enforces geometric alignment.
-```brief
+```briv
 let base: Int[100];
 let modifier: Int[50];
 &base[25..75] = base[25..75] * modifier; // Valid: 50 lanes vs 50 lanes
@@ -98,7 +98,7 @@ The `within` keyword handles asynchronous timeouts for assignments.
 ### 4.2 Mandatory Error Handling
 If `within` is used, the receiver **must** be a `Union` type containing `Error` (e.g., `Result` or `String | Error`). The compiler enforces exhaustive checking of all variants. You cannot `term` until the error condition is guarded.
 
-```brief
+```briv
 let response: String | Error = httpGet(url) within 5s;
 
 [response Ok(data)] { 
@@ -121,14 +121,14 @@ let response: String | Error = httpGet(url) within 5s;
 *   **`trg` (Read-Only):** Physical hardware inputs (sensors, buttons). Must have an `@ address`.
 *   **`let` with `@ address` (Writable):** Physical hardware outputs (LEDs, motors).
 
-```brief
+```briv
 trg button: Bool @ 0x40020010 / 0;  // Input
 let led: Bool @ 0x40020000 / 0;     // Output
 ```
 
 ### 5.2 Override Safety (`!@`)
 Required to map variables to reserved hardware memory regions defined in `memory.toml`.
-```brief
+```briv
 let debug_reg: Int !@ 0xE000E100;
 ```
 

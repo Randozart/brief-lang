@@ -1,5 +1,5 @@
-// Parameter Range Analysis for Brief self-hosted compiler.
-// Mirrors src/analysis/range.rs functionality in Brief.
+// Parameter Range Analysis for Briv self-hosted compiler.
+// Mirrors src/analysis/range.rs functionality in Briv.
 //
 // Infers the possible value ranges of transaction parameters by analyzing
 // preconditions. Backends use this for:

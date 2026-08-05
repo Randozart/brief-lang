@@ -2,7 +2,7 @@ use crate::errors::RuntimeError;
 use crate::interpreter::{bool_to_bits, f64_to_bits, i64_to_bits, Value};
 use std::collections::HashMap;
 
-/// Convert a serde_json::Value to a Brief Value.
+/// Convert a serde_json::Value to a Briv Value.
 fn json_value_to_value(json: serde_json::Value) -> Value {
     match json {
         serde_json::Value::Null => Value::Void,
@@ -31,7 +31,7 @@ fn json_value_to_value(json: serde_json::Value) -> Value {
     }
 }
 
-/// Convert a Brief Value to a serde_json::Value.
+/// Convert a Briv Value to a serde_json::Value.
 fn value_to_json_value(val: &Value) -> serde_json::Value {
     match val {
         Value::Void => serde_json::Value::Null,

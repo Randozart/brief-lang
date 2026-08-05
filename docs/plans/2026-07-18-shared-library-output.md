@@ -17,7 +17,7 @@ with a stable ABI, no GC dependency, and contract-proven memory safety.
 ## Architecture
 
 ```
-┌─ Brief source ───────────────────────────────────────────────┐
+┌─ Briv source ───────────────────────────────────────────────┐
 │                                                               │
 │  export defn process(input: Ptr<Byte>, len: Int) -> Int {     │
 │      [input != null][result >= 0]                              │
@@ -27,17 +27,17 @@ with a stable ABI, no GC dependency, and contract-proven memory safety.
 └───────────────────────────────────────────────────────────────┘
                             │
                             ▼
-┌─ briefc build --shared ──────────────────────────────────────┐
+┌─ brivc build --shared ──────────────────────────────────────┐
 │                                                               │
 │  1. Parse export annotations                                   │
 │  2. Generate wrapper per exported function:                    │
 │     • Stack-allocate a transient arena                         │
 │     • Derive %State struct on stack or TLS                     │
-│     • Call internal Brief body                                 │
+│     • Call internal Briv body                                 │
 │     • Return result via C ABI                                  │
 │     • Teardown arena                                           │
 │  3. Skip main loop, reactor tick, runtime init                 │
-│  4. Emit __brief_init / __brief_fini (constructor/destructor)  │
+│  4. Emit __briv_init / __briv_fini (constructor/destructor)  │
 │  5. clang -shared -fPIC -o component.so                       │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -70,7 +70,7 @@ with a stable ABI, no GC dependency, and contract-proven memory safety.
 
 **CLI:**
 ```
-briefc build --shared example.bv --out component.so
+brivc build --shared example.bv --out component.so
 ```
 
 **Changes:**
@@ -93,7 +93,7 @@ let args = vec![
     ll_path.to_string_lossy().to_string(),
     "-lm".to_string(),
 ];
-// No brief_rt.o linked — no runtime threads, no barrier sync.
+// No briv_rt.o linked — no runtime threads, no barrier sync.
 // No main() expected.
 ```
 
@@ -105,7 +105,7 @@ let args = vec![
 transaction set as a single `run_reactive` entry point. The host calls this
 to run all reactive transactions to convergence:
 
-```brief
+```briv
 export node process [x < TOTAL][x == TOTAL] {
     x = x + 1;
     term;
@@ -156,7 +156,7 @@ if let TopLevel::Definition(d) = item {
 
 For each exported function `defn f(a: Int, b: Int) -> Int`:
 
-1. Emit the normal Brief function body (internal name: `brief_impl_f`)
+1. Emit the normal Briv function body (internal name: `briv_impl_f`)
 2. Emit a C-callable wrapper `f`:
 
 ```llvm
@@ -165,9 +165,9 @@ entry:
   ; Per-call stack arena (256KB — can be tuned)
   %arena = alloca i8, i64 262144
   %arena_end = getelementptr i8, ptr %arena, i64 262144
-  store ptr %arena, ptr @__brief_arena_ptr
-  store ptr %arena_end, ptr @__brief_arena_end
-  store ptr %arena, ptr @__brief_arena_base
+  store ptr %arena, ptr @__briv_arena_ptr
+  store ptr %arena_end, ptr @__briv_arena_end
+  store ptr %arena, ptr @__briv_arena_base
 
   ; Set up a minimal %State — just the arena pointers
   %state = alloca %State, align 8
@@ -175,17 +175,17 @@ entry:
   store ptr %arena, ptr %ap
 
   ; Call the real implementation
-  %result = call i64 @brief_impl_f(ptr %state, i64 %arg0, i64 %arg1)
+  %result = call i64 @briv_impl_f(ptr %state, i64 %arg0, i64 %arg1)
 
   ; Arena reset (not free — memory is reused on next call from same thread)
-  store ptr %arena, ptr @__brief_arena_ptr
+  store ptr %arena, ptr @__briv_arena_ptr
   ret i64 %result
 }
 ```
 
 **ABI mapping:**
 
-| Brief type | C type | LLVM type |
+| Briv type | C type | LLVM type |
 |-----------|--------|-----------|
 | `Int` | `int64_t` | `i64` |
 | `Float` | `double` | `double` |
@@ -202,7 +202,7 @@ void f(int64_t a, int64_t *out0, int8_t *out1);
 **Struct returns** — `defn f() -> MyStruct` — return by value if ≤16 bytes, else by out-pointer.
 
 **Stateful exports** — `export defn init()` and `export defn run()` share the same persistent arena
-(via the module's `__brief_arena_*` globals, not per-call stack arena).
+(via the module's `__briv_arena_*` globals, not per-call stack arena).
 
 **Rollback:** Remove wrapper emission from `emit_toplevel.rs`.
 
@@ -217,19 +217,19 @@ Add `is_shared_lib: bool` to `CompilerContext`. When true:
 - `emit_main()` / `emit_ssa_main()` / `emit_reactor()` are NOT called
 - No `@main()` function emitted
 - No `ss_main_loop`, no reactive transaction dispatch
-- No `brief_rt.c` functions linked (no thread pool, no barrier)
+- No `briv_rt.c` functions linked (no thread pool, no barrier)
 
 Instead, emit module constructors/destructors:
 
 ```llvm
 ; Module constructor — called automatically when .so is loaded
-define void @__brief_init() __attribute__((constructor)) {
+define void @__briv_init() __attribute__((constructor)) {
   ; Zero-initialize arena globals, or allocate TLS keys
   ret void
 }
 
 ; Module destructor — called when .so is unloaded
-define void @__brief_fini() __attribute__((destructor)) {
+define void @__briv_fini() __attribute__((destructor)) {
   ; Free persistent arena, destroy TLS keys
   ret void
 }
@@ -243,7 +243,7 @@ preconditions can never become true again), then returns control to the host:
 ; Reactive entry point for shared library
 define void @run_reactive() {
 entry:
-  call void @__brief_init()
+  call void @__briv_init()
   br label %.ss_main_loop
 
 .ss_main_loop:
@@ -253,7 +253,7 @@ entry:
   br i1 %any_active, label %.loop, label %.end
 
 .end:
-  call void @__brief_fini()
+  call void @__briv_fini()
   ret void
 }
 ```
@@ -304,7 +304,7 @@ own stack frame. However:
    (each thread has its own stack). The persistent arena uses the existing
    CAS + mutex infrastructure from A7. The arena reset between calls is:
    ```llvm
-   store ptr %arena_base, ptr @__brief_arena_ptr
+   store ptr %arena_base, ptr @__briv_arena_ptr
    ```
    This is a plain store on the per-call arena (stack-local, no race).
    For the persistent arena, use `atomicrmw` if shared.
@@ -322,7 +322,7 @@ Generated `.so` is linked with:
 clang -shared -fPIC -o component.so component.ll -lm
 ```
 
-No `brief_rt.c` linked. The `.so` has zero external runtime dependencies
+No `briv_rt.c` linked. The `.so` has zero external runtime dependencies
 beyond libc and libm.
 
 To make this work on macOS (`.dylib`), detect the platform in `compile.rs`:
@@ -368,7 +368,7 @@ cc -o test_host test_host.c -ldl
 | `src/backend/llvm/mod.rs` | L2, L4 | `exported_fn_names`, `is_shared_lib`, skip main loop |
 | `src/backend/llvm/emit_toplevel.rs` | L3 | `emit_export_wrapper` for C ABI wrappers |
 | `src/backend/llvm/context.rs` | L4 | `is_shared_lib: bool` on `CompilerContext` |
-| `src/backend/llvm/emit_toplevel.rs` | L4 | `__brief_init` / `__brief_fini` constructors |
+| `src/backend/llvm/emit_toplevel.rs` | L4 | `__briv_init` / `__briv_fini` constructors |
 
 ---
 
@@ -389,7 +389,7 @@ cc -o test_host test_host.c -ldl
    more efficient. Should this be the default, or opt-in? Recommendation: stack
    arena for safety (no TLS complexity), TLS as follow-up optimization.
 
-4. **Multiple `.so` loading** — If two Brief `.so` files are loaded into the
+4. **Multiple `.so` loading** — If two Briv `.so` files are loaded into the
    same process, their arena globals might conflict (symbol interposition).
    Recommendation: prefix all exported symbols and globals with a module hash.
 

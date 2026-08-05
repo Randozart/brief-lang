@@ -1,7 +1,7 @@
-# Accelerated Brief (`.abv`) — Native GPU Compilation Tier
+# Accelerated Briv (`.abv`) — Native GPU Compilation Tier
 
 **Date:** 2026-06-18 (updated 2026-06-19)  
-**Status:** COMPLETED — renamed from "Graphic Brief" to "Accelerated Brief" (`.gbv` → `.abv`)  
+**Status:** COMPLETED — renamed from "Graphic Briv" to "Accelerated Briv" (`.gbv` → `.abv`)  
 **Context:** SPIR-V backend extended through Phases 1–7 (1028 tests). Dedicated file
 extension `.abv` that always compiles to GPU, with type/intrinsic guards.
 
@@ -18,8 +18,8 @@ extension `.abv` that always compiles to GPU, with type/intrinsic guards.
 | Contracts | Optional (warn if missing) |
 | GPU flag | Implicit — no `#gpu` or `--gpu-offload` needed |
 | Output | Both: native binary (embedded SPIR-V) + standalone `file.spv` |
-| CLI | `brief-compiler build file.abv` — auto-detect extension |
-| Alternative name | "Brief Accel" |
+| CLI | `briv-compiler build file.abv` — auto-detect extension |
+| Alternative name | "Briv Accel" |
 
 ---
 
@@ -34,7 +34,7 @@ extension `.abv` that always compiles to GPU, with type/intrinsic guards.
 | `src/backend/llvm/gpu.rs` | `emit_standalone_spirv()` for `.spv` file output |
 | `src/main.rs` | `.abv` auto-detection, standalone `.spv` emission |
 | `AGENTS.md` | File types table — add `.abv` |
-| `docs/architecture/features/accelerated-brief.md` | Architecture doc |
+| `docs/architecture/features/accelerated-briv.md` | Architecture doc |
 
 ### New test files
 
@@ -97,8 +97,8 @@ warning: .abv transaction 'name' has no contracts — contracts enable GPU
 | **3** | Standalone SPIR-V emit + auto-detect build | `mod.rs`, `gpu.rs`, `main.rs` |
 | **4** | End-to-end test | `tests/gpu_e2e.rs`, test `.abv` files |
 | **5** | GPU benchmark | `benchmarks/gpu/saxpy/`, `build_and_bench.sh` |
-| **6** | Architecture doc + AGENTS.md update | `docs/architecture/features/accelerated-brief.md`, `AGENTS.md` |
-| **7** | Rename `.gbv` → `.abv`, "Graphic Brief" → "Accelerated Brief" | All source + docs |
+| **6** | Architecture doc + AGENTS.md update | `docs/architecture/features/accelerated-briv.md`, `AGENTS.md` |
+| **7** | Rename `.gbv` → `.abv`, "Graphic Briv" → "Accelerated Briv" | All source + docs |
 
 
 ---

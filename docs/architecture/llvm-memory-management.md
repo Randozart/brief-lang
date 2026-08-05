@@ -33,7 +33,7 @@ Layer 1: Phase 4 DAG analysis (pre-codegen)
 Layer 2: Explicit override (2nd arg to Alloc#)
   Alloc#(size, Arena)       — PascalCase: intrinsic strategy
   Alloc#(size, "pool_serial") — quoted string: config template
-  Alloc#(size, my_alloc_fn)  — identifier: user Brief function
+  Alloc#(size, my_alloc_fn)  — identifier: user Briv function
 
 Layer 3: Default heuristics (no analysis, no override)
   Arena scope active       → arena bump allocate
@@ -145,7 +145,7 @@ free = "none"  # pool reuse — no per-element free
 2026-08-01 (Phase D2): this is a garbage **scheduler**, not a collector —
 the compiler PROVES, at compile time, the reactor-ordered last transaction
 that touches each heap-backed state field, and emits a `Free#` (routed through
-`@__brief_free`) exactly after that transaction's body. Design:
+`@__briv_free`) exactly after that transaction's body. Design:
 `docs/plans/2026-08-01-global-lifetime-design.md`.
 
 - **The pass** (`analysis/global_lifetime.rs`): for each field whose
@@ -161,13 +161,13 @@ that touches each heap-backed state field, and emits a `Free#` (routed through
   (the scheduler only frees after the last ordered touch); **manually-freed
   fields are excluded** (a manual `Free#`, a `free x;`, or a `keep x;` + a
   scheduled free = double-free).
-- **Calibration**: scheduled frees route through `__brief_free` (a runtime
+- **Calibration**: scheduled frees route through `__briv_free` (a runtime
   counter + `free`) so a test can assert frees == allocs via
-  `__brief_free_count()`. `@__brief_free` is declared `argmemonly` (it only
+  `__briv_free_count()`. `@__briv_free` is declared `argmemonly` (it only
   touches the pointer's memory) so a scheduled free doesn't clobber the module.
 - **Observability as liveness**: the scheduled free makes the freed field's
   memory OBSERVABLE — dead table writes that a C compiler would eliminate stay
-  alive in Brief. Benchmarks must be honest on BOTH sides (a read-modify-write
+  alive in Briv. Benchmarks must be honest on BOTH sides (a read-modify-write
   whose RHS reads a previously-written slot keeps the C reference honest too).
 
 ### 0.6 The Free-Check — `free`/`keep` hints + consume destroys (Phase 5)
@@ -190,7 +190,7 @@ lifetime control and the consumptive-operators' runtime destroy. Design:
   `pending_consumes`; `emit_statement_sequence` drains it at the statement
   boundary via `emit_destroy_register`. Scalars/unknown strategies are never
   freed (a scalar's value is not a pointer).
-- **`briefc memcheck <file.bv>`** — the diagnostics subcommand: per heap-backed
+- **`brivc memcheck <file.bv>`** — the diagnostics subcommand: per heap-backed
   field, whether the scheduler proved a last use (and after which txn) or the
   field lives for the program, plus redundant keeps.
 - **Refcount (not implemented)**: a per-fire decrement refcount is UNSOUND for
@@ -598,7 +598,7 @@ Emits **no runtime library calls**:
 A 6-node TBAA type tree (`mod.rs:448-457`):
 
 ```
-!0 = !{!"Brief"}        — root
+!0 = !{!"Briv"}        — root
 !1 = !{!"Int", !0}      — i64-stored values
 !2 = !{!"Bool", !0}     — i1/i8-stored Bool
 !3 = !{!"Char", !0}     — i32-stored Char
@@ -694,7 +694,7 @@ back to original order.
 ### Kahn's Topological Sort
 
 Kahn's algorithm orders a DAG so every edge goes forward — no statement
-appears before something it depends on. For Brief's reorder pass, each
+appears before something it depends on. For Briv's reorder pass, each
 transaction body statement is a node, and edges are **data dependencies**:
 
 | Edge | Name | Meaning |
@@ -717,18 +717,18 @@ schedule where independent statements (no connected edges) appear in
 parallel-friendly groups — LLVM's scheduler can then fill execution ports
 simultaneously.
 
-### Comparison: Brief vs Forth
+### Comparison: Briv vs Forth
 
 This is nearly the opposite of how Forth sequences operations:
 
-| Forth | Brief |
+| Forth | Briv |
 |-------|-------|
 | Data flows through implicit stack. Programmer sequences words manually; stack order *is* the data flow. | Data flows through explicit SSA registers. Compiler builds a dependency DAG, then reorders. |
 | Sequence is the *constraint* — stack position defines which value an operator consumes. | Sequence is the *output* — dependencies were already resolved in the DAG. The linear emit is just one valid schedule. |
 | ILP requires the programmer to manually stack-juggle. | ILP comes from automatic reordering of independent operations. |
 | No analysis — the programmer *is* the compiler. | Full dependency analysis — the compiler *is* the scheduler. |
 
-A better analogy than Forth: Brief's reorder pass is like a
+A better analogy than Forth: Briv's reorder pass is like a
 **superscalar processor's out-of-order scheduler**. It takes a sequential
 program, builds a data-flow graph, then emits a new sequence that respects
 all dependencies while maximizing distance between independent operations.
@@ -747,7 +747,7 @@ Both reorderers share the premise that *"the programmer's linear sequence
 is not optimal; the compiler can pick a better one"*, but the optimization
 domains differ:
 
-| | Microsoft PGO Block Reorderer | Brief Kahn sort |
+| | Microsoft PGO Block Reorderer | Briv Kahn sort |
 |---|---|---|
 | **Input** | Profile data (execution frequency from real runs) | Static data dependencies (RAW/WAW/WAR) |
 | **Unit** | Basic blocks within a function | Statements within a transaction body |
@@ -774,10 +774,10 @@ hardware capacity:
 
 ## 15. Native Type Mapping
 
-`TypedRegister::llvm()` (`mod.rs:179-188`) maps each Brief type to its
+`TypedRegister::llvm()` (`mod.rs:179-188`) maps each Briv type to its
 native LLVM type:
 
-| Brief | LLVM |
+| Briv | LLVM |
 |-------|------|
 | `Bool` | `i1` |
 | `Char` | `i32` |

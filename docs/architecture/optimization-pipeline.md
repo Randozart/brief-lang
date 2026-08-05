@@ -270,7 +270,7 @@ LLVM optimization:
    non-countable to LLVM's unroller. Fixed by emitting `br %done` via
    `loop_exit_label`.
 
-Combined impact: 3.85x → 0.98x (brief ties C).
+Combined impact: 3.85x → 0.98x (briv ties C).
 
 ## Related Files
 

@@ -3,7 +3,7 @@
 
 ## The Four FFI Levels
 
-Brief provides four FFI declaration levels:
+Briv provides four FFI declaration levels:
 
 | Level | Keyword | Must link? | Blocking? | Return | Guard required? |
 |-------|---------|-----------|-----------|--------|-----------------|
@@ -21,7 +21,7 @@ compilation fails. `fn?` always returns `true`. No guard needed.
 
 Links if available. The compiler **requires** a `fn?` guard before any call:
 
-```brief
+```briv
 frgn? gpu_kernel(n: Int) -> Int from #System fallback -1;
 
 export defn run(n: Int) -> Int {
@@ -48,7 +48,7 @@ The narrowing pass proves `gpu_kernel?` at compile time per target:
 Returns immediately. The return type is always `Void`. If the symbol doesn't
 link, the call is silently skipped at the codegen level — no LLVM IR emitted.
 
-```brief
+```briv
 frgn! emit_log(msg: String) -> Void from #System fallback;
 
 export defn process() {
@@ -62,7 +62,7 @@ export defn process() {
 Returns `Bool(true)` if the call was dispatched, `Bool(false)` if the symbol
 doesn't link or the dispatch failed. Never blocks.
 
-```brief
+```briv
 frgn?! send_telemetry(value: Int) -> Bool from #System fallback false;
 
 export defn report(v: Int) -> Bool {
@@ -96,7 +96,7 @@ function doesn't exist. Zero runtime cost.
 `term expr?` tries to `term expr`. If `expr` can't be resolved (e.g., it calls
 a `frgn?` that doesn't exist), execution continues to the next statement:
 
-```brief
+```briv
 export defn handle(x: Int) -> Int {
     term posix_fn(x)?;         // try POSIX
     term fallback(x);          // fallback
@@ -105,7 +105,7 @@ export defn handle(x: Int) -> Int {
 
 Desugars to:
 
-```brief
+```briv
 export defn handle(x: Int) -> Int {
     when posix_fn? { term posix_fn(x); };
     term fallback(x);
@@ -148,9 +148,9 @@ Any bare protocol hashword other than `#System` produces a compile error.
 ## `#Link<name>` — Direct System Library Linking
 
 `from #Link<name>` links a system library directly by name — no per-target
-config, no registry lookup. The canonical brief form is:
+config, no registry lookup. The canonical briv form is:
 
-```brief
+```briv
 frgn MessageBoxW(h: Int, text: Int, caption: Int, type: Int) -> Int from #Link<user32>;
 ```
 
@@ -181,11 +181,11 @@ Use `from "path/file.c"` for source files you control.
 | `from #Link<user32>` | Windows platform APIs |
 | `from #Link<wasi_snapshot_preview1>` | WASI imports |
 | `from "path/file.c"` | Your own source files |
-| `from <registry_entry>` | Registry-installed (via `briefc registry add`) |
+| `from <registry_entry>` | Registry-installed (via `brivc registry add`) |
 | `from <stdlib/file.bv>` | Compiler stdlib |
 
 See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §1f for the
-registry design (`briefc registry add`, lookup order, platform paths).
+registry design (`brivc registry add`, lookup order, platform paths).
 
 ## Compile-Time Guard Safety
 

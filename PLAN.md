@@ -1,4 +1,4 @@
-# Brief Compiler — VHDL Backend Completion Plan
+# Briv Compiler — VHDL Backend Completion Plan
 
 **Date:** 2026-05-25
 **Status:** Proposed
@@ -20,7 +20,7 @@ What already exists and works:
 - **Parser** (`parser.rs:2075`): parses `#pragma.c key(value)`, `#pragma bind(...)`, `#pragma key(value)`  
 - **AST** (`ast.rs:659`): `Attribute { target: Option<String>, key: String, value: Option<String> }` on `StateDecl` and `Transaction`
 - **Hardware** (`hardware/mod.rs:18`): `memory_pragmas` and `logic_pragmas` HashMaps
-- **CLI dispatch** (`main.rs:1414-1429`): `brief vhdl <file> --hw <board.dbv>`
+- **CLI dispatch** (`main.rs:1414-1429`): `briv vhdl <file> --hw <board.dbv>`
 - **`run_vhdl`** (`main.rs:1959-2118`): full pipeline: parse → resolve → desugar → typecheck → HW validate → generate
 
 ---
@@ -87,7 +87,7 @@ Generate `clk_div.vhd` from `TargetConfig.clock_hz`:
 
 ### Step 6: Full type mapping
 
-Complete the `brief_type_to_vhdl()` method to handle all `Type` variants:
+Complete the `briv_type_to_vhdl()` method to handle all `Type` variants:
 
 | Type | VHDL |
 |------|------|
@@ -129,7 +129,7 @@ Generate a separate testbench `.vhd` that:
 - Instantiates the top entity
 - Generates clock and reset
 - Reads input stimulus (optional from BOM file)
-- Asserts expected outputs from Brief contracts
+- Asserts expected outputs from Briv contracts
 - Writes VCD waveform output
 
 ### Step 10: PSL assertion generation

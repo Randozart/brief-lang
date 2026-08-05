@@ -6,7 +6,7 @@
 // into scalars for alias analysis and vectorization.
 
 use crate::ast::{Expr, Statement, Type};
-use crate::backend::llvm::{emit_expr::member_brief_name, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{emit_expr::member_briv_name, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 /// Emit LLVM IR for a statement. Returns the last expression's register.
@@ -89,7 +89,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
             };
-            // 2026-08-04 (compiler-in-Brief): a top-level let that is reassigned
+            // 2026-08-04 (compiler-in-Briv): a top-level let that is reassigned
             // later was PRE-BOUND to an entry-block alloca (emit_definition's
             // pre-declaration). Store the value into that alloca and keep the
             // binding — reassignments then store into the same entry alloca,
@@ -205,7 +205,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             reg
                         } else {
                             let slot = backend.fun.gen_reg();
-                            // 2026-07-31: The slot type must match the binding's Brief
+                            // 2026-07-31: The slot type must match the binding's Briv
                             // type — an outlined guard param that is a FLOAT state field
                             // (e.g. `sum = 0.0` reset in accumulator_flush) is a `float`
                             // register; boxing it as i64 produces
@@ -299,7 +299,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             Expr::Identifier(n) => backend.fun.volatile_locals.contains(n),
                             _ => false,
                         };
-                        // 2026-08-04 (compiler-in-Brief): collection slots are
+                        // 2026-08-04 (compiler-in-Briv): collection slots are
                         // i64 — a String element (a ptr) must be ptrtoint'd
                         // before the store (`inner.data[len] = val`), or
                         // `store i64 <ptr>, ptr` is invalid IR.
@@ -829,13 +829,13 @@ pub(super) fn emit_strategy_member_call(
     };
     let Expr::Identifier(recv_name) = &recv else { return None; };
     let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return None; };
-    let type_name = match backend.ctx.field_brief_types.get(ridx) {
+    let type_name = match backend.ctx.field_briv_types.get(ridx) {
         Some(Type::Custom(n)) => n.clone(),
         Some(Type::Applied(n, _)) => n.clone(),
         _ => return None,
     };
     let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
-    let member = members.iter().find(|m| member_brief_name(m) == fn_name.as_str()).cloned();
+    let member = members.iter().find(|m| member_briv_name(m) == fn_name.as_str()).cloned();
     let Some(member) = member else { return None; };
     // Emit the receiver (the struct address) and pass the value register.
     let recv_tmp = backend.fun.gen_reg();

@@ -11,7 +11,7 @@
 
 ### 1.1 Problem Statement
 
-Brief's reactor runs continuously to evaluate preconditions, but different files have different needs:
+Briv's reactor runs continuously to evaluate preconditions, but different files have different needs:
 
 - **UI components** need `@10Hz` (fast enough for smooth interaction)
 - **Game logic** needs `@60Hz` (frame-synchronized)
@@ -58,7 +58,7 @@ rct_transaction ::= "rct" ("async")? "txn" identifier contract "{" body "}" ("@"
 
 ### 2.2 File-Level Reactor Declaration
 
-```brief
+```briv
 reactor @30Hz;
 ```
 
@@ -70,7 +70,7 @@ reactor @30Hz;
 
 ### 2.3 Per-rct Speed Declaration
 
-```brief
+```briv
 rct [condition] txn name [pre][post] { ... } @60Hz;
 ```
 
@@ -84,7 +84,7 @@ rct [condition] txn name [pre][post] { ... } @60Hz;
 
 Files without any `rct` blocks are **reactor-inactive**:
 
-```brief
+```briv
 // Pure library - reactor never activates
 let MAX_SIZE: Int = 100;
 
@@ -480,7 +480,7 @@ fn test_scheduler_skip_ratio() {
 
 Create `examples/reactor_speeds.bv`:
 
-```brief
+```briv
 // Pure library - no reactor
 defn multiply(a: Int, b: Int) [true][true] -> Int {
   term a * b;
@@ -499,7 +499,7 @@ rct [true] txn update_ui [pre][post] {
 
 Create `examples/reactor_adaptive.bv`:
 
-```brief
+```briv
 // Game logic needs fast reactor
 reactor @60Hz;
 
@@ -531,7 +531,7 @@ cargo test --release
 
 ### 5.1 Zero Hz
 
-```brief
+```briv
 reactor @0Hz;  // ERROR: Must be positive
 ```
 
@@ -539,7 +539,7 @@ reactor @0Hz;  // ERROR: Must be positive
 
 ### 5.2 Extremely High Hz
 
-```brief
+```briv
 reactor @50000Hz;  // WARNING: Probably unintended
 ```
 
@@ -547,7 +547,7 @@ reactor @50000Hz;  // WARNING: Probably unintended
 
 ### 5.3 Mixed Speeds with No File-Level Default
 
-```brief
+```briv
 rct [c1] txn t1 [p][q] { term; } @10Hz;
 rct [c2] txn t2 [p][q] { term; } @60Hz;
 ```
@@ -556,7 +556,7 @@ rct [c2] txn t2 [p][q] { term; } @60Hz;
 
 ### 5.4 Per-rct Override Higher Than File Default
 
-```brief
+```briv
 reactor @10Hz;
 rct [c] txn test [p][q] { term; } @100Hz;  // OK - overrides upward
 ```
@@ -565,7 +565,7 @@ rct [c] txn test [p][q] { term; } @100Hz;  // OK - overrides upward
 
 ### 5.5 File-Level Default Irrelevant for Non-rct
 
-```brief
+```briv
 reactor @100Hz;  // File has no rct blocks
 defn pure_fn() [true][true] -> Int { term 42; };
 ```
@@ -576,11 +576,11 @@ defn pure_fn() [true][true] -> Int { term 42; };
 
 ## 6. R.rbv Implications
 
-For Rendered Brief components, this enables powerful optimization:
+For Rendered Briv components, this enables powerful optimization:
 
-```brief
+```briv
 // mainMenu.rbv - passive UI, doesn't need reactor
-<script type="brief">
+<script type="briv">
   let selected: Int = 0;
   
   txn select_item [true][selected > 0] {
@@ -590,7 +590,7 @@ For Rendered Brief components, this enables powerful optimization:
 </script>
 
 // gameLogic.rbv - active gameplay, needs fast reactor
-<script type="brief">
+<script type="briv">
   reactor @60Hz;
   
   let position: Int = 0;

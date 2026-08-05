@@ -1,11 +1,11 @@
-# Compiler-in-Brief — the recipe
+# Compiler-in-Briv — the recipe
 
 **Date:** 2026-08-04
 **Status:** Active (P1–P5 complete; the two pilots ship in the compiler)
-**Related:** `docs/plans/2026-08-04-compiler-in-brief-dogfood-ffi.md`,
-`docs/architecture/glue-ffi.md`, `src/glue/brief_pass.rs`
+**Related:** `docs/plans/2026-08-04-compiler-in-briv-dogfood-ffi.md`,
+`docs/architecture/glue-ffi.md`, `src/glue/briv_pass.rs`
 
-This is how a Rust compiler pass becomes a Brief program, compiled by `briefc`
+This is how a Rust compiler pass becomes a Briv program, compiled by `brivc`
 itself, and loaded through the GLUE C ABI at runtime — so the compiler
 dogfoods the FFI it ships. Two passes are wired this way:
 
@@ -20,26 +20,26 @@ dogfoods the FFI it ships. Two passes are wired this way:
 ## The model
 
 ```
-Rust (projection) ── tagged Data Brief string ──▶ Brief pass ──▶ i64 result
+Rust (projection) ── tagged Data Briv string ──▶ Briv pass ──▶ i64 result
                                                         │
         src/*_projection.rs                      lib/compiler/*.bv
                                                         │ (dlopen)
-        fallback reference ◀── if absent ── src/glue/brief_pass.rs
+        fallback reference ◀── if absent ── src/glue/briv_pass.rs
 ```
 
-1. **Rust serializes** the pass's input into a tagged Data Brief projection
+1. **Rust serializes** the pass's input into a tagged Data Briv projection
    (`src/analysis/needs_state_projection.rs`, `soa_projection.rs`). This is the
-   long-lived interchange contract: Rust walks the AST, Brief decides.
-2. **Brief decides** (`lib/compiler/*.bv`), reading the projection with the
+   long-lived interchange contract: Rust walks the AST, Briv decides.
+2. **Briv decides** (`lib/compiler/*.bv`), reading the projection with the
    shared scanner (`lib/compiler/reader.bv`). `when` is an if-guard (not a
    while loop) in both interpreter and backend — all iteration is RECURSION.
-3. **build.rs** compiles each pass with a prebuilt `briefc` into
-   `target/compiler-in-brief/*.so` and embeds the paths via `cargo:rustc-env`
+3. **build.rs** compiles each pass with a prebuilt `brivc` into
+   `target/compiler-in-briv/*.so` and embeds the paths via `cargo:rustc-env`
    (read at compile time with `option_env!` — rustc-env is not a runtime var).
-   First build has no `briefc` yet (self-hosted bootstrap) and every pass
+   First build has no `brivc` yet (self-hosted bootstrap) and every pass
    falls back to its Rust reference.
-4. **brief_pass.rs** dlopens the `.so` (raw `extern dlopen/dlsym` + libdl),
-   resolves `compute(state, proj) -> i64` + `__brief_init_state`, calls through
+4. **briv_pass.rs** dlopens the `.so` (raw `extern dlopen/dlsym` + libdl),
+   resolves `compute(state, proj) -> i64` + `__briv_init_state`, calls through
    the C ABI. The i64's MEANING is pass-specific (needs_state: bitmask;
    soa_reorder: the address of a Malloc'd `[total][idx0]...` permutation
    buffer).
@@ -51,23 +51,23 @@ Rust (projection) ── tagged Data Brief string ──▶ Brief pass ──▶
 1. **Projection** (`src/analysis/<pass>_projection.rs`): a
    `serialize_<pass>_projection(items) -> String` emitting section lines
    (`<key> <count> <tokens...>`, one section per line, single spaces). Keep the
-   flat/linear shape — the Brief reader scans line-by-line with `:` slices.
+   flat/linear shape — the Briv reader scans line-by-line with `:` slices.
 2. **Pass** (`lib/compiler/<pass>.bv`): `export defn <pass>_compute(proj: CStr)
    -> Int`, reading the projection via `import "compiler/reader.bv"`.
    - Recursion, not `when`-loops.
-   - Substrings via `str_substr` (the runtime `brief_str_substr` frgn — the LLVM
+   - Substrings via `str_substr` (the runtime `briv_str_substr` frgn — the LLVM
      backend's dynamic String slice returns the whole array, see BUGS.md).
    - Character compares via `char_at` (no allocation; a per-char substr corrupts
      the heap under recursion).
    - No `List` element reads (generic `T`), no String `+` (register collision).
    - `Malloc#` + `Ptr<Int>` indexed stores for output buffers (the i64 ABI).
 3. **build.rs**: add a `build_pass` line + a `cargo:rustc-env` var.
-4. **brief_pass.rs**: a `LoadedPass` singleton + a `compute_<pass>_...`
+4. **briv_pass.rs**: a `LoadedPass` singleton + a `compute_<pass>_...`
    helper that serializes, calls, applies, and falls back to the reference.
-5. **Wire the call site** to prefer the Brief path.
-6. **Transition test**: assert the Brief result equals the Rust reference
+5. **Wire the call site** to prefer the Briv path.
+6. **Transition test**: assert the Briv result equals the Rust reference
    (`tests/c_driver_needs_state.rs` pattern; or a unit test in the reference
-   module using `parse_and_check` + `reorder_fields_brief`).
+   module using `parse_and_check` + `reorder_fields_briv`).
 
 ## Verified facts that shape every pass
 
@@ -77,7 +77,7 @@ Rust (projection) ── tagged Data Brief string ──▶ Brief pass ──▶
   in a register is a ptr. `.^Len` and `==` inttoptr it back
   (`is_semantic_string` + `string_ptr`, emit_expr.rs).
 - **Dynamic String slices return the whole array** (emit_expr.rs:992) — use
-  `brief_str_substr`. **String `+` codegens a register collision** — avoid.
+  `briv_str_substr`. **String `+` codegens a register collision** — avoid.
 - **`List<String>` element reads return generic `T`** — avoid collection reads;
   re-scan the projection string instead.
 - The pass's C signature takes the **state handle first**

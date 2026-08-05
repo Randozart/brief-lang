@@ -1,4 +1,4 @@
-# Learn Brief - Complete Tutorial
+# Learn Briv - Complete Tutorial
 
 **Version:** 0.16.0  
 **Last Updated:** 2026-06-22  
@@ -10,13 +10,13 @@
 
 ### Beginner (Start Here)
 
-1. **[00-welcome.md](00-welcome.md)** - What is Brief?
+1. **[00-welcome.md](00-welcome.md)** - What is Briv?
    - Introduction to declarative programming
    - Key features overview
    - Quick start guide
 
-2. **[00a-base-design.md](00a-base-design.md)** - The Brief Mindset
-   - How to read Brief code
+2. **[00a-base-design.md](00a-base-design.md)** - The Briv Mindset
+   - How to read Briv code
    - Symbol meanings and heuristics
    - The "feel" of the language
 
@@ -118,7 +118,7 @@
 
 ### Syntax Cheat Sheet
 
-```brief
+```briv
 // State
 let counter: Int = 0;
 const MAX_SIZE: Int = 100;
@@ -166,7 +166,7 @@ frgn sqrt(x: Float) -> Result<Float, MathError>;
 
 ### Collections
 
-```brief
+```briv
 // HashMap
 let map = new_map<String, Int>();
 map = map.insert("key", 42);
@@ -206,8 +206,8 @@ let (val, queue) = queue.dequeue();
 - [08-examples.md](08-examples.md) - Complete examples
 
 ### Tools
-- Brief Compiler - `brief` command
-- Language Server - `brief lsp`
+- Briv Compiler - `briv` command
+- Language Server - `briv lsp`
 - Syntax Highlighting - VS Code extension
 
 ---
@@ -216,7 +216,7 @@ let (val, queue) = queue.dequeue();
 
 - **GitHub Issues:** Report bugs and request features
 - **Discussions:** Ask questions and share ideas
-- **Discord:** Chat with other Brief developers
+- **Discord:** Chat with other Briv developers
 
 ---
 
@@ -227,7 +227,7 @@ After completing this tutorial:
 1. **Build a Project** - Apply what you've learned
 2. **Read the Spec** - Deep dive into language details
 3. **Explore Examples** - Study real-world code
-4. **Contribute** - Help improve Brief
+4. **Contribute** - Help improve Briv
 5. **Teach Others** - Share your knowledge
 
 ---
@@ -235,4 +235,4 @@ After completing this tutorial:
 *Happy coding! 🚀*
 
 *Last updated: 2026-06-08*  
-*Version: Brief v0.16.0*
+*Version: Briv v0.16.0*

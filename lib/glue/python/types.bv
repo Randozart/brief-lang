@@ -1,4 +1,4 @@
-// 2026-07-22: Python type declarations for Brief's type universe.
+// 2026-07-22: Python type declarations for Briv's type universe.
 // Types are defined against protocol hashwords (#String<UTF8>, #Int, etc.)
 // so GLUE can find CastTo/CastFrom paths.
 
@@ -25,7 +25,7 @@ type PyInt: #Int {
     op CastFrom(#Int) = i64_to_pylong(#L);
 };
 
-// Zero-copy melds: if Brief CBuffer has same layout as PyBytes
+// Zero-copy melds: if Briv CBuffer has same layout as PyBytes
 meld PyBytes -> CBuffer {
     ptr -> ptr;
     len -> len;

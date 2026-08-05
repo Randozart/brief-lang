@@ -186,7 +186,7 @@ Three new tests in `src/backend/llvm/tests.rs`:
 ## Trade-Offs Considered
 
 ### Escape Analysis Pass in the Compiler
-Rejected. Adding a Brief-level escape analysis would require a new pass or
+Rejected. Adding a Briv-level escape analysis would require a new pass or
 context parameter threaded through `emit_expr`. LLVM's existing promotion
 handles it at no code complexity cost.
 
@@ -207,7 +207,7 @@ call site. The global sentinel is zero-cost and simpler.
    to heap or stack depending on the list's origin (push, slice, etc.).
    Adding reference counting or a tracing GC is a separate project.
 
-2. **Brief-level escape analysis** — if LLVM's promotion proves insufficient
+2. **Briv-level escape analysis** — if LLVM's promotion proves insufficient
    for some pattern (e.g., partial escape through phi nodes), add an additive
    pass that chooses `alloca` over `malloc` when escape is disproven.
    Default remains `malloc`; override to `alloca` is optimization.

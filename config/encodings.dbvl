@@ -2,7 +2,7 @@
 // 2026-07-18: All encoding definitions. No hardcoded PascalCase table in the
 // compiler — every encoding is resolved through this file.
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): migrated from encodings.toml.
+// 2026-08-03 (Phase 3, data-briv-config plan): migrated from encodings.toml.
 // Each line is `<name>: <char_width>; <ops.index_at>; <ops.char_len>;` in the
 // flat .dbvl line-table form. The `encoding.` prefix on keys matches the TOML
 // table names the loader strips. `ops` fields are optional — when absent the

@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS ?= -Wall -Wextra -Wpedantic -std=c99 -O0 -g
 LDFLAGS ?=
 
-all: tamer test_simple test_add test_from_briefc test_brief_tamer
+all: tamer test_simple test_add test_from_brivc test_briv_tamer
 
 test_simple: tests/test_simple.c interp.c interp.h
 	$(CC) $(CFLAGS) -o $@ tests/test_simple.c interp.c $(LDFLAGS)
@@ -10,11 +10,11 @@ test_simple: tests/test_simple.c interp.c interp.h
 test_add: tests/test_add.c interp.c interp.h
 	$(CC) $(CFLAGS) -o $@ tests/test_add.c interp.c $(LDFLAGS)
 
-test_from_briefc: tests/test_from_briefc.c interp.c interp.h
-	$(CC) $(CFLAGS) -o $@ tests/test_from_briefc.c interp.c $(LDFLAGS)
+test_from_brivc: tests/test_from_brivc.c interp.c interp.h
+	$(CC) $(CFLAGS) -o $@ tests/test_from_brivc.c interp.c $(LDFLAGS)
 
-test_brief_tamer: tests/test_brief_tamer.c interp.c interp.h
-	$(CC) $(CFLAGS) -o $@ tests/test_brief_tamer.c interp.c $(LDFLAGS)
+test_briv_tamer: tests/test_briv_tamer.c interp.c interp.h
+	$(CC) $(CFLAGS) -o $@ tests/test_briv_tamer.c interp.c $(LDFLAGS)
 
 tamer: main.c interp.c interp.h
 	$(CC) $(CFLAGS) -o $@ main.c interp.c $(LDFLAGS)
@@ -22,10 +22,10 @@ tamer: main.c interp.c interp.h
 check: all
 	./test_simple
 	./test_add
-	./test_from_briefc /tmp/user_add.lair
-	./test_brief_tamer
+	./test_from_brivc /tmp/user_add.lair
+	./test_briv_tamer
 
 clean:
-	rm -f test_simple test_add test_from_briefc test_brief_tamer tamer
+	rm -f test_simple test_add test_from_brivc test_briv_tamer tamer
 
 .PHONY: all check clean

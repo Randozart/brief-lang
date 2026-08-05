@@ -213,7 +213,7 @@ $(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
 **File:** `benchmarks/metropolitan/bench_add.bv`
 
 Add contract precondition so the narrowing pass can prove i32 safety:
-```brief
+```briv
 export defn add(a: Int, b: Int [a < 1000 && b < 1000]) -> Int {
     term a + b;
 };
@@ -257,7 +257,7 @@ bridge generation unchanged for now — the benchmark calls WASM directly via
 `instance.exports.add`, not through the generated bridge.
 
 **Rationale comment added to gen_wasm.bv:**
-```brief
+```briv
 // 2026-07-25: When --int-bits 32 is used, WASM exports i32 functions
 // that return plain JS numbers (no BigInt). The generated bridge
 // currently wraps in BigInt() — a future update can detect the int

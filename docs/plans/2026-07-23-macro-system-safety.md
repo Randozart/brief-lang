@@ -36,7 +36,7 @@ The core tension in any compile-time macro system is: *when do macros run relati
 
 ### Phase 3: Generation Output — New Compilation Units
 
-Files written via `FileWrite$` at any phase become new source files that are compiled in a separate, clean compiler invocation. A single `brief build` orchestrates both passes transparently, with the guarantee that macro-generated code is NEVER compiled in the same pass as the macro that generated it.
+Files written via `FileWrite$` at any phase become new source files that are compiled in a separate, clean compiler invocation. A single `briv build` orchestrates both passes transparently, with the guarantee that macro-generated code is NEVER compiled in the same pass as the macro that generated it.
 
 ---
 
@@ -68,7 +68,7 @@ Shell (opt-in: --allow-run)
 
 `FileWrite$` writes to an in-memory virtual filesystem (`virtual://`) by default. Physical disk writes require explicit `.Persist$()` call:
 
-```brief
+```briv
 // Default: writes to virtual filesystem (in-memory, never touches disk)
 FileWrite$("src/generated/bridge.rs", content);
 
@@ -98,17 +98,17 @@ FileWrite$("src/generated/bridge.rs", content, { persist: true });
 
 ```bash
 # Development — inspect generated code without writing anything
-brief build bridge.bv --dump-vfs
+briv build bridge.bv --dump-vfs
 
 # CI — write generated files as part of the build
-brief build bridge.bv --allow-write
+briv build bridge.bv --allow-write
 ```
 
 ### Directory Scoping (Chrooted File I/O)
 
 `FileWrite$` and `FileRead$` operate relative to the project root ONLY. Absolute paths and `../` traversal are rejected:
 
-```brief
+```briv
 FileWrite$("src/generated/bridge.rs", content);  // allowed
 FileWrite$("/etc/passwd", content);               // rejected
 FileWrite$("../../.ssh/id_rsa", content);         // rejected
@@ -134,13 +134,13 @@ On subsequent builds, if a plugin's hash changes and it requests NEW capabilitie
 [!] Plugin 'glue-generator' has changed since last approved.
     Previously requested: disk-read, disk-write
     Now also requests: network
-    Run `brief audit` to inspect changes, or update macro-lock.toml
+    Run `briv audit` to inspect changes, or update macro-lock.toml
 ```
 
 ### Static Capability Auditing
 
 ```bash
-brief audit
+briv audit
 
 # Scanning 3 macros...
 #   deps/glue/generator.bv
@@ -180,7 +180,7 @@ Macro starts → creates delta-branch of AST
 
 Non-deterministic system inputs are mocked for reproducible builds:
 
-```brief
+```briv
 TimeNow$()  // returns frozen timestamp (git commit time or fixed epoch)
 EnvGet$("BUILD_NUMBER")  // returns "42"
 EnvGet$("HOME")          // returns "" (blocked unless allowlisted)
@@ -219,7 +219,7 @@ Every generated or mutated AST node carries a "lineage span" back to the source 
 
 Structural interpolation instead of string-based template substitution:
 
-```brief
+```briv
 let node = Quote$({
     fn $fn_name($params) -> $return_type {
         body_content
@@ -233,14 +233,14 @@ let node = Quote$({
 
 Generated AST nodes carry a taint flag. `All$()` and `Tag$("defn")` EXCLUDE generated nodes by default. To explicitly select generated nodes:
 
-```brief
+```briv
 All$({ include_generated: true }).Count$()
 ```
 
 ### Semantic Diff/Dry-Run
 
 ```bash
-brief build --diff
+briv build --diff
 
 # Changes proposed by all macros:
 # + src/generated/bridge.rs (new, by glue-generator)
@@ -259,7 +259,7 @@ brief build --diff
 | 4 | Add `virtual://` VFS namespace (default for FileWrite$) | 1 |
 | 5 | Add `.Persist$()` marker for physical flush | 4 |
 | 6 | Add `macro-lock.toml` with capability hashing | 3 |
-| 7 | Add `brief audit` command (static capability scan) | 2 |
+| 7 | Add `briv audit` command (static capability scan) | 2 |
 | 8 | Add resource quota / gas limit | 1 |
 | 9 | Add transactional macro execution | 4 |
 | 10 | Add AST lineage / macro expansion traces | 1 |
@@ -280,7 +280,7 @@ topology — without raw shell commands.
 
 ### The Intrinsic
 
-```brief
+```briv
 let cache_line = SysQuery$("cpu.cache_line_size");     // → 64
 let simd_width = SysQuery$("cpu.simd_register_width"); // → 512 (AVX-512)
 let gpu_addr   = SysQuery$("pci.device.gpu.bar[0]");   // → 0xFE000000
@@ -288,7 +288,7 @@ let gpu_addr   = SysQuery$("pci.device.gpu.bar[0]");   // → 0xFE000000
 
 ### Three Resolution Modes
 
-Driven by `brief.toml` target profiles, NOT by the macro source code:
+Driven by `briv.toml` target profiles, NOT by the macro source code:
 
 | Mode | Use case | Build flag | Portability |
 |------|----------|------------|-------------|
@@ -320,7 +320,7 @@ cached artifacts from being served to other machines.
 
 ### The Contract → Optimization Pipeline
 
-`SysQuery$` feeds directly into Brief's contract system to create optimizations
+`SysQuery$` feeds directly into Briv's contract system to create optimizations
 unavailable in any other language:
 
 ```
@@ -346,7 +346,7 @@ Same mechanism for:
 
 ### Comparison With Other Languages
 
-| Feature | C/C++ | Rust | **Brief** |
+| Feature | C/C++ | Rust | **Briv** |
 |---------|-------|------|-----------|
 | System info | `#ifdef` preprocessor (fragile) | `build.rs` env vars (string-based) | `SysQuery$` (typed, structured) |
 | Assumptions | `__builtin_assume(x)` (UB if wrong) | Hard to pass to optimizer | Safe invariants (debug=assert, release=opt) |
@@ -356,7 +356,7 @@ Same mechanism for:
 
 ## Layer 3: Multi-Target Compilation
 
-### Build Configuration (`brief.toml`)
+### Build Configuration (`briv.toml`)
 
 ```toml
 [package]
@@ -383,7 +383,7 @@ The compiler driver runs N passes, each with a different `SysQuery$` mock:
 ```
                       ┌───► [Pass 1: local-dev]        SysQuery$ reads PHYSICAL HOST
                       │
-brief build ──────────┼───► [Pass 2: aws-h100-node]    SysQuery$ reads nvidia_h100.json
+briv build ──────────┼───► [Pass 2: aws-h100-node]    SysQuery$ reads nvidia_h100.json
                       │
                       └───► [Pass 3: edge-jetson-nano] SysQuery$ reads inline config
 ```
@@ -398,7 +398,7 @@ bin/edge-jetson-nano/tensor_core # ARM NEON, 128-bit SIMD
 
 ### Fat Binaries with `#[multi_target]`
 
-```brief
+```briv
 #[multi_target(targets = ["aws-h100-node", "edge-jetson-nano"])]
 fn process_tensors(buffer: &mut [f32]) {
     let simd_width = SysQuery$("cpu.simd_register_width");
@@ -424,7 +424,7 @@ The compiler generates:
 | 4 | Add `virtual://` VFS namespace (default for FileWrite$) | 1 |
 | 5 | Add `.Persist$()` marker for physical flush | 4 |
 | 6 | Add `macro-lock.toml` with capability hashing | 3 |
-| 7 | Add `brief audit` command (static capability scan) | 2 |
+| 7 | Add `briv audit` command (static capability scan) | 2 |
 | 8 | Add resource quota / gas limit | 1 |
 | 9 | Add transactional macro execution | 4 |
 | 10 | Add AST lineage / macro expansion traces | 1 |
@@ -434,7 +434,7 @@ The compiler generates:
 | 14 | Add `TimeNow$`, `EnvGet$`, `HttpFetch$` | 3 |
 | **2a** | **Add `SysQuery$` + `host-introspection` capability** | **3** |
 | **2b** | **Add host-taint tracking on compilation output** | **2a** |
-| **2c** | **Add target profiles in `brief.toml`** | **2a** |
+| **2c** | **Add target profiles in `briv.toml`** | **2a** |
 | **2d** | **Add `#[multi_target]` + dispatch stub generator** | **2c** |
 | 15 | Rewrite GLUE bridge generator as `.bv` plugin | All of the above |
 

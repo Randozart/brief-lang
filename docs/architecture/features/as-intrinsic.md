@@ -10,7 +10,7 @@ function calls. Used for `llvm.sqrt.f32`, `llvm.ceil.f32`, etc.
 
 ## Syntax
 
-```brief
+```briv
 frgn sqrt_f32(x: Float) -> Float as intrinsic "llvm.sqrt.f32" ;
 ```
 
@@ -28,7 +28,7 @@ backend emits it at both declare and call sites.
 
 ## Standard library usage
 
-```brief
+```briv
 // lib/std/llvm.bv
 frgn sqrt_f32(x: Float) -> Float  as intrinsic "llvm.sqrt.f32" ;
 frgn sqrt_f64(x: Float) -> Float  as intrinsic "llvm.sqrt.f64" ;
@@ -36,7 +36,7 @@ frgn sqrt_f64(x: Float) -> Float  as intrinsic "llvm.sqrt.f64" ;
 
 ## Limitations
 
-- Only supports LLVM intrinsics whose signature matches the Brief `frgn`
+- Only supports LLVM intrinsics whose signature matches the Briv `frgn`
   declaration exactly. Intrinsics with extra parameters (like `llvm.abs.i64`
   with its `i1` zero-undef flag) can't be expressed and remain hardcoded in
   `emit_declares()`.

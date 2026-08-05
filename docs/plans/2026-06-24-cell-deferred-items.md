@@ -92,7 +92,7 @@ The CellCall convergence loop codegen (emit_expr.rs) uses `self.state_reg_name` 
 
 Allow one cell's output port to feed into another cell's input argument without parent mediation:
 
-```brief
+```briv
 cell! filter(input: Int) -> out: Int { ... };
 cell! smoother(input: Int) -> out: Int { ... };
 

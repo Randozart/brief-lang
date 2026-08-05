@@ -3,7 +3,7 @@
 **Date:** 2026-08-01
 **Status:** Superseded by the master plan —
 [2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md).
-**Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
+**Worktree:** `briv-compiler-cwm` (`feat/collections-watchdogs-memory`)
 
 **Relationship (plan map):** the original Phases 1–4. Phase 1 (docs/highlighter)
 is DONE. Phases 2–6 (intrinsic audit, consumptive operators, stream symbols,
@@ -30,10 +30,10 @@ removal) with the full rationale. Also related:
 3. **Free-check** — the garbage scheduler's unprovable tail is reclaimed by a
    sound runtime refcount at the *edge-of-use* checkpoint; the `free`/`keep`
    body-annotation keywords let the programmer fill proof gaps with verified
-   contracts; `briefc memcheck` reports every unprovable point and the hint that
+   contracts; `brivc memcheck` reports every unprovable point and the hint that
    closes it.
 4. **C-surface reduction** — the `.bv`/`.ebv` split (Rust's core/alloc/std
-   layering, in Brief's file-extension terms): logic moves to `.ebv` pure Brief,
+   layering, in Briv's file-extension terms): logic moves to `.ebv` pure Briv,
    `.bv` keeps only the genuine OS-syscall shim, the target picks the variant.
 
 ## Design decisions (settled with the user)
@@ -54,7 +54,7 @@ removal) with the full rationale. Also related:
   int/float/char/str emission by the argument type; other types cast first.
 - **`.bv` vs `.ebv`** — the same stdlib API has two target variants: `.bv`
   (OS/libc-backed — maps to OS functions) and `.ebv` (embedded/no-OS — pure
-  Brief logic). The import resolver prefers `.bv` on OS targets and `.ebv` on
+  Briv logic). The import resolver prefers `.bv` on OS targets and `.ebv` on
   freestanding targets.
 
 ## Audit criterion (intrinsics vs stdlib)
@@ -67,19 +67,19 @@ removal) with the full rationale. Also related:
 
 ## Phase 1 — Docs/highlighter
 
-### 1.1 `syntax-highlighter/syntaxes/brief.tmLanguage.json`
+### 1.1 `syntax-highlighter/syntaxes/briv.tmLanguage.json`
 - REMOVE the `"macro-words"` repository (`\b[a-zA-Z_][a-zA-Z0-9_]*!` →
-  `entity.name.tag.macro-call.brief`) and its `"include": "#macro-words"`.
+  `entity.name.tag.macro-call.briv`) and its `"include": "#macro-words"`.
 - REMOVE the `"macros"` repository (`\b(entry|args|print|println|get_env|get_env_int)!` →
-  `keyword.control.macro.brief`) and its `"include": "#macros"`.
+  `keyword.control.macro.briv`) and its `"include": "#macros"`.
 - ADD standalone `?` and `!` operator rules after the existing `@`/`&` rules,
-  same scope name (`storage.modifier.ownership.brief`). Rule order keeps
+  same scope name (`storage.modifier.ownership.briv`). Rule order keeps
   `!=` and `~?` winning over the standalone chars.
 - ADD the missing keywords `seq`/`vol`/`sync` and the intrinsics
   `Now#`/`Malloc#`/`Alloc#`/`Free#`/`Load#`/`Store#`.
 
-### 1.2 `syntax-highlighter/syntaxes/dbrief.tmLanguage.json`
-- ADD the standalone `?`/`!` rules after `@`/`&` (mirroring the dbrief
+### 1.2 `syntax-highlighter/syntaxes/dbriv.tmLanguage.json`
+- ADD the standalone `?`/`!` rules after `@`/`&` (mirroring the dbriv
   convention). No word-bang to remove (verified absent).
 
 ### 1.3 `spec/SPEC.md`
@@ -153,11 +153,11 @@ agree; a mixed Int×Float expression errors with a clear message.
 - For heap fields the static proof cannot close (an unordered reader exists),
   the scheduler inserts a refcount at the edge-of-use checkpoint: the compiler
   emits inc/dec on address copies (reusing provenance), and at the checkpoint a
-  zero count → `__brief_free`. Sound (no premature free — only freed when no
+  zero count → `__briv_free`. Sound (no premature free — only freed when no
   live reference remains).
 - The checkpoint is the LAST POSSIBLE consumer boundary, not an arbitrary point.
 
-### 3.4 `briefc memcheck`
+### 3.4 `brivc memcheck`
 - A diagnostics subcommand that reports every unprovable heap field, its
   possible readers, and the exact `free`/`keep` hint that would close the gap.
 - The hints the scheduler verifies (a `free` with a later read is an error).
@@ -169,22 +169,22 @@ agree; a mixed Int×Float expression errors with a clear message.
 
 **Verify:** a `free` hint with a later read errors; a `keep` on a provably-dead
 field warns; a program with an unprovable field + a correct `free` hint matches
-C; `briefc memcheck` lists the unprovable points.
+C; `brivc memcheck` lists the unprovable points.
 
 ---
 
 ## Phase 4 — `.bv`/`.ebv` C-surface reduction
 
 ### 4.1 Runtime inventory (committed as its own step)
-- Classify every `brief_rt.c` function as **syscall shim** (stays C) vs
+- Classify every `briv_rt.c` function as **syscall shim** (stays C) vs
   **logic** (moves to `.ebv`): the digit/float formatting
   (`__print_int`/`__print_float` itoa/ftoa), string ops
-  (`brief_str_eq`/`band`/`bor`/`bxor`/`bnot`/`concat`/`len`), the allocator.
+  (`briv_str_eq`/`band`/`bor`/`bxor`/`bnot`/`concat`/`len`), the allocator.
 - Produce the classification table in the architecture doc.
 
 ### 4.2 `.ebv` variants
 - Introduce `lib/std/*.ebv` implementations of the formatting/string/allocator
-  logic in pure Brief (byte loops, digit conversion, a free-list allocator on a
+  logic in pure Briv (byte loops, digit conversion, a free-list allocator on a
   buffer). The `.bv` variants keep the OS/libc calls.
 - The import resolver prefers `.bv` on OS targets; a freestanding target
   prefers `.ebv`.
@@ -213,6 +213,6 @@ implementation that builds and prints identically.
 
 - Chained-bucket HashMap (the flat form works; the chained end-state is a
   standalone follow-up).
-- The Rust `compiler_builtins` equivalent (wide-int/memcpy libcalls) — Brief's
+- The Rust `compiler_builtins` equivalent (wide-int/memcpy libcalls) — Briv's
   integer ops are native-width i64, so the surface is minimal; deferred to the
   no-libc target work.

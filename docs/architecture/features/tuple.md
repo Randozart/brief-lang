@@ -11,7 +11,7 @@ Tuples group multiple values into a single compound value. They are used for mul
 
 ### Tuple Literal
 
-```brief
+```briv
 let pair = (1, "hello");
 let triple = (true, 42, "world");
 let singleton = (1,);     // trailing comma required for single-element
@@ -19,14 +19,14 @@ let singleton = (1,);     // trailing comma required for single-element
 
 ### Tuple Type
 
-```brief
+```briv
 defn split_name(s: String) -> (String, String);
 defn process() -> (Bool, Int, String);
 ```
 
 ### Tuple Destructuring
 
-```brief
+```briv
 let (first, second) = split_name("John Doe");
 let (a, b, c) = process();
 let (_, important) = split("skip_this,keep_this");  // _ discards
@@ -34,7 +34,7 @@ let (_, important) = split("skip_this,keep_this");  // _ discards
 
 ### Tuple Indexing via Projection
 
-```brief
+```briv
 let pair = (42, "hello");
 let first: Int = pair :> 0;      // 42
 let second: String = pair :> 1;  // "hello"
@@ -42,7 +42,7 @@ let second: String = pair :> 1;  // "hello"
 
 ### Multi-Return Functions
 
-```brief
+```briv
 defn split(s: String, sep: String) -> (String, String) {
     let pos = find(s, sep);
     term (s[..pos], s[pos+1..]);

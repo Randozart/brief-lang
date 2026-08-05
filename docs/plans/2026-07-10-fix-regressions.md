@@ -42,7 +42,7 @@ This mirrors the identical pattern at `emit_memory_field_store:42-54`.
 ## Issue 2: A005c Dispatch Heuristic for Complex Single-Txn Programs
 
 ### Symptoms
-fannkuch_redux regresses from 0.99x (Brief wins) to 1.60x (C wins).
+fannkuch_redux regresses from 0.99x (Briv wins) to 1.60x (C wins).
 The program still produces correct output (MATCH), but performance is worse.
 
 ### Root Cause

@@ -2,13 +2,13 @@
 
 ## Overview
 
-Add `brief map` and `brief wrap` commands to automatically generate FFI bindings for foreign libraries. The system analyzes libraries and generates Brief definitions with suggested contracts.
+Add `briv map` and `briv wrap` commands to automatically generate FFI bindings for foreign libraries. The system analyzes libraries and generates Briv definitions with suggested contracts.
 
 ## Command Interface
 
 ```
-brief map <library_path> [--mapper <mapper_name>] [--out <output_dir>] [--force]
-brief wrap <library_path> [--mapper <mapper_name>] [--out <output_dir>] [--force]
+briv map <library_path> [--mapper <mapper_name>] [--out <output_dir>] [--force]
+briv wrap <library_path> [--mapper <mapper_name>] [--out <output_dir>] [--force]
 ```
 
 - `map` - Analyze and show what would be generated (dry-run)
@@ -21,7 +21,7 @@ brief wrap <library_path> [--mapper <mapper_name>] [--out <output_dir>] [--force
 
 ```
 lib/ffi/generated/<libname>/
-├── lib.bv              # Generated Brief definitions (frgn interfaces)
+├── lib.bv              # Generated Briv definitions (frgn interfaces)
 ├── bindings.toml       # FFI binding metadata
 ├── README.md           # Documentation + user instructions
 └── wrapper/            # Language-specific wrapper code (optional)
@@ -32,7 +32,7 @@ lib/ffi/generated/<libname>/
 
 ## lib.bv Structure
 
-```brief
+```briv
 // Auto-generated wrapper for <libname>
 // Mapper: <mapper_name>
 
@@ -123,8 +123,8 @@ message = "String"
 ## Current Status
 
 **Working:** 
-- `brief map <lib>` - analyzes library, shows full preview of generated files
-- `brief wrap <lib>` - generates lib.bv + bindings.toml with full contracts
+- `briv map <lib>` - analyzes library, shows full preview of generated files
+- `briv wrap <lib>` - generates lib.bv + bindings.toml with full contracts
 - `--mapper` flag (rust, c, wasm)
 - `--out` flag for output directory
 - `--force` flag to overwrite
@@ -137,10 +137,10 @@ test result: ok. 58 passed; 0 failed
 **Example:**
 ```bash
 # Analyze and preview C header
-brief map test_lib.h
+briv map test_lib.h
 
 # Generate bindings
-brief wrap test_lib.h --force
+briv wrap test_lib.h --force
 ```
 
 **Remaining:**

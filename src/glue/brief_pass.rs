@@ -1,10 +1,10 @@
-// ── Compiler-in-Brief: Brief passes loaded through the GLUE C ABI ─────
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P3+P5): Brief
+// ── Compiler-in-Briv: Briv passes loaded through the GLUE C ABI ─────
+// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi, P3+P5): Briv
 // passes (lib/compiler/needs_state.bv, lib/compiler/soa_reorder.bv) are
-// compiled by briefc (build.rs) into target/compiler-in-brief/*.so and loaded
-// HERE via dlopen — the same way a host language calls a Brief bridge. Each
+// compiled by brivc (build.rs) into target/compiler-in-briv/*.so and loaded
+// HERE via dlopen — the same way a host language calls a Briv bridge. Each
 // pass has a Rust reference that runs when its library is absent (first build
-// / no prebuilt briefc). Transition tests assert the Brief result equals the
+// / no prebuilt brivc). Transition tests assert the Briv result equals the
 // reference.
 
 use std::ffi::{c_char, c_int, c_void, CString};
@@ -13,7 +13,7 @@ use once_cell::sync::OnceCell;
 
 use crate::ast::TopLevel;
 
-/// A dlopen'd Brief pass: `compute(state, proj) -> i64`. The i64's MEANING is
+/// A dlopen'd Briv pass: `compute(state, proj) -> i64`. The i64's MEANING is
 /// pass-specific (needs_state: the bitmask; soa_reorder: the address of a
 /// `[total][idx0]...` permutation buffer).
 struct LoadedPass {
@@ -55,7 +55,7 @@ impl LoadedPass {
             dlsym(handle, CString::new(compute_symbol).ok()?.as_ptr() as *const c_char)
         };
         let init_state = unsafe {
-            dlsym(handle, b"__brief_init_state\0".as_ptr() as *const c_char)
+            dlsym(handle, b"__briv_init_state\0".as_ptr() as *const c_char)
         };
         if compute.is_null() || init_state.is_null() {
             return None;
@@ -91,7 +91,7 @@ fn needs_state_pass() -> Option<&'static LoadedPass> {
         .as_ref()
 }
 
-/// Compute the needs_state map for a program, preferring the Brief pass when
+/// Compute the needs_state map for a program, preferring the Briv pass when
 /// its library is present. Falls back to the Rust reference (export_abi.rs).
 /// The two must agree — asserted by tests/c_driver_needs_state.rs.
 pub fn compute_export_needs_state(items: &[TopLevel]) -> std::collections::HashMap<String, bool> {
@@ -129,7 +129,7 @@ fn soa_reorder_pass() -> Option<&'static LoadedPass> {
         .as_ref()
 }
 
-/// Compute the AoS → SoA item permutation via the Brief pass, when its
+/// Compute the AoS → SoA item permutation via the Briv pass, when its
 /// library is present. Returns None when the pass is unavailable (caller falls
 /// back to the Rust reorder_fields). The permutation is the pass's Malloc'd
 /// `[total][idx0]...[idx_{N-1}]` buffer; read and freed here.
@@ -167,12 +167,12 @@ fn rt_free(ptr: *mut c_void) {
 
 // ── diagnostics ────────────────────────────────────────────────────────
 
-/// Whether the compiled Brief needs_state pass library is available to load.
+/// Whether the compiled Briv needs_state pass library is available to load.
 pub fn pass_available() -> bool {
     needs_state_pass().is_some()
 }
 
-/// Whether the compiled Brief soa_reorder pass library is available to load.
+/// Whether the compiled Briv soa_reorder pass library is available to load.
 pub fn soa_pass_available() -> bool {
     soa_reorder_pass().is_some()
 }
@@ -192,10 +192,10 @@ mod tests {
     }
 
     /// The dlopen path must actually run (not silently fall back). Builds the
-    /// bridges, runs BOTH the Brief pass and the Rust reference, and requires
-    /// equality — and that the Brief path was used when the .so was produced.
+    /// bridges, runs BOTH the Briv pass and the Rust reference, and requires
+    /// equality — and that the Briv path was used when the .so was produced.
     #[test]
-    fn brief_pass_matches_reference_when_loaded() {
+    fn briv_pass_matches_reference_when_loaded() {
         let root = env!("CARGO_MANIFEST_DIR");
         let corpus = [
             "examples/glue-host/boundary.bv",
@@ -204,20 +204,20 @@ mod tests {
             "examples/glue-host/rank.bv",
             "examples/glue-host/bench.bv",
         ];
-        let mut used_brief = false;
+        let mut used_briv = false;
         for rel in corpus {
             let src = format!("{}/{}", root, rel);
             let source = std::fs::read_to_string(&src).unwrap();
             let (items, _) = crate::library::parse_and_check(&src, &source).unwrap();
-            let brief = compute_export_needs_state(&items);
+            let briv = compute_export_needs_state(&items);
             let reference = crate::analysis::export_abi::compute_export_needs_state(&items);
-            assert_eq!(brief, reference, "Brief pass diverged from reference for {}", rel);
+            assert_eq!(briv, reference, "Briv pass diverged from reference for {}", rel);
             if needs_state_pass().is_some() {
-                used_brief = true;
+                used_briv = true;
             }
         }
         if option_env!("BRIEF_COMPILER_IN_BRIEF_SO").map_or(false, |p| !p.is_empty()) {
-            assert!(used_brief, "pass library was built but never used");
+            assert!(used_briv, "pass library was built but never used");
         }
     }
 

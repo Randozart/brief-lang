@@ -9,7 +9,7 @@ A block expression (`{ stmt1; stmt2; last_expr }`) groups a sequence of statemen
 
 ## Syntax
 
-```brief
+```briv
 let result = {
     &temp = temp + 1;
     temp * 2
@@ -38,7 +38,7 @@ This means block expressions are **pure** from the perspective of the enclosing 
 
 ## Examples
 
-```brief
+```briv
 // Scoped computation
 let x: Int = 10;
 let result = {

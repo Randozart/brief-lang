@@ -5,7 +5,7 @@
 
 ## Summary
 
-Brief's provenance analysis pass currently tracks pointer lifetimes but does
+Briv's provenance analysis pass currently tracks pointer lifetimes but does
 not automatically select allocation strategies (stack arena vs heap). This
 feature would extend provenance analysis to automatically promote allocations
 between stack-tied arenas and long-lived heaps based on compile-time proof of

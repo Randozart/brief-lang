@@ -1,8 +1,8 @@
-// ── Needs-State Projection — the compiler-in-Brief handoff ──────────────
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi): serializes the
-// input to `compute_export_needs_state` into a form the Brief pass
+// ── Needs-State Projection — the compiler-in-Briv handoff ──────────────
+// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi): serializes the
+// input to `compute_export_needs_state` into a form the Briv pass
 // (`lib/compiler/needs_state.bv`) reads. This is the long-lived interchange
-// contract: Rust walks the AST and emits the projection; Brief parses it, runs
+// contract: Rust walks the AST and emits the projection; Briv parses it, runs
 // the analysis, and emits the needs_state bitmask; Rust reads the bitmask.
 //
 // The projection encodes the export bodies as FLAT PREORDER node lists (no
@@ -10,7 +10,7 @@
 // is `kind:name` (kind ∈ t b e x l a g i f c m o for statements, D C B U L I _
 // for expressions; name empty for kinds without one). Because the analysis is
 // an OR over every reachable node, a preorder flat list fully determines it —
-// Brief walks the tokens in order, applying the per-node rule, and resolves
+// Briv walks the tokens in order, applying the per-node rule, and resolves
 // export→export calls by DFS. The kinds mirror export_abi.rs EXACTLY:
 //   stmts walked: t term, b termbang, e escape, x expression, l let(expr),
 //                 a assign(lhs+rhs), g guarded(body), i if(then+els),
@@ -21,12 +21,12 @@
 //                 U unary(inner), L list(items), I identifier(state?)
 //   exprs false:  _ every other expression kind
 // Undo: if `compute_export_needs_state` is ever replaced by this pass and the
-// Brief pass is removed, delete this module and the projection format.
+// Briv pass is removed, delete this module and the projection format.
 
 use crate::ast::{Definition, Expr, Statement, TopLevel};
 
 /// The intrinsic calls that force `needs_state` (kept in sync with the
-/// backend's list; serialized so the Brief pass need not hardcode them).
+/// backend's list; serialized so the Briv pass need not hardcode them).
 const STATEFUL_INTRINSICS: &[&str] = &[
     "Malloc#", "Memcpy#", "Memmove#", "Memset#",
     "Print#",
@@ -167,10 +167,10 @@ fn emit_expr_flat(out: &mut Vec<String>, expr: &Expr) {
             for e in items { emit_expr_flat(out, e); }
         }
         Expr::Identifier(name) => out.push(format!("I:{}", name)),
-        // 2026-08-04 (compiler-in-Brief): wrapping kinds that can HIDE a
+        // 2026-08-04 (compiler-in-Briv): wrapping kinds that can HIDE a
         // stateful inner (a cast-wrapped call, a method call on a state-field
         // receiver, an index/slice/addr-of of a state field). Walk the inner —
-        // mirrors export_abi.rs expr_needs_state so the Brief pass sees the
+        // mirrors export_abi.rs expr_needs_state so the Briv pass sees the
         // same nodes the Rust reference does.
         Expr::Cast(inner, _) => emit_expr_flat(out, inner),
         Expr::MethodCall(recv, name, args, _) => {
@@ -242,12 +242,12 @@ mod tests {
     fn projection_encodes_call_and_assign() {
         let d = defn("greet", vec![
             Statement::Assign(Expr::Identifier("saved".into()), Expr::Identifier("name".into())),
-            Statement::Term(Some(Expr::Call("cstr_to_brief".into(), vec![Expr::Identifier("saved".into())], None))),
+            Statement::Term(Some(Expr::Call("cstr_to_briv".into(), vec![Expr::Identifier("saved".into())], None))),
         ]);
         let items = vec![exported(d)];
         let p = serialize_needs_state_projection(&items);
-        // {a (I saved) (I name)} {t (C cstr_to_brief [(I saved)])}
-        assert!(p.contains("body greet 6 a: I:saved I:name t: C:cstr_to_brief I:saved"), "{}", p);
+        // {a (I saved) (I name)} {t (C cstr_to_briv [(I saved)])}
+        assert!(p.contains("body greet 6 a: I:saved I:name t: C:cstr_to_briv I:saved"), "{}", p);
     }
 
     #[test]

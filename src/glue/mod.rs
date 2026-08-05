@@ -1,17 +1,17 @@
 // GLUE — General Language Unification Engine
 //
-// FFI broker built on Brief's meld system. Any two languages that consume
+// FFI broker built on Briv's meld system. Any two languages that consume
 // LLVM-compatible object code can be linked through GLUE. Neither language
-// knows Brief exists. Both see their own native interface.
+// knows Briv exists. Both see their own native interface.
 //
 // Architecture decisions:
-// - GLUE adapters are Brief `$!` macros, not Rust template engines.
+// - GLUE adapters are Briv `$!` macros, not Rust template engines.
 //   Adapters live in glue/adapters/<language>.bv and use emit_file#() to
 //   write native source files at compile time. Adding a language = writing
 //   one .bv file. This avoids throwaway Rust infrastructure that will be
 //   rewritten during self-hosting.
 //
-// - The bridge IS native object code. Brief emits LLVM IR → .o/.a/.wasm.
+// - The bridge IS native object code. Briv emits LLVM IR → .o/.a/.wasm.
 //   No C compiler, no extern "C", no cc crate. The foreign linker consumes
 //   .a directly.
 //
@@ -22,7 +22,7 @@
 // See docs/plans/2026-06-23-glue-implementation-status.md for status.
 
 pub mod bridge;
-pub mod brief_pass;
+pub mod briv_pass;
 pub mod config;
 pub mod export;
 pub mod link;

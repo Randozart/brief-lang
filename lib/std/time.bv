@@ -1,7 +1,7 @@
 // Standard Time Library
 //
 // Functions marked with 'frgn' require foreign implementation.
-// Functions with 'defn' are implemented natively in Brief.
+// Functions with 'defn' are implemented natively in Briv.
 
 // ===== PURE FOREIGN (requires system time) =====
 

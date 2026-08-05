@@ -1,6 +1,6 @@
 # Extensible Lexer — Literal Parsing via `op Parse`
 
-Brief's literal syntax is not hardcoded. The lexer's job is purely mechanical:
+Briv's literal syntax is not hardcoded. The lexer's job is purely mechanical:
 split source text into raw tokens (barewords, numbers, quoted strings) and
 identify prefix/suffix discriminators. It never needs to know what any
 discriminator means — that is delegated to the type's `op Parse(Form, pre: "suffix")`
@@ -14,7 +14,7 @@ Adding a new literal syntax is one line in a `.bv` file. No compiler changes.
 
 Every primordial type comes with `op Parse(#Category)` — the identity parse:
 
-```brief
+```briv
 type Int {   // in lib/std/types/bootstrap.bv
     op Parse(#Int);      // 42 → Int (identity, zero-cost)
     op Parse(Decimal);   // also accepts numeric literals
@@ -34,7 +34,7 @@ These give every type a default way to be constructed from source text.
 Other number bases are defined in the standard library without touching
 the compiler's lexer:
 
-```brief
+```briv
 type Int {
     op Parse(Decimal, pre: "0b") = parse_binary(#L);  // 0b1010 → 10
     op Parse(Decimal, pre: "0o") = parse_octal(#L);   // 0o77 → 63
@@ -51,7 +51,7 @@ The function `parse_binary` runs at compile time and returns the value.
 
 Suffixes attach naturally to numbers and read like natural language:
 
-```brief
+```briv
 type Milliseconds {
     data: Bits<64>;
     op Parse(Decimal, suf: "ms") = parse_ms(#L);
@@ -77,7 +77,7 @@ The typechecker routes it to `Milliseconds.Parse(Decimal, suf: "ms")`.
 Colors can use clean, readable syntax without `#` (which is reserved for
 hashwords):
 
-```brief
+```briv
 type Color {
     r: Bits<8>;
     g: Bits<8>;
@@ -99,7 +99,7 @@ The lexer sees `rgbFF0055` and routes it to the `Color` type's Parse op.
 
 Raw string-like syntax for regex:
 
-```brief
+```briv
 type Regex {
     data: Bits<64>;  // pointer to compiled regex
     len: Bits<64>;

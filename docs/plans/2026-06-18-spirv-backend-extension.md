@@ -31,7 +31,7 @@ add/sub/mul kernels via `emit_spirv_module` in `gpu.rs`. Two active backends
 | `src/backend/llvm/emit_toplevel.rs` | Pass `field_types` to `collect_gpu_kernel` | Low — one parameter |
 | `src/backend/llvm/tests.rs` | New GPU kernel SPIR-V IR tests | Low — test assertions |
 | `src/interpreter.rs` | Match arms for new `Intrinsic` + `Expr::SharedMem` | Low — stub returns |
-| `lib/runtime/brief_gpu_rt.c` | Multi-buffer dispatch, `grid_y`/`grid_z` params | Low — API extension |
+| `lib/runtime/briv_gpu_rt.c` | Multi-buffer dispatch, `grid_y`/`grid_z` params | Low — API extension |
 | `lib/std/gpu.bv` | NEW — standard library wrappers | Low — fresh file |
 | `docs/architecture/features/spirv-backend.md` | NEW — architecture doc | Low — documentation |
 
@@ -221,9 +221,9 @@ Split kernel parameters from one `i8* %buffer` into `i8* %in_buf, i8* %out_buf`.
    - `%base_out = getelementptr i8, i8* %out_buf, i64 %gtid` (for output fields)
    - `ensure_field_loaded` selects buffer based on field classification
 
-5. **Update `brief_gpu_launch` C API**:
+5. **Update `briv_gpu_launch` C API**:
    ```c
-   void brief_gpu_launch(
+   void briv_gpu_launch(
        const void* kernel_spirv, size_t kernel_size,
        int grid_x, int block_x,
        const int64_t* buffer_handles, int num_buffers
@@ -330,7 +330,7 @@ Add `get_global_id#(dim)`, `get_local_id#(dim)`, `get_group_id#(dim)`,
     has a wildcard catch-all.
 
 11. **Update `emit_expr.rs`** (CPU codegen): add match arms that call the
-    actual C runtime functions (e.g. `__get_global_id` in `brief_gpu_rt.c`).
+    actual C runtime functions (e.g. `__get_global_id` in `briv_gpu_rt.c`).
     These compile to real FFI calls on CPU for testing, and get replaced by
     SPIR-V builtins in the GPU path.
 
@@ -572,9 +572,9 @@ Support 2D/3D workgroup dispatch via `get_global_id(0)`, `get_global_id(1)`,
    This is emitted automatically when the kernel body references
    `get_global_id(1)` or `get_global_id(2)`.
 
-3. **Update `brief_gpu_launch` C API** to accept `grid_y, grid_z`:
+3. **Update `briv_gpu_launch` C API** to accept `grid_y, grid_z`:
    ```c
-   void brief_gpu_launch(
+   void briv_gpu_launch(
        const void* kernel_spirv, size_t kernel_size,
        int grid_x, int grid_y, int grid_z,
        int block_x,
@@ -615,9 +615,9 @@ test_emit_spirv_module_1d_grid_no_overhead
 
 New file `lib/std/gpu.bv`:
 
-```brief
+```briv
 // GPU compute intrinsic wrappers
-// These expose SPIR-V built-in functions as Brief FFI calls.
+// These expose SPIR-V built-in functions as Briv FFI calls.
 // The SPIR-V backend recognizes them and emits the correct
 // SPIR-V LLVM IR built-in calls.
 
@@ -638,23 +638,23 @@ frgn barrier() -> Bool ;
 ```
 
 This is imported into user programs via:
-```brief
+```briv
 import "std/gpu.bv";
 ```
 
 The declarations ensure the CPU fallback path links against real
-implementations in `brief_gpu_rt.c`.
+implementations in `briv_gpu_rt.c`.
 
 ---
 
 ## C Runtime Updates
 
-File: `lib/runtime/brief_gpu_rt.c`
+File: `lib/runtime/briv_gpu_rt.c`
 
 Changes:
-1. **`brief_gpu_launch`** — add `grid_y, grid_z` parameters:
+1. **`briv_gpu_launch`** — add `grid_y, grid_z` parameters:
    ```c
-   void brief_gpu_launch(
+   void briv_gpu_launch(
        const void* kernel_spirv, size_t kernel_size,
        int grid_x, int grid_y, int grid_z,
        int block_x,
@@ -690,7 +690,7 @@ New file `docs/architecture/features/spirv-backend.md`:
 2. **Module layout** — `gpu.rs` responsibilities, each public function
 3. **Kernel extraction flow** — eligibility → cost → extract → emit → compile → embed
 4. **Float opcode dispatch** — `field_types` map + `is_float_context` analysis,
-   table of Brief expr → SPIR-V LLVM IR
+   table of Briv expr → SPIR-V LLVM IR
 5. **Buffer classification** — read/write set analysis, input vs output buffers
 6. **Intrinsic → SPIR-V mapping** — table of all GPU intrinsics and their
    SPIR-V LLVM IR equivalents
@@ -711,9 +711,9 @@ New file `docs/architecture/features/spirv-backend.md`:
 | **1** | Eligibility relaxation (P5) | `gpu.rs` |
 | **2** | Thread/block ID intrinsics (P3) | `ast.rs`, `gpu.rs`, `interpreter.rs`, `mod.rs`, `emit_expr.rs`, `loop_engine.rs`, `reorder.rs`, `hazard.rs`, `tests.rs` |
 | **3** | Float arithmetic (P1) | `gpu.rs`, `mod.rs` (plumbing), `emit_toplevel.rs` |
-| **4** | Multiple storage buffers (P2) | `gpu.rs`, `brief_gpu_rt.c` |
+| **4** | Multiple storage buffers (P2) | `gpu.rs`, `briv_gpu_rt.c` |
 | **5** | Shared memory (P4) | `ast.rs`, `gpu.rs`, `interpreter.rs`, `mod.rs`, all expr-match functions |
-| **6** | Multiple dimensions (P6) | `gpu.rs`, `brief_gpu_rt.c` |
+| **6** | Multiple dimensions (P6) | `gpu.rs`, `briv_gpu_rt.c` |
 | **7** | Stdlib + arch doc | `lib/std/gpu.bv`, `docs/architecture/features/spirv-backend.md` |
 
 ---

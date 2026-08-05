@@ -9,7 +9,7 @@
 // `detect_increments` picks up `count = count + 1` as delta=1.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/cancel_math.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/cancel_math.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: cancel_math_c.c

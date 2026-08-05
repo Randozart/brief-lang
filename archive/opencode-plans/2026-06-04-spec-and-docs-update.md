@@ -14,7 +14,7 @@ Phase 2: lib/std/ .bv files   (parseable once parser is done)
     ↓
 Phase 3: lib/compiler/ .bv files   (depend on stdlib)
     ↓
-Phase 4: Spec + learn-brief docs   (can be done in parallel with Phases 2-3)
+Phase 4: Spec + learn-briv docs   (can be done in parallel with Phases 2-3)
     ↓
 Phase 5: Internal docs (AGENTS.md, plans, BUGS.md)
 ```
@@ -97,7 +97,7 @@ syntax with `x :> Size`. This is the self-hosted compiler code.
 
 ---
 
-## Phase 4: Spec + Learn-Brief Documentation
+## Phase 4: Spec + Learn-Briv Documentation
 
 ### `spec/SPEC.md` (7 sites)
 Replace all `x.len()` and `len(x)` with `x :> Size`. Key locations:
@@ -113,7 +113,7 @@ Replace all `x.len()` and `len(x)` with `x :> Size`. Key locations:
 - Line 1228: `list.len()` → `list :> Size`
 - Line 1319: `observers.len()` → `observers :> Size`
 
-### `learn-brief/` (8 files, ~50 sites)
+### `learn-briv/` (8 files, ~50 sites)
 
 Systematic search-and-replace:
 - `items.len()` → `items :> Size`
@@ -180,7 +180,7 @@ Already up to date (written as the plan for this change).
 | 1. Parser | 1 | ~25 lines | 🟢 Low |
 | 2. lib/std/ .bv | ~8 | ~100 replacements | 🟡 Medium (must not break logic) |
 | 3. lib/compiler/ .bv | ~10 | ~120 replacements | 🟡 Medium (self-hosted, harder to test) |
-| 4. Spec + learn-brief | ~20 | ~200 replacements | 🟢 Low (docs only) |
+| 4. Spec + learn-briv | ~20 | ~200 replacements | 🟢 Low (docs only) |
 | 5. Internal docs | ~15 | ~100 replacements | 🟢 Low (docs only) |
 
 **Total:** ~54 files, ~545 replacements

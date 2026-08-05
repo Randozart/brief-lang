@@ -485,7 +485,7 @@ not a compiler primitive. `StringBuilder` is a `List<UInt8>` with an
 handle it are deleted (they become unreachable). The stdlib definition of
 `StringBuilder` becomes a wrapper around `List<UInt8>`:
 
-```brief
+```briv
 type StringBuilder: Bits {
     buf: List<UInt8>;
     op InsertAt(self, pos: Int, val: UInt8) = sb_append;
@@ -497,7 +497,7 @@ type StringBuilder: Bits {
 Same reasoning as StringBuilder. `Stack` and `Queue` are `List<T>` with
 specific `op InsertAt`/`op ExtractFrom` conventions:
 
-```brief
+```briv
 // Stack: LIFO
 type Stack<T>: Bits {
     inner: List<T>;
@@ -583,7 +583,7 @@ with guard clauses for each statement type. Max 2 levels.
 
 **Old:**
 
-```brief
+```briv
 type String: Bits {
     ptr: Ptr<UInt8>;
     len: Int;
@@ -597,7 +597,7 @@ type String: Bits {
 
 **New:**
 
-```brief
+```briv
 type String: Bits {
     ptr: Ptr<UInt8>;
     len: Int;
@@ -679,7 +679,7 @@ is unambiguously a custom literal even if `FF00FF` is in scope as a variable.
 A codec declares which token forms it accepts via the `formatting <~`
 property. The value is a frontend-intrinsic identifier (not a string):
 
-```brief
+```briv
 codec HexColor {
     formatting <~ Bare;                // ← accepts FF00FF as a bareword
     parse      <~ parse_hex;           // converts "FF00FF" → Value::Bits
@@ -699,7 +699,7 @@ codec DefaultDecimal {
 The three recognized identifiers are `Quoted`, `Bare`, and `Decimal` — one
 for each compiler-intrinsic token form. A type can accept multiple forms:
 
-```brief
+```briv
 type FlexibleInt : Int {
     codec <~ FlexibleCodec;
 };
@@ -714,7 +714,7 @@ codec FlexibleCodec {
 
 The prelude defines three default codecs, one for each token form:
 
-```brief
+```briv
 codec DefaultQuoted {
     formatting <~ Quoted;
     parse      <~ identity_UTF8;
@@ -733,7 +733,7 @@ codec DefaultBare {
 
 The standard types reference these:
 
-```brief
+```briv
 type Int    : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
 type Float  : Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
 type String : Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
@@ -744,7 +744,7 @@ No name-based magic. `String` accepts `"..."` because `DefaultQuoted` says
 
 ### Custom Token Handler Example
 
-```brief
+```briv
 type HexColor : Int {
     codec <~ HexCodec;
 };
@@ -810,7 +810,7 @@ Value::HashMap => ..., }`) collapses to a single property lookup:
 
 **File:** `lib/std/types/bootstrap.bv`
 
-```brief
+```briv
 type Void: Bits {
     bytes <~ 0;
     alignment <~ 1;

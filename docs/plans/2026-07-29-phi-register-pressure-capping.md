@@ -52,7 +52,7 @@ The 2.5x speedup comes from avoiding scalar phi nodes entirely via explicit vect
 Implication: This validates our approach — fewer phi-carried values → better code.
 
 ### Era-5 IR Reconstruction
-Source: Era-5 worktree at `../brief-compiler-era5`, hash `8a827db`
+Source: Era-5 worktree at `../briv-compiler-era5`, hash `8a827db`
 - 6 `<4 x float>` vector phis (bx0-3, by0-3, bz0-3, vx0-3, vy0-3, vz0-3)
 - 11 scalar phis + 1 counter = 18 phis total
 - Attribute `#5` on `@main` (SLP-hazard, now known to be decorative)

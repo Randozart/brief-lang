@@ -1,7 +1,7 @@
 # Extensible Number Types — LLVM Backend
 
 **Date:** 2026-07-19
-**Author:** Brief Compiler Team
+**Author:** Briv Compiler Team
 **Status:** Plan — ready for implementation
 
 ## Problem
@@ -576,7 +576,7 @@ Replace inline `Type::float64()`/`Type::float()` checks with a call to the gener
 
 ```rust
 // 2026-07-19: Generalized phi unboxing — reads llvm_type from universe.
-let unboxed = self.unbox_phi_value(out, indent, &phi_reg, &brief_ty);
+let unboxed = self.unbox_phi_value(out, indent, &phi_reg, &briv_ty);
 ```
 
 Where `unbox_phi_value` uses the same `unbox_from_i64()` helper from 1d.
@@ -602,7 +602,7 @@ No Rust code changes beyond Phase 1.
 
 **Stdlib types to add:**
 
-```brief
+```briv
 // lib/std/types/float.bv
 type Bfloat16 : Bits {
     bytes <~ 2; alignment <~ 2;
@@ -671,7 +671,7 @@ In the normalizer, after all types and functions are registered:
 
 #### Posit32 demonstration
 
-```brief
+```briv
 type Posit32 : Bits {
     bytes <~ 4; alignment <~ 4;
     op Add ~> "Posit32_add";

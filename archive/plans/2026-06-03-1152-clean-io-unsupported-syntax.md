@@ -4,7 +4,7 @@
 **Status**: Done
 
 ## Problem
-`lib/std/io.bv` contains unsupported, unimplemented syntax that no Brief parser handles:
+`lib/std/io.bv` contains unsupported, unimplemented syntax that no Briv parser handles:
 
 | Construct | Lines | Problem |
 |-----------|-------|---------|
@@ -16,7 +16,7 @@ RBV is just HTML `<script>` + `<view>` wrapping the same `.bv` parser (`src/rbv.
 
 ## Design Decision
 
-**Remove convenience lookup functions entirely.** Users gate on `io_ready` and compose with `std/string.bv` methods in their own handlers. This is both more performant (O(1) per tick) and more Brief-idiomatic (the user owns handler logic; the IO module provides infrastructure).
+**Remove convenience lookup functions entirely.** Users gate on `io_ready` and compose with `std/string.bv` methods in their own handlers. This is both more performant (O(1) per tick) and more Briv-idiomatic (the user owns handler logic; the IO module provides infrastructure).
 
 ### Why not txn-based scan
 A reactive txn scanning `__io_buffer` character-by-character costs 1 reactor tick per char + 3 state fields. The buffer from `__raw_poll()` is small (a few events), so this overhead is disproportionate. Users know what key they're looking for and can `char_at()` directly.

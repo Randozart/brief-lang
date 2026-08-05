@@ -524,7 +524,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
     }
 }
 
-/// Convert an f64 Brief float to an f32 SPIR-V float bit pattern.
+/// Convert an f64 Briv float to an f32 SPIR-V float bit pattern.
 ///
 /// SPIR-V uses native 32-bit float, unlike the CPU backend which boxes
 /// floats as i64. This truncates f64→f32 then produces the i32 bit pattern
@@ -617,7 +617,7 @@ fn ensure_field_loaded(
     reg
 }
 
-/// Emit a single Brief statement as SPIR-V-compatible LLVM IR.
+/// Emit a single Briv statement as SPIR-V-compatible LLVM IR.
 fn emit_spirv_stmt(
     stmt: &Statement,
     ir: &mut String,
@@ -684,7 +684,7 @@ fn emit_spirv_stmt(
     }
 }
 
-/// Emit a Brief expression as SPIR-V-compatible LLVM IR,
+/// Emit a Briv expression as SPIR-V-compatible LLVM IR,
 /// returning the SSA register name holding the result.
 ///
 /// Field identifiers are looked up in `field_offsets` and loaded
@@ -998,7 +998,7 @@ fn emit_spirv_intrinsic(
 pub fn embed_spirv_blob(spirv_binary: &[u8], kernel_name: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!("\n; Embedded SPIR-V kernel: {}\n", kernel_name));
-    out.push_str(&format!("@brief_kernel_{} = private constant [{} x i8] c\"",
+    out.push_str(&format!("@briv_kernel_{} = private constant [{} x i8] c\"",
         kernel_name, spirv_binary.len()));
     for (i, byte) in spirv_binary.iter().enumerate() {
         if i > 0 && i % 32 == 0 {
@@ -1025,12 +1025,12 @@ pub fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
     use std::process::Command;
 
     // 2026-06-29: FIXED TOCTOU race — use unique filenames with process + thread ID.
-    // The old code used fixed paths "brief_kernel.ll"/"brief_kernel.spv" which caused
+    // The old code used fixed paths "briv_kernel.ll"/"briv_kernel.spv" which caused
     // file corruption under parallel builds (cargo test --lib -- --test-threads=N).
     // Each compiler invocation now gets a unique filename.
     let tmp_dir = std::env::temp_dir();
     let unique_id = format!(
-        "brief_kernel_{}_{}",
+        "briv_kernel_{}_{}",
         std::process::id(),
         // Thread ID — use an atomic counter as fallback when thread::id().as_u64() is unstable
         {
@@ -1204,7 +1204,7 @@ mod tests {
     fn test_embed_spirv_blob_generates_array() {
         let blob = vec![0x03, 0x02, 0x01, 0x00];
         let s = embed_spirv_blob(&blob, "test_kernel");
-        assert!(s.contains("@brief_kernel_test_kernel"));
+        assert!(s.contains("@briv_kernel_test_kernel"));
         assert!(s.contains("[4 x i8]"));
         assert!(s.contains("\\03"));
     }

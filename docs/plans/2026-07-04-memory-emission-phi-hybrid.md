@@ -4,7 +4,7 @@
 
 Three remaining benchmark gaps share two root causes:
 
-| Benchmark | Ratio | Brief | C | Root Cause |
+| Benchmark | Ratio | Briv | C | Root Cause |
 |-----------|-------|-------|---|------------|
 | nbody_sqrt | 1.26× | 4.05s | 3.21s | 4 of 6 `sqrtf` calls scalar (SLP vectorizer only; loop vectorizer blocked by phi escape) |
 | fannkuch_redux | 1.62× | 0.109s | 0.067s | Phase-ordering: ~80-instruction unoptimized body (LCG, max_flips, seed) blocks LLVM loop unroller; DCE shrinks to 23 insns but unroller already passed |
@@ -503,16 +503,16 @@ Edge cases:
 | Benchmark | Current | Target | Primary fix |
 |-----------|---------|--------|-------------|
 | nbody_sqrt | 1.26× | ~1.05× | Memory fields → loop vectorizer fires on all 6 sqrt calls |
-| nbody_sqrt_idio | .88× (Brief win) | ~.80× | Same (already wins, improves) |
-| nbody_newton | .98× (Brief win) | ~.95× | Same |
+| nbody_sqrt_idio | .88× (Briv win) | ~.80× | Same (already wins, improves) |
+| nbody_newton | .98× (Briv win) | ~.95× | Same |
 | fannkuch_redux | 1.62× | ~1.10× | Dead-field elimination → unroller fires 4× |
 | float_math | 1.20× | ~1.05× | No backedge identity ops → cleaner latch |
 | float_math_nonzero | 1.02× (tie) | ~1.00× | Marginal improvement |
-| fasta | .94× (Brief win) | ~.90× | Marginal |
-| print_loop | .98× (Brief win) | ~.95× | Marginal |
+| fasta | .94× (Briv win) | ~.90× | Marginal |
+| print_loop | .98× (Briv win) | ~.95× | Marginal |
 | cancel_math | 1.02× | ~1.00× | Marginal |
 
-All MATCH (bit_clear is pre-existing — no print in Brief version).
+All MATCH (bit_clear is pre-existing — no print in Briv version).
 
 ---
 
@@ -520,26 +520,26 @@ All MATCH (bit_clear is pre-existing — no print in Brief version).
 
 ```
 ╔═══════════════════════════╦══════════╦══════════╦════════╦════════╦═══════════╗
-║ Benchmark                 ║ Brief    ║ C        ║ Ratio  ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briv    ║ C        ║ Ratio  ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬══════════╬══════════╬════════╬════════╬═══════════╣
-║ ring_buffer               ║ .0847s   ║ .0866s   ║ .97x   ║ Brief  ║ MATCH     ║
+║ ring_buffer               ║ .0847s   ║ .0866s   ║ .97x   ║ Briv  ║ MATCH     ║
 ║ float_math                ║ .0949s   ║ .0785s   ║ 1.20x  ║ C      ║ MATCH     ║
 ║ float_math_nonzero        ║ .1859s   ║ .1811s   ║ 1.02x  ║ C      ║ MATCH     ║
-║ nbody_newton              ║ 9.6935s  ║ 9.8671s  ║ .98x   ║ Brief  ║ MATCH     ║
+║ nbody_newton              ║ 9.6935s  ║ 9.8671s  ║ .98x   ║ Briv  ║ MATCH     ║
 ║ nbody_sqrt                ║ 4.0513s  ║ 3.2071s  ║ 1.26x  ║ C      ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.3502s  ║ 3.9937s  ║ .83x   ║ Brief  ║ MATCH     ║
-║ fasta                     ║ .2316s   ║ .2450s   ║ .94x   ║ Brief  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.3502s  ║ 3.9937s  ║ .83x   ║ Briv  ║ MATCH     ║
+║ fasta                     ║ .2316s   ║ .2450s   ║ .94x   ║ Briv  ║ MATCH     ║
 ║ fannkuch_redux            ║ .1085s   ║ .0668s   ║ 1.62x  ║ C      ║ MATCH     ║
-║ kalman_filter_runtime     ║ .1713s   ║ .1836s   ║ .93x   ║ Brief  ║ MATCH     ║
+║ kalman_filter_runtime     ║ .1713s   ║ .1836s   ║ .93x   ║ Briv  ║ MATCH     ║
 ║ knucleotide               ║ .1980s   ║ .1962s   ║ 1.00x  ║ ~tie   ║ MATCH     ║
-║ cancel_math               ║ .0630s   ║ .0639s   ║ .98x   ║ Brief  ║ MATCH     ║
-║ print_loop                ║ .0561s   ║ .0563s   ║ .99x   ║ Brief  ║ MATCH     ║
+║ cancel_math               ║ .0630s   ║ .0639s   ║ .98x   ║ Briv  ║ MATCH     ║
+║ print_loop                ║ .0561s   ║ .0563s   ║ .99x   ║ Briv  ║ MATCH     ║
 ║ queue_drain_sym           ║ .0611s   ║ .0610s   ║ 1.00x  ║ ~tie   ║ MATCH     ║
-║ interval_step             ║ .0006s   ║ .0621s   ║ 0x     ║ Brief  ║ MATCH     ║
+║ interval_step             ║ .0006s   ║ .0621s   ║ 0x     ║ Briv  ║ MATCH     ║
 ╚═══════════════════════════╩══════════╩══════════╩════════╩════════╩═══════════╝
 ```
 
-(Bit_clear MISMATCH pre-existing — no print in Brief version, not touched by
+(Bit_clear MISMATCH pre-existing — no print in Briv version, not touched by
 this plan.)
 
 ---

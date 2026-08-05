@@ -10,7 +10,7 @@
 A type never needs to know how to cast to another type. It only needs to know
 how to cast to its protocol category. The protocol category — `#String`,
 `#Int`, `#Float` — is the **language-agnostic concept**. The TOML maps
-protocol categories (not Brief types) to language-native types.
+protocol categories (not Briv types) to language-native types.
 
 Any path between two types that goes through the SAME protocol category gets
 its redundant transforms eliminated at compile time. An ASCIIString that
@@ -78,7 +78,7 @@ Cost = Cost(Step1) + Cost(Step2) = identity + identity = 0
 ```
 
 The `compute_protocol_path` function already handles this. The fix is:
-- Use the protocol category (found by walking CastTo on the Brief type)
+- Use the protocol category (found by walking CastTo on the Briv type)
 - NOT the foreign type name (which doesn't exist in the type universe)
 
 ## Files Changed
@@ -111,7 +111,7 @@ for all three languages (python, node, rust).
 
 ### Step 3 — Update `resolve_single_frgn` to use protocol lookup
 
-Replace the `lookup_foreign_type` via `c_type_map` with: "find Brief type's
+Replace the `lookup_foreign_type` via `c_type_map` with: "find Briv type's
 CastTo, get protocol category, look up in target's `protocols`."
 
 `HashMap` import already exists.
@@ -128,6 +128,6 @@ with protocol category → native/C ABI type mapping.
 ```bash
 cargo test --lib          # 969 pass
 cargo test --test pp_roundtrip_tests -- --test-threads=1  # 8 pass
-brief export pp-types.bv rust --out /tmp/test
+briv export pp-types.bv rust --out /tmp/test
 cd /tmp/test/pp-types-bridge && cargo build  # compiles
 ```

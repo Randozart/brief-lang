@@ -24,8 +24,8 @@ Building the analysis pipeline from `docs/design/determinism-and-optimization-fr
 ## Running Benchmark
 ```
 IIR filter benchmark (50M iterations):
-  Brief: 0.15s  C: 0.23s
-  Brief is 1.53× faster than C
+  Briv: 0.15s  C: 0.23s
+  Briv is 1.53× faster than C
 ```
 
 ## Next: Phase 2 — Value-Set Enumeration in LLVM Backend

@@ -82,7 +82,7 @@ The handle is `{ i64, i64 }`:
 | `src/compile.rs` | B | Add `--feature sso-strings` flag |
 | `src/interpreter/intrinsics.rs` | C | String representation |
 | `src/interpreter/value.rs` | C | String in interpreter |
-| `lib/runtime/brief_rt.c` | C | `brief_str_to_c` — handle SSO + new heap layout |
+| `lib/runtime/briv_rt.c` | C | `briv_str_to_c` — handle SSO + new heap layout |
 | `lib/std/types/bootstrap.bv` | B | Update String type (fields, bytes=16, no llvm) |
 | All `examples/*.bv` | B | Verify compilation with new String layout |
 | All `benchmarks/*.bv` | B | Verify correctness, re-run baseline |
@@ -105,7 +105,7 @@ None of them communicate. The property bag strings are dead code. The typechecke
 
 **bootstrap.bv** uses generic backend-agnostic op identifiers:
 
-```brief
+```briv
 type Int : Bits {
     op Add(Int) -> Int = "int.add";
     op Sub(Int) -> Int = "int.sub";
@@ -313,7 +313,7 @@ The existing `ctx.struct_types: HashMap<String, Vec<(String, Type)>>` (populated
 
 #### A6. Update bootstrap.bv
 
-```brief
+```briv
 type String {
     data: Int;
     len: Int;
@@ -380,7 +380,7 @@ SSO literal: pack bytes into u64, `shl 3` + `or 0b001`. Handle[1] = `len`. Retur
 
 #### B3. State field layout
 
-`push_field_type` reads `fields.len()` — for String it's 2, so pushes 2 × `i64`. The existing `field_brief_types` records `Type::Custom("String")` for both slots. State access automatically widens to 2 slots.
+`push_field_type` reads `fields.len()` — for String it's 2, so pushes 2 × `i64`. The existing `field_briv_types` records `Type::Custom("String")` for both slots. State access automatically widens to 2 slots.
 
 #### B4. Function ABI
 
@@ -414,7 +414,7 @@ cargo test --lib  → 918 pass with flag ON  (new tests for SSO paths)
 
 #### C1. C runtime
 
-`brief_str_to_c` checks tag:
+`briv_str_to_c` checks tag:
 - `001` → extract 6 bytes from field[0] >> 3, malloc, copy
 - `000/010/100` → mask tag, ptr = field[0] & ~7, len = field[1], memcpy from ptr
 
@@ -459,8 +459,8 @@ Set `--feature sso-strings` default to `true`. After stabilization, remove the f
 
 | Test | What it asserts |
 |------|----------------|
-| `test_c_runtime_sso` | `brief_str_to_c` handles SSO handle |
-| `test_c_runtime_heap` | `brief_str_to_c` handles heap handle (new no-header layout) |
+| `test_c_runtime_sso` | `briv_str_to_c` handles SSO handle |
+| `test_c_runtime_heap` | `briv_str_to_c` handles heap handle (new no-header layout) |
 | `test_interpreter_string` | Interpreter round-trip with new handle format |
 
 ---

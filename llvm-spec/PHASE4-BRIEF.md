@@ -1,4 +1,4 @@
-# Phase 4 Brief: FFI declare + call with C ABI Marshaling
+# Phase 4 Briv: FFI declare + call with C ABI Marshaling
 
 **Date:** 2026-05-29  
 **Spec Reference:** `07-FFI-TO-DECLARE.md`  
@@ -34,7 +34,7 @@ Four functions recognized by name, emitting optimized IR:
 
 ### 3. ABI Type Marshaling
 
-| Brief Type | C ABI Type | LLVM Conversion |
+| Briv Type | C ABI Type | LLVM Conversion |
 |------------|------------|-----------------|
 | `Int` | `int64_t` | i64 pass-through |
 | `Bool` | `int32_t` | `zext i8 %val to i32` |
@@ -73,7 +73,7 @@ frgn_map: HashMap<String, ForeignSignature>,
 
 ```bash
 for f in tests/fixtures/phase4/*.bv; do
-  brief-compiler llvm "$f" --out /tmp/p4/
+  briv-compiler llvm "$f" --out /tmp/p4/
   llc /tmp/p4/$(basename "$f" .bv).ll -o /dev/null
 done
 grep "declare.*@strlen" /tmp/p4/ffi_declare.ll    # declare present

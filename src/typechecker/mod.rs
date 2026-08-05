@@ -627,7 +627,7 @@ pub fn infer_expression(
                 Type::Vector(inner, _) => (**inner).clone(),
                 Type::Ptr(inner) | Type::PtrConst(inner) => (**inner).clone(),
                 Type::Custom(n) if n == "String" => Type::int(),
-                // 2026-08-04 (compiler-in-Brief): indexing a generic returns
+                // 2026-08-04 (compiler-in-Briv): indexing a generic returns
                 // its element type param — `List<String>[i]` is String, not
                 // Int. General (any generic's first type param is its
                 // element), so no type-name matching.
@@ -817,7 +817,7 @@ pub fn infer_expression(
         Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
         Expr::Match(expr, arms) => infer_match(expr, arms, ctx).map(|ty| (ty, Provenance::Unknown)),
         // 2026-07-19: Plugin-intercept calls are resolved by Front or Mid
-        // stage plugins. `briefc check` does not run plugins, so known
+        // stage plugins. `brivc check` does not run plugins, so known
         // env-variable intercepts are typed here (they desugar to stdlib
         // `get_env`/`get_env_int` calls in the build path).
         // 2026-08-01: Phase 1 of the plugin-macro rework — only lowercase
@@ -1635,13 +1635,13 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
             // 2026-07-31 (Phase 2): frgn return types — `term frgn_foo(x)`
             // must see the declared foreign return type, not the Int fallback.
             TopLevel::ForeignBinding(fb) => {
-                let brief_name = fb
-                    .brief_name
+                let briv_name = fb
+                    .briv_name
                     .clone()
                     .unwrap_or_else(|| fb.foreign_name.clone());
                 fb.success_output
                     .first()
-                    .map(|(_, ty)| (brief_name, ty.clone()))
+                    .map(|(_, ty)| (briv_name, ty.clone()))
             }
             _ => None,
         }

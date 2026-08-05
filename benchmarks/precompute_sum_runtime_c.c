@@ -2,7 +2,7 @@
 // Perfect C reference for precompute_sum_runtime.bv.
 //
 // Local variables, no volatile, returns accumulated sum.
-// The interleaved accumulation pattern is what Brief's two-txn
+// The interleaved accumulation pattern is what Briv's two-txn
 // dispatch produces; clang cannot fold this to O(1).
 //
 // Build:

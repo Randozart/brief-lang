@@ -9,7 +9,7 @@ When the LLVM backend encounters a `ForeignBinding` or an `Expr::Call` to a fore
 
 ## Declaration
 
-```brief
+```briv
 frgn strlen(s: String) -> Int from "libc.so.6";
 ```
 
@@ -24,30 +24,30 @@ declare i64 @strlen(i8*) #1
 
 ## Call Site
 
-```brief
+```briv
 let len = strlen("hello");
 ```
 
 ```llvm
 ; String → i8* (auto-null-terminated)
-%s = call i8* @brief_string_to_cstr(%string_val)
+%s = call i8* @briv_string_to_cstr(%string_val)
 %len = call i64 @strlen(i8* %s)
 ```
 
 ## ABI Marshaling Table
 
-| Brief Type | C ABI Type | LLVM Conversion |
+| Briv Type | C ABI Type | LLVM Conversion |
 |------------|------------|-----------------|
 | `Int` | `int64_t` | Pass direct |
 | `Float` | `float` | Pass direct |
 | `Bool` | `int32_t` | `zext i1 %val to i32` |
 | `Char` | `uint32_t` | `zext i32 %val to i32` |
-| `String` | `const char*` | Emit `@brief_string_to_cstr` call (see memory lifecycle below) |
+| `String` | `const char*` | Emit `@briv_string_to_cstr` call (see memory lifecycle below) |
 | `Void` | `void` | No return value |
 
 ## C-String Memory Lifecycle
 
-The `@brief_string_to_cstr` intrinsic must **not** leak. Use stack allocation for small strings:
+The `@briv_string_to_cstr` intrinsic must **not** leak. Use stack allocation for small strings:
 
 ```llvm
 ; Strategy 1: Stack allocation (preferred — no leak, no malloc)
@@ -65,7 +65,7 @@ If using heap allocation instead, the backend MUST emit a corresponding `free` c
 
 For complex types (`List`, `Enum`, `Struct`, `Tuple`), the backend emits a different pattern:
 
-```brief
+```briv
 frgn process_json(input: JsonValue) -> JsonValue from "libprocessor" via metropolitan;
 ```
 
@@ -87,7 +87,7 @@ The 4 bootstrap functions (`__read_file`, `__write_file`, `__print`, `__exit`) a
 
 ```llvm
 ; __print(msg: String)
-%cstr = call i8* @brief_string_to_cstr(%msg)
+%cstr = call i8* @briv_string_to_cstr(%msg)
 %len = call i64 @strlen(i8* %cstr)
 call i64 @write(i32 1, i8* %cstr, i64 %len)  ; fd=1 (stdout)
 ```

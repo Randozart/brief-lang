@@ -1,13 +1,13 @@
 # Hello World
 
-This is the simplest possible Brief program. It demonstrates the basic structure of a Brief transaction.
+This is the simplest possible Briv program. It demonstrates the basic structure of a Briv transaction.
 
 ## Run It
 
-From the `brief-compiler` directory:
+From the `briv-compiler` directory:
 
 ```bash
-brief run examples/hello-world/src/main.bv
+briv run examples/hello-world/src/main.bv
 ```
 
 ## What It Does
@@ -20,7 +20,7 @@ The contract `[true][result == "Hello, World!"]` means:
 
 ## The Code Explained
 
-```brief
+```briv
 txn greet         // Define a transaction called "greet"
 [true]           // Precondition: always satisfied
 [result == "Hello, World!"]  // Postcondition: result must be this string

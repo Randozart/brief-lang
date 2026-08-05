@@ -1,6 +1,6 @@
-//! Brief FFI Native Implementations
+//! Briv FFI Native Implementations
 //!
-//! This crate contains the Rust implementations for all Brief foreign functions.
+//! This crate contains the Rust implementations for all Briv foreign functions.
 //! Each function follows the pattern: takes basic types, returns Result<Output, ErrorType>
 
 use wasm_bindgen::prelude::*;

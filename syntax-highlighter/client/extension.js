@@ -6,9 +6,9 @@ const os = require('os');
 
 let client;
 
-function findBrief(context) {
+function findBriv(context) {
     // 1. Try bundled binary (most reliable for Flatpak/Snap)
-    const bundledPath = path.join(context.extensionPath, 'client', 'bin', 'brief');
+    const bundledPath = path.join(context.extensionPath, 'client', 'bin', 'briv');
     if (fs.existsSync(bundledPath)) {
         return bundledPath;
     }
@@ -16,10 +16,10 @@ function findBrief(context) {
     // 2. Try common locations
     const home = os.homedir();
     const commonPaths = [
-        path.join(home, '.local/bin/brief'),
-        path.join(home, 'bin/brief'),
-        '/usr/local/bin/brief',
-        '/usr/bin/brief'
+        path.join(home, '.local/bin/briv'),
+        path.join(home, 'bin/briv'),
+        '/usr/local/bin/briv',
+        '/usr/bin/briv'
     ];
 
     for (const p of commonPaths) {
@@ -29,31 +29,31 @@ function findBrief(context) {
     }
 
     // 3. Try PATH as a last resort
-    return 'brief';
+    return 'briv';
 }
 
 function activate(context) {
-    const logPath = path.join(os.tmpdir(), 'brief-extension.log');
-    fs.appendFileSync(logPath, 'Brief extension activate called\n');
+    const logPath = path.join(os.tmpdir(), 'briv-extension.log');
+    fs.appendFileSync(logPath, 'Briv extension activate called\n');
 
-    const briefPath = findBrief(context);
-    fs.appendFileSync(logPath, `Using Brief binary at: ${briefPath}\n`);
+    const brivPath = findBriv(context);
+    fs.appendFileSync(logPath, `Using Briv binary at: ${brivPath}\n`);
 
-    // The server is implemented in the brief binary
+    // The server is implemented in the briv binary
     const serverOptions = {
-        run: { command: briefPath, args: ['lsp'], transport: TransportKind.stdio },
-        debug: { command: briefPath, args: ['lsp'], transport: TransportKind.stdio }
+        run: { command: brivPath, args: ['lsp'], transport: TransportKind.stdio },
+        debug: { command: brivPath, args: ['lsp'], transport: TransportKind.stdio }
     };
 
     // Options to control the language client
     const clientOptions = {
-        // Register the server for Brief, DBrief, and Strict Brief files
+        // Register the server for Briv, DBriv, and Strict Briv files
         documentSelector: [
-            { scheme: 'file', language: 'brief' },
+            { scheme: 'file', language: 'briv' },
             { scheme: 'file', language: 'rbv' },
             { scheme: 'file', language: 'ebv' },
-            { scheme: 'file', language: 'dbrief' },
-            { scheme: 'file', language: 'sbrief' },
+            { scheme: 'file', language: 'dbriv' },
+            { scheme: 'file', language: 'sbriv' },
             { scheme: 'file', language: 'srbv' },
             { scheme: 'file', language: 'sebv' }
         ],
@@ -65,8 +65,8 @@ function activate(context) {
 
     // Create the language client and start the client.
     client = new LanguageClient(
-        'briefLanguageServer',
-        'Brief Language Server',
+        'brivLanguageServer',
+        'Briv Language Server',
         serverOptions,
         clientOptions
     );

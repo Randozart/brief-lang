@@ -1,11 +1,11 @@
-// GLUE Rust Bridge — example Brief bridge file
+// GLUE Rust Bridge — example Briv bridge file
 //
 // Inlines the minimal type definitions to avoid pulling in the prelude
-// (no OS runtime — extern brief_rt.c not needed for scalar math).
+// (no OS runtime — extern briv_rt.c not needed for scalar math).
 // The resulting .ll is self-contained — only references LLVM builtins.
 //
 // Workflow:
-//   brief build --disable-plugin prelude --library bridge.bv --out .  # bridge.ll
+//   briv build --disable-plugin prelude --library bridge.bv --out .  # bridge.ll
 //   cargo build                                            # build.rs llc + link
 
 type Int: #Int {

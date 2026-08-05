@@ -1,15 +1,15 @@
-// UTF-8 Operations — Tests pure-Brief memcmp + UTF8_validate
+// UTF-8 Operations — Tests pure-Briv memcmp + UTF8_validate
 //
 // Allocates runtime buffers with Alloc#, stores the loop counter
 // (runtime varying) via Store#, then compares/validates via
-// pure-Brief byte-string functions. The loop counter changes each
+// pure-Briv byte-string functions. The loop counter changes each
 // iteration, preventing compile-time folding.
 //
 // C reference: UTF8_ops_c.c
 //
 // Note: Use environment variables BOUND and SEED to control iteration
 // count and data variation. Default BOUND is 50000000 but this
-// benchmark is slower (pure-Brief txn convergence loops),
+// benchmark is slower (pure-Briv txn convergence loops),
 // so expect ~100 iterations/second at default budget.
 
 import "std/types/UTF8view.bv";

@@ -7,7 +7,7 @@
 
 ## Overview
 
-Added two new compiler backends for generating native code from Brief programs:
+Added two new compiler backends for generating native code from Briv programs:
 
 1. **Rust Backend** (`src/backend/rust.rs`) - Generates native Rust with `asm!` blocks
 2. **C Backend** (`src/backend/c.rs`) - Generates C with `__asm__ __volatile__`
@@ -19,7 +19,7 @@ Added two new compiler backends for generating native code from Brief programs:
 ### Rust Backend
 
 ```bash
-./target/release/brief-compiler rust <file.bv> [--out <dir>]
+./target/release/briv-compiler rust <file.bv> [--out <dir>]
 ```
 
 **Output:** `<filename>.rs`
@@ -32,7 +32,7 @@ Added two new compiler backends for generating native code from Brief programs:
 - `main()` function that initializes state and runs transactions
 
 **Example:**
-```brief
+```briv
 let count: Int = 0;
 
 txn inc [true][true] {
@@ -65,7 +65,7 @@ fn main() {
 ### C Backend
 
 ```bash
-./target/release/brief-compiler c <file.bv> [--out <dir>]
+./target/release/briv-compiler c <file.bv> [--out <dir>]
 ```
 
 **Output:** `<filename>.c`
@@ -77,7 +77,7 @@ fn main() {
 - Transaction functions return `bool` (success/failure)
 
 **Example:**
-```brief
+```briv
 let count: Int = 0;
 
 txn inc [true][true] {
@@ -113,13 +113,13 @@ int main(void) {
 
 Both backends support inline assembly:
 
-```brief
+```briv
 asm "instruction" { "clobber1", "clobber2" };
 ```
 
 ### Examples
 
-```brief
+```briv
 // ARM cache flush
 txn flush_cache {
     effect {
@@ -181,9 +181,9 @@ __asm__ __volatile__("DC CIVAC X0, X1" : : : "x0", "x1");
 
 ## Expression Translation
 
-Both backends translate Brief expressions to native code:
+Both backends translate Briv expressions to native code:
 
-| Brief | Rust | C |
+| Briv | Rust | C |
 |-------|------|---|
 | `count` | `self.count` | `state->count` |
 | `count + 1` | `self.count + 1` | `state->count + 1` |
@@ -209,11 +209,11 @@ Both backends translate Brief expressions to native code:
 cargo build --release
 echo 'let count: Int = 0;
 txn inc [true][true] { count = count + 1; };' > test.bv
-./target/release/brief-compiler rust test.bv
+./target/release/briv-compiler rust test.bv
 cat test.rs
 
 # Test C backend
-./target/release/brief-compiler c test.bv
+./target/release/briv-compiler c test.bv
 cat test.c
 
 # Clean up

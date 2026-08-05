@@ -24,7 +24,7 @@ Appends a value to the collection. Dispatch by type:
 | `Stack<T>` | Push onto top |
 | `Queue<T>` | Enqueue to back |
 
-```brief
+```briv
 items <- 42;
 map <- ("name", "alice");
 set <- "tag";
@@ -45,7 +45,7 @@ Removes and returns an element (read/destructive forms; see §1.2 of
 | `Stack<T>` | Pop from top |
 | `Queue<T>` | Dequeue from front |
 
-```brief
+```briv
 let last = items <- ;    // pop list
 let val = map <- "name";   // remove key from map
 let top = stack <- ;     // pop stack
@@ -56,7 +56,7 @@ let front = queue <- ;    // dequeue queue
 
 Removes an element without returning it:
 
-```brief
+```briv
 list <- 0 !;      // discard index 0
 map <- "key" !;    // discard entry by key
 set <- "elem" !;    // discard element
@@ -67,7 +67,7 @@ stack <- !;      // discard top
 
 Moves all elements from source to destination (the destructive form):
 
-```brief
+```briv
 dest ~<- source;     // destructive extract — copy, then destroy the source's backing
 ```
 
@@ -77,7 +77,7 @@ The `TypeUniverse` can configure custom strategies via `type ... : List { Insert
 The strategy system resolves the binding string to an `InsertStrategy` or `ExtractStrategy`
 variant:
 
-```brief
+```briv
 // Built-in strategies:
 type Fifo : List { InsertAt = prepend; ExtractFrom = shift; };
 type Mapped : List { InsertAt = hash; };

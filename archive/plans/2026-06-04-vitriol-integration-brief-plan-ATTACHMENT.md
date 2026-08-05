@@ -1,12 +1,12 @@
-# Brief Compiler — SPIR-V & LUT Matmul Implementation Cookbook
+# Briv Compiler — SPIR-V & LUT Matmul Implementation Cookbook
 
 **Date:** 2026-06-04 08:14 UTC
-**Parent:** `2026-06-04-vitriol-integration-brief-plan.md`
+**Parent:** `2026-06-04-vitriol-integration-briv-plan.md`
 **Status:** Design reference — ready for implementation after vectorization syntax lands
 
 ---
 
-This document provides the concrete LLVM IR patterns, address space mappings, kernel emission designs, FFI patterns, and implementation guidance for Brief's SPIR-V backend and CPU LUT matmul compilation.
+This document provides the concrete LLVM IR patterns, address space mappings, kernel emission designs, FFI patterns, and implementation guidance for Briv's SPIR-V backend and CPU LUT matmul compilation.
 
 ---
 
@@ -34,7 +34,7 @@ target triple = "spirv64-unknown-vulkan1.2"
 | `target datalayout` | `e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128` | SPIR-V logical layout (see above) |
 | `target triple` | `x86_64-unknown-linux-gnu` | `spirv64-unknown-vulkan1.2` |
 | Runtime declares | `@__rt_init`, `@__rt_poll`, `@__rt_wait` | **None** — no host runtime in kernels |
-| Thread pool | `@brief_thread_pool_init`, `@brief_barrier_*` | **None** — parallelism via `vkCmdDispatch` |
+| Thread pool | `@briv_thread_pool_init`, `@briv_barrier_*` | **None** — parallelism via `vkCmdDispatch` |
 | `@llvm.assume` | Declared and used for range metadata | **Replace** with `!spirv.Decorations` metadata |
 
 ### Implementation in `emit_header`
@@ -90,7 +90,7 @@ pub enum AddressSpace {
 
 ### SPIR-V Address Space Mapping Table
 
-| Brief Semantic | LLVM Addrspace | SPIR-V StorageClass | Vulkan Binding | Use Case |
+| Briv Semantic | LLVM Addrspace | SPIR-V StorageClass | Vulkan Binding | Use Case |
 |---|---|---|---|---|
 | `Ddr4` / host memory | 1 | `CrossWorkgroup` | SSBO (storage buffer) | LUT data, input/output buffers |
 | `Private` / local vars | 0 (default) | `Function` | (none) | Loop counters, accumulators |
@@ -209,7 +209,7 @@ This affects the NVPTX and SPIR-V backends in two ways:
 ```
 
 In the `.bv` source, this means:
-```brief
+```briv
 # When baking for Pascal target:
 #   LUT stored as Float16 on host
 #   GPU kernel loads as Float16, promotes to Float32 for computation
@@ -235,7 +235,7 @@ declare spir_func i64 @_Z33__spirv_BuiltInGlobalInvocationIdi(i32)
 ; Returns: i64 (must truncate to i32 if using 32-bit indices)
 ```
 
-### Integration into Brief's Parallel Dispatch
+### Integration into Briv's Parallel Dispatch
 
 When `DispatchMode::Parallel` is active and the target is SPIR-V, the loop over array elements is replaced by per-thread element access:
 
@@ -363,9 +363,9 @@ fn validate_spirv_compatibility(&self, program: &Program) -> Vec<String> {
 
 ## 7. CPU LUT Matmul FFI Pattern
 
-The `.bv` source for the CPU LUT matmul uses Brief's `frgn` declarations to create C-compatible entry points:
+The `.bv` source for the CPU LUT matmul uses Briv's `frgn` declarations to create C-compatible entry points:
 
-```brief
+```briv
 # lut_matmul.bv
 # FFI exports for VITRIOL's C++ bridge
 
@@ -416,10 +416,10 @@ declare i32 @lut_matmul_init(i8*) #0
 The same pattern works for the LUT matmul library. The `.bv` file is compiled to `liblut_matmul.so` via:
 
 ```bash
-brief build lib/std/lut_matmul.bv --target x86_64 -o liblut_matmul.so
+briv build lib/std/lut_matmul.bv --target x86_64 -o liblut_matmul.so
 ```
 
-The resulting `.so` exports C-compatible symbols that VITRIOL's `vitriol-brief-bridge.cpp` can `dlopen`.
+The resulting `.so` exports C-compatible symbols that VITRIOL's `vitriol-briv-bridge.cpp` can `dlopen`.
 
 ---
 
@@ -427,7 +427,7 @@ The resulting `.so` exports C-compatible symbols that VITRIOL's `vitriol-brief-b
 
 Once vectorization syntax is implemented, the matmul source will look like:
 
-```brief
+```briv
 # lut_matmul.bv — LUT-based quantized matmul
 
 # ── State ──────────────────────────────────────────
@@ -491,12 +491,12 @@ The key insight: `range.rs` proves that `act` is bounded (0..16 for 4-bit activa
 
 ---
 
-## 9. File Manifest for Brief Changes
+## 9. File Manifest for Briv Changes
 
 | File | Change | Lines affected (approx) |
 |------|--------|------------------------|
 | `src/analysis/address_space.rs` | Add `CrossWorkgroup`, `Workgroup`, `Uniform`, `Private` enum variants | +10 |
-| `src/analysis/address_space.rs` | Add `classify_for_target()` method that maps Brief→LLVM addrspace | +25 |
+| `src/analysis/address_space.rs` | Add `classify_for_target()` method that maps Briv→LLVM addrspace | +25 |
 | `src/backend/llvm.rs` | Add `TargetTriple` enum and `--target` CLI propagation | +30 |
 | `src/backend/llvm.rs` | Modify `emit_header` to dispatch on target triple | +40 |
 | `src/backend/llvm.rs` | Add `emit_spirv_header()` for SPIR-V specific header | +30 |

@@ -63,7 +63,7 @@ enum Token {
     KeywordStage,
     KeywordOn,
     
-    // Rendered Brief
+    // Rendered Briv
     KeywordRender,
     
     // Boolean literals

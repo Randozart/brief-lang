@@ -1,6 +1,6 @@
-// lib/std/json.bv — Pure-Brief JSON Parser
+// lib/std/json.bv — Pure-Briv JSON Parser
 //
-// Replaces all frgn __* declarations with pure-Brief recursive descent.
+// Replaces all frgn __* declarations with pure-Briv recursive descent.
 // The public API matches officina's needs: parse, is_array, length,
 // get (by key), get_by_index.
 

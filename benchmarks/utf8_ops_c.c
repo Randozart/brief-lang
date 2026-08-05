@@ -1,4 +1,4 @@
-// UTF-8 Operations — C reference for Brief LLVM backend
+// UTF-8 Operations — C reference for Briv LLVM backend
 //
 // Symmetric with UTF8_ops.bv: Allocates buffers, stores loop
 // counter, compares via memcmp + validates via UTF8_validate.

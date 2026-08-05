@@ -75,7 +75,7 @@ impl MemorySpec {
         }
     }
 
-    /// Collect allocations from a parsed Brief program
+    /// Collect allocations from a parsed Briv program
     pub fn collect_from_program(&mut self, items: &[TopLevel]) {
         for item in items {
             match item {

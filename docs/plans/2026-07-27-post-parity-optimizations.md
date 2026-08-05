@@ -200,7 +200,7 @@ Change `ptr noalias nocapture align 8 %state` to
 | 8 | `@async_body_*` | emit_toplevel.rs:2302 | `"define void @{}(ptr noalias nocapture align 8 %state)..."` | ✅ |
 | 9 | `@emit_fused` (3 variants) | emit_toplevel.rs:2369,2383,2421 | `"define void @{}(ptr noalias nocapture align 8 %state)..."` | ✅ |
 | 10 | `@cell_persistent_ticks` | emit_toplevel.rs:2549 | `"define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state)..."` | ✅ |
-| 11 | `@__brief_init_state` | emit_toplevel.rs:2491 | `"define dso_local void @__brief_init_state(ptr %state)..."` | ❌ |
+| 11 | `@__briv_init_state` | emit_toplevel.rs:2491 | `"define dso_local void @__briv_init_state(ptr %state)..."` | ❌ |
 
 Also fix the **3 functions missing `align 8`** (sites 3, 11 above, plus reactor_tick):
 
@@ -210,7 +210,7 @@ Also fix the **3 functions missing `align 8`** (sites 3, 11 above, plus reactor_
 | `@reactor_tick` (parallel) | dispatch.rs:365 | `align 8` |
 | `@reactor_tick` (fallback) | mod.rs:3118 | `align 8` |
 | User `@defn` export | emit_toplevel.rs:1277 | `noalias nocapture align 8` (bare ptr currently) |
-| `@__brief_init_state` | emit_toplevel.rs:2491 | `noalias nocapture align 8` (bare ptr currently) |
+| `@__briv_init_state` | emit_toplevel.rs:2491 | `noalias nocapture align 8` (bare ptr currently) |
 
 The `N` value for `dereferenceable(N)` comes from `compute_state_size_bytes()`,
 already called at `loop_engine/mod.rs:244`. Store the result on `CompilerContext`
@@ -440,7 +440,7 @@ LLVM `ptr` instead of opaque `i64` in %State.
 The comment at `mod.rs:921-928` explicitly chose `"i64"` for ALL fields:
 ```rust
 // 2026-07-17: ALL state fields are stored as i64 in %State, regardless
-// of their Brief type (Float, Float64, Ptr, etc.). The adapt_to_i64 /
+// of their Briv type (Float, Float64, Ptr, etc.). The adapt_to_i64 /
 // ensure_typed_value functions handle the conversion between i64 and
 // the field's natural type at load/store time.
 ```
@@ -482,7 +482,7 @@ if ptr_related {
 code assumes loaded values are `i64`. The float-boxing code at lines 194-209 does
 `load i64` then `trunc → bitcast to float`. For Ptr fields, the load would return
 `ptr` — the `else` block at lines 210-214 handles non-float types by returning
-the register with `brief_ty`. This is actually correct for Ptr — the register IS
+the register with `briv_ty`. This is actually correct for Ptr — the register IS
 `ptr`, and downstream code (inttoptr → GEP) would treat it as such. The `inttoptr`
 in `emit_expr.rs:485` becomes a no-op.
 

@@ -9,11 +9,11 @@
 Allow executable statements directly at global scope, which the compiler
 automatically wraps in a synthesized `node __init` transaction at
 compile time. Eliminates boilerplate for simple scripts while retaining
-Brief's transactional safety guarantees.
+Briv's transactional safety guarantees.
 
 ## Syntax
 
-```brief
+```briv
 // Conventional: boilerplate wrapper
 node main [true][true] {
     println#("hello");
@@ -40,7 +40,7 @@ execution. A declaration after a `Statement` is a compile error:
 `Program::synthesize_init_txn()` (in `src/ast.rs`) collects all
 `TopLevel::Statement` items and synthesizes:
 
-```brief
+```briv
 // Synthesized (fannkuch_redux_0.bv was the test case):
 let __booted_0: Int = 0;
 
@@ -86,7 +86,7 @@ The `synthesize_init_txn()` call is added in `run_llvm_compile()` and
 processes the synthesized `__init` transaction through the normal
 `emit_direct_ssa_main()` path.
 
-### RBV (Rendered Brief) Backend
+### RBV (Rendered Briv) Backend
 
 `synthesize_init_txn()` is also called in `run_rbv()` in `main.rs`, so
 top-level statements work in `.rbv`/`.srbv` files as well.

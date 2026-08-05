@@ -2,11 +2,11 @@
 
 ## Array Types → Vector Operations
 
-Brief SIMD arrays (`Float[64]`, `Int[16]`) are memory-mapped with explicit alignment. The LLVM backend emits vectorized operations using LLVM's native vector types.
+Briv SIMD arrays (`Float[64]`, `Int[16]`) are memory-mapped with explicit alignment. The LLVM backend emits vectorized operations using LLVM's native vector types.
 
 ## Vector Load/Store
 
-```brief
+```briv
 let data: Float[64] @ 0x40000000;
 let result = data[0] + data[1];
 ```
@@ -28,7 +28,7 @@ let result = data[0] + data[1];
 
 ## Explicit Loop Vectorization
 
-```brief
+```briv
 let i: Int = 0;
 [i < 16] {
     &result[i] = input[i] * 2.0;

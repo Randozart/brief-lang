@@ -218,5 +218,5 @@ Overall speedup: ~1.5× at any depth.
 ## Verification
 
 - `cargo test --lib` — 1167+ existing tests pass
-- Manual: `brief derive --enumerative-depth 4 benchmarks/popcount_derive.bv` completes in <30s
-- Manual: `brief derive --enumerative-depth 5 benchmarks/popcount_derive.bv` completes in <120s
+- Manual: `briv derive --enumerative-depth 4 benchmarks/popcount_derive.bv` completes in <30s
+- Manual: `briv derive --enumerative-depth 5 benchmarks/popcount_derive.bv` completes in <120s

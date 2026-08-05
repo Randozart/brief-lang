@@ -161,7 +161,7 @@ fn float_fixpoint(bindings: &[(String, Option<Type>, &Expr)]) -> HashSet<String>
 /// Is this type annotation a float protocol type?
 ///
 /// TEMP: 2026-07-31 — name-based until Phase 3 (§8.4 D4) wires the casting
-/// graph into analysis. The primitive float set is closed in Brief's
+/// graph into analysis. The primitive float set is closed in Briv's
 /// bootstrap; a user float type carries an `op Add(#Float)` binding and is
 /// caught by the literal/operation propagation instead.
 fn is_float_type(ty: &Type) -> bool {

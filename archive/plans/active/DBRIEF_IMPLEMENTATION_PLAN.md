@@ -1,4 +1,4 @@
-# DBrief Implementation Plan
+# DBriv Implementation Plan
 
 **Date:** 2026-05-05
 **Status:** Planning
@@ -8,7 +8,7 @@
 
 ## 1. Scope
 
-Implement DBrief (Data Brief) as a new language variant for configuration and database files, with Brief integration.
+Implement DBriv (Data Briv) as a new language variant for configuration and database files, with Briv integration.
 
 ---
 
@@ -22,7 +22,7 @@ Implement DBrief (Data Brief) as a new language variant for configuration and da
 | `.dbvl` files | Mutable line-based database | HIGH |
 | `.dbvs` files | Schema/register definition | HIGH |
 | `@address` syntax | Register/address addressing | HIGH |
-| Type system | Brief types + Addr, RegOffset | HIGH |
+| Type system | Briv types + Addr, RegOffset | HIGH |
 
 ### 2.2 ALIAS System
 
@@ -116,11 +116,11 @@ Implement DBrief (Data Brief) as a new language variant for configuration and da
 
 | File | Purpose |
 |------|---------|
-| `src/dbrief/parser.rs` | Parse .dbv/.dbvl/.dbvs files |
-| `src/dbrief/eval.rs` | Query evaluation engine |
-| `src/dbrief/alloc.rs` | Address allocation |
-| `src/dbrief/mod.rs` | Module entry |
-| `src/dbrief/ast.rs` | DBrief AST |
+| `src/dbriv/parser.rs` | Parse .dbv/.dbvl/.dbvs files |
+| `src/dbriv/eval.rs` | Query evaluation engine |
+| `src/dbriv/alloc.rs` | Address allocation |
+| `src/dbriv/mod.rs` | Module entry |
+| `src/dbriv/ast.rs` | DBriv AST |
 
 ---
 
@@ -128,7 +128,7 @@ Implement DBrief (Data Brief) as a new language variant for configuration and da
 
 | Integration | Description |
 |--------------|-------------|
-| Brief import | `.bv` can import .dbv via FFI |
+| Briv import | `.bv` can import .dbv via FFI |
 | EBV binding | `.ebv` can bind to .dbv config |
 | RBV data | `.rbv` views bind to .dbvl data |
 
@@ -140,7 +140,7 @@ After implementation:
 
 | Criteria | Verification |
 |-----------|--------------|
-| `.dbv` parses without error | `brief compile config.dbv` |
+| `.dbv` parses without error | `briv compile config.dbv` |
 | `.dbv` contracts verify | Invalid data rejected at compile |
 | Queries work | `@1->FILTER x > 0` returns correct |
 | ALIAS binds correctly | Address resolution works |

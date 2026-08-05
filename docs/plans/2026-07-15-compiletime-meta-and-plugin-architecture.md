@@ -46,7 +46,7 @@ behavior with an explicit `$(Stage)` metaprogramming system:
 
 The result is a compiler where every behavior is either a system plugin (ships
 with the compiler, `--disable-plugin` to turn off) or a user `$(Stage)` block
-(written inline in Brief source).
+(written inline in Briv source).
 
 ---
 
@@ -131,7 +131,7 @@ are registered for a stage, it produces its input unchanged.
 | Tier | Location | Who writes | Enabled by | Priority |
 |------|----------|------------|------------|----------|
 | **System** | `plugins/{front,mid,post,back}/` directory | Compiler engineers | Default on, ships with compiler binary | `@ highest` (1000) |
-| **User** | `$(Stage @ N) { ... }` inline in `.bv` files | Any Brief programmer | Declared in source file | `@ normal` (500) default |
+| **User** | `$(Stage @ N) { ... }` inline in `.bv` files | Any Briv programmer | Declared in source file | `@ normal` (500) default |
 
 ### System Plugin Discovery
 
@@ -140,7 +140,7 @@ The compiler searches:
 
 1. `--plugin-dir` CLI flag
 2. `BRIEF_PLUGIN_DIR` environment variable
-3. Compiler installation path: `<executable_dir>/../share/brief/plugins/`
+3. Compiler installation path: `<executable_dir>/../share/briv/plugins/`
 4. Project-local: `<project_root>/plugins/`
 
 Each subdirectory (`front/`, `mid/`, `post/`, `back/`) contains `.bv` files.
@@ -150,13 +150,13 @@ Every `.bv` file in the directory is loaded and executed at that stage.
 
 ```bash
 # Disable a specific system plugin by name
-brief-compiler build --disable-plugin prelude main.bv
+briv-compiler build --disable-plugin prelude main.bv
 
 # Disable all system plugins
-brief-compiler build --disable-plugin '*' main.bv
+briv-compiler build --disable-plugin '*' main.bv
 
 # Load an additional user plugin from a path
-brief-compiler build --enable-plugin ./my-plugin.bv main.bv
+briv-compiler build --enable-plugin ./my-plugin.bv main.bv
 ```
 
 The `--disable-plugin` flag accepts a plugin name (filename stem) or `'*'`.
@@ -166,7 +166,7 @@ The `--enable-plugin` flag accepts a file path and loads it as a user plugin.
 
 ## Priority System
 
-```brief
+```briv
 $(Front) { ... }                     // priority 500 (default = normal)
 $(Front @ 100) { ... }               // explicit integer priority
 $(Front @ highest) { ... }           // named alias
@@ -217,7 +217,7 @@ Produces `TopLevel::StageBlock { stage: StageKind, priority: u32, body: Vec<Stat
 
 ### Examples
 
-```brief
+```briv
 $(Front) {
     InsertRegistryImport$("std/types/bootstrap");
 }
@@ -237,7 +237,7 @@ $(Back) {
 
 ### Body Execution
 
-The body of a `$(Stage)` block is **regular Brief code** run at compile time.
+The body of a `$(Stage)` block is **regular Briv code** run at compile time.
 The compiler:
 
 1. Parses the body into `Vec<Statement>`
@@ -246,7 +246,7 @@ The compiler:
 4. `$`-suffixed identifiers (`InsertRegistryImport$`, `Collect$`, etc.) are
    resolved as compiler-known intrinsics, not runtime function calls
 
-All other Brief constructs (`let`, `if`, `defn`, type constructors, etc.) work
+All other Briv constructs (`let`, `if`, `defn`, type constructors, etc.) work
 normally within the body. The only restriction: `$` intrinsics cannot be called
 from outside a `$(Stage)` block.
 
@@ -415,7 +415,7 @@ optimization passes (contract→metadata, sugar stripping). Annotations in
 ```
 AssertStructure$(condition: String)
 ```
-Asserts a structural property of the AST. The `condition` is a Brief
+Asserts a structural property of the AST. The `condition` is a Briv
 expression evaluated at compile time. If it evaluates to `false`,
 compilation aborts with a diagnostic.
 Replaces: validation passes currently in the backend.
@@ -583,14 +583,14 @@ Each entry maps a registry name to an absolute or project-relative path.
 ### CLI Registration
 
 ```bash
-brief-compiler register my-project/utils /home/user/projects/utils/utils.bv
-brief-compiler unregister my-project/utils
-brief-compiler list-registry   # lists all registered modules
+briv-compiler register my-project/utils /home/user/projects/utils/utils.bv
+briv-compiler unregister my-project/utils
+briv-compiler list-registry   # lists all registered modules
 ```
 
 The `register` command appends to `config/module-registry.toml`. The
 command operates on the project-local config by default, or a user-global
-config at `~/.config/brief/registry.toml` with `--global`.
+config at `~/.config/briv/registry.toml` with `--global`.
 
 ### What This Replaces
 
@@ -665,7 +665,7 @@ AddressOf#<T?, strategy?>(id: String) -> T
 
 ### Examples
 
-```brief
+```briv
 // Simple — type inferred, strategy from type metadata
 trg input @ AddressOf#("stdin").#line_ready;
 
@@ -687,7 +687,7 @@ trg rx @ AddressOf#<MMIO>(from_config("CHIP_UART_PORT")).#data_ready;
 Types carry a `listen <~` metadata annotation that declares what listening
 strategy the backend should use:
 
-```brief
+```briv
 // std/types/io.bv — ships with the compiler
 type Stdin {
     metadata listen <~ "select";
@@ -722,7 +722,7 @@ strategy is a compile error with a clear message listing supported values.
 
 ### `from_config()` — Compile-Time Config Read
 
-```brief
+```briv
 AddressOf#<MMIO>(from_config("CHIP_UART_PORT"))
 ```
 
@@ -821,7 +821,7 @@ runtime: a USB device on a hot-swappable bus, a virtual device registered
 by another component, or a memory-mapped peripheral whose address is read
 from a device tree.
 
-Brief's contract system must extend to these cases without sacrificing
+Briv's contract system must extend to these cases without sacrificing
 safety. The solution is a **two-phase safety model**: the compile-time
 type parameter on `AddressOf#` guarantees shape, a runtime init guard
 guarantees the entity exists and matches.
@@ -832,7 +832,7 @@ guarantees the entity exists and matches.
 entity's declared shape `T`. Applying `.#field` scopes the pointer type
 to a specific port:
 
-```brief
+```briv
 let uart_rx: Ptr<UartRxPort> = AddressOf#<UartRxPort>("sys:uart/rx").#rx;
 trg x @ *uart_rx;
 ```
@@ -844,7 +844,7 @@ when `AddressOf#` resolved, the trigger binding is statically type-safe.
 When the pointer type already describes the full port (no field projection
 needed):
 
-```brief
+```briv
 trg x @ *AddressOf#<UartRxPort>("sys:uart/rx");
 ```
 
@@ -861,11 +861,11 @@ because the type already describes exactly what trigger to set up.
 
 The compile-time contract (`T`) guarantees shape correctness. The runtime
 check guarantees the entity exists and matches. Two-phase safety mirrors
-Brief's overall contract philosophy: contracts are verified, never assumed.
+Briv's overall contract philosophy: contracts are verified, never assumed.
 
 #### Example: Hot-swappable Input Device
 
-```brief
+```briv
 type GamepadInput : InputPort {
     // fields: button_a, button_b, dpad_x, dpad_y
 };
@@ -886,7 +886,7 @@ txn handle_input [has_device][has_device] {
 
 `AddressOf#` is usable anywhere, not only in trigger bindings:
 
-```brief
+```briv
 let counter_addr: Ptr<Int> = AddressOf#<Int>("sys:sysclock_ticks");
 let ticks: Int = *counter_addr;  // read via deref
 ```
@@ -1541,11 +1541,11 @@ test_import_registry_lookup:
   // Returns error if not found in registry
 
 test_register_cli_command:
-  // brief-compiler register name path → adds entry to registry
+  // briv-compiler register name path → adds entry to registry
   // Subsequent import <name> resolves to that path
 
 test_unregister_cli_command:
-  // brief-compiler unregister name → removes entry
+  // briv-compiler unregister name → removes entry
   // Subsequent import <name> returns error
 
 test_no_magic_prelude:
@@ -1580,11 +1580,11 @@ test_listening_strategy_validation:
 
 ```
 test_compile_with_prelude_plugin:
-  // Compile a minimal Brief file with system plugins enabled
+  // Compile a minimal Briv file with system plugins enabled
   // Verify prelude imports are present in the resolved AST
 
 test_compile_with_disable_plugin:
-  // brief-compiler build --disable-plugin prelude minimal.bv
+  // briv-compiler build --disable-plugin prelude minimal.bv
   // Verify no prelude imports in the resolved AST
 
 test_compile_with_user_stage_block:

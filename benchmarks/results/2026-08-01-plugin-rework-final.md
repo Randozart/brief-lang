@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 **Commits:** `8962a2a1` (Phase 1) → `c5ae8b78` (B4b); `7dceefb7` (B0), `ba1d02b4` (B1), `4452ae3d` (B2), `30922fc6` (B3), `9106bb51`/`c5ae8b78` (B4)
-**Worktree:** `../brief-compiler-plugin-rework`, branch `feat/plugin-macro-rework`
+**Worktree:** `../briv-compiler-plugin-rework`, branch `feat/plugin-macro-rework`
 **Plan:** `docs/plans/2026-08-01-plugin-macro-rework.md`
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Raw output:** `/tmp/plugin_final.log`
@@ -21,28 +21,28 @@
 > re-run is needed for a compiler-only change. The `.text`-ratio precomputed
 > detection is unaffected.
 
-| Benchmark | Brief | C | Ratio | Winner | Correct | Δ vs baseline |
+| Benchmark | Briv | C | Ratio | Winner | Correct | Δ vs baseline |
 |-----------|:-----:|:--:|:-----:|:------:|:-------:|:------------:|
 | ring_buffer | .0519s | .0439s | 1.18× | C | MATCH | +.02 |
-| float_math | .0422s | .0703s | .60× | Brief | MATCH | 0 |
-| float_math_nonzero | .1569s | .1646s | .95× | Brief | MATCH | 0 |
-| sparse_dispatch | .0474s | .0597s | .79× | Brief | MATCH | −.02 |
-| print_loop | .0329s | .0562s | .58× | Brief | MATCH | −.01 |
-| nbody_newton | 7.4724s | 8.9388s | .83× | Brief | MATCH | 0 |
-| nbody_sqrt | 2.3246s | 2.9984s | .77× | Brief | MATCH | +.01 |
-| nbody_sqrt_idio | 2.9184s | 3.8474s | .75× | Brief | MATCH | 0 |
-| fasta | .2180s | .2191s | .99× | Brief | MATCH | −.07 |
-| fannkuch_redux | .0594s | .0643s | .92× | Brief | MATCH | −.02 |
+| float_math | .0422s | .0703s | .60× | Briv | MATCH | 0 |
+| float_math_nonzero | .1569s | .1646s | .95× | Briv | MATCH | 0 |
+| sparse_dispatch | .0474s | .0597s | .79× | Briv | MATCH | −.02 |
+| print_loop | .0329s | .0562s | .58× | Briv | MATCH | −.01 |
+| nbody_newton | 7.4724s | 8.9388s | .83× | Briv | MATCH | 0 |
+| nbody_sqrt | 2.3246s | 2.9984s | .77× | Briv | MATCH | +.01 |
+| nbody_sqrt_idio | 2.9184s | 3.8474s | .75× | Briv | MATCH | 0 |
+| fasta | .2180s | .2191s | .99× | Briv | MATCH | −.07 |
+| fannkuch_redux | .0594s | .0643s | .92× | Briv | MATCH | −.02 |
 | mandelbrot | .7047s | .6855s | 1.02× | C | MATCH | 0 |
-| kalman_filter_runtime | .1521s | .1782s | .85× | Brief | MATCH | 0 |
-| knucleotide | .1896s | .1903s | .99× | Brief | MATCH | 0 |
-| cancel_math | .0512s | .0589s | .86× | Brief | MATCH | +.01 |
+| kalman_filter_runtime | .1521s | .1782s | .85× | Briv | MATCH | 0 |
+| knucleotide | .1896s | .1903s | .99× | Briv | MATCH | 0 |
+| cancel_math | .0512s | .0589s | .86× | Briv | MATCH | +.01 |
 | bit_clear | .0002s | .0002s | 1.00× | ~tie | MATCH | −.25 |
-| interval_step | .0585s | .0600s | .97× | Brief | MATCH | −.03 |
-| telemetry_stream | .1915s | .1984s | .96× | Brief | MATCH | 0 |
-| pid_control | .3406s | .3468s | .98× | Brief | MATCH | 0 |
-| matrix_pipeline | .4622s | .7192s | .64× | Brief | MATCH | +.02 |
-| accumulator_flush | .1059s | .1495s | .70× | Brief | MATCH | −.01 |
+| interval_step | .0585s | .0600s | .97× | Briv | MATCH | −.03 |
+| telemetry_stream | .1915s | .1984s | .96× | Briv | MATCH | 0 |
+| pid_control | .3406s | .3468s | .98× | Briv | MATCH | 0 |
+| matrix_pipeline | .4622s | .7192s | .64× | Briv | MATCH | +.02 |
+| accumulator_flush | .1059s | .1495s | .70× | Briv | MATCH | −.01 |
 | sweep_sparse | .2193s | .1543s | 1.42× | C | MATCH | −.01 |
 | sweep_mid | .2599s | .2356s | 1.10× | C | MATCH | −.01 |
 | sweep_dense | .3969s | .2640s | 1.50× | C | MATCH | 0 |

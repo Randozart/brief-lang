@@ -1,6 +1,6 @@
 // gate.js — Gate A + B for Node. Native feature_hash uses BigInt (JS numbers
 // are doubles; bitwise ops truncate to 32 bits) with a 64-bit mask — the same
-// 64-bit wrapping semantics as Brief's FNV-1a.
+// 64-bit wrapping semantics as Briv's FNV-1a.
 const b = require(process.argv[2]);
 
 const MASK = (1n << 64n) - 1n;

@@ -1,4 +1,4 @@
-# Brief Language Reference Guide
+# Briv Language Reference Guide
 
 **Version:** v0.16.0
 **Date:** 2026-07-09
@@ -135,7 +135,7 @@
 
 ### Primitive Types
 
-```brief
+```briv
 let x: Int = 42;
 let y: UInt = 100;
 let flag: Bool = true;
@@ -145,14 +145,14 @@ let pi: Float = 3.14;
 
 ### Vector Types
 
-```brief
+```briv
 let buffer: Int[16];        // Fixed-size array
 let matrix: Float[4][4];     // 2D array
 ```
 
 ### Constrained Types (Bit-Range)
 
-```brief
+```briv
 let byte: UInt /8;          // 8-bit unsigned
 let nibble: UInt /4;        // 4-bit unsigned
 let word: Int /16;          // 16-bit signed
@@ -161,7 +161,7 @@ let flags: UInt /x8;        // Inferred 8-bit
 
 ### Pointer Types
 
-```brief
+```briv
 let p: Ptr<Int> = &field;           // Mutable pointer to state field
 let r: PtrConst<Int> = &let_var;    // Read-only pointer to let binding
 let v = *p;                          // Dereference: reads pointed-to value
@@ -177,14 +177,14 @@ described below in "Volatile Pointers".
 
 ### Union Types
 
-```brief
+```briv
 let result: Result<Int, String> = Ok(42);
 let value: Int | String = "hello";
 ```
 
 ### Custom Types
 
-```brief
+```briv
 let point: Point;  // Declare variable of custom type
 let status: Status;  // Declare variable of enum type
 ```
@@ -195,7 +195,7 @@ let status: Status;  // Declare variable of enum type
 
 ### Basic Declaration
 
-```brief
+```briv
 let counter: Int = 0;
 let name: String = "test";
 let enabled: Bool = false;
@@ -203,34 +203,34 @@ let enabled: Bool = false;
 
 ### With Address Mapping (EBV)
 
-```brief
+```briv
 let led: Bool @ 0x4000 = false;           // Memory-mapped at 0x4000
 let sensor: UInt @ 0x8000 /8;             // 8-bit sensor at 0x8000
 ```
 
 ### With Bit-Range
 
-```brief
+```briv
 let flags: UInt @ 0x1000 /0..7;           // Bits 0-7 at address 0x1000
 let status: UInt /4;                      // 4-bit field
 ```
 
 ### Address with Bit-Range Shorthand
 
-```brief
+```briv
 let data: UInt @ 0x2000 /x16;             // 16-bit value at 0x2000
 ```
 
 ### Memory Regions
 
-```brief
+```briv
 let stack_var: Int @ stack:8;             // Stack offset 8
 let heap_ptr: Int @ heap:16;               // Heap offset 16
 ```
 
 ### Vector with Address
 
-```brief
+```briv
 let buffer: UInt[256] @ 0x1000;            // 256-element buffer at 0x1000
 ```
 
@@ -238,7 +238,7 @@ let buffer: UInt[256] @ 0x1000;            // 256-element buffer at 0x1000
 
 ## Constants
 
-```brief
+```briv
 const MAX_SIZE: Int = 100;
 const VERSION: String = "1.0.0";
 const FLAGS: UInt = 0xFF;
@@ -251,15 +251,15 @@ const FLAGS: UInt = 0xFF;
 Executable statements written at global scope are automatically wrapped in a
 synthesized `node __init` that fires once at startup.
 
-```brief
-let message: String = "Hello, Brief!";
+```briv
+let message: String = "Hello, Briv!";
 println(message);           // top-level — no txn wrapper needed
 ```
 
 The compiler generates a one-shot transaction equivalent to:
 
-```brief
-let message: String = "Hello, Brief!";
+```briv
+let message: String = "Hello, Briv!";
 let __booted_0: Int = 0;
 node __init [!__booted_0][__booted_0] {
     println(message);
@@ -290,7 +290,7 @@ Requires `.bv`, `.sbv`, `.rbv`, `.srbv` extensions (standard or strict tiers).
 
 ### Basic Transaction
 
-```brief
+```briv
 txn name [precondition] [postcondition] {
     // body
     term;
@@ -299,7 +299,7 @@ txn name [precondition] [postcondition] {
 
 ### Reactive Transaction (RCT)
 
-```brief
+```briv
 node name [precondition] [postcondition] {
     variable = value;
     term;
@@ -308,7 +308,7 @@ node name [precondition] [postcondition] {
 
 ### Async Transaction
 
-```brief
+```briv
 async txn name [precondition] [postcondition] {
     term;
 };
@@ -316,7 +316,7 @@ async txn name [precondition] [postcondition] {
 
 ### Reactive Async Transaction
 
-```brief
+```briv
 async node name [precondition] [postcondition] {
     term;
 };
@@ -324,7 +324,7 @@ async node name [precondition] [postcondition] {
 
 ### With Parameters
 
-```brief
+```briv
 txn add [a: Int] [b: Int] [result == a + b] {
     term result;
 };
@@ -332,13 +332,13 @@ txn add [a: Int] [b: Int] [result == a + b] {
 
 ### Lambda-style (No Body)
 
-```brief
+```briv
 txn identity [x: Int] [result == x];
 ```
 
 ### With Reactor Speed
 
-```brief
+```briv
 node blink @60Hz [true] [led == !led] {
     term;
 };
@@ -346,7 +346,7 @@ node blink @60Hz [true] [led == !led] {
 
 ### Transaction Method (dot syntax)
 
-```brief
+```briv
 node counter.increment [count < max] [count == @count + 1] {
     count = count + 1;
     term;
@@ -363,13 +363,13 @@ Dependencies are inferred from pre/post conditions automatically.
 
 ### Precondition and Postcondition
 
-```brief
+```briv
 [pre_condition] [post_condition]
 ```
 
 ### Watchdog (Third Contract Bracket)
 
-```brief
+```briv
 [pre][post][watchdog]     // Required watchdog (default)
 [pre][post][?watchdog]     // Optional watchdog
 ```
@@ -378,13 +378,13 @@ The watchdog is checked at `term`.
 
 ### Prior State Toggle Shorthand
 
-```brief
+```briv
 ~/identifier
 ```
 
 Expands to: `[~identifier][identifier]`
 
-```brief
+```briv
 node toggle [~/ready][ready] {
     ready = !ready;
     term;
@@ -393,7 +393,7 @@ node toggle [~/ready][ready] {
 
 ### Examples
 
-```brief
+```briv
 node increment [counter < 10]
   [counter == @counter + 1]
 {
@@ -419,7 +419,7 @@ node with_watchdog [ready == true][done == true][?timeout] {
 
 ### Predicate Definition
 
-```brief
+```briv
 defn sufficient_funds(amount: Int) [amount > 0][true] -> Bool {
     term amount >= minimum_balance;
 };
@@ -427,7 +427,7 @@ defn sufficient_funds(amount: Int) [amount > 0][true] -> Bool {
 
 ### Function Definition with Contract
 
-```brief
+```briv
 defn square(x: Int) [true] [result == x * x] -> Int {
     term x * x;
 };
@@ -437,7 +437,7 @@ defn square(x: Int) [true] [result == x * x] -> Int {
 
 ## Structs
 
-```brief
+```briv
 struct Point {
     let x: Int = 0;
     let y: Int = 0;
@@ -461,7 +461,7 @@ struct Counter {
 
 ### Field Declaration Syntax
 
-```brief
+```briv
 // Using let (required initializer)
 let x: Int = 0;
 let y: Int = 0;
@@ -476,7 +476,7 @@ field_name: Type,
 
 RStructs automatically namespace transactions with the struct name.
 
-```brief
+```briv
 rstruct Counter {
     let value: Int = 0;
 
@@ -495,7 +495,7 @@ After parsing, `increment` becomes `Counter.increment`.
 
 ### Simple Enum
 
-```brief
+```briv
 enum Status {
     Idle,
     Processing,
@@ -506,7 +506,7 @@ enum Status {
 
 ### Enum with Type Parameters
 
-```brief
+```briv
 enum Result<T, E> {
     Ok(T),
     Err(E),
@@ -515,7 +515,7 @@ enum Result<T, E> {
 
 ### Tuple Variants
 
-```brief
+```briv
 enum Value {
     Int(Int),
     Float(Float),
@@ -527,7 +527,7 @@ enum Value {
 
 Enums use bare variant names:
 
-```brief
+```briv
 let state: Status = Idle;
 
 // Comparison
@@ -546,19 +546,19 @@ Status(s) = state;
 
 ### Basic Signature
 
-```brief
+```briv
 sig my_function: Int -> Bool;
 ```
 
 ### With Source
 
-```brief
+```briv
 sig read: String -> String from "io.fs";
 ```
 
 ### With Binding
 
-```brief
+```briv
 sig process: Int -> Int = complex(x);
 ```
 
@@ -572,7 +572,7 @@ The new FFI system uses language profiles and doesn't require TOML file referenc
 
 #### File-Level Attribute
 
-```brief
+```briv
 #![ffi.<lang>, bind("./profile.toml"), import("./script"), map("from","to")]
 ```
 
@@ -583,39 +583,39 @@ The new FFI system uses language profiles and doesn't require TOML file referenc
 
 #### Foreign Function (Standard)
 
-```brief
+```briv
 frgn printk(fmt: String) -> Result<Int, Err>;
 ```
 
 #### Foreign Function (Fire-and-Forget / Void Return)
 
-```brief
+```briv
 frgn! printk(fmt: String);
 ```
 
 #### Foreign Function with Explicit Address
 
-```brief
+```briv
 frgn read_reg @ 0x40001000 () -> Result<UInt, Err>;
 frgn! write_reg @ 0x40001000 (val: UInt);
 ```
 
 #### Per-Function Type Override
 
-```brief
+```briv
 #[ffi.c, type("Int32Array")]
 frgn get_buffer() -> Result<UInt, Err>;
 ```
 
 ### Legacy Syntax (Still Supported)
 
-```brief
+```briv
 frgn fetch(url: String) -> Result<Data, Error> from "http.toml";
 ```
 
 ### System Call
 
-```brief
+```briv
 syscall! read(fd: Int, buf: String) -> Result<Int, Error>;
 ```
 
@@ -623,7 +623,7 @@ syscall! read(fd: Int, buf: String) -> Result<Int, Error>;
 
 ## Resources
 
-```brief
+```briv
 resource uart: UART {
     baud_rate: 9600,
     parity: None,
@@ -641,7 +641,7 @@ rsrc buffer: RingBuffer {
 
 Hardware triggers define external input signals.
 
-```brief
+```briv
 trg button: Bool @ 0x4000;
 trg sensor: UInt @ 0x8000 /8;
 ```
@@ -652,7 +652,7 @@ Synthesized to: `input logic button;`
 
 ## Render Blocks (RBV)
 
-```brief
+```briv
 render Counter {
     <div class="counter">
         <span b-text="value">0</span>
@@ -682,13 +682,13 @@ render Counter {
 
 ### Single Import
 
-```brief
+```briv
 import "std/io";
 ```
 
 ### Multiple Imports
 
-```brief
+```briv
 import {
     "std/io",
     "std/strings",
@@ -698,7 +698,7 @@ import {
 
 ### With Alias
 
-```brief
+```briv
 import "std/io" as io;
 ```
 
@@ -708,7 +708,7 @@ import "std/io" as io;
 
 ### Literals
 
-```brief
+```briv
 42          // Integer
 3.14        // Float
 "hello"     // String
@@ -718,7 +718,7 @@ false       // Boolean
 
 ### Identifiers
 
-```brief
+```briv
 counter
 max_value
 is_enabled
@@ -726,20 +726,20 @@ is_enabled
 
 ### Prior State (@)
 
-```brief
+```briv
 @counter        // Previous value of counter
 @x + 1          // Prior x plus 1
 ```
 
 ### Mutable Reference (&)
 
-```brief
+```briv
 &variable       // Mutable reference for assignment
 ```
 
 ### Unary Operations
 
-```brief
+```briv
 !flag           // Logical NOT
 -x              // Arithmetic negation
 ~bits           // Bitwise NOT
@@ -749,7 +749,7 @@ is_enabled
 
 ### Binary Operations
 
-```brief
+```briv
 x + y           // Addition
 x - y           // Subtraction
 x * y           // Multiplication
@@ -771,37 +771,37 @@ x >> n          // Shift right
 
 ### Function Call
 
-```brief
+```briv
 process(data)
 max(a, b)
 ```
 
 ### Method Call
 
-```brief
+```briv
 result.validate()
 list.length()
 ```
 
 ### Field Access
 
-```brief
+```briv
 point.x
 rect.width
 ```
 
 ### Index Access
 
-```brief
+```briv
 buffer[0]
 matrix[i][j]
 ```
 
 ### Pattern Matching
 
-Brief uses **guard-based pattern matching** for unions and enums:
+Briv uses **guard-based pattern matching** for unions and enums:
 
-```brief
+```briv
 // Extract variant from union type
 let result: Int | Error = fetch_data();
 Ok(value) = result;
@@ -817,7 +817,7 @@ Status(s) = state;
 
 ### Quantifiers *(planned)*
 
-```brief
+```briv
 forall x in range(0, 10) { x >= 0 }
 exists y in set { y > 0 }
 ```
@@ -828,14 +828,14 @@ exists y in set { y > 0 }
 
 ### Assignment
 
-```brief
+```briv
 x = 42;
 counter = counter + 1;
 ```
 
 ### Mutable Assignment (Pointer Write)
 
-```brief
+```briv
 field = new_value;         // Direct state field write
 *ptr = new_value;           // Write through pointer dereference
 ```
@@ -845,14 +845,14 @@ type `Ptr<T>`. Writing through a `PtrConst<T>` is a compile-time error.
 
 ### With Timeout
 
-```brief
+```briv
 result = read_spi() within 10 cycles;
 data = fetch(url) within 100 ms;
 ```
 
 ### Guarded Statement
 
-```brief
+```briv
 [condition] statement;
 [condition] {
     // multiple statements
@@ -861,7 +861,7 @@ data = fetch(url) within 100 ms;
 
 ### Pattern Matching (Guard-based)
 
-```brief
+```briv
 // Union type pattern extraction
 let result: Int | Error = fetch();
 Ok(value) = result;
@@ -874,7 +874,7 @@ Status(s) = state;
 
 ### Term (Termination)
 
-```brief
+```briv
 term;                     // Void termination
 term result;              // Return value
 term (a, b);              // Multiple outputs
@@ -882,14 +882,14 @@ term (a, b);              // Multiple outputs
 
 ### Escape
 
-```brief
+```briv
 escape;                   // Early exit
 escape error_code;        // Exit with value
 ```
 
 ### Expression Statement
 
-```brief
+```briv
 process_data();
 update_state();
 ```
@@ -898,7 +898,7 @@ update_state();
 
 Low-level inline assembly for architecture-specific operations. Generates native code via `asm!` (Rust) or `__asm__ __volatile__` (C).
 
-```brief
+```briv
 asm "DC CIVAC X0, X1" { "x0", "x1" };
 asm "DSB SY" {};
 asm "mov x0, #0" {};
@@ -912,7 +912,7 @@ asm "mov x0, #0" {};
 - Generates `__asm__ __volatile__("instruction" : : : clobbers)` in C
 
 **Usage:**
-```brief
+```briv
 txn flush_cache {
     effect {
         // Flush data cache before DMA transfer
@@ -937,7 +937,7 @@ txn flush_cache {
 
 ## Test Cases Reference
 
-### Core Brief (.bv)
+### Core Briv (.bv)
 
 | File | Feature | Status |
 |------|---------|--------|
@@ -952,7 +952,7 @@ txn flush_cache {
 | `core/09_sig_type.bv` | Foreign signatures | ✅ Pass |
 | `core/10_imports.bv` | Import statements | ✅ Pass |
 
-### Embedded Brief (.bv - extended)
+### Embedded Briv (.bv - extended)
 
 | File | Feature | Status |
 |------|---------|--------|
@@ -969,9 +969,9 @@ txn flush_cache {
 
 | Extension | Name | Description |
 |-----------|------|-------------|
-| `.bv` | Core Brief | Transactional state machines with FFI |
-| `.ebv` | Embedded Brief | Adds vectors, bit-ranges, triggers, hardware mapping |
-| `.rbv` | Rendered Brief | Adds UI/view components with reactive bindings |
+| `.bv` | Core Briv | Transactional state machines with FFI |
+| `.ebv` | Embedded Briv | Adds vectors, bit-ranges, triggers, hardware mapping |
+| `.rbv` | Rendered Briv | Adds UI/view components with reactive bindings |
 
 ---
 
@@ -981,36 +981,36 @@ The file extension selects the backend:
 
 | Extension | Variant | Backend | Output |
 |-----------|---------|---------|--------|
-| `.bv` | Brief | LLVM | Native binary (`llc` + `ld`) |
-| `.ebv` | Embedded Brief | LLVM | Microcontroller binary |
-| `.abv` | Accelerated Brief | LLVM | SPIR-V GPU kernel |
-| `.rbv` | Rendered Brief | Webstack | WASM + JS shim + view bindings |
-| `.cbv` | Circuit Brief | CIRCT | Verilog/VHDL (via MLIR) |
-| `.dbv` / `.dbvs` / `.dbvl` | Data Brief | (parsed by Brief) | Configuration data |
+| `.bv` | Briv | LLVM | Native binary (`llc` + `ld`) |
+| `.ebv` | Embedded Briv | LLVM | Microcontroller binary |
+| `.abv` | Accelerated Briv | LLVM | SPIR-V GPU kernel |
+| `.rbv` | Rendered Briv | Webstack | WASM + JS shim + view bindings |
+| `.cbv` | Circuit Briv | CIRCT | Verilog/VHDL (via MLIR) |
+| `.dbv` / `.dbvs` / `.dbvl` | Data Briv | (parsed by Briv) | Configuration data |
 
 ### LLVM Native (`.bv`)
 ```bash
-brief-compiler build input.bv                # full compile chain
-brief-compiler build --llvm input.bv          # emit LLVM IR only
-brief-compiler check input.bv                # type-check only
+briv-compiler build input.bv                # full compile chain
+briv-compiler build --llvm input.bv          # emit LLVM IR only
+briv-compiler check input.bv                # type-check only
 ```
 
 ### Web Frontend (`.rbv`)
 ```bash
-brief-compiler build input.rbv --backend webstack   # WASM + JS shim
+briv-compiler build input.rbv --backend webstack   # WASM + JS shim
 ```
 
 ### Hardware (`.cbv`)
 ```bash
-brief-compiler build input.cbv               # CIRCT MLIR → Verilog/VHDL
+briv-compiler build input.cbv               # CIRCT MLIR → Verilog/VHDL
 ```
 
 ### GPU (`.abv`)
 ```bash
-brief-compiler build input.abv               # SPIR-V kernel
+briv-compiler build input.abv               # SPIR-V kernel
 ```
 
 ### Strict Mode (`.sbv`, `.srbv`, `.sebv`)
 ```bash
-brief-compiler build --strict input.sbv      # full contracts required
+briv-compiler build --strict input.sbv      # full contracts required
 ```

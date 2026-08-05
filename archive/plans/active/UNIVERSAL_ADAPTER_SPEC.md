@@ -1,16 +1,16 @@
-# Brief Compiler: Universal Transpilation Adapter
+# Briv Compiler: Universal Transpilation Adapter
 
 **Date:** 2026-05-01  
 **Status:** Phase 2 Complete (CBackend refactored)
 
 ## Executive Summary
 
-This document defines the **Target Spec TOML** system for the Brief compiler. The goal is to transform Brief from a multi-flag compiler into a universal transpilation adapter where framework-specific conventions are defined in declarative TOML files rather than hardcoded Rust logic.
+This document defines the **Target Spec TOML** system for the Briv compiler. The goal is to transform Briv from a multi-flag compiler into a universal transpilation adapter where framework-specific conventions are defined in declarative TOML files rather than hardcoded Rust logic.
 
 **Key insight:** The Metropolitan FFI profiles (`lib/ffi/profiles/`) already define 90% of the architecture. We extend them with a `[codegen]` block to create unified Target Spec files that drive both FFI call generation and code generation.
 
 **Separation of concerns:**
-- **Language Backend** (`c. rs`, `typescript. rs`) → Only generates syntax (translates Brief AST → target language)
+- **Language Backend** (`c. rs`, `typescript. rs`) → Only generates syntax (translates Briv AST → target language)
 - **Target Spec TOML** → Defines framework wrapping (headers, entry points, memory allocation, type mappings, templates)
 - **Metropolitan FFI** → Defines memory layouts and type representations (used by both FFI and codegen)
 
@@ -22,8 +22,8 @@ This document defines the **Target Spec TOML** system for the Brief compiler. Th
 
 The compiler currently uses CLI flags to select targets:
 ```bash
-brief compile --target linux_ kernel file. bv   # C backend + kernel headers
-brief compile --target bare_ metal file. ebv  # C backend + ARM start
+briv compile --target linux_ kernel file. bv   # C backend + kernel headers
+briv compile --target bare_ metal file. ebv  # C backend + ARM start
 ```
 
 In `src/backend/c. rs`: hardcoded boolean flags drive 200+ lines of if/else branching.
@@ -32,7 +32,7 @@ In `src/backend/c. rs`: hardcoded boolean flags drive 200+ lines of if/else bran
 
 With Target Spec TOML:
 ```bash
-brief compile --target lib/ffi/profiles/ linux_ kernel. toml file. bv
+briv compile --target lib/ffi/profiles/ linux_ kernel. toml file. bv
 ```
 
 CBackend becomes:
@@ -46,7 +46,7 @@ pub struct CBackend {
 
 ```
 CLI Layer
-  brief compile --target <spec. toml>
+  briv compile --target <spec. toml>
          | loads
          v
 Target Spec TOML
@@ -418,7 +418,7 @@ reactive = "useEffect"
 [codegen.templates]
 header = """
 import React, { useState, useCallback, useEffect } from 'react';
-export const BriefApp: React.FC = () => {
+export const BrivApp: React.FC = () => {
 """
 
 footer = """};
@@ -561,7 +561,7 @@ reactive = "useEffect"
 header = """
 import React, { useState, useCallback, useEffect } from 'react';
 
-export const BriefApp: React.FC = () => {
+export const BrivApp: React.FC = () => {
 """
 
 footer = """};
@@ -657,7 +657,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
-class BriefState:
+class BrivState:
 """
 
 [codegen.validation]
@@ -693,8 +693,8 @@ header = """
 import SwiftUI
 import Combine
 
-class BriefViewModel: ObservableObject {
-    @Published var state: BriefState
+class BrivViewModel: ObservableObject {
+    @Published var state: BrivState
 """
 
 [codegen.validation]
@@ -715,12 +715,12 @@ Override: `#[mobile.main_thread] txn ui_update [...] {...}` → Dispatched to ma
 
 ## 8.5 Attribute (`#[]`) Logic: The Diplomatic Layer
 
-Attributes provide target-specific overrides without polluting the core Brief language.
+Attributes provide target-specific overrides without polluting the core Briv language.
 **A well-defined TOML can often bypass the need for most, if not all, attribute declarations.**
 Attributes are "pointers" — they help the compiler navigate edge cases where the happy path needs adjustment.
 
 ### 8.5.1 For React:
-```brief
+```briv
 #[react.hook(useMemo)]
 let derived_view = ...
 
@@ -729,13 +729,13 @@ trg user_clicked: Bool;
 ```
 
 ### 8.5.2 For eBPF:
-```brief
+```briv
 #[ebpf.map(type: "hash", max_entries: 1024)]
 let packet_counts: Vector<UInt, 1024>;
 ```
 
 ### 8.5.3 For CUDA:
-```brief
+```briv
 #[cuda.shared]
 let cache: Vector<Int, 64>;
 
@@ -744,7 +744,7 @@ node compute [true][...] { ... }
 ```
 
 ### 8.5.4 For WebGPU:
-```brief
+```briv
 #[wgsl.uniform]
 let uniforms: Vector<Float, 16>;
 
@@ -753,7 +753,7 @@ node cast_rays [player_moving][...] { ... }
 ```
 
 ### 8.5.5 For Python:
-```brief
+```briv
 #[python.jit]
 node heavy_math [true][...] { ... }
 
@@ -762,7 +762,7 @@ txn api_endpoint [true][...] { ... }
 ```
 
 ### 8.5.6 For Mobile (Swift/Kotlin):
-```brief
+```briv
 #[mobile.observable]
 let gps_location: LatLong;
 
@@ -794,7 +794,7 @@ node update_ui [state_changed][...] { ... }
 
 ### Phase 5: TypeScript Backend (for Reach)
 - Create `src/backend/typescript. rs`
-- Generate TypeScript from Brief AST using spec
+- Generate TypeScript from Briv AST using spec
 
 ### Phase 6: Additional Profiles
 - `linux_kernel.toml`
@@ -808,7 +808,7 @@ node update_ui [state_changed][...] { ... }
 
 ### Phase 8: WebGPU/WGSL Backend
 - Create `src/backend/wgsl.rs`
-- Map Brief state to WGSL address spaces (`var<storage>`, `var<uniform>`)
+- Map Briv state to WGSL address spaces (`var<storage>`, `var<uniform>`)
 - Generate compute shaders with `@workgroup_size`
 
 ### Phase 9: TypeScript + React Backend
@@ -840,7 +840,7 @@ node update_ui [state_changed][...] { ... }
 | C backend uses TargetSpec | All boolean flags removed, spec-driven generation |
 | Float emits E3001 for kernel | cargo test --lib passes; kernel spec blocks Float |
 | Reach codegen works | reach.toml + TypeScript backend generates valid Reach code |
-| CLI loads specs | brief compile --target linux_kernel.toml file.bv succeeds |
+| CLI loads specs | briv compile --target linux_kernel.toml file.bv succeeds |
 | Spec loader searches paths | Both lib/ and hardware_lib/ paths resolve |
 | Multiple targets | Linux kernel, KV260, WASM, COBOL all work |
 | CUDA backend works | `cuda.toml` + generates valid `.cu` kernels |

@@ -5,10 +5,10 @@
 
 ## Core Philosophy
 
-> Everything compiles to binary in the end. Brief tries to figure out the best way how,
+> Everything compiles to binary in the end. Briv tries to figure out the best way how,
 > and treats every language equal to itself.
 
-Brief is a **Cosmopolitan language**. Its role is not to reinvent forty years of systems
+Briv is a **Cosmopolitan language**. Its role is not to reinvent forty years of systems
 libraries. Its role is to be the **orchestrator** — taking any language that produces
 LLVM bitcode, linking it into a unified module, optimizing across all language boundaries,
 and emitting for the target. The bitcode doesn't remember what language it came from.
@@ -29,7 +29,7 @@ The language the import came from is irrelevant.
 - **Interpreter dispatch through FFI registry**: One hashmap lookup
   (`ffi_name_to_location` → `foreign_functions`). Faster than 20+ string comparisons
   in the old `dispatch_method_by_type`.
-- **Webstack decomposes, doesn't transform**: Brief logic → WASM. HTML/CSS/SVG → as-is.
+- **Webstack decomposes, doesn't transform**: Briv logic → WASM. HTML/CSS/SVG → as-is.
   JS/TS → emitted as native browser source. Nothing is forced into WASM that the browser
   can run natively.
 - **Zero performance loss**: LTO inlines across all language boundaries. The dispatch path
@@ -50,7 +50,7 @@ Anything the browser already has a native parser, renderer, or runtime for stays
 | **HTML Templates / `<template>`** | Emitted as-is | Native DOM cloning |
 | **ES Modules / Import Maps** | `import './pkg/app.js'` — standard JS module system | Native browser behavior, already used by webstack glue |
 
-**The rule**: Only compile to WASM what the browser cannot run natively. This keeps the WASM binary small — containing only the Brief state machine and its C/Rust FFI dependencies.
+**The rule**: Only compile to WASM what the browser cannot run natively. This keeps the WASM binary small — containing only the Briv state machine and its C/Rust FFI dependencies.
 
 ### FFI Target Classification per Backend
 
@@ -76,20 +76,20 @@ llc output is wasm32. Everything that produces LLVM bitcode targets both.
 
 ## Phase 0: Infrastructure — Eliminate Runtime Special Treatment
 
-**Goal**: `brief_rt.c` is a regular file, not an embedded constant. `LinkDependency` is generic. The LTO pipeline handles N modules.
+**Goal**: `briv_rt.c` is a regular file, not an embedded constant. `LinkDependency` is generic. The LTO pipeline handles N modules.
 
-### 0.1 — Move `brief_rt.c` from embedded constant to filesystem file
+### 0.1 — Move `briv_rt.c` from embedded constant to filesystem file
 
 **Files**: `src/main.rs:389`, `src/main.rs:2212-2219`, `src/main.rs:1864-1978`
 
 | Current | Problem | Fix |
 |---------|---------|-----|
-| `include_str!("../runtime/brief_rt.c")` | Embedded in compiler binary | Move to `lib/runtime/brief_rt.c`, delete the `include_str!` constant |
-| `is_bundled_rt` flag in parser (line 800) | Hardcoded name match on `"brief_rt.o"` | Delete the field entirely |
-| Always written to disk (line 2218-2219) | Even when program has no link deps | Only write when `import "link/brief_rt.c"` is present |
+| `include_str!("../runtime/briv_rt.c")` | Embedded in compiler binary | Move to `lib/runtime/briv_rt.c`, delete the `include_str!` constant |
+| `is_bundled_rt` flag in parser (line 800) | Hardcoded name match on `"briv_rt.o"` | Delete the field entirely |
+| Always written to disk (line 2218-2219) | Even when program has no link deps | Only write when `import "link/briv_rt.c"` is present |
 | Single-file `try_lto_pipeline(rt_c_path)` | Only handles exactly one C file | Replace with generic `link_and_optimize(&[LinkModule])` |
 
-**After**: `import "link/brief_rt.c"` resolves through the exact same code path as `import "link/xxhash/xxhash.c"`. Zero special treatment.
+**After**: `import "link/briv_rt.c"` resolves through the exact same code path as `import "link/xxhash/xxhash.c"`. Zero special treatment.
 
 ### 0.2 — `LinkLanguage` enum in AST
 
@@ -235,7 +235,7 @@ Every operation currently in `dispatch_method_by_type` gets a `"__builtin.*"` lo
 
 New `.bv` files that declare `frgn` for each built-in. No `from` clause — they resolve through `fn_locations_by_name`.
 
-```brief
+```briv
 // lib/std/__builtin/hashmap.bv
 frgn __builtin_HashMap_insert<K,V>(map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>;
 frgn __builtin_HashMap_get<K,V>(map: HashMap<K,V>, key: K) -> Option<V>;
@@ -248,7 +248,7 @@ frgn __builtin_HashMap_values<K,V>(map: HashMap<K,V>) -> List<V>;
 frgn __builtin_HashMap_new<K,V>() -> HashMap<K,V>;
 ```
 
-```brief
+```briv
 // lib/std/__builtin/stack.bv
 frgn __builtin_Stack_push<T>(stack: Stack<T>, item: T) -> Stack<T>;
 frgn __builtin_Stack_pop<T>(stack: Stack<T>) -> Option<(T, Stack<T>)>;
@@ -259,7 +259,7 @@ frgn __builtin_Stack_clear<T>(stack: Stack<T>) -> Stack<T>;
 frgn __builtin_Stack_new<T>() -> Stack<T>;
 ```
 
-```brief
+```briv
 // lib/std/__builtin/result.bv
 frgn __builtin_Result_is_ok<T,E>(r: Result<T,E>) -> Bool;
 frgn __builtin_Result_is_err<T,E>(r: Result<T,E>) -> Bool;
@@ -269,7 +269,7 @@ frgn __builtin_Result_Ok<T,E>(value: T) -> Result<T,E>;
 frgn __builtin_Result_Err<T,E>(error: E) -> Result<T,E>;
 ```
 
-```brief
+```briv
 // lib/std/__builtin/option.bv
 frgn __builtin_Option_Some<T>(value: T) -> Option<T>;
 frgn __builtin_Option_None<T>() -> Option<T>;
@@ -281,7 +281,7 @@ frgn __builtin_Option_None<T>() -> Option<T>;
 
 Each stdlib module imports its `__builtin` declarations and wraps them in proper `defn` definitions.
 
-```brief
+```briv
 // lib/std/hashmap.bv
 import { __builtin_HashMap_new, __builtin_HashMap_insert, __builtin_HashMap_get,
          __builtin_HashMap_contains_key, __builtin_HashMap_remove,
@@ -304,7 +304,7 @@ defn get<K,V>(map: HashMap<K,V>, key: K) -> Option<V> [true][true] {
 // ... etc.
 ```
 
-```brief
+```briv
 // lib/std/result.bv
 import { __builtin_Result_Ok, __builtin_Result_Err,
          __builtin_Result_is_ok, __builtin_Result_is_err,
@@ -378,7 +378,7 @@ Strictly faster.
 **File**: `src/import_resolver.rs`
 
 Paths starting with `link/` resolve in this order:
-1. `lib/runtime/<rest>` (for `link/brief_rt.c` → `lib/runtime/brief_rt.c`)
+1. `lib/runtime/<rest>` (for `link/briv_rt.c` → `lib/runtime/briv_rt.c`)
 2. `lib/std/c/<rest>` (for `link/xxhash/xxhash.c` → `lib/std/c/xxhash/xxhash.c`)
 3. Project root `<rest>` (for `link/mylib.c` → `./mylib.c`)
 4. Absolute paths as-is
@@ -389,7 +389,7 @@ The `link/` prefix is a convention, not a filesystem requirement. The resolver s
 
 **File**: `src/main.rs:2129-2331`
 
-The driver already collects `LinkDependency` items (line 2129). Replace the hardcoded single-file brief_rt pipeline:
+The driver already collects `LinkDependency` items (line 2129). Replace the hardcoded single-file briv_rt pipeline:
 
 ```rust
 let link_modules: Vec<LinkModule> = link_deps.iter()
@@ -425,7 +425,7 @@ Each library follows the same pattern:
 
 1. Vendor C/Rust source to `lib/std/c/<name>/`
 2. Create `lib/std/<name>.bv` with `import "link/std/c/<name>/..."` + `frgn` declarations
-3. Wrap with Brief `sig` and `defn` as needed
+3. Wrap with Briv `sig` and `defn` as needed
 4. Run `frgn` declarations through the standard FFI dispatch (no special treatment)
 
 ### Priority order
@@ -454,8 +454,8 @@ The `#define IMPLEMENTATION` pattern (stb, miniaudio, sokol) gets a wrapper `.c`
 #include "stb_image.h"
 ```
 
-The Brief source imports the wrapper:
-```brief
+The Briv source imports the wrapper:
+```briv
 import "link/std/c/stb_image/stb_image.c";
 frgn stbi_load(filename: Ptr<Byte>, x: Ptr<Int>, y: Ptr<Int>, comp: Ptr<Int>, req_comp: Int) -> Ptr<Byte>;
 ```
@@ -470,7 +470,7 @@ frgn stbi_load(filename: Ptr<Byte>, x: Ptr<Int>, y: Ptr<Int>, comp: Ptr<Int>, re
 
 | Component | Fate | Implementation |
 |---|---|---|
-| **Brief logic** (reactive state machine, transactions, contracts) | → WASM via LLVM `-march=wasm32` | Existing `WebstackGenerator::generate_rust_code()` → wasm-bindgen → wasm-pack, OR direct LLVM→wasm32 path |
+| **Briv logic** (reactive state machine, transactions, contracts) | → WASM via LLVM `-march=wasm32` | Existing `WebstackGenerator::generate_rust_code()` → wasm-bindgen → wasm-pack, OR direct LLVM→wasm32 path |
 | **HTML** (from `<view>` tag) | → Emitted as `.html` unchanged | Existing behavior, already works |
 | **CSS** (from `<style>` tag or imports) | → Emitted as `.css` file or inline `<style>` | Existing behavior, already works |
 | **SVG** (from `TopLevel::SvgComponent`) | → Embedded in HTML/SVG DOM | Already supported in `.rbv` pipeline |
@@ -506,14 +506,14 @@ When `.rbv` declares `frgn formatDate(d: String) -> String from "ts"`:
 
 ### 4.4 — Source maps and debugging
 
-Generated JS glue preserves line-number mappings back to the original `.rbv` source where possible, so developers can debug their Brief→WASM logic and their JS/TS FFI targets in browser DevTools.
+Generated JS glue preserves line-number mappings back to the original `.rbv` source where possible, so developers can debug their Briv→WASM logic and their JS/TS FFI targets in browser DevTools.
 
 ---
 
 ## Phase 5: Language-Capability Matrix (All Languages, All Targets)
 
 **Philosophy**: "Everything compiles to binary in the end." The question is which
-toolchain produces that binary from a given source language. Brief delegates to the
+toolchain produces that binary from a given source language. Briv delegates to the
 appropriate compiler and treats the resulting bitcode as its own. The bitcode doesn't
 remember what language it came from — it targets whatever `llc` backend is selected.
 
@@ -555,7 +555,7 @@ import "link/MyClass.java"
 
 **Caveat**: Java AOT via GraalVM Native Image carries the SubstrateVM runtime (GC, thread
 model, metadata). This is acceptable for the cosmopolitan tier (`.bv`, general purpose).
-Embedded Brief (`.ebv`) rejects GC-dependent bitcode at compile time via the hardware
+Embedded Briv (`.ebv`) rejects GC-dependent bitcode at compile time via the hardware
 validator.
 
 ### 5.4 — The AssemblyScript path (TypeScript → bitcode)
@@ -598,7 +598,7 @@ These are currently hardcoded Rust match arms that create `Value::Enum` on name 
 
 Declared in `lib/std/__builtin/result.bv` and `lib/std/__builtin/option.bv`, re-exported through `lib/std/result.bv` and `lib/std/option.bv`.
 
-**After**: `Ok(value)` in Brief source resolves to `defn Ok` in `std/result.bv` → calls `__builtin_Result_Ok` → FFI registry → `Enum("Result", "Ok", ...)`. Zero name magic.
+**After**: `Ok(value)` in Briv source resolves to `defn Ok` in `std/result.bv` → calls `__builtin_Result_Ok` → FFI registry → `Enum("Result", "Ok", ...)`. Zero name magic.
 
 ### 6.2 — Remove hardcoded LLVM `emit_declares()`
 
@@ -606,7 +606,7 @@ Declared in `lib/std/__builtin/result.bv` and `lib/std/__builtin/option.bv`, re-
 
 The backend has hardcoded LLVM `declare` statements for `__rt_init`, `__rt_poll`, `__rt_wait`. These should come from `std/rt.bv` through the generic `frgn` declaration emission (lines 727-751, which already works for any `frgn` in the program).
 
-Delete the hardcoded block at lines 1840-1864. The functions are already declared in `lib/std/brief_rt.bv` or should be moved there.
+Delete the hardcoded block at lines 1840-1864. The functions are already declared in `lib/std/briv_rt.bv` or should be moved there.
 
 ### 6.3 — Remove `from "libruntime"` parser discard
 
@@ -624,7 +624,7 @@ Search for `"libruntime"` string handling. The parser currently discards `from "
 | `src/parser.rs:793-805` | 0.2 | Dispatch on extension → set `LinkLanguage` variant |
 | `src/parser.rs` | 6.3 | Remove `"libruntime"` discard |
 | `src/import_resolver.rs` | 0.2, 2.1 | Preserve `LinkLanguage` through resolution; resolve `link/` paths to stdlib or project |
-| `src/main.rs:389` | 0.1 | Delete `include_str!("../runtime/brief_rt.c")` |
+| `src/main.rs:389` | 0.1 | Delete `include_str!("../runtime/briv_rt.c")` |
 | `src/main.rs:1864-1978` | 0.3 | Replace `try_lto_pipeline()` with generic `link_and_optimize()` |
 | `src/main.rs:2129-2331` | 0.3, 2.2 | Generic link-dep collection + compilation dispatch |
 | `src/ffi/registry.rs` | 1.1 | Add `"__builtin.*"` match arms for all collection/Result/Option operations |
@@ -640,9 +640,9 @@ Search for `"libruntime"` string handling. The parser currently discards `from "
 | `lib/std/stack.bv` | 1.3 | Rewrite to use `__builtin_Stack_*` |
 | `lib/std/queue.bv` | 1.3 | Rewrite to use `__builtin_Queue_*` |
 | `lib/std/string_builder.bv` | 1.3 | Rewrite to use `__builtin_StringBuilder_*` |
-| `lib/runtime/brief_rt.c` | 0.1 | **Moved** from `runtime/brief_rt.c` |
+| `lib/runtime/briv_rt.c` | 0.1 | **Moved** from `runtime/briv_rt.c` |
 | `lib/std/c/<name>/` | 3 | **New directories** — vendored C library sources |
-| `lib/std/<name>.bv` | 3 | **New files** — Brief wrappers for each library |
+| `lib/std/<name>.bv` | 3 | **New files** — Briv wrappers for each library |
 
 ---
 
@@ -650,12 +650,12 @@ Search for `"libruntime"` string handling. The parser currently discards `from "
 
 | Phase | Gate |
 |---|---|
-| 0.1 | `cargo test --lib` passes; `brief_rt.c` no longer in binary; file exists at `lib/runtime/brief_rt.c` |
+| 0.1 | `cargo test --lib` passes; `briv_rt.c` no longer in binary; file exists at `lib/runtime/briv_rt.c` |
 | 0.2 | Parser test: `import "link/foo.c"` produces `LinkDependency{ lang: C }` |
-| 0.3 | Link trivial C file (`int add(a,b){return a+b;}`) from Brief → call `add(2,3)` → verify result is 5 |
+| 0.3 | Link trivial C file (`int add(a,b){return a+b;}`) from Briv → call `add(2,3)` → verify result is 5 |
 | 1 | All collection/stdlib tests pass with `dispatch_method_by_type` deleted |
 | 2 | `import "link/foo.c"` + `import "link/bar.rs"` both compile to bitcode and LTO together |
-| 3 | xxHash value from Brief matches C reference output |
+| 3 | xxHash value from Briv matches C reference output |
 | 4.1 | `.rbv` with inlined C library → single HTML file with embedded WASM |
 | 4.2 | `.rbv` with TS FFI target → `.ts` file emitted alongside JS glue |
 | 4.3 | WebGL shader in `.rbv` → GLSL string in generated JS, passed to WebGL API |
@@ -705,12 +705,12 @@ These sugar forms are **banned** in `.sbv`, `.srbv`, `.sebv`, and `.hebv`.
 A stricter module can be imported by a looser module. The stricter module's contracts are
 **trusted** by the caller — the caller gets the guarantee without re-verification:
 
-```brief
+```briv
 // heater_firmware.sebv — strict, verified, no OS deps
 export txn read_thermocouple(ch: Int) -> Int [ch >= 0 && ch < 8][term >= 0 && term < 4096];
 ```
 
-```brief
+```briv
 // controller.bv — cosmopolitan, calls the firmware boundary
 import { read_thermocouple } from "heater_firmware.sebv";
 // read_thermocouple guaranteed [term >= 0 && term < 4096] — caller trusts this
@@ -781,13 +781,13 @@ register MMIO_THERMOCOUPLE @ 0x40000000 {
 };
 ```
 
-```brief
+```briv
 // heater_control.hebv — pin-level
 trg thermocouple_raw: UInt[32] @ MMIO_THERMOCOUPLE;
 // compiler resolves MMIO_THERMOCOUPLE → 0x40000000 from .dbvs
 ```
 
-```brief
+```briv
 // heater_monitor.ebv — MMIO level
 trg thermocouple_raw: Int @ MMIO_THERMOCOUPLE;
 // same .dbvs, same address, different backend
@@ -841,7 +841,7 @@ redesigned to use appropriate syntax for each domain.
 
 ### 9.1 — Current problem
 
-The DBVS parser at `src/dbrief/parser.rs:294` calls `parse_register()` which requires
+The DBVS parser at `src/dbriv/parser.rs:294` calls `parse_register()` which requires
 a hex address as the first token. For FFI bindings (`std/bindings/*.dbvs`), this address:
 
 ```
@@ -850,7 +850,7 @@ register 0x1000 as "__builtin_HashMap_new" {
 };
 ```
 
-The address `0x1000` is never used — it's parsed into `DbriefRegister.address` but
+The address `0x1000` is never used — it's parsed into `DbrivRegister.address` but
 never read during FFI binding resolution (which uses `as "<name>"` → `location`
 mapping). It's cargo-culted from hardware register definitions.
 
@@ -888,7 +888,7 @@ cosmetic/syntax cleanup for when DBVS is revisited.
 
 | File | Change |
 |---|---|
-| `src/dbrief/parser.rs:294-330` | Add `bind` keyword or optional address on `register` |
+| `src/dbriv/parser.rs:294-330` | Add `bind` keyword or optional address on `register` |
 | `std/bindings/*.dbvs` | Migrate to new syntax |
 | `src/ffi/loader.rs` | Verify no breaking changes to binding loading |
 
@@ -902,7 +902,7 @@ cosmetic/syntax cleanup for when DBVS is revisited.
 
 ### Motivation
 
-Brief's computational model is one big state machine — the program is a `main()` that
+Briv's computational model is one big state machine — the program is a `main()` that
 transitions between states until it hits `term!` or exhausts all paths. For embedded,
 safety-critical, and interactive programs, **provable termination is less useful than
 provable preemptibility**. A program that cannot prove it ends on its own should still
@@ -1071,7 +1071,7 @@ parsed into `Pattern::Var` during a migration shim.
 
 #### After
 
-```brief
+```briv
 let pair: Option<(T, Stack<T>)> = __builtin_Stack_pop(stack);
 uni pair(Some((item, rest))) = {
     // item: T, rest: Stack<T>
@@ -1086,7 +1086,7 @@ statements — not just enums with flat fields.
 
 ```
                     ┌──────────────────────────────────────┐
-                    │          Brief .bv source             │
+                    │          Briv .bv source             │
                     │  frgn ...  import "link/..."          │
                     └──────┬──────┬──────┬──────────────────┘
                            │      │      │
@@ -1095,7 +1095,7 @@ statements — not just enums with flat fields.
       ┌──────────────────┐ ┌──────────────┐   ┌────────────────────┐
       │ Interpreter      │ │ LLVM native  │   │ Webstack (.rbv)    │
       │ (FFI registry    │ │ (--target    │   │                    │
-      │  dispatch, zero  │ │  native)     │   │ Brief logic → WASM │
+      │  dispatch, zero  │ │  native)     │   │ Briv logic → WASM │
       │  string matching)│ │              │   │ HTML/CSS → as-is   │
       │                  │ │ C → bitcode  │   │ SVG → DOM          │
       │                  │ │ C++ → bitc.  │   │ JS/TS → native JS  │
@@ -1198,7 +1198,7 @@ The `;` inside brackets introduces a mask/filter expression (parsed as `MultiSoc
 
 ### Design
 
-```brief
+```briv
 // Literal syntax (disambiguated from blocks at expression level)
 let map: HashMap<String, Int> = {"a": 1, "b": 2};
 let set: HashSet<Int> = {1, 2, 3};
@@ -1251,7 +1251,7 @@ Same rationale as Phase 12, extended to Stack (`Vec`), Queue (`VecDeque`), and T
 
 ### Design
 
-```brief
+```briv
 // True tuple type (not flattened to List)
 let pair: (Int, String) = (1, "hello");
 let first: Int = pair :> 0;             // projection by index

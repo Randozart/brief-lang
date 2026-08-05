@@ -45,7 +45,7 @@ The backend state is strictly stratified into three lifetimes to prevent state l
 generate(items)
   │
   ├─ build_field_index(items)        — Assign state slot indices from let declarations
-  │     Every let var → (field_index, field_type, brief_type)
+  │     Every let var → (field_index, field_type, briv_type)
   │     Synthetic fields (cycle_count, arena_ptr) appended after
   │
   ├─ declare_struct_types(&mut out)  — Emit %SmallString64, %StaticString, %String, %UTF8View
@@ -53,7 +53,7 @@ generate(items)
   │
   ├─ emit_declares(&mut out)         — Declare @llvm.* intrinsics + runtime functions
   │
-  ├─ emit_main_or_bootup(&mut out)   — Emit @main and/or __brief_init_state
+  ├─ emit_main_or_bootup(&mut out)   — Emit @main and/or __briv_init_state
   │     │
   │     ├─ emit_init_state()         — Function that writes initial values to %State
   │     │     Called from @main's entry block before the loop
@@ -130,7 +130,7 @@ Everything else — `Type::Custom(s)`, `Type::Applied(_, _)` — must go through
 
 ### 2.5 TBAA Exception (Rule 18c)
 
-The `tbaa_node` function in `mod.rs` matches LLVM IR type strings (`"i64"`, `"float"`, `"ptr"`), not Brief type names. This is permitted because it operates on LLVM's type system, not Brief's.
+The `tbaa_node` function in `mod.rs` matches LLVM IR type strings (`"i64"`, `"float"`, `"ptr"`), not Briv type names. This is permitted because it operates on LLVM's type system, not Briv's.
 
 ### 2.6 Audit Checklist
 
@@ -202,7 +202,7 @@ pub fn type_to_protocol(&self, universe: &TypeUniverse, ty: &Type) -> (String, S
 
 Every `let` declaration at the top level of a `.bv` file becomes a state field:
 
-```brief
+```briv
 let bound: Int = GetEnvInt!("BOUND");    // state field at index 0
 let count: Int = 0;                       // state field at index 1
 let bx0: Float32 = 0.0f32;               // state field at index 2
@@ -214,7 +214,7 @@ The `build_field_index` function in `mod.rs` assigns indices based on declaratio
 |-----------|------|-------------|
 | `field_index_map` | `HashMap<String, usize>` | Field name → state slot index |
 | `field_types` | `Vec<String>` | LLVM type per slot (e.g., `"i64"`, `"float"`, `"double"`) |
-| `field_brief_types` | `Vec<Type>` | Brief type per slot |
+| `field_briv_types` | `Vec<Type>` | Briv type per slot |
 | `idx_to_field_name` | `HashMap<usize, String>` | Reverse: index → field name |
 
 ### 4.2 Field Type Storage
@@ -227,7 +227,7 @@ Exception: Float fields (`Cast.#Float` types) are sometimes stored as their nati
 
 ```rust
 // Load from state (with !range metadata if available):
-let (reg_name, brief_type) = self.emit_state_load_i64_by_idx(out, "  ", field_idx);
+let (reg_name, briv_type) = self.emit_state_load_i64_by_idx(out, "  ", field_idx);
 
 // Store to state:
 self.emit_state_store_i64_by_idx(out, "  ", field_idx, &value_reg);
@@ -311,7 +311,7 @@ Key data structures:
 
 ### 5.3 Composite-Node Decomposition (Version-DAG)
 
-A reactive transaction whose body contains `when` guards is a **latent multi-node reactor**: each side-effecting guard is a second node trapped inside the first node's body. Brief's reactor design (concurrent firing, the XOR write rule) treats these as separate nodes that should be decomposed.
+A reactive transaction whose body contains `when` guards is a **latent multi-node reactor**: each side-effecting guard is a second node trapped inside the first node's body. Briv's reactor design (concurrent firing, the XOR write rule) treats these as separate nodes that should be decomposed.
 
 The decomposition is a **frontend analysis** (`analysis/match_normalize.rs`,
 `analysis/node_decompose.rs`, `analysis/loop_carried.rs`) that emits via
@@ -517,7 +517,7 @@ present/end blocks must restore the header phis.
 | Change the field name prefix detection | **Fields not grouped** — renamed fields (e.g., `body0_x`) produce wrong prefixes. |
 | Sort `non_float_indices` differently | **Non-deterministic output** — non-field items move around, changing the IR structure. |
 
-### 9.4 Brief-Level LICM (analysis/licm.rs)
+### 9.4 Briv-Level LICM (analysis/licm.rs)
 
 **What it runs:** Before the dispatch, identites loop-invariant let-bindings and prepends them to the body.
 
@@ -574,11 +574,11 @@ Phase 1b; the EMISSION remains dormant for the reasons below.
 
 ### 9.7 `push_field_type` i64 Override
 
-**What it does:** Forces all state field LLVM types to `"i64"` regardless of their Brief type.
+**What it does:** Forces all state field LLVM types to `"i64"` regardless of their Briv type.
 
 **Dependencies:**
 - `field_types` — used by `emit_state_load_i64_by_idx` / `emit_state_store_i64_by_idx` for GEP+load/store
-- `field_brief_types` — used by `llvm_type()` / `protocol_llvm_type()` for protocol-based type resolution
+- `field_briv_types` — used by `llvm_type()` / `protocol_llvm_type()` for protocol-based type resolution
 
 **What breaks if changed carelessly:**
 
@@ -646,7 +646,7 @@ These are resolved by `resolve_llvm_type()` in the casting graph. Never hardcode
 ## 10. Adding a New Protocol Type
 
 1. Define the type in stdlib `.bv` with protocol membership:
-   ```brief
+   ```briv
    type MyType: #String { !> bytes: 16; op CastTo(#Int): my_parse(#L); };
    ```
 2. If a new protocol category is needed, add a lane in `graph.rs::new()`:

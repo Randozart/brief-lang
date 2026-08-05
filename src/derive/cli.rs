@@ -1,5 +1,5 @@
 // ── Derivation CLI Handlers ────────────────────────────────────────────
-// 2026-07-12: Phase 6.3 — `brief derive` CLI command.
+// 2026-07-12: Phase 6.3 — `briv derive` CLI command.
 // 2026-07-28: Phase I.0 — Added DeriveConfig, flag parsing, MCMC + doppelganger output.
 // Flat code: max 2 levels of nesting.
 
@@ -9,7 +9,7 @@ use crate::derive::{synthesize, SynthesizeError};
 use std::fs;
 use std::path::Path;
 
-/// Configuration for `brief derive` command.
+/// Configuration for `briv derive` command.
 /// 2026-07-28: Phase I.0 — Flags parsed from CLI args.
 #[derive(Debug, Clone)]
 pub struct DeriveConfig {
@@ -87,8 +87,8 @@ pub fn parse_derive_flags(args: &[String]) -> Result<(DeriveConfig, Vec<String>)
     Ok((config, positional))
 }
 
-/// Handle the `brief derive` command.
-/// Reads a Brief source file, finds derivation blocks, synthesizes bodies,
+/// Handle the `briv derive` command.
+/// Reads a Briv source file, finds derivation blocks, synthesizes bodies,
 /// optionally runs MCMC superoptimization, writes doppelganger output.
 pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(), String> {
     let path = Path::new(file_path);
@@ -341,7 +341,7 @@ pub fn handle_derive_command(config: &DeriveConfig, file_path: &str) -> Result<(
     Ok(())
 }
 
-/// Lex a Brief source into (Token, byte_range) pairs using logos.
+/// Lex a Briv source into (Token, byte_range) pairs using logos.
 /// 2026-07-28: Preserves byte spans so derivation block positions are correct.
 fn lex_source_with_spans(source: &str) -> Result<Vec<(crate::lexer::Token, std::ops::Range<usize>)>, String> {
     use logos::Logos;

@@ -1,9 +1,9 @@
-// DBrief v2 — Data Brief parser (.dbv / .dbvl)
+// DBriv v2 — Data Briv parser (.dbv / .dbvl)
 //
 // 2026-07-26: New syntax — ; separator, > directives, bare tokens default.
-// See docs/architecture/data-brief.md for the full spec.
+// See docs/architecture/data-briv.md for the full spec.
 //
-// Produces clean document types (not native Brief values).
+// Produces clean document types (not native Briv values).
 // Conversion to native Value happens at import time.
 
 use std::collections::HashMap;
@@ -13,10 +13,10 @@ use serde::Serialize;
 // Types
 // ============================================================================
 
-/// Parsed DBrief document — can represent .dbv or .dbvl content.
+/// Parsed DBriv document — can represent .dbv or .dbvl content.
 /// .dbvs is removed — schema lives inline in .dbv or is imported.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct DbriefDocument {
+pub struct DbrivDocument {
     pub imports: Vec<String>,
     pub schemas: Vec<SchemaDef>,
     pub data_groups: Vec<DataGroup>,
@@ -99,20 +99,20 @@ pub enum DataValue {
 // ============================================================================
 
 /// Parse a .dbv or .dbvl document (new syntax, bare tokens default).
-pub fn parse_document(input: &str) -> Result<DbriefDocument, String> {
+pub fn parse_document(input: &str) -> Result<DbrivDocument, String> {
     let mut parser = Parser::new(input.to_string());
     parser.parse()
 }
 
 /// Parse with --quoted flag enabled (allows "..." for data with ; or }).
-pub fn parse_document_quoted(input: &str) -> Result<DbriefDocument, String> {
+pub fn parse_document_quoted(input: &str) -> Result<DbrivDocument, String> {
     let mut parser = Parser::new(input.to_string());
     parser.quoted = true;
     parser.parse()
 }
 
 /// Parse with byte offset tracking for lazy loading.
-pub fn parse_document_track_offsets(input: &str) -> Result<DbriefDocument, String> {
+pub fn parse_document_track_offsets(input: &str) -> Result<DbrivDocument, String> {
     let mut parser = Parser::new(input.to_string());
     parser.track_offsets = true;
     parser.parse()
@@ -144,8 +144,8 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self) -> Result<DbriefDocument, String> {
-        let mut doc = DbriefDocument {
+    fn parse(&mut self) -> Result<DbrivDocument, String> {
+        let mut doc = DbrivDocument {
             imports: Vec::new(),
             schemas: Vec::new(),
             data_groups: Vec::new(),
@@ -303,7 +303,7 @@ impl Parser {
     // ========================================================================
 
     /// Parse `>schema <Name> from <path>` (directive form, not definition).
-    fn parse_directive_schema(&mut self, doc: &mut DbriefDocument) -> Result<(), String> {
+    fn parse_directive_schema(&mut self, doc: &mut DbrivDocument) -> Result<(), String> {
         self.consume_keyword_ignore_case("schema")?;
         self.skip_ws();
         let name = self.parse_bare_ident();
@@ -377,7 +377,7 @@ impl Parser {
     // ========================================================================
 
     /// Parse a schema definition: `schema Name (key) { field: Type; field: Type; }`
-    fn parse_schema(&mut self, doc: &mut DbriefDocument) -> Result<(), String> {
+    fn parse_schema(&mut self, doc: &mut DbrivDocument) -> Result<(), String> {
         self.consume_keyword_ignore_case("schema")?;
         self.skip_ws();
         let name = self.parse_identifier()?;
@@ -933,7 +933,7 @@ impl Parser {
         // Named fields have `ident:` pattern; positional fields are bare tokens.
         // This fixes the bug where `{ > 0; rw; }` inside a sub-record was treated
         // as named fields and errored on `>`. Sub-records are always positional.
-        // See docs/architecture/data-brief.md §6.4.
+        // See docs/architecture/data-briv.md §6.4.
         if self.peek_char() == Some('{') {
             self.advance();
             let save = self.pos;
@@ -2075,7 +2075,7 @@ as Item {
     // ---- Board hardware map format tests (2026-08-03) ----
     //
     // Golden proof of the board-owned hardware map grammar (see
-    // docs/plans/2026-08-03-data-brief-config-and-board-hardware-map.md §5.1).
+    // docs/plans/2026-08-03-data-briv-config-and-board-hardware-map.md §5.1).
     // Verified by probing the parser: nested { } register blocks do NOT parse;
     // flat .dbvl line-tables and flat .dbv keyed entries DO. Hex literals parse
     // as String, not Int.

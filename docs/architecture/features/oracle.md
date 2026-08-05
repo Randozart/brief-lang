@@ -6,7 +6,7 @@
 A third watchdog form (alongside `?[...]` optional and `?![...]` required) that proves termination using the full strategy palette. If no static strategy succeeds, injects a runtime fuel counter with state rollback and a user-supplied handler.
 
 ## Syntax
-```brief
+```briv
 ?#[handler] {
     // body to prove terminating
 };

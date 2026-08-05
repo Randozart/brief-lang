@@ -36,7 +36,7 @@ enforcing what they can execute.
 
 ### Syntax
 
-```brief
+```briv
 // 1. Force stack allocation (frontend verifies no-escape)
 let buffer: List<Int>;
 buffer <~ alloc("Stack");

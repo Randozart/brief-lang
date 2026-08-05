@@ -4,7 +4,7 @@
 **Status:** Active implementation plan
 **Branch:** `feat/frontend-driven-dispatch`
 **Baseline commit:** `666fb502` (== `c2fe4402` compiler code; `c2fe4402` is doc-only)
-**Baseline worktree:** `../brief-compiler-baseline` (detached HEAD at `666fb502`)
+**Baseline worktree:** `../briv-compiler-baseline` (detached HEAD at `666fb502`)
 **Comparable with:** `bash benchmarks/compare_baseline.sh`
 
 ---
@@ -195,7 +195,7 @@ Appendix E:
 | Pure counter fold | `counter.rs::emit_folded_pure_counter` | Pure body + constant bound → O(1) store |
 | Transition-graph dispatch | `analysis/transition_graph.rs` | bounded_pre + increments; "decision driven by the transition graph, not runtime profiling" (mod.rs:2660-2661) |
 | Unconditional conflict detection | `74ec03a2` Phase 1 | writing is a XOR condition; deny on race |
-| Brief-level LICM | `analysis/licm.rs` | hoists loop-invariant let-bindings before codegen |
+| Briv-level LICM | `analysis/licm.rs` | hoists loop-invariant let-bindings before codegen |
 | SoA reorder | `analysis/soa_reorder.rs` | proves field independence, then assigns consecutive indices |
 | Float constant emission | `3371f985` | direct `bitcast i32 <hex> to float` |
 
@@ -332,9 +332,9 @@ config; **LLVM** = LLVM-semantics constraint; **N/A** = correctness.
 | C4 | `emit_stmt.rs:11`, `emit_expr.rs:1017, 386` | `MAX_FIELDS_PER_ALLLOCA=15`, SSO `<= 6` bytes, SVO `<= 3` | CFG (+SSO derivable from alignment/tag bits) |
 | C5 | `emit_toplevel.rs:1347-1356` | `type_driven_range` byte→range mapping | CFG |
 
-### 5.4 Rule 18 violations — hardcoded Brief type-name matching (Tier D)
+### 5.4 Rule 18 violations — hardcoded Briv type-name matching (Tier D)
 
-AGENTS.md Rule 18: never match Brief type names in Rust. Verified sites:
+AGENTS.md Rule 18: never match Briv type names in Rust. Verified sites:
 
 | # | Site | Names matched |
 |---|------|---------------|
@@ -646,7 +646,7 @@ Replace each D1–D11 site with casting-graph/universe resolution:
 1. `cargo test --lib` — all tests pass (Golden Rule 8).
 2. `cargo build` — no warnings.
 3. Praetor on new/changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6).
-4. For dispatch-changing phases: benchmark A/B vs `../brief-compiler-baseline`
+4. For dispatch-changing phases: benchmark A/B vs `../briv-compiler-baseline`
    with `bash benchmarks/compare_baseline.sh`, and record results in this
    document's results table (§11).
 5. No IR determinism regressions (HashMap iteration sorted before emission —
@@ -673,26 +673,26 @@ Replace each D1–D11 site with casting-graph/universe resolution:
 | Benchmark | Ratio | Winner | Correct |
 |-----------|:-----:|:------:|:-------:|
 | ring_buffer | 1.15× | C | MATCH |
-| float_math | 0.97× | Brief | MATCH |
+| float_math | 0.97× | Briv | MATCH |
 | float_math_nonzero | 1.21× | C | MATCH |
-| sparse_dispatch | 0.83× | Brief | MATCH |
+| sparse_dispatch | 0.83× | Briv | MATCH |
 | print_loop | 1.03× | C | MATCH |
-| nbody_newton | 0.83× | Brief | MATCH |
-| nbody_sqrt | 0.77× | Brief | MATCH |
-| nbody_sqrt_idio | 0.75× | Brief | MATCH |
+| nbody_newton | 0.83× | Briv | MATCH |
+| nbody_sqrt | 0.77× | Briv | MATCH |
+| nbody_sqrt_idio | 0.75× | Briv | MATCH |
 | fasta | 1.00× | ~tie | MATCH |
-| fannkuch_redux | 0.98× | Brief | MATCH |
+| fannkuch_redux | 0.98× | Briv | MATCH |
 | mandelbrot | 1.03× | ~tie | MATCH |
 | kalman_filter_runtime | 1.23× | C | MATCH |
-| knucleotide | 0.98× | Brief | MATCH |
-| cancel_math | 0.86× | Brief | MATCH |
-| bit_clear | 0.66× | Brief | MATCH |
-| queue_drain | 0.96× | Brief | MATCH |
-| queue_drain_sym | 0.89× | Brief | MATCH |
-| queue_drain_idio | 0.90× | Brief | MATCH |
+| knucleotide | 0.98× | Briv | MATCH |
+| cancel_math | 0.86× | Briv | MATCH |
+| bit_clear | 0.66× | Briv | MATCH |
+| queue_drain | 0.96× | Briv | MATCH |
+| queue_drain_sym | 0.89× | Briv | MATCH |
+| queue_drain_idio | 0.90× | Briv | MATCH |
 | interval_step | 1.00× | ~tie | MATCH |
 
-**Zero MISMATCH.** (Ratio < 1 = Brief faster.)
+**Zero MISMATCH.** (Ratio < 1 = Briv faster.)
 
 ### 9.4 Anti-regression rule
 
@@ -762,7 +762,7 @@ all 19 runtime benchmarks within noise of Phase 2 (max delta 0.08×, queue_drain
 0.85→0.93×), zero MISMATCH. §8.1/§8.2 move codegen tuning constants into
 `config/targets.toml` + `config/ir-lowering.toml` (defaults = prior literals).
 §8.3 derives write-mask width (u128/i128 when >64 fields), the `!prof` cap (2^30),
-and the type-driven range. §8.4 replaces every hardcoded Brief type-name match in
+and the type-driven range. §8.4 replaces every hardcoded Briv type-name match in
 `src/backend/llvm/` with casting-graph/universe resolution (`git grep
 'Type::Custom.*==' src/backend/llvm/` → zero), including seeding `Cast.#Char` and
 `Cast.#String` in the primordials and deleting the dead `primitive_from_name` /
@@ -800,7 +800,7 @@ Praetor-clean on changed files, and benchmark numbers recorded in §11.
 - Every code change references this plan document and the phase number.
 - Every benchmark run is recorded with: commit hash, date, harness flags,
   BOUND, iteration count, and the full ratio table.
-- The baseline worktree `../brief-compiler-baseline` is never updated during
+- The baseline worktree `../briv-compiler-baseline` is never updated during
   this effort (per AGENTS.md 11b); it is advanced only after ALL benchmarks
   equal or exceed baseline.
 - Regression root-cause investigations, if any, are appended to §2.7 with the

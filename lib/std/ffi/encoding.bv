@@ -1,7 +1,7 @@
 // Standard Encoding Library
 //
 // Functions marked with 'frgn' require foreign implementation.
-// Functions with 'defn' are implemented natively in Brief.
+// Functions with 'defn' are implemented natively in Briv.
 //
 // Note: Most encoding functions require bit manipulation 
 // and complex algorithms, so they are mostly foreign.
@@ -9,41 +9,41 @@
 // ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
 
 // Base64
-frgn __base64_encode(data: String) -> Result<String, EncodingError> as frgn__base64_encode from "lib/runtime/brief_rt.c" fallback "";
-frgn __base64_decode(s: String) -> Result<String, EncodingError> as frgn__base64_decode from "lib/runtime/brief_rt.c" fallback "";
-frgn __base64_url_encode(data: String) -> Result<String, EncodingError> as frgn__base64_url_encode from "lib/runtime/brief_rt.c" fallback "";
-frgn __base64_url_decode(s: String) -> Result<String, EncodingError> as frgn__base64_url_decode from "lib/runtime/brief_rt.c" fallback "";
+frgn __base64_encode(data: String) -> Result<String, EncodingError> as frgn__base64_encode from "lib/runtime/briv_rt.c" fallback "";
+frgn __base64_decode(s: String) -> Result<String, EncodingError> as frgn__base64_decode from "lib/runtime/briv_rt.c" fallback "";
+frgn __base64_url_encode(data: String) -> Result<String, EncodingError> as frgn__base64_url_encode from "lib/runtime/briv_rt.c" fallback "";
+frgn __base64_url_decode(s: String) -> Result<String, EncodingError> as frgn__base64_url_decode from "lib/runtime/briv_rt.c" fallback "";
 // Hex
-frgn __hex_encode(data: String) -> Result<String, EncodingError> as frgn__hex_encode from "lib/runtime/brief_rt.c" fallback "";
-frgn __hex_decode(s: String) -> Result<String, EncodingError> as frgn__hex_decode from "lib/runtime/brief_rt.c" fallback "";
-frgn __hex_encode_bytes(list: List<Int>) -> Result<String, EncodingError> as frgn__hex_encode_bytes from "lib/runtime/brief_rt.c" fallback "";
-frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError> as frgn__hex_decode_bytes from "lib/runtime/brief_rt.c" fallback [];
+frgn __hex_encode(data: String) -> Result<String, EncodingError> as frgn__hex_encode from "lib/runtime/briv_rt.c" fallback "";
+frgn __hex_decode(s: String) -> Result<String, EncodingError> as frgn__hex_decode from "lib/runtime/briv_rt.c" fallback "";
+frgn __hex_encode_bytes(list: List<Int>) -> Result<String, EncodingError> as frgn__hex_encode_bytes from "lib/runtime/briv_rt.c" fallback "";
+frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError> as frgn__hex_decode_bytes from "lib/runtime/briv_rt.c" fallback [];
 
 // URL Encoding
-frgn __url_encode(s: String) -> Result<String, EncodingError> as frgn__url_encode from "lib/runtime/brief_rt.c" fallback "";
-frgn __url_decode(s: String) -> Result<String, EncodingError> as frgn__url_decode from "lib/runtime/brief_rt.c" fallback "";
-frgn __url_encode_component(s: String) -> Result<String, EncodingError> as frgn__url_encode_component from "lib/runtime/brief_rt.c" fallback "";
-frgn __url_decode_component(s: String) -> Result<String, EncodingError> as frgn__url_decode_component from "lib/runtime/brief_rt.c" fallback "";
+frgn __url_encode(s: String) -> Result<String, EncodingError> as frgn__url_encode from "lib/runtime/briv_rt.c" fallback "";
+frgn __url_decode(s: String) -> Result<String, EncodingError> as frgn__url_decode from "lib/runtime/briv_rt.c" fallback "";
+frgn __url_encode_component(s: String) -> Result<String, EncodingError> as frgn__url_encode_component from "lib/runtime/briv_rt.c" fallback "";
+frgn __url_decode_component(s: String) -> Result<String, EncodingError> as frgn__url_decode_component from "lib/runtime/briv_rt.c" fallback "";
 // HTML Encoding
-frgn __html_escape(s: String) -> Result<String, EncodingError> as frgn__html_escape from "lib/runtime/brief_rt.c" fallback "";
-frgn __html_unescape(s: String) -> Result<String, EncodingError> as frgn__html_unescape from "lib/runtime/brief_rt.c" fallback "";
+frgn __html_escape(s: String) -> Result<String, EncodingError> as frgn__html_escape from "lib/runtime/briv_rt.c" fallback "";
+frgn __html_unescape(s: String) -> Result<String, EncodingError> as frgn__html_unescape from "lib/runtime/briv_rt.c" fallback "";
 // Unicode
-frgn __UTF8_encode(s: String) -> Result<List<Int>, EncodingError> as frgn__UTF8_encode from "lib/runtime/brief_rt.c" fallback [];
-frgn __UTF8_decode(list: List<Int>) -> Result<String, EncodingError> as frgn__UTF8_decode from "lib/runtime/brief_rt.c" fallback "";
-frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> as frgn__codepoint_to_char from "lib/runtime/brief_rt.c" fallback "";
-frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> as frgn__char_to_codepoint from "lib/runtime/brief_rt.c" fallback 0;
+frgn __UTF8_encode(s: String) -> Result<List<Int>, EncodingError> as frgn__UTF8_encode from "lib/runtime/briv_rt.c" fallback [];
+frgn __UTF8_decode(list: List<Int>) -> Result<String, EncodingError> as frgn__UTF8_decode from "lib/runtime/briv_rt.c" fallback "";
+frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> as frgn__codepoint_to_char from "lib/runtime/briv_rt.c" fallback "";
+frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> as frgn__char_to_codepoint from "lib/runtime/briv_rt.c" fallback 0;
 // Hashing
-frgn __md5(s: String) -> Result<String, EncodingError> as frgn__md5 from "lib/runtime/brief_rt.c" fallback "";
-frgn __sha1(s: String) -> Result<String, EncodingError> as frgn__sha1 from "lib/runtime/brief_rt.c" fallback "";
-frgn __sha256(s: String) -> Result<String, EncodingError> as frgn__sha256 from "lib/runtime/brief_rt.c" fallback "";
-frgn __sha512(s: String) -> Result<String, EncodingError> as frgn__sha512 from "lib/runtime/brief_rt.c" fallback "";
+frgn __md5(s: String) -> Result<String, EncodingError> as frgn__md5 from "lib/runtime/briv_rt.c" fallback "";
+frgn __sha1(s: String) -> Result<String, EncodingError> as frgn__sha1 from "lib/runtime/briv_rt.c" fallback "";
+frgn __sha256(s: String) -> Result<String, EncodingError> as frgn__sha256 from "lib/runtime/briv_rt.c" fallback "";
+frgn __sha512(s: String) -> Result<String, EncodingError> as frgn__sha512 from "lib/runtime/briv_rt.c" fallback "";
 // UUID
-frgn __uuid_v4() -> Result<String, EncodingError> as frgn__uuid_v4 from "lib/runtime/brief_rt.c" fallback "";
-frgn __is_uuid(s: String) -> Result<Bool, EncodingError> as frgn__is_uuid from "lib/runtime/brief_rt.c" fallback false;
+frgn __uuid_v4() -> Result<String, EncodingError> as frgn__uuid_v4 from "lib/runtime/briv_rt.c" fallback "";
+frgn __is_uuid(s: String) -> Result<Bool, EncodingError> as frgn__is_uuid from "lib/runtime/briv_rt.c" fallback false;
 // URI Components
-frgn __uri_parse(s: String) -> Result<Data, EncodingError> as frgn__uri_parse from "lib/runtime/brief_rt.c" fallback "";
-frgn __uri_build(data: Data) -> Result<String, EncodingError> as frgn__uri_build from "lib/runtime/brief_rt.c" fallback "";
-frgn __uri_get_param(url: String, key: String) -> Result<String, EncodingError> as frgn__uri_get_param from "lib/runtime/brief_rt.c" fallback "";
+frgn __uri_parse(s: String) -> Result<Data, EncodingError> as frgn__uri_parse from "lib/runtime/briv_rt.c" fallback "";
+frgn __uri_build(data: Data) -> Result<String, EncodingError> as frgn__uri_build from "lib/runtime/briv_rt.c" fallback "";
+frgn __uri_get_param(url: String, key: String) -> Result<String, EncodingError> as frgn__uri_get_param from "lib/runtime/briv_rt.c" fallback "";
 // ===== NATIVE DEFINITIONS =====
 
 // Simple hex digit to int

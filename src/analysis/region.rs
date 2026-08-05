@@ -485,7 +485,7 @@ impl RegionAnalyzer {
         }
     }
 
-    /// Extract bounds from a Brief type (e.g., `Bool` → `[0,1]`, `U8` → `[0,255]`).
+    /// Extract bounds from a Briv type (e.g., `Bool` → `[0,1]`, `U8` → `[0,255]`).
     fn type_to_interval(ty: &Type) -> Option<Interval> {
         match ty {
             Type::Custom(__t) if __t == "Bool" => Some(Interval { lo: 0, hi: 1 }),
@@ -1344,7 +1344,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
         match s {
             Statement::Term(_) | Statement::TermBang(_)
             | Statement::InlineAsm { .. } => return true,
-            // 2026-07-19: Block precomputation for non-# calls (frgn, pure-Brief).
+            // 2026-07-19: Block precomputation for non-# calls (frgn, pure-Briv).
             // # intrinsics are handled by the interpreter's execute_intrinsic
             // and can be precomputed. All other calls prevent precomputation
             // because the interpreter can't evaluate them efficiently.
@@ -1429,7 +1429,7 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            // 2026-07-19: Only frgn calls block precomputation — pure-Brief
+            // 2026-07-19: Only frgn calls block precomputation — pure-Briv
             // function calls and # intrinsics are handled by the interpreter.
             // Without frgn_names context, we conservatively skip all calls
             // and let the interpreter handle them during eval.

@@ -5,8 +5,8 @@ compiler automatically wraps in a synthesized `node __init` transaction
 at compile time.
 
 **Why it matters**: Eliminates boilerplate for simple scripts while retaining
-Brief's transactional safety guarantees. `println#("hello")` at top level is
-valid Brief. If the startup fails (an FFI error triggers `escape`), the entire
+Briv's transactional safety guarantees. `println#("hello")` at top level is
+valid Briv. If the startup fails (an FFI error triggers `escape`), the entire
 boot transaction atomically rolls back — zero partial state, no half-configured
 program.
 

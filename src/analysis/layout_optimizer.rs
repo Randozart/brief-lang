@@ -65,7 +65,7 @@ pub fn optimize_layouts(
 
         // 2026-07-22: Only optimize bridge-path frgns (GLUE-mediated calls).
         // Inline frgns and unsupported ones are skipped.
-        let target = match resolved_frgns.get(fb.effective_brief_name()) {
+        let target = match resolved_frgns.get(fb.effective_briv_name()) {
             Some(ResolvedFrgn::Bridge { language, .. }) => {
                 match glue_targets.get(language) {
                     Some(t) => t,
@@ -113,7 +113,7 @@ pub fn optimize_layouts(
             }
 
             // 2026-07-22: Check for an existing identity meld between the
-            // Brief type and the foreign type. If one exists, the boundary
+            // Briv type and the foreign type. If one exists, the boundary
             // is already zero-cost and no change is needed.
             if let Some(meld) = universe.find_meld(ty_key, &foreign_ty_name) {
                 if is_identity_meld(meld) {
@@ -185,7 +185,7 @@ fn get_type_layout(universe: &TypeUniverse, type_name: &str) -> Option<(u64, u64
     universe.get(type_name).map(|rt| (rt.bytes, rt.alignment))
 }
 
-/// Find the protocol category a Brief type participates in via its CastTo properties.
+/// Find the protocol category a Briv type participates in via its CastTo properties.
 /// Returns the category name (e.g., "String" for Cast.#String) or None.
 fn find_protocol_category(universe: &TypeUniverse, type_name: &str) -> Option<String> {
     let rt = universe.get(type_name)?;
@@ -197,9 +197,9 @@ fn find_protocol_category(universe: &TypeUniverse, type_name: &str) -> Option<St
     None
 }
 
-/// Derive the foreign type name for a Brief parameter type in the target language.
+/// Derive the foreign type name for a Briv parameter type in the target language.
 ///
-/// 2026-07-22: Maps Brief type names to their foreign equivalents based on
+/// 2026-07-22: Maps Briv type names to their foreign equivalents based on
 /// known language conventions. Python types are prefixed "Py", Node "Js",
 /// Rust "Rst". Unknown languages use the capitalized language name as prefix.
 ///
@@ -255,12 +255,12 @@ fn is_identity_meld(meld: &crate::ast::top::MeldDeclaration) -> bool {
 }
 
 /// Check if a foreign type has a safe CastTo/CastFrom path back to the
-/// original Brief type or its protocol.
+/// original Briv type or its protocol.
 ///
 /// 2026-07-22: Safety precondition for layout adoption. The foreign type
 /// must be able to cast back to the original type (directly or through
 /// a shared protocol like #Bits). If no path exists, adopting the foreign
-/// layout would make the Brief type incompatible.
+/// layout would make the Briv type incompatible.
 fn has_safe_cast_path(universe: &TypeUniverse, foreign_type: &str, original_type: &str) -> bool {
     if find_cast_path(universe, foreign_type, original_type).is_some() {
         return true;

@@ -9,10 +9,10 @@
 
 ## 1. Goal
 
-Brief's compiler accepts programs that are not well-typed, mis-parses its own
+Briv's compiler accepts programs that are not well-typed, mis-parses its own
 object layer (field access, reflection, method calls), emits void garbage for
 unimplemented expressions, and documents syntax it cannot parse. This plan
-restores the object layer and the type system to a state where **`briefc check`
+restores the object layer and the type system to a state where **`brivc check`
 is a real gate** — it rejects every malformed program — and the docs describe
 exactly what the compiler implements.
 
@@ -31,15 +31,15 @@ compiler phases; the suite guards against regressions.
 **Runtime benchmark ratios vs C (`BOUND=50M`, `-O3 -flto`, zero MISMATCH),
 from `benchmarks/results/2026-07-31-countdown-loop.md` + session harness:**
 
-| Benchmark | Ratio (Brief/C) | Direction |
+| Benchmark | Ratio (Briv/C) | Direction |
 |-----------|----------------:|:---------:|
-| kalman_filter_runtime | 0.85× | Brief faster |
-| float_math_nonzero | 0.94× | Brief faster |
-| float_math | 0.62× | Brief faster |
-| print_loop | 0.64× | Brief faster |
-| queue_drain (×3) | 0.47× / 0.62× / 0.57× | Brief faster |
-| matrix_pipeline | 0.66× | Brief faster |
-| accumulator_flush | 0.71× | Brief faster |
+| kalman_filter_runtime | 0.85× | Briv faster |
+| float_math_nonzero | 0.94× | Briv faster |
+| float_math | 0.62× | Briv faster |
+| print_loop | 0.64× | Briv faster |
+| queue_drain (×3) | 0.47× / 0.62× / 0.57× | Briv faster |
+| matrix_pipeline | 0.66× | Briv faster |
+| accumulator_flush | 0.71× | Briv faster |
 | telemetry_stream | 0.99× | parity |
 | pid_control | 0.97× | parity |
 | sweep_sparse / mid / dense | 1.40× / 1.10× / 1.49× | C faster (known gap, Phase-3 dispatch follow-up) |
@@ -49,7 +49,7 @@ from `benchmarks/results/2026-07-31-countdown-loop.md` + session harness:**
 
 ## 3. Investigation — the verified defects (evidence, not opinion)
 
-Every item below was reproduced with `briefc check` at the plan-start commit;
+Every item below was reproduced with `brivc check` at the plan-start commit;
 `file:line` anchors are cited.
 
 ### Group A — the postfix receiver subsystem is broken end-to-end
@@ -97,12 +97,12 @@ Watchdog `?[5000ms]` / `![1000ms]` is a parse error
 (`expected identifier, found '?'`). `Contract.watchdog: Option<WatchdogSpec>`
 exists (`ast/top.rs:140`); `parse_contract` always sets `None`
 (`definitions.rs:844-891`); only the legacy COBOL backend consumes it
-(`backend/cobol.rs:404`). SPEC §2.5 and `learn-brief/02-contracts.md` §7
+(`backend/cobol.rs:404`). SPEC §2.5 and `learn-briv/02-contracts.md` §7
 document the syntax as implemented. **Decision (user): add it back in.**
 
 ### Group E — the gate
 
-`briefc check` accepts every item in Group B and most of Group A. It is not a
+`brivc check` accepts every item in Group B and most of Group A. It is not a
 real typecheck gate.
 
 ## 4. Design decisions (final, locked this session)
@@ -232,7 +232,7 @@ Commit the uncommitted contract-position parser fix + 6 tests (`definitions.rs`
 9. **Tests** (regression per A1–A6): field access on `obj`/tuple, `var.^Len`
    in a body, `var.^^Size` foldable in a contract, `.^Ptr`, `s.trim()`,
    concrete `obj` with a `txn push` called via method, `collections.bv`
-   parses. Assert `briefc check` fails on the old broken inputs.
+   parses. Assert `brivc check` fails on the old broken inputs.
 
 ### Phase 2 — Re-establish type validation
 1. `let` (`typechecker/mod.rs:749`): compare inferred vs declared → `TypeMismatch`
@@ -243,7 +243,7 @@ Commit the uncommitted contract-position parser fix + 6 tests (`definitions.rs`
 3. `Term`/`TermBang` (`:773`): validate against declared `output_type`.
 4. Call args: validate each against the callee's param types (defn/txn/method).
 5. Group C: `unreachable!()`/`panic!`/void-stub → `BackendError` with spans.
-6. **Tests** per B1–B4 and C1–C4; assert `briefc check` fails on each.
+6. **Tests** per B1–B4 and C1–C4; assert `brivc check` fails on each.
 
 ### Phase 3 — Watchdogs
 1. `parse_contract` (`definitions.rs:844`): parse `?[expr]`/`![expr]` after
@@ -278,7 +278,7 @@ Commit the uncommitted contract-position parser fix + 6 tests (`definitions.rs`
 
 - `cargo test --lib` green after every phase; one regression test per A/B/C/D
   item.
-- `briefc check` **must fail** on every previously-accepted-invalid input —
+- `brivc check` **must fail** on every previously-accepted-invalid input —
   the "gate is real" assertion.
 - `cargo build` no new warnings; Praetor (one `--target` per invocation) on
   changed files; Kani if the `self`-binding member dispatch introduces unsafe
@@ -305,7 +305,7 @@ Commit the uncommitted contract-position parser fix + 6 tests (`definitions.rs`
 - `docs/architecture/backend-type-dispatch.md`: Field/Reflect/MethodCall
   emission notes.
 - `spec/SPEC.md`: grammar + Reflection section (Phase 5).
-- `learn-brief/13-projections.md` → Reflection chapter (Phase 5).
+- `learn-briv/13-projections.md` → Reflection chapter (Phase 5).
 - `docs/handoff-methodology.md`: this plan becomes a second worked example
   reference after completion.
 

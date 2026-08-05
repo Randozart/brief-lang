@@ -801,7 +801,7 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
     None
 }
 
-/// Verify .srbv (Strict Rendered Brief) view-state isomorphism
+/// Verify .srbv (Strict Rendered Briv) view-state isomorphism
 /// For every signal/transaction referenced in the view bindings,
 /// verify they have non-trivial contracts (not [true] on both sides).
 /// Returns list of verification errors.

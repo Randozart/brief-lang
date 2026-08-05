@@ -10,10 +10,10 @@ The `[count == N] { term! -> print_int#(nchksum); }` guard in knucleotide.bv pro
 an extra post-convergence print that the C reference (`knucleotide_c.c`) does not have.
 The C only prints periodically inside the loop — there is no `fprintf` after the loop.
 
-For nbody_sqrt, the Brief version computes energy every iteration (10 extra `sqrt#` calls
+For nbody_sqrt, the Briv version computes energy every iteration (10 extra `sqrt#` calls
 per tick) and prints periodically, while the C reference computes energy only once after
 the loop and prints once. This creates two differences:
-1. Brief outputs an extra periodic line at count=0 that C doesn't have
+1. Briv outputs an extra periodic line at count=0 that C doesn't have
 2. The final energy values differ slightly due to FP accumulation order
 
 ## Changes
@@ -21,7 +21,7 @@ the loop and prints once. This creates two differences:
 ### 1. knucleotide.bv — Remove post-convergence print
 **File:** `benchmarks/knucleotide.bv`  
 **Change:** Delete line 25:
-```brief
+```briv
 [count == N] { term! -> print_int#(nchksum); };
 ```
 C reference already matches: prints only every 5M inside the loop, no post-loop print.
@@ -37,7 +37,7 @@ Remove from the main body:
 - Lines 200-202: periodic print `[count % 5000000 == 0] { print_float#(energy); }`
 
 Add INSIDE the `[count == bound]` guard (currently lines 203-205):
-```brief
+```briv
 [count == bound] {
     let edist01: Float = sqrt#((bx0 - bx1)*(bx0 - bx1) + (by0 - by1)*(by0 - by1) + (bz0 - bz1)*(bz0 - bz1));
     let edist02: Float = sqrt#((bx0 - bx2)*(bx0 - bx2) + (by0 - by2)*(by0 - by2) + (bz0 - bz2)*(bz0 - bz2));
@@ -70,11 +70,11 @@ Add INSIDE the `[count == bound]` guard (currently lines 203-205):
 };
 ```
 
-This makes the Brief compute energy exactly once, at convergence — matching C's
+This makes the Briv compute energy exactly once, at convergence — matching C's
 post-loop EPAIR section. Output: one line (the periodic print at count=0 is removed).
 
 ### 3. nbody_sqrt_idio.bv + _c.c — New idiomatic pair
-Creates a variant where both Brief and C compute energy every iteration.
+Creates a variant where both Briv and C compute energy every iteration.
 
 **New file:** `benchmarks/nbody_sqrt_idio.bv`
 - Same body as current nbody_sqrt.bv (energy computed in-body every tick)
@@ -84,14 +84,14 @@ Creates a variant where both Brief and C compute energy every iteration.
 
 **New file:** `benchmarks/nbody_sqrt_idio_c.c`
 - Same loop body as nbody_sqrt_c.c (PAIR macros, position updates)
-- ADD in-loop energy computation + fprintf every 5M matching the Brief
+- ADD in-loop energy computation + fprintf every 5M matching the Briv
 - REMOVE post-loop energy computation (the in-loop print is the final one)
 
 ```c
 for (count = 0; count < total; count++) {
     // PAIR(0,1)... PAIR(3,4)  (same as symmetric)
     // position updates (same as symmetric)
-    // ENERGY COMPUTATION every tick (new — matches Brief idiomatic)
+    // ENERGY COMPUTATION every tick (new — matches Briv idiomatic)
     float energy = 0.0f;
     #define EPAIR(ia, ib) { \
         float dx = bx[ia] - bx[ib]; \
@@ -127,11 +127,11 @@ nbody_sqrt_idio) budget=2048 ;;
 
 ## Verification
 1. `cargo test --lib` — all tests pass
-2. `cargo build --release --bin brief-compiler` — no warnings
+2. `cargo build --release --bin briv-compiler` — no warnings
 3. Build + run each changed benchmark:
    ```bash
-   cargo build --release --bin brief-compiler
-   ./target/release/brief-compiler llvm benchmarks/knucleotide.bv --out /tmp
+   cargo build --release --bin briv-compiler
+   ./target/release/briv-compiler llvm benchmarks/knucleotide.bv --out /tmp
    clang -O3 -march=native -ffast-math /tmp/knucleotide.ll -o /tmp/knucleotide -lm
    diff <(env BOUND=50000000 /tmp/knucleotide) <(env BOUND=50000000 ./benchmarks/knucleotide_c)
    # same for nbody_sqrt, nbody_sqrt_idio

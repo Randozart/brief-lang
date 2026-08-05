@@ -1,10 +1,10 @@
-# Deep Dive: Where Brief Loses to C
+# Deep Dive: Where Briv Loses to C
 
 **Date:** 2026-06-04
 
 ## Summary
 
-| Benchmark | Brief | C | Ratio | Root cause |
+| Benchmark | Briv | C | Ratio | Root cause |
 |-----------|-------|---|-------|------------|
 | nbody_sqrt | 6.96s | 3.23s | 2.15× | `__sqrtf` is PLT call; C uses `vrsqrtps` hardware instr |
 | mandelbrot | 0.74s | 0.65s | 1.14× | 212 extractvalue/insertvalue + Int `/ SCALE` overhead |
@@ -16,7 +16,7 @@
 
 ### Root cause: frgn sqrt calls vs hardware instruction
 
-Brief's `frgn __sqrtf(d: Float) -> Float` goes through libc `sqrtf()`:
+Briv's `frgn __sqrtf(d: Float) -> Float` goes through libc `sqrtf()`:
 
 ```llvm
   %t56 = call float @__sqrtf(float %nffl59)   ; PLT call to libc sqrtf
@@ -33,9 +33,9 @@ C with `-ffast-math` converts `sqrt()` to hardware reciprocal sqrt:
 
 ### Why it happens
 
-Brief represents all values as `i64` (boxed). Float operations go through:
+Briv represents all values as `i64` (boxed). Float operations go through:
 1. `bitcast float → i32` (unbox)
-2. `zext i32 → i64` (fit into Brief's uniform register width)
+2. `zext i32 → i64` (fit into Briv's uniform register width)
 3. `call __sqrtf` (PLT call to libc)
 4. `trunc i64 → i32` (unbox result)
 5. `bitcast i32 → float` (re-box as float register)
@@ -44,9 +44,9 @@ Each sqrt costs ~5 instructions + PLT call. C does one instruction.
 
 ### Fix options
 
-**A) `llvm.sqrt.f32` intrinsic** — Replace `call @__sqrtf` with `call float @llvm.sqrt.f32(float)` in `emit_expr` for `Expr::Call("__sqrtf", ...)`. Combined with `fast-math`, LLVM converts this to `fsqrt`/`vsqrtps`. Zero changes to `brief_rt.c`.
+**A) `llvm.sqrt.f32` intrinsic** — Replace `call @__sqrtf` with `call float @llvm.sqrt.f32(float)` in `emit_expr` for `Expr::Call("__sqrtf", ...)`. Combined with `fast-math`, LLVM converts this to `fsqrt`/`vsqrtps`. Zero changes to `briv_rt.c`.
 
-**B) Inline `__sqrtf` with `alwaysinline`** — `__attribute__((alwaysinline)) static inline float __sqrtf(float x) { return sqrtf(x); }` in `brief_rt.c`. LTO should then inline it and `fast-math` will convert to `fsqrt`.
+**B) Inline `__sqrtf` with `alwaysinline`** — `__attribute__((alwaysinline)) static inline float __sqrtf(float x) { return sqrtf(x); }` in `briv_rt.c`. LTO should then inline it and `fast-math` will convert to `fsqrt`.
 
 **C) Mark `__sqrtf` as a builtin in LLVM** — Add `@llvm.compiler.used` or an attribute that tells LLVM "this is just sqrt, use the intrinsic."
 
@@ -62,7 +62,7 @@ Each sqrt costs ~5 instructions + PLT call. C does one instruction.
 
 ### Root cause: Int `/ SCALE` generates sdiv, extractvalue chains dominate
 
-Brief's mandelbrot uses integer fixed-point arithmetic (`zr * cr / SCALE`). Each `/ SCALE` generates:
+Briv's mandelbrot uses integer fixed-point arithmetic (`zr * cr / SCALE`). Each `/ SCALE` generates:
 - `sdiv i64` (signed division — 20-80 cycles on x86, much slower than float div)
 - The guarded `zr >= -200` check creates SSA control flow with `extractvalue`/`insertvalue`
 
@@ -70,19 +70,19 @@ Brief's mandelbrot uses integer fixed-point arithmetic (`zr * cr / SCALE`). Each
 
 ### Why it happens
 
-Brief's `Int` type is 64-bit. Integer division is fundamentally slower than float division on modern CPUs (~20-80 cycles vs ~10-14 cycles). The fixed-point scaling (multiply by 100, divide by 100) generates `sdiv` instructions that are expensive.
+Briv's `Int` type is 64-bit. Integer division is fundamentally slower than float division on modern CPUs (~20-80 cycles vs ~10-14 cycles). The fixed-point scaling (multiply by 100, divide by 100) generates `sdiv` instructions that are expensive.
 
 C's mandelbrot uses `double` Float arithmetic — faster division, no integer scaling needed.
 
 ### Fix options
 
-**A) Float mandelbrot** — Convert to Float arithmetic directly. Brief's Float pipeline is proven faster than C (float_math wins). The mandelbrot can use Float with `fast-math` and get the same SROA + SIMD benefits.
+**A) Float mandelbrot** — Convert to Float arithmetic directly. Briv's Float pipeline is proven faster than C (float_math wins). The mandelbrot can use Float with `fast-math` and get the same SROA + SIMD benefits.
 
 **B) Strength reduction** — `zr * cr / SCALE` where SCALE=100 could be 100.0 (Float) or replaced with a shift-based approximation.
 
 **C) Eliminate guarded blocks** — The `zr >= -200` check in `#!exit` creates SSA control flow. Remove it; use `#!exit count == N && escapes >= 0` instead.
 
-**Recommendation**: Option A. It's already proven that Brief beats C on Float benchmarks. Convert mandelbrot to use `Float` everywhere and drop the integer scaling.
+**Recommendation**: Option A. It's already proven that Briv beats C on Float benchmarks. Convert mandelbrot to use `Float` everywhere and drop the integer scaling.
 
 ---
 

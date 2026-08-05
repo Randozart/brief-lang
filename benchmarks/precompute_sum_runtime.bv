@@ -2,12 +2,12 @@
 // Bound is a state field, compiler cannot precompute.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/precompute_sum_runtime.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/precompute_sum_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
 
 import { get_env_int } from "std/env.bv";
-// brief_rt.c linked automatically
+// briv_rt.c linked automatically
 
 let bound: Int = get_env_int("BOUND");
 let count: Int = 0;

@@ -409,7 +409,7 @@ The `operator_defs` HashMap continues to carry non-cast ops (InsertAt, ExtractFr
 **File:** `lib/std/types/bootstrap.bv`
 
 Simplify `String` to protocol-only:
-```brief
+```briv
 type String: #String {
     !> alignment: 8;
     !> encoding: "UTF-8";

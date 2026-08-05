@@ -11,23 +11,23 @@ fields to SSA registers in the hot loop.
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Brief      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0548s     ║ .0474s     ║ 1.15x    ║ C      ║ MATCH     ║
-║ float_math                ║ .0717s     ║ .0729s     ║ .98x     ║ Brief  ║ MATCH     ║
+║ float_math                ║ .0717s     ║ .0729s     ║ .98x     ║ Briv  ║ MATCH     ║
 ║ float_math_nonzero        ║ .1629s     ║ .1624s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ sparse_dispatch           ║ .0476s     ║ .0597s     ║ .79x     ║ Brief  ║ MATCH     ║
-║ print_loop                ║ .0587s     ║ .0588s     ║ .99x     ║ Brief  ║ MATCH     ║
+║ sparse_dispatch           ║ .0476s     ║ .0597s     ║ .79x     ║ Briv  ║ MATCH     ║
+║ print_loop                ║ .0587s     ║ .0588s     ║ .99x     ║ Briv  ║ MATCH     ║
 ║ nbody_newton              ║ 10.8822s   ║ 7.8878s    ║ 1.37x    ║ C      ║ MATCH     ║
-║ nbody_sqrt                ║ 2.2531s    ║ 2.6530s    ║ .84x     ║ Brief  ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 2.3361s    ║ 3.4570s    ║ .67x     ║ Brief  ║ MATCH     ║
-║ fasta                     ║ .1988s     ║ .2014s     ║ .98x     ║ Brief  ║ MATCH     ║
-║ fannkuch_redux            ║ .0628s     ║ .0632s     ║ .99x     ║ Brief  ║ MATCH     ║
+║ nbody_sqrt                ║ 2.2531s    ║ 2.6530s    ║ .84x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 2.3361s    ║ 3.4570s    ║ .67x     ║ Briv  ║ MATCH     ║
+║ fasta                     ║ .1988s     ║ .2014s     ║ .98x     ║ Briv  ║ MATCH     ║
+║ fannkuch_redux            ║ .0628s     ║ .0632s     ║ .99x     ║ Briv  ║ MATCH     ║
 ║ mandelbrot                ║ .6333s     ║ .6320s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ kalman_filter_runtime     ║ .1779s     ║ .1753s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ knucleotide               ║ .1843s     ║ .1838s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ cancel_math               ║ .0616s     ║ .0619s     ║ .99x     ║ Brief  ║ MATCH     ║
-║ bit_clear                 ║ 0s         ║ .0001s     ║ 0x       ║ Brief  ║ MATCH     ║
+║ cancel_math               ║ .0616s     ║ .0619s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ bit_clear                 ║ 0s         ║ .0001s     ║ 0x       ║ Briv  ║ MATCH     ║
 ║ queue_drain               ║ .0614s     ║ .0612s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ queue_drain_sym           ║ .0607s     ║ .0603s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ queue_drain_idio          ║ .0610s     ║ .0001s     ║ 610.00x  ║ C      ║ MATCH     ║
@@ -47,9 +47,9 @@ improved several benchmarks vs the pre-revert run:
 | Benchmark | Pre-Revert | Post-Revert | Delta | Possible cause |
 |-----------|------------|-------------|-------|---------------|
 | ring_buffer | 1.31x | **1.15x** | -12% | More accurate alias for main()'s FFI calls |
-| float_math | 1.07x | **0.98x** | -9% | Same; Brief now beats C |
+| float_math | 1.07x | **0.98x** | -9% | Same; Briv now beats C |
 | sparse_dispatch | 0.91x | **0.79x** | -13% | Same |
-| print_loop | 1.01x | **0.99x** | -2% | Same (now Brief wins ~tie) |
+| print_loop | 1.01x | **0.99x** | -2% | Same (now Briv wins ~tie) |
 
 This confirms that `memory(readwrite)` on main is the correct default — it lets
 LLVM model FFI calls accurately.
@@ -57,7 +57,7 @@ LLVM model FFI calls accurately.
 ### Remaining false positive
 
 queue_drain_idio at 610.00x is still a harness artifact. The C binary at 0.0001s
-is physically impossible for 50M iterations. The Brief time (0.0610s) matches
+is physically impossible for 50M iterations. The Briv time (0.0610s) matches
 queue_drain_sym (0.0607s). No compiler action needed.
 
 ### nbody_newton is stable at 1.37x
@@ -86,7 +86,7 @@ different optimization problem not addressed by this plan.
 body actually contains FFI calls. In the current benchmark suite, every txn
 uses guarded prints (`when condition { PrintLn!(...) };`):
 
-```brief
+```briv
 node work [count < N][count == N] {
     count = count + 1;                            // hot path — runs every iteration
     when count % 5000000 == 0 {                   // cold path — runs 0.02% of iterations

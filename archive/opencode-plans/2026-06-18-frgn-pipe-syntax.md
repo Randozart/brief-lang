@@ -8,7 +8,7 @@
 Add a pipe-separated fallback syntax to `frgn` declarations as an alternative
 to `Result<T, E>` with TOML bindings:
 
-```brief
+```briv
 frgn name(args) -> T | fallback_expr ;
 ```
 
@@ -230,7 +230,7 @@ pub fn validate_frgn_against_binding(
 ### 7. Backend `declare` emission (`src/backend/llvm/mod.rs`)
 
 For pipe frgns, the LLVM `declare` uses the success type T as the C return
-type (not wrapped in Result — the wrapping happens in Brief-level emitted
+type (not wrapped in Result — the wrapping happens in Briv-level emitted
 code). No change needed to the declare emission; the `result_type` field
 still holds `Projection([T])`.
 
@@ -267,7 +267,7 @@ still holds `Projection([T])`.
    No invalid case.
 
 3. **String null check details**: At the FFI boundary, a C function returning
-   `char*` returns null on error. The Brief runtime wraps this in
+   `char*` returns null on error. The Briv runtime wraps this in
    `Value::String`. We must distinguish "null pointer" from "empty string"
    (which is `""` — a valid pointer to a null terminator).
 

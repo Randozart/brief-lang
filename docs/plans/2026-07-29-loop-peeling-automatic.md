@@ -5,7 +5,7 @@
 
 ## Executive Summary
 
-A manual loop-peeling experiment on the nbody_newton benchmark **eliminated 0.39× of the 0.39× performance gap in one step** — improving from 1.22× C (Brief loses) to **0.83× C (Brief wins)**. The only change was removing the `when count % 5000000 == 0 { PrintLn!(energy) }` guard from the loop body.
+A manual loop-peeling experiment on the nbody_newton benchmark **eliminated 0.39× of the 0.39× performance gap in one step** — improving from 1.22× C (Briv loses) to **0.83× C (Briv wins)**. The only change was removing the `when count % 5000000 == 0 { PrintLn!(energy) }` guard from the loop body.
 
 This confirms that **LLVM's if-conversion blocker** (not phi-register pressure) was the dominant bottleneck. The `control flow cannot be substituted for a select` diagnostic occurs because the guarded block contains an opaque function call (`PrintInt#`), which LLVM cannot speculate.
 
@@ -52,7 +52,7 @@ This is the exact same 32-phi structure, same state fields, same computation. Th
 
 ### Input (before)
 
-```brief
+```briv
 node simulate [count < bound][count == bound] {
     // ... compute physics ...
     energy = epp + ekc;
@@ -70,7 +70,7 @@ node simulate [count < bound][count == bound] {
 
 ### Output (after)
 
-```brief
+```briv
 txn inner_body(count: Int, bound: Int,
     bx0: Float32, ..., last_energy: Float32)
     -> (Int, Float32, ..., Float32)
@@ -106,9 +106,9 @@ node outer_loop
 
 ### Alternative — Simpler Single-Function Approach
 
-If the above is too complex (function calls between transactions may not be fully supported), a simpler approach is to **peel the loop within the same node** using Brief's compound block syntax:
+If the above is too complex (function calls between transactions may not be fully supported), a simpler approach is to **peel the loop within the same node** using Briv's compound block syntax:
 
-```brief
+```briv
 node simulate [count < bound][count == bound] {
     // BATCH 1: Pure compute (N iterations without side effects)
     [count < bound];  // convergence gate — continue while not exhausted

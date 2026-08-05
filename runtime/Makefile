@@ -1,4 +1,4 @@
-# brief_rt.o — pre-compiled runtime object for Brief LLVM backend
+# briv_rt.o — pre-compiled runtime object for Briv LLVM backend
 #
 # Usage:
 #   make                    # builds for detected host triple
@@ -14,7 +14,7 @@ TARGET ?= $(shell rustc -vV 2>/dev/null | grep host | cut -d' ' -f2 2>/dev/null 
 CC ?= cc
 CFLAGS ?= -O2 -g0 -ffreestanding -fno-stack-protector -fno-builtin
 
-SRC := brief_rt.c
+SRC := briv_rt.c
 BUILD_DIR := build
 OUT := $(BUILD_DIR)/$(TARGET).o
 

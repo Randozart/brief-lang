@@ -1,6 +1,6 @@
 //! AST Generator for Property-Based Fuzzing
 //!
-//! Procedurally generates valid and semi-valid Brief ASTs for fuzzing.
+//! Procedurally generates valid and semi-valid Briv ASTs for fuzzing.
 //! Uses depth limiting to prevent stack overflow during generation.
 
 use crate::ast::*;
@@ -12,7 +12,7 @@ use proptest::test_runner::TestRunner;
 /// Maximum depth for recursive AST generation
 const MAX_DEPTH: usize = 8;
 
-/// Generate a random Brief program (returns Vec<TopLevel>)
+/// Generate a random Briv program (returns Vec<TopLevel>)
 pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Vec<TopLevel>> {
     let max_depth = max_depth.min(MAX_DEPTH);
     (0usize..=5usize).prop_flat_map(move |num_items| {

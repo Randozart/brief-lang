@@ -1,7 +1,7 @@
 // Standard Encoding Library
 //
 // Functions marked with 'frgn' require foreign implementation.
-// Functions with 'defn' are implemented natively in Brief.
+// Functions with 'defn' are implemented natively in Briv.
 //
 // Note: Most encoding functions require bit manipulation 
 // and complex algorithms, so they are mostly foreign.

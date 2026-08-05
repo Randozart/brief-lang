@@ -13,7 +13,7 @@ Related: `docs/architecture/features/verification-chain.md`
 The `:=` operator on a `defn` declares a chain of structurally equivalent
 implementations. The compiler selects the first body whose target matches
 the compile target and passes cross-verification against every other body
-in the chain. This makes inline assembly safe (verified against a Brief
+in the chain. This makes inline assembly safe (verified against a Briv
 reference), derivation optional (one body source among equals), and the
 compiler a correctness gate rather than a trust boundary.
 
@@ -53,7 +53,7 @@ by symbolic execution of the assembly combined with the surrounding C code.
 The assembly is translated to a control-flow graph and checked against the
 reference's postcondition.
 
-Brief's approach is simpler: test the asm body against a Brief reference
+Briv's approach is simpler: test the asm body against a Briv reference
 on random inputs. No symbolic execution needed — concrete evaluation with
 enough samples provides high confidence. Wrong instruction → wrong output
 for any input → mismatch → skip to next body.
@@ -74,7 +74,7 @@ on unsupported architectures.
 
 ### 2.1 Assembly Function Declaration
 
-```brief
+```briv
 asm<x86_64> name(args: Type) -> ReturnType {
     "instruction {result}, {param}"
 };
@@ -92,7 +92,7 @@ asm_line      ::= string_literal
 Semantics:
 - `target_literal` is a compile-time constant string matching one of the
   target strings in `config/targets.toml`.
-- `asm_line` is a Brief string literal containing assembly mnemonics.
+- `asm_line` is a Briv string literal containing assembly mnemonics.
 - `{param}` is a template variable; the compiler substitutes the ABI
   register for that parameter on the declared target.
 - `{result}` is a template variable; the compiler substitutes the ABI
@@ -101,7 +101,7 @@ Semantics:
 
 ### 2.2 Verification Chain
 
-```brief
+```briv
 defn name(params) -> ReturnType [pre][post]
   := body1
   := body2
@@ -120,7 +120,7 @@ The last segment has no guard and is always accepted.
 
 ### 2.3 Derivation in the Chain
 
-```brief
+```briv
 defn popcount(x: Int) -> Int
   := popcount_x86                  // asm<x86_64>, tested against ref
   := { 0->0; 1->1; 3->2; 7->3 }  // synthesis from examples
@@ -141,7 +141,7 @@ case of the more general `:= body := body := body` pattern.
 
 ### 2.4 Contracts — `[pre][post]` on the Signature
 
-```brief
+```briv
 // Contracts live on the function signature, not on individual bodies.
 // Every body in the chain must satisfy them.
 defn popcount(x: Int) -> Int [result >= 0 && result < 64]

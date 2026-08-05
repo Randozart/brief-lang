@@ -1,5 +1,5 @@
 // 2026-07-26: Browser console API wrappers for frgn from #Web.
-// Each declaration wraps a browser console method as a Brief function.
+// Each declaration wraps a browser console method as a Briv function.
 // The GLUE [web] target generates JS import stubs from the type signatures
 // — no compiler knowledge of these function names.
 

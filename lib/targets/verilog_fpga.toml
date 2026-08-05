@@ -12,4 +12,4 @@ hardware_config = "examples/hardware.toml"
 style = "module"
 
 [codegen.templates]
-header = "module brief_top (input wire clk, input wire rst_n);"
+header = "module briv_top (input wire clk, input wire rst_n);"

@@ -13,7 +13,7 @@ full-power, unhygienic-capable AST transformation with I/O access.
 
 ### Declaration (no sigil — sigil is calling convention only)
 
-```brief
+```briv
 template unless(cond: Expr, body: Block) -> Stmt {
     return quote { [@cond] { @body } };
 };
@@ -26,7 +26,7 @@ macro circular_buffer(name: String, size: Int) -> Block {
 
 ### Call Sites
 
-```brief
+```briv
 $unless(sensor_tripped) { keep_moving(); };    // template (safe, hygienic)
 $!circular_buffer("rx", 256);                   // macro (high-power)
 ```
@@ -35,16 +35,16 @@ $!circular_buffer("rx", 256);                   // macro (high-power)
 
 `@`-interpolation markers produce `Expr::Interpolate(String)` / `Expr::InterpolateExpr(Box<Expr>)`.
 
-```brief
+```briv
 quote { [@cond] { @body } }
 quote { state @{name}_head: Int = 0; }
 ```
 
 ### `compile#()` — String Form (string mixin)
 
-Parses a Brief source string at compile time. Always returns `Value::Block`.
+Parses a Briv source string at compile time. Always returns `Value::Block`.
 
-```brief
+```briv
 compile#("state @{name}_head: Int = 0;")
 ```
 

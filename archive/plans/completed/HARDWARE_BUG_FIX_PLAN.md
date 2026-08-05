@@ -1,4 +1,4 @@
-# Brief Compiler - Hardware Bug Fix Plan
+# Briv Compiler - Hardware Bug Fix Plan
 
 ## Status: COMPLETED
 
@@ -214,7 +214,7 @@ if io_cfg.is_some() && !self.has_memory_mapping(addr) || force_internal {
 
 - Build: `cargo build`
 - Test: `cargo test --lib`
-- Compile example: `./target/release/brief-compiler rbv examples/shopping_cart.rbv`
+- Compile example: `./target/release/briv-compiler rbv examples/shopping_cart.rbv`
 - Verify Verilog output contains AXI ports when interface = "axi4-lite"
 
 ---
@@ -227,7 +227,7 @@ These laws codify the physical constraints of silicon that software compilers mu
 
 ## Law 1: The Law of Two Doors (True RAM Inference)
 
-**The Problem:** Your current compiler walks the syntax tree and emits a write assignment (`scratch[index] <= value;`) every time it sees one in the Brief code. In software, RAM has infinite doors. In hardware, BRAM and UltraRAM have exactly two. If your compiler outputs three different `always_ff` blocks that write to the same array, Vivado will shatter it into 4 million flip-flops.
+**The Problem:** Your current compiler walks the syntax tree and emits a write assignment (`scratch[index] <= value;`) every time it sees one in the Briv code. In software, RAM has infinite doors. In hardware, BRAM and UltraRAM have exactly two. If your compiler outputs three different `always_ff` blocks that write to the same array, Vivado will shatter it into 4 million flip-flops.
 
 **The Compiler Fix:**
 

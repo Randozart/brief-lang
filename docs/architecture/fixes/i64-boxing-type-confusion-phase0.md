@@ -9,7 +9,7 @@ register type.
 
 The backend boxes all native types to `i64` for a uniform ABI (Bool → zext i1 to i64,
 Char → zext i32 to i64, String → ptrtoint i8* to i64). The `TypedRegister.ty` field
-tracks the **Brief-level type** (Bool, Char, String, etc.), NOT the LLVM type (i64).
+tracks the **Briv-level type** (Bool, Char, String, etc.), NOT the LLVM type (i64).
 When `adapt_to_i64` (or equivalent) is called on a value with `ty == Type::String` but
 whose SSA register is already `i64`, it emits `ptrtoint i8* %i64_reg to i64` — invalid.
 

@@ -61,7 +61,7 @@ state_allocation = "static"
 
 [codegen.entry_point]
 style = "module_init"
-module_name = "brief_module"
+module_name = "briv_module"
 
 [codegen.templates]
 header = """
@@ -86,7 +86,7 @@ test result: ok. 109 passed; 0 failed; 0 ignored
 
 **Default (hosted) target:**
 ```
-$ ./target/release/brief-compiler c test.bv
+$ ./target/release/briv-compiler c test.bv
 /* Target: Hosted (Desktop/Embedded Linux) */
 #include <stdlib.h>
 static State *state = NULL;  // dynamic allocation
@@ -95,11 +95,11 @@ int main(void) { ... }
 
 **Kernel module target:**
 ```
-$ ./target/release/brief-compiler c test.bv --target lib/targets/linux_kernel.toml
+$ ./target/release/briv-compiler c test.bv --target lib/targets/linux_kernel.toml
 /* Target: module_init */
 #include <linux/module.h>
 static State state_instance;  // static allocation
-module_init(brief_init);
+module_init(briv_init);
 MODULE_LICENSE("GPL");
 ```
 
@@ -140,11 +140,11 @@ a2053ae Add target_spec module with TOML loader structure
 
 ```bash
 # Compile with default (hosted) target
-./brief-compiler c input.bv
+./briv-compiler c input.bv
 
 # Compile with kernel module target
-./brief-compiler c input.bv --target lib/targets/linux_kernel.toml
+./briv-compiler c input.bv --target lib/targets/linux_kernel.toml
 
 # Compile with bare-metal target (future)
-./brief-compiler c input.bv --target lib/targets/arm_el1.toml
+./briv-compiler c input.bv --target lib/targets/arm_el1.toml
 ```

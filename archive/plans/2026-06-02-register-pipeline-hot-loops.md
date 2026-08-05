@@ -5,7 +5,7 @@
 
 ## Motivation
 
-Brief's folded-path codegen currently emits a GEP → load → add → GEP → store
+Briv's folded-path codegen currently emits a GEP → load → add → GEP → store
 round-trip through `@global_state` on every loop iteration:
 
 ```

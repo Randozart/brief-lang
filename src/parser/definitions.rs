@@ -204,13 +204,13 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("asm") {
                     return self.parse_asm_fn().map(TopLevel::AsmFn);
                 }
-                // 2026-08-04 (remove-vestigial-return): Brief has no `return`
+                // 2026-08-04 (remove-vestigial-return): Briv has no `return`
                 // statement — give the same helpful error at top level as in
                 // statement bodies (src/parser/statements.rs parse_statement).
                 if self.check_identifier("return") {
                     self.pos += 1; // consume `return`
                     return Err(SyntaxError::InvalidStatement {
-                        reason: "Brief has no `return` statement. To return a value \
+                        reason: "Briv has no `return` statement. To return a value \
                                  from a defn use `term <value>`; to mark a convergence \
                                  checkpoint use bare `term;`; `term!` closes the program."
                             .to_string(),
@@ -251,12 +251,12 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-22: Parse `frgn` declaration (import model).
     /// Syntax:
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback <expr>];
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback <fn>(<args>)];
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [target "c"] [fallback ;];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback <expr>];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback <fn>(<args>)];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback ;];
     ///
     /// `from` is required (provenance for the foreign module).
-    /// `as` is optional and comes before `from` (Brief name, different from the C symbol).
+    /// `as` is optional and comes before `from` (Briv name, different from the C symbol).
     fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
         // 2026-07-22: First name after `frgn` is the C/foreign symbol name.
         let foreign_name = self.expect_identifier()?;
@@ -279,8 +279,8 @@ impl<'a> Parser<'a> {
             vec![]
         };
 
-        // 2026-07-22: Parse optional `as <brief_name>` — Brief-side name, before `from`.
-        let brief_name = if self.eat(&Token::As) {
+        // 2026-07-22: Parse optional `as <briv_name>` — Briv-side name, before `from`.
+        let briv_name = if self.eat(&Token::As) {
             Some(self.expect_identifier()?)
         } else {
             None
@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         Ok(ForeignBinding {
             foreign_name,
-            brief_name,
+            briv_name,
             from,
             target,
             inputs,

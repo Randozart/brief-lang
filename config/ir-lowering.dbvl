@@ -7,8 +7,8 @@
 // 8 - 2 = 6 payload bytes. This config entry is an OVERRIDE of that derivation;
 // the derivation is the source of truth if this key is removed.
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): migrated from ir-lowering.toml
-// to Data Brief. Each line is `key: value;` in the flat .dbvl line-table form;
+// 2026-08-03 (Phase 3, data-briv-config plan): migrated from ir-lowering.toml
+// to Data Briv. Each line is `key: value;` in the flat .dbvl line-table form;
 // values are Int scalars read via ConfigDb. The .toml remains until parity is
 // proven (config_db::load_ir_lowering).
 

@@ -125,7 +125,7 @@ fn parse_rust_function(line: &str) -> Option<AnalyzedFunction> {
             if parts.len() >= 2 {
                 let p_name = parts[0].trim().trim_start_matches("mut ").to_string();
                 let p_type = parts[1].trim().to_string();
-                parameters.push((p_name, rust_type_to_brief(&p_type)));
+                parameters.push((p_name, rust_type_to_briv(&p_type)));
             }
         }
     }
@@ -137,7 +137,7 @@ fn parse_rust_function(line: &str) -> Option<AnalyzedFunction> {
             .find(',')
             .unwrap_or(ret.len())
             .min(ret.find('{').unwrap_or(ret.len()));
-        rust_type_to_brief(&ret[..ret_end].trim())
+        rust_type_to_briv(&ret[..ret_end].trim())
     } else {
         "Void".to_string()
     };
@@ -151,8 +151,8 @@ fn parse_rust_function(line: &str) -> Option<AnalyzedFunction> {
     })
 }
 
-/// Convert Rust type to Brief type
-fn rust_type_to_brief(rust_type: &str) -> String {
+/// Convert Rust type to Briv type
+fn rust_type_to_briv(rust_type: &str) -> String {
     let t = rust_type.trim();
 
     match t {
@@ -167,10 +167,10 @@ fn rust_type_to_brief(rust_type: &str) -> String {
         _ => {
             if t.starts_with("Vec<") {
                 let inner = &t[4..t.len() - 1];
-                format!("List<{}>", rust_type_to_brief(inner))
+                format!("List<{}>", rust_type_to_briv(inner))
             } else if t.starts_with("Option<") {
                 let inner = &t[7..t.len() - 1];
-                format!("Maybe<{}>", rust_type_to_brief(inner))
+                format!("Maybe<{}>", rust_type_to_briv(inner))
             } else {
                 format!("Custom({})", t)
             }
@@ -178,7 +178,7 @@ fn rust_type_to_brief(rust_type: &str) -> String {
     }
 }
 
-/// Convert Rust function to Brief frgn sig format
+/// Convert Rust function to Briv frgn sig format
 pub fn rust_func_to_frgn_sig(func: &AnalyzedFunction) -> String {
     let params: Vec<String> = func
         .parameters

@@ -14,7 +14,7 @@ Every `<-` push/pop/discard/transfer and string concat currently emits
 `@free(@malloc(...)) + @memcpy`. For reactive transactions with N
 iterations, this means O(N) malloc/free cycles on the hot path. Malloc
 is optimized for general-purpose use (fragmentation, thread-safety, page
-tables); Brief's semantics are far more constrained and can exploit that.
+tables); Briv's semantics are far more constrained and can exploit that.
 
 Three observations make this a natural fit:
 
@@ -157,7 +157,7 @@ reclaimed with a single pointer store.
 When a loop contract provides an upper bound (`[i < N]`), preallocate
 the collection at full capacity before the loop:
 
-```brief
+```briv
 txn build_list(list: List<Int>, i: Int) [i < 100][i == 100] -> List<Int> {
     &list = list <- i;
     &i = i + 1;

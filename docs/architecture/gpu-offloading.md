@@ -7,14 +7,14 @@
 
 ## Architecture
 
-Brief's GPU offloading uses a **dual compilation** model. When `--gpu-offload`
+Briv's GPU offloading uses a **dual compilation** model. When `--gpu-offload`
 is active (or `#gpu`/`#?gpu` directives are present), the compiler emits TWO
 outputs from a single source:
 
 1. **Native CPU binary** via the existing LLVM x86/ARM backend
 2. **SPIR-V blobs** via `llc --mtriple=spirv64-unknown-unknown`
 
-At runtime, `brief_gpu_rt.c` dispatches the SPIR-V kernels via Vulkan compute,
+At runtime, `briv_gpu_rt.c` dispatches the SPIR-V kernels via Vulkan compute,
 with a transparent CPU fallback when Vulkan is unavailable.
 
 ---
@@ -22,10 +22,10 @@ with a transparent CPU fallback when Vulkan is unavailable.
 ## Compilation Flow
 
 ```
-Brief source
+Briv source
     │
     ├──→ Normal LLVM IR codegen →
-    │       GPU loops become dispatch calls to brief_gpu_rt functions
+    │       GPU loops become dispatch calls to briv_gpu_rt functions
     │       (with CPU fallback baked in)
     │
     └──→ SPIR-V kernel extraction (gpu.rs) →
@@ -62,7 +62,7 @@ A transaction body is GPU-eligible when:
 
 ---
 
-## Runtime Library (brief_gpu_rt.c)
+## Runtime Library (briv_gpu_rt.c)
 
 The Vulkan compute runtime is a C library that:
 
@@ -71,21 +71,21 @@ The Vulkan compute runtime is a C library that:
 - Manages device memory allocation for storage buffers
 - Loads embedded SPIR-V as shader modules
 - Dispatches compute pipelines with configurable workgroup sizes
-- Falls back gracefully: `brief_gpu_is_available()` returns 0 when Vulkan
+- Falls back gracefully: `briv_gpu_is_available()` returns 0 when Vulkan
   is not present, triggering the CPU path
 
 **API:**
 
 ```c
-int     brief_gpu_init();
-int     brief_gpu_is_available();
-int64_t brief_gpu_malloc(size_t bytes);
-void    brief_gpu_free(int64_t handle);
-void    brief_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
-void    brief_gpu_launch(void* kernel_spirv, size_t kernel_size,
+int     briv_gpu_init();
+int     briv_gpu_is_available();
+int64_t briv_gpu_malloc(size_t bytes);
+void    briv_gpu_free(int64_t handle);
+void    briv_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
+void    briv_gpu_launch(void* kernel_spirv, size_t kernel_size,
                          int grid_x, int block_x,
                          const int64_t* buffer_handles, int num_buffers);
-void    brief_gpu_shutdown();
+void    briv_gpu_shutdown();
 ```
 
 SPIR-V is the Vulkan shader format — no translation needed. The same `.spv`

@@ -1,8 +1,8 @@
-# Session Report — Compiler-in-Brief (2026-08-04)
+# Session Report — Compiler-in-Briv (2026-08-04)
 
-**Scope:** the `compiler-in-brief` branch (worktree `../brief-compiler-dogfood`),
-P1–P5, merged into main here. Two compiler passes are now written in Brief,
-compiled by `briefc` itself, and loaded through the GLUE C ABI at runtime — the
+**Scope:** the `compiler-in-briv` branch (worktree `../briv-compiler-dogfood`),
+P1–P5, merged into main here. Two compiler passes are now written in Briv,
+compiled by `brivc` itself, and loaded through the GLUE C ABI at runtime — the
 compiler dogfoods the FFI it ships.
 **Purpose:** record every finding, decision, and bug from the session so a
 future session can reconstruct the reasoning without re-deriving it.
@@ -13,8 +13,8 @@ future session can reconstruct the reasoning without re-deriving it.
 
 The compiler's own GLUE FFI (merged earlier in `glue-host-callable`) had no
 in-compiler consumer. This plan made the compiler use it: **one Rust compiler
-pass rewritten in Brief, compiled to a native library by `briefc`, and linked
-in at runtime via dlopen** — the same way a host language calls a Brief bridge.
+pass rewritten in Briv, compiled to a native library by `brivc`, and linked
+in at runtime via dlopen** — the same way a host language calls a Briv bridge.
 Two passes shipped: `needs_state` (which exports carry `ptr %state`) and
 `soa_reorder` (the AoS → SoA field permutation).
 
@@ -22,21 +22,21 @@ Two passes shipped: `needs_state` (which exports carry `ptr %state`) and
 
 | Phase | Commit | What |
 |-------|--------|------|
-| Plan | `ea6c4687` | `docs/plans/2026-08-04-compiler-in-brief-dogfood-ffi.md` |
+| Plan | `ea6c4687` | `docs/plans/2026-08-04-compiler-in-briv-dogfood-ffi.md` |
 | P1 | `5d281c92` | `needs_state_projection.rs`: the tagged flat-preorder handoff |
 | P2 | `dc4c9b3b` | `needs_state.bv` matches the Rust reference on the 5-bridge corpus |
-| P3 | `ede34733` | root `build.rs` + `brief_pass.rs` dlopen loader (Option 1: runtime dlopen) |
-| P4 | `ede34733` | both production call sites route through `brief_pass::compute_export_needs_state` |
+| P3 | `ede34733` | root `build.rs` + `briv_pass.rs` dlopen loader (Option 1: runtime dlopen) |
+| P4 | `ede34733` | both production call sites route through `briv_pass::compute_export_needs_state` |
 | P5 | `a23df1ab` | `soa_reorder.bv` (second pass) + `reader.bv` (shared scanner) + recipe doc |
 
-The pattern: Rust serializes a **tagged Data Brief projection**; Brief decides;
-build.rs compiles the pass with a prebuilt briefc; brief_pass.rs dlopens it and
+The pattern: Rust serializes a **tagged Data Briv projection**; Briv decides;
+build.rs compiles the pass with a prebuilt brivc; briv_pass.rs dlopens it and
 calls `compute(state, proj) -> i64` (the i64's meaning is pass-specific —
 bitmask for needs_state, a permutation-buffer address for soa_reorder); the
-first build has no briefc yet (self-hosted bootstrap) and every pass falls back
-to its Rust reference. Transition tests assert Brief == Rust on a corpus.
+first build has no brivc yet (self-hosted bootstrap) and every pass falls back
+to its Rust reference. Transition tests assert Briv == Rust on a corpus.
 
-## 3. Verified Brief language facts that shaped the passes
+## 3. Verified Briv language facts that shaped the passes
 
 - **`when cond { body }` is an if-guard, not a while loop** (interpreter and
   LLVM backend agree). All pass iteration is tail RECURSION.
@@ -44,7 +44,7 @@ to its Rust reference. Transition tests assert Brief == Rust on a corpus.
   String in a register is a ptr. `.^Len` and `==` must inttoptr the handle.
 - **Dynamic String slices return the whole array** (emit_expr.rs:992); **String
   `+` codegens a register collision**; **`List<String>` element reads return the
-  generic `T`**. The passes therefore use `brief_str_substr` + `char_at` frgns
+  generic `T`**. The passes therefore use `briv_str_substr` + `char_at` frgns
   and re-scan the projection string instead of building collections.
 - A stateful export's C signature takes the **state handle first**
   (`<pass>(state, proj)`).
@@ -79,8 +79,8 @@ to its Rust reference. Transition tests assert Brief == Rust on a corpus.
    to a regular defn produced a STATELESS export shim that referenced `%state`
    (opt: "use of undefined value '%state'"). Both now recurse. (`a23df1ab`)
 8. **Dynamic String slicing had no runtime implementation** — added
-   `brief_str_substr` (substring) and `brief_str_char_at` (Int byte, no
-   allocation) to brief_rt.c. (`ef5c476f`)
+   `briv_str_substr` (substring) and `briv_str_char_at` (Int byte, no
+   allocation) to briv_rt.c. (`ef5c476f`)
 
 ## 5. The "heap corruption" that wasn't
 
@@ -89,17 +89,17 @@ projection landed in `%state` and `%arg0` was garbage, so the meld read a
 random length across runs (60 / 5 / 3). With the correct two-argument call
 (`needs_state_compute(state, proj)`), the pass is deterministic. Recorded in
 BUGS.md as a correction — the lesson: a stateful export's C signature takes
-the state handle first; the `brief bindings` header is the source of truth.
+the state handle first; the `briv bindings` header is the source of truth.
 
 ## 6. Verification
 
 - `needs_state_compute` == `compute_export_needs_state` on boundary (0),
   node_bridge (31), cancel (1), rank (2), bench (2) — asserted by
-  `tests/c_driver_needs_state.rs` and `brief_pass.rs`'s unit test (which also
+  `tests/c_driver_needs_state.rs` and `briv_pass.rs`'s unit test (which also
   asserts the dlopen path was USED, not the fallback).
 - `soa_reorder_compute` == `reorder_fields` on `nbody_newton.bv` — asserted by
-  `soa_reorder.rs::brief_reorder_matches_reference_on_nbody` and
-  `brief_pass.rs::soa_pass_matches_reorder_fields`.
+  `soa_reorder.rs::briv_reorder_matches_reference_on_nbody` and
+  `briv_pass.rs::soa_pass_matches_reorder_fields`.
 - All c_driver glue tests (boundary/node/callback/cancel/library) pass through
   the dlopen'd passes.
 - Full `cargo test`: 1569 passed, 0 failed.
@@ -107,18 +107,18 @@ the state handle first; the `brief bindings` header is the source of truth.
 ## 7. Known gaps (see BUGS.md)
 
 - Dynamic String slices still return the whole array (worked around via the
-  `brief_str_substr` frgn); a real fix would make slices construct substrings.
+  `briv_str_substr` frgn); a real fix would make slices construct substrings.
 - String `+` codegens a register collision (the passes avoid it).
 - `List<String>` element reads return the generic `T` (the passes re-scan
   instead of reading collections).
 - string.bv does not type-check (legacy bodies: `StrBytes#`, `List+`, method
-  calls on String) — surfaced by the error-not-swallowed fix; the in-Brief
+  calls on String) — surfaced by the error-not-swallowed fix; the in-Briv
   compiler's `main.bv`/backends (which import std/string) need the repair.
 - The `.so` paths are embedded at compile time — a moved checkout rebuilds them.
 
 ## 8. Recipe
 
-`docs/architecture/compiler-in-brief.md` is the how-to: the model, a 6-step
+`docs/architecture/compiler-in-briv.md` is the how-to: the model, a 6-step
 "add a new pass" checklist, the verified language facts, and the Rust-side
 codegen rules learned the hard way. A third pass would justify generalizing the
 section-line writer in the Rust serializers into a shared helper.

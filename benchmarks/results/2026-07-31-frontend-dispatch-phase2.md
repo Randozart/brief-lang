@@ -1,7 +1,7 @@
 # Phase 2 — Frontend Measurement Passes results
 
 **Date:** 2026-07-31
-**Worktree:** FDD worktree at `../brief-compiler-fdd`, branch `feat/frontend-driven-dispatch`
+**Worktree:** FDD worktree at `../briv-compiler-fdd`, branch `feat/frontend-driven-dispatch`
 **Baseline:** Phase 1b results in `2026-07-31-frontend-dispatch-phase1b.md` (commit `c953c3c4`)
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
@@ -43,28 +43,28 @@ Phase 2 compiler were both used to compile all 38 `benchmarks/*.bv` programs:
   `declare` block ordering (which varies run-to-run even between two reference
   builds — pre-existing non-determinism, now fixed).
 
-## Runtime ratios (Brief vs C, ratio < 1 = Brief faster)
+## Runtime ratios (Briv vs C, ratio < 1 = Briv faster)
 
-| Benchmark | Phase 2 Brief | Phase 2 ratio | Phase 1b ratio | Δ | Winner | Correct |
+| Benchmark | Phase 2 Briv | Phase 2 ratio | Phase 1b ratio | Δ | Winner | Correct |
 |-----------|--------------:|:-------------:|:--------------:|:---:|:------:|:-------:|
 | ring_buffer | 0.0567s | 1.18× | 1.10× | +0.08 | C | MATCH |
-| float_math | 0.0715s | 0.97× | 0.95× | +0.02 | Brief | MATCH |
+| float_math | 0.0715s | 0.97× | 0.95× | +0.02 | Briv | MATCH |
 | float_math_nonzero | 0.2013s | 1.20× | 1.21× | −0.01 | C | MATCH |
-| sparse_dispatch | 0.0537s | 0.86× | 0.82× | +0.04 | Brief | MATCH |
+| sparse_dispatch | 0.0537s | 0.86× | 0.82× | +0.04 | Briv | MATCH |
 | print_loop | 0.0619s | 1.06× | 1.05× | +0.01 | C | MATCH |
-| nbody_newton | 6.8883s | 0.83× | 0.83× | 0.00 | Brief | MATCH |
-| nbody_sqrt | 2.1868s | 0.78× | 0.77× | +0.01 | Brief | MATCH |
-| nbody_sqrt_idio | 2.7818s | 0.76× | 0.75× | +0.01 | Brief | MATCH |
+| nbody_newton | 6.8883s | 0.83× | 0.83× | 0.00 | Briv | MATCH |
+| nbody_sqrt | 2.1868s | 0.78× | 0.77× | +0.01 | Briv | MATCH |
+| nbody_sqrt_idio | 2.7818s | 0.76× | 0.75× | +0.01 | Briv | MATCH |
 | fasta | 0.2120s | 1.01× | 0.98× | +0.03 | C | MATCH |
-| fannkuch_redux | 0.0627s | 0.97× | 0.95× | +0.02 | Brief | MATCH |
+| fannkuch_redux | 0.0627s | 0.97× | 0.95× | +0.02 | Briv | MATCH |
 | mandelbrot | 0.6814s | 1.03× | 1.03× | 0.00 | C | MATCH |
 | kalman_filter_runtime | 0.2197s | 1.23× | 1.24× | −0.01 | C | MATCH |
-| knucleotide | 0.1886s | 0.98× | 0.99× | −0.01 | Brief | MATCH |
-| cancel_math | 0.0521s | 0.80× | 0.85× | −0.05 | Brief | MATCH |
-| bit_clear | 0.0s | 0× | 0.33× | (noise) | Brief | MATCH |
-| queue_drain | 0.0561s | 0.85× | 0.93× | −0.08 | Brief | MATCH |
-| queue_drain_sym | 0.0565s | 0.92× | 0.90× | +0.02 | Brief | MATCH |
-| queue_drain_idio | 0.0579s | 0.93× | 0.91× | +0.02 | Brief | MATCH |
+| knucleotide | 0.1886s | 0.98× | 0.99× | −0.01 | Briv | MATCH |
+| cancel_math | 0.0521s | 0.80× | 0.85× | −0.05 | Briv | MATCH |
+| bit_clear | 0.0s | 0× | 0.33× | (noise) | Briv | MATCH |
+| queue_drain | 0.0561s | 0.85× | 0.93× | −0.08 | Briv | MATCH |
+| queue_drain_sym | 0.0565s | 0.92× | 0.90× | +0.02 | Briv | MATCH |
+| queue_drain_idio | 0.0579s | 0.93× | 0.91× | +0.02 | Briv | MATCH |
 | interval_step | 0.0629s | 1.01× | 1.01× | 0.00 | C | MATCH |
 
 **Zero MISMATCH.** The two largest deltas are ring_buffer (+0.08×) and

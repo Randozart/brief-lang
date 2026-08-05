@@ -173,7 +173,7 @@ a linter, formatter, or test runner would read rules from config.
 **Alternative:** Make `ConfigGet$` return `NavValue::Map` for structured config,
 and let subsequent `StrReplace$` calls access fields via dot notation:
 
-```brief
+```briv
 let cfg = ConfigGet$("rust");
 // cfg is NavValue::Map with keys "templates", "protocols", etc.
 let tmpl = cfg["templates"]["fn_template"];
@@ -241,7 +241,7 @@ This one is trickier because it requires extending `NavValue` and the item
 selection system to expose AST node properties. A simpler first step:
 `NavValue::TopLevel` already exists — extend it to support field access:
 
-```brief
+```briv
 let defn = Named$("my_fn").First$();
 let param_count = TypeInfo$(defn, "params.count");  // number of params
 let first_param_name = TypeInfo$(defn, "params.0.name");  // first param name
@@ -314,9 +314,9 @@ by external tools.
 
 **Examples of generic use:**
 - **Bridge generator**: `ShellCmd$("llc", "-filetype=obj", "bridge.ll")` — compile LLVM IR
-- **Formatter**: `ShellCmd$("brief", "check", "--format", "file.bv")` — run sub-compiler
+- **Formatter**: `ShellCmd$("briv", "check", "--format", "file.bv")` — run sub-compiler
 - **Linter**: `ShellCmd$("clang-tidy", "file.c")` — run external linter
-- **Test runner**: `ShellCmd$("cargo", "test")` — run tests from within Brief
+- **Test runner**: `ShellCmd$("cargo", "test")` — run tests from within Briv
 - **Doc generator**: `ShellCmd$("pandoc", "doc.md", "-o", "doc.pdf")` — convert docs
 
 **Implementation:**
@@ -377,7 +377,7 @@ Should document:
   it belongs in the bridge generator `.bv` file, not in the Rust engine itself
 - The catalog: all available `$` intrinsics with signatures and examples
 
-### `learn-brief/16-plugins.md`
+### `learn-briv/16-plugins.md`
 
 Should be extended with:
 - How plugins use `$` intrinsics for file I/O, config, and external commands
@@ -385,9 +385,9 @@ Should be extended with:
 - How the bridge generator plugin works (as an example of combining multiple
   `$` intrinsics)
 
-### `learn-brief/07-ffi.md`
+### `learn-briv/07-ffi.md`
 
-Add a brief section about the `$` intrinsics used in the GLUE pipeline.
+Add a briv section about the `$` intrinsics used in the GLUE pipeline.
 Currently it only covers `frgn` and `export defn` — should mention that
 the bridge generator itself is a `$(Glue @ highest)` plugin using `ConfigGet$`,
 `StrReplace$`, `FileWrite$`, etc.
@@ -401,10 +401,10 @@ the bridge generator itself is a `$(Glue @ highest)` plugin using `ConfigGet$`,
 cargo test --lib
 
 # The prelude still works (exercise the full pipeline)
-brief build counter.bv --llvm
+briv build counter.bv --llvm
 
 # GLUE bridge still works
-brief export pp-types.bv rust --out /tmp/test
+briv export pp-types.bv rust --out /tmp/test
 cd /tmp/test && cargo build
 ```
 

@@ -1,4 +1,4 @@
-# Brief Cosmopolitan Architecture Implementation
+# Briv Cosmopolitan Architecture Implementation
 
 **Version:** 1.0  
 **Date:** 2026-05-01  
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-This document details the implementation plan to fully realize the Brief Cosmopolitan Architecture: a single `brief compile` command that adapts to any target via TOML configuration.
+This document details the implementation plan to fully realize the Briv Cosmopolitan Architecture: a single `briv compile` command that adapts to any target via TOML configuration.
 
 ---
 
@@ -21,10 +21,10 @@ This document details the implementation plan to fully realize the Brief Cosmopo
 ### Verified Working
 ```bash
 # Default: hosted C
-./brief-compiler c test.bv → #include <stdlib.h>, main()
+./briv-compiler c test.bv → #include <stdlib.h>, main()
 
 # With target spec
-./brief-compiler c test.bv --target lib/targets/linux_kernel.toml → Linux kernel module
+./briv-compiler c test.bv --target lib/targets/linux_kernel.toml → Linux kernel module
 ```
 
 ---
@@ -33,7 +33,7 @@ This document details the implementation plan to fully realize the Brief Cosmopo
 
 ### The Unified Command
 ```bash
-brief compile <SOURCE> --target <CONFIG.toml>
+briv compile <SOURCE> --target <CONFIG.toml>
 ```
 
 ### Capabilities System
@@ -51,14 +51,14 @@ capabilities = ["logic", "reactive_ui"]  # .bv and .rbv allowed
 
 ### Phase 3: Unified CLI Interface
 
-**Goal:** Add `brief compile` command and capability validation.
+**Goal:** Add `briv compile` command and capability validation.
 
 #### Tasks
 
 1. **Add `compile` subcommand to CLI**
    - File: `src/main.rs`
    - Replace/alias all existing commands to use unified flow
-   - `brief compile <file> --target <spec>` as primary interface
+   - `briv compile <file> --target <spec>` as primary interface
 
 2. **Capability Validation**
    - File: `src/target_spec/mod.rs`
@@ -71,7 +71,7 @@ capabilities = ["logic", "reactive_ui"]  # .bv and .rbv allowed
    - Map to semantic layers
 
 #### Deliverables
-- `brief compile` command working
+- `briv compile` command working
 - Capability validation errors
 - Source type detection
 
@@ -157,7 +157,7 @@ capabilities = ["logic", "reactive_ui"]  # .bv and .rbv allowed
 
 #### Deliverables
 - All backends accept TargetSpec
-- `brief compile` produces correct output for each target
+- `briv compile` produces correct output for each target
 
 ---
 
@@ -203,11 +203,11 @@ capabilities = ["logic", "reactive_ui"]  # .bv and .rbv allowed
 ### Phase 3 Tests
 ```bash
 # Capability mismatch
-./brief compile app.ebv --target react_web.toml
+./briv compile app.ebv --target react_web.toml
 # Expected: Error B4001
 
 # Valid compile
-./brief compile app.rbv --target react_web.toml
+./briv compile app.rbv --target react_web.toml
 # Expected: Success, .tsx output
 ```
 
@@ -215,7 +215,7 @@ capabilities = ["logic", "reactive_ui"]  # .bv and .rbv allowed
 ```bash
 # Test each target spec
 for spec in lib/targets/*.toml; do
-  ./brief compile test.bv --target $spec
+  ./briv compile test.bv --target $spec
 done
 ```
 
@@ -224,7 +224,7 @@ done
 # Full matrix
 for target in react webgpu python cobol; do
   for source in bv rbv ebv; do
-    ./brief compile test.$source --target $target.toml
+    ./briv compile test.$source --target $target.toml
   done
 done
 ```
@@ -234,7 +234,7 @@ done
 ## Success Criteria
 
 1. ✅ **Phase 2:** C backend uses TargetSpec (DONE)
-2. ⏳ **Phase 3:** `brief compile` command, capability validation
+2. ⏳ **Phase 3:** `briv compile` command, capability validation
 3. ⏳ **Phase 4:** 9 target specs created
 4. ⏳ **Phase 5:** All backends wired to TargetSpec
 5. ⏳ **Phase 6:** Inference engine operational
@@ -261,9 +261,9 @@ git commit -m "Phase 6: Add inference engine"
 
 ## Notes
 
-- Legacy commands (`brief c`, `brief rbv`, etc.) will continue to work as convenience aliases
-- They will internally resolve to: `brief compile <file> --target <default_spec>.toml`
-- Error codes: Use prefix `B4xxx` for Brief Cosmopolitan errors
+- Legacy commands (`briv c`, `briv rbv`, etc.) will continue to work as convenience aliases
+- They will internally resolve to: `briv compile <file> --target <default_spec>.toml`
+- Error codes: Use prefix `B4xxx` for Briv Cosmopolitan errors
   - `B4001`: Capability mismatch
   - `B4002`: Target not found
   - `B4003`: Backend error

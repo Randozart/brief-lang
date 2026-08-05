@@ -1,4 +1,4 @@
-# Data Brief — Configuration & Structured Data Format
+# Data Briv — Configuration & Structured Data Format
 
 **Date:** 2026-07-26
 **Status:** Specification
@@ -8,7 +8,7 @@
 
 ## 1. Philosophy
 
-Data Brief is a family of two formats (`.dbv`, `.dbvl`) designed for the
+Data Briv is a family of two formats (`.dbv`, `.dbvl`) designed for the
 systems-programming sweet spot: **deterministic parsing, zero ambiguity, and
 human ergonomics** — without the bloat of XML, the magic coercions of YAML,
 the quote pollution of JSON, or the bracket noise of TOML.
@@ -32,8 +32,8 @@ Three principles govern the design:
 
 | Extension | Name | Purpose |
 |-----------|------|---------|
-| `.dbv` | Data Brief Volume | Structured data with optional inline schema. Supports named entries, positional entries, nested blocks, and key-value maps. |
-| `.dbvl` | Data Brief Lines | Line-oriented format. One entry per line. Positional fields separated by `;`. Schema imported via `>` directives. |
+| `.dbv` | Data Briv Volume | Structured data with optional inline schema. Supports named entries, positional entries, nested blocks, and key-value maps. |
+| `.dbvl` | Data Briv Lines | Line-oriented format. One entry per line. Positional fields separated by `;`. Schema imported via `>` directives. |
 
 `.dbvs` is removed. Schema definitions live in `.dbv` files (inline or as
 standalone schema-only `.dbv` files).
@@ -195,10 +195,10 @@ The import path is resolved relative to the current file's directory.
 
 ## 5. Primitive Types
 
-Data Brief defines exactly six primitive types. These are the only types the
-parser and schema validator understand natively — no Brief `.bv` type universe
-required. A `.dbv` file can be parsed by any language (C, Python, Rust, Brief)
-without importing any Brief source code.
+Data Briv defines exactly six primitive types. These are the only types the
+parser and schema validator understand natively — no Briv `.bv` type universe
+required. A `.dbv` file can be parsed by any language (C, Python, Rust, Briv)
+without importing any Briv source code.
 
 ### 5.1 The Six Primitives
 
@@ -283,10 +283,10 @@ markers (same syntax as an `as {}` block body).
 ### 5.5 Why Only Six Primitives
 
 The goal is universal parseability. A C program reading a `.dbv` file should
-not need to link against Brief's type system. Six primitives cover every
+not need to link against Briv's type system. Six primitives cover every
 configuration and metadata use case the format targets. If richer typing is
 needed, the bridge layer or a downstream tool can cast raw `String` values
-to Brief types — the data format does not enforce the mapping.
+to Briv types — the data format does not enforce the mapping.
 
 ---
 
@@ -525,8 +525,8 @@ user wants). See §3.4.
 
 ## 8. Universal Config (`.dbvl` line tables)
 
-2026-08-03 (plan `docs/plans/2026-08-03-data-brief-config-and-board-hardware-
-map.md`): Data Brief is the compiler's universal config format. Every
+2026-08-03 (plan `docs/plans/2026-08-03-data-briv-config-and-board-hardware-
+map.md`): Data Briv is the compiler's universal config format. Every
 `config/*.toml` was migrated to a flat `.dbvl` line table; the `.toml` files
 are deleted and the parity (now golden) tests lock the exact values.
 
@@ -565,7 +565,7 @@ The seven config files (all `.dbvl`):
 | `config/alloc-strategies.dbvl` | `<name>: "<IR template>"; [free];` (quoted) |
 | `config/address-map.dbvl` | `<KEY>: <0x...>; <block_size>;` |
 
-The loader is `src/dbrief/config_db.rs` (`ConfigDb`), shared by all consumers;
+The loader is `src/dbriv/config_db.rs` (`ConfigDb`), shared by all consumers;
 `resolve_config_file` resolves `.dbvl`/`.dbv` in the resolved config dir
 (`--config-dir` / profile / baked). `init_profile` seeds all seven.
 
@@ -697,7 +697,7 @@ for each line in file:
     emit(entry)
 ```
 
-No state machine beyond directive tracking. ~40 lines in C/Rust/Brief.
+No state machine beyond directive tracking. ~40 lines in C/Rust/Briv.
 
 ### 11.2 `.dbv` Parser
 
@@ -836,7 +836,7 @@ purpose of the line-per-record design.
 
 ### 13.5 Parser Error Messages
 
-The DBrief parser produces contextual errors for common mistakes. Each error
+The DBriv parser produces contextual errors for common mistakes. Each error
 must include: file path, line number, offending byte range, and what was
 expected vs found.
 
@@ -855,7 +855,7 @@ expected vs found.
 
 ## 14. Migration from Legacy Syntax
 
-The old Data Brief syntax (`docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`) used
+The old Data Briv syntax (`docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`) used
 commas, quotes, and `schema { }` blocks with different token rules. Migration:
 
 | Old | New |
@@ -876,7 +876,7 @@ files — the resulting binary is identical regardless of input format.
 
 ### 15.1 Schema Registry
 
-A `.brief/schemas/` directory (similar to `.brief/registry/`) for storing
+A `.briv/schemas/` directory (similar to `.briv/registry/`) for storing
 reusable schemas. `schema Person from "std/person.dbv"` resolves against the
 registry when the relative path fails.
 

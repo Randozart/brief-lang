@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fuzzing Infrastructure for Brief Compiler
+//! Fuzzing Infrastructure for Briv Compiler
 //!
 //! Property-based fuzzing using proptest to verify compiler correctness.
 

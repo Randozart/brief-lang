@@ -1,6 +1,6 @@
-// Async Parallel Counters — C reference for Brief LLVM backend Path 5 benchmark
+// Async Parallel Counters — C reference for Briv LLVM backend Path 5 benchmark
 //
-// Two counters each reach N via pure-body increments. Brief proves both are
+// Two counters each reach N via pure-body increments. Briv proves both are
 // pure with known bounds and emits two `store i64 N` (O(1)). C gets the same
 // optimization: the compiler eliminates both loops.
 //

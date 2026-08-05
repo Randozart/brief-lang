@@ -1,4 +1,4 @@
-# Brief Compiler - Agent Guidelines (Historical Record)
+# Briv Compiler - Agent Guidelines (Historical Record)
 
 **This is the archived historical record of all optimization sprints, benchmark results,
 implementation phases, and bug fixes from May 31 through June 5, 2026.**
@@ -6,7 +6,7 @@ The current active guidelines live in AGENTS.md.
 
 ---
 
-# Brief Compiler - Agent Guidelines
+# Briv Compiler - Agent Guidelines
 
 See CLAUDE.md for complete documentation. This file ensures OpenCode picks up the same guidelines.
 
@@ -16,15 +16,15 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
-- **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
-- **Selfhost** (deferred): `cargo run --bin brief-compiler -- selfhost <file.bv>` — self-hosting compiler relies on `list_append`/`get` magic; to be migrated to `<-` arrow syntax in Part C. Currently broken — magic handlers removed.
+- **Compile RBV**: `./target/release/briv-compiler rbv <file.rbv>`
+- **Selfhost** (deferred): `cargo run --bin briv-compiler -- selfhost <file.bv>` — self-hosting compiler relies on `list_append`/`get` magic; to be migrated to `<-` arrow syntax in Part C. Currently broken — magic handlers removed.
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness, never ad-hoc `/usr/bin/time` or other external timers. The harness rebuilds all binaries, uses nanosecond CLOCK_MONOTONIC timing, and averages 5 iterations. Ad-hoc timing produces false hangs (SIGTERM handler traps timeout) and imprecise numbers.
 
 ### File Types
-- **.bv** - Brief (standard Brief file)
-- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Designed for web specifically. Like `.tsx` is to `.ts`)
-- **.ebv** - Embedded Brief (Brief with less OS based abstractions, and more oriented towards bare metal and embedded programming)
-- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema and lines, think `.xml` compared to `.xmls` and `.json` compared to `.jsonl`)
+- **.bv** - Briv (standard Briv file)
+- **.rbv** - Rendered Briv (Briv + View, compiles to web frontend. Designed for web specifically. Like `.tsx` is to `.ts`)
+- **.ebv** - Embedded Briv (Briv with less OS based abstractions, and more oriented towards bare metal and embedded programming)
+- **.dbv/.dbvs/.dbvl** - Data Briv (configuration with schema and lines, think `.xml` compared to `.xmls` and `.json` compared to `.jsonl`)
 
 ### Critical Philosophy
 
@@ -54,7 +54,7 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 
 A program that produces no observable effect IS dead code. The compiler is correct to eliminate it.
 
-Brief's liveness model follows from one principle: **a value is live if an FFI call consumes it.** Every program must eventually interact with the world — print to stdout, write to a file, send a network packet. These are all `frgn` calls.
+Briv's liveness model follows from one principle: **a value is live if an FFI call consumes it.** Every program must eventually interact with the world — print to stdout, write to a file, send a network packet. These are all `frgn` calls.
 
 When benchmarking:
 - If the compiler folded your entire hot loop to `store i64 N`, **the compiler is right.** Your program produced no observable output, so the computation served no purpose.
@@ -69,19 +69,19 @@ When benchmarking:
 
 ### Benchmarks test semantic goals, not syntactic features
 
-Brief benchmarks answer one question: **"Can Brief compute X with competitive performance vs C?"** — not "Does Brief have feature Y?" Implement the benchmark's **semantic goal** using Brief's idioms, not a line-by-line port.
+Briv benchmarks answer one question: **"Can Briv compute X with competitive performance vs C?"** — not "Does Briv have feature Y?" Implement the benchmark's **semantic goal** using Briv's idioms, not a line-by-line port.
 
-Example: knucleotide counts k-mer frequencies over a DNA sequence. C uses `int counts[4^k]` + string indexing. Brief encodes the sequence as an Int rolling hash and dispatches through 64 guarded state-field blocks — same output, different encoding. Both compute the same frequency distribution.
+Example: knucleotide counts k-mer frequencies over a DNA sequence. C uses `int counts[4^k]` + string indexing. Briv encodes the sequence as an Int rolling hash and dispatches through 64 guarded state-field blocks — same output, different encoding. Both compute the same frequency distribution.
 
-### Benchmarks exist to find flaws in Brief
+### Benchmarks exist to find flaws in Briv
 
 A benchmark that fails (won't compile, hangs, produces wrong output) tells you something is missing in the compiler. A benchmark that is "too good to be true" (0.001s for a computation that should take work) tells you the compiler folded your program — your program produced no observable output, so it's dead code. Both failure modes are diagnostic signals. Treat them as such.
 
-If a Brief benchmark beats C by an implausible margin, first suspect the C reference has been hobbled (volatile, unused return, artificial liveness). Fix the C reference, don't celebrate the win. The only valid victory is Brief vs C on symmetric, structurally-live programs.
+If a Briv benchmark beats C by an implausible margin, first suspect the C reference has been hobbled (volatile, unused return, artificial liveness). Fix the C reference, don't celebrate the win. The only valid victory is Briv vs C on symmetric, structurally-live programs.
 
 ### When a benchmark can't be implemented as-is: find the isomorphism
 
-| C pattern | Brief-idiomatic equivalent |
+| C pattern | Briv-idiomatic equivalent |
 |-----------|---------------------------|
 | `malloc` + pointer navigation | Contract-proven struct arrays + index-based traversal |
 | `double u[N]` (runtime-sized) | Contract-proven compile-time bound + `<-` push |
@@ -103,9 +103,9 @@ If a Brief benchmark beats C by an implausible margin, first suspect the C refer
 
 ### The C reference is symmetric, always
 
-Every C reference uses the same observable output mechanism as the Brief version.
+Every C reference uses the same observable output mechanism as the Briv version.
 Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused variables.
-Any performance asymmetry is a signal of a missing Brief optimization — fix the compiler, not the C code.
+Any performance asymmetry is a signal of a missing Briv optimization — fix the compiler, not the C code.
 
 ### Useful utilities from benchmarks become standard library functions
 
@@ -122,25 +122,25 @@ could serve as a general-purpose utility MUST be added to `lib/std/`.
 
 ## Language Architecture
 
-Brief is a **general-purpose programming language**. The interpreter proves this — it already supports the full expression language including lists, strings, structs, enums, pattern matching, hash maps, and FFI. The standard library (`lib/std/`) has 26 modules covering strings, collections, math, I/O, JSON, HTTP, encoding, shared memory, and more.
+Briv is a **general-purpose programming language**. The interpreter proves this — it already supports the full expression language including lists, strings, structs, enums, pattern matching, hash maps, and FFI. The standard library (`lib/std/`) has 26 modules covering strings, collections, math, I/O, JSON, HTTP, encoding, shared memory, and more.
 
-### How Brief Works (Correct Model)
+### How Briv Works (Correct Model)
 
-Brief's computational primitive is the **reactive transaction** (`node`). A transaction has:
+Briv's computational primitive is the **reactive transaction** (`node`). A transaction has:
 - A **precondition** (guard): `[x > 0 && y < N]`
 - A **postcondition** (contract): `[x == N]`
 - A **body**: `{ &x = x + 1; &y = y * 2; }`
 
-The compiler's job is to analyze the transaction graph and emit code for the most efficient execution path. This is NOT a niche reactive DSL — it IS how Brief expresses computation. Loops are transactions with bounded convergence (`[count < N][count == N]`). Recursion is a transaction chain with proved termination. Every optimization (purity folding, dead-field elimination, SROA, SLP vectorization) applies because the compiler has enough information from contracts to prove correctness.
+The compiler's job is to analyze the transaction graph and emit code for the most efficient execution path. This is NOT a niche reactive DSL — it IS how Briv expresses computation. Loops are transactions with bounded convergence (`[count < N][count == N]`). Recursion is a transaction chain with proved termination. Every optimization (purity folding, dead-field elimination, SROA, SLP vectorization) applies because the compiler has enough information from contracts to prove correctness.
 
 ### Misconceptions to Avoid
 
 | Wrong | Correct |
 |-------|---------|
-| "Brief is a reactive state machine DSL" | Brief is a general-purpose language. Transactions are the computational primitive — they ARE loops, iteration, and recursion. |
-| "Brief has no arrays/strings/collections" | The interpreter supports `List<T>`, `String`, `HashMap<K,V>`, `HashSet<T>`, `Stack<T>`, `Queue<T>`, `StringBuilder`. The stdlib has 26 modules including `collections.bv`, `string.bv`, `char.bv`, `json.bv`, etc. |
-| "Brief can't do tree/heap benchmarks" | The interpreter supports recursive enum types (e.g., `enum Tree { Node(Tree, Tree), Leaf }`), struct instances, field access, and match expressions. |
-| "Brief needs malloc/FFI for buffers" | No. The compiler proves bounds from contracts at compile time and allocates accordingly. The programmer writes proofs, the compiler handles memory. |
+| "Briv is a reactive state machine DSL" | Briv is a general-purpose language. Transactions are the computational primitive — they ARE loops, iteration, and recursion. |
+| "Briv has no arrays/strings/collections" | The interpreter supports `List<T>`, `String`, `HashMap<K,V>`, `HashSet<T>`, `Stack<T>`, `Queue<T>`, `StringBuilder`. The stdlib has 26 modules including `collections.bv`, `string.bv`, `char.bv`, `json.bv`, etc. |
+| "Briv can't do tree/heap benchmarks" | The interpreter supports recursive enum types (e.g., `enum Tree { Node(Tree, Tree), Leaf }`), struct instances, field access, and match expressions. |
+| "Briv needs malloc/FFI for buffers" | No. The compiler proves bounds from contracts at compile time and allocates accordingly. The programmer writes proofs, the compiler handles memory. |
 | "The LLVM backend is the language" | The interpreter IS the reference implementation. The LLVM backend is an optimization pass over it. If the interpreter runs it, the backend should eventually compile it. |
 
 ### Two-Layer Architecture
@@ -190,7 +190,7 @@ The interpreter is the full reference implementation. Here is the exact status:
 - **Recursive defn calls**: `defn` functions CAN call themselves, but there is NO recursion guard or stack depth limit. A deeply-recursive `defn` will stack-overflow the Rust interpreter.
 - **ForAll/Exists**: Removed from surface syntax. Stub AST nodes remain but the quantified forms are not part of the language.
 
-**Conclusion**: The interpreter supports Brief as a general-purpose language. Recursive-defn safety is the only meaningful gap.
+**Conclusion**: The interpreter supports Briv as a general-purpose language. Recursive-defn safety is the only meaningful gap.
 
 ## LLVM Backend Gaps
 
@@ -240,15 +240,15 @@ This project uses OpenCode. When making changes:
 5. Document bugs and root causes in BUGS.md
 6. Never add Rust built-ins for things the standard library should provide
 7. **No prototyping — build clean**: Every optimization is a first-class pass in its proper module. Never inline new analysis into codegen as a shortcut.
-8. **Never weaken C benchmarks**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C with `volatile` or artificial liveness hacks. Fix Brief to match or beat C's optimization.
+8. **Never weaken C benchmarks**: Every asymmetry between Briv and C is a signal of a missing Briv optimization. Never hobble C with `volatile` or artificial liveness hacks. Fix Briv to match or beat C's optimization.
 9. **The interpreter IS the reference**: If the interpreter runs it correctly, the backend should eventually compile it. If the interpreter doesn't support something, add it to the interpreter first, then add codegen.
-10. **Benchmarks on our own terms**: Brief benchmarks compare end-to-end results (Input X → Output Y). The compiler chooses the optimal execution path. Adding features for benchmarks is fine IF they add value to the language. Never add features solely to run benchmarks.
+10. **Benchmarks on our own terms**: Briv benchmarks compare end-to-end results (Input X → Output Y). The compiler chooses the optimal execution path. Adding features for benchmarks is fine IF they add value to the language. Never add features solely to run benchmarks.
 
 ## Self-Hosting Pipeline
 
-The Brief-in-Brief compiler lives in `lib/compiler/`. The Rust interpreter runs it via:
+The Briv-in-Briv compiler lives in `lib/compiler/`. The Rust interpreter runs it via:
 ```
-brief-compiler selfhost <file.bv>
+briv-compiler selfhost <file.bv>
 ```
 
 **NOT currently being worked on.** The self-hosted compiler is broken at the parser level (multidimensional slice parsing bug). It is deferred until further notice. The CLI command remains wired in `main.rs` for reference only.
@@ -257,7 +257,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: 400 tests pass. Phases 1-4 complete plus Phase 5 (DBVS import pipeline), N3 (PGO), and N2 (equality saturation). Brief wins or ties on 8 of 9 benchmarks. print_loop at 1.63× of C.
+**Current**: 400 tests pass. Phases 1-4 complete plus Phase 5 (DBVS import pipeline), N3 (PGO), and N2 (equality saturation). Briv wins or ties on 8 of 9 benchmarks. print_loop at 1.63× of C.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -277,30 +277,30 @@ brief-compiler selfhost <file.bv>
 - **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
 
 ### Benchmarks (2026-06-03 — all phases, C with `-O3 -ffast-math`, 50M iterations)
-| Benchmark | Path | Brief | C | Ratio |
+| Benchmark | Path | Briv | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | Dead-field elim + pure counter | **0.001s** | 0.084s | **Brief wins** |
+| iir_filter | Dead-field elim + pure counter | **0.001s** | 0.084s | **Briv wins** |
 | precompute_sum | Compile-time precomputation | 0.001s | 0.001s | ~tie |
 | ring_buffer | Enum O(1) pure-counter | 0.001s | 0.001s | ~tie |
 | async_counters | Thread pool O(1) pure-counter | 0.001s | 0.001s | ~tie |
-| float_math | alloca+SROA + fast-math + -O3 | **0.004s** | 0.006s | **Brief ~1.5×** |
-| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.162s** | 0.165s | **Brief ~1.02×** |
+| float_math | alloca+SROA + fast-math + -O3 | **0.004s** | 0.006s | **Briv ~1.5×** |
+| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.162s** | 0.165s | **Briv ~1.02×** |
 | sparse_dispatch | Dispatch-chain collapse | 0.001s | 0.001s | ~tie |
-| const_heavy | Integer arithmetic (sdiv) | 0.001s | 0.034s | **Brief wins** |
-| print_loop | **FFI-based structurally-live** | **0.030s** | 0.049s | **Brief 1.63×** |
-| nbody_newton | Custom Newton sqrt inlined vs C sqrtf | **3.62s** | 9.73s | **Brief 2.7×** |
-| nbody_sqrt | Both use sqrtf, Brief loses on call overhead | 6.96s | 3.23s | C 2.15× |
+| const_heavy | Integer arithmetic (sdiv) | 0.001s | 0.034s | **Briv wins** |
+| print_loop | **FFI-based structurally-live** | **0.030s** | 0.049s | **Briv 1.63×** |
+| nbody_newton | Custom Newton sqrt inlined vs C sqrtf | **3.62s** | 9.73s | **Briv 2.7×** |
+| nbody_sqrt | Both use sqrtf, Briv loses on call overhead | 6.96s | 3.23s | C 2.15× |
 | fasta | LCG + FFI per-char output | — | — | (IO-bound) |
 | fannkuch_redux | 12-field rotation + modulo checksum | — | — | (computation) |
 | mandelbrot | Complex Int arithmetic + escape tracking | 0.74s | 0.65s | C 1.14× |
-| knucleotide | Rolling 2-bit hash + FFI output | **0.188s** | 0.194s | **Brief 0.97×** |
+| knucleotide | Rolling 2-bit hash + FFI output | **0.188s** | 0.194s | **Briv 0.97×** |
 | kalman_filter_runtime | 3×3 Float Kalman + SLP hazard guard | 0.161s | 0.153s | C 1.05× |
 
 ### New CLBG Benchmarks (2026-06-04)
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
-- **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
-- **Phase 5b**: Builtin declares (`brief_thread_pool_init`, `brief_barrier_release`, `brief_barrier_wait`)
+- **Phase 5a**: Thread pool primitives in `runtime/briv_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `briv_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
+- **Phase 5b**: Builtin declares (`briv_thread_pool_init`, `briv_barrier_release`, `briv_barrier_wait`)
 - **Phase 5c**: Auto-categorize txns in `generate()` — enum candidates (trigger-gated), async candidates (conflict-free pairwise), enum beats async
 - **Phase 5d**: `emit_async_body` — per-txn worker functions (`pre→fire` pattern)
 - **Phase 5e**: Async phase injection in `emit_main` and `emit_enum_main` — thread pool init at entry, `barrier_release → reactor_tick → barrier_wait`
@@ -308,12 +308,12 @@ brief-compiler selfhost <file.bv>
 - **4 new tests** (async body emission, thread pool metadata, barrier calls in main, no thread pool without async txns)
 - **No atomics on state fields** — the proof engine guarantees disjoint field access per txn group, so plain loads/stores are data-race-free (C11 5.1.2.4p25)
 - **Step 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
-- **Step 6**: Eliminate `io_registry.rs` and `#io` pragma — replaced by `import "link/brief_rt.o"` auto-dependency mechanism
+- **Step 6**: Eliminate `io_registry.rs` and `#io` pragma — replaced by `import "link/briv_rt.o"` auto-dependency mechanism
   - Deleted `src/io_registry.rs` (94 lines of hardcoded concept→symbol table)
   - Deleted `parse_io_declaration()` (~80 lines) and `#io` parsing loop (~15 lines)
   - New AST node `TopLevel::LinkDependency` — parser detects `.o`/`.a` imports
-  - New `lib/std/brief_rt.bv` — declares all `@ link` triggers as pure Brief code
-  - `lib/std/system.bv` rewritten to import from `brief_rt.bv` (no more `#io`)
+  - New `lib/std/briv_rt.bv` — declares all `@ link` triggers as pure Briv code
+  - `lib/std/system.bv` rewritten to import from `briv_rt.bv` (no more `#io`)
   - Compiler driver auto-detects link deps from source; `--link-rt` flag removed
   - 5 new parser tests for link dep detection
   - Zero compiler knowledge of OS signal concepts afterward
@@ -344,16 +344,16 @@ brief-compiler selfhost <file.bv>
 - **3 new tests** (foldable exits, persistent skipped, non-wake skipped)
 
 ### Benchmark Timing Results (fair — C references no longer hobbled by volatile)
-| Benchmark | Path | Brief | C | Ratio |
+| Benchmark | Path | Briv | C | Ratio |
 |-----------|------|-------|---|-------|
 | iir_filter | 2 (dead-field elim + pure counter) | 0.1524s | 0.1028s | 1.48× |
 | precompute_sum | 3 (compile-time) | 0.0020s | 0.0018s | ~tie (startup) |
 | ring_buffer | 4 (enum O(1) pure-counter) | 0.0019s | 0.0017s | ~tie (startup) |
 | async_counters | 5 (thread pool O(1) pure-counter) | 0.0018s | 0.0018s | ~tie (startup) |
-| kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **Brief beats C by ~5%** |
+| kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **Briv beats C by ~5%** |
 
 ### .gitignore / Infrastructure Cleanup
-- All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
+- All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `briv_rt.c`) now ignored
 - 18 tracked artifacts removed from git with `git rm --cached`
 - `build_and_bench.sh`: removed `bench_timeout` (all self-terminate), uses release binary directly, no `cargo run` overhead
 - `__rt_poll()`: non-blocking event drain called once at main() entry, before the first tick. Eliminates the 100ms wasted first tick on programs with already-pending events. Implemented for all platforms (epoll, kqueue, ARM wfi, x86 hlt, WASM).
@@ -374,8 +374,8 @@ brief-compiler selfhost <file.bv>
 - **File**: `src/backend/llvm.rs` (~25 lines net in `generate()` + `emit_case_folded_loops`)
 
 ### Dead-Field Elimination (Step 7)
-- **Problem**: C compiler proved IIR filter's non-volatile float delay-line state (x1/x2/y1/y2) is never observed, eliminated all 50M biquad iterations, leaving only `volatile long count` incq loop (0.09s). Brief emitted the full body verbatim (0.15s).
-- **Root Cause**: Brief had no liveness analysis — every state store was emitted regardless of whether the field value was ever consumed.
+- **Problem**: C compiler proved IIR filter's non-volatile float delay-line state (x1/x2/y1/y2) is never observed, eliminated all 50M biquad iterations, leaving only `volatile long count` incq loop (0.09s). Briv emitted the full body verbatim (0.15s).
+- **Root Cause**: Briv had no liveness analysis — every state store was emitted regardless of whether the field value was ever consumed.
 - **Solution**: `compute_live_fields()` + `compute_effectively_pure()` pass in `transition_graph.rs`.
   - Live set = identifiers in `#!exit <expr>` + preconditions of all txns
   - A txn is "effectively pure" if its only live stores are bounded counter increments; all dead-field stores are dropped.
@@ -390,7 +390,7 @@ brief-compiler selfhost <file.bv>
   - `async_counters_c.c`: `volatile + 2 pthreads` → `long g_a=N; long g_b=N` (O(1))
   - `precompute_sum_c.c`: dropped all volatile — clang eliminates 500-iter loop
   - `iir_filter_c.c`: removed volatile from float state (x1/x2/y1/y2) — register promotion
-- **Result**: Brief ties or beats C on all 4 benchmarks when both get equal compiler optimization
+- **Result**: Briv ties or beats C on all 4 benchmarks when both get equal compiler optimization
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
@@ -399,7 +399,7 @@ brief-compiler selfhost <file.bv>
 - **LLVM backend completion**: Structs, enums, collections, runtime-sized allocation. See `plans/2026-06-03-llvm-backend-completion.md`.
 
 ### Phase 5: DBVS Import Pipeline (2026-06-03)
-- **5a — DBVS import parsing + schema type validation**: `run_llvm_compile()` scans `.dbvs` imports, parses via `crate::dbrief::parse_dbvs()`, collects alias→type map. `LlvmBackend::with_schema_aliases()` stores schema aliases. `validate_schema_types()` cross-checks StateDecl types against schema (Vector/Option/Result → error, UInt→Int → warning).
+- **5a — DBVS import parsing + schema type validation**: `run_llvm_compile()` scans `.dbvs` imports, parses via `crate::dbriv::parse_dbvs()`, collects alias→type map. `LlvmBackend::with_schema_aliases()` stores schema aliases. `validate_schema_types()` cross-checks StateDecl types against schema (Vector/Option/Result → error, UInt→Int → warning).
 - **5b — Auto-target resolution**: When schema imports exist and no explicit `--target-dbv`, searches `lib/targets/` and source dir for `.dbv` files whose `IMPORT` matches. Auto-selects if exactly one match.
 - **5c — Schema ↔ target cross-validation**: New `src/analysis/schema_validator.rs`. Checks HW008 (missing target binding), HW009 (unreferenced target alias), HW010 (address overlap). Wired in `run_llvm_compile()` before codegen.
 - **5d — Scoped MMIO injection**: `build_field_index()` only routes field to MMIO if its name is in `schema_aliases` (prevents accidental MMIO from address-name collisions). Non-schema fields removed from `mmio_fields` to prevent read/write path confusion.
@@ -419,7 +419,7 @@ brief-compiler selfhost <file.bv>
 - **6 new tests**: cancel-add-sub, identity+0, identity*1, zero-mul, double-neg, no-candidates.
 
 ### LTO Closure (2026-06-03)
-- **`try_lto_pipeline()`** in `src/main.rs`: Compiles `brief_rt.c` to LLVM bitcode via `clang -c -emit-llvm`, merges with program IR via `llvm-link`, runs `opt -O3` on the merged module. Enables inlining of `__print_int`, `__wait_for_event`, and thread pool barriers into Brief loops.
+- **`try_lto_pipeline()`** in `src/main.rs`: Compiles `briv_rt.c` to LLVM bitcode via `clang -c -emit-llvm`, merges with program IR via `llvm-link`, runs `opt -O3` on the merged module. Enables inlining of `__print_int`, `__wait_for_event`, and thread pool barriers into Briv loops.
 - Graceful fallback: if `clang`/`llvm-link`/`llvm-as` not installed, falls back to existing `cc -c` + `opt` + `llc` + link path.
 
 ### MMIO Address Plumbing (2026-06-03)
@@ -449,7 +449,7 @@ brief-compiler selfhost <file.bv>
 
 ### FFI Output & Structurally-Live Benchmark (2026-06-03)
 - **`__print`/`__exit` magic removed from `llvm.rs`**: Deleted `has_print`/`has_exit` declare block, replaced `__print`/`__exit` match arms with generic FFI catch-all. `frgn` calls now go through standard `frgn_map` loop.
-- **`__print_int` + `__print` added to `runtime/brief_rt.c`**: Plain C functions (`int64_t __print(const char*)`, `int64_t __print_int(int64_t)`, `void __exit(void)`). `fputs` to stdout, `fprintf(stderr, "%lld\n")`, `exit(0)`.
+- **`__print_int` + `__print` added to `runtime/briv_rt.c`**: Plain C functions (`int64_t __print(const char*)`, `int64_t __print_int(int64_t)`, `void __exit(void)`). `fputs` to stdout, `fprintf(stderr, "%lld\n")`, `exit(0)`.
 - **`benchmarks/print_loop.bv`**: Structurally-live benchmark using `frgn __print_int` directly with `io_pending` wake trigger. 50M iterations, prints every 100K. Calls `__print_int` inside guard `[ops % print_interval == 0]`.
 - **`benchmarks/print_loop_c.c`**: C reference (symmetric). `if (ops % 100000 == 0) printf("%lld\n", ops);`.
 - **Fold prevention fixes**:
@@ -500,7 +500,7 @@ brief-compiler selfhost <file.bv>
   2. **Dual-variable constraint**: `count_cross_float_ops` required both operands to be variables, missing literal/constant operations (`x * 0.01`). Fixed by checking `left_is_typed || right_is_typed`.
   3. **Missing constants**: Peak formula ignored global float constants (Kalman A/Q matrices: 18 floats). Fixed by adding `accessed_constants` tracking + `const_packed = ceil(K/W)`.
 - **Corrected formula**: `peak = ceil(N/W) + min(2·ceil(N/W), ceil(C/2)) + T + ceil(K/W) + 2`
-- **Kalman verification**: n=12, C=72, T=12, K=18, R=16, W=4 → peak=28 ≥ 16 → SLP disabled. Brief 0.71s vs C 0.75s (Brief beats C by ~5%).
+- **Kalman verification**: n=12, C=72, T=12, K=18, R=16, W=4 → peak=28 ≥ 16 → SLP disabled. Briv 0.71s vs C 0.75s (Briv beats C by ~5%).
 - **6 new tests**: no-floats, small-field, large-field, independent-channels, AArch64-spec, AVX2-spec
 
 ### `opt` Pipeline Fix (2026-06-02)
@@ -565,11 +565,11 @@ brief-compiler selfhost <file.bv>
 **Tests**: 545 pass (was 527), 0 fail — **18 new tests**
 
 ### Stale FFI Registry Cleanup
-- **Deleted** `std/bindings/__builtin.dbvs` (420 lines) — all HashMap/HashSet/Stack/Queue/StringBuilder/Result/Option FFI entries. These were vestigial: collections dispatch natively through arrow syntax (`&map <- key`, `value <- &stack`) and projection targets (`map :> Keys`). Result/Option methods (`is_ok`, `unwrap`) are implemented in pure Brief via `uni` pattern matching.
+- **Deleted** `std/bindings/__builtin.dbvs` (420 lines) — all HashMap/HashSet/Stack/Queue/StringBuilder/Result/Option FFI entries. These were vestigial: collections dispatch natively through arrow syntax (`&map <- key`, `value <- &stack`) and projection targets (`map :> Keys`). Result/Option methods (`is_ok`, `unwrap`) are implemented in pure Briv via `uni` pattern matching.
 - **Deleted** `std/bindings/collections.dbvs` (50 lines) — stub entries (`__filter`, `__map`, `__reduce`, `__unique`, `__sort`, `__reverse`) with no-op implementations.
 - **Removed** `collections_*_impl` functions and `"collections::*"` match arms from `src/ffi/registry.rs` (6 functions: filter, map, reduce, unique, sort, reverse; 6 match arms).
 - **Removed** `"__builtin.clone"` from `registry.rs` — clone is native `Value::clone()`.
-- **Note**: The interpreter's `Expr::Call` dispatch at `interpreter.rs:1738` already handles all operations through: user defns → callable txns → dynamic FFI → enum constructors → FFI registry. With `__builtin` entries removed, Result/Option still work because their `is_ok`/`is_err`/`unwrap` etc. are pure Brief `uni` pattern matching in `lib/std/result.bv` and `lib/std/option.bv`.
+- **Note**: The interpreter's `Expr::Call` dispatch at `interpreter.rs:1738` already handles all operations through: user defns → callable txns → dynamic FFI → enum constructors → FFI registry. With `__builtin` entries removed, Result/Option still work because their `is_ok`/`is_err`/`unwrap` etc. are pure Briv `uni` pattern matching in `lib/std/result.bv` and `lib/std/option.bv`.
 
 ### All 10 Backends: SyncBlock Replaced
 Each backend had `Statement::SyncBlock { .. } => {}` — a silent no-op. Replaced with sequential emission of inner body statements:
@@ -626,7 +626,7 @@ New analysis module implementing the 6-step trigger preemptibility proof from th
 - **stb_image** in `lib/std/c/stb_image/` — image loading (single-header + wrapper)
 - **lz4** in `lib/std/c/lz4/` — compression (single-header + wrapper)
 - All follow the same pattern: single-header library + `_IMPLEMENTATION` `.c` wrapper
-- Included via `import "link/<lib>/<lib>.c"` in Brief source; compiled to bitcode via LTO
+- Included via `import "link/<lib>/<lib>.c"` in Briv source; compiled to bitcode via LTO
 
 ---
 
@@ -659,7 +659,7 @@ New analysis module implementing the 6-step trigger preemptibility proof from th
 - `test_link_dependency_typescript` — `.ts` → `LinkLanguage::AssemblyScript`
 
 ### Vendored C Library Compilation Tests (5 new)
-- `test_xxhash_compiles`, `test_yyjson_compiles`, `test_brief_json_compiles`
+- `test_xxhash_compiles`, `test_yyjson_compiles`, `test_briv_json_compiles`
 - `test_stb_image_compiles`, `test_lz4_compiles`
 - Each tests `clang -c` on the implementation wrapper succeeds
 
@@ -716,9 +716,9 @@ Replaced illegal patterns (`[true]`, `[x==x]`, `[true][true]`) with meaningful c
 - `docs/architecture/features/is-from-like.md` — architecture doc (design → implementation)
 - `docs/architecture/channel-map.md` — updated parser pipeline
 - `docs/BRIEF_3.0_SPEC.md` — added Section 11
-- `learn-brief/05-data-types.md` — added Section 8
-- `learn-brief/README.md` — updated TOC
-- `lib/runtime/brief_rt.c` — unchanged (pre-existing change)
+- `learn-briv/05-data-types.md` — added Section 8
+- `learn-briv/README.md` — updated TOC
+- `lib/runtime/briv_rt.c` — unchanged (pre-existing change)
 
 ---
 
@@ -752,8 +752,8 @@ invisible to the user.
 **What it does**: The LLVM backend emits `call i8* @__chr_to_str(i32)` for
 every `Char → String` cast at compile time.
 
-**Why it's on the edge**: `__chr_to_str` is a C function in `brief_rt.c` that
-the user never declared with `frgn`. If `brief_rt.c` isn't linked, the program
+**Why it's on the edge**: `__chr_to_str` is a C function in `briv_rt.c` that
+the user never declared with `frgn`. If `briv_rt.c` isn't linked, the program
 fails with an opaque linker error. Same pattern as `__str_concat` (pre-existing,
 same problem).
 
@@ -802,15 +802,15 @@ See `.opencode/plans/2026-06-14-eliminate-magic.md` for the fix plan.
 ## Session: 2026-06-19 — Tier Renames (Graphic → Accelerated, Hardware Embedded → Circuit)
 
 ### Goal
-Rename `.gbv` → `.abv` (Graphic Brief → Accelerated Brief / "Brief Accel") and
-`.hebv` → `.cbv` (Hardware Embedded Brief → Circuit Brief / "Brief Circuit")
+Rename `.gbv` → `.abv` (Graphic Briv → Accelerated Briv / "Briv Accel") and
+`.hebv` → `.cbv` (Hardware Embedded Briv → Circuit Briv / "Briv Circuit")
 across the entire codebase, including alternative names for all tiers.
 
 ### Changes
 
 **Rust source files:**
-- `src/main.rs`: All 5 `.gbv` → `.abv`, 3 `.hebv` → `.cbv`, "Graphic Brief" → "Accelerated Brief",
-  "Hardware Embedded Brief" → "Circuit Brief" in help text, error messages, comments
+- `src/main.rs`: All 5 `.gbv` → `.abv`, 3 `.hebv` → `.cbv`, "Graphic Briv" → "Accelerated Briv",
+  "Hardware Embedded Briv" → "Circuit Briv" in help text, error messages, comments
 - `src/ast.rs`: `StrictMode::Gpu` doc comment updated
 - `src/typechecker.rs`: `.gbv` → `.abv`
 - `src/hardware_validator.rs`: `.hebv` → `.cbv`
@@ -819,19 +819,19 @@ across the entire codebase, including alternative names for all tiers.
 - `test_gbv.gbv` → `test_abv.abv`
 
 **Documentation:**
-- `AGENTS.md`: All file types updated with `.abv`/`.cbv` + alternative names ("Brief Accel",
-  "Brief Render", "Brief Embed", "Brief Circuit", "D-Brief"/"Brief Data"); sugar rules updated
+- `AGENTS.md`: All file types updated with `.abv`/`.cbv` + alternative names ("Briv Accel",
+  "Briv Render", "Briv Embed", "Briv Circuit", "D-Briv"/"Briv Data"); sugar rules updated
 - `README.md`: Table expanded with `.abv` and `.cbv` rows + alternative names
-- `docs/architecture/features/graphic-brief.md` → `accelerated-brief.md` (content fully updated)
-- `docs/plans/2026-06-18-graphic-brief.md`: Updated with `.abv` and completion status
+- `docs/architecture/features/graphic-briv.md` → `accelerated-briv.md` (content fully updated)
+- `docs/plans/2026-06-18-graphic-briv.md`: Updated with `.abv` and completion status
 - `docs/plans/2026-06-18-gpu-io-intrinsics.md`: Updated `.gbv` → `.abv`, `test_gbv` → `test_abv`
-- `syntax-highlighter/syntaxes/brief.tmLanguage.json`: `fileTypes` array expanded to all 12 extensions
+- `syntax-highlighter/syntaxes/briv.tmLanguage.json`: `fileTypes` array expanded to all 12 extensions
 
 **Not changed (intentionally):**
 - Internal GPU-mode names (`StrictMode::Gpu`, `is_gpu_extension`, `with_gpu_mode`) — these
-  describe the compilation mode, not a brand name. Regular Brief can declare GPU-accelerated
+  describe the compilation mode, not a brand name. Regular Briv can declare GPU-accelerated
   code without a `.abv` file.
-- `learn-brief/` and `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` and `spec/SPEC.md` — had
+- `learn-briv/` and `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` and `spec/SPEC.md` — had
   zero old references
 
 ### Verification
@@ -843,7 +843,7 @@ across the entire codebase, including alternative names for all tiers.
 
 ## The Problem
 
-Officina-cli is a Brief terminal application that takes keyboard input. The Char→String cast
+Officina-cli is a Briv terminal application that takes keyboard input. The Char→String cast
 `(String)k` in `process_input` produced `"116121121..."` (garbage) instead of `"t"` because
 the LLVM backend lost type information for `Char` state fields — they were stored as `i32`
 at the LLVM level but treated as `i64` (boxed) by downstream code, causing LLVM IR type errors
@@ -1053,51 +1053,51 @@ to keep active guidance under ~350 lines. Preserved here for historical referenc
 
 ### GLUE — General Language Unification Engine
 
-GLUE is a universal FFI broker built on Brief's `meld` system. Any two
+GLUE is a universal FFI broker built on Briv's `meld` system. Any two
 languages that consume LLVM-compatible object code can be linked through GLUE.
-Neither language knows Brief exists. Both see their own native interface.
-Brief is the invisible translator — `meld` proves type compatibility at
+Neither language knows Briv exists. Both see their own native interface.
+Briv is the invisible translator — `meld` proves type compatibility at
 compile time, `frgn` declares calls into the target language, `#export`
 exposes functions to the caller.
 
 **The bridge is native object code.** No C compiler, no `extern "C"`, no `cc`
-crate. Brief emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
+crate. Briv emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
 linker consumes it directly.
 
-**GLUE adapters use Brief's `$!` macro system**, not a separate template engine.
+**GLUE adapters use Briv's `$!` macro system**, not a separate template engine.
 A `$!macro` takes the bridge's `#export`/`frgn`/`meld` declarations at compile
 time and emits native wrapper source code for the target language. Adding a
 language = writing one `.bv` macro file.
 
 **Key directives:**
-- `brief link <path> <function>` — analyzes a foreign library, generates a `.bv`
+- `briv link <path> <function>` — analyzes a foreign library, generates a `.bv`
   with `frgn` declarations. Cross-references against the `Intrinsic` enum in
   `src/ast.rs` — if a `frgn` name matches an intrinsic, emit `intrinsic_call#()`
   instead. This replaces the old TOML binding system.
-- `brief export <bridge.bv> <language>` — compiles to `.a` (library mode, no
+- `briv export <bridge.bv> <language>` — compiles to `.a` (library mode, no
   `main`), reads `glue.dbvl` to find the adapter entry for `<language>`, invokes
   the `$!` macro for that language, generates native wrappers.
-- `glue <target> <function> <language>` — one-shot wrapper: `brief link` + `brief export`.
+- `glue <target> <function> <language>` — one-shot wrapper: `briv link` + `briv export`.
 
 **GLUE protocol files:**
-- `glue.dbvl` — Data Brief Lines adapter registry (one language per line)
-- `glue.dbvs` — Data Brief Schema that validates `glue.dbvl` entries
+- `glue.dbvl` — Data Briv Lines adapter registry (one language per line)
+- `glue.dbvs` — Data Briv Schema that validates `glue.dbvl` entries
 - Adapter macros live in `glue/adapters/<language>.bv`
 
 ### File Types
-- **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
-- **.sbv** - Strict Brief (full contracts required, no sugar defaults)
-- **.abv** - Accelerated Brief (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Brief Accel")
-- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Brief Render")
-- **.srbv** - Strict Rendered Brief (full contracts required in web target)
-- **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Brief Embed")
-- **.sebv** - Strict Embedded Brief (full contracts required, bare metal)
-- **.cbv** - Circuit Brief (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Brief Circuit"; formerly Hardware Embedded Brief / `.hebv`)
-- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Brief" or "Brief Data")
+- **.bv** - Briv (standard Briv file, cosmopolitan tier — any FFI, any language, OS assumed)
+- **.sbv** - Strict Briv (full contracts required, no sugar defaults)
+- **.abv** - Accelerated Briv (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Briv Accel")
+- **.rbv** - Rendered Briv (Briv + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Briv Render")
+- **.srbv** - Strict Rendered Briv (full contracts required in web target)
+- **.ebv** - Embedded Briv (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Briv Embed")
+- **.sebv** - Strict Embedded Briv (full contracts required, bare metal)
+- **.cbv** - Circuit Briv (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Briv Circuit"; formerly Hardware Embedded Briv / `.hebv`)
+- **.dbv/.dbvs/.dbvl** - Data Briv (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Briv" or "Briv Data")
 
 ### Contract Sugar Syntax
 
-Brief provides sugar for single-sided contracts. Use these where possible in the stdlib
+Briv provides sugar for single-sided contracts. Use these where possible in the stdlib
 to teach readers the pattern:
 
 | Syntax | Precondition | Postcondition | Meaning |
@@ -1116,11 +1116,11 @@ postcondition (defaults to `true`).
 
 ### Pipe Chaining Sugar
 
-Brief provides pipe chaining (`|>`) as a syntactic sugar that desugars to
+Briv provides pipe chaining (`|>`) as a syntactic sugar that desugars to
 flat let-bindings before typechecking. All three active backends see only
 the desugared form — zero runtime overhead.
 
-```brief
+```briv
 x |> f()            // f(x) — pipeline value prepended as first arg
 x |> f() |> g()     // g(f(x)) — multi-step chain
 x |> f() .|> g()    // .|> reads from 1 position back in pipeline stack
@@ -1133,7 +1133,7 @@ See `docs/architecture/features/pipe.md` for full documentation.
 
 ### Language Architecture
 
-Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
+Briv is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
 - **Precondition** (guard): `[x > 0 && y < N]`
 - **Postcondition** (contract): `[x == N]`
 - **Body**: `{ &x = x + 1; &y = y * 2; }`
@@ -1144,10 +1144,10 @@ Loops are transactions with bounded convergence. Recursion is a transaction chai
 
 | Wrong | Correct |
 |-------|---------|
-| "Brief is a reactive state machine DSL" | Brief is general-purpose. Transactions ARE loops, iteration, and recursion. |
-| "Brief has no arrays/strings/collections" | Interpreter supports `List<T>`, `String`, `HashMap`, `HashSet`, `Stack`, `Queue`, `StringBuilder`. Stdlib has 26 modules. |
-| "Brief can't do tree/heap benchmarks" | Interpreter supports recursive enums, structs, field access, match. |
-| "Brief needs malloc/FFI for buffers" | Compiler proves bounds from contracts, allocates accordingly. |
+| "Briv is a reactive state machine DSL" | Briv is general-purpose. Transactions ARE loops, iteration, and recursion. |
+| "Briv has no arrays/strings/collections" | Interpreter supports `List<T>`, `String`, `HashMap`, `HashSet`, `Stack`, `Queue`, `StringBuilder`. Stdlib has 26 modules. |
+| "Briv can't do tree/heap benchmarks" | Interpreter supports recursive enums, structs, field access, match. |
+| "Briv needs malloc/FFI for buffers" | Compiler proves bounds from contracts, allocates accordingly. |
 | "The LLVM backend is the language" | Interpreter is the reference. Backend is an optimization pass. |
 
 #### Two-Layer Architecture
@@ -1270,7 +1270,7 @@ and `UserDefinedWithArg` fallthrough, `Expr::FieldAccess` field not found.
 
 ### Self-Hosting Pipeline
 
-The Brief-in-Brief compiler lives in `lib/compiler/`. Run via `brief-compiler selfhost <file.bv>`.
+The Briv-in-Briv compiler lives in `lib/compiler/`. Run via `briv-compiler selfhost <file.bv>`.
 
 **NOT currently being worked on.** Broken at parser level (multidimensional slice bug). Deferred.
 
@@ -1295,7 +1295,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 - **SLP hazard analyzer** — disables SLP when peak register demand exceeds hardware.
 - **Equality saturation** — lightweight recursive simplification (5-pass fixpoint, 9 rewrite rules).
 - **Compile-time PGO** — interpreter profiling guides LLVM branch weights.
-- **LTO pipeline** — merges `brief_rt.c` bitcode with program IR.
+- **LTO pipeline** — merges `briv_rt.c` bitcode with program IR.
 - **MMIO / DBVS / hardware handoff** — address plumbing, schema validation, Vivado XSA extraction.
 - **alka/on_exit permanently abandoned** — parser paths commented out, code left only as a historical artifact. No revisit planned.
 - **`__rt_poll()`** — non-blocking event drain at main() entry.
@@ -1367,11 +1367,11 @@ pointer, not a sentinel/placeholder.
 
 #### 2026-06-17: `read_file#` returns null instead of error — FFI must use `Result<T, E>`
 **Root cause**: `read_file#` returned `i8*` — either a valid C string or NULL if
-the file didn't exist. The Brief type system has no notion of "nullable pointer".
+the file didn't exist. The Briv type system has no notion of "nullable pointer".
 
 **Fix**: Changed `read_file#` to return `Result<String, String>`.
 
-**Architectural rule**: Every Brief `#`-intrinsic that can fail MUST return
+**Architectural rule**: Every Briv `#`-intrinsic that can fail MUST return
 `Result<T, E>` where `E` describes the failure.
 
 #### 2026-06-17: `is_string_chain` missing `Expr::Call` arm — officina SIGSEGV
@@ -1395,7 +1395,7 @@ and `\u{...}` escape sequences in char literals, but NOT `\0` (null).
 **Fix**: Changed `br label %done` to `br label %{skip_l}`.
 
 #### 2026-06-17: TBAA metadata tree for `i64`-boxed types
-**Implementation**: Added 6-node TBAA metadata tree (Brief root + Int, Bool,
+**Implementation**: Added 6-node TBAA metadata tree (Briv root + Int, Bool,
 Char, String, Float sub-types).
 
 #### 2026-06-17: `!range` metadata replaces `@llvm.assume` for simple patterns
@@ -1487,5 +1487,5 @@ This enables `from-bits.bv` to parse up to its `$` template syntax section.
 
 - `docs/architecture/overview.md` — Annotation Arrow + Bootstrap Type Universe sections
 - `docs/architecture/prelude-and-import-magic.md` — Bootstrap Type Universe auto-import
-- `learn-brief/12-pragmas.md` — Annotation Arrow + `#hashtag` shorthand
+- `learn-briv/12-pragmas.md` — Annotation Arrow + `#hashtag` shorthand
 - `.opencode/plans/2026-06-30-foreach-completion.md` — Foreach completion plan

@@ -69,7 +69,7 @@ ret void
   proof engine, the conflict check can be elided (constant `true`).
 - **User opt-in:** A program that wants parallel dispatch declares it at the top level:
 
-  ```brief
+  ```briv
   #pragma dispatch parallel
   ```
 
@@ -87,32 +87,32 @@ ret void
 
 ---
 
-## 2. Pre-built `brief_rt.o` (Build Tooling)
+## 2. Pre-built `briv_rt.o` (Build Tooling)
 
-**Problem:** Users must compile `runtime/brief_rt.c` themselves, which requires
+**Problem:** Users must compile `runtime/briv_rt.c` themselves, which requires
 a C compiler and awareness of the runtime dependency.
 
 **Solution 2a (Simple):** A Makefile or shell script in `runtime/` that builds
-`brief_rt.o` for the detected host triple:
+`briv_rt.o` for the detected host triple:
 
 ```bash
-cd runtime && make              # Produces build/brief_rt-x86_64-linux-gnu.o
+cd runtime && make              # Produces build/briv_rt-x86_64-linux-gnu.o
 ```
 
 ```makefile
 # runtime/Makefile
 TARGET ?= $(shell rustc -vV | grep host | cut -d' ' -f2)
-build/$(TARGET).o: brief_rt.c
+build/$(TARGET).o: briv_rt.c
 	mkdir -p build
 	cc -c -o $@ $<
 ```
 
-**Solution 2b (Integrated):** The `brief-compiler` CLI's `llvm` subcommand
+**Solution 2b (Integrated):** The `briv-compiler` CLI's `llvm` subcommand
 accepts a `--link-rt` flag that emits the `.o` path:
 
 ```bash
-brief-compiler llvm --link-rt program.bv -o program.ll
-# Also outputs: link with runtime/brief_rt.c or runtime/build/$(TARGET).o
+briv-compiler llvm --link-rt program.bv -o program.ll
+# Also outputs: link with runtime/briv_rt.c or runtime/build/$(TARGET).o
 ```
 
 When `--link-rt` is specified and the pre-built `.o` doesn't exist for the
@@ -126,7 +126,7 @@ crate and embedded as a byte slice, written to disk at runtime.
 
 - `runtime/Makefile` for immediate use (any platform, zero new dependencies)
 - `embed-rt` Cargo feature for convenience (ships pre-compiled `.o` in the binary)
-- `brief-compiler llvm --link-rt` prints the link command regardless
+- `briv-compiler llvm --link-rt` prints the link command regardless
 
 ### Files to Change
 
@@ -135,7 +135,7 @@ crate and embedded as a byte slice, written to disk at runtime.
 | `runtime/Makefile` | New — builds `.o` for detected target triple |
 | `runtime/build/` | Gitignored directory for pre-built artifacts |
 | `Cargo.toml` | Add `embed-rt` feature flag |
-| `build.rs` | If `embed-rt`, compile `runtime/brief_rt.c` via `cc` crate |
+| `build.rs` | If `embed-rt`, compile `runtime/briv_rt.c` via `cc` crate |
 | `src/main.rs` | Add `--link-rt` flag to `llvm` subcommand |
 | `README.md` | Document link step in LLVM backend section |
 
@@ -176,7 +176,7 @@ marshaling in the backend.
 
 The user currently writes `&io.io_ready = false;` manually. A convenience defn:
 
-```brief
+```briv
 defn consume() -> Bool {
     &io_ready = false;
     term true;
@@ -185,9 +185,9 @@ defn consume() -> Bool {
 
 ### 3f. Documentation: `trg` tutorial
 
-`learn-brief/11-triggers.md` should be updated to reflect the final event
+`learn-briv/11-triggers.md` should be updated to reflect the final event
 model: `@ link` bindings, `node [trg]` pattern, no `trg!` inside bodies,
-`runtime/brief_rt.c` linking.
+`runtime/briv_rt.c` linking.
 
 ---
 

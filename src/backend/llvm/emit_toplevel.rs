@@ -7,7 +7,7 @@ use std::fmt::Write;
 use std::sync::LazyLock;
 
 impl LlvmBackend {
-    /// 2026-08-04 (compiler-in-Brief): top-level `let` names in a body that are
+    /// 2026-08-04 (compiler-in-Briv): top-level `let` names in a body that are
     /// ASSIGNED later (incl. inside when/if/foreach/sync blocks). Such lets get
     /// an entry-block alloca instead of a bare SSA register, so a reassignment
     /// inside a guard/loop stores into an entry alloca — the old demotion at the
@@ -98,7 +98,7 @@ impl LlvmBackend {
     /// the variable's type in the TypeUniverse.
     fn lookup_strategy_type_name(&self, var_name: &str) -> Option<String> {
         // 2026-07-01: First check let_original_types (populated for function params).
-        // If not found, fall back to ctx.field_brief_types (populated for state vars).
+        // If not found, fall back to ctx.field_briv_types (populated for state vars).
         // State variables like `queue: RingBuffer<Int>` are NOT in let_original_types
         // (only function params go there). Without this fallback, strategy dispatch
         // returns None and custom types like RingBuffer fall through to the default
@@ -111,7 +111,7 @@ impl LlvmBackend {
             };
         }
         if let Some(&idx) = self.ctx.field_index_map.get(var_name) {
-            let ty = self.ctx.field_brief_types.get(idx)?;
+            let ty = self.ctx.field_briv_types.get(idx)?;
             return match ty {
                 crate::ast::Type::Custom(n) => Some(n.clone()),
                 crate::ast::Type::Applied(n, _) => Some(n.clone()),
@@ -165,7 +165,7 @@ impl LlvmBackend {
     /// Emit LLVM struct type declarations for user-defined struct types.
     /// Each struct becomes a named LLVM type so foreign callers (Rust via LTO,
     /// Python via ctypes) can match the memory layout. All fields are boxed
-    /// as i64 (Brief's universal scalar storage type).
+    /// as i64 (Briv's universal scalar storage type).
     ///
     /// Called after `emit_header()` and before `emit_declares()` so that
     /// struct types are available for use in function signatures emitted
@@ -257,15 +257,15 @@ impl LlvmBackend {
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-08-01 (D2): garbage scheduling — scheduled frees route through
-        // __brief_free so a benchmark can assert frees == allocs. argmemonly:
+        // __briv_free so a benchmark can assert frees == allocs. argmemonly:
         // the call only touches memory via its pointer arg, so a scheduled
         // free after a loop must not make LLVM treat the whole function's
         // memory as clobbered (without it, hash_ops' loop ran 23x slower —
         // LLVM could not promote the state slots to registers).
-        writeln!(out, "declare void @__brief_free(ptr) nounwind argmemonly").ok();
+        writeln!(out, "declare void @__briv_free(ptr) nounwind argmemonly").ok();
         // 2026-08-01 (D2): `Now#` — monotonic clock for the watchdog
         // `within N ms` deadline compare.
-        writeln!(out, "declare i64 @__brief_now() nounwind").ok();
+        writeln!(out, "declare i64 @__briv_now() nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
@@ -273,15 +273,15 @@ impl LlvmBackend {
         // 2026-07-26: ~50 dead declares removed — no Rust code path generated
         // calls to them. Only ShellCmd is kept (called via ShellCmd# intrinsic).
         // 2026-07-15: Raw OS syscall (SysCall# intrinsic)
-        writeln!(out, "declare i64 @brief_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @briv_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
         // 2026-07-15: Runtime system configuration (SysConf# intrinsic)
-        writeln!(out, "declare i64 @brief_sysconf(i64)").ok();
+        writeln!(out, "declare i64 @briv_sysconf(i64)").ok();
         // 2026-07-15: Dynamic linker (DlOpen#/DlSym#/DlClose# intrinsics)
         writeln!(out, "declare ptr @dlopen(ptr, i32) nounwind").ok();
         writeln!(out, "declare ptr @dlsym(ptr, ptr) nounwind").ok();
         writeln!(out, "declare i32 @dlclose(ptr) nounwind").ok();
         // 2026-07-15: Stack backtrace (Backtrace# intrinsic)
-        writeln!(out, "declare i64 @brief_backtrace()").ok();
+        writeln!(out, "declare i64 @briv_backtrace()").ok();
         // 2026-07-15: POSIX socket/ioctl declarations removed — they conflict
         // with the defn wrappers in std/os/ (which now use SysCall# internally).
     }
@@ -349,7 +349,7 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-22: Strings use ptr (opaque pointer) — a Brief String value
+        // 2026-07-22: Strings use ptr (opaque pointer) — a Briv String value
         // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
         // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
         // of the type-name match.
@@ -457,7 +457,7 @@ impl LlvmBackend {
         }
         // 2026-07-17: If the register is Float (32-bit) but the caller expects
         // double (e.g. Print# passes to printf which variadic-promotes float),
-        // emit an fpext to double. All brief floats are represented as float
+        // emit an fpext to double. All briv floats are represented as float
         // (32-bit), but C variadic functions receive double (64-bit).
         if reg.ty == Type::float() {
             let dbl = self.fun.gen_reg();
@@ -765,7 +765,7 @@ impl LlvmBackend {
     // WHY emit_init_state as a separate function AND emit_inline_init_stores:
     //   Two callers need init logic. The main reactor loop uses the inline path
     //   (emit_inline_init_stores) so SROA can scalarize %State. But library-mode
-    //   and external-C callers (via __brief_init_state) need a callable function
+    //   and external-C callers (via __briv_init_state) need a callable function
     //   that returns an initialized ptr — those callers don't have an alloca
     //   to inline into, so they need @init_state as a named function. Both share
     //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
@@ -787,19 +787,19 @@ impl LlvmBackend {
         idx: usize,
         init_expr: Option<&Expr>,
     ) -> bool {
-        let brief_ty = match self.ctx.field_brief_types.get(idx) {
+        let briv_ty = match self.ctx.field_briv_types.get(idx) {
             Some(Type::Custom(n)) => n.clone(),
             Some(Type::Applied(n, _)) => n.clone(),
             _ => return false,
         };
         // 2026-07-31 (A8): a generic field (`let q: RingBuffer<Int> = 0`)
         // monomorphizes to the applied key.
-        let field_ty_clone = self.ctx.field_brief_types.get(idx).cloned();
+        let field_ty_clone = self.ctx.field_briv_types.get(idx).cloned();
         let type_key = match field_ty_clone.as_ref() {
             Some(ty) => self.resolve_obj_key(ty),
             None => None,
-        }.unwrap_or_else(|| brief_ty.clone());
-        let defs = self.ctx.operator_defs.get(&brief_ty).cloned().unwrap_or_default();
+        }.unwrap_or_else(|| briv_ty.clone());
+        let defs = self.ctx.operator_defs.get(&briv_ty).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
             None => return false,
@@ -813,7 +813,7 @@ impl LlvmBackend {
             _ => return false,
         };
         let members = self.ctx.obj_members.get(&type_key).cloned().unwrap_or_default();
-        let member = members.iter().find(|m| super::emit_expr::member_brief_name(m) == fn_name).cloned();
+        let member = members.iter().find(|m| super::emit_expr::member_briv_name(m) == fn_name).cloned();
         let Some(member) = member else { return false; };
         // Allocate the instance storage and pass its address as `self`.
         let size = self.struct_type_size(&type_key);
@@ -971,7 +971,7 @@ impl LlvmBackend {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
                 // 2026-08-01 (B4): always the UNTAGGED store — a String value is
                 // an untagged ptr to [len][bytes] (bits model); the SSO static-tag
-                // (OR 1) path was retired (it misaligned the header for brief_str_eq).
+                // (OR 1) path was retired (it misaligned the header for briv_str_eq).
                 let s_str = String::from_utf8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
@@ -1224,12 +1224,12 @@ impl LlvmBackend {
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = has_ret;
-        // Rename user `main` to `brief_main` to avoid collision with
+        // Rename user `main` to `briv_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         // 2026-07-19: In --shared mode, internal functions keep original names.
         // Export wrappers use a unique suffix to avoid name collision.
         let ll_name: String = if d.name == "main" {
-            "brief_main".to_string()
+            "briv_main".to_string()
         } else {
             d.name.clone()
         };
@@ -1339,7 +1339,7 @@ impl LlvmBackend {
         // the function falls through to "ret i64 0" — every defn silently
         // returns zero regardless of its actual computation.
         self.fun.in_callable_txn = true;
-        // 2026-08-04 (compiler-in-Brief): pre-declare entry-block allocas for
+        // 2026-08-04 (compiler-in-Briv): pre-declare entry-block allocas for
         // top-level lets that are reassigned inside a guard/loop — the 
         // reassignment must NOT demote to an alloca at the assignment site
         // (dominance violation). The alloca is bound BEFORE the body so the
@@ -1406,7 +1406,7 @@ impl LlvmBackend {
     // 2026-06-13: Added ptr %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
-    // 2026-07-04: Return the known !range bounds for a Brief type based on
+    // 2026-07-04: Return the known !range bounds for a Briv type based on
     // its byte size in the type universe.  Narrow integer types have
     // representation-level ranges that LLVM can exploit for bounds-check
     // elimination — no contract precondition required.
@@ -1588,9 +1588,9 @@ impl LlvmBackend {
         // provides for free that LLVM uses to eliminate bounds checks.
         if let Some(ref universe) = self.ctx.type_universe {
             for (field_name, &idx) in &self.ctx.field_index_map {
-                let brief_ty = self.ctx.field_brief_types.get(idx);
-                let Some(brief_ty) = brief_ty else { continue; };
-                let Some(range_bounds) = Self::type_driven_range(universe, brief_ty) else { continue; };
+                let briv_ty = self.ctx.field_briv_types.get(idx);
+                let Some(briv_ty) = briv_ty else { continue; };
+                let Some(range_bounds) = Self::type_driven_range(universe, briv_ty) else { continue; };
                 // Only add if no contract-driven range already exists
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
@@ -1831,7 +1831,7 @@ impl LlvmBackend {
                         let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
                         let ptr = self.fun.gen_reg();
                         writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
-                        writeln!(out, "  call void @__brief_free(ptr {})", ptr).ok();
+                        writeln!(out, "  call void @__briv_free(ptr {})", ptr).ok();
                     }
                 }
                 writeln!(out, "  ret void").ok();
@@ -1852,7 +1852,7 @@ impl LlvmBackend {
             enum ParamSrc {
                 StateField(usize),
                 LetBinding(String), // LLVM type string ("float" or "i64")
-                Constant(Expr, Type), // value expression + Brief type
+                Constant(Expr, Type), // value expression + Briv type
             }
             // Scan body for FFI guards that can be outlined.
             let outlined_info: Vec<(usize, String, Vec<(String, String, ParamSrc)>)> = {
@@ -1910,18 +1910,18 @@ impl LlvmBackend {
                         if let Some(&idx) = self.ctx.field_index_map.get(ident) {
                             // Ptr<T> fields are stored as i64 in %State (opaque handles).
                             // Float fields use the native float type. All others use i64.
-                            let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+                            let briv_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
                             // 2026-07-31 (A4): aggregate (array) fields cannot be
                             // outlined as scalar cold-function params — the guard
                             // must stay inline so it reads them via the %State GEP.
-                            if matches!(brief_ty, Type::Vector(_, _)) {
+                            if matches!(briv_ty, Type::Vector(_, _)) {
                                 can_outline_all = false;
                                 break;
                             }
-                            let llvm_ty = if matches!(brief_ty, Type::Ptr(_)) {
+                            let llvm_ty = if matches!(briv_ty, Type::Ptr(_)) {
                                 "i64".to_string()
                             } else {
-                                self.llvm_type(&brief_ty)
+                                self.llvm_type(&briv_ty)
                             };
                             params.push((ident.clone(), llvm_ty, ParamSrc::StateField(idx)));
                         } else if txn_let_names.contains(ident) {
@@ -2233,7 +2233,7 @@ impl LlvmBackend {
                 self.fun.reg_float_cache.clear();
                 self.fun.reg_type_cache.clear();
 
-                // Build param list — register with correct Brief type so that
+                // Build param list — register with correct Briv type so that
                 // emit_statement uses pointer semantics (inttoptr+GEP+load) rather
                 // than vector semantics (extractelement) for Ptr<Int> fields.
                 let field_names: Vec<String> = fields.iter().map(|(f, _, _)| f.clone()).collect();
@@ -2241,18 +2241,18 @@ impl LlvmBackend {
                 let mut param_sig: Vec<String> = Vec::new();
                 for (fi, (f_name, llvm_ty, src)) in fields.iter().enumerate() {
                     param_sig.push(format!("{} %{}", llvm_ty, cp_names[fi]));
-                    let brief_ty = match src {
+                    let briv_ty = match src {
                         ParamSrc::StateField(idx) => {
-                            self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int())
+                            self.ctx.field_briv_types.get(*idx).cloned().unwrap_or(Type::int())
                         }
                         ParamSrc::LetBinding(llvm_ty) => {
                             if llvm_ty == "float" { Type::float() } else { Type::int() }
                         }
-                        ParamSrc::Constant(_, brief_ty) => brief_ty.clone(),
+                        ParamSrc::Constant(_, briv_ty) => briv_ty.clone(),
                     };
                     self.fun.let_bindings.insert(cp_names[fi].clone(), format!("%{}", cp_names[fi]));
-                    self.fun.let_binding_types.insert(cp_names[fi].clone(), brief_ty.clone());
-                    self.fun.let_original_types.insert(cp_names[fi].clone(), brief_ty);
+                    self.fun.let_binding_types.insert(cp_names[fi].clone(), briv_ty.clone());
+                    self.fun.let_original_types.insert(cp_names[fi].clone(), briv_ty);
                 }
                 writeln!(out, "define void @{}({}) local_unnamed_addr #0 {{", cold_name, param_sig.join(", ")).ok();
 
@@ -2762,7 +2762,7 @@ impl LlvmBackend {
     }
 }
 
-/// Map a Brief signal name (e.g. "SIGWINCH", "SIGINT") to its POSIX number.
+/// Map a Briv signal name (e.g. "SIGWINCH", "SIGINT") to its POSIX number.
 fn sig_number(name: &str) -> i32 {
     match name {
         "SIGHUP" => 1,
@@ -2801,7 +2801,7 @@ fn sig_number(name: &str) -> i32 {
 }
 
 impl LlvmBackend {
-    /// Emit a library shim — no main function, only `__brief_init_state`
+    /// Emit a library shim — no main function, only `__briv_init_state`
     /// and dso_local wrappers for #export functions.
     /// 2026-07-19: Emit wrappers for exported functions in shared library.
     /// In --shared mode, exported functions keep their original names (e.g., @add)
@@ -2819,21 +2819,21 @@ impl LlvmBackend {
                 }
             }
         }
-        writeln!(out, "define dso_local void @__brief_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
+        writeln!(out, "define dso_local void @__briv_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__brief_init() #0 {{").ok();
+        writeln!(out, "define void @__briv_init() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__brief_fini() #0 {{").ok();
+        writeln!(out, "define void @__briv_fini() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__brief_init, ptr null }}]").ok();
+        writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__briv_init, ptr null }}]").ok();
     }
 
     /// Called when `self.ctx.library_mode` is true.
 
-    /// 2026-08-04 (compiler-in-Brief): the LLVM ABI return type for a
+    /// 2026-08-04 (compiler-in-Briv): the LLVM ABI return type for a
     /// function. Struct/obj values are pointer handles (alloca + ptrtoint),
     /// so a function returning `List<T>` or any struct returns the i64
     /// HANDLE, not the struct ABI type — `llvm_type(List<String>)` resolves
@@ -2853,18 +2853,18 @@ impl LlvmBackend {
 
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
-        // earlier in generate()). We only need to add __brief_init_state.
-        // 2026-08-03 (node bridge): __brief_init_state MUST return a
+        // earlier in generate()). We only need to add __briv_init_state.
+        // 2026-08-03 (node bridge): __briv_init_state MUST return a
         // long-lived state pointer — the previous `alloca %State` returned a
         // stack address that dangled as soon as the call returned. It stayed
         // latent while no export touched a state field (rank.bv), but any
         // stateful export (save/read on `saved`) read garbage/crashed. The
         // library model is one state per process, so a module global is
         // correct; init_state fills it, __glue_release stays a no-op.
-        writeln!(out, "@__brief_state = global %State zeroinitializer").ok();
-        writeln!(out, "define dso_local i64 @__brief_init_state() local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  call void @init_state(ptr @__brief_state)").ok();
-        writeln!(out, "  %ptr = ptrtoint ptr @__brief_state to i64").ok();
+        writeln!(out, "@__briv_state = global %State zeroinitializer").ok();
+        writeln!(out, "define dso_local i64 @__briv_init_state() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  call void @init_state(ptr @__briv_state)").ok();
+        writeln!(out, "  %ptr = ptrtoint ptr @__briv_state to i64").ok();
         writeln!(out, "  ret i64 %ptr").ok();
         writeln!(out, "}}").ok();
         // Also emit a __glue_release placeholder (no-op for arena-free bridge)
@@ -2874,12 +2874,12 @@ impl LlvmBackend {
         // 2026-08-03: host cancellation — raise/clear the process-global
         // flag that CancelRequested#() polls. The state pointer is accepted
         // (future: per-state flag) but unused; the flag is process-global.
-        writeln!(out, "define dso_local void @__brief_set_cancel(ptr %state, i32 %flag) local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  store atomic i32 %flag, ptr @__brief_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "define dso_local void @__briv_set_cancel(ptr %state, i32 %flag) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 %flag, ptr @__briv_cancel_flag seq_cst, align 4").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define dso_local void @__brief_clear_cancel(ptr %state) local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  store atomic i32 0, ptr @__brief_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "define dso_local void @__briv_clear_cancel(ptr %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 0, ptr @__briv_cancel_flag seq_cst, align 4").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }

@@ -343,8 +343,8 @@ All are flat, max-2-depth changes (generally 1-5 lines each, fixes ~9 tests).
 | # | File | Line(s) | Fix | Tests Fixed |
 |---|------|---------|-----|-------------|
 | 4.1 | `analysis/watchdog.rs` | 123-125 | Add check that Identifier matches a known trigger name | `test_extract_trigger_name` |
-| 4.2 | `dbrief/bridge.rs` | 38-53 | Add else branch for non-lazy mode to iterate data groups | `test_data_conversion_basic` |
-| 4.3 | `dbrief/bridge.rs` | 441 | Update assertion: map→list yields 2 elements, not 1 | `test_data_value_conversion` |
+| 4.2 | `dbriv/bridge.rs` | 38-53 | Add else branch for non-lazy mode to iterate data groups | `test_data_conversion_basic` |
+| 4.3 | `dbriv/bridge.rs` | 441 | Update assertion: map→list yields 2 elements, not 1 | `test_data_value_conversion` |
 | 4.4 | `derive/cli.rs` | 88 | Change `is_ok()` → `is_err()` (lexer errors on unterminated strings) | `test_lex_source_error` |
 | 4.5 | `derive/engine.rs` | 88-108 | Add `Expr::Identifier` match arm for identity pattern | `test_identity`, `test_enumerative_search_identity` |
 | 4.6 | `ffi/orchestrator.rs` | 68 | Add layout validation guard returning Err | `test_orchestrator_call_missing_layout` |
@@ -384,7 +384,7 @@ After all regressions are fixed, write tests that model actual behavior:
 10. Phase 3.7 (MMIO guard) — 3-line, 30 seconds
 11. Phase 3.5 (struct bytes) — dynamic computation + TypeDef arm, 5 minutes
 12. Phase 3.3 (cast string dispatch) — new match arms in emit_expr, 5 minutes
-13. Phase 4.2-4.3 (dbrief bridge) — else branch + test update, 5 minutes
+13. Phase 4.2-4.3 (dbriv bridge) — else branch + test update, 5 minutes
 14. Phase 4.6 (orchestrator) — layout guard, 2 minutes
 15. Phase 4.8 (layout) — suppress semicolon or test, 5 minutes
 16. Phase 2.2 (analyze_program) — wire real analysis, 10 minutes
@@ -411,7 +411,7 @@ Total estimated time: ~2 hours for all 42 fixes.
 | `src/backend/llvm/helpers.rs` | 3.8 |
 | `src/backend/llvm/tests.rs` | 3.4, 3.6, 3.9 |
 | `src/backend/llvm/gpu.rs` | 3.9 |
-| `src/dbrief/bridge.rs` | 4.2, 4.3 |
+| `src/dbriv/bridge.rs` | 4.2, 4.3 |
 | `src/derive/cli.rs` | 4.4 |
 | `src/derive/engine.rs` | 4.5 |
 | `src/ffi/orchestrator.rs` | 4.6 |

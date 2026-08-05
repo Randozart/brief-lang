@@ -101,7 +101,7 @@ grep -c "<[0-9] x float>" /tmp/clang_*.ll
 grep -c "willreturn\|noundef\|dereferenceable\|argmem" /tmp/clang_*.ll
 grep "^define" /tmp/clang_*.ll
 
-# 3. Compare against our Brief-generated .ll
+# 3. Compare against our Briv-generated .ll
 diff <(grep -v '^;' /tmp/clang_nbody_newton.ll) \
      <(grep -v '^;' benchmarks/nbody_newton.ll) | head -200
 ```
@@ -109,13 +109,13 @@ diff <(grep -v '^;' /tmp/clang_nbody_newton.ll) \
 ### Phase 2: Diff Assembly Output
 
 ```bash
-# Brief binary assembly
-objdump -d /tmp/nbody_newton > /tmp/brief_nbody.s
+# Briv binary assembly
+objdump -d /tmp/nbody_newton > /tmp/briv_nbody.s
 # C reference assembly
 objdump -d /tmp/nbody_newton_c > /tmp/clang_nbody.s
 
 # Compare hot loop regions
-diff /tmp/brief_nbody.s /tmp/clang_nbody.s | head -300
+diff /tmp/briv_nbody.s /tmp/clang_nbody.s | head -300
 ```
 
 ### Phase 3: Trace LLVM's Decision Pass
@@ -124,7 +124,7 @@ diff /tmp/brief_nbody.s /tmp/clang_nbody.s | head -300
 # Run opt with remarks to see what LLVM decided
 opt -O3 -S \
     -pass-remarks-missed=sroa,slp-vectorizer,loop-vectorize \
-    brief_nbody.ll -o /dev/null 2>&1 | head -50
+    briv_nbody.ll -o /dev/null 2>&1 | head -50
 opt -O3 -S \
     -pass-remarks-missed=sroa,slp-vectorizer,loop-vectorize \
     clang_nbody.ll -o /dev/null 2>&1 | head -50
@@ -157,10 +157,10 @@ grep -n "getEntryCost\|isGather\|vectorizeTree\|buildTree" \
 
 ## Deliverables
 
-1. A table: "Clang vs Brief IR comparison" for all 19 benchmark C sources
+1. A table: "Clang vs Briv IR comparison" for all 19 benchmark C sources
 2. A file: clang-generated `.ll` files for each C benchmark (saved to `docs/reference-ll/clang/`)
-3. A file: LLVM pass-remarks for both Brief and clang IR
-4. A written analysis: "The 3-5 things clang does differently from Brief"
+3. A file: LLVM pass-remarks for both Briv and clang IR
+4. A written analysis: "The 3-5 things clang does differently from Briv"
 
 ## Timeline
 

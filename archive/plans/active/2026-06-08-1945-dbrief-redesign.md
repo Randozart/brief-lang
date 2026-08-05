@@ -1,4 +1,4 @@
-# DBrief Redesign Plan
+# DBriv Redesign Plan
 
 **Date:** 2026-06-08 19:45
 **Status:** Approved for implementation
@@ -8,13 +8,13 @@
 
 ## 1. Core Principle
 
-**DBrief = native Brief data.** Import a `.dbv`/`.dbvl`/`.dbvs` file from Brief and it is immediately a native Brief value — no parsing step, no deserialization, no intermediate representation. `data.Item["rusty_key"].desc` just works. The compiler stores DBrief data as its own internal value representations.
+**DBriv = native Briv data.** Import a `.dbv`/`.dbvl`/`.dbvs` file from Briv and it is immediately a native Briv value — no parsing step, no deserialization, no intermediate representation. `data.Item["rusty_key"].desc` just works. The compiler stores DBriv data as its own internal value representations.
 
 This means:
-- DBrief is **not** a struct/function declaration language — it is a data format
+- DBriv is **not** a struct/function declaration language — it is a data format
 - Schemas provide field names + types + constraints; data files provide values
-- The Brief optimizer consumes schema constraints as proven facts (preconditions for free)
-- Query operations (`->FILTER`, `->MAP`, `->SORT`, aggregations) are Brief operations on native values
+- The Briv optimizer consumes schema constraints as proven facts (preconditions for free)
+- Query operations (`->FILTER`, `->MAP`, `->SORT`, aggregations) are Briv operations on native values
 
 ---
 
@@ -62,7 +62,7 @@ schema FnBinding {
 **Rules:**
 - `schema Name { ... }` declares a named shape
 - Field order determines positional matching order (for terse data)
-- `[ != "" ]` before field = guard condition the data must satisfy (visible to Brief compiler)
+- `[ != "" ]` before field = guard condition the data must satisfy (visible to Briv compiler)
 - No `REGISTER`, no `ALIAS`, no `@address`, no `location` keyword
 - `Map[K, V]` and `Vec[T]` for collection types
 - Field types without `?` suffix are required; `field?: Type` is optional (skippable in positional form)
@@ -144,13 +144,13 @@ key: value1, value2, value3, ...       // "key" identifies the entry
 
 ---
 
-## 3. Brief Integration
+## 3. Briv Integration
 
-```brief
+```briv
 // Import a schema as a type
 import Item from "game.dbvs"
 
-// Import data as native Brief values
+// Import data as native Briv values
 import data from "world.dbv"
 
 // Direct field access — schema provides types
@@ -176,20 +176,20 @@ let item_names = data.Item -> MAP name
 
 | File | Lines | Reason |
 |------|-------|--------|
-| `src/dbrief/ast.rs` | 302 | `DbriefAddress`, `REGISTER`, `ALIAS`, old AST types obsolete |
-| `src/dbrief/parser.rs` | 1427 | Full rewrite from scratch |
-| `src/dbrief/alloc.rs` | 302 | Address allocation no longer a language construct |
-| `src/analysis/schema_validator.rs` | 119 | Replaced by import + Brief type checking |
+| `src/dbriv/ast.rs` | 302 | `DbrivAddress`, `REGISTER`, `ALIAS`, old AST types obsolete |
+| `src/dbriv/parser.rs` | 1427 | Full rewrite from scratch |
+| `src/dbriv/alloc.rs` | 302 | Address allocation no longer a language construct |
+| `src/analysis/schema_validator.rs` | 119 | Replaced by import + Briv type checking |
 
 ### Source Files (partial rewrite)
 
 | File | Lines | What Changes |
 |------|-------|--------------|
-| `src/dbrief/mod.rs` | 201 | Remove old engine types; expose single `compile_dbv()` → native value |
-| `src/dbrief/eval.rs` | 612 | Rewrite query engine to operate on native Brief values |
+| `src/dbriv/mod.rs` | 201 | Remove old engine types; expose single `compile_dbv()` → native value |
+| `src/dbriv/eval.rs` | 612 | Rewrite query engine to operate on native Briv values |
 | `src/hardware/handoff.rs` | 495 | Remove legacy `extract_target_addresses` / `generate_dbvs` / `generate_dbv`; replace with new format generators |
 | `src/ffi/registry.rs` | ~400 | Remove `load_from_dbvs()`; FFI bindings loaded from `.dbv` data via new import |
-| `src/main.rs` | ~50 | CLI `brief dbv/dbvs/dbvl` commands point to new parser |
+| `src/main.rs` | ~50 | CLI `briv dbv/dbvs/dbvl` commands point to new parser |
 
 ### Library Files (full rewrite)
 
@@ -217,14 +217,14 @@ let item_names = data.Item -> MAP name
 | `ALIAS` / `ALIAS?` keywords | Lexer, parser | No such keyword; plain data entries |
 | `@` address syntax | Lexer, parser | Addresses are `UInt[64]` schema fields |
 | `location:` field | Schema parser | FFI backend location is a field in the `FnBinding` schema |
-| `DbriefAddress` (Numeric/Hex/Auto/Named/Remote) | AST | `UInt[64]` values |
-| `DbriefRegister` AST node | AST | Data entries matching a schema |
-| `DbriefAlias` AST node | AST | Gone entirely |
+| `DbrivAddress` (Numeric/Hex/Auto/Named/Remote) | AST | `UInt[64]` values |
+| `DbrivRegister` AST node | AST | Data entries matching a schema |
+| `DbrivAlias` AST node | AST | Gone entirely |
 | `RULE head :- body` syntax | Parser | `rule name(params) { ... }` data entries |
 | `DEPENDS` keyword | Parser | Gone (package management separate) |
 | `SERVICE` keyword | Parser | Gone (moved to separate framework if needed) |
-| `DbvsEngine` | `mod.rs` | Data is directly a Brief value |
-| `DbriefEngine` | `mod.rs` | Same |
+| `DbvsEngine` | `mod.rs` | Data is directly a Briv value |
+| `DbrivEngine` | `mod.rs` | Same |
 | `get_register()` / `get_alias()` | `mod.rs` | Imports resolve to native value access |
 
 ---
@@ -233,13 +233,13 @@ let item_names = data.Item -> MAP name
 
 ### Phase A: Syntax Spec + Parser Rewrite (Priority: HIGH)
 
-**Goal:** New parser producing native Brief values directly, not an intermediate AST.
+**Goal:** New parser producing native Briv values directly, not an intermediate AST.
 
 **Files to create:**
-- `src/dbrief/parser.rs` (new, ~600-800 lines) — clean recursive-descent parser
+- `src/dbriv/parser.rs` (new, ~600-800 lines) — clean recursive-descent parser
 
 **Files to delete:**
-- `src/dbrief/ast.rs` (no longer needed; data = native Brief values)
+- `src/dbriv/ast.rs` (no longer needed; data = native Briv values)
 
 **Tests:**
 - Parse `.dbvs` with `schema`, field constraints, types
@@ -249,21 +249,21 @@ let item_names = data.Item -> MAP name
 - Parse `.dbvl` mixed with `key: val, val, val` casting
 - Error cases: missing required field, constraint violation, unknown schema ref
 
-**Deliverable:** `brief dbv <file>` outputs JSON confirming correct parse.
+**Deliverable:** `briv dbv <file>` outputs JSON confirming correct parse.
 
-### Phase B: Brief Import Mechanism (Priority: HIGH)
+### Phase B: Briv Import Mechanism (Priority: HIGH)
 
-**Goal:** `import data from "file.dbv"` populates native Brief values with schema-derived types.
+**Goal:** `import data from "file.dbv"` populates native Briv values with schema-derived types.
 
 **Files to modify:**
 - `src/parser.rs` — add `.dbv`/`.dbvl`/`.dbvs` import resolution
-- `src/typechecker.rs` — schema types become Brief types
+- `src/typechecker.rs` — schema types become Briv types
 - Import/symbol resolution — reading parsed data into value system
 
 **Tests:**
-- Import schema as type in Brief program
+- Import schema as type in Briv program
 - Import data as native values
-- Access `data.Schema["key"].field` from Brief
+- Access `data.Schema["key"].field` from Briv
 - Constraint propagation to optimizer
 - Error: import of non-existent file, schema mismatch
 
@@ -277,7 +277,7 @@ let item_names = data.Item -> MAP name
 - All FFI functions still resolve correctly via new format
 - Hardware handoff still generates valid output
 - Target schemas still compile
-- Integration: existing Brief programs that use `frgn` functions still work
+- Integration: existing Briv programs that use `frgn` functions still work
 
 ### Phase D: Remove Old Code (Priority: MEDIUM)
 
@@ -298,7 +298,7 @@ let item_names = data.Item -> MAP name
 
 ### Phase E: Query Engine on Native Values (Priority: LOW)
 
-**Goal:** The existing `eval.rs` query engine operates on native Brief values instead of `DbriefLiteral`.
+**Goal:** The existing `eval.rs` query engine operates on native Briv values instead of `DbrivLiteral`.
 
 **Tests:** All existing query operations (FILTER, MAP, SORT, COUNT, etc.) produce same results with native values.
 
@@ -330,10 +330,10 @@ Phase A and B are the hardest and most consequential — get parser semantics ri
 
 1. `cargo test --lib` passes with all new parser + import tests
 2. All FFI functions (`frgn print`, `frgn sqrt`, etc.) work identically through new `.dbv` binding files
-3. `brief dbv <file>` parses and outputs correct JSON
-4. `brief llvm` with hardware handoff generates valid `.dbv`/`.dbvs` in new format
-5. Brief programs can `import` a `.dbv` and use its data as native values
-6. Schema constraints are propagated to the Brief optimizer (provable via test)
+3. `briv dbv <file>` parses and outputs correct JSON
+4. `briv llvm` with hardware handoff generates valid `.dbv`/`.dbvs` in new format
+5. Briv programs can `import` a `.dbv` and use its data as native values
+6. Schema constraints are propagated to the Briv optimizer (provable via test)
 7. Old `REGISTER`/`ALIAS`/`@address` code deleted — zero traces in compiler
 8. `.dbvl` parse + append works for both schema-typed CSV and JSONL
 
@@ -345,8 +345,8 @@ Phase A and B are the hardest and most consequential — get parser semantics ri
 |----------|--------|-----------|
 | Schema field order defines positional matching | Yes | Enables terse `.dbvl` lines — just provide values |
 | Optional fields with `?` suffix | Yes | Allows skipping fields in positional form |
-| Constraints on fields: `[ != "" ]` syntax | Yes | Symmetry with Brief contract brackets; compiler-visible |
-| Rules as data entries, not separate extension | Yes | Keeps DBrief as "just data"; `.dbvr` not needed |
+| Constraints on fields: `[ != "" ]` syntax | Yes | Symmetry with Briv contract brackets; compiler-visible |
+| Rules as data entries, not separate extension | Yes | Keeps DBriv as "just data"; `.dbvr` not needed |
 | No `REGISTER`/`ALIAS`/`@address` keywords | Yes | Pure data with schemas replaces all of them |
 | FFI bindings as data matching `FnBinding` schema | Yes | No magic; users can see and customize bindings |
 | Both positional and named forms in `.dbv` | Yes | Positional for terse; named for clarity/skipping |

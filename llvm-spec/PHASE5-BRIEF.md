@@ -1,4 +1,4 @@
-# Phase 5 Brief: Reactor Loop + Acyclic Dispatch + Equilibrium Suspension
+# Phase 5 Briv: Reactor Loop + Acyclic Dispatch + Equilibrium Suspension
 
 **Date:** 2026-05-29  
 **Spec Reference:** `08-REACTOR-LOOP.md`, `08c-EQUILIBRIUM-SUSPENSION.md`  
@@ -109,7 +109,7 @@ This keeps the tick dispatcher clean and enables per-precondition `!range` metad
 
 ```bash
 for f in tests/fixtures/phase5/*.bv; do
-  brief-compiler llvm "$f" --out /tmp/p5/
+  briv-compiler llvm "$f" --out /tmp/p5/
   llc /tmp/p5/$(basename "$f" .bv).ll -o /dev/null  # Must succeed
 done
 grep "phi" /tmp/p5/acyclic_dispatch.ll           # Phi for by-value state merge

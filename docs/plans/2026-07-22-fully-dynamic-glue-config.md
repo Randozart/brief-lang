@@ -63,8 +63,8 @@ cargo test --test pp_roundtrip_tests  # 8 pass
 ## Verification
 
 After the change:
-- `brief export pp-types.bv rust --out /tmp/test` should still work
-- `brief export pp-types.bv python --out /tmp/test` should also work
+- `briv export pp-types.bv rust --out /tmp/test` should still work
+- `briv export pp-types.bv python --out /tmp/test` should also work
 - Adding a new language = adding TOML section, nothing else
 
 ## Risk Assessment

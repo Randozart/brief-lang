@@ -12,7 +12,7 @@ Three bugs preventing officina from working correctly.
 
 ### A1. `__print` doesn't flush stdout
 
-**File**: `lib/runtime/brief_rt.c:379-381`  
+**File**: `lib/runtime/briv_rt.c:379-381`  
 **Root cause**: ANSI escape sequences contain no `\n`; line-buffered stdout never flushes.  
 **Fix**: Add `fflush(stdout)` after `fputs`.  
 **Risk**: None.
@@ -26,7 +26,7 @@ Three bugs preventing officina from working correctly.
 
 ### A3. `@ link String` loads i8* pointer, not content
 
-**Files**: `mod.rs:318` + `emit_toplevel.rs:99-103` + `emit_expr.rs:1062` + `brief_rt.c`  
+**Files**: `mod.rs:318` + `emit_toplevel.rs:99-103` + `emit_expr.rs:1062` + `briv_rt.c`  
 **Root cause**: `@ link` for String declares `external global i8*` and loads a pointer address. For C functions (like `tty_read_key`), the GOT holds the function entry address — comparing this against the empty string literal's address always produces "not empty."  
 **Design**: Change `@ link String` to load a single byte from the linked address, consistent with how `@ link Int` loads i64 and `@ link Bool` loads i8. Add a special case in `emit_fcmp` to compare linked String triggers against string literals by first-byte value, not pointer address.
 
@@ -34,7 +34,7 @@ Three bugs preventing officina from working correctly.
 - **A3a** (`mod.rs:318`): Change `String` storage type from `"i8*"` to `"i8"`  
 - **A3b** (`emit_toplevel.rs:99-103`): Change load from `load volatile i8*; ptrtoint` to `load volatile i8; zext`  
 - **A3c** (`emit_expr.rs`): Add special case in `emit_fcmp` — when comparing a linked String trigger against a string literal `"X"`, compare against `X`'s first byte value (0 for `""`)  
-- **A3d** (`brief_rt.c`): Replace `int64_t tty_read_key(void)` (blocking function) with `volatile char __tty_read_key = 0` global; wire epoll/kqueue stdin handlers to read into `__tty_read_key`
+- **A3d** (`briv_rt.c`): Replace `int64_t tty_read_key(void)` (blocking function) with `volatile char __tty_read_key = 0` global; wire epoll/kqueue stdin handlers to read into `__tty_read_key`
 
 ---
 
@@ -55,8 +55,8 @@ Three bugs preventing officina from working correctly.
 ```
 Step │ Work  │ Files                │ Verification
 ─────┼───────┼──────────────────────┼─────────────────────────
-1    │ A1    │ brief_rt.c           │ Review output reaches terminal
-2    │ A3d   │ brief_rt.c           │ volatile char + epoll read
+1    │ A1    │ briv_rt.c           │ Review output reaches terminal
+2    │ A3d   │ briv_rt.c           │ volatile char + epoll read
 3    │ A2    │ loop_engine.rs       │ cargo test --lib
 4    │ A3a   │ mod.rs               │ cargo build
 5    │ A3b   │ emit_toplevel.rs     │ cargo build

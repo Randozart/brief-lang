@@ -72,7 +72,7 @@ impl AsmAssembler for StubAssembler {
 pub struct PlatformAssembler;
 
 impl PlatformAssembler {
-    /// Map Brief arch string to the assembler binary and flags.
+    /// Map Briv arch string to the assembler binary and flags.
     fn assembler_for_arch(arch: &str) -> (&'static str, &'static [&'static str]) {
         match arch {
             "x86_64" => ("as", &["--64"]),
@@ -89,7 +89,7 @@ impl AsmAssembler for PlatformAssembler {
     fn assemble(&self, text: &str, arch: &str) -> Result<Vec<u8>, String> {
         let (assembler, flags) = Self::assembler_for_arch(arch);
         let mut tmp_dir = std::env::temp_dir();
-        tmp_dir.push(format!("brief_asm_{}", std::process::id()));
+        tmp_dir.push(format!("briv_asm_{}", std::process::id()));
         std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("cannot create tmp dir: {}", e))?;
 
         let src_path = tmp_dir.join("input.s");

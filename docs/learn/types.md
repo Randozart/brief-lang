@@ -1,14 +1,14 @@
-# Types in Brief — Learning Guide
+# Types in Briv — Learning Guide
 
 **Last updated:** 2026-07-09
 
 ## Type Derivation (`<:`)
 
-Brief's type system is built on a small primitive kernel (~13 properties) that the compiler understands natively. Everything else is defined in user-space Brief.
+Briv's type system is built on a small primitive kernel (~13 properties) that the compiler understands natively. Everything else is defined in user-space Briv.
 
 The syntax for defining a type:
 
-```brief
+```briv
 Type Name : Base {
     Property = Value;
     [ Constraint ];
@@ -17,7 +17,7 @@ Type Name : Base {
 
 ### Scalars
 
-```brief
+```briv
 Type U8  : Bits { Bytes = 1; Alignment = 1; };
 Type U32 : Bits { Bytes = 4; Alignment = 4; };
 Type Int : U64;
@@ -32,7 +32,7 @@ instructions. See [Operator Declarations](#operator-declarations) below.
 
 Collections are defined with element type and access pattern metadata:
 
-```brief
+```briv
 Type List<T> : Bits {
     ElementType = T;
     FixedSize = false;
@@ -47,7 +47,7 @@ Type List<T> : Bits {
 
 Tuples are fixed-size heterogeneous collections. Unlike `List<T>` (which holds zero or more elements of a single type), a Tuple's length and element types are part of its type signature:
 
-```brief
+```briv
 defn pair() -> (Int, String) {
     term (42, "hello");
 };
@@ -57,7 +57,7 @@ defn pair() -> (Int, String) {
 
 Tuples support the same `[index]` bracket syntax as Lists:
 
-```brief
+```briv
 let t = (10, 20, 30);
 let x = t[1];   // 20
 let y = t[0];   // 10
@@ -73,7 +73,7 @@ In the LLVM backend, Tuples share the same memory layout as Lists: `[data_ptr, l
 
 Override to restrict access:
 
-```brief
+```briv
 Type Stack<T> : List<T> { AllowIndex = false; };
 Type Queue<T> : List<T> { ExtractFrom = 0; AllowIndex = false; };
 ```
@@ -84,7 +84,7 @@ These say: "Stack is like List but you can't index into it." The compiler synthe
 
 Codecs define how literals are translated to bytes at compile time:
 
-```brief
+```briv
 import { UTF8 } from "std/UTF8.bv";
 Type String : List<U8> { Codec = UTF8; };
 ```
@@ -93,7 +93,7 @@ When you write `"Hello"`, the compiler calls `UTF8::encode("Hello")` during comp
 
 ### Refinement Constraints
 
-```brief
+```briv
 Type PositiveInt : Int {
     [ > 0 ]
 };
@@ -125,7 +125,7 @@ Tuple element access via `:> N` (integer index) is **deprecated** — use `val[N
 Types declare their operations in the type definition body using `op` annotations.
 These tell the compiler which LLVM instruction to emit for each operator:
 
-```brief
+```briv
 type Int : Bits {
     bytes <~ 8;
     storage <~ "Boxed";
@@ -171,7 +171,7 @@ When you write `let x: Int = 0`, the compiler resolves the type through three st
 2. **NormalizeTypes pass** looks up `"Int"` in the TypeUniverse, finds `default_width <~ 64`, and produces `Type::Applied("Int", [Width(64)])`
 3. **Codegen** queries the universe for `Int`'s storage (`"Boxed"` → `i64`) and operator declarations (`"add nsw"` for Add)
 
-```brief
+```briv
 // All of these produce equivalent code:
 let a: Int = 0;          // Custom("Int") → Applied("Int", [Width(64)]) → Bits(64)
 let b: Int<64> = 0;      // Applied("Int", [Width(64)]) → Bits(64)
@@ -185,7 +185,7 @@ and user-defined types all resolve through the universe.
 
 `String` is a struct with three fields, defined in the TypeUniverse:
 
-```brief
+```briv
 type String : Bits {
     struct ptr: Ptr<Byte>;      // pointer to UTF-8 data
     struct len: Int;            // byte length
@@ -197,7 +197,7 @@ This means `String` occupies 24 bytes (pointer + length + codec) and supports
 field projection via `s :> ptr`, `s :> len`, `s :> codec`. String literals like
 `"hello"` are desugared at compile time:
 
-```brief
+```briv
 // Before NormalizeTypes:
 let s: String = "hello";
 
@@ -224,7 +224,7 @@ built-in strategy string, the compiler treats it as a reference to a
 user-defined function (typically an `inop` or `defn`). The `<-` arrow
 operator dispatches to that function instead of using the default behavior:
 
-```brief
+```briv
 type SkipList<T> : List<T> {
     InsertAt = sl_insert;     // sl <- val → sl_insert#(sl, val)
     ExtractFrom = sl_remove;  // dest <- sl → sl_remove#(sl)
@@ -248,15 +248,15 @@ Any other string becomes `Custom(fn_name)`.
 2. **Pass 2 (NormalizeTypes)**: Resolves `Custom("Int")` → `Applied("Int", [Width(64)])` → `Bits(64)` using universe defaults. Desugars string literals to struct instances.
 3. **Pass 3 (Executable)**: Uses the frozen type map for type checking, literal encoding, and code generation.
 
-### The Brief philosophy
+### The Briv philosophy
 
-Most languages hardcode type rules inside the compiler's Rust/C++ source. Brief hardcodes about 13 properties in the Rust compiler and declares the rest in `lib/std/types/bootstrap.bv` (~300 lines of type definitions with operator annotations). Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Brief source files, using the same syntax you use to define your own types.
+Most languages hardcode type rules inside the compiler's Rust/C++ source. Briv hardcodes about 13 properties in the Rust compiler and declares the rest in `lib/std/types/bootstrap.bv` (~300 lines of type definitions with operator annotations). Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Briv source files, using the same syntax you use to define your own types.
 
 ### The `&` address-of operator (2026-07-09)
 
 The `&` operator creates a typed pointer (reference) to a variable or state field:
 
-```brief
+```briv
 let x: Int = 42;
 let p = &x;        // p: PtrConst<Int>, points to x
 &x = 99;           // write through pointer to state field
@@ -272,7 +272,7 @@ let p = &x;        // p: PtrConst<Int>, points to x
 
 The `*` operator dereferences a pointer:
 
-```brief
+```briv
 let x: Int = 42;
 let p = &x;
 let v = *p;       // v = 42 (reads through the reference)
@@ -283,7 +283,7 @@ attempt to dereference a non-pointer type is a compile-time type error.
 
 **`&` in assignments** (LHS) is sugar for "store through this address":
 
-```brief
+```briv
 &field = value;   // writes value to state field 'field'
 *ptr = value;     // writes value through pointer
 ```
@@ -293,7 +293,7 @@ These produce the same LLVM IR: `getelementptr` + `store`.
 **Dangling detection:** The compiler warns if you store a pointer to a local
 variable into a state field:
 
-```brief
+```briv
 node example [true][true] {
     let tmp: Int = compute();
     &state_field = &tmp;  // warning: pointer to local may dangle
@@ -303,13 +303,13 @@ node example [true][true] {
 
 Store the value instead:
 
-```brief
+```briv
 &state_field = tmp;       // OK: copies the value, not the pointer
 ```
 
 ### Volatile pointers (2026-07-03)
 
-For hardware register access, Brief has four forms of explicit pointer type,
+For hardware register access, Briv has four forms of explicit pointer type,
 all sharing the same machine representation (`i64`/`u64` in the backend):
 
 | Form | Example | What it says |
@@ -321,7 +321,7 @@ all sharing the same machine representation (`i64`/`u64` in the backend):
 
 These pointers **cannot be dereferenced directly** — use `volatile_load#` / `volatile_store#`:
 
-```brief
+```briv
 let reg: Ptr<Int> = 0x40011000 as Ptr<Int>;
 let val = volatile_load#(reg);
 volatile_store#(reg, val + 1);
@@ -330,14 +330,14 @@ volatile_store#(reg, val + 1);
 Layout-compatible casts between pointer types are allowed when the pointee
 types have the same bytes and compatible alignment:
 
-```brief
+```briv
 let f: Ptr<Float> = 0x4000 as Ptr<Float>;
 let i: Ptr<Int32> = f as Ptr<Int32>;  // both 4 bytes, align 4
 ```
 
 Spatial operations use `lib/std/spatial.bv`:
 
-```brief
+```briv
 import { block_copy } from "std/spatial.bv";
 let dst: Ptr64 = malloc(8);
 block_copy(dst, src, 8);
@@ -345,7 +345,7 @@ block_copy(dst, src, 8);
 
 Function pointers via `.#Ptr`:
 
-```brief
+```briv
 defn cmp(a: Int, b: Int) -> Bool { term a == b; };
 let fn_ptr = cmp .#Ptr;
 let eq = fn_ptr(3, 5);

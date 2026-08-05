@@ -56,7 +56,7 @@ fn wrap_err(msg: String) -> Value {
 }
 
 /// Resolve and call a foreign function by name using the given library.
-/// Converts Brief Values to/from C ABI for each supported signature pattern.
+/// Converts Briv Values to/from C ABI for each supported signature pattern.
 pub fn call_foreign_by_name(
     lib: &Library,
     name: &str,

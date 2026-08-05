@@ -32,8 +32,8 @@ use crate::ast::{Statement, TopLevel};
 
 /// Detect unreachable statements and bare-term-guard confusions.
 ///
-/// Returns `(errors, warnings)`. Errors fail both `briefc check` and
-/// `briefc build`; warnings print to stderr.
+/// Returns `(errors, warnings)`. Errors fail both `brivc check` and
+/// `brivc build`; warnings print to stderr.
 pub fn analyze(items: &[TopLevel]) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();

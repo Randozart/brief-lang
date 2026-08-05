@@ -32,7 +32,7 @@ At stride-5, it creates separate v2f32 packs for each dimension
 
 ### Impact: 14% more shuffle ops
 
-Brief: 8× v2f32 vector phis, 133 shuffle/insert/extract ops
+Briv: 8× v2f32 vector phis, 133 shuffle/insert/extract ops
 C:     3× v4f32 vector phis, 117 shuffle/insert/extract ops
 
 ## 2. Fix: Field Interleaving
@@ -83,7 +83,7 @@ permutation to:
 - `field_index_map` (field name → new index)
 - `field_types` Vec (reorder by new index)
 - `field_initializers` Vec (reorder by new index)
-- `field_brief_types` Vec (reorder by new index)
+- `field_briv_types` Vec (reorder by new index)
 
 ### 3.3 Integration
 
@@ -108,9 +108,9 @@ modifies `self.ctx` fields directly.
 
 | Path | Why Rejected |
 |------|-------------|
-| FMA codegen | Both Brief and C produce zero FMA on Ivybridge (no -fma flag). Not the gap. |
+| FMA codegen | Both Briv and C produce zero FMA on Ivybridge (no -fma flag). Not the gap. |
 | Phi emission order | SLP traces def-use chains, not phi list position. Order irrelevant. |
 | Energy computation location | Both correctly place it outside the hot loop. No difference. |
-| Sqrt vectorization | Both cover all 10 gravity pairs. Brief uses 2 scalar vs C's fully packed, but these add <2% to runtime. |
+| Sqrt vectorization | Both cover all 10 gravity pairs. Briv uses 2 scalar vs C's fully packed, but these add <2% to runtime. |
 | MAX_FIELDS_PER_ALLLOCA tuning | Increasing from 15 would make SROA fail for 31-field states. |
 | Parallel-safe exemptions | All 30 fields are exempt for both positions and velocities. Disabling parallel-safe entirely would hurt vectorization, not help. |

@@ -1,4 +1,4 @@
-# C Language Profile for Brief FFI
+# C Language Profile for Briv FFI
 # Defines type mappings and conventions for speaking to C/kernel code
 
 [language]
@@ -33,7 +33,7 @@ Bool = { size = 4, representation = "int" }  # C has no bool, use int
 Void = { size = 0 }
 
 [mapping]
-# Default mappings for Brief types
+# Default mappings for Briv types
 String = "char*"
 Int = "int32_t"
 UInt = "uint32_t"

@@ -9,7 +9,7 @@
 ## Item 1 — `__chr_to_str` inline codegen (Phase 19)
 
 **Problem**: The LLVM backend emits `call i8* @__chr_to_str(i32)` for
-`Char → String` casts, creating a hidden dependency on `brief_rt.c`.
+`Char → String` casts, creating a hidden dependency on `briv_rt.c`.
 
 **Fix**: Replace the `call` + `ptrtoint` with inline LLVM IR that allocates
 a 2-byte buffer, stores the character, and null-terminates it.
@@ -32,7 +32,7 @@ store i8 0, i8* %gp, align 1
 ```
 
 **What to remove**:
-- `__chr_to_str` from `lib/runtime/brief_rt.c` (9 lines)
+- `__chr_to_str` from `lib/runtime/briv_rt.c` (9 lines)
 - `declare i8* @__chr_to_str(i32)` from `src/backend/llvm/mod.rs` (1 line)
 
 **Risk**: None — the inline IR is simpler and has no allocation
@@ -61,7 +61,7 @@ Instead, emit calls to **standard POSIX functions declared via `frgn`** that
 a standard library module provides:
 
 **New file: `lib/std/core/io.bv`**:
-```brief
+```briv
 frgn read(fd: Int, buf: Ptr<Byte>, count: Int) -> Int;
 frgn write(fd: Int, buf: Ptr<Byte>, count: Int) -> Int;
 frgn epoll_create1(flags: Int) -> Int;
@@ -82,7 +82,7 @@ keyword still triggers epoll setup invisibly.
 Instead of `@stdin#`, the user writes a reactive txn that calls `read()` via
 `frgn` directly:
 
-```brief
+```briv
 import# "core/io.bv" provides read, epoll_*, timerfd_*, signalfd_*;
 
 // Manual stdin poll:
@@ -104,7 +104,7 @@ The user would need to manually track the key state.
 The most transparent approach: allow `@ link` to bind to a `frgn` function's
 return value instead of a C global:
 
-```brief
+```briv
 frgn tty_read_key() -> Char;
 
 trg keypress: Char @ link tty_read_key;   // calls the frgn each tick
@@ -129,8 +129,8 @@ source. No hidden syscalls. No invisible C globals.
    replaced by `frgn` declarations the user writes.
 
 The user would then write:
-```brief
-// brief_rt.c provides these C functions:
+```briv
+// briv_rt.c provides these C functions:
 frgn __trg_stdin_read() -> Char;
 frgn __trg_timerfd_open(hz: Int) -> Int;
 frgn __trg_timerfd_read(fd: Int) -> Int;
@@ -146,7 +146,7 @@ trg sigint @ link __trg_signalfd_read;        // user's own code
 - `emit_trg_init()` method
 - All `__trg_*` declares in `mod.rs`
 - Non-blocking stdin setup in `__rt_init()`
-- All `__trg_*` C wrappers from `brief_rt.c`
+- All `__trg_*` C wrappers from `briv_rt.c`
 
 **Risk**: Medium — this is a non-trivial refactor. The `@ link` extension
 needs careful implementation to handle function calls with different signatures

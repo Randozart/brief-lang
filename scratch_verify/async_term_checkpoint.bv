@@ -1,0 +1,11 @@
+let a: Int = 0;
+
+// Parity test for the void-term checkpoint fix (2026-08-04): a bare `term;`
+// mid-body is a convergence checkpoint — execution continues to the next
+// statement (interpreter reference). The async emission path previously
+// stopped the body at `term;`, skipping Print#(a).
+async node n [a == 0][a == 1] {
+  a = 1;
+  term;
+  Print#(a);
+};

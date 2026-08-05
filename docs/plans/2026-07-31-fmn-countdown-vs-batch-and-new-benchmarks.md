@@ -16,7 +16,7 @@ gated out. This plan:
 2. **Phase 2** — build new **real-program benchmarks** (telemetry, PID control,
    matrix pipeline, accumulator flush) + a **sweep_density** family, with C
    references, that map the guard-cost × body-shape × field-count space and
-   stress both Brief and C.
+   stress both Briv and C.
 3. **Phase 3** — replace the `arithmetic_op_count >= 40` dispatch heuristic with
    a **principled structural rule** derived from the measured Why.
 
@@ -26,26 +26,26 @@ Current tip: `caaab9d9` (batch loop, gated to dense bodies ≥ 40 ops). Run:
 `cargo build --release` + `bash benchmarks/build_and_bench.sh --runtime`,
 BOUND=50000000. Raw log: `/tmp/opencode/batch_runtime3.log`. Zero MISMATCH.
 
-| Benchmark | Brief | C | Ratio | Winner | Correct |
+| Benchmark | Briv | C | Ratio | Winner | Correct |
 |-----------|------:|---:|------:|:------:|:-------:|
 | ring_buffer | .0557s | .0471s | 1.18× | C | MATCH |
-| float_math | .0713s | .0741s | 0.96× | Brief | MATCH |
+| float_math | .0713s | .0741s | 0.96× | Briv | MATCH |
 | float_math_nonzero | .2019s | .1657s | **1.21×** | C | MATCH |
-| sparse_dispatch | .0499s | .0604s | 0.82× | Brief | MATCH |
+| sparse_dispatch | .0499s | .0604s | 0.82× | Briv | MATCH |
 | print_loop | .0629s | .0599s | 1.05× | C | MATCH |
-| nbody_newton | 6.9111s | 8.2887s | 0.83× | Brief | MATCH |
-| nbody_sqrt | 2.1839s | 2.8012s | 0.77× | Brief | MATCH |
-| nbody_sqrt_idio | 2.7199s | 3.6441s | 0.74× | Brief | MATCH |
-| fasta | .2086s | .2121s | 0.98× | Brief | MATCH |
-| fannkuch_redux | .0630s | .0657s | 0.95× | Brief | MATCH |
+| nbody_newton | 6.9111s | 8.2887s | 0.83× | Briv | MATCH |
+| nbody_sqrt | 2.1839s | 2.8012s | 0.77× | Briv | MATCH |
+| nbody_sqrt_idio | 2.7199s | 3.6441s | 0.74× | Briv | MATCH |
+| fasta | .2086s | .2121s | 0.98× | Briv | MATCH |
+| fannkuch_redux | .0630s | .0657s | 0.95× | Briv | MATCH |
 | mandelbrot | .6843s | .6580s | 1.03× | C | MATCH |
 | kalman_filter_runtime | .1836s | .1788s | **1.02×** | C | MATCH |
-| knucleotide | .1850s | .1892s | 0.97× | Brief | MATCH |
-| cancel_math | .0544s | .0637s | 0.85× | Brief | MATCH |
+| knucleotide | .1850s | .1892s | 0.97× | Briv | MATCH |
+| cancel_math | .0544s | .0637s | 0.85× | Briv | MATCH |
 | bit_clear | .0005s | .0004s | 1.25× | C | MATCH |
-| queue_drain | .0564s | .0623s | 0.90× | Brief | MATCH |
-| queue_drain_sym | .0562s | .0621s | 0.90× | Brief | MATCH |
-| queue_drain_idio | .0562s | .0611s | 0.91× | Brief | MATCH |
+| queue_drain | .0564s | .0623s | 0.90× | Briv | MATCH |
+| queue_drain_sym | .0562s | .0621s | 0.90× | Briv | MATCH |
+| queue_drain_idio | .0562s | .0611s | 0.91× | Briv | MATCH |
 | interval_step | .0633s | .0631s | 1.00× | tie | MATCH |
 
 ## 3. Investigation summary — the Why
@@ -110,7 +110,7 @@ better (SIMD-friendly body)? This is the evidence Phase 3 needs.
 
 ## 5. Phase 2 — new real-program benchmarks
 
-Each benchmark has a C reference (symmetric) and is chosen to stress both Brief
+Each benchmark has a C reference (symmetric) and is chosen to stress both Briv
 and C with real-program structure:
 
 | Benchmark | Pattern | Body shape | Fields | Guard |
@@ -168,7 +168,7 @@ the frontend, not a threshold.
    + unit tests. `cargo test --lib`, Praetor.
 2. **Phase 1b**: A/B matrix (batch vs countdown vs version-DAG on 5 benchmarks).
    Record in §10.
-3. **Phase 2**: new benchmarks (Brief + C + harness registration) + sweep
+3. **Phase 2**: new benchmarks (Briv + C + harness registration) + sweep
    family. Full harness A/B.
 4. **Phase 3**: structural SIMD-friendliness dispatch. A/B vs §2 baseline +
    vs the heuristic. Keep whichever passes (zero regressions, zero MISMATCH).
@@ -180,7 +180,7 @@ Seven benchmarks added (each with a C reference): `telemetry_stream`, `pid_contr
 `matrix_pipeline`, `accumulator_flush`, `sweep_sparse`, `sweep_mid`, `sweep_dense`.
 Full harness (BOUND=50M, zero MISMATCH):
 
-| Benchmark | Brief | C | Ratio | Pattern |
+| Benchmark | Briv | C | Ratio | Pattern |
 |-----------|------:|---:|------:|---------|
 | telemetry_stream | — | — | **0.99×** | rolling EMA + periodic telemetry |
 | pid_control | — | — | **0.97×** | PID loop + periodic log |

@@ -22,7 +22,7 @@ During the lowering pass (`01-ARCHITECTURE.md`), the compiler attempts to prove 
 ### Three Inference Paths
 
 #### Path A: Literal Propagation
-```brief
+```briv
 let data = [1, 2, 3];
 // Compiler sees: literal with 3 elements
 // → Rewrites to: Vector[3]
@@ -33,7 +33,7 @@ let data = [1, 2, 3];
 ```
 
 #### Path B: Contract-Bound Inference
-```brief
+```briv
 txn process [len(data) <= 16] {
     // Compiler sees: precondition bounds length to max 16
     // → Rewrites to: Vector[16]
@@ -46,7 +46,7 @@ txn process [len(data) <= 16] {
 ```
 
 #### Path C: Symbolic Interval Analysis
-```brief
+```briv
 let buffer: [Int] = [];
 for i in 0..array_size {
     buffer = append(buffer, data[i]);
@@ -115,7 +115,7 @@ store i64 %capacity, i64* %list_cap_ptr   ; capacity = N
 ## 5. Integration with the FFI
 
 When a foreign function receives a promoted `Vector[N]`:
-```brief
+```briv
 frgn process_data(data: [Int]) -> Void from "lib.so"
 ```
 

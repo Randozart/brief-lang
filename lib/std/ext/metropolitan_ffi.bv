@@ -1,5 +1,5 @@
 // Metropolitan FFI - Shared Memory Negotiation System
-// Allows Brief to negotiate memory positions with foreign languages
+// Allows Briv to negotiate memory positions with foreign languages
 
 // ===== SHARED MEMORY REGIONS =====
 
@@ -163,7 +163,7 @@ defn create_metropolitan_channel(
     foreign_lang: String
 ) -> Result<MetropolitanChannel, String> {
     // Request three shared regions:
-    // 1. Request region (Brief → Foreign)
+    // 1. Request region (Briv → Foreign)
     let request = request_shared_region(
         channel_id + "_request",
         4096,
@@ -171,7 +171,7 @@ defn create_metropolitan_channel(
         foreign_lang
     )?;
     
-    // 2. Response region (Foreign → Brief)
+    // 2. Response region (Foreign → Briv)
     let response = request_shared_region(
         channel_id + "_response",
         4096,

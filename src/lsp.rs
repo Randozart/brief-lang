@@ -128,7 +128,7 @@ impl LspServer {
         let (connection, _) = Connection::stdio();
 
         if config.verbose {
-            eprintln!("Brief Language Server started");
+            eprintln!("Briv Language Server started");
             eprintln!("  Features: hover, definition, completion, documentSymbol, workspaceSymbol");
         }
 
@@ -320,18 +320,18 @@ impl LspServer {
 
     fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Vec<TopLevel>>) {
         let is_rbv = uri.ends_with(".rbv");
-        let is_dbrief = uri.ends_with(".dbv") || uri.ends_with(".dbvl");
+        let is_dbriv = uri.ends_with(".dbv") || uri.ends_with(".dbvl");
 
-        if is_dbrief {
+        if is_dbriv {
             let mut diagnostics = Vec::new();
-            if let Err(e) = crate::dbrief::v2::parse_document(text).map(|_| ()) {
+            if let Err(e) = crate::dbriv::v2::parse_document(text).map(|_| ()) {
                 diagnostics.push(serde_json::json!({
                     "range": {
                         "start": { "line": 0, "character": 0 },
                         "end": { "line": 0, "character": 1 }
                     },
                     "severity": 1,
-                    "source": "dbrief-parser",
+                    "source": "dbriv-parser",
                     "message": e,
                 }));
             }
@@ -342,7 +342,7 @@ impl LspServer {
             info!("Codicil mode enabled - ignoring [route], [pre], [post] blocks");
         }
 
-        let source = self.extract_brief_source(text, is_rbv, self.codicil_mode);
+        let source = self.extract_briv_source(text, is_rbv, self.codicil_mode);
 
         let tokens = {
             use logos::Logos;
@@ -373,7 +373,7 @@ impl LspServer {
         (diagnostics, Some(program))
     }
 
-    fn extract_brief_source(&self, source: &str, is_rbv: bool, codicil_mode: bool) -> String {
+    fn extract_briv_source(&self, source: &str, is_rbv: bool, codicil_mode: bool) -> String {
         if !is_rbv {
             if codicil_mode {
                 return strip_codicil_blocks(source);
@@ -479,7 +479,7 @@ impl LspServer {
                 "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
             },
             "severity": 1,
-            "source": "brief-parser",
+            "source": "briv-parser",
             "message": message
         })
     }
@@ -518,7 +518,7 @@ impl LspServer {
             "range": range,
             "severity": severity,
             "code": diag.code,
-            "source": "brief",
+            "source": "briv",
             "message": message
         })
     }
@@ -546,7 +546,7 @@ impl LspServer {
             "range": range,
             "severity": 1,
             "code": "proof",
-            "source": "brief-proof",
+            "source": "briv-proof",
             "message": msg
         })
     }
@@ -783,7 +783,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::Constant(c) => c.name.clone(),
         TopLevel::Obj(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
-        TopLevel::ForeignBinding(fb) => fb.effective_brief_name().to_string(),
+        TopLevel::ForeignBinding(fb) => fb.effective_briv_name().to_string(),
         _ => "unnamed".to_string(),
     }
 }
@@ -820,7 +820,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_brief_source_rbv() {
+    fn test_extract_briv_source_rbv() {
         let lsp = LspServer {
             connection: Connection::stdio().0,
             documents: Arc::new(Mutex::new(DocumentStore {
@@ -830,14 +830,14 @@ mod tests {
         };
 
         let rbv_source = r#"
-<script type="brief">
+<script type="briv">
 let x: Int = 10;
 </script>
 <view>
   <div>Test</div>
 </view>
 "#;
-        let extracted = lsp.extract_brief_source(rbv_source, true, false);
+        let extracted = lsp.extract_briv_source(rbv_source, true, false);
 
         // The script tag should be replaced by spaces/newlines
         assert!(extracted.contains("let x: Int = 10;"));
@@ -855,7 +855,7 @@ let x: Int = 10;
     }
 
     #[test]
-    fn test_extract_brief_source_rbv_with_other_tags() {
+    fn test_extract_briv_source_rbv_with_other_tags() {
         let lsp = LspServer {
             connection: Connection::stdio().0,
             documents: Arc::new(Mutex::new(DocumentStore {
@@ -870,7 +870,7 @@ let x: Int = 10;
 let x = 1;
 </script>
 "#;
-        let extracted = lsp.extract_brief_source(rbv_source, true, false);
+        let extracted = lsp.extract_briv_source(rbv_source, true, false);
 
         // <scripting> should be masked
         assert!(!extracted.contains("<scripting>"));
@@ -879,7 +879,7 @@ let x = 1;
     }
 
     #[test]
-    fn test_extract_brief_source_rbv_byte_accuracy() {
+    fn test_extract_briv_source_rbv_byte_accuracy() {
         let lsp = LspServer {
             connection: Connection::stdio().0,
             documents: Arc::new(Mutex::new(DocumentStore {
@@ -890,7 +890,7 @@ let x = 1;
 
         // Source with multi-byte character (🦀 is 4 bytes)
         let rbv_source = "🦀<script>let x = 1;</script>";
-        let extracted = lsp.extract_brief_source(rbv_source, true, false);
+        let extracted = lsp.extract_briv_source(rbv_source, true, false);
 
         assert_eq!(rbv_source.len(), extracted.len());
         assert!(extracted.contains("let x = 1;"));

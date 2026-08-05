@@ -9,7 +9,7 @@
 // `detect_increments` picks up `count = count + 1` as delta=1.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/cancel_math.bv \
+//   ./target/release/briv-compiler llvm benchmarks/cancel_math.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: cancel_math_c.c
@@ -17,7 +17,7 @@
 #!exit count == N && acc >= 0;
 
 import { get_env_int } from "std/env.bv";
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 
 frgn #out __print_int(n: Int) -> Bool ;
 

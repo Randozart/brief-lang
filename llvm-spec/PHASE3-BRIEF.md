@@ -1,4 +1,4 @@
-# Phase 3 Brief: Match Expression → switch
+# Phase 3 Briv: Match Expression → switch
 
 **Date:** 2026-05-29  
 **Spec Reference:** `06-MATCH-TO-SWITCH.md`  
@@ -14,7 +14,7 @@
 Three constructs lower to `switch`:
 
 ### 1. `Statement::Unification`
-```brief
+```briv
 uni Some(value) = opt_result { ... };
 // Single-arm match: if discriminant matches "Some", extract value and execute body
 ```
@@ -22,7 +22,7 @@ uni Some(value) = opt_result { ... };
 **AST fields:** `name: String`, `pattern: String`, `expr: Expr`
 
 ### 2. `Expr::Match`
-```brief
+```briv
 let result = match val {
     Ok(x) => handle_ok(x),
     Err(e) => handle_err(e),
@@ -34,7 +34,7 @@ let result = match val {
 **AST fields:** `value: Box<Expr>`, `arms: Vec<MatchArm>` where each arm has `pattern: MatchPattern` (Wildcard or Variant { name, fields })
 
 ### 3. `Expr::PatternMatch` (guard context)
-```brief
+```briv
 [value Variant(field1, field2)] { ... }
 // Boolean guard: true if value's discriminant matches Variant
 ```
@@ -56,7 +56,7 @@ The enum type is embedded in `%State` or is a local SSA value. Discriminant is a
 - From SSA register: `extractvalue %struct.Enum_Type %val, 0`
 
 ### Payload Extraction
-```brief
+```briv
 enum Option<Int> { Some(Int), None }
 // Layout: { i64, { i64 } } — discriminant + Some payload
 ```
@@ -106,7 +106,7 @@ unreachable:
 
 ```bash
 for f in tests/fixtures/phase3/*.bv; do
-  brief-compiler llvm "$f" --out /tmp/p3/
+  briv-compiler llvm "$f" --out /tmp/p3/
   llc /tmp/p3/$(basename "$f" .bv).ll -o /dev/null  # Must succeed
 done
 grep "switch" /tmp/p3/match_simple.ll         # switch instruction present

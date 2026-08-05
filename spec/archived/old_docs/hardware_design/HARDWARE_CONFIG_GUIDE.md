@@ -1,15 +1,15 @@
 # Hardware Specification Guide (.toml)
 
-This document provides a comprehensive specification for the `hardware.toml` file used by the Brief compiler to target hardware architectures (FPGAs/ASICs).
+This document provides a comprehensive specification for the `hardware.toml` file used by the Briv compiler to target hardware architectures (FPGAs/ASICs).
 
 ## Overview
 
-The `hardware.toml` file maps logical variables and transactions defined in Brief (`.ebv`) to physical hardware resources, interfaces, and timing constraints.
+The `hardware.toml` file maps logical variables and transactions defined in Briv (`.ebv`) to physical hardware resources, interfaces, and timing constraints.
 
 ## Root Sections
 
 ### 1. [project]
-Defines metadata about the Brief project.
+Defines metadata about the Briv project.
 ```toml
 [project]
 name = "my_gpu"
@@ -88,10 +88,10 @@ data_width = { default = 32 }
 
 ## Usage
 
-To compile a Brief file to SystemVerilog with hardware mapping, use the `--hw` flag:
+To compile a Briv file to SystemVerilog with hardware mapping, use the `--hw` flag:
 
 ```bash
-./brief-compiler verilog my_gpu.ebv --hw hardware.toml --out out_dir
+./briv-compiler verilog my_gpu.ebv --hw hardware.toml --out out_dir
 ```
 
 ## Key Concept: Memory = Internal, IO = External

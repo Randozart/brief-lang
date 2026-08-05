@@ -24,7 +24,7 @@ update all ~40 match arms, update tests.
 **`src/interpreter/intrinsics.rs`** — Same rename.
 
 **`lib/std/os/*.bv` and `lib/std/string_c.bv`** — Replace all `Syscall#(` →
-`SysCall#(` and `Sysconf#(` → `SysConf#(` in Brief source files.
+`SysCall#(` and `Sysconf#(` → `SysConf#(` in Briv source files.
 
 ## Implementation Steps
 

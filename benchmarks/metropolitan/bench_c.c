@@ -1,5 +1,5 @@
 // C benchmark — Tier 1: Direct .so call (gen_c output: bridge.h)
-// 2026-07-24: Measures per-call latency of Brief export via direct C ABI.
+// 2026-07-24: Measures per-call latency of Briv export via direct C ABI.
 // After LTO this is ~0ns overhead — the function IS the native function.
 //
 // Build:

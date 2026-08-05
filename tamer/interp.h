@@ -1,4 +1,4 @@
-// 2026-07-25: Brief VM interpreter — stack-based 64-bit virtual machine.
+// 2026-07-25: Briv VM interpreter — stack-based 64-bit virtual machine.
 // Executes .lair bytecode for the install-time compilation pipeline.
 // Hosted in the tamer system tool (tamer/main.c). No dependencies beyond C99.
 

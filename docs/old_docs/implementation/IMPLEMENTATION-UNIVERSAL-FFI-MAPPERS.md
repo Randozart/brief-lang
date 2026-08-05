@@ -3,7 +3,7 @@
 ## Overview
 
 This plan implements a universal FFI system where:
-- **TOML** defines explicit contracts between foreign libraries and Brief
+- **TOML** defines explicit contracts between foreign libraries and Briv
 - **Mappers** are external, user-extensible translation layers (NOT built into compiler)
 - **Any language** can be supported by writing a mapper, no compiler changes needed
 
@@ -79,7 +79,7 @@ pub struct ForeignBinding {
 name = "__sin"
 mapper = "rust"
 target = "native"
-location = "brief_ffi_native::__sin"
+location = "briv_ffi_native::__sin"
 ```
 
 ---
@@ -90,9 +90,9 @@ location = "brief_ffi_native::__sin"
 
 ```rust
 pub trait FfiMapper: Send + Sync {
-    fn map_input(&self, name: &str, value: ForeignValue) -> BriefValue;
-    fn map_output(&self, name: &str, value: BriefValue) -> ForeignValue;
-    fn map_error(&self, error: ForeignError) -> BriefError;
+    fn map_input(&self, name: &str, value: ForeignValue) -> BrivValue;
+    fn map_output(&self, name: &str, value: BrivValue) -> ForeignValue;
+    fn map_error(&self, error: ForeignError) -> BrivError;
 }
 
 pub struct MapperRegistry {
@@ -113,7 +113,7 @@ impl MapperRegistry {
 ### Phase 3: Default Mappers
 
 **Rust Mapper** (`lib/ffi/mappers/rust_mapper.bv`):
-```brief
+```briv
 // 1:1 mapping - no transformation
 defn map_input(value: Value) -> Value [true][true] { term value; };
 defn map_output(value: Value) -> Value [true][true] { term value; };
@@ -121,19 +121,19 @@ defn map_error(err: Error) -> Error [true][true] { term err; };
 ```
 
 **C Mapper** (`lib/ffi/mappers/c_mapper.bv`):
-```brief
+```briv
 // Handles C string null-termination, UTF-8
-defn c_string_to_brief(c_str: CString) -> String [c_str.is_valid()][true] {
+defn c_string_to_briv(c_str: CString) -> String [c_str.is_valid()][true] {
   term c_str.to_str();
 };
 
-defn brief_string_to_c(s: String) -> CString [true][true] {
+defn briv_string_to_c(s: String) -> CString [true][true] {
   term CString::new(s);
 };
 ```
 
 **WASM Mapper** (`lib/ffi/mappers/wasm_mapper.bv`):
-```brief
+```briv
 // Handles WASM linear memory, JS value conversion
 defn wasm_ptr_to_string(ptr: Int, mem: Memory) -> String [ptr > 0][true] {
   term mem.read_string(ptr);
@@ -185,7 +185,7 @@ Document how to create custom mappers:
 |-----------|-------------------|
 | **Not built into compiler** | All mapper code is in `lib/` - user-editable |
 | **No PR required** | User adds `lib/mappers/<name>/` - discovered automatically |
-| **Brief-can-define** | Mappers can be written in Brief (`*.bv` files) |
+| **Briv-can-define** | Mappers can be written in Briv (`*.bv` files) |
 | **Universal** | Add new language = write new mapper, no compiler changes |
 | **Explicit** | TOML is the contract boundary |
 
@@ -210,6 +210,6 @@ Document how to create custom mappers:
 
 1. Phase 1: Add mapper + path fields to AST and TOML
 2. Phase 2: Create mapper registry with discovery logic
-3. Phase 3: Implement default mappers in Brief
+3. Phase 3: Implement default mappers in Briv
 4. Phase 4: Update FFI loader to use mappers
 5. Phase 5: Document user mapper creation

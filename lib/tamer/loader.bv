@@ -1,5 +1,5 @@
 // 2026-07-25: Tamer loader — parse .bounty and .lair binary formats.
-// Pure Brief, no Alloc# needed. Uses Ptr<Int> for raw byte access.
+// Pure Briv, no Alloc# needed. Uses Ptr<Int> for raw byte access.
 
 // ── Bytecode read helpers ────────────────────────────────────────────────
 // NOTE: Inline implementation to avoid VM call mechanism bugs.

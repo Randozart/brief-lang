@@ -1,5 +1,5 @@
 // gen_c.bv — Tier 1: C header + .so bridge generator
-// 2026-07-24: Generates C declarations matching Brief's export ABI.
+// 2026-07-24: Generates C declarations matching Briv's export ABI.
 // Overhead: ~0ns after LTO — same function pointer, no marshalling.
 //
 // Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
@@ -15,9 +15,9 @@ $defn c_type(t: String) -> String {
 };
 
 $defn gen_c_header(exports: Selection, bridge_name: String) -> String {
-    let code = "// " + bridge_name + " — Brief export declarations (auto-generated)\n";
+    let code = "// " + bridge_name + " — Briv export declarations (auto-generated)\n";
     code += "// Tier 1: Zero-cost FFI — after LTO these IS the native function.\n";
-    code += "// Link with: brief build --shared --out . my_module.bv\n\n";
+    code += "// Link with: briv build --shared --out . my_module.bv\n\n";
     code += "#ifndef " + bridge_name + "_H\n#define " + bridge_name + "_H\n\n";
     code += "#include <stdint.h>\n#include <stdbool.h>\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
 
@@ -54,7 +54,7 @@ $defn gen_c_header(exports: Selection, bridge_name: String) -> String {
 $(Normalized @ highest) {
     let exports = Tag$("export");
     when exports.Count$() > 0 {
-        let code = gen_c_header(exports, "brief_bridge");
+        let code = gen_c_header(exports, "briv_bridge");
         FileWrite$("ffi-out/c/bridge.h", code, true);
         EmitInfo$("gen_c: ffi-out/c/bridge.h");
     };

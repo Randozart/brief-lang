@@ -24,7 +24,7 @@ The lowering pass consumes this list and applies the inhibition rules to produce
 
 ### Body Fusion
 
-```brief
+```briv
 ; Before fusion — two sequential ticks:
 txn StateX [true] {
     &gpuBar0 = reservedMem;

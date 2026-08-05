@@ -66,7 +66,7 @@ but cannot display, causing every P008 error to show `<expr>`.
 
 New file `lib/std/types.bv`:
 
-```brief
+```briv
 type Byte : Bits @/0..7 {
     IsZero = self == 0;
     IsOne  = self == 1;
@@ -107,9 +107,9 @@ cast support so that `as Ptr<Byte>` and `as Byte` compile.
 
 ```bash
 cargo test --lib
-cargo run --bin brief-compiler -- check lib/std/atomic.bv
-cargo run --bin brief-compiler -- check lib/std/skiplist.bv
-cargo run --bin brief-compiler -- check examples/inop-*.bv
+cargo run --bin briv-compiler -- check lib/std/atomic.bv
+cargo run --bin briv-compiler -- check lib/std/skiplist.bv
+cargo run --bin briv-compiler -- check examples/inop-*.bv
 ```
 
 No flags. No `--skip-proof`. Every inop and txn has a verified contract.

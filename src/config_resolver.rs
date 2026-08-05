@@ -1,8 +1,8 @@
 // ── ConfigResolver — Runtime Config File Resolution ────────────────────
 // 2026-07-16: P1 — Centralizes config loading so profiles can be swapped
-// at runtime via `brief-compiler config set <profile>`.
+// at runtime via `briv-compiler config set <profile>`.
 // Resolution chain: --config-dir CLI flag → BRIEF_CONFIG_DIR env var →
-// ./.brief/config/ (project) → ~/.config/brief-compiler/active_profile →
+// ./.briv/config/ (project) → ~/.config/briv-compiler/active_profile →
 // compile-time baked fallback.
 
 use crate::target::TargetConfig;
@@ -25,8 +25,8 @@ impl ConfigResolver {
     /// Priority:
     ///   1. --config-dir CLI flag override
     ///   2. BRIEF_CONFIG_DIR env var
-    ///   3. ./.brief/config/ (project-local)
-    ///   4. ~/.config/brief-compiler/active_profile symlink/text
+    ///   3. ./.briv/config/ (project-local)
+    ///   4. ~/.config/briv-compiler/active_profile symlink/text
     ///   5. Compile-time baked fallback (path = "__baked__")
     pub fn resolve(config_dir_override: Option<&Path>) -> Self {
         let config_dir = Self::resolve_config_dir(config_dir_override);
@@ -34,7 +34,7 @@ impl ConfigResolver {
         let target_config = if config_dir.to_string_lossy() == "__baked__" {
             TargetConfig::load()
         } else {
-            match crate::dbrief::config_db::resolve_config_file(&config_dir, "targets") {
+            match crate::dbriv::config_db::resolve_config_file(&config_dir, "targets") {
                 Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
                     eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
                     TargetConfig::load()
@@ -66,19 +66,19 @@ impl ConfigResolver {
             return PathBuf::from(env);
         }
         // 3. Project-local
-        if Path::new(".brief/config").exists() {
-            return PathBuf::from(".brief/config");
+        if Path::new(".briv/config").exists() {
+            return PathBuf::from(".briv/config");
         }
         // 4. User-global active profile
         if let Some(user_config) = dirs::config_dir() {
-            let brief_config = user_config.join("brief-compiler");
-            let active = brief_config.join("active_profile");
+            let briv_config = user_config.join("briv-compiler");
+            let active = briv_config.join("active_profile");
             // Try symlink first
             if let Ok(target) = std::fs::read_link(&active) {
                 let profile_dir = if target.is_absolute() {
                     target
                 } else {
-                    brief_config.join(target)
+                    briv_config.join(target)
                 };
                 if profile_dir.exists() {
                     return profile_dir;
@@ -86,7 +86,7 @@ impl ConfigResolver {
             }
             // Fallback: read as text file
             if let Ok(name) = std::fs::read_to_string(&active) {
-                let profile_dir = brief_config.join("profiles").join(name.trim());
+                let profile_dir = briv_config.join("profiles").join(name.trim());
                 if profile_dir.exists() {
                     return profile_dir;
                 }
@@ -98,21 +98,21 @@ impl ConfigResolver {
 
     /// Load the module registry (config/module-registry.dbvl).
     ///
-    /// 2026-08-03 (Phase 3): the Data Brief form is the only form now — the
+    /// 2026-08-03 (Phase 3): the Data Briv form is the only form now — the
     /// pre-migration .toml is deleted and the TOML fallback is removed.
     fn load_module_registry(config_dir: &Path) -> HashMap<String, String> {
-        crate::dbrief::config_db::load_string_registry(config_dir, "module-registry")
+        crate::dbriv::config_db::load_string_registry(config_dir, "module-registry")
     }
 
     /// Resolve a logical config name against this session's resolved config
-    /// dir, as a Data Brief file (`.dbvl`/`.dbv`).
+    /// dir, as a Data Briv file (`.dbvl`/`.dbv`).
     ///
-    /// 2026-08-03 (Phase 1a → 3, plan docs/plans/2026-08-03-data-brief-config-
+    /// 2026-08-03 (Phase 1a → 3, plan docs/plans/2026-08-03-data-briv-config-
     /// and-board-hardware-map.md): the migration seam for Phase 3. Existing
     /// `--config-dir`/profile users keep working because only the resolved
     /// extension changed during the migration.
     pub fn resolve_config(&self, name: &str) -> Option<PathBuf> {
-        crate::dbrief::config_db::resolve_config_file(&self.config_dir, name)
+        crate::dbriv::config_db::resolve_config_file(&self.config_dir, name)
     }
 }
 
@@ -123,7 +123,7 @@ pub struct ModuleRegistry {
     modules: HashMap<String, String>,
 }
 
-/// Manage config profiles in ~/.config/brief-compiler/
+/// Manage config profiles in ~/.config/briv-compiler/
 pub fn list_profiles() -> Result<Vec<String>, String> {
     let base = config_base_dir()?;
     let profiles_dir = base.join("profiles");
@@ -216,7 +216,7 @@ pub fn init_profile(name: &str) -> Result<(), String> {
         .map_err(|e| format!("cannot create '{}': {}", profile_dir.display(), e))?;
 
     let baked_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
-    // 2026-08-03 (Phase 3): all six configs are Data Brief now — seed the
+    // 2026-08-03 (Phase 3): all six configs are Data Briv now — seed the
     // profile with the .dbvl forms so created profiles load through the DB
     // path. (The pre-migration TOMLs were deleted; nothing consumes them.)
     for file in &[
@@ -241,9 +241,9 @@ pub fn init_profile(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the base config directory (~/.config/brief-compiler/).
+/// Get the base config directory (~/.config/briv-compiler/).
 fn config_base_dir() -> Result<PathBuf, String> {
     dirs::config_dir()
-        .map(|d| d.join("brief-compiler"))
+        .map(|d| d.join("briv-compiler"))
         .ok_or_else(|| "cannot determine config directory (no $HOME?)".to_string())
 }

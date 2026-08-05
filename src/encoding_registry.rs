@@ -6,7 +6,7 @@
 //                1+ = fixed-width (Index# emits direct GEP, O(1))
 //   - ops.index_at, ops.char_len: stdlib function names for runtime dispatch
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): migrated from encodings.toml
+// 2026-08-03 (Phase 3, data-briv-config plan): migrated from encodings.toml
 // to the flat .dbvl line-table form (`name: char_width; index_at; char_len;`).
 // The .toml remains until the parity test proves identical output.
 //
@@ -62,7 +62,7 @@ fn config_encodings() -> HashMap<String, EncodingInfo> {
         Ok(c) => c,
         Err(_) => return HashMap::new(),
     };
-    let db = match crate::dbrief::config_db::ConfigDb::from_str(&content) {
+    let db = match crate::dbriv::config_db::ConfigDb::from_str(&content) {
         Ok(db) => db,
         Err(_) => return HashMap::new(),
     };

@@ -1,4 +1,4 @@
-# Brief Compiler Architecture
+# Briv Compiler Architecture
 
 **Document Version:** 1.0  
 **Date:** 2026-04-04  
@@ -17,7 +17,7 @@
 6. [Manifest System](#6-manifest-system)
 7. [Watch Mode](#7-watch-mode)
 8. [Cache Architecture](#8-cache-architecture)
-9. [Rendered Brief (Future)](#9-rendered-brief-future)
+9. [Rendered Briv (Future)](#9-rendered-briv-future)
 10. [Decision Log](#10-decision-log)
 
 ---
@@ -61,7 +61,7 @@ Closed World + No Dynamic Dispatch
 ## 2. Language Structure
 
 ### 2.1 File Extension
-**Decision:** `.bv` (Brief)
+**Decision:** `.bv` (Briv)
 
 ### 2.2 Top-Level Elements
 
@@ -168,7 +168,7 @@ This independence enables:
 | Context | Requirement |
 |---------|-------------|
 | Interactive editing | <100ms feedback |
-| Rendered Brief web | Hot reload |
+| Rendered Briv web | Hot reload |
 | Large codebases | Don't re-verify unchanged code |
 
 ### 4.2 Durability Levels
@@ -274,7 +274,7 @@ source ::= identifier
 
 ## 6. Manifest System
 
-### 6.1 File: `brief.toml`
+### 6.1 File: `briv.toml`
 
 **Decision:** TOML format. Standard, well-understood, tooling exists.
 
@@ -289,7 +289,7 @@ entry = "main.bv"
 [dependencies]
 auth = { path = "lib/auth.bv" }
 utils = { path = "lib/utils.bv" }
-std-io = { registry = "brief-std", version = "1.0.0" }
+std-io = { registry = "briv-std", version = "1.0.0" }
 ```
 
 ### 6.3 Dependency Declaration Options
@@ -297,7 +297,7 @@ std-io = { registry = "brief-std", version = "1.0.0" }
 | Property | Description | Example |
 |----------|-------------|---------|
 | `path` | Local file relative to project root | `path = "lib/auth.bv"` |
-| `registry` | Package from registry | `registry = "brief-std"` |
+| `registry` | Package from registry | `registry = "briv-std"` |
 | `version` | Semver constraint | `version = "1.0.0"` |
 | `git` | Git URL (future) | `git = "https://..."` |
 | `optional` | May not be installed | `optional = true` |
@@ -305,11 +305,11 @@ std-io = { registry = "brief-std", version = "1.0.0" }
 ### 6.4 CLI Commands
 
 ```bash
-brief import <name>              # Add from registry
-brief import <name> --path <loc> # Add local path
-brief install                    # Install all from manifest
-brief list                      # List dependencies
-brief remove <name>             # Remove from manifest
+briv import <name>              # Add from registry
+briv import <name> --path <loc> # Add local path
+briv install                    # Install all from manifest
+briv list                      # List dependencies
+briv remove <name>             # Remove from manifest
 ```
 
 ### 6.5 Error Resolution
@@ -324,14 +324,14 @@ error[E0001]: unresolved import 'auth'
 3  | import { login } from auth;
    |                       ^^^^
 
-help: 'auth' is not in your brief.toml
+help: 'auth' is not in your briv.toml
 
   Available packages in scope:
     - ./lib/auth.bv       (found, not yet declared)
     
   To add 'auth', either:
-    1. Run: brief import auth --path lib/auth.bv
-    2. Or add manually to brief.toml:
+    1. Run: briv import auth --path lib/auth.bv
+    2. Or add manually to briv.toml:
        
        [dependencies]
        auth = { path = "lib/auth.bv" }
@@ -425,7 +425,7 @@ fn on_file_saved(path: &Path) {
 **Decision:** Project-local cache, version-aware.
 
 ```
-.brief-cache/
+.briv-cache/
 ├── manifest.json          # Cache config, version
 ├── modules/
 │   ├── auth.ast          # Parsed (hash of source)
@@ -473,12 +473,12 @@ Benefits:
 
 ---
 
-## 9. Rendered Brief (Future)
+## 9. Rendered Briv (Future)
 
 ### 9.1 Derivation Model
 
 ```
-Brief Compiler Core
+Briv Compiler Core
         │
         ├── .bv interpretation (desktop)
         │
@@ -487,13 +487,13 @@ Brief Compiler Core
                 ▼
         ┌───────────────────────┐
         │   .rbv Parser         │  Extract <script> + <view>
-        │   (extends Brief)      │
+        │   (extends Briv)      │
         └───────────────────────┘
                 │
                 ▼
         ┌───────────────────────┐
         │   Semantic Analysis    │  Symbol table, directives
-        │   (extends Brief)      │
+        │   (extends Briv)      │
         └───────────────────────┘
                 │
                 ▼
@@ -509,7 +509,7 @@ Brief Compiler Core
 
 ### 9.2 Shared Components
 
-| Component | Brief | Rendered Brief |
+| Component | Briv | Rendered Briv |
 |-----------|-------|----------------|
 | Lexer | ✓ | ✓ (extends) |
 | Parser | ✓ | ✓ (extends) |
@@ -567,7 +567,7 @@ Rationale:
 | 2026-04-04 | Manifest-driven package management | Explicit deps, registry-ready | Active |
 | 2026-04-04 | TOML for manifest | Standard, tooling exists | Active |
 | 2026-04-04 | On-save + debounced watch | Balance feedback speed vs. stability | Active |
-| 2026-04-04 | Rendered Brief derived from Brief | Shared core, separate compilation | Planned |
+| 2026-04-04 | Rendered Briv derived from Briv | Shared core, separate compilation | Planned |
 | 2026-04-04 | Rust → wasm-pack for WASM | Portability, mature ecosystem | Planned |
 
 ---
@@ -577,7 +577,7 @@ Rationale:
 ### Registry System
 Not implemented in v1.0. Design allows for:
 ```toml
-std-io = { registry = "brief-std", version = "1.2.0" }
+std-io = { registry = "briv-std", version = "1.2.0" }
 ```
 
 ### Workspace Support

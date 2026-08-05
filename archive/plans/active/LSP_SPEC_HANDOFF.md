@@ -72,7 +72,7 @@
 
 | Spec § | Feature | Implemented? | Where | Notes |
 |--------|---------|-------------|-------|-------|
-| **§10** | `alka {}` / `alka! {}` blocks | ❌ | Neither AST | Need `StmtAlka` variant in both Brief and Rust ASTs |
+| **§10** | `alka {}` / `alka! {}` blocks | ❌ | Neither AST | Need `StmtAlka` variant in both Briv and Rust ASTs |
 | **§11.1** | `#tag(expr)` value hashtags | ❌ | Parser | Only `#tag` and `#!tag` — parenthesized value not parsed |
 | **§11.2** | `#on_exit { ... };` block pragmas | ❌ | Neither AST | Need parsing support + proof engine verification |
 | **§11.4 pos 5** | Per-body hashtags before variant | ❌ | Parser | `[pre] #tag { body }` syntax not supported |

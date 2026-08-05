@@ -6,7 +6,7 @@
 # ==================================================
 [[functions]]
 name = "__http_get"
-location = "brief_ffi_native::__http_get"
+location = "briv_ffi_native::__http_get"
 target = "native"
 mapper = "rust"
 description = "HTTP GET request (native Rust implementation)"
@@ -65,7 +65,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__http_post"
-location = "brief_ffi_native::__http_post"
+location = "briv_ffi_native::__http_post"
 target = "native"
 mapper = "rust"
 description = "HTTP POST request (native Rust implementation)"

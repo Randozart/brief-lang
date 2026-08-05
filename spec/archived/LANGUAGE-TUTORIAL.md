@@ -1,6 +1,6 @@
-# Brief Language Tutorial
+# Briv Language Tutorial
 
-Learn Brief by building real systems, step by step.
+Learn Briv by building real systems, step by step.
 
 ---
 
@@ -10,29 +10,29 @@ Learn Brief by building real systems, step by step.
 
 ```bash
 cargo build --release
-./target/release/brief --help
+./target/release/briv --help
 ```
 
 ### Your First Program
 
 Create `hello.bv`:
 
-```brief
+```briv
 let message: String = "hello world";
 ```
 
 Run it:
 
 ```bash
-brief check hello.bv
-brief build hello.bv
+briv check hello.bv
+briv build hello.bv
 ```
 
-Brief programs don't need `main()` - they declare state, and transactions describe how state changes.
+Briv programs don't need `main()` - they declare state, and transactions describe how state changes.
 
 ### State is Everything
 
-```brief
+```briv
 let counter: Int = 0;
 let name: String = "Alice";
 let active: Bool = true;
@@ -42,7 +42,7 @@ let balance: Float = 1000.50;
 State is declared with `let`. You can:
 - Give it a type and initial value
 - Give it a type without a value (defaults to 0, "", false)
-- Brief infers types where possible
+- Briv infers types where possible
 
 ---
 
@@ -50,7 +50,7 @@ State is declared with `let`. You can:
 
 ### Your First Transaction
 
-```brief
+```briv
 let count: Int = 0;
 
 txn increment [count < 100][count == @count + 1] {
@@ -76,7 +76,7 @@ The compiler proves the code actually satisfies the postcondition.
 
 ### The Prior State Operator
 
-```brief
+```briv
 let balance: Int = 100;
 
 txn withdraw(amount: Int) 
@@ -92,7 +92,7 @@ txn withdraw(amount: Int)
 
 ### Guards: Conditional Execution
 
-```brief
+```briv
 txn process [true][true] {
     let value = compute();
     
@@ -108,7 +108,7 @@ txn process [true][true] {
 
 ### Escape: Rollback
 
-```brief
+```briv
 txn validate(x: Int) 
     [x >= 0][state == @state]
 {
@@ -128,7 +128,7 @@ txn validate(x: Int)
 
 ### Auto-Firing Transactions
 
-```brief
+```briv
 let count: Int = 0;
 let done: Bool = false;
 
@@ -159,9 +159,9 @@ node finish [count >= 10 && !done]
 
 ### Reactive State Machines
 
-This is Brief's superpower - describe state transitions, compiler handles the rest:
+This is Briv's superpower - describe state transitions, compiler handles the rest:
 
-```brief
+```briv
 let state: Int = 0;
 
 node step_1 [state == 0][state == 1] {
@@ -188,7 +188,7 @@ When you set `state = 0`, the machine automatically cycles through all three ste
 
 ### Writing Functions
 
-```brief
+```briv
 defn double(x: Int) -> Int [true][result == x * 2] {
     term x * 2;
 };
@@ -205,20 +205,20 @@ defn double(x: Int) -> Int [true][result == x * 2] {
 
 ### Multiple Return Values
 
-```brief
+```briv
 defn divide(a: Int, b: Int) -> Int, Int, Bool [b != 0][true] {
     term a / b, a % b, true;
 };
 ```
 
 **Using it:**
-```brief
+```briv
 let quotient, remainder, ok = divide(17, 5);
 ```
 
 ### Functions Can Call Other Functions
 
-```brief
+```briv
 defn absolute(x: Int) -> Int [true][result >= 0] {
     [x < 0] term -x;
     [x >= 0] term x;
@@ -231,11 +231,11 @@ defn is_positive(x: Int) -> Bool [true][true] {
 };
 ```
 
-### Pure Brief vs FFI
+### Pure Briv vs FFI
 
-Pure functions that Brief can express should use `defn`:
+Pure functions that Briv can express should use `defn`:
 
-```brief
+```briv
 defn min(a: Int, b: Int) -> Int [true][result == a || result == b] {
     [a <= b] term a;
     [a > b] term b;
@@ -250,7 +250,7 @@ Functions requiring system access use `frgn` (see Part 7).
 
 ### Handling Multiple Outcomes
 
-```brief
+```briv
 let result: Int | String;
 
 [Int(n) = result] int_val = n;
@@ -259,7 +259,7 @@ let result: Int | String;
 
 ### Guards for Branches
 
-```brief
+```briv
 let value: Int = get_value();
 
 [value > 0] positive = true;
@@ -271,7 +271,7 @@ let value: Int = get_value();
 
 Enums let you define types with named variants. Pattern matching in guards destructures them:
 
-```brief
+```briv
 enum Result<T, E> {
     Ok(T),
     Err(E)
@@ -298,7 +298,7 @@ The syntax is `[variable Variant(field1, field2)]` where the fields bind to the 
 
 ### Plain Struct
 
-```brief
+```briv
 struct BankAccount {
     balance: Int;
     overdraft_limit: Int;
@@ -323,7 +323,7 @@ struct BankAccount {
 
 ### Using Structs
 
-```brief
+```briv
 let account: BankAccount;
 account.deposit(100);
 account.withdraw(50);
@@ -331,7 +331,7 @@ account.withdraw(50);
 
 ### Render Struct
 
-```brief
+```briv
 rstruct Person {  
     name: String = "Alice";  
     age: Int = 30;  
@@ -353,7 +353,7 @@ let html = Person.render();
 Collections (lists, strings) are mutated with the `<-` arrow syntax. The
 arrow always points toward the collection:
 
-```brief
+```briv
 // Push/append
 items <- "hello";
 
@@ -381,16 +381,16 @@ count. `len()` is available as a stdlib convenience function.
 
 ### When to Use FFI
 
-FFI is for operations Brief genuinely cannot do:
+FFI is for operations Briv genuinely cannot do:
 - File I/O
 - Network access
 - Console input/output
 - Hardware math (sqrt, sin, etc.)
 
-FFI is NOT for things Brief can express natively:
+FFI is NOT for things Briv can express natively:
 - Arithmetic
 - Comparisons
-- String operations Brief can handle
+- String operations Briv can handle
 
 ### TOML Binding
 
@@ -416,15 +416,15 @@ code = "Int"
 message = "String"
 ```
 
-### Brief Declaration
+### Briv Declaration
 
-```brief
+```briv
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 ```
 
 ### Using FFI
 
-```brief
+```briv
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 
 defn load_config() -> String [true][result .#Size >= 0] {
@@ -435,7 +435,7 @@ defn load_config() -> String [true][result .#Size >= 0] {
 
 ### Generic FFI
 
-```brief
+```briv
 frgn<T> identity(value: T) -> Result<T, Error> from "lib/std/util.toml";
 ```
 
@@ -443,7 +443,7 @@ frgn<T> identity(value: T) -> Result<T, Error> from "lib/std/util.toml";
 
 ## Part 8: Real Example - Bank System
 
-```brief
+```briv
 // State
 let alice_balance: Int = 1000;
 let bob_balance: Int = 500;
@@ -479,7 +479,7 @@ node alert_low_balance [alice_balance < 100][alice_balance == @alice_balance] {
 
 ### Lazy Initialization
 
-```brief
+```briv
 let initialized: Bool = false;
 let value: Int = 0;
 
@@ -496,7 +496,7 @@ node use_value [initialized][initialized] {
 
 ### State Machine
 
-```brief
+```briv
 let state: Int = 0;  // 0=idle, 1=processing, 2=done
 
 node process [state == 0][state == 1] {
@@ -517,7 +517,7 @@ node reset [state == 2][state == 0] {
 
 ### Synchronization with Flags
 
-```brief
+```briv
 let ready: Bool = false;
 let busy: Bool = false;
 
@@ -536,13 +536,13 @@ txn finish_work [busy][busy == false] {
 
 ## Part 10: Syntactic Sugar
 
-Brief provides several syntactic shortcuts that make code more concise.
+Briv provides several syntactic shortcuts that make code more concise.
 
 ### Boolean Toggle (`~/`)
 
 `~/condition` is shorthand for `[~condition][condition]`:
 
-```brief
+```briv
 // These are equivalent:
 txn initialize [~/ready] {
     ready = true;
@@ -561,9 +561,9 @@ This reads as: "Fire when ready is false, ensure ready becomes true."
 
 When you use `~/condition`, the variable is automatically declared:
 
-```brief
+```briv
 // No need to write: let ready: Bool = false;
-// Brief infers it from the contract
+// Briv infers it from the contract
 node start [~/ready] {
     ready = true;
     term;
@@ -574,7 +574,7 @@ node start [~/ready] {
 
 When the postcondition is literal `true`, `term;` is implicitly treated as `term true;`:
 
-```brief
+```briv
 // Postcondition is literal true - term; becomes term true;
 txn activate [ready][true] {
     term;  // implicitly: term true;
@@ -583,7 +583,7 @@ txn activate [ready][true] {
 
 When the postcondition is a Bool expression, `term;` checks if it is satisfied:
 
-```brief
+```briv
 // Postcondition is an expression - term; checks if it is met
 txn set_flag [true][flag == true] {
     flag = true;
@@ -597,7 +597,7 @@ Note: `term true;` must obey borrowing rules since it implicitly performs a stat
 
 For simple transactions where the body is just `term`, you can omit the body:
 
-```brief
+```briv
 // Full form:
 txn increment [count < 100][count == @count + 1] {
     count = count + 1;
@@ -620,7 +620,7 @@ defn double(x: Int) -> Int [true][result == x * 2];
 
 `term functionCall();` means "call the function and use its return value in the postcondition":
 
-```brief
+```briv
 defn addOne(x: Int) -> Int [true][result == x + 1] {
     term x + 1;
 };
@@ -637,11 +637,11 @@ txn increment [count < 100][count == @count + 1] {
 
 ## Part 11: Multi-Return Functions
 
-Brief supports powerful multi-return functions with union types.
+Briv supports powerful multi-return functions with union types.
 
 ### Single Return
 
-```brief
+```briv
 defn get_value() -> Int [true][result >= 0] {
     term 42;
 };
@@ -653,7 +653,7 @@ let x: Int = get_value();  // x = 42
 
 A function can have multiple `term` statements. Each `term` adds to the accumulated return type:
 
-```brief
+```briv
 defn try_parse(s: String) -> Int | Bool | String [true][true] {
     term 1;        // Can return Int
     term true;     // Can return Bool
@@ -669,7 +669,7 @@ The function returns a union type containing all possible termination values.
 
 When calling a multi-return function, the type determines which term is used:
 
-```brief
+```briv
 defn try_parse(s: String) -> Int | Bool | String [true][true] {
     term 1;        // Int term
     term true;     // Bool term
@@ -686,7 +686,7 @@ let str: String = try_parse("hello");  // Returns "error"
 
 For multiple return slots, use explicit tuple type notation:
 
-```brief
+```briv
 defn multi() -> Int | Int, Int | Int, Int, Int [true][true] {
     term 1;        // Slot 1: returns Int
     term 2;        // Slot 2: returns Int
@@ -703,7 +703,7 @@ let n1, n2, n3: Int, Int, Int = multi();  // Returns 1, 2, 3
 
 Functions can return tuples:
 
-```brief
+```briv
 defn divide(a: Int, b: Int) -> Int, Int, Bool [b != 0][true] {
     term a / b, a % b, true;
 };
@@ -719,7 +719,7 @@ let quotient, remainder, ok = divide(17, 5);
 
 Transactions loop until the postcondition is satisfied. They continue mutating until the postcondition holds.
 
-```brief
+```briv
 // This terminates - each iteration accumulates until postcondition is met
 txn increment_by_2 [count < 100][count == @count + 2] {
     count = count + 1;
@@ -732,7 +732,7 @@ txn increment_by_2 [count < 100][count == @count + 2] {
 
 The `@` operator captures the value at the START of the transaction:
 
-```brief
+```briv
 txn increment [count < 100][count == @count + 1] {
     count = count + 1;
     term;
@@ -743,7 +743,7 @@ txn increment [count < 100][count == @count + 1] {
 
 ### Mutations Need `&`
 
-```brief
+```briv
 let count: Int = 0;
 
 count = count + 1;    // Correct - use &
@@ -752,7 +752,7 @@ count = count + 1;     // Wrong - & required
 
 ### Reactive vs Passive Transactions
 
-```brief
+```briv
 // Reactive transaction - fires automatically when preconditions are met
 // Return values are meaningless (no caller to receive them)
 node process [ready][done] {
@@ -777,7 +777,7 @@ txn increment [count < 100][count == @count + 1];  // No body needed
 
 ### Guards Skip Execution
 
-```brief
+```briv
 txn example [true][true] {
     [false] never_runs = true;  // This never executes
     [true] always_runs = true;   // This always executes
@@ -792,7 +792,7 @@ txn example [true][true] {
 ### Type Checking
 
 ```bash
-brief check program.bv
+briv check program.bv
 ```
 
 Shows all type errors before running.
@@ -808,7 +808,7 @@ The proof engine checks:
 
 #### "Precondition not satisfiable"
 
-```brief
+```briv
 // Precondition is contradictory
 txn bad [x > 0 && x < 0][...] {
     term;
@@ -817,7 +817,7 @@ txn bad [x > 0 && x < 0][...] {
 
 #### "Postcondition violation"
 
-```brief
+```briv
 // Code doesn't achieve postcondition
 txn bad [true][count == @count + 1] {
     count = count;  // Doesn't change count
@@ -827,7 +827,7 @@ txn bad [true][count == @count + 1] {
 
 #### "Termination unreachable"
 
-```brief
+```briv
 // No path to term
 txn bad [true][false] {
     escape;  // Always escapes
@@ -847,9 +847,9 @@ txn bad [true][false] {
 
 ## Appendix A: Complete Example - Shopping Cart
 
-Here's a complete Rendered Brief application:
+Here's a complete Rendered Briv application:
 
-```brief
+```briv
 // shopping_cart.rbv
 import "std/math";
 
@@ -937,9 +937,9 @@ rstruct ShoppingCart {
 
 ## Appendix B: Complete Example - Embedded LED Blinker
 
-An Embedded Brief example for FPGA/ARM:
+An Embedded Briv example for FPGA/ARM:
 
-```brief
+```briv
 // led_blinker.ebv
 import "std/time";
 
@@ -992,9 +992,9 @@ txn init_hardware() [true][timer_value == timer_reload] {
 
 ## Appendix C: Complete Example - FFI with Python
 
-Using Python libraries from Brief:
+Using Python libraries from Briv:
 
-```brief
+```briv
 // python_example.bv
 import "std/io";
 
@@ -1050,11 +1050,11 @@ String = "PyObject*"
 
 ---
 
-## Appendix D: Complete Example - Data Brief Configuration
+## Appendix D: Complete Example - Data Briv Configuration
 
-Using Data Brief for hardware configuration:
+Using Data Briv for hardware configuration:
 
-```brief
+```briv
 // hardware.dbvs (schema)
 schema Board {
     name: String,
@@ -1085,7 +1085,7 @@ schema Peripheral {
 };
 ```
 
-```brief
+```briv
 // hardware.dbv (data)
 import "hardware.dbvs";
 
@@ -1128,7 +1128,7 @@ Board {
 };
 ```
 
-```brief
+```briv
 // main.ebv (using the configuration)
 import "hardware.dbv";
 
@@ -1147,10 +1147,10 @@ txn init_gpio() [true][true] {
 **Validation:**
 ```bash
 # Check schema validity
-brief check hardware.dbv
+briv check hardware.dbv
 
 # Compile with hardware config
-brief compile main.ebv --target hardware.dbv
+briv compile main.ebv --target hardware.dbv
 ```
 
 ---
@@ -1233,7 +1233,7 @@ brief compile main.ebv --target hardware.dbv
 ### Standard Library
 
 **Math:**
-```brief
+```briv
 math.abs(n)
 math.min(a, b)
 math.max(a, b)
@@ -1244,7 +1244,7 @@ math.cos(n)
 ```
 
 **String:**
-```brief
+```briv
 s .#Size                // Length via projection operator
 string.len(s)            // Convenience wrapper for s .#Size
 string.concat(a, b)
@@ -1255,7 +1255,7 @@ string.trim(s)
 ```
 
 **Collections:**
-```brief
+```briv
 list .#Size
 list.contains(x)
 list.find(x)
@@ -1267,7 +1267,7 @@ set.contains(x)
 ```
 
 **IO:**
-```brief
+```briv
 io.print(msg)
 io.println(msg)
 io.input()
@@ -1281,7 +1281,7 @@ io.write_file(path, content)
 
 ### Pattern 1: State Machine
 
-```brief
+```briv
 enum State {
     Idle,
     Running,
@@ -1319,7 +1319,7 @@ node reset() [state == State::Done][state == State::Idle] {
 
 ### Pattern 2: Resource Pool
 
-```brief
+```briv
 const POOL_SIZE: Int = 10;
 let available: Int = POOL_SIZE;
 let in_use: List<Int> = [];
@@ -1341,7 +1341,7 @@ node release(id: Int) [in_use.contains(id)][available == @available + 1] {
 
 ### Pattern 3: Observer Pattern
 
-```brief
+```briv
 let observers: List<String> = [];
 let subject_value: Int = 0;
 
@@ -1374,7 +1374,7 @@ txn set_value(value: Int) [true][subject_value == value] {
 
 ### Pattern 4: Retry with Backoff
 
-```brief
+```briv
 let attempts: Int = 0;
 const MAX_ATTEMPTS: Int = 5;
 
@@ -1405,7 +1405,7 @@ defn backoff(attempt: Int) -> Int {
 postcondition is accepted. The swan song is a commit action, not a loop
 increment — it fires once on acceptance:
 
-```brief
+```briv
 let tx_log: List<String> = [];
 state committed: Int = 0;
 
@@ -1417,7 +1417,7 @@ node transfer(amount: Int) [balance >= amount][balance == @balance - amount] {
 
 **Program exit** — `term!` terminates the program with a centralized exit block:
 
-```brief
+```briv
 node shutdown() [cmd == "exit"][true] {
     term!;  // Exit program
 };
@@ -1436,7 +1436,7 @@ exit branch.
 **`#assume_event(trigger_name)`** tells the compiler that a trigger WILL fire
 eventually, enabling termination proofs for external-trigger loops:
 
-```brief
+```briv
 #assume_event(data_ready)
 node process() [data_ready][processed == @processed + 1] {
     processed = processed + 1;
@@ -1451,7 +1451,7 @@ true at runtime. The action specifies what happens on mismatch:
 - `run` — execute body with full safety checks
 - `exit` — terminate program
 
-```brief
+```briv
 #assume_shape(packet :> PaymentTxn, escape)
 node process_payment() [packet.active][processed == @processed + 1] {
     processed = processed + 1;
@@ -1465,7 +1465,7 @@ node process_payment() [packet.active][processed == @processed + 1] {
 
 ### 1. Use Contracts for Debugging
 
-```brief
+```briv
 txn debug_example(x: Int) [x > 0][result > 0 && result < 1000] {
     let result = compute(x);
     
@@ -1480,7 +1480,7 @@ txn debug_example(x: Int) [x > 0][result > 0 && result < 1000] {
 
 ### 2. Logging Transactions
 
-```brief
+```briv
 node log_state() [true][true] {
     io.println("Counter: " + String(counter));
     io.println("Active: " + String(active));
@@ -1490,7 +1490,7 @@ node log_state() [true][true] {
 
 ### 3. Watchdog Timers
 
-```brief
+```briv
 txn long_operation() [true][done] ?[5000ms] {
     // Must complete within 5 seconds
     do_work();
@@ -1501,7 +1501,7 @@ txn long_operation() [true][done] ?[5000ms] {
 
 ### 4. Assertion Checking
 
-```brief
+```briv
 defn safe_div(a: Int, b: Int) -> Int {
     [b != 0] {  // Guard acts as assertion
         term a / b;
@@ -1516,7 +1516,7 @@ defn safe_div(a: Int, b: Int) -> Int {
 
 ### 1. Use Reactive Transactions
 
-```brief
+```briv
 // Bad: Polling
 node check_sensor() [true][true] {
     let value = read_sensor();
@@ -1536,7 +1536,7 @@ node handle_event() [sensor_value > threshold][handled] {
 
 ### 2. Minimize State Mutations
 
-```brief
+```briv
 // Bad: Multiple mutations
 txn bad_example() [true][true] {
     x = x + 1;
@@ -1559,7 +1559,7 @@ txn good_example() [true][true] {
 
 ### 3. Use Guards Early
 
-```brief
+```briv
 // Bad: Check after work
 txn bad_check() [true][result != 0] {
     let result = expensive_computation();
@@ -1578,4 +1578,4 @@ txn good_check() [input != 0][result != 0] {
 
 ---
 
-*Last updated: Brief v0.12.0 (2026-05-06)*
+*Last updated: Briv v0.12.0 (2026-05-06)*

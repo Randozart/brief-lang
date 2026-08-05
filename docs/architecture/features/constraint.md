@@ -17,7 +17,7 @@ variable `_` is bound to the value at runtime. Constraints come from two sources
 
 ## Syntax
 
-```brief
+```briv
 // Inline constraint on let binding (no type annotation required)
 let x : [_ > 0] = expr;
 

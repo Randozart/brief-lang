@@ -99,14 +99,14 @@ and keep SLP.
 
 ## Appendix: Why `willreturn` Is Safe
 
-Every reactive txn in Brief has a convergence contract: `[pre][post]`. The pre-condition
+Every reactive txn in Briv has a convergence contract: `[pre][post]`. The pre-condition
 defines when the loop executes; the post-condition defines when it terminates. For
 `[count < bound][count == bound]`, the loop executes while `count < bound` and terminates
 when `count == bound`. This IS `willreturn` — the function will always return.
 
 The only concern is a reactive txn without a convergence post-condition (e.g.,
 `node serve [true]` with no terminal path). Such a program loops forever — `willreturn`
-would be a miscompilation risk. But such programs violate the Brief language specification
+would be a miscompilation risk. But such programs violate the Briv language specification
 (§3.2 of spec/SPEC.md: "Every txn must have a postcondition that provably terminates").
 
-Adding `willreturn` to `#11` is therefore semantically correct for all valid Brief programs.
+Adding `willreturn` to `#11` is therefore semantically correct for all valid Briv programs.

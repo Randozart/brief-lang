@@ -69,7 +69,7 @@ int main(void) {
         float dx, dy, dz, dsq, dist, mag;
 
         // Save OLD velocities before force computation.
-        // This matches Brief's prior-state semantics: within a transaction,
+        // This matches Briv's prior-state semantics: within a transaction,
         // all field reads see the pre-tick value (before any &=-updates).
         float old_vx[5], old_vy[5], old_vz[5];
         for (int i = 0; i < 5; i++) {

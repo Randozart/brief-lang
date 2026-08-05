@@ -2,7 +2,7 @@
 
 **Created:** 2026-06-11T21:30Z  
 **Status:** All phases implemented (760 tests passing, 0 failing)  
-**Source:** officina-cli development session — ~600 lines of Brief written blind  
+**Source:** officina-cli development session — ~600 lines of Briv written blind  
 **Implemented:** 2026-06-12 in commits `3a86053` through `2b84a45`
 
 ---
@@ -15,7 +15,7 @@ points at the wrong problem or communicates in compiler-internal terms.
 ### 1.1 `Some(Ok(...))` Rust-internal token leaks
 
 **Problem**: Many parser error paths use `format!("{:?}", token)` which renders the Rust Debug
-representation of a token. A `Token::LParen` becomes `Some(Ok(LParen))`. A Brief user has no idea
+representation of a token. A `Token::LParen` becomes `Some(Ok(LParen))`. A Briv user has no idea
 what `Some(Ok(...))` means — this is the compiler's internal type leaking into user-facing output.
 
 **File**: `src/parser.rs`
@@ -137,7 +137,7 @@ consistency is valuable.
 ### Motivation
 
 Current iteration pattern requires ~4 lines of mechanical scaffolding:
-```brief
+```briv
 txn filter_fluff(tokens, result, i) [i < tokens:>Size][i == tokens:>Size] -> List<String> {
     [not_fluff(tokens[i])] { &result <- tokens[i]; };
     &i = i + 1;

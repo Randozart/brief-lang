@@ -19,7 +19,7 @@
 
 ## Layer 1: Bits (the only primitive)
 
-```brief
+```briv
 // Exists implicitly. No layout. Only bitwise ops.
 op And(#Bits, #Bits);
 op Or(#Bits, #Bits);
@@ -37,7 +37,7 @@ Every type implicitly inherits `Cast(#Bits)` — the ability to reinterpret its 
 
 A type's layout is determined by its fields:
 
-```brief
+```briv
 type Meters { data: Bits<64>; };           // bytes=8, llvm_type="i64"
 type ASCIIString {                          // bytes=16, llvm_type="{ i64, i64 }"
     data: Bits<64>;                         // pointer to bytes
@@ -57,7 +57,7 @@ No `bytes <~`, `alignment <~`, `ctd <~`, or `alu <~` needed.
 
 Ops declare how a type interacts with backend categories:
 
-```brief
+```briv
 type Bfloat16 {
     data: Bits<16>;
     op Add(#Float, #Float) = bfloat_add(#L, #R);
@@ -89,7 +89,7 @@ Functions bound to ops via `= fn(...)` are automatically emitted with `alwaysinl
 
 Hashwords can be parameterized by protocol variant:
 
-```brief
+```briv
 #String<UTF8>         // UTF-8 encoding (default for all files)
 #String<ASCII>        // ASCII (explicit opt-in)
 #Float<IEEE754>       // IEEE 754 (default)
@@ -129,7 +129,7 @@ Conversion happens through the `CastTo`/`CastFrom` pair directly — there is
 no intermediate currency type. The compiler inlines both ops and LLVM
 eliminates any redundant transformations:
 
-```brief
+```briv
 inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
     let bytes = source :> CastTo(#Bits);        // raw bytes
     let result = ASCIIString::from_bytes(bytes); // construct from bytes
@@ -164,7 +164,7 @@ programmer writes `(TargetType)source`, the compiler internally emits
 
 `CastTo` and `CastFrom` are always oriented toward the `#Category` protocol:
 
-```brief
+```briv
 type Latin1String {
     op CastTo(#String) = latin1_to_UTF8(#L);      // Latin1 → UTF-8 bytes
     op CastFrom(#String) = UTF8_to_latin1(#L);     // UTF-8 bytes → Latin1
@@ -174,7 +174,7 @@ type Latin1String {
 `Cast(ConcreteType)` is for direct paths between concrete types, bypassing
 protocols. No `To`/`From` needed because both sides are concrete:
 
-```brief
+```briv
 type Posit32 {
     op Cast(Int) = Posit32_to_int(#L);             // Posit32 → Int
     op Cast(Float) = Posit32_to_float(#L);          // Posit32 → Float
@@ -263,7 +263,7 @@ Only essential bytes remain in the final IR.**
 Meld expresses: **"I, the programmer, assert that these two types are
 structurally equivalent (possibly with simple transformations)."**
 
-```brief
+```briv
 meld Meters -> Kilometers {
     data = #L / 1000;
 };
@@ -286,7 +286,7 @@ Meld IS:
 | IS meld | What it enables |
 |---|---|
 | Explicit structural assertion | `meld A -> B` with inline ops or function calls |
-| Implicit conversion in Brief code | Pass `Meters` where `Kilometers` expected — meld fires |
+| Implicit conversion in Briv code | Pass `Meters` where `Kilometers` expected — meld fires |
 | FFI bridge | Pass `String` where `PyString` expected — meld fires |
 | Validated by 5-layer cascade | L1: Structural → L2: Bit-permutation → L3: Unit-vector → L4: Symbolic → L5: SMT |
 
@@ -315,7 +315,7 @@ the `#Int` protocol ops.
 
 ## Layer 9: Type parameter constraints
 
-```brief
+```briv
 type HashMap<K: #String, V> {
     buckets: Bits<64>;
     len: Bits<64>;
@@ -341,7 +341,7 @@ At instantiation `HashMap<ASCIIString, Int>`:
 Types declare how they are constructed from source text at compile time
 using `op Parse` declarations:
 
-```brief
+```briv
 type Int : Bits {
     op Add(#Int, #Int);
     op Parse(#Int);           // compile-time identity — literal IS an Int
@@ -419,7 +419,7 @@ implementation handles the actual semantics (hex decoding, unit conversion).
 The parser validates that `pre:`/`suf:` values do not contain symbols that
 conflict with language operators:
 
-```brief
+```briv
 op Parse(Decimal, pre: "@hex") = parse_hex(#L);  // ERROR: '@' is reserved
 op Parse(Decimal, pre: "0x") = parse_hex(#L);    // OK
 ```
@@ -439,7 +439,7 @@ the discriminator against `pre:`/`suf:` qualifiers on Parse ops.
 After Parse constructs a value, `Cast#()` may fire if the parsed value's
 type doesn't match the target expression's expected type:
 
-```brief
+```briv
 type MyInt { data: Bits<64>;
     op Parse(Decimal) = myint_from_decimal(#L);
     op Cast(#Int) = myint_to_int(#L);
@@ -472,7 +472,7 @@ warning: Parse → Cast round-trip failed for type 'HexColor'
 
 Verification uses the protocol's `CastTo`/`CastFrom` pair directly:
 
-```brief
+```briv
 // Parse: "FF00FF" → HexColor via parse_hex_color
 // Cast: HexColor → #String via hex_color_to_string
 // Round-trip: hex_color_to_string(parse_hex_color("FF00FF")) == "FF00FF"

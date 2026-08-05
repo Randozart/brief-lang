@@ -28,7 +28,7 @@
 
 pub mod error;
 pub mod metropipe;         // Metropipe — shared memory IPC runtime
-pub mod metropipe_cli;     // `brief metrod connect` CLI
+pub mod metropipe_cli;     // `briv metrod connect` CLI
 
 pub use error::{ErrorConventions, ErrVariant, generate_bounds_check, generate_null_check};
 pub use metropipe::{MetropolitanChannel, MetropolitanHub, MetroStatus, SharedRegion};

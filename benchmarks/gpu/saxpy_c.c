@@ -1,5 +1,5 @@
 // SAXPY C reference — compiled via clang -O3 -ffast-math
-// Output must match Brief version for correctness check.
+// Output must match Briv version for correctness check.
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-# Brief Documentation Index (Legacy)
+# Briv Documentation Index (Legacy)
 
 This directory contains archived documentation. See [spec/INDEX.md](INDEX.md) for the current master documentation index.
 

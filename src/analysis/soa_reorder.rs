@@ -119,13 +119,13 @@ pub fn reorder_fields(items: &[TopLevel]) -> Vec<TopLevel> {    let mut float_fi
     result
 }
 
-/// 2026-08-04 (compiler-in-Brief, P5): reorder via the Brief soa_reorder pass
+/// 2026-08-04 (compiler-in-Briv, P5): reorder via the Briv soa_reorder pass
 /// when its library is present (it computes the item permutation through the
-/// GLUE C ABI, src/glue/brief_pass.rs); otherwise the Rust reference runs.
+/// GLUE C ABI, src/glue/briv_pass.rs); otherwise the Rust reference runs.
 /// The permutation's correctness against `reorder_fields` is asserted by
-/// brief_pass.rs's soa_pass_matches_reorder_fields test.
-pub fn reorder_fields_brief(items: &[TopLevel]) -> Vec<TopLevel> {
-    match crate::glue::brief_pass::compute_soa_permutation(items) {
+/// briv_pass.rs's soa_pass_matches_reorder_fields test.
+pub fn reorder_fields_briv(items: &[TopLevel]) -> Vec<TopLevel> {
+    match crate::glue::briv_pass::compute_soa_permutation(items) {
         Some(perm) if perm.len() == items.len() => {
             let mut result = Vec::with_capacity(items.len());
             for &orig in &perm {
@@ -184,7 +184,7 @@ pub(crate) fn try_extract_float_field(item: &TopLevel, index: usize) -> Option<F
     })
 }
 
-/// Check if a Brief type is reorderable (float or double).
+/// Check if a Briv type is reorderable (float or double).
 pub(crate) fn is_reorderable_float_type(ty: &Type) -> bool {
     ty == &Type::float() || ty == &Type::float64() || ty.to_string() == "Float32"
         || ty.to_string() == "Float64"
@@ -364,26 +364,26 @@ mod tests {
         assert_eq!(parse_numeric_prefix("x"), None);
     }
 
-    /// 2026-08-04 (compiler-in-Brief, P5): the Brief soa_reorder pass must
+    /// 2026-08-04 (compiler-in-Briv, P5): the Briv soa_reorder pass must
     /// reproduce reorder_fields on a real AoS benchmark (nbody_newton.bv).
-    /// Uses the transition harness (parse_and_check + reorder_fields_brief).
+    /// Uses the transition harness (parse_and_check + reorder_fields_briv).
     #[test]
-    fn brief_reorder_matches_reference_on_nbody() {
+    fn briv_reorder_matches_reference_on_nbody() {
         let root = env!("CARGO_MANIFEST_DIR");
         let rel = "benchmarks/nbody_newton.bv";
         let src = std::fs::read_to_string(format!("{}/{}", root, rel)).unwrap();
         let (items, _) = crate::library::parse_and_check(rel, &src).unwrap();
         let reference = reorder_fields(&items);
-        let brief = reorder_fields_brief(&items);
+        let briv = reorder_fields_briv(&items);
         assert_eq!(
-            brief.len(), reference.len(),
-            "Brief reorder length diverged for {}", rel,
+            briv.len(), reference.len(),
+            "Briv reorder length diverged for {}", rel,
         );
         // Compare the ORDER of item names.
-        for (i, (b, r)) in brief.iter().zip(reference.iter()).enumerate() {
+        for (i, (b, r)) in briv.iter().zip(reference.iter()).enumerate() {
             assert_eq!(
                 name_of_item(b), name_of_item(r),
-                "Brief reorder diverged at position {} for {}", i, rel,
+                "Briv reorder diverged at position {} for {}", i, rel,
             );
         }
         // The real nbody has AoS fields — the reorder must move them.

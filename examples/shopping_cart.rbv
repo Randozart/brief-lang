@@ -46,7 +46,7 @@ txn reset [step > 0][step == 0] { step = 0; items = 0; total = 0; product = 0; t
 render struct ShoppingCart {
     <div class="app">
         <span class="header">
-            <h1>Brief Store</h1>
+            <h1>Briv Store</h1>
             <span class="badge"><span b-text="items">0</span> items | $<span b-text="total">0</span></span>
         </span>
         <span class="shop" b-show="step == 0">

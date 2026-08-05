@@ -1,6 +1,6 @@
-# Brief Language Guide
+# Briv Language Guide
 
-A transactional, contract-enforced language compiler. Brief treats program execution as verified state transitions with mathematical proofs at compile time.
+A transactional, contract-enforced language compiler. Briv treats program execution as verified state transitions with mathematical proofs at compile time.
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ A transactional, contract-enforced language compiler. Brief treats program execu
 9. [Expressions](#expressions)
 10. [Imports & Foreign](#imports--foreign)
 11. [Standard Library](#standard-library)
-12. [Rendered Brief (.rbv)](#rendered-brief-rbv)
+12. [Rendered Briv (.rbv)](#rendered-briv-rbv)
 13. [Examples](#examples)
 14. [FAQ](#faq)
 
@@ -23,14 +23,14 @@ A transactional, contract-enforced language compiler. Brief treats program execu
 
 ## Introduction
 
-Brief is a declarative language where:
+Briv is a declarative language where:
 
 - **Transactions are contracts.** Every state change is proven valid before execution.
 - **No runtime surprises.** The compiler verifies all state transitions at compile time.
 - **Lock-free concurrency.** Preconditions act as hardware-level gates — no mutexes needed.
 - **Formal verification without boilerplate.** Reactive state machines with pre/post conditions.
 
-```brief
+```briv
 let balance: Int = 100;
 let withdrawn: Int = 0;
 
@@ -51,23 +51,23 @@ txn withdraw(amount: Int) [amount > 0 && amount <= balance][balance == @balance 
 cargo install --path .
 ```
 
-### Running Brief Files
+### Running Briv Files
 
 ```bash
 # Type check without execution (fast)
-brief check program.bv
+briv check program.bv
 
 # Build and execute
-brief build program.bv
+briv build program.bv
 
 # Watch for changes and rebuild
-brief watch program.bv
+briv watch program.bv
 ```
 
 ### File Types
 
-- **`.bv`** - Pure Brief code (state, transactions, functions)
-- **`.rbv`** - Brief + HTML/CSS (Rendered Brief for reactive UIs)
+- **`.bv`** - Pure Briv code (state, transactions, functions)
+- **`.rbv`** - Briv + HTML/CSS (Rendered Briv for reactive UIs)
 
 ---
 
@@ -77,7 +77,7 @@ brief watch program.bv
 
 Declare mutable state with `let`:
 
-```brief
+```briv
 let count: Int = 0;
 let name: String = "Guest";
 let items: List<String> = [];
@@ -85,13 +85,13 @@ let items: List<String> = [];
 
 ### Transactions
 
-Transactions are the core unit of execution in Brief. They have:
+Transactions are the core unit of execution in Briv. They have:
 
 1. A name
 2. A contract (pre/post conditions)
 3. A body
 
-```brief
+```briv
 txn increment [true][count == @count + 1] {
   &count = count + 1;
   term;
@@ -102,7 +102,7 @@ txn increment [true][count == @count + 1] {
 
 The `term` statement outputs values from a transaction:
 
-```brief
+```briv
 txn greet [true] {
   term "Hello, World!";
 };
@@ -115,7 +115,7 @@ txn add(a: Int, b: Int) [true][result == a + b] {
 
 Multi-output transactions use trailing commas:
 
-```brief
+```briv
 txn swap [true][a == @b && b == @a] {
   let temp: Int = a;
   &a = b;
@@ -141,7 +141,7 @@ txn swap [true][a == @b && b == @a] {
 
 ### Container Types
 
-```brief
+```briv
 // List of strings
 let items: List<String> = ["apple", "banana"];
 
@@ -151,14 +151,14 @@ let empty: List<Int> = [];
 
 ### Custom Types
 
-```brief
+```briv
 // A custom type alias
 let config: MyConfig = Data();
 ```
 
 ### Generic Types
 
-```brief
+```briv
 defn first<T>(list: List<T>) [list.len() > 0][result == list[0]] -> T {
   term list[0];
 };
@@ -166,7 +166,7 @@ defn first<T>(list: List<T>) [list.len() > 0][result == list[0]] -> T {
 
 ### Type Bounds
 
-```brief
+```briv
 defn double<N: Add>(n: N) [true][result == n + n] -> N {
   let result: N = n + n;
   term result;
@@ -192,7 +192,7 @@ txn name [pre_condition][post_condition] { ... }
 
 Use `@` to reference the prior state (before transaction execution):
 
-```brief
+```briv
 txn increment [count < 100][count == @count + 1] {
   &count = count + 1;
   term;
@@ -203,7 +203,7 @@ txn increment [count < 100][count == @count + 1] {
 
 The `~/` shorthand means "not the prior state":
 
-```brief
+```briv
 // These are equivalent:
 txn set_active [~/active][active == true] { ... }
 txn set_active [![@active]][active == true] { ... }
@@ -213,7 +213,7 @@ txn set_active [![@active]][active == true] { ... }
 
 Return `true` to indicate success without specific output:
 
-```brief
+```briv
 txn save_data [data != null][-> true] {
   // save logic
   term;
@@ -226,7 +226,7 @@ txn save_data [data != null][-> true] {
 
 ### Basic Transaction (`txn`)
 
-```brief
+```briv
 txn process [true] {
   term;
 };
@@ -236,7 +236,7 @@ txn process [true] {
 
 Reactive transactions automatically trigger when their preconditions become true:
 
-```brief
+```briv
 rct auto_save [data_changed][saved == true] {
   &saved = true;
   term;
@@ -247,7 +247,7 @@ rct auto_save [data_changed][saved == true] {
 
 Async transactions run in the background and can interleave:
 
-```brief
+```briv
 async txn fetch_data [url != ""][data == result] {
   let data: String = fetch(url);
   term data;
@@ -256,7 +256,7 @@ async txn fetch_data [url != ""][data == result] {
 
 ### Combined Modifiers
 
-```brief
+```briv
 async node live_update [data != @data][displayed == data] {
   &displayed = data;
   term;
@@ -267,13 +267,13 @@ async node live_update [data != @data][displayed == data] {
 
 Use `txc` for transactions that only need post-conditions:
 
-```brief
+```briv
 txc increment(amount: Int) [count == @count + amount];
 ```
 
 Desugars to:
 
-```brief
+```briv
 txn increment(amount: Int) [true][count == @count + amount] {
   &count = count + amount;
   term;
@@ -288,7 +288,7 @@ txn increment(amount: Int) [true][count == @count + amount] {
 
 Declare function interfaces:
 
-```brief
+```briv
 sig add: (Int, Int) -> Int;
 sig fetch: (String) -> String;
 sig process: (Data) -> (Bool, String);
@@ -296,7 +296,7 @@ sig process: (Data) -> (Bool, String);
 
 ### Definitions (`defn`)
 
-```brief
+```briv
 defn add(a: Int, b: Int) [true][result == a + b] -> Int {
   let result: Int = a + b;
   term result;
@@ -305,7 +305,7 @@ defn add(a: Int, b: Int) [true][result == a + b] -> Int {
 
 ### Type Parameters
 
-```brief
+```briv
 defn first<T>(list: List<T>) [list.len() > 0] -> T {
   term list[0];
 };
@@ -318,7 +318,7 @@ defn map<A, B>(list: List<A>, f: A -> B) [true][result.len() == list.len()] -> L
 
 ### Type Bounds
 
-```brief
+```briv
 defn double<N: Add>(n: N) [true][result == n + n] -> N {
   let result: N = n + n;
   term result;
@@ -331,7 +331,7 @@ defn double<N: Add>(n: N) [true][result == n + n] -> N {
 
 ### Struct Definition
 
-```brief
+```briv
 struct Counter {
   count: Int;
 
@@ -349,7 +349,7 @@ struct Counter {
 
 ### Render Block (Separate View)
 
-```brief
+```briv
 struct Counter {
   count: Int;
   
@@ -371,7 +371,7 @@ render Counter {
 
 In `.rbv` files, use `rstruct` to combine struct definition with inline view:
 
-```brief
+```briv
 rstruct Counter {
   count: Int;
 
@@ -405,7 +405,7 @@ rstruct Counter {
 
 Use `&` to assign to mutable state:
 
-```brief
+```briv
 &count = count + 1;
 &name = "Updated";
 &items = items + ["new"];
@@ -413,20 +413,20 @@ Use `&` to assign to mutable state:
 
 Without `&`, you're creating a local binding:
 
-```brief
+```briv
 let x: Int = count;    // local copy
 &count = count + 1;    // mutation
 ```
 
 ### Prior State (`@`)
 
-```brief
+```briv
 let prev: Int = @count;    // snapshot before transaction
 ```
 
 ### List Operations
 
-```brief
+```briv
 let items: List<String> = [];           // empty list
 let first: String = items[0];            // index
 let len: Int = items.len();               // length
@@ -435,7 +435,7 @@ let combined: List<String> = a + b;       // concatenate
 
 ### Field Access
 
-```brief
+```briv
 let value: Int = record.field;
 let result: String = obj.method();
 ```
@@ -446,14 +446,14 @@ let result: String = obj.method();
 
 ### Import
 
-```brief
+```briv
 import { add, multiply } from "math";
 import { fetch } from "http";
 ```
 
 ### Partial Imports
 
-```brief
+```briv
 import { fetch } from "http";
 // Only loads `fetch`, other exports available lazily
 ```
@@ -462,7 +462,7 @@ import { fetch } from "http";
 
 Declare functions implemented elsewhere:
 
-```brief
+```briv
 frgn sig log: (String) -> Void;
 frgn sig random: () -> Int;
 frgn sig http_get: (String) -> String;
@@ -472,9 +472,9 @@ frgn sig http_get: (String) -> String;
 
 ## Standard Library
 
-Brief includes a standard library with common operations. Import modules as needed:
+Briv includes a standard library with common operations. Import modules as needed:
 
-```brief
+```briv
 import { abs, sqrt, sin, cos } from "math";
 import { len, trim, split } from "string";
 import { append, map, filter } from "collections";
@@ -485,7 +485,7 @@ import { base64_encode, url_encode } from "encoding";
 
 ### std/math - Mathematics
 
-```brief
+```briv
 abs(n: Int) -> Int           # Absolute value
 sqrt(n: Float) -> Float       # Square root
 pow(base: Float, exp: Float) -> Float  # Power
@@ -501,7 +501,7 @@ exp(n: Float) -> Float
 
 ### std/string - String Operations
 
-```brief
+```briv
 len(s: String) -> Int
 concat(a: String, b: String) -> String
 trim(s: String) -> String
@@ -519,7 +519,7 @@ to_int(s: String) -> Int
 
 ### std/collections - List/Collection Operations
 
-```brief
+```briv
 len<T>(list: List<T>) -> Int
 append<T>(list: List<T>, item: T) -> List<T>
 prepend<T>(item: T, list: List<T>) -> List<T>
@@ -540,7 +540,7 @@ drop<T>(list: List<T>, n: Int) -> List<T>
 
 ### std/time - Time/Date
 
-```brief
+```briv
 now() -> Int              # Unix timestamp (seconds)
 now_millis() -> Int       # Unix timestamp (milliseconds)
 year(timestamp: Int) -> Int
@@ -557,7 +557,7 @@ format_timestamp(timestamp: Int, format: String) -> String
 
 ### std/json - JSON Processing
 
-```brief
+```briv
 parse(s: String) -> Data
 stringify(data: Data) -> String
 is_null(data: Data) -> Bool
@@ -572,7 +572,7 @@ keys(data: Data) -> List<String>
 
 ### std/encoding - Encoding & Hashing
 
-```brief
+```briv
 base64_encode(s: String) -> String
 base64_decode(s: String) -> String
 hex_encode(s: String) -> String
@@ -587,15 +587,15 @@ uuid_v4() -> String
 
 ---
 
-## Rendered Brief (.rbv)
+## Rendered Briv (.rbv)
 
-Rendered Brief (`.rbv`) combines Brief logic with HTML/CSS in a single file.
+Rendered Briv (`.rbv`) combines Briv logic with HTML/CSS in a single file.
 
 ### File Structure
 
 ```html
-<script type="brief">
-  // Brief code here
+<script type="briv">
+  // Briv code here
   let count: Int = 0;
 
   txn increment [true][count == @count + 1] {
@@ -628,7 +628,7 @@ Rendered Brief (`.rbv`) combines Brief logic with HTML/CSS in a single file.
 ### Example: Counter
 
 ```html
-<script type="brief">
+<script type="briv">
   let count: Int = 0;
 
   txn increment [true][count == @count + 1] {
@@ -659,7 +659,7 @@ Rendered Brief (`.rbv`) combines Brief logic with HTML/CSS in a single file.
 ### Example: Todo List
 
 ```html
-<script type="brief">
+<script type="briv">
   let items: List<String> = [];
 
   txn add_item [true][items.len() == @items.len() + 1] {
@@ -692,10 +692,10 @@ Rendered Brief (`.rbv`) combines Brief logic with HTML/CSS in a single file.
 
 ```bash
 # Compile to directory
-brief rbv component.rbv --out dist/
+briv rbv component.rbv --out dist/
 
 # Compile and build WASM
-brief run component.rbv
+briv run component.rbv
 ```
 
 ---
@@ -704,7 +704,7 @@ brief run component.rbv
 
 ### Hello World
 
-```brief
+```briv
 let greeting: String = "Hello";
 
 txn greet [true] {
@@ -719,7 +719,7 @@ txn set_greeting [true] {
 
 ### Bank Account
 
-```brief
+```briv
 let balance: Int = 1000;
 let withdrawn: Int = 0;
 
@@ -743,7 +743,7 @@ txn reset [true][balance == 1000 && withdrawn == 0] {
 
 ### Generic Function
 
-```brief
+```briv
 defn first<T>(list: List<T>) [list.len() > 0] -> T {
   term list[0];
 };
@@ -762,18 +762,18 @@ defn append<T>(list: List<T>, item: T) [true][result.len() == list.len() + 1] ->
 
 ## FAQ
 
-### How is Brief different from other languages?
+### How is Briv different from other languages?
 
-Brief focuses on **contract-enforced state transitions**. Instead of exceptions or runtime checks, the compiler proves that every state change is valid before execution.
+Briv focuses on **contract-enforced state transitions**. Instead of exceptions or runtime checks, the compiler proves that every state change is valid before execution.
 
-### Can Brief be used for web development?
+### Can Briv be used for web development?
 
 Yes! Use `.rbv` files with the RBV compiler to generate WASM-based web components with reactive bindings.
 
 ### What is the difference between `.bv` and `.rbv`?
 
-- `.bv` - Pure Brief (logic only)
-- `.rbv` - Brief + HTML/CSS (reactive UI)
+- `.bv` - Pure Briv (logic only)
+- `.rbv` - Briv + HTML/CSS (reactive UI)
 
 ### How do contracts work?
 
@@ -787,6 +787,6 @@ Use `frgn` to declare foreign functions that link to external implementations (R
 
 ## Next Steps
 
-- Read the [Brief Language Specification](../spec/brief-lang-spec.md)
-- Check out the [Rendered Brief Spec](../spec/rendered-brief-spec-v4.md)
+- Read the [Briv Language Specification](../spec/briv-lang-spec.md)
+- Check out the [Rendered Briv Spec](../spec/rendered-briv-spec-v4.md)
 - Explore the examples in `examples/`

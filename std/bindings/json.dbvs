@@ -5,7 +5,7 @@ register 0x30 as "__json_parse" {
     type: Data;
     location: "json::parse";
     target: native;
-    description: "Parse a JSON string into a Brief value";
+    description: "Parse a JSON string into a Briv value";
     check: [true];
 }
 
@@ -13,7 +13,7 @@ register 0x31 as "__json_stringify" {
     type: Data;
     location: "json::stringify";
     target: native;
-    description: "Serialize a Brief value to JSON string";
+    description: "Serialize a Briv value to JSON string";
     check: [true];
 }
 

@@ -18,7 +18,7 @@ means.
 
 ## Syntax
 
-```brief
+```briv
 // Equivalence chain: body1 is equivalent to body2 is equivalent to body3
 defn name(params) -> ReturnType := body1 := body2 := body3;
 ```
@@ -28,7 +28,7 @@ Each body is one of:
 | Body type | Syntax | Evaluated via | Has target? |
 |-----------|--------|---------------|-------------|
 | **Assembly** | `asm<target> fn ... { "..." }` | Compile-time gcc + FFI | Yes (required) |
-| **Brief function** | `defn fn ... { ... }` | Interpreter | No |
+| **Briv function** | `defn fn ... { ... }` | Interpreter | No |
 | **Examples** | `{ input -> output; ... }` | CEGIS synthesis | No |
 
 The last body in the chain is always unguarded (no target restriction) and
@@ -50,7 +50,7 @@ For each body in chain (left to right):
 ### Target matching
 
 An `asm<target>` body declares its target architecture. Non-asm bodies
-(Brief functions, examples) have no target — they are available on any
+(Briv functions, examples) have no target — they are available on any
 target.
 
 ```
@@ -78,7 +78,7 @@ Default: 50 samples per candidate. Override with `--verify-samples N`.
 
 | Body type | How it's evaluated |
 |-----------|-------------------|
-| **Ref (Brief defn)** | Brief interpreter via `eval_expr` + `eval_block`. Handles `let` bindings, `term` returns, and `TermReturn` early-return pattern. Params bound by position. |
+| **Ref (Briv defn)** | Briv interpreter via `eval_expr` + `eval_block`. Handles `let` bindings, `term` returns, and `TermReturn` early-return pattern. Params bound by position. |
 | **Asm** | Compiles to shared library via `gcc` + `as`, loads via `libloading`, calls function pointer with test inputs. Platform-independent file handling with temp directories. |
 | **Synthesized** | Same as Ref — expression evaluated via interpreter. |
 
@@ -127,7 +127,7 @@ fallback exists.
 
 An `asm` function is callable like any other `defn`:
 
-```brief
+```briv
 asm<x86_64> fn popcnt_asm(x: Int) -> Int { "popcnt {result}, {x}" };
 
 defn use_popcnt(x: Int) -> Int {
@@ -156,15 +156,15 @@ asm<x86_64> name(params) -> ReturnType {
 - Parsed as `TopLevel::AsmFn`
 - Emitted as `call asm sideeffect` in LLVM IR
 
-### Brief function (`defn`)
+### Briv function (`defn`)
 
 ```
 defn name(params) -> ReturnType { body };
 ```
 
 - No target annotation (available on all targets)
-- Body is evaluated via the Brief interpreter
-- Let bindings, contracts, all Brief features supported
+- Body is evaluated via the Briv interpreter
+- Let bindings, contracts, all Briv features supported
 
 ### Examples (derivation block)
 
@@ -220,7 +220,7 @@ a fallback — the chain guarantees a correct implementation exists.
 | Feature | How it uses equivalence chains |
 |---------|-------------------------------|
 | **Derivation** | One body source among equals. CEGIS produces a candidate; the chain verifies it against the reference. |
-| **Inline asm** | Target-annotated bodies in the chain. Cross-verified against a Brief reference at compile time. |
+| **Inline asm** | Target-annotated bodies in the chain. Cross-verified against a Briv reference at compile time. |
 | **Contracts** | `[pre][post]` are on the function signature, not individual bodies. Every body in the chain must satisfy them. |
 | **Metaprogramming** | A `$` metaprogram could generate bodies for the chain at compile time. |
 | **MCMC superoptimization** | After chain resolution, the superoptimizer could optimize the selected body (with re-verification). |

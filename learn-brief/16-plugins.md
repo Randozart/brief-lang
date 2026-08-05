@@ -1,7 +1,7 @@
 # Compiler Plugins
 
-Brief supports compile-time plugins that run at defined hooks in the
-compilation pipeline.  Plugins are written in Brief and use a tree-navigation
+Briv supports compile-time plugins that run at defined hooks in the
+compilation pipeline.  Plugins are written in Briv and use a tree-navigation
 DSL to inspect and transform the AST, source text, or generated IR.
 
 ## Pipeline Stages
@@ -26,7 +26,7 @@ Source ──► PreLex ──► Parsed ──► Resolved ──► Typed ─�
 
 A plugin is a `.bv` file with one or more `$(StageName)` blocks:
 
-```brief
+```briv
 // my-plugin.bv
 $(Parsed) {
     // Runs after parsing, before import resolution
@@ -43,7 +43,7 @@ Every operation follows the same pattern:
 SELECT ──► TRAVERSE ──► POSITION ──► ACT
 ```
 
-```brief
+```briv
 Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
  └─SELECT──┘  └TRAVERSE┘ └POSITION┘ └────────ACT────────────┘
 ```
@@ -55,10 +55,10 @@ Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
 
 ### Flow Control
 
-Inside `$(Stage)` blocks, standard Brief syntax (`let`, `when`, `foreach`, `match`)
+Inside `$(Stage)` blocks, standard Briv syntax (`let`, `when`, `foreach`, `match`)
 is evaluated at compile time. Navigation selections are first-class values.
 
-```brief
+```briv
 // Bind a selection to a variable
 let imports = Tag$("import");
 
@@ -77,26 +77,26 @@ when imports.Count$() == 0 {
 
 ```bash
 # Disable the prelude plugin (no auto-imports)
-brief build file.bv --disable-plugin prelude
+briv build file.bv --disable-plugin prelude
 
 # Enable a specific plugin
-brief build file.bv --enable-plugin my-custom
+briv build file.bv --enable-plugin my-custom
 
 # Disable all plugins (equivalent to --no-stdlib)
-brief build file.bv --disable-plugin prelude
+briv build file.bv --disable-plugin prelude
 ```
 
 ## Building With Plugins
 
 ```bash
 # Default: system plugins run automatically
-brief build file.bv
+briv build file.bv
 
 # With BEAST snapshots for debugging
-brief build file.bv --emit-beast parsed
+briv build file.bv --emit-beast parsed
 
 # Custom plugin file
-brief build file.bv --enable-plugin my-plugin
+briv build file.bv --enable-plugin my-plugin
 ```
 
 ## Target Selection
@@ -113,7 +113,7 @@ Each stage has a default data target:
 
 You can always override by prefixing `Source$.`, `Ir$.`, `Bin$.`, or `Stage$.`:
 
-```brief
+```briv
 $(Typed) {
     // Default: AST operations
     Tag$("defn").Named$("main").Set$("entry", true);
@@ -127,7 +127,7 @@ $(Typed) {
 Stage blocks can declare a priority to control execution order. The
 syntax is `$(Stage @ priority)`:
 
-```brief
+```briv
 $(Parsed @ 750) {
     // Runs at priority 750 (high)
 };
@@ -156,7 +156,7 @@ control their position in the execution queue.
 
 Stage blocks can define mutable and immutable compile-time variables:
 
-```brief
+```briv
 $(Parsed) {
     $let target_count = 100;       // mutable
     $const max_items = 500;        // immutable
@@ -179,7 +179,7 @@ Rules:
 
 Stage blocks can define reusable compile-time functions:
 
-```brief
+```briv
 $(Parsed) {
     $defn count_defns() -> Int {
         term Tag$("defn").Count$();
@@ -193,16 +193,16 @@ $(Parsed) {
 - `$defn` — pure compile-time function
 - `$txn` — convergent compile-time function (needs `[pre][post]`)
 
-See the existing `defn` example in "Full Brief at Compile Time" — the
+See the existing `defn` example in "Full Briv at Compile Time" — the
 same syntax works with `$defn` inside `$(Stage)` blocks. The `$` prefix
 distinguishes compile-time from runtime definitions.
 
-## Full Brief at Compile Time
+## Full Briv at Compile Time
 
-Inside `$(Stage)` blocks, you can write arbitrary Brief code and it runs at
+Inside `$(Stage)` blocks, you can write arbitrary Briv code and it runs at
 compile time:
 
-```brief
+```briv
 $(Parsed) {
     defn count_tagged(sel: Selection, tag: String) -> Int {
         let total = 0;
@@ -224,7 +224,7 @@ Only `let`/`defn`/`when`/`match`/`for` and the navigation DSL.
 
 ## Diagnostics
 
-```brief
+```briv
 EmitInfo$("informational message");     // prints to stdout
 EmitWarning$("suspicious pattern");     // prints to stderr
 EmitError$("fatal problem");            // aborts compilation
@@ -234,7 +234,7 @@ EmitError$("fatal problem");            // aborts compilation
 
 A plugin can register new plugins for later stages:
 
-```brief
+```briv
 $(Parsed) {
     when Tag$("call").Named$("Unsafe#").Count$() > 0 {
         Stage$.Insert$(Typed) {
@@ -264,7 +264,7 @@ just bridge generators.
 
 ### String Processing
 
-```brief
+```briv
 $(Parsed) {
     let msg = StrReplace$("Found {{n}} errors", "{{n}}", "42");
     EmitInfo$(msg);  // prints "Found 42 errors"
@@ -277,7 +277,7 @@ $(Parsed) {
 
 ### File I/O
 
-```brief
+```briv
 $(Parsed) {
     // Read a config file
     let cfg = FileRead$("config.toml");
@@ -289,7 +289,7 @@ $(Parsed) {
 
 ### Configuration Reading
 
-```brief
+```briv
 $(Parsed) {
     let tmpl = ConfigGet$("rust", "templates.fn_template");
     // Reads lib/glue.toml → [rust.templates] → "fn_template"
@@ -298,7 +298,7 @@ $(Parsed) {
 
 ### Type Information
 
-```brief
+```briv
 $(Parsed) {
     let name = TypeInfo$(Named$("my_fn").First$(), "name");
     let pcount = TypeInfo$(Named$("my_fn").First$(), "params.count");
@@ -308,7 +308,7 @@ $(Parsed) {
 
 ### Protocol Path Queries
 
-```brief
+```briv
 $(Parsed) {
     // Compute protocol path between two types
     let path = CastPath$("String", "#String");
@@ -318,16 +318,16 @@ $(Parsed) {
 
 ### External Commands
 
-```brief
+```briv
 $(Parsed) {
     // Run an external tool at compile time
-    let output = ShellCmd$("brief", "check", "file.bv");
+    let output = ShellCmd$("briv", "check", "file.bv");
 };
 ```
 
 ### Environment and System Intrinsics
 
-```brief
+```briv
 $(Parsed) {
     // Get environment variable (requires --allow-read)
     let home = EnvGet$("HOME");

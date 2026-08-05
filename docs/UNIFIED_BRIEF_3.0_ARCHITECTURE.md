@@ -1,20 +1,20 @@
-# Unified Brief 3.0 Architecture: Silicon-Software Convergence
+# Unified Briv 3.0 Architecture: Silicon-Software Convergence
 
 ## 1. Vision
-Brief 3.0 unifies the **Logic Engine** and **Grammar** across Core Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv). This allows for **Silicon-Software Co-Design**, where the same logic can be validated in a browser (WASM) and synthesized into physical hardware (SystemVerilog/MCU).
+Briv 3.0 unifies the **Logic Engine** and **Grammar** across Core Briv (.bv), Rendered Briv (.rbv), and Embedded Briv (.ebv). This allows for **Silicon-Software Co-Design**, where the same logic can be validated in a browser (WASM) and synthesized into physical hardware (SystemVerilog/MCU).
 
 ## 2. Separation of Concerns (Containers vs. Language)
 While the underlying language engine is unified, the file containers maintain strict boundaries:
-- **Rendered Brief (.rbv):** The exclusive container for UI, HTML (`<view>`), and CSS (`<style>`).
-- **Embedded Brief (.ebv):** The exclusive container for Silicon Pin Mapping and Memory-Mapped I/O (MMIO) address definitions.
-- **Core Brief (.bv):** The shared substrate for platform-agnostic math, state machines, and business logic.
+- **Rendered Briv (.rbv):** The exclusive container for UI, HTML (`<view>`), and CSS (`<style>`).
+- **Embedded Briv (.ebv):** The exclusive container for Silicon Pin Mapping and Memory-Mapped I/O (MMIO) address definitions.
+- **Core Briv (.bv):** The shared substrate for platform-agnostic math, state machines, and business logic.
 
-The "Unification" refers to the fact that every Brief script, whether inside an `.rbv` UI or an `.ebv` hardware file, now understands Hardware Geometry and Vector Lifting.
+The "Unification" refers to the fact that every Briv script, whether inside an `.rbv` UI or an `.ebv` hardware file, now understands Hardware Geometry and Vector Lifting.
 
 ## 3. Core Concepts
 
 ### 3.1. Hardware Geometry (Vectors)
-The `[]` syntax in Brief 3.0 represents **Physical Geometry**, not just data structures.
+The `[]` syntax in Briv 3.0 represents **Physical Geometry**, not just data structures.
 - `let pixels: UInt[1024]` defines a block of 1024 discrete physical lanes.
 - **WASM Realization:** Implemented as `TypedArrays` (`Uint32Array`), utilizing SIMD when possible.
 - **Verilog Realization:** Implemented as **Unpacked Arrays** (`logic pixels [0:1023]`), drawing parallel wires in silicon.

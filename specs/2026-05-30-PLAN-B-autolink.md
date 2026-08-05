@@ -6,14 +6,14 @@
 
 ## Problem
 
-`--link-rt` currently writes `brief_rt.c` to disk, compiles it to a `.o` file, and prints link instructions. The user then has to manually run `llc` and `cc`/`ld` to produce a final binary. This is friction — the flag should produce a ready-to-run executable.
+`--link-rt` currently writes `briv_rt.c` to disk, compiles it to a `.o` file, and prints link instructions. The user then has to manually run `llc` and `cc`/`ld` to produce a final binary. This is friction — the flag should produce a ready-to-run executable.
 
 ## Goal
 
 When `--link-rt` is passed, produce a final executable binary in the output directory:
 
 1. Compile `.ll` → `.o` via `llc`
-2. Compile `brief_rt.c` → `.o` via `cc` (already done)
+2. Compile `briv_rt.c` → `.o` via `cc` (already done)
 3. Link both `.o` files + libc into a final binary via `cc`
 
 If `llc` or `cc` is missing, fall back to printing instructions (current behavior).

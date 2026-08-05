@@ -1,6 +1,6 @@
 # Reflection: `.^` and `.^^`
 
-Brief has two reflection operators that read **compiler-known metadata** about
+Briv has two reflection operators that read **compiler-known metadata** about
 a value or its type:
 
 | Operator | Kind | Example | Result |
@@ -31,7 +31,7 @@ initializers and contract expressions:
 | `Alignment` | alignment of the type |
 | `Type` | type identity token |
 
-```brief
+```briv
 let items: Int[8];
 let n: Int = items.^^Size;         // 8 — compile-time constant
 let sz: Int = items.^^Bytes;       // 64 — 8 elements × 8 bytes
@@ -49,7 +49,7 @@ Value-derived metadata — a runtime value whose *type* is statically known:
 | `Len` | runtime length of a String/List value |
 | `Ptr` | address-of — `&x` is the primary spelling |
 
-```brief
+```briv
 let s: String = "hello";
 let n: Int = s.^Len;               // 5 — runtime length
 let p: Ptr<Int> = &x;              // address-of (primary form)

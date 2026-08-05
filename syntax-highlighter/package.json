@@ -1,17 +1,17 @@
 {
-  "name": "brief-language",
-  "displayName": "Brief Language",
-  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv) files",
+  "name": "briv-language",
+  "displayName": "Briv Language",
+  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Briv (.bv), Rendered Briv (.rbv), and Embedded Briv (.ebv) files",
   "version": "0.1.0",
   "icon": "images/extension-logo.png",
   "publisher": "randozart",
   "main": "./client/extension.js",
   "activationEvents": [
-    "onLanguage:brief",
+    "onLanguage:briv",
     "onLanguage:rbv",
     "onLanguage:ebv",
-    "onLanguage:dbrief",
-    "onLanguage:sbrief",
+    "onLanguage:dbriv",
+    "onLanguage:sbriv",
     "onLanguage:srbv",
     "onLanguage:sebv",
     "onLanguage:abv",
@@ -27,92 +27,92 @@
   "contributes": {
     "languages": [
       {
-        "id": "brief",
-        "aliases": ["Brief", "brief"],
+        "id": "briv",
+        "aliases": ["Briv", "briv"],
         "extensions": [".bv"],
         "icon": {
-          "light": "./images/brief-logo.svg",
-          "dark": "./images/brief-logo.svg"
+          "light": "./images/briv-logo.svg",
+          "dark": "./images/briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "rbv",
-        "aliases": ["Rendered Brief", "rendered-brief", "Brief Render", "brief-render"],
+        "aliases": ["Rendered Briv", "rendered-briv", "Briv Render", "briv-render"],
         "extensions": [".rbv"],
         "icon": {
-          "light": "./images/r-brief-logo.svg",
-          "dark": "./images/r-brief-logo.svg"
+          "light": "./images/r-briv-logo.svg",
+          "dark": "./images/r-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "ebv",
-        "aliases": ["Embedded Brief", "embedded-brief", "Brief Embed", "brief-embed"],
+        "aliases": ["Embedded Briv", "embedded-briv", "Briv Embed", "briv-embed"],
         "extensions": [".ebv"],
         "icon": {
-          "light": "./images/e-brief-logo.svg",
-          "dark": "./images/e-brief-logo.svg"
+          "light": "./images/e-briv-logo.svg",
+          "dark": "./images/e-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
-        "id": "dbrief",
-        "aliases": ["Data Brief", "dbrief", "Brief Data", "brief-data"],
+        "id": "dbriv",
+        "aliases": ["Data Briv", "dbriv", "Briv Data", "briv-data"],
         "extensions": [".dbv", ".dbvl"],
         "icon": {
-          "light": "./images/d-brief-logo.svg",
-          "dark": "./images/d-brief-logo.svg"
+          "light": "./images/d-briv-logo.svg",
+          "dark": "./images/d-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
-        "id": "sbrief",
-        "aliases": ["Strict Brief", "strict-brief"],
+        "id": "sbriv",
+        "aliases": ["Strict Briv", "strict-briv"],
         "extensions": [".sbv"],
         "icon": {
-          "light": "./images/brief-logo.svg",
-          "dark": "./images/brief-logo.svg"
+          "light": "./images/briv-logo.svg",
+          "dark": "./images/briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "srbv",
-        "aliases": ["Strict Rendered Brief", "strict-rendered-brief", "Strict Render", "strict-render"],
+        "aliases": ["Strict Rendered Briv", "strict-rendered-briv", "Strict Render", "strict-render"],
         "extensions": [".srbv"],
         "icon": {
-          "light": "./images/r-brief-logo.svg",
-          "dark": "./images/r-brief-logo.svg"
+          "light": "./images/r-briv-logo.svg",
+          "dark": "./images/r-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "sebv",
-        "aliases": ["Strict Embedded Brief", "strict-embedded-brief", "Strict Embed", "strict-embed"],
+        "aliases": ["Strict Embedded Briv", "strict-embedded-briv", "Strict Embed", "strict-embed"],
         "extensions": [".sebv"],
         "icon": {
-          "light": "./images/e-brief-logo.svg",
-          "dark": "./images/e-brief-logo.svg"
+          "light": "./images/e-briv-logo.svg",
+          "dark": "./images/e-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "abv",
-        "aliases": ["Accelerated Brief", "accelerated-brief", "Brief Accel", "brief-accel"],
+        "aliases": ["Accelerated Briv", "accelerated-briv", "Briv Accel", "briv-accel"],
         "extensions": [".abv"],
         "icon": {
-          "light": "./images/a-brief-logo.svg",
-          "dark": "./images/a-brief-logo.svg"
+          "light": "./images/a-briv-logo.svg",
+          "dark": "./images/a-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "cbv",
-        "aliases": ["Circuit Brief", "circuit-brief", "Brief Circuit", "brief-circuit"],
+        "aliases": ["Circuit Briv", "circuit-briv", "Briv Circuit", "briv-circuit"],
         "extensions": [".cbv"],
         "icon": {
-          "light": "./images/c-brief-logo.svg",
-          "dark": "./images/c-brief-logo.svg"
+          "light": "./images/c-briv-logo.svg",
+          "dark": "./images/c-briv-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
@@ -129,9 +129,9 @@
     ],
     "grammars": [
       {
-        "language": "brief",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "language": "briv",
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
         "language": "rbv",
@@ -140,18 +140,18 @@
       },
       {
         "language": "ebv",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
-        "language": "dbrief",
-        "scopeName": "source.dbrief",
-        "path": "./syntaxes/dbrief.tmLanguage.json"
+        "language": "dbriv",
+        "scopeName": "source.dbriv",
+        "path": "./syntaxes/dbriv.tmLanguage.json"
       },
       {
-        "language": "sbrief",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "language": "sbriv",
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
         "language": "srbv",
@@ -160,18 +160,18 @@
       },
       {
         "language": "sebv",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
         "language": "abv",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
         "language": "cbv",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "scopeName": "source.briv",
+        "path": "./syntaxes/briv.tmLanguage.json"
       },
       {
         "language": "beast",
@@ -181,19 +181,19 @@
     ],
     "themes": [
       {
-        "label": "Brief Dark",
+        "label": "Briv Dark",
         "uiTheme": "vs-dark",
-        "path": "./themes/brief-dark.json"
+        "path": "./themes/briv-dark.json"
       },
       {
-        "label": "Brief Light",
+        "label": "Briv Light",
         "uiTheme": "vs",
-        "path": "./themes/brief-light.json"
+        "path": "./themes/briv-light.json"
       }
     ],
     "folding": [
       {
-        "language": "brief",
+        "language": "briv",
         "boundaries": [
           "// === PATH ANALYSIS ===",
           "// === END PATH ANALYSIS ==="
@@ -202,17 +202,17 @@
     ],
     "brackets": [
       {
-        "language": "brief",
+        "language": "briv",
         "open": "{",
         "close": "}"
       },
       {
-        "language": "brief",
+        "language": "briv",
         "open": "[",
         "close": "]"
       },
       {
-        "language": "brief",
+        "language": "briv",
         "open": "(",
         "close": ")"
       }

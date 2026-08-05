@@ -1,7 +1,7 @@
-# Brief-in-Brief Parity Plan
+# Briv-in-Briv Parity Plan
 
 ## Goal
-Bring `parser.bv`, `typechecker.bv`, `ast.bv`, `token.bv`, and `proof_engine.bv` in the self-hosted Brief compiler up to parity with the Rust compiler's `Expr::Term` handling.
+Bring `parser.bv`, `typechecker.bv`, `ast.bv`, `token.bv`, and `proof_engine.bv` in the self-hosted Briv compiler up to parity with the Rust compiler's `Expr::Term` handling.
 
 ## Background
 
@@ -11,7 +11,7 @@ The Rust compiler now has:
 - `expr_has_result()` matching both `Expr::Term` and `Expr::Identifier("result")`
 - Symbolic verification (not type-checking) of postconditions at call sites via `satisfies_postcondition`
 
-The Brief-in-Brief compiler has none of this. It does pure type inference, not symbolic execution.
+The Briv-in-Briv compiler has none of this. It does pure type inference, not symbolic execution.
 
 ## Changes
 

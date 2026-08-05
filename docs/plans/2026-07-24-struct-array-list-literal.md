@@ -3,7 +3,7 @@
 ## Problem
 
 When a list literal `[PyMethodDef{...}, ...]` has all elements of the same
-C-compatible struct type, `emit_heap_seq` emits a heap-allocated Brief list
+C-compatible struct type, `emit_heap_seq` emits a heap-allocated Briv list
 (malloc + header + element slots as `i64` values). C code expects a contiguous
 `PyMethodDef*` array. The GLUE bridge generator emits `let methods = [PyMethodDef{...}]`
 but the generated code cannot be passed to C functions expecting `PyMethodDef*`.
@@ -12,7 +12,7 @@ but the generated code cannot be passed to C functions expecting `PyMethodDef*`.
 
 Detect when all elements of a list literal are `Expr::StructLiteral` with the
 same known struct type. In that case, emit a contiguous stack-allocated array
-instead of a heap-allocated Brief list. The `&var` on such a list naturally
+instead of a heap-allocated Briv list. The `&var` on such a list naturally
 produces a `ptrtoint ptr %alloca to i64` — exactly what C expects.
 
 ## Design

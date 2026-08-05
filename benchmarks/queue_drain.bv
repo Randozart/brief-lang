@@ -11,7 +11,7 @@
 // side exercise that tests the LLVM backend's op InsertAt/ExtractFrom path.
 //
 // Build:
-//   ./target/release/briefc build --llvm benchmarks/queue_drain.bv \
+//   ./target/release/brivc build --llvm benchmarks/queue_drain.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: queue_drain_c.c

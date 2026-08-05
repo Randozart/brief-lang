@@ -84,7 +84,7 @@ Create 10 docs in `docs/architecture/features/`:
 |-----|--------|-------------|
 | `arrow.md` | `arrow.rs` | `<-` dispatch on Value type |
 | `block.md` | `block.rs` | Block expression evaluation |
-| `dbvl.md` | `dbvl.rs` | D-Brief line validation |
+| `dbvl.md` | `dbvl.rs` | D-Briv line validation |
 | `ellipsis.md` | `ellipsis.rs` | `...` spread operator |
 | `field.md` | `field.rs` | Struct field access dispatch |
 | `pattern.md` | `pattern.rs` | Unification/wildcard matching |

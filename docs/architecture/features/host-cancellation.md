@@ -1,4 +1,4 @@
-# Host Cancellation — cancel a long-running Brief call
+# Host Cancellation — cancel a long-running Briv call
 
 **Date:** 2026-08-03
 **Status:** Implemented (explicit polling; process-global flag)
@@ -7,10 +7,10 @@ stuck so we can cancel the request as it is taking too long."
 
 ## What was built
 
-A host thread raises a process-global atomic flag; a long-running Brief loop
+A host thread raises a process-global atomic flag; a long-running Briv loop
 polls it explicitly and stops early with a partial result.
 
-```brief
+```briv
 txn sum_loop(acc: Int, i: Int, count: Int)
     [i < count && !CancelRequested#()][i == count] -> Int
 {
@@ -27,18 +27,18 @@ export defn cancellable_sum(count: Int) -> Int {
 
 Host side (C):
 ```c
-__brief_set_cancel(st, 1);   // from another thread
+__briv_set_cancel(st, 1);   // from another thread
 int64_t r = cancellable_sum(st, 2000000000);  // returns early
-__brief_clear_cancel(st);
+__briv_clear_cancel(st);
 ```
 
 ## Pieces
 
-1. **Intrinsics:** `CancelRequested#() -> Bool` loads `@__brief_cancel_flag`
+1. **Intrinsics:** `CancelRequested#() -> Bool` loads `@__briv_cancel_flag`
    (seq_cst); `ClearCancel#()` stores 0. Interpreter returns `false` (no
    host in-process).
-2. **Shim exports:** `__brief_set_cancel(ptr %state, i32)` /
-   `__brief_clear_cancel(ptr %state)` in `emit_library_shim`; declared in the
+2. **Shim exports:** `__briv_set_cancel(ptr %state, i32)` /
+   `__briv_clear_cancel(ptr %state)` in `emit_library_shim`; declared in the
    C bindings header.
 3. **Explicit polling only** (rule 2): the loop's precondition is
    `[i < count && !CancelRequested#()]` — the compiler never injects checks.
@@ -49,7 +49,7 @@ __brief_clear_cancel(st);
 
 ## Design notes
 
-- **Process-global flag** (`@__brief_cancel_flag`): one Brief instance per
+- **Process-global flag** (`@__briv_cancel_flag`): one Briv instance per
   process. The `ptr %state` parameter is accepted for ABI stability but
   unused. Per-state flags (independent concurrent instances) would move the
   flag into the `%State` layout — deferred.
@@ -63,5 +63,5 @@ __brief_clear_cancel(st);
 ## Undo
 
 - Remove the `CancelRequested#`/`ClearCancel#` signatures + intrinsics arms,
-  `@__brief_cancel_flag` global, and the shim `__brief_set_cancel`/
-  `__brief_clear_cancel` functions.
+  `@__briv_cancel_flag` global, and the shim `__briv_set_cancel`/
+  `__briv_clear_cancel` functions.

@@ -9,7 +9,7 @@ The `within` keyword on assignments specifies a timeout bound for the operation.
 
 ## Syntax
 
-```brief
+```briv
 let result = fetch() within 10 cycles;
 ```
 
@@ -20,11 +20,11 @@ The timeout applies to the entire assignment expression, not just the function c
 - The cycle count is evaluated as an integer expression
 - If the inner expression completes before the cycle budget is exhausted, the result is stored normally
 - If the cycle budget is exhausted, the result becomes the type default (`0` for `Int`, `false` for `Bool`, `""` for `String`, etc.)
-- Used primarily in Embedded Brief (`.ebv`) for hardware-timed operations
+- Used primarily in Embedded Briv (`.ebv`) for hardware-timed operations
 
 ## Examples
 
-```brief
+```briv
 // Hardware fetch with timeout
 sig fetch: () -> Int;
 let res: Int = fetch() within 10 cycles;
@@ -33,11 +33,11 @@ let res: Int = fetch() within 10 cycles;
 let port_val: Int = read_port() within 5 cycles;
 ```
 
-## Embedded Brief Context
+## Embedded Briv Context
 
 In `.ebv` files, `within` is particularly useful for MMIO operations where hardware might not respond:
 
-```brief
+```briv
 // Wait for hardware ready with timeout
 let status: Int = read_register(0x4000) within 100 cycles;
 [status == 0] {

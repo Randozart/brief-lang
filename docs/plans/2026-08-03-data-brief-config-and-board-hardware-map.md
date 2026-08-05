@@ -1,11 +1,11 @@
-# Plan: Data Brief as Universal Config + Board-Owned Hardware Map
+# Plan: Data Briv as Universal Config + Board-Owned Hardware Map
 
 **Date:** 2026-08-03
 **Status:** Phase 3 complete — all six TOML configs migrated to `.dbvl` and deleted (`8b52f0ff` `a37923af` `4e07e82d` `7d426e22` `aa56e9a5` `d648f3f2`); parity tests converted to golden tests; `address-map.toml` migrated to `.dbvl` and deleted; TOML fallback branches removed. Phase 4 docs done — plan complete (`.ebv` runtime hand-off is a follow-up).
-**Branch:** `feat/data-brief-config` (new)
+**Branch:** `feat/data-briv-config` (new)
 
 **This is the AUTHORITATIVE record** for two coupled streams that share one
-mechanism: (1) making **Data Brief** (`.dbv`/`.dbvl`, via `src/dbrief/v2.rs`)
+mechanism: (1) making **Data Briv** (`.dbv`/`.dbvl`, via `src/dbriv/v2.rs`)
 the universal config and board-description format, replacing the `config/*.toml`
 layer; and (2) giving **`.cbv` and `.ebv` a single, board-owned shared hardware
 map** they both resolve against, so firmware and hardware agree on MMIO
@@ -15,8 +15,8 @@ addresses by construction.
 
 | Plan | Role | Status |
 |---|---|---|
-| **[This plan](2026-08-03-data-brief-config-and-board-hardware-map.md)** | The authoritative record — the DB-as-config migration, the board-owned hardware map, the shared address contract, and the `.ebv` follow-up handoff. All design research lives here. | Active |
-| [2026-07-30-meta-circular-tamer.md](2026-07-30-meta-circular-tamer.md) | The freestanding `.ebv` stress test (VM, pointers, bytecode in Brief). Depends on `.ebv` having a real no-OS runtime; this plan provides the board/address foundation it builds on. | Design → foundation |
+| **[This plan](2026-08-03-data-briv-config-and-board-hardware-map.md)** | The authoritative record — the DB-as-config migration, the board-owned hardware map, the shared address contract, and the `.ebv` follow-up handoff. All design research lives here. | Active |
+| [2026-07-30-meta-circular-tamer.md](2026-07-30-meta-circular-tamer.md) | The freestanding `.ebv` stress test (VM, pointers, bytecode in Briv). Depends on `.ebv` having a real no-OS runtime; this plan provides the board/address foundation it builds on. | Design → foundation |
 | [2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md) | The C-surface reduction master plan. This plan carries its `.ebv` thread forward by making `.ebv` config-driven (board map) rather than hardcoded. | Superseded for config |
 
 ---
@@ -46,25 +46,25 @@ it. That inverts the dependency: a board's `.dbv`/`.dbvl` becomes the single
 source of truth both backends resolve against, and automation (CMSIS-SVD import,
 vendor-provided files) can regenerate it because it is just data.
 
-### 2. Why Data Brief, now
+### 2. Why Data Briv, now
 
 `config/*.toml` is the *last* configuration in the system not expressed in a
-Brief-native form. Data Brief (`.dbv`/`.dbvl`) is already shipped — `src/dbrief/
+Briv-native form. Data Briv (`.dbv`/`.dbvl`) is already shipped — `src/dbriv/
 v2.rs` parses it (`;` separator, `>` directives, bare tokens default), and
-`src/dbrief/bridge.rs::document_to_program` converts it to the Brief AST. It is
+`src/dbriv/bridge.rs::document_to_program` converts it to the Briv AST. It is
 already consumed for board files (`import "target"` → `lib/boards/<board>.dbvl`
 in `src/import_resolver.rs:275-321`) and for GLUE registries
 (`lib/glue.dbvl`). The hardware-map seam for using it as the universal config is
 therefore already built and battle-tested.
 
-Notably, quotes (`"..."`) **are** legal Data Brief — they are opt-in via the
+Notably, quotes (`"..."`) **are** legal Data Briv — they are opt-in via the
 parser flag (spec §3.4) and `parse_document_quoted` in `v2.rs`. This is what
 makes even the IR-template-heavy `alloc-strategies.toml` migratable as quoted
 string values.
 
 ### 3. `.dbv` vs `.dbvl` — the split
 
-Data Brief family is two formats. They are complementary, not interchangeable:
+Data Briv family is two formats. They are complementary, not interchangeable:
 
 | Format | Strength | Weakness | Use here |
 |---|---|---|---|
@@ -79,7 +79,7 @@ carrying the flat `CAPITALIZED_CONSTANT → address` table. The `.dbvl` is what
 ### 4. The intrinsic-runtime thread (explicitly deferred)
 
 The `.ebv` no-OS runtime divergence (`Malloc#`→ bump allocator, `Print#`→ pure
-Brief formatting + `write`, `Now#`→ freestanding clock) is **out of scope for
+Briv formatting + `write`, `Now#`→ freestanding clock) is **out of scope for
 this plan** and becomes its own follow-up plan (included in §Phase 4 as a
 hand-off doc). The reason for the split: the board/address context (this plan)
 is the *precondition* the intrinsic-runtime work reads (a device lives at an
@@ -93,7 +93,7 @@ is cleaner if the two are decoupled.
 ### 5.1 The board-owned hardware map
 
 > **2026-08-03 (format audit):** the existing `lib/boards/stm32f407.dbvl` is
-> **obsolete pre-v2 syntax** and does not parse under `src/dbrief/v2.rs`. Three
+> **obsolete pre-v2 syntax** and does not parse under `src/dbriv/v2.rs`. Three
 > violations: (1) `schema lib/devices/uart.dbvs;` uses the removed `.dbvs`
 > extension and the non-directive `schema X;` form, which fails
 > `parse_schema`'s `expect_char('{')`; (2) `uart1 { ... }` key-without-colon
@@ -101,7 +101,7 @@ is cleaner if the two are decoupled.
 > `{ }` in a `.dbvl` contradicts the line-oriented spec (§7/§12.4). Phase 2
 > therefore **rewrites** (not merely relocates) this file into valid v2 DB.
 
-> **2026-08-03 (parser verification, empirical):** probing `src/dbrief/v2.rs`
+> **2026-08-03 (parser verification, empirical):** probing `src/dbriv/v2.rs`
 > with candidate board forms proved that **nested `{ }` register blocks do NOT
 > parse** in the current v2 parser — neither `>`-prefixed (`{ > 0; rw; }`) nor
 > bare (`{ 0; 9; rw; }`), nor the spec's own §11.3 example verbatim. The
@@ -185,7 +185,7 @@ firmware's assumptions.
 
 ### Phase 1 — DB-read routing (shared loader + parity harness)
 
-- Add a small Rust loader (in `src/dbrief/` or a new `src/config_db.rs`) that
+- Add a small Rust loader (in `src/dbriv/` or a new `src/config_db.rs`) that
   dispatches `.dbv`/`.dbvl` content through `v2::parse_document` /
   `parse_document_quoted` and exposes keyed lookup by **capitalized constant**.
 - Wire it so `--config-dir`/profile resolution (in
@@ -198,9 +198,9 @@ firmware's assumptions.
 ### Phase 1b — stm32f407 round-trip golden test (format proof)
 
 Before the loader and real board rewrite, **prove the format**: add a unit test
-in `src/dbrief/v2.rs` (tests module) that feeds the *intended* v2 flat
+in `src/dbriv/v2.rs` (tests module) that feeds the *intended* v2 flat
 `map.dbv` (schemas only) + `addresses.dbvl` + `registers.dbvl` content through
-`parse_document` and asserts a well-formed `DbriefDocument`: the `Device`/
+`parse_document` and asserts a well-formed `DbrivDocument`: the `Device`/
 `Register` schemas resolve, every `.dbvl` `KEY → address/fields` pair lands
 with the schema-derived key and the expected field values (hex addresses read
 as `String`). This locks the format **before** any loader dependency, so Phase
@@ -236,7 +236,7 @@ as `String`). This locks the format **before** any loader dependency, so Phase
 >    directive set `current_schema` to `path`'s stem ("map"), so `.dbvl` groups
 >    were tagged "map" and flattening could not find the declared `Device`
 >    schema. The directive names the schema explicitly; `current_schema` is now
->    the NAME. Matches `docs/architecture/data-brief.md` semantics.
+>    the NAME. Matches `docs/architecture/data-briv.md` semantics.
 > 3. **Board schema carrier re-emitted as an import**: `>schema Device from
 >    "map.dbv"` pushed "map.dbv" into `doc.imports`; the bridge turned it into a
 >    literal `import "map.dbv"` that failed resolution. `resolve_target_import`
@@ -330,7 +330,7 @@ so the five clean ones are not blocked by the IR one.
 
 ### Phase 4 — Documentation + `.ebv` runtime hand-off
 
-- ✅ Update `docs/architecture/data-brief.md`: note it is now the universal config
+- ✅ Update `docs/architecture/data-briv.md`: note it is now the universal config
   format — new §8 "Universal Config (`.dbvl` line tables)" documents the seven
   config files, their row shapes, and the conventions (// comments, flattened
   dotted keys, space-separated lists, quoted protocol map names, quoted IR

@@ -98,7 +98,7 @@ async function run_bench_async(name, fn, iterations = 100, ...args) {
 
 async function main() {
     console.log("=".repeat(65));
-    console.log("Multi-Language Bridge Benchmark — Brief export defn from Node.js");
+    console.log("Multi-Language Bridge Benchmark — Briv export defn from Node.js");
     console.log("=".repeat(65));
 
     const a = 3, b = 4;

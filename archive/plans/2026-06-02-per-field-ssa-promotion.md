@@ -54,7 +54,7 @@ fields, the 1.87× ratio is a hardware limitation. Future work:
 - Use `alloca` + separate load/store for cold fields to avoid struct aliasing overhead
 
 ## Updated Benchmark Table
-| Benchmark | Fields | Brief | C | Ratio | Notes |
+| Benchmark | Fields | Briv | C | Ratio | Notes |
 |-----------|--------|-------|---|-------|-------|
 | iir_filter | 4 | 0.156s | 0.155s | **1.01×** | No spill → parity |
 | precompute_sum | 2 | 0.001s | 0.016s | **0.06×** | O(1) fold beats C loop |

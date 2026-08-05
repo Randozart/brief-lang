@@ -494,9 +494,9 @@ impl LlvmBackend {
         sorted_keys.sort();
         for name in &sorted_keys {
             if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                let (val, brief_ty) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                let (val, briv_ty) = self.emit_state_load_i64_by_idx(out, "  ", idx);
                 self.fun.last_val_temps.insert(name.clone(), val.clone());
-                self.fun.last_val_types.insert(name.clone(), brief_ty);
+                self.fun.last_val_types.insert(name.clone(), briv_ty);
             }
         }
     }

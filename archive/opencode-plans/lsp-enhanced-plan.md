@@ -1,4 +1,4 @@
-# Plan: Enhanced LSP for Brief Language
+# Plan: Enhanced LSP for Briv Language
 
 ## Goal
 Add full Language Server Protocol (LSP) features to enable IDE integration with hover, goto definition, completions, and document symbols.
@@ -14,10 +14,10 @@ Add full Language Server Protocol (LSP) features to enable IDE integration with 
 Add language server configuration to `syntax-highlighter/package.json`:
 ```json
 "languageServer": {
-    "brief": {
-        "command": "brief",
+    "briv": {
+        "command": "briv",
         "args": ["lsp"],
-        "languages": ["brief", "rbv", "ebv"]
+        "languages": ["briv", "rbv", "ebv"]
     }
 }
 ```
@@ -52,7 +52,7 @@ Medium (~4-6 hours)
 - ~3-5 hours for LSP handlers
 
 ## Verification
-Run `brief lsp` and test with VS Code:
+Run `briv lsp` and test with VS Code:
 - Open `.bv` file → should get diagnostics on type/check errors
 - Hover over variable → shows type
 - Ctrl+Click → goes to definition

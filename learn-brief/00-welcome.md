@@ -1,13 +1,13 @@
-# Welcome to Brief! 🎉
+# Welcome to Briv! 🎉
 
-**Brief** is a declarative, contract-enforced logic language designed for building verifiable state machines.
+**Briv** is a declarative, contract-enforced logic language designed for building verifiable state machines.
 
-## What Makes Brief Different?
+## What Makes Briv Different?
 
 ### 1. Contracts First
 Every transaction declares what must be true **before** and **after** it runs:
 
-```brief
+```briv
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]  // Precondition
     [balance == @balance - amount]      // Postcondition
@@ -21,7 +21,7 @@ The compiler **verifies** that your code actually satisfies these contracts.
 
 ### 1b. Three kinds of declaration: `node`, `txn`, and `defn`
 
-Brief has two kinds of state-changing declarations plus a pure function form:
+Briv has two kinds of state-changing declarations plus a pure function form:
 
 | | `node` | `txn` | `defn` |
 |---|--------|-------|--------|
@@ -32,7 +32,7 @@ Brief has two kinds of state-changing declarations plus a pure function form:
 | **Contracts** | `[pre][post]` | `[pre][post]` | Optional (straight-line translation is inherently provable) |
 | **Typical use** | The program's driver (`node tick`, `node process`) | Callable operations (`withdraw`, `push`) | Pure computation (`next(x)`, `score(p)`) |
 
-```brief
+```briv
 node tick [count < total][count == total] {
     count = count + 1;
     term;
@@ -57,7 +57,7 @@ reaches the outside world is through a caller assigning its return value.
 ### 2. Reactive by Default
 `node` declarations fire automatically when their preconditions are met:
 
-```brief
+```briv
 node auto_save [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
@@ -70,7 +70,7 @@ No event handlers. No polling. Just logic.
 ### 3. Zero-Nesting Logic
 No `if/else` chains. Use `when` guards instead:
 
-```brief
+```briv
 // Instead of: if x > 0 { ... } else if x < 0 { ... }
 when x > 0 {
     &result = x * 2;
@@ -93,20 +93,20 @@ The compiler proves:
 
 Create `hello.bv`:
 
-```brief
-let message: String = "Hello, Brief!";
+```briv
+let message: String = "Hello, Briv!";
 
 println(message);     // scripting — no transaction wrapper needed
 ```
 
-Brief lets you write statements directly at global scope. The compiler
+Briv lets you write statements directly at global scope. The compiler
 automatically wraps them in a synthesized `node __init` that fires
 once on start. No boilerplate needed.
 
 Run it:
 
 ```bash
-briefc check hello.bv
+brivc check hello.bv
 ```
 
 For more complex programs, you can still write explicit transactions
@@ -115,7 +115,7 @@ for simple programs — all the same safety guarantees apply.
 
 ### Learning Path
 
-This folder contains a complete Brief tutorial:
+This folder contains a complete Briv tutorial:
 
 1. **01-basics.md** - Variables, types, transactions
 2. **02-contracts.md** - Preconditions, postconditions, @ prior state

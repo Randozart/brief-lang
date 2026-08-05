@@ -1,4 +1,4 @@
-# Brief v6.1 Implementation Status
+# Briv v6.1 Implementation Status
 **Date:** 2026-04-05  
 **Final Status:** 5 Major Features Complete + Foundations Laid for Features A/B/C
 
@@ -16,7 +16,7 @@
   - Evaluates postconditions with @ (prior-state) operator
   - Enumerates multiple paths through guard blocks
 - **Examples:**
-  ```brief
+  ```briv
   &x = 5; [x == 5] ✓
   &x = @x + 1; [x == @x + 1] ✓
   &x = y * 2 + z; [x == y * 2 + z] ✓
@@ -37,7 +37,7 @@
   - Groups multiple statements under one guard
   - 100% backward compatible with flat syntax
 - **Examples:**
-  ```brief
+  ```briv
   [x > 100] {
     &transfers = transfers + 1;
     &total = total + x;
@@ -62,7 +62,7 @@
   - Pure libraries (no rct blocks) cost zero CPU
   - 6 unit tests with intelligent skipping patterns
 - **Example:**
-  ```brief
+  ```briv
   reactor @60Hz;  // Global max
   
   rct [cond] txn slow [pre][post] { ... };       // @10Hz default
@@ -125,7 +125,7 @@ e34aa23 Issue #1: Add guard block syntax support [condition] { statements }
 eae72bd Issue #2: Add // comment support in lexer
 a5bc71e Issue #3: Add output name parsing to AST and parser
 c3ff073 Issue #4: Implement symbolic executor for assignment tracking...
-6bcae6d Upgrade to Brief v6.1 specification - add multi-output types, sig casting...
+6bcae6d Upgrade to Briv v6.1 specification - add multi-output types, sig casting...
 ```
 
 ### Test Results

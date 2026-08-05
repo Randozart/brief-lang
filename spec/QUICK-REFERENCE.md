@@ -1,10 +1,10 @@
-# Brief Quick Reference
+# Briv Quick Reference
 
 ## Syntax at a Glance
 
 ### Basic Declarations
 
-```brief
+```briv
 // State declaration
 state <name>: <type> = <expr>?
 
@@ -31,7 +31,7 @@ sig #out <name>(<params>) -> T from <path>;
 sig #inline <name>(<params>) -> T;
 
 // Import source file to link
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 ```
 
 ### FFI Keywords
@@ -55,7 +55,7 @@ import "link/brief_rt.c";
 
 ### Output Types
 
-```brief
+```briv
 // Single output
 -> Bool
 
@@ -74,7 +74,7 @@ import "link/brief_rt.c";
 
 ### Multi-Output Term
 
-```brief
+```briv
 term a, b, c;          // returns tuple of a, b, c
 term item;             // returns single value
 term;                  // returns nothing
@@ -82,8 +82,8 @@ term;                  // returns nothing
 
 ### Import Linking
 
-```brief
-import "link/brief_rt.c";    // C source → LLVM IR → llvm-link
+```briv
+import "link/briv_rt.c";    // C source → LLVM IR → llvm-link
 import "link/rust_lib.rs";   // Rust library
 import "link/zig_lib.zig";   // Zig library
 ```
@@ -99,7 +99,7 @@ import "link/zig_lib.zig";   // Zig library
 
 ### Operator Taxonomy
 
-Brief's operators belong to three conceptual groups:
+Briv's operators belong to three conceptual groups:
 
 | Group | Operators | Purpose |
 |-------|-----------|---------|
@@ -111,7 +111,7 @@ The **Anchor** (`@`) is a universal modifier for spatial/temporal location acros
 
 ### Control Flow
 
-```brief
+```briv
 // Guards (branching)
 [guard_expr] {
     // executes when guard is true
@@ -123,7 +123,7 @@ unbinding <name>(<pattern>) = <expr>
 
 ### Result Type Methods
 
-```brief
+```briv
 result.is_ok()     // Bool
 result.is_err()    // Bool  
 result.value       // Unwrapped value
@@ -155,7 +155,7 @@ result.error.message  // Error message
 
 ### Error Handling
 
-```brief
+```briv
 let result = read_file(path);
 [result.is_ok()] {
     term result.value;
@@ -166,13 +166,13 @@ let result = read_file(path);
 
 ### Fire-and-Forget FFI
 
-```brief
+```briv
 frgn! send_message(msg: String);
 ```
 
 ### Importing
 
-```brief
+```briv
 import "std/io";
 import "std/math" as math;
 import {File, Dir} from "std/fs" from "fs.toml";
@@ -180,7 +180,7 @@ import {File, Dir} from "std/fs" from "fs.toml";
 
 ### Multi-Output
 
-```brief
+```briv
 defn get_pair() -> (Int, String) [true] {
     term (42, "answer");
 };

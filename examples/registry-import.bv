@@ -4,7 +4,7 @@
 // The compiler resolves <name> against config/module-registry.toml
 // instead of searching the filesystem.
 //
-// Check: brief-compiler check examples/registry-import.bv
+// Check: briv-compiler check examples/registry-import.bv
 
 // Import all symbols from the collections module via registry
 import <collections>;

@@ -254,10 +254,10 @@ done:
 
 ### `benchmarks/ring_buffer.bv`
 
-```brief
+```briv
 #!exit ops == N;
 
-import { io_pending } from "std/brief_rt.bv";
+import { io_pending } from "std/briv_rt.bv";
 
 let ops: Int = 0;
 const N: Int = 50000000;
@@ -273,10 +273,10 @@ but serves as an explicit declaration of intent.
 
 ### `benchmarks/async_counters.bv`
 
-```brief
+```briv
 #!exit a == N && b == N;
 
-import { io_pending } from "std/brief_rt.bv";
+import { io_pending } from "std/briv_rt.bv";
 
 let a: Int = 0;
 let b: Int = 0;

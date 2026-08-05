@@ -18,7 +18,7 @@ use crate::linkage::LinkageConfig;
 use std::collections::HashMap;
 use std::fmt::Write;
 
-/// VHDL code generator: converts a Brief Program into multi-file VHDL output.
+/// VHDL code generator: converts a Briv Program into multi-file VHDL output.
 pub struct VhdlGenerator {
     spec: Option<crate::target_spec::TargetSpec>,
     entity_name: String,
@@ -192,7 +192,7 @@ impl VhdlGenerator {
         let mut type_names: Vec<String> = Vec::new();
         for item in &program.items {
             if let TopLevel::StateDecl(state) = item {
-                let vh = self.brief_type_to_vhdl(&state.ty);
+                let vh = self.briv_type_to_vhdl(&state.ty);
                 if vh.starts_with("record") || vh.starts_with("array") {
                     let tn = format!("{}_t", state.name);
                     if !type_names.contains(&tn) {
@@ -206,7 +206,7 @@ impl VhdlGenerator {
         o.push_str("\n    -- Constants\n");
         for item in &program.items {
             if let TopLevel::Constant(c) = item {
-                let vh = self.brief_type_to_vhdl(&c.ty);
+                let vh = self.briv_type_to_vhdl(&c.ty);
                 o.push_str(&format!("    constant {} : {} := {};\n", c.name, vh, self.expr_to_string(&c.expr)));
             }
         }
@@ -284,12 +284,12 @@ impl VhdlGenerator {
                 if let Some(addr) = state.address {
                     if self.get_io_mapping(addr).is_some() && !self.has_memory_mapping(addr) {
                         if first { first = false; }
-                        let vh = self.brief_type_to_vhdl(&state.ty);
+                        let vh = self.briv_type_to_vhdl(&state.ty);
                         o.push_str(&format!("        {} : out {};\n", state.name, vh));
                     }
                 } else if let Some(_p) = get_pragma(&state.attrs, "port") {
                     if first { first = false; }
-                    let vh = self.brief_type_to_vhdl(&state.ty);
+                    let vh = self.briv_type_to_vhdl(&state.ty);
                     o.push_str(&format!("        {} : out {};\n", state.name, vh));
                 }
             }
@@ -313,7 +313,7 @@ impl VhdlGenerator {
                 } else if get_pragma(&state.attrs, "port").is_some() {
                     continue;
                 }
-                let vh = self.brief_type_to_vhdl(&state.ty);
+                let vh = self.briv_type_to_vhdl(&state.ty);
                 let init = self.get_default_value(&state.ty);
                 o.push_str(&format!("    signal {} : {} := {};\n", state.name, vh, init));
             }
@@ -810,7 +810,7 @@ impl VhdlGenerator {
         output.push_str(&format!("    end process {};\n\n", proc_name));
     }
 
-    /// Convert a Brief statement to VHDL code with the given indentation level.
+    /// Convert a Briv statement to VHDL code with the given indentation level.
     fn statement_to_vhdl(&mut self, output: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
@@ -860,7 +860,7 @@ impl VhdlGenerator {
                 let _ = write!(output, "{}-- side effect: {}\n", indent, expr_code);
             }
             Statement::LocalTrigger { name, ty, expr, .. } => {
-                let _ty_str = self.brief_type_to_vhdl(ty);
+                let _ty_str = self.briv_type_to_vhdl(ty);
                 if let Some(e) = expr {
                     let expr_code = self.expr_to_string(e);
                     let _ = write!(output, "{}-- trg! {}: {} = {}\n", indent, name, _ty_str, expr_code);
@@ -930,7 +930,7 @@ impl VhdlGenerator {
 
         for item in &program.items {
             if let TopLevel::StateDecl(state) = item {
-                let vh = self.brief_type_to_vhdl(&state.ty);
+                let vh = self.briv_type_to_vhdl(&state.ty);
                 o.push_str(&format!("    signal {} : {};\n", state.name, vh));
             }
         }
@@ -976,8 +976,8 @@ impl VhdlGenerator {
         o
     }
 
-    /// Convert a Brief Type to its VHDL type string, handling all type variants.
-    fn brief_type_to_vhdl(&self, ty: &Type) -> String {
+    /// Convert a Briv Type to its VHDL type string, handling all type variants.
+    fn briv_type_to_vhdl(&self, ty: &Type) -> String {
         match ty {
             Type::Bool => "std_logic".to_string(),
             Type::UInt => "std_logic_vector(31 downto 0)".to_string(),
@@ -989,7 +989,7 @@ impl VhdlGenerator {
             Type::Char => "std_logic_vector(31 downto 0)".to_string(),
             Type::Custom(name) => format!("std_logic_vector(31 downto 0) -- custom {}", name),
             Type::Vector(inner, dims) => {
-                let inner_vhdl = self.brief_type_to_vhdl(inner);
+                let inner_vhdl = self.briv_type_to_vhdl(inner);
                 let mut result = inner_vhdl;
                 for d in dims.iter().rev() {
                     let size = match d {
@@ -1002,13 +1002,13 @@ impl VhdlGenerator {
             }
             Type::Tuple(types) => {
                 let fields: Vec<String> = types.iter().enumerate().map(|(i, t)| {
-                    format!("        field_{} : {}", i, self.brief_type_to_vhdl(t))
+                    format!("        field_{} : {}", i, self.briv_type_to_vhdl(t))
                 }).collect();
                 format!("record\n{}\n    end record", fields.join(";\n"))
             }
             Type::Union(types) => {
                 let max_width = types.iter().map(|t| self.get_type_width(t)).max().unwrap_or(32);
-                let field_types: Vec<String> = types.iter().map(|t| self.brief_type_to_vhdl(t)).collect();
+                let field_types: Vec<String> = types.iter().map(|t| self.briv_type_to_vhdl(t)).collect();
                 format!("record\n        tag : std_logic_vector(7 downto 0);\n        data : std_logic_vector({} downto 0);\n    end record", max_width - 1)
             }
             Type::Custom(n) if n == "Option" || n.starts_with("Option<") => {
@@ -1115,7 +1115,7 @@ impl VhdlGenerator {
         }
     }
 
-    /// Convert a Brief expression to a VHDL expression string.
+    /// Convert a Briv expression to a VHDL expression string.
     fn expr_to_string(&self, expr: &Expr) -> String {
         match expr {
             Expr::Bool(b) => if *b { "'1'" } else { "'0'" }.to_string(),

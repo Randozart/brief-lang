@@ -1,6 +1,6 @@
 // glue-macro.bv — Full GLUE bridge pattern
 // 2026-07-22: Demonstrates export defn, frgn, meld.
-// Three-language bridge: Brief exports, Rust/Python/Node imports
+// Three-language bridge: Briv exports, Rust/Python/Node imports
 
 // The type bridge: prove Int and Float are layout-compatible
 meld Int -> Float {

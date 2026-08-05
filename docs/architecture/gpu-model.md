@@ -1,4 +1,4 @@
-# Brief GPU Model — Borrowing, Not Barriers
+# Briv GPU Model — Borrowing, Not Barriers
 
 **Date:** 2026-07-15  
 **Status:** Foundational  
@@ -21,15 +21,15 @@ These barriers are:
 
 ---
 
-## How Brief Eliminates Barriers
+## How Briv Eliminates Barriers
 
-Brief's borrowing rules guarantee **data-race freedom by construction**. If a
+Briv's borrowing rules guarantee **data-race freedom by construction**. If a
 transaction writes to a variable, no other transaction can read or write it
 simultaneously. This is enforced at compile time, not at runtime.
 
 For GPU code, this means:
 
-```brief
+```briv
 // Each work-item has a unique idx, guaranteed by precondition
 // Each access is idx * stride — provably non-overlapping
 txn kernel [idx < N][idx >= N] {
@@ -54,7 +54,7 @@ Therefore no barrier is needed. The GPU backend simply:
 
 ## The Transaction-Work-Item Mapping
 
-| Brief construct | GPU meaning |
+| Briv construct | GPU meaning |
 |----------------|-------------|
 | `txn kernel [idx < N][done]` | Work-item with unique idx |
 | `[idx < N]` precondition | Work-item is active |
@@ -100,7 +100,7 @@ Only four `#` intrinsics are needed for GPU programming:
 | `GetLocalId#(dim)` | Local index within group | CUDA: `threadIdx` |
 
 No `Barrier#`. No `WorkgroupSize#`. No `WorkgroupId#`. All derived values
-are computed in Brief from the four primitives above.
+are computed in Briv from the four primitives above.
 
 ---
 
@@ -116,4 +116,4 @@ The SPIR-V backend (when implemented) has a trivial job:
 6. **Termination:** `OpReturn` on convergence
 
 No barrier analysis. No shared memory allocation. No synchronization pass.
-The borrowing rules have already done the hard work at the Brief level.
+The borrowing rules have already done the hard work at the Briv level.

@@ -1,4 +1,4 @@
-# Brief Language Gap Analysis: Spec vs Implementation
+# Briv Language Gap Analysis: Spec vs Implementation
 
 **Document Version:** 3.0  
 **Date:** 2026-04-08  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This document captures discrepancies between the Brief Language Specification and the actual compiler implementation, along with decisions on how to resolve each gap.
+This document captures discrepancies between the Briv Language Specification and the actual compiler implementation, along with decisions on how to resolve each gap.
 
 ---
 
@@ -43,7 +43,7 @@ This document captures discrepancies between the Brief Language Specification an
 - Lambda-style transactions must have provable postcondition
 
 **Lambda Defn Example:**
-```brief
+```briv
 // Full syntax
 defn double(n: Int) -> Int [true][result == n * 2] {
     term n * 2;
@@ -79,7 +79,7 @@ defn double(n: Int) -> Int [true][result == n * 2];
 **Decision:** SPEC should match implementation (inline `<tag>` syntax).
 
 **Correct Syntax:**
-```brief
+```briv
 rstruct Counter {
     count: Int;
     
@@ -132,7 +132,7 @@ transaction ::= ("async")? "txn" identifier "(" parameters? ")" contract "{" bod
 **Definition:** A `sig` is a **constrained view** of a defn that limits which output type path is valid. The compiler must PROVE the constrained path is reachable in all cases.
 
 **Syntax:**
-```brief
+```briv
 defn complex(x: Bool) -> Bool | Int | String {
     [x == true] term true;       // Path 1: Bool
     [x == false] term 42;        // Path 2: Int  
@@ -177,7 +177,7 @@ txn use_sig [true] {
 - `term x;` desugars to `&result = x; term;`
 
 **Syntax:**
-```brief
+```briv
 // Compiler sees "result == n * 2" → infers: let result: Int; at parent scope
 // Type inference: result == n * 2 implies result is Int
 
@@ -187,7 +187,7 @@ defn double(n: Int) -> Int [true][result == n * 2] {
 ```
 
 **Desugared Form:**
-```brief
+```briv
 let result: Int;  // Auto-created at parent scope (type inferred from postcondition)
 
 defn double(n: Int) -> Int [true][result == n * 2] {
@@ -201,7 +201,7 @@ defn double(n: Int) -> Int [true][result == n * 2] {
 - `result` = value after function completes (current value)
 
 **Example:**
-```brief
+```briv
 let result: Int = 5;  // Outer scope
 
 defn double(n: Int) -> Int [true][result == n * 2] {
@@ -395,7 +395,7 @@ true    false             # Literals
 
 ### Syntax
 
-```brief
+```briv
 // Single instance (default values)
 let counter = Counter {};
 

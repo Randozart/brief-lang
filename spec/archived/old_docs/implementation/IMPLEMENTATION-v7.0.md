@@ -1,4 +1,4 @@
-# Brief v7.0 Implementation Summary
+# Briv v7.0 Implementation Summary
 
 **Date:** 2026-04-07
 **Status:** Implementation Complete - Tests Passing
@@ -15,7 +15,7 @@
 | FFI error enforcement | typechecker.rs | 7.7 | ✅ Tested |
 | Dynamic FFI registry | ffi/registry.rs | 7 | ✅ Fixed |
 | Term functionCall verification | typechecker.rs | 5.3.2 | ✅ Tested |
-| R-Brief syntax fix | SPEC.md, refs | 9.2 | 📝 Docs only |
+| R-Briv syntax fix | SPEC.md, refs | 9.2 | 📝 Docs only |
 | Reactor throttling | SPEC.md | 8.4 | ✅ Tested |
 | Mutual exclusion fix | SPEC.md | 8.3 | ✅ Tested |
 | **Modular FFI Mapper System** | FFI/mapper | 7.x | 🔲 Not started |
@@ -120,7 +120,7 @@ All documentation updated to v7.0:
 
 # FFI Mapper System Implementation Plan
 
-**Part of:** Brief v7.0
+**Part of:** Briv v7.0
 **Status:** Planned
 **Priority:** High
 
@@ -128,21 +128,21 @@ All documentation updated to v7.0:
 
 ## Overview
 
-Brief's FFI system enables integration with any language via a modular mapper architecture. Mappers bridge Brief and foreign packages, handling type conversions and compilation.
+Briv's FFI system enables integration with any language via a modular mapper architecture. Mappers bridge Briv and foreign packages, handling type conversions and compilation.
 
 ### Core Principles
 
 | Principle | Description |
 |-----------|-------------|
-| **TOML is contract** | Defines what Brief expects; source of truth |
+| **TOML is contract** | Defines what Briv expects; source of truth |
 | **Runtime violations = errors** | Foreign code can break promises (404, unavailable resources) → Result types |
 | **Treat foreign code as unpredictable** | Cannot validate at compile time; always assume error margin |
-| **Errors must be handleable** | `frgn sig` requires Result type; Brief code must handle errors |
-| **Brief never breaks** | All errors are handled, not crashes |
+| **Errors must be handleable** | `frgn sig` requires Result type; Briv code must handle errors |
+| **Briv never breaks** | All errors are handled, not crashes |
 
 ### FFI Error Examples
 
-```brief
+```briv
 // Console unavailable
 frgn print(msg: String) -> Result<Void, IoError>;
 
@@ -161,7 +161,7 @@ frgn read_file(path: String) -> Result<String, IoError>;
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Brief Compiler                         │
+│                      Briv Compiler                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │
 │  │   Parser    │  │ TypeChecker │  │ FFI Resolver    │   │
 │  └─────────────┘  └─────────────┘  └─────────────────┘   │
@@ -185,7 +185,7 @@ frgn read_file(path: String) -> Result<String, IoError>;
 ### Mapper Invocation Flow
 
 ```
-brief run app.bv
+briv run app.bv
     │
     ├── Parse app.bv + frgn declarations
     │
@@ -210,10 +210,10 @@ brief run app.bv
 
 ### Mapper Protocol
 
-Each mapper is an executable (any language) invoked by Brief:
+Each mapper is an executable (any language) invoked by Briv:
 
 ```bash
-brief-mapper <lang> build <toml> <package> --output <bridge_path>
+briv-mapper <lang> build <toml> <package> --output <bridge_path>
 ```
 
 **Arguments:**
@@ -231,8 +231,8 @@ brief-mapper <lang> build <toml> <package> --output <bridge_path>
 |------|---------|
 | `0` | Success |
 | `1` | Error (compilation error) |
-| `2` | Missing dependency (Brief prompts user) |
-| `3` | Mapper not found (Brief tries next) |
+| `2` | Missing dependency (Briv prompts user) |
+| `3` | Mapper not found (Briv tries next) |
 
 ### Mapper Metadata (JSON)
 
@@ -244,7 +244,7 @@ Each mapper includes `mapper.json` for discovery:
   "version": "1.0.0",
   "language": "javascript",
   "runtime": "node",
-  "description": "Maps JavaScript/TypeScript packages to Brief FFI",
+  "description": "Maps JavaScript/TypeScript packages to Briv FFI",
   "targets": ["wasm", "native"],
   "requires": ["node", "wasm-pack"],
   "files": {
@@ -262,7 +262,7 @@ Each mapper includes `mapper.json` for discovery:
 
 Search order (first found wins):
 1. `./mappers/<lang>/` (project-local)
-2. `~/.brief/mappers/<lang>/` (user-wide)
+2. `~/.briv/mappers/<lang>/` (user-wide)
 3. `$BRIEF_MAPPERS_PATH/` (custom directory)
 4. `$BRIEF_REGISTRY/<lang>/` (registry URL)
 5. Built-in (bundled with compiler)
@@ -270,9 +270,9 @@ Search order (first found wins):
 ### Mapper Installation
 
 ```bash
-brief install js-mapper           # From registry
-brief install js-mapper --from ./my_mapper.js  # Local path
-brief install js-mapper --from github:user/js-mapper  # GitHub
+briv install js-mapper           # From registry
+briv install js-mapper --from ./my_mapper.js  # Local path
+briv install js-mapper --from github:user/js-mapper  # GitHub
 ```
 
 ---
@@ -331,8 +331,8 @@ message = "String"
 TOML defines type conversions:
 
 ```toml
-# Brief type → Target type
-# Target type → Brief type (return)
+# Briv type → Target type
+# Target type → Briv type (return)
 
 [functions.types]
 # Input mapping
@@ -350,7 +350,7 @@ String = { js = "string", rust = "String" }
 ### Cache Location
 
 ```
-~/.brief/cache/
+~/.briv/cache/
 └── bridges/
     └── <hash_of_toml>/
         ├── bridge.wasm (or .so, .a, etc.)
@@ -487,9 +487,9 @@ main().catch(err => {
 **Files:** `src/cli/install.rs`
 
 ```bash
-brief install js-mapper
-brief install rust-mapper
-brief install python-mapper
+briv install js-mapper
+briv install rust-mapper
+briv install python-mapper
 ```
 
 **Registry format (JSON):**
@@ -500,7 +500,7 @@ brief install python-mapper
       "name": "js-mapper",
       "version": "1.0.0",
       "description": "JavaScript/TypeScript package bridge",
-      "url": "https://github.com/brief-lang/mapper-js/releases/v1.0.0.zip",
+      "url": "https://github.com/briv-lang/mapper-js/releases/v1.0.0.zip",
       "sha256": "abc123..."
     }
   ]
@@ -522,16 +522,16 @@ brief install python-mapper
 
 ### Runtime Errors
 
-| Error | Source | Brief Handling |
+| Error | Source | Briv Handling |
 |-------|--------|----------------|
 | NetworkError | HTTP requests | Result types |
 | IoError | File system | Result types |
 | TypeError | Bridge mismatch | Panic + diagnostic |
 | Timeout | Long operations | Result types |
 
-### Brief Never Breaks
+### Briv Never Breaks
 
-```brief
+```briv
 // All FFI errors are handleable
 txn safe_read [true][true] {
     let result = read_file("config.json");
@@ -549,7 +549,7 @@ txn safe_read [true][true] {
 ## File Structure
 
 ```
-brief-lang/
+briv-lang/
 ├── src/
 │   ├── ffi/
 │   │   ├── mod.rs
@@ -602,13 +602,13 @@ brief-lang/
 ### E2E Tests
 ```bash
 # Test JS package bridge
-brief run tests/fetch_time.bv
+briv run tests/fetch_time.bv
 
 # Test native Rust crate bridge
-brief run tests/crypto_hash.bv
+briv run tests/crypto_hash.bv
 
 # Test C library bridge
-brief run tests/zlib_compress.bv
+briv run tests/zlib_compress.bv
 ```
 
 ---
@@ -627,9 +627,9 @@ brief run tests/zlib_compress.bv
    - Add examples for each language
 
 3. **Tutorial** (update)
-   - "Using NPM packages in Brief"
-   - "Using Rust crates in Brief"
-   - "Using Python libraries in Brief"
+   - "Using NPM packages in Briv"
+   - "Using Rust crates in Briv"
+   - "Using Python libraries in Briv"
 
 ---
 

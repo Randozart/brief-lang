@@ -1,4 +1,4 @@
-# Brief FFI & Export — A Practical Guide
+# Briv FFI & Export — A Practical Guide
 
 **Date:** 2026-08-04
 **Applies to:** the current `glue-host-callable` work (per-language glue
@@ -6,12 +6,12 @@ folders, native extensions, the zero-friction gate).
 **Architecture reference:** `docs/architecture/glue-ffi.md` — this guide is the
 hands-on how-to; the arch doc is the complete method.
 
-Brief compiles to a native library that any language can call at **native
+Briv compiles to a native library that any language can call at **native
 speed** — C, C++, Rust, Python, Node, Go, Java, Lua, C# are prepackaged
-(§14). The FFI is **protocol-driven**: Brief has no type layouts, only
+(§14). The FFI is **protocol-driven**: Briv has no type layouts, only
 adaptive protocols. A boundary representation is a sub-protocol
 (`#String<C_String>`), a `proto` declaration supplies the transforms, and the
-casting graph finds the minimal path between a Brief type and its boundary
+casting graph finds the minimal path between a Briv type and its boundary
 representation — emitting the **delta**, not a chain. The composite String
 crosses as a pointer into a state-owned NUL-invariant region — zero-copy from
 every host.
@@ -23,22 +23,22 @@ every host.
 - **The export signature IS the boundary contract.** Declare a function with
   `export defn` and boundary types, and the generated ABI (widths, pointers)
   derives from the protocol graph — no per-language conversion tables.
-- **Boundary types are declared in Brief** (`lib/glue/c.bv`): `CStr`,
+- **Boundary types are declared in Briv** (`lib/glue/c.bv`): `CStr`,
   `CFloat`, `CDouble`, `CI64`, `CI32`, `CBool`, `CChar`, `CPtr`.
-- **Marshalling is ordinary Brief casting.** `name as String` on a `CStr`
-  emits the graph's binding call (`cstr_to_brief`); `s as CStr` emits
+- **Marshalling is ordinary Briv casting.** `name as String` on a `CStr`
+  emits the graph's binding call (`cstr_to_briv`); `s as CStr` emits
   `str_to_c`. `+` concatenates strings; `CStr + CStr` uses the variant's own
   `cstring_concat`. The `meld CStr -> String` declaration makes the pair
   interchangeable with no `as` at all.
 - **The compiler knows no type names and no language.** Only protocol
   categories and metadata are hardcoded; every language's vocabulary lives in
-  per-language Data Brief config (`lib/glue/<lang>/glue.dbvl`).
+  per-language Data Briv config (`lib/glue/<lang>/glue.dbvl`).
 
 ## 2. Quick start
 
 `examples/glue-host/boundary.bv` is the running example:
 
-```brief
+```briv
 import "glue/c.bv";
 
 export defn echo(name: CStr) -> CStr {
@@ -46,7 +46,7 @@ export defn echo(name: CStr) -> CStr {
 };
 
 export defn greet(name: CStr) -> CStr {
-    let s: String = name as String;   // CStr → String via cstr_to_brief
+    let s: String = name as String;   // CStr → String via cstr_to_briv
     term s as CStr;                    // String → CStr via str_to_c
 };
 
@@ -62,28 +62,28 @@ export defn identity(x: CDouble) -> CDouble {
 Build a C-callable static library **and** a PIC shared library:
 
 ```bash
-briefc build examples/glue-host/boundary.bv --library --out build/
+brivc build examples/glue-host/boundary.bv --library --out build/
 #   → libboundary.a  (gcc/rustc-linkable, real ELF, -O3)
 #   → boundary.so    (clang -O3 -flto, for ctypes/ffi-napi)
 ```
 
-Generate C bindings (a header that declares the exports + the `BriefState`
+Generate C bindings (a header that declares the exports + the `BrivState`
 lifecycle):
 
 ```bash
-briefc bindings examples/glue-host/boundary.bv c --out build/
-#   → build/boundary-bindings/brief_types.h
+brivc bindings examples/glue-host/boundary.bv c --out build/
+#   → build/boundary-bindings/briv_types.h
 ```
 
 The header resolves the boundary types to C ABI names (`CStr → int64_t`,
 `CDouble → double`) and declares:
 
 ```c
-typedef struct BriefState BriefState;
-extern BriefState* __brief_init_state(void);
-extern void __glue_release(BriefState* state);
-extern void __brief_set_cancel(BriefState* state, int32_t flag);
-extern void __brief_clear_cancel(BriefState* state);
+typedef struct BrivState BrivState;
+extern BrivState* __briv_init_state(void);
+extern void __glue_release(BrivState* state);
+extern void __briv_set_cancel(BrivState* state, int32_t flag);
+extern void __briv_clear_cancel(BrivState* state);
 
 int64_t echo(int64_t name);
 int64_t greet(int64_t name);
@@ -94,11 +94,11 @@ double identity(double x);
 ## 3. Calling from C
 
 ```c
-#include "boundary-bindings/brief_types.h"
+#include "boundary-bindings/briv_types.h"
 #include <stdio.h>
 
 int main(void) {
-    BriefState* st = __brief_init_state();
+    BrivState* st = __briv_init_state();
     printf("%s\n", (char*)(uintptr_t)echo((int64_t)"hello"));   // hello
     printf("%s\n", (char*)(uintptr_t)greet((int64_t)"hello"));  // hello
     printf("%s\n", (char*)(uintptr_t)join((int64_t)"foo", (int64_t)"bar")); // foobar
@@ -115,41 +115,41 @@ cc -o driver driver.c -I build/boundary-bindings -L build/ -lboundary
 ## 4. Calling from Rust
 
 `examples/glue-host/rust-host/` is a self-contained crate whose `build.rs`
-compiles the Brief library with `briefc` and links it:
+compiles the Briv library with `brivc` and links it:
 
 ```bash
 cd examples/glue-host/rust-host
-BRIEFC=$PWD/../../../target/release/briefc cargo run --release
+BRIEFC=$PWD/../../../target/release/brivc cargo run --release
 ```
 
-The generated `brief_bindings.rs` exposes plain `extern "C"` functions. The
+The generated `briv_bindings.rs` exposes plain `extern "C"` functions. The
 boundary is a single C-ABI call; measured `feature_hash` runs **within 2.4% of
 native Rust** — this is the path for writing compiler-internal components in
-Brief without loss of efficiency.
+Briv without loss of efficiency.
 
 ## 5. Calling from Python (ctypes)
 
 ```python
 import ctypes
 lib = ctypes.CDLL("build/boundary.so")
-lib.__brief_init_state.restype = ctypes.c_void_p
-state = lib.__brief_init_state()
+lib.__briv_init_state.restype = ctypes.c_void_p
+state = lib.__briv_init_state()
 lib.greet.argtypes = [ctypes.c_void_p, ctypes.c_int64]
 lib.greet.restype = ctypes.c_int64
 print(ctypes.cast(lib.greet(state, ctypes.c_void_p(b"hello").value), ctypes.c_char_p).value.decode())
 ```
 
 The ~2µs/call is ctypes marshalling (identical for C through ctypes). The
-shipped **native Python C-extension** target (§10, `brief extension python`)
-removes it entirely — a Python→Brief call is now **faster than Python calling
+shipped **native Python C-extension** target (§10, `briv extension python`)
+removes it entirely — a Python→Briv call is now **faster than Python calling
 Python** (§15, Gate B).
 
-## 6. Callbacks (host → Brief → host)
+## 6. Callbacks (host → Briv → host)
 
-A host can pass a function pointer into Brief; Brief calls it back for
+A host can pass a function pointer into Briv; Briv calls it back for
 first-level-primitive updates (progress bars, per-item status):
 
-```brief
+```briv
 export defn apply(cb: fn(Int) -> Int, x: Int) -> Int {
     term CallPtr#(cb, x);        // call through the pointer
 };
@@ -166,9 +166,9 @@ for callbacks.
 
 ## 7. Cancellation
 
-A host thread can cancel a long-running Brief call:
+A host thread can cancel a long-running Briv call:
 
-```brief
+```briv
 txn sum_loop(acc: Int, i: Int, count: Int)
     [i < count && !CancelRequested#()][i == count] -> Int
 {
@@ -185,7 +185,7 @@ export defn cancellable_sum(count: Int) -> Int {
 
 ```c
 pthread_t t;
-pthread_create(&t, NULL, canceller, NULL);   // canceller calls __brief_set_cancel(st, 1)
+pthread_create(&t, NULL, canceller, NULL);   // canceller calls __briv_set_cancel(st, 1)
 int64_t partial = cancellable_sum(st, 2000000000);   // stops early
 ```
 
@@ -194,14 +194,14 @@ compiler never injects checks.
 
 ## 8. Extending: adding a language
 
-> **New to Brief? Read `docs/guides/add-an-ffi-target.md`** — the beginner
+> **New to Briv? Read `docs/guides/add-an-ffi-target.md`** — the beginner
 > walkthrough. It explains the three target shapes (`bindings` / `export` /
 > `extension`), every field of `glue.dbvl`, the template system with real Lua
 > content, the renderer variables, and ends with a checklist and a
 > copy-the-right-folder table.
 
 The FFI is infinitely extensible through per-language glue folders
-(`lib/glue/<lang>/`), each a Data Brief config + templates. Zero compiler
+(`lib/glue/<lang>/`), each a Data Briv config + templates. Zero compiler
 changes. The steps:
 
 1. `mkdir lib/glue/<lang>/` with `types.bv` (boundary declarations — usually
@@ -211,9 +211,9 @@ changes. The steps:
    `param_decl`, and the **toolchain recipe** (`native_include_cmd`,
    `native_suffix`/`native_suffix_cmd`, `native_link_cmd`, `native_cc`,
    `native_prefix`).
-3. Templates — `bindings.*` (declarative, via `brief bindings`), `templates.*`
-   (packages, via `brief export`, with `{{exports}}`), and/or `native.*` (the
-   extension shim, via `brief extension`: module, method, per-category
+3. Templates — `bindings.*` (declarative, via `briv bindings`), `templates.*`
+   (packages, via `briv export`, with `{{exports}}`), and/or `native.*` (the
+   extension shim, via `briv extension`: module, method, per-category
    `parse`/`build`/`c_type`/`ret` snippets; JNI-style shims add
    `native.sig.<cat>` + `native.ret_jni.<cat>`).
 4. `tests/c_driver_<lang>.rs` — a render assertion (runs everywhere) + a
@@ -224,11 +224,11 @@ The complete anatomy is in `docs/architecture/glue-ffi.md` §5.
 
 ## 9. Performance notes
 
-The authoritative numbers are the **zero-friction gate** (§15) — Brief vs each
+The authoritative numbers are the **zero-friction gate** (§15) — Briv vs each
 host writing the same function natively. Quick reference (feature_hash
 count=1000, ns/call):
 
-| host | Brief | native | ratio |
+| host | Briv | native | ratio |
 |------|-------|--------|-------|
 | C | 1098 | 1100 | 1.00 |
 | C++ | 1107 | 1094 | 1.01 |
@@ -242,15 +242,15 @@ count=1000, ns/call):
   is fully SSA (a plain `llc -O3` in LLVM 18.1.3 did not SROA the transaction
   loop's allocas).
 - The boundary is a single C-ABI call; the compute dominates. Interpreted hosts
-  get Brief's native-machine-code compute and win by 1–2 orders of magnitude.
+  get Briv's native-machine-code compute and win by 1–2 orders of magnitude.
 
 ## 10. Native Python extension (no ctypes)
 
-`brief extension <bridge.bv> python` generates a CPython C-extension module
-that calls the Brief exports directly — no ctypes marshalling layer:
+`briv extension <bridge.bv> python` generates a CPython C-extension module
+that calls the Briv exports directly — no ctypes marshalling layer:
 
 ```
-$ brief extension rank.bv python --out build/
+$ briv extension rank.bv python --out build/
   Extension: build/rank.cpython-312-x86_64-linux-gnu.so
 $ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
 ```
@@ -260,11 +260,11 @@ $ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
   parse/build snippets (in `lib/glue/python/glue.dbvl`, the python target's
   `native.*` templates) marshal natively — Python `int`/`float`/`str` in,
   native Python values out. String params use `PyUnicode_AsUTF8AndSize`
-  (limited API ≥ 3.10); `#String` handles are the CStr/Brief pointer.
+  (limited API ≥ 3.10); `#String` handles are the CStr/Briv pointer.
 - The `CStr <-> String` meld (`lib/glue/c.bv`) makes boundary functions
   cast-free: `let s: String = name;` needs no `as`, and the marshalling inserts
-  `cstr_to_brief`/`str_to_c` (zero-copy in the String → CStr direction — a
-  Brief String's data region IS a nul-terminated C string).
+  `cstr_to_briv`/`str_to_c` (zero-copy in the String → CStr direction — a
+  Briv String's data region IS a nul-terminated C string).
 - Adding another language is a config section (templates + protocol mappings)
   — the compiler renders, it never hardcodes a language.
 - The composite ABI contract: a String/Data composite crosses as an i64 handle;
@@ -279,7 +279,7 @@ $ python3 -c "import rank; print(rank.feature_hash(1000, 42))"
 Each language's entire interop definition lives in `lib/glue/<lang>/` — a
 `glue.dbvl` config file (protocols, ABI, templates, **toolchain recipe**),
 `types.bv` (boundary declarations), and an optional `gen.bv` compile-time
-plugin escape hatch. `brief export|bindings|extension <bridge.bv> <lang>`
+plugin escape hatch. `briv export|bindings|extension <bridge.bv> <lang>`
 resolves `lib/glue/<lang>/` BY NAME and loads its config; `load_glue_config`
 scans the folders for extension routing. The compiler carries zero language
 knowledge — the glue folder is data.
@@ -291,29 +291,29 @@ compiler only does "compile C, link a shared library"; python's
 
 ## 12. Native Node addon + the Python ↔ Node bridge
 
-`brief extension <bridge.bv> node` generates a NAPI `.node` addon (no npm) —
+`briv extension <bridge.bv> node` generates a NAPI `.node` addon (no npm) —
 same generic renderer as the Python shim, node's `native.*` templates in
 `lib/glue/node/glue.dbvl`:
 
 ```
-$ brief extension node_bridge.bv node --out build/
+$ briv extension node_bridge.bv node --out build/
   Extension: build/node_bridge.node
 $ node -e "const b = require('./node_bridge.node'); console.log(b.save('hi'))"
 ```
 
-Python and Node have no native binding between them; Brief's composite is their
+Python and Node have no native binding between them; Briv's composite is their
 only common interface. The cross-language test (`tests/c_driver_node.rs`)
 proves both directions: Node persists `"hello from node"` via the bridge's
 `persist` (runtime file I/O), Python loads it with `load`; then Python
 persists `"hello from python"` and Node loads it. Stateful exports (a String
 state field read/written across calls) work — several latent backend bugs were
-fixed along the way (see `BUGS.md`): the library `__brief_init_state` now
+fixed along the way (see `BUGS.md`): the library `__briv_init_state` now
 returns a module-global state instead of a dangling stack pointer, state-field
 references from exports are no longer eliminated as dead, and stateful exports
 keep their `%state` param.
 
 Two shim-level correctness notes: every export is declared in the shim as
-`__brief_export_<name>` with an `asm("<name>")` label (a bridge export named
+`__briv_export_<name>` with an `asm("<name>")` label (a bridge export named
 like a libc function — `read`, `open` — would otherwise collide with the host's
 prototype at compile time and be PLT-interposed at runtime); and the link adds
 `-Wl,-Bsymbolic-functions` so the addon binds its own symbols.
@@ -329,20 +329,20 @@ the templates can't express. Staged after the config-driven path is proven.
 ## 14. Shipped language roster (2026-08-04)
 
 Each language is a `lib/glue/<lang>/` folder — config, templates, toolchain
-recipe. Zero compiler knowledge; `brief bindings` / `brief export` /
-`brief extension` render through the generic pipeline.
+recipe. Zero compiler knowledge; `briv bindings` / `briv export` /
+`briv extension` render through the generic pipeline.
 
 | Language | Flavor | Command | Notes |
 |----------|--------|---------|-------|
-| C | bindings | `brief bindings <b> c` | header, C/C++-compatible (`extern "C"`) |
+| C | bindings | `briv bindings <b> c` | header, C/C++-compatible (`extern "C"`) |
 | C++ | bindings | same C header | g++ round-trip test |
-| Rust | bindings | `brief export <b> rust` | cgo-free crate |
-| Python | native ext | `brief extension <b> python` | CPython C-extension (no ctypes) |
-| Node | native ext | `brief extension <b> node` | NAPI `.node` addon (no npm) |
-| Go | cgo package | `brief export <b> go` | `import "C"` + wrappers; String → `C.GoString` |
-| Java | native ext | `brief extension <b> java` + `brief export <b> java` | JNI shim (`lib<b>.so`) + class with `native` methods |
-| Lua | native ext | `brief extension <b> lua` | C module `luaopen_<b>`; `lua_pushstring` |
-| C# | bindings | `brief bindings <b> csharp` | P/Invoke DllImport class |
+| Rust | bindings | `briv export <b> rust` | cgo-free crate |
+| Python | native ext | `briv extension <b> python` | CPython C-extension (no ctypes) |
+| Node | native ext | `briv extension <b> node` | NAPI `.node` addon (no npm) |
+| Go | cgo package | `briv export <b> go` | `import "C"` + wrappers; String → `C.GoString` |
+| Java | native ext | `briv extension <b> java` + `briv export <b> java` | JNI shim (`lib<b>.so`) + class with `native` methods |
+| Lua | native ext | `briv extension <b> lua` | C module `luaopen_<b>`; `lua_pushstring` |
+| C# | bindings | `briv bindings <b> csharp` | P/Invoke DllImport class |
 
 The composite String crosses every boundary as a pointer into the
 NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
@@ -351,31 +351,31 @@ NUL-invariant `[len][bytes][\0]` region — zero-copy read from every host
 
 **The speed table** (feature_hash count=1000, median ns/call — see §9 and
 `docs/architecture/glue-ffi.md` §6): compiled hosts at parity (C 1.00, C++ 1.01,
-Java 1.00, Go 1.07), interpreted hosts won by Brief 1–2 orders of magnitude
+Java 1.00, Go 1.07), interpreted hosts won by Briv 1–2 orders of magnitude
 (Lua 0.09, Python 0.01, Node 0.01).
 
 ## 15. The zero-friction FFI gate
 
-`benchmarks/bridge/gate/run_gate.sh` is the committed regression gate: Brief's
+`benchmarks/bridge/gate/run_gate.sh` is the committed regression gate: Briv's
 `feature_hash` vs each host's *own* native `feature_hash` (Gate A — real work)
-and Brief's `add` vs the host's pure-internal `add` (Gate B — dispatch). Run it
+and Briv's `add` vs the host's pure-internal `add` (Gate B — dispatch). Run it
 with `BRIEF_RUN_GATE=1 cargo test --test gate`.
 
-**Gate A — Brief vs native feature_hash (median):**
+**Gate A — Briv vs native feature_hash (median):**
 | host | ratio | |
 |------|-------|---|
 | C | 1.00 | parity |
 | C++ | 1.01 | parity |
 | Java | 1.00 | parity (JIT) |
 | Go | 1.07 | parity (cgo) |
-| Lua | 0.09 | Brief 11× |
-| Python | 0.01 | Brief 195× |
-| Node | 0.01 | Brief 149× |
+| Lua | 0.09 | Briv 11× |
+| Python | 0.01 | Briv 195× |
+| Node | 0.01 | Briv 149× |
 
-Compiled hosts are at parity; interpreted hosts get Brief's native-machine-code
+Compiled hosts are at parity; interpreted hosts get Briv's native-machine-code
 compute and win by 1–2 orders of magnitude.
 
-**Gate B — dispatch (Brief add vs native internal add):** Python 0.77 (the
+**Gate B — dispatch (Briv add vs native internal add):** Python 0.77 (the
 `METH_FASTCALL` shim dispatches *faster* than Python's own function call),
 C 1.07, C++ 1.09, Lua 1.10, Node 2.17, Java ~6×, Go ~70×. Node/Java/Go sit at
 their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).

@@ -40,7 +40,7 @@ The print buffer is ONLY emitted when the kernel body uses print intrinsics
 
 ### 3. Host runtime drain
 
-In `brief_gpu_launch`, after kernel dispatch + buffer readback:
+In `briv_gpu_launch`, after kernel dispatch + buffer readback:
 
 ```c
 // Drain print buffer
@@ -58,7 +58,7 @@ intrinsics are detected.
 
 ### 4. `.abv` test file
 
-```brief
+```briv
 // Pure GPU kernel — zero frgn
 node increment
     [i < N]
@@ -80,7 +80,7 @@ term! -> print_int#(i);    // intrinsic, NOT frgn
 | File | Change |
 |------|--------|
 | `src/backend/llvm/gpu.rs` | Add PrintInt/PutChar/PrintFloat to allowlist + `emit_spirv_intrinsic` + print buffer generation |
-| `lib/runtime/brief_gpu_rt.c` | Allocate + drain print buffer in `brief_gpu_launch` |
+| `lib/runtime/briv_gpu_rt.c` | Allocate + drain print buffer in `briv_gpu_launch` |
 | `AGENTS.md` | Add "before frgn, check intrinsics" directive |
 | `test_abv.abv` | Clean test with print_int# intrinsic |
 

@@ -8,10 +8,10 @@
 The baseline is a persistent git worktree at the Phase 3 anchor commit:
 
 ```bash
-git worktree add ../brief-compiler-baseline e88fd55
+git worktree add ../briv-compiler-baseline e88fd55
 ```
 
-This creates a checkout at `../brief-compiler-baseline` that:
+This creates a checkout at `../briv-compiler-baseline` that:
 - Shares git history/objects with the main worktree (no duplication)
 - Is writable — can build the compiler there
 - Persists until replaced (never deleted unless benchmarks are equal or better)
@@ -22,9 +22,9 @@ This creates a checkout at `../brief-compiler-baseline` that:
 To compare a benchmark against baseline:
 
 ```bash
-cd ../brief-compiler-baseline
+cd ../briv-compiler-baseline
 cargo build --release
-BOUND=50000000 ./target/release/brief-compiler build benchmarks/nbody_newton.bv --out benchmarks
+BOUND=50000000 ./target/release/briv-compiler build benchmarks/nbody_newton.bv --out benchmarks
 BOUND=50000000 bash -c "TIMEFORMAT='%3R'; time ./benchmarks/nbody_newton" 2>&1
 
 # Same steps in main worktree, compare times
@@ -35,9 +35,9 @@ BOUND=50000000 bash -c "TIMEFORMAT='%3R'; time ./benchmarks/nbody_newton" 2>&1
 When ALL benchmarks at the main worktree equal or exceed the baseline, update:
 
 ```bash
-rm -rf ../brief-compiler-baseline
+rm -rf ../briv-compiler-baseline
 git worktree prune
-git worktree add ../brief-compiler-baseline <current-tip-commit>
+git worktree add ../briv-compiler-baseline <current-tip-commit>
 ```
 
 The old baseline is discarded. The new baseline is the current tip.

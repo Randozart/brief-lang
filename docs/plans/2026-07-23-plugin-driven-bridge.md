@@ -1,4 +1,4 @@
-# Plugin-Driven Bridge: Python C Extension via Brief
+# Plugin-Driven Bridge: Python C Extension via Briv
 
 **Date:** 2026-07-23
 **Status:** Plan → Implementation

@@ -1,4 +1,4 @@
-# Phase 7 Brief: Self-Hosted LLVM Backend Parity
+# Phase 7 Briv: Self-Hosted LLVM Backend Parity
 
 **Date:** 2026-05-29  
 **Spec Reference:** `11-SELF-HOSTED.md`  
@@ -21,9 +21,9 @@ lib/compiler/main.bv            — Add llvm dispatch arm
 
 ## Functions to Implement in `llvm.bv`
 
-Each Rust backend method becomes a Brief `defn`:
+Each Rust backend method becomes a Briv `defn`:
 
-| Rust Method | Brief defn | Phase Ported |
+| Rust Method | Briv defn | Phase Ported |
 |-------------|-----------|--------------|
 | `generate()` | `generate_llvm(program, cg) -> String` | Entry |
 | `declare_state_type()` | Inline in entry | P0 |
@@ -45,7 +45,7 @@ Each Rust backend method becomes a Brief `defn`:
 
 Every function returns a `String` built via `new_builder()` + `append_str()`:
 
-```brief
+```briv
 defn emit_txn(txn: Transaction) -> String {
     let sb = new_builder();
     sb = sb.append_str("define void @");
@@ -71,12 +71,12 @@ defn emit_txn(txn: Transaction) -> String {
 ## Litmus Test
 
 ```bash
-# Step 1: Rust backend compiles Brief-in-Brief to native binary
-brief-compiler llvm lib/compiler/main.bv --out /tmp/stage1/
+# Step 1: Rust backend compiles Briv-in-Briv to native binary
+briv-compiler llvm lib/compiler/main.bv --out /tmp/stage1/
 llc /tmp/stage1/main.ll -o /tmp/stage1/main
 
 # Step 2: Self-hosted compiler uses llvm.bv backend
-# This step requires the Brief source bugs in lib/compiler/ to be fixed first
+# This step requires the Briv source bugs in lib/compiler/ to be fixed first
 # ./tmp/stage1/main selfhost lib/compiler/main.bv --target llvm --out /tmp/stage2/
 # llc /tmp/stage2/main.ll -o /tmp/stage2/main
 
@@ -89,20 +89,20 @@ llc /tmp/stage1/main.ll -o /tmp/stage1/main
 
 ```bash
 # All 17 existing fixtures still pass via Rust backend
-brief-compiler llvm tests/fixtures/counter.bv | llc -o /dev/null
-brief-compiler llvm tests/fixtures/phase1/guarded.bv | llc -o /dev/null
+briv-compiler llvm tests/fixtures/counter.bv | llc -o /dev/null
+briv-compiler llvm tests/fixtures/phase1/guarded.bv | llc -o /dev/null
 # ... all 17 ...
 
 # llvm.bv emits valid LLVM IR for its own test fixture
-brief-compiler selfhost tests/fixtures/llvm_selfhost_test.bv --target llvm --out /tmp/llvm_bv_test/
+briv-compiler selfhost tests/fixtures/llvm_selfhost_test.bv --target llvm --out /tmp/llvm_bv_test/
 llc /tmp/llvm_bv_test/*.ll -o /dev/null
 
 # lib/compiler/backends/mod.bv supports "llvm" hashtags
-brief-compiler llvm tests/fixtures/hashtag_llvm.bv | llc -o /dev/null
+briv-compiler llvm tests/fixtures/hashtag_llvm.bv | llc -o /dev/null
 ```
 
 ## Risks
 
-- **Brief source bugs in lib/compiler/** — the typechecker rejects 7/10 modules with contract errors. These are not backend bugs but block the full self-hosting litmus test.
+- **Briv source bugs in lib/compiler/** — the typechecker rejects 7/10 modules with contract errors. These are not backend bugs but block the full self-hosting litmus test.
 - **StringBuilder capacity** — LLVM IR files can be large. The self-hosted StringBuilder must handle multi-megabyte strings.
 - **The `c.bv` backend is the template.** Every pattern used there (item iteration, `uni` pattern matching, `append_str`) works identically in `llvm.bv`.

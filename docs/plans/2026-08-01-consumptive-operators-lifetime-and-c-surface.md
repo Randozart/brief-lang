@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 **Status:** Planned → executing
-**Worktree:** `brief-compiler-cwm` (`feat/collections-watchdogs-memory`)
+**Worktree:** `briv-compiler-cwm` (`feat/collections-watchdogs-memory`)
 
 **This is the AUTHORITATIVE plan.** It supersedes/consolidates the original
 Phases 1–4 and records the design research (C independence, the intrinsic
@@ -15,7 +15,7 @@ removal) so the token/arrow shuffling is unambiguous.
 |---|---|---|
 | **[This plan](2026-08-01-consumptive-operators-lifetime-and-c-surface.md)** | The authoritative record — the consumptive `~op` operators, the arrow rewrite, the `!/` contract sugar, the intrinsic audit, the stream symbols, the free-check, and the `.bv`/`.ebv` C-surface reduction. All design research lives here. | Active |
 | [2026-08-01-lifetime-hints-and-intrinsic-audit.md](2026-08-01-lifetime-hints-and-intrinsic-audit.md) | The original Phases 1–4 (docs/highlighter, intrinsic audit, free-check, C-surface). Phase 1 is done; the rest is folded into this master plan's Phases 2–6. | Superseded by this plan |
-| [2026-08-01-global-lifetime-design.md](2026-08-01-global-lifetime-design.md) | The garbage-scheduler design (the compile-time proof of each field's last consumer + the `__brief_free` calibration). The free-check (Phase 5) extends it with the runtime refcount + `free`/`keep` + `memcheck`. | Design → extended |
+| [2026-08-01-global-lifetime-design.md](2026-08-01-global-lifetime-design.md) | The garbage-scheduler design (the compile-time proof of each field's last consumer + the `__briv_free` calibration). The free-check (Phase 5) extends it with the runtime refcount + `free`/`keep` + `memcheck`. | Design → extended |
 | [2026-07-31-collections-watchdogs-memory.md](2026-07-31-collections-watchdogs-memory.md) | The collections/watchdogs/memory phase — the obj model, the `<-` ops, the watchdogs (incl. `within`), and the memory-by-proof stress family. The `~<-` arrow rewrite (Phase 3) changes the `<-`-op syntax this plan uses. | Complete → superseded syntax |
 | [2026-08-01-plugin-macro-rework.md](2026-08-01-plugin-macro-rework.md) | The merged plugin/macro rework + the String bits model (B0–B3). Fully merged. The `~op`/arrow work is orthogonal but builds on the merged base. | Merged |
 
@@ -25,13 +25,13 @@ removal) so the token/arrow shuffling is unambiguous.
 
 ### 1. C independence — how far, and why
 
-Brief compiles to LLVM IR; the compiler itself is Rust. The C dependency is the
-**runtime** (`lib/runtime/brief_rt.c`), which splits into two layers:
+Briv compiles to LLVM IR; the compiler itself is Rust. The C dependency is the
+**runtime** (`lib/runtime/briv_rt.c`), which splits into two layers:
 
 | Layer | What it is | Verdict |
 |---|---|---|
 | **OS syscall shim** | `write`, `exit`, `mmap`, `clock_gettime`, `getenv`, `sysconf` | Must stay C (or become raw syscalls) — the OS is C's home. The pragmatic floor. |
-| **Logic that happens to be in C** | digit→string printing, float formatting, string EQ/band/bor (byte loops), the allocator | Expressible in Brief stdlib with today's syntax. The stand-on-its-own win. |
+| **Logic that happens to be in C** | digit→string printing, float formatting, string EQ/band/bor (byte loops), the allocator | Expressible in Briv stdlib with today's syntax. The stand-on-its-own win. |
 
 **Rust's answer (the model):** a three-layer runtime split.
 - **`core`** (`#![no_std]`, no libc): arithmetic, control, and `core::fmt`
@@ -45,10 +45,10 @@ The key insight: **formatting is separable from writing, and the heap is
 pluggable.** Rust's `println!` formatting is pure Rust; only `write(1, …)` is the
 user's.
 
-**Brief's version — the `.bv`/`.ebv` split.** The same stdlib API has two target
-variants, in Brief's own file-extension terms:
+**Briv's version — the `.bv`/`.ebv` split.** The same stdlib API has two target
+variants, in Briv's own file-extension terms:
 - **`.bv`** — the OS/libc-backed stdlib (maps to OS functions).
-- **`.ebv`** — the embedded/no-OS stdlib (pure Brief logic: digit conversion,
+- **`.ebv`** — the embedded/no-OS stdlib (pure Briv logic: digit conversion,
   byte loops, an allocator on a buffer).
 
 The import resolver already tries `.bv` first (and treats `.ebv` as an
@@ -95,7 +95,7 @@ falls back to "lives for the program". The **free-check** reclaims that tail:
 
 - **Refcount at the edge-of-use checkpoint** (the last possible consumer
   boundary, not an arbitrary point): the compiler emits inc/dec on address
-  copies (reusing provenance); a zero count at the checkpoint → `__brief_free`.
+  copies (reusing provenance); a zero count at the checkpoint → `__briv_free`.
   Sound (no premature free).
 - **`free` / `keep` body annotations** let the programmer fill proof gaps with
   verified contracts:
@@ -104,7 +104,7 @@ falls back to "lives for the program". The **free-check** reclaims that tail:
     hint)**. Verified → free emitted at that point.
   - `keep x;` — "beyond here x must stay alive". Suppresses a scheduled free; a
     provably-dead-after `keep` is a **warning (redundant keep)**, not an error.
-- **`briefc memcheck`** reports every unprovable field, its possible readers,
+- **`brivc memcheck`** reports every unprovable field, its possible readers,
   and the exact `free`/`keep` hint that closes the gap.
 - Both annotations are FRONTEND (scheduler) directives — a backend that doesn't
   free (a GC target) simply doesn't emit; no parse rejection, no
@@ -171,10 +171,10 @@ must go. **The port is removed:** the trigger form becomes `trg name @ instance;
 
 ### Phase 1 — Docs/highlighter (DONE, commit `0140db38`)
 
-- `brief.tmLanguage.json`: removed the `word!` special-cases (the `"macros"` and
+- `briv.tmLanguage.json`: removed the `word!` special-cases (the `"macros"` and
   `"macro-words"` repos); `?`/`!` are now standalone operator rules using the
   same scope as `@`/`&`; added `seq`/`vol`/`sync` keywords.
-- `dbrief.tmLanguage.json`: the same `?`/`!` rules + `seq`/`vol`/`sync`.
+- `dbriv.tmLanguage.json`: the same `?`/`!` rules + `seq`/`vol`/`sync`.
 - `spec/SPEC.md`: the watchdog BNF now includes the liveliness condition, the
   `-> handler(val)` callback, and the `within N <unit>` deadline.
 - Collections plan: corrected the stale "Deferred: fuel/time" note.
@@ -316,7 +316,7 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
    `Trigger.port`/`TrgBinding.port` AST fields removed; the `port == "__wake"`
    sentinel removed (name check kept); the trigger tutorial rewritten to the
    whole-target form `trg name @ instance;`. **DONE**.
-3. **`briefc memcheck`** (or in Phase 5) — report the unprovable fields + hints.
+3. **`brivc memcheck`** (or in Phase 5) — report the unprovable fields + hints.
 
 ### Phase 5 — The free-check
 
@@ -332,7 +332,7 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
    scheduler already handles via `free_after`. The sound fallback for
    unprovable fields is the developer-verified `free x;` (Phase 5a). See
    `docs/plans/2026-08-01-free-check.md`.
-3. **`briefc memcheck`** — **DONE**: reports per heap-backed field whether the
+3. **`brivc memcheck`** — **DONE**: reports per heap-backed field whether the
    scheduler proved a last use (freed after which txn) or the field lives for
    the program, plus the redundant `keep` hints (`src/macros/memcheck.rs`).
 4. **Design doc** — **DONE**: `docs/plans/2026-08-01-free-check.md`.
@@ -340,19 +340,19 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 ### Phase 6 — C-surface reduction (`.bv`/`.ebv`)
 
 1. **Runtime inventory** — **DONE**: `docs/architecture/c-surface-inventory.md`
-   classifies every `brief_rt.c` function as *syscall shim* (stays C: the
+   classifies every `briv_rt.c` function as *syscall shim* (stays C: the
    syscall/getenv/argv/trigger/tty/threading boundary) or *logic* (movable to
    `.ebv`: string marshalling, formatting, equality, bitwise, list ops). The
    import resolver already searches `.bv` then `.ebv` and errors on ambiguity.
-2. **`.ebv` variants** — formatting/strings/allocator logic in pure Brief; the
+2. **`.ebv` variants** — formatting/strings/allocator logic in pure Briv; the
    `.bv` variants keep the OS/libc calls; the import resolver prefers `.bv` on
    OS targets, `.ebv` on freestanding. **Status: designed (inventory doc);
    BLOCKED on the string-construction (`bytes → String`) + write-syscall
    primitives + a freestanding build flow (`_start`, target config). See
    `docs/architecture/c-surface-inventory.md` §Next steps.**
-3. **No-libc target sketch** — **DONE (design)**: `_start` calls `brief_main`
-   then `_exit`; `brief_syscall` is the only C shim; the `.ebv` stdlib
-   implements string/formatting/collections in pure Brief over a `write`
+3. **No-libc target sketch** — **DONE (design)**: `_start` calls `briv_main`
+   then `_exit`; `briv_syscall` is the only C shim; the `.ebv` stdlib
+   implements string/formatting/collections in pure Briv over a `write`
    syscall; a `brk` bump allocator. See the inventory doc.
 
 ---
@@ -372,6 +372,6 @@ used in 4 files (`queue_drain.bv`, `queue_drain_idio.bv`, `stack_push_pop.bv`,
 
 - Chained-bucket HashMap (the flat form works; the chained end-state is a
   standalone follow-up).
-- The Rust `compiler_builtins` equivalent (wide-int/memcpy libcalls) — Brief's
+- The Rust `compiler_builtins` equivalent (wide-int/memcpy libcalls) — Briv's
   integer ops are native-width i64, so the surface is minimal; deferred to the
   no-libc target work.

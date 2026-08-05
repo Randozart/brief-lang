@@ -21,7 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::{Expr, Import, ImportKind, TopLevel, Type};
-use crate::dbrief::v2 as dbrief_v2;
+use crate::dbriv::v2 as dbriv_v2;
 use crate::lexer::Token;
 use logos::Logos;
 use std::collections::{HashMap, HashSet};
@@ -33,12 +33,12 @@ use std::path::{Path, PathBuf};
 // Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
 
 /// Load the module registry from config/module-registry.toml (or its Data
-/// Brief form module-registry.dbvl — Phase 3, 2026-08-03).
+/// Briv form module-registry.dbvl — Phase 3, 2026-08-03).
 /// When the file doesn't exist or can't be parsed, returns an empty map
 /// so that Registry imports fall back to literal filesystem resolution.
 /// 2026-07-15: Phase 7i
 fn load_module_registry() -> HashMap<String, String> {
-    crate::dbrief::config_db::load_string_registry(Path::new("config"), "module-registry")
+    crate::dbriv::config_db::load_string_registry(Path::new("config"), "module-registry")
 }
 
 pub struct ImportResolver {
@@ -59,7 +59,7 @@ pub struct ImportResolver {
     /// embedded target), the resolver prefers the `.ebv` stdlib variant over
     /// the `.bv` one instead of erroring "Ambiguous import". The `.ebv`
     /// stdlib provides the casting-lane symbols (int_to_str, str_to_int, …)
-    /// as Brief defns; the `.bv` stdlib + brief_rt.c provide them as C.
+    /// as Briv defns; the `.bv` stdlib + briv_rt.c provide them as C.
     prefer_ebv: bool,
 }
 
@@ -68,7 +68,7 @@ fn item_name(item: &TopLevel) -> Option<&str> {
     match item {
         TopLevel::Definition(d) => Some(d.name.as_str()),
         TopLevel::Signature(s) => Some(s.name.as_str()),
-        TopLevel::ForeignBinding(fb) => Some(fb.effective_brief_name()),
+        TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
         TopLevel::Transaction(t) => Some(t.name.as_str()),
         TopLevel::Constant(c) => Some(c.name.as_str()),
         TopLevel::Obj(s) => Some(s.name.as_str()),
@@ -206,18 +206,18 @@ impl ImportResolver {
         // 3. Executable-relative (dev layout)
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                // Development: brief-compiler/target/release/ -> ../../lib/
+                // Development: briv-compiler/target/release/ -> ../../lib/
                 let dev_p = exe_dir.join("../../lib/");
                 if dev_p.exists() {
                     return Some(dev_p);
                 }
-                // Alternate: brief-compiler/target/debug/ -> ../../lib/
+                // Alternate: briv-compiler/target/debug/ -> ../../lib/
                 let debug_p = exe_dir.join("../../lib/");
                 if debug_p.exists() {
                     return Some(debug_p);
                 }
-                // Installed: ~/.local/bin/ -> ~/.local/share/brief/
-                let installed_p = exe_dir.join("../share/brief/");
+                // Installed: ~/.local/bin/ -> ~/.local/share/briv/
+                let installed_p = exe_dir.join("../share/briv/");
                 if installed_p.join("std/core").exists() {
                     return Some(installed_p);
                 }
@@ -266,7 +266,7 @@ impl ImportResolver {
         Ok(items)
     }
 
-    /// Resolve `import "target"` — loads the board D-brief description and emits typed constants.
+    /// Resolve `import "target"` — loads the board D-briv description and emits typed constants.
     fn resolve_target_import(&mut self) -> Result<Vec<TopLevel>, String> {
         let board = self.board_name.as_deref().unwrap_or("stm32f407");
 
@@ -287,14 +287,14 @@ impl ImportResolver {
 
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
-            let mut doc = crate::dbrief::v2::parse_document(&content)
+            let mut doc = crate::dbriv::v2::parse_document(&content)
                 .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?;
 
             // Merge the schema carrier (map.dbv) and register detail table.
             let schemas_path = path.with_file_name("map.dbv");
             if schemas_path.exists() {
                 if let Ok(schema_content) = std::fs::read_to_string(&schemas_path) {
-                    if let Ok(schema_doc) = crate::dbrief::v2::parse_document(&schema_content) {
+                    if let Ok(schema_doc) = crate::dbriv::v2::parse_document(&schema_content) {
                         doc.schemas.extend(schema_doc.schemas);
                         // map.dbv is merged inline — drop it from doc.imports so
                         // the bridge does not re-emit it as a literal import.
@@ -305,7 +305,7 @@ impl ImportResolver {
             let registers_path = path.with_file_name("registers.dbvl");
             if registers_path.exists() {
                 if let Ok(reg_content) = std::fs::read_to_string(&registers_path) {
-                    if let Ok(reg_doc) = crate::dbrief::v2::parse_document(&reg_content) {
+                    if let Ok(reg_doc) = crate::dbriv::v2::parse_document(&reg_content) {
                         doc.data_groups.extend(reg_doc.data_groups);
                     }
                 }
@@ -329,7 +329,7 @@ impl ImportResolver {
             };
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
-            crate::dbrief::v2::parse_document(&content)
+            crate::dbriv::v2::parse_document(&content)
                 .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?
         };
 
@@ -343,7 +343,7 @@ impl ImportResolver {
 
             if let Some(sp) = schema_path {
                 if let Ok(schema_content) = std::fs::read_to_string(&sp) {
-                    if let Ok(schema_doc) = crate::dbrief::v2::parse_document(&schema_content) {
+                    if let Ok(schema_doc) = crate::dbriv::v2::parse_document(&schema_content) {
                         doc.schemas.extend(schema_doc.schemas);
                         resolved_imports.push(import_path.clone());
                     }
@@ -352,7 +352,7 @@ impl ImportResolver {
         }
         doc.imports.retain(|i| !resolved_imports.contains(i));
 
-        let items = crate::dbrief::bridge::document_to_program(&doc, &board);
+        let items = crate::dbriv::bridge::document_to_program(&doc, &board);
 
         Ok(items)
     }
@@ -370,7 +370,7 @@ impl ImportResolver {
         // Handle Registry imports — look up name in registry dir first,
         // then fall back to the TOML module registry config.
         // 2026-07-15: Phase 7i
-        // 2026-07-26: Check ~/.brief/registry/ before TOML registry.
+        // 2026-07-26: Check ~/.briv/registry/ before TOML registry.
         if let ImportKind::Registry(name) = &import.kind {
             // 2026-07-26: Check registry directory first (user-installed modules
             // take priority over baked config/module-registry.toml entries).
@@ -477,37 +477,37 @@ impl ImportResolver {
             }
         }
 
-        // Check for DBrief import (.dbv, .dbvl)
+        // Check for DBriv import (.dbv, .dbvl)
         if import.path().ends_with(".dbv") || import.path().ends_with(".dbvl") {
-            let dbrief_src_dir = source_file
+            let dbriv_src_dir = source_file
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."));
 
-            let dbrief_path = self
+            let dbriv_path = self
                 .search_paths
                 .iter()
-                .map(|p| dbrief_src_dir.join(p).join(&import.path()))
-                .chain(std::iter::once(dbrief_src_dir.join(&import.path())))
+                .map(|p| dbriv_src_dir.join(p).join(&import.path()))
+                .chain(std::iter::once(dbriv_src_dir.join(&import.path())))
                 .find(|p| p.exists())
                 .ok_or_else(|| {
                     format!(
-                        "DBrief file not found: {} (searched in lib/, imports/, ./ and source dir)",
+                        "DBriv file not found: {} (searched in lib/, imports/, ./ and source dir)",
                         import.path()
                     )
                 })?;
 
-            let content = std::fs::read_to_string(&dbrief_path)
-                .map_err(|e| format!("Failed to read DBrief file '{}': {}", dbrief_path.display(), e))?;
+            let content = std::fs::read_to_string(&dbriv_path)
+                .map_err(|e| format!("Failed to read DBriv file '{}': {}", dbriv_path.display(), e))?;
 
             let is_dbvl = import.path().ends_with(".dbvl");
 
             // For .dbvl files, use offset-tracking parser for lazy loading
             let doc = if is_dbvl {
-                dbrief_v2::parse_document_track_offsets(&content)
+                dbriv_v2::parse_document_track_offsets(&content)
             } else {
-                dbrief_v2::parse_document(&content)
-            }.map_err(|e| format!("Failed to parse DBrief file '{}': {}", dbrief_path.display(), e))?;
+                dbriv_v2::parse_document(&content)
+            }.map_err(|e| format!("Failed to parse DBriv file '{}': {}", dbriv_path.display(), e))?;
 
             // Determine the constant name from import symbols
             let constant_name = import
@@ -515,28 +515,28 @@ impl ImportResolver {
                 .first()
                 .cloned()
                 .unwrap_or_else(|| {
-                    let fname = dbrief_path
+                    let fname = dbriv_path
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "data".to_string());
                     fname
                 });
 
-            let mut dbrief_items = crate::dbrief::bridge::document_to_program_flags(
+            let mut dbriv_items = crate::dbriv::bridge::document_to_program_flags(
                 &doc, &constant_name, is_dbvl,
             );
 
-            let program_for_cache = dbrief_items.clone();
+            let program_for_cache = dbriv_items.clone();
 
             self.loaded_modules.insert(
                 import.path().to_string(),
                 (program_for_cache, vec![]),
             );
 
-            return Ok(dbrief_items);
+            return Ok(dbriv_items);
         }
 
-        // Default: Brief module (.bv or .ebv)
+        // Default: Briv module (.bv or .ebv)
         let module_path = {
             if import.path().ends_with(".bv") {
                 import.path()[..import.path().len() - 3].replace('.', "/")
@@ -575,7 +575,7 @@ impl ImportResolver {
             let bv = bv_candidate.exists();
             let ebv = ebv_candidate.exists();
             if bv && ebv {
-                // 2026-08-04 (compiler-in-brief): prefer_ebv=false (the
+                // 2026-08-04 (compiler-in-briv): prefer_ebv=false (the
                 // default) prefers the `.bv` variant — the natural behavior
                 // before `.ebv` existed. Only an embedded target prefers
                 // `.ebv`. This was regressed to an "Ambiguous import" error,
@@ -677,7 +677,7 @@ impl ImportResolver {
         // 2026-07-14: Parse errors in imported files are non-fatal — the
         // imported file may use syntax (struct literals, etc.) that the
         // parser supports as AST but not yet as a fully parseable form.
-        // 2026-08-04 (compiler-in-Brief): the error is NOT swallowed — it is
+        // 2026-08-04 (compiler-in-Briv): the error is NOT swallowed — it is
         // reported as a visible warning so a silently-empty import (which
         // drops a module's defns, e.g. std/string's `..` slices) is never
         // hidden again. The import still proceeds with the items that DID
@@ -794,7 +794,7 @@ impl ImportResolver {
                 let name = match item {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),
-                    TopLevel::ForeignBinding(fb) => Some(fb.effective_brief_name()),
+                    TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
                     TopLevel::Transaction(t) => Some(t.name.as_str()),
                     TopLevel::Constant(c) => Some(c.name.as_str()),
                     TopLevel::Obj(s) => Some(s.name.as_str()),

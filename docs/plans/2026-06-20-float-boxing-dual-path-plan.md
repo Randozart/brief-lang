@@ -147,7 +147,7 @@ cache. `adapt_to_i64` will be called if the value needs boxing.
 **When**: Float value crosses function boundary (C ABI parameter, callable txn param).
 **Code**: `emit_toplevel.rs` lines 621-625 (callable txn params).
 **Emitted**: `%aiN = bitcast float %raw to i32` + `%acN = zext i32 %aiN to i64`
-**Rationale**: The LLVM C ABI passes float as float in registers (xmm), but Brief's internal
+**Rationale**: The LLVM C ABI passes float as float in registers (xmm), but Briv's internal
 representation stores everything in a uniform i64 state slot. When marshaling into a callable
 txn, the incoming native float must be boxed to i64. The `reg_float_cache` maps the i64 result
 back to the native float for downstream computation.
@@ -160,7 +160,7 @@ back to the native float for downstream computation.
 **Emitted**: `%call_result = call float @sinf(float %fa)` + `%fbi = bitcast float %call to i32`
 + `%fze = zext i32 %fbi to i64`
 **Rationale**: C ABI returns float in xmm0. The result is boxed to i64 for uniform storage in
-Brief's register model. The `reg_float_cache` maps `%fze → %call_result` so downstream code
+Briv's register model. The `reg_float_cache` maps `%fze → %call_result` so downstream code
 can recover the native float.
 **Status**: CORRECT. Returns `{ name: "%fze", ty: Type::Float }` which has the same issue as
 Path B (i64 register with Float type), BUT: all callers of intrinsic results either go through
@@ -259,8 +259,8 @@ Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::Lit
 |----------|-------------|----------------------|-------------|
 | State field init | Direct `bitcast i32 <hex> to float` | `emit_expr` → `adapt_to_i64` → `native_float_or_box` | Zero dead IR. The compiler knows the value at codegen time. No cache needed. |
 | Expression computation | Native float `%ffN` + `Type::Float` | i64-boxed + `reg_float_cache` | Arithmetic (fadd, fsub, fmul, fdiv) operates on native float. `ensure_float_reg` resolves via cache. Simpler IR for LLVM to optimize. |
-| C ABI parameter marshaling | Box to i64 + cache bridge | Store direct float in state field | ABI expects float in xmm registers, but Brief's cross-function internal ABI is i64-uniform. The cache preserves the native float for consumption within the same function. |
-| Intrinsic float return | Box result to i64 + cache bridge | Return native float directly | Consistent with Brief's internal ABI (all values are i64). Cache recovers native float for downstream computation. |
+| C ABI parameter marshaling | Box to i64 + cache bridge | Store direct float in state field | ABI expects float in xmm registers, but Briv's cross-function internal ABI is i64-uniform. The cache preserves the native float for consumption within the same function. |
+| Intrinsic float return | Box result to i64 + cache bridge | Return native float directly | Consistent with Briv's internal ABI (all values are i64). Cache recovers native float for downstream computation. |
 | `adapt_to_i64` on unknown `Type::Float` reg | Check cache first, then `bitcast float` | Assume register name is float | Defense-in-depth. If a new code path returns i64-boxed with Type::Float (like intrinsic returns do), this path handles it correctly instead of crashing. |
 
 ---

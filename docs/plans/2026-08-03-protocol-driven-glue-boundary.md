@@ -10,13 +10,13 @@
 ## Motivation
 
 The first GLUE implementation (phases 1–5 of `2026-08-03-host-callable-glue-export.md`)
-got Brief callable from C, Python, and Rust, with callbacks and host cancellation.
+got Briv callable from C, Python, and Rust, with callbacks and host cancellation.
 But its **boundary marshalling** was a workaround: per-language `conversions`
 templates (`to_abi`/`from_abi` strings) and a `resolve_protocol` lookup that
 mapped a type's *category* to a C-ABI name. That duplicates — and falls short
-of — the mechanism Brief was designed around.
+of — the mechanism Briv was designed around.
 
-**Brief has no type layouts.** A type is `(protocol, metadata)`, nothing else.
+**Briv has no type layouts.** A type is `(protocol, metadata)`, nothing else.
 Conversion is `CastTo`/`CastFrom` edges in a protocol graph, and those protocols
 are *adaptive*: the compiler finds the minimal path between two representations
 and emits the **delta** of operations, not a hop-by-hop chain. FFI marshalling
@@ -41,7 +41,7 @@ boundary types, cast-path marshalling, and delta emission.
    is the primary one.)
 3. **Casting emits the delta, not the chain.** The casting graph resolves the
    *chain* (BFS finds the minimal number of hops); codegen emits the *delta* —
-   the minimal incremental operations. Brief adopts whatever operations are most
+   the minimal incremental operations. Briv adopts whatever operations are most
    convenient: if the base protocol's representation is stable and casting
    to/from a sub-protocol is just as fast, a value is treated as whatever
    representation suits the current operation, and the cost of changing
@@ -56,7 +56,7 @@ The delta between two representations collapses under three rules, in order:
    String — only its *encoding* differs. Casting between two variants with the
    same machine representation is free when the encoding matches.
 2. **Single binding → one call.** `CStr → String` emits exactly one call
-   (`cstr_to_brief`); `String → CStr` emits `str_to_c`. The delta transform,
+   (`cstr_to_briv`); `String → CStr` emits `str_to_c`. The delta transform,
    not a chain through an intermediate.
 3. **Inverse pair → nothing (1-to-1).** If `A.CastTo(#String)` is `<< 1` and
    `B.CastFrom(#String)` is `>> 1`, the composition
@@ -157,13 +157,13 @@ inverse-delta collapse, and the cross-variant op overrides (P1.4) — the graph
 registers `variant_cross_ops`, and the boundary_marshalling pass rewrites a
 `CStr + CStr` (or `++`) into the variant's own `cstring_concat` binding call
 (the generic inline concat would treat a nul-terminated C string as
-`[len][data]`, which is wrong). `brief_cstring_concat` was added to the
+`[len][data]`, which is wrong). `briv_cstring_concat` was added to the
 runtime. The `+`-for-concat fix rides the same machinery.
 
 ## Phase 2 status — `lib/glue/c.bv` DONE (ABI), marshalling = follow-up
 
 The C-ABI boundary module exists (`lib/glue/c.bv`): `proto C_String` with
-`cstr_to_brief`/`str_to_c` bindings, and the boundary types `CStr`/`CFloat`/
+`cstr_to_briv`/`str_to_c` bindings, and the boundary types `CStr`/`CFloat`/
 `CDouble`/`CI64`/`CI32`/`CBool`/`CChar`/`CPtr`. The ABI derivation works:
 - `CStr` → `ptr` (a #String sub-protocol IS a ptr), `CDouble` → `double`
   (the Float ABI fix — declaring the boundary type clears the BUGS.md item).
@@ -173,8 +173,8 @@ The C-ABI boundary module exists (`lib/glue/c.bv`): `proto C_String` with
   generalized from `std/`-only to any `lib/` module.
 - Demo `examples/glue-host/boundary.bv` (echo: CStr→ptr, identity: CDouble→double).
 
-**Marshalling: DONE.** `name as String` for a CStr param emits `cstr_to_brief`
-(and `s as CStr` emits `str_to_c`) — the graph-resolved binding calls. Brief's
+**Marshalling: DONE.** `name as String` for a CStr param emits `cstr_to_briv`
+(and `s as CStr` emits `str_to_c`) — the graph-resolved binding calls. Briv's
 boxing turns CStr values into i64 registers, so the decision is made on the
 typed AST BEFORE codegen: `src/analysis/boundary_marshalling.rs` builds the
 casting graph from the program's protos + a type→protocol map, and rewrites a
@@ -187,16 +187,16 @@ so boundary types resolve to their category's ABI names in the generated
 header/wrapper: `CStr` → `int64_t`, `CDouble` → `double`.
 
 Verified end-to-end via a C driver: `echo(CStr)` pass-through (ptr ABI),
-`greet` marshals a C string through `brief_cstr_to_brief`/`brief_str_to_c`,
+`greet` marshals a C string through `briv_cstr_to_briv`/`briv_str_to_c`,
 and `identity(CDouble)` returns `3.14` as `double` — the Float ABI bug
 (BUGS.md) is fixed by declaring the boundary type.
 
 ## Phase 2 — `lib/glue/c.bv` (the C-ABI boundary module)
 
-```brief
+```briv
 // The C string representation: nul-terminated bytes.
 proto C_String: #String {
-    CastTo(#String<UTF8>) = cstr_to_brief(#L);   // nul-terminated → [len][data]
+    CastTo(#String<UTF8>) = cstr_to_briv(#L);   // nul-terminated → [len][data]
     CastFrom(#String<UTF8>) = str_to_c(#L);       // [len][data] → nul-terminated
 };
 
@@ -210,9 +210,9 @@ type CChar:   #Char<C_I32>      { };
 type CPtr:    #Data<C_Ptr>      { };
 ```
 
-The `cstr_to_brief`/`str_to_c` frgns to `lib/runtime/brief_rt.c` are declared
+The `cstr_to_briv`/`str_to_c` frgns to `lib/runtime/briv_rt.c` are declared
 here (they already exist in the runtime). Verify:
-- `find_path(CStr → String)` = one `cstr_to_brief` call.
+- `find_path(CStr → String)` = one `cstr_to_briv` call.
 - `llvm_type(CDouble)` = `double`; `llvm_type(CI32)` = `i32`.
 - A declared CString-native op (e.g. `Concat`) is used without any cast when a
   `CStr` value is concatenated.
@@ -226,13 +226,13 @@ here (they already exist in the runtime). Verify:
 - `format_type` handles `Type::HashWordVariant` and boundary custom types.
 - **Remove** the config `conversions` templates. The `.ll` ABI type already
   flows from `llvm_type(param)` — correct once Phase 1 lands.
-- Body marshalling is ordinary Brief casts (`(String)name`) → the
+- Body marshalling is ordinary Briv casts (`(String)name`) → the
   `Cast#`/`emit_cast_path` machinery emits the delta.
 
 ## Phase 4 — Migrate demos + verify
 
 - `pp-types.bv`, `examples/glue-host/rank.bv`, `callback.bv` migrate to boundary
-  signatures (`CStr`, `CDouble`); the manual `cstr_to_brief`/`str_to_c` calls
+  signatures (`CStr`, `CDouble`); the manual `cstr_to_briv`/`str_to_c` calls
   inside bodies become plain casts.
 - **Float exports now work** (clears the BUGS.md item): `export defn
   scale(x: CDouble) -> CDouble` → `double` end-to-end.
@@ -253,7 +253,7 @@ here (they already exist in the runtime). Verify:
 - **P3 (export boundary):** DONE — `resolve_protocol` uses a type→protocol
   map so the generated header resolves boundary types to C ABI names
   (`CStr` → `int64_t`, `CDouble` → `double`); `boundary_marshalling` rewrites
-  `CStr ⇄ String` casts into the graph's binding calls (`cstr_to_brief`/
+  `CStr ⇄ String` casts into the graph's binding calls (`cstr_to_briv`/
   `str_to_c`).
 - **P4 (migrate + verify):** DONE — boundary round-trip test
   (`tests/c_driver_boundary.rs`), Float export in `rank.bv`

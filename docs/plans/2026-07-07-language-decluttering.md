@@ -23,7 +23,7 @@
 
 ## 1. Executive Summary
 
-Brief has accumulated syntax bloat across six dimensions:
+Briv has accumulated syntax bloat across six dimensions:
 
 | Bloat Area | Current | Target | Effort |
 |------------|---------|--------|--------|
@@ -49,7 +49,7 @@ Brief has accumulated syntax bloat across six dimensions:
 
 Captured from commit `5467de8` on `main`. All benchmarks run via `bash benchmarks/build_and_bench.sh --runtime` after `cargo build --release`.
 
-| Benchmark | Brief vs C | Brief wins by |
+| Benchmark | Briv vs C | Briv wins by |
 |-----------|-----------|---------------|
 | nbody_newton | 0.70x | 30% |
 | nbody_sqrt | 0.72x | 28% |
@@ -70,7 +70,7 @@ Captured from commit `5467de8` on `main`. All benchmarks run via `bash benchmark
 **Benchmarking procedure**:
 1. `cargo build --release`
 2. `bash benchmarks/build_and_bench.sh --runtime`
-3. Collect the `Brief vs C` ratios from the output table
+3. Collect the `Briv vs C` ratios from the output table
 4. Compare each ratio against the baseline above
 5. Any ratio below 0.97x of baseline is a regression — block and revert
 
@@ -884,7 +884,7 @@ These are genuinely compiler-known and cannot be expressed as inops:
 
 Each group becomes a `.bv` file with `inop` declarations. Example:
 
-```brief
+```briv
 // std/os/fs.bv — auto-imported via prelude
 // 2026-07-07: Phase 3 — relocated from compiler intrinsic
 

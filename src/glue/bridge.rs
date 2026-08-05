@@ -139,7 +139,7 @@ pub fn emit_protocol_chain(
 /// # Parameters
 /// * `out` — The LLVM IR string buffer to write to
 /// * `call_reg` — The register holding the call result
-/// * `ret_type` — The Brief return type (used to determine void vs non-void)
+/// * `ret_type` — The Briv return type (used to determine void vs non-void)
 /// * `ret_llvm_ty` — The LLVM type string (e.g., "i64", "double", "void")
 /// * `fallback` — The fallback strategy to use
 /// * `indent` — Whitespace indentation for IR lines
@@ -205,7 +205,7 @@ pub fn emit_fallback_llvm(
 /// 2026-07-22: Returns the register name holding the fallback value.
 /// Each branch generates a different form:
 /// * `Static(expr)` — A constant expression
-/// * `FnCall(name, args)` — A call to a Brief function
+/// * `FnCall(name, args)` — A call to a Briv function
 /// * `Implicit` — Zero-value (void-return equivalent, for completeness)
 /// * `None` — Zero-initializer of the return type
 fn emit_fallback_value(

@@ -1,4 +1,4 @@
-=== Building Brief compiler (release) ===
+=== Building Briv compiler (release) ===
 warning: unexpected `cfg` condition name: `kani`
    --> src/annotator.rs:698:11
     |
@@ -326,7 +326,7 @@ note: but type `DbvlTableInner` is only usable at visibility `pub(crate)`
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: `#[warn(private_interfaces)]` on by default
 
-warning: `brief-compiler` (lib) generated 25 warnings
+warning: `briv-compiler` (lib) generated 25 warnings
     Finished `release` profile [optimized] target(s) in 0.20s
 
 
@@ -340,7 +340,7 @@ benchmarks/iir_filter.ll:16:22: error: integer constant must have integer type
       |                      ^
 1 error generated.
   (clang linking skipped — possibly linked by compiler)
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -354,7 +354,7 @@ note: not referenced by any precondition or #!exit; values computed but have no 
   Output: benchmarks/precompute_sum.ll
 warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
 1 warning generated.
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -362,7 +362,7 @@ warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverrid
 ================================================
 Compiling to LLVM IR: benchmarks/ring_buffer.bv
   Output: benchmarks/ring_buffer.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/ring_buffer.ll:83:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -372,8 +372,8 @@ llc: error: llc: benchmarks/ring_buffer.ll:83:51: error: use of undefined value 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/ring_buffer.ll -o ring_buffer.opt.ll
     llc ring_buffer.opt.ll -filetype=obj -o benchmarks/ring_buffer.o
-    ld ring_buffer.o benchmarks/brief_rt.o -o ring_buffer
-  Brief binary ready.
+    ld ring_buffer.o benchmarks/briv_rt.o -o ring_buffer
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -381,7 +381,7 @@ llc: error: llc: benchmarks/ring_buffer.ll:83:51: error: use of undefined value 
 ================================================
 Compiling to LLVM IR: benchmarks/async_counters.bv
   Output: benchmarks/async_counters.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/async_counters.ll:226:51: error: use of undefined value '@str.0'
 %sp7 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -391,8 +391,8 @@ llc: error: llc: benchmarks/async_counters.ll:226:51: error: use of undefined va
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/async_counters.ll -o async_counters.opt.ll
     llc async_counters.opt.ll -filetype=obj -o benchmarks/async_counters.o
-    ld async_counters.o benchmarks/brief_rt.o -o async_counters -lpthread
-  Brief binary ready.
+    ld async_counters.o benchmarks/briv_rt.o -o async_counters -lpthread
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -400,7 +400,7 @@ llc: error: llc: benchmarks/async_counters.ll:226:51: error: use of undefined va
 ================================================
 Compiling to LLVM IR: benchmarks/float_math.bv
   Output: benchmarks/float_math.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/float_math.ll:18:23: error: integer constant must have integer type
 @Q22 = constant float 0
                       ^
@@ -410,8 +410,8 @@ llc: error: llc: benchmarks/float_math.ll:18:23: error: integer constant must ha
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/float_math.ll -o float_math.opt.ll
     llc float_math.opt.ll -filetype=obj -o benchmarks/float_math.o
-    ld float_math.o benchmarks/brief_rt.o -o float_math
-  Brief binary ready.
+    ld float_math.o benchmarks/briv_rt.o -o float_math
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -419,7 +419,7 @@ llc: error: llc: benchmarks/float_math.ll:18:23: error: integer constant must ha
 ================================================
 Compiling to LLVM IR: benchmarks/float_math_nonzero.bv
   Output: benchmarks/float_math_nonzero.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/float_math_nonzero.ll:18:23: error: integer constant must have integer type
 @Q11 = constant float 0
                       ^
@@ -429,8 +429,8 @@ llc: error: llc: benchmarks/float_math_nonzero.ll:18:23: error: integer constant
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/float_math_nonzero.ll -o float_math_nonzero.opt.ll
     llc float_math_nonzero.opt.ll -filetype=obj -o benchmarks/float_math_nonzero.o
-    ld float_math_nonzero.o benchmarks/brief_rt.o -o float_math_nonzero
-  Brief binary ready.
+    ld float_math_nonzero.o benchmarks/briv_rt.o -o float_math_nonzero
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -438,7 +438,7 @@ llc: error: llc: benchmarks/float_math_nonzero.ll:18:23: error: integer constant
 ================================================
 Compiling to LLVM IR: benchmarks/sparse_dispatch.bv
   Output: benchmarks/sparse_dispatch.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/sparse_dispatch.ll:619:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -448,12 +448,12 @@ llc: error: llc: benchmarks/sparse_dispatch.ll:619:51: error: use of undefined v
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/sparse_dispatch.ll -o sparse_dispatch.opt.ll
     llc sparse_dispatch.opt.ll -filetype=obj -o benchmarks/sparse_dispatch.o
-    ld sparse_dispatch.o benchmarks/brief_rt.o -o sparse_dispatch
+    ld sparse_dispatch.o benchmarks/briv_rt.o -o sparse_dispatch
 /usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crt1.o: in function `_start':
 (.text+0x1b): undefined reference to `main'
 collect2: error: ld returned 1 exit status
   (link failed — try manual link)
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -461,7 +461,7 @@ collect2: error: ld returned 1 exit status
 ================================================
 Compiling to LLVM IR: benchmarks/const_heavy.bv
   Output: benchmarks/const_heavy.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/const_heavy.ll:172:51: error: use of undefined value '@str.0'
 %sp3 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -471,8 +471,8 @@ llc: error: llc: benchmarks/const_heavy.ll:172:51: error: use of undefined value
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/const_heavy.ll -o const_heavy.opt.ll
     llc const_heavy.opt.ll -filetype=obj -o benchmarks/const_heavy.o
-    ld const_heavy.o benchmarks/brief_rt.o -o const_heavy
-  Brief binary ready.
+    ld const_heavy.o benchmarks/briv_rt.o -o const_heavy
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -480,7 +480,7 @@ llc: error: llc: benchmarks/const_heavy.ll:172:51: error: use of undefined value
 ================================================
 Compiling to LLVM IR: benchmarks/print_loop.bv
   Output: benchmarks/print_loop.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/print_loop.ll:86:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -490,8 +490,8 @@ llc: error: llc: benchmarks/print_loop.ll:86:51: error: use of undefined value '
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/print_loop.ll -o print_loop.opt.ll
     llc print_loop.opt.ll -filetype=obj -o benchmarks/print_loop.o
-    ld print_loop.o benchmarks/brief_rt.o -o print_loop
-  Brief binary ready.
+    ld print_loop.o benchmarks/briv_rt.o -o print_loop
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -499,7 +499,7 @@ llc: error: llc: benchmarks/print_loop.ll:86:51: error: use of undefined value '
 ================================================
 Compiling to LLVM IR: benchmarks/nbody_newton.bv
   Output: benchmarks/nbody_newton.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/nbody_newton.ll:18:22: error: integer constant must have integer type
 @m4 = constant float 0
                      ^
@@ -509,8 +509,8 @@ llc: error: llc: benchmarks/nbody_newton.ll:18:22: error: integer constant must 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/nbody_newton.ll -o nbody_newton.opt.ll
     llc nbody_newton.opt.ll -filetype=obj -o benchmarks/nbody_newton.o
-    ld nbody_newton.o benchmarks/brief_rt.o -o nbody_newton
-  Brief binary ready.
+    ld nbody_newton.o benchmarks/briv_rt.o -o nbody_newton
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -518,7 +518,7 @@ llc: error: llc: benchmarks/nbody_newton.ll:18:22: error: integer constant must 
 ================================================
 Compiling to LLVM IR: benchmarks/nbody_sqrt.bv
   Output: benchmarks/nbody_sqrt.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/nbody_sqrt.ll:19:22: error: integer constant must have integer type
 @m0 = constant float 0
                      ^
@@ -528,8 +528,8 @@ llc: error: llc: benchmarks/nbody_sqrt.ll:19:22: error: integer constant must ha
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/nbody_sqrt.ll -o nbody_sqrt.opt.ll
     llc nbody_sqrt.opt.ll -filetype=obj -o benchmarks/nbody_sqrt.o
-    ld nbody_sqrt.o benchmarks/brief_rt.o -o nbody_sqrt
-  Brief binary ready.
+    ld nbody_sqrt.o benchmarks/briv_rt.o -o nbody_sqrt
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -537,7 +537,7 @@ llc: error: llc: benchmarks/nbody_sqrt.ll:19:22: error: integer constant must ha
 ================================================
 Compiling to LLVM IR: benchmarks/fasta.bv
   Output: benchmarks/fasta.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/fasta.ll:102:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -547,8 +547,8 @@ llc: error: llc: benchmarks/fasta.ll:102:51: error: use of undefined value '@str
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/fasta.ll -o fasta.opt.ll
     llc fasta.opt.ll -filetype=obj -o benchmarks/fasta.o
-    ld fasta.o benchmarks/brief_rt.o -o fasta
-  Brief binary ready.
+    ld fasta.o benchmarks/briv_rt.o -o fasta
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -556,7 +556,7 @@ llc: error: llc: benchmarks/fasta.ll:102:51: error: use of undefined value '@str
 ================================================
 Compiling to LLVM IR: benchmarks/fannkuch_redux.bv
   Output: benchmarks/fannkuch_redux.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/fannkuch_redux.ll:198:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -566,8 +566,8 @@ llc: error: llc: benchmarks/fannkuch_redux.ll:198:51: error: use of undefined va
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/fannkuch_redux.ll -o fannkuch_redux.opt.ll
     llc fannkuch_redux.opt.ll -filetype=obj -o benchmarks/fannkuch_redux.o
-    ld fannkuch_redux.o benchmarks/brief_rt.o -o fannkuch_redux
-  Brief binary ready.
+    ld fannkuch_redux.o benchmarks/briv_rt.o -o fannkuch_redux
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -575,7 +575,7 @@ llc: error: llc: benchmarks/fannkuch_redux.ll:198:51: error: use of undefined va
 ================================================
 Compiling to LLVM IR: benchmarks/mandelbrot.bv
   Output: benchmarks/mandelbrot.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/mandelbrot.ll:260:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -585,8 +585,8 @@ llc: error: llc: benchmarks/mandelbrot.ll:260:51: error: use of undefined value 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/mandelbrot.ll -o mandelbrot.opt.ll
     llc mandelbrot.opt.ll -filetype=obj -o benchmarks/mandelbrot.o
-    ld mandelbrot.o benchmarks/brief_rt.o -o mandelbrot
-  Brief binary ready.
+    ld mandelbrot.o benchmarks/briv_rt.o -o mandelbrot
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -594,7 +594,7 @@ llc: error: llc: benchmarks/mandelbrot.ll:260:51: error: use of undefined value 
 ================================================
 Compiling to LLVM IR: benchmarks/kalman_filter_runtime.bv
   Output: benchmarks/kalman_filter_runtime.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/kalman_filter_runtime.ll:18:23: error: integer constant must have integer type
 @q11 = constant float 0
                       ^
@@ -604,8 +604,8 @@ llc: error: llc: benchmarks/kalman_filter_runtime.ll:18:23: error: integer const
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/kalman_filter_runtime.ll -o kalman_filter_runtime.opt.ll
     llc kalman_filter_runtime.opt.ll -filetype=obj -o benchmarks/kalman_filter_runtime.o
-    ld kalman_filter_runtime.o benchmarks/brief_rt.o -o kalman_filter_runtime
-  Brief binary ready.
+    ld kalman_filter_runtime.o benchmarks/briv_rt.o -o kalman_filter_runtime
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -613,7 +613,7 @@ llc: error: llc: benchmarks/kalman_filter_runtime.ll:18:23: error: integer const
 ================================================
 Compiling to LLVM IR: benchmarks/knucleotide.bv
   Output: benchmarks/knucleotide.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/knucleotide.ll:161:51: error: use of undefined value '@str.0'
 %sp5 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -623,8 +623,8 @@ llc: error: llc: benchmarks/knucleotide.ll:161:51: error: use of undefined value
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/knucleotide.ll -o knucleotide.opt.ll
     llc knucleotide.opt.ll -filetype=obj -o benchmarks/knucleotide.o
-    ld knucleotide.o benchmarks/brief_rt.o -o knucleotide
-  Brief binary ready.
+    ld knucleotide.o benchmarks/briv_rt.o -o knucleotide
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -632,7 +632,7 @@ llc: error: llc: benchmarks/knucleotide.ll:161:51: error: use of undefined value
 ================================================
 Compiling to LLVM IR: benchmarks/cancel_math.bv
   Output: benchmarks/cancel_math.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/cancel_math.ll:91:51: error: use of undefined value '@str.0'
 %sp3 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -642,8 +642,8 @@ llc: error: llc: benchmarks/cancel_math.ll:91:51: error: use of undefined value 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/cancel_math.ll -o cancel_math.opt.ll
     llc cancel_math.opt.ll -filetype=obj -o benchmarks/cancel_math.o
-    ld cancel_math.o benchmarks/brief_rt.o -o cancel_math
-  Brief binary ready.
+    ld cancel_math.o benchmarks/briv_rt.o -o cancel_math
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -653,7 +653,7 @@ Compiling to LLVM IR: benchmarks/bit_clear.bv
   Output: benchmarks/bit_clear.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/bit_clear
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -661,7 +661,7 @@ Compiling to LLVM IR: benchmarks/bit_clear.bv
 ================================================
 Compiling to LLVM IR: benchmarks/queue_drain.bv
   Output: benchmarks/queue_drain.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/queue_drain.ll:80:51: error: use of undefined value '@str.0'
 %sp3 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -671,8 +671,8 @@ llc: error: llc: benchmarks/queue_drain.ll:80:51: error: use of undefined value 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/queue_drain.ll -o queue_drain.opt.ll
     llc queue_drain.opt.ll -filetype=obj -o benchmarks/queue_drain.o
-    ld queue_drain.o benchmarks/brief_rt.o -o queue_drain
-  Brief binary ready.
+    ld queue_drain.o benchmarks/briv_rt.o -o queue_drain
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -680,7 +680,7 @@ llc: error: llc: benchmarks/queue_drain.ll:80:51: error: use of undefined value 
 ================================================
 Compiling to LLVM IR: benchmarks/interval_step.bv
   Output: benchmarks/interval_step.ll
-  Runtime object: benchmarks/brief_rt.o
+  Runtime object: benchmarks/briv_rt.o
 opt: benchmarks/interval_step.ll:96:51: error: use of undefined value '@str.0'
 %sp3 = getelementptr inbounds [6 x i8], [6 x i8]* @str.0, i64 0, i64 0
                                                   ^
@@ -690,8 +690,8 @@ llc: error: llc: benchmarks/interval_step.ll:96:51: error: use of undefined valu
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/interval_step.ll -o interval_step.opt.ll
     llc interval_step.opt.ll -filetype=obj -o benchmarks/interval_step.o
-    ld interval_step.o benchmarks/brief_rt.o -o interval_step
-  Brief binary ready.
+    ld interval_step.o benchmarks/briv_rt.o -o interval_step
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -699,6 +699,6 @@ llc: error: llc: benchmarks/interval_step.ll:96:51: error: use of undefined valu
 ================================================
 
 === iir_filter ===
-  Brief: .0002s  (min 0.000140s, max 0.000255s)
+  Briv: .0002s  (min 0.000140s, max 0.000255s)
   C:     .0846s
-  Ratio: 0x  →  Brief wins
+  Ratio: 0x  →  Briv wins

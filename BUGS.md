@@ -1,15 +1,15 @@
 # Bugs
 
-## Runtime: Stale `free()` of Zero-Copy `brief_str_to_c` Results Crashed `get_env_int`/`__print` — FIXED
+## Runtime: Stale `free()` of Zero-Copy `briv_str_to_c` Results Crashed `get_env_int`/`__print` — FIXED
 
 **Date:** 2026-08-04
 **Status:** Fixed (main, post-merge)
 **Root cause:** The 2026-08-03 composite plan
 (`docs/plans/2026-08-03-native-python-meld-composite.md`) made
-`brief_str_to_c` return the IN-PLACE data pointer for heap Brief strings —
+`briv_str_to_c` return the IN-PLACE data pointer for heap Briv strings —
 zero-copy, contract "caller must NOT free". `__read_file__`/`__write_file__`
 were updated, but five callers still `free()`d the result (a stale free of an
-arena/state-owned pointer): `__getenv_brief`, `__getenv_int`, `__print`,
+arena/state-owned pointer): `__getenv_briv`, `__getenv_int`, `__print`,
 `__print_str`, `__eprint_str`. The crash surfaced when the
 `feat/term-termination-diagnostics` merge's clang-guarded integration test
 (`member_inline_term_links_in_countdown_loop`, which reads `BOUND` via
@@ -31,7 +31,7 @@ again on main; 6/6 integration + 1469 lib tests green.
 **Date:** 2026-08-04
 **Status:** Resolved by REMOVING the feature (branch `feat/term-termination-diagnostics`)
 **Root cause:** `return expr;` / `return;` was a vestigial parser path carried
-over from the Phase 1 parser rewrite (`77836c35`). Brief's language never
+over from the Phase 1 parser rewrite (`77836c35`). Briv's language never
 defined a `return` statement — `spec/SPEC.md` documents "return" only as a
 return TYPE. Zero `.bv` files used it. Its semantics disagreed across engines:
 the interpreter (`src/interpreter/eval.rs`) returned `Ok(Value)` so execution
@@ -43,7 +43,7 @@ codegen. The 2026-08-04 term-termination plan (§5) claimed this divergence was
 "logged in BUGS.md" — it was not; this entry resolves the matter by removing the
 statement.
 **Fix:** Parser now rejects `return` (at top level and in statement bodies) with
-`invalid statement: Brief has no \`return\` statement. To return a value from a
+`invalid statement: Briv has no \`return\` statement. To return a value from a
 defn use \`term <value>\`; to mark a convergence checkpoint use bare \`term;\`;
 \`term!\` closes the program.` The `Statement::Return` AST variant and all ~50
 match arms across the pipeline (parser → AST → typechecker → interpreter →
@@ -156,21 +156,21 @@ Term value-form void path of `emit_stmt.rs`.
 **Status:** Fixed
 **Root cause:** the casting graph (`src/casting/graph.rs:195-257`) declares ten
 `ExtCall` lanes between `#String` and the other base protocols. Only `int_to_str`
-existed in `lib/runtime/brief_rt.c`. The other nine (str_to_int, uint_to_str,
+existed in `lib/runtime/briv_rt.c`. The other nine (str_to_int, uint_to_str,
 str_to_uint, float_to_str, str_to_float, str_to_bool, bool_to_str,
 str_first_char, char_to_str) were **undefined symbols** — a latent LINK ERROR
 whenever `(s as Int)`, `(f as String)`, etc. was exercised, for `.bv` and `.ebv`
 alike. (The `to_int`/`to_float` stubs in `std/string.bv` were `term 0`/`term 0.0`,
 so the broken path was rarely hit.) Verified: `(s as Int)` on `"42"` failed with
 "use of undefined value '@str_to_int'".
-**Fix (`70f596f9`):** added all nine to `brief_rt.c` (String ABI = ptr to
-[len: i64][bytes]; the Float lanes use the 32-bit `float` ABI — the Brief Float
+**Fix (`70f596f9`):** added all nine to `briv_rt.c` (String ABI = ptr to
+[len: i64][bytes]; the Float lanes use the 32-bit `float` ABI — the Briv Float
 protocol is `float`, not `double`, which a first attempt got wrong; the Char
 lanes are single-UTF8-codepoint strings), and added the lane declares to the LLVM
 header (the ExtCall lane emission writes the `call` inline without a declare).
 **Impact:** all `#String` conversions round-trip correctly (verified `42`, `3.5`,
 `true`, `A`). The `.ebv` freestanding path will provide these same symbols as
-Brief defns (the declare-guard from `c7f25a95` skips the backend declare when the
+Briv defns (the declare-guard from `c7f25a95` skips the backend declare when the
 program defines the symbol).
 **Undo:** remove the nine C functions + the lane declares.
 
@@ -397,7 +397,7 @@ When adding escape sequences, match the most common ones first: `\0`, `\n`,
 
 ## 2026-06-17 — `done_{name}` SSA dispatch skips to exit instead of next txn
 
-**Issue**: After the `\0` fix, officina rendered output briefly then exited
+**Issue**: After the `\0` fix, officina rendered output brivly then exited
 before the render txn could fire. The SSA dispatch loop's `done_process_input`
 label branched to `%done` (program exit) instead of `%s_process_input` (next
 txn's skip label), skipping the render txn entirely.
@@ -596,7 +596,7 @@ While `call_defn`'s top-level handler correctly stored `result`, it never checke
 2. Modified `exec_stmt`'s `Term` handler to store the value in `self.return_value`
 3. Modified `call_defn` to save/restore `return_value` and break when it's set after any statement (top-level or nested)
 
-**Lesson**: `term` in Brief is not merely a "function return" — it's a value-capture mechanism that can appear inside any nested scope (guards, unifications, blocks). The interpreter must capture ALL `term` values, not just top-level ones.
+**Lesson**: `term` in Briv is not merely a "function return" — it's a value-capture mechanism that can appear inside any nested scope (guards, unifications, blocks). The interpreter must capture ALL `term` values, not just top-level ones.
 
 ## 2026-05-29 — Result field key mismatch between constructor and consumer
 
@@ -612,7 +612,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 **Lesson**: When multiple construction paths exist for the same enum type, their field key conventions must be consistent. The generic path always uses `"value"` for single-field enum construction, but the specific Result path had its own convention. Prefer a single consistent convention.
 
-## 2026-05-29 — Brief-written lexer rejects all input with "Unexpected character"
+## 2026-05-29 — Briv-written lexer rejects all input with "Unexpected character"
 
 **Issue**: Self-host pipeline tokenizes files via `lib/compiler/lexer.bv` (running inside the interpreter) but fails with `Lex error: Unexpected character: ` on all inputs.
 
@@ -677,7 +677,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 ## 2026-05-30 — `len()` infinite recursion in self-host interpreter
 
-**Issue**: The self-host pipeline (`brief-compiler selfhost`) failed with a stack overflow / hang on any input. The Brief-written lexer (`lib/compiler/lexer.bv`) called `len(state.source)` which dispatched to `call_defn("len")`, causing infinite recursion through `lib/std/string.bv`'s `term s.len()`.
+**Issue**: The self-host pipeline (`briv-compiler selfhost`) failed with a stack overflow / hang on any input. The Briv-written lexer (`lib/compiler/lexer.bv`) called `len(state.source)` which dispatched to `call_defn("len")`, causing infinite recursion through `lib/std/string.bv`'s `term s.len()`.
 
 **Root Cause**: The interpreter's `Expr::Call` handler (interpreter.rs:963) checked user `definitions` **before** any built-in handler for `len`. Since `lib/std/string.bv` defines `defn len(s: String) { term s.len(); }`, calling `len(x)` on a `String` value found the user definition first, dispatched to `call_defn`, which evaluated `term s.len()` — which called `len` again via `Expr::Call("len", [Identifier("s")])` — ad infinitum.
 
@@ -743,7 +743,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 **Root Cause**: The wake main loop unconditionally routes case arms to `do_wait` → `__rt_wait()` → `br label %tick`. No convergence-based exit path exists in the wake codegen paths. Compiler already computes convergence data but doesn't use it in `emit_enum_main` or `emit_main`.
 
-**How discovered**: `timeout 5s ./benchmarks/ring_buffer` never terminated. SIGTERM is caught by `brief_rt.c` signal handler — program refuses to die. Only SIGKILL works.
+**How discovered**: `timeout 5s ./benchmarks/ring_buffer` never terminated. SIGTERM is caught by `briv_rt.c` signal handler — program refuses to die. Only SIGKILL works.
 
 **Current workaround**: `timeout --signal=KILL 30s` for benchmarks.
 
@@ -786,7 +786,7 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 ## 2026-06-02 — Struct-SSA regression for non-pure bodies (Kalman filter 2× slowdown)
 
-**Issue**: Kalman filter benchmark ran 0.28s at 10M iterations while the old code ran 0.143s (scaled from 0.716s at 50M) — exactly 2× slower. C reference ran 0.14s. Brief went from beating C to trailing by 2×.
+**Issue**: Kalman filter benchmark ran 0.28s at 10M iterations while the old code ran 0.143s (scaled from 0.716s at 50M) — exactly 2× slower. C reference ran 0.14s. Briv went from beating C to trailing by 2×.
 
 **Root Cause**: `emit_folded_main` with `use_phi=false, body=Some(stmts)` emits a `load %State` (64 bytes), 13-element chained `extractvalue`/`insertvalue` sequence, then `store %State`. This struct-SSA pattern requires SROA (Scalar Replacement of Aggregates) to decompose into per-field scalar operations. But `llc -O2` does NOT run SROA — only `opt -O2` does. Without SROA, LLVM's backend materializes the entire 64-byte struct as a memory block, preventing per-field register promotion, phi node generation, and GVN across float operations.
 
@@ -796,7 +796,7 @@ The old (pre-struct-SSA) codegen used per-field `GEP + load/store` throughout, w
 
 **Fix**: Run `opt -O2 -S` before `llc` in `run_llvm_compile()` at `src/main.rs:1899`. `opt -O2` runs SROA, mem2reg, GVN, and constant propagation. SROA decomposes the `load %State`/`store %State` into scalar phis; GVN eliminates redundant float→i64→float round trips. The SLP hazard analyzer's `-vectorize-slp=false` flag is passed to `opt` (where SLP runs as a middle-end pass), not `llc`. Graceful fallback if `opt` is not installed.
 
-**Result**: Kalman filter recovers from 2× regression to 0.71s at 50M vs C 0.75s (Brief beats C by ~5%, tied at worst).
+**Result**: Kalman filter recovers from 2× regression to 0.71s at 50M vs C 0.75s (Briv beats C by ~5%, tied at worst).
 
 **Lesson**: `llc -O2` and `opt -O2` run different pass pipelines. `llc` is the codegen backend (instruction selection, regalloc, scheduling). `opt` is the middle-end optimizer (SROA, mem2reg, GVN, loop opts, vectorization). Struct-SSA (`load %State`/`store %State` + insertvalue chains) requires SROA to decompose — always run `opt -O2` before `llc` for programs with struct values.
 
@@ -875,7 +875,7 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 + Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) => {
 ```
 
-**Lesson**: Negative literals in Brief are `Neg(Integer(n))`, not `Integer(-n)`. Any code path that pattern-matches on `Expr::Integer` for constants must also handle `Expr::Neg(Expr::Integer(_))`. The `emit_expr` function already handles `Neg` correctly — the fix delegates to it.
+**Lesson**: Negative literals in Briv are `Neg(Integer(n))`, not `Integer(-n)`. Any code path that pattern-matches on `Expr::Integer` for constants must also handle `Expr::Neg(Expr::Integer(_))`. The `emit_expr` function already handles `Neg` correctly — the fix delegates to it.
 
 ## 2026-06-04 — Universal loop hangs with decreasing counter contract
 
@@ -904,11 +904,11 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 
 ## 2026-06-05 — Unused `io_pending` import forces reactive runtime on pure-state benchmarks
 
-**Issue**: `benchmarks/bit_clear.bv` and `benchmarks/queue_drain.bv` both imported `io_pending` from `std/brief_rt.bv` but never used it in any precondition. The import was dead weight but still triggered the reactive runtime path (`has_wake_triggers = true` → reactor with `__rt_wait()` 100ms blocking per tick), turning a 63-iteration burn (bit_clear) into a 6.3-second slog and a 10-iteration burn (queue_drain) into a 1-second slog.
+**Issue**: `benchmarks/bit_clear.bv` and `benchmarks/queue_drain.bv` both imported `io_pending` from `std/briv_rt.bv` but never used it in any precondition. The import was dead weight but still triggered the reactive runtime path (`has_wake_triggers = true` → reactor with `__rt_wait()` 100ms blocking per tick), turning a 63-iteration burn (bit_clear) into a 6.3-second slog and a 10-iteration burn (queue_drain) into a 1-second slog.
 
 **Root Cause**: The compiler treats any import of `io_pending` as evidence the program needs wake triggers, even if no precondition references it. The presence of `io_pending` in the import set sets `has_triggers = true` in the transition graph, which in turn selects the reactor codegen path instead of the pure SSA while-loop path.
 
-**Fix**: Removed `import { io_pending } from "std/brief_rt.bv"` from both files. Neither benchmark needs external event wakeup — both converge purely on state (`reg != 0 → reg == 0`, `queue:>Size > 0 → queue:>Size == 0`).
+**Fix**: Removed `import { io_pending } from "std/briv_rt.bv"` from both files. Neither benchmark needs external event wakeup — both converge purely on state (`reg != 0 → reg == 0`, `queue:>Size > 0 → queue:>Size == 0`).
 
 **Lesson**: Never import `io_pending` unless the program genuinely waits for external IO. Pure-state convergence benchmarks must use the SSA while-loop path (no reactor). The `io_pending` import is a foot-gun: it looks harmless but silently activates the full reactive machinery.
 
@@ -934,9 +934,9 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 ```
 attributes #1 = { nocallback nofree nosync nounwind willreturn }
 ```
-Without any `memory(...)` restriction, LLVM conservatively assumes the function can read/write arbitrary memory. During LTO, `opt -O3`'s FunctionAttrs pass examines `__print_int`'s actual body (merged from `brief_rt.c`), sees `fprintf(stderr, ...)` as a real global side effect, and correctly preserves the call. For `__sqrtf`, FunctionAttrs infers `readnone` from the `sqrtf` call and restores CSE/hoisting.
+Without any `memory(...)` restriction, LLVM conservatively assumes the function can read/write arbitrary memory. During LTO, `opt -O3`'s FunctionAttrs pass examines `__print_int`'s actual body (merged from `briv_rt.c`), sees `fprintf(stderr, ...)` as a real global side effect, and correctly preserves the call. For `__sqrtf`, FunctionAttrs infers `readnone` from the `sqrtf` call and restores CSE/hoisting.
 
-**Lesson**: Never assert `memory(argmem: write)` on FFI functions — the Brief compiler cannot verify this. The mathematically correct default is no memory restriction. LTO reveals actual function bodies and LLVM's FunctionAttrs pass infers correct attributes deterministically.
+**Lesson**: Never assert `memory(argmem: write)` on FFI functions — the Briv compiler cannot verify this. The mathematically correct default is no memory restriction. LTO reveals actual function bodies and LLVM's FunctionAttrs pass infers correct attributes deterministically.
 
 ## 2026-06-05 — Compile-time-known list size causes precomputation (correct behavior)
 
@@ -978,9 +978,9 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 ## 2026-06-05 — `__putchar` undefined at link time despite definition in runtime
 
-**Issue**: `__putchar` was declared in `fasta.bv` as `frgn` and present in `runtime/brief_rt.c`, but LTO link failed with `undefined reference to '__putchar'`.
+**Issue**: `__putchar` was declared in `fasta.bv` as `frgn` and present in `runtime/briv_rt.c`, but LTO link failed with `undefined reference to '__putchar'`.
 
-**Root Cause**: Function was `static inline` with `always_inline`. Clang compiled `brief_rt.c` at `-O2`, inlined all calls within the runtime translation unit, then discarded the function body. The program IR's `declare` remained unresolved across module boundaries.
+**Root Cause**: Function was `static inline` with `always_inline`. Clang compiled `briv_rt.c` at `-O2`, inlined all calls within the runtime translation unit, then discarded the function body. The program IR's `declare` remained unresolved across module boundaries.
 
 **Fix**: Changed to `__attribute__((used)) int64_t __putchar(int64_t c)`. No `static`, no `inline`. The `used` attribute forces emission even when no callers exist within the translation unit.
 
@@ -1024,7 +1024,7 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 ## 2026-06-06 — Hardcoded runtime declares in LLVM backend
 
-**Issue**: `emit_declares()` unconditionally emitted `declare void @__rt_init()`, `declare void @__rt_wait()`, `declare void @__rt_poll()`, `declare void @__exit()`, `declare void @brief_thread_pool_init()`, etc. Users couldn't opt out and these symbols were never declared in user code.
+**Issue**: `emit_declares()` unconditionally emitted `declare void @__rt_init()`, `declare void @__rt_wait()`, `declare void @__rt_poll()`, `declare void @__exit()`, `declare void @briv_thread_pool_init()`, etc. Users couldn't opt out and these symbols were never declared in user code.
 
 **Root Cause**: The runtime functions were hardcoded in `llvm.rs:1844-1868` instead of being declared as `frgn` in `std/rt.bv` and imported by the user.
 
@@ -1103,11 +1103,11 @@ If a terminating statement fired inside the guarded body, leave `self.terminated
 
 ## 2026-06-07 — `-lm` missing in compiler driver link step (FIXED)
 
-**Issue**: `brief_rt.c` provides `float __sqrtf(float x) { return sqrtf(x); }` (line 392), which is actively used by `benchmarks/nbody_sqrt.bv` (24 call sites). The compiler driver at `main.rs:~2360` never passes `-lm` to the linker. The C reference gets `-lm` via the same clang invocation, creating asymmetry. Programs using `__sqrtf` get undefined reference at link time.
+**Issue**: `briv_rt.c` provides `float __sqrtf(float x) { return sqrtf(x); }` (line 392), which is actively used by `benchmarks/nbody_sqrt.bv` (24 call sites). The compiler driver at `main.rs:~2360` never passes `-lm` to the linker. The C reference gets `-lm` via the same clang invocation, creating asymmetry. Programs using `__sqrtf` get undefined reference at link time.
 
 **Root Cause**: The link command at `main.rs:2359-2365` was assembled incrementally (conditionally adding `-lrt`, `-lpthread`) and `-lm` was never added. Since `sqrtf` is in libm (not libc), glibc requires explicit `-lm`.
 
-**Fix**: Added `link_cmd.arg("-lm");` to the link command unconditionally (brief_rt.c references `sqrtf`). Also added `-lm` to the linking-failed hint message.
+**Fix**: Added `link_cmd.arg("-lm");` to the link command unconditionally (briv_rt.c references `sqrtf`). Also added `-lm` to the linking-failed hint message.
 
 **Lesson**: Every library dependency of the runtime must be provided to the linker. `sqrtf` from `libm` is the runtime's dependency, not the user program's. The compiler driver is responsible for its own runtime module's link requirements.
 
@@ -1133,7 +1133,7 @@ Affected files and approximate counts:
 
 **Fix**: Replace broken `defn` iterators with callable `txn` declarations. Regular `txn` takes parameters and returns values like `defn`, but with `[pre][post]` convergence loop semantics — the body re-executes until the postcondition is met.
 
-```brief
+```briv
 // BEFORE (broken — guarded fires once):
 defn iter_filter<T>(list, pred) -> List<T> [true] {
     let i = 0;
@@ -1340,18 +1340,18 @@ This worked in `float_math.bv` because constant globals (like `A00`, `Q00`) had 
 ```bash
 c_out=$(BOUND=5 timeout 10 "$c_bin" 2>/dev/null || echo "__FAIL__")
 ```
-If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"`. The Brief binary exits 0 with empty stdout, so `brief_out=""`. The comparison `"" != "__FAIL__"` reports MISMATCH — but the programs are actually correct, just using exit code for their result instead of stderr output.
+If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"`. The Briv binary exits 0 with empty stdout, so `briv_out=""`. The comparison `"" != "__FAIL__"` reports MISMATCH — but the programs are actually correct, just using exit code for their result instead of stderr output.
 
 **Affected**: `float_math_c`, `float_math_nonzero_c`, `const_heavy_c` — all return the computed result via `main()` return value, which gets a non-zero exit code (6, 8, or truncated to 45 for values > 255).
 
 **Root Cause**: Three interacting issues:
-1. The C references returned their result via exit code (`return (int)(count + x0 + ...)`) while Brief used `__print_float`/`__print_int` (stderr output).
+1. The C references returned their result via exit code (`return (int)(count + x0 + ...)`) while Briv used `__print_float`/`__print_int` (stderr output).
 2. Linux truncates exit codes to 8 bits, so values > 255 (e.g., 105005 → 45) are corrupted.
 3. The harness treats non-zero exit codes as "failed" via `|| echo "__FAIL__"`.
 
-**Fix**: Changed all three C references to match Brief's pattern — periodic `fprintf(stderr, ...)` inside a `count % 5000000 == 0` guard (post-increment), with `return 0`. At BOUND=5, neither Brief (guard fires on post-increment counts 5M, 10M, ...) nor C (same guard) produces output, so both show empty stdout + exit 0 → MATCH.
+**Fix**: Changed all three C references to match Briv's pattern — periodic `fprintf(stderr, ...)` inside a `count % 5000000 == 0` guard (post-increment), with `return 0`. At BOUND=5, neither Briv (guard fires on post-increment counts 5M, 10M, ...) nor C (same guard) produces output, so both show empty stdout + exit 0 → MATCH.
 
-**Lesson**: C references for optimizer benchmarks must match Brief's output pattern exactly — if Brief uses periodic `__print_*` inside `[count % N == 0]`, the C reference must use the same periodic `fprintf` with the same format. Return-path-only results confuse the harness. Exit codes are truncated to 8 bits on Linux.
+**Lesson**: C references for optimizer benchmarks must match Briv's output pattern exactly — if Briv uses periodic `__print_*` inside `[count % N == 0]`, the C reference must use the same periodic `fprintf` with the same format. Return-path-only results confuse the harness. Exit codes are truncated to 8 bits on Linux.
 
 ## 2026-06-10: Benchmark Investigation After R2+R3
 
@@ -1360,7 +1360,7 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 | Benchmark | Before | After | Gap | Why |
 |---|---|---|---|---|
 | nbody_newton | 1.69× | **1.08×** | Near parity | Float boxing elimination + copy elimination |
-| nbody_sqrt | 2.81× | **2.41×** | Unchanged | C gets vsqrtps (SIMD sqrt), Brief has scalar sqrt |
+| nbody_sqrt | 2.81× | **2.41×** | Unchanged | C gets vsqrtps (SIMD sqrt), Briv has scalar sqrt |
 | fannkuch_redux | 5.06× | **4.36×** | Improved | R3 (SROA) + copy elimination, but 15 dead-field phi nodes remain |
 | float_math_nonzero | 2.43× | **2.42×** | Unchanged | Register scheduling — C keeps all in XMM |
 | knucleotide | 1.21× | **1.24×** | Unchanged | Guard dispatch overhead |
@@ -1374,40 +1374,40 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 - Constant loads from globals instead of immediates (a00, a01, etc.)
 - `add i64 0, %src` noise adds ~30 redundant instructions
 - Periodic `srem` + branch for the `% 5000000` print condition
-- No `-march=native` in the LLVM pipeline (C uses it, Brief doesn't)
+- No `-march=native` in the LLVM pipeline (C uses it, Briv doesn't)
 
 **fannkuch_redux (4.63×)**
 - R3 enabled SROA: 17 fields → 17 phi nodes in the loop
 - 12 rotation fields are DEAD (only rotate among themselves, never observed)
-- Brief's liveness analysis doesn't eliminate them → 15 dangling phi nodes at the loop back edge
+- Briv's liveness analysis doesn't eliminate them → 15 dangling phi nodes at the loop back edge
 - LLVM can't eliminate these phis because they're structurally part of the loop (each phi's output feeds the next tick's phi input)
 - Results in register pressure for 17 `i64` values per tick when only 3-4 are actually used
 - Full 12-field rotation compiles to ~6 scalar ops but carries 15 dead phi values
 
 **nbody_sqrt (2.41×)**
 - LLVM intrinsic replaced `call @sqrtf` but C uses `-ffast-math -march=native` for `vsqrtps`
-- Brief's `float` = 32-bit, C's `float` = 32-bit — same type, but C gets SIMD sqrt
+- Briv's `float` = 32-bit, C's `float` = 32-bit — same type, but C gets SIMD sqrt
 
 **float_math_nonzero (2.41×)**
 - Float arithmetic matches C instruction-for-instruction size
-- Probable cause: register scheduling — C keeps all floats in XMM registers, Brief's phi structure forces round-trips
+- Probable cause: register scheduling — C keeps all floats in XMM registers, Briv's phi structure forces round-trips
 - Not a boxing issue (already fixed in R2)
 
 ### Open Questions for Future Work
 
-1. **Dead-field elimination**: fannkuch's 12 rotation fields are only rotated, never observed — liveness analysis should eliminate them. Currently Brief's field elimination only drops fields whose ASSIGNMENTS are never read; it doesn't trace the full def-use chain to check for observable output.
-2. **`-march=native`**: Adding `-march=native` to `llc` in the benchmark harness would give Brief the same ISA as C (AVX, FMA, etc.). Currently `llc` uses the host triple without `-march=native`.
+1. **Dead-field elimination**: fannkuch's 12 rotation fields are only rotated, never observed — liveness analysis should eliminate them. Currently Briv's field elimination only drops fields whose ASSIGNMENTS are never read; it doesn't trace the full def-use chain to check for observable output.
+2. **`-march=native`**: Adding `-march=native` to `llc` in the benchmark harness would give Briv the same ISA as C (AVX, FMA, etc.). Currently `llc` uses the host triple without `-march=native`.
 3. **SLP hazard over-conservatism**: For straight-line float code (kalman's matrix arithmetic), the peak register estimate (line 178 in hazard.rs) counts `shuffle_pressure` as `min(cross_ops, n*2)` which overestimates for tree-shaped computation where values are consumed and released quickly.
 4. **`add i64 0, %src` noise**: Fixed for non-SSA field loads and MMIO reads in commit 5ab6bb0. Copies reduced from 18% to 2% of IR instructions (fannkuch), 18% to 3% (knucleotide). Remaining copies are from `let_binding` lookups, SSA extractvalue path, and trivial expression results. Full elimination would require refactoring `emit_expr` to reuse its allocated `v` register more aggressively.
-5. **SSA atomicity overhead**: The %State-based GEP load/store model forces memory round-trips for every field access. For benchmarks like kalman (132 loads for 145 arith ops), this is ~1:1 memory:compute ratio vs C's ~0:1. Fixing this would require Brief-specific LLVM passes or a different codegen model (e.g., rewrite entire loop body with %State register).
+5. **SSA atomicity overhead**: The %State-based GEP load/store model forces memory round-trips for every field access. For benchmarks like kalman (132 loads for 145 arith ops), this is ~1:1 memory:compute ratio vs C's ~0:1. Fixing this would require Briv-specific LLVM passes or a different codegen model (e.g., rewrite entire loop body with %State register).
 
 
 ### Clang IR Comparison (2026-06-10)
 
 Compiled C reference for each benchmark with `clang -O3 -ffast-math -march=native -S -emit-llvm`.
-Brief compiled with `opt -O3 -ffast-math -mtriple=x86_64-pc-linux-gnu; llc -O3 --mcpu=native`.
+Briv compiled with `opt -O3 -ffast-math -mtriple=x86_64-pc-linux-gnu; llc -O3 --mcpu=native`.
 
-| Metric | Clang | Brief | Factor |
+| Metric | Clang | Briv | Factor |
 |---|---|---|---|
 | **Kalman loads/stores** | 1 (stderr) | 132 loads + 29 stores | ~160× |
 | **Kalman GEPs** | 0 | 87 | ∞ |
@@ -1437,11 +1437,11 @@ be used after the loop. It can't prove that the phis are dead after `done:`.
 array element as a standalone SSA value that truly IS a reduction. The C code
 `for (int i = 0; i < N; i++) { sum += a[i]; }` has `sum` as a phi that is
 only used after the loop — LLVM recognizes it as a reduction and vectorizes
-around it. Brief's per-field phis are NOT reductions (each field is
+around it. Briv's per-field phis are NOT reductions (each field is
 independently computed, not accumulated).
 
 **Effect**: `opt -O3 -ffast-math -Rpass=loop-vectorize` produces 0
-vectorized loops for nbody benchmarks. Brief emits scalar `fadd`/`fmul`/`sqrt`
+vectorized loops for nbody benchmarks. Briv emits scalar `fadd`/`fmul`/`sqrt`
 only. C emits `<4 x float>` vector ops with `vector.reduce.fadd`.
 
 **Status**: This is the last remaining vectorization blocker. Previous blockers
@@ -1466,10 +1466,10 @@ have been resolved:
 ### Root Cause
 
 Clang keeps ALL state in **SSA phi nodes** across the loop back-edge. Zero memory traffic
-in the hot path except the periodic `fprintf`. Brief emits every field access as
+in the hot path except the periodic `fprintf`. Briv emits every field access as
 `getelementptr %State → load/store`, creating 100-500× more memory operations.
 
-Clang's C code uses local variables which LLVM promotes to phi nodes. Brief's state
+Clang's C code uses local variables which LLVM promotes to phi nodes. Briv's state
 machine uses a `%State` struct which forces GEP + load/store on every access.
 
 ### Fix: Skip reactor_tick for single-txn runtime programs
@@ -1485,15 +1485,15 @@ matching Clang's IR structure.
 
 ### Instruction Count Comparison (fannkuch_redux)
 
-Operation | Clang (phi) | Brief (struct) | Ratio
+Operation | Clang (phi) | Briv (struct) | Ratio
 --- | --- | --- | ---
 phi nodes | 29 | 0 | Clang 29× better
-load/store | 1 | 74 | Brief 74× worse
-getelementptr | 0 | 69 | Brief infinite
+load/store | 1 | 74 | Briv 74× worse
+getelementptr | 0 | 69 | Briv infinite
 arithmetic | ~50 | ~50 | Equal
 
-The arithmetic ops are the same between C and Brief for fannkuch. All the overhead is
-from memory (load/store/GEP). If Brief used phi nodes like Clang, the gap would close
+The arithmetic ops are the same between C and Briv for fannkuch. All the overhead is
+from memory (load/store/GEP). If Briv used phi nodes like Clang, the gap would close
 to ~1.0×.
 
 ## 2026-06-11 — fannkuch_redux: silent correctness failure + 3.85x performance gap
@@ -1511,7 +1511,7 @@ both stdout captures are empty — C's `fprintf(stderr)` is discarded by `2>/dev
    never fires. This is the SAME issue as nbody_sqrt's `[count == bound]` guard,
    but nbody_sqrt has an alternate output path `[count % 5000000 == 0]`.
 
-2. **Algorithm mismatch**: The Brief code uses `seed % 13` for the checksum
+2. **Algorithm mismatch**: The Briv code uses `seed % 13` for the checksum
    accumulation, while the C reference uses `saved % 13` where `saved = p0`
    (the first permutation element). These are different values — `seed` is the
    LCG output (~0-139967), while `saved` / `p0` is always 0-11. The programs
@@ -1540,7 +1540,7 @@ contracts. Use local `let` variables to compute values outside prior-state scope
 adds 3 extra loads + 3 extra GEP stores per tick. With 15 ALU operations (9 mul,
 6 add), 6 memory operations add ~9% overhead.
 
-**Decision**: Accepted. The overhead is inherent to Brief's prior-state semantics.
+**Decision**: Accepted. The overhead is inherent to Briv's prior-state semantics.
 LLVM's SROA already absorbs most of the cost. Closing this gap would require
 per-field prior-state elision (skip save/restore for fields that are read-only or
 write-only within a tick), which is a future optimization target.
@@ -1631,7 +1631,7 @@ value.
 **Verdict**: Not a compiler bug. Correct usage is `&result <- items[i];`
 followed by `term result;` if the accumulated value must survive the txn.
 
-**Lesson**: The `&` sigil is required for all mutation targets in Brief,
+**Lesson**: The `&` sigil is required for all mutation targets in Briv,
 including `<-` targets. Txn parameters are inputs; outputs flow through
 return values.
 
@@ -1659,11 +1659,11 @@ errors.
 
 **Root Cause**: `emit_expr.rs` lines 656, 673, 681, 735, 739, 759 used `"%marm{}:"`, `"%{}:"` format strings for label definitions. In LLVM IR, label definitions must NOT have `%` (e.g. `marm0:`) while label references MUST have `%` (e.g. `br label %marm0`). The backend was doing the opposite for 6 label sites.
 
-**Latency**: The bug was invisible until `brief build` switched to LLVM backend (previous session). The old `compile` subcommand used Rust-transpile → `rustc`, and the `llvm` subcommand ran `llc` directly without `opt`. Only `brief build` runs `opt -O3` on the generated `.ll` file, which exposed the syntax error.
+**Latency**: The bug was invisible until `briv build` switched to LLVM backend (previous session). The old `compile` subcommand used Rust-transpile → `rustc`, and the `llvm` subcommand ran `llc` directly without `opt`. Only `briv build` runs `opt -O3` on the generated `.ll` file, which exposed the syntax error.
 
 **Fix**: Changed the 6 `writeln!` calls to omit the `%` prefix from label definitions. Branch target references (`label %mdef4`, `br label %mmerge5`) were already correct.
 
-**Lesson**: LLVM IR distinguishes label definitions (`name:`) from value references (`%name`). The backend had been wrong since the match codegen was first written — the error was latent because `opt` was never run on the output before `brief build` was implemented.
+**Lesson**: LLVM IR distinguishes label definitions (`name:`) from value references (`%name`). The backend had been wrong since the match codegen was first written — the error was latent because `opt` was never run on the output before `briv build` was implemented.
 
 ## 2026-06-13 — `terminated` flag leak in `Guarded` block (emit_stmt.rs)
 
@@ -1894,11 +1894,11 @@ dominating block.
 ## 2026-06-14 — Stdlib files fail to parse with Rust parser (pre-existing)
 
 **Issue**: When implementing auto-core import (`import#` / `--no-std`),
-discovered that most Brief stdlib files in `lib/std/` fail to parse
+discovered that most Briv stdlib files in `lib/std/` fail to parse
 with the Rust parser. The auto-core whitelist currently includes only
 `ptr.bv`.
 
-**Root Cause**: Multiple Brief language features used in stdlib files
+**Root Cause**: Multiple Briv language features used in stdlib files
 are not supported by the Rust parser. Examples:
 - `uni` keyword (unification operator) used in `options.bv`, `result.bv`,
   `hashmap.bv`, `hashset.bv` and others
@@ -1909,7 +1909,7 @@ are not supported by the Rust parser. Examples:
 **Fix**: Isolated the auto-core import to `ptr.bv` only. Option + Result
 are now hardcoded via `Program::synthesize_builtin_types()` in `ast.rs`.
 
-**Lesson**: Brief's Rust parser and TypeChecker have known gaps vs the
+**Lesson**: Briv's Rust parser and TypeChecker have known gaps vs the
 interpreter. Auto-core must be conservative — only inject files that
 pass both parsing AND typechecking. Gradual expansion can happen as the
 parser improves.
@@ -1926,7 +1926,7 @@ TypeChecker:
 | `collections.bv` | Collection mutation (`&list <- item`) not a recognized statement type |
 | `string_builder.bv` | Same collection mutation pattern, not a recognized statement |
 
-**Root Cause**: While these files are syntactically valid Brief, the
+**Root Cause**: While these files are syntactically valid Briv, the
 Rust TypeChecker (which predates several language features) does not
 handle:
 1. Type casts via `as Type` syntax
@@ -1947,7 +1947,7 @@ to the whitelist.
 
 **Issue**: ANSI escape sequences (`"\x1b[2J\x1b[H"`) with no `\n` never reach the terminal. Line-buffered stdout (`_IOLBF`) only flushes on `\n` or buffer-full.
 
-**Root Cause**: `lib/runtime/brief_rt.c:379-381`: `fputs(msg, stdout)` without `fflush(stdout)`.
+**Root Cause**: `lib/runtime/briv_rt.c:379-381`: `fputs(msg, stdout)` without `fflush(stdout)`.
 
 **Fix**: Added `fflush(stdout)` after `fputs`.
 
@@ -1975,7 +1975,7 @@ to the whitelist.
 
 **Fix**: Changed String `@ link` storage to `"i8"` (single byte). Backend now emits `load volatile i8, i8* @sym; zext i8 to i64`. Added special case in `emit_fcmp` to compare linked String triggers against string literals by first-byte value (0 for `""`). C runtime provides `volatile char __tty_read_key` set by epoll/kqueue stdin handlers.
 
-**Files**: `mod.rs:318`, `emit_toplevel.rs:99-103`, `emit_expr.rs` (`emit_fcmp`), `loop_engine.rs:622`, `brief_rt.c`
+**Files**: `mod.rs:318`, `emit_toplevel.rs:99-103`, `emit_expr.rs` (`emit_fcmp`), `loop_engine.rs:622`, `briv_rt.c`
 
 **Lesson**: `@ link` should load raw byte values from the linked address, consistent with all other types. The `i8*` storage type was inconsistent with the byte-oriented nature of the trigger mechanism. String triggers now compare by first-byte value, not by pointer identity.
 
@@ -2024,9 +2024,9 @@ let read_idx = pos - 1 - step.skip;
 
 **Root Cause**: `print_int#(value)` is already defined as `Intrinsic::PrintInt` at `src/ast.rs:576` and handled in all three active backends (LLVM, Webstack, CIRCT). The `frgn` approach violates the "Intrinsics Before Frgn" rule — no `frgn` declaration should duplicate functionality already available as an intrinsic.
 
-**Fix**: Replaced all `frgn __print_int` + `__print_int(result)` with `print_int#(result)` across examples, architecture docs, and learn-brief.
+**Fix**: Replaced all `frgn __print_int` + `__print_int(result)` with `print_int#(result)` across examples, architecture docs, and learn-briv.
 
-**Files**: `examples/pipe-chain.bv`, `examples/pipe-skip.bv`, `docs/architecture/features/pipe.md`, `learn-brief/01-basics.md`
+**Files**: `examples/pipe-chain.bv`, `examples/pipe-skip.bv`, `docs/architecture/features/pipe.md`, `learn-briv/01-basics.md`
 
 **Lesson**: Check for existing intrinsics before reaching for `frgn`. `print_int#`, `put_char#`, `print_float#` all exist and should be used in examples.
 
@@ -2123,14 +2123,14 @@ output at BOUND≥2. Likely a list header encoding issue in the inop code.
 
 ---
 
-## 2026-06-26 — `setvbuf(stdout, NULL, _IOLBF, 0)` in brief_rt.c makes fputc 2.1× slower
+## 2026-06-26 — `setvbuf(stdout, NULL, _IOLBF, 0)` in briv_rt.c makes fputc 2.1× slower
 
-**Issue**: `benchmarks/fasta.bv` compiled by Brief runs at 2.1× wall-clock time
+**Issue**: `benchmarks/fasta.bv` compiled by Briv runs at 2.1× wall-clock time
 vs the C reference (0.480s vs 0.230s at BOUND=50000000). The generated assembly
 is instruction-identical except for 2 extra register-to-register `mov`
 instructions, which should be ~0 cycles via mov elimination.
 
-**Root Cause**: `lib/runtime/brief_rt.c:276` calls `setvbuf(stdout, NULL, _IOLBF, 0)`
+**Root Cause**: `lib/runtime/briv_rt.c:276` calls `setvbuf(stdout, NULL, _IOLBF, 0)`
 in `__rt_init()` (the runtime constructor). This forces stdout into line-buffered
 mode (`_IOLBF`). On glibc, `fputc` into a line-buffered stream is ~2.1× slower
 than the default fully-buffered mode (`_IOFBF`), because every call checks
@@ -2142,22 +2142,22 @@ were removed on 2026-06-26, but these were redundant — `__rt_init()` in the
 C runtime called `setvbuf` before `main()` ever ran, overriding any LLVM-level
 setting.
 
-**Fix**: Removed `setvbuf(stdout, NULL, _IOLBF, 0)` from `brief_rt.c:276`.
+**Fix**: Removed `setvbuf(stdout, NULL, _IOLBF, 0)` from `briv_rt.c:276`.
 `__print` and `__print_int` already call `fflush(stdout)` explicitly, so line-
 buffering was redundant for correctness. Glibc's default auto-selects
 fully-buffered for non-TTY and line-buffered for TTY terminals — matching
 standard C program behavior.
 
 Users who need interactive flushing on `\n` can call it manually:
-```brief
+```briv
 frgn setvbuf(stream: Ptr<Byte>, buf: Ptr<Byte>, mode: Int, size: Int) -> Int;
 setvbuf(stdout, 0, 1, 0);  // _IOLBF = 1
 ```
 
-**Result**: fasta gap closes from 2.1× to ~0.96× (Brief 0.220s vs C 0.230s).
-Brief now BEATS C on fasta.
+**Result**: fasta gap closes from 2.1× to ~0.96× (Briv 0.220s vs C 0.230s).
+Briv now BEATS C on fasta.
 
-**Files**: `lib/runtime/brief_rt.c:276`, `src/backend/llvm/loop_engine.rs`
+**Files**: `lib/runtime/briv_rt.c:276`, `src/backend/llvm/loop_engine.rs`
 
 **Lesson**: The C runtime constructor (`__rt_init`) runs before `main()` and
 can override any LLVM-level buffering configuration. Always check the C runtime
@@ -2362,7 +2362,7 @@ after adding operator bindings.
 go out of scope, but it does not prove the absence of dangling pointers. A user
 can write:
 
-```brief
+```briv
 let list: List<Int> = [1, 2, 3];
 let first: Int = list[0];      // borrows from list
 list[5] = 42;                  // mutates list while first still active
@@ -2379,7 +2379,7 @@ sound, but mutation-while-borrowed is not detected.
 
 **Impact**: Memory safety depends on the programmer not aliasing pointers through
 collection accessors. This is acceptable for single-threaded reactive programs
-(common Brief use case) but unsound for general-purpose code with complex
+(common Briv use case) but unsound for general-purpose code with complex
 aliasing patterns.
 
 **Fix**: No immediate fix planned. A borrow checker pass would need to:
@@ -2496,7 +2496,7 @@ controls body execution, not process termination. This is by design: reactive
 transactions are for long-running reactive systems, not one-shot tests.
 
 **Workaround**: Use `SysCall#(Exit, code)` to terminate after the test, or use the
-benchmark harness (`/tmp/brief_bench_timer`) which enforces a timeout. No fix
+benchmark harness (`/tmp/briv_bench_timer`) which enforces a timeout. No fix
 needed — this is architectural, not a bug.
 
 **Lesson**: For one-shot tests, use `defn` with `SysCall#(Exit, ...)` or integrate
@@ -2524,7 +2524,7 @@ set to `None`.
 **Issue**: `__memcmp`, `__UTF8_find`, `__UTF8_validate` used double-underscore prefix
 convention which is reserved for `frgn` (foreign) functions.
 
-**Root Cause**: Author used C convention (`__function_name = internal`). Brief
+**Root Cause**: Author used C convention (`__function_name = internal`). Briv
 convention is: `__` prefix => `frgn` only.
 
 **Fix**: Renamed to `memcmp`, `UTF8_find`, `UTF8_validate` (no `__` prefix).
@@ -2534,9 +2534,9 @@ convention is: `__` prefix => `frgn` only.
 ## 2026-07-18 — `else` keyword not supported
 
 **Issue**: `else if` chains and `if/else` expressions produce parse errors in
-Brief expressions.
+Briv expressions.
 
-**Root Cause**: Brief's expression parser has no `else` token. Conditionals use
+**Root Cause**: Briv's expression parser has no `else` token. Conditionals use
 `when` guards (statement level) or `if cond { expr } else { expr }` at expression
 level, but `else` is not parsed as a keyword in all contexts.
 
@@ -2583,7 +2583,7 @@ that Ptr type instead of `Int`.
 
 **Tests**: `test_call_with_ptr_arg_emits_inttoptr` added. 1210 tests pass.
 
-**Discovered by**: Compiling `lib/tamer/main.bv` (the Brief tamer) via `briefc build`
+**Discovered by**: Compiling `lib/tamer/main.bv` (the Briv tamer) via `brivc build`
 produced `main.ll` with invalid IR: `%t1 = add nsw i64 %ac0, %t3` followed by
 `load i64, ptr %t1` — clang rejected the second line because `%t1` is `i64`, not `ptr`.
 
@@ -2800,7 +2800,7 @@ The crash appears to be triggered by a specific combination of:
 - No struct type declarations for stdlib types in the IR
 - Correct alignment values
 
-The crash is not a Brief compiler bug — it's a clang/LLVM bug in the LICM
+The crash is not a Briv compiler bug — it's a clang/LLVM bug in the LICM
 sinkRegion pass. The baseline avoided it by producing slightly different IR that
 the buggy pass doesn't choke on.
 
@@ -2826,7 +2826,7 @@ code explicitly returned `{ i64, i64 }` for String (emit_toplevel.rs:274), but t
 path is inside `if self.feature_sso_strings { ... }` which defaults to `false`.
 
 The `i128` representation changes the FFI ABI for all functions taking String args:
-`__getenv_brief({ i64, i64 })` → `__getenv_brief(i128)`. Clang passes `i128` by
+`__getenv_briv({ i64, i64 })` → `__getenv_briv(i128)`. Clang passes `i128` by
 value in a single register, while `{ i64, i64 }` is passed by pointer. This
 completely changes call site codegen and triggers different optimizer behavior.
 
@@ -2860,14 +2860,14 @@ merge. The actual baseline worktree binary produces no output.
 
 ---
 
-## mandelbrot: Brief Output Differs from C — UNFIXED (pre-existing)
+## mandelbrot: Briv Output Differs from C — UNFIXED (pre-existing)
 
 **Date:** 2026-07-30  
 **Status:** Pre-existing, not caused by our changes (verified by testing 4 commits
 back before any of our work — same wrong output)  
-**Evidence:** Brief mandelbrot produces 2 lines of large integers
+**Evidence:** Briv mandelbrot produces 2 lines of large integers
 (`101363715272128`, `4318579316753219217`) while C produces 11 lines
-(`73`, then 10 × `119`). The Brief output values look like raw memory values
+(`73`, then 10 × `119`). The Briv output values look like raw memory values
 or uninitialized state fields, suggesting a state loading bug in the loop engine
 for integer-heavy convergent nodes.
 
@@ -2881,7 +2881,7 @@ derivation-synthesis merge or the casting graph refactoring.
 **Date:** 2026-07-30  
 **Status:** Pre-existing — `Sqrt#` intrinsic call signature mismatch in
 `frgn` declaration or `emit_intrinsic_call_dispatch`. The error occurs during
-clang LTO linking, not during Brief compilation.
+clang LTO linking, not during Briv compilation.
 
 ---
 
@@ -2900,7 +2900,7 @@ Likely has similar loop structure and alignment issues.
 **Root cause:** `emit_declares` / the foreign-declare loop at
 `src/backend/llvm/mod.rs:2069` iterated `self.ctx.frgn_map` — a `HashMap` with a
 per-process SipHash seed — WITHOUT sorting. The emitted `declare` statements
-(e.g. `__getenv_brief`, `__print_int`, `__print_str`) appeared in run-to-run
+(e.g. `__getenv_briv`, `__print_int`, `__print_str`) appeared in run-to-run
 nondeterministic ORDER in the generated IR. Violates Coding Standard 7
 (HashMap iteration that produces LLVM IR MUST be sorted by key).
 **Fix:** The loop now collects `frgn_map.iter()` into a `Vec`, sorts by key, and
@@ -2967,7 +2967,7 @@ unless the type declares a cross-type `op` overload. Verified:
 outlined guard param that is a FLOAT state field (e.g. accumulator_flush's
 `sum = 0` reset) is a `float` register — boxing it as i64 produced
 `store i64 %__cp_sum` on a float param (type error).
-**Fix:** the alloca uses the binding's Brief type (`let_binding_types` →
+**Fix:** the alloca uses the binding's Briv type (`let_binding_types` →
 `llvm_type`).
 
 ## 2026-08-01 — queue_drain dispatches to version-DAG, not the countdown
@@ -3020,7 +3020,7 @@ in `float_math.ll`.
 **Root cause:** `emit_field_init_value` (emit_toplevel.rs) OR-ed tag bit 0 (= 1)
 onto String literal addresses when `tag_strings=true` (the inline-init path used
 by `emit_inline_init_stores` in `main`). Under the bits model a String value is
-an UNTAGGED `ptr` to `[len: i64][bytes]`; the tag made `brief_str_eq` read a
+an UNTAGGED `ptr` to `[len: i64][bytes]`; the tag made `briv_str_eq` read a
 misaligned length header, so equal-content strings at heap vs literal addresses
 compared unequal. The tag bit belongs to the old SSO encoding only.
 **Fix:** gate the tag with `tag_strings && self.feature_sso_strings`; the
@@ -3091,7 +3091,7 @@ stripping the `#` from its target.
 `base` parent (`type Latin1String: #String` ⇒ "String") since the normalizer
 no longer injects `Cast.#` properties.
 **Impact:** `s as #Bit` now emits `ptrtoint` (content view); `b as String`
-emits `brief_bits_to_str` (encoding door). Verified in `.smoke/bit_let.bv`,
+emits `briv_bits_to_str` (encoding door). Verified in `.smoke/bit_let.bv`,
 `.smoke/bit_to_str.bv`, and `test_hashword_category_strip`.
 **Lesson:** a type's protocol category is derived from the universe's Cast.#
 properties OR its declared base — never from the raw HashWord text — and the
@@ -3112,7 +3112,7 @@ graph keys must be normalized consistently.
 **Fix:** `collect_identifiers` gained an `Expr::Reflect(recv, _, _)` arm that
 collects the receiver (the same liveness rule as FFI args: an observation keeps
 the value alive).
-**Impact:** `.smoke/len_demo.bv` now emits `brief_char_len` for `s.^Len`
+**Impact:** `.smoke/len_demo.bv` now emits `briv_char_len` for `s.^Len`
 (chars=5) and a header load for `s.^^Bytes` (bytes=6) on "héllo".
 **Lesson:** every expression construct that reads a state value must be listed
 in the liveness identifier collector; a missing arm silently eliminates the
@@ -3256,7 +3256,7 @@ the stale-read behavior returns.
 then `ptrtoint`'d an i64 (a type mismatch), AND `int_to_str` was undefined in
 the runtime (a latent link error). The direct-cast path emitted
 `call i64 @__int_to_str__` — also undefined.
-**Fix:** (a) `int_to_str`/`__int_to_str__` defined in `brief_rt.c` (format the
+**Fix:** (a) `int_to_str`/`__int_to_str__` defined in `briv_rt.c` (format the
 int via snprintf + wrap as a `[len][bytes]` String); (b) the ExtCall lane
 emission uses `dst_ll` for the return type (`call ptr @int_to_str(i64)`) —
 the same pattern the `CastFromBitCallback` case already used; (c) the direct
@@ -3270,7 +3270,7 @@ Regression tests: `test_cast_int_to_string_lane_emits_ptr_call` (lane path) +
 **Date:** 2026-08-03
 **Root cause (two related):** (1) The `#Float` protocol crosses the boundary as
 LLVM `float` (32-bit) but config/glue.dbvl declares `c_abi = "double"` — a C
-caller using `double` gets garbage for Brief `Float` args/returns. (2) Float
+caller using `double` gets garbage for Briv `Float` args/returns. (2) Float
 parameter/arithmetic codegen is broken: `export defn scale(x: Float) -> Float`
 emits `%ac0 = zext i32 (bitcast float %arg0) to i64` then `fmul float %ac0, ...`
 — an `i64` used as a `float` operand, rejected by `llc` ("'%ac0' defined with
@@ -3307,8 +3307,8 @@ calls — rank/cancel/boundary never did):**
    so `term saved;` (and the marshalled `term str_to_c(saved);` — the CStr↔String
    meld rewrite makes the read a frgn call ARG) didn't mark the export stateful
    → the wrapper lost its `%state` param.
-3. `__brief_init_state` (emit_library_shim) returned a STACK `alloca` pointer
-   that dangled on return. Fixed to a module-global `@__brief_state`
+3. `__briv_init_state` (emit_library_shim) returned a STACK `alloca` pointer
+   that dangled on return. Fixed to a module-global `@__briv_state`
    (library model is one state per process).
 4. `fn_return_types` omitted Transactions → `term store_text(name)` on a
    CStr-returning txn inferred Int (the Int fallback only ever worked by luck).
@@ -3316,18 +3316,18 @@ calls — rank/cancel/boundary never did):**
    LLVM constants for non-integer return types) → opt rejected the IR.
 **Also fixed along the way:** the shim exported `read` collided with libc's
 `read(2)` (compile-time conflicting prototypes + runtime PLT interposition → -1)
-— the renderer now emits `__brief_export_<name>` + `asm("name")` labels and the
+— the renderer now emits `__briv_export_<name>` + `asm("name")` labels and the
 link adds `-Wl,-Bsymbolic-functions`. The fragile "looks like a C string"
-heuristic in `brief_str_to_c` misread any Brief String whose length byte is
+heuristic in `briv_str_to_c` misread any Briv String whose length byte is
 printable ASCII (a 35-char path read as '$'); removed — under the composite
 every String IS `[len][bytes][\0]`. `__read_file__`/`__write_file__` free'd the
 now-borrowed `str_to_c` result (P2 zero-copy) — removed the frees.
 
-## String Value Representation Inconsistency (bits model) — compiler-in-Brief blocker
+## String Value Representation Inconsistency (bits model) — compiler-in-Briv blocker
 
 **Date:** 2026-08-04
-**Status:** Open — a systemic backend issue surfaced by the compiler-in-Brief PoC
-(plan 2026-08-04-compiler-in-brief-dogfood-ffi).
+**Status:** Open — a systemic backend issue surfaced by the compiler-in-Briv PoC
+(plan 2026-08-04-compiler-in-briv-dogfood-ffi).
 **Symptom:** `inner.data[len] = val` (List.push) emits `store i64 %t7, ptr %t37`
 where `%t7` is a String-literal `ptr` and the slot is `i64` → invalid IR.
 **Root cause:** a String value's representation is inconsistent at the crossing
@@ -3338,7 +3338,7 @@ store writes a `ptr` into an `i64` slot. Fixed instances: String==literal
 comparison (`string_ptr` inttoptr), list-element store (`adapt_to_i64`), the
 lvalue Index store (`adapt_to_i64`). The remaining instance: String values that
 are typed `Int` but physically `ptr` at param/argument boundaries.
-**Impact:** any Brief code passing a String literal into a collection constructor
+**Impact:** any Briv code passing a String literal into a collection constructor
 (`List.push("b")`) fails codegen. Blocks the needs_state pass's list handling.
 **Fix direction:** a single point that ptrtoint's a String argument when binding
 it to a param (method call / frgn / call), and inttoptr's on load — an
@@ -3369,7 +3369,7 @@ arrays but the generic/`Custom` local-array case is missing).
 ## Generic struct array-field layout is zeroed (Stack<T,N> unusable)
 
 **Date:** 2026-08-04
-**Status:** Open — compiler-in-Brief PoC. Any struct with an inline array field
+**Status:** Open — compiler-in-Briv PoC. Any struct with an inline array field
 whose element type is the generic parameter (`obj Stack<T, N> { data: T[N]; len:
 Int; }`) codegens `len` and `data[i]` at byte offset 0 (element stride 0).
 Verified: `Stack<Int,8>` + `Malloc#(72) as Stack<Int,8>`; init writes data[0]
@@ -3425,7 +3425,7 @@ layout fix (this batch), `List<String>` fields register as `inner.data: Ptr<T>`
 panics ("Phase-1b boundary"), and `let x: String = l.inner.data[i]` fails
 typecheck (T vs String). `as String` casts codegen a `{ ptr, i64 }` load that
 opt rejects (mismatch with i64 use).
-**Impact:** a Brief pass cannot read back list elements as Strings for
+**Impact:** a Briv pass cannot read back list elements as Strings for
 comparison/slicing — the needs_state splitter can push but not inspect.
 **Fix direction:** substitute the generic T when resolving `Ptr<T>` pointees
 for concrete instantiations (the index_elem_ty / load path), OR define the
@@ -3436,13 +3436,13 @@ bits-model invariant: element at a boundary IS an i64 handle).
 
 **Date:** 2026-08-04
 **Status:** Open — probe `let text: String = s` (s: CStr) then `text .^Len`
-returned 5 for a 2-char input "xy" when linked as `briefc build --library`.
+returned 5 for a 2-char input "xy" when linked as `brivc build --library`.
 The glue-path meld (boundary.bv echo/greet) passes its test, so the divergence
 is likely in the library-mode export wrapper or the String length-prefix read
 after the meld. Verify against `__glue_release`/`str_to_c` before trusting any
 String length/slice computed from a melded input in the pass.
 **Fix direction:** reproduce with a focused boundary-style export (not a defn
-export), compare the length-prefix write in `brief_cstr_to_brief` vs the
+export), compare the length-prefix write in `briv_cstr_to_briv` vs the
 `.^Len` codegen path.
 
 ## String slicing returns the whole string (no substring semantics)
@@ -3451,18 +3451,18 @@ export), compare the length-prefix write in `brief_cstr_to_brief` vs the
 **Status:** Open — blocks the needs_state pass EXECUTION (the pass type-checks
 and its string-scanning design is complete). Constant-bounds slices
 (`s[0:1]`) are narrowed to `Vector<String,1>` and `.^Len`/`==` on them read the
-WHOLE buffer (brief_char_len(%t0) for both a=whole and c=whole). Dynamic-bounds
+WHOLE buffer (briv_char_len(%t0) for both a=whole and c=whole). Dynamic-bounds
 slices (`s[a:b]`) hit the emit_expr.rs:992 arm which only evaluates the bounds
 and RETURNS array_reg — no substring is created. Verified in a linked library:
 `let a = t[1:t .^Len]; a .^Len` returns the WHOLE string's length.
-**Impact:** any Brief code that slices a String (including every scanner in the
+**Impact:** any Briv code that slices a String (including every scanner in the
 pass: line_end, token_at, has_token, in_section, token_name) computes against
 the whole string. The pass currently panics at `line .^Len` when `line` is a
 `let` from a dynamic slice of a String PARAM (the boxed i64 param is passed to
-brief_char_len as a raw ptr).
+briv_char_len as a raw ptr).
 **Fix direction (two paths, pick per plan):**
   (a) emit a REAL substring for String-typed slices — a `[len][bytes]` copy of
-      chars a..b via a runtime `brief_str_substr` + a `frgn __str_substr(s,
+      chars a..b via a runtime `briv_str_substr` + a `frgn __str_substr(s,
       a, b) -> String` (the stdlib already declares frgns with String
       params/returns, but NONE is exercised — the frgn String marshalling
       (i64 handle vs ptr) is UNVERIFIED and must be tested first), or
@@ -3474,28 +3474,28 @@ brief_char_len as a raw ptr).
 ## Imported-module frgn with String param + String return resolves to Int
 
 **Date:** 2026-08-04
-**Status:** Open — verified while wiring the substring frgn. `frgn brief_str_substr(handle: String, a: Int, b: Int) -> String` declared in `lib/glue/c.bv` and IMPORTED resolves its return type as `Int` (a `let x: String = ...` fails "found Int"). The SAME declaration placed in the importing file type-checks and runs correctly (1002/2003 via the boundary). `cstr_to_brief` (Int param + String return) and `str_to_c` (String param + Int return) — each alone — resolve fine when imported; only String-param AND String-return combined fails.
+**Status:** Open — verified while wiring the substring frgn. `frgn briv_str_substr(handle: String, a: Int, b: Int) -> String` declared in `lib/glue/c.bv` and IMPORTED resolves its return type as `Int` (a `let x: String = ...` fails "found Int"). The SAME declaration placed in the importing file type-checks and runs correctly (1002/2003 via the boundary). `cstr_to_briv` (Int param + String return) and `str_to_c` (String param + Int return) — each alone — resolve fine when imported; only String-param AND String-return combined fails.
 **Impact:** the pass declares its substr frgn locally; a future cleanup should fix the imported-module frgn signature resolution (typechecker/mod.rs:1637 collects `success_output` per top-level item — the merge of imported ForeignBindings is likely missing the return type).
 
 ## Frgn String-return heap corruption under many calls (blocks the pass)
 
 **Date:** 2026-08-04
-**Status:** Open — the compiler-in-Brief pass computes the CORRECT bitmask for
+**Status:** Open — the compiler-in-Briv pass computes the CORRECT bitmask for
 the small boundary.bv projection (mask=0) but the linked library's memory is
 corrupted on longer projections (node_bridge: mask 0 instead of 31; a
 dbg_probe returns t .^Len = 60 / 5 / 3 across THREE runs of the SAME binary —
 nondeterministic heap corruption). The corruption is in the frgn String-return
-path: every `brief_str_substr` call allocates a fresh [len][bytes] String via
+path: every `briv_str_substr` call allocates a fresh [len][bytes] String via
 the emit_direct_frgn_call String-return marshalling and it is never freed; the
 per-char substr scans (before the char_at frgn) made it far worse. The meld
-(`brief_cstr_to_brief`) result itself is sometimes read back with a corrupted
+(`briv_cstr_to_briv`) result itself is sometimes read back with a corrupted
 length.
 **Impact:** `needs_state_compute` is only reliable on short inputs; the pass
 cannot yet replace the Rust reference.
 **Fix direction:** (1) run the linked library under ASan/valgrind to find the
 exact overrun (likely a runtime fn or the frgn String-arg/return marshalling
 writing past the [len][bytes] buffer); (2) convert the remaining String-return
-frgns (brief_str_substr) to Int-return where the pass only needs a length /
+frgns (briv_str_substr) to Int-return where the pass only needs a length /
 char, minimizing allocation; (3) verify every frgn String arg is inttoptr'd to
 the buffer (not the boxed i64 handle) at the call site.
 
@@ -3509,7 +3509,7 @@ call regular defns, so the needs_state analysis gives them `%state`), but the
 C main called them with ONE argument. The projection pointer landed in
 `%state` and `%arg0` was garbage, so the meld read a random length (60 / 5 / 3
 across runs — "corruption"). With the correct two-argument call
-(`needs_state_compute(st, proj)` where `st = __brief_init_state()`), the pass
+(`needs_state_compute(st, proj)` where `st = __briv_init_state()`), the pass
 is DETERMINISTIC and matches the Rust reference on all five bridges
 (boundary=0, node_bridge=31, cancel=1, rank=2, bench=2) — asserted by
 `tests/c_driver_needs_state.rs`. Lesson: a stateful export's C signature takes
@@ -3519,7 +3519,7 @@ the state handle first; the glue `bindings` header is the source of truth.
 
 **Date:** 2026-08-04
 **Status:** Resolved (fixed incidentally). The `lib/compiler/reader.bv` shared
-module now declares `brief_str_substr(handle: String, a: Int, b: Int) -> String`
+module now declares `briv_str_substr(handle: String, a: Int, b: Int) -> String`
 and both passes import it — the return type resolves correctly and the pass
 runs (verified: soa_reorder imports reader.bv and produces the exact
 permutation). The failure was observed before the P3 string/codegen fixes

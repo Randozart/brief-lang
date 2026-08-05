@@ -56,7 +56,7 @@ Remove the `post_hoist.is_empty()` guard (line 2640 area):
 
 ```bash
 cargo build --release
-BOUND=50000000 ./target/release/brief-compiler build benchmarks/nbody_newton.bv --out benchmarks
+BOUND=50000000 ./target/release/briv-compiler build benchmarks/nbody_newton.bv --out benchmarks
 # Verify output matches C reference
 diff <(BOUND=50000000 timeout 30 ./benchmarks/nbody_newton) <(timeout 30 ./benchmarks/nbody_newton_c)
 # Verify timing
@@ -156,27 +156,27 @@ The `_by_idx` variants follow the same pattern.
 The `field_index_map` path (memory state load):
 ```rust
 // Current — hardcoded load i64 + unbox:
-let brief_ty = ...;
+let briv_ty = ...;
 writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
-if brief_ty == Type::float64() {
+if briv_ty == Type::float64() {
     let dbl = self.fun.gen_reg();
     writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, v).ok();
     TypedRegister { name: dbl, ty: Type::float64() }
-} else if brief_ty == Type::float() {
+} else if briv_ty == Type::float() {
     let tr = self.fun.gen_reg();
     let fl = self.fun.gen_reg();
     writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, v).ok();
     writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
     TypedRegister { name: fl, ty: Type::float() }
 } else {
-    TypedRegister { name: v.to_string(), ty: brief_ty }
+    TypedRegister { name: v.to_string(), ty: briv_ty }
 }
 
 // New — dynamic load, no unboxing:
 let llvm_ty = &self.ctx.field_types[idx];
 writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v, llvm_ty, gep, self.align_of(llvm_ty)).ok();
-let brief_ty = ...;
-TypedRegister { name: v.to_string(), ty: brief_ty }
+let briv_ty = ...;
+TypedRegister { name: v.to_string(), ty: briv_ty }
 ```
 
 The `phi_field_regs` path (lines 91-109) stays the same — phi registers remain `i64`.
@@ -255,7 +255,7 @@ match ft.as_str() {
 cargo build --release
 # Build every benchmark — LLVM verifier catches any type mismatch
 for b in benchmarks/*.bv; do
-    BOUND=50000000 timeout 30 ./target/release/brief-compiler build "$b" --out benchmarks
+    BOUND=50000000 timeout 30 ./target/release/briv-compiler build "$b" --out benchmarks
 done
 # Run correctness check
 BOUND=50000000 timeout 300 bash benchmarks/build_and_bench.sh --correctness

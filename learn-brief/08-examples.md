@@ -1,10 +1,10 @@
 # Complete Examples
 
-Real-world Brief programs demonstrating all features.
+Real-world Briv programs demonstrating all features.
 
 ## 1. Counter Application
 
-```brief
+```briv
 // counter.rbv
 let count: Int = 0;
 
@@ -39,7 +39,7 @@ the HTML template that binds to those variables via `b-*` directives.
 
 ## 2. Bank Account System
 
-```brief
+```briv
 // bank.bv
 let balance: Int = 1000;
 let overdraft_protection: Bool = false;
@@ -89,7 +89,7 @@ txn enable_overdraft()
 
 ## 3. Shopping Cart
 
-```brief
+```briv
 // shopping_cart.rbv
 let items: Int = 0;
 let total: Float = 0.0;
@@ -158,7 +158,7 @@ render struct ShoppingCart {
 
 ## 4. Todo List
 
-```brief
+```briv
 // todo.rbv
 struct Todo {
     id: Int;
@@ -232,7 +232,7 @@ render struct TodoList {
 
 ## 5. Traffic Light System
 
-```brief
+```briv
 // traffic_light.bv
 enum LightState { Red, Yellow, Green }
 let state: LightState = LightState::Red;
@@ -273,7 +273,7 @@ node increment_timer() [true][timer == @timer + 1] {
 
 ## 6. Producer-Consumer Pattern
 
-```brief
+```briv
 // producer_consumer.bv
 let buffer: List<Int> = [];
 let buffer_size: Int = 10;
@@ -308,7 +308,7 @@ defn process(item: Int) {
 
 ## 7. File Processor with FFI
 
-```brief
+```briv
 // file_processor.bv
 import "std/io";
 import "std/string";
@@ -345,7 +345,7 @@ txn process_file(input_path: String, output_path: String)
 
 ## 8. State Machine: Vending Machine
 
-```brief
+```briv
 // vending_machine.bv
 enum MachineState { Idle, Selection, Payment, Dispensing }
 let state: MachineState = MachineState::Idle;
@@ -394,7 +394,7 @@ node refund()
 
 ## 9. Reactive Dashboard
 
-```brief
+```briv
 // dashboard.rbv
 let temperature: Float = 20.0;
 let humidity: Float = 50.0;
@@ -460,7 +460,7 @@ render struct Dashboard {
 Compile-time metaprogramming uses `$(Stage)` blocks with `$let` variables
 and `$defn` helper functions:
 
-```brief
+```briv
 // compile_time_meta.bv
 $let factor = 1000;
 

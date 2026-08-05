@@ -3,12 +3,12 @@
 // Bound is a state field, so the compiler cannot constant-fold.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/print_loop.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/print_loop.bv \
 //       --out benchmarks --optimize-budget 256
 
 
 import { get_env_int } from "std/env.bv";
-// brief_rt.c linked automatically
+// briv_rt.c linked automatically
 
 let bound: Int = get_env_int("BOUND");
 let ops: Int = 0;

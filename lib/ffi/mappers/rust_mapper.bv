@@ -1,5 +1,5 @@
 // Rust Mapper - 1:1 mapping
-// No transformation between Rust and Brief types
+// No transformation between Rust and Briv types
 
 // Map input: 1:1 identity
 defn map_input(value: Value) -> Value [true][term == value] {

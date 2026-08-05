@@ -13,7 +13,7 @@
 //                     (.2|> skips 2 commands back,
 //                      reads from index 2-2 = 0)
 //
-// Run: brief-compiler build --llvm examples/pipe-skip.bv
+// Run: briv-compiler build --llvm examples/pipe-skip.bv
 
 defn square(x: Int) -> Int { term x * x; };
 defn add_one(x: Int) -> Int { term x + 1; };

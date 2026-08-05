@@ -9,7 +9,7 @@
 > described in this document are superseded. Primordial types now carry
 > hashword op signatures instead of metadata tags:
 >
-> ```brief
+> ```briv
 > type Int: #Int {
 >     op Add(#Int, #Int);      // not primitive <~ "Int" + llvm <~ "i64"
 >     op Parse(#Int);           // identity literal construction

@@ -128,10 +128,10 @@ impl StrategyAnalyzer {
         // G3: Precise has_unguarded_ffi via ForeignBinding table. NOT using
         // statement_contains_ffi (which false-positives on sqrt(), sin(), etc.).
         // Instead, collect known FFI names from ForeignBinding declarations:
-        //   frgn __print_float(x: Float32) -> Int from "link/brief_rt.c";
+        //   frgn __print_float(x: Float32) -> Int from "link/briv_rt.c";
         // Then check if any txn body calls these names OUTSIDE a `when` guard.
         let ffi_names: HashSet<String> = ctx.foreign_bindings.iter()
-            .map(|fb| fb.brief_name.as_ref().unwrap_or(&fb.foreign_name).clone())
+            .map(|fb| fb.briv_name.as_ref().unwrap_or(&fb.foreign_name).clone())
             .collect();
         let has_unguarded_ffi = txn.body.iter().any(|stmt| match stmt {
             Statement::Guarded(_, _) => false,  // skip guard bodies
@@ -321,22 +321,22 @@ Variables computed through raw float register pressure (`raw_peak_live_floats`).
 
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦═══════╦═══════════╗
-║ Benchmark             ║ Brief    ║ C        ║ Ratio    ║ Winner║ Correct   ║
+║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner║ Correct   ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬═══════╬═══════════╣
 ║ ring_buffer           ║ .0536s   ║ .0480s   ║ 1.11x    ║ C     ║ MATCH     ║
 ║ float_math            ║ .0727s   ║ .0727s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
 ║ float_math_nonzero    ║ .1691s   ║ .1666s   ║ 1.01x    ║ C     ║ MATCH     ║
-║ sparse_dispatch       ║ .0519s   ║ .0596s   ║ .87x     ║ Brief ║ MATCH     ║
-║ print_loop            ║ .0588s   ║ .0594s   ║ .98x     ║ Brief ║ MATCH     ║
+║ sparse_dispatch       ║ .0519s   ║ .0596s   ║ .87x     ║ Briv ║ MATCH     ║
+║ print_loop            ║ .0588s   ║ .0594s   ║ .98x     ║ Briv ║ MATCH     ║
 ║ nbody_newton          ║ 11.79s   ║ 8.40s    ║ 1.40x    ║ C     ║ MATCH     ║
-║ nbody_sqrt            ║ 2.81s    ║ 2.82s    ║ .99x     ║ Brief ║ MATCH     ║
-║ nbody_sqrt_idio       ║ 2.98s    ║ 3.65s    ║ .81x     ║ Brief ║ MATCH     ║
-║ fasta                 ║ .2090s   ║ .2097s   ║ .99x     ║ Brief ║ MATCH     ║
+║ nbody_sqrt            ║ 2.81s    ║ 2.82s    ║ .99x     ║ Briv ║ MATCH     ║
+║ nbody_sqrt_idio       ║ 2.98s    ║ 3.65s    ║ .81x     ║ Briv ║ MATCH     ║
+║ fasta                 ║ .2090s   ║ .2097s   ║ .99x     ║ Briv ║ MATCH     ║
 ║ fannkuch_redux        ║ .0646s   ║ .0644s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
 ║ mandelbrot            ║ .6656s   ║ .6594s   ║ 1.00x    ║ ~tie  ║ MATCH     ║
-║ kalman_filter_runtime ║ .1780s   ║ .1807s   ║ .98x     ║ Brief ║ MATCH     ║
-║ knucleotide           ║ .1883s   ║ .1898s   ║ .99x     ║ Brief ║ MATCH     ║
-║ cancel_math           ║ .0605s   ║ .0627s   ║ .96x     ║ Brief ║ MATCH     ║
+║ kalman_filter_runtime ║ .1780s   ║ .1807s   ║ .98x     ║ Briv ║ MATCH     ║
+║ knucleotide           ║ .1883s   ║ .1898s   ║ .99x     ║ Briv ║ MATCH     ║
+║ cancel_math           ║ .0605s   ║ .0627s   ║ .96x     ║ Briv ║ MATCH     ║
 ║ queue_drain           ║ .0619s   ║ .0608s   ║ 1.01x    ║ C     ║ MATCH     ║
 ║ queue_drain_sym       ║ .0631s   ║ .0618s   ║ 1.02x    ║ C     ║ MATCH     ║
 ║ queue_drain_idio      ║ .0625s   ║ .0621s   ║ 1.00x    ║ ~tie  ║ MATCH     ║

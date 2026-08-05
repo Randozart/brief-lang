@@ -1,6 +1,6 @@
-# Brief Language - VSCode Extension
+# Briv Language - VSCode Extension
 
-Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (`.bv`), Rendered Brief (`.rbv`), Embedded Brief (`.ebv`), and Data Brief (`.dbv`, `.dbvl`) files.
+Syntax highlighting, folding, bracket colorization, and intelligent editing for Briv (`.bv`), Rendered Briv (`.rbv`), Embedded Briv (`.ebv`), and Data Briv (`.dbv`, `.dbvl`) files.
 
 ## Features
 
@@ -8,7 +8,7 @@ Syntax highlighting, folding, bracket colorization, and intelligent editing for 
 - **Bracket Colorization**: Matching brackets highlighted in different colors
 - **Auto-closing**: Automatically closes `{}`, `[]`, `()`, and `""`
 - **Folding**: Fold the PATH ANALYSIS annotation block
-- **Auto-indentation**: Smart indentation for Brief code blocks
+- **Auto-indentation**: Smart indentation for Briv code blocks
 - **Themes**: Dark and Light themes included
 
 ## Installation
@@ -17,9 +17,9 @@ Syntax highlighting, folding, bracket colorization, and intelligent editing for 
 
 ```bash
 # Create symlink to extensions folder
-ln -s "$(pwd)" ~/.vscode/extensions/brief-language
+ln -s "$(pwd)" ~/.vscode/extensions/briv-language
 # Or for VScodium:
-ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/brief-language
+ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/briv-language
 ```
 
 ### Option 2: Package as .vsix
@@ -27,7 +27,7 @@ ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/brief-language
 ```bash
 npm install -g @vscode/vsce
 vsce package
-code --install-extension brief-language-0.1.0.vsix
+code --install-extension briv-language-0.1.0.vsix
 ```
 
 ## Color Scheme
@@ -73,24 +73,24 @@ Files with `.bv` extension are automatically recognized.
 ## Development
 
 To modify the grammar:
-1. Edit `syntaxes/brief.tmLanguage.json`
+1. Edit `syntaxes/briv.tmLanguage.json`
 2. Reload VSCode window
 
 To modify themes:
-1. Edit `themes/brief-dark.json` or `themes/brief-light.json`
+1. Edit `themes/briv-dark.json` or `themes/briv-light.json`
 2. Reload window
 
 ## Extension Structure
 
 ```
-brief-language/
+briv-language/
 ├── package.json              # Extension manifest
 ├── language-configuration.json # Brackets, indentation rules
 ├── settings.json             # Default settings
 ├── syntaxes/
-│   └── brief.tmLanguage.json # TextMate grammar
+│   └── briv.tmLanguage.json # TextMate grammar
 ├── themes/
-│   ├── brief-dark.json       # Dark theme
-│   └── brief-light.json      # Light theme
+│   ├── briv-dark.json       # Dark theme
+│   └── briv-light.json      # Light theme
 └── README.md
 ```

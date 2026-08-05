@@ -4,7 +4,7 @@
 // Used by the compiler to resolve AddressOf#("uart") at compile time.
 // The interpreter has a fallback table for known names.
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): migrated from address-map.toml.
+// 2026-08-03 (Phase 3, data-briv-config plan): migrated from address-map.toml.
 // This is the DEPRECATED tier-2 fallback — the active board's
 // lib/boards/<board>/addresses.dbvl is the primary source and resolves first.
 // Keys are CAPITALIZED constants (matches the case-insensitive lookup).

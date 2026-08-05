@@ -9,7 +9,7 @@ The ellipsis (`..`) in multi-slice expressions represents "all remaining dimensi
 
 ## Syntax
 
-```brief
+```briv
 // Ellipsis captures remaining slice axes
 matrix[.., 0]            // all rows, column 0
 tensor[0, ..]            // first row, all remaining dims
@@ -37,7 +37,7 @@ matrix[0..N, 0..M, 0]
 
 ## Error Cases
 
-```brief
+```briv
 [.., ..]   // Error: multiple ellipses not allowed
 ..          // Error: ellipsis must be inside brackets
 ```

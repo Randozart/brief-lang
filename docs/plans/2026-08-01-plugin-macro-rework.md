@@ -1,11 +1,11 @@
-# Brief: Plugin / Macro Syntax Rework + The Bits Model (String as `#String` Protocol)
+# Briv: Plugin / Macro Syntax Rework + The Bits Model (String as `#String` Protocol)
 
 **Date:** 2026-08-01
 **Status:** Approved. Part A (macro rework) approved at start; Part B (the bits
 model — String as `#String` protocol) added and approved 2026-08-01. **Merged**
 (see `docs/2026-08-01-plugin-macro-rework-completion.md`).
-**Worktree:** `../brief-compiler-plugin-rework` (new, from `main` `d6c6c818`)
-**Baseline worktree:** `../brief-compiler-baseline` — synced to `d6c6c818` on 2026-08-01
+**Worktree:** `../briv-compiler-plugin-rework` (new, from `main` `d6c6c818`)
+**Baseline worktree:** `../briv-compiler-baseline` — synced to `d6c6c818` on 2026-08-01
 
 **Plan map:** merged. The master plan —
 [2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md) —
@@ -20,7 +20,7 @@ needs content-based String equality). See §5.6 and the Execution order (§6).
 
 ## 1. Goal
 
-Rework the plugin / macro surface of Brief to match the language's disclosure
+Rework the plugin / macro surface of Briv to match the language's disclosure
 principle (AGENTS.md #2):
 
 1. **Remove `[#]`** as a special-cased entry precondition in the parser. It is
@@ -87,7 +87,7 @@ type-name matching (#18), measure-before-build (#19), delimiter semantic load
 | `[#]` parsing | Special-cased in `parse_contract`; sets `Contract.is_entry` | `src/parser/definitions.rs:872-959` (branch at `:880-908`) |
 | `is_entry` consumption | **None.** Only display, beast serialization, tests | `src/ast/display.rs:476`, `src/beast/serialize.rs:52,81-83,365`, `src/ast/top.rs:137`, `src/ast/mod.rs:8` |
 | `is_entry` constructor sites | ~50 `is_entry: false` (mechanical sweep) | `backend/llvm/tests.rs`, `backend/mod.rs:645`, `backend/circt.rs:795`, `backend/spirv/mod.rs:66`, `backend/webstack.rs:1108`, `fuzzing/*`, `assertion_verify.rs`, `reactor.rs`, `plugin/intrinsics.rs`, `analysis/*`, `hardware_validator.rs` |
-| `defn main` | Emitted as `brief_main` (`emit_toplevel.rs:1133`) but **never called** by the runtime — reactor only fires reactive `txn`/`node` | `src/backend/llvm/emit_toplevel.rs:1133` |
+| `defn main` | Emitted as `briv_main` (`emit_toplevel.rs:1133`) but **never called** by the runtime — reactor only fires reactive `txn`/`node` | `src/backend/llvm/emit_toplevel.rs:1133` |
 | Implicit entry wrap | `wrap_implicit_entry` is an empty placeholder | `src/parser/definitions.rs:1210-1213` |
 | Plugin intercept syntax | `name!(args)` postfix → `Expr::PluginIntercept` | `src/parser/expressions.rs:319-339`, `src/ast/expr.rs:80-86` |
 | Intercept rewriting | Rust plugins at Parsed stage: `Print`/`PrintLn` → `PrintInt#`/`PrintStr#`/`PrintFloat#`/`PrintChar#`; `GetEnv`/`GetEnvInt` → stdlib `get_env`/`get_env_int` | `src/plugin/print_plugin.rs`, `src/plugin/env_plugin.rs` |
@@ -95,9 +95,9 @@ type-name matching (#18), measure-before-build (#19), delimiter semantic load
 | Typechecker intercept arm | Recognizes `GetEnvInt`, `GetEnv`, `GetEnvOrDefault`, `PrintLn`, `println`; unknown intercepts → error | `src/typechecker/mod.rs:544-557` |
 | Interpreter on intercepts | `Expr::PluginIntercept` → runtime error (no plugin pass before eval) | `src/interpreter/eval.rs:136` |
 | CLI args | **None.** `main` is `define i32 @main()` with no args in all loop-engine paths | `loop_engine/counter.rs` (×5), `ssa.rs` (×4), `mod.rs` (×1) |
-| Env vars | brief_rt.c provides `__getenv_brief` / `__getenv_int`; `frgn` wrappers in `lib/std/ffi/env.bv` | `lib/runtime/brief_rt.c:127-157`, `lib/std/ffi/env.bv` |
+| Env vars | briv_rt.c provides `__getenv_briv` / `__getenv_int`; `frgn` wrappers in `lib/std/ffi/env.bv` | `lib/runtime/briv_rt.c:127-157`, `lib/std/ffi/env.bv` |
 | FFI dispatch | `frgn` `.c/.cpp/.rs` → Inline (compile+link+LTO); `#System`/`#Link<x>` → Inline direct `-l`; GLUE-mapped ext → Bridge; native `.o/.so/.a` → Inline | `src/analysis/frgn_dispatch.rs:143-219` |
-| Print codegen | `PrintInt#` → `call i64 @__print_int` (brief_rt.c, `always_inline` + LTO) | `src/backend/llvm/intrinsics.rs:65-90`, `lib/runtime/brief_rt.c:178` |
+| Print codegen | `PrintInt#` → `call i64 @__print_int` (briv_rt.c, `always_inline` + LTO) | `src/backend/llvm/intrinsics.rs:65-90`, `lib/runtime/briv_rt.c:178` |
 | Concurrency gate | Documented, **not enforced** — only auto-selects Sequential/Parallel | `src/backend/llvm/strategy.rs:50-102`, `docs/architecture/concurrency-and-modifiers.md` |
 | XOR helpers | `collect_assigned_identifiers` / `collect_read_identifiers` | `src/backend/mod.rs` |
 | SAT check | `check_satisfiable(a, b) -> bool` | `src/proof_engine/mod.rs:291` |
@@ -164,7 +164,7 @@ args emits only `PrintChar#(10)`.
 
 **Placement:** inside contract brackets, as a Bool expression:
 
-```brief
+```briv
 node build [entry!("build")][result == 0] { ... }
 txn  serve [entry!("serve")][running == false] { ... }
 ```
@@ -173,11 +173,11 @@ txn  serve [entry!("serve")][running == false] { ... }
 
 1. Inject a top-level one-shot guard (deduped per command; `__` prefix is
    compiler-reserved):
-   ```brief
+   ```briv
    let __entry_<cmd>_done: Bool = false;
    ```
 2. Rewrite the `entry!` expression in the contract to:
-   ```brief
+   ```briv
    entry_cmd() == "<cmd>" && !__entry_<cmd>_done
    ```
    composed into `N`'s existing precondition with `&&` (precedence: parenthesize).
@@ -186,7 +186,7 @@ txn  serve [entry!("serve")][running == false] { ... }
    at most once. **One-shot by default.** A deliberately persistent node declares
    its own explicit contract (its own counter/state guard) alongside `entry!`.
 4. If `N` is a `defn` (non-reactive), the plugin also injects a reactive wrapper:
-   ```brief
+   ```briv
    let __entry_<cmd>_done: Bool = false;
    node __entry_<cmd> [entry_cmd() == "<cmd>" && !__entry_<cmd>_done][__entry_<cmd>_done] {
        <call to N>;
@@ -197,7 +197,7 @@ txn  serve [entry!("serve")][running == false] { ... }
 
 **`args!("--flag")` expansion:**
 
-```brief
+```briv
 let arg_flag: Bool = __argv_has("--flag");
 ```
 
@@ -207,7 +207,7 @@ guard, no flip (the enclosing node's one-shot guard governs firing).
 
 **`args!("--flag", T)` expansion (typed value):**
 
-```brief
+```briv
 let arg_flag: T = __argv_value_as::<T>("--flag");
 ```
 
@@ -222,11 +222,11 @@ the plugin errors (no silent shadowing).
 
 **Stdlib (rule #13):** `lib/std/cli.bv` (new) provides the FFI + helper surface:
 
-```brief
-frgn __argv_count() -> Int        from "lib/runtime/brief_rt.c" fallback 0;
-frgn __argv_get(i: Int) -> String from "lib/runtime/brief_rt.c" fallback "";
-frgn __argv_has(flag: String) -> Bool   from "lib/runtime/brief_rt.c" fallback false;
-frgn __argv_value(flag: String) -> String from "lib/runtime/brief_rt.c" fallback "";
+```briv
+frgn __argv_count() -> Int        from "lib/runtime/briv_rt.c" fallback 0;
+frgn __argv_get(i: Int) -> String from "lib/runtime/briv_rt.c" fallback "";
+frgn __argv_has(flag: String) -> Bool   from "lib/runtime/briv_rt.c" fallback false;
+frgn __argv_value(flag: String) -> String from "lib/runtime/briv_rt.c" fallback "";
 
 defn entry_cmd() -> String { term __argv_command(); };
 defn arg_present(flag: String) -> Bool { term __argv_has(flag); };
@@ -249,10 +249,10 @@ environment dependency and is additive.
   `define i32 @main(i32 %argc, ptr %argv)` in **every** loop-engine main
   emission site (`counter.rs` ×5, `ssa.rs` ×4, `mod.rs` ×1).
 - At the top of `main`, store into module globals:
-  `@__brief_argc = internal global i32 0`, `@__brief_argv = internal global ptr null`,
-  via `store i32 %argc, ptr @__brief_argc` / `store ptr %argv, ptr @__brief_argv`.
-- brief_rt.c gains: `__argv_count`, `__argv_get`, `__argv_has`, `__argv_value`,
-  `__argv_command` (reading the globals; `extern int64_t __brief_argc; extern void* __brief_argv;`).
+  `@__briv_argc = internal global i32 0`, `@__briv_argv = internal global ptr null`,
+  via `store i32 %argc, ptr @__briv_argc` / `store ptr %argv, ptr @__briv_argv`.
+- briv_rt.c gains: `__argv_count`, `__argv_get`, `__argv_has`, `__argv_value`,
+  `__argv_command` (reading the globals; `extern int64_t __briv_argc; extern void* __briv_argv;`).
 - **Scope:** native (LLVM) targets only. Non-native backends (WASM/SPIR-V/Webstack)
   receive a compile-time warning if `entry!`/`args!` are used on a target without
   argv support, and the helpers degrade to their fallbacks (documented behavior,
@@ -264,7 +264,7 @@ New `src/plugin/script_plugin.rs` (Parsed stage). When a `.bv` has **bare
 top-level statements** (`TopLevel::Statement`), `TopLevel::Constant`, or
 `TopLevel::Let`) and **zero** explicit `defn`/`txn`/`node`:
 
-```brief
+```briv
 let __script_done: Bool = false;
 node __script_main [__script_done == false][__script_done] {
     <script statements, in order>
@@ -276,7 +276,7 @@ node __script_main [__script_done == false][__script_done] {
   makes it false afterward. **`[true]` is never emitted.**
 - The guard is read by the reactor's per-tick precondition check → live, no DCE.
 - `defn main` wiring: if a `defn main()` exists (no explicit `entry!`), the
-  plugin synthesizes the same one-shot node calling `brief_main()` once, fixing
+  plugin synthesizes the same one-shot node calling `briv_main()` once, fixing
   the current dead-code gap.
 - Naming: `__script_main`, `__script_done` are compiler-reserved; collision with
   a user top-level binding is a compile error (not silent shadowing).
@@ -368,8 +368,8 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
 2. **A String value is a pointer** to `[len: i64][bytes]`. The value register
    is the address (`ptr`); state slots store it as an `i64` machine word (via
    the existing Ptr-state `ptrtoint`/`inttoptr` adapters — String follows the
-   `Ptr<T>` pattern). Matches the runtime contract: `brief_str_to_c(int64_t)`
-   (`lib/runtime/brief_rt.c:48-102`), `__print(int64_t)`, `__print_str(int64_t)`
+   `Ptr<T>` pattern). Matches the runtime contract: `briv_str_to_c(int64_t)`
+   (`lib/runtime/briv_rt.c:48-102`), `__print(int64_t)`, `__print_str(int64_t)`
    — the `int64_t` *is* the address.
 3. **Value moves never deref; operands deref by default.** Params, returns,
    stores, FFI args are the address. Ops/casts on `#String` operands deref
@@ -384,7 +384,7 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
    **The header is never part of the bits.** In both directions the cast moves
    the address unchanged; a `#Bit → #String` wrap does NOT inherit a header
    from the bits — it *materializes* one by construction (C-side length scan,
-   as `brief_cstr_to_brief` does). If the source already was a `#String`, the
+   as `briv_cstr_to_briv` does). If the source already was a `#String`, the
    address still points at a header-prefixed buffer, so the header stays
    *reachable* for region ops — but it is carried by the buffer's layout, not
    by the value, and never included in the bits the cast interprets.
@@ -427,7 +427,7 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
 
 **Verified consequences:**
 
-- **Format-demo clang error** (the Part A Phase 1 blocker): `briefc build`
+- **Format-demo clang error** (the Part A Phase 1 blocker): `brivc build`
   succeeds, but `clang` rejects `'%t4' defined with type 'i64' but expected
   'ptr'` on `call i64 @__print_str(ptr %t4)`. The IR also shows
   `declare void @__print_str({ i64, i64 })` — sourced from the dead
@@ -461,7 +461,7 @@ the runtime's `int64_t`-handle contract, and it **removes** conversion churn
   every type-claiming site (`llvm_type`, `protocol_llvm_type`, casting graph).
   State slots are `i64` words (the address) via the existing `Ptr<T>` state
   adapters (`mod.rs:837-843`, `adapt_to_i64`/`ensure_typed_value`). SSO remains
-  a *runtime* encoding detail inside `brief_str_to_c` — never a compiler type.
+  a *runtime* encoding detail inside `briv_str_to_c` — never a compiler type.
 - **B-D2 (deref positions):** value moves pass the address; operands in
   ops/casts deref by default through **one central helper**. Two-position rule;
   no scattered deref decisions. This is what kills the split-brain: the
@@ -569,7 +569,7 @@ all runtime benchmarks at `d6c6c818` in `benchmarks/results/2026-08-01-plugin-re
      `i64↔ptr` coercions (`coerce_to_param_type`) — quantify any added
      instructions in hot loops.
    - `frgn!`/`frgn?!` fire-and-forget codegen (dead-skip vs call).
-2. A/B against `../brief-compiler-baseline` (now at `d6c6c818` = current state,
+2. A/B against `../briv-compiler-baseline` (now at `d6c6c818` = current state,
    so A/B isolates only our subsequent changes) via `compare_baseline.sh`.
 3. `git log --oneline` over `src/backend/llvm/emit_expr.rs`,
    `emit_toplevel.rs`, `intrinsics.rs`, `src/plugin/{print,env}_plugin.rs` to
@@ -591,7 +591,7 @@ all runtime benchmarks at `d6c6c818` in `benchmarks/results/2026-08-01-plugin-re
 | `benchmarks/*.bv` (~40) | `PrintLn!`→`println!`, `GetEnvInt!`→`get_env_int!` |
 | `lib/std/{io,env,ffi/io,ffi/env}.bv` | Update comments/defn doc strings |
 | `examples/*.bv` | Same rename sweep |
-| `learn-brief/*`, `spec/SPEC.md` | Tutorial + spec sweep |
+| `learn-briv/*`, `spec/SPEC.md` | Tutorial + spec sweep |
 | `syntax-highlighter/` | Grammar: lowercase macro tokens |
 
 **Tests:** format expansion (literal/`{}`/`{0}`/`{1}`/`{{}}`/out-of-range/
@@ -641,7 +641,7 @@ for String); full `cargo test --lib`; `cargo build` no new warnings.
 |------|--------|
 | new central helper (`intrinsics.rs` or a small module) | `emit_string_operand`: deref → buffer, read header, bound region; used by every `#String` op default |
 | `src/interpreter/eval.rs:332` | `Eq`/`Ne` on String operands → content comparison (**rule #4: interpreter first**) |
-| `src/backend/llvm/emit_expr.rs:2437-2454` | `Eq`/`Ne` on `#String` operands → content compare (len + bytes; runtime `brief_str_eq` or inline) |
+| `src/backend/llvm/emit_expr.rs:2437-2454` | `Eq`/`Ne` on `#String` operands → content compare (len + bytes; runtime `briv_str_eq` or inline) |
 | op dispatch | add `#String` defaults for `band`/`bor`/`bxor`/`bnot` (content, same-length result), `Concat`, `Slice` as protocol defaults |
 | value moves | params/returns/stores/FFI remain address-only — never deref |
 
@@ -655,9 +655,9 @@ comparison; full `cargo test --lib`.
 
 **Status (2026-08-01): IMPLEMENTED.** Content Eq/Ne landed interpreter-first
 (`interpreter/eval.rs` via the shared `Value::string_bytes` deref helper) and in
-the backend (`emit_expr.rs` Eq/Ne arms → `brief_str_eq` runtime call, declared
+the backend (`emit_expr.rs` Eq/Ne arms → `briv_str_eq` runtime call, declared
 in `mod.rs`). Bitwise `&`/`|`/`^`/`~` on `#String` operate on content bytes via
-`brief_str_band/bor/bxor/bnot` (same-length result), gated by the central
+`briv_str_band/bor/bxor/bnot` (same-length result), gated by the central
 `is_string_operand` helper (`helpers.rs`, rule #16 — the 7 inline protocol
 checks were centralized). `emit_binop_from_config` returns None for `#String`
 operands so the dedicated arms own them (the flexible primordial's `bytes=0`
@@ -665,7 +665,7 @@ would otherwise derive `i0` in the integer template). Verified end-to-end:
 `.smoke/eq_demo.bv` (heap vs literal content-eq), `.smoke/bit_demo.bv` (bitwise
 identity/XOR-NUL/bnot-nonempty). Two real bugs found & fixed during B1: (1) the
 SSO tag bit was OR-ed onto String literal addresses in the inline-init path,
-corrupting pointers for `brief_str_eq` — now gated on `feature_sso_strings`;
+corrupting pointers for `briv_str_eq` — now gated on `feature_sso_strings`;
 (2) the interpreter's `Value::Int(addr)` heap-handle deref must require a valid
 heap allocation so numeric comparisons fall through (see `BUGS.md`). `Slice` on
 String deferred per B-D8.
@@ -702,7 +702,7 @@ is what rejects `[#]`.
 | File | Change |
 |------|--------|
 | `src/backend/llvm/loop_engine/{mod,counter,ssa}.rs` | `main(i32 %argc, ptr %argv)` + global capture stores (all 10 sites) |
-| `lib/runtime/brief_rt.c` | `__argv_count/__argv_get/__argv_has/__argv_value/__argv_command` |
+| `lib/runtime/briv_rt.c` | `__argv_count/__argv_get/__argv_has/__argv_value/__argv_command` |
 | `lib/std/cli.bv` (new) | frgn declarations + `entry_cmd`/`arg_present` defns (§4.3) |
 | `src/plugin/entry_plugin.rs` (new) | `entry!`/`args!` expansion, guard injection, `std/cli.bv` import, collision checks |
 | `src/plugin/mod.rs`, `src/compile.rs:861` | Register `EntryPlugin` |
@@ -719,8 +719,8 @@ gate deny/allow matrix (UNSAT, XOR-overlap, async, sync<group>, unclassified);
 **Status (2026-08-01): 3a (CLI runtime capture) IMPLEMENTED.** Every loop-engine
 main is now `define i32 @main(i32 %argc, ptr %argv)` via a central
 `emit_main_header` helper (helpers.rs) that stores argc/argv into
-`@__brief_argc`/`@__brief_argv` (external globals the runtime links against).
-`lib/runtime/brief_rt.c` gains `__argv_count/__argv_get/__argv_has/__argv_value/
+`@__briv_argc`/`@__briv_argv` (external globals the runtime links against).
+`lib/runtime/briv_rt.c` gains `__argv_count/__argv_get/__argv_has/__argv_value/
 __argv_command` (command = first non-flag argv[1..], honoring `$BRIEF_ENTRY_CMD`).
 `lib/std/cli.bv` declares the frgns + `entry_cmd`/`arg_present`. Verified
 end-to-end in `.smoke/cli_demo.bv` (build/run/flag/env fallback) and a backend
@@ -769,7 +769,7 @@ intent, matches its "not thread pool" comment). 4 gate unit tests.
 
 | File | Change |
 |------|--------|
-| `src/plugin/script_plugin.rs` (new) | §4.5 synthesis; `defn main` wiring to `brief_main` |
+| `src/plugin/script_plugin.rs` (new) | §4.5 synthesis; `defn main` wiring to `briv_main` |
 | `src/plugin/mod.rs`, `src/compile.rs`, `config/targets.toml` | Register `ScriptPlugin` (priority after entry) |
 | `src/parser/definitions.rs:1210` | Remove the placeholder `wrap_implicit_entry` (replaced by the plugin) |
 
@@ -783,11 +783,11 @@ node/txn, no `sync<group>`, no non-`main` defn, no explicit `entry!`) gets a
 synthesized one-shot opening node:
 `node __script_main [__script_done == false][__script_done] { ...;
 __script_done = true; }`. Two cases: (1) `defn main()` → the node calls
-`main()` once (fixes the dead-code gap — `brief_main` was defined but never
+`main()` once (fixes the dead-code gap — `briv_main` was defined but never
 invoked); (2) bare top-level lets/consts → the node runs them in order.
 `[true]` is never emitted; `__script_main`/`__script_done` are
 compiler-reserved (collision = error). Supporting fixes: `emit_user_call`
-now maps a call to `main` → `brief_main` (the defn rename), and the
+now maps a call to `main` → `briv_main` (the defn rename), and the
 `wrap_implicit_entry` parser placeholder was removed. Verified:
 `.smoke/main_script.bv` (defn main runs once), `.smoke/script_let.bv`
 (one-shot bare-let script). 6 script plugin tests; the `sync<group>`/entry!
@@ -815,7 +815,7 @@ universe or emitted IR.
 (`PtrToInt` — a String value is a ptr to `[len][bytes]`, so the cast yields the
 buffer address; was `ExtractData` on the dead `{i64,i64}`). `#Bit → #String` is
 the ENCODING DOOR (`CastFromBitCallback` — default UTF8 wrap via
-`brief_bits_to_str`, which re-materializes the `[len][bytes]` header by
+`briv_bits_to_str`, which re-materializes the `[len][bytes]` header by
 construction from the bits; registered `CastFrom(#Bit)` overrides are called).
 `!> encoding` removed from bootstrap.bv (unread). Two supporting fixes: (1)
 `type_to_protocol` strips the `#` from HashWord categories so casts to/from
@@ -840,13 +840,13 @@ by subtypes.
 |------|--------|
 | prop dispatch (`typechecker`/backend) | resolve `prop Size` / `prop Bytes` bodies to codegen instead of treating them as documentation |
 | `src/backend/llvm/intrinsics.rs:700-716` (`emit_len`) | String length routes through the op default; list length untouched |
-| runtime | `brief_len` / `brief_char_len` helpers for the `#String` defaults (via `brief_str_to_c`) |
+| runtime | `briv_len` / `briv_char_len` helpers for the `#String` defaults (via `briv_str_to_c`) |
 
 **Tests:** default `Bytes` O(1); `Size` UTF8 correctness (ASCII + multibyte);
 subtype override (the B2 example); no `Length#` regression for lists.
 
 **Status (2026-08-01): IMPLEMENTED.** `x.^Len` on a #String → the `Size` prop
-default = UTF8 char count via `brief_char_len` (runtime counts codepoints);
+default = UTF8 char count via `briv_char_len` (runtime counts codepoints);
 `x.^^Bytes` → the `Bytes` prop default = O(1) header read (the `[0]` length
 prefix). Interpreter parity in `eval.rs` Reflect (Len = char count, Bytes =
 byte length). Bug fixed (BUGS.md): `collect_identifiers` did not handle
@@ -865,7 +865,7 @@ Reflect now keeps its receiver live. Verified: `.smoke/len_demo.bv` prints
 | `docs/architecture/agent-reference.md` | Naming convention + plugin surface |
 | `docs/architecture/hash-words.md` | If it references `[#]` |
 | `syntax-highlighter/` | Grammar for `entry!`/`args!`/`print!`/`println!`/`get_env!`/`get_env_int!` |
-| `learn-brief/` | Tutorials: scripting, CLI, printing |
+| `learn-briv/` | Tutorials: scripting, CLI, printing |
 | `benchmarks/results/2026-08-01-plugin-rework-final.md` | Post-change full runtime table (rule #11) |
 
 **Final verification:** `cargo test --lib` green; `cargo build` no new warnings;
@@ -924,7 +924,7 @@ rows), `casting-protocol.md` (ptr concat examples), `agent-reference.md`
 (String = ptr table rows), `hash-words.md` (`op InsertAt:` strategy bindings),
 `spec/SPEC.md` §5.6 rewritten (`!> key: value;` — the `<~` metadata form was
 removed; the type_property grammar and all metadata examples converted),
-`learn-brief/12-pragmas.md` + `15-custom-types.md` (the `<~` → `!>` syntax).
+`learn-briv/12-pragmas.md` + `15-custom-types.md` (the `<~` → `!>` syntax).
 `bits-thesis.md` is a historical thesis — its `<~` references are "old
 mechanism" comparisons and the removal note, intentionally preserved. The
 final benchmark table (`2026-08-01-plugin-rework-final.md`) got a B4 note:
@@ -953,7 +953,7 @@ green, release build clean). B0 proceeds from that commit.
 8. Phase 4: script plugin.
 9. **Phase B2 (gated): content-view casts + encoding door.**
 10. **Phase B3 (gated): length-op dispatch.**
-11. Phase 5 + **Phase B4**: docs/highlighter/learn-brief, legacy retirement,
+11. Phase 5 + **Phase B4**: docs/highlighter/learn-briv, legacy retirement,
     final benchmark A/B.
 
 Each commit: `git add` only intended files; `cargo test --lib` before commit;

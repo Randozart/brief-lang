@@ -1,4 +1,4 @@
-# Rendered Brief — WASM-First Webstack Architecture v2
+# Rendered Briv — WASM-First Webstack Architecture v2
 
 **Date:** 2026-07-26
 **Status:** Spec — awaiting implementation
@@ -6,16 +6,16 @@
 
 ## Overview
 
-Rendered Brief (`.rbv`) and plain Brief (`.bv`) compile to the web via **WebAssembly + a thin generated JS shim**. The old webstack backend (TypeScript emitter) is replaced by a dual-codegen pipeline: the existing `LlvmBackend` with `wasm32-unknown-wasi` target generates the WASM module, while a new `GlueWebGenerator` emits the minimal JS DOM binding layer.
+Rendered Briv (`.rbv`) and plain Briv (`.bv`) compile to the web via **WebAssembly + a thin generated JS shim**. The old webstack backend (TypeScript emitter) is replaced by a dual-codegen pipeline: the existing `LlvmBackend` with `wasm32-unknown-wasi` target generates the WASM module, while a new `GlueWebGenerator` emits the minimal JS DOM binding layer.
 
-This is not a "transpile to JS" approach. WASM runs the application logic at near-native speed. The JS shim is a passive reader of WASM's linear memory — it applies DOM mutations that the compiler has proven correct through Brief's contract system.
+This is not a "transpile to JS" approach. WASM runs the application logic at near-native speed. The JS shim is a passive reader of WASM's linear memory — it applies DOM mutations that the compiler has proven correct through Briv's contract system.
 
 ## Language Variants
 
 | Extension | Syntax | Backend | Output |
 |-----------|--------|---------|--------|
-| `.bv` | Pure Brief logic | `LlvmBackend(wasm32)` | `*.wasm` + optional `metropipe-shim.js` |
-| `.rbv` | Brief + `<view>` + `<style>` + `render` blocks | `LlvmBackend(wasm32)` + `GlueWebGenerator` | `*.wasm` + `dom-shim.mjs` + `*.css` |
+| `.bv` | Pure Briv logic | `LlvmBackend(wasm32)` | `*.wasm` + optional `metropipe-shim.js` |
+| `.rbv` | Briv + `<view>` + `<style>` + `render` blocks | `LlvmBackend(wasm32)` + `GlueWebGenerator` | `*.wasm` + `dom-shim.mjs` + `*.css` |
 
 A `.bv` compiled with `--backend webstack` produces a logic-only WASM module with no DOM bindings — for web workers, compute kernels, or shared libraries consumed by JS/TS. An `.rbv` produces a full rendered application.
 
@@ -23,7 +23,7 @@ A `.bv` compiled with `--backend webstack` produces a logic-only WASM module wit
 
 The `render` keyword attaches view information to types:
 
-```brief
+```briv
 struct Counter {
     count: Int;
     label: String;
@@ -49,7 +49,7 @@ render obj Observable {
 
 ### Desugaring
 
-```brief
+```briv
 render struct Counter { ... <span b-text="count"> ... <button b-trigger:click="increment"> ... };
 ```
 
@@ -74,7 +74,7 @@ This is the core architectural insight. **Contracts ARE the UI binding.** The co
 ```
 .rbv file
   │
-  ├── RbvFile::parse() → brief_source + view_html + style_css
+  ├── RbvFile::parse() → briv_source + view_html + style_css
   │
   ├── typecheck + normalize (webstack_normalizer)
   │
@@ -122,7 +122,7 @@ When the WASM module calls `__web_flush_state(updates_ptr: i32, count: i32)`:
 3. Applies the DOM mutation synchronously — `element.textContent = decoded_value`, `element.classList.toggle(class, bool)`, etc.
 4. Returns control to WASM. Total JS execution time: microseconds per transaction.
 
-The key property: **no JS runs unless a transaction actually commits.** Brief's convergence semantics guarantee that if the pre-condition is false, the transaction body does not execute and `__web_flush_state` is never called. Zero overhead in the idle state.
+The key property: **no JS runs unless a transaction actually commits.** Briv's convergence semantics guarantee that if the pre-condition is false, the transaction body does not execute and `__web_flush_state` is never called. Zero overhead in the idle state.
 
 ### Zero Overhead Guarantee
 
@@ -207,7 +207,7 @@ And produces:
 
 DOM elements and browser API objects are represented inside WASM as opaque `i32` handles:
 
-```brief
+```briv
 type Element: #System;    // i32 handle in WASM, HTMLElement in JS
 type CanvasContext;       // i32 handle, WebGL/WebGPU context in JS
 ```
@@ -220,7 +220,7 @@ const _web_objects = [null]; // index 0 is reserved (null handle)
 
 `frgn` declarations from `#Web` protocol use this handle table:
 
-```brief
+```briv
 frgn create_element(tag: String) -> Element from #Web;
 frgn set_text(elem: Element, text: String) from #Web;
 ```
@@ -245,7 +245,7 @@ imports.env = {
 
 When a `.rbv` declares a canvas rendering context, the JS shim performs a one-time handoff and steps back completely:
 
-```brief
+```briv
 frgn get_canvas(id: String) -> CanvasContext from #Web fallback null;
 frgn present_frame(ctx: CanvasContext) from #Web;
 ```
@@ -285,7 +285,7 @@ plugins = ["prelude"]
 Additionally, a `.bv` can be compiled for web explicitly:
 
 ```bash
-briefc build logic.bv --backend webstack --target wasm32-unknown-wasi
+brivc build logic.bv --backend webstack --target wasm32-unknown-wasi
 ```
 
 This routes through `LlvmBackend` with the WASM target triple, producing `logic.wasm` and a minimal `metropipe-shim.mjs` that handles only `frgn from #Web` imports (no DOM binding layer).
@@ -296,7 +296,7 @@ For a `.rbv` file `app.rbv`, the compiler produces:
 
 | File | Contents | Producer |
 |------|----------|----------|
-| `app.wasm` | Compiled Brief logic, WASM32 | `LlvmBackend(wasm32)` |
+| `app.wasm` | Compiled Briv logic, WASM32 | `LlvmBackend(wasm32)` |
 | `dom-shim.mjs` | ES module: `WasmDomRuntime` class + handle table + state binding | `GlueWebGenerator` |
 | `app.d.ts` | TypeScript declarations for `WasmDomRuntime` exports | `GlueWebGenerator` |
 | `app.css` | Extracted `<style>` block (passthrough) | `RbvFile::parse()` |
@@ -305,7 +305,7 @@ For a `.bv` file `logic.bv` compiled with `--backend webstack`:
 
 | File | Contents | Producer |
 |------|----------|----------|
-| `logic.wasm` | Compiled Brief logic, WASM32 | `LlvmBackend(wasm32)` |
+| `logic.wasm` | Compiled Briv logic, WASM32 | `LlvmBackend(wasm32)` |
 | `metropipe-shim.mjs` | Minimal import stubs for `frgn from #Web` | `GlueWebGenerator` |
 
 ## Relationship to Existing Systems
@@ -314,7 +314,7 @@ For a `.bv` file `logic.bv` compiled with `--backend webstack`:
 |--------|-----------------|----------------------|
 | `LlvmBackend` (wasm32) | WASM binary codegen with pointer width handling | The main codegen path — `.bv`/`.rbv` logic → WASM |
 | `ViewCompiler` | HTML b-* directive parsing → `Vec<Binding>` | Unchanged — feeds binding table to shim generator |
-| `RbvFile::parse()` | .rbv parsing → brief_source + view_html + style_css | Unchanged — entry point for .rbv compilation |
+| `RbvFile::parse()` | .rbv parsing → briv_source + view_html + style_css | Unchanged — entry point for .rbv compilation |
 | `GlueEngine` (src/glue/) | Protocol-based FFI bridge generation | Extended with `[web]` target in `lib/glue.toml` |
 | `Metropipe` (src/ffi/) | Shared memory IPC code generation | Not used — WASM linear memory replaces it for web |
 | `WebstackGenerator` (old) | TS App class emitter | **Replaced** — no longer generates TypeScript |
@@ -325,11 +325,11 @@ For a `.bv` file `logic.bv` compiled with `--backend webstack`:
 The `rstruct` keyword (old syntax, `Token::Rstruct`) is preserved in the lexer but deprecated. The parser emits a deprecation warning: `"rstruct is deprecated, use 'render struct'"`.  
 The `WebstackGenerator` in `src/backend/webstack.rs` is kept for the migration period but its codegen path is redirected to the new pipeline (no TS emission).
 
-Existing `.rbv` files using the old format (`<script type="brief">` wrapper, view-only without `render` keyword) continue to parse correctly via `RbvFile::parse()` backward compatibility logic.
+Existing `.rbv` files using the old format (`<script type="briv">` wrapper, view-only without `render` keyword) continue to parse correctly via `RbvFile::parse()` backward compatibility logic.
 
 ## See Also
 
-- `docs/plans/2026-07-26-rendered-brief-webstack-v2.md` — Implementation plan
+- `docs/plans/2026-07-26-rendered-briv-webstack-v2.md` — Implementation plan
 - `src/view_compiler.rs` — View directive parsing (unchanged)
 - `src/rbv.rs` — `.rbv` file parser (unchanged)
 - `src/glue/web_generator.rs` — (NEW) JS shim generator

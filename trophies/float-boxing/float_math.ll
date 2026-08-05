@@ -13,9 +13,9 @@ declare i64 @llvm.ctlz.i64(i64, i1) #1
 declare i64 @llvm.cttz.i64(i64, i1) #1
 declare i64 @llvm.abs.i64(i64, i1) #1
 declare i64 @llvm.bitreverse.i64(i64) #1
-declare void @brief_barrier_release()
-declare void @brief_barrier_wait()
-declare void @brief_thread_pool_init(i32, i8**)
+declare void @briv_barrier_release()
+declare void @briv_barrier_wait()
+declare void @briv_thread_pool_init(i32, i8**)
 declare i64 @__get_env_int(i8*) #1
 declare i64 @__print_float(float) #1
 @Q22 = constant float bitcast (i32 1036831949 to float)

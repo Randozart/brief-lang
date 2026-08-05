@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 7 Part 1 implements a complete AArch64 binary backend that generates native ARM64 machine code directly from Brief programs.
+Tier 7 Part 1 implements a complete AArch64 binary backend that generates native ARM64 machine code directly from Briv programs.
 
 **Key Features:**
 - AArch64 instruction encoding
@@ -26,7 +26,7 @@ Tier 7 Part 1 implements a complete AArch64 binary backend that generates native
 ### Instruction Enum (30+ variants)
 
 **Data Processing (Immediate):**
-```brief
+```briv
 ADDI(String, String, Int)    // add Rd, Rn, #imm
 SUBI(String, String, Int)    // sub Rd, Rn, #imm
 ANDI(String, String, Int)    // and Rd, Rn, #imm
@@ -35,7 +35,7 @@ MOVI(String, Int)            // mov Rd, #imm
 ```
 
 **Data Processing (Register):**
-```brief
+```briv
 ADD(String, String, String)   // add Rd, Rn, Rm
 SUB(String, String, String)   // sub Rd, Rn, Rm
 AND(String, String, String)   // and Rd, Rn, Rm
@@ -44,7 +44,7 @@ EOR(String, String, String)   // eor Rd, Rn, Rm
 ```
 
 **Memory Operations:**
-```brief
+```briv
 LDR(String, String, Int)     // ldr Rd, [Rn, #offset]
 STR(String, String, Int)     // str Rd, [Rn, #offset]
 LDRB(String, String, Int)    // ldrb Rd, [Rn, #offset]
@@ -52,7 +52,7 @@ STRB(String, String, Int)    // strb Rd, [Rn, #offset]
 ```
 
 **Branch Operations:**
-```brief
+```briv
 B(String)        // b label
 BL(String)       // bl label (call)
 BR(String)       // br Rn (indirect)
@@ -65,7 +65,7 @@ BGE(String)      // bge label
 ```
 
 **Compare & System:**
-```brief
+```briv
 CMP(String, String)   // cmp Rn, Rm
 CMP_IMM(String, Int)  // cmp Rn, #imm
 NOP                   // nop
@@ -81,7 +81,7 @@ Comment(String)       // // comment
 
 ### Linear Scan Algorithm
 
-```brief
+```briv
 struct RegisterAllocator {
     used_regs: HashSet<String>,
     var_to_reg: HashMap<String, String>,
@@ -97,7 +97,7 @@ struct RegisterAllocator {
 - **Special:** X30 (LR), SP, PC
 
 **Allocation Strategy:**
-```brief
+```briv
 defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, RegisterAllocator) {
     // 1. Try hint first (O(1))
     // 2. Find first available caller-saved (O(19) = O(1))
@@ -113,7 +113,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
 ### Instruction Encoding Examples
 
 **ADD (immediate):**
-```brief
+```briv
 // add X0, X1, #5
 // Encoding: 0x11000520
 // Binary: 00010001 00000000 00000100 10000000
@@ -130,7 +130,7 @@ defn encode_instr(instr: A64Instr) -> List<u8> {
 ```
 
 **Register to Number:**
-```brief
+```briv
 defn reg_to_num(reg: String) -> u32 {
     [reg == "X0"] { term 0; };
     [reg == "X1"] { term 1; };
@@ -146,7 +146,7 @@ defn reg_to_num(reg: String) -> u32 {
 
 ### Main Entry Point
 
-```brief
+```briv
 defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
     let instrs = [];
     
@@ -198,7 +198,7 @@ reactor_exit:
 
 ### Check Function
 
-```brief
+```briv
 defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
     let instrs = [];
     let alloc = new_regalloc();
@@ -255,7 +255,7 @@ txn_increment_pre_fail:
 
 ### Let Binding
 
-```brief
+```briv
 defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> ... {
     unification stmt(StmtLet(name, _, Some(init))) = {
         // let name = init;
@@ -279,7 +279,7 @@ str x0, [x29, #0]
 
 ### Assignment
 
-```brief
+```briv
 unification stmt(StmtAssign(lhs, rhs)) = {
     ; lhs = rhs;
     let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
@@ -297,7 +297,7 @@ str x0, [x29, #0]    ; Store x
 
 ### Guarded Statement
 
-```brief
+```briv
 unification stmt(StmtGuarded(condition, body)) = {
     ; [condition] { body }
     let (cond_instrs, new_alloc) = generate_expr(*condition, alloc);
@@ -333,7 +333,7 @@ guard_false_0:
 
 ### Integer Literal
 
-```brief
+```briv
 unification expr(ExprInt(n)) = {
     let (reg, new_alloc) = alloc_reg(alloc, None);
     let instrs = [emit_mov(reg, n)];
@@ -348,7 +348,7 @@ mov x0, #42
 
 ### Variable Load
 
-```brief
+```briv
 unification expr(ExprVar(name)) = {
     let (reg, new_alloc) = alloc_reg(alloc, None);
     let instrs = [
@@ -367,7 +367,7 @@ ldr x0, [x29, #0]
 
 ### Binary Operation
 
-```brief
+```briv
 unification expr(ExprBinOp(op, left, right)) = {
     let (left_instrs, left_alloc) = generate_expr(*left, alloc);
     let (right_instrs, right_alloc) = generate_expr(*right, left_alloc);
@@ -398,7 +398,7 @@ add x2, x0, x1       ; x2 = x + y
 
 ### Complete Binary Generation
 
-```brief
+```briv
 defn generate_aarch64(program: Program) -> List<u8> {
     let all_instrs = [];
     
@@ -444,7 +444,7 @@ defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
 
 **Optimization:** Linear scan instead of graph coloring
 
-```brief
+```briv
 // Graph coloring: O(n²) or worse
 // Linear scan: O(n log n) for sorting + O(n) for scan = O(n log n)
 
@@ -460,7 +460,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
 
 **Optimization:** Direct bit manipulation
 
-```brief
+```briv
 defn encode_instr(instr: A64Instr) -> List<u8> {
     // Single pattern match: O(1)
     // Bit operations: O(1)
@@ -472,7 +472,7 @@ defn encode_instr(instr: A64Instr) -> List<u8> {
 
 **Optimization:** Single pass over AST
 
-```brief
+```briv
 defn generate_transaction(txn: Transaction) -> List<A64Instr> {
     // Visit each statement once: O(n)
     // Each statement: O(1) instruction emission
@@ -484,9 +484,9 @@ defn generate_transaction(txn: Transaction) -> List<A64Instr> {
 
 ## Usage Example
 
-### Brief Source
+### Briv Source
 
-```brief
+```briv
 let counter: Int = 0;
 
 txn increment() [counter < 100][counter == @counter + 1] {

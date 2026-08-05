@@ -3,7 +3,7 @@
 **Status**: Implemented (Core)  
 **Created**: 2026-05-08  
 **Updated**: 2026-05-08  
-**Purpose**: Add multidimensional vector syntax, named dimensions, and struct property filtering to Brief
+**Purpose**: Add multidimensional vector syntax, named dimensions, and struct property filtering to Briv
 
 ---
 
@@ -23,7 +23,7 @@
 - Typechecker: List SIMD type inference
 - All backends updated (Rust, C, Cobol, VHDL, Verilog, WASM)
 - Spec updated with new grammar
-- Learn-brief documentation updated
+- Learn-briv documentation updated
 
 ### 🔄 In Progress
 - List SIMD code generation backends (strip-mining for AArch64, AXI-Stream for FPGA)
@@ -47,7 +47,7 @@
 - Typechecker: List SIMD type inference
 - All backends updated (Rust, C, Cobol, VHDL, Verilog, WASM)
 - Spec updated with new grammar
-- Learn-brief documentation updated
+- Learn-briv documentation updated
 
 ### 🔄 In Progress
 - List SIMD code generation backends (strip-mining for AArch64, AXI-Stream for FPGA)
@@ -57,7 +57,7 @@
 
 ## Motivation
 
-Brief currently supports 1D vectors with `Type[N]` syntax (e.g., `Int[10]`). This is insufficient for:
+Briv currently supports 1D vectors with `Type[N]` syntax (e.g., `Int[10]`). This is insufficient for:
 
 1. **Hardware design** - FPGAs and SIMD units work with multi-dimensional data (matrices, tensors, image buffers)
 2. **Spatial thinking** - Vectors should encourage thinking about data layout, not sequential access
@@ -70,7 +70,7 @@ Brief currently supports 1D vectors with `Type[N]` syntax (e.g., `Int[10]`). Thi
 
 ### Syntax
 
-```brief
+```briv
 Vector<Int, 50, 10, 20, 50>              // 4D: anonymous dimensions
 Vector<Person, width:50, height:50, depth:40, time:10>  // 4D: named dimensions
 ```
@@ -85,7 +85,7 @@ Vector<Person, width:50, height:50, depth:40, time:10>  // 4D: named dimensions
 
 ### Examples
 
-```brief
+```briv
 // 1D (same as current)
 let vec: Vector<Int, 100>;
 
@@ -122,7 +122,7 @@ This enables:
 
 ### Declaration
 
-```brief
+```briv
 Vector<Person, width:50, height:50, depth:40, time:10>
 ```
 
@@ -142,7 +142,7 @@ Named dimensions are purely syntactic sugar. The memory layout is identical to a
 
 ### Named Dimension Slicing
 
-```brief
+```briv
 persons[time:5]                    // slice at time=5 (returns 3D vector)
 persons[time:5, width:10]          // slice at time=5, width=10 (returns 2D)
 persons[time:5, width:10, height:20]  // returns 1D vector
@@ -150,7 +150,7 @@ persons[time:5, width:10, height:20]  // returns 1D vector
 
 ### Anonymous Coordinate Slicing
 
-```brief
+```briv
 data[5, 10, 20, 30]                // single point (returns element)
 data[5, :, :, :]                   // slice at first dimension
 data[0..10, :, :, :]               // range slice
@@ -158,7 +158,7 @@ data[0..10, :, :, :]               // range slice
 
 ### Range Syntax
 
-```brief
+```briv
 data[0..10]                        // indices 0 to 10 (inclusive)
 data[10..]                         // from 10 to end
 data[..20]                         // from 0 to 20 (inclusive)
@@ -171,7 +171,7 @@ data[0..100:5]                     // range with stride (every 5th)
 
 ### Syntax
 
-```brief
+```briv
 data[::2]                          // every 2nd element
 data[time:0..10:2]                 // every 2nd from 0 to 10 in time dimension
 data[width:0..50:5]                // every 5th in width dimension
@@ -179,7 +179,7 @@ data[width:0..50:5]                // every 5th in width dimension
 
 ### Combined with Slicing
 
-```brief
+```briv
 persons[time:0..10:2, width:5]     // every 2nd time step, at width=5
 ```
 
@@ -191,7 +191,7 @@ persons[time:0..10:2, width:5]     // every 2nd time step, at width=5
 
 The semicolon `;` separates **coordinates** from **filter conditions**:
 
-```brief
+```briv
 persons[: age > 18]                // filter: all persons where age > 18
 persons[time:5; age > 18]          // slice + filter: at time=5, where age > 18
 persons[0..10, :, :; city == "NYC"] // anonymous range + filter
@@ -199,7 +199,7 @@ persons[0..10, :, :; city == "NYC"] // anonymous range + filter
 
 ### What This Enables
 
-```brief
+```briv
 // Set adult flag for all persons over 18
 persons[: age > 18].adult = true;
 
@@ -231,7 +231,7 @@ The compiler must prove:
 
 ### Full Syntax
 
-```brief
+```briv
 vector[coordinates; condition]
 ```
 
@@ -248,7 +248,7 @@ And `condition` is:
 
 ### Examples
 
-```brief
+```briv
 // Every 2nd time step from 0 to 10, where age > 18, set adult to true
 persons[time:0..10:2; age > 18].adult = true;
 
@@ -382,7 +382,7 @@ coord_value → integer                     // index
 
 ### Example 1: Image Processing
 
-```brief
+```briv
 struct Pixel {
     r: UInt,
     g: UInt,
@@ -400,7 +400,7 @@ frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
 
 ### Example 2: Time Series Database
 
-```brief
+```briv
 struct SensorReading {
     temperature: Float,
     humidity: Float,
@@ -418,7 +418,7 @@ let subset: Vector<SensorReading, time:500> = readings[sensor:5, time:0..500];
 
 ### Example 3: Neural Network Weights
 
-```brief
+```briv
 let weights: Vector<Float, layer:4, input:128, output:64>;
 
 // Initialize all weights to small random values

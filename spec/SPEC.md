@@ -1,4 +1,4 @@
-# Brief Language Specification
+# Briv Language Specification
 
 **Version:** v0.18.0  
 **Date:** 2026-07-12  
@@ -7,21 +7,21 @@
 
 ## 1. Introduction and Philosophy
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions.
+Briv is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions.
 
-Brief is designed for **Formal Verification without the Boilerplate**. It eliminates imperative control flow (`if`, `else`, `while`) in favor of contracts, guards, and atomic transactions.
+Briv is designed for **Formal Verification without the Boilerplate**. It eliminates imperative control flow (`if`, `else`, `while`) in favor of contracts, guards, and atomic transactions.
 
 ### 1.1 Core Design Principles
 
 1. **Contracts First**: Every transaction declares what must be true before and after it runs. The compiler verifies these contracts.
 2. **Atomic State Transitions**: Transactions are atomic - they either complete fully or roll back completely.
-3. **Reactive Execution**: Brief programs use a reactor model where transactions fire automatically when their preconditions are met.
+3. **Reactive Execution**: Briv programs use a reactor model where transactions fire automatically when their preconditions are met.
 4. **Zero-Nesting Logic**: Branching is handled via guards, not nested blocks. This improves clarity and LLM comprehension.
-5. **FFI for External Capabilities**: Brief cannot do everything (file I/O, networking, hardware math). Foreign Function Interface handles these cases with explicit contracts.
+5. **FFI for External Capabilities**: Briv cannot do everything (file I/O, networking, hardware math). Foreign Function Interface handles these cases with explicit contracts.
 
 ### 1.2 Language Variants and Extension Modifiers
 
-Brief uses a **base variant** extension (`.bv`, `.ebv`, etc.) with optional
+Briv uses a **base variant** extension (`.bv`, `.ebv`, etc.) with optional
 **modifier flags** in the filename as a middle segment. The format is
 `[name].[modifiers].[variant]` where modifiers are single-character flags
 in any order.
@@ -36,7 +36,7 @@ in any order.
 
 | Filename | Variant | Modifiers | Meaning |
 |----------|---------|-----------|---------|
-| `main.bv` | `bv` | — | Standard Brief |
+| `main.bv` | `bv` | — | Standard Briv |
 | `main.s.bv` | `bv` | `s` | Strict |
 | `main.f.bv` | `bv` | `f` | Formatted (indentation) |
 | `main.sf.bv` | `bv` | `s`, `f` | Strict + Formatted |
@@ -49,15 +49,15 @@ are superseded by `.s.bv`, `.s.rbv`, `.s.ebv`. The old forms continue to
 compile during a deprecation window but emit a warning.
 
 **Base Variants:**
-* **Core Brief** (`.bv`): Transactional state machines with FFI support. Compiles to native binary via LLVM backend.
-* **Rendered Brief** (`.rbv`): Adds `render struct`/`render obj`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to WASM + JS shim via Webstack backend (LlvmBackend wasm32 + GlueWebGenerator). `rstruct` deprecated.
-* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to microcontroller binary via LLVM backend.
-* **Accelerated Brief** (`.abv`): GPU compute kernels. Compiles to SPIR-V via LLVM backend (GPU intrinsics, no FFI).
-* **Circuit Brief** (`.cbv`): Pure hardware logic. Compiles to Verilog/VHDL via CIRCT backend (no FFI, no external deps).
-* **Data Brief Schema** (`.dbvs`): Schema definitions for Data Brief, including aliases and validation rules.
-* **Data Brief Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
-* **Rendered Brief** (`.rbv`): Combines Strict Brief enforcement with verified view-state isomorphism. Same targets as `.rbv`.
-* **Strict Embedded Brief** (`.s.ebv`): Strict Brief for hardware targets. Same targets as `.ebv` with additional strictness.
+* **Core Briv** (`.bv`): Transactional state machines with FFI support. Compiles to native binary via LLVM backend.
+* **Rendered Briv** (`.rbv`): Adds `render struct`/`render obj`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to WASM + JS shim via Webstack backend (LlvmBackend wasm32 + GlueWebGenerator). `rstruct` deprecated.
+* **Embedded Briv** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to microcontroller binary via LLVM backend.
+* **Accelerated Briv** (`.abv`): GPU compute kernels. Compiles to SPIR-V via LLVM backend (GPU intrinsics, no FFI).
+* **Circuit Briv** (`.cbv`): Pure hardware logic. Compiles to Verilog/VHDL via CIRCT backend (no FFI, no external deps).
+* **Data Briv Schema** (`.dbvs`): Schema definitions for Data Briv, including aliases and validation rules.
+* **Data Briv Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
+* **Rendered Briv** (`.rbv`): Combines Strict Briv enforcement with verified view-state isomorphism. Same targets as `.rbv`.
+* **Strict Embedded Briv** (`.s.ebv`): Strict Briv for hardware targets. Same targets as `.ebv` with additional strictness.
 
 ### 1.3 Versioning
 
@@ -114,7 +114,7 @@ Backends — consume frontend decisions; never re-derive them
 
 ## 1.5. Symbolic Design Philosophy
 
-Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+Briv's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
 | Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
 |:---:|---|---|---|---|
@@ -138,7 +138,7 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 
 ### Operator Taxonomy
 
-Brief's operators fall into conceptual groups that govern how types relate, how data is partitioned, how data moves, and how metadata is read:
+Briv's operators fall into conceptual groups that govern how types relate, how data is partitioned, how data moves, and how metadata is read:
 
 | Group | Operators | Purpose |
 |-------|-----------|---------|
@@ -454,7 +454,7 @@ of the compiler's **recursive version-DAG decomposition** (see
 The write-conflict analysis (the XOR rule in §3.1 below) makes the
 guard-present→absent dependency sequential: a guard-present version that reads
 state written by the guard-absent version fires only after the guard-absent
-version commits, preserving Brief's concurrent-firing semantics.
+version commits, preserving Briv's concurrent-firing semantics.
 
 **Minimal-state / loop purity.** A variable is hot-loop state (a phi register)
 iff it is loop-carried (written in iteration N, read in iteration N+k) or read
@@ -587,7 +587,7 @@ foreign_sig ::= "frgn" identifier "(" parameters? ")" ("->" result_type)?
                 ("as" identifier)? "from" source_spec
                 ("fallback" fallback_expr)? ";"
 
-source_spec ::= string_literal          (* literal path, e.g. "link/brief_rt.c" *)
+source_spec ::= string_literal          (* literal path, e.g. "link/briv_rt.c" *)
               | "<" identifier ">"       (* compiler registry, e.g. <xxhash.c> *)
 
 fallback_expr ::= ";"                   (* implicit — skip call, return zero-value *)
@@ -619,9 +619,9 @@ The compiler enforces that all FFI calls handle `Result` types. The `frgn` varia
 
 ### 3.1 Transactions and Reactivity
 
-Brief uses a reactor model where transactions declare when they can run and what they guarantee:
+Briv uses a reactor model where transactions declare when they can run and what they guarantee:
 
-```brief
+```briv
 // Passive transaction (must be explicitly called)
 txn increment(amount: Int) [amount > 0][counter == @counter + amount] {
     counter = counter + amount;
@@ -658,9 +658,9 @@ async node fetch_data [needs_update][data != @data] {
 
 ### 3.2 Guard-Based Control Flow
 
-Brief eliminates imperative branching (`if`/`else`) in favor of guards:
+Briv eliminates imperative branching (`if`/`else`) in favor of guards:
 
-```brief
+```briv
 txn process(value: Int) [true][result != 0] {
     let result: Int = 0;
     
@@ -691,7 +691,7 @@ txn process(value: Int) [true][result != 0] {
 
 Functions (`defn`) are pure computations with contracts:
 
-```brief
+```briv
 // Simple function
 defn abs(n: Int) [true][result >= 0] -> Int {
     [n < 0] {
@@ -729,7 +729,7 @@ defn get_coords() -> (x: Int, y: Int) {
 
 Signatures declare external function bindings. The `frgn` keyword declares an external symbol; `frgn!` is fire-and-forget with no return.
 
-```brief
+```briv
 // Standard FFI returning Result — caller must handle both Ok and Err
 frgn sqrt(x: Float) -> Result<Float, MathError>;
 
@@ -737,7 +737,7 @@ frgn sqrt(x: Float) -> Result<Float, MathError>;
 frgn! log_message(msg: String);
 
 // frgn without from searches import "link/..." targets
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 frgn __print_int(n: Int) -> Result<Bool, Error>;
 
 // sig #out — observable output, LLVM memory(write) prevents elimination
@@ -751,7 +751,7 @@ import { OUT__print_int } from "std/out.bv";
 - `sig #inline` — Pure modifier — safe to fold/eliminate
 
 **`from` clause:**
-  - `from "c"` — C calling convention (symbol name is the Brief name)
+  - `from "c"` — C calling convention (symbol name is the Briv name)
   - `from "rust"` — Rust calling convention (name-mangled symbol)
   - `from "js"` — JavaScript (interpreter only, no LLVM backend)
   - `from "python"` — Python (interpreter only, no LLVM backend)
@@ -768,15 +768,15 @@ import { OUT__print_int } from "std/out.bv";
 **`import "link/..."` search order:**
 The `resolve_link_source()` function searches in this order, returning the first match:
 1. Project-relative (same directory as source file)
-2. `lib/runtime/` — built-in runtime modules (`brief_rt.c`)
+2. `lib/runtime/` — built-in runtime modules (`briv_rt.c`)
 3. `lib/std/c/` — vendored C libraries (`xxhash/`, `yyjson/`, etc.)
 4. `BRIEF_STDLIB_PATH` environment variable
 5. Absolute path resolution
 
-The `import "link/..."` directive's `"..."` path is the file name (e.g., `"brief_rt.c"`, `"xxhash/xxhash.c"`). The resolver appends this to each search directory. This means `import "link/xxhash/xxhash.c"` resolves to `lib/std/c/xxhash/xxhash.c` via the `lib/std/c/` prefix.
+The `import "link/..."` directive's `"..."` path is the file name (e.g., `"briv_rt.c"`, `"xxhash/xxhash.c"`). The resolver appends this to each search directory. This means `import "link/xxhash/xxhash.c"` resolves to `lib/std/c/xxhash/xxhash.c` via the `lib/std/c/` prefix.
 
-```brief
-import "link/brief_rt.c";       // resolves to lib/runtime/brief_rt.c
+```briv
+import "link/briv_rt.c";       // resolves to lib/runtime/briv_rt.c
 import "link/xxhash/xxhash.c";  // resolves to lib/std/c/xxhash/xxhash.c
 ```
 
@@ -784,7 +784,7 @@ import "link/xxhash/xxhash.c";  // resolves to lib/std/c/xxhash/xxhash.c
 
 State is declared globally and mutated with `&`:
 
-```brief
+```briv
 // Simple state
 let counter: Int = 0;
 let name: String = "default";
@@ -825,7 +825,7 @@ txn increment() [true][counter == @counter + 1] {
 
 Structs define composite types with fields and transactions:
 
-```brief
+```briv
 // Basic struct
 struct Point {
     x: Int;
@@ -857,7 +857,7 @@ c.increment(5);
 
 **Render Structs** attach UI views to state (`.rbv` files):
 
-```brief
+```briv
 // counter.rbv — state declarations + transactions + render struct
 let count: Int = 0;
 
@@ -880,7 +880,7 @@ The old `rstruct` keyword is deprecated — use `render struct`/`render obj`.
 
 Enums define sum types with variants:
 
-```brief
+```briv
 // Simple enum
 enum Color {
     Red,
@@ -922,7 +922,7 @@ enum Option<T> {
 
 Imports bring external code into scope:
 
-```brief
+```briv
 // Import entire module
 import "std/math";
 let x = math.sqrt(4.0);
@@ -949,13 +949,13 @@ import "./logo.svg" as Logo;
 **Import resolution:**
 - Relative paths: `./module.bv`, `../parent.bv`
 - Standard library: `std.math`, `std.string`, etc.
-- Resources: `.css`, `.svg`, `.png` (for Rendered Brief)
+- Resources: `.css`, `.svg`, `.png` (for Rendered Briv)
 
 ### 3.9 Resources
 
 Resources declare external objects (files, kernel objects, etc.):
 
-```brief
+```briv
 // File resource
 rsrc config: File("config.toml", "read");
 
@@ -985,7 +985,7 @@ rsrc lock: Mutex();
 
 Inline assembly for low-level operations:
 
-```brief
+```briv
 // ARM assembly
 txn wait_for_interrupt() [true][true] {
     asm "wfi";
@@ -1014,7 +1014,7 @@ txn complex_op() [true][true] {
 
 Struct fields can have bit widths for compact storage:
 
-```brief
+```briv
 // Packed struct (fits in 16 bits)
 struct Pixel {
     r: 4bits,
@@ -1043,14 +1043,14 @@ let packed: Int = p;  // Automatically packed
 ### 3.12 Vector and Slice Types
 
 Fixed-size arrays (`Vector<T, N>`) and runtime slice views (`Slice<T>`) for
-contiguous and strided element access across all Brief source variants.
+contiguous and strided element access across all Briv source variants.
 
 #### 3.12a Vector Declaration (`Type[N]`)
 
 `Type[N]` declares a fixed-size array of N elements. The compiler embeds it
 as `[N x T]` in LLVM IR, enabling SROA decomposition and auto-vectorization.
 
-```brief
+```briv
 let data: Float[64];   // 64 floats
 let ints: Int[1024];   // 1024 integers
 let frames: Frame[256]; // 256 frames (struct type)
@@ -1060,7 +1060,7 @@ let frames: Frame[256]; // 256 frames (struct type)
 
 Embedded variants (`.ebv`) additionally support memory-mapped vectors:
 
-```brief
+```briv
 let sensor: Float[8] @ 0x40000000;  // 8 floats at address 0x40000000
 ```
 
@@ -1068,14 +1068,14 @@ let sensor: Float[8] @ 0x40000000;  // 8 floats at address 0x40000000
 
 Index access with contract-proven bounds:
 
-```brief
+```briv
 v[i]        // Single element access
 v[i] = val; // Single element assignment
 ```
 
 Contracts prove bounds at compile time:
 
-```brief
+```briv
 [i >= 0 && i < arr :#Size] {  // Guarded access
     let x = arr[i];
 };
@@ -1087,7 +1087,7 @@ A slice is a zero-copy view into an existing array. It produces a `Vector<T, M>`
 when all bounds are compile-time constants, or a `Slice<T>` runtime descriptor
 when any bound is a variable.
 
-```brief
+```briv
 arr[:]         // Full view — same as arr but typed as slice
 arr[4:]        // Index 4 to end
 arr[:8]        // Start to index 8
@@ -1117,7 +1117,7 @@ length: Int, stride: Int }`, or inlined as direct GEP when used immediately.
 
 Element-wise arithmetic operators on `Vector<T, N>` and `Slice<T>` types:
 
-```brief
+```briv
 let a: Int[4] = ...;
 let b: Int[4] = ...;
 let sum = a + b;       // <4 x i64> vector add
@@ -1137,7 +1137,7 @@ proven equal by contract → same vectorized codegen.
 
 Slices can appear on the left of assignment:
 
-```brief
+```briv
 arr[2:8] = src[4:10];    // Contiguous memcpy (stride 1:1)
 arr[0:N:2] = src[0:N];   // Strided dest, contiguous src — gather/scatter loop
 ```
@@ -1153,7 +1153,7 @@ The `as` operator produces zero-copy views between compatible array types:
 
 **Type-punned view** — reinterpret the same bytes with a different element type:
 
-```brief
+```briv
 let raw: Int[1024];
 let bytes = raw as Byte[8192];   // 1024 * 8 = 8192 bytes
 let frames = raw as Frame[256];  // if sizeof(Frame) == 32
@@ -1164,7 +1164,7 @@ Compile-time validation: `N * sizeof(T) == M * sizeof(U)`. Emits `bitcast`.
 
 **Strided view** — recast a slice onto a sized array:
 
-```brief
+```briv
 let evens = raw[0:1024:2] as Int[512];  // stride 2 → 512 elements
 let subset = raw[2:10] as Int[8];        // contiguous, 8 elements
 ```
@@ -1179,7 +1179,7 @@ for matching byte-size vectors.
 `map`, `filter`, `fold`, `any`, `all`, `sum`, `product` are regular txn functions
 in `lib/std/array.bv`, not compiler intrinsics:
 
-```brief
+```briv
 txn array_map<T, U>(arr: Vector<T, N>, f: T -> U, i: Int)
     -> Vector<U, N>
     [i < N][i == N]
@@ -1221,7 +1221,7 @@ match value {
 
 **Examples:**
 
-```brief
+```briv
 // Basic enum matching
 enum Option<T> { Some(T), None };
 let val: Option<Int> = Some(42);
@@ -1246,7 +1246,7 @@ term match status {
 
 **Relation to `uni`:** The `match` expression is a higher-level construct that desugars to a sequence of `uni` statements with a `term` fallthrough. Single-arm pattern matching should still use `uni` for simplicity.
 
-**Compiler support:** Supported in Rust parser + interpreter; self-hosted (Brief-in-Brief) support pending (requires `KeywordMatch` token in `token.bv` and `parse_match_expr` in `parser.bv`).
+**Compiler support:** Supported in Rust parser + interpreter; self-hosted (Briv-in-Briv) support pending (requires `KeywordMatch` token in `token.bv` and `parse_match_expr` in `parser.bv`).
 
 ### 3.14 Collection Mutation
 
@@ -1254,27 +1254,27 @@ Collection mutation is expressed through the `<-` arrow syntax, with the `&`
 sigil marking the target collection. Three operations are supported:
 
 **Push (append):**
-```brief
+```briv
 &list <- item;        // Append item to list
 ```
 
 **Pop (remove and return):**
-```brief
+```briv
 let item = <- &list;  // Pop item from list (removes last element)
 ```
 
 **Indexed write:**
-```brief
+```briv
 &list[i] <- value;    // Write value at index i
 ```
 
 **Indexed remove:**
-```brief
+```briv
 <- &list[i];          // Remove element at index i
 ```
 
 **Prepend (insert at front):**
-```brief
+```briv
 item <- &list;        // Insert item at front of list
 ```
 
@@ -1291,7 +1291,7 @@ item <- &list;        // Insert item at front of list
    the mutation is an observable side effect on state.
 
 **Discard form:**
-```brief
+```briv
 <- &list;             // Pop and discard last element
 <- &list[i];          // Remove and discard element at i
 ```
@@ -1301,7 +1301,7 @@ followed immediately by dropping the value. It is useful when only the
 length effect is needed (e.g., drain-until-empty halting patterns).
 
 **Expression discard form:**
-```brief
+```briv
 <- syscall! @ 3 (fd);          // Call syscall, discard result
 <- compute_side_effect();       // Call function, discard return
 ```
@@ -1317,7 +1317,7 @@ The expression discard `<- expr` evaluates any expression and discards its resul
 
 ### 3.15 Reflection (`.^` runtime, `.^^` compile-time)
 
-Brief has two reflection operators, both compile-time-resolved and explicitly
+Briv has two reflection operators, both compile-time-resolved and explicitly
 marked (a lower-case name after the operator is a parse error):
 
 | Operator | Kind | Result |
@@ -1344,7 +1344,7 @@ expressions. Runtime introspection beyond these targets uses method calls
 
 **Examples:**
 
-```brief
+```briv
 let n: Int   = s.^Len;         // runtime length
 let p: Ptr<T> = &x;            // & is primary; x.^Ptr is the reflection form
 let sz: Int  = x.^^Bytes;      // compile-time constant
@@ -1379,7 +1379,7 @@ When a `Ptr<T>` is indexed with `ptr[i]`, the compiler emits a direct
 `getelementptr + load` (or `store`) instruction — identical to raw C pointer
 access — but only after verifying the access is within bounds.
 
-```brief
+```briv
 let p: Ptr<Int> = &x;
 let val = p[0];                   // Read — compiler verifies 0 < sizeof(x)
 p[0] = 42;                        // Write — compiler verifies bounds
@@ -1415,7 +1415,7 @@ Operations on layout-constrained pointers are spatial-only:
 memcpy, memcmp, memset, hash, address arithmetic, volatile load/store.
 Semantic operations (arithmetic on pointee, field access) are rejected.
 
-```brief
+```briv
 let p: Ptr64 = 0x4000 as Ptr64;
 let raw: Ptr = p as Ptr;          // cast between layout-constrained ptrs
 let i: Ptr<Int32> = p as Ptr<Int32>;  // if bytes match (4 == 4)
@@ -1426,7 +1426,7 @@ let i: Ptr<Int32> = p as Ptr<Int32>;  // if bytes match (4 == 4)
 `Ptr<A> as Ptr<B>` is valid when `bytes(A) == bytes(B)` and `alignment(A) >=
 alignment(B)`. No explicit `meld` required for simple layout compatibility.
 
-```brief
+```briv
 // Float (4 bytes, align 4) and Int32 (4 bytes, align 4)
 let f: Ptr<Float> = 0x40010000 as Ptr<Float>;
 let i: Ptr<Int32> = f as Ptr<Int32>;         // ✅ same layout
@@ -1458,7 +1458,7 @@ no intermediate wrappers. Available via `lib/std/spatial.bv`:
 
 A function reference can be converted to a function pointer:
 
-```brief
+```briv
 defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
 let cmp_fn = &my_cmp;   // fn pointer type: Fn(Int, Int) -> Bool
 let eq = cmp_fn(3, 5);        // indirect call through fn pointer
@@ -1475,7 +1475,7 @@ The LLVM backend marshals arguments per the internal calling convention
 When `meld T -> Int`, the pattern `(x as Int) op (y as Int) as T` is
 detected and compiled as a single native operation without redundant casts:
 
-```brief
+```briv
 meld Meters -> Int;
 defn scale(val: Meters, factor: Int) -> Meters {
     term (val as Int) * factor as Meters;  // single mul i64
@@ -1495,7 +1495,7 @@ with the hashword-protocol architecture (2026-07-20). Type relationships are
 now expressed with protocol hashwords (`type Int: #Int`) and reflection
 (§3.15). Cross-layout reuse is expressed with `meld`:
 
-```brief
+```briv
 meld CBuffer -> RSBuffer {
     layout { bytes; alignment; };
 };
@@ -1510,7 +1510,7 @@ not yet implemented. When they land, they will use method-call syntax
 
 ### 3.18 Throughput-Matched Optimization (Roofline Model)
 
-Brief's compiler uses physical hardware constraints to guide precompute/fold
+Briv's compiler uses physical hardware constraints to guide precompute/fold
 decisions. A precomputed LUT that spills out of cache runs *slower* than the
 arithmetic loop — the roofline model prevents this.
 
@@ -1594,7 +1594,7 @@ lookup. Collection bracket is never implicitly regex.
 
 A new expression form producing a regex value:
 
-```brief
+```briv
 // Regex literal
 let vowel: Regex = @"[aeiou]";
 
@@ -1666,7 +1666,7 @@ A codec declaration defines a named codec that controls how values of a type are
 
 **Syntax:**
 
-```brief
+```briv
 codec HexColor {
     [value >= 0];               // validation constraint
     [value <= 0xFFFFFF];        // validation constraint
@@ -1691,7 +1691,7 @@ binding    ::= "!>" ("parse" | "format") ":" ident ";"
 3. `!> format: fn_name;` registers a function that converts a value to its string representation.
 4. A type references a codec via the `!> codec:` property binding in its body:
 
-```brief
+```briv
 type MyInt : Int {
     !> codec: PositiveInt;
 };
@@ -1703,7 +1703,7 @@ type MyInt : Int {
 
 When a variable is declared with a type that has a codec containing a `!> parse:` handler, the compiler detects bare identifiers in the initializer position and rewrites them as deferred literals:
 
-```brief
+```briv
 codec HexColor {
     [value >= 0];
     [value <= 0xFFFFFF];
@@ -1738,9 +1738,9 @@ Compiler plugins are WASM (or native `.so`) modules loaded at compile time that 
 **CLI:**
 
 ```bash
-brief build file.bv --plugin ./my_plugin.wasm        # WASM plugin
-brief build file.bv --plugin ./my_plugin.so           # Native plugin
-brief build file.bv --plugin ./p1.wasm --plugin ./p2.wasm  # Multiple plugins
+briv build file.bv --plugin ./my_plugin.wasm        # WASM plugin
+briv build file.bv --plugin ./my_plugin.so           # Native plugin
+briv build file.bv --plugin ./p1.wasm --plugin ./p2.wasm  # Multiple plugins
 ```
 
 **Hook points:**
@@ -1764,9 +1764,9 @@ pub trait Plugin: Debug {
 }
 ```
 
-**Native plugin ABI:** A `.so`/`.dylib`/`.dll` must export a `brief_plugin_create` function returning a `*mut dyn Plugin`. Loading uses `libloading`.
+**Native plugin ABI:** A `.so`/`.dylib`/`.dll` must export a `briv_plugin_create` function returning a `*mut dyn Plugin`. Loading uses `libloading`.
 
-**WASM plugin loading:** Requires the `plugins` Cargo feature (wasmtime runtime). The WIT interface is defined in `wit/` and compiled to WASM via Brief's own Phase 6 WASM target.
+**WASM plugin loading:** Requires the `plugins` Cargo feature (wasmtime runtime). The WIT interface is defined in `wit/` and compiled to WASM via Briv's own Phase 6 WASM target.
 
 **Why WASM for plugins?** See `docs/architecture/features/plugins.md`.
 
@@ -1779,7 +1779,7 @@ transaction. When a body is present, the examples act as compile-time
 assertions. When the body is omitted (drafting state), the compiler
 synthesizes the minimal formula that satisfies all examples.
 
-```brief
+```briv
 // Resolved state: body + derivation (compile-time assertions)
 defn add(a: Int, b: Int) -> Int {
     term a + b;
@@ -1807,7 +1807,7 @@ defn clamp(val: Int) -> Int
 **Behavior:**
 - When body is present: compiler interprets the body with each example's
   inputs and asserts the output matches. Compile error on mismatch.
-- When body is absent: `brief derive` runs SMT synthesis to infer the body.
+- When body is absent: `briv derive` runs SMT synthesis to infer the body.
 - The derivation block is never consumed — it stays in source as the
   permanent specification.
 - `#no_derive` pragma blocks synthesis during drafting.
@@ -1821,7 +1821,7 @@ which expand to explicit preconditions and guard injection.
 
 **`entry!("<cmd>")`** in a node's contract makes it a one-shot CLI subcommand:
 
-```brief
+```briv
 // `myapp build` fires this node exactly once; `myapp run` fires the other.
 node build [entry!("build")][result == 0] { ... };
 node run   [entry!("run")][result == 0]   { ... };
@@ -1836,7 +1836,7 @@ emitted. A non-reactive `defn` entry point gets a synthesized reactive wrapper
 **`args!("--flag")`** / **`args!("--flag", T)`** bind a snapshot state field
 from `__argv_has` / `__argv_value`:
 
-```brief
+```briv
 let clean: Bool = args!("--clean");   // __argv_has("--clean")
 let out: String = args!("--out", String); // __argv_value("--out")
 ```
@@ -1859,15 +1859,15 @@ the sole environment fallback.
 The `export` keyword marks a definition for C/foreign linking. The
 compiler generates a C-ABI compatible wrapper with state handle.
 
-```brief
+```briv
 export defn add(a: Int, b: Int) -> Int { term a + b; };
 ```
 
-Compiled with `brief build --library`, this produces:
+Compiled with `briv build --library`, this produces:
 - `.ll` LLVM IR with a `dso_local` wrapper function
 - `.o` object file
 - `.a` static library
-- `brief_types.h` C header with `__brief_init_state` and `__glue_release`
+- `briv_types.h` C header with `__briv_init_state` and `__glue_release`
 
 **Replaces:** The old `#export` pragma (now removed — use `export defn` instead).
 deprecation window.
@@ -1877,7 +1877,7 @@ deprecation window.
 The `alloc` annotation on variable bindings controls where and how memory
 is allocated. It follows the `!>` metadata pattern.
 
-```brief
+```briv
 // Stack allocation (verified no-escape at compile time)
 let buffer: List<Int>;
 !> buffer: alloc("Stack");
@@ -1911,10 +1911,10 @@ let header: PacketHeader;
 ### 3.27 `observable` and `volatile` Metadata \[2026-07-12: Phase 8G\]
 
 `observable` marks a function or variable access as having side effects
-visible outside the Brief program. DCE must preserve calls to observable
+visible outside the Briv program. DCE must preserve calls to observable
 functions. `volatile` prevents LLVM from reordering or redundantly loading.
 
-```brief
+```briv
 defn print_int(n: Int) -> Bool {
     !> observable: true;
     !> llvm_asm: "call @printf";
@@ -1931,7 +1931,7 @@ When a `.bv` file contains only bare top-level `let` bindings / `const`
 declarations — or a single `defn main()` with no explicit `entry!` — the
 flat-scripting plugin synthesizes a **one-shot opening node**:
 
-```brief
+```briv
 // No defn, no txn, no node — this is a script (bare let bindings).
 let x: Int = 42;
 let y: Int = x + 1;
@@ -1939,7 +1939,7 @@ let y: Int = x + 1;
 
 becomes:
 
-```brief
+```briv
 let __script_done: Bool = false;
 node __script_main [__script_done == false][__script_done] {
     let x: Int = 42;
@@ -1952,7 +1952,7 @@ The guard `[__script_done == false]` is true exactly once; the final flip
 makes it false afterward. `[true]` is never emitted.
 
 A `defn main() -> Int { ... }` (no `entry!`) is also wired to run exactly once
-via the same synthesized node (calling the renamed `brief_main`), fixing the
+via the same synthesized node (calling the renamed `briv_main`), fixing the
 dead-code gap where a plain `defn main` was defined but never invoked.
 
 **Rules:**
@@ -1962,14 +1962,14 @@ dead-code gap where a plain `defn main` was defined but never invoked.
   with either name is a compile error (no silent shadowing).
 - Scripting and explicit `entry!` are mutually exclusive in the same file.
 
-### 3.29 `.f` Layout Parsing (Formatted Brief) \[2026-07-12: Phase 16C\]
+### 3.29 `.f` Layout Parsing (Formatted Briv) \[2026-07-12: Phase 16C\]
 
 Files with the `.f` modifier (e.g., `main.f.bv`, `server.f.c.bv`) use
 indentation instead of braces and semicolons. The layout pre-processor
 injects virtual `{`, `}`, and `;` tokens based on indentation changes.
 
-```brief
-// main.f.bv — same semantics as standard Brief
+```briv
+// main.f.bv — same semantics as standard Briv
 defn add(a: Int, b: Int) -> Int
     a + b         // indented body — virtual { } inserted
                   // virtual ; at end of line
@@ -1987,7 +1987,7 @@ Files with the `.c` modifier (e.g., `server.c.bv`, `sensor.c.ebv`) are
 automatically wrapped in `cell <stem> { ... }`. The `input` and `output`
 keywords declare the cell's parameters and return type.
 
-```brief
+```briv
 // server.c.bv — becomes: cell server(port: UInt16, verbose: Bool) -> status: Int { ... }
 input port: UInt16;
 input verbose: Bool;
@@ -2010,13 +2010,13 @@ Metadata follows a key-value pattern with a prefix convention:
 | Prefix | Consumed by |
 |--------|-------------|
 | `alloc` | Frontend + all backends |
-| `llvm_*` | `brief-llvm` backend |
-| `circt_*` | `brief-circt` hardware backend |
-| `hls_*` | `brief-circt` HLS pass |
-| `wasm_*` | `brief-webstack` backend |
+| `llvm_*` | `briv-llvm` backend |
+| `circt_*` | `briv-circt` hardware backend |
+| `hls_*` | `briv-circt` HLS pass |
+| `wasm_*` | `briv-webstack` backend |
 | `gpu_*` | GPU backends |
 | `interpreter_*` | Compile-time interpreter |
-| No prefix | All backends (standard Brief) |
+| No prefix | All backends (standard Briv) |
 
 **Validation rules:**
 1. **Unknown key** → silently ignored. Forward compatibility.
@@ -2046,7 +2046,7 @@ architecture.
 | `Void` | 0-bit | Unit type | `()` |
 
 **Type literals:**
-```brief
+```briv
 let i: Int = 42;
 let u: UInt = 42u;
 let f: Float = 3.14;
@@ -2060,7 +2060,7 @@ let d: Data = Data::from_bytes([1, 2, 3]);
 ### 4.2 Compound Types
 
 **Lists (dynamic arrays):**
-```brief
+```briv
 let list: List<Int> = [1, 2, 3];
 let empty: List<String> = [];
 
@@ -2073,7 +2073,7 @@ list.contains(2);     // Membership
 ```
 
 **Vectors (fixed-size arrays):**
-```brief
+```briv
 let vec: Int[5] = [1, 2, 3, 4, 5];
 let matrix: Float[3][3];  // 3x3 matrix
 
@@ -2083,7 +2083,7 @@ vec .^Len;          // Size (compile-time constant)
 ```
 
 **Options (nullable types):**
-```brief
+```briv
 let opt: Option<Int> = Some(42);
 let none: Option<Int> = None;
 
@@ -2096,7 +2096,7 @@ opt.map(|x| x * 2); // Transform if Some
 ```
 
 **Results (error handling):**
-```brief
+```briv
 let result: Result<Int, String> = Ok(42);
 let err: Result<Int, String> = Err("error");
 
@@ -2111,7 +2111,7 @@ result.and_then(|x| Ok(x * 2)); // Chain operations
 ```
 
 **Tuples:**
-```brief
+```briv
 let pair: (Int, String) = (42, "answer");
 let triple: (Int, Bool, Float) = (1, true, 3.14);
 
@@ -2122,7 +2122,7 @@ let second = pair.1;
 ```
 
 **Unions:**
-```brief
+```briv
 let value: Int Union String Union Bool = 42;
 
 // Pattern matching
@@ -2134,7 +2134,7 @@ unification value(Bool(b)) = if b { 1 } else { 0 };
 ### 4.3 Custom Types
 
 **Structs:**
-```brief
+```briv
 struct Point {
     x: Int,
     y: Int
@@ -2145,7 +2145,7 @@ let x = p.x;
 ```
 
 **Enums:**
-```brief
+```briv
 enum Color {
     Red,
     Green(Int),  // With data
@@ -2156,7 +2156,7 @@ let c: Color = Color::Green(255);
 ```
 
 **Type aliases:**
-```brief
+```briv
 type UserId = Int;
 type Name = String;
 type Point2D = (Int, Int);
@@ -2167,7 +2167,7 @@ let id: UserId = 42;
 ### 4.4 Type Conversions
 
 **Implicit conversions:**
-```brief
+```briv
 let i: Int = 42;
 let f: Float = i;      // Int → Float (widening)
 
@@ -2176,7 +2176,7 @@ let i2: Int = u;       // UInt → Int (if fits)
 ```
 
 **Explicit casts:**
-```brief
+```briv
 let f: Float = 3.14;
 let i: Int = f as Int;  // Float → Int (truncates)
 
@@ -2185,7 +2185,7 @@ let i2: Int = s as Int; // String → Int (parses)
 ```
 
 **Type constructors:**
-```brief
+```briv
 let s: String = String(42);      // Int → String
 let i: Int = Int("42");          // String → Int
 let f: Float = Float(42);        // Int → Float
@@ -2196,7 +2196,7 @@ let c: Char = Char(65);          // Int → Char ('A')
 
 Functions and types can be generic:
 
-```brief
+```briv
 // Generic function
 defn identity<T>(x: T) -> T {
     term x;
@@ -2220,7 +2220,7 @@ let r: Result<Int, String> = Ok(42);
 ```
 
 **Generic constraints (future):**
-```brief
+```briv
 // Trait bounds (planned)
 defn max<T: Ord>(a: T, b: T) -> T {
     [a >= b] { term a; };
@@ -2237,9 +2237,9 @@ defn process<T, U>(t: T, u: U) -> String
 
 ### 4.6 Type Inference
 
-Brief can infer types in many contexts:
+Briv can infer types in many contexts:
 
-```brief
+```briv
 // Variable type inference
 let x = 42;           // Inferred: Int
 let s = "hello";      // Inferred: String
@@ -2264,7 +2264,7 @@ let p = make_pair(1, 2);  // Inferred: (Int, Int)
 
 > **Added 2026-06-09 (Phase 1.5)**
 
-Brief types are defined via `Type Name : [Parent] [Protocol] { ... }` declarations. The old `<:`
+Briv types are defined via `Type Name : [Parent] [Protocol] { ... }` declarations. The old `<:`
 operator (read as "derives from") connects a new type to its base type. Properties
 and constraints within the `{ }` body define how the new type differs from the base.
 
@@ -2300,7 +2300,7 @@ Unrecognized expression forms produce a compile-time error in Pass 1.
 
 #### 4.7.3 Examples
 
-```brief
+```briv
 // Scalar derivation
 Type U8  : Bits { !> Bytes: 1; !> Alignment: 1; };
 Type U32 : Bits { !> Bytes: 4; !> Alignment: 4; };
@@ -2356,7 +2356,7 @@ PASS 2: Executable Pass
 ### 5.1 FFI Declaration
 
 **Foreign signatures:**
-```brief
+```briv
 // Standard FFI (must handle Result)
 frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
@@ -2380,7 +2380,7 @@ syscall! exit(code: Int);
 
 ### 5.2 FFI Type Mapping
 
-| Brief Type | C Type | Rust Type | Python Type |
+| Briv Type | C Type | Rust Type | Python Type |
 |------------|--------|-----------|-------------|
 | `Int` | `int64_t` | `i64` | `int` |
 | `UInt` | `uint64_t` | `u64` | `int` |
@@ -2394,7 +2394,7 @@ syscall! exit(code: Int);
 ### 5.3 Error Handling
 
 **Result handling patterns:**
-```brief
+```briv
 // Pattern 1: Guard-based
 let result = sqrt(4.0);
 [result.is_ok()] {
@@ -2419,7 +2419,7 @@ let doubled = result.map(|x| x * 2.0);
 ```
 
 **Error types:**
-```brief
+```briv
 enum MathError {
     DomainError(String),
     Overflow,
@@ -2436,7 +2436,7 @@ enum IOError {
 
 ### 5.4 Compiler Directives
 
-**Brief's pragma philosophy (2026-06-06):** In other languages, pragmas exist so the programmer can feed the compiler hints to optimize better — they require deep systems-level insight. In Brief, the compiler runs at full speed by default — inlining, folding, precomputing, dead-field-eliminating — with maximum zealotry. **Pragmas are the programmer's way to request the compiler calm down on a specific point.** Not "help me optimize" but "I understand you can prove this is dead, but I need it alive anyway."
+**Briv's pragma philosophy (2026-06-06):** In other languages, pragmas exist so the programmer can feed the compiler hints to optimize better — they require deep systems-level insight. In Briv, the compiler runs at full speed by default — inlining, folding, precomputing, dead-field-eliminating — with maximum zealotry. **Pragmas are the programmer's way to request the compiler calm down on a specific point.** Not "help me optimize" but "I understand you can prove this is dead, but I need it alive anyway."
 
 Every pragma follows this pattern:
 - `#out` — "Calm down, this FFI call has external effects you can't see"
@@ -2444,21 +2444,21 @@ Every pragma follows this pattern:
 - `#assume_event(x)` — "Calm down proof engine, trust that `x` fires"
 - `#assume_shape(g, a)` — "Calm down, the guard+action contract is valid"
 
-The programmer holds the authority — the compiler defers. This is teachable in one sentence: **"Brief runs at full speed by default. A pragma is a request to the compiler to hold back its zealotry on a specific point."**
+The programmer holds the authority — the compiler defers. This is teachable in one sentence: **"Briv runs at full speed by default. A pragma is a request to the compiler to hold back its zealotry on a specific point."**
 
 Three syntax forms are supported:
 
 #### 5.4.1 `#pragma` Syntax (Recommended)
 
 Item-level (single target):
-```brief
+```briv
 #pragma.c           // Target: C backend (replaces #[c])
 #pragma.rust        // Target: Rust backend
 #pragma.c optimize(3)  // Target + value
 ```
 
 File-level (multiple directives):
-```brief
+```briv
 #!pragma ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")
 ```
 
@@ -2466,7 +2466,7 @@ File-level (multiple directives):
 
 The bracket-based syntax still works but emits a deprecation warning:
 
-```brief
+```briv
 #![ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")]
 
 frgn custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
@@ -2479,14 +2479,14 @@ frgn custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
 - `ffi.wasm` / `#pragma.ffi.wasm` - WASM FFI
 - `bind("path.toml")` - Binding configuration
 - `import("lib.a")` - Link library
-- `map("brief_type", "foreign_type")` - Type mapping
+- `map("briv_type", "foreign_type")` - Type mapping
 
 #### 5.4.3 `#!exit` — Program Termination Condition
 
 The `#!exit` directive declares a condition under which the program should
 terminate. It appears at the top level of a program:
 
-```brief
+```briv
 #!exit count >= 1000000;
 ```
 
@@ -2506,7 +2506,7 @@ If a program has wake triggers but no `#!exit` condition, a warning is emitted.
 Declares that the named trigger **will** fire eventually. This enables the proof
 engine to prove termination for reactive transactions with wake triggers:
 
-```brief
+```briv
 #assume_event(stdin_ready)
 node [count < total][count == total] {
     count = count + 1;
@@ -2528,7 +2528,7 @@ is emitted for the pragma — it is purely a proof-engine constraint.
 Declares that `guard_expr` is expected to be true at runtime. The compiler
 generates a runtime guard check and splits execution into fast/slow paths:
 
-```brief
+```briv
 #assume_shape(packet, escape)
 node [*][*] {
     &processed = processed + 1;
@@ -2547,7 +2547,7 @@ and only the rollback action infrastructure is emitted.
 
 ### 5.5 Annotations (`#`, `#!`, `#?`)
 
-Brief provides a lightweight annotation system for attaching compiler directives
+Briv provides a lightweight annotation system for attaching compiler directives
 to items (definitions, transactions, types). Annotations are distinct from
 metadata (`!>`) — they tell the compiler **what to do**, not **what something is**.
 
@@ -2568,7 +2568,7 @@ explanations at compile time:
 ```
 
 Annotations appear on the signature line, before the item keyword:
-```brief
+```briv
 #?gpu defn my_compute() -> Int { term 42; };
 #!out txn write_port() [*][*] { &port = value; term; };
 ```
@@ -2582,7 +2582,7 @@ declarative data — they describe properties of the annotated item.
 sole metadata-declaration form. Writing `<~` is a parse error.)
 
 **Inside type bodies**, `!>` declares type properties:
-```brief
+```briv
 type UInt32 : Bits {
     !> bytes: 4;
     !> alignment: 4;
@@ -2592,7 +2592,7 @@ type UInt32 : Bits {
 
 **Inside definition/transaction bodies**, `!>` at the body top declares
 item-level metadata:
-```brief
+```briv
 defn process() -> Int {
     !> jira: "FIN-8422";
     !> priority: 2;
@@ -2601,7 +2601,7 @@ defn process() -> Int {
 ```
 
 **Inside guard branches**, `!>` declares branch-scoped metadata:
-```brief
+```briv
 txn compute [count < N][count == N] {
     [count % 2 == 0] {
         !> priority: 1;
@@ -2639,7 +2639,7 @@ Codegen queries the property system via `TypeUniverse` convenience methods:
 
 Resources are declared and managed:
 
-```brief
+```briv
 // Declare resource
 rsrc file: File("data.txt", "read");
 
@@ -2662,7 +2662,7 @@ txn read_data() [file.exists()][data .^Len > 0] {
 Inline `frgn` declarations with `from "lib.so"` replace TOML-based FFI bindings. The compiler resolves foreign functions at runtime via dynamic linking (`dlsym`).
 
 **Syntax:**
-```brief
+```briv
 // Primitive types — direct C ABI via dlsym (Tier 1)
 frgn strlen(s: String) -> Int from "libc.so.6";
 
@@ -2672,7 +2672,7 @@ frgn process_json(input: JsonValue) -> JsonValue from "libprocessor" via metropo
 
 **Tier 1: Direct Dynamic Linking (default)**
 - Functions with primitive parameter/return types (`Int`, `Float`, `Bool`, `Char`, `String`, `Void`) are called via `dlsym` through `libloading`.
-- Brief values are auto-converted to C ABI (strings null-terminated, booleans become `i32`, etc.).
+- Briv values are auto-converted to C ABI (strings null-terminated, booleans become `i32`, etc.).
 - Overhead: ~1-2ns per call (same as native C function pointer).
 
 **Tier 2: Metropolitan Protocol (via metropolitan)**
@@ -2695,7 +2695,7 @@ All other foreign functionality (`strlen`, `is_digit`, file I/O, math functions,
 
 **TOML Migration:**
 All existing `from "*.toml"` declarations remain valid but are deprecated. The recommended pattern is:
-```brief
+```briv
 // Old (deprecated):
 frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
@@ -2756,13 +2756,13 @@ The interpreter maintains an **FFI registry** that maps location keys (e.g., `"s
 | `std/os/ring` | Ring buffer | `ring_create`, `ring_push`, `ring_pop`, `ring_free` |
 | `std/os/core` | Core I/O | `read`, `write`, `open`, `close` — micro-optimized |
 | `std/os/atomic` | Atomic operations | `atomic_load`, `atomic_store`, `atomic_fetch_add`, `cmpxchg`, `fence` |
-| `std/rt` | Runtime | `__rt_init`, `__rt_alloc`, `__rt_free` via `frgn` from `brief_rt.c` |
+| `std/rt` | Runtime | `__rt_init`, `__rt_alloc`, `__rt_free` via `frgn` from `briv_rt.c` |
 
-All `std/os/` modules are prelude-imported automatically. Each module contains `inop` declarations that call `brief_rt.c` wrapper functions (or direct LLVM IR for atomics).
+All `std/os/` modules are prelude-imported automatically. Each module contains `inop` declarations that call `briv_rt.c` wrapper functions (or direct LLVM IR for atomics).
 
 ### 6.2 Math Module
 
-```brief
+```briv
 import "std/math";
 
 // Basic operations
@@ -2785,7 +2785,7 @@ let fib = math.fibonacci(10);          // 55
 
 ### 6.3 String Module
 
-```brief
+```briv
 import "std/string";
 
 let s = "Hello, World!";
@@ -2802,7 +2802,7 @@ let starts = string.starts_with(s, "Hello"); // true
 
 // Manipulation
 let trimmed = string.trim("  hello  "); // "hello"
-let replaced = string.replace(s, "World", "Brief");  // "Hello, Brief!"
+let replaced = string.replace(s, "World", "Briv");  // "Hello, Briv!"
 let parts = string.split(s, ", ");     // ["Hello", "World!"]
 
 // Substring
@@ -2811,7 +2811,7 @@ let sub = string.substr(s, 7, 12);     // "World"
 
 ### 6.4 Collections Module
 
-```brief
+```briv
 import "std/collections";
 
 // Lists
@@ -2849,7 +2849,7 @@ let (val, queue) = queue.dequeue();    // (Some(1), queue with [2])
 
 ### 6.5 IO Module
 
-```brief
+```briv
 import "std/io";
 
 // Console I/O
@@ -2869,7 +2869,7 @@ io.formatln("Name: {}, Age: {}", "Alice", 30);
 
 ### 6.6 JSON Module
 
-```brief
+```briv
 import "std/json";
 
 // Serialization
@@ -2888,7 +2888,7 @@ let value2 = json.from_json(json_str2);
 
 ### 6.7 Time Module
 
-```brief
+```briv
 import "std/time";
 
 // Current time
@@ -2913,7 +2913,7 @@ Compile-time regex compilation (planned; see §3.17). The DFA is
 compiled during parsing using Thompson construction → subset construction.
 The transition table is embedded as a constant; the scan loop is O(n) linear.
 
-```brief
+```briv
 let found : "hello@example.com"["^[a-z]+@[a-z]+\\.[a-z]+$"];
 ```
 
@@ -2933,7 +2933,7 @@ precompute/fold decisions. Configured via `bottlenecks.dbvs` schema files.
 
 The `@` operator provides memory-mapped access:
 
-```brief
+```briv
 // Raw physical address (embedded only)
 let reg: Int @ 0x40020000;
 
@@ -2967,13 +2967,13 @@ let field: Int @0x40020000.0..4;  // Bits 0-4 at address
 
 ---
 
-## 8. Data Brief (Configuration)
+## 8. Data Briv (Configuration)
 
-Data Brief provides schema-enforced configuration:
+Data Briv provides schema-enforced configuration:
 
-### 8.1 Data Brief Schema (`.dbvs`)
+### 8.1 Data Briv Schema (`.dbvs`)
 
-```brief
+```briv
 // hardware.dbvs
 schema Hardware {
     name: String,
@@ -3015,9 +3015,9 @@ alias CommonPeriph = {
 };
 ```
 
-### 8.2 Data Brief (`.dbv`)
+### 8.2 Data Briv (`.dbv`)
 
-```brief
+```briv
 // hardware.dbv
 import "hardware.dbvs";
 
@@ -3063,11 +3063,11 @@ Hardware {
 };
 ```
 
-### 8.3 Data Brief Lines (`.dbvl`)
+### 8.3 Data Briv Lines (`.dbvl`)
 
 Line-based storage for large datasets:
 
-```brief
+```briv
 // sensors.dbvl
 schema SensorReading {
     timestamp: Int,
@@ -3083,13 +3083,13 @@ schema SensorReading {
 
 ### 8.4 Validation
 
-Data Brief validates against schema:
+Data Briv validates against schema:
 
-```brief
+```briv
 // Compile-time validation
-brief check hardware.dbv  // Error if schema mismatch
+briv check hardware.dbv  // Error if schema mismatch
 
-// Access in Brief code
+// Access in Briv code
 import "hardware.dbv";
 
 let addr = hardware.peripherals[0].address;
@@ -3120,51 +3120,51 @@ Backend (code generation)
 Target (Rust/C/WASM/Verilog/VHDL/COBOL)
 ```
 
-### 9.2 Strict Brief Verification
+### 9.2 Strict Briv Verification
 
-**Strict Brief** (`.s.bv`, `.s.ebv`, `.s.rbv`) extends the standard Brief compiler pipeline with:
+**Strict Briv** (`.s.bv`, `.s.ebv`, `.s.rbv`) extends the standard Briv compiler pipeline with:
 
 4. **Capability Requirements** (`.s.ebv`/`.s.rbv`): Strict embedded files require `hardware_triggers` capability; strict rendered files require `reactive_ui` capability.
 
-Use `--strict` flag to apply strict mode to any file: `brief check --strict file.bv`
+Use `--strict` flag to apply strict mode to any file: `briv check --strict file.bv`
 
 ### 9.3 CLI Commands
 
 ```bash
 # Check (type-check only, no codegen)
-brief check file.bv
+briv check file.bv
 
 # Build (compile to default target)
-brief build file.bv      # .bv → native Rust executable
-brief build file.rbv     # .rbv → web app (WASM + JS + UI)
-brief build file.ebv     # .ebv → error (needs --target)
+briv build file.bv      # .bv → native Rust executable
+briv build file.rbv     # .rbv → web app (WASM + JS + UI)
+briv build file.ebv     # .ebv → error (needs --target)
 
 # Compile with explicit target
-brief compile file.bv --target rust.toml
-brief compile file.ebv --target vhdl_fpga.toml
-brief compile file.rbv --target nextjs.toml
+briv compile file.bv --target rust.toml
+briv compile file.ebv --target vhdl_fpga.toml
+briv compile file.rbv --target nextjs.toml
 
 # Backend-specific
-brief wasm file.bv       # .bv → standalone WASM
-brief wasm file.rbv      # .rbv → full web app
-brief rust file.bv       # .bv → Rust source
-brief c file.bv          # .bv/.ebv → C source
-brief arm file.ebv       # .ebv → bare-metal Rust
-brief verilog file.ebv   # .ebv → SystemVerilog
-brief vhdl file.ebv      # .ebv → VHDL
-brief cobol file.bv      # .bv → COBOL
-brief llvm file.bv       # .bv → LLVM IR \[2026-05-29\]
-brief aarch64 file.bv    # .bv → AArch64 binary \[2026-05-29\]
-brief x86_64 file.bv     # .bv → x86_64 binary \[2026-05-29\]
+briv wasm file.bv       # .bv → standalone WASM
+briv wasm file.rbv      # .rbv → full web app
+briv rust file.bv       # .bv → Rust source
+briv c file.bv          # .bv/.ebv → C source
+briv arm file.ebv       # .ebv → bare-metal Rust
+briv verilog file.ebv   # .ebv → SystemVerilog
+briv vhdl file.ebv      # .ebv → VHDL
+briv cobol file.bv      # .bv → COBOL
+briv llvm file.bv       # .bv → LLVM IR \[2026-05-29\]
+briv aarch64 file.bv    # .bv → AArch64 binary \[2026-05-29\]
+briv x86_64 file.bv     # .bv → x86_64 binary \[2026-05-29\]
 
 # Run (build and execute)
-brief run file.rbv       # Build and open in browser
-brief run file.bv        # Build and execute native
+briv run file.rbv       # Build and open in browser
+briv run file.bv        # Build and execute native
 
 # Project management
-brief init my-app        # Create new project
-brief import package     # Add dependency
-brief lsp                # Start language server
+briv init my-app        # Create new project
+briv import package     # Add dependency
+briv lsp                # Start language server
 ```
 
 ### 9.3 Target Specifications
@@ -3241,12 +3241,12 @@ reset = "RESETn"
 | `link_and_optimize()` | ✅ Complete | `llvm-link` + `opt -O2` with `-vectorize-slp=false` \[2026-06-06\] |
 | FFI Registry | ✅ Complete | No hardcoded string matching; all dispatch through `ffi_name_to_location` → `foreign_functions` \[2026-06-06\] |
 | `__builtin.dbvs` | ✅ Complete | Schema documenting all registered FFI location keys \[2026-06-06\] |
-| `brief_rt.c` as import | ✅ Complete | Runtime functions via `import "link/brief_rt.c"` not hardcoded \[2026-06-06\] |
+| `briv_rt.c` as import | ✅ Complete | Runtime functions via `import "link/briv_rt.c"` not hardcoded \[2026-06-06\] |
 | Resource declarations | ✅ Complete | `rsrc` keyword |
 | Bit-packing | ✅ Complete | AST-level |
 | Vector types | ✅ Complete | Embedded only |
 | Address system | ✅ Complete | `@`, `@raw:`, `@stack:`, `@heap:` |
-| **Data Brief** | | |
+| **Data Briv** | | |
 | Schema (`.dbvs`) | ✅ Complete | |
 | Data (`.dbv`) | ✅ Complete | |
 | Lines (`.dbvl`) | ✅ Complete | |
@@ -3276,7 +3276,7 @@ reset = "RESETn"
 | Formatter | ❌ Planned | |
 | Debugger | ❌ Planned | |
 | Profiler | ❌ Planned | |
-| `brief derive` CLI | ❌ Planned | Synthesizes bodies from `:=` blocks (Phase 9) |
+| `briv derive` CLI | ❌ Planned | Synthesizes bodies from `:=` blocks (Phase 9) |
 | **Phase 8+ Features** | | |
 | `:=` derivation blocks | ✅ Complete | Lexer, parser, AST committed (8.0-8.2) |
 | `when` keyword guards | ❌ Planned | Parser addition, same `Statement::Guarded` as brackets (Phase 8.6) |
@@ -3385,7 +3385,7 @@ error[S001]: unexpected token
 ### From v0.9 to v0.11
 
 **State declaration changes:**
-```brief
+```briv
 // Old (v0.9)
 state counter: Int = 0;
 
@@ -3394,7 +3394,7 @@ let counter: Int = 0;
 ```
 
 **FFI syntax changes:**
-```brief
+```briv
 // Old (v0.9)
 frgn sqrt(x: Float) -> Float from "math.toml";
 
@@ -3406,7 +3406,7 @@ frgn! log(msg: String);
 ```
 
 **Contract watchdog syntax:**
-```brief
+```briv
 // Old (v0.9)
 txn foo [true][true] watchdog [100ms] { ... }
 
@@ -3419,7 +3419,7 @@ txn foo [true][true] ![100ms] { ... }  // Required timeout
 
 Legacy code continues to work with auto-upgrades:
 
-```brief
+```briv
 // v1 style - auto-upgraded by compiler
 frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
@@ -3439,7 +3439,7 @@ frgn! write_to_hw(address, value);
 
 ### 13.1 Counter Application
 
-```brief
+```briv
 // counter.rbv — using render struct syntax
 let count: Int = 0;
 
@@ -3464,7 +3464,7 @@ render struct Counter {
 
 ### 13.2 Bank Transfer
 
-```brief
+```briv
 let alice_balance: Int = 1000;
 let bob_balance: Int = 500;
 let transfer_in_progress: Bool = false;
@@ -3483,7 +3483,7 @@ txn transfer_alice_to_bob(amount: Int)
 
 ### 13.3 FFI Usage
 
-```brief
+```briv
 import "std/math";
 import "std/io";
 
@@ -3513,4 +3513,4 @@ txn main() [true][true] {
 
 ---
 
-*Last updated: Brief v0.18.0 (2026-07-11)*
+*Last updated: Briv v0.18.0 (2026-07-11)*

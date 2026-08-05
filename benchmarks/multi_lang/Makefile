@@ -2,13 +2,13 @@
 # 2026-07-24
 #
 # Targets:
-#   all       — build Brief .so + protocol shim
+#   all       — build Briv .so + protocol shim
 #   run       — build and run all benchmarks
 #   clean     — remove build artifacts
 
 PROJECT_ROOT ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 BUILD_DIR ?= $(PROJECT_ROOT)/target/multi_lang
-BRIEFC ?= $(PROJECT_ROOT)/target/release/brief-compiler
+BRIEFC ?= $(PROJECT_ROOT)/target/release/briv-compiler
 CC ?= gcc
 
 .PHONY: all run clean
@@ -18,7 +18,7 @@ all: $(BUILD_DIR)/export_add.so $(BUILD_DIR)/proto_shim
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# ── Brief .so ───────────────────────────────────────────────────────────
+# ── Briv .so ───────────────────────────────────────────────────────────
 # Build the shared library with export defn add/mul
 
 $(BUILD_DIR)/export_add.so: $(PROJECT_ROOT)/benchmarks/multi_lang/export_add.bv $(BRIEFC)

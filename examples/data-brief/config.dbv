@@ -1,4 +1,4 @@
-// config.dbv — Data Brief configuration file
+// config.dbv — Data Briv configuration file
 // Schema defined inline, > marks positional entries
 
 schema Config {
@@ -17,5 +17,5 @@ schema OptimConfig {
 };
 
 as Config {
-    main: brief-compiler; 1.0.0; false; { 256; true; true }; llvm webstack circt; 4;
+    main: briv-compiler; 1.0.0; false; { 256; true; true }; llvm webstack circt; 4;
 };

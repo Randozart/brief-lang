@@ -13,7 +13,7 @@ bit-level control but is verbose for the common case: fields aligned
 to their natural type boundaries, tight-packed, native endianness.
 
 The struct syntax `{ field: Type }` lets the programmer write field
-names and Brief types, and the compiler computes bit widths from the
+names and Briv types, and the compiler computes bit widths from the
 TypeUniverse.
 
 The two paths converge at `LayoutPattern` and produce identical
@@ -23,7 +23,7 @@ The two paths converge at `LayoutPattern` and produce identical
 
 ## Syntax
 
-```brief
+```briv
 type MyType : Bits {
     bytes <~ 16;
     layout <~ { ptr: Int, size: Int };

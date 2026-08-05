@@ -2,13 +2,13 @@
 
 ## Baseline Context
 
-**Current baseline**: `32e5a24a` (this commit) — worktree at `../brief-compiler-baseline`
+**Current baseline**: `32e5a24a` (this commit) — worktree at `../briv-compiler-baseline`
 **All 19/19 benchmarks MATCH**.
 **Previous baseline**: `b39461e2` — removed, replaced by the above.
 
 ---
 
-## Investigation 1: nbody_newton (1.23x C — Brief loses)
+## Investigation 1: nbody_newton (1.23x C — Briv loses)
 
 ### Status
 - **Ratio**: 1.23x C (10.2063s vs 8.2850s)
@@ -17,8 +17,8 @@
 - **Pre-existing**: MISMATCH predates all recent changes (dispatch guardrail, RHS mapping fix, etc.)
 
 ### Best Ever
-- **0.75x** at Era 5 (commit `8a827db`, Jul 11) — Brief BEAT C by 25%
-- Era 5 worktree available at `../brief-compiler-era5`
+- **0.75x** at Era 5 (commit `8a827db`, Jul 11) — Briv BEAT C by 25%
+- Era 5 worktree available at `../briv-compiler-era5`
 
 ### What's Been Tried
 
@@ -38,7 +38,7 @@ Without these, LLVM's SLP vectorizer creates 6 `<4 x float>` vector phis from nb
 
 ### What To Investigate Next
 
-1. **Trace Era-5 IR structure**: Compare Era-5's `nbody_newton.ll` (worktree at `../brief-compiler-era5`) with current to see exact IR differences. Era-5 used our own vector phi groups + hazard-gated SLP-disable. What IR produced 0.75x?
+1. **Trace Era-5 IR structure**: Compare Era-5's `nbody_newton.ll` (worktree at `../briv-compiler-era5`) with current to see exact IR differences. Era-5 used our own vector phi groups + hazard-gated SLP-disable. What IR produced 0.75x?
 
 2. **Restore `-slp-vectorize-hor=false`**: Check if simply adding back `--mllvm -slp-vectorize-hor=false` closes the gap. The baseline had this. Does it work alone, or only in combination with Era-5's own vector phis?
 
@@ -60,7 +60,7 @@ Without these, LLVM's SLP vectorizer creates 6 `<4 x float>` vector phis from nb
 
 ---
 
-## Investigation 2: ring_buffer (1.11x C — Brief loses)
+## Investigation 2: ring_buffer (1.11x C — Briv loses)
 
 ### Status
 - **Ratio**: 1.11x C (0.0564s vs 0.0505s)
@@ -69,7 +69,7 @@ Without these, LLVM's SLP vectorizer creates 6 `<4 x float>` vector phis from nb
 
 ### Benchmark Structure (44 lines)
 
-```brief
+```briv
 const CAP: Int = 1024;
 const TOTAL: Int = 50000000;
 
@@ -105,7 +105,7 @@ Key observations:
 ### Hypothesized Bottlenecks (speculative — unverified)
 
 1. **Pointer boxing**: `Malloc#` returns `Ptr<Int>`, which is stored as i64 in state. Each access requires `inttoptr` + GEP. C uses native pointers directly.
-2. **Modular arithmetic**: `tail % CAP` every iteration. Could be strength-reduced, but Brief's IR emits `srem` which LLVM should optimize.
+2. **Modular arithmetic**: `tail % CAP` every iteration. Could be strength-reduced, but Briv's IR emits `srem` which LLVM should optimize.
 3. **State field phi overhead**: 4 fields (data, head, tail, ops) is small (< 8) and should get InlineSsa dispatch, which has the write_set bug fix. Likely fine.
 4. **Ptr dereference cost**: `data[tail % CAP]` goes through `Expr::Index` → `inttoptr` + GEP + load/store. This is the main loop body.
 
@@ -136,7 +136,7 @@ Key observations:
 ```bash
 bash benchmarks/compare_baseline.sh <benchmark_name>
 ```
-Compiles and times on both `../brief-compiler-baseline` and current worktree.
+Compiles and times on both `../briv-compiler-baseline` and current worktree.
 
 ### LLVM diagnostic commands
 ```bash

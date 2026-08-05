@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Brief",
+  "name": "Briv",
   "fileTypes": ["bv", "br", "abv", "sbv", "rbv", "srbv", "ebv", "sebv", "cbv", "dbv", "dbvl"],
   "firstLineMatch": "^//",
   "patterns": [
@@ -78,7 +78,7 @@
     "block-comments": {
       "patterns": [
         {
-          "name": "comment.block.brief",
+          "name": "comment.block.briv",
           "begin": "#\\[",
           "end": "\\]#"
         }
@@ -87,7 +87,7 @@
     "line-comments": {
       "patterns": [
         {
-          "name": "comment.line.brief",
+          "name": "comment.line.briv",
           "match": "//.*$"
         }
       ]
@@ -95,19 +95,19 @@
     "annotations": {
       "patterns": [
         {
-          "name": "meta.annotation.brief",
+          "name": "meta.annotation.briv",
           "match": "^// === PATH ANALYSIS ==="
         },
         {
-          "name": "meta.annotation.brief",
+          "name": "meta.annotation.briv",
           "match": "^// === END PATH ANALYSIS ==="
         },
         {
-          "name": "comment.annotation.brief",
+          "name": "comment.annotation.briv",
           "match": "^// \\[(ENTRY_POINT|RECURSIVE)\\]"
         },
         {
-          "name": "comment.annotation.brief",
+          "name": "comment.annotation.briv",
           "match": "^// (PATHS_TO|CALLERS|RESOLVES_TO):"
         }
       ]
@@ -115,59 +115,59 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.txn.brief",
+          "name": "keyword.control.txn.briv",
           "match": "\\b(txn|TXN)\\b"
         },
         {
-          "name": "keyword.control.async.brief",
+          "name": "keyword.control.async.briv",
           "match": "\\b(async|ASYNC)\\b"
         },
         {
-          "name": "keyword.control.modifier.brief",
+          "name": "keyword.control.modifier.briv",
           "match": "\\b(seq|vol|sync)\\b"
         },
         {
-          "name": "keyword.control.flow.brief",
+          "name": "keyword.control.flow.briv",
           "match": "\\b(term|term!|escape|TERM|ESCAPE)\\b"
         },
         {
-          "name": "keyword.declaration.brief",
+          "name": "keyword.declaration.briv",
           "match": "\\b(sig|defn|let|const|trg|txn|SIG|DEFN|LET|CONST|TRG|TXN|struct|enum|STRUCT|ENUM|type|TYPE|fallback|FALLBACK|node|NODE)\\b"
         },
         {
-          "name": "keyword.declaration.ffi.brief",
+          "name": "keyword.declaration.ffi.briv",
           "match": "\\b(frgn!?|syscall!?)\\b"
         },
         {
-          "name": "keyword.control.render.brief",
+          "name": "keyword.control.render.briv",
           "match": "\\b(render|RENDER)\\b"
         },
         {
-          "name": "keyword.control.match.brief",
+          "name": "keyword.control.match.briv",
           "match": "\\b(match|uni)\\b"
         },
         {
-          "name": "keyword.control.visibility.brief",
+          "name": "keyword.control.visibility.briv",
           "match": "\\b(pvt|sed)\\b"
         },
         {
-          "name": "keyword.import.brief",
+          "name": "keyword.import.briv",
           "match": "\\b(import|from|IMPORT|FROM|as|AS|target|TARGET)\\b"
         },
         {
-          "name": "keyword.control.dbrief.brief",
+          "name": "keyword.control.dbriv.briv",
           "match": "\\b(REGISTER|ALIAS|RULE|CHECK)\\b"
         },
         {
-          "name": "keyword.control.temporal.brief",
+          "name": "keyword.control.temporal.briv",
           "match": "\\b(within|retry)\\b"
         },
         {
-          "name": "storage.modifier.brief",
+          "name": "storage.modifier.briv",
           "match": "\\b(mmio|MMIO|wake|WAKE|nowake|NOWAKE)\\b"
         },
         {
-          "name": "keyword.other.time-unit.brief",
+          "name": "keyword.other.time-unit.briv",
           "match": "\\b(cycles|cyc|seconds|s|milliseconds|ms|minutes|min|nanoseconds|ns)\\b"
         }
       ]
@@ -175,11 +175,11 @@
     "types": {
       "patterns": [
         {
-          "name": "support.type.primitive.brief",
+          "name": "support.type.primitive.briv",
           "match": "\\b(Int|Float|String|Bool|Data|Void|UInt|Ptr|Bits)\\b"
         },
         {
-          "name": "entity.name.type.custom.brief",
+          "name": "entity.name.type.custom.briv",
           "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
         }
       ]
@@ -187,7 +187,7 @@
     "contracts": {
       "patterns": [
         {
-          "name": "meta.contract.brief",
+          "name": "meta.contract.briv",
           "begin": "\\[\\[?",
           "end": "\\]\\]?",
           "patterns": [
@@ -207,71 +207,71 @@
     "operators": {
       "patterns": [
         {
-          "name": "storage.modifier.ownership.brief",
+          "name": "storage.modifier.ownership.briv",
           "match": "&"
         },
         {
-          "name": "storage.modifier.ownership.brief",
+          "name": "storage.modifier.ownership.briv",
           "match": "@"
         },
         {
-          "name": "storage.modifier.ownership.brief",
+          "name": "storage.modifier.ownership.briv",
           "match": "\\?"
         },
         {
-          "name": "storage.modifier.ownership.brief",
+          "name": "storage.modifier.ownership.briv",
           "match": "!"
         },
         {
-          "name": "keyword.operator.comparison.brief",
+          "name": "keyword.operator.comparison.briv",
           "match": "==|!="
         },
         {
-          "name": "keyword.operator.push.brief",
+          "name": "keyword.operator.push.briv",
           "match": "<-"
         },
         {
-          "name": "keyword.operator.subtype.brief",
+          "name": "keyword.operator.subtype.briv",
           "match": "<:"
         },
         {
-          "name": "keyword.operator.relational.brief",
+          "name": "keyword.operator.relational.briv",
           "match": "<=|>=|<|>"
         },
         {
-          "name": "keyword.operator.logical.brief",
+          "name": "keyword.operator.logical.briv",
           "match": "&&|\\|\\|"
         },
         {
-          "name": "keyword.operator.arithmetic.brief",
+          "name": "keyword.operator.arithmetic.briv",
           "match": "\\+|\\-|\\*|/"
         },
         {
-          "name": "keyword.operator.consumptive.brief",
+          "name": "keyword.operator.consumptive.briv",
           "match": "~<-|~=|~\\+|~\\-|~\\*|~/"
         },
         {
-          "name": "keyword.operator.bitwise.brief",
+          "name": "keyword.operator.bitwise.briv",
           "match": "~|&(?!&)|\\|(?!\\|)"
         },
         {
-          "name": "keyword.operator.arrow.brief",
+          "name": "keyword.operator.arrow.briv",
           "match": "->"
         },
         {
-          "name": "keyword.operator.projection.brief",
+          "name": "keyword.operator.projection.briv",
           "match": ":>"
         },
         {
-          "name": "keyword.operator.arrow.brief",
+          "name": "keyword.operator.arrow.briv",
           "match": "<-"
         },
         {
-          "name": "keyword.operator.property.brief",
+          "name": "keyword.operator.property.briv",
           "match": "<~"
         },
         {
-          "name": "keyword.operator.assignment.brief",
+          "name": "keyword.operator.assignment.briv",
           "match": "="
         }
       ]
@@ -279,16 +279,16 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.single.brief",
+          "name": "string.quoted.single.briv",
           "match": "'(\\\\.|[^'\\\\])'"
         },
         {
-          "name": "string.quoted.double.brief",
+          "name": "string.quoted.double.briv",
           "begin": "\"",
           "end": "\"",
           "patterns": [
             {
-              "name": "constant.character.escape.brief",
+              "name": "constant.character.escape.briv",
               "match": "\\\\."
             }
           ]
@@ -298,11 +298,11 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.float.brief",
+          "name": "constant.numeric.float.briv",
           "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
         },
         {
-          "name": "constant.numeric.integer.brief",
+          "name": "constant.numeric.integer.briv",
           "match": "\\b0x[0-9a-fA-F]+\\b|\\b[0-9]+\\b"
         }
       ]
@@ -310,7 +310,7 @@
     "hash-words": {
       "patterns": [
         {
-          "name": "support.constant.property-value.hashword.brief",
+          "name": "support.constant.property-value.hashword.briv",
           "comment": "Positional markers (#L, #R, #T) and protocol category hashwords (#Int, #Float, #String, #Bool, #Char, #Bits, #UInt, #Ptr, #Link, #System). Optional <variant> suffix for parameterized protocols like #String<UTF8>.",
           "match": "#(L|R|T|Int|Float|String|Bool|Char|Bits|UInt|Ptr|Link|System)(<[a-zA-Z0-9_]+>)?"
         }
@@ -319,19 +319,19 @@
     "booleans": {
       "patterns": [
         {
-          "name": "constant.language.true.brief",
+          "name": "constant.language.true.briv",
           "match": "\\b(true|TRUE)\\b"
         },
         {
-          "name": "constant.language.false.brief",
+          "name": "constant.language.false.briv",
           "match": "\\b(false|FALSE)\\b"
         },
         {
-          "name": "constant.language.null.brief",
+          "name": "constant.language.null.briv",
           "match": "\\b(null|NULL)\\b"
         },
         {
-          "name": "constant.language.result.brief",
+          "name": "constant.language.result.briv",
           "match": "\\b(Ok|Err|OK|ERR|Some|None|SOME|NONE)\\b"
         }
       ]
@@ -339,7 +339,7 @@
     "intrinsics": {
       "patterns": [
         {
-          "name": "support.constant.property-value.intrinsic.brief",
+          "name": "support.constant.property-value.intrinsic.briv",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*#"
         }
       ]
@@ -347,7 +347,7 @@
     "constants": {
       "patterns": [
         {
-          "name": "variable.other.constant.brief",
+          "name": "variable.other.constant.briv",
           "match": "\\b[A-Z][A-Z0-9_]*\\b"
         }
       ]
@@ -355,11 +355,11 @@
     "identifiers": {
       "patterns": [
         {
-          "name": "entity.name.function.brief",
+          "name": "entity.name.function.briv",
           "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
         },
         {
-          "name": "variable.other.read.brief",
+          "name": "variable.other.read.briv",
           "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
         }
       ]
@@ -395,23 +395,23 @@
     "punctuation": {
       "patterns": [
         {
-          "name": "punctuation.terminator.brief",
+          "name": "punctuation.terminator.briv",
           "match": ";"
         },
         {
-          "name": "punctuation.separator.comma.brief",
+          "name": "punctuation.separator.comma.briv",
           "match": ","
         },
         {
-          "name": "punctuation.bracket.curly.brief",
+          "name": "punctuation.bracket.curly.briv",
           "match": "[{}]"
         },
         {
-          "name": "punctuation.bracket.square.brief",
+          "name": "punctuation.bracket.square.briv",
           "match": "[\\[\\]]"
         },
         {
-          "name": "punctuation.bracket.round.brief",
+          "name": "punctuation.bracket.round.briv",
           "match": "[()]"
         }
       ]
@@ -419,12 +419,12 @@
     "render-block": {
       "begin": "\\b(render|RENDER)\\b\\s*(\\{)",
       "beginCaptures": {
-        "1": { "name": "keyword.control.render.brief" },
-        "2": { "name": "punctuation.bracket.curly.brief" }
+        "1": { "name": "keyword.control.render.briv" },
+        "2": { "name": "punctuation.bracket.curly.briv" }
       },
       "end": "\\}",
       "endCaptures": {
-        "0": { "name": "punctuation.bracket.curly.brief" }
+        "0": { "name": "punctuation.bracket.curly.briv" }
       },
       "patterns": [
         {
@@ -434,7 +434,7 @@
           "include": "text.html.basic"
         },
         {
-          "include": "#brief-bindings"
+          "include": "#briv-bindings"
         }
       ]
     },
@@ -443,50 +443,50 @@
         {
           "match": "(<)([A-Z][a-zA-Z0-9_]*)(\\s+[^>]*)?(/?>)",
           "captures": {
-            "1": { "name": "punctuation.definition.tag.brief" },
-            "2": { "name": "entity.name.tag.brief" },
+            "1": { "name": "punctuation.definition.tag.briv" },
+            "2": { "name": "entity.name.tag.briv" },
             "3": { "patterns": [{ "include": "text.html.basic" }] },
-            "4": { "name": "punctuation.definition.tag.brief" }
+            "4": { "name": "punctuation.definition.tag.briv" }
           }
         },
         {
           "match": "(</)([A-Z][a-zA-Z0-9_]*)(>)",
           "captures": {
-            "1": { "name": "punctuation.definition.tag.brief" },
-            "2": { "name": "entity.name.tag.brief" },
-            "3": { "name": "punctuation.definition.tag.brief" }
+            "1": { "name": "punctuation.definition.tag.briv" },
+            "2": { "name": "entity.name.tag.briv" },
+            "3": { "name": "punctuation.definition.tag.briv" }
           }
         },
         {
           "begin": "(<)([a-z][a-z0-9]*)",
           "beginCaptures": {
-            "1": { "name": "punctuation.definition.tag.brief" },
-            "2": { "name": "entity.name.tag.brief" }
+            "1": { "name": "punctuation.definition.tag.briv" },
+            "2": { "name": "entity.name.tag.briv" }
           },
           "end": "(</)(\\2)(>)|(/>)",
           "endCaptures": {
-            "1": { "name": "punctuation.definition.tag.brief" },
-            "2": { "name": "entity.name.tag.brief" },
-            "3": { "name": "punctuation.definition.tag.brief" },
-            "4": { "name": "punctuation.definition.tag.brief" }
+            "1": { "name": "punctuation.definition.tag.briv" },
+            "2": { "name": "entity.name.tag.briv" },
+            "3": { "name": "punctuation.definition.tag.briv" },
+            "4": { "name": "punctuation.definition.tag.briv" }
           },
           "patterns": [
-            { "include": "#brief-bindings" },
+            { "include": "#briv-bindings" },
             { "include": "text.html.basic" },
             { "include": "#html-components" }
           ]
         }
       ]
     },
-    "brief-bindings": {
+    "briv-bindings": {
       "patterns": [
         {
           "match": "\\b(b-[a-z0-9\\-]+)(:([a-z0-9\\-]+))?(=)(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "entity.other.attribute-name.brief" },
-            "3": { "name": "variable.parameter.brief" },
-            "4": { "name": "punctuation.separator.key-value.brief" },
-            "5": { "name": "string.quoted.double.brief" }
+            "1": { "name": "entity.other.attribute-name.briv" },
+            "3": { "name": "variable.parameter.briv" },
+            "4": { "name": "punctuation.separator.key-value.briv" },
+            "5": { "name": "string.quoted.double.briv" }
           }
         }
       ]
@@ -494,11 +494,11 @@
     "stage-blocks": {
       "patterns": [
         {
-          "name": "entity.name.function.stage-block.brief",
+          "name": "entity.name.function.stage-block.briv",
           "match": "\\$\\((PreLex|Parsed|Resolved|Typed|Normalized|Verified|Allocated|Provenanced|Generated|Optimized|Linked)\\)"
         },
         {
-          "name": "entity.name.function.stage-block.deprecated.brief",
+          "name": "entity.name.function.stage-block.deprecated.briv",
           "match": "\\$\\((Front|Mid|Post|Back)\\)"
         }
       ]
@@ -506,7 +506,7 @@
     "navigation-intrinsics": {
       "patterns": [
         {
-          "name": "support.constant.property-value.navigation.brief",
+          "name": "support.constant.property-value.navigation.briv",
           "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove|StrSplit|StrReplace|StrJoin|EnvGet|SysQuery|TimeNow|HttpFetch|ShellCmd|FileRead|FileWrite|ConfigGet|TypeInfo|CastPath|InjectTypeLayout|DocRead|EmitInfo|EmitWarning|EmitError|Quote)\\$"
         }
       ]
@@ -514,7 +514,7 @@
     "ast-constructors": {
       "patterns": [
         {
-          "name": "support.constant.property-value.constructor.brief",
+          "name": "support.constant.property-value.constructor.briv",
           "match": "\\b(Import|Defn|Txn|Contract|Block|Let|Assign|Term|Guarded|Call|Ident|Expr|BinOp|Field|BlockExpr|Bits|Ptr|Tuple|Metadata|Pattern)\\$"
         }
       ]
@@ -522,7 +522,7 @@
     "diagnostics": {
       "patterns": [
         {
-          "name": "support.constant.property-value.diagnostic.brief",
+          "name": "support.constant.property-value.diagnostic.briv",
           "match": "\\b(EmitInfo|EmitWarning|EmitError)\\$"
         }
       ]
@@ -530,7 +530,7 @@
     "targets": {
       "patterns": [
         {
-          "name": "support.constant.property-value.target.brief",
+          "name": "support.constant.property-value.target.briv",
           "match": "\\b(Source|Ir|Bin|Stage)\\$"
         }
       ]
@@ -538,7 +538,7 @@
     "compiletime-keywords": {
       "patterns": [
         {
-          "name": "support.constant.property-value.compiletime.brief",
+          "name": "support.constant.property-value.compiletime.briv",
           "match": "\\$(let|const|defn|txn)\\b"
         }
       ]
@@ -546,11 +546,11 @@
     "metadata-properties": {
       "patterns": [
         {
-          "name": "keyword.other.property.brief",
+          "name": "keyword.other.property.briv",
           "match": "\\b(maxbits|observable|alignment|primitive|ctd|alu|llvm_type|layout)\\b"
         }
       ]
     }
   },
-  "scopeName": "source.brief"
+  "scopeName": "source.briv"
 }

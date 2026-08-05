@@ -6,7 +6,7 @@
 # ==================================================
 [[functions]]
 name = "__input"
-location = "brief_ffi_native::__input"
+location = "briv_ffi_native::__input"
 target = "native"
 description = "Read line from stdin"
 

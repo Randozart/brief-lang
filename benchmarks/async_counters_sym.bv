@@ -5,7 +5,7 @@
 //     The original async_counters benchmark had print_int guards for observability
 //     but its C reference was changed in ad67b83 to a trivial fold-only version
 //     (long g_a = 25000000L; (void)g_a;). This made the comparison meaningless:
-//     Brief ran the full thread pool with 50M barrier round-trips (~500s) while
+//     Briv ran the full thread pool with 50M barrier round-trips (~500s) while
 //     C returned in microseconds. The sym version keeps the observable body and
 //     gets a proper 2-thread barrier C reference for fair runtime comparison.
 //     The idio version removes print_int from bodies to test the pure fold path.
@@ -20,7 +20,7 @@
 // guarantees no data races -- plain loads/stores, no atomics needed.
 //
 // Build:
-//   cargo run --bin brief-compiler -- build --llvm benchmarks/async_counters_sym.bv \
+//   cargo run --bin briv-compiler -- build --llvm benchmarks/async_counters_sym.bv \
 //     --out benchmarks --optimize-budget 256
 //
 // C reference: async_counters_sym_c.c (two pthreads + barriers)

@@ -93,7 +93,7 @@ let base_reg = self.fun.last_val_temps.get(&lhs_name)
 
 ```bash
 # 1. Emit IR for nbody_newton
-BOUND=5000000 briefc build benchmarks/nbody_newton.bv --llvm --out /tmp
+BOUND=5000000 brivc build benchmarks/nbody_newton.bv --llvm --out /tmp
 
 # 2. Check SLP remarks — should show -295 horizontal reduction
 opt -O3 -pass-remarks=slp-vectorizer /tmp/nbody_newton.ll -o /dev/null 2>&1 | grep "horizontal reduction"

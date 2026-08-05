@@ -1,8 +1,8 @@
-# Native Brief I/O: Completion Plan (Phase 3–6 + Ext B–D)
+# Native Briv I/O: Completion Plan (Phase 3–6 + Ext B–D)
 
 **Date:** 2026-06-25
 **Status:** Planned
-**Previous:** `docs/plans/2026-06-25-native-brief-io.md` (Phases 1–2, Ext A done)
+**Previous:** `docs/plans/2026-06-25-native-briv-io.md` (Phases 1–2, Ext A done)
 
 ## What was implemented in commit 3c607d4
 
@@ -198,7 +198,7 @@ define i64 @name(...) section ".init_array" local_unnamed_addr #0 {
 
 #### 4a. Create `lib/std/syscall.bv`
 
-```brief
+```briv
 inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int
     [nr > 0][nr < 512]
 {
@@ -369,7 +369,7 @@ For each intrinsic below, create a syscall-based `inop!` version in
 
 #### 8b. Guarding with `#!cfg`
 
-```brief
+```briv
 #!cfg(target_os == "linux")
 inop! print_int(n: Int) -> Bool {
     // syscall SYS_write(1, buf, 8) — BILD body with asm target { }
@@ -382,7 +382,7 @@ fallback until the `volatile_store#(UART_TX, ...)` path is also implemented.
 #### 8c. Remove C runtime functions
 
 After each intrinsic's native version is stable, remove the corresponding
-function from `brief_rt.c`. The C runtime shrinks from ~1744 lines toward ~200.
+function from `briv_rt.c`. The C runtime shrinks from ~1744 lines toward ~200.
 
 #### 8d. Tests
 
@@ -399,7 +399,7 @@ This item has been **replaced** by `docs/plans/2026-06-25-function-lens-properti
 The `fn(T) -> U` type, `Expr::AddressOf`, and `&f` address-of operator are
 cancelled. Instead, function metadata is accessed via the existing `:>` lens:
 
-```brief
+```briv
 let addr: Int = add :> Address;   // replaces &f
 ```
 
@@ -407,7 +407,7 @@ Rationale:
 - Zero parser changes (existing `:>` parsing works)
 - Zero AST additions (new `ProjectionTarget` variants only)
 - Zero `OwnedRef` match site changes (204 sites untouched)
-- Idiomatic with Brief's lens philosophy
+- Idiomatic with Briv's lens philosophy
 - Opens additional metadata (name, arity, docs, hash, etc.) for free
 
 ## Effort estimate
@@ -430,7 +430,7 @@ Rationale:
 - `cargo build` — no warnings
 - Praetor on new/changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6)
 - Update architecture docs if API contracts changed
-- Update `learn-brief/` for any user-facing syntax change
+- Update `learn-briv/` for any user-facing syntax change
 - Create or update example `.bv` file for every new construct
 - Kani harnesses for all safety-critical code
 - `_ => return None;` fallthrough unchanged in all optimization passes

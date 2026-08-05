@@ -25,7 +25,7 @@ Every expression result is wrapped in `add i64 0, %source`. This is an SSA no-op
 
 ```bash
 cd ~/Desktop/Projects/officina-cli
-../brief-compiler/target/release/brief-compiler llvm officina.bv --out /tmp/officina_test --prod
+../briv-compiler/target/release/briv-compiler llvm officina.bv --out /tmp/officina_test --prod
 ```
 
 If it fails, document the error. If it succeeds, compile with clang and test.

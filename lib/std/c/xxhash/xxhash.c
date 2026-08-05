@@ -8,7 +8,7 @@
  * places struct definitions (XXH32_state_s, XXH64_state_s) behind this
  * guard, and the implementation code references struct internals.
  *
- * Included by: import "link/xxhash/xxhash.c" in Brief source.
+ * Included by: import "link/xxhash/xxhash.c" in Briv source.
  */
 #define XXH_STATIC_LINKING_ONLY
 #define XXH_IMPLEMENTATION

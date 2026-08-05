@@ -40,7 +40,7 @@ pub mod target;
 pub mod features;
 pub mod type_universe;
 pub mod cache;
-pub mod dbrief;
+pub mod dbriv;
 pub mod derive;
 pub mod desugarer;
 pub mod encoding_registry;

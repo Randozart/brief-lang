@@ -1,10 +1,10 @@
-# Brief Project Structure
+# Briv Project Structure
 
 > Extracted from the README (2026-07-31).
 > Note: the tree is a summary; the canonical layout is the repository itself.
 
 ```
-brief-compiler/
+briv-compiler/
 ├── src/                          # Rust bootstrap compiler
 │   ├── main.rs                   # CLI: check, build, compile, bind, metrod, lsp
 │   ├── lib.rs                    # Crate root
@@ -54,7 +54,7 @@ brief-compiler/
 │   │   ├── native_mapper.rs      # Byte serialization
 │   │   ├── loader.rs             # DBVS binding file loader
 │   │   ├── resolver.rs           # Binding path resolution
-│   │   ├── metro_cli.rs          # `brief metrod connect` CLI (661 lines)
+│   │   ├── metro_cli.rs          # `briv metrod connect` CLI (661 lines)
 │   │   ├── types.rs              # FfiValue, MemoryLayout, FfiType
 │   │   ├── error.rs              # Error conventions
 │   │   ├── protocol.rs           # Mapper trait
@@ -64,7 +64,7 @@ brief-compiler/
 │   │   ├── validator.rs          # Binding validation
 │   │   └── mod.rs                # FFI crate root
 │   │
-│   ├── dbrief/                   # Data Brief (DBVS) subsystem
+│   ├── dbriv/                   # Data Briv (DBVS) subsystem
 │   │   ├── ast.rs                # DBVS AST + Fn/Trigger/Result types
 │   │   ├── parser.rs             # DBVS parser
 │   │   └── ...                   # DBVS compiler

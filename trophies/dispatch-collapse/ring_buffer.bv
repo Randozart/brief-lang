@@ -4,16 +4,16 @@
 //   - Folded while-loop (ops < N → ops == N convergence)
 //   - FFI output prevents dead-code elimination
 //
-// import "link/brief_rt.c" in brief_rt.bv pulls in the runtime automatically.
+// import "link/briv_rt.c" in briv_rt.bv pulls in the runtime automatically.
 //
 // Build:
-//   cargo run --bin brief-compiler -- llvm benchmarks/ring_buffer.bv --out benchmarks --optimize-budget 256
+//   cargo run --bin briv-compiler -- llvm benchmarks/ring_buffer.bv --out benchmarks --optimize-budget 256
 //
 // C reference: ring_buffer_c.c
 
 #!exit ops == N;
 
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 import { get_env_int } from "std/env.bv";
 
 frgn __print_int(n: Int) -> Bool ;

@@ -7,11 +7,11 @@
 
 | Old | New | Extension change | Alternative name(s) |
 |-----|-----|------------------|---------------------|
-| Graphic Brief | Accelerated Brief | `.gbv` → `.abv` | "Brief Accel" |
-| Hardware Embedded Brief | Circuit Brief | `.hebv` → `.cbv` | "Brief Circuit" |
-| (Embedded Brief) | (unchanged) | `.ebv` | "Brief Embed" |
-| (Rendered Brief) | (unchanged) | `.rbv` | "Brief Render" |
-| (Data Brief) | (unchanged) | `.dbv`/`.dbvs`/`.dbvl` | "D-Brief", "Brief Data" |
+| Graphic Briv | Accelerated Briv | `.gbv` → `.abv` | "Briv Accel" |
+| Hardware Embedded Briv | Circuit Briv | `.hebv` → `.cbv` | "Briv Circuit" |
+| (Embedded Briv) | (unchanged) | `.ebv` | "Briv Embed" |
+| (Rendered Briv) | (unchanged) | `.rbv` | "Briv Render" |
+| (Data Briv) | (unchanged) | `.dbv`/`.dbvs`/`.dbvl` | "D-Briv", "Briv Data" |
 
 ## Internal naming (no change)
 
@@ -25,7 +25,7 @@
 - `src/main.rs` — extension checks, help text, error messages (~40 occurrences)
 - `src/ast.rs` — `StrictMode::Gpu` doc comment (1 occurrence)
 - `src/typechecker.rs` — validation messages referencing `.gbv` (~8 occurrences)
-- `src/hardware_validator.rs` — all `.hebv`/`hebv`/`Hardware Embedded Brief` (~15 occurrences)
+- `src/hardware_validator.rs` — all `.hebv`/`hebv`/`Hardware Embedded Briv` (~15 occurrences)
 
 ### Test assets
 - `test_gbv.gbv` → rename to `test_abv.abv`
@@ -35,13 +35,13 @@
 - `CLAUDE.md` — file types table
 
 ### Documentation
-- `README.md` — file type table, brief references
+- `README.md` — file type table, briv references
 - `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` — file type descriptions
-- `docs/architecture/features/graphic-brief.md` → rename to `accelerated-brief.md` + content update
-- `docs/plans/2026-06-18-graphic-brief.md` — update references
+- `docs/architecture/features/graphic-briv.md` → rename to `accelerated-briv.md` + content update
+- `docs/plans/2026-06-18-graphic-briv.md` — update references
 - `docs/plans/2026-06-18-gpu-io-intrinsics.md` — update references
 - `spec/SPEC.md` — extension references
-- `learn-brief/` — update relevant file type mentions
+- `learn-briv/` — update relevant file type mentions
 
 ### Tooling
 - `syntax-highlighter/package.json` — extension registrations

@@ -5,10 +5,10 @@
 
 ## Problem
 
-Every AI session resets context about Brief's capabilities. Agents repeatedly conclude:
-- "Brief is a reactive state machine DSL with no arrays"
-- "Brief has no strings or collections"
-- "Brief needs malloc for buffers"
+Every AI session resets context about Briv's capabilities. Agents repeatedly conclude:
+- "Briv is a reactive state machine DSL with no arrays"
+- "Briv has no strings or collections"
+- "Briv needs malloc for buffers"
 - "The interpreter has known gaps in Block/Tuple/Struct/Match"
 
 All of these are false. The interpreter (`src/interpreter.rs`, 2327 lines) already supports the full expression language. The LLVM backend (`src/backend/llvm.rs`, 6024 lines) lags behind with stubs returning `0` for 10 Expr variants and silently skipping Struct/Enum TopLevel nodes.
@@ -16,7 +16,7 @@ All of these are false. The interpreter (`src/interpreter.rs`, 2327 lines) alrea
 ## What Was Done
 
 ### AGENTS.md Overhaul
-- Added **Language Architecture** section explaining Brief IS general-purpose
+- Added **Language Architecture** section explaining Briv IS general-purpose
 - Added **Misconceptions to Avoid** table — 6 common AI mistakes with corrections
 - Added **Interpreter Completeness** table — every Expr/Statement variant with line numbers and status
 - Added **LLVM Backend Gaps** table — exact line numbers for every stub, empty catch-all, and degraded codegen path

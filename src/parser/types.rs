@@ -1,5 +1,5 @@
 // ── Type Parser ────────────────────────────────────────────────────────
-// 2026-07-12: Phase 1.4 — Parse Brief type annotations.
+// 2026-07-12: Phase 1.4 — Parse Briv type annotations.
 // Flat code: each function is max 2 levels of nesting.
 
 use super::helpers::Parser;

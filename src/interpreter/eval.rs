@@ -154,7 +154,7 @@ pub fn eval_expr(
             // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
             // = UTF8 character count, `Bytes` = byte length. A String is
             // `Value::Bits(bytes)` (direct) or a heap handle `Value::Int(addr)`
-            // (`[len: i64][bytes]`). Mirrors the backend's brief_char_len /
+            // (`[len: i64][bytes]`). Mirrors the backend's briv_char_len /
             // header-read emission (rule #4: interpreter is the reference).
             let val = eval_expr(recv, heap, bindings)?;
             match name.as_str() {
@@ -501,7 +501,7 @@ fn eval_binary_op(
         BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
             // 2026-08-01 (B1): #String bitwise defaults — operate on content
             // bytes and return a NEW string of the same length (interpreter
-            // half of B1; the backend mirrors it with brief_str_band/bor/bxor).
+            // half of B1; the backend mirrors it with briv_str_band/bor/bxor).
             // When both operands deref as strings, apply the byte-wise op.
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
                 (Some(a), Some(b)) => {
@@ -558,7 +558,7 @@ fn eval_unary_op(
         UnaryOpKind::BitNot => {
             // 2026-08-01 (B1): #String unary bitwise default — complement each
             // content byte, same length (interpreter half; the backend emits
-            // brief_str_bnot).
+            // briv_str_bnot).
             if let Some(bytes) = val.string_bytes(heap) {
                 return Ok(Value::bits(bytes.iter().map(|b| !b).collect()));
             }

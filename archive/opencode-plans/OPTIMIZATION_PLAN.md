@@ -1,4 +1,4 @@
-# Brief Compiler — Complete Optimization Plan
+# Briv Compiler — Complete Optimization Plan
 
 **Date:** 2026-05-26  
 **Status:** Proposed  
@@ -327,14 +327,14 @@ The compiler architecture is solid. 269 tests pass. 11 backends exist. But there
 
 ## Phase 5: Self-Hosted Compiler Mirroring
 
-### 5.1 `is_acyclic` Codegen Paths in Brief Backends
+### 5.1 `is_acyclic` Codegen Paths in Briv Backends
 
 **Status:** The only unchecked item in the self-hosted mirroring checklist.
 
 **Location:** `lib/compiler/backends/`
 
 **What to implement:**
-- Brief versions of `aarch64.bv`, `x86_64.bv`, `rust.bv`, `c.bv` must check acyclicity
+- Briv versions of `aarch64.bv`, `x86_64.bv`, `rust.bv`, `c.bv` must check acyclicity
 - Each backend needs: `if has_cycle then emit_dynamic_dispatch else emit_static_dispatch`
 - Mirrors the Rust-side `analyze_program()` integration
 
@@ -356,7 +356,7 @@ MEDIUM         3.x VHDL parity (10 steps)        ~4 days    Per PLAN.md
 MEDIUM         1.5 Lambda negation check         ~1 day
 MEDIUM         1.6 Non-negated constraint check  ~1 day
 MEDIUM         2.2 Escape fix (c.rs)             ~2 hrs     Single backend, trivial
-LOW            5.1 Brief backends acyclicity     ~2 days    Last self-hosted mirror item
+LOW            5.1 Briv backends acyclicity     ~2 days    Last self-hosted mirror item
 FUTURE         4.x PRAXIS optimizations          ~3-5 weeks All unchecked, no timeline
 ```
 

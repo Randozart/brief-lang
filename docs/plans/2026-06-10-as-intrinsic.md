@@ -6,7 +6,7 @@
 
 ## The Problem
 
-Brief's `frgn` system routes FFI calls through the dynamic FFI registry (interpreter) or
+Briv's `frgn` system routes FFI calls through the dynamic FFI registry (interpreter) or
 direct function calls (LLVM backend). For LLVM intrinsics like `llvm.sqrt.f32`:
 
 - Interpreter: dynamic FFI calls `sqrtf()` from libc — correct
@@ -17,7 +17,7 @@ The fix must respect the NO MAGIC rule: no hardcoded Rust string matches mapping
 
 ## Solution: `as intrinsic "llvm.symbol.name"`
 
-```brief
+```briv
 frgn sqrt_f32(x: Float) -> Float as intrinsic "llvm.sqrt.f32" ;
 ```
 

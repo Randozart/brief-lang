@@ -33,10 +33,10 @@ loop:
 
 The SMT quantifier check (`forall x . spec(x) == candidate(x)`) is the
 authoritative generalization test. If it passes for ALL x, the candidate is
-truly correct. Brief cannot use this approach because Z3 4.8 does not support
+truly correct. Briv cannot use this approach because Z3 4.8 does not support
 `synth-fun` (SyGuS), and quantified bitvector formulas are expensive.
 
-### Brief's Alternative: Three-Tier Generalization
+### Briv's Alternative: Three-Tier Generalization
 
 Instead of full SMT verification, we use three increasingly strict tiers:
 
@@ -141,9 +141,9 @@ So `X & -1` should be pruned as identity for BitAnd.
 ### Research
 
 CEGIS systems verify candidates against a formal specification using SMT.
-Brief's `[[post]]` syntax provides natural specification constraints:
+Briv's `[[post]]` syntax provides natural specification constraints:
 
-```brief
+```briv
 defn popcount(x: Int) -> Int := { examples } [[popcount(x) < 64 && popcount(x) >= 0]]
 ```
 

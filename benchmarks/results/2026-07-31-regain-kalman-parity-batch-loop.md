@@ -28,7 +28,7 @@ the io precondition interval instead of `extract_batch_size` heuristics.
 
 ## kalman_filter_runtime — 1.21× → 1.02× (target achieved)
 
-| Run | Brief | C | Ratio | Winner |
+| Run | Briv | C | Ratio | Winner |
 |-----|------:|---:|------:|:------:|
 | Phase 3 (version-DAG) | .2197s | .1808s | 1.21× | C |
 | With batch loop | ~.180s | .180s | **1.02×** | ~tie |

@@ -29,7 +29,7 @@ Add back the memory counter loop condition in mod.rs (non-pure path, line 2641 a
 ```bash
 cargo build --release
 rm -f benchmarks/nbody_newton.ll benchmarks/nbody_newton
-BOUND=50000000 timeout 30 ./target/release/brief-compiler build benchmarks/nbody_newton.bv --out benchmarks
+BOUND=50000000 timeout 30 ./target/release/briv-compiler build benchmarks/nbody_newton.bv --out benchmarks
 ```
 
 ### Step 3: Check the IR

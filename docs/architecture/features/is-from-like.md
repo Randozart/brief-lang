@@ -7,7 +7,7 @@
 
 Three binary infix operators, all returning `Bool`:
 
-```brief
+```briv
 x is Int           // true if x's runtime type is Int
 x is Some          // true if x's enum variant tag is Some
 x is Option<Int>   // true if x is an Option<Int>
@@ -202,7 +202,7 @@ Recursive structural comparison:
 
 These expressions enable type-directed branching in contracts and guards:
 
-```brief
+```briv
 defn process<T>(x: T) -> String {
     [T is Int]    { term int_to_string(x); };
     [T is String] { term x; };
@@ -212,7 +212,7 @@ defn process<T>(x: T) -> String {
 
 At monomorphization time, `T is Int` and `T is String` fold to compile-time constants, and the dead guard body is pruned by dead-field elimination:
 
-```brief
+```briv
 // monomorphized for T = Int:
 defn process(x: Int) -> String {
     [true]   { term int_to_string(x); };  // live

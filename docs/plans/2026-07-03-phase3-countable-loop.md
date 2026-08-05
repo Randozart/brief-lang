@@ -24,7 +24,7 @@ LLVM cannot recognize this as a countable loop because:
 - No phi node in the header — the counter is extracted from a loaded struct
 - The 33-field struct load/store round-trip per iteration prevents SROA promotion
 - C auto-vectorizes to `<4 x float>`/`<8 x float>`+ `vector.reduce.fadd` (233 vector ops);
-  Brief emits only scalar `@llvm.sqrt.f32` and `fadd` (0 vector ops)
+  Briv emits only scalar `@llvm.sqrt.f32` and `fadd` (0 vector ops)
 
 **Target IR** (LLVM-countable with per-field phi nodes):
 
@@ -316,7 +316,7 @@ these with LICM. After hoisting, the body has no memory operations at all
 After per-field phi emission:
 - Loop body is pure math (no loads/stores to %State, no branches)
 - LLVM can vectorize the inner float operations
-- Expected: Brief matches C's vectorization pattern
+- Expected: Briv matches C's vectorization pattern
 
 ## Files to Modify
 

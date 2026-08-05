@@ -1,4 +1,4 @@
-// 2026-07-18: Arena — single-direction bump allocator in pure Brief.
+// 2026-07-18: Arena — single-direction bump allocator in pure Briv.
 // Backed by Alloc# for the backing buffer. The arena is itself
 // arena-allocated when arena_init is called inside a txn context
 // (nested arena — the parent arena manages the child arena's backing

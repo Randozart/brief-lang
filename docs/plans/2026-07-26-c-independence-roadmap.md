@@ -2,9 +2,9 @@
 
 ## Goal
 
-Eliminate C as a source-level dependency of the Brief compiler and stdlib.
+Eliminate C as a source-level dependency of the Briv compiler and stdlib.
 The compiler should produce binaries by invoking `llc` + `lld`, not `clang`.
-The stdlib should implement all runtime functions in Brief, calling OS syscalls
+The stdlib should implement all runtime functions in Briv, calling OS syscalls
 through `frgn from #System` and `#Link` directives instead of compiling `.c` files.
 
 ## Current C Dependencies
@@ -13,8 +13,8 @@ through `frgn from #System` and `#Link` directives instead of compiling `.c` fil
 
 | File | Used by | Functions |
 |------|---------|-----------|
-| `lib/runtime/brief_rt.c` | 8 stdlib ffi modules | ~100 fn: print, env, time, string ops, encoding (base64/hex/URL/HTML/md5/sha/uuid), HTTP, SHM, mmap |
-| `lib/runtime/brief_gpu_rt.c` | GPU backend | GPU runtime |
+| `lib/runtime/briv_rt.c` | 8 stdlib ffi modules | ~100 fn: print, env, time, string ops, encoding (base64/hex/URL/HTML/md5/sha/uuid), HTTP, SHM, mmap |
+| `lib/runtime/briv_gpu_rt.c` | GPU backend | GPU runtime |
 | `lib/std/c/xxhash/xxhash.c` | `ffi/xxhash.bv` | XXH64, XXH32 |
 | `lib/std/c/lz4/lz4.c` | (unused) | LZ4 compression |
 | `lib/std/c/stb_image/stb_image.c` | (unused) | Image loading |
@@ -29,7 +29,7 @@ through `frgn from #System` and `#Link` directives instead of compiling `.c` fil
 
 ### Phase 1: Remove hardcoded C references (this commit)
 
-- Remove hardcoded `brief_rt.c` from `compile_ll_to_binary` — it's already carried
+- Remove hardcoded `briv_rt.c` from `compile_ll_to_binary` — it's already carried
   by `extra_objects` via frgn declarations
 - Deduplicate `extra_objects` at the merge point
 
@@ -45,38 +45,38 @@ This requires a C compiler toolchain to be installed.
 
 **Dependencies replaced:**
 - `clang -O3 -flto` → `llc -O3` + `lld -O3`
-- `-lm` → no linker flag needed (Brief implements math in Brief or calls `#System` libm)
+- `-lm` → no linker flag needed (Briv implements math in Briv or calls `#System` libm)
 
-### Phase 3: Rewrite `brief_rt.c` in Brief
+### Phase 3: Rewrite `briv_rt.c` in Briv
 
 Each function group can be migrated independently:
 
 | Group | Approach | Difficulty |
 |-------|----------|------------|
-| Pure string ops (`to_upper`, `is_alpha`, `rfind`, etc.) | `defn` in Brief | Low — pure computation |
-| Encoding (base64, hex, URL, HTML, UTF8) | `defn` + `txn` in Brief | Low — pure computation |
-| Hashing (md5, sha1, sha256, sha512) | `defn` in Brief | Medium — algorithmic |
-| UUID generation | Brief with `frgn from #System` `/dev/urandom` | Low |
+| Pure string ops (`to_upper`, `is_alpha`, `rfind`, etc.) | `defn` in Briv | Low — pure computation |
+| Encoding (base64, hex, URL, HTML, UTF8) | `defn` + `txn` in Briv | Low — pure computation |
+| Hashing (md5, sha1, sha256, sha512) | `defn` in Briv | Medium — algorithmic |
+| UUID generation | Briv with `frgn from #System` `/dev/urandom` | Low |
 | Time functions (`now`, `year`, `format_timestamp`, etc.) | `frgn from #System` `clock_gettime`, `localtime_r` etc. | Medium — POSIX API |
 | I/O (`print_int`, `print_float`, `print_char`, `print_str`) | `frgn from #System` `write` syscall | Low |
 | HTTP (`http_get`, `http_post`) | `frgn from #System` socket APIs | Medium |
 | SHM/mmap (`shm_open`, `mmap`, `munmap`) | `frgn from #System` POSIX APIs | Medium |
-| XXHash | Rewrite in Brief or `frgn from #System xxhash` | Medium |
+| XXHash | Rewrite in Briv or `frgn from #System xxhash` | Medium |
 
 A migrated function looks like:
-```brief
-// Instead of:  frgn __to_upper(s: String) -> String from "lib/runtime/brief_rt.c"
+```briv
+// Instead of:  frgn __to_upper(s: String) -> String from "lib/runtime/briv_rt.c"
 // Write:
 frgn __to_upper(s: String) -> String from #System;
 ```
 With `#Link<xxx>` if a system library is needed.
 
-### Phase 4: Move `brief_rt.c` out of the repo
+### Phase 4: Move `briv_rt.c` out of the repo
 
 Once all functions are migrated:
-- Delete `lib/runtime/brief_rt.c` and `lib/runtime/brief_gpu_rt.c`
+- Delete `lib/runtime/briv_rt.c` and `lib/runtime/briv_gpu_rt.c`
 - Remove C compilation from `collect_extra_objects` (no more `.c` → `.o` step)
-- All runtime functions are either Brief `defn`/`txn` or `frgn from #System`
+- All runtime functions are either Briv `defn`/`txn` or `frgn from #System`
 
 ## Measure of Success
 

@@ -25,7 +25,7 @@ fn item_key(tl: &TopLevel) -> String {
         Definition(d) => format!("defn:{}", d.name),
         Transaction(t) => format!("txn:{}", t.name),
         Cell(c) => format!("cell:{}", c.name),
-        ForeignBinding(f) => format!("frgn:{}", f.effective_brief_name()),
+        ForeignBinding(f) => format!("frgn:{}", f.effective_briv_name()),
         Export(e) => format!("export:{}", e.export_name.as_deref().unwrap_or("_")),
         Constant(c) => format!("constant:{}", c.name),
         Obj(s) => format!("obj:{}", s.name),

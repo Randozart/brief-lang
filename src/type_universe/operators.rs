@@ -102,7 +102,7 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
         ("String", "Eq") => Some(OpBinding::Intrinsic("StringEq#".into())),
         // 2026-08-01 (B1): #String bitwise defaults — & | ^ ~ operate on the
         // content bytes and return a new String of the same length (see
-        // brief_str_band/bor/bxor/bnot). Binding here lets the typechecker
+        // briv_str_band/bor/bxor/bnot). Binding here lets the typechecker
         // accept `a & b` on Strings; the backend/interpreter dispatch to the
         // content ops via #String protocol membership.
         ("String", "BitAnd") => Some(OpBinding::Intrinsic("StringBitAnd#".into())),

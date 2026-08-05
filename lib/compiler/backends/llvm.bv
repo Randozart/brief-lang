@@ -1,4 +1,4 @@
-// LLVM Backend — Generates LLVM IR (.ll) from Brief AST
+// LLVM Backend — Generates LLVM IR (.ll) from Briv AST
 // Definitive implementation, mirroring src/backend/llvm.rs
 
 obj CgResult {

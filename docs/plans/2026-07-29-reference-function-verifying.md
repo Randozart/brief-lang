@@ -17,7 +17,7 @@ A derivation block can declare an existing function as the correctness
 oracle. The synthesized function must match the reference for ALL inputs
 (within optional tolerance):
 
-```brief
+```briv
 defn popcount_ref(x: Int) -> Int := {
     // Reference implementation — simple loop, provably correct
 };
@@ -80,7 +80,7 @@ Z3 query structure with reference:
   <candidate-body>
 )
 
-; Reference function (inlined from the Brief defn's body)
+; Reference function (inlined from the Briv defn's body)
 (define-fun ref ((x (_ BitVec 64))) (_ BitVec 64)
   <ref-body>
 )

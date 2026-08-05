@@ -1,12 +1,12 @@
-# Embedded Brief Implementation Summary
+# Embedded Briv Implementation Summary
 
 ## Overview
 
-This document describes the implementation of **Embedded Brief** - a bare-metal variant of the Brief programming language for microcontrollers and high-velocity hardware (GPUs, FPGAs). This implementation extends the existing Brief compiler with new features for embedded systems programming.
+This document describes the implementation of **Embedded Briv** - a bare-metal variant of the Briv programming language for microcontrollers and high-velocity hardware (GPUs, FPGAs). This implementation extends the existing Briv compiler with new features for embedded systems programming.
 
 ## Project Goal
 
-The goal is to implement Embedded Brief (`.ebv` files) while also adding features that benefit Core (`.bv`) and Rendered Brief (`.rbv`) variants. The approach uses a unified approach where all three file types can share logic via imports.
+The goal is to implement Embedded Briv (`.ebv` files) while also adding features that benefit Core (`.bv`) and Rendered Briv (`.rbv`) variants. The approach uses a unified approach where all three file types can share logic via imports.
 
 ## Discoveries from Research
 
@@ -19,7 +19,7 @@ The goal is to implement Embedded Brief (`.ebv` files) while also adding feature
 
 ### 1. Lexer Updates (`src/lexer.rs`)
 
-Added new tokens for Embedded Brief features:
+Added new tokens for Embedded Briv features:
 
 ```rust
 // Type tokens
@@ -142,17 +142,17 @@ fn parse_bit_range(&mut self) -> Result<BitRange, String> {
 ```
 
 **State Declaration with Address:**
-```brief
+```briv
 let led_pin @ 0x40001000 [0:3]: Int = 0;
 ```
 
 **Assignment with Timeout:**
-```brief
+```briv
 sensor_read = read_sensor() within 100 ms;
 ```
 
 **Trigger Declaration:**
-```brief
+```briv
 trg button_press on stage init [0] {
     term true;
 };
@@ -242,5 +242,5 @@ Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.46s
 
 - `docs/EMBEDDED_BRIEF_2.2_SPEC.md` - Final spec
 - `docs/EMBEDDED_BRIEF_IMPLEMENTATION_PLAN.md` - Implementation plan
-- `spec/EMBEDDED-BRIEF-SPEC.md` - Original Embedded Brief 1.0 spec
+- `spec/EMBEDDED-BRIEF-SPEC.md` - Original Embedded Briv 1.0 spec
 - `CLAUDE.md` - Compiler documentation

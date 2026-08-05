@@ -1,8 +1,8 @@
-# Brief Compiler: Unified Signal & Polling Architecture Plan
+# Briv Compiler: Unified Signal & Polling Architecture Plan
 
 ## Executive Summary
 
-This document outlines the plan to transition the Brief compiler from a poll-loop architecture to a unified signal-driven and polling model. The goal is to improve performance by eliminating unnecessary polling loops while retaining the flexibility of time-based reactions (e.g., for gaming loops).
+This document outlines the plan to transition the Briv compiler from a poll-loop architecture to a unified signal-driven and polling model. The goal is to improve performance by eliminating unnecessary polling loops while retaining the flexibility of time-based reactions (e.g., for gaming loops).
 
 ### Current State
 - **Frontend:** Uses a `requestAnimationFrame` loop to poll WASM for dispatch updates.

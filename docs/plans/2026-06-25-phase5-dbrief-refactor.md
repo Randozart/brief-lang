@@ -1,4 +1,4 @@
-# Phase 5 Refactor: Replace TOML with D-Brief v2 Schemas
+# Phase 5 Refactor: Replace TOML with D-Briv v2 Schemas
 
 **Date:** 2026-06-25
 **Replaces:** TOML-based `import "target"` implementation
@@ -8,14 +8,14 @@
 ## Problem
 
 The current `import "target"` implementation parses a custom TOML format that
-duplicates what the D-brief v2 schema system already does. Device schemas
+duplicates what the D-briv v2 schema system already does. Device schemas
 live in `.dbvs` files, board layouts in `.dbvl` files — both use the existing
-D-brief v2 parser and bridge. The TOML path is a parallel system that bypasses
+D-briv v2 parser and bridge. The TOML path is a parallel system that bypasses
 this infrastructure.
 
 ## Goal
 
-Replace the TOML-based implementation with one that uses D-brief v2 `.dbvl`
+Replace the TOML-based implementation with one that uses D-briv v2 `.dbvl`
 files that reference device `.dbvs` schemas. `import "target"` resolves to a
 `.dbvl` board file, which imports device schemas and instantiates peripherals.
 
@@ -29,9 +29,9 @@ lib/boards/stm32f407.dbvl
 
 ## Implementation
 
-### Part A: `schema <path>;` directive in D-brief v2 parser (30 min)
+### Part A: `schema <path>;` directive in D-briv v2 parser (30 min)
 
-**File:** `src/dbrief/v2.rs`
+**File:** `src/dbriv/v2.rs`
 
 The v2 parser's main dispatch loop recognizes `'s'/'S'` and calls
 `parse_schema()` — which expects `schema Name { fields }`. Add a check: if
@@ -63,7 +63,7 @@ parser just records the import path, and the resolver loads and bridges.
 
 ### Part B: `schema <path>;` as active-schema directive (1 hr)
 
-**File:** `src/dbrief/v2.rs`
+**File:** `src/dbriv/v2.rs`
 
 Add a `current_schema: Option<String>` field to the `Parser` struct.
 
@@ -150,7 +150,7 @@ fn resolve_target_import(&mut self) -> Result<Program, String> {
     // ... search paths for lib/boards/<name>.dbvl ...
 
     let content = std::fs::read_to_string(&path)?;
-    let doc = dbrief_v2::parse_document(&content)?;
+    let doc = dbriv_v2::parse_document(&content)?;
 
     // Resolve schema imports (schema <path>; directives)
     let mut all_schemas = doc.schemas.clone();
@@ -158,13 +158,13 @@ fn resolve_target_import(&mut self) -> Result<Program, String> {
         // Load and parse the referenced .dbvs file
         let schema_path = resolve_schema_path(import_path)?;
         let schema_content = std::fs::read_to_string(&schema_path)?;
-        if let Ok(schema_doc) = dbrief_v2::parse_document(&schema_content) {
+        if let Ok(schema_doc) = dbriv_v2::parse_document(&schema_content) {
             all_schemas.extend(schema_doc.schemas);
         }
     }
 
     // Merge schemas back and bridge to TopLevel constants
-    let merged_doc = DbriefDocument {
+    let merged_doc = DbrivDocument {
         imports: doc.imports.clone(),
         schemas: all_schemas,
         data_groups: doc.data_groups,
@@ -172,7 +172,7 @@ fn resolve_target_import(&mut self) -> Result<Program, String> {
         key_offsets: doc.key_offsets,
     };
 
-    let items = dbrief::bridge::document_to_program(&merged_doc, &board);
+    let items = dbriv::bridge::document_to_program(&merged_doc, &board);
     Ok(Program { items, ... })
 }
 ```
@@ -186,13 +186,13 @@ fn resolve_target_import(&mut self) -> Result<Program, String> {
 
 | File | Change |
 |---|---|
-| `src/dbrief/v2.rs` | Add `schema <path>;` import directive parsing |
-| `src/dbrief/v2.rs` | Add `current_schema` field for active-schema data lines |
+| `src/dbriv/v2.rs` | Add `schema <path>;` import directive parsing |
+| `src/dbriv/v2.rs` | Add `current_schema` field for active-schema data lines |
 | `lib/devices/uart.dbvs` | UART peripheral schema (flat fields) |
 | `lib/devices/gpio.dbvs` | GPIO peripheral schema |
 | `lib/devices/timer.dbvs` | Timer peripheral schema |
 | `lib/boards/stm32f407.dbvl` | Board layout with schema imports + data |
-| `src/import_resolver.rs` | Replace TOML parsing with D-brief v2 pipeline |
+| `src/import_resolver.rs` | Replace TOML parsing with D-briv v2 pipeline |
 | `lib/boards/stm32f407.toml` | **Deleted** (replaced by .dbvl) |
 
 ## Per-commit checklist

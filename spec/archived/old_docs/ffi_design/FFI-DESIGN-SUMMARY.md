@@ -1,4 +1,4 @@
-# Brief v6.2 FFI System - Design Summary
+# Briv v6.2 FFI System - Design Summary
 
 **Date:** 2026-04-05  
 **Status:** Design Complete - Ready for Implementation  
@@ -8,11 +8,11 @@
 
 ## Executive Summary
 
-Brief v6.2 introduces a **Robust Foreign Function Interface (FFI)** system that enables seamless integration with Rust libraries while maintaining Brief's core philosophy: **contracts first, verification always**.
+Briv v6.2 introduces a **Robust Foreign Function Interface (FFI)** system that enables seamless integration with Rust libraries while maintaining Briv's core philosophy: **contracts first, verification always**.
 
 The system consists of three integrated components:
 
-1. **TOML Binding Declarations** - Explicit contracts between Brief and foreign code
+1. **TOML Binding Declarations** - Explicit contracts between Briv and foreign code
 2. **frgn Syntax** - Lightweight foreign function declarations  
 3. **Safe Wrapper Pattern** - defn handles all error cases and ensures contracts
 
@@ -22,8 +22,8 @@ The system consists of three integrated components:
 
 ✅ **TOML is the Contract** - All foreign function metadata explicitly declared  
 ✅ **JSON as Bridge Language** - Language-agnostic serialization format  
-✅ **Brief Wraps Everything** - Foreign code assumed untrusted, always wrapped  
-✅ **Never Touch Source Again** - TOML + Brief, no source code modifications  
+✅ **Briv Wraps Everything** - Foreign code assumed untrusted, always wrapped  
+✅ **Never Touch Source Again** - TOML + Briv, no source code modifications  
 ✅ **Platform Agnostic with Hooks** - Same code, different targets via TOML  
 ✅ **Full Generics Support** - Complex types, nested structures, type parameters  
 
@@ -32,16 +32,16 @@ The system consists of three integrated components:
 ## Architecture
 
 ```
-Brief Application Code (defn + sig)
+Briv Application Code (defn + sig)
     ↓
 frgn Gateway (typed foreign function declaration)
     ↓
-Brief FFI Layer (JSON ↔ Brief types)
+Briv FFI Layer (JSON ↔ Briv types)
     ↓
 Foreign Library (Rust/C/other, returns JSON)
 ```
 
-**Key Insight:** Foreign functions are black boxes that might fail. Brief wraps them safely.
+**Key Insight:** Foreign functions are black boxes that might fail. Briv wraps them safely.
 
 ---
 
@@ -79,21 +79,21 @@ message = "String"
 ### 2. Foreign Function Declaration (frgn)
 
 **Syntax:**
-```brief
+```briv
 frgn read_file(path: String) -> Result<String, IoError> from "std/bindings/io.toml";
 ```
 
 **Semantics:**
 - Minimal: just declares existence and location
-- Maps Brief types to TOML binding
+- Maps Briv types to TOML binding
 - Result type auto-wraps success/error
 - Generic type parameters fully supported
 
 ### 3. Safe Wrapper Pattern (defn)
 
-**Philosophy:** Brief code handles all outcomes
+**Philosophy:** Briv code handles all outcomes
 
-```brief
+```briv
 defn safe_read(path: String) [path.len() > 0] [result != ""] -> String {
     let raw = frgn read_file(path);
     
@@ -106,7 +106,7 @@ defn safe_read(path: String) [path.len() > 0] [result != ""] -> String {
 - Exhaustiveness checking at compile time
 - All error cases explicitly handled
 - Contracts verified by proof engine
-- Failures isolated to Brief code (visible, verifiable)
+- Failures isolated to Briv code (visible, verifiable)
 
 ---
 
@@ -130,20 +130,20 @@ Each binding includes:
 ## Type System Integration
 
 **Result Wrapping (Automatic)**
-```brief
+```briv
 frgn read_file(path: String) -> Result<String, IoError>
 // Foreign function returns: Result<String, IoError>
 // FFI layer deserializes from JSON
-// Brief code pattern matches both branches
+// Briv code pattern matches both branches
 ```
 
 **Generic Type Parameters (Full Support)**
-```brief
+```briv
 frgn process<T, U>(input: T, transformer: String) -> Result<U, ProcessError>
 ```
 
 **Complex Types (Nested Structs)**
-```brief
+```briv
 frgn query(filter: { field: String, value: Int }) -> Result<[{ id: Int, name: String }], DbError>
 ```
 
@@ -152,12 +152,12 @@ frgn query(filter: { field: String, value: Int }) -> Result<[{ id: Int, name: St
 ## Error Handling Patterns
 
 ### Pattern 1: Reactive (Handle Error)
-```brief
+```briv
 [raw is IoError(err)] term "Error: " + err.message;
 ```
 
 ### Pattern 2: Inspection (Check Error Details)
-```brief
+```briv
 [raw is IoError(err)] {
     [err.code == 2] term "File not found";
     [err.code == 13] term "Permission denied";
@@ -166,12 +166,12 @@ frgn query(filter: { field: String, value: Int }) -> Result<[{ id: Int, name: St
 ```
 
 ### Pattern 3: Propagation (Pass Error Up)
-```brief
+```briv
 [raw is IoError(err)] term err;  // Return error as union type
 ```
 
 ### Pattern 4: Fallback (Try Alternative)
-```brief
+```briv
 [primary_result is IoError(_)] {
     let fallback_result = frgn read_file(secondary);
     // Try fallback...
@@ -281,13 +281,13 @@ examples/ffi_*                # NEW: Example programs
 
 ### Compilation & Compatibility
 - ✅ All new modules compile without warnings
-- ✅ Zero breaking changes to existing Brief code
+- ✅ Zero breaking changes to existing Briv code
 - ✅ All 47 existing tests still pass
 
 ### Functionality
 - ✅ Load and parse TOML binding files
 - ✅ Validate frgn declarations against TOML
-- ✅ Type check FFI usage in Brief code
+- ✅ Type check FFI usage in Briv code
 - ✅ Prove FFI contracts in defn bodies
 - ✅ Handle all error cases properly
 
@@ -329,17 +329,17 @@ examples/ffi_*                # NEW: Example programs
 
 - Language-agnostic (Rust, C, Python, JS all support it)
 - Human-readable for debugging
-- Simple parsing in Brief
+- Simple parsing in Briv
 - Reduces type mapping complexity
 - Proven for cross-language communication
 
-### Why Brief wraps foreign code?
+### Why Briv wraps foreign code?
 
-- Brief owns contracts; foreign code is untrusted
+- Briv owns contracts; foreign code is untrusted
 - Separation of concerns: defn ensures safety, frgn is pure plumbing
-- Failures visible in Brief code (easier debugging)
+- Failures visible in Briv code (easier debugging)
 - Enables exhaustiveness checking at compiler level
-- Maintains Brief's formal verification guarantees
+- Maintains Briv's formal verification guarantees
 
 ---
 
@@ -347,7 +347,7 @@ examples/ffi_*                # NEW: Example programs
 
 **v6.2 is fully backward compatible with v6.1:**
 
-- ✅ Existing Brief code: unaffected
+- ✅ Existing Briv code: unaffected
 - ✅ FFI system: opt-in via frgn declarations
 - ✅ TOML bindings: optional (new feature)
 - ✅ All v6.1 features: unchanged
@@ -380,7 +380,7 @@ examples/ffi_*                # NEW: Example programs
 ## Appendix: Quick Reference
 
 ### frgn Declaration Syntax
-```brief
+```briv
 frgn name(param: Type) -> Result<OutputType, ErrorType> from "binding.toml";
 ```
 
@@ -403,7 +403,7 @@ field = "Type"
 ```
 
 ### Safe Wrapper Pattern
-```brief
+```briv
 defn safe_name(args) [pre] [post] -> Type {
     let raw = frgn name(args);
     [raw is Success(val)] term value;
@@ -412,7 +412,7 @@ defn safe_name(args) [pre] [post] -> Type {
 ```
 
 ### Error Handling Patterns
-```brief
+```briv
 // Reactive
 [raw is IoError(err)] term "Error: " + err.message;
 

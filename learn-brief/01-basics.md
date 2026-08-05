@@ -1,6 +1,6 @@
-# Brief Basics
+# Briv Basics
 
-> **Operator quick reference:** Brief's operators fall into three groups
+> **Operator quick reference:** Briv's operators fall into three groups
 > — **Reflection** (`.^` — `s.^Len` runtime; `.^^` — `x.^^Bytes` compile-time), **Partition
 > Operators** (`[]`, `@/`), and the **Transfer Operator** (`<-`). The
 > **Anchor** (`@`) prefixes prior state in contracts. See `00a-base-design.md`
@@ -8,9 +8,9 @@
 
 ## 1. State Declarations
 
-All state in Brief is declared globally with `let`:
+All state in Briv is declared globally with `let`:
 
-```brief
+```briv
 let counter: Int = 0;
 let name: String = "Alice";
 let active: Bool = true;
@@ -19,14 +19,14 @@ let initial: Char = 'A';
 ```
 
 **Type Inference:**
-```brief
+```briv
 let x = 42;          // Inferred: Int
 let s = "hello";     // Inferred: String
 let b = true;        // Inferred: Bool
 ```
 
 **Without Initial Value:**
-```brief
+```briv
 let counter: Int;    // Defaults to 0
 let name: String;    // Defaults to ""
 let active: Bool;    // Defaults to false
@@ -36,7 +36,7 @@ let active: Bool;    // Defaults to false
 
 Immutable values with `const`:
 
-```brief
+```briv
 const MAX_SIZE: Int = 100;
 const VERSION: String = "1.0.0";
 const PI: Float = 3.14159;
@@ -47,7 +47,7 @@ const PI: Float = 3.14159;
 State changes happen in `node`s (reactive) and `txn`s (callable). A reactive
 `node` fires whenever its precondition is met:
 
-```brief
+```briv
 node increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -75,26 +75,26 @@ Instead of wrapping every program in a `txn`/`node`, you can write top-level
 `let`/`const` bindings (or a plain `defn main()`). The flat-scripting plugin
 synthesizes a one-shot opening node that runs them exactly once:
 
-```brief
-let message: String = "Hello, Brief!";
+```briv
+let message: String = "Hello, Briv!";
 let x: Int = 42;
 ```
 
 This is equivalent to:
 
-```brief
-let message: String = "Hello, Brief!";
+```briv
+let message: String = "Hello, Briv!";
 let x: Int = 42;
 let __script_done: Bool = false;
 node __script_main [__script_done == false][__script_done] {
-    let message: String = "Hello, Brief!";
+    let message: String = "Hello, Briv!";
     let x: Int = 42;
     __script_done = true;
 };
 ```
 
 A `defn main() -> Int { ... }` with no `entry!` is also wired to run exactly
-once via the same synthesized node (it is renamed to `brief_main`).
+once via the same synthesized node (it is renamed to `briv_main`).
 
 **Rules:**
 - All declarations (`let`, `const`, `struct`, `enum`, `defn`, `txn`) must come
@@ -122,7 +122,7 @@ emit runtime code.
 
 Callable `txn`s run only when called. A reactive `node` can drive them:
 
-```brief
+```briv
 node run [counter < 100][counter == 100] {
     increment();
     decrement();
@@ -146,7 +146,7 @@ values); `run` is reactive and drives the program from the main loop.
 
 Or they can be **reactive** (fire automatically when precondition is met):
 
-```brief
+```briv
 node auto_increment [counter < 10][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -157,9 +157,9 @@ We'll cover reactive transactions in detail in [03-reactive.md](03-reactive.md).
 
 ## 6. Guards (Conditional Execution)
 
-Instead of `if/else`, Brief uses `when` guards:
+Instead of `if/else`, Briv uses `when` guards:
 
-```brief
+```briv
 let x: Int = 5;
 
 node process [x > 0 || x <= 0][result >= 0] {
@@ -189,7 +189,7 @@ node process [x > 0 || x <= 0][result >= 0] {
 
 Use `escape` to rollback a transaction:
 
-```brief
+```briv
 txn validate(x: Int) [x >= 0][state == @state] {
     [x > 1000] {
         escape;  // Rollback - nothing changes
@@ -201,10 +201,10 @@ txn validate(x: Int) [x >= 0][state == @state] {
 
 ## 8. Pipe Chaining
 
-Brief supports pipe chaining (`|>`) for chaining function calls in dataflow
+Briv supports pipe chaining (`|>`) for chaining function calls in dataflow
 order — like Unix pipes, but at the expression level:
 
-```brief
+```briv
 // Instead of: g(f(x))
 // Write:
 x |> f() |> g()
@@ -213,7 +213,7 @@ x |> f() |> g()
 The pipeline value is automatically passed as the first argument to each
 function. Existing arguments follow:
 
-```brief
+```briv
 x |> f(a, b)    // f(x, a, b)
 ```
 
@@ -223,7 +223,7 @@ The dot-skip variants (`.|>`, `..|>`, `.N|>`) let a downstream step read
 from an earlier position in the pipeline, not just the immediately
 preceding one:
 
-```brief
+```briv
 a |> f() |> g() .|> h()
 // h receives f(a) — the same value g received (skip=1)
 
@@ -239,7 +239,7 @@ that's a compile-time error.
 
 If the target is a bare identifier, it is auto-wrapped as a function call:
 
-```brief
+```briv
 x |> f           // same as: x |> f()
 ```
 
@@ -247,7 +247,7 @@ x |> f           // same as: x |> f()
 
 A pipe chain can start with a function call (no initial value):
 
-```brief
+```briv
 f() |> g()       // initial value is the result of f()
 ```
 
@@ -256,7 +256,7 @@ f() |> g()       // initial value is the result of f()
 Pipe chains are syntactic sugar — they desugar to flat let-bindings
 before typechecking, with zero runtime overhead:
 
-```brief
+```briv
 // x |> f() |> g() desugars to:
 {
     let __pipe_0 = x;
@@ -268,7 +268,7 @@ before typechecking, with zero runtime overhead:
 
 ## 9. Complete Example
 
-```brief
+```briv
 // counter.bv
 let counter: Int = 0;
 const TOTAL: Int = 100;

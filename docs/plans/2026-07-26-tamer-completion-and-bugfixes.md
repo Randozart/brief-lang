@@ -3,7 +3,7 @@
 
 ## Overview
 
-The self-hosted Brief tamer (written in Brief, compiled to `.lair` bytecode via
+The self-hosted Briv tamer (written in Briv, compiled to `.lair` bytecode via
 `BackendKind::Vm`) works end-to-end within the C interpreter harness. It loads a
 user program's `.lair` file, validates the header, allocates buffers, and
 interprets the program via a convergent `txn` loop (`vm_loop`) with a 20+ arm
@@ -116,7 +116,7 @@ Option A is simplest and least surprising. The VM doesn't have a concept of
 is the correct semantic for condition inversion.
 
 **Impact analysis:** Currently only `Neq` uses `not`, and it's already
-worked around with `xor 1` in the Brief compiler's VM backend
+worked around with `xor 1` in the Briv compiler's VM backend
 (`src/backend/vm/emit_expr.rs`). Fixing `OP_NOT` in the C interpreter will
 make the `not` instruction usable for other purposes.
 
@@ -135,7 +135,7 @@ make the `not` instruction usable for other purposes.
 (via the C test harness). To be a standalone system tool, it must read files
 from disk.
 
-**Context:** The `briefc bounty` command produces `.bounty` files containing
+**Context:** The `brivc bounty` command produces `.bounty` files containing
 a `.lair` bytecode section, `.beastpack` section, and a JSON manifest. The
 tamer needs to:
 1. Read the `.bounty` file from disk (via `SysCall#(SYS_open/read/close)`)
@@ -151,7 +151,7 @@ Steps 1 and 4-5 need implementation.
 
 The `.bounty` file is binary (contains compressed `.beastpack` and raw
 `.lair` bytecode). It must be read into memory as raw bytes, not as a
-Brief String (which might corrupt non-UTF-8 data).
+Briv String (which might corrupt non-UTF-8 data).
 
 **Approach:** Use `SysCall#` for raw binary I/O:
 - `SysCall#(2, path_cstr, 0, 0, ...)` — `SYS_open` (returns fd)
@@ -162,11 +162,11 @@ Brief String (which might corrupt non-UTF-8 data).
 - `SysCall#(3, fd, 0, ...)` — `SYS_close`
 
 **Challenge:** `SysCall#` expects integer arguments. A file path is a
-`String ` in Brief, but `SYS_open` expects a C string pointer (the raw
-address of the path's data). Converting a Brief `String` to a C string
+`String ` in Briv, but `SYS_open` expects a C string pointer (the raw
+address of the path's data). Converting a Briv `String` to a C string
 requires extracting the data pointer from the string handle.
 
-Brief's `String` type stores data as: `{i64 length, i8 data[]}` with tag bits
+Briv's `String` type stores data as: `{i64 length, i8 data[]}` with tag bits
 in the handle. Untagging: `handle & ~3ULL` gives the pointer to the
 `{length, data}` struct. Adding 8 gives the data pointer.
 
@@ -177,7 +177,7 @@ it directly as a pointer to a NUL-terminated string).
 **Files to modify:**
 - `lib/tamer/main.bv` — add file reading before the `.lair` parse step
 - `lib/tamer/bounty.bv` — `.bounty` format parsing (section extraction)
-- `tamer/tests/test_brief_tamer.c` — update test to pass file path
+- `tamer/tests/test_briv_tamer.c` — update test to pass file path
 
 **Step 4: LLVM IR Generation**
 
@@ -200,7 +200,7 @@ LLVM IR is written to a `.ll` file.
 
 Use `ShellCmd#` to invoke the system C compiler:
 
-```brief
+```briv
 let cmd = "clang -O3 " + ll_path + " -o " + output_path;
 let result = ShellCmd#(cmd);
 ```
@@ -211,10 +211,10 @@ run the shell command and return stdout).
 **Testing the flow:**
 ```bash
 # Create a .bounty
-briefc bounty test.bv -o test.bounty
+brivc bounty test.bv -o test.bounty
 
 # Run the tamer with the .bounty
-./target/debug/briefc --backend llvm lib/tamer/main.bv -o tamer_native
+./target/debug/brivc --backend llvm lib/tamer/main.bv -o tamer_native
 ./tamer_native test.bounty
 # → produces native binary
 ```
@@ -223,10 +223,10 @@ briefc bounty test.bv -o test.bounty
 
 ### 4. Fix `fcntl` redirect in compile.rs
 
-**Severity:** Medium — Blocks `briefc` from outputting compiled `.ll` or
+**Severity:** Medium — Blocks `brivc` from outputting compiled `.ll` or
 `.lair` files to stdout, which breaks any pipeline that reads from stdout.
 
-**Symptom:** When compiling with `briefc build --backend vm`, the `.lair`
+**Symptom:** When compiling with `brivc build --backend vm`, the `.lair`
 file is written to disk but the CLI tool also tries to redirect fcntl which
 fails on some systems.
 
@@ -235,7 +235,7 @@ fails on some systems.
 **Checklist:**
 - [ ] Find the `libc::dup2` or `fcntl` call that's failing
 - [ ] Add error handling (don't crash if redirect fails)
-- [ ] Test: `briefc build --backend vm test.bv` should produce test.lair
+- [ ] Test: `brivc build --backend vm test.bv` should produce test.lair
 
 ---
 
@@ -273,13 +273,13 @@ but they should still be correct for future use.
 
 **File:** The LLVM IR generation code (`src/backend/llvm/` or related)
 
-The `.ll` files written by `briefc build --backend llvm` may have a UTF-8
+The `.ll` files written by `brivc build --backend llvm` may have a UTF-8
 BOM (`\xEF\xBB\xBF`) at the start, which causes `clang` to emit a warning.
 
 **Checklist:**
 - [ ] Check if generated `.ll` files start with a BOM
 - [ ] Remove BOM if present
-- [ ] Verify with `briefc build --backend llvm test.bv && head -1 test.ll`
+- [ ] Verify with `brivc build --backend llvm test.bv && head -1 test.ll`
 
 ---
 
@@ -305,7 +305,7 @@ to operate as a standalone system tool.
 ### For each bugfix:
 
 1. **Regression test:** Add a `.bv` test case that triggers the bug
-2. **Compile:** `briefc build --backend vm test.bv` → produces `.lair`
+2. **Compile:** `brivc build --backend vm test.bv` → produces `.lair`
 3. **Execute:** Load `.lair` into C interpreter and check expected result
 4. **Verify:** `cargo test --lib` still passes (1006+ tests)
 5. **Commit:** With rationale comment referencing this plan
@@ -326,7 +326,7 @@ defn main() -> Int { term 42; }
 EOF
 
 # 2. Package as .bounty
-briefc bounty /tmp/hello.bv -o /tmp/hello.bounty
+brivc bounty /tmp/hello.bv -o /tmp/hello.bounty
 
 # 3. Run tamer on the .bounty
 tamer /tmp/hello.bounty -o /tmp/hello_bin
@@ -343,7 +343,7 @@ tamer /tmp/hello.bounty -o /tmp/hello_bin
 | `tamer/interp.h` | VM state struct, opcode definitions |
 | `lib/tamer/main.bv` | Tamer entry point — `tame` function with inlined reads |
 | `lib/tamer/loader.bv` | Bytecode read helpers, `.lair`/`.bounty` format parsers |
-| `lib/tamer/vm.bv` | VM interpreter in Brief — `vm_loop` txn, `exec_op` dispatch |
+| `lib/tamer/vm.bv` | VM interpreter in Briv — `vm_loop` txn, `exec_op` dispatch |
 | `src/backend/vm/assembler.rs` | `.lair` bytecode assembler |
 | `src/backend/vm/emit_expr.rs` | Expression → bytecode emission (includes Ptr scaling) |
 | `src/backend/vm/emit_stmt.rs` | Statement → bytecode emission |
@@ -351,4 +351,4 @@ tamer /tmp/hello.bounty -o /tmp/hello_bin
 | `src/backend/vm/mod.rs` | `VmBackend` struct, `generate()` entry point |
 | `src/backend/llvm/emit_stmt.rs` | LLVM ret type narrowing fix (trunc from i64 to fn_ret_ty) |
 | `src/backend/llvm/emit_toplevel.rs` | LLVM function header emission, `llvm_type()` with narrowing |
-| `tamer/tests/test_brief_tamer.c` | C test harness for Brief-compiled tamer |
+| `tamer/tests/test_briv_tamer.c` | C test harness for Briv-compiled tamer |

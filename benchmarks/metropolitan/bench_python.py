@@ -14,7 +14,7 @@ import importlib.util
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__)) + "/out"
 SO_PATH = OUT_DIR + "/bench_add.so"
-C_EXT_PATH = OUT_DIR + "/brief_bridge.so"
+C_EXT_PATH = OUT_DIR + "/briv_bridge.so"
 N_ITER = 50000
 
 def load_ctypes():
@@ -26,7 +26,7 @@ def load_ctypes():
 def load_cext():
     if not os.path.exists(C_EXT_PATH):
         return None
-    spec = importlib.util.spec_from_file_location("brief_bridge", C_EXT_PATH)
+    spec = importlib.util.spec_from_file_location("briv_bridge", C_EXT_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

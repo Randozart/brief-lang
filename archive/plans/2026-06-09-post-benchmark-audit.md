@@ -203,7 +203,7 @@ Rather than relying on `#!exit` (which has its own codegen path gaps), the
 correct fix is to restructure `precompute_sum.bv` as a single `node`
 with the convergence output embedded in the body:
 
-```brief
+```briv
 node compute [count < total][count == total] {
     &acc_a = acc_a + count;
     &acc_b = acc_b + count;

@@ -1,12 +1,12 @@
-# Brief Self-Hosting Implementation Plan
+# Briv Self-Hosting Implementation Plan
 
-**Goal:** Enable the Brief compiler to be written in Brief itself, with direct binary backend and self-verification
+**Goal:** Enable the Briv compiler to be written in Briv itself, with direct binary backend and self-verification
 
 **Current Status:** ~15% feasible (Char type implemented)  
 **Target:** 100% self-hosting capable with AArch64 binary backend  
 **Estimated Timeline:** 4-6 weeks with AI assistance
 
-**Vision:** Brief is not just another self-hosting language. It is a **Universal Logic Transformer** that can:
+**Vision:** Briv is not just another self-hosting language. It is a **Universal Logic Transformer** that can:
 - Target anything from FPGA gates to CPU binary
 - Mathematically prove its own compiler correctness (kills "Trusting Trust")
 - Define CPUs as reactive transactions (opcodes = guards)
@@ -17,13 +17,13 @@
 
 ## Executive Summary
 
-The Brief compiler currently consists of ~19,452 lines of Rust across 26 modules. To write the compiler in Brief, we need to add:
+The Briv compiler currently consists of ~19,452 lines of Rust across 26 modules. To write the compiler in Briv, we need to add:
 
 - **50+ new types** (structs, enums, traits)
 - **~470 native function definitions** (`defn`)
 - **~20 FFI bindings** (for OS interaction, can be native later)
 - **Type system extensions** (traits, constraints, unification)
-- **Binary backends** (AArch64, x86-64) - THE "TRUE" Brief target
+- **Binary backends** (AArch64, x86-64) - THE "TRUE" Briv target
 - **Self-verification contracts** - Prove compiler correctness
 
 This plan is organized into **9 tiers** with clear dependencies. Each tier must be completed before the next can begin.
@@ -60,10 +60,10 @@ Tier 1 (Core Types) ──┬──> Tier 2 (String) ──> Tier 3 (Lexer) ─�
 
 ### 1.1 Char Type
 
-**Problem:** Brief has `String` but no single-character type. Cannot iterate strings efficiently.
+**Problem:** Briv has `String` but no single-character type. Cannot iterate strings efficiently.
 
 **Implementation:**
-```brief
+```briv
 // New primitive type (requires compiler changes)
 let c: Char = 'a';
 
@@ -98,7 +98,7 @@ defn char_le(a: Char, b: Char) -> Bool
 **Problem:** Symbol tables, scopes, and lookups require O(1) access. Lists are O(n).
 
 **Implementation:**
-```brief
+```briv
 struct HashMap<K, V> {
     // Internal representation (compiler magic or native implementation)
     opaque: Data
@@ -150,7 +150,7 @@ defn filter<K, V>(map: HashMap<K, V>, pred: (K, V) -> Bool) -> HashMap<K, V>
 **Problem:** Need O(1) membership testing for visited nodes, dependency tracking.
 
 **Implementation:**
-```brief
+```briv
 struct HashSet<T> {
     opaque: Data  // Backed by HashMap<T, ()>
 }
@@ -196,7 +196,7 @@ defn is_disjoint<T>(a: HashSet<T>, b: HashSet<T>) -> Bool
 **Problem:** String concatenation `s = s + "text"` is O(n²). Need efficient building.
 
 **Implementation:**
-```brief
+```briv
 struct StringBuilder {
     buffer: List<Char>,
     length: Int
@@ -237,7 +237,7 @@ defn is_empty(builder: StringBuilder) -> Bool
 **Problem:** Parser needs stack for recursive descent. Proof engine needs queue for BFS.
 
 **Implementation:**
-```brief
+```briv
 // Stack (LIFO)
 struct Stack<T> {
     items: List<T>
@@ -278,7 +278,7 @@ defn len<T>(queue: Queue<T>) -> Int
 **Problem:** Current Result/Option types lack functional methods for chaining.
 
 **Implementation:**
-```brief
+```briv
 // Result enhancements
 defn map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
 defn and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E>
@@ -323,7 +323,7 @@ defn filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T>
 **Current status:** All FFI in `lib/std/string.bv`
 
 **Implementation:**
-```brief
+```briv
 defn is_whitespace(c: Char) -> Bool
 defn is_digit(c: Char) -> Bool
 defn is_hex_digit(c: Char) -> Bool
@@ -350,7 +350,7 @@ defn is_ASCII(c: Char) -> Bool
 ### 2.2 Character Conversion (Move from FFI to Native)
 
 **Implementation:**
-```brief
+```briv
 defn to_upper(c: Char) -> Char
 defn to_lower(c: Char) -> Char
 defn to_title(c: Char) -> Char
@@ -372,7 +372,7 @@ defn int_to_hex_digit(n: Int) -> Option<Char>  // 0-15 -> '0'-'9', 'a'-'f'
 ### 2.3 String Building & Manipulation
 
 **Implementation:**
-```brief
+```briv
 defn concat_chars(chars: List<Char>) -> String
 defn string_to_chars(s: String) -> List<Char>
 defn repeat_char(c: Char, n: Int) -> String
@@ -396,7 +396,7 @@ defn replace_all_char(s: String, old: Char, new: Char) -> String
 ### 2.4 Unicode Support
 
 **Implementation:**
-```brief
+```briv
 defn UTF8_decode(s: String, index: Int) -> Result<(Char, Int), UnicodeError>
 defn UTF8_encode(c: Char) -> String
 defn UTF8_len(s: String) -> Int
@@ -420,7 +420,7 @@ defn is_valid_codepoint(n: Int) -> Bool
 ### 2.5 String Formatting
 
 **Implementation:**
-```brief
+```briv
 defn format_int(n: Int, base: Int) -> String  // base 2, 8, 10, 16
 defn format_uint(n: UInt, base: Int) -> String
 defn format_float(f: Float, precision: Int) -> String
@@ -453,7 +453,7 @@ defn join_strings(strings: List<String>, sep: String) -> String
 ### 3.1 Token Type Definition
 
 **Implementation:**
-```brief
+```briv
 enum Token {
     // Literals
     Identifier(String),
@@ -564,7 +564,7 @@ enum Token {
 ### 3.2 Lexer Functions
 
 **Implementation:**
-```brief
+```briv
 struct LexerState {
     source: String,
     position: Int,
@@ -600,7 +600,7 @@ defn make_error(message: String, state: LexerState) -> LexError
 - `lib/std/lexer.bv` - New module
 
 **Acceptance criteria:**
-- [ ] Can tokenize valid Brief source
+- [ ] Can tokenize valid Briv source
 - [ ] Produces meaningful errors for invalid input
 - [ ] Handles all token types correctly
 - [ ] Tracks line/column for error reporting
@@ -610,7 +610,7 @@ defn make_error(message: String, state: LexerState) -> LexError
 ### 3.3 Lexical Error Types
 
 **Implementation:**
-```brief
+```briv
 enum LexError {
     UnexpectedChar(Char, Span),
     UnterminatedString(Span),
@@ -650,9 +650,9 @@ defn span_from_state(state: LexerState, length: Int) -> Span
 
 ### 4.1 AST Struct Definitions
 
-**Implementation:** Define all AST types in Brief:
+**Implementation:** Define all AST types in Briv:
 
-```brief
+```briv
 // Top-level program structure
 struct Program {
     items: List<TopLevel>,
@@ -808,7 +808,7 @@ enum Literal {
 ### 4.2 Parser Functions
 
 **Implementation:**
-```brief
+```briv
 struct ParserState {
     tokens: List<Token>,
     position: Int,
@@ -864,7 +864,7 @@ defn make_parse_error(message: String, token: Token, span: Span) -> ParseError
 - `lib/std/parser.bv` - New module
 
 **Acceptance criteria:**
-- [ ] Can parse all valid Brief programs
+- [ ] Can parse all valid Briv programs
 - [ ] Produces correct AST
 - [ ] Error messages include context
 - [ ] Handles all syntax variants
@@ -874,7 +874,7 @@ defn make_parse_error(message: String, token: Token, span: Span) -> ParseError
 ### 4.3 Parse Error Types
 
 **Implementation:**
-```brief
+```briv
 enum ParseError {
     UnexpectedToken(Token, Token, Span),  // got, expected, location
     UnexpectedEof(Span),
@@ -909,7 +909,7 @@ defn highlight_span(source: String, span: Span) -> String
 **Problem:** Generics syntax exists but trait bounds are not enforced.
 
 **Implementation:**
-```brief
+```briv
 // Trait definitions
 trait Eq {
     defn eq(self, other: Self) -> Bool;
@@ -989,7 +989,7 @@ defn process<T, U>(t: T, u: U) -> String
 ### 5.2 Type Unification Algorithm
 
 **Implementation:**
-```brief
+```briv
 struct Substitution {
     mappings: HashMap<TypeVar, Type>
 }
@@ -1023,7 +1023,7 @@ defn generalize(type: Type, context: TypeContext) -> TypeScheme
 ### 5.3 Type Context and Scopes
 
 **Implementation:**
-```brief
+```briv
 struct TypeContext {
     scopes: Stack<HashMap<String, TypeScheme>>,
     traits: HashMap<String, Trait>,
@@ -1053,7 +1053,7 @@ defn check_trait_impl(ctx: TypeContext, trait_name: String, ty: Type) -> Bool
 ### 5.4 Type Checking Functions
 
 **Implementation:**
-```brief
+```briv
 // Main entry
 defn typecheck_program(program: Program) -> Result<TypedProgram, TypeError>
 
@@ -1095,7 +1095,7 @@ defn verify_postcondition(post: Expr, ctx: TypeContext) -> Result<(), TypeError>
 ### 5.5 Type Error Types
 
 **Implementation:**
-```brief
+```briv
 enum TypeError {
     TypeMismatch(Type, Type, Span),
     UndefinedVariable(String, Span),
@@ -1125,13 +1125,13 @@ defn format_type_error(err: TypeError) -> String
 ## Tier 6: Proof Engine
 
 **Status:** ❌ Not started  
-**Priority:** HIGH - core Brief feature  
+**Priority:** HIGH - core Briv feature  
 **Estimated:** 7-10 days
 
 ### 6.1 Symbolic Values
 
 **Implementation:**
-```brief
+```briv
 enum SymbolicValue {
     ConcreteInt(Int),
     ConcreteFloat(Float),
@@ -1175,7 +1175,7 @@ defn free_vars(sv: SymbolicValue) -> HashSet<String>
 ### 6.2 Symbolic State
 
 **Implementation:**
-```brief
+```briv
 struct SymbolicState {
     vars: HashMap<String, SymbolicValue>,
     path_constraints: List<SymbolicValue>,
@@ -1204,7 +1204,7 @@ defn mark_visited(state: SymbolicState, key: String) -> SymbolicState
 ### 6.3 Statement Execution
 
 **Implementation:**
-```brief
+```briv
 defn execute_statement(stmt: Statement, state: SymbolicState) -> List<SymbolicState>
 defn execute_assignment(lhs: Expr, rhs: Expr, state: SymbolicState) -> List<SymbolicState>
 defn execute_guarded(condition: Expr, body: List<Statement>, state: SymbolicState) -> List<SymbolicState>
@@ -1229,7 +1229,7 @@ defn merge_states(states: List<SymbolicState>) -> SymbolicState
 ### 6.4 Path Exploration
 
 **Implementation:**
-```brief
+```briv
 struct ExecutionPath {
     statements: List<Statement>,
     constraints: List<SymbolicValue>,
@@ -1257,7 +1257,7 @@ defn detect_deadlock(txns: List<Transaction>) -> Option<DeadlockCycle>
 ### 6.5 Contract Verification
 
 **Implementation:**
-```brief
+```briv
 enum ProofResult {
     Verified,
     Failed(CounterExample),
@@ -1291,7 +1291,7 @@ defn check_vc(vc: VerificationCondition) -> Result<(), ProofError>
 ### 6.6 Proof Error Types
 
 **Implementation:**
-```brief
+```briv
 enum ProofError {
     PreconditionFailed(CounterExample),
     PostconditionFailed(CounterExample),
@@ -1317,17 +1317,17 @@ defn format_proof_error(err: ProofError) -> String
 ## Tier 7: Code Generation Backends
 
 **Status:** ❌ Not started  
-**Priority:** CRITICAL - AArch64 binary backend is the "true" Brief target  
+**Priority:** CRITICAL - AArch64 binary backend is the "true" Briv target  
 **Estimated:** 7-10 days
 
-**Philosophy:** ASM is the "most honest" software representation of Brief. It bypasses the "sequential delusion" of C/Rust and treats the CPU as what it is: a collection of physical resources (registers, ALUs) that must be coordinated to satisfy a logical state.
+**Philosophy:** ASM is the "most honest" software representation of Briv. It bypasses the "sequential delusion" of C/Rust and treats the CPU as what it is: a collection of physical resources (registers, ALUs) that must be coordinated to satisfy a logical state.
 
 ### 7.1 AArch64 Binary Backend (NEW - HIGH PRIORITY)
 
-**Why First:** ARM is simpler than x86, matches KV260 hardware, and is the "true" Brief target (no runtime, direct hardware access).
+**Why First:** ARM is simpler than x86, matches KV260 hardware, and is the "true" Briv target (no runtime, direct hardware access).
 
 **Implementation:**
-```brief
+```briv
 // Reactor as jump table
 defn generate_aarch64_reactor(txns: List<TypedTransaction>) -> List<u8> {
     let code: List<u8> = [];
@@ -1377,15 +1377,15 @@ defn emit_masked_assign(vec: String, mask: Expr, value: Expr) -> List<u8> {
 ```
 
 **Key Features:**
-- **Reactor Loop:** Simple `CALL` sequence to all transactions (no mutexes needed - Brief proved safety)
+- **Reactor Loop:** Simple `CALL` sequence to all transactions (no mutexes needed - Briv proved safety)
 - **Direct MMIO:** `@0xA0000000` becomes literal memory operand
 - **Zero Runtime:** No stack checks, no null checks, no bounds checks (all proven at compile time)
-- **Register Allocation:** Map Brief variables to CPU registers via `@REG_X0`, `@REG_X1`, etc.
+- **Register Allocation:** Map Briv variables to CPU registers via `@REG_X0`, `@REG_X1`, etc.
 - **Interrupt Handling:** IRQs become reactive transactions with hardware pin guards
 
 **Register Aliases:**
-```brief
-// Map Brief state to CPU registers
+```briv
+// Map Briv state to CPU registers
 ALIAS accumulator: UInt[64] @REG_X0;
 ALIAS status_flags: UInt[64] @REG_X1;
 ALIAS program_counter: UInt[64] @REG_PC;
@@ -1409,7 +1409,7 @@ ALIAS program_counter: UInt[64] @REG_PC;
 
 **Implementation:** Similar to AArch64 but with x86-64 opcodes, AVX-512 for SIMD.
 
-```brief
+```briv
 defn generate_x86_64(program: TypedProgram) -> List<u8>
 defn emit_reactor_x64(txns: List<Transaction>) -> List<u8>
 defn emit_avx512_masked(vec: String, mask: Expr, value: Expr) -> List<u8>
@@ -1428,9 +1428,9 @@ defn emit_avx512_masked(vec: String, mask: Expr, value: Expr) -> List<u8>
 ### 7.3 Rust Backend (Intermediate)
 
 **Status:** Existing in Rust compiler  
-**Purpose:** Bootstrap only (generate Brief compiler initially)
+**Purpose:** Bootstrap only (generate Briv compiler initially)
 
-```brief
+```briv
 defn generate_rust(program: TypedProgram) -> String
 defn generate_rust_transaction(txn: TypedTransaction) -> String
 // ... etc
@@ -1451,27 +1451,27 @@ Similar to Rust - for bootstrap and embedded targets without Rust support.
 
 ### 7.5 WASM Backend
 
-For browser-based Brief development and testing.
+For browser-based Briv development and testing.
 
 ---
 
 ### 7.6 FPGA Backends (SystemVerilog/VHDL)
 
-Brief in **Space** (vs ASM in **Time**).
+Briv in **Space** (vs ASM in **Time**).
 
 ---
 
-## Tier 7.5: CPU Definition in Brief (NEW)
+## Tier 7.5: CPU Definition in Briv (NEW)
 
 **Status:** ❌ Not started  
-**Priority:** DEMONSTRATION - proves Brief universality  
+**Priority:** DEMONSTRATION - proves Briv universality  
 **Estimated:** 2-3 days
 
-**Goal:** Define a CPU in Brief where opcodes are transaction guards. This demonstrates that Brief can define its own runtime.
+**Goal:** Define a CPU in Briv where opcodes are transaction guards. This demonstrates that Briv can define its own runtime.
 
-### Brief-16 CPU Example
+### Briv-16 CPU Example
 
-```brief
+```briv
 // cpu_arch.dbvs - CPU topology
 REGISTER @REG_FILE: Vector[UInt[32], 16];
 ALIAS pc: UInt[32] @0x0;   // Program Counter
@@ -1498,8 +1498,8 @@ node inst_jz [ir[31..24] == 0x05 && @REG_FILE[ir[23..20]] == 0] {
 }
 ```
 
-**Program in DBrief:**
-```brief
+**Program in DBriv:**
+```briv
 // program.dbvl
 ALIAS ADD(D, A, B) = (0x01 << 24) | (D << 20) | (A << 16) | (B << 12);
 + @ROM[0] = ADD(1, 2, 3);
@@ -1508,7 +1508,7 @@ ALIAS ADD(D, A, B) = (0x01 << 24) | (D << 20) | (A << 16) | (B << 12);
 **Acceptance criteria:**
 - [ ] CPU definition compiles to VHDL (FPGA)
 - [ ] CPU definition compiles to AArch64 (emulator)
-- [ ] DBrief program runs on defined CPU
+- [ ] DBriv program runs on defined CPU
 - [ ] Cross-layer verification (program proven safe for CPU)
 
 ---
@@ -1516,15 +1516,15 @@ ALIAS ADD(D, A, B) = (0x01 << 24) | (D << 20) | (A << 16) | (B << 12);
 ## Tier 6.5: Compiler Self-Verification (NEW)
 
 **Status:** ❌ Not started  
-**Priority:** CRITICAL - Brief's unfair advantage  
+**Priority:** CRITICAL - Briv's unfair advantage  
 **Estimated:** 3-4 days
 
-**Goal:** Use Brief's proof engine to verify the compiler's own transformations. This eliminates the "Trusting Trust" attack and all silent compiler bugs.
+**Goal:** Use Briv's proof engine to verify the compiler's own transformations. This eliminates the "Trusting Trust" attack and all silent compiler bugs.
 
 ### Self-Verification Contracts
 
-```brief
-// In the Brief compiler source code
+```briv
+// In the Briv compiler source code
 
 // Prove lexing is correct
 CHECK lexer_correctness [
@@ -1552,14 +1552,14 @@ CHECK optimizer_correctness [
 
 // Prove the compiler doesn't miscompile itself
 CHECK self_hosting_integrity [
-    let compiler_v1 = compile(brief_compiler_source);
-    let compiler_v2 = compile_v2(brief_compiler_source);
+    let compiler_v1 = compile(briv_compiler_source);
+    let compiler_v2 = compile_v2(briv_compiler_source);
     binary_equiv(compiler_v1, compiler_v2)
 ];
 ```
 
 **Implementation:**
-```brief
+```briv
 defn verify_compiler(program: TypedProgram) -> VerificationResult {
     let results: List<CheckResult> = [];
     
@@ -1593,9 +1593,9 @@ defn verify_compiler(program: TypedProgram) -> VerificationResult {
 **Priority:** OPTIMIZATION - after basic lexer works  
 **Estimated:** 2-3 days
 
-**Goal:** Use Brief's masked SIMD syntax for parallel tokenization.
+**Goal:** Use Briv's masked SIMD syntax for parallel tokenization.
 
-```brief
+```briv
 // Parallel lexing with masked SIMD
 let source: Vector[UInt8, 65536] = load_source();
 let tokens: Vector<Token, 65536];
@@ -1627,7 +1627,7 @@ let tokens: Vector<Token, 65536];
 ### 8.1 Source Spans
 
 **Implementation:**
-```brief
+```briv
 struct Span {
     file: String,
     line: Int,
@@ -1658,7 +1658,7 @@ defn span_contains(parent: Span, child: Span) -> Bool
 ### 8.2 File I/O (FFI initially, native later)
 
 **Implementation:**
-```brief
+```briv
 // FFI signatures (backed by Rust/C initially)
 frgn __read_file(path: String) -> Result<String, IOError> from "std/fs.toml"
 frgn __write_file(path: String, content: String) -> Result<Void, IOError> from "std/fs.toml"
@@ -1698,7 +1698,7 @@ defn normalize_path(path: String) -> String
 ### 8.3 IO Error Types
 
 **Implementation:**
-```brief
+```briv
 enum IOError {
     NotFound(String),
     PermissionDenied(String),
@@ -1723,8 +1723,8 @@ defn format_io_error(err: IOError) -> String
 ### 8.4 Process Spawning (for bootstrap)
 
 **Implementation:**
-```brief
-// For bootstrap: Brief compiler calls rustc/gcc
+```briv
+// For bootstrap: Briv compiler calls rustc/gcc
 frgn __spawn(command: String, args: List<String>) -> Result<Int, IOError> from "std/process.toml"
 frgn __spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> from "std/process.toml"
 frgn __env_var(name: String) -> Option<String> from "std/process.toml"
@@ -1752,7 +1752,7 @@ frgn __set_current_dir(path: String) -> Result<Void, IOError> from "std/process.
 ### 9.1 Complete Result Type
 
 **Implementation:**
-```brief
+```briv
 enum Result<T, E> {
     Ok(T),
     Err(E)
@@ -1793,7 +1793,7 @@ defn filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E>
 ### 9.2 Complete Option Type
 
 **Implementation:**
-```brief
+```briv
 enum Option<T> {
     Some(T),
     None
@@ -1835,7 +1835,7 @@ defn xor<T>(opt: Option<T>, other: Option<T>) -> Option<T>  // One or the other,
 ### 9.3 Iterators (Advanced)
 
 **Implementation:**
-```brief
+```briv
 // Iterator trait
 trait Iterator<T> {
     defn next(self) -> Option<T>;
@@ -1895,7 +1895,7 @@ defn values<K, V>(map: HashMap<K, V>) -> impl Iterator<V>
 ### 9.4 Comparison and Ordering
 
 **Implementation:**
-```brief
+```briv
 enum Ordering {
     Less,
     Equal,
@@ -1956,10 +1956,10 @@ defn clamp<T>(value: T, min: T, max: T) -> T where T: Ord
 - [ ] Bootstrap: compile compiler with itself
 
 ### Phase 6: Self-Hosting (Week 6+)
-- [ ] Compile Brief compiler (in Brief) using Rust compiler
-- [ ] Compile Brief compiler (in Brief) using Brief AArch64 backend
+- [ ] Compile Briv compiler (in Briv) using Rust compiler
+- [ ] Compile Briv compiler (in Briv) using Briv AArch64 backend
 - [ ] Verify binary equivalence (self-verification)
-- [ ] Success: Brief compiles itself!
+- [ ] Success: Briv compiles itself!
 
 ---
 
@@ -1967,7 +1967,7 @@ defn clamp<T>(value: T, min: T, max: T) -> T where T: Ord
 
 ### Unit Tests
 Each module should have comprehensive tests:
-```brief
+```briv
 // Example: HashMap tests
 defn test_hashmap_insert_get() -> Bool {
     let map = new_map<Int, String>();
@@ -1985,10 +1985,10 @@ defn test_hashmap_missing_key() -> Bool {
 ### Integration Tests
 - Lexer + Parser: tokenize and parse example programs
 - Parser + Typechecker: typecheck parsed programs
-- Full pipeline: compile Brief programs to AArch64 binary
+- Full pipeline: compile Briv programs to AArch64 binary
 
 ### Self-Verification Tests (NEW)
-```brief
+```briv
 CHECK compiler_correctness [
     forall source in @test_sources:
         logic_equiv(source, generate_aarch64(parse(source)))
@@ -1996,13 +1996,13 @@ CHECK compiler_correctness [
 ```
 
 ### Bootstrap Test
-Final test: compile the Brief compiler (written in Brief) using itself
+Final test: compile the Briv compiler (written in Briv) using itself
 
 ### CPU Definition Test (NEW)
-- Define Brief-16 CPU in Brief
+- Define Briv-16 CPU in Briv
 - Compile to VHDL → run on FPGA
 - Compile to AArch64 → run as emulator
-- Write program in DBrief → verify it runs on both
+- Write program in DBriv → verify it runs on both
 
 ---
 
@@ -2032,13 +2032,13 @@ Final test: compile the Brief compiler (written in Brief) using itself
 ## Success Metrics
 
 ### Milestone 1: Lexer Complete
-- Can tokenize any valid Brief program
+- Can tokenize any valid Briv program
 - Produces correct tokens with spans
 - Error messages point to right location
 - SIMD parallelization works (optimization)
 
 ### Milestone 2: Parser Complete
-- Can parse any valid Brief program
+- Can parse any valid Briv program
 - Produces correct AST
 - Handles all syntax variants
 
@@ -2066,34 +2066,34 @@ Final test: compile the Brief compiler (written in Brief) using itself
 - Produces runnable `.bin` file
 
 ### Milestone 7: CPU Definition Works (NEW)
-- Brief-16 CPU defined in Brief
+- Briv-16 CPU defined in Briv
 - Compiles to VHDL (FPGA) and AArch64 (emulator)
-- DBrief program runs on both
+- DBriv program runs on both
 - Cross-layer verification proves program safety
 
 ### Milestone 8: Self-Hosting Complete
-- Brief compiler written in Brief
+- Briv compiler written in Briv
 - Compiles itself successfully
 - Binary equivalence verified
-- **Brief is self-sustaining**
+- **Briv is self-sustaining**
 
 ---
 
 ## Bootstrap Strategy
 
 ### Stage 0: Current (Rust Compiler)
-- Rust-based Brief compiler exists
-- Compiles Brief → Rust/C/WASM/VHDL
+- Rust-based Briv compiler exists
+- Compiles Briv → Rust/C/WASM/VHDL
 - **Used to compile Stage 1**
 
-### Stage 1: Minimal Brief Compiler
-- Brief compiler written in minimal Brief subset
+### Stage 1: Minimal Briv Compiler
+- Briv compiler written in minimal Briv subset
 - Compiled by Stage 0 compiler
 - Outputs AArch64 binary (via Rust backend initially)
 - **Limited features: no traits, basic types only**
 
-### Stage 2: Full Brief Compiler
-- Full-featured Brief compiler (all tiers complete)
+### Stage 2: Full Briv Compiler
+- Full-featured Briv compiler (all tiers complete)
 - Compiled by Stage 1 compiler
 - Outputs AArch64 binary directly
 - **Includes self-verification contracts**
@@ -2101,16 +2101,16 @@ Final test: compile the Brief compiler (written in Brief) using itself
 ### Stage 3: Self-Compiled
 - Stage 2 compiler compiles itself
 - Binary from Stage 2 == Binary from Stage 3
-- **Success! Brief is self-hosting**
+- **Success! Briv is self-hosting**
 
 ---
 
 ## The Ultimate Vision
 
-**Brief is not just another self-hosting language.** It is:
+**Briv is not just another self-hosting language.** It is:
 
 1. **A Universal Logic Transformer**
-   - Same Brief code → FPGA (VHDL), CPU (AArch64), Browser (WASM)
+   - Same Briv code → FPGA (VHDL), CPU (AArch64), Browser (WASM)
    - No semantic changes between targets
 
 2. **A Self-Verifying Compiler**
@@ -2133,7 +2133,7 @@ Final test: compile the Brief compiler (written in Brief) using itself
    - Defines its own runtime (CPU)
    - Verifies its own transformations
 
-**When complete, Brief will be the first language that is mathematically proven to not have compiler bugs, can define its own hardware, and compiles directly to binary with zero runtime overhead.**
+**When complete, Briv will be the first language that is mathematically proven to not have compiler bugs, can define its own hardware, and compiles directly to binary with zero runtime overhead.**
 
 This is not just self-hosting. This is **language singularity**.
 

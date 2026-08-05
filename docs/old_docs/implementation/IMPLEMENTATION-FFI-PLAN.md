@@ -1,8 +1,8 @@
-# Brief Compiler FFI Implementation Plan
+# Briv Compiler FFI Implementation Plan
 
 ## Overview
 
-This document outlines the implementation plan for restructuring the Brief compiler's foreign function interface (FFI) system to:
+This document outlines the implementation plan for restructuring the Briv compiler's foreign function interface (FFI) system to:
 1. Replace `#` comments with `//` style comments
 2. Convert as many `frgn sig` declarations as possible to native `defn` implementations
 3. Create proper wrapper pattern with `__raw` prefix for FFI functions
@@ -32,7 +32,7 @@ This document outlines the implementation plan for restructuring the Brief compi
 **Objective:** Make standard library functions native where possible, with proper FFI wrapper pattern.
 
 **Pattern:**
-```brief
+```briv
 // Raw FFI - handles Result<T, Error> manually
 frgn sig __println(msg: String) -> Result<Bool, IoError> from "lib/ffi/bindings/io.toml";
 
@@ -64,7 +64,7 @@ defn println(msg: String) -> Bool [true] [true] {
 **New directory structure:**
 ```
 lib/
-├── std/                     // Native Brief implementations
+├── std/                     // Native Briv implementations
 │   └── *.bv
 ├── ffi/                     // NEW: FFI infrastructure
 │   ├── __init__.bv          // Main import file
@@ -127,7 +127,7 @@ my_project/
 ```
 
 **Usage:**
-```brief
+```briv
 import my_ffi;
 
 defn main() -> Int {
@@ -158,12 +158,12 @@ The double underscore is:
 Users can handle FFI errors in multiple ways:
 
 1. **Using wrapper** (returns basic type):
-   ```brief
+   ```briv
    defn println(msg: String) -> Bool { ... };  // Returns true
    ```
 
 2. **Using raw FFI** (handles Result manually):
-   ```brief
+   ```briv
    frgn sig __println(msg: String) -> Result<Bool, IoError>;
    
    defn safe_print(msg: String) -> Bool {
@@ -174,7 +174,7 @@ Users can handle FFI errors in multiple ways:
    ```
 
 3. **Using union types** (future):
-   ```brief
+   ```briv
    defn try_print(msg: String) -> Bool|String {
      let result = __println(msg);
      [result is error] { term result.error.message };

@@ -1,11 +1,11 @@
-# Pointers in Brief
+# Pointers in Briv
 
-Brief has a unified `&` operator that always means **address-of**. When you
+Briv has a unified `&` operator that always means **address-of**. When you
 write `&x` you get a pointer (`Ptr<T>` or `PtrConst<T>`) to `x`.
 
 ## The short rule for state field writes
 
-```brief
+```briv
 field = value;      // direct state field write — use this
 &field = value;     // writes through a transient pointer — redundant
 ```
@@ -22,7 +22,7 @@ This is semantically correct but unnecessarily verbose. Write directly instead.
 
 ## When `&` IS meaningful
 
-```brief
+```briv
 let p = &field;     // creates a persistent Ptr<T> — the pointer lives
 *p = value;         // writes through p — genuine pointer store
 let v = *p;         // reads through p — genuine pointer load
@@ -31,7 +31,7 @@ let v = *p;         // reads through p — genuine pointer load
 The collection arrow (2026-08-01, Phase 3) is `&`-free — the dispatch finds
 the collection by the op binding on each side:
 
-```brief
+```briv
 list <- value;     // insert (push) — InsertAt binding on the lhs
 dest <- list;      // read (copy) an element out — ExtractFrom/CopyFrom binding on the rhs
 dest ~<- list;     // destructive extract — copy, then destroy the source's backing
@@ -43,7 +43,7 @@ dest ~<- list;     // destructive extract — copy, then destroy the source's ba
 
 `*ptr` reads or writes the value that `ptr` points to:
 
-```brief
+```briv
 let p = &counter;   // p: Ptr<Int>
 let v = *p;         // v: Int (reads counter)
 *p = v + 1;         // writes through p (updates counter)

@@ -137,7 +137,7 @@ The IIR filter at `benchmarks/iir_filter.bv` is the canonical folded-path test. 
 Every phase must satisfy:
 
 1. `cargo test --lib` — all existing 334 tests pass unchanged
-2. IIR benchmark — Brief maintains ≥ C speed (0.15s vs 0.23s)
+2. IIR benchmark — Briv maintains ≥ C speed (0.15s vs 0.23s)
 3. Phase-specific new tests (7 integration tests for LLVM backend)
 4. **New: wake-trigger soundness** — Bool wake trigger program no longer exits after one tick
 

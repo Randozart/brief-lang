@@ -22,7 +22,7 @@ pub enum LaneKind {
     /// Call an external/intrinsic conversion function: call @fn_name
     ExtCall(&'static str),
     /// Call a proto-binding transform function (owned name — user-declared
-    /// `proto C_String: #String { CastTo(...) = cstr_to_brief(#L); }`).
+    /// `proto C_String: #String { CastTo(...) = cstr_to_briv(#L); }`).
     /// 2026-08-03: distinct from ExtCall so seeded base lanes keep their
     /// `&'static str` without changing all call sites.
     ExtCallDyn(String),
@@ -304,7 +304,7 @@ impl CastingGraph {
         self.set_llvm_type("Float", "",  LlvmTypeResolver::FloatWidth);
         self.set_llvm_type("Bool", "",   LlvmTypeResolver::Fixed("i8"));
         self.set_llvm_type("Char", "",   LlvmTypeResolver::Fixed("i32"));
-        // 2026-08-01 (B0): A Brief String value IS a pointer to a
+        // 2026-08-01 (B0): A Briv String value IS a pointer to a
         // length-prefixed [len: i64][bytes] buffer, in every type-claiming
         // site. The old { i64, i64 } fat-pointer claim caused the 4-way
         // representation split-brain (ptr vs i64 vs {i64,i64} vs i128). The
@@ -372,7 +372,7 @@ impl CastingGraph {
 
         for edge in &pd.cast_edges {
             // 2026-08-03: a CastBinding is the delta transform. CastTo binds
-            // proto → target (e.g. cstr_to_brief); CastFrom binds target →
+            // proto → target (e.g. cstr_to_briv); CastFrom binds target →
             // proto (e.g. str_to_c). Each edge gets the binding's function as
             // its lane so emit_cast_steps emits a real call, not a bitcast.
             let lane = match &edge.binding {
@@ -739,7 +739,7 @@ impl CastingGraph {
 
     // ── LLVM Type Resolution ──────────────────────────────────────────
 
-    /// Resolve the LLVM type string for a given Brief type.
+    /// Resolve the LLVM type string for a given Briv type.
     ///
     /// Derived from (protocol, metadata) by the casting graph. This replaces
     /// the normalizer's three-phase llvm_type derivation and primordial
@@ -987,7 +987,7 @@ mod tests {
     #[test]
     fn test_proto_binding_becomes_ext_call_lane() {
         // 2026-08-03: `proto C_String: #String { CastTo(#String<UTF8>) =
-        // cstr_to_brief(#L); CastFrom(#String<UTF8>) = str_to_c(#L); }` — the
+        // cstr_to_briv(#L); CastFrom(#String<UTF8>) = str_to_c(#L); }` — the
         // bindings must become real call lanes (ExtCallDyn), not the old
         // Bitcast placeholder.
         let mut graph = CastingGraph::new();
@@ -1001,7 +1001,7 @@ mod tests {
                     target_category: "String".to_string(),
                     target_variant: "UTF8".to_string(),
                     binding: Some(crate::ast::top::CastBinding {
-                        fn_name: "cstr_to_brief".to_string(),
+                        fn_name: "cstr_to_briv".to_string(),
                         param: "#L".to_string(),
                     }),
                 },
@@ -1023,7 +1023,7 @@ mod tests {
         let path = graph.find_path("String", "C_String", "String", "UTF8")
             .expect("C_String -> UTF8 path");
         assert_eq!(path.len(), 1);
-        assert_eq!(path[0].lane, LaneKind::ExtCallDyn("cstr_to_brief".to_string()));
+        assert_eq!(path[0].lane, LaneKind::ExtCallDyn("cstr_to_briv".to_string()));
 
         // UTF8 → C_String uses the CastFrom binding.
         let rev = graph.find_path("String", "UTF8", "String", "C_String")

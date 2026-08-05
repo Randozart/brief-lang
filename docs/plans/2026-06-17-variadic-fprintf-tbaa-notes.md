@@ -80,7 +80,7 @@ Metadata is naturally discarded when unused; `assume` lingers.
 
 ### 2. TBAA Metadata for `i64`-Boxed Types
 
-Brief's `i64`-centric model (all values boxed to i64 for storage)
+Briv's `i64`-centric model (all values boxed to i64 for storage)
 disables LLVM's Type-Based Alias Analysis (TBAA), because LLVM sees
 all fields as `i64` and assumes they may alias.
 

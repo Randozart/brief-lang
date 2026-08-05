@@ -6,7 +6,7 @@
 
 ## Problem
 
-Two systemic inefficiencies in the LLVM backend waste cycles on every benchmark and prevent Brief from decisively beating C on float-heavy workloads.
+Two systemic inefficiencies in the LLVM backend waste cycles on every benchmark and prevent Briv from decisively beating C on float-heavy workloads.
 
 ### Bottleneck A: Constants Loaded from RAM Instead of Inlined as Immediates
 
@@ -28,7 +28,7 @@ LLVM's `opt -O2` can hoist loads out of loops via LICM, but:
 
 ### Bottleneck B: The i64 Boxing Tax on Float Values (Hidden Cost)
 
-Brief uses `i64` as its universal wire type. Every float operation requires round-tripping through i32→float→i32→i64. Tracing a single Kalman filter iteration:
+Briv uses `i64` as its universal wire type. Every float operation requires round-tripping through i32→float→i32→i64. Tracing a single Kalman filter iteration:
 
 ```llvm
 ; Load field x0 (3 instructions):
@@ -246,7 +246,7 @@ if self.proof_engine_proves_convergence(txn_name) {
 
 ## Solution Part D: Compile-Time Peephole Constant Folding
 
-When `emit_binop` sees both operands as compile-time constants, fold them at the Brief compiler level:
+When `emit_binop` sees both operands as compile-time constants, fold them at the Briv compiler level:
 
 ```rust
 fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str,
@@ -324,20 +324,20 @@ The `emit_exit_expr` (lines 2533-2639) handles `#!exit` conditions and is a para
 | `emit_exit_expr` Phase 1 refactor | ~30 | llvm.rs | Low |
 | `reg_float_cache` field + init | ~5 | llvm.rs | **HIGH IMPACT** |
 
-## How Brief Beats C on This
+## How Briv Beats C on This
 
-| Optimization | Brief | C (world-class) |
+| Optimization | Briv | C (world-class) |
 |-------------|-------|-----------------|
 | Constant immediates | `add i64 0, 50000000` (auto) | `cmp rax, 50000000` (manual) |
 | Float register promotion | Bypasses i64 boxing inside SSA bodies | Local float variables stay in registers naturally |
 | `llvm.assume` branch elimination | Uses proof engine results to remove branches | C cannot prove branches are always taken without `__builtin_unreachable()` |
 | Float literal caching | Single `bitcast` per unique literal | Compiler handles this automatically |
-| Constant peephole folding | Brief-level folding before LLVM | Clang does this too (no advantage) |
+| Constant peephole folding | Briv-level folding before LLVM | Clang does this too (no advantage) |
 | `emit_exit_expr` unification | Currently duplicated → fixable | N/A |
 
-**C's advantage:** Local variables naturally stay in float registers. Brief's i64 boxing adds overhead that float register promotion eliminates.
+**C's advantage:** Local variables naturally stay in float registers. Briv's i64 boxing adds overhead that float register promotion eliminates.
 
-**Brief's advantage:** `llvm.assume` on convergent preconditions removes branches that C's optimizer cannot prove are always-taken. The proof engine's convergence proof is information C's compiler fundamentally lacks.
+**Briv's advantage:** `llvm.assume` on convergent preconditions removes branches that C's optimizer cannot prove are always-taken. The proof engine's convergence proof is information C's compiler fundamentally lacks.
 
 ## Benchmark Strategy
 
@@ -354,7 +354,7 @@ The `emit_exit_expr` (lines 2533-2639) handles `#!exit` conditions and is a para
 |--------|--------|-------|---|
 | Float boxing instructions | ~360/tick | ~48/tick | 0 (native float regs) |
 | Runtime (50M) | 0.71s | **~0.45-0.50s** | 0.75s |
-| Ratio vs C | +5% (Brief wins) | **+33-40% (Brief wins decisively)** | baseline |
+| Ratio vs C | +5% (Briv wins) | **+33-40% (Briv wins decisively)** | baseline |
 
 ### Benchmark 3: Kalman with `llvm.assume`
 
@@ -380,4 +380,4 @@ The `emit_exit_expr` (lines 2533-2639) handles `#!exit` conditions and is a para
 6. **`emit_exit_expr`**: `#!exit` conditions correctly use `emit_expr` constants
 7. **`force_reg()`**: Used for all `store`/`call`/`switch` operands → valid LLVM IR
 8. **`cargo test --lib`**: 368+ tests pass
-9. **Kalman filter benchmark**: Brief beats C by ≥10%
+9. **Kalman filter benchmark**: Briv beats C by ≥10%

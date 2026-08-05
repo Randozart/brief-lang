@@ -3,11 +3,11 @@
 
 ## Overview
 
-This plan eliminates all C dependencies from the Brief compiler pipeline and
+This plan eliminates all C dependencies from the Briv compiler pipeline and
 replaces `Alloc#` with `struct`-embedded static arrays proven by contract. The
-tamer (install-time compiler) becomes a pure Brief program compiled by Brief's
+tamer (install-time compiler) becomes a pure Briv program compiled by Briv's
 own LLVM backend, using `SysCall#` with inline assembly for OS interaction and
-`struct` with `Int[N]` fields for all buffers. No `malloc`, no `brief_rt.c`,
+`struct` with `Int[N]` fields for all buffers. No `malloc`, no `briv_rt.c`,
 no `tamer/*.c` — zero C.
 
 | Phase | Title | Dependencies | Outcome |
@@ -16,9 +16,9 @@ no `tamer/*.c` — zero C.
 | 1 | `#System` Protocol Wire-up | Phase 0 | `from #System` resolves end-to-end per target |
 | 1.5 | Guard/When Syntax Convergence Gates | Phase 1 | Clean syntax across all `.bv` files; `[cond]{body}` replaced with `when cond { body }` |
 | 1.6 | DotHash, Type Inheritance, and Syntax Cleanup | Phase 1.5 | `:>` → `.#`, `<:` → `type X: Y`, Memory by Proof rename, hashword annotations |
-| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1.6 | No `brief_rt.c` — all runtime in Brief using syscall asm |
+| 2 | `SysCall#` Inline Asm + Runtime Port | Phase 1.6 | No `briv_rt.c` — all runtime in Briv using syscall asm |
 | 2.5 | Array Slice, Stride, and SIMD Operations | Phase 2 | Slice syntax `arr[start:end:stride]`, SIMD operators on Vector/Slice types |
-| 3 | Tamer in Brief | Phase 2.5 | No `tamer/*.c` — pure Brief tamer with struct arrays, no `Alloc#` |
+| 3 | Tamer in Briv | Phase 2.5 | No `tamer/*.c` — pure Briv tamer with struct arrays, no `Alloc#` |
 | 4 | DAG-Based Size Inference | Phase 3 | Max buffer sizes proven by DAG, not guessed |
 
 ---
@@ -69,11 +69,11 @@ Frame* cur = &vm->frames[vm->frame_count - 1];  // callee
 cur->return_pc = pc + 3;
 ```
 
-**Also fix the Brief VM** (`lib/tamer/vm.bv:257-287` and `lib/tamer/combined.bv`):
+**Also fix the Briv VM** (`lib/tamer/vm.bv:257-287` and `lib/tamer/combined.bv`):
 `OP_CALL` saves frame metadata (`ll`, `callee_local_c`, `pc + 3`, `sll`) in the
 flat `fd` buffer, and increments `fc` (frame_count). But `OP_RET` (line 166-168)
 just sets `new_pc = -1` — it never reads the saved return PC from `fd`. The
-Brief VM's `OP_CALL` must store `pc + 3` as the return PC in the frame record,
+Briv VM's `OP_CALL` must store `pc + 3` as the return PC in the frame record,
 and `OP_RET` must read it and jump there. This is structurally the same bug:
 `OP_RET` discards the caller's state.
 
@@ -102,7 +102,7 @@ call never executes. The fix is to push the callee's frame first, then save
 
 **Severity:** Medium — affects `!=` comparisons and any code that inverts a
 boolean. Currently worked around for `Neq` via `eq + push_i8(1) + xor` in the
-Brief VM backend.
+Briv VM backend.
 
 **File:** `tamer/interp.c:320-323`
 ```c
@@ -123,7 +123,7 @@ Bitwise NOT is still useful for bit manipulation. Rather than ambiguating `OP_NO
 add a separate `OP_BNOT` opcode.
 
 **Opcode assignment:** `OP_BNOT = 0x1C` (next available after `OP_TRAP = 0x1B`).
-Update `tamer/interp.h` and the Brief VM opcode constants.
+Update `tamer/interp.h` and the Briv VM opcode constants.
 
 **Files to modify:**
 - `tamer/interp.c` — `case OP_NOT:` change to logical, add `case OP_BNOT:` with `~a`
@@ -188,7 +188,7 @@ work, but it's more verbose and slower — one word read + shift is better than
 
 **Action:** Verify `.ll` files don't start with a UTF-8 BOM (`\xEF\xBB\xBF`):
 ```bash
-briefc build --backend llvm test.bv -o test.ll
+brivc build --backend llvm test.bv -o test.ll
 head -c 3 test.ll | xxd
 ```
 
@@ -286,7 +286,7 @@ if let FromSpec::Protocol(proto) = &fb.from {
     let protocol_config = crate::target::ProtocolConfig::load();
     let default_triple = "x86_64-linux";  // or from --target CLI flag
     let lib = protocol_config.resolve(default_triple, proto).map_err(|e| {
-        format!("frgn '{}': {}", fb.effective_brief_name(), e)
+        format!("frgn '{}': {}", fb.effective_briv_name(), e)
     })?;
     return Ok(ResolvedFrgn::Inline {
         symbol: fb.foreign_name.clone(),
@@ -416,19 +416,19 @@ No changes needed in `compile.rs` — the `protocol_lib` mechanism already passe
 - `src/compile.rs` — pass protocol libs to linker
 - `src/backend/llvm/emit_toplevel.rs` — conditional `declare` for protocol frgns
 
-### 1f. Compiler Registry — `briefc registry`
+### 1f. Compiler Registry — `brivc registry`
 
 **Problem:** `import <name>` resolves via `config/module-registry.toml` (a baked
 HashMap), and `from <name>` searches the stdlib path. Neither allows users to
 install their own `.bv` files for `<name>` lookup.
 
-**Solution:** A per-user registry directory at `~/.brief/registry/` populated
-by `briefc registry add`.
+**Solution:** A per-user registry directory at `~/.briv/registry/` populated
+by `brivc registry add`.
 
 #### Directory layout
 
 ```
-~/.brief/
+~/.briv/
   registry/
     my-queue.bv                 # single module
     xxhash/                      # multi-file package
@@ -436,21 +436,21 @@ by `briefc registry add`.
       xxhash.c
 ```
 
-Project-local `.brief/registry/` overrides the user-wide one (same merge
+Project-local `.briv/registry/` overrides the user-wide one (same merge
 semantics as project-local config).
 
 #### CLI commands
 
 ```
-briefc registry add <path> [--name <name>]
-  # Copy file/dir to ~/.brief/registry/<name>, version-locked (no symlink).
+brivc registry add <path> [--name <name>]
+  # Copy file/dir to ~/.briv/registry/<name>, version-locked (no symlink).
   # --name defaults to the file stem: ./my-queue.bv → "my-queue".
 
-briefc registry list
-  # Print every entry in ~/.brief/registry/ with type (file/dir) and size.
+brivc registry list
+  # Print every entry in ~/.briv/registry/ with type (file/dir) and size.
 
-briefc registry remove <name>
-  # rm -rf ~/.brief/registry/<name>* matching.
+brivc registry remove <name>
+  # rm -rf ~/.briv/registry/<name>* matching.
 ```
 
 #### Resolution changes
@@ -467,15 +467,15 @@ briefc registry remove <name>
 
 The `ImportResolver` gets a `registry_dir: Option<PathBuf>` field, loaded at
 construction from the platform data directory (`dirs::data_dir()`), overridable
-by project-local `.brief/registry/` and `--registry-dir` CLI flag.
+by project-local `.briv/registry/` and `--registry-dir` CLI flag.
 
 #### Design decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Copy vs symlink | **Copy** (version-locked) | Source may change or disappear; registry is a snapshot |
-| Platform path | `dirs::data_dir()` | Cross-platform: Linux `~/.local/share/brief/`, macOS `~/Library/Application Support/brief/`, Windows `%APPDATA%/brief/` |
-| Project override | `.brief/registry/` | Same pattern as `.brief/config/` for target config |
+| Platform path | `dirs::data_dir()` | Cross-platform: Linux `~/.local/share/briv/`, macOS `~/Library/Application Support/briv/`, Windows `%APPDATA%/briv/` |
+| Project override | `.briv/registry/` | Same pattern as `.briv/config/` for target config |
 | File types | All types (`.bv`, `.c`, `.rs`, `.o`, `.so`) | Registry is content-agnostic; works for `import <name>` and `from <name>` |
 | Duplicates | Last added wins | Simple and predictable |
 
@@ -490,11 +490,11 @@ by project-local `.brief/registry/` and `--registry-dir` CLI flag.
 
 #### Tests
 
-1. `briefc registry add ./test.bv` → file appears in `~/.brief/registry/test.bv`
-2. `briefc registry list` → output contains `test.bv`
-3. `briefc registry remove test` → file removed
-4. `import <test>` resolves to `~/.brief/registry/test.bv` when it exists
-5. `from <test.c>` resolves to `~/.brief/registry/test.c` when it exists
+1. `brivc registry add ./test.bv` → file appears in `~/.briv/registry/test.bv`
+2. `brivc registry list` → output contains `test.bv`
+3. `brivc registry remove test` → file removed
+4. `import <test>` resolves to `~/.briv/registry/test.bv` when it exists
+5. `from <test.c>` resolves to `~/.briv/registry/test.c` when it exists
 
 ---
 
@@ -599,7 +599,7 @@ constructs with different semantics and AST representations:
 **Step 16 — Documentation:**
 - Update `AGENTS.md` items 25 and 30 (done in this commit)
 - Update `spec/SPEC.md` — document all three constructs
-- Update `learn-brief/` — update tutorial files
+- Update `learn-briv/` — update tutorial files
 
 ### 1.5c. Files Changed
 
@@ -666,7 +666,7 @@ Same behavior as `.#Size` — just different syntax.
 **Replace `<:` with `:`** for type inheritance. The `<:` token is removed
 from the lexer. **Hashwords always sit left of what they attach to:**
 
-```brief
+```briv
 // Old:
 type String <: Bits { ... };
 
@@ -693,7 +693,7 @@ keyword or hashword annotation.
 
 Alongside `op` declarations, protocols declare metaproperties via `prop`:
 
-```brief
+```briv
 proto #String {
     op CastTo(#Bits) = encode(#L);
     prop Size = chars(#L);          // .#Size → character count
@@ -720,7 +720,7 @@ is user-defined through `prop` in proto/type bodies.
 Hashwords placed before struct/obj fields or declarations act as compiler
 directives:
 
-```brief
+```briv
 struct Buffer {
     #Stack data: Int[1024];       // proven stack allocation
     #Heap metadata: Ptr<Byte>;    // forced heap allocation
@@ -761,7 +761,7 @@ in the type system is removed.
 
 The `<-` operator operates purely through protocol binding:
 
-```brief
+```briv
 obj List<T> {
     InsertAt <~ push(#L, #R);
     ExtractFrom <~ pop(#L);
@@ -795,8 +795,8 @@ value)` when `<-` is used. No type names are hardcoded.
 | `docs/plans/2026-07-25-memory-by-proof.md` | Rename + update content |
 | `AGENTS.md` | Remove `<:`, update items, add DotHash rule |
 | `spec/SPEC.md` | Replace `:>` throughout, update type syntax section |
-| `learn-brief/05-data-types.md` | `:>` → `.#` in examples |
-| `learn-brief/13-projections.md` | Rewrite for `.#` |
+| `learn-briv/05-data-types.md` | `:>` → `.#` in examples |
+| `learn-briv/13-projections.md` | Rewrite for `.#` |
 | `docs/architecture/overview.md` | Note Phase 1.6 |
 
 ### 1.6i. Risks
@@ -814,8 +814,8 @@ value)` when `<-` is used. No type names are hardcoded.
 |----------|-------|----------------|
 | `AGENTS.md` | 1.6 | Remove `<:` references, add DotHash rule (item 11), update items 24-26, rename Memory by Proof |
 | `spec/SPEC.md` | 1.6 | Replace `:>` with `.#` throughout, update type syntax |
-| `learn-brief/05-data-types.md` | 1.6 | `:>` → `.#` in examples |
-| `learn-brief/13-projections.md` | 1.6 | Rewrite projections section for `.#` syntax |
+| `learn-briv/05-data-types.md` | 1.6 | `:>` → `.#` in examples |
+| `learn-briv/13-projections.md` | 1.6 | Rewrite projections section for `.#` syntax |
 | `docs/architecture/overview.md` | 1.6 | Add Phase 1.6 entry |
 | `docs/plans/2026-07-25-memory-by-proof.md` | 1.6 | Rename + update |
 | `src/ast/expr.rs` (doc comment) | 1.6 | Add `///` for `Expr::HashProjection` |
@@ -829,12 +829,12 @@ value)` when `<-` is used. No type names are hardcoded.
 **File:** `src/backend/llvm/intrinsics.rs` — `emit_intrinsic_call()` match arm
 for `"SysCall#"`.
 
-Replace the current `call @brief_syscall(i64 %num, ...)` with target-conditional
+Replace the current `call @briv_syscall(i64 %num, ...)` with target-conditional
 inline assembly:
 
 **x86_64 (Linux):**
 ```rust
-// 2026-07-26: Emit inline syscall asm instead of calling brief_syscall().
+// 2026-07-26: Emit inline syscall asm instead of calling briv_syscall().
 // This eliminates the libc dependency for system calls. The syscall
 // instruction clobbers rcx and r11 (used internally by the kernel to save
 // RIP and RFLAGS), plus rax (return value) and rdi/rsi/rdx/r10/r8/r9 (args).
@@ -876,7 +876,7 @@ inline asm form matches the Linux syscall ABI exactly:
 - r9/x5 = arg6
 
 **2026-07-26: SysCall# emits inline assembly instead of calling C.**
-Before this change, every `SysCall#` called `brief_syscall()` in `brief_rt.c`,
+Before this change, every `SysCall#` called `briv_syscall()` in `briv_rt.c`,
 which called `syscall()` from libc. This tied the compiler to libc at the
 runtime level. With inline asm, the syscall instruction issues directly — no
 libc dependency. The target triple determines which asm template to use
@@ -901,36 +901,36 @@ libc dependency. The target triple determines which asm template to use
 Add `variadic: bool` to the `Signature` struct in `src/intrinsic_signatures.rs`
 (default `false`). This avoids false arity errors for variadic intrinsics.
 
-### 2b. Port `brief_rt.c` Functions to Brief
+### 2b. Port `briv_rt.c` Functions to Briv
 
-Each C function becomes a Brief `defn` using `SysCall#`. Organized into protocol
+Each C function becomes a Briv `defn` using `SysCall#`. Organized into protocol
 modules under `lib/std/posix/`. Each function is ported one at a time, verified,
-then the C original is removed from `brief_rt.c`.
+then the C original is removed from `briv_rt.c`.
 
 #### Migration Order
 
-| Step | C Function | Brief Equivalent | Depends On |
+| Step | C Function | Briv Equivalent | Depends On |
 |------|-----------|------------------|------------|
 | 1 | `__print_char` | `posix/io.bv`: `syscall(SYS_write, 1, &c, 1)` | Phase 2a (inline asm) |
 | 2 | `__print_int` | `posix/io.bv`: format + write | Step 1 |
 | 3 | `__exit` | `posix/io.bv`: `syscall(SYS_exit_group, code)` | Phase 2a |
-| 4 | `brief_str_to_c` | **Delete** — no C strings needed without C runtime | — |
-| 5 | `brief_cstr_to_brief` | **Delete** — same reasoning | — |
-| 6 | `brief_free_brief_str` | **Delete** — same reasoning | — |
+| 4 | `briv_str_to_c` | **Delete** — no C strings needed without C runtime | — |
+| 5 | `briv_cstr_to_briv` | **Delete** — same reasoning | — |
+| 6 | `briv_free_briv_str` | **Delete** — same reasoning | — |
 | 7 | `__read_file__` | `posix/io.bv`: `open` + `read` + `close` | Steps 8-10 |
 | 8 | `__write_file__` | `posix/io.bv`: `open` + `write` + `close` | Steps 9-11 |
 | 9 | `SysCall#` backend | **Already replaced** in Phase 2a | Phase 2a |
-| 10 | `brief_syscall` | **Delete** — replaced by inline asm | Phase 2a |
-| 11 | `brief_sysconf` | `posix/syscall.bv`: `syscall(SYS_sysconf, name)` | Phase 2a |
+| 10 | `briv_syscall` | **Delete** — replaced by inline asm | Phase 2a |
+| 11 | `briv_sysconf` | `posix/syscall.bv`: `syscall(SYS_sysconf, name)` | Phase 2a |
 | 12 | `ShellCmd` | `posix/process.bv`: `clone` + `execve` + `pipe` | Steps 1, 7 |
-| 13 | `__getenv_brief` | `posix/env.bv`: read `/proc/self/environ` | Steps 7-8 |
+| 13 | `__getenv_briv` | `posix/env.bv`: read `/proc/self/environ` | Steps 7-8 |
 | 14 | `__getenv_int` | `posix/env.bv`: parse Int from env string | Step 13 |
 | 15 | Thread pool | `posix/thread.bv`: `clone(CLONE_VM)` | Phase 2a |
 | 16 | GPU runtime | **Separate concern** — not in scope | — |
 
 #### `lib/std/posix/syscall.bv`
 
-```brief
+```briv
 // 2026-07-26: POSIX syscall wrappers. All system calls go through SysCall#
 // which emits inline assembly (syscall instruction on x86_64, svc #0 on
 // aarch64). No libc dependency. See docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md.
@@ -987,7 +987,7 @@ export defn syscall6(n: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: In
 
 #### `lib/std/posix/io.bv`
 
-```brief
+```briv
 // 2026-07-26: POSIX I/O — print, exit, file read/write.
 // All functions use SysCall# with inline assembly — no C runtime needed.
 
@@ -1007,7 +1007,7 @@ export let O_TRUNC:  Int = 512;
 export let O_APPEND: Int = 1024;
 
 // ── Print ─────────────────────────────────────────────────────────────────
-// These replace __print_char, __print_int, __print from brief_rt.c.
+// These replace __print_char, __print_int, __print from briv_rt.c.
 
 export defn print_char(c: Int) -> Int {
     // Write a single character to stdout. SysCall# takes integer args,
@@ -1022,7 +1022,7 @@ export defn print_char(c: Int) -> Int {
 
 export defn print_int(n: Int) -> Int {
     // Format integer as decimal, write to stdout.
-    // This is a simplified version — full formatting is handled by Brief code.
+    // This is a simplified version — full formatting is handled by Briv code.
     // For MVP, write hex using syscall.
     let buf = Alloc#(32) as Ptr<Int>;
     let mut i: Int = 0;
@@ -1047,7 +1047,7 @@ export defn exit(code: Int) -> Int {
 };
 
 // ── File I/O ──────────────────────────────────────────────────────────────
-// These replace __read_file__ and __write_file__ from brief_rt.c.
+// These replace __read_file__ and __write_file__ from briv_rt.c.
 
 export defn open(path: Int, flags: Int, mode: Int) -> Int {
     term syscall3(SYS_OPEN, path, flags, mode);
@@ -1072,9 +1072,9 @@ export defn lseek(fd: Int, offset: Int, whence: Int) -> Int {
 
 #### `lib/std/posix/process.bv`
 
-```brief
+```briv
 // 2026-07-26: Process spawning — clone + execve.
-// Replaces ShellCmd from brief_rt.c (which used popen).
+// Replaces ShellCmd from briv_rt.c (which used popen).
 
 import "syscall.bv";
 
@@ -1099,13 +1099,13 @@ export defn wait4(pid: Int, wstatus: Int, options: Int) -> Int {
 **File:** `src/backend/llvm/emit_toplevel.rs:185-269`
 
 The ~40 legacy `declare` statements for functions that don't exist in
-`brief_rt.c` were from the pre-intrinsic era. They would cause linker errors
+`briv_rt.c` were from the pre-intrinsic era. They would cause linker errors
 if ever called, but since the calls were also dead, they silently bloated
 every generated `.ll` file.
 
 **Audit and removal:** Cross-reference each `declare` against:
 
-1. `lib/runtime/brief_rt.c` — does the C function exist?
+1. `lib/runtime/briv_rt.c` — does the C function exist?
 2. `lib/std/*.bv` — does any `frgn` reference this symbol?
 3. `src/intrinsic_signatures.rs` — is this mapped to an intrinsic?
 
@@ -1128,21 +1128,21 @@ __dlopen__, __dlsym__, __dlclose__, __ttyname__
 
 **2026-07-26: Removed dead LLVM IR declares.**
 These ~50 `declare` statements were emitted in every generated `.ll` file but
-had no corresponding C implementation in `brief_rt.c`. They were a historical
+had no corresponding C implementation in `briv_rt.c`. They were a historical
 artifact from before the intrinsic migration. Removing them cleans up the
 generated IR and eliminates the risk of linker errors if any were accidentally
 referenced. Functions that still have actual C implementations
 (`__print_int`, `__read_file__`, `__exit`, thread pool, etc.) are kept until
-Phase 2b ports them to Brief.
+Phase 2b ports them to Briv.
 
 ### After Each Migration Step
 
-For each C function ported to Brief in Step 2b:
+For each C function ported to Briv in Step 2b:
 
-1. Write the Brief implementation in `lib/std/posix/*.bv`
-2. Compile a minimal test program that uses the new Brief function
+1. Write the Briv implementation in `lib/std/posix/*.bv`
+2. Compile a minimal test program that uses the new Briv function
 3. Verify the output matches the old C function's behavior
-4. Remove the C implementation from `lib/runtime/brief_rt.c`
+4. Remove the C implementation from `lib/runtime/briv_rt.c`
 5. Remove the `declare` from `src/backend/llvm/emit_toplevel.rs`
 6. Update any `frgn` declarations in `lib/std/` that referenced the C function
 7. `cargo test --lib` passes
@@ -1154,7 +1154,7 @@ Extend the `as` cast mechanism for Vector types to produce zero-copy views:
 
 **Type-punned view** — reinterpret the same bytes as a different element type:
 
-```brief
+```briv
 let raw: Int[1024];
 let bytes = raw as Byte[8192];   // 1024 * 8 = 8192 bytes
 let frames = raw as Frame[256];  // if sizeof(Frame) == 32
@@ -1166,7 +1166,7 @@ LLVM IR: `bitcast [1024 x i64] to [8192 x i8]` or `bitcast [1024 x i64] to [256 
 
 **Strided view** — recast a slice onto a sized array:
 
-```brief
+```briv
 let evens = raw[0:1024:2] as Int[512];  // stride 2, 1024/2 = 512 elements
 let subset = raw[2:10] as Int[8];        // contiguous, 8 elements
 ```
@@ -1183,7 +1183,7 @@ byte-size vectors).
 
 ---
 
-## Phase 3 — Tamer in Pure Brief (No `Alloc#`, No C)
+## Phase 3 — Tamer in Pure Briv (No `Alloc#`, No C)
 
 ### 3a. Implement `Int[N]` Array Syntax
 
@@ -1218,7 +1218,7 @@ if let Type::Vector(inner, dims) = ty {
         if let Dimension::Anonymous(n) = dims[0] {
             let inner_llvm = self.llvm_type(inner);
             self.ctx.field_types.push(format!("[{} x {}]", n, inner_llvm));
-            self.ctx.field_brief_types.push(ty.clone());
+            self.ctx.field_briv_types.push(ty.clone());
             return;
         }
     }
@@ -1242,16 +1242,16 @@ if let Type::Vector(inner, _) = &*array_ty {
 **Struct emission** (`src/backend/llvm/mod.rs`): `struct S { data: Int[1024] }`
 → `%S = type { [1024 x i64] }` in LLVM.
 
-### 3b. Write Tamer VM in Brief with Struct Arrays
+### 3b. Write Tamer VM in Briv with Struct Arrays
 
 Replace `lib/tamer/main.bv`, `lib/tamer/vm.bv`, `lib/tamer/loader.bv` with
-struct-based versions. The existing Brief VM (`vm.bv:314` lines) already has a
+struct-based versions. The existing Briv VM (`vm.bv:314` lines) already has a
 working fetch-decode-execute loop — the change is to use struct fields instead
 of pointers + offset arithmetic.
 
 #### Struct Definitions
 
-```brief
+```briv
 // 2026-07-26: Tamer VM buffers as struct arrays.
 // No Alloc# — sizes are part of the type and proven by contract bounds.
 // Max stack depth: 1024 words (worst-case analyzed from .lair bytecode).
@@ -1266,7 +1266,7 @@ struct Frame { locals_base: Int; local_count: Int; return_pc: Int; };
 
 #### Entry Point (`main.bv`)
 
-```brief
+```briv
 // 2026-07-26: Tamer entry point with struct buffers.
 // Reads .bounty from file (via POSIX syscalls), parses sections,
 // interprets .lair bytecode, produces LLVM IR.
@@ -1336,7 +1336,7 @@ export defn tame(file_path: Int, file_path_len: Int,
 
 The existing `vm_loop` txn gets rewritten to use struct fields:
 
-```brief
+```briv
 // 2026-07-26: VM loop using struct array buffers.
 // stack.data[stack.len - 1] = top of stack.
 // locals.data[locals_base + slot] = local variable.
@@ -1366,7 +1366,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 The key change in `exec_op`: instead of a flat stack pointer and manual
 `*(sd + sl)`, use `stack.data[stack.len]`:
 
-```brief
+```briv
 0x06 => { // add
     [stack.len >= 2] {
         stack.data[stack.len - 2] = stack.data[stack.len - 2]
@@ -1380,7 +1380,7 @@ The key change in `exec_op`: instead of a flat stack pointer and manual
 
 **The CALL/RET fix from Phase 0a** is ported:
 
-```brief
+```briv
 0x54 => { // call
     let fn_idx = read_u16(bc_data, pc + 1);
     [fn_idx < fn_count] {
@@ -1433,7 +1433,7 @@ The key change in `exec_op`: instead of a flat stack pointer and manual
 These contracts prove buffer safety at compile time. The backend can eliminate
 the bounds checks after proving they never fail.
 
-### 3c. LLVM IR Emission from Brief
+### 3c. LLVM IR Emission from Briv
 
 The `.beastpack` contains the typed AST. Two approaches:
 
@@ -1441,23 +1441,23 @@ The `.beastpack` contains the typed AST. Two approaches:
 via OP_HCALL. The host function appends to an LLVM IR text buffer. After the VM
 halts, the accumulated IR is written to a `.ll` file via `posix::write()`.
 
-**Future (pure Brief):** Walk the `.beastpack` binary format in Brief and emit
+**Future (pure Briv):** Walk the `.beastpack` binary format in Briv and emit
 LLVM IR text directly. This eliminates the HCALL dependency. The beastpack
 format is:
 - 4 bytes: section type
 - 8 bytes: item count
 - Items: type (4 bytes) + data (variable length)
 
-The Brief code would iterate items, match on type, and produce LLVM IR text.
+The Briv code would iterate items, match on type, and produce LLVM IR text.
 
-**For this plan:** Implement MVP via HCALL in Phase 3, defer pure-Brief
+**For this plan:** Implement MVP via HCALL in Phase 3, defer pure-Briv
 beastpack walking to a follow-up.
 
-### 3d. Clang Invocation from Brief
+### 3d. Clang Invocation from Briv
 
 After the `.ll` file is written to disk, invoke clang:
 
-```brief
+```briv
 // 2026-07-26: Invoke system clang via clone + execve.
 // Replaces ShellCmd# and the C popen dependency.
 
@@ -1500,14 +1500,14 @@ export defn compile_to_binary(ll_path: Ptr<Int>, ll_len: Int,
 Once the tamer works with fixed static buffers (Phase 3), extend the analysis
 to compute *minimum sufficient* sizes from the `.lair` bytecode itself.
 
-### 4a. Bytecode Static Analysis in Brief
+### 4a. Bytecode Static Analysis in Briv
 
 The tamer receives a `.lair` file at runtime. Before allocating buffers, it can
 analyze the bytecode to determine worst-case resource usage:
 
-```brief
+```briv
 // 2026-07-26: Static analysis of .lair bytecode to compute
-// minimum sufficient buffer sizes. Implemented in Brief, runs
+// minimum sufficient buffer sizes. Implemented in Briv, runs
 // before VM execution. Proves bounds contractually.
 
 export defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
@@ -1517,36 +1517,36 @@ export defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
     // 2. Walk each function's bytecode, tracking stack depth
     // 3. Find worst-case depth across all call paths
     // 4. Return max stack words needed
-    // This is a dataflow analysis in Brief itself.
+    // This is a dataflow analysis in Briv itself.
     term 1024;  // MVP: return fixed max, prove it's sufficient
 };
 ```
 
 ### 4b. Dynamic-Size Struct Arrays
 
-Future Brief feature: dimension from expression:
+Future Briv feature: dimension from expression:
 
-```brief
+```briv
 // NOT YET IMPLEMENTED — conceptual only.
 let max_stack = analyze_max_stack(...);
 let mut stack: Int[max_stack];  // future: dynamic-size struct array
 ```
 
 This requires runtime-sizeable stack allocations, which LLVM supports via
-`alloca` with a dynamic operand. The Brief type system would need to allow
+`alloca` with a dynamic operand. The Briv type system would need to allow
 `Int[expr]` where `expr` is a runtime value proven bounded by contract.
 
 ### 4c. DAG Integration with `src/analysis/allocation.rs`
 
 The existing allocation analysis (`src/analysis/allocation.rs`) operates on
-the Brief AST at compile time. Extending it to also analyze `.lair` bytecode
-at runtime (in the Brief tamer) is a different analysis — it would be written
-in Brief and operate on the VM bytecode format, not the Rust AST. The two
+the Briv AST at compile time. Extending it to also analyze `.lair` bytecode
+at runtime (in the Briv tamer) is a different analysis — it would be written
+in Briv and operate on the VM bytecode format, not the Rust AST. The two
 analyses serve different purposes:
 
 - **Compile-time (Rust):** Analyzes the program being compiled to choose
   Alloc# strategies (Arena/Alloca/Malloc/Inline).
-- **Runtime (Brief):** Analyzes the `.lair` bytecode being interpreted to
+- **Runtime (Briv):** Analyzes the `.lair` bytecode being interpreted to
   compute minimum buffer sizes.
 
 **Phase 4 implements the runtime analysis only.**
@@ -1575,7 +1575,7 @@ analyses serve different purposes:
 | 3a | `struct S { d: Int[16] }` → LLVM `[16 x i64]` | Snapshot | Correct LLVM type |
 | 3a | `let x = s.d[i]` → GEP load | Integration | Correct value |
 | 3b | Tamer processes `.bounty` → native binary | End-to-end | Binary runs |
-| 3d | clang invocation via Brief clone+execve | Integration | `.ll` → binary |
+| 3d | clang invocation via Briv clone+execve | Integration | `.ll` → binary |
 
 ### Regression Guard
 
@@ -1591,7 +1591,7 @@ bash benchmarks/compare_baseline.sh all  # only for Phase 0 — subsequent phase
 
 Phase 0 must not regress any benchmark. Phases 1-3 fundamentally change the
 runtime and tamer; existing benchmarks that depend on C runtime functions must
-be updated to use the new Brief equivalents. Run `--correctness` only for
+be updated to use the new Briv equivalents. Run `--correctness` only for
 phases that should preserve behavior.
 
 ### Key Failsafe
@@ -1607,7 +1607,7 @@ to the next phase with failing tests.
 |------|-------|------|
 | `tamer/interp.c` | 0a, 0b | Fix CALL return_pc save, fix OP_NOT logical |
 | `tamer/interp.h` | 0b | Add OP_BNOT opcode |
-| `lib/tamer/vm.bv` | 0a, 3b | Fix CALL/RET in Brief VM, rewrite with struct arrays |
+| `lib/tamer/vm.bv` | 0a, 3b | Fix CALL/RET in Briv VM, rewrite with struct arrays |
 | `lib/tamer/loader.bv` | 0c | Remove duplicates, keep cast-based Version 1 |
 | `lib/tamer/combined.bv` | 0a, 0b, 0c | Mirror all changes from vm.bv + loader.bv |
 | `lib/tamer/main.bv` | 3b | Entry point with struct buffers, POSIX I/O |
@@ -1618,7 +1618,7 @@ to the next phase with failing tests.
 | `src/intrinsic_signatures.rs` | 2a | Add `variadic` field to `Signature` |
 | `src/backend/llvm/intrinsics.rs` | 2a | `SysCall#` inline asm for x86_64 + aarch64 |
 | `src/backend/llvm/emit_toplevel.rs` | 2c | Remove ~50 dead `declare` statements |
-| `lib/runtime/brief_rt.c` | 2b | Gradually delete functions as ported |
+| `lib/runtime/briv_rt.c` | 2b | Gradually delete functions as ported |
 | `lib/std/posix/syscall.bv` | 2b | **New:** syscall wrappers with named constants |
 | `lib/std/posix/io.bv` | 2b | **New:** print, exit, file I/O via SysCall# |
 | `lib/std/posix/process.bv` | 2b | **New:** clone + execve wrappers |
@@ -1642,20 +1642,20 @@ table specifies which documents change in which phase:
 |----------|-------|----------------|
 | `BUGS.md` | 0 | Log CALL bug root cause (return_pc on wrong frame). Log OP_NOT fix. |
 | `tamer/interp.c` (comment) | 0a | Add rationale comment at OP_CALL explaining the fix. |
-| `lib/tamer/vm.bv` (comment) | 0a | Add rationale comment at OP_CALL/OP_RET for the Brief VM fix. |
+| `lib/tamer/vm.bv` (comment) | 0a | Add rationale comment at OP_CALL/OP_RET for the Briv VM fix. |
 | `lib/tamer/loader.bv` (comment) | 0c | Update file header to document only Version 1 is used. |
 | `docs/architecture/conditional-ffi.md` | 1 | Document completed protocol_map resolution. Add `protocol_lib` field description. |
 | `docs/architecture/backend-type-dispatch.md` | 1 | If protocol resolution changes type dispatch, update. |
 | `config/targets.toml` | 1a | Add `protocol_map` entries for each target. |
 | `AGENTS.md` (items 25, 30) | 1.5 | Document the three guard forms (`[expr];`, `[expr] stmt;`, `when expr { body }`) and the `[cond]{body}` rejection rule. |
 | `spec/SPEC.md` | 1.5 | Add Gate semantics, update all guard/conditional syntax sections. |
-| `learn-brief/` | 1.5 | Update tutorial files to use `when` instead of `[cond]{body}`. |
+| `learn-briv/` | 1.5 | Update tutorial files to use `when` instead of `[cond]{body}`. |
 | `src/ast/top.rs` (doc comment) | 1.5 | Add `///` doc comment for `Statement::Gate` variant. |
 | `src/backend/llvm/context.rs` (doc comment) | 1.5 | Add `///` doc comment for `convergence_target` field. |
 | `src/features/stmt/gate.rs` (doc comment) | 1.5 | Module-level doc comment explaining GateStmt. |
 | `docs/plans/2026-07-25-memory-by-proof.md` | 3a | Update implementation status; note which steps are complete. |
 | `docs/architecture/features/backend-dispatch.md` | 2a | Document `SysCall#` inline asm dispatch by target triple. |
-| `docs/architecture/bounty-architecture.md` | 3b | Document the pure-Brief tamer's architecture. |
+| `docs/architecture/bounty-architecture.md` | 3b | Document the pure-Briv tamer's architecture. |
 | `AGENTS_HISTORY.md` | End | Major session milestones for each phase. |
 
 ### Rationale Comment Format (Every Modified Code Site)
@@ -1674,10 +1674,10 @@ table specifies which documents change in which phase:
 |------|-------|-----------|--------|------------|
 | CALL bug fix breaks existing .lair programs | 0a | Low | High | Write test that calls function twice; run all cargo tests |
 | Inline asm `SysCall#` not portable | 2a | Medium | Medium | Keep C fallback for non-Linux targets |
-| Porting a C function to Brief introduces a subtle bug | 2b | Medium | Medium | Compare output of C and Brief versions side-by-side |
+| Porting a C function to Briv introduces a subtle bug | 2b | Medium | Medium | Compare output of C and Briv versions side-by-side |
 | `[cond]{body}` migration (604 sites) misses some instances | 1.5 | Medium | Low | Grep `rg '\]\s*\{' --include '*.bv'` and inspect each hit; scripts catch most, manual review catches rest |
 | `Int[N]` syntax conflicts with existing `>>` token issue | 3a | Low | Low | Already handled: `>>` in nested generics requires space; `Int[1024]` uses brackets, not angle brackets |
-| Brief VM struct-array version is slower than pointer version | 3b | Low | Medium | Contracts prove bounds; LLVM optimizes proven-safe GEP chains |
+| Briv VM struct-array version is slower than pointer version | 3b | Low | Medium | Contracts prove bounds; LLVM optimizes proven-safe GEP chains |
 | Run-time of Phase 2b is too high (porting 15+ C functions) | 2b | Medium | Low | Each function is independent; parallelize porting |
 | `clang` not available on target system | 3d | Low | Medium | Future: bundle a small C compiler or switch to `llc` directly |
 

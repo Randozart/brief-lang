@@ -13,9 +13,9 @@ declare i64 @llvm.ctlz.i64(i64, i1) #1
 declare i64 @llvm.cttz.i64(i64, i1) #1
 declare i64 @llvm.abs.i64(i64, i1) #1
 declare i64 @llvm.bitreverse.i64(i64) #1
-declare void @brief_barrier_release()
-declare void @brief_barrier_wait()
-declare void @brief_thread_pool_init(i32, i8**)
+declare void @briv_barrier_release()
+declare void @briv_barrier_wait()
+declare void @briv_thread_pool_init(i32, i8**)
 declare i64 @__print_float(float) #1
 declare i64 @__get_env_int(i8*) #1
 %State = type { i8, i64, i64 }
@@ -219,12 +219,12 @@ define i32 @main() local_unnamed_addr #3 {
   %state = alloca %State, align 8
   call void @init_state(%State* noalias nocapture %state)
   %tp_fn_ptr = bitcast [2 x void (%State*)*]* @thread_pool_fns to i8**
-  call void @brief_thread_pool_init(i32 2, i8** %tp_fn_ptr)
+  call void @briv_thread_pool_init(i32 2, i8** %tp_fn_ptr)
   br label %tick
   tick:
-  call void @brief_barrier_release()
+  call void @briv_barrier_release()
   call void @reactor_tick(%State* noalias nocapture %state)
-  call void @brief_barrier_wait()
+  call void @briv_barrier_wait()
   %gep_exit_9 = getelementptr inbounds %State, %State* %state, i32 0, i32 1
   %t8 = load i64, i64* %gep_exit_9, align 8
   %gep_exit_11 = getelementptr inbounds %State, %State* %state, i32 0, i32 2

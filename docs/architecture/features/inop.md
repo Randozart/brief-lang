@@ -9,7 +9,7 @@
 `inop`/`inop!` allows the standard library and systems programmers to implement
 high-performance low-level primitives in LLVM IR directly,
 without modifying compiler source code. The body uses raw LLVM IR with
-Brief-flavored syntax.
+Briv-flavored syntax.
 
 This is the user-facing counterpart of the builtin `#`-intrinsic system.
 
@@ -20,7 +20,7 @@ with `Custom` strategy names — see `docs/architecture/features/typedef.md`.
 
 ### Declaration
 
-```brief
+```briv
 // Pure (eligible for CSE, DCE, precomputation):
 inop sadd(a: Int, b: Int) -> Int { %res = add i64 %a, %b; term %res; } fallback a + b;
 
@@ -47,10 +47,10 @@ must come AFTER the contract: `inop! foo() -> Int [pre][post] (%state) { ... }`.
 
 Inops support type parameters `<T, U, ...>` for type-level polymorphism.
 The type variables are resolved at compile time from the call-site argument
-types. The body uses concrete LLVM types (all Brief values are `i64` at
+types. The body uses concrete LLVM types (all Briv values are `i64` at
 the LLVM level), so generics are a type-checker-only abstraction:
 
-```brief
+```briv
 inop atomic_load<T>(ptr: Ptr<T>) -> T {
     %p = inttoptr i64 %ptr to ptr
     %v = load atomic i64, ptr %p acquire, align 8
@@ -63,7 +63,7 @@ inop atomic_load<T>(ptr: Ptr<T>) -> T {
 All inops are called via the existing `name#(args)` syntax, or via direct
 function call when imported by name:
 
-```brief
+```briv
 let r = sadd#(x, y);
 let n = write_buf#(ptr, len);
 let sl: SkipList<Int> = [];
@@ -76,7 +76,7 @@ to `Type::Custom(name)`.
 
 ### Body
 
-The body uses raw LLVM IR with Brief-flavored syntax.
+The body uses raw LLVM IR with Briv-flavored syntax.
 
 Key rules:
 - Statements are separated by `;`
@@ -88,12 +88,12 @@ Key rules:
 
 ### Fallback block
 
-```brief
+```briv
 } fallback expr;
 } fallback { block_expr };
 ```
 
-The fallback is a single Brief expression or block. It provides the reference
+The fallback is a single Briv expression or block. It provides the reference
 implementation for the interpreter and non-LLVM backends (Webstack, CIRCT).
 Without a fallback, the interpreter raises `MissingInopFallback` and the
 Webstack/CIRCT backends cannot compile.
@@ -120,7 +120,7 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 - `term %res` → `ret i64 %res`
 - `term %v, %lh;` (multi-output) → `insertvalue { i64, i64 } ...` / `ret { i64, i64 } ...`
 - `term!` → `ret i64` (with swan song if present)
-- User `defn main` is renamed to `brief_main` to avoid collision with `define i32 @main()`
+- User `defn main` is renamed to `briv_main` to avoid collision with `define i32 @main()`
 
 ### Webstack / CIRCT
 
@@ -156,7 +156,7 @@ and `compute_effectively_pure`.
 | `src/interpreter.rs` | `inop_decls`, fallback evaluation |
 | `src/analysis/transition_graph.rs` | Side-effect flag via `intrinsic_has_side_effects` |
 | `src/backend/llvm/mod.rs` | `inop_decls` collection, emission loop |
-| `src/backend/llvm/emit_toplevel.rs` | `emit_inop()`, `term`→`ret` lowering, `brief_main` rename |
+| `src/backend/llvm/emit_toplevel.rs` | `emit_inop()`, `term`→`ret` lowering, `briv_main` rename |
 | `src/backend/llvm/emit_expr.rs` | `UserDefined` call codegen, `check_extract_strategy` |
 | `src/backend/webstack.rs` | Fallback-only (no LLVM IR) |
 | `src/backend/circt.rs` | Fallback-only (no LLVM IR) |

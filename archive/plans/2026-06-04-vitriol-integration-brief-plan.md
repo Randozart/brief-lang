@@ -1,14 +1,14 @@
-# Brief Compiler — VITRIOL Integration Plan
+# Briv Compiler — VITRIOL Integration Plan
 
 **Date:** 2026-06-04 08:14 UTC
 **Status:** Design complete — awaiting vectorization syntax (`@`, `<-`, `...`) implementation
-**Parent:** VITRIOL × Brief Master Plan (`../VITRIOL/.opencode/plans/vitriol-brief-integration-master-plan-2026-06-04.md`)
+**Parent:** VITRIOL × Briv Master Plan (`../VITRIOL/.opencode/plans/vitriol-briv-integration-master-plan-2026-06-04.md`)
 
 ---
 
 ## 1. Overview
 
-This document covers all changes to the **Brief Compiler** required for the VITRIOL integration. The compiler gains three new capabilities:
+This document covers all changes to the **Briv Compiler** required for the VITRIOL integration. The compiler gains three new capabilities:
 
 1. **SPIR-V backend** (via LLVM `spirv64-unknown-unknown` target)
 2. **CPU LUT matmul FFI library** compilation (x86_64, existing backend)
@@ -18,7 +18,7 @@ All three backends compile from the **same `.bv` source** — a single LUT-based
 
 ---
 
-## 2. Brief Compiler Changes
+## 2. Briv Compiler Changes
 
 ### Phase 0 — SPIR-V Backend
 
@@ -26,7 +26,7 @@ All three backends compile from the **same `.bv` source** — a single LUT-based
 |------|--------|----------------|
 | **0.1** | Parameterize `target_triple` — add `--target` flag to CLI, propagate to `LlvmBackend` | `src/main.rs`, `src/backend/llvm.rs:1789` |
 | **0.2** | Add GPU address space variants to `AddressSpace` enum: `CrossWorkgroup`, `Function`, `Uniform`, `Private` | `src/analysis/address_space.rs` |
-| **0.3** | Map Brief address spaces → SPIR-V addrspaces: `Ddr4`→CrossWorkgroup(1), `FpgaInternal`→Function(4), `Mmio`→Uniform(2), stack→Private(5) | `src/analysis/address_space.rs` |
+| **0.3** | Map Briv address spaces → SPIR-V addrspaces: `Ddr4`→CrossWorkgroup(1), `FpgaInternal`→Function(4), `Mmio`→Uniform(2), stack→Private(5) | `src/analysis/address_space.rs` |
 | **0.4** | In `emit_header`: switch target triple + datalayout for `spirv64-unknown-unknown` | `src/backend/llvm.rs:emit_header` |
 | **0.5** | Emit kernel metadata: `[[spirv::kernel]]` attribute, work-group size, `reqd_work_group_size` | `src/backend/llvm.rs:emit_kernel` (new function) |
 | **0.6** | Map `DispatchMode::Parallel` → `@llvm.spirv.get_global_id(i32)` for thread-ID-based array indexing | `src/backend/llvm.rs:emit_expr` |
@@ -65,10 +65,10 @@ The CPU LUT matmul uses the existing x86_64 LLVM backend. The work is in the `.b
 |------|--------|----------------|
 | **1.1** | Write `lib/std/lut_matmul.bv` — LUT-based quantized matmul using `@` dimension targeting + `<-` arrow syntax | New file in `lib/std/` |
 | **1.2** | Export `frgn`-compatible C ABI entry points: `lut_matmul_init(vpo_path: Str)`, `lut_matmul_eval(layer_id: Int, input_ptr: Ptr, output_ptr: Ptr)` | New file |
-| **1.3** | Brief's `range.rs` proves activation bounds from type constraints or preconditions | Already works |
-| **1.4** | Brief's `region.rs` classifies matmul as `Pure` + bounded → chain composition folds the inner loop | Already works |
-| **1.5** | Brief's `proof_engine.rs` verifies LUT lookup safety (bounds checking on activation values) | Already works |
-| **1.6** | Compile `lut_matmul.bv` → `liblut_matmul.so` via `brief build --target x86_64` | Existing |
+| **1.3** | Briv's `range.rs` proves activation bounds from type constraints or preconditions | Already works |
+| **1.4** | Briv's `region.rs` classifies matmul as `Pure` + bounded → chain composition folds the inner loop | Already works |
+| **1.5** | Briv's `proof_engine.rs` verifies LUT lookup safety (bounds checking on activation values) | Already works |
+| **1.6** | Compile `lut_matmul.bv` → `liblut_matmul.so` via `briv build --target x86_64` | Existing |
 
 ### Phase 5 — NVPTX Backend
 
@@ -83,9 +83,9 @@ The CPU LUT matmul uses the existing x86_64 LLVM backend. The work is in the `.b
 
 ## 3. The `.bv` Source (Conceptual)
 
-The LUT matmul source, written in post-vectorization-syntax Brief:
+The LUT matmul source, written in post-vectorization-syntax Briv:
 
-```brief
+```briv
 # lut_matmul.bv
 #
 # LUT-based quantized matrix multiplication.
@@ -138,7 +138,7 @@ The `@` dimension specifier lets the compiler reason about tensor shapes statica
 
 ## 4. FFI Contract
 
-The Brief-compiled `liblut_matmul.so` exposes:
+The Briv-compiled `liblut_matmul.so` exposes:
 
 ```c
 // Initialize the LUT engine with a .vpo file.
@@ -163,9 +163,9 @@ uint32_t lut_matmul_output_len(uint32_t layer_id);
 void lut_matmul_stats(uint64_t* lut_bytes, uint32_t* n_layers);
 ```
 
-These are declared in Brief via:
+These are declared in Briv via:
 
-```brief
+```briv
 frgn lut_matmul_init(path: Str) -> Int from "liblut_matmul";
 frgn lut_matmul_eval(layer_id: Int, input: Ptr, output: Ptr, len: Int) -> Int from "liblut_matmul";
 frgn lut_matmul_output_len(layer_id: Int) -> Int from "liblut_matmul";
@@ -182,7 +182,7 @@ No new Rust dependencies. The SPIR-V and NVPTX backends use LLVM IR text output,
 
 ### Target Detection
 
-`brief build --target` accepts:
+`briv build --target` accepts:
 
 | Target | Triple | Backend |
 |--------|--------|---------|
@@ -198,7 +198,7 @@ SPIR-V target requires LLVM built with `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=SPI
 
 ## 6. Related Documents
 
-- Master plan: `../VITRIOL/.opencode/plans/vitriol-brief-integration-master-plan-2026-06-04.md`
+- Master plan: `../VITRIOL/.opencode/plans/vitriol-briv-integration-master-plan-2026-06-04.md`
 - VITRIOL-specific plan: `../VITRIOL/.opencode/plans/vitriol-integration-vitriol-plan-2026-06-04.md`
 - Collection mutation + dimension syntax design: `./2026-06-04-collection-mutation-language-design.md`
 
@@ -206,7 +206,7 @@ SPIR-V target requires LLVM built with `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=SPI
 
 ## 7. Implementation Order
 
-The Brief compiler changes must happen in this order (dependencies within the compiler):
+The Briv compiler changes must happen in this order (dependencies within the compiler):
 
 1. Vectorization syntax (`@`, `...`, `<-`) — required by all `.bv` source
 2. Phase 0 steps 0.1-0.8 — SPIR-V backend

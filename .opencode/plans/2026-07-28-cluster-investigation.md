@@ -21,10 +21,10 @@
 
 ### Affected Benchmarks
 
-| Benchmark | Current Ratio | Best Ratio | Era | Brief Gap |
+| Benchmark | Current Ratio | Best Ratio | Era | Briv Gap |
 |-----------|-------------|------------|-----|-----------|
-| sparse_dispatch | 0.82x | 0.09x | 5 | **0.73x → Brief loses** (previously won by 11×) |
-| queue_drain | 0.97x | 0.01x | 5 | **0.96x → Brief loses** (previously won by 100×) |
+| sparse_dispatch | 0.82x | 0.09x | 5 | **0.73x → Briv loses** (previously won by 11×) |
+| queue_drain | 0.97x | 0.01x | 5 | **0.96x → Briv loses** (previously won by 100×) |
 | interval_step | 1.01x | 0.01x | 4 | **1.00x → ~tie** (previously won by 100×) |
 
 These benchmarks currently run full 50M-iteration loops because the pure-counter fold
@@ -61,12 +61,12 @@ can ignore them.
 ### Verification Tests
 
 **V1 (sparse_dispatch):** Force fold by editing the benchmark to have 1 node instead of 8.
-Compile and run. Expected: Brief time drops from ~0.05s to ~0.001s.
+Compile and run. Expected: Briv time drops from ~0.05s to ~0.001s.
 
 **V2 (queue_drain):** Manually hoist the guard body from the hot path and fold the remaining
-body. Expected: Brief time drops from ~0.06s to ~0.001s.
+body. Expected: Briv time drops from ~0.06s to ~0.001s.
 
-**V3 (interval_step):** Same as V2. Expected: Brief time drops from ~0.06s to ~0.001s.
+**V3 (interval_step):** Same as V2. Expected: Briv time drops from ~0.06s to ~0.001s.
 
 **V4 (global):** Implement a two-phase purity analysis in `transition_graph.rs`:
 - Phase 1: analyze guard bodies separately (mark as "has FFI" or "pure")
@@ -104,11 +104,11 @@ Uses the existing dead-field analysis infrastructure.
 
 ### Affected Benchmarks
 
-| Benchmark | Current Ratio | Best Ratio | Era | Brief Gap |
+| Benchmark | Current Ratio | Best Ratio | Era | Briv Gap |
 |-----------|-------------|------------|-----|-----------|
-| nbody_newton | 1.05x | 0.75x | 5 | **0.30x → Brief loses** (previously won by 33%) |
+| nbody_newton | 1.05x | 0.75x | 5 | **0.30x → Briv loses** (previously won by 33%) |
 | nbody_sqrt | 0.97x | 0.85x | 10 | **0.12x → within parity** |
-| nbody_sqrt_idio | 0.93x | 0.67x | 10 | **0.26x → Brief loses** (previously won by 49%) |
+| nbody_sqrt_idio | 0.93x | 0.67x | 10 | **0.26x → Briv loses** (previously won by 49%) |
 
 ### Root Cause
 
@@ -144,7 +144,7 @@ to 0.67x is from slope-optimized field layout changes between Era 5 and Era 10.
 - Baseline: 33 stores/iteration → `grep -c "store.*%state" nbody.ll`
 - Forced: 0–1 stores → `grep -c "store.*%state" nbody.ll`
 
-**V2:** Run nbody_sqrt_idio with forced off. If Brief time drops from ~3.6s toward ~2.6s,
+**V2:** Run nbody_sqrt_idio with forced off. If Briv time drops from ~3.6s toward ~2.6s,
 hypothesis confirmed.
 
 **V3:** Implement `post_hoist_read_set` and run FULL benchmark suite. All 19 must MATCH.
@@ -190,9 +190,9 @@ rename to `post_hoist_pending: bool` as a gating flag.
 
 ### Affected Benchmarks
 
-| Benchmark | Current Ratio | Best Ratio | Era | Brief Gap |
+| Benchmark | Current Ratio | Best Ratio | Era | Briv Gap |
 |-----------|-------------|------------|-----|-----------|
-| float_math | 0.97x | 0.81x | 5 | **0.16x → Brief loses** (previously won by 23%) |
+| float_math | 0.97x | 0.81x | 5 | **0.16x → Briv loses** (previously won by 23%) |
 | fannkuch_redux | 1.02x | 0.96x | 5 | **0.06x → C wins** (previously won by 4%) |
 
 ### Root Cause
@@ -223,7 +223,7 @@ are strictly cheaper than GEP+store for hot-path values.
 ### Verification Tests
 
 **V1:** Force per-field phi for float_math by temporarily removing `total_fields < 16` check.
-Compile and run. Expected: Brief time drops from ~0.071s toward ~0.063s.
+Compile and run. Expected: Briv time drops from ~0.071s toward ~0.063s.
 
 **V2:** Run FULL benchmark suite with per-field phi forced for ALL benchmarks. If any
 benchmark regresses, the guard has a purpose; analyze which and why.
@@ -262,7 +262,7 @@ criterion: `live_register_pressure < REGISTER_THRESHOLD` instead of `total_field
 
 ### Affected Benchmarks
 
-| Benchmark | Current Ratio | Best Ratio | Era | Brief Gap |
+| Benchmark | Current Ratio | Best Ratio | Era | Briv Gap |
 |-----------|-------------|------------|-----|-----------|
 | bit_clear | 0.50x (noise) | 0.50x | 10 | **None — noise floor** |
 | cancel_math | 0.97x | 0.96x | 14 | **None — within noise** |
@@ -288,7 +288,7 @@ the benchmark is at its best. Document the result.
 
 ### Affected Benchmarks
 
-| Benchmark | Current Ratio | Best Ratio | Era | Brief Gap |
+| Benchmark | Current Ratio | Best Ratio | Era | Briv Gap |
 |-----------|-------------|------------|-----|-----------|
 | knucleotide | 0.99x | 0.97x | 1 | **0.02x → within noise** |
 | kalman_filter_runtime | 0.99x | 0.95x | 1 | **0.04x → within noise** |

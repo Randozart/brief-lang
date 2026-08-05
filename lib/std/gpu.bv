@@ -1,6 +1,6 @@
 // GPU compute intrinsic wrappers.
 //
-// These expose SPIR-V built-in functions as Brief intrinsic calls.
+// These expose SPIR-V built-in functions as Briv intrinsic calls.
 // The SPIR-V backend recognizes them and emits the correct
 // SPIR-V LLVM IR built-in calls. On CPU (fallback), these
 // resolve via the intrinsic codegen in the LLVM backend.

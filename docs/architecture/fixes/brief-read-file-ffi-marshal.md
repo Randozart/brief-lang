@@ -1,23 +1,23 @@
-# Fix: brief_read_file FFI marshaling mismatch (C string vs Brief header)
+# Fix: briv_read_file FFI marshaling mismatch (C string vs Briv header)
 
 **Date**: 2026-06-14
 **Author**: OpenCode (diagnosis from officina-cli agent)
-**Bug**: brief_read_file crashes with corrupt malloc call (size = 0x6E6174737265646F)
+**Bug**: briv_read_file crashes with corrupt malloc call (size = 0x6E6174737265646F)
 
 ## Root Cause
 
 The LLVM backend marshals `String` as `i8*` (C string pointer) when crossing the
-FFI boundary. This is documented at `brief_rt.c:376`:
+FFI boundary. This is documented at `briv_rt.c:376`:
 
 > The LLVM backend marshals String as i8*, Int as i64, Bool as i64.
 
 Functions like `__print(const char* msg)` correctly follow this convention.
-However, `brief_read_file` was written to accept a **Brief internal header pointer**
+However, `briv_read_file` was written to accept a **Briv internal header pointer**
 (the old format: `[data_ptr, len, chars...]` stored as `int64_t[]`):
 
 ```c
 // Old (broken) convention:
-int64_t brief_read_file(int64_t path_ptr) {
+int64_t briv_read_file(int64_t path_ptr) {
     int64_t* path_str = (int64_t*)path_ptr;
     int64_t path_len = path_str[1];  // reads bytes 8-15 of C string chars!
 ```
@@ -31,10 +31,10 @@ were header fields. For the path `"system/understands.dbv"`, bytes 8-15 decode t
 
 Two files changed:
 
-### 1. `lib/runtime/brief_rt.c` — Rewrite `brief_read_file` to C string convention
+### 1. `lib/runtime/briv_rt.c` — Rewrite `briv_read_file` to C string convention
 
 ```c
-char* brief_read_file(const char* path) {
+char* briv_read_file(const char* path) {
     if (!path) return NULL;
     FILE* fp = fopen(path, "rb");
     if (!fp) return NULL;
@@ -60,13 +60,13 @@ pointer marshaling:
 
 ```llvm
 %fp = inttoptr i64 %path_val to i8*
-%raw = call i64 @brief_read_file(i8* %fp)
+%raw = call i64 @briv_read_file(i8* %fp)
 %result = ptrtoint i8* %raw to i64   ; back to i64 for SSA
 ```
 
 ### 3. `src/backend/llvm/emit_toplevel.rs` — Update declaration
 
-Changed `declare i64 @brief_read_file(i64)` to `declare ptr @brief_read_file(ptr)`
+Changed `declare i64 @briv_read_file(i64)` to `declare ptr @briv_read_file(ptr)`
 so LLVM's optimizer sees the correct type for alias analysis. The call site now
 uses explicit `inttoptr`/`ptrtoint` casts, so the declaration is purely for
 LLVM's benefit.
@@ -82,5 +82,5 @@ LLVM's benefit.
 
 ## Test
 
-After fix, `read_file#("system/understands.dbv")` in a brief program compiled with
+After fix, `read_file#("system/understands.dbv")` in a briv program compiled with
 the LLVM backend should correctly read the file instead of crashing with ENOMEM.

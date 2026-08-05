@@ -1,7 +1,7 @@
 # LLVM Backend Constants + Reactive Convergence Contract — Plan
 
 **Date**: 2026-05-31
-**Author**: Brief Compiler (via OpenCode)
+**Author**: Briv Compiler (via OpenCode)
 
 ---
 
@@ -101,7 +101,7 @@ Convergence accepted (counter + delay-line side effects), convergence rejected (
 ```
 cargo test --lib
 cargo build
-./target/release/brief-compiler llvm benchmarks/iir_filter.bv -o benchmarks/iir_filter.ll
+./target/release/briv-compiler llvm benchmarks/iir_filter.bv -o benchmarks/iir_filter.ll
 clang -O3 -march=native -o benchmarks/iir_filter benchmarks/iir_filter.ll
 ./benchmarks/iir_filter
 ```

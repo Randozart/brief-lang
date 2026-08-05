@@ -1,4 +1,4 @@
-# Phase 1 Brief: Basic Transaction Emission
+# Phase 1 Briv: Basic Transaction Emission
 
 **Date:** 2026-05-29  
 **Spec Reference:** `03-TRANSACTIONS.md`  
@@ -17,8 +17,8 @@ Each deliverable includes a test fixture, a validation command, and the expected
 
 ### 1. `let` Bindings → SSA Registers
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 let x: Int = 42;
 let y: Int = x + 1;
 ```
@@ -33,8 +33,8 @@ let y: Int = x + 1;
 
 ### 2. `&field = expr` Assignments → Store via GEP
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 &count = count + 1;
 ```
 
@@ -50,8 +50,8 @@ store i64 %new, i64* %ptr
 
 ### 3. `term` → `ret void`
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 term;
 ```
 
@@ -59,8 +59,8 @@ term;
 
 ### 4. `term expr` → `ret i64 %val`
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 term result;
 ```
 
@@ -80,8 +80,8 @@ term result;
 
 ### 6. Guarded Blocks → `br i1` + Basic Blocks
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 [count < 100] {
     &count = count + 1;
 };
@@ -101,12 +101,12 @@ end:
 
 ### 7. Bool-to-i64 Coercion (Preconditions)
 
-**Brief:**
-```brief
+**Briv:**
+```briv
 node increment [counter < 10] [...]
 ```
 
-**Expected LLVM:** The precondition expression `counter < 10` emits `icmp slt` + `zext` to produce an `i64` from the `i1` comparison. The `zext` is needed because Brief's expression system uses `i64` for Bool values (1 = true, 0 = false).
+**Expected LLVM:** The precondition expression `counter < 10` emits `icmp slt` + `zext` to produce an `i64` from the `i1` comparison. The `zext` is needed because Briv's expression system uses `i64` for Bool values (1 = true, 0 = false).
 
 ## New Test Fixtures
 
@@ -125,7 +125,7 @@ Create `tests/fixtures/phase1/` with:
 All of the following must pass:
 
 ```bash
-brief-compiler llvm tests/fixtures/phase1/full_txn.bv --out /tmp/p1/
+briv-compiler llvm tests/fixtures/phase1/full_txn.bv --out /tmp/p1/
 llc /tmp/p1/full_txn.ll -o /dev/null          # Must succeed
 opt -verify /tmp/p1/full_txn.ll -o /dev/null   # Must succeed
 grep -c "add i64" /tmp/p1/full_txn.ll           # Integer arithmetic present
@@ -146,5 +146,5 @@ grep -c "br i1" /tmp/p1/full_txn.ll             # Guarded branches present
 
 ## Risks
 
-- **Bool values are i64 in Brief's expression system** but i8 in `%State`. Transactions must `trunc` stores and `zext` loads. The Phase 0 implementation handles this, but the `let` binder must preserve the i64 type for chained arithmetic.
+- **Bool values are i64 in Briv's expression system** but i8 in `%State`. Transactions must `trunc` stores and `zext` loads. The Phase 0 implementation handles this, but the `let` binder must preserve the i64 type for chained arithmetic.
 - **Precondition expressions** (`[counter < 10]`) emit `icmp` → `i1` → `zext` to `i64`. The `zext` register must not collide with the transaction's body registers. The `txn_counter` field handles this.

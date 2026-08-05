@@ -1,8 +1,8 @@
-# Brief-to-COBOL Transpiler Specification
+# Briv-to-COBOL Transpiler Specification
 
 ## Overview
 
-This document specifies the COBOL transpilation target for the Brief compiler, generating IBM Enterprise COBOL for z/OS from Brief's declarative, state-based logic.
+This document specifies the COBOL transpilation target for the Briv compiler, generating IBM Enterprise COBOL for z/OS from Briv's declarative, state-based logic.
 
 ## 1. Lexical & Structural Directives
 
@@ -11,7 +11,7 @@ This document specifies the COBOL transpilation target for the Brief compiler, g
 
 ### 1.2 Program Definition
 - `IDENTIFICATION DIVISION.` followed by `PROGRAM-ID. [MODULE-NAME] RECURSIVE.`
-- The `RECURSIVE` keyword is always appended to support Brief's recursion model
+- The `RECURSIVE` keyword is always appended to support Briv's recursion model
 
 ### 1.3 Division Order
 Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
@@ -20,7 +20,7 @@ Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
 
 ### 2.1 Default Mappings
 
-| Brief Type | COBOL PIC Clause | Usage | Notes |
+| Briv Type | COBOL PIC Clause | Usage | Notes |
 |------------|------------------|-------|-------|
 | `int` | `PIC S9(18) COMP-5` | COMP-5 | Native binary, 64-bit |
 | `dec` | `PIC S9(13)V99 COMP-3` | COMP-3 | Packed decimal, 15 digits |
@@ -32,7 +32,7 @@ Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
 
 Override defaults using attributes:
 
-```brief
+```briv
 # Default: derives from type
 state balance: dec
 
@@ -57,7 +57,7 @@ COBOL has no native boolean. Map to single byte with Level 88 condition names:
 
 ### 2.4 Array/Vector Mapping
 
-```brief
+```briv
 state ids: vec[int, 10]  # OCCURS 10 TIMES
 ```
 
@@ -69,11 +69,11 @@ state ids: vec[int, 10]  # OCCURS 10 TIMES
 
 ### 3.1 Local State (WORKING-STORAGE)
 
-Brief state declared in module body → `WORKING-STORAGE SECTION`
+Briv state declared in module body → `WORKING-STORAGE SECTION`
 
 Name mangling: `{NAME}` → `WS-{MANGLED-NAME}`
 
-```brief
+```briv
 state count: int
 
 fn increment() {
@@ -90,7 +90,7 @@ WORKING-STORAGE SECTION.
 
 Parameters in function signatures → `LINKAGE SECTION` + `PROCEDURE DIVISION USING`
 
-```brief
+```briv
 fn process(balance: dec, amount: dec) -> dec
 ```
 
@@ -106,7 +106,7 @@ PROCEDURE DIVISION USING LS-BALANCE LS-AMOUNT.
 
 Return value becomes last parameter in USING clause:
 
-```brief
+```briv
 fn calc(a: int, b: int) -> int
 ```
 
@@ -125,7 +125,7 @@ PROCEDURE DIVISION USING LS-A LS-B LS-RESULT.
 
 Transpile to inverted IF traps at block start:
 
-```brief
+```briv
 fn withdraw(balance: dec, amount: dec) -> dec
     pre: amount > 0
     pre: balance >= amount
@@ -160,7 +160,7 @@ MOVE LS-BALANCE TO WS-OLD-BALANCE.
 ```
 
 **Step 4:** Validate post-condition at end:
-```brief
+```briv
 fn withdraw(balance: dec, amount: dec) -> dec
     pre: amount > 0
     post: balance == old(balance) - amount
@@ -186,7 +186,7 @@ END-IF.
 
 For critical failures requiring program termination:
 
-```brief
+```briv
 #[cobol, abend]
 fn critical_op() {
     pre: system_ready == true
@@ -206,7 +206,7 @@ END-IF.
 
 ### 5.1 RECURSIVE Keyword
 
-Always emit `RECURSIVE` in PROGRAM-ID to support Brief's recursion model:
+Always emit `RECURSIVE` in PROGRAM-ID to support Briv's recursion model:
 ```cobol
 PROGRAM-ID. TRANSFER RECURSIVE.
 ```
@@ -215,7 +215,7 @@ PROGRAM-ID. TRANSFER RECURSIVE.
 
 If watchdog is specified in contract, generate depth limiting:
 
-```brief
+```briv
 fn factorial(n: int) -> int
     pre: n >= 0
     post: result >= 0
@@ -243,7 +243,7 @@ SUBTRACT 1 FROM WS-RECURSION-DEPTH.
 
 ### 6.1 Functions/Blocks → PARAGRAPHs
 
-```brief
+```briv
 fn process() {
     step_one()
     step_two()
@@ -275,7 +275,7 @@ STEP-TWO SECTION.
 
 ### 6.2 If/Else → IF/ELSE/END-IF
 
-```brief
+```briv
 if x > 0 {
     y = 1
 } else {
@@ -293,7 +293,7 @@ END-IF.
 
 ### 6.3 Match/Switch → EVALUATE
 
-```brief
+```briv
 match status {
     "active" => state = 1
     "pending" => state = 2
@@ -314,7 +314,7 @@ END-EVALUATE.
 
 ### 6.4 Loops → PERFORM UNTIL
 
-```brief
+```briv
 while i < 10 {
     sum = sum + i
     i = i + 1
@@ -334,7 +334,7 @@ END-PERFORM.
 
 Set default transpilation target for subsequent attributes:
 
-```brief
+```briv
 #![cobol, program-id("BANK-TRANSFER")]
 #![cobol, keywords("RECURSIVE")]
 
@@ -344,7 +344,7 @@ Set default transpilation target for subsequent attributes:
 
 ### 7.2 Program ID Override
 
-```brief
+```briv
 #![cobol, program-id("MYMODULE")]
 ```
 
@@ -352,7 +352,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 7.3 Global COBOL Options
 
-```brief
+```briv
 #![cobol, abend-on-contract-fail]
 ```
 
@@ -360,7 +360,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 8.1 Operators
 
-| Brief | COBOL | Notes |
+| Briv | COBOL | Notes |
 |-------|-------|-------|
 | `+` | `+` | |
 | `-` | `-` | |
@@ -378,7 +378,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 8.2 Assignment
 
-Brief: `x = y + 1`
+Briv: `x = y + 1`
 
 COBOL: Use MOVE for simple, COMPUTE for expressions:
 ```cobol
@@ -387,14 +387,14 @@ COMPUTE WS-X = WS-Y + 1.
 
 ### 8.3 Compound Assignment
 
-Brief: `x += 1`
+Briv: `x += 1`
 
 COBOL:
 ```cobol
 ADD 1 TO WS-X.
 ```
 
-Brief: `x = x - 1`
+Briv: `x = x - 1`
 ```cobol
 SUBTRACT 1 FROM WS-X.
 ```
@@ -429,7 +429,7 @@ END PROGRAM {MODULE-NAME}.
 
 ```bash
 # Compile to COBOL
-brief-compiler cobol <file.brv>
+briv-compiler cobol <file.brv>
 
 # Output: <file>.cbl
 ```

@@ -1,5 +1,5 @@
 // 2026-07-25: VM backend — emits .lair bytecode from typed AST.
-// This backend implements BackendKind::Vm, compiling Brief programs
+// This backend implements BackendKind::Vm, compiling Briv programs
 // to portable stack-based bytecode for the tamer VM interpreter.
 
 pub mod assembler;

@@ -158,8 +158,8 @@ No other files change — `WatchdogSpec` already has `is_required: bool`.
 
 1. `cargo build` — compiles with new AST variant + parser + interpreter
 2. `cargo test --lib` — 269/269 still pass
-3. `cargo run --bin brief-compiler -- check lib/std/char.bv` — no parse errors for `as` casts
-4. `cargo run --bin brief-compiler -- selfhost examples/counter.rbv` — pipeline passes `char.bv` import, proceeds past `is_digit`
+3. `cargo run --bin briv-compiler -- check lib/std/char.bv` — no parse errors for `as` casts
+4. `cargo run --bin briv-compiler -- selfhost examples/counter.rbv` — pipeline passes `char.bv` import, proceeds past `is_digit`
 5. Test `[pre]]` / `[[post]` in isolation with a small `.bv` file
 6. Test `?[wd]` / `?![wd]` in isolation with a small `.bv` file
 

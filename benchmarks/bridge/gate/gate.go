@@ -4,9 +4,9 @@ package main
 /*
 #cgo LDFLAGS: -L${SRCDIR} -lbench
 #include <stdint.h>
-typedef struct BriefState BriefState;
-extern BriefState* __brief_init_state(void);
-extern int64_t feature_hash(BriefState*, int64_t, int64_t);
+typedef struct BrivState BrivState;
+extern BrivState* __briv_init_state(void);
+extern int64_t feature_hash(BrivState*, int64_t, int64_t);
 extern int64_t add(int64_t, int64_t);
 */
 import "C"
@@ -29,7 +29,7 @@ func nativeAdd(a, b int64) int64 { return a + b }
 
 func main() {
     r, _ := strconv.ParseInt(os.Args[1], 10, 64)
-    state := C.__brief_init_state()
+    state := C.__briv_init_state()
     const N = 200000
     const N2 = 2000000
     var sink int64

@@ -1,4 +1,4 @@
-# DBrief Universal Data Engine - Implementation Plan
+# DBriv Universal Data Engine - Implementation Plan
 
 **Date:** 2026-05-09
 **Status:** Planning
@@ -9,7 +9,7 @@
 
 ## 1. Vision
 
-DBrief (Data Brief) is a universal data language that unifies:
+DBriv (Data Briv) is a universal data language that unifies:
 
 | Replaces | How |
 |----------|-----|
@@ -26,15 +26,15 @@ DBrief (Data Brief) is a universal data language that unifies:
 - **Dual mode** - Static config (`.dbv`) and mutable database (`.dbvl`)
 - **Schema-driven** - `.dbvs` defines types, constraints, aliases
 
-### Cross-Brief Interoperability
+### Cross-Briv Interoperability
 
-DBrief serves as the **data key** between all Brief variants:
+DBriv serves as the **data key** between all Briv variants:
 
-| Brief Variant | DBrief Role |
+| Briv Variant | DBriv Role |
 |---------------|-------------|
-| **Brief (.bv)** | FFI: `IMPORT "./data.dbv"` |
-| **R-Brief** | Transpiles to SystemVerilog for hardware |
-| **E-Brief (.ebv)** | Register binding via `.dbvs` |
+| **Briv (.bv)** | FFI: `IMPORT "./data.dbv"` |
+| **R-Briv** | Transpiles to SystemVerilog for hardware |
+| **E-Briv (.ebv)** | Register binding via `.dbvs` |
 | **RBV (.rbv)** | Reactive data binding to `.dbvl` |
 
 ---
@@ -43,21 +43,21 @@ DBrief serves as the **data key** between all Brief variants:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            DBrief Universal Data Layer                          │
+│                            DBriv Universal Data Layer                          │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
 │  │                              File Formats                                   │ │
 │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐         │ │
 │  │  │  .dbv   │  │  .dbvl  │  │  .dbvs  │  │  .bv    │  │  .ebv   │         │ │
-│  │  │ Config  │  │ Database│  │ Schema  │  │  Brief  │  │  Brief  │         │ │
+│  │  │ Config  │  │ Database│  │ Schema  │  │  Briv  │  │  Briv  │         │ │
 │  │  │(static) │  │(mutable)│  │(types)  │  │   Core  │  │  Hard.  │         │ │
 │  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘  └─────────┘         │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
 │                                      │                                          │
 │                                      ▼                                          │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
-│  │                         DBrief Engine Core                                 │ │
+│  │                         DBriv Engine Core                                 │ │
 │  │                                                                             │ │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │ │
 │  │  │   Parser    │  │ Query Engine │  │  Contract   │  │   Storage   │      │ │
@@ -77,7 +77,7 @@ DBrief serves as the **data key** between all Brief variants:
 │                                      │                                          │
 │                                      ▼                                          │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
-│  │              SystemVerilog Transpiler (R-Brief → Hardware)                │ │
+│  │              SystemVerilog Transpiler (R-Briv → Hardware)                │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -153,7 +153,7 @@ Line-oriented mutable records. Each line is a self-contained record.
 Type definitions, register maps, aliases, and contracts.
 
 ```dbvs
-// hardware_registers.dbvs - Register map for R-Brief
+// hardware_registers.dbvs - Register map for R-Briv
 REGISTER @0x1000: Vector[Register]
 REGISTER @0x2000: Vector[MemoryBlock]
 REGISTER @0x3000: Vector[Interrupt]
@@ -194,11 +194,11 @@ ALIAS? optional_clock: Addr;  // Optional - may be unbound
 
 ### 4.1 Parser Layer
 
-**Location:** `src/dbrief/parser.rs` (existing)
+**Location:** `src/dbriv/parser.rs` (existing)
 
 | Parser | Purpose | Status |
 |--------|---------|--------|
-| `parse_dbrief` | Parse `.dbv` files | ✅ Implemented |
+| `parse_dbriv` | Parse `.dbv` files | ✅ Implemented |
 | `parse_dbvl` | Parse `.dbvl` files | ✅ Implemented |
 | `parse_dbvs` | Parse `.dbvs` files | ✅ Implemented |
 
@@ -209,7 +209,7 @@ ALIAS? optional_clock: Addr;  // Optional - may be unbound
 
 ### 4.2 Query Engine
 
-**Location:** `src/dbrief/eval.rs` (existing, extend)
+**Location:** `src/dbriv/eval.rs` (existing, extend)
 
 **Current capabilities:**
 - Filter, Map, Sort, Limit, Skip, Unique
@@ -229,7 +229,7 @@ ALIAS? optional_clock: Addr;  // Optional - may be unbound
 
 **Query syntax:**
 
-```dbrief
+```dbriv
 // Pipeline syntax
 @users->FILTER age > 25->SORT name->LIMIT 10
 
@@ -253,7 +253,7 @@ RULE can_access(resource, user) :- @permissions[resource, user, access == true]
 
 ### 4.3 Contract Verification
 
-**Location:** `src/dbrief/contract.rs` (new)
+**Location:** `src/dbriv/contract.rs` (new)
 
 ```rust
 pub trait Contract {
@@ -282,7 +282,7 @@ pub struct Violation {
 
 ### 4.4 Inference Engine (Datalog-style)
 
-**Location:** `src/dbrief/inference.rs` (new)
+**Location:** `src/dbriv/inference.rs` (new)
 
 ```rust
 pub struct Rule {
@@ -311,7 +311,7 @@ pub struct InferenceEngine {
 
 **Example rules:**
 
-```dbrief
+```dbriv
 // Simple rule
 RULE is_adult(person) :- @persons[person, age >= 18]
 
@@ -336,16 +336,16 @@ RULE no_access(user) :- @users[user, suspended == true] NOT @access[user, active
 
 ### 4.5 Storage Backend
 
-**Location:** `lib/dbrief-engine/src/storage/` (new)
+**Location:** `lib/dbriv-engine/src/storage/` (new)
 
 ```rust
 pub trait StorageBackend {
-    fn load(&mut self, path: &str) -> Result<MutableEngine, DbriefError>;
-    fn save(&mut self, engine: &MutableEngine, path: &str) -> Result<(), DbriefError>;
-    fn export_json(&self, engine: &DbriefEngine) -> Result<String, DbriefError>;
-    fn export_jsonl(&self, engine: &DbriefEngine) -> Result<String, DbriefError>;
-    fn import_json(&mut self, json: &str) -> Result<MutableEngine, DbriefError>;
-    fn import_jsonl(&mut self, jsonl: &str) -> Result<MutableEngine, DbriefError>;
+    fn load(&mut self, path: &str) -> Result<MutableEngine, DbrivError>;
+    fn save(&mut self, engine: &MutableEngine, path: &str) -> Result<(), DbrivError>;
+    fn export_json(&self, engine: &DbrivEngine) -> Result<String, DbrivError>;
+    fn export_jsonl(&self, engine: &DbrivEngine) -> Result<String, DbrivError>;
+    fn import_json(&mut self, json: &str) -> Result<MutableEngine, DbrivError>;
+    fn import_jsonl(&mut self, jsonl: &str) -> Result<MutableEngine, DbrivError>;
 }
 ```
 
@@ -358,12 +358,12 @@ pub trait StorageBackend {
 
 ---
 
-## 5. Cross-Brief Integration
+## 5. Cross-Briv Integration
 
-### 5.1 Brief (.bv) FFI
+### 5.1 Briv (.bv) FFI
 
-```brief
-// auth.bv - Brief state machine using DBrief data
+```briv
+// auth.bv - Briv state machine using DBriv data
 IMPORT "./users.dbvl" AS users
 IMPORT "./permissions.dbvs" AS perms
 
@@ -386,10 +386,10 @@ MACHINE auth {
 }
 ```
 
-### 5.2 E-Brief Register Binding
+### 5.2 E-Briv Register Binding
 
 ```ebv
-// firmware.ebv - Embedded Brief with hardware registers
+// firmware.ebv - Embedded Briv with hardware registers
 IMPORT "../hardware_registers.dbvs"
 
 // Direct register access
@@ -403,14 +403,14 @@ FUNCTION init_uart() {
     gpio_port[0x08] = 0x03;  // 8N1
 }
 
-// Interrupt handler bound to DBrief schema
+// Interrupt handler bound to DBriv schema
 INTERRUPT @0x3000[0] = timer_handler;
 INTERRUPT @0x3000[1] = uart_handler;
 ```
 
-### 5.3 R-Brief Hardware Transpilation
+### 5.3 R-Briv Hardware Transpilation
 
-**Location:** `lib/dbrief-transpiler/src/sv.rs` (new)
+**Location:** `lib/dbriv-transpiler/src/sv.rs` (new)
 
 ```rust
 pub fn transpile_to_systemverilog(schema: &DbvsProgram) -> String {
@@ -425,7 +425,7 @@ pub fn transpile_to_systemverilog(schema: &DbvsProgram) -> String {
 
 ```systemverilog
 // Generated from hardware_registers.dbvs
-module dbrief_registers (
+module dbriv_registers (
     input  wire         clk,
     input  wire         rst_n,
     input  wire [31:0]  addr,
@@ -464,7 +464,7 @@ endmodule
 ### 5.4 RBV Reactive Data Binding
 
 ```rbv
-// dashboard.rbv - Rendered Brief view
+// dashboard.rbv - Rendered Briv view
 IMPORT "../users.dbvl" AS users
 
 VIEW dashboard {
@@ -490,12 +490,12 @@ VIEW dashboard {
 
 ## 6. Server & CLI
 
-### 6.1 Server Binary: `dbriefd`
+### 6.1 Server Binary: `dbrivd`
 
-**Location:** `bin/dbriefd/` (new)
+**Location:** `bin/dbrivd/` (new)
 
 ```
-bin/dbriefd/
+bin/dbrivd/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs
@@ -530,7 +530,7 @@ bin/dbriefd/
 **gRPC API** (optional):
 
 ```protobuf
-service DBriefService {
+service DBrivService {
     rpc LoadSchema(LoadSchemaRequest) returns (LoadSchemaResponse);
     rpc Insert(InsertRequest) returns (InsertResponse);
     rpc Update(UpdateRequest) returns (UpdateResponse);
@@ -541,38 +541,38 @@ service DBriefService {
 }
 ```
 
-### 6.2 CLI Tool: `dbrief`
+### 6.2 CLI Tool: `dbriv`
 
 **Location:** Extend `bin/main.rs` or new CLI
 
 ```bash
 # Load and query
-dbrief query data.dbvl --filter 'role == "admin"'
-dbrief query data.dbvl --aggregate 'count BY role'
-dbrief query data.dbvl --pipeline '@1->FILTER age > 25->SORT name'
+dbriv query data.dbvl --filter 'role == "admin"'
+dbriv query data.dbvl --aggregate 'count BY role'
+dbriv query data.dbvl --pipeline '@1->FILTER age > 25->SORT name'
 
 # Datalog inference
-dbrief infer data.dbvl --rule 'is_admin(X) :- role(X, "admin")'
+dbriv infer data.dbvl --rule 'is_admin(X) :- role(X, "admin")'
 
 # Import/Export
-dbrief export data.dbv --format json --output data.json
-dbrief export data.dbv --format jsonl --output data.jsonl
-dbrief import data.jsonl --format jsonl --output data.dbvl
+dbriv export data.dbv --format json --output data.json
+dbriv export data.dbv --format jsonl --output data.jsonl
+dbriv import data.jsonl --format jsonl --output data.dbvl
 
 # Verification
-dbrief verify data.dbv --schema schema.dbvs
-dbrief check data.dbvl --contracts
+dbriv verify data.dbv --schema schema.dbvs
+dbriv check data.dbvl --contracts
 
 # Schema operations
-dbrief schema show schema.dbvs
-dbrief schema validate data.dbv --schema schema.dbvs
+dbriv schema show schema.dbvs
+dbriv schema validate data.dbv --schema schema.dbvs
 
 # Hardware transpilation
-dbrief transpile schema.dbvs --target systemverilog --output hardware.sv
+dbriv transpile schema.dbvs --target systemverilog --output hardware.sv
 
 # Server operations
-dbrief serve --port 8080 --data data.dbvl
-dbrief serve --schema schema.dbvs --mode read-only
+dbriv serve --port 8080 --data data.dbvl
+dbriv serve --schema schema.dbvs --mode read-only
 ```
 
 ---
@@ -581,33 +581,33 @@ dbrief serve --schema schema.dbvs --mode read-only
 
 ### 7.1 C FFI
 
-**Location:** `lib/dbrief-ffi/` (new)
+**Location:** `lib/dbriv-ffi/` (new)
 
 ```c
-// dbrief.h - C API
-typedef struct dbrief_engine_s* dbrief_engine_t;
-typedef struct dbrief_result_s* dbrief_result_t;
-typedef struct dbrief_error_s* dbrief_error_t;
+// dbriv.h - C API
+typedef struct dbriv_engine_s* dbriv_engine_t;
+typedef struct dbriv_result_s* dbriv_result_t;
+typedef struct dbriv_error_s* dbriv_error_t;
 
-dbrief_engine_t* dbrief_engine_new();
-void dbrief_engine_free(dbrief_engine_t*);
+dbriv_engine_t* dbriv_engine_new();
+void dbriv_engine_free(dbriv_engine_t*);
 
-dbrief_error_t dbrief_load_dbvl(dbrief_engine_t*, const char* path);
-dbrief_error_t dbrief_load_dbvs(dbrief_engine_t*, const char* path);
-dbrief_error_t dbrief_load_dbv(dbrief_engine_t*, const char* path);
+dbriv_error_t dbriv_load_dbvl(dbriv_engine_t*, const char* path);
+dbriv_error_t dbriv_load_dbvs(dbriv_engine_t*, const char* path);
+dbriv_error_t dbriv_load_dbv(dbriv_engine_t*, const char* path);
 
-dbrief_result_t dbrief_insert(dbrief_engine_t*, const char* table, const char* json);
-dbrief_result_t dbrief_update(dbrief_engine_t*, uint64_t addr, const char* json);
-dbrief_result_t dbrief_delete(dbrief_engine_t*, uint64_t addr);
-char* dbrief_read(dbrief_engine_t*, uint64_t addr);
+dbriv_result_t dbriv_insert(dbriv_engine_t*, const char* table, const char* json);
+dbriv_result_t dbriv_update(dbriv_engine_t*, uint64_t addr, const char* json);
+dbriv_result_t dbriv_delete(dbriv_engine_t*, uint64_t addr);
+char* dbriv_read(dbriv_engine_t*, uint64_t addr);
 
-char* dbrief_query(dbrief_engine_t*, const char* pipeline_json);
-char* dbrief_infer(dbrief_engine_t*, const char* rule_json);
+char* dbriv_query(dbriv_engine_t*, const char* pipeline_json);
+char* dbriv_infer(dbriv_engine_t*, const char* rule_json);
 
-char* dbrief_export_json(dbrief_engine_t*);
-char* dbrief_export_jsonl(dbrief_engine_t*);
+char* dbriv_export_json(dbriv_engine_t*);
+char* dbriv_export_jsonl(dbriv_engine_t*);
 
-char* dbrief_verify(dbrief_engine_t*, const char* schema_path);
+char* dbriv_verify(dbriv_engine_t*, const char* schema_path);
 ```
 
 ### 7.2 Language SDKs
@@ -618,14 +618,14 @@ char* dbrief_verify(dbrief_engine_t*, const char* schema_path);
 | **JavaScript** | WASM | `lib/sdk/js/` |
 | **Go** | cgo | `lib/sdk/go/` |
 | **Ruby** | FFI | `lib/sdk/ruby/` |
-| **Rust** | native | `lib/dbrief-engine/` |
+| **Rust** | native | `lib/dbriv-engine/` |
 
 **Python example:**
 
 ```python
-import dbrief
+import dbriv
 
-engine = dbrief.load("users.dbvl")
+engine = dbriv.load("users.dbvl")
 result = engine.query('@users->FILTER age > 25')
 for record in result.records:
     print(record["name"])
@@ -637,9 +637,9 @@ engine.save()
 **JavaScript example:**
 
 ```javascript
-import { DbriefEngine } from "@brief/dbrief-js";
+import { DbrivEngine } from "@briv/dbriv-js";
 
-const engine = await DbriefEngine.load("users.dbvl");
+const engine = await DbrivEngine.load("users.dbvl");
 const result = engine.query('@users->FILTER age > 25');
 console.log(result.records);
 
@@ -655,7 +655,7 @@ await engine.save();
 
 | Task | Description | Priority |
 |------|-------------|----------|
-| 1.1 | Create `dbrief-engine` crate | HIGH |
+| 1.1 | Create `dbriv-engine` crate | HIGH |
 | 1.2 | Refactor existing parser/eval/ast | HIGH |
 | 1.3 | Implement unified Engine trait | HIGH |
 | 1.4 | Add full query operations (join, group, having) | HIGH |
@@ -688,21 +688,21 @@ await engine.save();
 
 | Task | Description | Priority |
 |------|-------------|----------|
-| 4.1 | Create dbriefd binary | HIGH |
+| 4.1 | Create dbrivd binary | HIGH |
 | 4.2 | Implement REST API | HIGH |
 | 4.3 | Add CRUD endpoints | HIGH |
 | 4.4 | Add query endpoint | HIGH |
 | 4.5 | Add import/export endpoints | HIGH |
-| 4.6 | Build dbrief CLI | HIGH |
+| 4.6 | Build dbriv CLI | HIGH |
 
-### Phase 5: Cross-Brief Integration (Month 6)
+### Phase 5: Cross-Briv Integration (Month 6)
 
 | Task | Description | Priority |
 |------|-------------|----------|
-| 5.1 | Brief → DBrief FFI | HIGH |
-| 5.2 | E-Brief register binding | HIGH |
+| 5.1 | Briv → DBriv FFI | HIGH |
+| 5.2 | E-Briv register binding | HIGH |
 | 5.3 | RBV reactive binding | MEDIUM |
-| 5.4 | R-Brief SystemVerilog transpiler | HIGH |
+| 5.4 | R-Briv SystemVerilog transpiler | HIGH |
 
 ### Phase 6: Language Bindings (Month 7)
 
@@ -729,9 +729,9 @@ await engine.save();
 ## 9. File Structure
 
 ```
-brief-compiler/
+briv-compiler/
 ├── lib/
-│   ├── dbrief-engine/           # Core engine (new)
+│   ├── dbriv-engine/           # Core engine (new)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
@@ -764,13 +764,13 @@ brief-compiler/
 │   │           ├── memory.rs
 │   │           └── sqlite.rs
 │   │
-│   ├── dbrief-transpiler/       # Hardware transpiler (new)
+│   ├── dbriv-transpiler/       # Hardware transpiler (new)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       └── sv.rs
 │   │
-│   ├── dbrief-ffi/              # C FFI bindings (new)
+│   ├── dbriv-ffi/              # C FFI bindings (new)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       └── lib.rs
@@ -778,16 +778,16 @@ brief-compiler/
 │   └── ffi/                     # Existing FFI (keep)
 │
 ├── bin/
-│   ├── dbriefd/                 # Server (new)
+│   ├── dbrivd/                 # Server (new)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── main.rs
 │   │       └── routes/
 │   │
-│   └── brief/                   # Existing CLI (extend)
+│   └── briv/                   # Existing CLI (extend)
 │
 ├── src/
-│   └── dbrief/                  # Existing (keep, refactor to use lib)
+│   └── dbriv/                  # Existing (keep, refactor to use lib)
 │       ├── parser.rs
 │       ├── ast.rs
 │       ├── eval.rs
@@ -809,9 +809,9 @@ brief-compiler/
 
 | Criteria | Verification |
 |----------|-------------|
-| Parse `.dbv` files | `dbrief load config.dbv` succeeds |
-| Parse `.dbvl` files | `dbrief load data.dbvl` succeeds |
-| Parse `.dbvs` files | `dbrief schema show schema.dbvs` works |
+| Parse `.dbv` files | `dbriv load config.dbv` succeeds |
+| Parse `.dbvl` files | `dbriv load data.dbvl` succeeds |
+| Parse `.dbvs` files | `dbriv schema show schema.dbvs` works |
 | Query works | `@users->FILTER age > 25` returns correct results |
 | Aggregations work | `AGGREGATE COUNT BY role` works |
 | Joins work | Cross-address joins return correct results |
@@ -840,7 +840,7 @@ brief-compiler/
 - `docs/reference/DBRIEF_SPEC.md` - Language specification
 - `docs/reference/BRIEF-DATALOG_RESEARCH.md` - Datalog research
 - `plans/active/DBRIEF_IMPLEMENTATION_PLAN.md` - Previous plan (superseded)
-- `docs/EMBEDDED_BRIEF_2.2_SPEC.md` - E-Brief specification
+- `docs/EMBEDDED_BRIEF_2.2_SPEC.md` - E-Briv specification
 
 ---
 

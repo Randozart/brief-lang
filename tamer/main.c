@@ -1,4 +1,4 @@
-// 2026-07-25: tamer — Brief install-time compiler system tool.
+// 2026-07-25: tamer — Briv install-time compiler system tool.
 // Reads a .bounty file, extracts .lair + .beastpack, executes the
 // compilation passes via the VM, and produces a native binary.
 //

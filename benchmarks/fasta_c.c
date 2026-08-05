@@ -1,4 +1,4 @@
-// Fasta C reference — symmetric with Brief benchmark.
+// Fasta C reference — symmetric with Briv benchmark.
 // Compile: clang -O3 -march=native -ffast-math -o fasta_c fasta_c.c
 
 #include <stdio.h>

@@ -2336,7 +2336,7 @@ fn test_frgn_ptr_declare() {
     let program = vec![
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "test_fn".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("arg".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -2370,7 +2370,7 @@ fn test_frgn_ptr_return() {
     let program = vec![
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "make_ptr".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("n".to_string(), Type::int())],
@@ -2471,7 +2471,7 @@ fn test_addr_of_struct_literal() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_ptr".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -2557,7 +2557,7 @@ fn test_frgn_ptr_param_inttoptr() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_ptr".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -2808,7 +2808,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_methods".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -3387,7 +3387,7 @@ fn test_out_let_computation_survives() {
 
 /// 2026-08-04 (Phase 4, .ebv heap reframe): an embedded target with String
 /// state must NOT error — the static bump arena (@embedded_heap) provides a
-/// heap without @malloc/brief_rt.c. The old hard rejection was a vestige of
+/// heap without @malloc/briv_rt.c. The old hard rejection was a vestige of
 /// the pre-split .ebv/.cbv entanglement; the heap rejection belongs to .cbv
 /// (CIRCT synthesizes hardware), not .ebv (LLVM embedded).
 #[test]
@@ -3624,12 +3624,12 @@ fn test_legacy_println_not_rewritten_by_plugin() {
 }
 
 /// 2026-08-01 (B1): String == / != on #String operands emits a content
-/// comparison (brief_str_eq) instead of `icmp eq ptr` (address comparison).
+/// comparison (briv_str_eq) instead of `icmp eq ptr` (address comparison).
 /// This is the backend half of B1; the interpreter already does content
 /// equality (rule #4). The entry!-shaped comparison `cmd == "build"` is the
 /// motivating pattern (Phase 3).
 #[test]
-fn test_string_content_eq_emits_brief_str_eq() {
+fn test_string_content_eq_emits_briv_str_eq() {
     let src = r#"
         let a: String = "abc";
         let b: String = "abc";
@@ -3647,8 +3647,8 @@ fn test_string_content_eq_emits_brief_str_eq() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @brief_str_eq(ptr "),
-        "String == must emit brief_str_eq content compare; got:\n{ir}"
+        ir.contains("call i64 @briv_str_eq(ptr "),
+        "String == must emit briv_str_eq content compare; got:\n{ir}"
     );
     assert!(
         !ir.contains("icmp eq ptr"),
@@ -3679,13 +3679,13 @@ fn test_int_eq_still_emits_icmp() {
         "int == must still emit icmp eq i64; got:\n{ir}"
     );
     assert!(
-        !ir.contains("call i64 @brief_str_eq("),
-        "int == must not call brief_str_eq; got:\n{ir}"
+        !ir.contains("call i64 @briv_str_eq("),
+        "int == must not call briv_str_eq; got:\n{ir}"
     );
 }
 
 /// 2026-08-01 (B1): String & | ^ ~ emit content-bitwise runtime calls
-/// (brief_str_band/bor/bxor/bnot) and return a String (ptr).
+/// (briv_str_band/bor/bxor/bnot) and return a String (ptr).
 #[test]
 fn test_string_bitwise_emits_content_ops() {
     let src = r#"
@@ -3709,20 +3709,20 @@ fn test_string_bitwise_emits_content_ops() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call ptr @brief_str_band("),
-        "String & must emit brief_str_band; got:\n{ir}"
+        ir.contains("call ptr @briv_str_band("),
+        "String & must emit briv_str_band; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @brief_str_bor("),
-        "String | must emit brief_str_bor; got:\n{ir}"
+        ir.contains("call ptr @briv_str_bor("),
+        "String | must emit briv_str_bor; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @brief_str_bxor("),
-        "String ^ must emit brief_str_bxor; got:\n{ir}"
+        ir.contains("call ptr @briv_str_bxor("),
+        "String ^ must emit briv_str_bxor; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @brief_str_bnot("),
-        "String ~ must emit brief_str_bnot; got:\n{ir}"
+        ir.contains("call ptr @briv_str_bnot("),
+        "String ~ must emit briv_str_bnot; got:\n{ir}"
     );
 }
 
@@ -3749,12 +3749,12 @@ fn test_main_signature_and_argv_capture() {
         "main must take (i32 %argc, ptr %argv); got:\n{ir}"
     );
     assert!(
-        ir.contains("store i32 %argc, ptr @__brief_argc"),
-        "main must store argc into @__brief_argc; got:\n{ir}"
+        ir.contains("store i32 %argc, ptr @__briv_argc"),
+        "main must store argc into @__briv_argc; got:\n{ir}"
     );
     assert!(
-        ir.contains("store ptr %argv, ptr @__brief_argv"),
-        "main must store argv into @__brief_argv; got:\n{ir}"
+        ir.contains("store ptr %argv, ptr @__briv_argv"),
+        "main must store argv into @__briv_argv; got:\n{ir}"
     );
     assert!(
         !ir.contains("define i32 @main()"),
@@ -3821,7 +3821,7 @@ fn test_string_to_bit_content_view() {
 
 /// 2026-08-01 (B2): `#Bit → #String` is the ENCODING DOOR — wraps the bits
 /// (a [len][bytes] buffer) back into a String by materializing the header via
-/// brief_bits_to_str. Not a bitcast.
+/// briv_bits_to_str. Not a bitcast.
 #[test]
 fn test_bit_to_string_encoding_door() {
     let src = r#"
@@ -3842,8 +3842,8 @@ fn test_bit_to_string_encoding_door() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call ptr @brief_bits_to_str(ptr "),
-        "#Bit → #String must emit brief_bits_to_str (UTF8 wrap); got:\n{ir}"
+        ir.contains("call ptr @briv_bits_to_str(ptr "),
+        "#Bit → #String must emit briv_bits_to_str (UTF8 wrap); got:\n{ir}"
     );
     assert!(
         !ir.contains("extractvalue"),
@@ -3852,7 +3852,7 @@ fn test_bit_to_string_encoding_door() {
 }
 
 /// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
-/// char count (brief_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
+/// char count (briv_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
 /// header read (byte length). Also verifies a String `let` used only via
 /// reflection stays live (not eliminated as a dead state field).
 #[test]
@@ -3875,8 +3875,8 @@ fn test_string_len_and_bytes_reflect() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @brief_char_len(ptr "),
-        "String .^Len must emit brief_char_len (UTF8 char count); got:\n{ir}"
+        ir.contains("call i64 @briv_char_len(ptr "),
+        "String .^Len must emit briv_char_len (UTF8 char count); got:\n{ir}"
     );
     assert!(
         ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
@@ -4142,7 +4142,7 @@ fn test_float64_field_init_stores_double() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let _ir = backend.generate(&items, None);
     // The end-to-end correctness (a double slot stores the f64 bits, not a
-    // float32 boxed with 4 garbage bytes) is verified by the briefc build path
+    // float32 boxed with 4 garbage bytes) is verified by the brivc build path
     // (d=3.25 / d=-3.25 print correctly); the bare generate here is a smoke
     // test that Float64 literals + the coercion typecheck and emit.
 }

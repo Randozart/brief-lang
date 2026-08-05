@@ -1,5 +1,5 @@
 // WASM bridge benchmark — Tier 2: WebAssembly (gen_wasm output)
-// 2026-07-24: Measures per-call latency of Brief export via WASM.
+// 2026-07-24: Measures per-call latency of Briv export via WASM.
 // Usage: node bench_wasm.mjs
 
 import { readFileSync } from 'fs';

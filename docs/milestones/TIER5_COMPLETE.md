@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 5 implements a complete type checker with type inference using unification. All in pure Brief.
+Tier 5 implements a complete type checker with type inference using unification. All in pure Briv.
 
 **Key Features:**
 - Type context with lexical scoping
@@ -25,7 +25,7 @@ Tier 5 implements a complete type checker with type inference using unification.
 
 ### Context Structure
 
-```brief
+```briv
 struct TypeContext {
     scopes: Stack<HashMap<String, Type>>,  // Lexical scopes
     functions: HashMap<String, Definition>,  // Function signatures
@@ -39,7 +39,7 @@ struct TypeContext {
 
 ### Context Operations
 
-```brief
+```briv
 // Lifecycle
 defn new_context() -> TypeContext
 defn enter_scope(ctx: TypeContext) -> TypeContext
@@ -60,7 +60,7 @@ defn add_transaction(ctx: TypeContext, txn: Transaction) -> TypeContext
 
 ### Substitution
 
-```brief
+```briv
 struct Substitution {
     bindings: HashMap<String, Type>
 }
@@ -71,7 +71,7 @@ defn apply_subst(ty: Type, subst: Substitution) -> Type
 
 ### Unification
 
-```brief
+```briv
 defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, String>
 defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substitution, String>
 defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool
@@ -84,7 +84,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool
 4. Otherwise → type error
 
 **Example:**
-```brief
+```briv
 // Unify: HashMap<String, Int> with HashMap<K, V>
 // Result: K = String, V = Int
 
@@ -98,7 +98,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool
 
 ### Inference Result
 
-```brief
+```briv
 struct InferResult {
     ty: Type,
     subst: Substitution
@@ -107,14 +107,14 @@ struct InferResult {
 
 ### Expression Inference
 
-```brief
+```briv
 defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String>
 ```
 
 **Inference Rules:**
 
 **Literals:**
-```brief
+```briv
 ExprInt(_) → TypeInt
 ExprFloat(_) → TypeFloat
 ExprString(_) → TypeString
@@ -123,12 +123,12 @@ ExprBool(_) → TypeBool
 ```
 
 **Variables:**
-```brief
+```briv
 ExprVar(name) → lookup_type(ctx, name)
 ```
 
 **Binary Operations:**
-```brief
+```briv
 ExprBinOp(op, left, right):
   - Infer left type: t1
   - Infer right type: t2
@@ -140,7 +140,7 @@ ExprBinOp(op, left, right):
 ```
 
 **Function Calls:**
-```brief
+```briv
 ExprCall(name, args):
   - Lookup function signature
   - Infer each argument type
@@ -154,7 +154,7 @@ ExprCall(name, args):
 
 ### Program Checking
 
-```brief
+```briv
 defn check_program(program: Program) -> Result<TypedProgram, String>
 ```
 
@@ -174,7 +174,7 @@ defn check_program(program: Program) -> Result<TypedProgram, String>
 
 ### Definition Checking
 
-```brief
+```briv
 defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String>
 ```
 
@@ -186,7 +186,7 @@ defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String>
 
 ### Transaction Checking
 
-```brief
+```briv
 defn check_transaction(txn: Transaction, ctx: TypeContext) -> Result<(), String>
 ```
 
@@ -199,14 +199,14 @@ defn check_transaction(txn: Transaction, ctx: TypeContext) -> Result<(), String>
 
 ### Statement Checking
 
-```brief
+```briv
 defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeContext), String>
 ```
 
 **Statement Types:**
 
 **Let Binding:**
-```brief
+```briv
 StmtLet(name, var_type, init):
   - Infer init expression type
   - Unify with declared type (if any)
@@ -214,7 +214,7 @@ StmtLet(name, var_type, init):
 ```
 
 **Assignment:**
-```brief
+```briv
 StmtAssign(lhs, rhs):
   - Infer lhs type
   - Infer rhs type
@@ -222,27 +222,27 @@ StmtAssign(lhs, rhs):
 ```
 
 **Expression Statement:**
-```brief
+```briv
 StmtExpr(expr):
   - Infer expression type
 ```
 
 **Term Statement:**
-```brief
+```briv
 StmtTerm(values):
   - Infer each value type
   - Check matches return type
 ```
 
 **Guarded Statement:**
-```brief
+```briv
 StmtGuarded(condition, body):
   - Check condition is Bool
   - Check body statements
 ```
 
 **Unification:**
-```brief
+```briv
 StmtUnification(name, pattern, expr):
   - Infer expression type
   - Bind pattern variables
@@ -254,7 +254,7 @@ StmtUnification(name, pattern, expr):
 
 ### Type Errors
 
-```brief
+```briv
 // Type mismatch
 "Type mismatch: expected Int, got String"
 
@@ -280,7 +280,7 @@ StmtUnification(name, pattern, expr):
 
 ### Type Inference
 
-```brief
+```briv
 import std.typechecker;
 
 // Code with no type annotations
@@ -296,7 +296,7 @@ let b = identity("hello");  // T = String
 
 ### Type Checking
 
-```brief
+```briv
 let program = parse_program(source)?;
 let typed_program = check_program(program)?;
 
@@ -308,7 +308,7 @@ let typed_program = check_program(program)?;
 
 ### Contract Verification
 
-```brief
+```briv
 txn add(x: Int, y: Int) [x > 0][result == @x + @y] {
     term x + y;
 }
@@ -328,7 +328,7 @@ txn add(x: Int, y: Int) [x > 0][result == @x + @y] {
 
 Uses Stack<HashMap> for efficient scope management:
 
-```brief
+```briv
 defn enter_scope(ctx: TypeContext) -> TypeContext {
     let scopes = ctx.scopes;
     scopes = scopes.push(new_map());  // New scope
@@ -350,7 +350,7 @@ defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
 
 ### Unification with Occurs Check
 
-```brief
+```briv
 defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substitution, String> {
     // Prevent infinite types: x = List<x>
     [occurs_check(name, ty, subst)] {
@@ -416,7 +416,7 @@ All type checker features tested:
 
 ### Complete Compilation Pipeline
 
-```brief
+```briv
 import std.lexer;
 import std.parser;
 import std.typechecker;

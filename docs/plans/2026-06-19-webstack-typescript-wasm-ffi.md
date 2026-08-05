@@ -9,8 +9,8 @@
 > to produce `.wasm` + `dom-shim.mjs`.
 >
 > See:
-> - `docs/architecture/features/rendered-brief-wasm.md` — current spec
-> - `docs/plans/2026-07-26-rendered-brief-webstack-v2.md` — current plan
+> - `docs/architecture/features/rendered-briv-wasm.md` — current spec
+> - `docs/plans/2026-07-26-rendered-briv-webstack-v2.md` — current plan
 >
 > Phase A (TS emitter) was partially implemented — the TS emitter in
 > `src/backend/webstack.rs` exists and is the current code path. Phase B
@@ -19,11 +19,11 @@
 
 ## Architecture
 
-Brief's web target has two compilation paths that coexist in the same build:
+Briv's web target has two compilation paths that coexist in the same build:
 
 ```
             ┌─ .rbv → TypeScript emitter → .ts + .html  (reactive UI, signal wiring)
-brief build ┤
+briv build ┤
             └─ (wasm) import → LLVM wasm32 → .wasm       (compute sidecar)
 ```
 
@@ -35,21 +35,21 @@ standard intrinsics. Custom `frgn from "c"` / `from "rust"` declarations in a
 
 | `frgn from` | WASM target action |
 |---|---|
-| `"c"` (known intrinsic: `__print_int`, etc.) | Compile `brief_rt.c` to wasm32 bitcode, link |
+| `"c"` (known intrinsic: `__print_int`, etc.) | Compile `briv_rt.c` to wasm32 bitcode, link |
 | `"c"` (unknown function) | Compile-time error: *"no WASM implementation"* |
 | `"javascript"` / `"ts"` | Compile-time error: *"JS/TS FFI cannot be used in WASM-compiled modules"* |
 | `"rust"` | Compile-time error: *"Rust FFI not available in WASM target"* |
 | Omitted (internal symbol) | Resolved from linked targets (e.g., stdlib) |
 
-## Phase 0 — `.rbv` Format: Brief as Default
+## Phase 0 — `.rbv` Format: Briv as Default
 
 ### Goal
-Flip the `.rbv` file format so Brief code is the default content, not wrapped in `<script>` tags. CSS imports via `import "file.css"` already works — document and keep.
+Flip the `.rbv` file format so Briv code is the default content, not wrapped in `<script>` tags. CSS imports via `import "file.css"` already works — document and keep.
 
 ### 0.1 — Current Format (deprecated)
 
 ```html
-<script type="brief">
+<script type="briv">
 let count: Int = 0;
 txn inc [true][@count + 1 == count] { &count = count + 1; term; };
 </script>
@@ -78,11 +78,11 @@ span { color: red; }
 </style>
 ```
 
-Everything outside `<view>...</view>` and `<style>...</style>` is Brief code.
+Everything outside `<view>...</view>` and `<style>...</style>` is Briv code.
 
 ### 0.3 — CSS Imports (already works)
 
-Within the Brief section:
+Within the Briv section:
 
 ```rbv
 import "styles.css";
@@ -100,7 +100,7 @@ The existing pipeline (`run_rbv()` in `main.rs`) already:
 
 | File | Change | Lines |
 |---|---|---|
-| `src/rbv.rs` | `RbvFile::parse()` — remove `<script>` extraction, treat everything outside `<view>`/`<style>` as Brief | ~20 |
+| `src/rbv.rs` | `RbvFile::parse()` — remove `<script>` extraction, treat everything outside `<view>`/`<style>` as Briv | ~20 |
 | `src/rbv.rs` | Update `RbvError` — remove `MissingScript`, add `MissingView` (only error if no `<view>`) | ~5 |
 | `src/rbv.rs` | Update test | ~10 |
 
@@ -108,7 +108,7 @@ The existing pipeline (`run_rbv()` in `main.rs`) already:
 
 For the transition period, `RbvFile::parse()` can detect the old format:
 - If `<script>` tag is found, use old extraction logic
-- Otherwise, use new Brief-as-default logic
+- Otherwise, use new Briv-as-default logic
 
 This allows existing `.rbv` files to compile unchanged while new files use the cleaner syntax. Remove the old path after 2 releases.
 
@@ -116,7 +116,7 @@ This allows existing `.rbv` files to compile unchanged while new files use the c
 
 | Test | What it verifies |
 |---|---|
-| `test_parse_rbv_new_format` | Brief as default, `<view>` extracted, `<style>` optional |
+| `test_parse_rbv_new_format` | Briv as default, `<view>` extracted, `<style>` optional |
 | `test_parse_rbv_old_format` | `<script>`-wrapped format still works |
 | `test_parse_rbv_no_view` | Error when `<view>` is missing |
 | `test_parse_rbv_css_import` | `import "styles.css"` results in `Stylesheet` TopLevel |
@@ -126,13 +126,13 @@ This allows existing `.rbv` files to compile unchanged while new files use the c
 ## Phase A — TypeScript Emitter
 
 ### Goal
-`brief build ui.rbv` emits valid `.ts` + `.html` — no wasm-bindgen dependency.
+`briv build ui.rbv` emits valid `.ts` + `.html` — no wasm-bindgen dependency.
 
 ### A.1 — Signal Storage (webstack.rs)
 
 Replace `Vec<JsValue>` with typed vectors:
 
-| Brief type | TS storage | JS boundary |
+| Briv type | TS storage | JS boundary |
 |---|---|---|
 | `Int` | `Float64Array` | `get_x(): number` |
 | `Bool` | `Float64Array` (0/1) | `get_x(): boolean` |
@@ -232,7 +232,7 @@ Only change: read from typed arrays instead of `Vec<JsValue>`.
 ### A.7 — `frgn from "javascript"` Handler
 
 When `frgn foo(x: Int) -> Bool from "javascript"` is encountered in `.rbv`:
-- Emit a TS function with the Brief name as a JS builtin call
+- Emit a TS function with the Briv name as a JS builtin call
 - If the name matches a known JS global (`alert`, `console.log`, `fetch`, etc.),
   emit it directly. Otherwise emit `${name}(${args})` as a call expression.
 
@@ -297,7 +297,7 @@ and the `SignalType` enum (if not reused by TS path).
 
 New import prefix syntax:
 
-```brief
+```briv
 (wasm) import physics from "physics.bv";
 ```
 
@@ -334,11 +334,11 @@ if target == "wasm32" {
     // Emit LLVM IR as usual
     // llc -march=wasm32 -filetype=obj
     // wasm-ld --no-entry --allow-undefined
-    // brief_rt.c compiled to wasm32 bitcode, linked in
+    // briv_rt.c compiled to wasm32 bitcode, linked in
 }
 ```
 
-Also compile `brief_rt.c` to wasm32 bitcode to resolve standard intrinsics.
+Also compile `briv_rt.c` to wasm32 bitcode to resolve standard intrinsics.
 
 ### B.4 — WASM Embedding (webstack.rs, ~100 lines)
 
@@ -362,7 +362,7 @@ Applied at compile time when a `.bv` is targeted for WASM:
 
 | Declaration | Action |
 |---|---|
-| `frgn name from "c"` where name is known intrinsic | Resolved via `brief_rt.wasm` |
+| `frgn name from "c"` where name is known intrinsic | Resolved via `briv_rt.wasm` |
 | `frgn name from "c"` where name is unknown | **Error**: *"no WASM implementation for {name}"* |
 | `frgn name from "javascript"` | **Error**: *"JS FFI not available in WASM-compiled modules"* |
 | `frgn name from "rust"` / other | **Error**: *"FFI target not available in WASM"* |
@@ -383,7 +383,7 @@ Applied at compile time when a `.bv` is targeted for WASM:
 
 ```
 Phase 0:
-Step 0a: Rewrite RbvFile::parse() — Brief as default, backward compat
+Step 0a: Rewrite RbvFile::parse() — Briv as default, backward compat
 Step 0b: Update tests + commit
 ────────────────────────────────────────
 Phase A:

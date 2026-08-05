@@ -1,4 +1,4 @@
-# Level 3 Ptr — Safe Borrow Checking for Brief
+# Level 3 Ptr — Safe Borrow Checking for Briv
 
 **Date:** 2026-07-09
 **Status:** Plan — awaiting implementation
@@ -73,13 +73,13 @@ address of `name`, typed as `Ptr<T>`. This gives the syntax real weight:
 ### Why keep `&name = value` sugar
 
 Without sugar, a mutation would require:
-```brief
+```briv
 *(&counter) = counter + 1;   // dereference + assign — messy
 &amp;counter = counter + 1;        // ampersand-in-a-row — visually confusing
 ```
 
 With sugar:
-```brief
+```briv
 &counter = counter + 1;       // clear: "I'm mutating counter"
 ```
 
@@ -224,7 +224,7 @@ the assignment/arrow node wraps it with an implicit `Deref`.
 ### 4.2 Why desugaring is essential
 
 Without desugaring, every assignment would look like:
-```brief
+```briv
 *(&counter) = counter + 1;
 ```
 
@@ -326,7 +326,7 @@ rather than explicit annotations.
 
 ### 6.1 The only dangerous pattern
 
-```brief
+```briv
 state { saved: Ptr<Int> };
 
 node example {
@@ -363,7 +363,7 @@ enum Provenance {
 
 ### 6.2 Warning messages
 
-```brief
+```briv
 &saved = &temp;
 ```
 
@@ -388,7 +388,7 @@ warning[W-PTR-LOCAL]: pointer to local may dangle
 
 For `const` pointers to locals:
 
-```brief
+```briv
 let r = &temp;       // Ptr<const Int> — no warning yet
 let v = *r;          // read through — fine
 // r's last use
@@ -449,7 +449,7 @@ and given clear paths to eliminate it.
 When two transactions execute in parallel, a write through a pointer may alias
 with a direct field write in the other transaction:
 
-```brief
+```briv
 // Txn A                                     // Txn B
 node write_via_ptr {                       node write_direct {
     [true][true] {                               [true][true] {
@@ -1146,24 +1146,24 @@ Before merging:
 
 (Taken from `main` at commit `1023ebb`, 2026-07-09, `cargo build --release` + `bash benchmarks/build_and_bench.sh --runtime`)
 
-| Benchmark | Brief | C | Ratio | Winner | Correct |
+| Benchmark | Briv | C | Ratio | Winner | Correct |
 |-----------|-------|---|-------|--------|---------|
-| ring_buffer | .0591s | .0607s | .97x | Brief | MATCH |
-| float_math | .0576s | .0743s | .77x | Brief | MATCH |
+| ring_buffer | .0591s | .0607s | .97x | Briv | MATCH |
+| float_math | .0576s | .0743s | .77x | Briv | MATCH |
 | float_math_nonzero | .1734s | .1675s | 1.03x | C | MATCH |
-| sparse_dispatch | .0060s | .0606s | .09x | Brief | MATCH |
+| sparse_dispatch | .0060s | .0606s | .09x | Briv | MATCH |
 | print_loop | .0591s | .0591s | 1.00x | ~tie | MATCH |
-| nbody_newton | 6.4594s | 9.1394s | .70x | Brief | MATCH |
-| nbody_sqrt | 2.3248s | 3.4094s | .68x | Brief | MATCH |
-| nbody_sqrt_idio | 2.8469s | 3.9685s | .71x | Brief | MATCH |
+| nbody_newton | 6.4594s | 9.1394s | .70x | Briv | MATCH |
+| nbody_sqrt | 2.3248s | 3.4094s | .68x | Briv | MATCH |
+| nbody_sqrt_idio | 2.8469s | 3.9685s | .71x | Briv | MATCH |
 | fasta | .2068s | .2062s | 1.00x | ~tie | MATCH |
-| fannkuch_redux | .0575s | .0635s | .90x | Brief | MATCH |
+| fannkuch_redux | .0575s | .0635s | .90x | Briv | MATCH |
 | mandelbrot | .6489s | .6476s | 1.00x | ~tie | MATCH |
 | kalman_filter_runtime | .1802s | .1787s | 1.00x | ~tie | MATCH |
-| knucleotide | .1879s | .1880s | .99x | Brief | MATCH |
+| knucleotide | .1879s | .1880s | .99x | Briv | MATCH |
 | cancel_math | .0624s | .0588s | 1.06x | C | MATCH |
 | bit_clear | .0007s | .0007s | 1.00x | ~tie | MATCH |
 | queue_drain | .0596s | .0582s | 1.02x | C | MATCH |
 | queue_drain_sym | .0592s | .0582s | 1.01x | C | MATCH |
 | queue_drain_idio | SKIP | — | — | — | SKIP |
-| interval_step | .0006s | .0599s | .01x | Brief | MATCH |
+| interval_step | .0006s | .0599s | .01x | Briv | MATCH |

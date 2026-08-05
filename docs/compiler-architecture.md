@@ -1,4 +1,4 @@
-# Brief Compiler Architecture
+# Briv Compiler Architecture
 
 > Extracted from the README (2026-07-31). The pipeline diagram below is the
 > conceptual data flow; see `docs/architecture/` for the deep backend and
@@ -46,6 +46,6 @@ graph TD
 The LLVM backend CONSUMES decisions computed once in `AnalysisResults`
 (loop shapes, swan-song hoists, density, modulo partitions, inline decisions,
 batch shapes) and derives type knowledge from the casting graph — it never
-re-derives a decision from a body re-walk, and never matches Brief type names.
+re-derives a decision from a body re-walk, and never matches Briv type names.
 Tunables live in `config/targets.toml` + `config/ir-lowering.toml`. See
 `docs/architecture/backend-architecture.md`.

@@ -8,7 +8,7 @@
 // C reference: sparse_dispatch_c.c — equivalent switch (count % 8).
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/sparse_dispatch.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/sparse_dispatch.bv \
 //       --out benchmarks --optimize-budget 256
 
 

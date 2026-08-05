@@ -1,10 +1,10 @@
 # String Manipulation
 
-Brief provides comprehensive string operations, all implemented natively (no FFI).
+Briv provides comprehensive string operations, all implemented natively (no FFI).
 
 ## 1. Basic Operations
 
-```brief
+```briv
 let s: String = "Hello, World!";
 
 // Length (method syntax)
@@ -22,7 +22,7 @@ let c = s.char_at(0);  // "H"
 
 ## 2. Search Operations
 
-```brief
+```briv
 let s: String = "Hello, World!";
 
 // Contains
@@ -48,7 +48,7 @@ let idx = string.find(s, "World");  // 7
 
 ## 3. Case Conversion
 
-```brief
+```briv
 let s: String = "Hello, World!";
 
 let lower = string.to_lower(s);  // "hello, world!"
@@ -59,7 +59,7 @@ let title = string.title_case(s);  // "Hello, World!"
 
 ## 4. Trimming
 
-```brief
+```briv
 let s: String = "  Hello  ";
 
 let trimmed = string.trim(s);  // "Hello"
@@ -69,7 +69,7 @@ let right_trimmed = string.trim_right(s);  // "  Hello"
 
 ## 5. Split and Join
 
-```brief
+```briv
 let s: String = "apple,banana,cherry";
 
 // Split
@@ -85,11 +85,11 @@ let lines = string.lines(text);  // ["Line 1", "Line 2", "Line 3"]
 
 ## 6. Replace
 
-```brief
+```briv
 let s: String = "Hello, World!";
 
 // Replace first occurrence
-let replaced = string.replace(s, "World", "Brief");  // "Hello, Brief!"
+let replaced = string.replace(s, "World", "Briv");  // "Hello, Briv!"
 
 // Replace all (FFI - will be native soon)
 // let all = string.replace_all(s, "l", "L");  // "HeLLo, WorLd!"
@@ -97,7 +97,7 @@ let replaced = string.replace(s, "World", "Brief");  // "Hello, Brief!"
 
 ## 7. Padding
 
-```brief
+```briv
 let s: String = "42";
 
 let left_padded = string.pad_left(s, 5);  // "   42"
@@ -110,7 +110,7 @@ let zero_padded = string.pad_left_with(s, 5, '0');  // "00042"
 
 ## 8. Character Classification
 
-```brief
+```briv
 let s: String = "Hello123";
 
 // Check all characters
@@ -138,7 +138,7 @@ let spaces = string.count_char(s, 'l');  // 2
 
 For building strings incrementally, use StringBuilder (O(1) append):
 
-```brief
+```briv
 let sb = new_builder();
 sb = sb.append_str("Hello");
 sb = sb.append_char(',');
@@ -150,7 +150,7 @@ let result = sb.to_string();  // "Hello, World!"
 
 ## 10. Complete Example: Text Analyzer
 
-```brief
+```briv
 // text_analyzer.bv
 
 struct TextStats {

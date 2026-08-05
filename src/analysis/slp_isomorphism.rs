@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub struct VectorPhiCandidate {
     /// Group name derived from common field prefix (descriptive only).
     pub group_name: String,
-    /// The Brief type of each field in this group.
+    /// The Briv type of each field in this group.
     pub element_ty: Type,
     /// Number of lanes in the group.
     pub width: usize,

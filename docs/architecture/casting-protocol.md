@@ -8,7 +8,7 @@
 
 ## Overview
 
-Brief has no built-in `as` cast operator. Type conversion is triggered by
+Briv has no built-in `as` cast operator. Type conversion is triggered by
 the `Cast#()` compiler intrinsic (emitted when the programmer writes
 `(TargetType)expr`). The intrinsick runs a resolution pipeline that checks,
 in order:
@@ -32,7 +32,7 @@ needed because both sides are concrete and the direction is unambiguous.
 
 ### Example
 
-```brief
+```briv
 type Latin1String {
     op CastTo(#String) = latin1_to_UTF8(#L);      // Latin1 → UTF-8
     op CastFrom(#String) = UTF8_to_latin1(#L);     // UTF-8 → Latin1
@@ -61,7 +61,7 @@ representations of the same semantic concept:
 
 **The file extension determines the default protocol:**
 
-```brief
+```briv
 // foo.bv — #String<UTF8> by default
 op Add(#String, #String);   // resolves to #String<UTF8>
 
@@ -71,7 +71,7 @@ op Add(#String, #String);   // resolves to #String<ASCII>
 
 **Cross-variant calls require explicit protocol:**
 
-```brief
+```briv
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
                                ^^^^^ explicit
 ```
@@ -98,7 +98,7 @@ Explicit protocols at crossing boundaries prevent this. The programmer
 must acknowledge the encoding difference and declare the transformation
 via a `proto` declaration:
 
-```brief
+```briv
 proto ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -119,7 +119,7 @@ the shortest path from source to target at compile time via BFS.
 
 Protocol variants are declared via `proto` with required bindings:
 
-```brief
+```briv
 proto ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);      // edge: ASCII → UTF8
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);     // edge: UTF8 → ASCII
@@ -134,7 +134,7 @@ the two layouts.
 
 Types can also declare edges via `op CastTo`/`op CastFrom`:
 
-```brief
+```briv
 type Latin1String {
     op CastTo(#String) = latin1_to_UTF8(#L);      // edge: Latin1String → #String
     op CastFrom(#String) = UTF8_to_latin1(#L);     // edge: #String → Latin1String
@@ -306,7 +306,7 @@ variants differ (`UTF8` vs `ASCII`), and the typechecker's existing
 mismatch detection catches it automatically. The programmer adds the
 explicit variant at the call site:
 
-```brief
+```briv
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
@@ -336,7 +336,7 @@ The `disamb <~ "value"` metadata property disambiguates representations that
 structure + bytes + protocol ops cannot distinguish. Currently only needed
 for 2-byte floats (`half` vs `bfloat`):
 
-```brief
+```briv
 type Bfloat16 {
     data: Bits<16>;
     disamb <~ "bfloat";
@@ -376,7 +376,7 @@ CastFrom(#Bits)                      // from raw bytes
 These ops let ANY two `#String` types communicate through the `CastTo`/`CastFrom`
 pair — they negotiate the UTF-8 protocol shape without an intermediate type.
 
-```brief
+```briv
 inline defn any_string_to_ASCII(source: #String) -> #String<ASCII> {
     let bytes = source :> CastTo(#Bits);
     // bytes are UTF-8 — validate, then construct ASCIIString
@@ -443,7 +443,7 @@ The protocol shape for `#Int` is `i64`. Conversion goes through `CastTo(#Bits)` 
 
 ## Type Parameter Constraints
 
-```brief
+```briv
 type HashMap<K: #String, V> {
     buckets: Bits<64>;
     len: Bits<64>;
@@ -459,7 +459,7 @@ does `K` implement the `#String` protocol ops (`Extract(#Char)`,
 If yes, `K` satisfies `#String` regardless of its concrete name or layout.
 
 Protocol variant constraints are also valid:
-```brief
+```briv
 type AscHashMap<K: #String<ASCII>, V> { ... };
 ```
 
@@ -525,7 +525,7 @@ The parser validates that `pre:`/`suf:` values contain no symbols that
 conflict with language operators. Forbidden symbols:
 `# ! @ & $ ( ) [ ] < > * , ; : = ~ % { } " ' | \`.
 
-```brief
+```briv
 op Parse(Decimal, pre: "@hex") = parse_hex(#L);  // ERROR: '@' reserved
 ```
 
@@ -555,7 +555,7 @@ are superseded by `op Parse`:
 For every protocol that declares matching `CastTo`/`CastFrom` pairs, the
 compiler proves round-trip identity via symbolic execution and SMT:
 
-```brief
+```briv
 proto ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -567,7 +567,7 @@ proto ASCII: #String {
 For every cross-variant `op` declaration, the compiler proves equivalence
 to the default round-trip path:
 
-```brief
+```briv
 protocol ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -632,17 +632,17 @@ shim honors:
    borrow is safe (Python's `memoryview` holds the state ref, Rust borrows the
    state, C is a documented don't-release contract).
 3. **Mutability is declared by the meld**, never per language. Default
-   read-only (a Brief String is immutable — every language must see it
+   read-only (a Briv String is immutable — every language must see it
    read-only); a meld may declare a mutable region.
 4. **Interchangeability is declared by the meld.** `meld CStr -> String`
    admits the pair without `as` at assignment, let-init, call args, constructor
    slots, and term/return. The boundary marshalling inserts the delta
-   (`cstr_to_brief`/`str_to_c`) at those sites; the typechecker only admits
+   (`cstr_to_briv`/`str_to_c`) at those sites; the typechecker only admits
    the pair — the conversion stays a casting-graph / marshalling decision.
-5. **The composite is asymmetric.** A Brief String's data region IS a
+5. **The composite is asymmetric.** A Briv String's data region IS a
    nul-terminated C string, so String → CStr is zero-copy (`str_to_c` returns
    the in-place `(handle + 8)` pointer). CStr → String wraps (a bare C string
-   has no length prefix — `cstr_to_brief` allocates the `[len][bytes][\0]`
+   has no length prefix — `cstr_to_briv` allocates the `[len][bytes][\0]`
    form).
 6. **No language knowledge in the compiler.** Every language's shim is a
    config-driven recipe (`config/glue.dbvl` templates + per-category

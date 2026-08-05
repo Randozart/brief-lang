@@ -11,7 +11,7 @@
 // (frgn calls, compound expressions), SSR falls through gracefully —
 // the WASM module initializes normally and the page renders client-side.
 //
-// Future: Evaluate initializer expressions via the Brief interpreter to
+// Future: Evaluate initializer expressions via the Briv interpreter to
 // support arbitrary initializers at SSR time.
 
 use std::collections::HashMap;

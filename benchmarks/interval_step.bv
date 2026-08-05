@@ -8,7 +8,7 @@
 // increment pattern (not bare `x = x + N` or `x = x - N`).
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/interval_step.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/interval_step.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: interval_step_c.c

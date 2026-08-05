@@ -32,7 +32,7 @@ pub struct AllocConfig {
 impl AllocConfig {
     /// Load the built-in alloc strategies file.
     ///
-    /// 2026-08-03 (Phase 3, data-brief-config plan): reads config/alloc-strategies.dbvl
+    /// 2026-08-03 (Phase 3, data-briv-config plan): reads config/alloc-strategies.dbvl
     /// in quoted mode — the LLVM IR templates carry `{v}`/`{size}` braces that
     /// bare mode would take as a nested sub-record. Row shape:
     /// `<name>: "<template with \n escapes>"; [free];`. The .toml is deleted;
@@ -43,7 +43,7 @@ impl AllocConfig {
             Ok(c) => c,
             Err(_) => return AllocConfig { strategies: HashMap::new() },
         };
-        let db = match crate::dbrief::config_db::ConfigDb::from_quoted_str(&content) {
+        let db = match crate::dbriv::config_db::ConfigDb::from_quoted_str(&content) {
             Ok(db) => db,
             Err(e) => {
                 eprintln!("warning: config/alloc-strategies.dbvl parse error: {} — using empty set", e);

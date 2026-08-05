@@ -1,4 +1,4 @@
-// knucleotide C reference — symmetric with Brief benchmark.
+// knucleotide C reference — symmetric with Briv benchmark.
 // Rolling 2-bit hash (k=3) + checksum, printf every 5M.
 // Compile: clang -O3 -march=native -o knucleotide_c knucleotide_c.c
 

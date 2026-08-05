@@ -7,7 +7,7 @@ instructions. These shuffles force multiple packed phis simultaneously live,
 overflowing x86_64's 16 XMM registers and causing stack spills.
 
 **With SLP (default):** 1.214s (1.87× of C)
-**Without SLP:** 0.716s (0.92× of C — Brief beats C by 9%)
+**Without SLP:** 0.716s (0.92× of C — Briv beats C by 9%)
 
 ## Root Cause
 Not the number of float fields, but **variable coupling density**:
@@ -184,7 +184,7 @@ llc_args.extend(flags.iter().map(|s| s.as_str()));
 ```
 
 ## Acceptance Criteria
-1. **Kalman (x86_64 SSE):** 0.716s — Brief beats C
+1. **Kalman (x86_64 SSE):** 0.716s — Briv beats C
 2. **IIR (x86_64 SSE):** 0.156s — parity unchanged
 3. **AArch64:** Kalman auto-enables SLP, faster than scalar
 4. **12 independent channels:** SLP auto-enabled, ~2× faster than scalar

@@ -3,7 +3,7 @@
 ## Discovery
 
 In the calibration baseline (2026-06-02), `float_math` showed a **9.79× gap**
-(Brief 0.4231s vs C 0.0432s). Investigation of the C IR revealed that **clang -O3
+(Briv 0.4231s vs C 0.0432s). Investigation of the C IR revealed that **clang -O3
 completely eliminated the matrix multiply** by proving x0=x1=x2=0 invariants
 through the recurrence:
 
@@ -16,7 +16,7 @@ through the recurrence:
   count++
 ```
 
-The entire 9-element matrix multiply (12 fmul + fadd) was eliminated. Brief's
+The entire 9-element matrix multiply (12 fmul + fadd) was eliminated. Briv's
 `opt -O2` could NOT do the same — it emitted all 17 float ops per iteration.
 
 ## Root Cause: Three Barriers
@@ -131,10 +131,10 @@ stability. Both compilers must compute the full 9-element matrix multiply.
 
 Also keep `p00/p11/p22` only (not all 9 covariance fields) to eliminate the
 dead-field noise. The original float_math has p01-p21 all zero-initialized
-with zero Q-coefficients — those 6 fields are dead work that Brief shouldn't
+with zero Q-coefficients — those 6 fields are dead work that Briv shouldn't
 pay for. The nonzero variant should match the C variant field-for-field.
 
-**Expected gap**: TBD — this measures the real structural overhead of Brief's
+**Expected gap**: TBD — this measures the real structural overhead of Briv's
 reactive model (preconditions, global state, dispatch) vs C's plain while-loop.
 
 ## Track 3 — Close the residual gap
@@ -148,7 +148,7 @@ primary fix for 32-byte or 64-byte struct register pressure.
 
 ## Benchmark Matrix
 
-| Benchmark | Initial | Matrix | Expected Brief vs C |
+| Benchmark | Initial | Matrix | Expected Briv vs C |
 |-----------|---------|--------|-------------------|
 | `float_math` (original) | x=0,y=0,z=0 | Identity+coupling | ~tie (both eliminate) |
 | `float_math_nonzero` | x=1.0,y=0.5,z=0.2 | Full coupling | TBD — real overhead |

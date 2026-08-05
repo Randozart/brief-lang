@@ -2,39 +2,39 @@
 
 **Date:** 2026-08-01
 **Commit:** `f546af1c` (== `d6c6c818` for benchmarks; the plan doc commit adds no code)
-**Worktree:** `../brief-compiler-plugin-rework`, branch `feat/plugin-macro-rework`
+**Worktree:** `../briv-compiler-plugin-rework`, branch `feat/plugin-macro-rework`
 **Plan:** `docs/plans/2026-08-01-plugin-macro-rework.md`
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Raw output:** `/tmp/plugin_rework_baseline.log`
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
-**Baseline reference worktree:** `../brief-compiler-baseline` at `d6c6c818`
+**Baseline reference worktree:** `../briv-compiler-baseline` at `d6c6c818`
 
 ## 1. Baseline results (rule #11 — clean `cargo build --release` + harness)
 
 5 iterations per benchmark, nanosecond-precision fork+exec timing.
 
-| Benchmark | Brief | C | Ratio | Winner | Correct |
+| Benchmark | Briv | C | Ratio | Winner | Correct |
 |-----------|:-----:|:--:|:-----:|:------:|:-------:|
 | ring_buffer | .0516s | .0442s | 1.16× | C | MATCH |
-| float_math | .0436s | .0720s | .60× | Brief | MATCH |
-| float_math_nonzero | .1590s | .1662s | .95× | Brief | MATCH |
-| sparse_dispatch | .0502s | .0615s | .81× | Brief | MATCH |
-| print_loop | .0362s | .0609s | .59× | Brief | MATCH |
-| nbody_newton | 7.6315s | 9.1267s | .83× | Brief | MATCH |
-| nbody_sqrt | 2.4004s | 3.1238s | .76× | Brief | MATCH |
-| nbody_sqrt_idio | 2.9454s | 3.9006s | .75× | Brief | MATCH |
+| float_math | .0436s | .0720s | .60× | Briv | MATCH |
+| float_math_nonzero | .1590s | .1662s | .95× | Briv | MATCH |
+| sparse_dispatch | .0502s | .0615s | .81× | Briv | MATCH |
+| print_loop | .0362s | .0609s | .59× | Briv | MATCH |
+| nbody_newton | 7.6315s | 9.1267s | .83× | Briv | MATCH |
+| nbody_sqrt | 2.4004s | 3.1238s | .76× | Briv | MATCH |
+| nbody_sqrt_idio | 2.9454s | 3.9006s | .75× | Briv | MATCH |
 | fasta | .2422s | .2267s | 1.06× | C | MATCH |
-| fannkuch_redux | .0604s | .0641s | .94× | Brief | MATCH |
+| fannkuch_redux | .0604s | .0641s | .94× | Briv | MATCH |
 | mandelbrot | .7117s | .6932s | 1.02× | C | MATCH |
-| kalman_filter_runtime | .1522s | .1780s | .85× | Brief | MATCH |
-| knucleotide | .1894s | .1911s | .99× | Brief | MATCH |
-| cancel_math | .0503s | .0590s | .85× | Brief | MATCH |
+| kalman_filter_runtime | .1522s | .1780s | .85× | Briv | MATCH |
+| knucleotide | .1894s | .1911s | .99× | Briv | MATCH |
+| cancel_math | .0503s | .0590s | .85× | Briv | MATCH |
 | bit_clear | .0005s | .0004s | 1.25× | C | MATCH |
 | interval_step | .0597s | .0596s | 1.00× | ~tie | MATCH |
-| telemetry_stream | .1919s | .1987s | .96× | Brief | MATCH |
-| pid_control | .3432s | .3486s | .98× | Brief | MATCH |
-| matrix_pipeline | .4630s | .7407s | .62× | Brief | MATCH |
-| accumulator_flush | .1072s | .1489s | .71× | Brief | MATCH |
+| telemetry_stream | .1919s | .1987s | .96× | Briv | MATCH |
+| pid_control | .3432s | .3486s | .98× | Briv | MATCH |
+| matrix_pipeline | .4630s | .7407s | .62× | Briv | MATCH |
+| accumulator_flush | .1072s | .1489s | .71× | Briv | MATCH |
 | sweep_sparse | .2190s | .1530s | 1.43× | C | MATCH |
 | sweep_mid | .2602s | .2343s | 1.11× | C | MATCH |
 | sweep_dense | .3957s | .2627s | 1.50× | C | MATCH |
@@ -66,8 +66,8 @@ workstream.
 %t44 = call i64 @__print_char(i64 %t45)
 ```
 
-The runtime helpers (`brief_rt.c:178-199`) are `always_inline` and the harness
-links `.ll` + `brief_rt.c` with `-O3 -flto`, so these inline into `main`'s hot
+The runtime helpers (`briv_rt.c:178-199`) are `always_inline` and the harness
+links `.ll` + `briv_rt.c` with `-O3 -flto`, so these inline into `main`'s hot
 loop. This matches the "native era" emission (intrinsics.rs emits the same
 `call i64 @__print_*` shapes since 0ebfba39). print_loop improved 1.03×→.59×
 with the countdown loop (9d7a2404) — already on main.
@@ -77,12 +77,12 @@ with the countdown loop (9d7a2404) — already on main.
 `float_math.ll` (module init, not hot loop):
 
 ```llvm
-%t0 = call i64 @__getenv_int(ptr %t2)       ; brief_rt.c: `__getenv_int(int64_t key_bstr)`
-%t0 = call ptr @__getenv_brief(ptr %t2)
+%t0 = call i64 @__getenv_int(ptr %t2)       ; briv_rt.c: `__getenv_int(int64_t key_bstr)`
+%t0 = call ptr @__getenv_briv(ptr %t2)
 ```
 
-`ptr` is the 8-byte ABI equivalent of the C `int64_t` param. brief_rt.c
-`__getenv_int`/`__getenv_brief` (lines 137-160) decode the length-prefixed Brief
+`ptr` is the 8-byte ABI equivalent of the C `int64_t` param. briv_rt.c
+`__getenv_int`/`__getenv_briv` (lines 137-160) decode the length-prefixed Briv
 string → C string → `getenv`. Called once at init for `let bound = get_env_int("BOUND")`.
 
 ### 2.3 LATENT INCONSISTENCY (documented, NOT fixed — out of phase scope)
@@ -91,7 +91,7 @@ The frgn **declare** emission uses `protocol_llvm_type` (`mod.rs:366`), which
 returns `{ i64, i64 }` for String-shaped types **unconditionally**:
 
 ```llvm
-declare { i64, i64 } @__getenv_brief({ i64, i64 }) #6
+declare { i64, i64 } @__getenv_briv({ i64, i64 }) #6
 declare i64 @__getenv_int({ i64, i64 }) #6
 ```
 
@@ -156,8 +156,8 @@ currently green (1311 tests).
 ## 4. Harness fix (pre-existing bug)
 
 `benchmarks/compare_baseline.sh:34` referenced the stale binary name
-`brief-compiler` (renamed to `briefc` long ago) — baseline builds would fail.
-Fixed to `briefc`. Also `build_and_bench.sh` `bridge_multi` node bench failed
+`briv-compiler` (renamed to `brivc` long ago) — baseline builds would fail.
+Fixed to `brivc`. Also `build_and_bench.sh` `bridge_multi` node bench failed
 under `set -e` (missing koffi), aborting the suite before the summary; now
 guarded with `|| echo SKIP`. Both are robustness fixes, not number-gaming.
 

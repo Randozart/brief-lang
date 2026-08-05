@@ -1,7 +1,7 @@
 // xxhash — xxHash Fast Hash Function Bindings
 // Tier 3: Data & Encoding
 //
-// Provides Brief wrappers for the xxHash family of non-cryptographic
+// Provides Briv wrappers for the xxHash family of non-cryptographic
 // hash functions. xxHash is extremely fast and has excellent
 // distribution properties.
 //

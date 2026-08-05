@@ -1,7 +1,7 @@
 # Phase 3 — Config Migration + Rule 18 Cleanup results
 
 **Date:** 2026-07-31
-**Worktree:** FDD worktree at `../brief-compiler-fdd`, branch `feat/frontend-driven-dispatch`
+**Worktree:** FDD worktree at `../briv-compiler-fdd`, branch `feat/frontend-driven-dispatch`
 **Baseline:** Phase 2 results in `2026-07-31-frontend-dispatch-phase2.md` (commit `d5ac5509`)
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
@@ -44,7 +44,7 @@ align-8 − 2-tag-bit String handle; documented at the key). All consumers rewir
 
 ### §8.4 Rule 18 cleanup — casting graph / universe (`ebbeaa03`, `25b6fd01`, `35a1790c`)
 
-All hardcoded Brief type-name matches in `src/backend/llvm/` replaced:
+All hardcoded Briv type-name matches in `src/backend/llvm/` replaced:
 
 | D# | Site | Now |
 |----|------|-----|
@@ -84,29 +84,29 @@ resolved to "Bit"/i64 in a bare universe).
   diagnostic on the new `TypeUniverse.warnings` whenever a fallback fires; the
   LLVM backend surfaces them in its warning report.
 
-## Runtime ratios (Brief vs C, ratio < 1 = Brief faster)
+## Runtime ratios (Briv vs C, ratio < 1 = Briv faster)
 
-| Benchmark | Phase 3 Brief | Phase 3 ratio | Phase 2 ratio | Δ | Winner | Correct |
+| Benchmark | Phase 3 Briv | Phase 3 ratio | Phase 2 ratio | Δ | Winner | Correct |
 |-----------|--------------:|:-------------:|:-------------:|:---:|:------:|:-------:|
 | ring_buffer | 0.0524s | 1.13× | 1.18× | −0.05 | C | MATCH |
-| float_math | 0.0734s | 0.99× | 0.97× | +0.02 | Brief | MATCH |
+| float_math | 0.0734s | 0.99× | 0.97× | +0.02 | Briv | MATCH |
 | float_math_nonzero | 0.2003s | 1.21× | 1.20× | +0.01 | C | MATCH |
-| sparse_dispatch | 0.0515s | 0.84× | 0.86× | −0.02 | Brief | MATCH |
+| sparse_dispatch | 0.0515s | 0.84× | 0.86× | −0.02 | Briv | MATCH |
 | print_loop | 0.0607s | 1.03× | 1.06× | −0.03 | C | MATCH |
-| nbody_newton | 6.9053s | 0.82× | 0.83× | −0.01 | Brief | MATCH |
-| nbody_sqrt | 2.1862s | 0.78× | 0.78× | 0.00 | Brief | MATCH |
-| nbody_sqrt_idio | 2.7251s | 0.75× | 0.76× | −0.01 | Brief | MATCH |
-| fasta | 0.2088s | 0.99× | 1.01× | −0.02 | Brief | MATCH |
-| fannkuch_redux | 0.0607s | 0.93× | 0.97× | −0.04 | Brief | MATCH |
+| nbody_newton | 6.9053s | 0.82× | 0.83× | −0.01 | Briv | MATCH |
+| nbody_sqrt | 2.1862s | 0.78× | 0.78× | 0.00 | Briv | MATCH |
+| nbody_sqrt_idio | 2.7251s | 0.75× | 0.76× | −0.01 | Briv | MATCH |
+| fasta | 0.2088s | 0.99× | 1.01× | −0.02 | Briv | MATCH |
+| fannkuch_redux | 0.0607s | 0.93× | 0.97× | −0.04 | Briv | MATCH |
 | mandelbrot | 0.6778s | 1.02× | 1.03× | −0.01 | C | MATCH |
 | kalman_filter_runtime | 0.2197s | 1.21× | 1.23× | −0.02 | C | MATCH |
-| knucleotide | 0.1873s | 0.99× | 0.98× | +0.01 | Brief | MATCH |
-| cancel_math | 0.0535s | 0.84× | 0.80× | +0.04 | Brief | MATCH |
+| knucleotide | 0.1873s | 0.99× | 0.98× | +0.01 | Briv | MATCH |
+| cancel_math | 0.0535s | 0.84× | 0.80× | +0.04 | Briv | MATCH |
 | bit_clear | 0.0003s | 3.00× | 0× | (noise) | C | MATCH |
-| queue_drain | 0.0570s | 0.93× | 0.85× | +0.08 | Brief | MATCH |
-| queue_drain_sym | 0.0565s | 0.92× | 0.92× | 0.00 | Brief | MATCH |
-| queue_drain_idio | 0.0564s | 0.91× | 0.93× | −0.02 | Brief | MATCH |
-| interval_step | 0.0629s | 0.99× | 1.01× | −0.02 | Brief | MATCH |
+| queue_drain | 0.0570s | 0.93× | 0.85× | +0.08 | Briv | MATCH |
+| queue_drain_sym | 0.0565s | 0.92× | 0.92× | 0.00 | Briv | MATCH |
+| queue_drain_idio | 0.0564s | 0.91× | 0.93× | −0.02 | Briv | MATCH |
+| interval_step | 0.0629s | 0.99× | 1.01× | −0.02 | Briv | MATCH |
 
 **Zero MISMATCH.** All deltas are within the harness's run-to-run noise band
 (±0.05–0.08× on the ~0.05s benchmarks; bit_clear times a ~0.3ms benchmark). The

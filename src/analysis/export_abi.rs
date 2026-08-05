@@ -8,7 +8,7 @@
 // renders the per-function state argument). Wrappers/bindings derive their
 // ABI from the per-export metadata, never by re-analyzing the AST.
 //
-// Rule: a defn needs state if its body (transitively through called Brief
+// Rule: a defn needs state if its body (transitively through called Briv
 // defns) uses the runtime state. This fixes the prior non-transitive check
 // in the LLVM backend, which emitted `call @f(ptr %state, ...)` from a
 // "pure" export that had no `%state` parameter → undefined-value IR.
@@ -90,7 +90,7 @@ fn defn_needs_state(
     }
     let d = exports.get(name).copied();
     let Some(d) = d else {
-        // Not an exported Brief defn — no state on its own. (Regular defns
+        // Not an exported Briv defn — no state on its own. (Regular defns
         // and transactions short-circuit to `true` at the call site.)
         memo.insert(name.to_string(), false);
         return false;
@@ -212,7 +212,7 @@ fn expr_needs_state(
         Expr::List(items) => {
             items.iter().any(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
-        // 2026-08-04 (compiler-in-Brief): wrapping expression kinds that can
+        // 2026-08-04 (compiler-in-Briv): wrapping expression kinds that can
         // HIDE a stateful inner — a cast-wrapped call (`token_at(t, 1) as Int`),
         // a method call on a state-field receiver, an index/slice/addr-of of a
         // state field. Previously the `_ => false` arm made these invisible, so
@@ -324,9 +324,9 @@ mod tests {
 
     #[test]
     fn export_calling_frgn_needs_no_state() {
-        // cstr_to_brief is a frgn, not a Brief defn → no state.
+        // cstr_to_briv is a frgn, not a Briv defn → no state.
         let d = defn("f", vec![Statement::Term(Some(
-            Expr::Call("cstr_to_brief".to_string(), vec![], None),
+            Expr::Call("cstr_to_briv".to_string(), vec![], None),
         ))]);
         let items = vec![exported(d)];
         let map = compute_export_needs_state(&items);

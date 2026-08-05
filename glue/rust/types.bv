@@ -1,10 +1,10 @@
-// GLUE: Rust foreign type declarations for Brief's type universe.
+// GLUE: Rust foreign type declarations for Briv's type universe.
 //
 // These declare Rust's primitive C-ABI-compatible types as names in
-// Brief's type universe, so `meld` can reference them directly.
+// Briv's type universe, so `meld` can reference them directly.
 // The LLVM/C type mapping is stored in glue.dbvl, not duplicated here.
 //
-// A bridge file imports these and melds them to Brief types:
+// A bridge file imports these and melds them to Briv types:
 //   import { i64, f64 } from "glue/rust/types.bv";
 //   meld Int -> i64 { Ptr -> Ptr; Size -> 8; Bytes -> 8; };
 //   #export add(a: Int) -> Int { term a; };

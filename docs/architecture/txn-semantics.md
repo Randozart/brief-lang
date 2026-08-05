@@ -1,6 +1,6 @@
 # Transaction and Node Semantics
 
-Brief has three executable constructs. They share a common contract-driven
+Briv has three executable constructs. They share a common contract-driven
 foundation but differ in how they are called and what state they can touch.
 
 ## 0. The Three Constructs

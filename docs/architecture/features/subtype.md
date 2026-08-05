@@ -6,11 +6,11 @@
 
 ## Overview
 
-Subtype projections (`<:` syntax) are Brief's built-in collection query pipeline. They let you filter, transform, sort, join, and aggregate collections with a SQL-like chain of operations, all without explicit loops.
+Subtype projections (`<:` syntax) are Briv's built-in collection query pipeline. They let you filter, transform, sort, join, and aggregate collections with a SQL-like chain of operations, all without explicit loops.
 
 ## Syntax
 
-```brief
+```briv
 let result : source { OP1(args); OP2(args); ... };
 ```
 
@@ -39,7 +39,7 @@ The source is evaluated, then each operation is applied in sequence. Each item i
 
 ### Examples
 
-```brief
+```briv
 // Filter and map
 let result : items { FILTER(active); MAP(x * 2); };
 

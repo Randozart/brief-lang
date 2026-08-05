@@ -1,6 +1,6 @@
 # Data Types: Collections & Structures
 
-Brief provides powerful built-in data types with O(1) operations.
+Briv provides powerful built-in data types with O(1) operations.
 
 ## 1. HashMap<K, V>
 
@@ -8,7 +8,7 @@ Hash-based key-value storage with O(1) lookup. The current `std/collections.bv`
 HashMap is a **flat open-addressing** obj (keys/vals Ptr arrays) constructed via
 `op Init` and mutated through method calls:
 
-```brief
+```briv
 import { HashMap } from "std/collections.bv";
 
 // Construction via op Init
@@ -28,7 +28,7 @@ defn get_age(m: HashMap<Int, Int>) -> Int {
 
 ### Example: Word Counter
 
-```brief
+```briv
 defn count_words(text: String) -> HashMap<String, Int> {
     let counts = new_map<String, Int>();
     let words = text.split(" ");
@@ -54,7 +54,7 @@ defn count_words(text: String) -> HashMap<String, Int> {
 
 Hash-based set with O(1) membership testing.
 
-```brief
+```briv
 // Construction
 let set: HashSet<String> = new_set();
 
@@ -83,7 +83,7 @@ let items = set.iter();
 
 ### Example: Unique Items
 
-```brief
+```briv
 defn unique_items(list: List<String>) -> List<String> {
     let seen = new_set<String>();
     let result: List<String> = [];
@@ -108,7 +108,7 @@ LIFO (Last-In-First-Out) structure. The current collections (`std/collections.bv
 are **obj instances** driven by the `<-` operators: `op InsertAt` (push),
 `op ExtractFrom` (pop), `op Init` (`let s: Stack<T, N> = 0` constructs).
 
-```brief
+```briv
 import { Stack } from "std/collections.bv";
 
 // Construction via op Init — allocates the instance + its data buffer
@@ -140,7 +140,7 @@ is the fixed-size circular buffer.
 
 ### Example: Expression Evaluator
 
-```brief
+```briv
 defn evaluate_rpn(expr: List<String>) -> Int {
     let stack: Stack<Int> = new_stack();
     
@@ -172,7 +172,7 @@ defn evaluate_rpn(expr: List<String>) -> Int {
 
 FIFO (First-In-First-Out) structure.
 
-```brief
+```briv
 // Construction
 let queue: Queue<String> = new_queue();
 
@@ -203,7 +203,7 @@ queue = queue.clear();
 
 ### Example: BFS Traversal
 
-```brief
+```briv
 defn bfs(start: Node) -> List<Node> {
     let visited = new_set<Node>();
     let queue: Queue<Node> = new_queue();
@@ -237,7 +237,7 @@ defn bfs(start: Node) -> List<Node> {
 
 Efficient string concatenation (O(1) amortized append).
 
-```brief
+```briv
 // Construction
 let sb = new_builder();
 
@@ -264,7 +264,7 @@ sb = sb.clear();
 
 ### Example: CSV Builder
 
-```brief
+```briv
 defn build_csv(rows: List<List<String>>) -> String {
     let sb = new_builder();
     
@@ -291,7 +291,7 @@ defn build_csv(rows: List<List<String>>) -> String {
 
 `struct` declares pure data with fixed layout, C-compatible, no methods or contracts:
 
-```brief
+```briv
 struct Point {
     x: Int;
     y: Int;
@@ -311,7 +311,7 @@ let name = p.name;  // field access
 
 Arrays of compile-time-known size are declared inline. Works for any type:
 
-```brief
+```briv
 struct VMStack {
     data: Int[1024];    // [1024 x i64] in LLVM IR
     len: Int;
@@ -329,7 +329,7 @@ Bounds proven by contract: `[i >= 0 && i < stack .^Len]`.
 
 A slice is a **zero-copy view** into an existing array:
 
-```brief
+```briv
 arr[:]         // Full view
 arr[4:]        // From index 4 to end
 arr[:8]        // From start to index 8
@@ -344,7 +344,7 @@ All components are optional: start defaults to 0, end to array length, stride to
 
 Element-wise arithmetic on array and slice types:
 
-```brief
+```briv
 let a: Int[4] = ...;
 let b: Int[4] = ...;
 let sum = a + b;       // <4 x i64> vector add
@@ -355,7 +355,7 @@ let doubled = a * 2;   // Scalar broadcast
 
 The `as` operator produces zero-copy views between compatible array types:
 
-```brief
+```briv
 let raw: Int[1024];
 let bytes = raw as Byte[8192];  // type-punned: same bytes, different type
 let evens = raw[0:1024:2] as Int[512];  // strided: slice recast as sized array
@@ -369,7 +369,7 @@ validated against target size. Both are zero-copy.
 
 `map`, `filter`, `fold` are regular txn functions in `lib/std/array.bv`:
 
-```brief
+```briv
 txn array_map<T, U>(arr: Vector<T, N>, f: T -> U, i: Int)
     -> Vector<U, N>
     [i < N][i == N]
@@ -395,7 +395,7 @@ vectorizes the load-apply-store loop without compiler magic.
 
 ## 8. Complete Example: Contact Manager
 
-```brief
+```briv
 // contacts.bv
 
 struct Contact {
@@ -467,7 +467,7 @@ Vectors are fixed-size, contiguous memory arrays optimized for hardware and SIMD
 
 ### Declaration
 
-```brief
+```briv
 // 1D vector
 let vec: Vector<Int, 100>;
 
@@ -490,7 +490,7 @@ let persons: Vector<Person, width:50, height:50, depth:40, time:10>;
 
 ### Accessing Elements
 
-```brief
+```briv
 let mat: Vector<Int, 10, 20>;
 
 // 2D access
@@ -510,9 +510,9 @@ let slice: Vector<Person, 50> = persons[time:5, width:10];
 
 ### Slicing Syntax
 
-Brief supports powerful slicing with commas for multiple dimensions:
+Briv supports powerful slicing with commas for multiple dimensions:
 
-```brief
+```briv
 let mat: Vector<Int, 10, 20>;
 
 // Single index per dimension
@@ -533,9 +533,9 @@ persons[time::2, width:5]  // Every 2nd time step, at width=5
 
 ### Slicing Syntax
 
-Brief supports powerful slicing with commas for multiple dimensions:
+Briv supports powerful slicing with commas for multiple dimensions:
 
-```brief
+```briv
 let mat: Vector<Int, 10, 20>;
 
 // Single index per dimension
@@ -558,7 +558,7 @@ persons[time::2, width:5]  // Every 2nd time step, at width=5
 
 The semicolon separates coordinates from filter conditions:
 
-```brief
+```briv
 let persons: Vector<Person, 50, 50>;
 
 // Filter: all persons where age > 18
@@ -583,7 +583,7 @@ persons[0..50:2; city == "NYC"].region = "East";
 
 ### Example: Image Processing
 
-```brief
+```briv
 struct Pixel {
     r: UInt,
     g: UInt,
@@ -610,7 +610,7 @@ knowing its origin.
 
 ### Creating Pointers
 
-```brief
+```briv
 // Verified pointer (compiler tracks bounds, guarantees non-null)
 let p: Ptr<Int> = &x;
 
@@ -625,7 +625,7 @@ let p2: Ptr<Int> = x.^Ptr;
 
 Use bracket indexing — `ptr[i]` — or the `*` dereference operator:
 
-```brief
+```briv
 let val: Int = p[0];          // Read element 0 — bounds-checked at compile time
 p[0] = 42;                    // Write element 0 — bounds-checked
 let first: Int = *p;          // Dereference — first element
@@ -641,13 +641,13 @@ after proving the access is within bounds.
 | Bounds | `i * sizeof(T) < ptr.^^Bytes` is proven by the SMT solver |
 | Non-null | `Ptr<T>` from `&x` or `&list[0]` is always valid |
 | Alignment | Address is always aligned to `T.^^Alignment` |
-| No use-after-free | Brief has no `free` — global state lives forever |
+| No use-after-free | Briv has no `free` — global state lives forever |
 
 ### Standard Library
 
 `std/ptr.bv` provides convenient wrappers with explicit contracts:
 
-```brief
+```briv
 import { read_i64, write_i64, copy, address } from "std/ptr.bv";
 
 // Safe read — precondition: i >= 0 && (i+1)*8 <= p .^^Bytes
@@ -671,11 +671,11 @@ with a `ProofError`.
 
 ## 11. Type/Metadata Checks: `is`, `from`, `like`
 
-Brief provides three infix operators for inspecting types and structure at runtime.
+Briv provides three infix operators for inspecting types and structure at runtime.
 
 ### `is` — Type or Variant Check
 
-```brief
+```briv
 let x: Int = 42;
 let is_int = x is Int;    // → true
 
@@ -688,7 +688,7 @@ The RHS of `is` can be a type name (`Int`, `String`) or a variant keyword (`some
 
 ### `from` — Derivation Check
 
-```brief
+```briv
 struct Foo { x: Int; }
 struct Bar : Foo { y: Int; }
 
@@ -700,7 +700,7 @@ Checks whether the value's type is or derives from the target type.
 
 ### `like` — Structural Equality
 
-```brief
+```briv
 42 like 42             // → true
 [1, 2] like [1, 2]     // → true (recursive comparison)
 "hi" like "hi"         // → true
@@ -712,7 +712,7 @@ but identical fields can be `like` each other.
 
 ### Precedence
 
-```brief
+```briv
 !x is Some      → !(x is Some)
 x is Some == true → (x is Some) == true
 ```

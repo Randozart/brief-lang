@@ -1,5 +1,5 @@
 // ── Array Operations ──────────────────────────────────────────────
-// 2026-07-26: Pure-Brief iterator functions for Vector<T,N> and Slice<T>.
+// 2026-07-26: Pure-Briv iterator functions for Vector<T,N> and Slice<T>.
 // No compiler magic — the LLVM auto-vectorizer recognizes the [i < N]
 // convergence contract and vectorizes the load-apply-store loop.
 

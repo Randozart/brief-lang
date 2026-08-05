@@ -26,10 +26,20 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     when fn_off + fn_size > lair_len { term 104; };
     when fn_count == 0 { term 105; };
 
-    // Single-return buffer sizing (VM backend doesn't support multi-return)
+    // Single-return buffer sizing
     let stack_slots = compute_stack_slots(fn_table, fn_count, bc_data, bc_len);
     let locals_slots = compute_locals_slots(fn_table, fn_count, bc_data, bc_len);
     let frames_max = compute_frames_max(fn_table, fn_count, bc_data, bc_len);
+
+    // Allocate buffers and run the user's program via the inner VM
+    let stack: VMStack;
+    let locals: VMLocals;
+    let frames: VMFrames;
+
+    let _result = vm_loop(
+        &stack, &locals, &frames,
+        bc_data, bc_len, fn_table, fn_count,
+        0, 0, 1);
 
     term 0;
 };

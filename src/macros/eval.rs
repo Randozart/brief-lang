@@ -433,7 +433,7 @@ pub fn eval_nav_chain(
             // For regular frgn/defn, always exists (true).
             let exists = program.iter().any(|item| {
                 if let TopLevel::ForeignBinding(fb) = item {
-                    let bname = fb.brief_name.as_deref().unwrap_or(&fb.foreign_name);
+                    let bname = fb.briv_name.as_deref().unwrap_or(&fb.foreign_name);
                     bname == name && !fb.is_optional
                 } else {
                     false
@@ -1109,7 +1109,7 @@ fn eval_nav_call(
             ))))
         }
         // 2026-07-23: Quote$ — structural quasiquoting.
-        // Template string parsed as Brief source; $ident references resolved
+        // Template string parsed as Briv source; $ident references resolved
         // from compile-time scope variables. $$escapes to literal $.
         // Returns TopLevel (single item) or VecTopLevel (multiple items).
         "Quote$" => {
@@ -1885,7 +1885,7 @@ fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String>
         }
         (TopLevel::Definition(d), "outputs.count") => Ok(d.outputs.len().to_string()),
         (TopLevel::ForeignBinding(fb), "name") => Ok(fb.foreign_name.clone()),
-        (TopLevel::ForeignBinding(fb), "brief_name") => Ok(fb.effective_brief_name().to_string()),
+        (TopLevel::ForeignBinding(fb), "briv_name") => Ok(fb.effective_briv_name().to_string()),
         (TopLevel::Import(i), "path") => Ok(i.path().to_string()),
         _ => Err(format!("TypeInfo$: unknown field '{}' for this item type", field)),
     }
@@ -1909,7 +1909,7 @@ fn single_type_name(ot: &OutputType) -> String {
 // 2026-07-23: AST-level quasiquoting — resolve $identifier references from
 // scope, convert NavValues to Exprs, and handle $$ escaping.
 
-/// Parse a string as a single Brief expression.
+/// Parse a string as a single Briv expression.
 fn parse_expr_from_string(s: &str) -> Result<Expr, String> {
     let tokens = crate::lexer::tokenize(s)
         .map_err(|e| format!("cannot tokenize expression '{}': {}", s, e))?;
@@ -2271,7 +2271,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
 /// that contain the sentinel byte.
 fn restore_double_dollar_in_toplevel(tl: &mut TopLevel) {
     // For the initial implementation, this is a no-op at the AST level
-    // because $$ is not a valid identifier start in Brief's lexer —
+    // because $$ is not a valid identifier start in Briv's lexer —
     // it would be lexed as two separate tokens: $ and $identifier.
     // The sentinel replacement at the string level handles this correctly.
     // This function is a hook for future $$-in-identifier support.

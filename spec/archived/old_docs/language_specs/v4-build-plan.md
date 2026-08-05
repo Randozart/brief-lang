@@ -1,4 +1,4 @@
-# Brief Compiler Build Plan
+# Briv Compiler Build Plan
 
 **Based on:** `ARCHITECTURE.md` v1.0  
 **Target:** Incremental compiler for `.bv` files with manifest-driven imports  
@@ -25,10 +25,10 @@
 
 ## Phase 1: Manifest System (1 day)
 
-**Goal:** Package management with `brief.toml`
+**Goal:** Package management with `briv.toml`
 
 ### Deliverables
-- `src/manifest.rs` - Parse and validate brief.toml
+- `src/manifest.rs` - Parse and validate briv.toml
 - CLI commands: `import`, `install`, `list`, `remove`
 
 ### Tasks
@@ -39,9 +39,9 @@
 
 ### CLI Commands
 ```bash
-brief import <name> --path <loc>   # Add dependency
-brief install                      # Install all deps
-brief list                         # List deps
+briv import <name> --path <loc>   # Add dependency
+briv install                      # Install all deps
+briv list                         # List deps
 ```
 
 ---
@@ -88,7 +88,7 @@ brief list                         # List deps
 **Goal:** Persistent, content-addressed caching
 
 ### Deliverables
-- `.brief-cache/` directory
+- `.briv-cache/` directory
 - Phase-level caching (AST, types, proofs)
 
 ### Tasks
@@ -99,7 +99,7 @@ brief list                         # List deps
 
 ### Cache Structure
 ```
-.brief-cache/
+.briv-cache/
 ├── manifest.json
 ├── modules/
 │   ├── {name}.ast
@@ -134,17 +134,17 @@ brief list                         # List deps
 **Goal:** Complete command-line interface
 
 ### Deliverables
-- `brief check` - Type check without execution
-- `brief build` - Full compilation
-- `brief watch` - Watch mode
-- `brief init` - Scaffold new project
+- `briv check` - Type check without execution
+- `briv build` - Full compilation
+- `briv watch` - Watch mode
+- `briv init` - Scaffold new project
 
 ### Commands
 ```bash
-brief check <file.bv>      # Skip interpreter, fast feedback
-brief build <file.bv>      # Full compilation
-brief watch <file.bv>      # Watch mode
-brief init --name <name>   # Create project scaffold
+briv check <file.bv>      # Skip interpreter, fast feedback
+briv build <file.bv>      # Full compilation
+briv watch <file.bv>      # Watch mode
+briv init --name <name>   # Create project scaffold
 ```
 
 ---
@@ -162,7 +162,7 @@ brief init --name <name>   # Create project scaffold
 
 ---
 
-## Phase 8: Rendered Brief Preparation (Ongoing)
+## Phase 8: Rendered Briv Preparation (Ongoing)
 
 **Goal:** Design for future .rbv compilation
 
@@ -197,7 +197,7 @@ Phase 0: Architecture Foundation
     │                                                           │
     │                                                           └──► Phase 7: Integration Tests
     │
-    └──► Phase 8: Rendered Brief Preparation (Parallel)
+    └──► Phase 8: Rendered Briv Preparation (Parallel)
 ```
 
 ---
@@ -226,5 +226,5 @@ Phase 0: Architecture Foundation
 ## Key References
 
 - **Architecture:** `ARCHITECTURE.md`
-- **Language Spec:** `brief-lang-spec.md`
-- **Rendered Brief:** `rendered-brief-rbv-spec-v3.md`
+- **Language Spec:** `briv-lang-spec.md`
+- **Rendered Briv:** `rendered-briv-rbv-spec-v3.md`

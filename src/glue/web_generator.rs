@@ -14,7 +14,7 @@
 // Trade-off: One FFI crossing per transaction (not per field). This is optimal
 // for transactions with 1-5 field mutations (the common case). For transactions
 // with 20+ field mutations, a single large batch still beats per-field crossings.
-// See docs/architecture/features/rendered-brief-wasm.md.
+// See docs/architecture/features/rendered-briv-wasm.md.
 
 use std::collections::HashMap;
 
@@ -227,7 +227,7 @@ export class WasmDomRuntime {{
   _readString(ptr) {{
     if (!ptr) return null;
     const mem = new Uint8Array(this._memory.buffer);
-    // Brief strings: [i64 length][data\0] — read length, then slice data
+    // Briv strings: [i64 length][data\0] — read length, then slice data
     const lenView = new DataView(this._memory.buffer);
     const len = Number(lenView.getBigUint64(ptr, true));
     const bytes = mem.slice(Number(ptr) + 8, Number(ptr) + 8 + len);
@@ -235,7 +235,7 @@ export class WasmDomRuntime {{
   }}
 
   _writeString(str) {{
-    // Allocate WASM memory for a Brief string (i64 length + bytes + \0)
+    // Allocate WASM memory for a Briv string (i64 length + bytes + \0)
     // and return the pointer. Uses Module.malloc or pre-allocated buffer.
     const encoder = new TextEncoder();
     const bytes = encoder.encode(str);
@@ -416,7 +416,7 @@ export async function createApp(wasmBytes) {{
     /// using from #Web, emit a JS import stub in the WASM instantiation's
     /// import object. The stub unmarshals each parameter from WASM ABI to JS
     /// value (using GLUE protocol mappings), calls the native function by its
-    /// Brief name, then marshals the return value back to WASM ABI.
+    /// Briv name, then marshals the return value back to WASM ABI.
     ///
     /// No function name matching — the TYPE determines marshalling:
     ///   #String       → _readString(ptr) / _writeString(str)
@@ -432,7 +432,7 @@ export async function createApp(wasmBytes) {{
     fn generate_imports(&self) -> String {
         let mut out = String::new();
         for fb in &self.frgn_decls {
-            let fn_name = fb.effective_brief_name();
+            let fn_name = fb.effective_briv_name();
             let param_names = self.frgn_param_names(&fb.inputs);
             let marshal_in = self.frgn_marshal_in(&fb.inputs, &param_names);
             let marshal_out = self.frgn_marshal_out(&fb.success_output);
@@ -472,7 +472,7 @@ export async function createApp(wasmBytes) {{
         out
     }
 
-    /// Derive JS parameter names from Brief parameter types.
+    /// Derive JS parameter names from Briv parameter types.
     /// 2026-07-26: Phase 6 — Type-driven naming so the generated JS is readable.
     fn frgn_param_names(&self, inputs: &[(String, crate::ast::Type)]) -> Vec<String> {
         inputs.iter().enumerate().map(|(i, (name, ty))| {
@@ -484,7 +484,7 @@ export async function createApp(wasmBytes) {{
         }).collect()
     }
 
-    /// Generate a JS parameter name based on its Brief type.
+    /// Generate a JS parameter name based on its Briv type.
     fn param_name_from_type(&self, ty: &crate::ast::Type, idx: usize) -> String {
         match ty {
             crate::ast::Type::Ptr(_) => format!("ptr{}", idx),

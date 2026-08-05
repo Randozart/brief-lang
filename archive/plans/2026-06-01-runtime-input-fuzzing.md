@@ -6,14 +6,14 @@
 ## Motivation
 
 All benchmarks currently use compile-time constants for loop bounds and inputs.
-Brief exploits this to fold loops into O(1) stores, proving counter convergence
+Briv exploits this to fold loops into O(1) stores, proving counter convergence
 at compile time. This is legitimate optimization but leaves a blind spot: **how
-does Brief perform when inputs are genuinely runtime-variable?**
+does Briv perform when inputs are genuinely runtime-variable?**
 
 With runtime-variable inputs:
-- Brief cannot fold loops (no constant bound to store)
-- Brief cannot precompute final values (no compile-time state space)
-- Brief falls through to its runtime dispatch: reactor ticks, pre/fire/post, 
+- Briv cannot fold loops (no constant bound to store)
+- Briv cannot precompute final values (no compile-time state space)
+- Briv falls through to its runtime dispatch: reactor ticks, pre/fire/post, 
   trigger-gated enum/async paths
 - C loses clang's constant propagation too — fair comparison
 
@@ -25,8 +25,8 @@ compiler can't know the inputs ahead of time?
 Avoids modifying `emit_init_state()` (which silently drops complex expressions).
 Instead, uses the existing trigger (`@ link`) mechanism:
 
-1. `runtime/brief_rt.c` adds `volatile int64_t __runtime_bound` — a C global
-2. Constructor function `__brief_read_env_bound()` reads `BOUND` from environment
+1. `runtime/briv_rt.c` adds `volatile int64_t __runtime_bound` — a C global
+2. Constructor function `__briv_read_env_bound()` reads `BOUND` from environment
    before `main()` via `__attribute__((constructor))`
 3. `lib/std/env.bv` declares `trg runtime_bound: Int @ link __runtime_bound;`
 4. Runtime `.bv` benchmarks `import { runtime_bound } from "std/env.bv"` and use
@@ -44,14 +44,14 @@ or compile-time constant), the compiler's analysis is agnostic:
 
 ## Implementation Steps
 
-### Step 1: `runtime/brief_rt.c` — Add environment global + constructor
+### Step 1: `runtime/briv_rt.c` — Add environment global + constructor
 
 ```c
 #include <stdlib.h>     // for getenv, strtol
 
 volatile int64_t __runtime_bound = 0;
 
-__attribute__((constructor)) static void __brief_read_env_bound(void) {
+__attribute__((constructor)) static void __briv_read_env_bound(void) {
     const char* val = getenv("BOUND");
     if (val) {
         char* end = NULL;
@@ -63,7 +63,7 @@ __attribute__((constructor)) static void __brief_read_env_bound(void) {
 
 ### Step 2: `lib/std/env.bv` — Trigger declaration
 
-```brief
+```briv
 trg runtime_bound: Int @ link __runtime_bound;
 ```
 
@@ -115,16 +115,16 @@ Mode B — runtime (--mode runtime):
   1. Compile runtime-variant .bv + .c once
   2. For each run:
      a. Export BOUND=<random>
-     b. /usr/bin/time ./benchmark_runtime [brief]
+     b. /usr/bin/time ./benchmark_runtime [briv]
      c. /usr/bin/time ./benchmark_runtime_c [C]
      d. Store both times
   3. Compute statistics
 
 Output:
   benchmark: ring_buffer (runtime, n=50)
-    brief: mean=0.045s median=0.044s min=0.042s max=0.052s σ=0.0023s
+    briv: mean=0.045s median=0.044s min=0.042s max=0.052s σ=0.0023s
     c:     mean=0.042s median=0.041s min=0.040s max=0.048s σ=0.0018s
-    brief/c ratio: 1.07×  (Brief is 7% slower)
+    briv/c ratio: 1.07×  (Briv is 7% slower)
     correctness: 50/50 exit codes match
 ```
 
@@ -141,7 +141,7 @@ runtime targets Linux/macOS/ARM via Clang/GCC anyway.
 
 | File | Action | Lines |
 |------|--------|-------|
-| `runtime/brief_rt.c` | EDIT | +5 (global) +12 (constructor) |
+| `runtime/briv_rt.c` | EDIT | +5 (global) +12 (constructor) |
 | `lib/std/env.bv` | NEW | 2 |
 | `benchmarks/ring_buffer_runtime.bv` | NEW | ~25 |
 | `benchmarks/async_counters_runtime.bv` | NEW | ~30 |
@@ -158,7 +158,7 @@ runtime targets Linux/macOS/ARM via Clang/GCC anyway.
 
 | Benchmark | Compile-time (both) | Runtime (neither) | Gap analysis |
 |-----------|--------------------|--------------------|--------------|
-| iir_filter | Field + Brief: 0.00s C: 0.10s | Both: actual loop | Brief's runtime dispatch overhead |
-| ring_buffer | Both: 0.00s | Both: actual loop | Brief's trigger/reactor tick overhead |
+| iir_filter | Field + Briv: 0.00s C: 0.10s | Both: actual loop | Briv's runtime dispatch overhead |
+| ring_buffer | Both: 0.00s | Both: actual loop | Briv's trigger/reactor tick overhead |
 | async_counters | Both: 0.00s | Both: actual loop | Thread pool + dispatch overhead |
-| precompute_sum | Both: 0.00s | Both: actual loop | Brief's chain execution overhead |
+| precompute_sum | Both: 0.00s | Both: actual loop | Briv's chain execution overhead |

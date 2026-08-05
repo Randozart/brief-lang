@@ -2,19 +2,19 @@
 
 **Date:** 2026-06-25
 **Status:** Planned
-**Replaces:** `docs/plans/2026-06-25-native-brief-io-followup.md` Item 2 (Extension B)
+**Replaces:** `docs/plans/2026-06-25-native-briv-io-followup.md` Item 2 (Extension B)
 
 ---
 
 ## Motivation
 
-Functions are first-class citizens in Brief's contract system, but there is no way to
+Functions are first-class citizens in Briv's contract system, but there is no way to
 query their metadata at runtime. This plan extends the `:>` projection/lens system
 (already used for `list .#Size`, `map :> Keys`, etc.) to work on callable declarations:
 `defn`, `inop!`, and `txn`.
 
 A programmer writes:
-```brief
+```briv
 defn add(x: Int, y: Int) -> Int [x > 0][y > 0] { term x + y; };
 
 // Function properties via lens
@@ -32,7 +32,7 @@ let is_pure: Bool = add :> IsPure;     // true (defn is always pure)
 ```
 
 The lens works identically on `inop!` and `txn`:
-```brief
+```briv
 let h: Int    = my_isr :> Address;   // ISR address for IVT
 let doc: String = compute :> Doc; // txn doc string
 ```
@@ -349,7 +349,7 @@ Add 12 new arms returning `SymbolicValue::Unknown`.
 sufficient for FFI callbacks (passing to C via `frgn`) and embedded interrupt
 vector tables (storing via `volatile_store#`).
 
-**Indirect calls from within Brief are intentionally not supported.** Calling
+**Indirect calls from within Briv are intentionally not supported.** Calling
 through a function pointer would bypass:
 
 - **Contracts** — no pre/post conditions on an indirect call
@@ -357,27 +357,27 @@ through a function pointer would bypass:
   engine rely on known call targets
 - **Optimization** — LLVM cannot inline or SROA across indirect call boundaries
 
-Every use case for indirect calls has a better Brief-native mechanism:
+Every use case for indirect calls has a better Briv-native mechanism:
 
-| C pattern | Brief equivalent | Guarantees |
+| C pattern | Briv equivalent | Guarantees |
 |---|---|---|
 | `dispatch_table[i](arg)` | `node` with contract convergence | Contract-proven, optimizable |
 | `sort(&cmp_fn, list)` | Generics + `:>` type dispatch | Static dispatch, inlinable |
 | `signal(SIGINT, &handler)` | `frgn signal(sig: Int, handler: Int)` + `handler :> Address` | Address at boundary, contracts intact |
 
-### Embedded Brief note
+### Embedded Briv note
 
-For Embedded Brief targets, `fn_name :> Address` is critical: it allows storing
+For Embedded Briv targets, `fn_name :> Address` is critical: it allows storing
 function addresses into interrupt vector tables, callback registration slots,
 and linker-specified entry points — all typed through contract-proven `inop!`
-declarations with `volatile_store#`. The address is just an integer; Brief's
+declarations with `volatile_store#`. The address is just an integer; Briv's
 lens syntax makes querying it a first-class language operation while keeping
 the interior of the function under full contract protection.
 
 ## Replaces: Cancelled from Previous Plan
 
 This plan **replaces and cancels** the following from
-`docs/plans/2026-06-25-native-brief-io-followup.md`:
+`docs/plans/2026-06-25-native-briv-io-followup.md`:
 
 ### Item 2: Extension B — `fn(T) -> U` function pointer type + `&f` address-of
 
@@ -396,7 +396,7 @@ All of this is obviated by `f :> Address` lens syntax, which:
 - Requires zero AST changes (new `ProjectionTarget` variants only)
 - Requires zero `OwnedRef` match site changes
 - Is more idiomatic: "extract the address property of f" vs "address-of operator"
-- Consistent with Brief's existing lens philosophy
+- Consistent with Briv's existing lens philosophy
 
 ### What survives from the follow-up plan unchanged:
 

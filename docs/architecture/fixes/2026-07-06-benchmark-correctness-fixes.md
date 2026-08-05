@@ -25,7 +25,7 @@ experimental analysis including Config A/B/C/D comparisons.
 
 ### Symptoms
 
-`bit_clear` produces output `0` but C reference produces `1`. The Brief
+`bit_clear` produces output `0` but C reference produces `1`. The Briv
 version reads stale (pre-update) field value for the `[reg == 0]` guard.
 
 ### Root Cause
@@ -110,7 +110,7 @@ which was uninitialized → garbage → wrong guard branch → wrong output.
 
 Additionally, the print guard threshold `[count % 5000000 == 0]` was
 used with `print_int#(count)`.  C's print happens after `count++`, so
-the printed values are 5M, 10M, 15M...  Brief's guard fires BEFORE the
+the printed values are 5M, 10M, 15M...  Briv's guard fires BEFORE the
 `&count = count + 1` increment, printing 0, 5M-1, 10M-1...  Mismatch.
 
 ### Fix
@@ -243,6 +243,6 @@ All 22 benchmarks MATCH against C references (0 MISMATCH):
 | nbody_sqrt | MATCH | compiler (vector_phi_current) |
 
 Runtime ratios unchanged or improved:
-- nbody_sqrt: non-deterministic → 0.74x (Brief wins, deterministic)
+- nbody_sqrt: non-deterministic → 0.74x (Briv wins, deterministic)
 - mandelbrot: unchanged (0.99x)
 - All others: within noise

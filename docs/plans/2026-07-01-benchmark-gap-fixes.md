@@ -49,7 +49,7 @@ The C-linking path (line 134) uses `clang -O3 filename.ll` but does not pass
 ### Impact
 
 .text section is 15-21x larger than C for simple benchmarks (fannkuch_redux,
-mandelbrot). The L1I cache (32KB on x86_64) is filled entirely by Brief's
+mandelbrot). The L1I cache (32KB on x86_64) is filled entirely by Briv's
 .text, causing cache pressure on every function call (like fprintf).
 
 ### Fix
@@ -62,7 +62,7 @@ invocation at line 134. This tells the linker to eliminate unused sections.
 `--gc-sections` works at the section level. Since `clang -O3` places each
 function in its own section when `-ffunction-sections` is enabled, this
 effectively provides dead-function elimination. It does NOT eliminate dead
-code within a function — that's LLVM's job. The Brief backend should still
+code within a function — that's LLVM's job. The Briv backend should still
 emit clean IR; gc-sections is a safety net, not a substitute.
 
 **Dual-path consideration**: For small programs (< 10 functions), the

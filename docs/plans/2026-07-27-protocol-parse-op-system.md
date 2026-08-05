@@ -63,7 +63,7 @@ After the op name `Add`, before `:`, parse optional key-value pairs:
 - `reg:"[0-9a-fA-F]+"` → `reg = Some("...")`
 
 Syntax:
-```brief
+```briv
 type Int: #Int {
     op Parse(Decimal): parse_dec(#L);
 };
@@ -116,7 +116,7 @@ After parsing a literal (`Decimal`, `Float`, `Quoted`, `Identifier`), check:
 
 | File | Change |
 |------|--------|
-| `benchmarks/build_and_bench.sh` | One-step clang linking with `lib/runtime/brief_rt.c` |
+| `benchmarks/build_and_bench.sh` | One-step clang linking with `lib/runtime/briv_rt.c` |
 | `src/backend/llvm/loop_engine/counter.rs` | phi type `"i64"` for all counter fields |
 
 ## 5. Coding Standards

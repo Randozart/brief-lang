@@ -81,7 +81,7 @@
 
 - **Kernel Target Fixes (2026-04-29 19:25)**:
   - Fixed `return0` bug in C backend — now generates `return 0;` with proper space (`src/backend/c.rs:184,206`)
-  - Fixed duplicate `brief_init` function — renamed wrapper to `init_wrapper()` to avoid kernel naming conflict
+  - Fixed duplicate `briv_init` function — renamed wrapper to `init_wrapper()` to avoid kernel naming conflict
   - Fixed NULL state pointer in kernel mode — now uses `static State state_instance;` for static allocation
   - Fixed `find_entry_point()` to prioritize transaction named "init" over generic `[true]` preconditions
   - Fixed Makefile generation — removed circular `-objs` dependency that caused build failures
@@ -147,7 +147,7 @@
 
 - **Tested with**:
   ```bash
-  ./brief-compiler c kernel.ebv --out /tmp/test
+  ./briv-compiler c kernel.ebv --out /tmp/test
   aarch64-linux-gnu-gcc -nostdlib -static -march=armv8-a -ffreestanding -O2 -c /tmp/test/kernel.c -o kernel.o
   ```
 

@@ -1,4 +1,4 @@
-// ── Brief Collections ───────────────────────────────────────────────
+// ── Briv Collections ───────────────────────────────────────────────
 // 2026-07-26: Standard collection types. No compiler magic.
 // Protocol bindings let the <- operator work for any collection
 // via op InsertAt: fn(#L, #R) and op ExtractFrom: fn(#R).
@@ -84,7 +84,7 @@ obj List<T> {
     op Init: init(#L, #R);
 
     txn init(val: T) [true][len == 1] {
-        // 2026-08-04 (compiler-in-Brief): allocate 16 ELEMENTS (128 bytes for
+        // 2026-08-04 (compiler-in-Briv): allocate 16 ELEMENTS (128 bytes for
         // the i64-handle ABI), not 16 bytes. The original Malloc#(16) gave a
         // 2-element buffer while advertising cap 16 — push's precondition
         // permitted 16 writes into a 16-byte allocation (heap overflow past
@@ -96,7 +96,7 @@ obj List<T> {
         len = 1;
     };
 
-    // 2026-08-04 (compiler-in-Brief): grow the backing buffer to a new
+    // 2026-08-04 (compiler-in-Briv): grow the backing buffer to a new
     // element capacity, preserving existing elements. Lets callers build
     // larger lists (the needs_state pass splits projections into tens of
     // line/token strings).

@@ -6,9 +6,9 @@
 // Int, and Float placeholders, positional {n}, and {{ }} escapes.
 //
 // Build + run:
-//   ./target/debug/briefc build .smoke/format_demo.bv --llvm --out /tmp/demo
+//   ./target/debug/brivc build .smoke/format_demo.bv --llvm --out /tmp/demo
 //   clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
-//       -Wl,--gc-sections /tmp/demo/format_demo.ll lib/runtime/brief_rt.c -o /tmp/demo/format_demo
+//       -Wl,--gc-sections /tmp/demo/format_demo.ll lib/runtime/briv_rt.c -o /tmp/demo/format_demo
 //   WHO=world /tmp/demo/format_demo
 //
 // Expected output:

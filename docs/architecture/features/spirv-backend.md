@@ -9,7 +9,7 @@
 ## Module Layout
 
 The GPU pipeline lives in `src/backend/llvm/gpu.rs` with cost analysis in
-`src/analysis/gpu_cost.rs`. The runtime C library is `lib/runtime/brief_gpu_rt.c`.
+`src/analysis/gpu_cost.rs`. The runtime C library is `lib/runtime/briv_gpu_rt.c`.
 
 ### Public Functions in `gpu.rs`
 
@@ -32,14 +32,14 @@ The GPU pipeline lives in `src/backend/llvm/gpu.rs` with cost analysis in
 ## Flow
 
 ```
-Brief source → codegen (CPU IR) → collect_gpu_kernel():
+Briv source → codegen (CPU IR) → collect_gpu_kernel():
   1. check_eligibility() — purity: no unsafe FFI/term/unification/escape
   2. gpu_cost::estimate() — ops vs bytes, crossover point, remarks
   3. extract_kernel() — clone body, classify read/write fields
   4. emit_spirv_module() — produce LLVM IR for spirv64-unknown-unknown
   5. compile_to_spirv() — llc --mtriple=spirv64-unknown-unknown
-  6. SPIR-V blob embedded as @brief_kernel_N byte array in .rodata
-  7. At runtime: brief_gpu_launch() via Vulkan or OpenCL
+  6. SPIR-V blob embedded as @briv_kernel_N byte array in .rodata
+  7. At runtime: briv_gpu_launch() via Vulkan or OpenCL
 ```
 
 ---
@@ -62,7 +62,7 @@ The SPIR-V backend determines the correct opcode via `is_float_context()`.
 
 ### Expression → SPIR-V LLVM IR mapping
 
-| Brief expression | Integer (i64) | Float (f32) |
+| Briv expression | Integer (i64) | Float (f32) |
 |-----------------|---------------|-------------|
 | `a + b` | `add i64 %a, %b` | `fadd float %a, %b` |
 | `a - b` | `sub i64 %a, %b` | `fsub float %a, %b` |
@@ -104,7 +104,7 @@ field is in `write_fields`. Stores always target `%base_out`.
 
 ### Thread/Block ID Queries
 
-| Brief intrinsic | SPIR-V LLVM IR |
+| Briv intrinsic | SPIR-V LLVM IR |
 |----------------|----------------|
 | `get_global_id#(dim)` | `call i64 @_Z13get_global_idj(i32 %dim)` |
 | `get_local_id#(dim)` | `call i64 @_Z12get_local_idj(i32 %dim)` |
@@ -114,7 +114,7 @@ field is in `write_fields`. Stores always target `%base_out`.
 
 ### Math Intrinsics
 
-| Brief intrinsic | SPIR-V LLVM IR |
+| Briv intrinsic | SPIR-V LLVM IR |
 |----------------|----------------|
 | `sin#(f)` | `call float @llvm.sin.f32(float %f)` |
 | `cos#(f)` | `call float @llvm.cos.f32(float %f)` |
@@ -169,7 +169,7 @@ The kernel's `%N` parameter represents the total linearized element count.
 by calling `get_global_id(1)` and `get_global_id(2)` directly in the kernel
 body — the user computes their own linearized index.
 
-The runtime's `brief_gpu_launch` accepts `grid_y` and `grid_z` parameters,
+The runtime's `briv_gpu_launch` accepts `grid_y` and `grid_z` parameters,
 passed through to `vkCmdDispatch` as the 2nd and 3rd dimensions.
 
 ---

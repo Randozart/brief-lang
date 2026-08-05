@@ -1,7 +1,7 @@
 # Pointer Borrow Checking + Native Ring Functions
 
 Merge of `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` (Phases 1-6)
-with the `<-` arrow restoration and native `ring_push`/`ring_pop` in Brief.
+with the `<-` arrow restoration and native `ring_push`/`ring_pop` in Briv.
 
 ---
 
@@ -37,7 +37,7 @@ with the `<-` arrow restoration and native `ring_push`/`ring_pop` in Brief.
 **2a. Fix `Expr::Cast` for `Ptr<T>`** (`src/backend/llvm/emit_expr.rs`)
 
 Current: `(Ptr<Int>)i64_val` calls `__int_to_str__` (String path) because both
-`String` and `Ptr<T>` map to LLVM `"ptr"`. Fix: check Brief type first:
+`String` and `Ptr<T>` map to LLVM `"ptr"`. Fix: check Briv type first:
 
 ```
 if *target == Type::string() || *target == Type::data() => String runtime helper
@@ -71,11 +71,11 @@ This enables `buf + 3` → `GEP i64, ptr %buf, i64 3`.
 
 ---
 
-## Phase 3: Implement `ring_push` / `ring_pop` in Brief
+## Phase 3: Implement `ring_push` / `ring_pop` in Briv
 
-**3a. Write the Brief implementations** (`lib/std/os/ring.bv`)
+**3a. Write the Briv implementations** (`lib/std/os/ring.bv`)
 
-```brief
+```briv
 defn ring_push(handle: i64, val: i64) {
     let buf: Ptr<i64> = (Ptr<i64>)handle;
     let tail: i64 = *buf;
@@ -163,7 +163,7 @@ Pop/discard currently checks `rhs` for `AddrOf` pattern. With provenance,
 verify that the source is a valid collection type (not a random pointer).
 
 **5b. Remove inline GEP path**  
-Now that `ring_push`/`ring_pop` are Brief functions, the inline GEP path in
+Now that `ring_push`/`ring_pop` are Briv functions, the inline GEP path in
 `emit_stmt.rs` is dead code. Remove it. The `<-` codegen calls the strategy
 function instead.
 
@@ -202,7 +202,7 @@ function instead.
 | `src/type_universe.rs` | 1 | Add `PtrConst` variant |
 | `src/backend/llvm/emit_expr.rs` | 2a | Fix Cast for Ptr<T> vs String |
 | `src/backend/llvm/emit_expr.rs` | 2b | Pointer-offset BinaryOp → GEP |
-| `lib/std/os/ring.bv` | 3a | Native ring_push/ring_pop in Brief |
+| `lib/std/os/ring.bv` | 3a | Native ring_push/ring_pop in Briv |
 | `src/backend/llvm/intrinsics.rs` | 3b, 6a | Remove RingPush/RingPop |
 | `src/backend/llvm/emit_stmt.rs` | 3c, 5b, 6b | strategy-based dispatch, remove inline GEP |
 | `src/backend/llvm/mod.rs` | 3d | Property→function resolution helper |

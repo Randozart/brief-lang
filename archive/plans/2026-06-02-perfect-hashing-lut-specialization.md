@@ -6,7 +6,7 @@
 
 ## Problem
 
-Brief's enum switch-dispatch (Path 4) emits a dense `switch i64 %trigger` block at `llvm.rs:3126`. LLVM compiles this to an O(1) jump table **only when trigger values are consecutive integers** (e.g., `0, 1, 2, 3`). The switch hardcodes `for val in 0..n as i64`, which means:
+Briv's enum switch-dispatch (Path 4) emits a dense `switch i64 %trigger` block at `llvm.rs:3126`. LLVM compiles this to an O(1) jump table **only when trigger values are consecutive integers** (e.g., `0, 1, 2, 3`). The switch hardcodes `for val in 0..n as i64`, which means:
 
 1. **Sparse triggers** (`101, 204, 404`): `value_set_size_of` returns `Some(3)` but the switch emits cases for `0, 1, 2` — **wrong mapping**. Falls back to binary decision tree (O(log N)).
 2. **Arbitrary Int triggers** with no range annotation: `value_set_size_of` returns `None` → enum dispatch is entirely disabled → falls back to sequential reactor (100ms tick polling).
@@ -142,7 +142,7 @@ Then perfect hash the combined key. This replaces the current multi-trigger fall
 
 ### Phase 4a: `#weight(N)` Annotations
 
-```brief
+```briv
 enum Phase {
     Idle    #weight(5),
     Heating #weight(89),   // 89% of execution
@@ -181,16 +181,16 @@ Add `--profile-generate` and `--profile-use=<file>`:
 
 Only emit LUT entries for values covering top 80% of execution. Residual handles the remaining 20%. Saves 3/5 of LUT entries in a 5-value enum with 90/10 split.
 
-## How Brief Beats C on This
+## How Briv Beats C on This
 
-| Technique | Brief | C (world-class) | Advantage |
+| Technique | Briv | C (world-class) | Advantage |
 |-----------|-------|-----------------|-----------|
-| Perfect hash for sparse dispatch | Auto-detected from preconditions | Programmer must manually write `static const void* table[]` + computed goto | **Brief is automatic** |
+| Perfect hash for sparse dispatch | Auto-detected from preconditions | Programmer must manually write `static const void* table[]` + computed goto | **Briv is automatic** |
 | `likely()` branch prediction | `@llvm.expect.i64` via weight annotations | `__builtin_expect(expr, 1)` | **Identical** |
-| Multi-trigger dispatch | Auto-concatenation + hash | Programmer writes nested switch or manual packing | **Brief is automatic** |
-| Key extraction | Extracts from precondition AST | N/A — C switch values must be literals | **Brief handles dynamic sets** |
+| Multi-trigger dispatch | Auto-concatenation + hash | Programmer writes nested switch or manual packing | **Briv is automatic** |
+| Key extraction | Extracts from precondition AST | N/A — C switch values must be literals | **Briv handles dynamic sets** |
 
-C can match Brief's **performance** with hand-tuned computed gotos and `__builtin_expect`, but Brief matches it **automatically** — the programmer writes `[sensor == 101 \|\| sensor == 204]`, and the compiler does the rest.
+C can match Briv's **performance** with hand-tuned computed gotos and `__builtin_expect`, but Briv matches it **automatically** — the programmer writes `[sensor == 101 \|\| sensor == 204]`, and the compiler does the rest.
 
 ## Implementation Map
 
@@ -246,7 +246,7 @@ fn emit_enum_main(...) {
 
 ### Benchmark 1: Sparse Trigger Dispatch (pure dispatch, no math)
 
-| Variant | Brief (before) | Brief (after) | C (world-class) |
+| Variant | Briv (before) | Briv (after) | C (world-class) |
 |---------|---------------|---------------|-----------------|
 | 3 dense keys (0,1,2) | O(1) jump table | O(1) jump table | O(1) jump table |
 | 3 sparse keys (101,204,404) | O(log 3) binary tree | O(1) hash + jump table | O(1) computed goto |
@@ -270,7 +270,7 @@ done: /* next */
 
 ### Benchmark 2: Hot/Cold Speculative Branch
 
-| Variant | Brief (before) | Brief (after) | C (world-class) |
+| Variant | Briv (before) | Briv (after) | C (world-class) |
 |---------|---------------|---------------|-----------------|
 | Uniform (10% each) | Full switch | Full switch | Full switch |
 | 90/10 skewed | Full switch | `likely()` branch + residual | `if (likely(x==HOT))` + residual |
@@ -282,7 +282,7 @@ done: /* next */
 
 Kalman filter receiving `PREDICT(101)` vs `UPDATE(204)` vs `INIT(404)` — three sparse keys, each triggering a different filter mode.
 
-| Variant | Brief (before) | Brief (after) | C (world-class) |
+| Variant | Briv (before) | Briv (after) | C (world-class) |
 |---------|---------------|---------------|-----------------|
 | Dispatch only | Binary tree (O(log 3)) | Hash + jump (O(1)) | Computed goto (O(1)) |
 | Full pipeline | Binary tree + Kalman math | Hash + Kalman math | Computed goto + Kalman math |
@@ -298,7 +298,7 @@ Kalman filter receiving `PREDICT(101)` vs `UPDATE(204)` vs `INIT(404)` — three
 7. **`#weight(90)`**: Enum variant with weight annotation emits `llvm.expect` check
 8. **Zero tests broken**: `cargo test --lib` passes (368+)
 9. **Compile-time bounded**: Hash search < 10ms for N ≤ 256
-10. **C benchmarks**: Brief performs at worst 1.1× of optimized C for all new benchmarks
+10. **C benchmarks**: Briv performs at worst 1.1× of optimized C for all new benchmarks
 
 ## Benchmark Impact Matrix
 

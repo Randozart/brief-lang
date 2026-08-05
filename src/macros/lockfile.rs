@@ -6,7 +6,7 @@
 // Flow:
 //   1. User runs with --update-lockfile + --allow-* flags → lockfile generated
 //   2. Lockfile records (plugin_name, hash, requested_caps) for each plugin
-//   3. On plain `brief build`, lockfile is validated and applied:
+//   3. On plain `briv build`, lockfile is validated and applied:
 //      - All plugins must be in lockfile (error if new plugin found)
 //      - Hash changes with NEW capabilities → error with diff
 //      - Hash changes with SAME capabilities → silently accept

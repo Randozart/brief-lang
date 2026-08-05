@@ -1,9 +1,9 @@
 // c.bv — C-ABI boundary representations for GLUE export.
-// 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): Brief has no
+// 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): Briv has no
 // type layouts — only adaptive protocols. An FFI boundary representation is a
 // sub-protocol (`#String<C_String>`, `#Float<C_Double>`, …) whose CastTo/
 // CastFrom bindings are the delta transforms. The casting graph finds the
-// minimal path between a Brief type and its boundary representation, and
+// minimal path between a Briv type and its boundary representation, and
 // codegen emits the delta — not a chain.
 //
 // Import this module (or a bridge-specific one derived from it) and declare
@@ -11,20 +11,20 @@
 //   import "glue/c.bv";
 //   export defn greet(name: CStr) -> CStr { ... };
 
-// C string ↔ Brief string transforms (brief_rt.c). `cstr_to_brief` reads a
-// nul-terminated C string into a [len][data] Brief String; `str_to_c` emits a
-// nul-terminated C string from a Brief String. The CastTo/CastFrom pair makes
+// C string ↔ Briv string transforms (briv_rt.c). `cstr_to_briv` reads a
+// nul-terminated C string into a [len][data] Briv String; `str_to_c` emits a
+// nul-terminated C string from a Briv String. The CastTo/CastFrom pair makes
 // the C_String variant 1-to-1 with the UTF8 base: the delta is one call.
-frgn brief_cstr_to_brief(ptr: Int) -> String as cstr_to_brief from "lib/runtime/brief_rt.c" fallback "";
-frgn brief_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/brief_rt.c" fallback 0;
-frgn brief_cstring_concat(a: Int, b: Int) -> Int as cstring_concat from "lib/runtime/brief_rt.c" fallback 0;
+frgn briv_cstr_to_briv(ptr: Int) -> String as cstr_to_briv from "lib/runtime/briv_rt.c" fallback "";
+frgn briv_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/briv_rt.c" fallback 0;
+frgn briv_cstring_concat(a: Int, b: Int) -> Int as cstring_concat from "lib/runtime/briv_rt.c" fallback 0;
 
 // The C string sub-protocol of #String: nul-terminated bytes vs the base's
 // [len][data] encoding. `Concat` is the variant's own operation — a CStr
 // concatenated with + / ++ uses it directly (zero cast), not the [len][data]
 // inline concat.
 proto C_String: #String {
-    CastTo(#String<UTF8>) = cstr_to_brief(#L);
+    CastTo(#String<UTF8>) = cstr_to_briv(#L);
     CastFrom(#String<UTF8>) = str_to_c(#L);
     op Concat(#String) = cstring_concat(#L, #R);
 };
@@ -42,9 +42,9 @@ type CChar:   #Char<C_I32>      { };
 type CPtr:    #Data<C_Ptr>      { };
 
 // The composite declaration: a CStr and a String are one memory region under
-// two views. Every Brief String carries the NUL invariant ([len][bytes][\0]),
+// two views. Every Briv String carries the NUL invariant ([len][bytes][\0]),
 // so the region at offset 8 IS a nul-terminated C string. `meld CStr -> String`
 // admits the pair interchangeably — the typechecker accepts `let s: String =
 // name;` (name: CStr) with no `as`, and the marshalling inserts the delta
-// (cstr_to_brief / str_to_c) — zero-copy in the String → CStr direction.
+// (cstr_to_briv / str_to_c) — zero-copy in the String → CStr direction.
 meld CStr -> String;

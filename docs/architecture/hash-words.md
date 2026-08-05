@@ -8,7 +8,7 @@ They are lexed as distinct tokens, never as identifiers.
 Hashwords now serve an additional role as **backend category directives** in
 op signatures:
 
-```brief
+```briv
 type Int : Bits {
     op Add(#Int, #Int);       // "backend, emit whatever i64 add means to you"
     op Sub(#Int, #Int);
@@ -31,7 +31,7 @@ CIRCT → hardware adder, SPIR-V → `OpIAdd`).
 — the compiler errors if a `.bv` file calls a `.ebv` function using `#String`
 without specifying the variant:
 
-```brief
+```briv
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
@@ -68,7 +68,7 @@ See `docs/architecture/casting-protocol.md` for the full protocol system.
 hashword ops — they are concrete-form ops that always require a conversion
 function. Only `op Parse(#Category)` is a hashword op.
 
-```brief
+```briv
 type Int {
     op Add(#Int, #Int);       // backend directive: integer add
     op Parse(#Int);            // identity parse: literal IS an Int

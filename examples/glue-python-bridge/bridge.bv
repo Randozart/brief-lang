@@ -1,10 +1,10 @@
-// GLUE Python Bridge — example Brief bridge file
+// GLUE Python Bridge — example Briv bridge file
 //
 // Inlines minimal type definitions (no prelude dependency).
 // Compiled to a shared library that Python loads via ctypes.
 //
 // Workflow:
-//   brief build --disable-plugin prelude --library bridge.bv --out .
+//   briv build --disable-plugin prelude --library bridge.bv --out .
 //   llc -filetype=obj bridge.ll -o bridge.o
 //   cc -shared bridge.o -o libbridge.so   (Linux)
 //   python3 gluerun.py

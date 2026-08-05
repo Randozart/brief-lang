@@ -135,11 +135,11 @@ Binds compiler to AMD/Xilinx Zynq UltraScale+.
 ### B8 — Kalman Benchmark: test/jnz Loop Structure
 Suggested optimization for the C reference: using `--BOUND/--total` directly
 in the loop condition allows `test + jnz` instead of `cmp + jne`.
-- Brief already uses `icmp eq` for the folded loop exit (matches `test + jnz`)
+- Briv already uses `icmp eq` for the folded loop exit (matches `test + jnz`)
 - C reference: `while (count < bound)` → `cmp + jne` on x86
 - Measured improvement: ~0.01s averaged over 100 runs
 - `-march=native` already passed in build_and_bench.sh lines 59, 72
-- Brief compile: `opt -O2` + `llc -O2` + `clang -O3 -march=native` (link step)
+- Briv compile: `opt -O2` + `llc -O2` + `clang -O3 -march=native` (link step)
 
 ---
 
@@ -163,17 +163,17 @@ in the loop condition allows `test + jnz` instead of `cmp + jne`.
 
 ## Current Benchmark Table (post Phase A + C + SLP fix)
 
-| Benchmark | Brief | C | Ratio | Status |
+| Benchmark | Briv | C | Ratio | Status |
 |-----------|-------|---|-------|--------|
-| float_math | 0.011s | 0.052s | **Brief 4.5×** | ✅ O(1), beats C |
+| float_math | 0.011s | 0.052s | **Briv 4.5×** | ✅ O(1), beats C |
 | float_math_nonzero | 0.380s | 0.165s | **2.32×** | 🔶 Phi scheduling gap |
 | iir_filter | 0.172s | 0.119s | 1.44× | ✅ Fields eliminated |
 | precompute_sum | 0.002s | 0.002s | tie | ✅ O(1) |
 | ring_buffer | 0.007s | 0.002s | 3.3× | 🔶 Startup noise |
 | async_counters | 0.004s | 0.005s | ~tie | ✅ |
 | sparse_dispatch | 0.077s | 0.002s | startup | 🔶 Redesign needed |
-| const_heavy | 0.006s | 0.044s | **Brief 7×** | ✅ |
-| kalman_filter | 0.71s | 0.75s | **Brief beats C** | ✅ SLP disabled |
+| const_heavy | 0.006s | 0.044s | **Briv 7×** | ✅ |
+| kalman_filter | 0.71s | 0.75s | **Briv beats C** | ✅ SLP disabled |
 
 ---
 

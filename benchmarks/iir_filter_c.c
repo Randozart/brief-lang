@@ -1,10 +1,10 @@
-// Biquad IIR Filter Cascade — C reference for Brief LLVM backend benchmark
+// Biquad IIR Filter Cascade — C reference for Briv LLVM backend benchmark
 //
 // Matches benchmarks/iir_filter.bv exactly:
-//   - single-precision float (f32) — same as Brief LLVM `float` type
+//   - single-precision float (f32) — same as Briv LLVM `float` type
 //   - 50M iterations of the biquad difference equation
 //   - impulse input (constant 1.0)
-//   - float state in registers (no volatile) — matches Brief's register promotion
+//   - float state in registers (no volatile) — matches Briv's register promotion
 //   - only `count` is volatile to prevent dead-code elimination of the entire loop
 //
 // Build:

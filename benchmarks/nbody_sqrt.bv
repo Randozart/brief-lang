@@ -1,10 +1,10 @@
 // nbody_sqrt — 5-body gravity sim with libm sqrtf (FFI)
-// Compares Brief vs C on identical algorithm: libm sqrtf, unrolled pairs.
+// Compares Briv vs C on identical algorithm: libm sqrtf, unrolled pairs.
 // The sqrt FFI call inside the hot body prevents pure-counter fold
 // via statement_contains_ffi, keeping all field stores live.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/nbody_sqrt.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/nbody_sqrt.bv \
 //       --out benchmarks --optimize-budget 2048
 
 

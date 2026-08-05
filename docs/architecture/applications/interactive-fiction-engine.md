@@ -9,13 +9,13 @@
 
 Interactive fiction (parser games like *Zork*, *Spider and Web*, games written in
 *Dialog* or *Inform 7*) has a natural two-part architecture that maps directly
-onto Brief's strengths:
+onto Briv's strengths:
 
 1. **A relational world model** — rooms, items, containment, player state.
 2. **A reactive rule engine** — parsing player input, checking preconditions,
    mutating state, printing descriptions.
 
-Data Brief (`.dbv`) is a natural fit for the world model. Brief's `node` and
+Data Briv (`.dbv`) is a natural fit for the world model. Briv's `node` and
 `txn` constructs are a natural fit for the rule engine. The combination is a
 zero-runtime, compile-time-proven interactive fiction platform.
 
@@ -24,11 +24,11 @@ zero-runtime, compile-time-proven interactive fiction platform.
 ## 2. World Model in `.dbv`
 
 The world is a set of flat, positional schemas. Rooms, items, and player state
-are stored as Data Brief entries.
+are stored as Data Briv entries.
 
 ### 2.1 Room Schema
 
-```brief
+```briv
 schema Room (name) {
     name: String;
     desc: String;
@@ -41,7 +41,7 @@ schema Room (name) {
 
 Entries are pure data — no markup, no quotes, no nested JSON:
 
-```brief
+```briv
 as Room {
     kitchen: Kitchen; You are in a dusty kitchen. A heavy door leads south.; ; cellar; ; ;
     cellar: Cellar; Damp and dark. Steps lead north.; kitchen; ; ; ; ;
@@ -55,7 +55,7 @@ array — zero parsing overhead at runtime.
 
 ### 2.2 Item Schema
 
-```brief
+```briv
 schema Item (name) {
     name: String;
     desc: String;
@@ -77,7 +77,7 @@ runtime crash.
 
 ### 2.3 Player State
 
-```brief
+```briv
 schema Player {
     location: String;
     inventory: String[];
@@ -101,7 +101,7 @@ an independent, provable contract.
 
 ### 3.1 Core Types
 
-```brief
+```briv
 type Command {
     verb: String;
     noun: String;
@@ -113,7 +113,7 @@ on `cmd.verb` and `cmd.noun`.
 
 ### 3.2 Take Action
 
-```brief
+```briv
 txn handle_take(cmd: Command, player_location: String)
     [cmd.verb == take][cmd.verb == take && handled == true] -> Bool
 {
@@ -142,7 +142,7 @@ guarantees convergence: the action terminates with a boolean result.
 
 ### 3.3 Move Action
 
-```brief
+```briv
 txn handle_move(cmd: Command, player_location: String)
     [cmd.verb == go || cmd.verb == north || cmd.verb == south][handled == true] -> Bool
 {
@@ -174,7 +174,7 @@ produces a descriptive message.
 
 ### 4.1 Native Binary
 
-The Brief compiler compiles the world model + rule nodes into a single native
+The Briv compiler compiles the world model + rule nodes into a single native
 binary. The `.dbv` world data is packed into a memory-mapped `.beastdb` binary
 blob in `.rodata`. At runtime, the game is a ~10KB ELF with zero startup time,
 zero heap allocation, and zero runtime dependencies.
@@ -198,10 +198,10 @@ Because the binary is tiny and allocation-free, the game can run on:
 
 ## 5. Comparison to Existing IF Platforms
 
-| Aspect | Inform 7 | Dialog | Brief + .dbv |
+| Aspect | Inform 7 | Dialog | Briv + .dbv |
 |--------|----------|--------|--------------|
 | World model | Custom I7 syntax | Custom Dialog syntax | Standard `.dbv` — any editor |
-| Rule language | Natural language | Lisp-like | Brief contracts |
+| Rule language | Natural language | Lisp-like | Briv contracts |
 | Type safety | Runtime | Runtime | Compile-time proven |
 | Distribution | Glulx blorb | Interpreter + story file | Native binary or `.beastpack` |
 | Memory model | VM heap | VM heap | Zero-heap (`.beastdb` mmap) |
@@ -211,7 +211,7 @@ Because the binary is tiny and allocation-free, the game can run on:
 
 ## 6. Open Questions
 
-1. **Parser grammar**: Brief `node`s need a string-input command parser.
+1. **Parser grammar**: Briv `node`s need a string-input command parser.
    Should this be a built-in `parse_command(string)` intrinsic, or should
    the author write a `txn` that splits on word boundaries?
 

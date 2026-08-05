@@ -2,7 +2,7 @@
 
 ## What Are Triggers?
 
-In Brief, triggers (`trg`) represent **external events** that can change at any time. They are the bridge between your verified state machine and the unpredictable outside world.
+In Briv, triggers (`trg`) represent **external events** that can change at any time. They are the bridge between your verified state machine and the unpredictable outside world.
 
 Unlike regular variables, triggers are **volatile** - the compiler cannot assume their value stays the same between reads. This makes them fundamentally different from `let` declarations.
 
@@ -10,8 +10,8 @@ Unlike regular variables, triggers are **volatile** - the compiler cannot assume
 
 Top-level triggers are declared in the global scope and represent events that can wake up your reactive transaction loop:
 
-```brief
-// Hardware trigger (Embedded Brief) — whole-target form
+```briv
+// Hardware trigger (Embedded Briv) — whole-target form
 trg button @ 0x1000A000;
 
 // System trigger — linked to a runtime symbol (LLVM backend)
@@ -32,12 +32,12 @@ The `@ link sym` syntax binds a trigger to an external symbol defined by the run
 
 - **LLVM backend**: `@sym = external global <type>, align N` — the linker resolves this
 - **C backend**: `extern volatile <type> sym;`
-- **Runtime**: `runtime/brief_rt.c` provides `volatile char __io_pending`, `volatile int64_t __timer_1hz`, etc.
+- **Runtime**: `runtime/briv_rt.c` provides `volatile char __io_pending`, `volatile int64_t __timer_1hz`, etc.
 
-The `@ link` mechanism is **zero-magic**: the compiler knows nothing about the symbol name. It emits whatever name you provide. The runtime/OS provides the definition. This lets any C/assembly symbol be used as a Brief trigger.
+The `@ link` mechanism is **zero-magic**: the compiler knows nothing about the symbol name. It emits whatever name you provide. The runtime/OS provides the definition. This lets any C/assembly symbol be used as a Briv trigger.
 
 **Supported trigger types** for `@ link`:
-| Brief Type | Runtime C Type | LLVM IR Type |
+| Briv Type | Runtime C Type | LLVM IR Type |
 |-----------|----------------|-------------|
 | `Bool` | `volatile char` | `i8` |
 | `Int` | `volatile int64_t` | `i64` |
@@ -48,10 +48,10 @@ The `@ link` mechanism is **zero-magic**: the compiler knows nothing about the s
 
 ### Trigger Aliases
 
-Brief accepts multiple forms for trigger declarations:
+Briv accepts multiple forms for trigger declarations:
 - `trg` / `TRG` / `trigger` / `TRIGGER` - all equivalent for top-level triggers
 
-```brief
+```briv
 trg button @ 0x1000A000;  // lowercase
 TRG button @ 0x1000A000;  // uppercase
 trigger button @ 0x1000A000;   // full word
@@ -62,7 +62,7 @@ TRIGGER button @ 0x1000A000;   // uppercase full word
 
 The event-driven dispatch uses `node` (reactive transaction) with trigger-based preconditions:
 
-```brief
+```briv
 import io from "std/io.bv";
 
 node handle_input [io.io_ready] {
@@ -88,7 +88,7 @@ The `#pragma dispatch(parallel)` form is deprecated — use `#!dispatch(parallel
 
 Blocking sleep is a library pattern, not a compiler intrinsic:
 
-```brief
+```briv
 // lib/std/io.bv
 frgn __wait_for_event() -> Void from "libruntime";
 node __io_sleep [true] {
@@ -105,7 +105,7 @@ Because `[true]` is always the last precondition evaluated (it's declared last),
 
 Local triggers were declared **inside transaction bodies** and represented mid-flight async waits. They required the `!` suffix as a psychological speedbump — warning "async rollback risk here".
 
-```brief
+```briv
 // OLD pattern — deprecated:
 txn fetch_user[user_requested] {
     trg! db_response: Result<Data, DbError> = fetch_from_db(user_id);
@@ -128,13 +128,13 @@ node handle_db_response [db_response] {
 The `!` suffix follows a tradition in language design:
 - **Ruby**: `sort!` warns "this mutates in-place"
 - **Rust**: `unsafe {}` warns "pointer math ahead"
-- **Brief**: `trg!` warned "async rollback risk here"
+- **Briv**: `trg!` warned "async rollback risk here"
 
 The modern event model (`@ link` + `node`) eliminates rollback risk by keeping triggers at the top level, making the entire reactive loop stateless with respect to event arrival.
 
 ## Volatile Semantics
 
-The Brief compiler treats trigger variables as **volatile**:
+The Briv compiler treats trigger variables as **volatile**:
 
 1. **Each read creates a new symbolic value** - `x` read twice becomes `x@t1` and `x@t2`
 2. **`x == x` is NOT assumed true** for trigger variables
@@ -142,7 +142,7 @@ The Brief compiler treats trigger variables as **volatile**:
 4. **Stricter verification** on paths "polluted" by trigger variables
 
 This means:
-```brief
+```briv
 trg sensor: Int;
 
 txn read_sensor[sensor > 0] {
@@ -155,7 +155,7 @@ txn read_sensor[sensor > 0] {
 
 ## Pre-Evaluation Guards
 
-Brief's reactor uses a **two-tier execution model** to avoid wasted FFI side effects:
+Briv's reactor uses a **two-tier execution model** to avoid wasted FFI side effects:
 
 **Tier 1: Pre-Evaluation Guard**
 Before running a transaction, the reactor checks if any escape conditions are provably true based on currently-known state. If so, it **skips the transaction entirely** - no FFI calls fired, zero risk.
@@ -163,7 +163,7 @@ Before running a transaction, the reactor checks if any escape conditions are pr
 **Tier 2: Speculative Execution**
 When escape conditions depend on unpredictable events (FFI responses, future triggers), the transaction runs speculatively. If escape hits mid-flight, state rolls back automatically.
 
-```brief
+```briv
 trg button: Bool;
 let counter: Int = 0;
 
@@ -182,7 +182,7 @@ node handle_button[button == true] {
 
 ## System Triggers
 
-Brief provides standard system triggers in `lib/std/system.bv`. These use `@ link` bindings to runtime symbols:
+Briv provides standard system triggers in `lib/std/system.bv`. These use `@ link` bindings to runtime symbols:
 
 | Trigger | Type | `@ link` Symbol | Description |
 |---------|------|-----------------|-------------|
@@ -202,7 +202,7 @@ Additional triggers in `io.bv`:
 
 ### Example: Reactive Event Handler (LLVM Backend)
 
-```brief
+```briv
 import io from "std/io.bv";
 
 let counter: Int = 0;
@@ -216,9 +216,9 @@ node count_input [io.io_ready] {
     term;
 };
 
-// Compile:     brief build --llvm program.bv
-// Produces program.ll + brief_rt.c, then links to binary.
-// Link:        ld program.o brief_rt.o -o program
+// Compile:     briv build --llvm program.bv
+// Produces program.ll + briv_rt.c, then links to binary.
+// Link:        ld program.o briv_rt.o -o program
 ```
 
 ## Trigger Configuration
@@ -227,7 +227,7 @@ Triggers map to OS events through:
 1. **`@ link` symbol bindings** in `.bv` files (LLVM backend)
 2. **`.dbv` binding files** for hardware targets: `std/bindings/system_triggers.dbv`
 
-```brief
+```briv
 // Triggers are declared with `trg` in the BV source file:
 trg sigint: Bool @ link __sigint_flag;
 trg sigterm: Bool @ link __sigterm_flag;
@@ -241,7 +241,7 @@ import bindings from "std/bindings/system_triggers.dbv";
 
 When a transaction hits `escape`, all state modifications are **rolled back** to the pre-transaction snapshot:
 
-```brief
+```briv
 txn transfer(amount: Int) [amount > 0][balance == @balance] {
     state.processing = true;  // Tentative change
     
@@ -268,27 +268,27 @@ txn transfer(amount: Int) [amount > 0][balance == @balance] {
 
 ## LLVM Backend + Runtime
 
-The LLVM backend is the primary compilation target for event-driven Brief programs.
+The LLVM backend is the primary compilation target for event-driven Briv programs.
 
 ### Compile and Link
 
 ```bash
-# Build (produces .ll + links with brief_rt)
-brief build --llvm program.bv --out output/
+# Build (produces .ll + links with briv_rt)
+briv build --llvm program.bv --out output/
 
 # Or manually:
-brief build --llvm program.bv --out output/
+briv build --llvm program.bv --out output/
 llc output/program.ll -filetype=obj -o output/program.o
-cc -c runtime/brief_rt.c -o output/brief_rt.o
-ld output/program.o output/brief_rt.o -o program
+cc -c runtime/briv_rt.c -o output/briv_rt.o
+ld output/program.o output/briv_rt.o -o program
 ```
 
-The `build --llvm` writes the embedded `brief_rt.c` source to the output directory, compiles it with `cc`, and prints the final `ld` command.
+The `build --llvm` writes the embedded `briv_rt.c` source to the output directory, compiles it with `cc`, and prints the final `ld` command.
 
 ### Runtime Source
 
-`runtime/brief_rt.c` is a single C file that provides:
-- **`@ link` global definitions**: `volatile` variables in section `brief_trg` for signal handlers, timers, stdin
+`runtime/briv_rt.c` is a single C file that provides:
+- **`@ link` global definitions**: `volatile` variables in section `briv_trg` for signal handlers, timers, stdin
 - **`__wait_for_event()`**: platform-optimized blocking sleep (epoll on Linux, kqueue on BSD, WFI on ARM, HLT on x86, fallback nanosleep)
 - **Constructor**: auto-runs before `main()` to set up signal handlers and timers
 
@@ -296,12 +296,12 @@ The `build --llvm` writes the embedded `brief_rt.c` source to the output directo
 
 | Platform | Mechanism | Source |
 |----------|-----------|--------|
-| Linux | `epoll` + `signal` | `runtime/brief_rt.c` |
-| macOS/BSD | `kqueue` + `signal` | `runtime/brief_rt.c` |
-| ARM bare-metal | `WFI` instruction | `runtime/brief_rt.c` |
-| x86 bare-metal | `STI; HLT` | `runtime/brief_rt.c` |
-| WASM | `memory.grow` yield | `runtime/brief_rt.c` |
-| Fallback | `nanosleep` (1ms) | `runtime/brief_rt.c` |
+| Linux | `epoll` + `signal` | `runtime/briv_rt.c` |
+| macOS/BSD | `kqueue` + `signal` | `runtime/briv_rt.c` |
+| ARM bare-metal | `WFI` instruction | `runtime/briv_rt.c` |
+| x86 bare-metal | `STI; HLT` | `runtime/briv_rt.c` |
+| WASM | `memory.grow` yield | `runtime/briv_rt.c` |
+| Fallback | `nanosleep` (1ms) | `runtime/briv_rt.c` |
 
 ## Best Practices
 

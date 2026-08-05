@@ -1,6 +1,6 @@
 // rank_ref.c — C reference for the GLUE native-speed benchmark.
 // Mirrors examples/glue-host/rank.bv feature_hash (FNV-1a folding) so
-// Brief and C produce identical output on the same workload.
+// Briv and C produce identical output on the same workload.
 #include <stdint.h>
 
 int64_t feature_hash_c(int64_t count, int64_t seed) {

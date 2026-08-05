@@ -32,96 +32,96 @@ declare noalias ptr @malloc(i64) nounwind
 declare void @free(ptr) nounwind
 declare ptr @realloc(ptr, i64) nounwind
 declare i64 @ShellCmd(i64)
-declare i64 @brief_syscall(i64, i64, i64, i64, i64, i64, i64)
-declare i64 @brief_sysconf(i64)
+declare i64 @briv_syscall(i64, i64, i64, i64, i64, i64, i64)
+declare i64 @briv_sysconf(i64)
 declare ptr @dlopen(ptr, i32) nounwind
 declare ptr @dlsym(ptr, ptr) nounwind
 declare i32 @dlclose(ptr) nounwind
-declare i64 @brief_backtrace()
+declare i64 @briv_backtrace()
 declare i64 @__print_char(i64) #6
 declare void @__print_str({ i64, i64 }) #6
 declare i64 @__print_int(i64) #6
 declare i64 @__getenv_int({ i64, i64 }) #6
-declare { i64, i64 } @__getenv_brief({ i64, i64 }) #6
+declare { i64, i64 } @__getenv_briv({ i64, i64 }) #6
 declare i64 @__print_float(float) #6
 declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
 declare i64 @__str_to_int(i8*) #1
-declare i64 @brief_open(i64, i64, i64) #1
-declare i64 @brief_close(i64) #1
-declare i64 @brief_read(i64, i64, i64) #1
-declare i64 @brief_write(i64, i64, i64) #1
-declare i64 @brief_lseek(i64, i64, i64) #1
-declare i64 @brief_pread(i64, i64, i64, i64) #1
-declare i64 @brief_pwrite(i64, i64, i64, i64) #1
-declare i64 @brief_stat(i64, i64) #1
-declare i64 @brief_fstat(i64) #1
-declare i64 @brief_truncate(i64, i64) #1
-declare i64 @brief_ftruncate(i64, i64) #1
-declare i64 @brief_fsync(i64) #1
-declare i64 @brief_dup(i64) #1
-declare i64 @brief_dup2(i64, i64) #1
-declare i64 @brief_fcntl(i64, i64, i64) #1
-declare i64 @brief_socket(i64, i64, i64) #1
-declare i64 @brief_bind(i64, i64, i64) #1
-declare i64 @brief_listen(i64, i64) #1
-declare i64 @brief_accept(i64, i64, i64) #1
-declare i64 @brief_connect(i64, i64, i64) #1
-declare i64 @brief_send(i64, i64, i64, i64) #1
-declare i64 @brief_recv(i64, i64, i64, i64) #1
-declare i64 @brief_sendto(i64, i64, i64, i64, i64, i64) #1
-declare i64 @brief_recvfrom(i64, i64, i64, i64, i64, i64) #1
-declare i64 @brief_setsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @brief_getsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @brief_shutdown(i64, i64) #1
-declare i64 @brief_mkdir(i64, i64) #1
-declare i64 @brief_rmdir(i64) #1
-declare i64 @brief_unlink(i64) #1
-declare i64 @brief_rename(i64, i64) #1
-declare i64 @brief_symlink(i64, i64) #1
-declare i64 @brief_link(i64, i64) #1
-declare i64 @brief_chdir(i64) #1
-declare i64 @brief_chmod(i64, i64) #1
-declare i64 @brief_chown(i64, i64, i64) #1
-declare i64 @brief_umask(i64) #1
-declare i64 @brief_access(i64, i64) #1
-declare i64 @brief_mmap(i64, i64, i64, i64, i64, i64) #1
-declare i64 @brief_munmap(i64, i64) #1
-declare i64 @brief_mprotect(i64, i64, i64) #1
-declare i64 @brief_brk(i64) #1
-declare i64 @brief_mlock(i64, i64) #1
-declare i64 @brief_pipe(i64) #1
-declare i64 @brief_shm_open(i64, i64, i64) #1
-declare i64 @brief_shm_unlink(i64) #1
-declare i64 @brief_sem_open(i64, i64, i64, i64) #1
-declare i64 @brief_sem_wait(i64) #1
-declare i64 @brief_sem_post(i64) #1
-declare i64 @brief_getpid() #1
-declare i64 @brief_getppid() #1
-declare i64 @brief_clock_gettime(i64, i64) #1
-declare i64 @brief_nanosleep(i64, i64) #1
-declare i64 @brief_getenv(i64, i64, i64) #1
-declare i64 @brief_setenv(i64, i64, i64) #1
-declare i64 @brief_unsetenv(i64) #1
-declare i64 @brief_futex(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briv_open(i64, i64, i64) #1
+declare i64 @briv_close(i64) #1
+declare i64 @briv_read(i64, i64, i64) #1
+declare i64 @briv_write(i64, i64, i64) #1
+declare i64 @briv_lseek(i64, i64, i64) #1
+declare i64 @briv_pread(i64, i64, i64, i64) #1
+declare i64 @briv_pwrite(i64, i64, i64, i64) #1
+declare i64 @briv_stat(i64, i64) #1
+declare i64 @briv_fstat(i64) #1
+declare i64 @briv_truncate(i64, i64) #1
+declare i64 @briv_ftruncate(i64, i64) #1
+declare i64 @briv_fsync(i64) #1
+declare i64 @briv_dup(i64) #1
+declare i64 @briv_dup2(i64, i64) #1
+declare i64 @briv_fcntl(i64, i64, i64) #1
+declare i64 @briv_socket(i64, i64, i64) #1
+declare i64 @briv_bind(i64, i64, i64) #1
+declare i64 @briv_listen(i64, i64) #1
+declare i64 @briv_accept(i64, i64, i64) #1
+declare i64 @briv_connect(i64, i64, i64) #1
+declare i64 @briv_send(i64, i64, i64, i64) #1
+declare i64 @briv_recv(i64, i64, i64, i64) #1
+declare i64 @briv_sendto(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briv_recvfrom(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briv_setsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briv_getsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briv_shutdown(i64, i64) #1
+declare i64 @briv_mkdir(i64, i64) #1
+declare i64 @briv_rmdir(i64) #1
+declare i64 @briv_unlink(i64) #1
+declare i64 @briv_rename(i64, i64) #1
+declare i64 @briv_symlink(i64, i64) #1
+declare i64 @briv_link(i64, i64) #1
+declare i64 @briv_chdir(i64) #1
+declare i64 @briv_chmod(i64, i64) #1
+declare i64 @briv_chown(i64, i64, i64) #1
+declare i64 @briv_umask(i64) #1
+declare i64 @briv_access(i64, i64) #1
+declare i64 @briv_mmap(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briv_munmap(i64, i64) #1
+declare i64 @briv_mprotect(i64, i64, i64) #1
+declare i64 @briv_brk(i64) #1
+declare i64 @briv_mlock(i64, i64) #1
+declare i64 @briv_pipe(i64) #1
+declare i64 @briv_shm_open(i64, i64, i64) #1
+declare i64 @briv_shm_unlink(i64) #1
+declare i64 @briv_sem_open(i64, i64, i64, i64) #1
+declare i64 @briv_sem_wait(i64) #1
+declare i64 @briv_sem_post(i64) #1
+declare i64 @briv_getpid() #1
+declare i64 @briv_getppid() #1
+declare i64 @briv_clock_gettime(i64, i64) #1
+declare i64 @briv_nanosleep(i64, i64) #1
+declare i64 @briv_getenv(i64, i64, i64) #1
+declare i64 @briv_setenv(i64, i64, i64) #1
+declare i64 @briv_unsetenv(i64) #1
+declare i64 @briv_futex(i64, i64, i64, i64, i64, i64) #1
 declare i64 @__ioctl__(i64, i64, i64) #1
 declare i64 @__isatty__(i64) #1
 declare i64 @__print(i64) #1
-declare i64 @brief_getuid() #1
-declare i64 @brief_geteuid() #1
-declare i64 @brief_getgid() #1
-declare i64 @brief_getegid() #1
-declare i64 @brief_sched_yield() #1
-declare i64 @brief_getpriority(i64, i64) #1
-declare i64 @brief_setpriority(i64, i64, i64) #1
-declare i64 @brief_getrlimit(i64) #1
-declare i64 @brief_setrlimit(i64, i64) #1
-declare i64 @brief_pagesize() #1
-declare i64 @brief_cpu_count() #1
-declare i64 @brief_ttyname(i64) #1
-declare i64 @brief_ring_push(i64, i64) #1
-declare i64 @brief_ring_pop(i64) #1
+declare i64 @briv_getuid() #1
+declare i64 @briv_geteuid() #1
+declare i64 @briv_getgid() #1
+declare i64 @briv_getegid() #1
+declare i64 @briv_sched_yield() #1
+declare i64 @briv_getpriority(i64, i64) #1
+declare i64 @briv_setpriority(i64, i64, i64) #1
+declare i64 @briv_getrlimit(i64) #1
+declare i64 @briv_setrlimit(i64, i64) #1
+declare i64 @briv_pagesize() #1
+declare i64 @briv_cpu_count() #1
+declare i64 @briv_ttyname(i64) #1
+declare i64 @briv_ring_push(i64, i64) #1
+declare i64 @briv_ring_pop(i64) #1
 declare i64 @__tty_read_key__(i64) #1
 declare i64 @__tty_size__() #1
 declare i64 @cpu_count() #1
@@ -144,7 +144,7 @@ define ptr @get_env(ptr noundef noalias nocapture align 8 %state, ptr %arg0) loc
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
     %t2 = inttoptr i64 %ac0 to ptr
-   %t0 = call ptr @__getenv_brief(ptr %t2)
+   %t0 = call ptr @__getenv_briv(ptr %t2)
   ret ptr %t0
 }
 
@@ -430,7 +430,7 @@ attributes #12 = {
 
 !50 = !{ i64 -9223372036854775808, i64 50000000 }
 
-!0 = !{!"Brief"}
+!0 = !{!"Briv"}
 !1 = !{!"Int", !0}
 !2 = !{!"Bool", !0}
 !3 = !{!"Char", !0}

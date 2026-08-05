@@ -66,7 +66,7 @@ After the fix, verify the memory counter loop dispatch is still active in mod.rs
 
 ### Current Behavior
 
-`push_field_type` (mod.rs:902) pushes `"i64".to_string()` for ALL state fields, regardless of their Brief type. Float32 values take 4 instructions per access:
+`push_field_type` (mod.rs:902) pushes `"i64".to_string()` for ALL state fields, regardless of their Briv type. Float32 values take 4 instructions per access:
 ```
 GEP → load i64 → trunc i64 to i32 → bitcast i32 to float
 ```
@@ -92,7 +92,7 @@ This propagates the correct type:
 
 | Location | File:Line | Change |
 |----------|-----------|--------|
-| Identifier resolution (state memory load) | `emit_expr.rs:127-132` | Load with `field_types[idx]`. Remove the `brief_ty == Type::float32()` unboxing block. The load already returns the correct type. |
+| Identifier resolution (state memory load) | `emit_expr.rs:127-132` | Load with `field_types[idx]`. Remove the `briv_ty == Type::float32()` unboxing block. The load already returns the correct type. |
 | `load_last_val_temps` | `ssa.rs:513` | Load with `field_types[idx]`. Remove manual unboxing. |
 | Identifier resolution (phi register) | `emit_expr.rs:108-126` | **Keep unboxing** — phi registers are always i64. Only memory loads change. |
 

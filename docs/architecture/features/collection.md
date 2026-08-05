@@ -5,14 +5,14 @@
 
 ## Purpose
 
-Bracket syntax (`[]`) is Brief's **Partition Operator** — it segments any value
+Bracket syntax (`[]`) is Briv's **Partition Operator** — it segments any value
 into addressable sub-ranges. Every value decomposes to visual `Char` fragments
 under bracket operations. Bracket operations select, filter, stride, or
 transform these fragments. The result reconstructs to the original type.
 
 ## Syntax
 
-```brief
+```briv
 // Coord access
 digits[0..3]                    // First 3 chars of Int -> Int
 str[0]                          // First char of String -> Char
@@ -93,7 +93,7 @@ When exactly one `BracketOp::Coord(Index(expr))` is present and `expr`
 evaluates to `Value::String` on an atomic type, it desugars to a per-element
 regex filter:
 
-```brief
+```briv
 15561["[15]"]  →  decompose ['1','5','5','6','1']
                →  keep ['1','5','5','1'] (chars matching [15])
                →  reconstruct Int(1551)
@@ -164,7 +164,7 @@ When a TypeDef defines `InsertAt = "strategy"` or `ExtractFrom = "strategy"`, th
 
 ### Defining Custom Strategies
 
-```brief
+```briv
 type Queue : List {
     InsertAt    = "append";
     ExtractFrom = "shift";

@@ -1,4 +1,4 @@
-# DBrief - Brief's Hardware Register and Data Description Language
+# DBriv - Briv's Hardware Register and Data Description Language
 
 **Version:** 0.1.0  
 **Status:** Active development
@@ -7,7 +7,7 @@
 
 ## Overview
 
-DBrief (`.dbv`, `.dbvs`, `.dbvl` files) is Brief's language for:
+DBriv (`.dbv`, `.dbvs`, `.dbvl` files) is Briv's language for:
 - Hardware register declarations
 - FFI (Foreign Function Interface) bindings
 - Data description and schemas
@@ -19,15 +19,15 @@ DBrief (`.dbv`, `.dbvs`, `.dbvl` files) is Brief's language for:
 
 | Extension | Name | Purpose |
 |-----------|------|---------|
-| `.dbvs` | DBrief Schema | Template/schema definitions (declarations only) |
-| `.dbv` | DBrief View | Concrete bindings (schema + data) |
-| `.dbvl` | DBrief Live | Mutable line-based data records |
+| `.dbvs` | DBriv Schema | Template/schema definitions (declarations only) |
+| `.dbv` | DBriv View | Concrete bindings (schema + data) |
+| `.dbvl` | DBriv Live | Mutable line-based data records |
 
 ---
 
 ## Keywords and Abbreviations
 
-All DBrief keywords support abbreviations:
+All DBriv keywords support abbreviations:
 
 | Keyword | Abbreviations | Description |
 |---------|---------------|-------------|
@@ -47,7 +47,7 @@ All DBrief keywords support abbreviations:
 
 ### Register (FFI Binding)
 
-```dbrief
+```dbriv
 // Full keyword
 register 0x00 as "sqrt" {
     type: Float;
@@ -66,7 +66,7 @@ reg @sqrt as "sqrt" {
 
 ### Service (I/O Interface)
 
-```dbrief
+```dbriv
 // Full keyword
 service ImageClassifier {
     INPUT img_data: Vector[UInt[8], 4096];
@@ -83,7 +83,7 @@ serv Classifier {
 
 ### Alias (Named Address)
 
-```dbrief
+```dbriv
 // Full keyword
 ALIAS debug_led: UInt[8] = 0xFF5E0000;
 
@@ -93,7 +93,7 @@ alias? debug_mode: Bool;
 
 ### Dependencies
 
-```dbrief
+```dbriv
 // Single dependency
 DEPENDS "sqlite3" VERSION ">=3.36.0" PLATFORM native;
 
@@ -106,7 +106,7 @@ dep "openssl" VERSION "^1.1" PLATFORM [native, wasm];
 
 ### Record (Data Instance)
 
-```dbrief
+```dbriv
 @0x1000 {
     name: "sensor_1";
     value: 42;
@@ -120,22 +120,22 @@ dep "openssl" VERSION "^1.1" PLATFORM [native, wasm];
 
 ```bash
 # Parse DBVS schema and export to JSON
-brief dbvs <file.dbvs> [--out <file.json>] [--pretty]
+briv dbvs <file.dbvs> [--out <file.json>] [--pretty]
 
 # Parse DBVL (line-based) and export to JSON  
-brief dbvl <file.dbvl> [--out <file.json>] [--pretty]
+briv dbvl <file.dbvl> [--out <file.json>] [--pretty]
 
 # Parse DBV (full) and export to JSON
-brief dbv <file.dbv> [--out <file.json>] [--pretty]
+briv dbv <file.dbv> [--out <file.json>] [--pretty]
 ```
 
 ---
 
 ## FFI Binding Schema
 
-FFI bindings in DBrief use the `register` keyword to declare external functions:
+FFI bindings in DBriv use the `register` keyword to declare external functions:
 
-```dbrief
+```dbriv
 register <address> as "<name>" {
     type: <function signature>;
     location: "<module::path>";
@@ -184,8 +184,8 @@ register <address> as "<name>" {
 
 - `std/bindings/*.dbvs` - FFI binding schemas
 - `lib/targets/*.dbv` - Hardware target definitions
-- `src/dbrief/parser.rs` - Parser implementation
-- `src/dbrief/ast.rs` - AST definitions
+- `src/dbriv/parser.rs` - Parser implementation
+- `src/dbriv/ast.rs` - AST definitions
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Goal
 Build the most computationally intense benchmark to date — a full 3×3 Kalman filter
-propagation (state vector + covariance matrix) — and stress-test Brief's struct-SSA
+propagation (state vector + covariance matrix) — and stress-test Briv's struct-SSA
 register promotion with 12 float fields.
 
 ## Why this benchmark
@@ -22,13 +22,13 @@ register promotion with 12 float fields.
 - `#!exit count == bound;`
 
 ### `benchmarks/kalman_filter_runtime_c.c`
-- Matches Brief exactly: local float variables, same constants, same loop structure
+- Matches Briv exactly: local float variables, same constants, same loop structure
 - Returns `(int)(count + x₀ + x₁ + x₂ + sum(P))` — makes all 12 float fields + counter observable
 - No volatile, no structs, no function calls — pure register pressure test
 
 ## Results (BOUND=50000000, 50M iterations)
 
-| Metric | Brief | C | Ratio |
+| Metric | Briv | C | Ratio |
 |--------|-------|---|-------|
 | Runtime | 1.214s | 0.649s | **1.87×** |
 | Float ops in assembly | 228 | 84 | **2.7×** |
@@ -60,7 +60,7 @@ The IIR filter (4 float fields) had no spill (197 vs 13 ratio is 0 — IIR has ~
 The boundary is between 4 and 12 float fields.
 
 ### Key Finding
-**Brief is register-pressured at ~12 float fields.** Solutions for future optimization:
+**Briv is register-pressured at ~12 float fields.** Solutions for future optimization:
 
 1. **Selective promotion** — only promote hot fields to registers; cold fields use GEP load/store
 2. **Strut decomposition** — split %State into hot and cold structs to reduce phi count
@@ -73,7 +73,7 @@ The boundary is between 4 and 12 float fields.
 |-----------|--------|
 | Both compile without errors | ✅ |
 | Both produce same arithmetic | ✅ (exit codes differ, both compute correctly) |
-| Brief runtime ≈ C (within 20%) | ❌ (1.87× slower) |
+| Briv runtime ≈ C (within 20%) | ❌ (1.87× slower) |
 | Emits struct-SSA (extract/insert chains) | ✅ (50 extract/insert in loop body) |
 
 ## How to Run

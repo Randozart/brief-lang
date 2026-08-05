@@ -1,12 +1,12 @@
-# The Brief Mindset
+# The Briv Mindset
 
-**How to read and think in Brief**
+**How to read and think in Briv**
 
 ---
 
 ## Symbolic Design Philosophy: What the Symbols Mean
 
-Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+Briv's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
 | Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
 |--------|-------------|-------------------|----------------|-------|
@@ -51,7 +51,7 @@ Four delimiters, four honest meanings — never swapped:
 
 ## Why This Document Exists
 
-Most language tutorials teach you the **syntax** - what to write. This document teaches you how to **see** Brief code. It's the mental model you need to read Brief the way a Brief developer reads it, understanding intent at a glance.
+Most language tutorials teach you the **syntax** - what to write. This document teaches you how to **see** Briv code. It's the mental model you need to read Briv the way a Briv developer reads it, understanding intent at a glance.
 
 If you're the kind of learner who picks up languages by "getting a feel" for them, this is for you.
 
@@ -59,9 +59,9 @@ If you're the kind of learner who picks up languages by "getting a feel" for the
 
 ## The Core Philosophy
 
-Brief removes familiar imperative constructs **by design**. No `if/else`, no `while`, no `for`.
+Briv removes familiar imperative constructs **by design**. No `if/else`, no `while`, no `for`.
 
-This is **not a limitation**. It's the foundation of what makes Brief work. When code can't branch unpredictably, the compiler can **prove** properties about it. No races. No unhandled cases. No deadlocks.
+This is **not a limitation**. It's the foundation of what makes Briv work. When code can't branch unpredictably, the compiler can **prove** properties about it. No races. No unhandled cases. No deadlocks.
 
 **Never-nesting** - Treat each block of code as an individual building block to be strung together, not nested inside other blocks.
 
@@ -71,9 +71,9 @@ This is **not a limitation**. It's the foundation of what makes Brief work. When
 
 ### `[ ]` - Brackets for Logic
 
-Square brackets are for **logical checks and verification**. This is the primary way Brief makes decisions.
+Square brackets are for **logical checks and verification**. This is the primary way Briv makes decisions.
 
-```brief
+```briv
 [x > 0] {        // Guard: only runs if x is positive
     &result = x;
 };
@@ -81,7 +81,7 @@ Square brackets are for **logical checks and verification**. This is the primary
 
 **Vector format**: `Vector<T, dim1, dim2, ...>` with commas, not angle brackets for dimensions
 
-```brief
+```briv
 let items: Vector<Int, 10>;   // Type declaration - obviously not a check
 let x = items[5];             // Index access
 let matrix: Vector<Int, 10, 20>;    // 2D vector
@@ -93,15 +93,15 @@ let matrix: Vector<Int, 10, 20>;    // 2D vector
 
 When you see angle brackets, think **Type**. This is almost always a generic or comparison.
 
-```brief
+```briv
 HashMap<String, Int>;    // Generic type
 Option<String>;         // Optional type
 Result<Int, Error>;    // Result type
 ```
 
-**Exception**: Rendered Brief's inline HTML uses `<tag>` for actual HTML elements:
+**Exception**: Rendered Briv's inline HTML uses `<tag>` for actual HTML elements:
 
-```brief
+```briv
 <div class="card">     // HTML element in .rbv view block
     <span>Hello</span>
 </div>
@@ -113,14 +113,14 @@ Result<Int, Error>;    // Result type
 
 Curly braces **divvy up code** - they group statements into logical units:
 
-```brief
+```briv
 txn increment [true][count == @count + 1] {
     &count = count + 1;   // Block 1
     term;                  // Block 2
 };
 ```
 
-Unlike languages where `{` starts a new scope, in Brief each block is just organization.
+Unlike languages where `{` starts a new scope, in Briv each block is just organization.
 
 ---
 
@@ -128,7 +128,7 @@ Unlike languages where `{` starts a new scope, in Brief each block is just organ
 
 Parentheses are for **arguments** - parameters to functions, transactions, or calls:
 
-```brief
+```briv
 txn withdraw(amount: Int) (...) { ... };
 defn max(a: Int, b: Int) -> Int (...) { ... };
 io.println("hello");
@@ -140,7 +140,7 @@ io.println("hello");
 
 When you see `.`, you're accessing something **inside** a struct or type:
 
-```brief
+```briv
 account.balance         // Field access
 list.len()           // UFCS: desugars to len(list)
 result.value         // Result unwrapping
@@ -152,7 +152,7 @@ result.value         // Result unwrapping
 1. **Internal struct field/defn** — if `subject` has a field or internal `defn` defined in its struct body, it compiles as a direct access
 2. **UFCS fallback** — otherwise desugars to `method(subject, args)`
 
-**What this means**: Brief is transparent. If you see `something.field`, that struct exists somewhere in the standard library. Nothing is hidden magic.
+**What this means**: Briv is transparent. If you see `something.field`, that struct exists somewhere in the standard library. Nothing is hidden magic.
 
 ---
 
@@ -161,7 +161,7 @@ result.value         // Result unwrapping
 Reflection reads compiler-known metadata about a value or its type. Think of
 it as "ask the compiler for a property of this thing":
 
-```brief
+```briv
 list.^Len;       // runtime length (elements)
 x.^^Bytes;       // compile-time storage size
 &x;              // verified pointer (the & operator; x.^Ptr is the reflection form)
@@ -179,13 +179,13 @@ removed with the hashword-protocol architecture; the LLVM bit intrinsics are
 declared but have no operator form. Every `.^`/`.^^` target maps to either a
 compile-time constant or a zero-cost intrinsic.
 
-See `learn-brief/13-projections.md` for the complete reference.
+See `learn-briv/13-projections.md` for the complete reference.
 
 ---
 
 ### `@` — The Universal Anchor
 
-`@` is Brief's universal **Anchor** — a single symbol for spatial and temporal location across every context:
+`@` is Briv's universal **Anchor** — a single symbol for spatial and temporal location across every context:
 
 | Context | Example | What it anchors |
 |---------|---------|----------------|
@@ -195,7 +195,7 @@ See `learn-brief/13-projections.md` for the complete reference.
 | Hardware link | `trg timer @ 1kHz` | Anchors a timer to a hardware or OS resource |
 | Memory address | `let led: Bool @ 0x40020000` | Anchors a variable to a physical address |
 
-```brief
+```briv
 // Prior-state anchor — @balance = balance BEFORE this txn ran
 txn withdraw(amount: Int)
     [balance >= amount]
@@ -218,7 +218,7 @@ let nibble = word @/0..3;
 
 **You must use `&` to mutate state.** This is mandatory and deliberate.
 
-```brief
+```briv
 &count = count + 1;    // Correct - mutates state
 count = count + 1;     // Wrong - won't compile
 ```
@@ -236,7 +236,7 @@ This explicit marker exists because mutations are verification-critical. The com
    consumed (its backing destroyed) after the op. Only a mutable lvalue can be
    consumed; reading it afterward is a use-after-move compile error.
 
-```brief
+```briv
 a ~= b;      // move-assign: a = b, then b is dead
 a ~+ b;      // a = a + b, then b is dead
 dest ~<- src;  // destructive extract: copy src's element into dest, then src is dead
@@ -247,7 +247,7 @@ The old `~?` (temporal fallback) is removed; the old `~/` term-until token is
 now the consumptive divide. "Until this holds" contracts use the `[!/X]` invert
 form instead (see 02-contracts.md).
 
-```brief
+```briv
 // Until-ready contracts, the modern form:
 [!/ready]                  // pre !ready, post ready (was: [~/ready])
 ```
@@ -258,7 +258,7 @@ form instead (see 02-contracts.md).
 
 The `!` suffix signals **this does something unusual to control flow**:
 
-```brief
+```briv
 frgn! log_message(msg);   // Fire-and-forget - no Result to check, runs and forgets
 syscall! exit(code);      // Kernel call that never returns
 trg! interrupt();        // Trigger that can fire during any function
@@ -273,7 +273,7 @@ When you see `!`, pause and think: "What makes this call unusual?"
 
 `?` marks a **watchdog** - a timeout or external condition:
 
-```brief
+```briv
 txn long_operation() [true][done] ?[5000ms] {   // Must finish in 5 seconds
     do_work();
     &done = true;
@@ -287,7 +287,7 @@ txn long_operation() [true][done] ?[5000ms] {   // Must finish in 5 seconds
 
 Arrows always represent **directional movement, dataflow, or state transitions**:
 
-```brief
+```briv
 &list <- x;                        # Push: x ends up in list
 x <- &list;                        # Pop: last element becomes x
 <- &list;                          # Discard: pop last element, throw away
@@ -303,7 +303,7 @@ defn double(x: Int) -> Int [...] { # Signature: input transitions to output
 
 `<- expr` explicitly discards the result of an expression. This is required for syscall results that you don't want to handle:
 
-```brief
+```briv
 <- syscall! @ 3 (fd);              # Close fd, discard result
 ```
 
@@ -315,7 +315,7 @@ This ensures no system-level side-effect can ever be silently ignored. The compi
 
 `;` is a hard stop. Every statement must end in `;`, including blocks denoted by `{}` (transaction bodies, struct definitions, pragmas):
 
-```brief
+```briv
 node t [x < 10] [x == 10] {
     &x = x + 1;
     term;
@@ -328,7 +328,7 @@ The parser uses `;` as an absolute synchronization token during error recovery, 
 
 ## Keywords and Their Abbreviations
 
-Brief has many **full forms** and **abbreviated forms**. The abbreviated ones are used by default. You can write them in all lowercase or all uppercase, but never mixed case.
+Briv has many **full forms** and **abbreviated forms**. The abbreviated ones are used by default. You can write them in all lowercase or all uppercase, but never mixed case.
 
 | Abbrev | Full | Meaning |
 |-------|------|--------|
@@ -351,7 +351,7 @@ Brief has many **full forms** and **abbreviated forms**. The abbreviated ones ar
 
 Something **will change state**. Transactions are atomic - they either complete fully or roll back.
 
-```brief
+```briv
 txn deposit(amount) [amount > 0][balance == @balance + amount] {
     &balance = balance + amount;
     term;
@@ -362,7 +362,7 @@ txn deposit(amount) [amount > 0][balance == @balance + amount] {
 
 This **fires automatically** when its precondition becomes true. No caller needed.
 
-```brief
+```briv
 node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
@@ -374,7 +374,7 @@ node auto_save() [dirty && !saving][!dirty] {
 
 A calculation that doesn't mutate state (except via return).
 
-```brief
+```briv
 defn absolute(x: Int) -> Int [true][result >= 0] {
     [x < 0] term -x;
     term x;
@@ -383,9 +383,9 @@ defn absolute(x: Int) -> Int [true][result >= 0] {
 
 ### `frgn` / `frgn!` - Foreign
 
-Calls **outside** Brief. Requires error handling unless using `!` (fire-and-forget).
+Calls **outside** Briv. Requires error handling unless using `!` (fire-and-forget).
 
-```brief
+```briv
 frgn sqrt(x: Float) -> Result<Float, MathError>;
 
 frgn! log(msg: String) -> void;
@@ -399,9 +399,9 @@ frgn! log(msg: String) -> void;
 
 **Old thinking**: "If X, do Y. Otherwise, do Z."
 
-**Brief thinking**: "When X is true, Y fires. When not-X is true, Z fires. Both can fire. I need to ensure my postcondition holds regardless."
+**Briv thinking**: "When X is true, Y fires. When not-X is true, Z fires. Both can fire. I need to ensure my postcondition holds regardless."
 
-```brief
+```briv
 // NOT if/else - these are guards, both CAN fire
 [x > 0] &positive = true;
 [x < 0] &negative = true;
@@ -411,7 +411,7 @@ frgn! log(msg: String) -> void;
 
 A transaction's contract is its **documentation**:
 
-```brief
+```briv
 txn withdraw(amount)
     [amount > 0 && balance >= amount]      // When can this run?
     [balance == @balance - amount]          // What must be true after?
@@ -423,7 +423,7 @@ That precondition says: "You can withdraw if and only if the amount is positive 
 
 If you see a weak postcondition like `[true][true]`, something is wrong:
 
-```brief
+```briv
 // Suspicious - promises nothing
 txn do_something [true][true] {
     // What does this actually guarantee?
@@ -446,7 +446,7 @@ only one side, use sugar that fills the omitted side as `[true]`:
 
 ### `struct` and `T[N]` — Data Declarations
 
-Brief distinguishes three declaration keywords:
+Briv distinguishes three declaration keywords:
 
 - **`type`** — Protocols, operator bindings, type system extensibility
   (`type Int: #Int { op Add(#Int); };`)
@@ -461,7 +461,7 @@ size, embedded as `[1024 x i64]` in LLVM IR and auto-vectorized.
 
 ## Why `term` and `escape`, Not `return` and `break`
 
-Brief deliberately uses different words for ending a transaction: `term` (terminate) and `escape` (rollback).
+Briv deliberately uses different words for ending a transaction: `term` (terminate) and `escape` (rollback).
 
 ### The Reasoning
 
@@ -470,7 +470,7 @@ Most languages use `return` and `break` because they assume:
 - You might want to exit early from a loop
 - The compiler doesn't need to verify your loop will end
 
-Brief assumes:
+Briv assumes:
 - Transactions can **loop** (they run until their postcondition is satisfied)
 - You might need to exit early AND rollback all changes
 - The compiler **must verify** termination
@@ -485,7 +485,7 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 
 `node` can self-verify when to end:
 
-```brief
+```briv
 node fill_buffer() [buffer .^Len < 100][buffer .^Len == 100] {
     &buffer = buffer + [new_item];
     term;
@@ -500,7 +500,7 @@ That's why `node` is different from a `while` loop: the reactor pattern includes
 
 ## Why Lists and Vectors, Not Regular Arrays
 
-Brief provides **`List<T>`** and **`Vector<T, dim1, dim2, ...>`**, not traditional arrays. This is deliberate.
+Briv provides **`List<T>`** and **`Vector<T, dim1, dim2, ...>`**, not traditional arrays. This is deliberate.
 
 ### Spatial Thinking, Not Sequential
 
@@ -508,7 +508,7 @@ Regular arrays force you to think sequentially: `array[0]`, `array[1]`, `array[2
 
 Lists and Vectors encourage **spatial thinking**:
 
-```brief
+```briv
 let items: List<Int> = [1, 2, 3, 4];                      // List - growable
 let buffer: Vector<Int, 100>;                             // 1D vector - fixed size
 let matrix: Vector<Int, 10, 20>;                         // 2D matrix
@@ -516,7 +516,7 @@ let tensor: Float, 3, 32, 32>;                         // 3D tensor
 let persons: Vector<Person, width:50, height:50>;           // Named dimensions
 ```
 
-When Brief compiles to hardware (`.ebv` → SystemVerilog/VHDL) or uses SIMD operations, the compiler can reason about the **entire structure at once**, not just iterate sequentially.
+When Briv compiles to hardware (`.ebv` → SystemVerilog/VHDL) or uses SIMD operations, the compiler can reason about the **entire structure at once**, not just iterate sequentially.
 
 ### The Difference
 
@@ -530,7 +530,7 @@ Vectors use **angle brackets** with commas for multiple dimensions:
 - Remaining arguments are **dimensions**
 - Dimensions can be **anonymous** (just numbers) or **named** (`name:size`)
 
-```brief
+```briv
 Vector<Int, 10, 20>                             // 2D, 10x20
 Vector<Person, width:50, height:50, time:10>      // Named dimensions
 ```
@@ -541,15 +541,15 @@ Choosing between List and Vector forces you to think about your access pattern u
 
 ## Why Multiple File Extensions
 
-Brief splits into **file extensions by target** to keep syntax clean and bake in base assumptions:
+Briv splits into **file extensions by target** to keep syntax clean and bake in base assumptions:
 
 | Extension | Purpose | Assumptions |
 |----------|---------|-----------|
-| `.bv` | Pure Brief | Universal - assumes some architecture exists |
-| `.rbv` | Rendered Brief | MUST run in browser - HTML/CSS/SVG embeddable |
+| `.bv` | Pure Briv | Universal - assumes some architecture exists |
+| `.rbv` | Rendered Briv | MUST run in browser - HTML/CSS/SVG embeddable |
 | `.ebv` | Embedded | Bare-metal or FPGA - memory-mapped I/O, hardware triggers |
-| `.dbv` | Data Brief | Configuration data - cleaner to audit than regular Brief |
-| `.dbvs` | Data Brief Schema | Schema definitions for `.dbv` |
+| `.dbv` | Data Briv | Configuration data - cleaner to audit than regular Briv |
+| `.dbvs` | Data Briv Schema | Schema definitions for `.dbv` |
 
 Each extension bakes in **what the target expects**:
 
@@ -609,7 +609,7 @@ When you see **`List`** → think **dynamic, spatial**
 
 When you see **`Vector`** → think **fixed, contiguous, hardware-friendly**
 
-When you see **`.bv`** → think **pure Brief (universal)**
+When you see **`.bv`** → think **pure Briv (universal)**
 
 When you see **`.rbv`** → think **rendered (browser)**
 
@@ -626,4 +626,4 @@ Now that you have the feel, continue to [01-basics.md](01-basics.md) to learn th
 ---
 
 *Last updated: 2026-05-08  
-Version: Brief v0.12.0*
+Version: Briv v0.12.0*

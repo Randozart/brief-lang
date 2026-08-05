@@ -11,19 +11,19 @@ completeness, type marshaling, and end-to-end testing.
 
 ## 1. Goal
 
-Add a `--library` flag to `brief build` that produces a reusable LLVM IR module
+Add a `--library` flag to `briv build` that produces a reusable LLVM IR module
 (`.ll`) with `#export` wrappers and an initializer, but **no main function**.
 This `.ll` module is the compiled artifact that foreign build systems consume
 as part of the GLUE protocol:
 
 ```
-brief build --library bridge.bv --out ./out
-  → out/bridge.ll   (library-mode LLVM IR — #export wrappers + __brief_init_state)
+briv build --library bridge.bv --out ./out
+  → out/bridge.ll   (library-mode LLVM IR — #export wrappers + __briv_init_state)
 ```
 
 Combined with:
 ```
-brief export bridge.bv rust --out ./out
+briv export bridge.bv rust --out ./out
   → out/bridge-bridge/bridge-exports.dbvl  (metadata for the foreign build system)
 ```
 
@@ -34,13 +34,13 @@ generate bindings, and `llc bridge.ll` to produce a linkable `.o`.
 
 ## 2. Current State
 
-- `brief build --llvm` already produces a `.ll` file and exits before linking
+- `briv build --llvm` already produces a `.ll` file and exits before linking
   (line 3818-3839 of `src/main.rs`)
 - `library_mode` is a `bool` field on `CompilerContext` (line 60 of
   `src/backend/llvm/context.rs`), set via `with_library_mode()` (line 947 of
   `src/backend/llvm/mod.rs`)
 - `emit_library_shim()` exists in `src/backend/llvm/emit_toplevel.rs:1971` —
-  emits `__brief_init_state()` (allocates `%State`, returns ptr) and
+  emits `__briv_init_state()` (allocates `%State`, returns ptr) and
   `__glue_release()` (no-op placeholder), skips `main()` function
 - **No CLI flag sets `library_mode`** — it is only available programmatically
 - `--emit-bindings` flag (line 1733 of `src/main.rs`) generates C/Rust/Python
@@ -136,7 +136,7 @@ In library mode, `LlvmBackend::generate()` emits:
 3. **Globals**: string constants, constant aggregates
 4. **`%State` type**: struct with all state fields
 5. **`#export` wrappers**: `define dso_local <ret> @<export_name>(ptr %state, <params>)`
-6. **init_state**: `define dso_local i64 @__brief_init_state()` — allocates
+6. **init_state**: `define dso_local i64 @__briv_init_state()` — allocates
    `%State`, initializes to zero/null, returns pointer as `i64`
 7. **`__glue_release`**: `define dso_local void @__glue_release(i64)` — no-op
 8. **No main function**: reactor loop, SSA main, thread pool metadata are all absent
@@ -161,9 +161,9 @@ No changes to the LLVM backend itself — all infrastructure already exists.
 ## 5. Tests
 
 - `cargo test --lib` — all 1448 tests must pass
-- Manual: `brief build --library examples/glue-macro.bv --out /tmp/glue-test`
-  → verifies `.ll` contains `@__brief_init_state` and no `@main`
-- Manual: `brief build --library examples/glue-macro.bv --llvm` → should be
+- Manual: `briv build --library examples/glue-macro.bv --out /tmp/glue-test`
+  → verifies `.ll` contains `@__briv_init_state` and no `@main`
+- Manual: `briv build --library examples/glue-macro.bv --llvm` → should be
   rejected or ignored (mutually exclusive with `--llvm`)
 
 ---
@@ -171,7 +171,7 @@ No changes to the LLVM backend itself — all infrastructure already exists.
 ## 6. Future Work (Out of Scope)
 
 - **`bridge-exports.dbvl` auto-generation** as part of `--library` — currently
-  handled separately by `brief export`
+  handled separately by `briv export`
 - **Library mode for transactions** — `#export` on callable `txn` items
   (currently only `defn` items get export wrappers)
 - **Configurable target triple** — `emit_header` hardcodes

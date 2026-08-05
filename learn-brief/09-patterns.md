@@ -1,12 +1,12 @@
 # Common Patterns and Best Practices
 
- idiomatic Brief code and proven design patterns.
+ idiomatic Briv code and proven design patterns.
 
 ## 1. State Machine Pattern
 
 Use enums and reactive transactions for state machines:
 
-```brief
+```briv
 enum OrderState { Pending, Paid, Shipped, Delivered, Cancelled }
 let state: OrderState = OrderState::Pending;
 
@@ -52,7 +52,7 @@ node cancel()
 
 Use reactive transactions for automatic notifications:
 
-```brief
+```briv
 let observers: List<String> = [];
 let subject_value: Int = 0;
 let notified_value: Int = -1;
@@ -80,7 +80,7 @@ txn subscribe(observer: String) [true][observers.contains(observer)] {
 
 Separate state-changing transactions from queries:
 
-```brief
+```briv
 // Commands (state-changing)
 txn create_user(name: String, email: String) 
     [!user_exists(email)]
@@ -126,7 +126,7 @@ defn list_users() -> List<User> {
 
 Encapsulate data access logic:
 
-```brief
+```briv
 struct UserRepository {
     cache: HashMap<Int, User>;
     dirty: Bool;
@@ -159,7 +159,7 @@ txn flush(repo: Ptr<UserRepository>) [repo.dirty][!repo.dirty] {
 
 Construct complex objects step-by-step:
 
-```brief
+```briv
 struct RequestBuilder {
     url: String,
     method: String,
@@ -233,7 +233,7 @@ let request = builder_build(
 
 Swap algorithms at runtime:
 
-```brief
+```briv
 enum SortStrategy { BubbleSort, QuickSort, MergeSort }
 let strategy: SortStrategy = SortStrategy::QuickSort;
 
@@ -260,7 +260,7 @@ txn set_strategy(new_strategy: SortStrategy) [true][strategy == new_strategy] {
 
 Prevent cascade failures:
 
-```brief
+```briv
 enum CircuitState { Closed, Open, HalfOpen }
 let circuit_state: CircuitState = CircuitState::Closed;
 let failure_count: Int = 0;
@@ -311,7 +311,7 @@ defn call_external_service() -> Result<String, String> {
 
 ## 8. Retry with Backoff
 
-```brief
+```briv
 let attempts: Int = 0;
 let last_attempt_time: Int = 0;
 
@@ -336,7 +336,7 @@ node retry_operation()
 
 ## 9. Rate Limiting
 
-```brief
+```briv
 let request_count: Int = 0;
 let window_start: Int = 0;
 
@@ -361,7 +361,7 @@ txn process_request()
 
 ## 10. Caching Pattern
 
-```brief
+```briv
 let cache: HashMap<String, CacheEntry> = new_map();
 let cache_size: Int = 100;
 
@@ -404,7 +404,7 @@ txn cache_put(key: String, value: String, ttl: Int)
 
 ### 1. Write Meaningful Contracts
 
-```brief
+```briv
 // ❌ BAD - provides no information
 txn process() [true][true] { ... }
 
@@ -417,7 +417,7 @@ txn withdraw(amount: Int)
 
 ### 2. Keep Transactions Small
 
-```brief
+```briv
 // ❌ BAD - too much logic in one transaction
 txn process_order() {
     validate_order();
@@ -438,7 +438,7 @@ txn send_confirmation() [inventory_updated][sent == true] { ... }
 
 ### 3. Use Reactive Transactions for Side Effects
 
-```brief
+```briv
 // ❌ BAD - manual polling
 node check_email() [true][true] {
     [has_new_email()] {
@@ -456,7 +456,7 @@ node process_new_email() [has_new_email()][email_processed == true] {
 
 ### 4. Handle All Error Cases
 
-```brief
+```briv
 // ❌ BAD - ignores errors
 let result = read_file(path);
 let content = result.value;  // Panics if error!
@@ -474,7 +474,7 @@ let result = read_file(path);
 
 ### 5. Document with Contracts
 
-```brief
+```briv
 // Self-documenting code
 defn binary_search(list: List<Int>, target: Int) 
     [is_sorted(list)]              // Requires sorted list

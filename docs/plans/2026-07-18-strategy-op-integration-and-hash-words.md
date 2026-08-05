@@ -78,7 +78,7 @@ For `as #T`:
 ### 3a. Remove inline GEP functions
 
 Delete `emit_ring_push` and `emit_ring_pop` from `emit_stmt.rs`. The strategy
-dispatch now calls the Brief function definition directly.
+dispatch now calls the Briv function definition directly.
 
 ### 3b. Remove RingPush/RingPop intrinsics
 

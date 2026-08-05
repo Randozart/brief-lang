@@ -4,18 +4,18 @@
 
 After Round 2 code-review fixes (5 bugs resolved, 368 tests pass), the benchmark picture at 50M iterations:
 
-| Benchmark | Brief | C | Gap |
+| Benchmark | Briv | C | Gap |
 |-----------|-------|---|-----|
 | iir_filter | 0.1876s | 0.1466s | 1.28× (**regression** — was 0.000s) |
-| float_math | 0.0251s | 0.0584s | Brief wins |
+| float_math | 0.0251s | 0.0584s | Briv wins |
 | float_math_nonzero | 0.4779s | 0.2126s | **2.25×** (µarch scheduling) |
 | sparse_dispatch | 0.0795s | 0.0044s | 18× (call-chain overhead) |
-| const_heavy | 0.0074s | 0.0519s | Brief 7× faster |
+| const_heavy | 0.0074s | 0.0519s | Briv 7× faster |
 | precompute_sum | 0.0125s | 0.0024s | O(1) — wall-clock noise |
 | ring_buffer | 0.0050s | 0.0022s | O(1) — wall-clock noise |
 | async_counters | 0.0073s | 0.0039s | O(1) — wall-clock noise |
 
-Key finding: O(1) benchmarks have 0.00s user time. All sub-20ms wall-clock variance is `exec()` + scheduler noise — confirmed via `time -v` and 5× repeated runs showing identical variance in both Brief and C binaries.
+Key finding: O(1) benchmarks have 0.00s user time. All sub-20ms wall-clock variance is `exec()` + scheduler noise — confirmed via `time -v` and 5× repeated runs showing identical variance in both Briv and C binaries.
 
 ## Collection of All Architecture Ideas from Discussion
 
@@ -38,7 +38,7 @@ Key finding: O(1) benchmarks have 0.00s user time. All sub-20ms wall-clock varia
 | P0 bug fixes (B1-B4) | `lib/ffi/native/src/lib.rs`, `entry_point.rs`, `assertion_verify.rs`, `cross_reference.rs` | Done (Phase 2) |
 | iir_filter x==x fix | `transition_graph.rs` — collect_identifiers skips tautological Eq/Ge/Le | Done (Phase 3) |
 | Commutativity pattern fix (A6) | `llvm.rs` — removed duplicate match arm in extract_trigger_keys | Done (Phase 3A) |
-| Round 2 code-review fixes | `__find_from`, dbrief pipeline, dataflow extracts, protocol verifier, parser dedup | Done (Round 2) |
+| Round 2 code-review fixes | `__find_from`, dbriv pipeline, dataflow extracts, protocol verifier, parser dedup | Done (Round 2) |
 | Parser deduplication | `parser.rs` — keyword_token_to_name + parse_keyword_as_expr, −236 lines | Done (Round 2) |
 
 ---
@@ -68,7 +68,7 @@ Key finding: O(1) benchmarks have 0.00s user time. All sub-20ms wall-clock varia
 
 ### B. Loop Unrolling in emit_folded_loop
 
-**Problem**: float_math_nonzero shows 2.25× gap (0.4779s vs 0.2126s C). Both Brief and C produce identical 15-instruction AVX hot loops (`vmulss`/`vaddss`/`vaddps`/`dec`/`jne`), zero spills, same loop alignment. The gap is µarch scheduling — phi-per-iteration overhead.
+**Problem**: float_math_nonzero shows 2.25× gap (0.4779s vs 0.2126s C). Both Briv and C produce identical 15-instruction AVX hot loops (`vmulss`/`vaddss`/`vaddps`/`dec`/`jne`), zero spills, same loop alignment. The gap is µarch scheduling — phi-per-iteration overhead.
 
 **Solution**: In `emit_folded_loop`, emit the loop body N times (4× or 8×) with a guarded remainder:
 
@@ -183,7 +183,7 @@ For these variables, bypass the struct entirely:
 
 ### E. Explicit `!range` Metadata on Loads
 
-**Problem**: Brief knows variable bounds statically from preconditions (e.g., `counter < limit`, `enum_field in {0, 1, 2, 3}`). This information is currently not communicated to LLVM.
+**Problem**: Briv knows variable bounds statically from preconditions (e.g., `counter < limit`, `enum_field in {0, 1, 2, 3}`). This information is currently not communicated to LLVM.
 
 **Solution**: When emitting loads from state fields that have known ranges, attach `!range` metadata:
 ```llvm
@@ -250,7 +250,7 @@ For these variables, bypass the struct entirely:
 
 ### H. Extend `noalias`/`nocapture` to All Function Boundaries
 
-**Problem**: Brief guarantees non-overlapping addresses at compile time (verified by address consistency pass). But these guarantees aren't fully communicated to LLVM across all function boundaries.
+**Problem**: Briv guarantees non-overlapping addresses at compile time (verified by address consistency pass). But these guarantees aren't fully communicated to LLVM across all function boundaries.
 
 **Solution**: Audit and extend `noalias` and `nocapture` annotations on all function parameters and return values where the language semantics guarantee it:
 - State pointers: `noalias nocapture` (no aliasing, no pointer escape)

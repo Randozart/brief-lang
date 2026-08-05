@@ -66,7 +66,7 @@ pub struct CompilerContext {
     // State layout (built during generate(), then read-only)
     pub field_index_map: HashMap<String, usize>,
     pub field_types: Vec<String>,
-    pub field_brief_types: Vec<Type>,
+    pub field_briv_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
     pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
     /// 2026-07-02: Tracks RingBuffer variables whose fields are stored inline
@@ -87,7 +87,7 @@ pub struct CompilerContext {
     pub observable_names: std::collections::HashSet<String>,
     /// 2026-08-03: Per-export `needs_state` from the export ABI analysis
     /// (src/analysis/export_abi.rs). Pure exports keep a clean C ABI;
-    /// exports calling any Brief defn carry `ptr %state` first.
+    /// exports calling any Briv defn carry `ptr %state` first.
     pub export_needs_state: HashMap<String, bool>,
     /// 2026-07-27: Reverse index from state field position to field name.
     /// Used by load_field_type() to look up !range metadata by field index.
@@ -103,7 +103,7 @@ pub struct CompilerContext {
     pub mmio_fields: HashMap<String, u64>,
     pub mmio_initializers: HashMap<String, Option<Expr>>,
     pub mmio_prepopulated: bool,
-    /// 2026-07-26: Replaced DbriefType with HashSet. The type annotation
+    /// 2026-07-26: Replaced DbrivType with HashSet. The type annotation
     /// was never read in production — only names matter for cross-validation.
     pub schema_alias_names: HashSet<String>,
 
@@ -281,7 +281,7 @@ impl CompilerContext {
             module_init: false,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
-            field_brief_types: Vec::new(),
+            field_briv_types: Vec::new(),
             field_initializers: HashMap::new(),
             ringbuf_inline: HashMap::new(),
             field_modes: HashMap::new(),
@@ -391,7 +391,7 @@ pub struct FunctionContext {
     pub let_original_types: HashMap<String, Type>,
     /// 2026-07-18: Tracks which let-bindings point to allocas (vs SSA registers).
     pub let_binding_allocas: HashSet<String>,
-    /// 2026-08-04 (compiler-in-Brief): top-level `let name` bindings that are
+    /// 2026-08-04 (compiler-in-Briv): top-level `let name` bindings that are
     /// reassigned somewhere in the body (incl. inside when/if/foreach blocks).
     /// Pre-declared as allocas at the function ENTRY so a reassignment inside a
     /// guard/loop body stores into an entry-block alloca — emitting the demotion
@@ -550,7 +550,7 @@ pub struct FunctionContext {
     // extractvalue from the state phi always gives old values, so all
     // computations are naturally independent.  The per-field phi loop
     // (EmitPerFieldPhi) broke this by updating ssa_old caches after each &
-    // (correct per Brief semantics but creates artificial dependency
+    // (correct per Briv semantics but creates artificial dependency
     // chains).  Parallel-safe mode restores the EmitInlineSsa independence.
     //
     // Exception: the counter field (tracked by counter_field_name) always

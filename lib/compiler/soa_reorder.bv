@@ -1,6 +1,6 @@
-// soa_reorder.bv — the second compiler pass written in Brief.
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P5): proves the
-// compiler-in-Brief pattern generalizes past needs_state. This pass computes
+// soa_reorder.bv — the second compiler pass written in Briv.
+// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi, P5): proves the
+// compiler-in-Briv pattern generalizes past needs_state. This pass computes
 // the AoS → SoA field REORDERING of src/analysis/soa_reorder.rs — which state
 // fields move into which position — and returns the resulting PERMUTATION of
 // item indices (a Malloc'd buffer `[N][idx0]...[idx_{N-1}]`, address as Int).
@@ -9,7 +9,7 @@
 // The projection (src/analysis/soa_projection.rs) is the permutation-only
 // handoff — Rust walks the AST and emits, per reorderable float field, its
 // SIBLING-REFERENCE count (how many same-prefix fields its update expr / the
-// txn body's assigns reference). The Brief pass decides the DECISION: which
+// txn body's assigns reference). The Briv pass decides the DECISION: which
 // prefix groups are SAFE to reorder (≥2 members AND no member references a
 // sibling) and builds the permutation. `when` is an if-guard (not a while
 // loop), so all iteration is RECURSION.

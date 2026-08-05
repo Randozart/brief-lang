@@ -11,7 +11,7 @@ peripheral and register, enabling contract-proven MMIO access.
 
 ## Usage
 
-```brief
+```briv
 import "target";  // uses --board or defaults to "stm32f407"
 
 // Peripheral base address:
@@ -49,7 +49,7 @@ access = "rw"
 ## CLI Flag
 
 ```bash
-brief-compiler --board stm32f407 source.bv
+briv-compiler --board stm32f407 source.bv
 ```
 
 Defaults to `stm32f407` if `--board` is not specified.

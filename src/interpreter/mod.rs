@@ -225,7 +225,7 @@ impl Default for Interpreter {
 /// Signature for foreign function implementations registered in the FFI registry.
 pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
 
-/// The only representational value in the Brief interpreter.
+/// The only representational value in the Briv interpreter.
 /// All program data — Int, Float, Bool, String, pointers — is Bits(Vec<u8>).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -331,9 +331,9 @@ impl Value {
         self.as_bool().unwrap_or(false)
     }
 
-    /// Dereference this value as a Brief String's content bytes.
+    /// Dereference this value as a Briv String's content bytes.
     ///
-    /// 2026-08-01 (B1): A Brief String is either raw bytes (`Value::Bits`,
+    /// 2026-08-01 (B1): A Briv String is either raw bytes (`Value::Bits`,
     /// produced by literals and the get_env! macro) or a heap handle
     /// (`Value::Int(addr)` pointing at `[len: i64][payload]`, produced by
     /// FFI marshalling like EnvGet#). This is the single deref used by

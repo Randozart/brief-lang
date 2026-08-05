@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-04
 **Status:** Phases 1–3 DONE (`03becb29` cast, `cc8fe299`+`47e5964c`+`29da13b0`+`d86f9844` out, `bcb3cebe` casting de-dup); Phase 4 (`.ebv` heap reframe) IN PROGRESS
-**Branch:** `feat/out-observability` (worktree `../brief-compiler-out`)
+**Branch:** `feat/out-observability` (worktree `../briv-compiler-out`)
 **Related:**
 - `docs/plans/2026-08-03-glue-folders-node-bridge.md` (GLUE convergence — Phase 6)
 - `docs/plans/2026-08-01-consumptive-operators-lifetime-and-c-surface.md` (intrinsic audit, C-surface reduction)
@@ -15,8 +15,8 @@
 
 ## The Goal
 
-Prove Brief can hold its own as a **systems language without dependencies**: every
-C-expressible piece of the runtime becomes Brief-native. C shrinks to the
+Prove Briv can hold its own as a **systems language without dependencies**: every
+C-expressible piece of the runtime becomes Briv-native. C shrinks to the
 **irreducible OS boundary** (syscalls, threads, signals) — and even some of that
 is eventually raw-syscall lowered. Every native implementation is a win.
 
@@ -24,18 +24,18 @@ This plan has two threads that interlock:
 
 1. **The `out` keyword** — the stdlib-side observability pin. It lets stdlib
    functions claim "the compiler must not eliminate calls to me," which is what
-   permits formatting/logic to move out of the C runtime and into Brief without
+   permits formatting/logic to move out of the C runtime and into Briv without
    being dead-code-eliminated.
 2. **The native-stdlib migration** — moving the pure-logic half of
-   `lib/runtime/brief_rt.c` (digit→string, string byte-ops, `str_to_int`, file
-   read/write) into Brief, and creating the first real `.ebv` freestanding
+   `lib/runtime/briv_rt.c` (digit→string, string byte-ops, `str_to_int`, file
+   read/write) into Briv, and creating the first real `.ebv` freestanding
    target.
 
 ---
 
 ## Core Design: Keywords are Pins, Never Accelerations
 
-Brief's compiler **always maximizes optimization** — even if that means folding a
+Briv's compiler **always maximizes optimization** — even if that means folding a
 program into a single LUT. No annotation, pragma, or keyword makes a program run
 *faster*. Keywords like `seq`, `vol`, and `out` are **restrictions**: they tell
 the compiler "I need this specific thing done, you cannot optimize it out." They
@@ -74,8 +74,8 @@ Observable intrinsics need **no `out`** — they are already exact by design.
   redundant).
 - **NOT `out export`** — whatever `export` returns IS the output boundary for the
   other language; it is inherently observable at the ABI. If the same function is
-  also called from Brief, there are two versions: the exported one (ABI-pinned)
-  and a Brief twin that may be optimized into other bodies.
+  also called from Briv, there are two versions: the exported one (ABI-pinned)
+  and a Briv twin that may be optimized into other bodies.
 - **NOT `out frgn`** — a `frgn` is always an input/boundary. Its call is
   inherently observable (external side effects unknown to the compiler).
 
@@ -183,7 +183,7 @@ backend is already conservative (any call blocks folding; `Malloc#`/`Store#`/
 `Load#` are `observable: true` intrinsics), so the "keep the allocation
 observable" goal is already met without `out`. The `out` keyword's benchmark
 value materializes in Phases 4–5, when stdlib print/format functions move into
-Brief and need `out` to survive DCE.
+Briv and need `out` to survive DCE.
 
 **Tests:** parse tests for all four forms; a DCE test proving an `out` function
 call survives while an identical non-`out` call is folded; a folding test proving
@@ -218,10 +218,10 @@ route casting through the casting graph's existing lanes.
 **Work:**
 - Delete the hardcoded arms; route `(n as String)` / `(String) n` through
   `emit_cast_path` → the `Int ⇄ String` lanes.
-- Fix `std/string.bv` `to_string` to use the casting path (or a Brief digit
+- Fix `std/string.bv` `to_string` to use the casting path (or a Briv digit
   loop — see Phase 4).
 - **Creates the `.ebv` seam:** the lane *implementation* becomes swappable —
-  `.bv` uses `ExtCall("int_to_str")` (C), `.ebv` uses a Brief digit loop.
+  `.bv` uses `ExtCall("int_to_str")` (C), `.ebv` uses a Briv digit loop.
 
 **Tests:** `(n as String)` produces the same IR as today (byte-identical before
 the `.ebv` seam); `to_string` works; no `IntToStr#` references remain.
@@ -237,9 +237,9 @@ the `.ebv` seam); `to_string` works; no `IntToStr#` references remain.
 static bump arena + heap-rejection downgrade done (`f2b57043`). Remaining: the
 C-free `.ebv` stdlib/prelude (see "Remaining" below).
 
-**Goal:** prove Brief can hold its own as a systems language without C — a real
+**Goal:** prove Briv can hold its own as a systems language without C — a real
 `.ebv` freestanding target with a **heap** (static bump arena, no `@malloc`),
-String/Data support, and the string-conversion stdlib implemented in Brief.
+String/Data support, and the string-conversion stdlib implemented in Briv.
 
 ### Why `.ebv` rejects heap is WRONG (the provenance)
 
@@ -256,15 +256,15 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
   (genuinely no heap — it synthesizes hardware). The heap rejection should have
   gone with `.cbv`.
 - The documented `.ebv` vision REQUIRES a heap and Strings:
-  - `docs/plans/2026-08-03-data-brief-config-and-board-hardware-map.md:81` —
-    `.ebv` is explicitly `Malloc#`→ bump allocator, `Print#`→ pure Brief
+  - `docs/plans/2026-08-03-data-briv-config-and-board-hardware-map.md:81` —
+    `.ebv` is explicitly `Malloc#`→ bump allocator, `Print#`→ pure Briv
     formatting + `write`, `Now#`→ freestanding clock.
   - `docs/plans/2026-06-23-arena-allocation.md` — the bump-allocator design.
   - `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md:992` — `SysCall#`
     with inline asm, "no C runtime needed".
 
 **Decision (2026-08-04):** heap is RIGHT for `.ebv`. The rejection belongs to
-`.cbv`. Brief should PROVIDE an allocator on bare metal, not forbid Strings.
+`.cbv`. Briv should PROVIDE an allocator on bare metal, not forbid Strings.
 
 ### Current state (verified)
 
@@ -272,7 +272,7 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
   said it existed; grep found nothing). The `is_embedded` flag existed on the
   backend but was never wired.
 - **Latent link-error bug found+fixed** (`70f596f9`): the casting graph declares
-  10 `ExtCall` string-lane symbols; only `int_to_str` existed in `brief_rt.c`.
+  10 `ExtCall` string-lane symbols; only `int_to_str` existed in `briv_rt.c`.
   The other nine (str_to_int, uint_to_str, str_to_uint, float_to_str,
   str_to_float, str_to_bool, bool_to_str, str_first_char, char_to_str) were
   undefined — `(s as Int)` etc. LINK-ERRORED for .bv and .ebv alike. Added the
@@ -310,7 +310,7 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
 **3. `.ebv` string-conversion stdlib** — ⏳ REMAINING
 - `lib/std/conversions.ebv` provides the cast-lane symbols (`int_to_str`,
   `str_to_int`, `uint_to_str`, `str_to_uint`, `float_to_str`, `str_to_float`,
-  `str_to_bool`, `bool_to_str`, `str_first_char`, `char_to_str`) as **Brief
+  `str_to_bool`, `bool_to_str`, `str_first_char`, `char_to_str`) as **Briv
   defns** over the arena. The declare-guard (`c7f25a95`) already skips the
   backend declares when the program defines the symbol.
 - `with_prefer_ebv` means an `.ebv` program importing `std/conversions` picks
@@ -318,13 +318,13 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
 
 **3b. C-free `.ebv` prelude** — ⏳ REMAINING (the freestanding-link blocker)
 - The `prelude` plugin (`plugins/parsed/prelude.bv`) imports `std/os/*`,
-  `std/io.bv`, `std/env.bv` — these transitively import `std/brief_rt.bv`
-  which does `import "link/brief_rt.c"`, pulling `brief_rt.o` into EVERY build
+  `std/io.bv`, `std/env.bv` — these transitively import `std/briv_rt.bv`
+  which does `import "link/briv_rt.c"`, pulling `briv_rt.o` into EVERY build
   including `.ebv`. Verified: `nm` on an `.ebv` binary shows `int_to_str` (a
-  brief_rt.c symbol).
+  briv_rt.c symbol).
 - For a true freestanding `.ebv`, the prelude must be a **C-free variant**
   (import only `std/types/bootstrap.bv` + C-free compute modules), and the
-  `.ebv` build must skip `brief_rt.c` in `collect_extra_objects`. This is a
+  `.ebv` build must skip `briv_rt.c` in `collect_extra_objects`. This is a
   stdlib restructure (os/* and io/env are C-backed).
 
 **4. Stale docs**
@@ -335,7 +335,7 @@ String/Data support, and the string-conversion stdlib implemented in Brief.
 ### Measure
 
 A `.ebv` firmware program with String state + `(n as String)` / `(s as Int)`
-compiles, links, and runs with `brief_rt.c` NOT linked (freestanding).
+compiles, links, and runs with `briv_rt.c` NOT linked (freestanding).
 
 ---
 
@@ -349,7 +349,7 @@ compiles, links, and runs with `brief_rt.c` NOT linked (freestanding).
   the stream symbol resolves per target (OS fd / WASM fd / `.ebv` transport).
   This is how `Print#` avoids being locked to stdio.
 - **Formatting moves to stdlib** — the Phase 4 digit loops (`int_to_str`,
-  `float_to_str`). The `.ebv` print path is pure Brief formatting + a raw
+  `float_to_str`). The `.ebv` print path is pure Briv formatting + a raw
   `write` syscall.
 - `out` (Phase 2) keeps the stdlib print function from being elided.
 
@@ -361,7 +361,7 @@ compiles, links, and runs with `brief_rt.c` NOT linked (freestanding).
 ## Phase 6 — `ExtCall#`/frgn Unification (converge with GLUE)
 
 **Status:** deferred — the GLUE tree (`glue-host-callable` branch, worktree
-`../brief-compiler-glue-host`) is landing `2026-08-03-glue-folders-node-bridge.md`.
+`../briv-compiler-glue-host`) is landing `2026-08-03-glue-folders-node-bridge.md`.
 This phase records the convergence contract; **no code now**.
 
 **Contract:**
@@ -399,7 +399,7 @@ there or here?
    respects them; benchmarks migrated to `out` (no `Store#`-as-anchor left).
 3. `IntToStr#`/`ToString#`/`FloatToStr#` gone; casting routes through the graph;
    `std/string.bv:248` latent break fixed.
-4. First real `.ebv` stdlib exists; `is_embedded_extension` wired; `brief_rt.c`
+4. First real `.ebv` stdlib exists; `is_embedded_extension` wired; `briv_rt.c`
    shrinks; `--no-stdlib` string formatting works.
 5. `Print#` writes to a `#StdOut` symbol; formatting is stdlib.
 6. GLUE convergence contract recorded; no divergence with `glue-host-callable`.

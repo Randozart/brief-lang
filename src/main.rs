@@ -1,4 +1,4 @@
-// ── Brief Compiler CLI Entry Point ────────────────────────────────────
+// ── Briv Compiler CLI Entry Point ────────────────────────────────────
 // 2026-07-12: Phase 7 — Clean CLI dispatch.
 // Flat code: max 2 nesting. No unqualified unwraps.
 // 2026-07-14: Add --llvm, --out, --optimize-budget, --gpu-offload flags to build.
@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 
-use brief_compiler::library;
-use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
+use briv_compiler::library;
+use briv_compiler::target::{BackendKind, TargetConfig, get_extension};
 use compile::BeastFilter;
 
 fn main() {
@@ -63,10 +63,10 @@ fn main() {
 fn print_usage(program: &str) {
     let name = Path::new(program).file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("brief-compiler");
-    eprintln!("Brief Compiler");
+        .unwrap_or("briv-compiler");
+    eprintln!("Briv Compiler");
     eprintln!("Usage:");
-    eprintln!("  {} build <file.bv>                 Compile a Brief source file", name);
+    eprintln!("  {} build <file.bv>                 Compile a Briv source file", name);
     eprintln!("  {} build <file.bv> --llvm           Emit LLVM IR only, no binary", name);
     eprintln!("  {} build <file.bv> --config-dir <d>  Set config directory", name);
     eprintln!("  {} build <file.bv> --out <dir>      Set output directory", name);
@@ -85,7 +85,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --dump-vfs               Print virtual filesystem contents after build", name);
     eprintln!("  {} build <file.bv> --dump-traces            Print macro expansion traces after build", name);
     eprintln!("  {} build <file.bv> --diff                   Show macro changes (dry-run, no output)", name);
-    eprintln!("  {} build <file.bv> --target <name>           Build for a specific target profile from brief.toml", name);
+    eprintln!("  {} build <file.bv> --target <name>           Build for a specific target profile from briv.toml", name);
     eprintln!("  {} build <file.bv> --sysquery <key=value>    Override a SysQuery$ result (repeatable, highest priority)", name);
     eprintln!("  {} build <file.bv> --sysquery-file <path>    Load SysQuery$ overrides from a key=value file", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
@@ -355,9 +355,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     })
 }
 
-/// `briefc bounty <file.bv>` — package a .bounty for install-time compilation.
+/// `brivc bounty <file.bv>` — package a .bounty for install-time compilation.
 fn run_bounty(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: briefc bounty <file.bv>")?;
+    let file_path = args.first().ok_or("usage: brivc bounty <file.bv>")?;
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
 
@@ -369,12 +369,12 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         optimize_budget: 256,
         gpu_offload: false,
         emit_beast_stages: vec![],
-        backend: brief_compiler::target::BackendKind::Vm,
+        backend: briv_compiler::target::BackendKind::Vm,
         no_stdlib: false,
         stdlib_path: None,
         disable_plugins: vec![],
         enable_plugins: vec![],
-        trg_unresolved_action: brief_compiler::backend::llvm::TrgUnresolvedAction::Warn,
+        trg_unresolved_action: briv_compiler::backend::llvm::TrgUnresolvedAction::Warn,
         extra_objects: vec![],
         shared: false,
         library_mode: false,
@@ -413,11 +413,11 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
     let noise_seed = 0xDEADBEEF; // MVP: fixed seed. Future: random.
     eprintln!("[bounty] Obfuscating identifiers...");
     let (obfuscated_items, _inverse_map) =
-        brief_compiler::beastpack::obfuscate::obfuscate(&items, noise_seed);
+        briv_compiler::beastpack::obfuscate::obfuscate(&items, noise_seed);
 
     // 3. Serialize beastpack
     eprintln!("[bounty] Serializing .beastpack...");
-    let beastpack = brief_compiler::beastpack::serialize(&obfuscated_items, &universe, noise_seed);
+    let beastpack = briv_compiler::beastpack::serialize(&obfuscated_items, &universe, noise_seed);
     eprintln!("[bounty]   .beastpack: {} bytes", beastpack.len());
 
     // 4. Pre-compile the tamer VM interpreter to .lair bytecode
@@ -426,18 +426,18 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("cannot read lib/tamer/main.bv: {}", e))?;
     let (tamer_items, tamer_universe) = compile::compile_to_typed(
         "lib/tamer/main.bv", &tamer_source, &opts)?;
-    let mut vm = brief_compiler::backend::vm::VmBackend::new();
+    let mut vm = briv_compiler::backend::vm::VmBackend::new();
     let tamer_lair = vm.generate(&tamer_items, &tamer_universe);
     eprintln!("[bounty]   tamer .lair: {} bytes", tamer_lair.len());
 
     // 5. Compile user program to .lair too (data for tamer to interpret)
-    let mut vm2 = brief_compiler::backend::vm::VmBackend::new();
+    let mut vm2 = briv_compiler::backend::vm::VmBackend::new();
     let user_lair = vm2.generate(&obfuscated_items, &universe);
     eprintln!("[bounty]   user .lair: {} bytes", user_lair.len());
 
     // 6. Assemble .bounty (4-section: tamer.lair + user.lair + beastpack + manifest)
     let manifest = format!(r#"{{"version":1,"entry_point":"main","noise_seed":{}}}"#, noise_seed);
-    let bounty = brief_compiler::bounty::write_bounty_full(
+    let bounty = briv_compiler::bounty::write_bounty_full(
         &tamer_lair, &user_lair, &beastpack, &manifest);
 
     // 6. Write .bounty file
@@ -457,7 +457,7 @@ fn run_build(args: &[String]) -> Result<(), String> {
     // 2026-07-28: Phase E.2 — doppelganger resolution: .opt.bv > .derive.bv > .bv
     // Read source from the doppelganger if it exists, but pass opts.file_path
     // to compile functions so error messages and output paths use the original name.
-    let doppelganger_path = brief_compiler::derive::Doppelganger::resolve(std::path::Path::new(&opts.file_path));
+    let doppelganger_path = briv_compiler::derive::Doppelganger::resolve(std::path::Path::new(&opts.file_path));
     let source = if doppelganger_path != std::path::Path::new(&opts.file_path) {
         eprintln!("[derive] using {}", doppelganger_path.display());
         std::fs::read_to_string(&doppelganger_path)
@@ -468,7 +468,7 @@ fn run_build(args: &[String]) -> Result<(), String> {
     };
 
     // 2026-07-23: Resolve SysQuery$ overrides from three sources (low→high):
-    //   1. --target <name> loads per-target overrides from brief.toml profiles
+    //   1. --target <name> loads per-target overrides from briv.toml profiles
     //   2. --sysquery-file <path> loads key=value pairs from a text file
     //   3. --sysquery <key=value> CLI flags (highest priority)
     // Each source merges over the previous. If no overrides from any source,
@@ -503,17 +503,17 @@ fn run_build(args: &[String]) -> Result<(), String> {
     // ── Determine what to build ──────────────────────────────────────
     // Each entry: (target_name, base_overrides_from_profile)
     let target_profiles: Vec<(String, HashMap<String, String>)> = if let Some(ref target_name) = opts.target {
-        // --target <name>: single target from brief.toml
+        // --target <name>: single target from briv.toml
         let project_dir = std::path::Path::new(&opts.file_path)
             .parent().map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        let manifest = brief_compiler::manifest::find_manifest(&project_dir)
-            .and_then(|p| brief_compiler::manifest::Manifest::load(&p).ok());
+        let manifest = briv_compiler::manifest::find_manifest(&project_dir)
+            .and_then(|p| briv_compiler::manifest::Manifest::load(&p).ok());
         let manifest = manifest.as_ref().ok_or_else(|| {
-            format!("--target '{}' requires a brief.toml with target profiles", target_name)
+            format!("--target '{}' requires a briv.toml with target profiles", target_name)
         })?;
         let profile = manifest.target.get(target_name).ok_or_else(|| {
-            format!("target '{}' not found in brief.toml. Available targets: {}",
+            format!("target '{}' not found in briv.toml. Available targets: {}",
                 target_name, manifest.target.keys().cloned().collect::<Vec<_>>().join(", "))
         })?;
         vec![(target_name.clone(), profile.sysquery_overrides())]
@@ -564,7 +564,7 @@ fn run_check(args: &[String]) -> Result<(), String> {
     let file_path = args.first().ok_or("missing file argument")?;
     let source = {
         let p = std::path::Path::new(file_path);
-        let doppel = brief_compiler::derive::Doppelganger::resolve(p);
+        let doppel = briv_compiler::derive::Doppelganger::resolve(p);
         if doppel != p {
             std::fs::read_to_string(&doppel)
                 .map_err(|e| format!("cannot read '{}': {}", doppel.display(), e))?
@@ -577,26 +577,26 @@ fn run_check(args: &[String]) -> Result<(), String> {
 }
 
 fn run_memcheck_cmd(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: briefc memcheck <file.bv>")?;
+    let file_path = args.first().ok_or("usage: brivc memcheck <file.bv>")?;
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
-    let tokens = brief_compiler::lexer::tokenize(&source)
+    let tokens = briv_compiler::lexer::tokenize(&source)
         .map_err(|e| format!("lex failed: {}", e))?;
-    let mut parser = brief_compiler::parser::Parser::new(tokens, &source);
+    let mut parser = briv_compiler::parser::Parser::new(tokens, &source);
     let items = parser.parse_program().map_err(|e| format!("parse failed: {}", e))?;
-    let report = brief_compiler::macros::memcheck::run_memcheck(&items);
-    brief_compiler::macros::memcheck::print_memcheck(&report);
+    let report = briv_compiler::macros::memcheck::run_memcheck(&items);
+    briv_compiler::macros::memcheck::print_memcheck(&report);
     Ok(())
 }
 
 fn run_audit_cmd(args: &[String]) -> Result<(), String> {
     let source_file = args.first().map(|s| s.as_str());
-    let results = brief_compiler::macros::audit::run_audit(source_file)?;
-    brief_compiler::macros::audit::print_audit(&results);
+    let results = briv_compiler::macros::audit::run_audit(source_file)?;
+    briv_compiler::macros::audit::print_audit(&results);
     Ok(())
 }
 
-/// `briefc registry {add,list,remove}` — manage the compiler registry.
+/// `brivc registry {add,list,remove}` — manage the compiler registry.
 /// 2026-07-26: Phase 1f — Per-user registry directory.
 fn run_registry(args: &[String]) -> Result<(), String> {
     let sub = args.first().ok_or("expected 'add', 'list', or 'remove'")?;
@@ -609,11 +609,11 @@ fn run_registry(args: &[String]) -> Result<(), String> {
             }).or_else(|| {
                 source.file_stem().and_then(|s| s.to_str())
             }).ok_or("could not infer registry name from path; use --name=<name>")?;
-            brief_compiler::registry::add(source, name)?;
+            briv_compiler::registry::add(source, name)?;
             Ok(())
         }
         "list" => {
-            let entries = brief_compiler::registry::list()?;
+            let entries = briv_compiler::registry::list()?;
             if entries.is_empty() {
                 println!("(registry is empty)");
             } else {
@@ -636,14 +636,14 @@ fn run_registry(args: &[String]) -> Result<(), String> {
         }
         "remove" => {
             let name = args.get(1).ok_or("missing name argument for 'registry remove'")?;
-            brief_compiler::registry::remove(name)?;
+            briv_compiler::registry::remove(name)?;
             Ok(())
         }
         _ => Err(format!("unknown registry subcommand '{}'. Use 'add', 'list', or 'remove'", sub)),
     }
 }
 
-/// `brief-compiler register <name>` — register a project/target schema.
+/// `briv-compiler register <name>` — register a project/target schema.
 /// 2026-07-15: Phase 7 — Stub implementation.
 fn run_register(_args: &[String]) -> Result<(), String> {
     eprintln!("register: not yet implemented — schema registration is a future feature");
@@ -651,16 +651,16 @@ fn run_register(_args: &[String]) -> Result<(), String> {
 }
 
 fn run_derive(args: &[String]) -> Result<(), String> {
-    let (config, positional) = brief_compiler::derive::parse_derive_flags(args)?;
-    let file_path = positional.first().ok_or("missing file argument\nusage: brief derive [--stochastic] [--iterations N] [--temperature T] [--enumerative-depth N] <file.bv>")?;
-    brief_compiler::derive::handle_derive_command(&config, file_path)
+    let (config, positional) = briv_compiler::derive::parse_derive_flags(args)?;
+    let file_path = positional.first().ok_or("missing file argument\nusage: briv derive [--stochastic] [--iterations N] [--temperature T] [--enumerative-depth N] <file.bv>")?;
+    briv_compiler::derive::handle_derive_command(&config, file_path)
 }
 
 fn run_accept(args: &[String]) -> Result<(), String> {
     let use_opt = args.iter().any(|a| a == "--opt");
     let file_path = args.iter().find(|a| !a.starts_with("--"))
-        .ok_or("missing file argument\nusage: brief accept [--opt] <file.bv>")?;
-    brief_compiler::derive::handle_accept_command(file_path, use_opt)
+        .ok_or("missing file argument\nusage: briv accept [--opt] <file.bv>")?;
+    briv_compiler::derive::handle_accept_command(file_path, use_opt)
 }
 
 /// Load TargetConfig with optional --config-dir override.
@@ -668,7 +668,7 @@ fn run_accept(args: &[String]) -> Result<(), String> {
 fn load_target_config(config_dir: Option<&str>) -> TargetConfig {
     match config_dir {
         Some(dir) => {
-            match brief_compiler::dbrief::config_db::resolve_config_file(std::path::Path::new(dir), "targets") {
+            match briv_compiler::dbriv::config_db::resolve_config_file(std::path::Path::new(dir), "targets") {
                 Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
                     eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
                     TargetConfig::load()
@@ -683,19 +683,19 @@ fn load_target_config(config_dir: Option<&str>) -> TargetConfig {
     }
 }
 
-/// `brief doc <file.bv>` — generate HTML documentation.
+/// `briv doc <file.bv>` — generate HTML documentation.
 fn run_doc(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: brief doc <file.bv>")?;
-    brief_compiler::doc::generate_doc(file_path)
+    let file_path = args.first().ok_or("usage: briv doc <file.bv>")?;
+    briv_compiler::doc::generate_doc(file_path)
 }
 
-/// `brief-compiler config <subcommand>` — manage config profiles.
+/// `briv-compiler config <subcommand>` — manage config profiles.
 /// Subcommands: list, show, set <name>, init <name>
 fn run_config(args: &[String]) -> Result<(), String> {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("show");
     match sub {
         "list" => {
-            let profiles = brief_compiler::config_resolver::list_profiles()?;
+            let profiles = briv_compiler::config_resolver::list_profiles()?;
             if profiles.is_empty() {
                 println!("no profiles configured");
             } else {
@@ -706,24 +706,24 @@ fn run_config(args: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
-        "show" => brief_compiler::config_resolver::show_active_profile(),
+        "show" => briv_compiler::config_resolver::show_active_profile(),
         "set" => {
-            let name = args.get(1).ok_or("usage: brief-compiler config set <profile-name>")?;
-            brief_compiler::config_resolver::set_active_profile(name)
+            let name = args.get(1).ok_or("usage: briv-compiler config set <profile-name>")?;
+            briv_compiler::config_resolver::set_active_profile(name)
         }
         "init" => {
-            let name = args.get(1).ok_or("usage: brief-compiler config init <profile-name>")?;
-            brief_compiler::config_resolver::init_profile(name)
+            let name = args.get(1).ok_or("usage: briv-compiler config init <profile-name>")?;
+            briv_compiler::config_resolver::init_profile(name)
         }
         _ => Err(format!("unknown config subcommand '{}'. Use: list, show, set <name>, init <name>", sub)),
     }
 }
 
-/// `brief export <file.bv> <language> [--out <dir>]`
+/// `briv export <file.bv> <language> [--out <dir>]`
 /// 2026-07-22: Generate a GLUE bridge for the target language.
 fn run_export(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: brief export <file.bv> <language> [--out <dir>]")?;
-    let language = args.get(1).ok_or("usage: brief export <file.bv> <language> [--out <dir>]")?;
+    let file_path = args.first().ok_or("usage: briv export <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: briv export <file.bv> <language> [--out <dir>]")?;
     let mut out_dir = ".".to_string();
     let mut i = 2;
     while i < args.len() {
@@ -734,14 +734,14 @@ fn run_export(args: &[String]) -> Result<(), String> {
             return Err(format!("unknown flag: {}", args[i]));
         }
     }
-    brief_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
+    briv_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
 }
 
-/// `brief extension <file.bv> <language> [--out <dir>]` — build a native
+/// `briv extension <file.bv> <language> [--out <dir>]` — build a native
 /// host-language extension module (e.g. a CPython C-extension, no ctypes).
 fn run_extension(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: brief extension <file.bv> <language> [--out <dir>]")?;
-    let language = args.get(1).ok_or("usage: brief extension <file.bv> <language> [--out <dir>]")?;
+    let file_path = args.first().ok_or("usage: briv extension <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: briv extension <file.bv> <language> [--out <dir>]")?;
     let mut out_dir = ".".to_string();
     let mut i = 2;
     while i < args.len() {
@@ -752,14 +752,14 @@ fn run_extension(args: &[String]) -> Result<(), String> {
             return Err(format!("unknown flag: {}", args[i]));
         }
     }
-    brief_compiler::glue::export::run_extension_cli(file_path, language, &out_dir)
+    briv_compiler::glue::export::run_extension_cli(file_path, language, &out_dir)
 }
 
-/// `brief bindings <file.bv> <language> [--out <dir>]` — render only the
-/// language's config-driven bindings templates (e.g. brief_types.h).
+/// `briv bindings <file.bv> <language> [--out <dir>]` — render only the
+/// language's config-driven bindings templates (e.g. briv_types.h).
 fn run_bindings(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: brief bindings <file.bv> <language> [--out <dir>]")?;
-    let language = args.get(1).ok_or("usage: brief bindings <file.bv> <language> [--out <dir>]")?;
+    let file_path = args.first().ok_or("usage: briv bindings <file.bv> <language> [--out <dir>]")?;
+    let language = args.get(1).ok_or("usage: briv bindings <file.bv> <language> [--out <dir>]")?;
     let mut out_dir = ".".to_string();
     let mut i = 2;
     while i < args.len() {
@@ -770,16 +770,16 @@ fn run_bindings(args: &[String]) -> Result<(), String> {
             return Err(format!("unknown flag: {}", args[i]));
         }
     }
-    brief_compiler::glue::export::run_bindings_cli(file_path, language, &out_dir)
+    briv_compiler::glue::export::run_bindings_cli(file_path, language, &out_dir)
 }
 
-/// `brief link <library.so/a/o>`
+/// `briv link <library.so/a/o>`
 /// 2026-07-22: Analyze a foreign library and generate frgn declarations.
 fn run_link(args: &[String]) -> Result<(), String> {
-    let lib_path = args.first().ok_or("usage: brief link <library.so/a/o>")?;
-    let result = brief_compiler::glue::link::analyze_library(std::path::Path::new(lib_path))?;
-    brief_compiler::glue::link::print_link_summary(&result);
-    let bridge_bv = brief_compiler::glue::link::generate_bridge_bv(&result);
+    let lib_path = args.first().ok_or("usage: briv link <library.so/a/o>")?;
+    let result = briv_compiler::glue::link::analyze_library(std::path::Path::new(lib_path))?;
+    briv_compiler::glue::link::print_link_summary(&result);
+    let bridge_bv = briv_compiler::glue::link::generate_bridge_bv(&result);
     println!("{}", bridge_bv);
     Ok(())
 }
@@ -799,7 +799,7 @@ fn run_init(name: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-/// `brief install-highlighter [--vsix-only]`
+/// `briv install-highlighter [--vsix-only]`
 /// 2026-07-25: Build & install the VS Code / VSCodium syntax highlighter .vsix.
 /// Detects the highlighter directory relative to the executable or CWD.
 /// Detects `codium` or `code` CLI for automatic installation.

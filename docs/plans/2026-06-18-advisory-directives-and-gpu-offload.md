@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This plan introduces three interlocking features that extend Brief's
+This plan introduces three interlocking features that extend Briv's
 "Safety as Optimization" philosophy from a passive guarantee into an
 interactive partnership between the developer and the compiler:
 
@@ -320,7 +320,7 @@ After research, the target is **SPIR-V** emitted via LLVM's built-in
 **Why SPIR-V:**
 - LLVM includes a full SPIR-V backend (`llvm/lib/Target/SPIRV/`) with
   instruction selection, legalizer, and code gen — already compiled into
-  the LLVM Brief depends on.
+  the LLVM Briv depends on.
 - SPIR-V is the most portable GPU IR: runs on NVIDIA (NVK), AMD (RADV),
   Intel (ANV), Apple (MoltenVK), and software (LLVMPipe/Mesa).
 
@@ -337,7 +337,7 @@ When `#gpu` or `--gpu-offload` is active, the compiler emits TWO outputs:
 2. **SPIR-V blobs** via separate `spirv64` codegen pass, embedded in the
    executable's `.rodata` as opaque byte arrays.
 
-At runtime, `brief_gpu_rt.c` (Vulkan compute runtime) handles:
+At runtime, `briv_gpu_rt.c` (Vulkan compute runtime) handles:
 - Vulkan instance/device creation
 - SPIR-V shader module loading
 - Device memory allocation + upload/download
@@ -374,8 +374,8 @@ A transaction is GPU-eligible when:
    llc --mtriple=spirv64-unknown-unknown kernel.ll -o kernel.spv
    ```
 5. In the main CPU module, replace the loop body with Vulkan dispatch:
-   - `brief_gpu_init()` → one-time Vulkan instance creation
-   - `brief_gpu_malloc()` → `vkAllocateMemory`
+   - `briv_gpu_init()` → one-time Vulkan instance creation
+   - `briv_gpu_malloc()` → `vkAllocateMemory`
 
 **Control flow:**
 
@@ -385,15 +385,15 @@ Original:
 
 After #gpu:
   // Host code (CPU binary):
-  %gpu_ok = call i1 @brief_gpu_is_available()
+  %gpu_ok = call i1 @briv_gpu_is_available()
   br i1 %gpu_ok, label %gpu_path, label %cpu_path
 
 gpu_path:
-  %dev = call i64 @brief_gpu_malloc(i64 %N * 8)
-  call void @brief_gpu_memcpy(i64 %dev, i64 %host, i64 %N*8, i32 0)  // H2D
-  call void @brief_gpu_launch(i64 @kernel_0, i32 %N, i32 256, i64 %dev)
-  call void @brief_gpu_memcpy(i64 %host, i64 %dev, i64 %N*8, i32 1)  // D2H
-  call void @brief_gpu_free(i64 %dev)
+  %dev = call i64 @briv_gpu_malloc(i64 %N * 8)
+  call void @briv_gpu_memcpy(i64 %dev, i64 %host, i64 %N*8, i32 0)  // H2D
+  call void @briv_gpu_launch(i64 @kernel_0, i32 %N, i32 256, i64 %dev)
+  call void @briv_gpu_memcpy(i64 %host, i64 %dev, i64 %N*8, i32 1)  // D2H
+  call void @briv_gpu_free(i64 %dev)
   br label %merge
 
 cpu_path:
@@ -481,26 +481,26 @@ If `--pgo-generate` + `--gpu-offload` are combined:
 
 ### 4.5 Sub-phase E: Runtime Support Library (Vulkan Compute)
 
-Create `brief_gpu_rt.c` alongside `brief_rt.c` implementing a lightweight
+Create `briv_gpu_rt.c` alongside `briv_rt.c` implementing a lightweight
 Vulkan compute runtime:
 
 ```c
 // One-time init — creates Vulkan instance, picks a compute-capable device.
-int   brief_gpu_init();
+int   briv_gpu_init();
 // Returns 1 if Vulkan is available and a compute device was found.
-int   brief_gpu_is_available();
+int   briv_gpu_is_available();
 // Allocate device memory (vkAllocateMemory).
-int64_t brief_gpu_malloc(size_t bytes);
+int64_t briv_gpu_malloc(size_t bytes);
 // Free device memory.
-void    brief_gpu_free(int64_t handle);
+void    briv_gpu_free(int64_t handle);
 // Copy host→device (vkMapMemory + memcpy or vkCmdCopyBuffer).
-void    brief_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
+void    briv_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
 // Load SPIR-V blob as a shader module and dispatch compute.
 // kernel_idx indexes into the embedded SPIR-V array.
-void    brief_gpu_launch(int kernel_idx, int grid_x, int block_x,
+void    briv_gpu_launch(int kernel_idx, int grid_x, int block_x,
                          int64_t* buffer_handles, int num_buffers);
 // Cleanup.
-void    brief_gpu_shutdown();
+void    briv_gpu_shutdown();
 ```
 
 **Linking model:**
@@ -510,7 +510,7 @@ At link time, there are three possible resolutions:
    runtime, resolve all vk* function pointers lazily. Graceful if missing.
 2. **OpenCL fallback** (`--gpu-backend opencl`): consume the same SPIR-V
    blob via `clCreateProgramWithIL`.
-3. **CPU fallback** (no GPU runtime): `brief_gpu_is_available()` returns 0.
+3. **CPU fallback** (no GPU runtime): `briv_gpu_is_available()` returns 0.
    All GPU loops execute the CPU path. Zero additional dependencies.
 
 For `#gpu?` runtime dispatch, this means the compiled binary works on
@@ -637,13 +637,13 @@ No existing optimization path is weakened — all changes are additive
 | Runtime dispatch branch (`#gpu?`) causes binary bloat | Large binaries from dead paths | Emit only the needed path when N is compile-time known; use linker GC for dead sections |
 | `--gpu-offload` + PGO creates complex interaction | Wrong offload decisions | Validate against synthetic benchmarks with known crossover points |
 | SPIR-V backend not enabled in the build's LLVM | `spirv64` target triple fails | Make SPIR-V emission conditional: `--features spirv` enables it; fallback emits remark and CPU-only binary |
-| Vulkan runtime dlopen fails | GPU path silently falls back to CPU | `brief_gpu_is_available()` returns 0; CPU path always compiled as fallback |
+| Vulkan runtime dlopen fails | GPU path silently falls back to CPU | `briv_gpu_is_available()` returns 0; CPU path always compiled as fallback |
 
 ---
 
 ## Key Design Principles
 
-1. **Purity is the enabler.** GPU offloading is safe only because Brief
+1. **Purity is the enabler.** GPU offloading is safe only because Briv
    enforces a pure domain bounded by FFI/I/O. The cost model is meaningful
    only because the compiler can count every operation.
 

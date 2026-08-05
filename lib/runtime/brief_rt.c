@@ -1,5 +1,5 @@
 /*
- * brief_rt.c — Minimal runtime for Brief LLVM backend
+ * brief_rt.c — Minimal runtime for Briv LLVM backend
  *
  * 2026-07-15: Stripped ~70 brief_* wrapper functions that were replaced
  * by SysCall#/SysConf#/Atomic*# intrinsics. Only keeps infrastructure
@@ -34,7 +34,7 @@
 #endif
 #include <sys/ioctl.h>
 
-// ── Integer type for Brief C ABI ──────────────────────────────────────
+// ── Integer type for Briv C ABI ──────────────────────────────────────
 #ifndef _BRIEF_INT_DEFINED
 #define _BRIEF_INT_DEFINED
 #if defined(__LP64__) || defined(_WIN64)
@@ -45,7 +45,7 @@ typedef int32_t brief_int;
 #endif
 
 // ── String conversion helpers (internal) ──────────────────────────────
-// 2026-08-01 (B0): A Brief String value is a ptr to a length-prefixed
+// 2026-08-01 (B0): A Briv String value is a ptr to a length-prefixed
 // [len][bytes] buffer. The old int64_t "handle" params were the address in
 // disguise; they are now typed as pointers so clang's IR (ptr) matches the
 // compiler's `ptr`-based frgn declares (String ABI = ptr). int64_t and
@@ -75,15 +75,15 @@ char* brief_str_to_c(const char* handle) {
         return c_str;
     }
     // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): the fragile
-    // "looks like a C string" heuristic was REMOVED — it misread any Brief
+    // "looks like a C string" heuristic was REMOVED — it misread any Briv
     // String whose length byte is printable ASCII (a 35-char path reads as
     // '$' → the [len][bytes] header was strlened as a bare C string). Under
-    // the composite, every String value IS a [len][bytes][\0] Brief String
+    // the composite, every String value IS a [len][bytes][\0] Briv String
     // (CStr → String is marshalled through cstr_to_brief at the boundary), so
     // str_to_c only ever sees the heap form below. A bare C string passed to a
     // String-typed site is a programming error, not a runtime case to guess.
-    // Heap Brief string: ptr is a pointer to [8-byte length][data][\0].
-    // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): every Brief
+    // Heap Briv string: ptr is a pointer to [8-byte length][data][\0].
+    // 2026-08-03 (plan 2026-08-03-native-python-meld-composite): every Briv
     // String allocation carries the NUL invariant (bytes[len] == '\0'), so
     // the data region IS a valid C string in place — return it directly
     // (zero-copy, the composite). Caller must NOT free; valid for the state's
@@ -95,8 +95,8 @@ char* brief_str_to_c(const char* handle) {
     return (char*)(ptr + 8);
 }
 
-/// Convert a C string (null-terminated) to a Brief string.
-/// Returns a heap-allocated Brief string (8-byte length prefix + data).
+/// Convert a C string (null-terminated) to a Briv string.
+/// Returns a heap-allocated Briv string (8-byte length prefix + data).
 /// Caller should free via brief_free_brief_str().
 char* brief_cstr_to_brief(const char* c_str) {
     if (!c_str) return 0;
@@ -112,7 +112,7 @@ char* brief_cstr_to_brief(const char* c_str) {
 }
 
 // 2026-08-01: the `Int → #String` casting-graph lane — format an integer into
-// a Brief string. The lane emission calls `ptr @int_to_str(i64)` (a String IS
+// a Briv string. The lane emission calls `ptr @int_to_str(i64)` (a String IS
 // a ptr to [len][bytes]); previously this symbol was undefined (a latent link
 // error whenever `(n as String)` was used). `__int_to_str__` is the alias the
 // direct-cast path emits.
@@ -125,7 +125,7 @@ char* __int_to_str__(int64_t n) {
     return int_to_str(n);
 }
 
-// 2026-08-04 (compiler-in-Brief): BYTE-wise substring of a Brief String.
+// 2026-08-04 (compiler-in-Briv): BYTE-wise substring of a Briv String.
 // Returns a fresh [len][bytes][\0] String with the bytes [a, b). The pass
 // scanner runs over the ASCII projection, so byte == char here; the UTF-8
 // char boundary is the caller's contract. Bounds clamp to [0, len].
@@ -147,7 +147,7 @@ char* brief_str_substr(const char* s, int64_t a, int64_t b) {
     return buf;
 }
 
-// 2026-08-04 (compiler-in-Brief): the i-th BYTE of a Brief String as an Int
+// 2026-08-04 (compiler-in-Briv): the i-th BYTE of a Briv String as an Int
 // (0 if out of range, 255 if the length header is invalid). Character scans in
 // the pass (newline/space/colon comparisons) use this INSTEAD of a per-char
 // brief_str_substr — a 1-byte allocation per scan step was corrupting the heap
@@ -166,12 +166,12 @@ int64_t brief_str_char_at(const char* s, int64_t i) {
 // between #String and every other base protocol. Only `int_to_str` existed in
 // the runtime; the other NINE were undefined symbols — a latent LINK ERROR
 // whenever `(s as Int)` / `(f as String)` etc. was exercised (.bv and .ebv
-// alike). Each function here converts between the Brief String ABI (ptr to
+// alike). Each function here converts between the Briv String ABI (ptr to
 // [len: i64][bytes], heap-allocated, freed via brief_free_brief_str) and a C
-// value. The `.ebv` freestanding path provides the SAME symbols as Brief
+// value. The `.ebv` freestanding path provides the SAME symbols as Briv
 // defns (lib/std/*.ebv) — never both linked.
 //
-// A Brief String's payload is NOT null-terminated as an invariant (the length
+// A Briv String's payload is NOT null-terminated as an invariant (the length
 // header is authoritative), so these helpers copy the payload to a temporary
 // C buffer before strtoll/strtod.
 
@@ -207,7 +207,7 @@ uint64_t str_to_uint(const char* s) {
     return (uint64_t)strtoull(tmp, 0, 10);
 }
 
-// Float → String — `#Float → #String` lane. The Brief Float protocol is the
+// Float → String — `#Float → #String` lane. The Briv Float protocol is the
 // 32-bit `float` LLVM type, so the ABI takes a float (the IR emits
 // `call ptr @float_to_str(float ...)`), matching the C signature.
 char* float_to_str(float d) {
@@ -247,7 +247,7 @@ int64_t str_first_char(const char* s) {
     if (!s) return 0;
     int64_t len = *(const int64_t*)s;
     if (len <= 0) return 0;
-    // Read the first UTF8 codepoint from the payload (a Brief String's bytes
+    // Read the first UTF8 codepoint from the payload (a Briv String's bytes
     // are valid UTF8; continuation bytes are skipped the same way brief_char_len
     // counts them).
     const unsigned char* p = (const unsigned char*)(s + 8);
@@ -287,13 +287,13 @@ char* char_to_str(int64_t c) {
     return brief_cstr_to_brief(tmp);
 }
 
-/// Free a Brief string allocated by brief_cstr_to_brief or similar.
+/// Free a Briv string allocated by brief_cstr_to_brief or similar.
 void brief_free_brief_str(void* handle) {
     if (handle) free(handle);
 }
 
 // 2026-08-01 (B2): The #Bit → #String ENCODING DOOR default. The bits are a
-// Brief `[len: i64][bytes]` buffer (the content view of a String — see
+// Briv `[len: i64][bytes]` buffer (the content view of a String — see
 // #String→#Bit). This re-materializes a String from those bits by copying the
 // length header + payload into a fresh heap buffer. This is NOT brief_cstr_to_brief
 // (which reads a null-terminated C string) — the bits carry their own length.
@@ -312,7 +312,7 @@ char* brief_bits_to_str(const char* bits) {
     return buf;
 }
 
-// 2026-08-01 (B3): UTF8 character count of a Brief String value (String ABI =
+// 2026-08-01 (B3): UTF8 character count of a Briv String value (String ABI =
 // ptr to [len: i64][bytes]). Bytes are valid UTF8, so the count is the number
 // of codepoints (skip continuation bytes 0b10xxxxxx). This is the `#String`
 // `Size` prop default (the O(1) byte-length header read is the `Bytes` prop).
@@ -331,12 +331,12 @@ int64_t brief_char_len(const char* str) {
     return chars;
 }
 
-// 2026-08-01 (B1): Content equality for Brief String values (String ABI = ptr
+// 2026-08-01 (B1): Content equality for Briv String values (String ABI = ptr
 // to a length-prefixed [len: i64][bytes] buffer). Compares lengths first, then
 // payload bytes. Returns 1 if equal, 0 otherwise. This is the runtime half of
 // B1's content Eq/Ne — the compiler emits a call to this instead of comparing
 // the two addresses. Both arguments must be valid [len][bytes] buffers (as all
-// Brief String values are under the bits model); handles are converted to
+// Briv String values are under the bits model); handles are converted to
 // content by the caller when needed.
 int64_t brief_str_eq(const char* a, const char* b) {
     if (a == b) return 1;
@@ -348,7 +348,7 @@ int64_t brief_str_eq(const char* a, const char* b) {
     return memcmp(a + 8, b + 8, (size_t)la) == 0;
 }
 
-// 2026-08-01 (B1): Content bitwise ops for Brief String values (String ABI =
+// 2026-08-01 (B1): Content bitwise ops for Briv String values (String ABI =
 // ptr to [len: i64][bytes]). The result is a NEW heap buffer with the same
 // length and the per-byte op applied to the payloads (band/bor/bxor) or to a
 // single payload (bnot). Length must match for binary ops (asserted by the
@@ -399,7 +399,7 @@ int64_t __argv_count(void) {
     return (int64_t)__brief_argc;
 }
 
-// argv[i] as a Brief string (empty for out-of-range i).
+// argv[i] as a Briv string (empty for out-of-range i).
 char* __argv_get(int64_t i) {
     if (!__brief_argv || i < 0 || i >= __brief_argc) {
         return brief_cstr_to_brief("");
@@ -408,7 +408,7 @@ char* __argv_get(int64_t i) {
     return brief_cstr_to_brief(s);
 }
 
-// Whether any argv token equals `flag` (a Brief string). Returns 1/0.
+// Whether any argv token equals `flag` (a Briv string). Returns 1/0.
 // Skips argv[0] (the program name) — flags/commands live in argv[1..].
 int64_t __argv_has(const char* flag_bstr) {
     char* c_flag = brief_str_to_c(flag_bstr);
@@ -467,16 +467,16 @@ char* __argv_command(void) {
 // ── Core intrinsics (kept) ────────────────────────────────────────────
 
 // 2026-07-19: Returns the environ pointer (char **environ) as an Int.
-// Used by pure-Brief getenv to scan the environment block.
+// Used by pure-Briv getenv to scan the environment block.
 int64_t __get_environ(void) {
     extern char **environ;
     return (int64_t)(uintptr_t)environ;
 }
 
-// 2026-07-19: Returns the value of an env var as a heap-allocated Brief string
+// 2026-07-19: Returns the value of an env var as a heap-allocated Briv string
 // (null-terminated UTF-8 data preceded by 8-byte length header).
 // Caller takes ownership of the returned pointer.
-// 2026-08-01 (B0): key_bstr is a ptr to a Brief [len][bytes] buffer; returns
+// 2026-08-01 (B0): key_bstr is a ptr to a Briv [len][bytes] buffer; returns
 // a ptr to the same layout (String ABI = ptr, matching the compiler declares).
 char* __getenv_brief(const char* key_bstr) {
     char* c_key = brief_str_to_c(key_bstr);
@@ -531,7 +531,7 @@ __attribute__((always_inline)) int64_t __print_bool(int64_t b) {
 }
 
 // 2026-07-31: %.9g — round-trips any float32 uniquely (~7 sig decimal digits).
-// The prior %g (6 sig digits) truncated precision, making Brief's float output
+// The prior %g (6 sig digits) truncated precision, making Briv's float output
 // differ from C references that print %.9f even for identical values.
 int64_t __print_float(float f) {
     printf("%.9g", (double)f);
@@ -714,7 +714,7 @@ void __wait_for_trigger__(void) {
 }
 
 // ── File I/O (used by stdlib) ─────────────────────────────────────────
-// 2026-08-01 (B0): path_bstr/data_bstr are ptrs to Brief [len][bytes] buffers
+// 2026-08-01 (B0): path_bstr/data_bstr are ptrs to Briv [len][bytes] buffers
 // (String ABI = ptr).
 
 int64_t __read_file__(const char* path_bstr) {
@@ -801,10 +801,10 @@ int64_t brief_ttyname(int64_t fd) {
 }
 
 // 2026-07-25: ShellCmd# runtime implementation.
-// Runs a shell command via popen() and returns stdout as a Brief String.
+// Runs a shell command via popen() and returns stdout as a Briv String.
 // Expected LLVM signature: call i64 @ShellCmd(i64 %cmd_bstr)
 int64_t ShellCmd(int64_t cmd_bstr) {
-    // Extract C string from Brief String handle
+    // Extract C string from Briv String handle
     int64_t handle = cmd_bstr & ~3ULL;  // strip tag bits
     int64_t len = *(int64_t*)(uintptr_t)handle;  // read length prefix
     char* cstr = (char*)(uintptr_t)(handle + 8);  // data starts after length
@@ -832,7 +832,7 @@ int64_t ShellCmd(int64_t cmd_bstr) {
     }
     pclose(f);
     
-    // Pack as Brief String: {i64 length, i8 data[]}
+    // Pack as Briv String: {i64 length, i8 data[]}
     int64_t total = 8 + out_len;
     int64_t* result = (int64_t*)malloc(total + 8);  // extra padding
     if (!result) { free(out); return 0; }
@@ -842,10 +842,10 @@ int64_t ShellCmd(int64_t cmd_bstr) {
     return (int64_t)(uintptr_t)result;
 }
 
-// 2026-07-18: All __utf8_* functions now implemented as pure Brief in utf8view.bv
+// 2026-07-18: All __utf8_* functions now implemented as pure Briv in utf8view.bv
 // (uses Load# + convergent txn). Find byte substring in byte string.
 // Returns offset or -1.
-// (implemented in pure Brief in lib/std/types/utf8view.bv)
+// (implemented in pure Briv in lib/std/types/utf8view.bv)
 
 // 2026-08-01 (C3): required-watchdog failure exit. A `![cond]` watchdog that
 // fires without an on-fire handler is a fatal program error — the loop engine

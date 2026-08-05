@@ -13,7 +13,7 @@
 // Tag: --runtime
 
 
-// brief_rt.c linked automatically
+// briv_rt.c linked automatically
 
 frgn consume_buffer(data: Int, size: Int) -> Int ;
 

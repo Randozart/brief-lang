@@ -31,7 +31,7 @@ The primary goals of this plan:
 
 Every constraint is a boolean expression with `_` bound to the constrained value:
 
-```brief
+```briv
 // Range sugar: [0..100]  →  _ >= 0 && _ <= 100
 
 // Regex: [@"^[a-z]+@"]  →  _ :> Match pattern
@@ -209,7 +209,7 @@ let_stmt ::= "let" ident (":" type_expr)? ("<:" "[" constraint_expr "]")? ("=" e
 
 All four parts are independent. Valid forms:
 
-```brief
+```briv
 let x: Int = 5;                  // existing — type annotation only
 let x: Int : [0..100];          // new — type + constraint, no initializer
 let x = 50;                      // existing — initializer only

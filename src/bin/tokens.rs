@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use brief_compiler::lexer::Token;
+use briv_compiler::lexer::Token;
 use logos::Logos;
 
 fn main() {

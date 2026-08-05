@@ -1,12 +1,12 @@
 # Contracts: Preconditions & Postconditions
 
-Contracts are the heart of Brief. They're not just documentation - the compiler **verifies** them.
+Contracts are the heart of Briv. They're not just documentation - the compiler **verifies** them.
 
 ## 1. Preconditions `[pre]`
 
 The precondition declares **when** a transaction can run:
 
-```brief
+```briv
 node withdraw [amount > 0 && balance >= amount][balance == @balance - amount] {
     &balance = balance - amount;
     term;
@@ -30,20 +30,20 @@ If the precondition is false, the transaction simply doesn't run.
 ### Common Precondition Patterns
 
 **Range checks:**
-```brief
+```briv
 [age >= 18 && age <= 65]      // Must be working age
 [index >= 0 && index < len]    // Valid array index
 ```
 
 **State checks:**
-```brief
+```briv
 [!locked]                      // Must be unlocked
 [status == "active"]           // Must be active
 [items .^Len > 0]             // Must have items
 ```
 
 **Resource checks:**
-```brief
+```briv
 [available >= needed]          // Must have enough
 [!in_progress]                 // Must not be running
 ```
@@ -52,7 +52,7 @@ If the precondition is false, the transaction simply doesn't run.
 
 The postcondition declares **what must be true after** the transaction:
 
-```brief
+```briv
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]
     [balance == @balance - amount]  // Postcondition
@@ -68,21 +68,21 @@ txn withdraw(amount: Int)
 
 ### Common Postcondition Patterns
 **State changes:**
-```brief
+```briv
 [counter == @counter + 1]      // Counter incremented
 [items .^Len == @items .^Len + 1]  // One item added
 [active == false]              // Now inactive
 ```
 
 **Relationships:**
-```brief
+```briv
 [total == sum(items)]          // Total equals sum
 [sorted(items)]                // Items are sorted
 [unique(items)]                // No duplicates
 ```
 
 **Preservation:**
-```brief
+```briv
 [total == @total]              // Total unchanged
 [count >= @count]              // Count didn't decrease
 ```
@@ -97,7 +97,7 @@ to both the precondition and the postcondition:
 | `[!/X]` | `!X` | `X` |
 | `[!/!X]` | `X` | `!X` |
 
-```brief
+```briv
 // The node fires only while the queue is NOT full, and leaves it full.
 node refill [!/ queue.^Len < capacity] {
     queue <- item;
@@ -112,13 +112,13 @@ of the condition.
 ## 3. The `@` Prior State Operator
 `@` gives you the value **before** the transaction started:
 
-```brief
+```briv
 
 [counter == counter + 1]  // Always false!
 ```
 
 **With `@`:**
-```brief
+```briv
 [counter == @counter + 1]  // counter after = counter before + 1
 ```
 
@@ -126,7 +126,7 @@ of the condition.
 
 The compiler checks that your code **actually satisfies** the contract:
 
-```brief
+```briv
 // ❌ This FAILS verification
 txn broken_increment() [true][counter == @counter + 1] {
     &counter = counter + 2;  // Oops! Adds 2, not 1
@@ -137,7 +137,7 @@ txn broken_increment() [true][counter == @counter + 1] {
 // Proof: counter = @counter + 2, but postcondition requires @counter + 1
 ```
 
-```brief
+```briv
 // ✅ This PASSES verification
 txn correct_increment() [true][counter == @counter + 1] {
     &counter = counter + 1;
@@ -149,7 +149,7 @@ txn correct_increment() [true][counter == @counter + 1] {
 
 All paths must satisfy the postcondition:
 
-```brief
+```briv
 txn conditional(x: Int) [true][result >= 0] {
     let result: Int = 0;
     
@@ -171,7 +171,7 @@ txn conditional(x: Int) [true][result >= 0] {
 
 `escape` rolls back the transaction - the postcondition doesn't need to hold:
 
-```brief
+```briv
 txn safe_divide(a: Int, b: Int) 
     [b != 0]
     [result == a / b]
@@ -191,7 +191,7 @@ condition holds, and **fires** the moment it stops — or when a deadline
 expires. `?[...]` is optional (the fire is graceful); `![...]` is required
 (firing is an error exit).
 
-```brief
+```briv
 // Optional liveliness: fires when `x` reaches 5 (the condition stops holding)
 txn converge() [true][done] ?[x < 5] {
     x = x + 1;
@@ -217,7 +217,7 @@ clock) and `cyc` (a cycle/fuel deadline). The `within` clause comes before the
 
 ## 8. Complete Example
 
-```brief
+```briv
 // bank_account.bv
 let balance: Int = 1000;
 let overdraft_protection: Bool = true;

@@ -1,6 +1,6 @@
-# Brief FFI Standard Library Reference v6.2
+# Briv FFI Standard Library Reference v6.2
 
-Complete reference for all standard library FFI bindings included with Brief v6.2.
+Complete reference for all standard library FFI bindings included with Briv v6.2.
 
 **Location**: `std/bindings/`  
 **Status**: Production Ready  
@@ -27,7 +27,7 @@ Complete reference for all standard library FFI bindings included with Brief v6.
 
 Read entire file contents as string.
 
-```brief
+```briv
 frgn read_file(path: String) -> Result<String, IoError> from "std::io";
 ```
 
@@ -43,7 +43,7 @@ frgn read_file(path: String) -> Result<String, IoError> from "std::io";
 - `3`: I/O error
 
 **Example**:
-```brief
+```briv
 defn load_config(path: String) -> String [true] [true] {
     let config: String = read_file(path);
     config;
@@ -54,7 +54,7 @@ defn load_config(path: String) -> String [true] [true] {
 
 Write string contents to file (creates or truncates).
 
-```brief
+```briv
 frgn write_file(path: String, content: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -73,7 +73,7 @@ frgn write_file(path: String, content: String) -> Result<Void, IoError> from "st
 
 Append string contents to end of file.
 
-```brief
+```briv
 frgn append_file(path: String, content: String) -> Result<Int, IoError> from "std::io";
 ```
 
@@ -90,7 +90,7 @@ frgn append_file(path: String, content: String) -> Result<Int, IoError> from "st
 
 Check if file or directory exists.
 
-```brief
+```briv
 frgn file_exists(path: String) -> Result<Bool, IoError> from "std::io";
 ```
 
@@ -108,7 +108,7 @@ frgn file_exists(path: String) -> Result<Bool, IoError> from "std::io";
 
 Delete a file.
 
-```brief
+```briv
 frgn delete_file(path: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -126,7 +126,7 @@ frgn delete_file(path: String) -> Result<Void, IoError> from "std::io";
 
 Create a single directory.
 
-```brief
+```briv
 frgn create_dir(path: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -144,7 +144,7 @@ frgn create_dir(path: String) -> Result<Void, IoError> from "std::io";
 
 Create directory and all parent directories.
 
-```brief
+```briv
 frgn create_dir_all(path: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -161,7 +161,7 @@ frgn create_dir_all(path: String) -> Result<Void, IoError> from "std::io";
 
 Delete an empty directory.
 
-```brief
+```briv
 frgn delete_dir(path: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -179,7 +179,7 @@ frgn delete_dir(path: String) -> Result<Void, IoError> from "std::io";
 
 Delete directory and all contents recursively.
 
-```brief
+```briv
 frgn delete_dir_all(path: String) -> Result<Void, IoError> from "std::io";
 ```
 
@@ -205,7 +205,7 @@ frgn delete_dir_all(path: String) -> Result<Void, IoError> from "std::io";
 
 Compute square root of a float.
 
-```brief
+```briv
 frgn sqrt(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -222,7 +222,7 @@ frgn sqrt(value: Float) -> Result<Float, MathError> from "std::math";
 
 Raise float to a power.
 
-```brief
+```briv
 frgn pow(base: Float, exponent: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -241,7 +241,7 @@ frgn pow(base: Float, exponent: Float) -> Result<Float, MathError> from "std::ma
 
 Compute absolute value of integer.
 
-```brief
+```briv
 frgn abs_int(value: Int) -> Result<Int, MathError> from "std::math";
 ```
 
@@ -258,7 +258,7 @@ frgn abs_int(value: Int) -> Result<Int, MathError> from "std::math";
 
 Compute absolute value of float.
 
-```brief
+```briv
 frgn abs_float(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -272,7 +272,7 @@ frgn abs_float(value: Float) -> Result<Float, MathError> from "std::math";
 
 Round float down to nearest integer.
 
-```brief
+```briv
 frgn floor(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -286,7 +286,7 @@ frgn floor(value: Float) -> Result<Float, MathError> from "std::math";
 
 Round float up to nearest integer.
 
-```brief
+```briv
 frgn ceil(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -300,7 +300,7 @@ frgn ceil(value: Float) -> Result<Float, MathError> from "std::math";
 
 Round float to nearest integer.
 
-```brief
+```briv
 frgn round(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -314,7 +314,7 @@ frgn round(value: Float) -> Result<Float, MathError> from "std::math";
 
 Compute sine of angle in radians.
 
-```brief
+```briv
 frgn sin(radians: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -328,7 +328,7 @@ frgn sin(radians: Float) -> Result<Float, MathError> from "std::math";
 
 Compute cosine of angle in radians.
 
-```brief
+```briv
 frgn cos(radians: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -342,7 +342,7 @@ frgn cos(radians: Float) -> Result<Float, MathError> from "std::math";
 
 Compute tangent of angle in radians.
 
-```brief
+```briv
 frgn tan(radians: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -359,7 +359,7 @@ frgn tan(radians: Float) -> Result<Float, MathError> from "std::math";
 
 Compute natural logarithm.
 
-```brief
+```briv
 frgn log(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -377,7 +377,7 @@ frgn log(value: Float) -> Result<Float, MathError> from "std::math";
 
 Compute e raised to the power.
 
-```brief
+```briv
 frgn exp(value: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -394,7 +394,7 @@ frgn exp(value: Float) -> Result<Float, MathError> from "std::math";
 
 Return minimum of two integers.
 
-```brief
+```briv
 frgn min_int(a: Int, b: Int) -> Result<Int, MathError> from "std::math";
 ```
 
@@ -409,7 +409,7 @@ frgn min_int(a: Int, b: Int) -> Result<Int, MathError> from "std::math";
 
 Return maximum of two integers.
 
-```brief
+```briv
 frgn max_int(a: Int, b: Int) -> Result<Int, MathError> from "std::math";
 ```
 
@@ -424,7 +424,7 @@ frgn max_int(a: Int, b: Int) -> Result<Int, MathError> from "std::math";
 
 Return minimum of two floats.
 
-```brief
+```briv
 frgn min_float(a: Float, b: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -439,7 +439,7 @@ frgn min_float(a: Float, b: Float) -> Result<Float, MathError> from "std::math";
 
 Return maximum of two floats.
 
-```brief
+```briv
 frgn max_float(a: Float, b: Float) -> Result<Float, MathError> from "std::math";
 ```
 
@@ -464,7 +464,7 @@ frgn max_float(a: Float, b: Float) -> Result<Float, MathError> from "std::math";
 
 Get length of string in bytes.
 
-```brief
+```briv
 frgn string_length(text: String) -> Result<Int, StringError> from "std::string";
 ```
 
@@ -478,7 +478,7 @@ frgn string_length(text: String) -> Result<Int, StringError> from "std::string";
 
 Extract substring from start position for length.
 
-```brief
+```briv
 frgn substring(text: String, start: Int, length: Int) -> Result<String, StringError> from "std::string";
 ```
 
@@ -498,7 +498,7 @@ frgn substring(text: String, start: Int, length: Int) -> Result<String, StringEr
 
 Replace all occurrences of pattern with replacement.
 
-```brief
+```briv
 frgn string_replace(text: String, pattern: String, replacement: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -517,7 +517,7 @@ frgn string_replace(text: String, pattern: String, replacement: String) -> Resul
 
 Check if string contains substring.
 
-```brief
+```briv
 frgn string_contains(text: String, substring: String) -> Result<Bool, StringError> from "std::string";
 ```
 
@@ -532,7 +532,7 @@ frgn string_contains(text: String, substring: String) -> Result<Bool, StringErro
 
 Check if string starts with prefix.
 
-```brief
+```briv
 frgn string_starts_with(text: String, prefix: String) -> Result<Bool, StringError> from "std::string";
 ```
 
@@ -547,7 +547,7 @@ frgn string_starts_with(text: String, prefix: String) -> Result<Bool, StringErro
 
 Check if string ends with suffix.
 
-```brief
+```briv
 frgn string_ends_with(text: String, suffix: String) -> Result<Bool, StringError> from "std::string";
 ```
 
@@ -562,7 +562,7 @@ frgn string_ends_with(text: String, suffix: String) -> Result<Bool, StringError>
 
 Convert string to uppercase.
 
-```brief
+```briv
 frgn string_to_upper(text: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -576,7 +576,7 @@ frgn string_to_upper(text: String) -> Result<String, StringError> from "std::str
 
 Convert string to lowercase.
 
-```brief
+```briv
 frgn string_to_lower(text: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -590,7 +590,7 @@ frgn string_to_lower(text: String) -> Result<String, StringError> from "std::str
 
 Remove leading and trailing whitespace.
 
-```brief
+```briv
 frgn string_trim(text: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -604,7 +604,7 @@ frgn string_trim(text: String) -> Result<String, StringError> from "std::string"
 
 Split string by delimiter (returns first part).
 
-```brief
+```briv
 frgn string_split(text: String, delimiter: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -622,7 +622,7 @@ frgn string_split(text: String, delimiter: String) -> Result<String, StringError
 
 Parse string as signed integer.
 
-```brief
+```briv
 frgn parse_int(text: String) -> Result<Int, ParseError> from "std::string";
 ```
 
@@ -640,7 +640,7 @@ frgn parse_int(text: String) -> Result<Int, ParseError> from "std::string";
 
 Parse string as floating-point number.
 
-```brief
+```briv
 frgn parse_float(text: String) -> Result<Float, ParseError> from "std::string";
 ```
 
@@ -658,7 +658,7 @@ frgn parse_float(text: String) -> Result<Float, ParseError> from "std::string";
 
 Convert integer to string.
 
-```brief
+```briv
 frgn int_to_string(value: Int) -> Result<String, StringError> from "std::string";
 ```
 
@@ -672,7 +672,7 @@ frgn int_to_string(value: Int) -> Result<String, StringError> from "std::string"
 
 Convert float to string.
 
-```brief
+```briv
 frgn float_to_string(value: Float) -> Result<String, StringError> from "std::string";
 ```
 
@@ -686,7 +686,7 @@ frgn float_to_string(value: Float) -> Result<String, StringError> from "std::str
 
 Concatenate two strings.
 
-```brief
+```briv
 frgn string_concat(left: String, right: String) -> Result<String, StringError> from "std::string";
 ```
 
@@ -709,7 +709,7 @@ frgn string_concat(left: String, right: String) -> Result<String, StringError> f
 
 Get current Unix timestamp in milliseconds.
 
-```brief
+```briv
 frgn current_timestamp() -> Result<Int, TimeError> from "std::time";
 ```
 
@@ -720,7 +720,7 @@ frgn current_timestamp() -> Result<Int, TimeError> from "std::time";
 - `1`: System time unavailable
 
 **Example**:
-```brief
+```briv
 defn log_with_timestamp(msg: String) -> String [true] [true] {
     let now: Int = current_timestamp();
     now;
@@ -731,7 +731,7 @@ defn log_with_timestamp(msg: String) -> String [true] [true] {
 
 Sleep for specified milliseconds.
 
-```brief
+```briv
 frgn sleep_ms(milliseconds: Int) -> Result<Void, TimeError> from "std::time";
 ```
 
@@ -748,7 +748,7 @@ frgn sleep_ms(milliseconds: Int) -> Result<Void, TimeError> from "std::time";
 
 Sleep for specified seconds.
 
-```brief
+```briv
 frgn sleep_seconds(seconds: Int) -> Result<Void, TimeError> from "std::time";
 ```
 
@@ -765,7 +765,7 @@ frgn sleep_seconds(seconds: Int) -> Result<Void, TimeError> from "std::time";
 
 Start timing measurement (returns handle).
 
-```brief
+```briv
 frgn measure_time_ms() -> Result<Int, TimeError> from "std::time";
 ```
 
@@ -781,7 +781,7 @@ frgn measure_time_ms() -> Result<Int, TimeError> from "std::time";
 
 Get elapsed milliseconds since measurement started.
 
-```brief
+```briv
 frgn elapsed_ms(handle: Int) -> Result<Int, TimeError> from "std::time";
 ```
 
@@ -799,7 +799,7 @@ frgn elapsed_ms(handle: Int) -> Result<Int, TimeError> from "std::time";
 
 ## Complete Example
 
-```brief
+```briv
 // Using multiple stdlib bindings together
 
 frgn read_file(path: String) -> Result<String, IoError> from "std::io";
@@ -844,4 +844,4 @@ Modules planned for future releases:
 ---
 
 **Last Updated**: 2026-04-05  
-**Maintained By**: Brief Core Team
+**Maintained By**: Briv Core Team

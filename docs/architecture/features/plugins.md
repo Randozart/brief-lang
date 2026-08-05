@@ -12,7 +12,7 @@ live tree in memory — no `.beast` serialization in the plugin data path.
 A plugin is a `.bv` file containing one or more `$(StageName)` blocks.
 Each block runs at the corresponding compiler pipeline stage:
 
-```brief
+```briv
 // plugins/parsed/prelude.bv
 $(Parsed) @ highest {
     Tag$("import").First$().Before$()
@@ -23,11 +23,11 @@ $(Parsed) @ highest {
 The block body can contain:
 - Navigation chains (`Tag$("import").First$().Before$().Insert$(...)`)
 - Flow control (`let`, `when`, `foreach`, `match`)
-- Full Brief code (`defn`, `let`, `when`, `match`, `for`) evaluated at compile time
+- Full Briv code (`defn`, `let`, `when`, `match`, `for`) evaluated at compile time
 - Plugin injection (`Stage$.Insert$`, `Stage$.Remove$`, `Stage$.List$`)
 - Diagnostics (`EmitInfo$`, `EmitWarning$`, `EmitError$`)
 
-These are not separate DSL constructs — they are the standard Brief interpreter
+These are not separate DSL constructs — they are the standard Briv interpreter
 extended with compile-time types (`CTSelection`, `CTPosition`, `CTTarget`)
 and navigation intrinsics as built-in methods on selections.
 
@@ -42,7 +42,7 @@ Every transformation follows:
 SELECT ──► TRAVERSE ──► POSITION ──► ACT
 ```
 
-```brief
+```briv
 Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
  └─SELECT──┘  └TRAVERSE┘ └POSITION┘ └───────────ACT────────────┘
 ```
@@ -69,7 +69,7 @@ Tag$("import") .First$() .Before$() .Insert$(Import$("std/x.bv"))
 
 The `@` syntax sets execution priority (lower number = earlier):
 
-```brief
+```briv
 $(Parsed) @ highest { ... }     // maps to priority 0
 $(Typed) @ 100 { ... }          // explicit priority
 $(Verified) @ lowest { ... }    // maps to priority 999
@@ -94,7 +94,7 @@ Navigation operations target one of four data surfaces:
 The default target at each stage is shown in the table above.  You can always
 override by prefixing with `Source$.`, `Ir$.`, or `Bin$.`:
 
-```brief
+```briv
 $(Parsed) {
     // Default: AST
     Tag$("import").First$().Before$().Insert$(Import$("std/x.bv"));
@@ -191,7 +191,7 @@ $(Generated) {
 
 ### Flow Control
 
-Inside `$(Stage)` blocks, standard Brief syntax (`let`, `when`, `foreach`, `match`)
+Inside `$(Stage)` blocks, standard Briv syntax (`let`, `when`, `foreach`, `match`)
 is evaluated at compile time. Navigation selections are first-class values.
 
 | Construct | Description |
@@ -267,7 +267,7 @@ Plugins not listed are skipped.
 
 Plugins can also be embedded directly in source files using `$(Stage)` blocks:
 
-```brief
+```briv
 // file.bv
 $(Parsed) {
     // Custom compile-time logic for this file only
@@ -285,17 +285,17 @@ They are registered as plugins for their declared stage.
 
 ```bash
 # Disable a system plugin
-brief build file.bv --disable-plugin prelude
+briv build file.bv --disable-plugin prelude
 
 # Enable only specific plugins
-brief build file.bv --enable-plugin auto-main
+briv build file.bv --enable-plugin auto-main
 
 # Disable plugin = --no-stdlib (same effect)
-brief build file.bv --no-stdlib
+briv build file.bv --no-stdlib
 
 # Emit BEAST snapshots for plugin debugging
-brief build file.bv --emit-beast typed
-brief build file.bv --emit-beast all
+briv build file.bv --emit-beast typed
+briv build file.bv --emit-beast all
 ```
 
 ---
@@ -304,7 +304,7 @@ brief build file.bv --emit-beast all
 
 ### Prelude — Insert standard library imports
 
-```brief
+```briv
 $(Parsed) @ highest {
     let anchor = Tag$("import").First$();
     anchor.Before$().Insert$(
@@ -327,7 +327,7 @@ $(Parsed) @ highest {
 
 ### Auto-main — Set entry marker
 
-```brief
+```briv
 $(Typed) @ highest {
     Tag$("defn").Named$("main").First$()
         .Descendants$("contract").First$().Set$("entry", true);
@@ -338,7 +338,7 @@ $(Typed) @ highest {
 
 ### Entry check — Verify program can start
 
-```brief
+```briv
 $(Typed) {
     let has_entry = Tag$("contract").WithAttr$("entry", true).Count$();
     let has_trg = Tag$("trigger").Count$();
@@ -350,7 +350,7 @@ $(Typed) {
 
 ### PrintLn! expansion
 
-```brief
+```briv
 $(Parsed) {
     foreach(intercept in Tag$("plugin_intercept").Named$("PrintLn")) {
         let args = intercept.Children$();
@@ -364,17 +364,17 @@ $(Parsed) {
 
 ### IR text modification
 
-```brief
+```briv
 $(Generated) {
     Find$("target triple = \"x86_64\"")
         .ReplaceWith$("target triple = \"arm64\"");
-    Prepend$("; Optimized by Brief plugin\n");
+    Prepend$("; Optimized by Briv plugin\n");
 };
 ```
 
 ### Post-link binary stripping
 
-```brief
+```briv
 $(Linked) {
     Bin$.Run$("strip --strip-unnecessary {{path}}");
 };
@@ -382,7 +382,7 @@ $(Linked) {
 
 ### Conditional plugin injection
 
-```brief
+```briv
 $(Parsed) {
     // Only register a typed validator if unsafe code is present
     let unsafe = Tag$("call").Named$("Unsafe#").Count$();
@@ -398,7 +398,7 @@ $(Parsed) {
 
 ### Diagnostics
 
-```brief
+```briv
 $(Parsed) {
     let count = Tag$("import").Count$();
     EmitInfo$("file has " + count + " imports");
@@ -411,9 +411,9 @@ $(Parsed) {
 };
 ```
 
-### Full Brief evaluation at compile time
+### Full Briv evaluation at compile time
 
-```brief
+```briv
 $(Typed) {
     defn count_pattern(sel: Selection, tag: String) -> Int {
         let total = 0;
@@ -502,7 +502,7 @@ The `--sysquery <key=value>` and `--sysquery-file <path>` flags override
 `SysQuery$` results without changing source code:
 
 ```bash
-brief build hello.bv \
+briv build hello.bv \
   --sysquery cpu.cores=32 \
   --sysquery cpu.arch=x86_64 \
   --sysquery-file ./prod-sysquery.txt
@@ -530,9 +530,9 @@ The `.beast` format is preserved as a **read-only visualization tool** for
 plugin authors.  It shows the AST as S-expressions for human inspection:
 
 ```bash
-brief build file.bv --emit-beast parsed    # → file.beast.parse
-brief build file.bv --emit-beast typed     # → file.beast.types
-brief build file.bv --emit-beast all       # all stages
+briv build file.bv --emit-beast parsed    # → file.beast.parse
+briv build file.bv --emit-beast typed     # → file.beast.types
+briv build file.bv --emit-beast all       # all stages
 ```
 
 `.beast` snapshots show the AST exactly as the navigation DSL sees it at

@@ -1,4 +1,4 @@
-# Brief Language Specification - Definitive Reference
+# Briv Language Specification - Definitive Reference
 **Version:** 4.0 Multi-Output & Proof Engine
 **Date:** 2026-04-04
 **Status:** Authoritative Reference
@@ -7,14 +7,14 @@
 
 ## 1. Introduction and Philosophy
 
-**Brief** (Compiled Brief / Communication Brief) is a declarative, contract-enforced logic language designed natively for LLM-assisted development. It treats program execution as a series of verified state transitions (Settlements) rather than sequential instructions. 
+**Briv** (Compiled Briv / Communication Briv) is a declarative, contract-enforced logic language designed natively for LLM-assisted development. It treats program execution as a series of verified state transitions (Settlements) rather than sequential instructions. 
 
-Brief is designed for **Formal Verification without the Boilerplate**. It eliminates imperative control flow (`if`, `else`, `while`) in favor of Goal-Driven Execution, Unification, and Contractual Convergence.
+Briv is designed for **Formal Verification without the Boilerplate**. It eliminates imperative control flow (`if`, `else`, `while`) in favor of Goal-Driven Execution, Unification, and Contractual Convergence.
 
 ### 1.1 Core Design Principles
 
-1. **The Brief**: Every transaction is a legally binding agreement. If the postcondition isn't met, the transaction never happened (Atomic STM Rollback).
-2. **Goal-Driven Execution (Blackboard)**: The runtime is a Reactor. It does not "run" code top-to-bottom; it continuously evaluates the global state and satisfies Briefs whose preconditions are met.
+1. **The Briv**: Every transaction is a legally binding agreement. If the postcondition isn't met, the transaction never happened (Atomic STM Rollback).
+2. **Goal-Driven Execution (Blackboard)**: The runtime is a Reactor. It does not "run" code top-to-bottom; it continuously evaluates the global state and satisfies Brivs whose preconditions are met.
 3. **Flat, Zero-Nesting Logic**: To maximize LLM token efficiency and context-window comprehension, nested scopes are abolished. Branching is handled via Unification Guards and state constraints.
 4. **Promise Exhaustiveness**: The compiler forces developers (and AIs) to handle every possible outcome of an external capability before the code is allowed to run.
 5. **Infallible Signatures**: The host system can mathematically guarantee capabilities to the AI, reducing boilerplate error handling.
@@ -26,7 +26,7 @@ File extension is `.bv`.
 
 ## 2. Grammar Specification (Complete BNF)
 
-*Note: Imperative constructs (`if`, `else`, `while`, `switch`) do not exist in Brief.*
+*Note: Imperative constructs (`if`, `else`, `while`, `switch`) do not exist in Briv.*
 
 ### 2.1 Top-Level Program Structure
 
@@ -61,7 +61,7 @@ field_decl ::= identifier ":" type ";"
 ```
 
 **Example:**
-```brief
+```briv
 struct Player {
     name: String;
     score: Int;
@@ -79,7 +79,7 @@ Structs can contain:
 - **Transactions**: Methods that operate on the struct's state
 
 **Field Access:**
-```brief
+```briv
 let player: Player;
 player.name       # Access field
 player.score      # Access another field
@@ -157,7 +157,7 @@ namespace_path ::= identifier ("." identifier)*
 ```
 
 **Examples:**
-```brief
+```briv
 import std.io;                           # Import everything from std.io (shorthand)
 import { print } from std.io;            # Import specific symbol
 import { print as p } from std.io;       # Import with alias
@@ -167,7 +167,7 @@ import { map, filter as f } from collections;  # Multiple with aliases
 **Note:** The `from` keyword is optional when importing an entire namespace (e.g., `import std.io;`). It is required when importing specific items (e.g., `import { print } from std.io;`).
 
 **Examples:**
-```brief
+```briv
 import std.io;                           # Import everything from std.io
 import { print } from std.io;            # Import specific symbol
 import { print as p } from std.io;       # Import with alias
@@ -180,7 +180,7 @@ import { map, filter as f } from collections;  # Multiple with aliases
 
 ### 3.1 Blackboard Execution Model
 
-Brief programs have no `main()` function. They execute using a **Blackboard Architecture**:
+Briv programs have no `main()` function. They execute using a **Blackboard Architecture**:
 
 1. **The Blackboard**: `let` and `const` variables act as the global truth state.
 2. **The Reactor Loop**: The engine continuously evaluates the `[pre]` conditions of all `rct` blocks (`node` and `async node`).
@@ -197,7 +197,7 @@ Brief programs have no `main()` function. They execute using a **Blackboard Arch
 
 ### 3.2 STM Rollback Semantics (Software Transactional Memory)
 
-A transaction in Brief is atomic. If a transaction reaches an `escape` statement, fails an inline guard, or fails to satisfy its `[post]` condition upon `term`, it acts as a **No-Op**. 
+A transaction in Briv is atomic. If a transaction reaches an `escape` statement, fails an inline guard, or fails to satisfy its `[post]` condition upon `term`, it acts as a **No-Op**. 
 
 Any mutations to `&variables` made during the failed transaction are instantly rolled back to their original state, keeping the Blackboard pristine.
 
@@ -226,7 +226,7 @@ txn increment [count < 10][count == @count + 1] {
 When `term` is invoked, the runtime evaluates the postcondition. If the postcondition is false, the runtime **loops** the transaction body. It continuously attempts to converge on the truth. If it succeeds, the state mutates globally.
 
 ### 4.5 Flat Logic Guards `[condition]`
-Instead of nested `if` blocks, Brief uses inline logic gates. If a guard evaluates to `false`, the rest of the line is skipped.
+Instead of nested `if` blocks, Briv uses inline logic gates. If a guard evaluates to `false`, the rest of the line is skipped.
 ```acr
 let result = attempt();
 [result == true] &successes = @successes + 1;
@@ -238,7 +238,7 @@ let result = attempt();
 ## 5. Promises, Signatures, and Exhaustiveness
 
 ### 5.1 Signatures (`sig`)
-Signatures define the boundary between Brief logic and the external host system (I/O, Network, OS). 
+Signatures define the boundary between Briv logic and the external host system (I/O, Network, OS). 
 
 *   **Fallible Signatures**: `sig fetch: Int -> User | Error;` (The AI must handle both outcomes).
 *   **Infallible Signatures**: `sig print: String -> true;` (The host guarantees execution. Error handling is abstracted away).
@@ -274,7 +274,7 @@ txn load_user [~/has_user] {
 A `defn` can declare multiple output types, and each `term` provides values for all of them.
 
 **Syntax:**
-```brief
+```briv
 defn print(msg: String) -> String, Void, Bool, Bool {
     [msg.len() == 0] term "",,false, true;
     [msg.len() > 0] term msg,, true, true;
@@ -292,13 +292,13 @@ defn print(msg: String) -> String, Void, Bool, Bool {
 A `sig` projects specific outputs from a multi-output `defn`.
 
 **Projection by type:**
-```brief
+```briv
 sig print: String -> Bool as safe_print;   # Takes first Bool output
 sig print: String -> Bool, Bool as both;   # Takes both Bool outputs
 ```
 
 **Assertion with `-> true`:**
-```brief
+```briv
 sig print: String -> true;
 ```
 
@@ -311,7 +311,7 @@ When you write `sig fn: T -> true`, the compiler must **prove** that the project
 2. The actual inputs passed at call sites in your program
 
 **Example: Guaranteed true**
-```brief
+```briv
 defn always_true(x: Int) -> Bool {
     term true;
 };
@@ -320,7 +320,7 @@ sig always_true: Int -> true;  # ✅ Approved - defn always returns true
 ```
 
 **Example: Conditional - rejected**
-```brief
+```briv
 defn maybe_true(b: Bool) -> Bool {
     term b;
 };
@@ -329,7 +329,7 @@ sig maybe_true: Bool -> true;  # ❌ Rejected - b could be false
 ```
 
 **Example: Context-dependent - approved if callers use it safely**
-```brief
+```briv
 defn bool_return(b: Bool) -> Bool {
     term b;
 };
@@ -343,7 +343,7 @@ sig bool_return: Bool -> true;  # ✅ If all call sites pass true
 When a `term` contains a function call expression without an explicit signature, the compiler **infers** the signature:
 
 **Sugared:**
-```brief
+```briv
 import { print } from std.io;
 
 node hello [~/done] {
@@ -352,7 +352,7 @@ node hello [~/done] {
 ```
 
 **Desugars to:**
-```brief
+```briv
 let done: Bool = false;
 
 sig print: String -> true;  # Auto-generated
@@ -402,7 +402,7 @@ async node fetch_data [~/data_loaded][data_loaded] {
 ```
 
 ### 6.3 Entry Point and Equilibrium
-Brief programs have no `main()` function. Entry is whichever `rct`'s preconditions hold first. The program reaches equilibrium when no `rct` preconditions evaluate to true.
+Briv programs have no `main()` function. Entry is whichever `rct`'s preconditions hold first. The program reaches equilibrium when no `rct` preconditions evaluate to true.
 
 **Flow:**
 1. Reactor evaluates all `[pre]` conditions for `rct` blocks only
@@ -415,7 +415,7 @@ Brief programs have no `main()` function. Entry is whichever `rct`'s preconditio
 ## 7. Borrow and Scope Rules (New)
 
 ### 7.1 Variable Scoping
-Brief uses explicit scoping rules to manage variable lifetime and ownership.
+Briv uses explicit scoping rules to manage variable lifetime and ownership.
 
 **Syntax:**
 ```bnf
@@ -508,7 +508,7 @@ Variables declared via `let` are read-only by default. To mutate a variable, a t
 ```
 
 ### 8.2 Lock-Free Concurrency
-Brief achieves concurrent thread safety without `Mutexes` or explicit locks. 
+Briv achieves concurrent thread safety without `Mutexes` or explicit locks. 
 If two `async txn` blocks mutate the same `&variable`, the compiler proves safety by ensuring their preconditions are **mutually exclusive**.
 
 ```acr
@@ -534,7 +534,7 @@ txn writer [access == 1] {
 
 ## 9. Compilation and Proof Engine
 
-Brief utilizes a two-stage pipeline: a fast AST Linter for development, and a rigorous Proof Engine for deployment.
+Briv utilizes a two-stage pipeline: a fast AST Linter for development, and a rigorous Proof Engine for deployment.
 
 ### 9.1 DAG-Based Dead Code Detection
 During semantic analysis, the compiler maps all `[pre]` and `[post]` contracts into a Directed Acyclic Graph (DAG).
@@ -554,7 +554,7 @@ Instead of evaluating all preconditions every tick, the compiler already compute
 
 ---
 
-## 10. Comprehensive Examples (The Brief Way)
+## 10. Comprehensive Examples (The Briv Way)
 
 ### 10.1 API Fetch with Fallbacks
 ```acr
@@ -604,7 +604,7 @@ async node read_counter [global_counter > 0][read_complete] {
 ```
 
 ### 10.4 Multi-Output Function Example
-```brief
+```briv
 defn validate_input(input: String) -> Bool, String, String {
     [input.len() == 0] term false,, "Error: empty", "Please provide input";
     [input.len() < 3] term false,, "Error: too short", "Minimum 3 characters";
@@ -622,7 +622,7 @@ sig validate_input: String -> true;
 ```
 
 ### 10.5 Sugared Transaction Example
-```brief
+```briv
 import { print } from std.io;
 
 node hello [~/done] {
@@ -631,7 +631,7 @@ node hello [~/done] {
 ```
 
 Desugars to:
-```brief
+```briv
 let done: Bool = false;
 sig print: String -> true;
 
@@ -645,7 +645,7 @@ node hello [~done][done] {
 
 ## 11. Common Patterns (Declarative Logic)
 
-These patterns demonstrate how Brief rejects imperative spaghetti code in favor of contract-driven logic.
+These patterns demonstrate how Briv rejects imperative spaghetti code in favor of contract-driven logic.
 
 ### Pattern 1: Guarded Concurrency (The Contract as a Mutex)
 No manual locks. The contract acts as a hardware-level gate.
@@ -718,7 +718,7 @@ namespace_path ::= identifier ("." identifier)*
 ```
 
 **Examples:**
-```brief
+```briv
 import std.io;                           # Import everything
 import { print } from std.io;            # Import specific
 import { print as p } from std.io;       # Import with alias
@@ -737,7 +737,7 @@ result_type ::= type ("," type)* | "true"   # Projection or assertion
 ```
 
 **Examples:**
-```brief
+```briv
 sig get_user: Int -> User | Error from db.lib as db_user;
 sig print: String -> Bool as safe_print;      # Project first Bool
 sig print: String -> Bool, Bool as both;      # Project both Bools
@@ -752,7 +752,7 @@ sig print: String -> true;                    # Assert: Bool is always true
 - **From clause**: Specifies source library (required for external functions)
 
 ### 12.3 Three Tiers of Contract Declaration
-Brief supports three levels of contract strictness:
+Briv supports three levels of contract strictness:
 
 1. **Inferred Contracts**: Term position implies contract based on usage
    ```acr
@@ -825,6 +825,6 @@ node incomplete [true] {
 
 ## 13. Conclusion
 
-Brief forces a paradigm shift: programs are verified legal settlements between the developer and the runtime. 
+Briv forces a paradigm shift: programs are verified legal settlements between the developer and the runtime. 
 
-By eliminating imperative loops, nested blocks, and manual error tracking, Brief provides a radically token-efficient canvas. It is designed from the ground up for LLMs to generate provably safe, mathematically sound, and concurrently resilient autonomous agents.
+By eliminating imperative loops, nested blocks, and manual error tracking, Briv provides a radically token-efficient canvas. It is designed from the ground up for LLMs to generate provably safe, mathematically sound, and concurrently resilient autonomous agents.

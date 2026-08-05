@@ -20,25 +20,25 @@ rebuilt — stale pre-regression binaries persist.
 **Affected benchmarks (8 of 22):** precompute_sum, nbody_newton, nbody_sqrt,
 fannkuch_redux, mandelbrot, knucleotide, and others with `[guard] { term! ... }`.
 
-### Bug 2 (Critical): `benchmarks/brief_rt.c` writes output to stderr without flushing
-**File:** `benchmarks/brief_rt.c`, `runtime/brief_rt.c`
+### Bug 2 (Critical): `benchmarks/briv_rt.c` writes output to stderr without flushing
+**File:** `benchmarks/briv_rt.c`, `runtime/briv_rt.c`
 
 `__print_int`, `__print_float`, `__putchar` all use `fprintf(stderr, ...)` without
-calling `fflush(stderr)`. The constructor `brief_rt_ctor` sets
+calling `fflush(stderr)`. The constructor `briv_rt_ctor` sets
 `setvbuf(stderr, NULL, _IOFBF, 65536)` (fully buffered 64KB). Output accumulates
 in the buffer and is silently discarded on `exit()`.
 
-The canonical `lib/runtime/brief_rt.c` writes to stdout with `fwrite` + `fflush`
+The canonical `lib/runtime/briv_rt.c` writes to stdout with `fwrite` + `fflush`
 and works correctly. Benchmarks that DON'T have Bug 1 (e.g., print_loop, fasta,
 ring_buffer) DO link via LTO successfully — but their output disappears into
 the stderr buffer void.
 
-### Bug 3 (Configuration): `resolve_link_source` picks wrong `brief_rt.c`
+### Bug 3 (Configuration): `resolve_link_source` picks wrong `briv_rt.c`
 **File:** `src/main.rs:1848-1853`
 
 Search order is project-relative first. Since source files are in `benchmarks/`,
-`source_dir = benchmarks/`, so `link/brief_rt.c` resolves to
-`benchmarks/brief_rt.c` before `lib/runtime/brief_rt.c`. The benchmarks directory
+`source_dir = benchmarks/`, so `link/briv_rt.c` resolves to
+`benchmarks/briv_rt.c` before `lib/runtime/briv_rt.c`. The benchmarks directory
 has a stripped-down, differently-behaved runtime copy.
 
 ### Bug 4 (Design): `has_side_effects()` missing from intrinsics
@@ -123,7 +123,7 @@ Expr::IntrinsicCall { intrinsic, .. } => intrinsic.has_side_effects(),
 
 Add 4 new variants to the `Intrinsic` enum, wired through parser →
 typechecker → interpreter → LLVM codegen. Use direct libc calls in LLVM
-(no brief_rt.c shims).
+(no briv_rt.c shims).
 
 **New variants:**
 
@@ -200,10 +200,10 @@ Emit format strings at the end of the module header if flags are set.
 | Variant | Current stub | New codegen |
 |---|---|---|
 | `Println` | `and i1 true, true` | `@fprintf(@stdout, @FMT_STR, %msg)` then `\n` |
-| `Readln` | `add i64 0, 0` | `call i64 @brief_read_stdin(i64 %buf)` |
+| `Readln` | `add i64 0, 0` | `call i64 @briv_read_stdin(i64 %buf)` |
 | `Exit` | `call void @__exit()` + stub | `call void @exit(i32 0)` |
-| `WriteFile` | `add i64 0, 1` | delegate to `brief_write_file` or `fwrite` |
-| `Sleep` | `add i64 0, 1` | `call i64 @brief_nanosleep(i64 %ms)` |
+| `WriteFile` | `add i64 0, 1` | delegate to `briv_write_file` or `fwrite` |
+| `Sleep` | `add i64 0, 1` | `call i64 @briv_nanosleep(i64 %ms)` |
 | `SpawnWithOutput` | ignores args[1]+ | merge args into shell command |
 
 ---
@@ -233,7 +233,7 @@ Implement in interpreter (i32 math with trunc/zext) and LLVM backend (i32 arithm
 **Scope:** ~22 `.bv` files in `benchmarks/`
 
 For each file:
-1. Remove `import "link/brief_rt.c";`
+1. Remove `import "link/briv_rt.c";`
 2. Remove `frgn __print_int(n: Int) -> Bool ;` etc.
 3. Replace calls with `#` intrinsic syntax
 
@@ -261,9 +261,9 @@ sparse_dispatch
 ### Phase 6 — Clean Up Dead Runtime Files
 **Scope:** 2 files removed
 
-- **Remove** `benchmarks/brief_rt.c` — no longer referenced after migration
-- **Remove** `runtime/brief_rt.c` — duplicate of `lib/runtime/brief_rt.c`
-- **Keep** `lib/runtime/brief_rt.c` — canonical runtime for programs that LTO-link
+- **Remove** `benchmarks/briv_rt.c` — no longer referenced after migration
+- **Remove** `runtime/briv_rt.c` — duplicate of `lib/runtime/briv_rt.c`
+- **Keep** `lib/runtime/briv_rt.c` — canonical runtime for programs that LTO-link
 
 ---
 
@@ -281,7 +281,7 @@ sparse_dispatch
 
 After each phase:
 1. `cargo test --lib` — all tests pass
-2. `cargo build --release --bin brief-compiler` — no warnings
+2. `cargo build --release --bin briv-compiler` — no warnings
 
 Final verification:
 3. `bash benchmarks/build_and_bench.sh --correctness` — all outputs match C
@@ -295,4 +295,4 @@ Final verification:
 | `fprintf`/`putchar` varargs LLVM IR wrong | Segfault or no output | Test each intrinsic in isolation; verify with strace |
 | Format string pool conflicts with existing `@str.N` constants | Name collision | Use `@FMT_INT` prefix (all caps, `FMT` prefix is unique in codebase) |
 | Char arithmetic changes affect non-benchmark code | Breakage in stdlib | Run `cargo test --lib` after every change |
-| Stale `benchmarks/brief_rt.c` deletion breaks something | Build failure | Only delete after all benchmarks migrated and tested |
+| Stale `benchmarks/briv_rt.c` deletion breaks something | Build failure | Only delete after all benchmarks migrated and tested |

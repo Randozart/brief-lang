@@ -1,5 +1,5 @@
 // System Triggers FFI Bindings Schema
-// Defines OS-level event triggers available via FFI for Regular Brief
+// Defines OS-level event triggers available via FFI for Regular Briv
 // These map to signals, stdin, timers, filesystem events, and network events
 
 import "std/types.dbvs";

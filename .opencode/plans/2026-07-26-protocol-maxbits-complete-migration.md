@@ -8,7 +8,7 @@
 
 A type's LLVM representation, ABI width, boxing behavior, and protocol
 category are derived from its `ResolvedType` in the `TypeUniverse` — never
-from matching on its Brief type name string. The `ResolvedType` contains:
+from matching on its Briv type name string. The `ResolvedType` contains:
 
 | Source | Field | Example |
 |--------|-------|---------|
@@ -30,7 +30,7 @@ Every file in `src/backend/llvm/` and `src/glue/` was searched for:
 bootstrap primitives or test data). They group into 5 functional clusters:
 
 ### Cluster A: Type-to-LLVM mapping (~30 sites)
-These take a Brief type and return an LLVM type string. They all duplicate
+These take a Briv type and return an LLVM type string. They all duplicate
 the same information that already exists in the primordial `llvm_type`
 property.
 
@@ -204,7 +204,7 @@ refactoring), but the narrowing branch removal is independent.
 **Fix:** Make it universe-driven, accepting an optional `&TypeUniverse`.
 
 ```rust
-/// 2026-07-26: Returns the LLVM type for a Brief type, driven by the
+/// 2026-07-26: Returns the LLVM type for a Briv type, driven by the
 /// type's primordial llvm_type property + maxbits. No name matching.
 pub fn protocol_llvm_type(ty: &Type, universe: Option<&TypeUniverse>) -> String {
     if let Some(ref u) = universe {
@@ -306,7 +306,7 @@ match llvm_ty.as_str() {
 ```
 
 Note: this still has LLVM-type matching (`"i64"`, `"float"`, etc.), which is
-correct — these are LLVM IR types, not Brief type names. The dispatch is on
+correct — these are LLVM IR types, not Briv type names. The dispatch is on
 the LLVM representation, which is what the emission needs.
 
 ### 2a.6 Update `llvm_type()` in `emit_toplevel.rs`
@@ -568,7 +568,7 @@ Same pattern as 2c.1 — replace name matches with protocol membership.
 ### 2c.3 `ensure_typed_value()` — `helpers.rs:2881-2934`
 
 **Current:** Matches on LLVM type pairs (`("double", "i64")`, `("i64", "float")`,
-`("i8", "i64")`, `("i32", "i64")`). These are LLVM type conversions, not Brief
+`("i8", "i64")`, `("i32", "i64")`). These are LLVM type conversions, not Briv
 type name matches — the dispatch is on LLVM IR types. **No change needed.**
 
 ---

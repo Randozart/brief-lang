@@ -1,8 +1,8 @@
-# Data Brief (Archived)
+# Data Briv (Archived)
 
-**This document is obsolete.** The Data Brief format has been redesigned.
+**This document is obsolete.** The Data Briv format has been redesigned.
 
-See the new specification at `docs/architecture/data-brief.md`.
+See the new specification at `docs/architecture/data-briv.md`.
 
 Key changes:
 - `" "` quotes are opt-in via parser flag, not the default

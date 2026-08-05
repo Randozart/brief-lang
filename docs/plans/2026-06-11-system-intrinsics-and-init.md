@@ -78,7 +78,7 @@ pub enum TopLevel {
 
 The compiler collects all `TopLevel::Statement` nodes in program order and synthesizes:
 
-```brief
+```briv
 let __booted_N: Bool = false;
 
 node __init [!__booted_N][__booted_N] {

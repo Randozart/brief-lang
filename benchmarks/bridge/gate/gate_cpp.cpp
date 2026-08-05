@@ -7,7 +7,7 @@ extern "C" {
     typedef long long ll;
     ll feature_hash(ll state, ll count, ll seed);
     ll add(ll a, ll b);
-    ll __brief_init_state();
+    ll __briv_init_state();
 }
 static ll native_fh(ll count, ll seed) {
     ll h = seed;
@@ -18,7 +18,7 @@ static ll native_add(ll a, ll b) { return a + b; }
 static double now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e9 + t.tv_nsec; }
 int main(int argc, char** argv) {
     ll r = atoll(argv[1]);
-    ll st = __brief_init_state();
+    ll st = __briv_init_state();
     const int N = 200000, N2 = 2000000;
     volatile ll sink = 0;
     feature_hash(st, 1000, r);

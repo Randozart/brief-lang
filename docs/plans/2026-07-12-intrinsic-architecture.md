@@ -269,9 +269,9 @@ get_operator_intrinsic("Complex<Float>", "Sqrt#") => Some("complex_sqrt")
 ```
 
 No new infrastructure. The same `op` binder that maps symbols to function names
-also maps `#` names to function names. The Brief syntax is:
+also maps `#` names to function names. The Briv syntax is:
 
-```brief
+```briv
 bind Complex<Float> {
     Sqrt# <~ complex_sqrt;
 };

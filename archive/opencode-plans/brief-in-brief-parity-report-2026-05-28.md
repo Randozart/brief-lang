@@ -1,4 +1,4 @@
-# Brief-in-Brief Self-Hosting Status
+# Briv-in-Briv Self-Hosting Status
 
 **Date**: 2026-05-28  
 **Rust compile**: ✓ `cargo build`  
@@ -6,7 +6,7 @@
 
 ## Objective
 
-Make all 18 `.bv` files in `lib/compiler/` parse, type-check, and eventually compile Brief code through the self-hosted compiler.
+Make all 18 `.bv` files in `lib/compiler/` parse, type-check, and eventually compile Briv code through the self-hosted compiler.
 
 ## Parse Status
 
@@ -68,7 +68,7 @@ Make all 18 `.bv` files in `lib/compiler/` parse, type-check, and eventually com
 
 ## Key Discoveries
 
-1. **Named struct literals unsupported**: `TypeName { field: val }` is NOT valid Brief syntax. Only anonymous `{ field: val }` (parsed as `Expr::ObjectLiteral`) works.
+1. **Named struct literals unsupported**: `TypeName { field: val }` is NOT valid Briv syntax. Only anonymous `{ field: val }` (parsed as `Expr::ObjectLiteral`) works.
 2. **`uni` is a statement, not an expression**: Cannot use `[!uni x(Pattern) = true]` as guard condition — `uni` only works as a statement (`uni ... = ...;`).
 3. **Keywords can't appear in any variable position**: Not just function parameters, but also `let` bindings and `uni` pattern variables (e.g., `TopTxn(txn)` fails because `txn` is `Token::Txn`).
 4. **Backend files are deeply embedded with Rust-isms**: `u8`/`u32`/`i32`/`u64` types, `as u8` casts, `<<`/`>>` bit shifts, hex handling, block comment strings `"/* expr */"`. These are non-trivial to convert.

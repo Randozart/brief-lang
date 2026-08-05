@@ -1,13 +1,13 @@
-// queue_drain_idio — Idiomatic Brief-native version of queue_drain.
+// queue_drain_idio — Idiomatic Briv-native version of queue_drain.
 // Reactive transaction with collection drain (`<- queue` + `queue <- count`).
 // Exercises the collection drain analysis (detect_collection_drain) in the
 // compiler, while the symmetric variant (queue_drain_sym) mirrors C.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/queue_drain_idio.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/queue_drain_idio.bv \
 //       --out benchmarks --optimize-budget 256
 //
-// No C reference — this is a Brief-native pattern. Correctness is compared
+// No C reference — this is a Briv-native pattern. Correctness is compared
 // against the symmetric variant's C reference.
 
 

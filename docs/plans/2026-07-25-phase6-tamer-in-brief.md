@@ -1,20 +1,20 @@
-# Phase 6: Write the Tamer in Brief — Self-Hosted Install-Time Compiler
+# Phase 6: Write the Tamer in Briv — Self-Hosted Install-Time Compiler
 ## 2026-07-25
 
 ## Overview
 
 The tamer system tool is currently implemented in C (`tamer/main.c`, `tamer/interp.c`).
-Phase 6 rewrites the entire tamer in **Brief itself**, then compiles it to a native binary
-via `briefc build --backend llvm`. This is the ultimate validation of the Bounty
-architecture — Brief compiling a compiler tool, written in Brief, that compiles user
+Phase 6 rewrites the entire tamer in **Briv itself**, then compiles it to a native binary
+via `brivc build --backend llvm`. This is the ultimate validation of the Bounty
+architecture — Briv compiling a compiler tool, written in Briv, that compiles user
 programs at install time.
 
 ### Architecture
 
 ```
-lib/tamer/*.bv  (Brief source — the tamer)
+lib/tamer/*.bv  (Briv source — the tamer)
     │
-    ▼ briefc build --backend llvm tamer_rt.c
+    ▼ brivc build --backend llvm tamer_rt.c
     │
 tamer  (native binary, compiled via LLVM)
     │
@@ -30,29 +30,29 @@ Native binary (output, optimized for target CPU)
 
 | Layer | Language | Role |
 |-------|----------|------|
-| `lib/tamer/*.bv` | Brief | VM interpreter, .bounty parser, orchestration |
+| `lib/tamer/*.bv` | Briv | VM interpreter, .bounty parser, orchestration |
 | `tamer_rt.c` | C | Low-level runtime: stack operations, LLVM FFI, linker, CPUID |
 | `tamer` | Native binary | Compiled output of the above two |
 
 The tamer's **interpretation loop** (fetch-decode-execute of `.lair` bytecode) is
-written in Brief using pattern matching. The **host FFI** (LLVM, linker, filesystem)
+written in Briv using pattern matching. The **host FFI** (LLVM, linker, filesystem)
 is accessed via `frgn` declarations backed by the tiny `tamer_rt.c` runtime.
 
 The **VM instruction set and `.lair` format** remain unchanged from Phase 1. What
-changes is WHO implements the interpreter — it moves from C to Brief.
+changes is WHO implements the interpreter — it moves from C to Briv.
 
 ### Why This Matters
 
-1. **Self-hosting milestone**: Brief compiles a real-world systems tool written in
+1. **Self-hosting milestone**: Briv compiles a real-world systems tool written in
    itself. This validates the compiler's backend (LLVM codegen), its FFI model
    (`frgn` declarations), and its standard library (`Ptr<Int>`, `String`, match
    expressions, etc.).
 
 2. **No more C in the critical path**: Eventually the `tamer_rt.c` can also be
-   replaced with Brief + direct LLVM IR emission, but for Phase 6 it remains
+   replaced with Briv + direct LLVM IR emission, but for Phase 6 it remains
    as a thin (~100 line) FFI layer.
 
-3. **Demonstrates the VM backend's purpose**: The `briefc bounty` command produces
+3. **Demonstrates the VM backend's purpose**: The `brivc bounty` command produces
    `.lair` bytecode via `BackendKind::Vm`. The tamer interprets that exact format.
    They are two sides of the same coin.
 
@@ -74,14 +74,14 @@ changes is WHO implements the interpreter — it moves from C to Brief.
 
 | File | Change |
 |------|--------|
-| `tamer/Makefile` | Add rule to compile tamer from Brief: `briefc build --backend llvm lib/tamer/main.bv tamer_rt.c -o tamer` |
+| `tamer/Makefile` | Add rule to compile tamer from Briv: `brivc build --backend llvm lib/tamer/main.bv tamer_rt.c -o tamer` |
 | `AGENTS.md` | Add Phase 6 as completed milestone |
 
 ---
 
 ## lib/tamer/main.bv — Entry Point
 
-```brief
+```briv
 import host_ffi;
 
 export defn main(argc: Int, argv: Ptr<Ptr<Int>>) -> Int {
@@ -119,11 +119,11 @@ orchestrate the VM. The heavy lifting (VM interpretation) happens in `vm.bv`.
 
 ## lib/tamer/vm.bv — VM Interpreter
 
-The VM implementation is a Brief module that implements the fetch-decode-execute
+The VM implementation is a Briv module that implements the fetch-decode-execute
 loop for the `.lair` bytecode format. It uses `frgn` calls for stack operations
 and memory management.
 
-```brief
+```briv
 // lib/tamer/vm.bv — Stack-based VM interpreter
 import host_ffi;
 
@@ -242,7 +242,7 @@ defn dispatch_op(vm: Ptr<VM>, op: Int, pc: Int) -> Int {
 
 ### Key Design Decisions
 
-**Stack operations are `frgn` calls**, not inline Brief operations. This is
+**Stack operations are `frgn` calls**, not inline Briv operations. This is
 because the VM stack lives in raw memory (`Ptr<Int>`) and needs bounds-checked
 push/pop/peek. These are implemented in `tamer_rt.c`:
 
@@ -257,22 +257,22 @@ void tamer_stack_push(uint64_t* vm_state, uint64_t val) {
 ```
 
 **Bytecode reads use helper functions** (`load_u8`, `load_i16`, `load_u32`,
-`load_i64`) which are inline in Brief and use Ptr arithmetic:
+`load_i64`) which are inline in Briv and use Ptr arithmetic:
 
-```brief
+```briv
 defn load_u8(ptr: Ptr<Int>) -> Int {
     term host_ffi::read_u8(ptr);
 };
 ```
 
-Or they could be direct `frgn` calls if Brief can't do pointer dereferencing
+Or they could be direct `frgn` calls if Briv can't do pointer dereferencing
 directly. The exact approach depends on what level of Ptr support is available.
 
 ---
 
 ## lib/tamer/loader.bv — Section Loading
 
-```brief
+```briv
 // lib/tamer/loader.bv — Parse .bounty and .lair formats
 
 pub defn parse_bounty_section(data: Ptr<Int>, section_type: Int) -> Ptr<Int> {
@@ -301,7 +301,7 @@ pub defn load_lair_header(data: Ptr<Int>) -> LairHeader {
 
 ## lib/tamer/host_ffi.bv — FFI Declarations
 
-```brief
+```briv
 // lib/tamer/host_ffi.bv — Host function declarations for the tamer runtime
 
 // ── Memory ────────────────────────────────────────────────────
@@ -352,10 +352,10 @@ frgn call_host(vm: Ptr<Int>, host_id: Int) as _tamer_call_host from "tamer_rt";
 ## tamer_rt.c — C Runtime
 
 This replaces `tamer/interp.c` and `tamer/main.c`. It's smaller because the VM
-interpreter loop moves to Brief.
+interpreter loop moves to Briv.
 
 ```c
-// tamer_rt.c — Low-level runtime for the Brief-compiled tamer.
+// tamer_rt.c — Low-level runtime for the Briv-compiled tamer.
 // Provides memory, stack, bytecode I/O, and LLVM FFI via frgn bindings.
 
 #include <stdint.h>
@@ -363,7 +363,7 @@ interpreter loop moves to Brief.
 #include <string.h>
 #include <stdio.h>
 
-// ── VM state (kept in C, accessed by Brief via Ptr<Int>) ────────────────
+// ── VM state (kept in C, accessed by Briv via Ptr<Int>) ────────────────
 typedef struct {
     uint64_t* stack;
     size_t stack_cap, stack_len;
@@ -412,7 +412,7 @@ void tamer_llvm_emit(int mod_handle, const char* ir_text) {
 | 3 | Create `loader.bv` | `lib/tamer/loader.bv` | Step 2 |
 | 4 | Create `vm.bv` | `lib/tamer/vm.bv` | Step 2 |
 | 5 | Create `main.bv` | `lib/tamer/main.bv` | Steps 3, 4 |
-| 6 | Compile: `briefc build --backend llvm lib/tamer/main.bv tamer_rt.c -o tamer` | Makefile | Steps 1-5 |
+| 6 | Compile: `brivc build --backend llvm lib/tamer/main.bv tamer_rt.c -o tamer` | Makefile | Steps 1-5 |
 | 7 | Test: `tamer /tmp/test_bounty.bounty` | — | Step 6 |
 | 8 | Clean up old C VM files | Remove `tamer/interp.c`, `tamer/interp.h`, `tamer/main.c` | Step 7 |
 
@@ -421,15 +421,15 @@ void tamer_llvm_emit(int mod_handle, const char* ir_text) {
 ## Testing Strategy
 
 ```bash
-# 1. Build the native tamer from Brief source
+# 1. Build the native tamer from Briv source
 cd lib/tamer
-briefc build --backend llvm main.bv ../../tamer/tamer_rt.c -o ../../tamer/brief_tamer
+brivc build --backend llvm main.bv ../../tamer/tamer_rt.c -o ../../tamer/briv_tamer
 
 # 2. Create a test bounty
-briefc bounty /tmp/test.bv -o /tmp/test.bounty
+brivc bounty /tmp/test.bv -o /tmp/test.bounty
 
-# 3. Process with the Brief-compiled tamer
-./tamer/brief_tamer /tmp/test.bounty
+# 3. Process with the Briv-compiled tamer
+./tamer/briv_tamer /tmp/test.bounty
 
 # 4. Run the output binary
 /tmp/test_binary
@@ -437,7 +437,7 @@ briefc bounty /tmp/test.bv -o /tmp/test.bounty
 
 ### Comparison Tests
 
-Run each phase's end-to-end test with both the C tamer and the Brief tamer,
+Run each phase's end-to-end test with both the C tamer and the Briv tamer,
 comparing outputs:
 
 ```bash
@@ -445,19 +445,19 @@ comparing outputs:
 ./tamer/tamer /tmp/test.bounty -o /tmp/out_c
 /tmp/out_c > /tmp/result_c.txt
 
-# Brief tamer
-./tamer/brief_tamer /tmp/test.bounty -o /tmp/out_brief
-/tmp/out_brief > /tmp/result_brief.txt
+# Briv tamer
+./tamer/briv_tamer /tmp/test.bounty -o /tmp/out_briv
+/tmp/out_briv > /tmp/result_briv.txt
 
 # Compare
-diff /tmp/result_c.txt /tmp/result_brief.txt  # should be empty
+diff /tmp/result_c.txt /tmp/result_briv.txt  # should be empty
 ```
 
 ### Regression Guard
 
 - All existing Rust tests must pass (`cargo test --lib`)
 - All existing C tests must pass until step 8 (when they're removed)
-- The Brief tamer must produce identical output to the C tamer for the same input
+- The Briv tamer must produce identical output to the C tamer for the same input
 
 ---
 
@@ -465,11 +465,11 @@ diff /tmp/result_c.txt /tmp/result_brief.txt  # should be empty
 
 | Risk | Mitigation |
 |------|------------|
-| **Brief's Ptr<Int> support isn't low-level enough** | All pointer operations go through `frgn` calls to the C runtime. Brief code only does integers, booleans, structs, and match expressions — no unsafe pointer work in Brief itself. |
+| **Briv's Ptr<Int> support isn't low-level enough** | All pointer operations go through `frgn` calls to the C runtime. Briv code only does integers, booleans, structs, and match expressions — no unsafe pointer work in Briv itself. |
 | **`frgn` calling convention doesn't support Ptr<Int>** | Pass pointers as `Int` (they're just 64-bit addresses). The C runtime casts them back. |
 | **Match on 30+ opcodes causes compile-time slowdown** | Acceptable for a build-once tool. The tamer is compiled once per platform, not per program. |
-| **Brief compiler doesn't support all patterns used** | The tamer's code uses only a restricted subset of Brief: `defn`, `if/match`, `for` loops, `fn` calls, `let` bindings, arithmetic. No generics beyond the needed scope. |
-| **Old C tamer breaks during transition** | Keep making `tamer/tamer` as the C version. Create `tamer/brief_tamer` as the Brief version alongside it. Remove the C version only after the Brief version is verified identical. |
+| **Briv compiler doesn't support all patterns used** | The tamer's code uses only a restricted subset of Briv: `defn`, `if/match`, `for` loops, `fn` calls, `let` bindings, arithmetic. No generics beyond the needed scope. |
+| **Old C tamer breaks during transition** | Keep making `tamer/tamer` as the C version. Create `tamer/briv_tamer` as the Briv version alongside it. Remove the C version only after the Briv version is verified identical. |
 
 ---
 
@@ -477,19 +477,19 @@ diff /tmp/result_c.txt /tmp/result_brief.txt  # should be empty
 
 | Document | Change |
 |----------|--------|
-| `docs/plans/2026-07-25-bounty-architecture.md` | Update Phase 6 section with brief impl details |
-| `docs/architecture/bounty-architecture.md` | Update tamer section to describe Brief compilation |
+| `docs/plans/2026-07-25-bounty-architecture.md` | Update Phase 6 section with briv impl details |
+| `docs/architecture/bounty-architecture.md` | Update tamer section to describe Briv compilation |
 | `AGENTS.md` | Add Phase 6 completion milestone |
 
 ### Rationale Comments
 
 All new `.bv` files get header comments:
 
-```brief
-// 2026-07-25: Tamer VM interpreter in Brief.
+```briv
+// 2026-07-25: Tamer VM interpreter in Briv.
 // Implements the fetch-decode-execute loop for .lair bytecode.
-// Compiled natively via briefc --backend llvm.
-// Replaces the C interpreter (tamer/interp.c) with Brief source.
+// Compiled natively via brivc --backend llvm.
+// Replaces the C interpreter (tamer/interp.c) with Briv source.
 ```
 
 Every opcode dispatch arm in `vm.bv` gets a one-line comment referencing

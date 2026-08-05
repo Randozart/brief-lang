@@ -2,7 +2,7 @@
 ## 2026-07-24 — Post-SLP baseline (`be6583bc`)
 
 All benchmarks call `export defn add(a: Int, b: Int) -> Int` returning `a + b`.
-The Brief `.so` is compiled with `--shared` — `add` is `i64 @add(i64, i64)` with no state parameter.
+The Briv `.so` is compiled with `--shared` — `add` is `i64 @add(i64, i64)` with no state parameter.
 
 | Language | Transport | Median | vs Native | vs Direct FFI |
 |----------|-----------|--------|-----------|---------------|
@@ -38,4 +38,4 @@ The Brief `.so` is compiled with `--shared` — `add` is `i64 @add(i64, i64)` wi
 - Kernel: Linux 6.17.0
 - Python: 3.x
 - Node.js: v24.16.0
-- Brief compiler: commit `c3d8c980` (post-struct-array baseline)
+- Briv compiler: commit `c3d8c980` (post-struct-array baseline)

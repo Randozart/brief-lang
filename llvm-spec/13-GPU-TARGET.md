@@ -5,10 +5,10 @@
 
 ## 1. Pipeline Overview
 
-Brief → LLVM IR → GPU-native virtual assembly → Physical machine code:
+Briv → LLVM IR → GPU-native virtual assembly → Physical machine code:
 
 ```text
-  [ Brief Source (.bv) ]
+  [ Briv Source (.bv) ]
            │
     [ LLVM IR (.ll) ]
            │
@@ -23,9 +23,9 @@ Brief → LLVM IR → GPU-native virtual assembly → Physical machine code:
  [ SASS (Physical Machine) ]   [ Native GPU Shader ]
 ```
 
-Both paths are viable because LLVM IR is target-independent. The same Brief source compiles to both.
+Both paths are viable because LLVM IR is target-independent. The same Briv source compiles to both.
 
-## 2. Four GPU Optimizations Brief Enables (That CUDA Cannot)
+## 2. Four GPU Optimizations Briv Enables (That CUDA Cannot)
 
 ### 2.1 Static Bank Conflict Elimination
 
@@ -33,8 +33,8 @@ GPU shared memory is divided into 32 banks. If two threads in a warp access diff
 
 **In CUDA:** Programmers manually pad arrays (`shared[row * 33 + col]`) — error-prone.
 
-**In Brief:** The SMT proof engine analyzes array indexing expressions:
-```brief
+**In Briv:** The SMT proof engine analyzes array indexing expressions:
+```briv
 // If compiler proves: thread_id < 32 and stride == 1
 // → Zero bank conflicts guaranteed
 let shared_data: Int[32];
@@ -49,7 +49,7 @@ GPU global memory reads must be coalesced (contiguous blocks from a warp) for pe
 
 **In CUDA:** Conservative pointer analysis prevents the compiler from proving coalesced access.
 
-**In Brief:** The `noalias` model guarantees disjoint thread memory regions:
+**In Briv:** The `noalias` model guarantees disjoint thread memory regions:
 ```llvm
 ; Compiler emits aligned vector loads:
 %val = load <4 x float>, <4 x float>* %ptr, align 16
@@ -60,7 +60,7 @@ GPU global memory reads must be coalesced (contiguous blocks from a warp) for pe
 
 GPU has three memory tiers: global (slow), constant (fast, read-only), shared (very fast, block-local).
 
-**In Brief:** The dataflow analysis proves read/write patterns:
+**In Briv:** The dataflow analysis proves read/write patterns:
 - **Read-only across all threads** → `__constant__` memory (cached, low latency)
 - **Read-write within a block** → `__shared__` memory (register-speed)
 - **Read-write across blocks** → global memory (VRAM)
@@ -78,7 +78,7 @@ The compiler emits the corresponding LLVM address spaces:
 
 When threads in a warp take different branches, all paths execute sequentially — halving or quartering throughput.
 
-**In Brief:** The guard-to-`select` conversion (`05-CONTRACT-TO-METADATA.md`) flattens branches:
+**In Briv:** The guard-to-`select` conversion (`05-CONTRACT-TO-METADATA.md`) flattens branches:
 ```llvm
 ; Instead of:
 ;   br i1 %cond, label %then, label %else
@@ -95,8 +95,8 @@ On GPUs, `select` compiles to **predicated execution** — all 32 threads execut
 ## 3. Compilation Flow (When Implemented)
 
 ```bash
-# Step 1: Compile Brief to LLVM IR
-brief-compiler llvm kernel.bv --out output.ll
+# Step 1: Compile Briv to LLVM IR
+briv-compiler llvm kernel.bv --out output.ll
 
 # Step 2: Generate PTX for NVIDIA GPUs
 llc -march=nvptx64 -mcpu=sm_89 output.ll -o kernel.ptx
@@ -115,4 +115,4 @@ spirv-as kernel.ll -o kernel.spv
 - GPU kernels must not use `reactor_tick()` — they use a flat kernel entry point instead
 - No FFI calls inside GPU kernels (no `frgn` — GPUs have no OS)
 - Dynamic `List` (un-promoted) cannot be used in GPU kernels without a device-side allocator
-- Must wait for Brief-in-Brief self-hosting (Phase 7) before Brief can compile its own GPU kernels
+- Must wait for Briv-in-Briv self-hosting (Phase 7) before Briv can compile its own GPU kernels

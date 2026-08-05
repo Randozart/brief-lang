@@ -1,7 +1,7 @@
-# Brief CLI Guide
+# Briv CLI Guide
 
 **Version:** 1.0  
-**Purpose:** Complete command reference for the Brief compiler CLI  
+**Purpose:** Complete command reference for the Briv compiler CLI  
 
 ---
 
@@ -39,7 +39,7 @@
 
 ```bash
 cargo build --release
-./target/release/brief install
+./target/release/briv install
 ```
 
 ### From Binary
@@ -52,14 +52,14 @@ Download the latest release from GitHub and add to your PATH.
 
 ```bash
 # Create a new project
-brief init my-project
+briv init my-project
 cd my-project
 
 # Run development server
-brief run src/main.bv
+briv run src/main.bv
 
 # Build for production
-brief build src/main.bv
+briv build src/main.bv
 ```
 
 ---
@@ -86,10 +86,10 @@ brief build src/main.bv
 
 ### check
 
-Type check a Brief file without executing it. Fastest way to validate code.
+Type check a Briv file without executing it. Fastest way to validate code.
 
 ```bash
-brief check <file.bv>
+briv check <file.bv>
 ```
 
 **Options:**
@@ -100,7 +100,7 @@ brief check <file.bv>
 
 **Example:**
 ```bash
-brief check src/main.bv
+briv check src/main.bv
 ```
 
 **Output:**
@@ -113,10 +113,10 @@ brief check src/main.bv
 
 ### build
 
-Full compilation of a Brief file. Runs type checking, proof verification, and generates output.
+Full compilation of a Briv file. Runs type checking, proof verification, and generates output.
 
 ```bash
-brief build <file.bv>
+briv build <file.bv>
 ```
 
 **Options:**
@@ -124,7 +124,7 @@ brief build <file.bv>
 
 **Example:**
 ```bash
-brief build src/main.bv
+briv build src/main.bv
 ```
 
 **Output:**
@@ -142,7 +142,7 @@ Compiling main.bv...
 Compile, build WASM, serve locally, and open browser.
 
 ```bash
-brief run <file>
+briv run <file>
 ```
 
 **Options:**
@@ -155,13 +155,13 @@ brief run <file>
 **Example:**
 ```bash
 # Run with defaults
-brief run src/main.bv
+briv run src/main.bv
 
 # Custom port, watch mode
-brief run src/main.bv --port 3000 --watch
+briv run src/main.bv --port 3000 --watch
 
 # No browser open
-brief run src/main.bv --no-open
+briv run src/main.bv --no-open
 ```
 
 ---
@@ -170,10 +170,10 @@ brief run src/main.bv --no-open
 
 ### rbv
 
-Compile Rendered Brief (RBV) to browser-ready files. RBV files combine Brief code with HTML views.
+Compile Rendered Briv (RBV) to browser-ready files. RBV files combine Briv code with HTML views.
 
 ```bash
-brief rbv <file.rbv>
+briv rbv <file.rbv>
 ```
 
 **Options:**
@@ -182,7 +182,7 @@ brief rbv <file.rbv>
 
 **Example:**
 ```bash
-brief rbv src/view.rbv
+briv rbv src/view.rbv
 ```
 
 ---
@@ -192,7 +192,7 @@ brief rbv src/view.rbv
 Serve static files locally.
 
 ```bash
-brief serve [dir]
+briv serve [dir]
 ```
 
 **Options:**
@@ -202,13 +202,13 @@ brief serve [dir]
 **Example:**
 ```bash
 # Serve current directory
-brief serve
+briv serve
 
 # Serve specific directory
-brief serve dist
+briv serve dist
 
 # Custom port
-brief serve --port 9000
+briv serve --port 9000
 ```
 
 ---
@@ -217,19 +217,19 @@ brief serve --port 9000
 
 ### init
 
-Create a new Brief project.
+Create a new Briv project.
 
 ```bash
-brief init [name]
+briv init [name]
 ```
 
 **Example:**
 ```bash
 # Create project in current directory
-brief init
+briv init
 
 # Create project in subdirectory
-brief init my-project
+briv init my-project
 ```
 
 **Creates:**
@@ -238,7 +238,7 @@ my-project/
 ├── src/
 │   └── main.bv
 ├── Cargo.toml
-└── brief.toml
+└── briv.toml
 ```
 
 ---
@@ -248,13 +248,13 @@ my-project/
 Add a dependency to the current project.
 
 ```bash
-brief import <name>
+briv import <name>
 ```
 
 **Example:**
 ```bash
-brief import std/io
-brief import my-library
+briv import std/io
+briv import my-library
 ```
 
 ---
@@ -266,7 +266,7 @@ brief import my-library
 Generate FFI bindings for a library. Writes generated files to disk.
 
 ```bash
-brief wrap <lib> [options]
+briv wrap <lib> [options]
 ```
 
 **Options:**
@@ -284,22 +284,22 @@ brief wrap <lib> [options]
 **Example:**
 ```bash
 # Auto-detect language
-brief wrap lib/my_library.h
+briv wrap lib/my_library.h
 
 # Specify mapper explicitly
-brief wrap lib/my_module.py --mapper python
+briv wrap lib/my_module.py --mapper python
 
 # Output to custom directory
-brief wrap lib/crypto --out src/ffi
+briv wrap lib/crypto --out src/ffi
 
 # Force overwrite
-brief wrap lib/my_lib.rs --force
+briv wrap lib/my_lib.rs --force
 ```
 
 **Generated Files:**
 ```
 lib/ffi/generated/my_lib/
-├── lib.bv          # Brief declarations
+├── lib.bv          # Briv declarations
 └── bindings.toml   # TOML metadata
 ```
 
@@ -310,7 +310,7 @@ lib/ffi/generated/my_lib/
 Analyze a library and preview generated bindings (dry-run). Does not write files.
 
 ```bash
-brief map <lib> [options]
+briv map <lib> [options]
 ```
 
 **Options:**
@@ -319,13 +319,13 @@ brief map <lib> [options]
 **Example:**
 ```bash
 # Preview C library bindings
-brief map lib/my_lib.h
+briv map lib/my_lib.h
 
 # Preview Python library
-brief map lib/utils.py --mapper python
+briv map lib/utils.py --mapper python
 
 # Preview TypeScript
-brief map types/api.d.ts --mapper js
+briv map types/api.d.ts --mapper js
 ```
 
 **Output:**
@@ -362,16 +362,16 @@ mapper = "c"
 
 ### install
 
-Install the Brief CLI to `~/.local/bin`.
+Install the Briv CLI to `~/.local/bin`.
 
 ```bash
-brief install
+briv install
 ```
 
 **Example:**
 ```bash
-$ brief install
-Installed 'brief' to /home/user/.local/bin/brief
+$ briv install
+Installed 'briv' to /home/user/.local/bin/briv
 
 Add to your PATH if needed:
   export PATH="$PATH:/home/user/.local/bin"
@@ -383,19 +383,19 @@ Add this line to your ~/.bashrc or ~/.zshrc to make it permanent.
 
 ### lsp
 
-Start the Brief Language Server for IDE integration.
+Start the Briv Language Server for IDE integration.
 
 ```bash
-brief lsp
+briv lsp
 ```
 
 **Example:**
 ```bash
 # Start LSP server
-brief lsp
+briv lsp
 
 # LSP clients:
-# - VSCode: Brief extension
+# - VSCode: Briv extension
 # - Neovim: nvim-lspconfig
 # - Emacs: eglans-lsp-mode
 ```
@@ -429,7 +429,7 @@ These options work with all commands:
 
 ## Configuration
 
-### brief.toml
+### briv.toml
 
 Project configuration file:
 
@@ -454,7 +454,7 @@ search_paths = ["lib", "vendor"]
 
 | Variable | Description |
 |----------|-------------|
-| `BRIEF_HOME` | Brief home directory |
+| `BRIEF_HOME` | Briv home directory |
 | `BRIEF_OUT` | Default output directory |
 | `BRIEF_PORT` | Default server port |
 
@@ -466,27 +466,27 @@ search_paths = ["lib", "vendor"]
 
 ```bash
 # 1. Create project
-brief init my-app
+briv init my-app
 cd my-app
 
 # 2. Run with watch mode
-brief run src/main.bv --watch
+briv run src/main.bv --watch
 
 # 3. Type check while editing
-brief check src/main.bv -v
+briv check src/main.bv -v
 
 # 4. Build for production
-brief build src/main.bv
+briv build src/main.bv
 ```
 
 ### FFI Workflow
 
 ```bash
 # 1. Preview bindings for a C library
-brief map libsqlite.h
+briv map libsqlite.h
 
 # 2. Generate bindings
-brief wrap libsqlite.h --out src/ffi
+briv wrap libsqlite.h --out src/ffi
 
 # 3. Use in code
 echo 'frgn sig sqlite_open: String -> Int from "src/ffi/bindings.toml";'
@@ -503,23 +503,23 @@ echo 'frgn sig sqlite_open: String -> Int from "src/ffi/bindings.toml";'
 #     io.bv
 
 # Run with multiple files
-brief run src/main.bv
+briv run src/main.bv
 
 # Check all files
-brief check src/lib/*.bv src/main.bv
+briv check src/lib/*.bv src/main.bv
 ```
 
 ### CI/CD Usage
 
 ```bash
 # Minimal output for CI
-brief check src/main.bv --quiet
+briv check src/main.bv --quiet
 
 # Skip expensive proof verification
-brief check src/main.bv --skip-proof
+briv check src/main.bv --skip-proof
 
 # Exit code based
-brief check src/main.bv || exit 1
+briv check src/main.bv || exit 1
 ```
 
 ---

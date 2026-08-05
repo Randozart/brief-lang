@@ -577,7 +577,7 @@ pub struct SynthesizedProgram {
 
 ### Step 3: `doppelganger.rs` + `accept.rs` — Helper emission
 - Emit helper defn blocks.
-- Fold helpers on brief accept.
+- Fold helpers on briv accept.
 
 ### Step 4: Documentation update
 - `derivation-blocks.md` — abstraction discovery phase.

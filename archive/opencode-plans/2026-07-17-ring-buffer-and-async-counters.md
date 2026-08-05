@@ -32,7 +32,7 @@
 
 ### 1. Real Ring Buffer (`benchmarks/ring_buffer.bv`)
 
-```brief
+```briv
 let data: Ptr<Int> = Malloc#(1024 * 8);
 let head: Int = 0;
 let tail: Int = 0;
@@ -52,7 +52,7 @@ txn dequeue() [tail - head > 0][tail - head == 0] -> Int {
 
 ### 2. Real Async Counters (`benchmarks/async_counters.bv`)
 
-```brief
+```briv
 const N: Int = 50000000;
 let a: Int = 0;
 let b: Int = 0;

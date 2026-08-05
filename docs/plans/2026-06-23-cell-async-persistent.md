@@ -10,7 +10,7 @@
 
 The current `cell!` persistent cell preserves state across calls but only runs when the parent explicitly invokes a `CellCall`. **True async** means the persistent cell ticks independently on the main reactor loop — it fires its internal transactions every tick (or at a configured rate) without the parent needing to call it. The parent reads the latest output via `trg @` bindings, and the output only propagates when it changes between ticks.
 
-```brief
+```briv
 // Current (sync persistent — parent must call):
 let r = cell! counter();  // tick happens NOW, returns current value
 
@@ -32,7 +32,7 @@ Without true async, `cell!` is indistinguishable from `cell` except for state pe
 
 After a cell call in a trigger binding, an optional `@Hz` annotation sets the tick rate:
 
-```brief
+```briv
 trg count: Int @ counter() @1kHz;
 trg smoothed: Int @ filter(raw).out @10kHz;
 ```
@@ -48,7 +48,7 @@ The `@Hz` annotation is **informational** in the interpreter (all cells tick eve
 
 Persistent cells can also be registered at top level:
 
-```brief
+```briv
 cell! timer(duration: Int) -> elapsed: Int @1kHz;
 
 defn main() -> Int {
@@ -264,7 +264,7 @@ This is consistent with the principle that `term!` inside a cell terminates the 
 
 ### 5.1 Multiple Calls to the Same Cell
 
-```brief
+```briv
 trg a: Int @ counter();
 let x = cell counter();  // sync call to the SAME persistent cell?
 ```
@@ -285,7 +285,7 @@ Direct cell-to-cell wiring is Phase 4 (deferred).
 
 ### 5.4 `@Hz` Without Trigger Binding
 
-```brief
+```briv
 cell! timer(duration: Int) -> elapsed: Int @1kHz;
 ```
 

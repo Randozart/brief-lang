@@ -2,7 +2,7 @@
 
 ## What It Is
 
-The Layout DSL is a declarative binary grammar for describing the physical arrangement of bits in any Brief type. It replaces the old opaque `codec` concept with a formal pattern language that the compiler can reason about, validate, transform, and prove.
+The Layout DSL is a declarative binary grammar for describing the physical arrangement of bits in any Briv type. It replaces the old opaque `codec` concept with a formal pattern language that the compiler can reason about, validate, transform, and prove.
 
 ## Tutorial
 
@@ -10,7 +10,7 @@ This section walks through the Layout DSL from simple to complex. You can read i
 
 ### 1. The simplest layout — a named slice
 
-```brief
+```briv
 type FourBytes : Bits {
     maxbits <~ 32;
     layout <~ [first: 16, second: 16];
@@ -23,7 +23,7 @@ Reading `x.first` returns bits 0-15 as an integer. Writing to `x.first` changes 
 
 ### 2. Float32 — standard IEEE 754 layout
 
-```brief
+```briv
 type Float32 : Bits {
     maxbits <~ 32;
     primitive <~ Float;
@@ -39,7 +39,7 @@ The fields are read-only (no `!` prefix). The compiler generates getters for all
 
 ### 3. Mutable fields with `!`
 
-```brief
+```briv
 type PngChunk : Bits {
     maxbits <~ 96;
     layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
@@ -53,7 +53,7 @@ type PngChunk : Bits {
 
 ### 4. String — variable-width UTF-8 pattern
 
-```brief
+```briv
 type String : Bits {
     maxbits <~ 64;
     primitive <~ String;
@@ -82,7 +82,7 @@ The compiler's DFA engine validates every string literal against this pattern at
 
 ### 5. List<T> — generic collection with typed reference
 
-```brief
+```briv
 type List<T> : Bits {
     maxbits <~ 128;
     layout <~ le: [$length: 64, data_ptr: 64, elements: {$length, $T}];
@@ -98,7 +98,7 @@ Accessing `list[5]` generates: bounds check `5 < $length`, GEP into `data_ptr` a
 
 ### 6. HashMap<K,V> — typed pair array
 
-```brief
+```briv
 type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
@@ -110,7 +110,7 @@ The `($K, $V)` pair type is a two-element tuple. The compiler knows each pair oc
 
 ### 7. Melding layouts — bit-shuffling between types
 
-```brief
+```briv
 meld Float32 <:> MyCustomFloat {
     layout {
         sign <:> sign;
@@ -124,7 +124,7 @@ This declares that `Float32` and `MyCustomFloat` are structurally equivalent at 
 
 ### 8. What you cannot do
 
-```brief
+```briv
 // ERROR: $length is structural, cannot be marked mutable
 type Bad : Bits { layout <~ be: [$length: 32, !$length: 32]; }
 
@@ -139,7 +139,7 @@ The compiler enforces all three at compile time.
 
 Every layout field and layout operation is accessed with the `#` prefix:
 
-```brief
+```briv
 packet.#magic        // layout field read — compiler reads at known bit position
 packet.#crc = 42     // layout field write — masks to field width, only touches those bits
 packet.#payload_len  // structural field — $ prefixed, no setter
@@ -154,7 +154,7 @@ list.#halve(arg)     // custom layout operation
 
 ### HashMap<K, V> with operation bindings
 
-```brief
+```briv
 type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
@@ -175,7 +175,7 @@ map.#set("user:42", user) // inserts via bound op
 
 ### SecurePacket with inline variable-width payload
 
-```brief
+```briv
 type SecurePacket : Bits {
     maxbits <~ 96;   // header size: magic + version + flags + payload_len + crc
     layout <~ be: [
@@ -245,7 +245,7 @@ Every named field in a layout has a compiler-enforced access level:
 
 For any type with a fixed-width layout, the normalizer auto-generates accessor annotations:
 
-```brief
+```briv
 chunk.$length    // → reads bits 0-31, returns as i32  (structural)
 chunk.kind       // → reads bits 32-63, returns as i32  (read-only)
 chunk.crc        // → reads bits ?-?  (getter)
@@ -304,7 +304,7 @@ For variable-width patterns: compiles the pattern to a DFA. If the DFA is non-de
 
 When a meld has a `layout { ... }` block:
 
-```brief
+```briv
 meld Float32 <:> MyFloat {
     layout {
         sign <:> sign;
@@ -338,7 +338,7 @@ The normalizer does NOT generate code directly. It attaches annotations to the A
 
 When the compiler encounters a literal:
 
-```brief
+```briv
 let pi: Float32 = 0x40490FDB;  // 3.14159... in IEEE 754
 ```
 
@@ -346,7 +346,7 @@ The normalizer's DFA engine compiles the `layout` pattern into a minimal DFA, th
 
 For string literals:
 
-```brief
+```briv
 let name: String = "hello";
 ```
 
@@ -356,7 +356,7 @@ The DFA engine walks each byte of `"hello"` through the UTF-8 DFA. If all bytes 
 
 When a variable-width pattern contains `@codepoint` labels:
 
-```brief
+```briv
 layout <~ (@codepoint: (0x00..0x7F | 0xC2..0xDF 0x80..0xBF | ...))*;
 ```
 
@@ -369,7 +369,7 @@ The SMT solver receives:
 
 ### Syntax
 
-```brief
+```briv
 meld TypeA <:> TypeB {
     layout {
         field_a <:> field_b;
@@ -440,7 +440,7 @@ range       ::= integer ".." integer
 
 The `*` operator distinguishes inline variable-width fields from heap-allocated ones:
 
-```brief
+```briv
 // Inline: data follows directly after the header fields
 type PngChunk : Bits {
     layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
@@ -458,7 +458,7 @@ Without `*`, a variable-width field is inline. With `*`, the preceding field is 
 
 Layout describes structure. `op` bindings describe behavior. The same `op` syntax used for arithmetic operations extends to collection operations:
 
-```brief
+```briv
 type HashMap<K, V> : Bits {
     maxbits <~ 192;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
@@ -490,7 +490,7 @@ User-defined functions (`hashmap_lookup`, `hashmap_insert`) are provided by the 
 
 Anonymous fields `_: N` for padding:
 
-```brief
+```briv
 type AlignedStruct : Bits {
     maxbits <~ 64;
     layout <~ le: [a: 8, _: 24, b: 32];
@@ -501,7 +501,7 @@ type AlignedStruct : Bits {
 
 Bitfield read-modify-write is non-atomic. The `atomic:` prefix on a `!` field generates atomic CAS loops:
 
-```brief
+```briv
 type SharedFlags : Bits {
     maxbits <~ 32;
     layout <~ le: [atomic: !flag: 1, _: 31];
@@ -512,7 +512,7 @@ type SharedFlags : Bits {
 
 `ValidateAs#<T>()` compiles the layout's DFA at compile time and runs it at runtime over a byte buffer:
 
-```brief
+```briv
 let bytes: Bytes = socket.read();
 let chunk = ValidateAs#<PngChunk>(bytes);  // explicit, opt-in
 ```

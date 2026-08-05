@@ -1,4 +1,4 @@
-// Lexer - Tokenizer for Brief language
+// Lexer - Tokenizer for Briv language
 // Tier 3: Lexer Components
 
 import "std/char";

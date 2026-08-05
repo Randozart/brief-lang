@@ -1,13 +1,13 @@
 # 12. Compiler Pragmas — The Complete Reference
 
-> These directives are Brief's complete set of compiler-intrinsic behavior.
+> These directives are Briv's complete set of compiler-intrinsic behavior.
 > Everything else — imports, FFI, transactions, contracts — is standard library or user code.
 > No hidden magic. If it doesn't appear on this page, the compiler doesn't know about it by name.
 
 ## Overview
 
 Pragmas use the `#` prefix to signal "this is a compiler instruction, not application logic."
-They are Brief's single, universal escape hatch, exhaustively documented here.
+They are Briv's single, universal escape hatch, exhaustively documented here.
 
 | Directive | Scope | Purpose |
 |-----------|-------|---------|
@@ -20,7 +20,7 @@ They are Brief's single, universal escape hatch, exhaustively documented here.
 ## `#!dispatch(parallel)` — Parallel Reactor Mode
 
 **Syntax at top of file:**
-```brief
+```briv
 #!dispatch(parallel)
 ```
 
@@ -36,7 +36,7 @@ The compiler computes a `u64` bitmask for each transaction (bit N = writes field
 and checks masks at runtime before firing.
 
 **Deprecated forms (kept for migration):**
-```brief
+```briv
 #pragma dispatch(parallel)       // Old item-level syntax — use #!dispatch(parallel)
 #!pragma dispatch(parallel)      // Old file-level syntax — use #!dispatch(parallel)
 ```
@@ -51,19 +51,19 @@ the default first-true-wins semantics. The `#pragma` forms are deprecated.
 Declares an OS-linked trigger without needing to know the underlying C runtime symbol.
 
 **Implicit form** (concept name = trigger name):
-```brief
+```briv
 #io sigint;                     // Creates trg sigint: Bool @ link __sigint_flag
 #io stdin_ready;                // Creates trg stdin_ready: Bool @ link __stdin_ready
 #io stdin_line;                 // Creates trg stdin_line: String @ link __stdin_buffer
 ```
 
 **Explicit form** (user-chosen name, type validation):
-```brief
+```briv
 #io timer(1hz) -> trg clock_tick: Int;    // Validates type, renames trigger
 ```
 
 **Parametrized concepts:**
-```brief
+```briv
 #io timer(1hz);                  // 1-second timer
 #io timer(100hz);                // 10ms timer
 ```
@@ -94,7 +94,7 @@ demultiplexing. The `#io` pragma abstracts these details: the compiler maps each
 concept name to the correct runtime symbol per target, and the runtime provides
 the actual implementation signal handlers, epoll/kqueue integration, etc.
 
-Embedded/Rendered Brief targets use raw `trg name: Type @ 0xADDRESS` instead,
+Embedded/Rendered Briv targets use raw `trg name: Type @ 0xADDRESS` instead,
 where triggers are natively wake-capable via hardware interrupt lines.
 
 ---
@@ -107,7 +107,7 @@ sources) or `__rt_wait()` (for MMIO-only programs) instead of busy-looping.
 Use `#nowake` to mark a trigger as passive — polled on every tick but does not
 prevent the reactor from sleeping:
 
-```brief
+```briv
 trg sensor: Bool @ 0x5000 #nowake;             // passive MMIO — polled on demand
 trg io_pending: Bool @ link __flag #nowake;    // passive link — doesn't wake
 ```
@@ -122,13 +122,13 @@ not block waiting for it.
 ## Migration Guide: `trg @ link` → `#io`
 
 Old syntax (still works, fully supported):
-```brief
+```briv
 trg sigint: Bool @ link __sigint_flag;
 trg clock_tick_1hz: Int @ link __timer_1hz;
 ```
 
 New syntax (preferred):
-```brief
+```briv
 #io sigint;
 #io timer(1hz) -> trg clock_tick_1hz: Int;
 ```
@@ -151,7 +151,7 @@ New syntax (preferred):
 Annotations use `#` before an item to tell the compiler what to do, not what
 the item is. They appear on the signature line before the keyword:
 
-```brief
+```briv
 #?gpu defn my_compute() -> Int { term 42; };
 #!out txn write_port() [*][*] { &port = value; term; };
 ```
@@ -177,7 +177,7 @@ item. (The old `<~` token was removed; `!>` is the sole metadata form.)
 
 **Type bodies**: `!> key: value;` declares a type property:
 
-```brief
+```briv
 type Foo : Bits {
     !> bytes: 8;
     !> alignment: 4;
@@ -188,7 +188,7 @@ type Foo : Bits {
 
 **Definition bodies**: `!>` at the top of a function body declares metadata:
 
-```brief
+```briv
 defn process() -> Int {
     !> jira: "FIN-8422";   // Documentation metadata
     !> priority: 2;
@@ -198,7 +198,7 @@ defn process() -> Int {
 
 **Guard branches**: `!>` inside a guard block scopes metadata to that branch:
 
-```brief
+```briv
 txn compute [count < N][count == N] {
     [count % 2 == 0] {
         !> priority: 1;
@@ -216,7 +216,7 @@ not be eliminated by the compiler's dead code elimination pass. Use the
 `!> observable: true` metadata to mark a function or intrinsic as having
 external side effects:
 
-```brief
+```briv
 defn print_hello() {
     !> observable: true;
     Print#(42);

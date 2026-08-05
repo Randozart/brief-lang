@@ -28,7 +28,7 @@ with `expected '=' after instruction name` because `%mdef4` looks like the start
 of `%mdef4 = add i64 0, ...` and the `:` is unexpected.
 
 The interpreter-only path never runs `opt`, so this bug was latent — only exposed
-when `brief build` was switched to use the LLVM backend (previous session).
+when `briv build` was switched to use the LLVM backend (previous session).
 
 ### Affected Sites (6 label definitions in emit_expr.rs)
 
@@ -60,7 +60,7 @@ when `brief build` was switched to use the LLVM backend (previous session).
    Fix: always restore `self.terminated = prev_terminated` unconditionally.
 
 3. **No defensive guard on `post:` label** (emit_toplevel.rs ~457):
-   Minor — valid Brief always ends bodies with `term`. Not fixing this cycle.
+   Minor — valid Briv always ends bodies with `term`. Not fixing this cycle.
 
 ---
 
@@ -174,7 +174,7 @@ SIMPLIFY phase is pure AST→AST. No backend changes.
 1. Fix 6 `%` prefixes in emit_expr.rs
 2. Fix `unreachable` + `br` dead code in emit_expr.rs
 3. Fix `terminated` flag leak in emit_stmt.rs
-4. **Verify**: `cargo build && brief build officina.bv` passes `opt`
+4. **Verify**: `cargo build && briv build officina.bv` passes `opt`
 5. Implement `--dev`/`--prod`/`--release`/`--simplify-budget` in main.rs
 6. Rewrite equality_saturation.rs with bottom-up + hash-cons
 7. Wire simplify pass into compile pipeline

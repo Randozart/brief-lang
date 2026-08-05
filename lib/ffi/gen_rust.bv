@@ -1,5 +1,5 @@
 // gen_rust.bv — Tier 1: Rust extern "C" + LTO bridge generator
-// 2026-07-24: Generates Rust `extern "C"` declarations matching Brief's export ABI.
+// 2026-07-24: Generates Rust `extern "C"` declarations matching Briv's export ABI.
 // Overhead: ~0ns after LTO — same binary, zero bridge cost.
 //
 // Supports up to 6 parameters with types: Int, Float, Bool, String, Ptr, Void.
@@ -15,9 +15,9 @@ $defn rust_type(t: String) -> String {
 };
 
 $defn gen_rust_bridge(exports: Selection, bridge_name: String) -> String {
-    let code = "// " + bridge_name + " — Brief extern \"C\" declarations (auto-generated)\n";
+    let code = "// " + bridge_name + " — Briv extern \"C\" declarations (auto-generated)\n";
     code += "// Tier 1: Zero-cost FFI — after LTO these are the same binary.\n";
-    code += "// Build with: brief build my_module.bv --shared --out .\n\n";
+    code += "// Build with: briv build my_module.bv --shared --out .\n\n";
     code += "extern \"C\" {\n\n";
 
     foreach(exp in exports) {
@@ -53,7 +53,7 @@ $defn gen_rust_bridge(exports: Selection, bridge_name: String) -> String {
 $(Normalized @ highest) {
     let exports = Tag$("export");
     when exports.Count$() > 0 {
-        let code = gen_rust_bridge(exports, "brief_bridge");
+        let code = gen_rust_bridge(exports, "briv_bridge");
         FileWrite$("ffi-out/rust/bridge.rs", code, true);
         EmitInfo$("gen_rust: ffi-out/rust/bridge.rs");
     };

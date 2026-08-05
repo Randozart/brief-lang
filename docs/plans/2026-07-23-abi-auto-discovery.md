@@ -7,7 +7,7 @@
 
 ## Goal
 
-Automatically discover foreign struct layouts and insert them into Brief's
+Automatically discover foreign struct layouts and insert them into Briv's
 protocol graph, so cross-language bridges can find `Identity` paths — zero
 transform overhead — without manual configuration.
 
@@ -36,7 +36,7 @@ find protocol paths that include this type. ~30 lines of Rust.
 
 ### ABI probe `$defn`
 
-```brief
+```briv
 $defn probe_struct(name: String, fields: List, lib_path: String) {
     // 1. Generate C probe source
     let src = "#include <stddef.h>\nint main() {\n";
@@ -86,7 +86,7 @@ as `InjectTypeLayout$` consumes, so the same universe population works.
 ### Structure
 - Minimal DWARF parser in Rust (~200 lines — enough for DWARF 4/5 structs)
 - `ShellCmd$("readelf --debug-dump=info lib.so")` → pipe output to a `$txn`
-  BFS parser (pure Brief, zero Rust code)
+  BFS parser (pure Briv, zero Rust code)
 
 ### Advantages
 - No headers needed — works with any `.so` that has debug info
@@ -105,17 +105,17 @@ as `InjectTypeLayout$` consumes, so the same universe population works.
 |------|--------|
 | `src/macros/eval.rs` | Add `InjectTypeLayout$` handler (~30 lines) |
 | `src/macros/eval.rs` | Add `DwarfReadLayout$` handler (future, ~200 lines) |
-| `lib/glue/generator.bv` | Add `probe_struct` `$defn` (pure Brief) |
+| `lib/glue/generator.bv` | Add `probe_struct` `$defn` (pure Briv) |
 | `src/analysis/layout_optimizer.rs` | Maybe — wire `InjectTypeLayout$` into protocol graph |
 
 ## Success Criteria
 
 A `.bv` file that:
 
-```brief
+```briv
 $(Parsed) {
     probe_struct("Point", ["x", "y"], "/usr/include");
     // After probe: compiler knows struct Point { int x; float y; }
-    // Bridge between Brief Point<->C Point is Identity → zero cost
+    // Bridge between Briv Point<->C Point is Identity → zero cost
 };
 ```

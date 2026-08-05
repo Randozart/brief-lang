@@ -1,7 +1,7 @@
 # Phase 1b — Frontend-Driven Dispatch (backend collapse) results
 
 **Date:** 2026-07-31
-**Worktree:** FDD worktree at `../brief-compiler-fdd`, branch `feat/frontend-driven-dispatch`
+**Worktree:** FDD worktree at `../briv-compiler-fdd`, branch `feat/frontend-driven-dispatch`
 **Baseline:** Phase 0 results in `2026-07-31-frontend-dispatch-phase0.md` (commit `ed2f4234`)
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
@@ -28,34 +28,34 @@ Phase 1b replaces the LLVM backend's loop-dispatch heuristics
 All emitters (`emit_countable_main`, `emit_folded_main`, `emit_version_dag_main`,
 `emit_folded_pure_counter`) are unchanged.
 
-## Runtime ratios (Brief vs C, ratio < 1 = Brief faster)
+## Runtime ratios (Briv vs C, ratio < 1 = Briv faster)
 
-| Benchmark | Phase 1b Brief | Phase 1b ratio | Phase 0 ratio | Winner | Correct |
+| Benchmark | Phase 1b Briv | Phase 1b ratio | Phase 0 ratio | Winner | Correct |
 |-----------|---------------:|:--------------:|:-------------:|:------:|:-------:|
 | ring_buffer | 0.0516s | 1.10× | 1.13× | C | MATCH |
-| float_math | 0.0727s | 0.95× | 0.97× | Brief | MATCH |
+| float_math | 0.0727s | 0.95× | 0.97× | Briv | MATCH |
 | float_math_nonzero | 0.2007s | 1.21× | 1.24× | C | MATCH |
-| sparse_dispatch | 0.0507s | 0.82× | 0.84× | Brief | MATCH |
+| sparse_dispatch | 0.0507s | 0.82× | 0.84× | Briv | MATCH |
 | print_loop | 0.0626s | 1.05× | 1.01× | C | MATCH |
-| nbody_newton | 6.9163s | 0.83× | 0.83× | Brief | MATCH |
-| nbody_sqrt | 2.1631s | 0.77× | 0.77× | Brief | MATCH |
-| nbody_sqrt_idio | 2.7575s | 0.75× | 0.75× | Brief | MATCH |
-| fasta | 0.2085s | 0.98× | 0.97× | Brief | MATCH |
-| fannkuch_redux | 0.0614s | 0.95× | 0.97× | Brief | MATCH |
+| nbody_newton | 6.9163s | 0.83× | 0.83× | Briv | MATCH |
+| nbody_sqrt | 2.1631s | 0.77× | 0.77× | Briv | MATCH |
+| nbody_sqrt_idio | 2.7575s | 0.75× | 0.75× | Briv | MATCH |
+| fasta | 0.2085s | 0.98× | 0.97× | Briv | MATCH |
+| fannkuch_redux | 0.0614s | 0.95× | 0.97× | Briv | MATCH |
 | mandelbrot | 0.6842s | 1.03× | 1.02× | C | MATCH |
 | kalman_filter_runtime | 0.2193s | 1.24× | 1.22× | C | MATCH |
-| knucleotide | 0.1891s | 0.99× | 0.99× | Brief | MATCH |
-| cancel_math | 0.0538s | 0.85× | 0.85× | Brief | MATCH |
-| bit_clear | 0.0002s | 0.33× | ~tie | Brief | MATCH |
-| queue_drain | 0.0564s | 0.93× | 0.86× | Brief | MATCH |
-| queue_drain_sym | 0.0564s | 0.90× | 0.89× | Brief | MATCH |
-| queue_drain_idio | 0.0564s | 0.91× | 0.94× | Brief | MATCH |
+| knucleotide | 0.1891s | 0.99× | 0.99× | Briv | MATCH |
+| cancel_math | 0.0538s | 0.85× | 0.85× | Briv | MATCH |
+| bit_clear | 0.0002s | 0.33× | ~tie | Briv | MATCH |
+| queue_drain | 0.0564s | 0.93× | 0.86× | Briv | MATCH |
+| queue_drain_sym | 0.0564s | 0.90× | 0.89× | Briv | MATCH |
+| queue_drain_idio | 0.0564s | 0.91× | 0.94× | Briv | MATCH |
 | interval_step | 0.0632s | 1.01× | 1.01× | C | MATCH |
 
 **Zero MISMATCH.** All deltas are within run-to-run noise of the Phase 0 baseline
 (≤0.04×; the two largest are queue_drain 0.86→0.93 and float_math_nonzero
 1.24→1.21, consistent with the ±0.03 band already observed in Phase 0 vs the
-`666fb502` baseline). bit_clear improved from ~tie to 0.33× (Brief 0.0002s vs C
+`666fb502` baseline). bit_clear improved from ~tie to 0.33× (Briv 0.0002s vs C
 0.0006s) — a noise artifact of timing a ~0.2ms benchmark.
 
 ## Dispatch decision A/B (from emitted IR markers)
@@ -103,5 +103,5 @@ Notes:
 - `bridge_glue`/`bridge_multi` failed at the end (missing `koffi` node package) —
   unrelated to this effort; not in the ratio table.
 - The `info: txn … dispatched via …` warnings are recorded in `self.warnings`
-  but not printed by `briefc build`; the `.ll` header-label markers are the
+  but not printed by `brivc build`; the `.ll` header-label markers are the
   authoritative dispatch signature and match Phase 0 for every benchmark.

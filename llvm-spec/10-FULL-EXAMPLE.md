@@ -1,8 +1,8 @@
 # Full Example: Counter.increment
 
-## Brief Source
+## Briv Source
 
-```brief
+```briv
 // counter.bv
 rstruct Counter {
     count: Int;

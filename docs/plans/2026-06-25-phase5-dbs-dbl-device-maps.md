@@ -2,18 +2,18 @@
 
 **Date:** 2026-06-25
 **Status:** Planned
-**Dependencies:** Phase 1–4 (complete), existing D-brief schema system
+**Dependencies:** Phase 1–4 (complete), existing D-briv schema system
 
 ---
 
 ## Goal
 
-Enable Brief programs to import board-level device descriptions via
+Enable Briv programs to import board-level device descriptions via
 `import "target"`, gaining typed `Ptr<T>` constants for peripheral MMIO
 registers with contract-proven address ranges.
 
-A Brief program writes:
-```brief
+A Briv program writes:
+```briv
 import "target";  // resolves to board spec
 
 // Board provides: uart, gpio, timer, etc. as typed constants
@@ -28,7 +28,7 @@ uart_dr .#Ptr;   // Ptr<Byte> — UART data register at UART_BASE+0x00
 **Location:** `lib/devices/<peripheral>.dbvs`
 
 Each `.dbvs` file defines a peripheral's register layout using the existing
-D-brief v2 schema format:
+D-briv v2 schema format:
 
 ```
 // lib/devices/uart.dbvs
@@ -41,7 +41,7 @@ schema Uart {
 };
 ```
 
-The existing `dbrief::v2` parser (`src/dbrief/v2.rs`) already parses `schema`
+The existing `dbriv::v2` parser (`src/dbriv/v2.rs`) already parses `schema`
 definitions with fields. The `DBS` loader adds a `register` keyword (or uses
 the existing field system to represent register offsets).
 
@@ -71,7 +71,7 @@ GPIOA { base_addr: 0x40020000; };
 GPIOB { base_addr: 0x40020400; };
 ```
 
-The existing `dbrief::v2` import system and `glue::dbvl_reader` already
+The existing `dbriv::v2` import system and `glue::dbvl_reader` already
 handle `.dbvl` file parsing.
 
 ### `import "target"` resolver
@@ -81,7 +81,7 @@ handle `.dbvl` file parsing.
 When `import "target"` is encountered:
 
 1. **Resolve board name** from CLI flag `--board <name>` or default target spec
-2. **Load** `lib/boards/<name>.dbvl` using existing D-brief v2 parser
+2. **Load** `lib/boards/<name>.dbvl` using existing D-briv v2 parser
 3. **Resolve schemas**: For each `schema <path>;` line, load the referenced
    `.dbvs` file
 4. **Emit typed constants**: For each peripheral instance, generate compile-time
@@ -91,7 +91,7 @@ When `import "target"` is encountered:
 
 The existing `ImportResolver` already handles `.dbv`, `.dbvs`, `.dbvl` files
 (lines 392–491 of `import_resolver.rs`). The bridge at
-`dbrief::bridge::document_to_program_flags()` converts schema documents to
+`dbriv::bridge::document_to_program_flags()` converts schema documents to
 `Vec<TopLevel>`. This path is extended to handle `import "target"`.
 
 ### CLI flags
@@ -99,7 +99,7 @@ The existing `ImportResolver` already handles `.dbv`, `.dbvs`, `.dbvl` files
 **File:** `src/main.rs`
 
 ```
-brief-compiler --board stm32f407 --target armv7em-none-eabi source.bv
+briv-compiler --board stm32f407 --target armv7em-none-eabi source.bv
 ```
 
 - `--board <name>` selects `lib/boards/<name>.dbvl`
@@ -110,7 +110,7 @@ brief-compiler --board stm32f407 --target armv7em-none-eabi source.bv
 
 For each peripheral register, the resolver emits:
 
-```brief
+```briv
 const uart : Ptr<Uart> = 0x40011000 as Ptr<Uart>;
 const uart_dr : Ptr<Byte> = (0x40011000 + 0x00) as Ptr<Byte>;
 const uart_sr : Ptr<Byte> = (0x40011000 + 0x01) as Ptr<Byte>;
@@ -137,7 +137,7 @@ compile time.
 
 ### Part B: Parser extensions (1 hr)
 
-3. Add `register` keyword to D-brief v2 parser (optional — can use existing
+3. Add `register` keyword to D-briv v2 parser (optional — can use existing
    `FieldDef` system with `@<offset>` notation)
 
 4. Add `#!board("<name>")` pragma as alternative to `--board` CLI flag
@@ -146,7 +146,7 @@ compile time.
 
 5. In `src/import_resolver.rs`, add `import "target"` handling:
    - When `import.path == ["target"]`, resolve to board spec
-   - Load `lib/boards/<board>.dbvl` via existing D-brief parser
+   - Load `lib/boards/<board>.dbvl` via existing D-briv parser
    - Walk schema imports, resolve register offsets
    - Emit `TopLevel::Constant` entries for each PTR
 
@@ -176,8 +176,8 @@ compile time.
 
 ## Remaining: Usage reminder
 
-After Phase 5, Brief programs can:
-```brief
+After Phase 5, Briv programs can:
+```briv
 import "target";  // loads board-level device constants
 
 // Interrupt handler registration

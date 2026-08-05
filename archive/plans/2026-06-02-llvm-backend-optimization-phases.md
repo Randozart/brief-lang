@@ -82,10 +82,10 @@ After `opt -O2`:
 ### Actual impact (DONE)
 | Benchmark | Before | After | C | Ratio |
 |-----------|--------|-------|---|-------|
-| float_math (zero) | 0.452s | **0.011s** | 0.05s | **Brief wins (4.5× faster)** |
+| float_math (zero) | 0.452s | **0.011s** | 0.05s | **Briv wins (4.5× faster)** |
 | float_math_nonzero | 0.486s | **0.380s** | 0.17s | **2.24×** |
 | iir_filter | 0.172s | ~0.17s | 0.17s | ~tie |
-| const_heavy | 0.006s | 0.006s | 0.04s | Brief wins |
+| const_heavy | 0.006s | 0.006s | 0.04s | Briv wins |
 
 **float_math_nonzero remaining gap**: The 0.210s difference is from instruction
 scheduling & pipeline effects (phi-based loop vs C's local-variable register
@@ -223,11 +223,11 @@ The `fast` flag enables:
 `arcp` (allow reciprocal), `contract` (allow FMA fusion), `reassoc` (allow
 reassociation), `afn` (allow approximations).
 
-For Brief's deterministic model where all float values are initialized to known
+For Briv's deterministic model where all float values are initialized to known
 constants and only receive constant updates, `fast` is semantically sound:
 - No NaN can arise (no 0/0, no inf-inf)
 - No Inf can arise (no overflow chains in benchmarks)
-- Signed zero is irrelevant (Brief doesn't distinguish +0/-0)
+- Signed zero is irrelevant (Briv doesn't distinguish +0/-0)
 
 ### Implementation
 1. Add `fast` string constant: `let FMF = "fast";`
@@ -425,10 +425,10 @@ But don't expect it to close the float_math_nonzero gap.
 
 | Benchmark | Before | After | C | Ratio (After) | Status |
 |-----------|--------|-------|---|---------------|--------|
-| float_math (zero) | 0.452s | **0.011s** | 0.05s | **Brief wins** | ✅ Alloca+SROA eliminated zero matrix |
+| float_math (zero) | 0.452s | **0.011s** | 0.05s | **Briv wins** | ✅ Alloca+SROA eliminated zero matrix |
 | float_math_nonzero | 0.486s | **0.380s** | 0.17s | **2.24×** | 🔶 Intrinsic phi scheduling gap |
 | iir_filter | 0.172s | ~0.17s | 0.17s | ~tie | ✅ Not float-bound, alloca helps |
-| const_heavy | 0.006s | 0.006s | 0.04s | Brief wins | ✅ Already O(1) |
+| const_heavy | 0.006s | 0.006s | 0.04s | Briv wins | ✅ Already O(1) |
 | ring_buffer | 0.007s | ~0.007s | 0.002s | ~3× | 🔶 Startup overhead |
 | async_counters | 0.004s | ~0.004s | 0.005s | ~tie | ✅ Already tie |
 | sparse_dispatch | 0.077s | ~0.077s | 0.002s | startup | 🔶 Startup overhead |

@@ -1,4 +1,4 @@
-# Remaining Pipeline: Struct Literals, Pure-Brief GLUE, Protocol Bridge, Doc Command
+# Remaining Pipeline: Struct Literals, Pure-Briv GLUE, Protocol Bridge, Doc Command
 
 **Date:** 2026-07-24
 **Status:** Plan → Implementation
@@ -6,7 +6,7 @@
 ## Overview
 
 Five remaining features to complete the GLUE bridge pipeline and make
-it fully Brief-native. Implemented in priority order.
+it fully Briv-native. Implemented in priority order.
 
 ---
 
@@ -44,19 +44,19 @@ for constructing method tables inline.
 
 ---
 
-## 2. Pure-Brief GLUE Pipeline
+## 2. Pure-Briv GLUE Pipeline
 
-The generator emits the entire Python C extension as Brief source using
+The generator emits the entire Python C extension as Briv source using
 `struct` declarations + struct literals + `export defn`. No C file, no
 `ShellCmd$("clang")`, no `InsertObject$`.
 
 The `$(Normalized)` stage block generates `PyMethodDef[]`, `PyModuleDef`,
-and `PyInit_bridge` as Brief source that the compiler compiles natively.
+and `PyInit_bridge` as Briv source that the compiler compiles natively.
 
 ### Blockers
 
 **1. `frgn Ptr` → `i64` mismatch.** The LLVM backend lowers `frgn`
-parameters and return types of `Ptr` to `i64` (Brief's internal pointer
+parameters and return types of `Ptr` to `i64` (Briv's internal pointer
 representation). For external C functions like `PyModule_Create2`,
 pointers must be LLVM `ptr`, not `i64`. Fix needed in `emit_frgn_call`:
 when the frgn signature has `Ptr`, emit LLVM `ptr` type, not `i64`.
@@ -80,14 +80,14 @@ For languages without C FFI (WASM, sandboxed scripting, browser).
 
 The generator emits:
 - A C shim with `main()` that reads text protocol from stdin and
-  dispatches to Brief exports via dlopen/dlsym
+  dispatches to Briv exports via dlopen/dlsym
 - The protocol is newline-delimited: `"add 3 4\n"` → `"7\n"`
 - Any language that can spawn a child process and read/write pipes
-  can use Brief exports — no FFI required at all
+  can use Briv exports — no FFI required at all
 
 ---
 
-## 4. `brief doc` Command
+## 4. `briv doc` Command
 
 CLI subcommand that reads doc comments (`///` and `//!`) from `.bv` files
 and renders them as HTML.
@@ -113,17 +113,17 @@ layouts without needing header files or probe programs.
 
 ## Implementation Order
 
-1. Struct literals (parser + codegen) — unblocks pure-Brief GLUE
-2. Pure-Brief GLUE generator — eliminates last C dependency
+1. Struct literals (parser + codegen) — unblocks pure-Briv GLUE
+2. Pure-Briv GLUE generator — eliminates last C dependency
 3. Protocol bridge — target languages without C FFI
-4. `brief doc` — documentation output
+4. `briv doc` — documentation output
 5. DWARF discovery — eliminates probe programs
 
 ---
 
 ## 6. Multi-Language Bridge Benchmark
 
-Build and benchmark bridges for 5+ languages to prove Brief's GLUE system
+Build and benchmark bridges for 5+ languages to prove Briv's GLUE system
 can match or beat native interop for any calling convention.
 
 | Language | Bridge type | Expected latency | Status |
@@ -146,5 +146,5 @@ can match or beat native interop for any calling convention.
 ### Goal
 
 Show the full spectrum: from 150ns (native C extension) to 200µs (protocol
-bridge) with clear trade-offs. Brief adapts to the calling convention of
+bridge) with clear trade-offs. Briv adapts to the calling convention of
 whatever language it needs to talk to — no single approach dominates.

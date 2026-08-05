@@ -37,7 +37,7 @@ sweep_mid 1.10× / sweep_dense 1.50× — the gap this plan addresses).
 `queue_drain` was removed from the harness (depends on the collections stdlib).
 
 **Test of record for the sweep gap** (harness-exact link, BOUND=50M):
-Brief countdown loop = **40 instructions** vs C = **34**; the 6 extra are
+Briv countdown loop = **40 instructions** vs C = **34**; the 6 extra are
 cross-lane shuffles (9 vshufps / 6 vblendps / 3 vinsertf128 / 2 vextractf128
 vs C's 6 vshufps / 2 vblendps / 4 vperm2f128). The countdown structure is
 NOT the cause (one tight block, guard cold-split, leaner counter than C);
@@ -103,7 +103,7 @@ handler  ::= identifier
 |--------|---------|----------------|
 | `?[formula]` | **liveliness** — a Bool predicate over state; fire when it stops holding | per-iteration check; false → fire path |
 | `?[N cyc]` | **fuel** — an iteration budget | the countdown loop's cycle budget (`cycles_bound`) |
-| `?[N ms]` | **time** — a wall-clock deadline | `Now#` (new `clock_gettime(CLOCK_MONOTONIC)` intrinsic in `brief_rt.c`); elapsed-vs-deadline compare |
+| `?[N ms]` | **time** — a wall-clock deadline | `Now#` (new `clock_gettime(CLOCK_MONOTONIC)` intrinsic in `briv_rt.c`); elapsed-vs-deadline compare |
 | `![…]` | required watchdog | fire = error-exit path |
 | `-> handler(val)` | **on-fire callback** | the loop calls `handler` on the fire path, passing the **last computed value** explicitly (never by reference to state that may be reset) |
 
@@ -208,11 +208,11 @@ recorded.
   arm only handled Ptr-indexed stores, so `f[i] = v` (Float[16]) vanished
   (seed + loop writes). Routed through the shared `emit_array_state_store`.
 - **A/B experiment (interleaved x3, BOUND=50M, countdown-dispatched,
-  non-folded)**: sweep_dense (16 scalars) Brief 0.41s vs C 0.26s = 1.57x;
-  sweep_arr (Float[16]) Brief 0.40s vs C 0.35s = 1.17x. **Conclusion (rule
-  #19): the hypothesis that the array form makes Brief faster is REFUTED** —
-  Brief's throughput is unchanged (0.40s both); the gap closure is C's array
-  reference being slower. No cyclic-shift pass is shipped (no Brief-side win).
+  non-folded)**: sweep_dense (16 scalars) Briv 0.41s vs C 0.26s = 1.57x;
+  sweep_arr (Float[16]) Briv 0.40s vs C 0.35s = 1.17x. **Conclusion (rule
+  #19): the hypothesis that the array form makes Briv faster is REFUTED** —
+  Briv's throughput is unchanged (0.40s both); the gap closure is C's array
+  reference being slower. No cyclic-shift pass is shipped (no Briv-side win).
   sweep_arr registered as a runtime benchmark (1.18x, MATCH). Diverges from C
   at real bounds like sweep_dense (f32 recurrence compounding; harness
   correctness at BOUND=5 passes).
@@ -241,7 +241,7 @@ recorded.
   frgn calls/returns) — fixed via `reg_float_cache` unboxing in
   `coerce_to_param_type`, `PrintFloat#`, and the Term return path.
 - **C5** — `series_converge`: `?[(x-last)^2 > eps] -> print_best(x)` fires on
-  convergence. Brief and C both print 0.500050008 (MATCH, 1.00x). Registered
+  convergence. Briv and C both print 0.500050008 (MATCH, 1.00x). Registered
   in the harness.
 - **Fuel/time DONE (2026-08-01)**: the `within N <unit>` deadline (`ms`/`cyc`/
   `seconds`/`minute`) + the `Now#` monotonic clock + the deadline compare in
@@ -256,10 +256,10 @@ Stress benchmarks + fixes as §5; global-lifetime design plan written.
 **D status (2026-08-01, substantially complete):**
 - **Garbage scheduler** (the global-lifetime inference, `analysis/global_lifetime.rs`):
   proves each heap-backed field's reactor-ordered last consumer and emits a
-  `Free#` (via `__brief_free`) exactly after that txn's body (countdown exit
+  `Free#` (via `__briv_free`) exactly after that txn's body (countdown exit
   AND non-loop body). Manually-freed fields are excluded (no double-free).
   The `global_lifetime` benchmark is now the SCHEDULER version (no manual
-  free in the file) — matches C. `__brief_free_count` calibrates frees ==
+  free in the file) — matches C. `__briv_free_count` calibrates frees ==
   allocs. Design doc reframed as "Garbage Scheduling".
 - **Stress family**: dangling_pointer (hard error + AddrOf provenance fix),
   arena_churn (realloc-grow cur_block fix), linked_list (Malloc#/Store#/Load#),
@@ -313,7 +313,7 @@ tutorials/benchmarks.
 `cargo test --lib` green (a regression test per feature); `cargo build` no new
 warnings; Praetor (one `--target` per invocation); full harness A/B zero
 MISMATCH with the §2 baseline; docs in the same commit (SPEC obj/watchdog
-grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
+grammar, `learn-briv` collections + watchdog chapters, `docs/architecture`).
 
 ## 8. Risks and mitigations
 | Risk | Mitigation |
@@ -321,7 +321,7 @@ grammar, `learn-brief` collections + watchdog chapters, `docs/architecture`).
 | Monomorphization scope (A8) | instantiate-on-first-use; regression tests per generic shape |
 | MethodCall `self` codegen (A5) | state-slot receivers first; locals via alloca copy-in/copy-out; the Phase-1 panic becomes the final emission |
 | SoA reactive desugar perf | benchmark-gated; AoS fallback retained if tests show it wins |
-| `Now#` time source (C) | `clock_gettime(CLOCK_MONOTONIC)` in `brief_rt.c`; deterministic ticks remain the default |
+| `Now#` time source (C) | `clock_gettime(CLOCK_MONOTONIC)` in `briv_rt.c`; deterministic ticks remain the default |
 | Global-lifetime free (D) | never frees until the last-consumer proof is sound; the benchmark pins it |
 
 ## 9. Results (filled after each phase)

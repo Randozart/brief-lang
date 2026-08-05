@@ -94,7 +94,7 @@ impl ErrorConventions {
     }
 }
 
-/// Built-in Err type variants for Brief FFI
+/// Built-in Err type variants for Briv FFI
 #[derive(Debug, Clone)]
 pub enum ErrVariant {
     /// I/O error with code and message

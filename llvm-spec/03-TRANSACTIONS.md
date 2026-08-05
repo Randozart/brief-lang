@@ -4,7 +4,7 @@
 
 Every `txn` becomes an LLVM `define` function receiving the global state pointer:
 
-```brief
+```briv
 rstruct Counter {
     count: Int;
 
@@ -40,7 +40,7 @@ entry:
 
 ## Transaction Body Translation Rules
 
-| Brief Statement | LLVM IR |
+| Briv Statement | LLVM IR |
 |----------------|---------|
 | `&count = count + 1;` | `%new = add i64 %old, 1` + `store i64 %new, i64* %ptr` |
 | `let x: Int = expr;` | `%x = ...` (SSA value) |

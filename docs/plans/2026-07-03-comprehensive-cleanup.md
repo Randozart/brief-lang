@@ -5,7 +5,7 @@
 Three independent issues share root causes in the LLVM backend:
 
 1. **False MISMATCH signals** — C benchmarks auto-vectorize, changing Float32
-   association order. Brief stays scalar. F32 precision differences (~1e-7) are
+   association order. Briv stays scalar. F32 precision differences (~1e-7) are
    inherent, not bugs.
 
 2. **Arrowhead nesting** — 6 key files have depth 8–14 against the AGENTS.md
@@ -14,7 +14,7 @@ Three independent issues share root causes in the LLVM backend:
 
 3. **No vectorization** — The txn loop IR (`%State` struct load/store, branch
    pre-check/body/post-check/backedge) is unrecognizable to LLVM's loop
-   vectorizer. C auto-vectorizes to `<4 x float>`/`<8 x float>`; Brief emits
+   vectorizer. C auto-vectorizes to `<4 x float>`/`<8 x float>`; Briv emits
    only scalar `@llvm.sqrt.f32` and `fadd`.
 
 The last two issues are linked — rewriting loop emission to produce
@@ -44,7 +44,7 @@ Float outputs. Stops false MISMATCH signals for f32 precision noise.
 **Implementation**: In `check_correctness()` of `build_and_bench.sh`:
 
 - Detect if output lines are numeric floats (match `/^-?[0-9]+\.[0-9]+$/`)
-- For each line, compare `abs(brief - c) < 1e-5` (relative epsilon)
+- For each line, compare `abs(briv - c) < 1e-5` (relative epsilon)
 - Non-numeric lines still use strict `==`
 - Mixed output (some numeric, some text) uses per-line strategy
 
@@ -180,7 +180,7 @@ done:
 
 **Key challenges:**
 
-1. **State extraction**: Currently Brief emits `load %State` + `extractvalue`
+1. **State extraction**: Currently Briv emits `load %State` + `extractvalue`
    per field. For countable loops, we need GEP-based array access or
    load-per-field. The `phi i64 %i` replaces the stored counter.
 

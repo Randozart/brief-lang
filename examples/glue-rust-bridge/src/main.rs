@@ -1,13 +1,13 @@
 // GLUE Rust Bridge — dogfooding test
 //
-// Calls Brief-exported functions through the GLUE protocol.
+// Calls Briv-exported functions through the GLUE protocol.
 // The bridge object is compiled by build.rs and linked statically.
 //
-// Each Brief export compiles to an LLVM function with signature:
+// Each Briv export compiles to an LLVM function with signature:
 //   i64 @<name>(ptr %state, i64 %arg0, i64 %arg1, ...)
 //
-// The first argument is the Brief state pointer (opaque).
-// Call __brief_init_state() once before any export to initialize.
+// The first argument is the Briv state pointer (opaque).
+// Call __briv_init_state() once before any export to initialize.
 
 #[repr(C)]
 struct CBuffer {
@@ -16,7 +16,7 @@ struct CBuffer {
 }
 
 extern "C" {
-    fn __brief_init_state() -> *mut std::ffi::c_void;
+    fn __briv_init_state() -> *mut std::ffi::c_void;
     fn add(state: *mut std::ffi::c_void, a: i64, b: i64) -> i64;
     fn multiply(state: *mut std::ffi::c_void, a: i64, b: i64) -> i64;
     fn first_len(state: *mut std::ffi::c_void, buf: *const CBuffer) -> i64;
@@ -25,8 +25,8 @@ extern "C" {
 fn main() {
     println!("═══ GLUE Rust Bridge Demo ═══");
 
-    let state = unsafe { __brief_init_state() };
-    println!("  Brief runtime initialized (state=0x{:x})", state as usize);
+    let state = unsafe { __briv_init_state() };
+    println!("  Briv runtime initialized (state=0x{:x})", state as usize);
 
     let sum = unsafe { add(state, 40, 2) };
     println!("  add(40, 2) = {}", sum);

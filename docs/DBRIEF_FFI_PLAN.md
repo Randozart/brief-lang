@@ -1,11 +1,11 @@
-# DBrief FFI Schema and Dependency Management Plan
+# DBriv FFI Schema and Dependency Management Plan
 
 ## Overview
 
-This document outlines the plan to extend DBrief with:
-1. Keyword abbreviations for all DBrief keywords
+This document outlines the plan to extend DBriv with:
+1. Keyword abbreviations for all DBriv keywords
 2. A `DEPENDS` keyword for dependency declarations
-3. Documentation of DBrief's unique syntax and capabilities
+3. Documentation of DBriv's unique syntax and capabilities
 
 ---
 
@@ -13,7 +13,7 @@ This document outlines the plan to extend DBrief with:
 
 ### Phase 1: Keyword Abbreviations ✅ IMPLEMENTED
 
-**Implemented in:** `src/dbrief/parser.rs`
+**Implemented in:** `src/dbriv/parser.rs`
 
 | Keyword | Abbreviations | Status |
 |---------|---------------|--------|
@@ -28,9 +28,9 @@ This document outlines the plan to extend DBrief with:
 
 ### Phase 2: DEPENDS Keyword ✅ IMPLEMENTED
 
-**Implemented in:** `src/dbrief/parser.rs` and `src/dbrief/ast.rs`
+**Implemented in:** `src/dbriv/parser.rs` and `src/dbriv/ast.rs`
 
-```dbrief
+```dbriv
 // Syntax supported:
 DEPENDS "sqlite3" VERSION ">=3.36.0" PLATFORM native;
 DEPENDS "openssl" VERSION "^1.1" PLATFORM [native, wasm];
@@ -59,6 +59,6 @@ Need to document:
 
 ## Related Files
 
-- `src/dbrief/parser.rs` - DBrief parser with keyword abbreviations
-- `src/dbrief/ast.rs` - DBrief AST with DbriefDependency struct
+- `src/dbriv/parser.rs` - DBriv parser with keyword abbreviations
+- `src/dbriv/ast.rs` - DBriv AST with DbrivDependency struct
 - `std/bindings/*.dbvs` - Existing FFI binding schemas

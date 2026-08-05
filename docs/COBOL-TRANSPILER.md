@@ -1,10 +1,10 @@
-# Brief-to-COBOL Transpiler
+# Briv-to-COBOL Transpiler
 
-A production-ready COBOL code generator that transpiles Brief's declarative, state-based smart contracts into IBM Enterprise COBOL for z/OS.
+A production-ready COBOL code generator that transpiles Briv's declarative, state-based smart contracts into IBM Enterprise COBOL for z/OS.
 
 ## Overview
 
-Brief is a contract-first programming language designed for financial systems. This transpiler generates **bank-ready COBOL** with:
+Briv is a contract-first programming language designed for financial systems. This transpiler generates **bank-ready COBOL** with:
 
 - **Contract verification** - Pre/post conditions become runtime guards
 - **Zero-cost abstraction** - No runtime library required
@@ -14,18 +14,18 @@ Brief is a contract-first programming language designed for financial systems. T
 ## Quick Start
 
 ```bash
-# Compile a Brief file to COBOL
-cargo run --bin brief-compiler -- cobol mycontract.bv --out output/
+# Compile a Briv file to COBOL
+cargo run --bin briv-compiler -- cobol mycontract.bv --out output/
 
 # Or after installing
-brief cobol contract.brv --out ./cobol_output
+briv cobol contract.brv --out ./cobol_output
 ```
 
 ## Example Transpilation
 
-### Brief Source (`transfer.br`)
+### Briv Source (`transfer.br`)
 
-```brief
+```briv
 let balance: Int = 1000;
 let transfer_in_progress: Bool = false;
 
@@ -88,9 +88,9 @@ END PROGRAM TRANSFER.
 
 ### Contract Enforcement
 
-Every Brief transaction has optional pre and post conditions:
+Every Briv transaction has optional pre and post conditions:
 
-```brief
+```briv
 txn withdraw [balance >= amount]
   [balance == @balance - amount]
 { ... }
@@ -103,7 +103,7 @@ These compile to **hard runtime guards** in COBOL:
 
 ### Type Mapping
 
-| Brief Type | COBOL PIC Clause | Notes |
+| Briv Type | COBOL PIC Clause | Notes |
 |------------|-----------------|-------|
 | `Int` | `PIC S9(18) COMP-5` | Native binary |
 | `Bool` | `PIC X` + 88-level | Condition names |
@@ -113,9 +113,9 @@ These compile to **hard runtime guards** in COBOL:
 
 ### State Management
 
-Brief state maps directly to COBOL's `WORKING-STORAGE SECTION`:
+Briv state maps directly to COBOL's `WORKING-STORAGE SECTION`:
 
-```brief
+```briv
 let counter: Int = 0;
 let enabled: Bool = false;
 ```
@@ -132,7 +132,7 @@ WORKING-STORAGE SECTION.
 
 Fine-tune COBOL generation with attributes:
 
-```brief
+```briv
 # Custom PIC clause
 state balance: Int #[cobol, type("PIC S9(15) COMP-3")]
 
@@ -153,10 +153,10 @@ txn critical_op() #[cobol, abend]
 
 ## File Extensions
 
-- **`.br`** - Pure Brief (specification only)
-- **`.bv`** - Brief with view/rendering
-- **`.ebv`** - Embedded Brief (hardware)
-- **`.rbv`** - Rendered Brief (compiled to JS)
+- **`.br`** - Pure Briv (specification only)
+- **`.bv`** - Briv with view/rendering
+- **`.ebv`** - Embedded Briv (hardware)
+- **`.rbv`** - Rendered Briv (compiled to JS)
 
 ## Error Codes
 
@@ -170,19 +170,19 @@ txn critical_op() #[cobol, abend]
 
 ```bash
 # Basic compilation
-brief-compiler cobol <file> [--out <directory>]
+briv-compiler cobol <file> [--out <directory>]
 
 # With custom output directory
-brief-compiler cobol contracts/transfer.br --out ./cobol_gen
+briv-compiler cobol contracts/transfer.br --out ./cobol_gen
 
 # With verbose output
-brief-compiler cobol -v mycontract.bv
+briv-compiler cobol -v mycontract.bv
 ```
 
 ## Architecture
 
 ```
-Brief Source (.bv)
+Briv Source (.bv)
        │
        ▼
 ┌──────────────────┐
@@ -224,7 +224,7 @@ Brief Source (.bv)
 
 ## Integration with Existing COBOL
 
-For calling Brief-generated COBOL from existing mainframe programs:
+For calling Briv-generated COBOL from existing mainframe programs:
 
 ```cobol
        CALL 'TRANSFER' USING LS-BALANCE, LS-AMOUNT
@@ -235,7 +235,7 @@ For calling Brief-generated COBOL from existing mainframe programs:
 
 ## Requirements
 
-- Brief compiler (this repository)
+- Briv compiler (this repository)
 - IBM Enterprise COBOL 5.1+ or GnuCOBOL
 - z/OS, VSE, or Linux (GnuCOBOL)
 

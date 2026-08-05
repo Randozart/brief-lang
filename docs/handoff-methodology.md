@@ -1,7 +1,7 @@
 # Handoff: the Rigorous Methodology
 
 **2026-07-31.** This is a REQUIRED-READING companion to `AGENTS.md`. It captures
-the precise, academically rigorous methodology the Brief compiler demands, with
+the precise, academically rigorous methodology the Briv compiler demands, with
 this session's frontend-driven-dispatch work as the worked example. Where
 `AGENTS.md` states the rules, this document shows the *practice*: the exact loop,
 the evidence standard, and the failure modes.
@@ -55,7 +55,7 @@ INVESTIGATE → PLAN → EXPERIMENT → IMPLEMENT → VERIFY → DOCUMENT → co
   use a hand-peeled `.bv` only when the structure requires it.
 - Link with the harness's EXACT command:
   `clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections
-  -Wl,--gc-sections <name>.ll lib/runtime/brief_rt.c`.
+  -Wl,--gc-sections <name>.ll lib/runtime/briv_rt.c`.
 - **Verify output equality at a BOUND that crosses a print boundary before
   timing.** (BOUND=10M for a 5M-periodic guard.)
 - **Interleave** reference/experiment/C timings ×N and compare averages

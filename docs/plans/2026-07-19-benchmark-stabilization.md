@@ -36,7 +36,7 @@ A benchmark that fails due to a missing feature is a signal to implement that fe
 |------|--------|--------|
 | SSO Phase B flag, literal emission, 2-slot state, `{i64,i64}` type, `extractvalue`, AND-8 tag | (multiple) | ✅ Implemented |
 | SSO concat (`emit_sso_concat` in helpers.rs) | (committed) | ⚠️ **Orphaned** — never called from dispatch |
-| UTF8View, StaticString, SmallString64 decls + pure-Brief ops | (committed) | ✅ Implemented |
+| UTF8View, StaticString, SmallString64 decls + pure-Briv ops | (committed) | ✅ Implemented |
 | SVO S0-S4: flag, `is_vector_like`, `push_field_type`, literal, index | `aded093` | ✅ Implemented |
 | SVO S5-S6: heap path, index fix | `d079134` | ⚠️ **push/pop via `<-` always heap** |
 | Ptr Level 3: `is_local_provenance` fix, `PtrConst`, `(Type, Provenance)`, `is_mutable_location`, compile pipeline | `8d0e4d9`, `7cb6083` | ✅ 6/10 items |
@@ -98,7 +98,7 @@ Add `writeln!(out, "{}ret void", indent).ok();` in two `else` branches before `b
 
 ```bash
 cargo build && \
-  BOUND=5 ./target/release/brief-compiler build benchmarks/precompute_sum.bv --out benchmarks && \
+  BOUND=5 ./target/release/briv-compiler build benchmarks/precompute_sum.bv --out benchmarks && \
   ./benchmarks/precompute_sum
 cargo test --lib
 ```
@@ -119,7 +119,7 @@ cargo build --release && bash benchmarks/build_and_bench.sh --runtime --optimize
 
 ### Expected output table
 
-| Benchmark | Brief (s) | C (s) | Ratio | Correctness |
+| Benchmark | Briv (s) | C (s) | Ratio | Correctness |
 |-----------|-----------|-------|-------|-------------|
 | ring_buffer | | | | |
 | float_math | | | | |
@@ -137,7 +137,7 @@ This is the post-SSO, post-allocation-strategy baseline. Compare against the Jul
 - All benchmarks compile and run
 - No benchmark produces `__FAIL__` (crash/timeout)
 - Correctness: all benchmarks MATCH C reference
-- Runtime benchmarks: Brief is within 2× of C (acceptable for initial SSO/SVO rollout)
+- Runtime benchmarks: Briv is within 2× of C (acceptable for initial SSO/SVO rollout)
 
 ---
 
@@ -191,7 +191,7 @@ cargo build --release && bash benchmarks/build_and_bench.sh --runtime --optimize
 |----------|---------------|
 | Did SSO concat fix affect any benchmark? | Check if string-heavy benchmarks changed |
 | Did the terminator fix affect performance? | No — it only adds `ret void` in dead paths |
-| How does Brief compare to C? | Ratio column |
+| How does Briv compare to C? | Ratio column |
 | Which benchmarks improved vs regressed? | Compare Phase 2 vs July 18 baseline |
 | Are there any correctness regressions? | Check correctness column against July 18 |
 
@@ -199,7 +199,7 @@ cargo build --release && bash benchmarks/build_and_bench.sh --runtime --optimize
 
 - **All benchmarks compile and run** (terminator fix)
 - **SSO concat fix** enables correct string operations (currently `++` produces garbage)
-- **Brief vs C ratios** should be similar to July 18 baseline for non-string benchmarks
+- **Briv vs C ratios** should be similar to July 18 baseline for non-string benchmarks
 - **String-heavy benchmarks** may show improvement from SSO (or regression from 2-register ABI)
 
 ---

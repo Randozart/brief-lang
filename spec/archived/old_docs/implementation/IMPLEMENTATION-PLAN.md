@@ -1,4 +1,4 @@
-# Brief Implementation Plan
+# Briv Implementation Plan
 **Version:** 1.0
 **Date:** 2026-04-05
 **Status:** Working Document
@@ -7,7 +7,7 @@
 
 ## Overview
 
-This document outlines the implementation roadmap for the Brief compiler, focusing on completing the contract verification system and fixing known issues in the standard library.
+This document outlines the implementation roadmap for the Briv compiler, focusing on completing the contract verification system and fixing known issues in the standard library.
 
 The plan is organized into phases. Each phase builds on the previous one.
 
@@ -190,7 +190,7 @@ Fix the standard library to conform to SPEC.md guidelines.
 ## Phase 6: Error Messages
 
 ### Goal
-Enhance error messages to teach Brief.
+Enhance error messages to teach Briv.
 
 ### Components to Build
 
@@ -203,7 +203,7 @@ Enhance error messages to teach Brief.
 - Explain why post-condition doesn't follow
 
 **6.3 Fix Suggestions**
-- Suggest specific changes in Brief syntax
+- Suggest specific changes in Briv syntax
 - Reference relevant spec sections
 
 ### Files to Modify
@@ -262,7 +262,7 @@ The initial symbolic executor implementation uses a **conservative verification 
 
 2. **Symbolic variable tracking**: Currently initializes variables from pre-condition but doesn't fully track how assignments modify state. This is conservative - we don't verify the relationship between pre and post for state changes.
 
-3. **Design Rationale**: Brief's goal is "if it runs, it won't have bugs." A conservative verifier that accepts valid programs is preferable to one that rejects valid programs. As the verifier matures, we can strengthen these checks.
+3. **Design Rationale**: Briv's goal is "if it runs, it won't have bugs." A conservative verifier that accepts valid programs is preferable to one that rejects valid programs. As the verifier matures, we can strengthen these checks.
 
 ### Future Improvements (TODO)
 - Track variable assignments and verify pre→post relationship for state changes
@@ -278,7 +278,7 @@ The initial symbolic executor implementation uses a **conservative verification 
 
 ### Core Design
 
-```brief
+```briv
 # Declare sig that can be used as type
 sig print(msg: String) -> true;
 
@@ -350,7 +350,7 @@ These items are out of scope for now but may be needed in the future:
 ## References
 
 - `spec/SPEC.md` - Language specification (authoritative)
-- `spec/v4-brief-lang-spec.md` - Previous version for reference
+- `spec/v4-briv-lang-spec.md` - Previous version for reference
 - `src/proof_engine.rs` - Current proof engine implementation
 - `src/interpreter.rs` - Runtime execution model
 

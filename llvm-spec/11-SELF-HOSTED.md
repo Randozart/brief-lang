@@ -1,12 +1,12 @@
-# Self-Hosted (Brief-in-Brief) LLVM Backend
+# Self-Hosted (Briv-in-Briv) LLVM Backend
 
 ## Overview
 
-The self-hosted LLVM backend lives at `lib/compiler/backends/llvm.bv`. It mirrors the Rust backend's logic but emits `.ll` text using Brief's `StringBuilder` pattern.
+The self-hosted LLVM backend lives at `lib/compiler/backends/llvm.bv`. It mirrors the Rust backend's logic but emits `.ll` text using Briv's `StringBuilder` pattern.
 
 ## Key Translations
 
-| Rust Feature | Brief Equivalent |
+| Rust Feature | Briv Equivalent |
 |--------------|------------------|
 | `String` (`push_str`, `push`) | `StringBuilder` (`sb.append`, `sb.append_line`) |
 | `writeln!(output, "...")` | `&sb = sb.append_line("...");` |
@@ -30,7 +30,7 @@ lib/compiler/backends/
 
 ## `llvm.bv` Function Signatures
 
-```brief
+```briv
 import string_builder from "std/string_builder.bv";
 import option from "std/option.bv";
 import result from "std/result.bv";
@@ -165,7 +165,7 @@ defn emit_intrinsics(sb: StringBuilder) -> StringBuilder {
 
 In `lib/compiler/main.bv`, add to the backend dispatch (around line 95-106):
 
-```brief
+```briv
 [state.backend == "llvm"] {
     let sb_result = compile_to_llvm(program, state, cg_result);
     [is_ok(sb_result)] {
@@ -182,7 +182,7 @@ In `lib/compiler/main.bv`, add to the backend dispatch (around line 95-106):
 
 ## Implementation Priority for Self-Hosted
 
-1. **Parse-only mode** — `Brief-compiler selfhost counter.bv --target llvm` runs without crashing
+1. **Parse-only mode** — `Briv-compiler selfhost counter.bv --target llvm` runs without crashing
 2. **Module header + `%State` type** — basic `.ll` structure
 3. **load/store for transactions** — one `txn` with a single `Int` field
 4. **Match → `switch`** — pattern matching in self-hosted code

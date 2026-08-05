@@ -1,4 +1,4 @@
-# DBrief Language Specification
+# DBriv Language Specification
 
 **Version:** v0.1.0 **Date:** 2026-05-05 **Status:** Draft (unstable) **Language Variants:** Config (.dbv), Database (.dbvl), Schema (.dbvs)
 
@@ -6,7 +6,7 @@
 
 ## 1. Introduction and Philosophy
 
-DBrief (Data Brief) is a declarative, contract-enforced data language that combines the best of TOML, Prolog/Datalog, and SQL into a unified verifiable data layer. It treats data as logical propositions that can be queried, validated, and synchronized across systems.
+DBriv (Data Briv) is a declarative, contract-enforced data language that combines the best of TOML, Prolog/Datalog, and SQL into a unified verifiable data layer. It treats data as logical propositions that can be queried, validated, and synchronized across systems.
 
 ### 1.1 Core Design Principles
 
@@ -14,15 +14,15 @@ DBrief (Data Brief) is a declarative, contract-enforced data language that combi
 2. **Verification Before Trust**: Local data is fully verifiable; remote data requires explicit error handling.
 3. **Dual Mode**: Works as both config language (`.dbv`) and database language (`.dbvl`).
 4. **Backend Agnostic**: Pluggable storage backends with unified query interface.
-5. ** Brief-Native**: Queries feel like Brief state machine syntax, not foreign SQL.
+5. ** Briv-Native**: Queries feel like Briv state machine syntax, not foreign SQL.
 
-### 1.2 Relationship to Brief
+### 1.2 Relationship to Briv
 
-| Brief Variant | Purpose | DBrief Role |
+| Briv Variant | Purpose | DBriv Role |
 |-------------|--------|-------------|
-| `.bv` | Core state machines | Can query DBrief data via FFI |
-| `.rbv` | Web views | Binds to DBrief for reactive data |
-| `.ebv` | Embedded hardware | Reads DBrief config for registers |
+| `.bv` | Core state machines | Can query DBriv data via FFI |
+| `.rbv` | Web views | Binds to DBriv for reactive data |
+| `.ebv` | Embedded hardware | Reads DBriv config for registers |
 | `.dbv` | Config files | Static configuration |
 | `.dbvl` | Database files | Mutable data store |
 
@@ -40,7 +40,7 @@ DBrief (Data Brief) is a declarative, contract-enforced data language that combi
 
 ### 2.2 Usage Patterns
 
-```brief
+```briv
 // config.dbv - Static configuration
 [network.settings]
 port: UInt[16] = 8080;
@@ -52,14 +52,14 @@ check valid_port {
 }
 ```
 
-```brief
+```briv
 // data.dbvl - Mutable database (each line is a record)
 @1 { "Alice", 30, "Engineer" }
 @1 { "Bob", 25, "Designer" }
 @2 { "admin_write", true }
 ```
 
-```brief
+```briv
 // schema.dbvs - Register map definition
 REGISTER @1: Vector[Person]
 REGISTER @2: Vector[Permission]
@@ -94,7 +94,7 @@ location ::= (ip_address | hostname) [":" port]
 
 ### 3.2 Schema Import
 
-```brief
+```briv
 // Import a schema to resolve registers
 IMPORT "./schema.dbvs"
 
@@ -104,7 +104,7 @@ IMPORT "./schema.dbvs"
 
 ### 3.3 Variable Binding
 
-```brief
+```briv
 // Bind address to variable for reuse
 LET USERS = @1
 LET API = @https://api.example.com/v1
@@ -118,7 +118,7 @@ LET USERS = @2  // Switch to different register
 
 ### 3.4 Remote Addresses
 
-```brief
+```briv
 // TCP/IP backend
 LET DB = @tcp:192.168.1.100:5432/1
 LET DB = @tcp:server.example.com:5432/main
@@ -134,7 +134,7 @@ LET API = @https://api.example.com/v1
 
 ### 3.5 Access Modes
 
-```brief
+```briv
 // Hot lookup - direct remote query each access
 @hot:tcp:server/1 | FILTER role == "admin"
 
@@ -149,7 +149,7 @@ LET API = @https://api.example.com/v1
 
 The `@auto` keyword allows the compiler to automatically assign unclaimed addresses:
 
-```brief
+```briv
 ALIAS heap_start: Addr = @auto   // Compiler picks free address
 ALIAS stack_top: Addr = @auto    // Compiler picks free address
 
@@ -190,7 +190,7 @@ REGISTER @auto: Vector[UInt[8], 4096]  // Auto-allocate 4KB
 
 ### 4.3 Composite Types
 
-```brief
+```briv
 STRUCT Person {
     name: String,
     age: UInt[8],
@@ -222,7 +222,7 @@ register_def ::= "REGISTER" address ":" type ["check" contract]
 
 ### 5.2 Examples
 
-```brief
+```briv
 // Simple register
 REGISTER @1: Vector[Person]
 
@@ -237,7 +237,7 @@ REGISTER @0xA000: {
 
 ### 5.4 ALIAS - Symbolic Name Binding
 
-The ALIAS keyword provides **logical to physical address separation**, enabling the same Brief code to target different hardware by swapping the `.dbv` config file.
+The ALIAS keyword provides **logical to physical address separation**, enabling the same Briv code to target different hardware by swapping the `.dbv` config file.
 
 ```bnf
 alias_def ::= "ALIAS" identifier ":" type
@@ -249,7 +249,7 @@ alias_def ::= "ALIAS?" identifier ":" type "=" address  // Optional - fallback a
 
 In `.dbvs` files, ALIAS declares symbolic names without addresses:
 
-```brief
+```briv
 // schema.dbvs - declares symbolic names (LOGICAL)
 // No addresses assigned - resolved at compile time
 ALIAS led_on: Bool
@@ -262,7 +262,7 @@ ALIAS? optional_value: UInt[32]  // Optional - fallback allowed
 
 In `.dbv` files, ALIAS binds symbolic names to physical addresses:
 
-```brief
+```briv
 // KV260.dbv - bind to specific addresses (CONCRETE)
 ALIAS led_on: Bool = @0xFF5E0000
 ALIAS counter: UInt[32] = @0xFF5E0004
@@ -277,7 +277,7 @@ ALIAS stack_top: Addr = @auto
 
 Same `.ebv` code with a different `.dbv` for a different board:
 
-```brief
+```briv
 // ZCU102.dbv - different board, different addresses
 ALIAS led_on: Bool = @0xFC010000
 ALIAS counter: UInt[32] = @0xFC010004
@@ -292,7 +292,7 @@ The compiler validates:
 3. **Type compatibility**: Bound address type must match declared type
 4. **Auto-allocation**: Unclaimed addresses are available for `@auto`
 
-```brief
+```briv
 // Error if required alias missing
 // Error: Alias 'led_on' not bound in config
 
@@ -309,7 +309,7 @@ The `ALIAS?` syntax marks an alias as optional. If not bound in `.dbv`, the comp
 - Uses a default/zero value at compile time
 - Logs a warning but doesn't fail
 
-```brief
+```briv
 // schema.dbvs
 ALIAS? debug_led: Bool  // Optional
 
@@ -332,7 +332,7 @@ check_def ::= "CHECK" "[" expression "]"
 
 ### 6.2 Examples
 
-```brief
+```briv
 // Single constraint
 CHECK age > 18
 
@@ -352,7 +352,7 @@ CHECK [
 
 ### 6.3 Contract Modes
 
-```brief
+```briv
 // compile: Verify at compile/build time (default for .dbv)
 // runtime: Verify at access time (default for remote)
 // observe: Log violations but allow access
@@ -375,7 +375,7 @@ negated_predicate ::= "NOT" predicate
 
 ### 7.2 Examples
 
-```brief
+```briv
 // Basic rule
 RULE can_write(U) :- user{ id: U, role: "admin" }
 RULE can_write(U) :- user{ id: U, role: "editor" }
@@ -391,7 +391,7 @@ RULE reachable(A, B) :- edge{ from: A, to: C }, reachable(C, B)
 
 ### 7.3 Query with Rules
 
-```brief
+```briv
 // Query using rule - returns proofs
 ?can_write(1)
 
@@ -407,11 +407,11 @@ RULE reachable(A, B) :- edge{ from: A, to: C }, reachable(C, B)
 
 ### 8.1 Unified Query Operators
 
-DBrief supports three complementary query styles that don't conflict with Brief keywords:
+DBriv supports three complementary query styles that don't conflict with Briv keywords:
 
 #### Style A: Arrow (->) Pipeline
 
-```brief
+```briv
 @1->FILTER role == "admin"
 @1->COUNT
 @1->MAP name, age * 2
@@ -421,7 +421,7 @@ DBrief supports three complementary query styles that don't conflict with Brief 
 
 #### Style B: Bracket ([]) Filter
 
-```brief
+```briv
 @1[role == "admin"]                    // Filter
 @1[age > 30]                       // Filter
 @1[*]                              // All
@@ -431,7 +431,7 @@ DBrief supports three complementary query styles that don't conflict with Brief 
 
 #### Style C: QUERY Keyword
 
-```brief
+```briv
 QUERY @1 | FILTER role == "admin" | COUNT
 QUERY @1 | WHERE age > 30 | MAP name | SORT
 QUERY @1 | JOIN @2 ON user_id
@@ -463,7 +463,7 @@ QUERY @1 | GROUP BY role | AGG COUNT
 
 ### 8.4 Joins
 
-```brief
+```briv
 @1->JOIN @2 ON user_id
 @1->LEFT_JOIN @2 ON user_id
 @1->CROSS_JOIN @2
@@ -481,7 +481,7 @@ txn_def ::= "TXN" identifier "(" parameters? ")" contract "{" body "}"
 
 ### 9.2 Examples
 
-```brief
+```briv
 // Add record
 TXN add_person(name, age, role) [true][added == true] {
     @1->PUSH { name, age, role }
@@ -506,7 +506,7 @@ TXN delete_user(id) [
 
 ### 9.3 Atomicity
 
-```brief
+```briv
 TXN transfer(from, to, amount) [
     @1->GET from: balance >= amount
 ][
@@ -524,7 +524,7 @@ TXN transfer(from, to, amount) [
 
 ### 10.1 FORALL/EXISTS Constraints
 
-```brief
+```briv
 // Every post must have a valid author
 CHECK FORALL p IN @posts: 
     EXISTS u IN @users WHERE p.author_id == u.id
@@ -536,7 +536,7 @@ CHECK FORALL u IN @users:
 
 ### 10.2 Foreign Key Relationships
 
-```brief
+```briv
 REGISTER @posts: Vector[Post]
 REGISTER @users: Vector[User]
 
@@ -560,7 +560,7 @@ CHECK [
 
 ### 11.2 Explicit Error Handling
 
-```brief
+```briv
 // FRN-style must handle errors
 FRN DEFN fetch_user(id: UInt[32]) -> RESULT[User, ApiError]
 
@@ -574,7 +574,7 @@ TXN load_user(id) [true][user != null] {
 
 ### 11.3 Standard Library API Handler
 
-```brief
+```briv
 ENUM ApiBackend {
     TCP,
     HTTP_REST,
@@ -601,7 +601,7 @@ DEFN tcp_query(addr: Addr, query: String) -> RESULT[Data, DbError]
 
 ### 12.1 RBV View Binding
 
-```brief
+```briv
 // In .rbv file
 IMPORT "./userdb.dbvs"
 
@@ -623,8 +623,8 @@ RENDER user_list {
 
 ### 12.2 REST Endpoint Generation
 
-```brief
-// Auto-generate REST from DBrief schema
+```briv
+// Auto-generate REST from DBriv schema
 REST @users {
     GET /users           // -> @users->ALL
     GET /users/:id       // -> @users->GET id
@@ -640,7 +640,7 @@ REST @users {
 
 ### 13.1 Index Strategies
 
-```brief
+```briv
 // Hash index on field
 INDEX @1 ON name HASH
 
@@ -660,7 +660,7 @@ INDEX @1 ON (role, department) COMPOSITE
 
 ### 13.3 Query Planning
 
-```brief
+```briv
 // Hint for query optimizer
 @1->FILTER role == "admin" | USE INDEX role_idx
 
@@ -674,7 +674,7 @@ VIEW admin_list = @1->FILTER role == "admin"
 
 ### 14.1 Backend Selection
 
-```brief
+```briv
 // Embeddable
 BACKEND sled
 
@@ -690,7 +690,7 @@ BACKEND remote
 
 ### 14.2 Configuration
 
-```brief
+```briv
 // Sled (embedded KV)
 BACKEND sled "./data.db"
 
@@ -715,7 +715,7 @@ BACKEND memory
 
 ### 15.1 Compile-Time Verification (SMT)
 
-```brief
+```briv
 // Verify contracts at compile time
 VERIFY compile
 
@@ -724,7 +724,7 @@ VERIFY compile
 
 ### 15.2 Runtime Verification
 
-```brief
+```briv
 // Verify at access time
 VERIFY runtime
 
@@ -733,14 +733,14 @@ VERIFY runtime
 
 ### 15.3 Observe Mode
 
-```brief
+```briv
 // Log violations, allow access
 VERIFY observe
 ```
 
 ### 15.4 Ignore Mode
 
-```brief
+```briv
 // Skip verification
 VERIFY ignore
 ```
@@ -751,7 +751,7 @@ VERIFY ignore
 
 ### 16.1 SystemVerilog (Hardware)
 
-```brief
+```briv
 // Generate SV package
 TARGET systemverilog "./kv260_pkg.sv"
 
@@ -764,7 +764,7 @@ TARGET systemverilog "./kv260_pkg.sv"
 
 ### 16.2 Rust
 
-```brief
+```briv
 TARGET rust "./config.rs"
 
 // Output:
@@ -774,7 +774,7 @@ TARGET rust "./config.rs"
 
 ### 16.3 C Headers
 
-```brief
+```briv
 TARGET c "./config.h"
 
 // Output:

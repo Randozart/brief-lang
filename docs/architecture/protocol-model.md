@@ -3,10 +3,10 @@
 
 ## 1. Core Thesis: Operations, Not Layouts
 
-Brief's type system is **protocol-based**, not layout-based. A type is defined by
+Briv's type system is **protocol-based**, not layout-based. A type is defined by
 what operations it supports, not by how many bytes it occupies on the target.
 
-```brief
+```briv
 type Int: #Int {
     op Add: add(#L, #R);
     op Sub: sub(#L, #R);
@@ -26,7 +26,7 @@ behavior matches the protocol contract.
 
 ### 1.1 The Implicit Golden Path: The Three Tiers
 
-Every value in Brief can be viewed through three lenses. The compiler resolves
+Every value in Briv can be viewed through three lenses. The compiler resolves
 all three at compile time — no runtime overhead:
 
 | Lens | Protocol | What you get | Example: `"1"` |
@@ -40,9 +40,9 @@ that plagues low-level languages. In C, a character literal like `'1'` evaluates
 to the integer `49` (ASCII encoding), conflating `#Bit` and `#Int`. To get the
 logical value `1`, the programmer must write `'1' - '0'` — a manual encoding hack.
 
-In Brief, the protocol cast selects the interpretation:
+In Briv, the protocol cast selects the interpretation:
 
-```brief
+```briv
 let addr: Ptr  = (Ptr) "1";      // → address in .rodata
 let byte: Bit  = (Bit) "1";      // → 0x31 (raw ASCII byte)
 let value: Int = (Int) "1";      // → 1 (logical integer)
@@ -70,7 +70,7 @@ final constant — no runtime conversion overhead.
 
 A type declares protocol membership via the colon syntax:
 
-```brief
+```briv
 type Int: #Int { ... };
 type UInt: Int { ... };         // UInt inherits #Int
 type Int8: Int { bits <~ 8; };  // Int8 inherits #Int with narrowed width
@@ -83,7 +83,7 @@ injects a `Cast.#<Category>` property for each protocol the type declares.
 
 Protocols can have named variants for different encodings:
 
-```brief
+```briv
 type String: #String<UTF8> { encoding <~ "UTF-8"; ... };
 type UTF16String: #String<UTF16> { ... };
 ```
@@ -98,7 +98,7 @@ unconditionally injects `#Bit` as a reachable node (layout_optimizer.rs:275-301)
 This provides the universal fallback: any type can be cast to `#Bit` to access
 its raw bit pattern, and back via `#Bit` cast to any sufficiently wide type.
 
-```brief
+```briv
 let raw: Bit = (Bit) myValue;       // always works
 let back: Int = (Int) raw;          // works if Int is wide enough
 ```
@@ -129,7 +129,7 @@ membership is enough.
 
 Cross-protocol conversion requires explicit operator declarations:
 
-```brief
+```briv
 type CustomType: #Int {
     op CastTo(#String<UTF8>) = my_to_string(#L);
     op CastFrom(#String<UTF8>) = my_from_string(#L);

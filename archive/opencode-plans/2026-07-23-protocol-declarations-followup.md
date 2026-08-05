@@ -8,7 +8,7 @@
 
 A protocol declaration defines **both** compatibility (edges) and transformation (functions).
 
-```brief
+```briv
 proto ASCII: #String {
     // REQUIRED: Edge with binding — defines HOW layouts differ
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
@@ -33,7 +33,7 @@ proto ASCII: #String {
 
 The binding functions are `defn` declarations with bodies the compiler can inline:
 
-```brief
+```briv
 defn ASCII_to_UTF8(x: #String<ASCII>) -> #String<UTF8> {
     // Bitwise ops — defines how the ASCII layout maps to UTF8
     // The compiler inlines this body for proof purposes
@@ -55,7 +55,7 @@ The `#String<ASCII>` parameter types in the `defn` are elegant — they declare 
 
 ### What gets proven
 
-```brief
+```briv
 // Given this protocol:
 CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
 CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -141,7 +141,7 @@ for item in &items {
 ### Part E: Follow-up plan update
 
 **Prelude (`lib/std/protocols.bv`):**
-```brief
+```briv
 // Non-default protocol variants with bindings.
 // The bindings define actual transformations between layouts.
 

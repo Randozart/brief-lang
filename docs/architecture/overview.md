@@ -1,4 +1,4 @@
-# Brief Compiler Architecture Overview
+# Briv Compiler Architecture Overview
 
 > **2026-07-20:** The three-layer architecture (CTD + ALU + TOML config) described
 > below is superseded by the **hashword protocol system**. See
@@ -13,7 +13,7 @@
 > See `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md`.
 > The old `Collect$`/`MatchIR$` serialize-deserialize intrinsics are removed.
 > Plugins now navigate the live AST via `Tag$`, `Named$`, `ForEach$`, etc.
-> Full Brief code (`defn`/`let`/`if`/`match`) is evaluated at compile time inside
+> Full Briv code (`defn`/`let`/`if`/`match`) is evaluated at compile time inside
 > `$(Stage)` blocks (Level C). Plugins can inject other plugins via `Stage$.Insert$`.
 > Diagnostics via `EmitInfo$`/`EmitWarning$`/`EmitError$`.
 >
@@ -29,13 +29,13 @@
 > `from #System` (the sole protocol hashword) replaces `from "c"`.
 > See `docs/architecture/conditional-ffi.md`.
 >
-> **2026-07-25:** Bounty install-time compilation pipeline. `briefc bounty`
+> **2026-07-25:** Bounty install-time compilation pipeline. `brivc bounty`
 > serializes the typed AST to `.beastpack` (with noise-pairing obfuscation),
 > compiles the tamer to `.lair` VM bytecode via `BackendKind::Vm`, and bundles
 > them into a portable `.bounty` data file. The `tamer` system tool (written
-> in Brief, compiled natively via LLVM) reads `.bounty` files, interprets the
+> in Briv, compiled natively via LLVM) reads `.bounty` files, interprets the
 > `.lair` bytecode, and produces a native binary on the customer's machine.
-> See `docs/plans/2026-07-25-phase6-tamer-in-brief.md`.
+> See `docs/plans/2026-07-25-phase6-tamer-in-briv.md`.
 >
 > **2026-07-26:** DotHash `.#` replaces `:>` for property projections
 > (`arr .#Size`, `s .#Bytes`). Type inheritance uses `:` instead of `<:`
@@ -43,12 +43,12 @@
 > on struct/obj fields. "Memory by Contract" renamed to "Memory by Proof".
 > See `docs/plans/2026-07-26-tamer-zero-c-and-static-memory.md` §Phase 1.6.
 >
-> **2026-07-26:** Webstack v2 — Rendered Brief compiles to **WASM + JS shim**
+> **2026-07-26:** Webstack v2 — Rendered Briv compiles to **WASM + JS shim**
 > (not TypeScript). The old `WebstackGenerator` (TS emitter) is superseded by
 > `LlvmBackend(wasm32)` + `GlueWebGenerator`. `rstruct` keyword deprecated in
 > favor of `render struct`/`render obj`. See
-> `docs/architecture/features/rendered-brief-wasm.md` and
-> `docs/plans/2026-07-26-rendered-brief-webstack-v2.md`.
+> `docs/architecture/features/rendered-briv-wasm.md` and
+> `docs/plans/2026-07-26-rendered-briv-webstack-v2.md`.
 >
 > **2026-07-31:** Composite-node decomposition and minimal-state loop purity.
 > A reactive transaction whose body contains side-effecting `when` guards is a
@@ -189,7 +189,7 @@ CLI: --backend overrides the config file.
 
 ## Operations vs Intrinsics
 
-Brief distinguishes between two kinds of compiler-known operations:
+Briv distinguishes between two kinds of compiler-known operations:
 
 | Kind | Syntax | Dispatch | Configurable |
 |------|--------|----------|--------------|
@@ -204,7 +204,7 @@ op; the move pass rejects a later read) and the **stream symbols**
 is a stream handle). See `docs/architecture/agent-reference.md` §1.3.
 
 Example:
-```brief
+```briv
 a + b           → Expr::BinaryOp(Add, a, b)    →  Operation — config file dispatch
 Sqrt#(x)        → Expr::Call("Sqrt#", [x])     →  Intrinsic — backend chooses
 my_int + other  → Expr::BinaryOp(Add, my, other) →  Operation, but type override checked first
@@ -229,7 +229,7 @@ Expr::BinaryOp(Add, lhs, rhs)
 
 ### Override syntax
 
-```brief
+```briv
 // Same-type: inside type definition
 type Int : Bits {
     maxbits <~ 64;
@@ -257,7 +257,7 @@ Flow:
   codegen ──► derive_llvm_type(Some("Int"), 8, &config) → "i64"
 ```
 
-The Rust binary is a thin reader of the type system defined in Brief source.
+The Rust binary is a thin reader of the type system defined in Briv source.
 
 ## How the Backend Derives Types (Backend Chooses)
 
@@ -377,14 +377,14 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 
 | Mode | Command | Output |
 |------|---------|--------|
-| Default | `briefc build file.bv` | Executable binary |
-| LLVM IR | `briefc build --llvm` | `file.ll` |
-| Static library | `briefc library file.bv` | `libfile.a` |
-| Shared library | `briefc build --shared` | `file.so` |
+| Default | `brivc build file.bv` | Executable binary |
+| LLVM IR | `brivc build --llvm` | `file.ll` |
+| Static library | `brivc library file.bv` | `libfile.a` |
+| Shared library | `brivc build --shared` | `file.so` |
 
-## Pure-Brief Standard Library Functions
+## Pure-Briv Standard Library Functions
 
-Several byte-string operations are implemented in pure Brief (no frgn) using
+Several byte-string operations are implemented in pure Briv (no frgn) using
 `Load#` + convergent `txn` loops with convergence contracts:
 
 | Function | File | Algorithm |

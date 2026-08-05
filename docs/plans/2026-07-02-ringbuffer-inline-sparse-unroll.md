@@ -78,7 +78,7 @@ add an `inop` variant with heap semantics.
 ### Verification
 ```bash
 # Compare before/after:
-./target/release/brief-compiler llvm benchmarks/queue_drain.bv
+./target/release/briv-compiler llvm benchmarks/queue_drain.bv
 grep '%aam\|malloc\|realloc' benchmarks/queue_drain.ll  # should be 0
 opt -O2 -pass-remarks=sroa benchmarks/queue_drain.ll -disable-output 2>&1
 # Should show SROA-promoted RingBuf fields
@@ -171,7 +171,7 @@ For K > 8, keep the existing `srem + switch` dispatch (it's optimal).
 
 ### Verification
 ```bash
-./target/release/brief-compiler llvm benchmarks/sparse_dispatch.bv
+./target/release/briv-compiler llvm benchmarks/sparse_dispatch.bv
 grep 'srem\|switch' benchmarks/sparse_dispatch.ll  # should be 0 (in main loop)
 bash benchmarks/build_and_bench.sh  # ratio should drop from 2.98x to ~1.2x
 ```

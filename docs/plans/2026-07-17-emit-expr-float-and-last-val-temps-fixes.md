@@ -46,7 +46,7 @@ All float operations use `double` irrespective of whether the operand type is
 
 ## Type Convention
 
-| Brief Type | LLVM Type | Width |
+| Briv Type | LLVM Type | Width |
 |-----------|-----------|-------|
 | `Float`   | `float`   | 32-bit |
 | `Float64` | `double`  | 64-bit |

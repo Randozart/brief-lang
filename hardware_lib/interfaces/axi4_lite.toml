@@ -7,7 +7,7 @@ type = "memory_mapped_slave"
 address_width = 18
 data_width = 32
 
-# Map clean Brief names to AXI physical port names
+# Map clean Briv names to AXI physical port names
 [port_map]
 clock = "s_axi_aclk"
 reset_n = "s_axi_aresetn"

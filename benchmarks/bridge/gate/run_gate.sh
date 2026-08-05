@@ -1,9 +1,9 @@
 #!/bin/bash
 # run_gate.sh — the zero-friction FFI gate.
-# Builds bench.bv, then runs Gate A (Brief feature_hash vs native) and
-# Gate B (Brief add vs native internal) for every host whose toolchain is
-# present. Toolchains: cc/g++/go (PATH or ~/brief-tools/go), javac (PATH or
-# ~/brief-tools/jdk-*), lua (~/brief-tools/lua-*/src/lua), python3, node.
+# Builds bench.bv, then runs Gate A (Briv feature_hash vs native) and
+# Gate B (Briv add vs native internal) for every host whose toolchain is
+# present. Toolchains: cc/g++/go (PATH or ~/briv-tools/go), javac (PATH or
+# ~/briv-tools/jdk-*), lua (~/briv-tools/lua-*/src/lua), python3, node.
 set -u
 export LC_ALL=C
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -12,12 +12,12 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 SEED=42
 
-briefc="$ROOT/target/debug/briefc"
-[ -x "$briefc" ] || briefc="$ROOT/target/release/briefc"
+brivc="$ROOT/target/debug/brivc"
+[ -x "$brivc" ] || brivc="$ROOT/target/release/brivc"
 BV="$ROOT/examples/glue-host/bench.bv"
 
 echo "== build bridge =="
-BC() { (cd "$ROOT" && "$briefc" "$@") || exit 1; }
+BC() { (cd "$ROOT" && "$brivc" "$@") || exit 1; }
 BC build "$BV" --library --out "$WORK"
 BC bindings "$BV" c --out "$WORK" >/dev/null
 for lang in go java lua python node; do
@@ -49,8 +49,8 @@ collect() { # label; then the driver prints BRIEF_FH etc. Runs in $WORK. 3 inter
     rm -f "$WORK/m.bf" "$WORK/m.nf" "$WORK/m.ba" "$WORK/m.na"
 }
 
-echo "== gate (Brief vs native, ns/call) =="
-printf "%-6s %9s %9s %7s %9s %9s %7s\n" "host" "BriefFH" "NatFH" "FHratio" "BriefAdd" "NatAdd" "Addratio"
+echo "== gate (Briv vs native, ns/call) =="
+printf "%-6s %9s %9s %7s %9s %9s %7s\n" "host" "BrivFH" "NatFH" "FHratio" "BrivAdd" "NatAdd" "Addratio"
 
 # C
 if command -v cc >/dev/null && command -v clang >/dev/null; then
@@ -60,9 +60,9 @@ fi
 if command -v g++ >/dev/null; then
     g++ -O3 -o "$WORK/gate_cpp" "$HERE/gate_cpp.cpp" "$WORK/libbench.a" && collect C++ "$WORK/gate_cpp" "$SEED"
 fi
-# Go — Brief side (cgo) + native side (pure Go, CGO=0; a cgo-linked binary
+# Go — Briv side (cgo) + native side (pure Go, CGO=0; a cgo-linked binary
 # produced bogus sub-1ns/iter native numbers).
-go="go"; [ -x "$HOME/brief-tools/go/bin/go" ] && go="$HOME/brief-tools/go/bin/go"
+go="go"; [ -x "$HOME/briv-tools/go/bin/go" ] && go="$HOME/briv-tools/go/bin/go"
 if command -v "$go" >/dev/null 2>&1; then
     mkdir -p "$WORK/gogo" && cp "$WORK/libbench.a" "$WORK/gogo/" && cp "$HERE/gate.go" "$WORK/gogo/" \
       && printf 'module gatego\n\ngo 1.22\n' > "$WORK/gogo/go.mod" \
@@ -76,7 +76,7 @@ if command -v "$go" >/dev/null 2>&1; then
 fi
 # Java
 JAVAC=javac; JAVA=java
-J=$(ls -d "$HOME"/brief-tools/jdk-*/bin 2>/dev/null | head -1)
+J=$(ls -d "$HOME"/briv-tools/jdk-*/bin 2>/dev/null | head -1)
 if [ -n "$J" ]; then JAVAC="$J/javac"; JAVA="$J/java"; fi
 if [ -x "$JAVAC" ]; then
     cp "$HERE/Gate.java" "$WORK/" \
@@ -86,7 +86,7 @@ if [ -x "$JAVAC" ]; then
       && printf "%-6s %8s %8s %6.2f %8s %8s %6.2f\n" "Java" "$bf" "$nf" "$(awk "BEGIN{print $bf/$nf}")" "$ba" "$na" "$(awk "BEGIN{print $ba/$na}")"
 fi
 # Lua
-LUA=$(ls "$HOME"/brief-tools/lua-*/src/lua 2>/dev/null | head -1)
+LUA=$(ls "$HOME"/briv-tools/lua-*/src/lua 2>/dev/null | head -1)
 if [ -n "$LUA" ] && [ -x "$LUA" ]; then
     collect Lua "$LUA" -e "package.cpath='$WORK/?.so'" "$HERE/gate.lua" "$WORK" "$SEED"
 fi

@@ -1,4 +1,4 @@
-# Brief Praxis: Topology Over Timing
+# Briv Praxis: Topology Over Timing
 
 **Version:** 0.12.0  
 **Status:** Core Design Principle
@@ -44,9 +44,9 @@
 
 ## The Fundamental Insight
 
-**Brief is not a programming language, so much as it is a language for describing the shape of computation.**
+**Briv is not a programming language, so much as it is a language for describing the shape of computation.**
 
-Traditional languages force you to write **instructions** (do this, then that). Traditionally, these are your imperative languages, which admittedly maps well onto our understanding of driving a CPU. Brief lets you write **relationships** (when this is true, that must become true). The execution is not a sequence, but a tiny, well-contrained computational universe settling into equilibrium. And the compiler will make sure to block an attempt at defining a universe that isn't internally verifiable.
+Traditional languages force you to write **instructions** (do this, then that). Traditionally, these are your imperative languages, which admittedly maps well onto our understanding of driving a CPU. Briv lets you write **relationships** (when this is true, that must become true). The execution is not a sequence, but a tiny, well-contrained computational universe settling into equilibrium. And the compiler will make sure to block an attempt at defining a universe that isn't internally verifiable.
 
 ## Core Principles
 
@@ -54,10 +54,10 @@ Traditional languages force you to write **instructions** (do this, then that). 
 
 In C, Rust, Python: the CPU follows a single finger pointing at instructions one by one.
 
-In Brief: **all transactions exist simultaneously**. The "reactor loop" is just checking which parts of the logical universe are currently out of equilibrium.
+In Briv: **all transactions exist simultaneously**. The "reactor loop" is just checking which parts of the logical universe are currently out of equilibrium.
 
 **Implication for Optimization:**
-```brief
+```briv
 // These are NOT sequential checks
 node door_open() [player_at_door && has_key][door.state == OPEN] { ... }
 node door_locked() [player_at_door && !has_key][door.state == LOCKED] { ... }
@@ -83,8 +83,8 @@ if (x) {
 }
 ```
 
-Brief:
-```brief
+Briv:
+```briv
 node do_A [x][A_done == true] { ... }
 node do_B [!x][B_done == true] { ... }
 ```
@@ -107,8 +107,8 @@ while (x < 10) {
 }
 ```
 
-Brief:
-```brief
+Briv:
+```briv
 node count_up [x < 10][x == @x + 1] {
     &x = x + 1;
     term;
@@ -131,7 +131,7 @@ node count_up [x < 10][x == @x + 1] {
     inc x
     jmp .loop
 
-; Brief transaction (proven bounded)
+; Briv transaction (proven bounded)
 mov ecx, 10
 sub ecx, eax          ; iterations = 10 - x
 lea eax, [eax + ecx]  ; x = x + iterations (single instruction!)
@@ -149,7 +149,7 @@ The SMT solver asks: *"Where does this vector end?"*
 - Boundary: `10`
 - **Fixed Point (Equilibrium):** `10`
 
-```brief
+```briv
 let count = 0;
 node count_up [count < 10][count == @count + 1] {
     &count = count + 1;
@@ -173,12 +173,12 @@ The compiler didn't "optimize a loop"—it **solved a difference equation.** The
 
 Traditional: pointers, heap, GC, cache misses.
 
-Brief: **addresses are part of the type system**. The compiler knows exactly which transactions touch which memory.
+Briv: **addresses are part of the type system**. The compiler knows exactly which transactions touch which memory.
 
 **Optimization Strategies:**
 
 #### A. Predictive Fetching
-```brief
+```briv
 node process_sensor() [buffer_ready && threshold > 100][processed == true] {
     let data = sensor_buffer[0];
     ...
@@ -197,7 +197,7 @@ prefetcht0 [sensor_buffer]  ; Load into L1 BEFORE transaction fires
 **Result:** Zero-latency memory access when transaction actually fires.
 
 #### B. Memory Overlay (Proven Safe)
-```brief
+```briv
 txn phase_1() [!phase_2_done][phase_1_done == true] {
     let temp: Int;  // Uses address 0x1000
     ...
@@ -224,7 +224,7 @@ phase_2:
 **Result:** 50% stack reduction, better cache utilization.
 
 #### C. Spatial Garbage Collection
-```brief
+```briv
 txn create_temp() [!temp_exists][temp_exists == true] {
     &temp_data = compute();
     term;
@@ -258,7 +258,7 @@ destroy_temp:
 The SMT solver doesn't "check" your code. It simulates the physics of your logical universe by figuring out what must be true when at which time to run what. And it's allergic to paradoxes.
 
 **Counterexample = Physics Violation:**
-```brief
+```briv
 // ❌ REJECTED by compiler
 node bad_transfer() [balance >= 100][balance == @balance - 100] {
     [balance < 50] {
@@ -287,7 +287,7 @@ jmp .done
 .error:
     call panic
 
-; Brief (proven safe)
+; Briv (proven safe)
 sub [balance], 100  ; No check needed - proven safe
 .done:
 ```
@@ -300,7 +300,7 @@ sub [balance], 100  ; No check needed - proven safe
 
 When two transactions always fire together, fuse them:
 
-```brief
+```briv
 node A [x > 0][x == @x - 1] { &x = x - 1; term; }
 node B [y < 100][y == @y + 1] { &y = y + 1; term; }
 
@@ -321,7 +321,7 @@ node A_B [x > 0 && y < 100][x == @x - 1 && y == @y + 1] {
 
 In hardware, this is called **Logic Depth**.
 
-```brief
+```briv
 node setup() [init][ready == true] { ... }
 node compute() [ready][result == func(data)] { ... }
 node output() [result][complete == true] { ... }
@@ -332,7 +332,7 @@ node output() [result][complete == true] { ... }
 Task A → Task B → Task C
 ```
 
-**Brief (1 logical pulse):**
+**Briv (1 logical pulse):**
 The compiler analyzes: if A's postcondition is B's precondition, it **fuses the gates**.
 
 ```verilog
@@ -352,12 +352,12 @@ On FPGA: the difference between a state machine and a **combinatorial datapath**
 
 When guards are expensive, pre-compute:
 
-```brief
+```briv
 node complex_check() [expensive_calc(x) && y > 0][...] { ... }
 ```
 
 **Compiler generates:**
-```brief
+```briv
 // Cached guard result
 let guard_cache: Bool = false;
 
@@ -377,14 +377,14 @@ node complex_check() [guard_cache][...] { ... }
 
 Group reactive transactions that modify same state:
 
-```brief
+```briv
 node increment_a() [cond_a][a == @a + 1] { &a = a + 1; term; }
 node increment_b() [cond_b][b == @b + 1] { &b = b + 1; term; }
 node update_sum() [a != @a || b != @b][sum == a + b] { &sum = a + b; term; }
 ```
 
 **Compiler generates:**
-```brief
+```briv
 // Batched update - only fires once after both increments
 node update_sum_batched() 
     [(a != @a || b != @b) && !update_pending]
@@ -403,7 +403,7 @@ node update_sum_batched()
 
 Use transaction access patterns to optimize memory layout:
 
-```brief
+```briv
 struct Entity {
     position: Vec3,
     health: Int,
@@ -433,7 +433,7 @@ struct Entity_Optimized {
 
 When transactions are proven independent, schedule in parallel:
 
-```brief
+```briv
 async node physics() [...] { ... }
 async node ai() [...] { ... }
 async node render() [...] { ... }
@@ -479,9 +479,9 @@ Traditional raycasting:
 while (!hit_wall) { step(); }  // N iterations
 ```
 
-Brief: The compiler analyzes the **Shape** of the world (BSP tree) and the **Vector** of the ray. If the map is static (a Fact), it synthesizes the collision point as a direct mathematical lookup:
+Briv: The compiler analyzes the **Shape** of the world (BSP tree) and the **Vector** of the ray. If the map is static (a Fact), it synthesizes the collision point as a direct mathematical lookup:
 
-```brief
+```briv
 struct Ray { origin: Vec3, direction: Vec3 }
 struct BSPNode { left: Box, right: Box, wall: Wall }
 
@@ -527,7 +527,7 @@ node cast_ray() [valid_ray][collision_point == solve_bsp(ray, bsp)]
 
 ## The Non-Von Neumann Advantage
 
-Traditional programmers think in **sequences**. Brief programmers think in **shapes**.
+Traditional programmers think in **sequences**. Briv programmers think in **shapes**.
 
 **Sequence Thinking (C, Rust):**
 ```
@@ -539,7 +539,7 @@ Traditional programmers think in **sequences**. Brief programmers think in **sha
 6. Next frame...
 ```
 
-**Shape Thinking (Brief):**
+**Shape Thinking (Briv):**
 ```
 - Player at door + has key → door open
 - Player at door + no key → play sound
@@ -572,7 +572,7 @@ Traditional programmers think in **sequences**. Brief programmers think in **sha
 
 Traditional coding is **knitting**—one stitch at a time. For a 10×10 square, click the needles 100 times.
 
-Brief is a **loom**. You set the warp (initial state) and the weft (transactions), then press the lever. The entire pattern appears at once because the structure **enforces** it.
+Briv is a **loom**. You set the warp (initial state) and the weft (transactions), then press the lever. The entire pattern appears at once because the structure **enforces** it.
 
 **Execution is just the compiler finding the shortest mathematical path between "What is true now" and "What must be true next."**
 
@@ -612,5 +612,5 @@ By removing the while loop, you didn't just clean the code—you made **Time** o
 ---
 
 *Last updated: 2026-05-07*  
-*Version: Brief v0.12.0*  
+*Version: Briv v0.12.0*  
 *Status: Core Philosophy Documented*

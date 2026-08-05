@@ -15,7 +15,7 @@
 //     weight). SSO's 6-byte default is derived from the String handle
 //     representation (align 8 − 2 tag bits); the config entry is an override.
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): both files migrated from TOML
+// 2026-08-03 (Phase 3, data-briv-config plan): both files migrated from TOML
 // to the flat .dbvl line-table form, still baked at compile time via include_str!
 // and cached with LazyLock.
 
@@ -103,12 +103,12 @@ pub fn known_target_triple(triple: &str) -> bool {
 
 /// Walk config/targets.dbvl's `target.<prefix>` rows.
 ///
-/// 2026-08-03 (Phase 3, data-brief-config plan): migrated from the
+/// 2026-08-03 (Phase 3, data-briv-config plan): migrated from the
 /// `[target.<prefix>]` tables in targets.dbvl. Row shape:
 /// `target.<prefix>: <float_registers>; <dense_compute_density>; <vector_min_width>;`.
 fn load_target_settings() -> HashMap<String, TargetSettings> {
     let content = include_str!("../config/targets.dbvl");
-    let db = match crate::dbrief::config_db::ConfigDb::from_str(content) {
+    let db = match crate::dbriv::config_db::ConfigDb::from_str(content) {
         Ok(db) => db,
         Err(e) => panic!("config/targets.dbvl parse error: {}", e),
     };
@@ -140,12 +140,12 @@ fn load_target_settings() -> HashMap<String, TargetSettings> {
 
 /// Parse config/ir-lowering.dbvl with per-key defaults.
 ///
-/// 2026-08-03 (Phase 3, data-brief-config plan): migrated from ir-lowering.toml
+/// 2026-08-03 (Phase 3, data-briv-config plan): migrated from ir-lowering.toml
 /// to the flat .dbvl line-table form; still compile-time baked via include_str!.
 /// Absent keys fall back to the hardcoded defaults, matching pre-migration.
 fn load_ir_lowering() -> IrLoweringSettings {
     let content = include_str!("../config/ir-lowering.dbvl");
-    let db = match crate::dbrief::config_db::ConfigDb::from_str(content) {
+    let db = match crate::dbriv::config_db::ConfigDb::from_str(content) {
         Ok(db) => db,
         Err(e) => panic!("config/ir-lowering.dbvl parse error: {}", e),
     };

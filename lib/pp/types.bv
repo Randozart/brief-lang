@@ -1,5 +1,5 @@
 // lib/pp/types.bv — AST pretty-printer for Type variants
-// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Brief
+// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Briv
 //
 // Each function takes the sub-expression strings pre-formatted by the
 // caller (Rust Display impl handles recursion). This first pass tests

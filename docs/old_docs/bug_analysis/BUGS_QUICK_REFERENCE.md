@@ -1,4 +1,4 @@
-# Brief Compiler - Parser Bugs Quick Reference
+# Briv Compiler - Parser Bugs Quick Reference
 
 ## Quick Diagnosis
 
@@ -78,7 +78,7 @@ output.push_str("wasm[`invoke_${config.txn}`]();");
 ```
 
 **Example that breaks:**
-```brief
+```briv
 txn Counter.increment [true][@count + 1 == count] {
   &count = count + 1;
   term;
@@ -132,7 +132,7 @@ But JS tries to call: `invoke_increment` ← ERROR!
 
 ### Before Fix: These all fail
 
-```brief
+```briv
 # Test 1: Nested divs
 rstruct Container {
   <div class="outer">
@@ -159,7 +159,7 @@ txn Counter.increment [true][@count + 1 == count] {
 
 ### After Fix: All work
 
-```brief
+```briv
 # Test 1: Nested divs
 rstruct Container {
   <div class="outer">

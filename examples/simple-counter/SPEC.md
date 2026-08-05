@@ -2,7 +2,7 @@
 
 ## Overview
 
-A minimal counter program demonstrating Brief's contract system.
+A minimal counter program demonstrating Briv's contract system.
 
 ## Program Structure
 
@@ -40,7 +40,7 @@ Preconditions define when a transaction may run. If the precondition is false, t
 
 ### Postconditions
 
-Postconditions define what must be true after a transaction completes. Brief mathematically verifies that the postcondition can be satisfied from the precondition.
+Postconditions define what must be true after a transaction completes. Briv mathematically verifies that the postcondition can be satisfied from the precondition.
 
 ### The @ Symbol
 

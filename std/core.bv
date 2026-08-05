@@ -1,6 +1,6 @@
-// Brief Core Standard Library
+// Briv Core Standard Library
 // 
-// Native Brief implementations - no FFI needed.
+// Native Briv implementations - no FFI needed.
 // These are provably correct state and computation patterns.
 
 // ============================================================================
@@ -81,7 +81,7 @@ defn is_zero(x: Int)
 };
 
 // ============================================================================
-// Float Comparison (since Brief has basic float ops)
+// Float Comparison (since Briv has basic float ops)
 // ============================================================================
 
 defn float_is_positive(x: Float) 

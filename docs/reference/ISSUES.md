@@ -1,6 +1,6 @@
 # Issues Log
 
-**Project:** brief-compiler
+**Project:** briv-compiler
 **Purpose:** Approaches that failed and required different solutions
 
 ---

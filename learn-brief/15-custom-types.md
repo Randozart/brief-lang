@@ -1,6 +1,6 @@
 # Defining Custom Types
 
-Brief lets you define types that behave like built-in `Int`, `Float`, and
+Briv lets you define types that behave like built-in `Int`, `Float`, and
 `String`. The same hashword protocol system that drives primitives also
 drives your custom types — no special compiler support needed.
 
@@ -10,7 +10,7 @@ Use the `type` keyword with a protocol hashword to define a new type. Layout
 comes from fields; the protocol provides its own self-arithmetic; overloads
 are declared **RHS-only** (the LHS is the declaring type):
 
-```brief
+```briv
 type MyInt : #Int {
     data: Bits<64>;              // layout: 8 bytes
     op Add: func(#L, #R);        // binding form — the generic self-add
@@ -35,7 +35,7 @@ No `!> maxbits:`, `!> alignment:`, `!> llvm:`, `!> storage:`, `default_width`,
 The hashword in an op signature tells the backend to dispatch to its
 intrinsic handler for that category:
 
-```brief
+```briv
 type Bfloat16 : #Float {
     data: Bits<16>;
     op Add(#Float): bfloat_add(#L, #R);   // protocol-family RHS overload
@@ -57,7 +57,7 @@ Functions bound to ops via `: fn(...)` are emitted with LLVM's `alwaysinline`.
 
 Alongside `op`, types declare metaproperties via `prop`:
 
-```brief
+```briv
 type MyString: Bits #String {
     op CastTo(#Bits) = my_encode(#L);
     prop Size = my_chars(#L);     // .^Len → character count
@@ -81,7 +81,7 @@ but a custom type can override them. Same resolution mechanism as `op`.
 
 Hashwords can be parameterized by protocol variant:
 
-```brief
+```briv
 type ASCIIString {
     data: Bits<64>;
     len: Bits<64>;
@@ -106,7 +106,7 @@ differ.
 
 Types declare how they are constructed from source text:
 
-```brief
+```briv
 type HexColor {
     data: Bits<24>;
     op Parse(Bare) = parse_hex(#L);              // FF00FF → HexColor
@@ -139,7 +139,7 @@ When the compiler encounters a literal, it checks the target type's Parse ops:
 The `CastTo`/`CastFrom` pair handles conversion between types via the
 protocol category:
 
-```brief
+```briv
 type Latin1String {
     data: Bits<64>;
     len: Bits<64>;
@@ -172,7 +172,7 @@ is reported.
 
 ## 7. Type Parameter Constraints
 
-```brief
+```briv
 type HashMap<K: #String, V> {
     data: Bits<64>;
     len: Bits<64>;
@@ -197,7 +197,7 @@ the GLUE bridge. When a function with a custom type parameter is exported:
 3. The language-appropriate native type and C ABI type are selected
 4. The `CastTo` function generates the conversion code at the boundary
 
-```brief
+```briv
 // A custom type that speaks the #Int protocol
 type MyFixedInt {
     data: Bits<32>;

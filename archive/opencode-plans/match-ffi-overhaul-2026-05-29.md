@@ -76,7 +76,7 @@ Expr::Match { value, arms }:
     → Error(non-exhaustive match) // should be caught at compile-time eventually
 ```
 
-### Self-hosted (Brief-in-Brief)
+### Self-hosted (Briv-in-Briv)
 - `token.bv`: Add `KeywordMatch`
 - `lexer.bv`: Recognize `match`
 - `ast.bv`: Add `ExprMatch(String, List<MatchArm>)`, `MatchArm { pattern: MatchPattern, guard: Expr, body: Expr }`, `MatchPattern { variant: String, fields: List<String> }`
@@ -118,7 +118,7 @@ frgn strlen {
 At resolution time:
 1. Compiler finds the declaration
 2. At interpreter startup OR first call, uses `libloading::Library::new("libc.so.6")` + `library.get::<...>("strlen")`
-3. Auto-generated wrapper converts Brief args → C values (`String` → `*const c_char`, etc.)
+3. Auto-generated wrapper converts Briv args → C values (`String` → `*const c_char`, etc.)
 4. Calls function pointer directly (~1-2ns overhead — same as native C call)
 5. Converts return value back
 

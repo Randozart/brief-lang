@@ -1,12 +1,12 @@
 # Best Practices and Advanced Topics
 
-Professional Brief development guidelines.
+Professional Briv development guidelines.
 
 ## Performance Tips
 
 ### 1. Use StringBuilder for String Concatenation
 
-```brief
+```briv
 // ❌ BAD - O(n²) performance
 let mut s = "";
 let i: Int = 0;
@@ -39,7 +39,7 @@ let s = sb.to_string();
 
 ### 3. Minimize State Mutations
 
-```brief
+```briv
 // ❌ BAD - many small mutations
 txn process() {
     &x = x + 1;
@@ -65,7 +65,7 @@ txn process() {
 
 ### 4. Use Reactive Transactions Wisely
 
-```brief
+```briv
 // ❌ BAD - fires too frequently
 node log_everything() [true][true] {
     println("State changed");
@@ -87,7 +87,7 @@ node log_important_changes()
 
 ### 1. Group Related Transactions
 
-```brief
+```briv
 // User management
 txn create_user(...) { ... }
 txn update_user(...) { ... }
@@ -107,7 +107,7 @@ txn revoke_role(...) { ... }
 
 ### 2. Use Modules for Large Projects
 
-```brief
+```briv
 // user_module.bv
 export txn create_user(...) { ... }
 export txn update_user(...) { ... }
@@ -125,7 +125,7 @@ import "auth_module";
 
 ### 3. Separate Concerns
 
-```brief
+```briv
 // models.bv - Data structures
 struct User { ... }
 struct Product { ... }
@@ -144,7 +144,7 @@ txn find_product(...) { ... }
 
 ### 1. Test Contracts
 
-```brief
+```briv
 // Test that postconditions hold
 defn test_increment() -> Bool {
     let old_counter = counter;
@@ -162,7 +162,7 @@ defn test_withdraw_insufficient_funds() -> Bool {
 
 ### 2. Test Edge Cases
 
-```brief
+```briv
 defn test_empty_list() -> Bool {
     let list: List<Int> = [];
     term list .^Len == 0;
@@ -181,7 +181,7 @@ defn test_negative_numbers() -> Bool {
 
 ### 3. Test Reactive Chains
 
-```brief
+```briv
 defn test_reactive_chain() -> Bool {
     // Set up initial state
     counter = 0;
@@ -199,7 +199,7 @@ defn test_reactive_chain() -> Bool {
 
 ### 1. Add Logging Transactions
 
-```brief
+```briv
 node log_state() [true][true] {
     println("Counter: " + String(counter));
     println("Balance: " + String(balance));
@@ -210,7 +210,7 @@ node log_state() [true][true] {
 
 ### 2. Use Invariants
 
-```brief
+```briv
 node check_invariants() [true][true] {
     [counter >= 0] {
         // Invariant holds
@@ -232,7 +232,7 @@ node check_invariants() [true][true] {
 
 ### 3. Trace Execution Paths
 
-```brief
+```briv
 let execution_log: List<String> = [];
 
 txn log_execution(step: String) {
@@ -253,7 +253,7 @@ txn process() {
 
 ### 1. Validate All Inputs
 
-```brief
+```briv
 txn create_user(username: String, email: String, password: String)
     [username .^Len >= 3 && username .^Len <= 20]
     [email.contains("@") && email.contains(".")]
@@ -268,7 +268,7 @@ txn create_user(username: String, email: String, password: String)
 
 ### 2. Use Access Control
 
-```brief
+```briv
 let current_user: Option<User> = None;
 let permissions: HashMap<String, List<String>> = new_map();
 
@@ -292,7 +292,7 @@ txn check_permission(resource: String, action: String)
 
 ### 3. Sanitize Outputs
 
-```brief
+```briv
 defn sanitize_html(input: String) -> String {
     let mut sb = new_builder();
     let i: Int = 0;
@@ -331,7 +331,7 @@ defn sanitize_html(input: String) -> String {
 
 ### 1. Infinite Reactive Loops
 
-```brief
+```briv
 // ❌ BAD - infinite loop
 node bad_increment() [true][counter == @counter + 1] {
     &counter = counter + 1;
@@ -348,7 +348,7 @@ node good_increment() [counter < 100][counter == @counter + 1] {
 
 ### 2. Race Conditions in Async Transactions
 
-```brief
+```briv
 // ❌ BAD - potential race condition
 async node bad_transfer() [balance >= 100][balance == @balance - 100] {
     &balance = balance - 100;
@@ -369,7 +369,7 @@ async node good_transfer()
 
 ### 3. Ignoring Error Results
 
-```brief
+```briv
 // ❌ BAD - ignores error
 let result = read_file(path);
 let content = result.value;  // Panics!
@@ -400,11 +400,11 @@ let result = read_file(path);
 
 ## Conclusion
 
-You've completed the Brief tutorial! 🎉
+You've completed the Briv tutorial! 🎉
 
 **Next Steps:**
-1. Build a complete project using Brief
-2. Contribute to the Brief ecosystem
+1. Build a complete project using Briv
+2. Contribute to the Briv ecosystem
 3. Share your knowledge with others
 4. Explore advanced topics in the specification
 

@@ -23,7 +23,7 @@ on each other and no dependencies on backend code:
 | **`.f` layout pre-processor** | `.f.bv` — indentation instead of braces | 16C |
 | **`.c` cell wrapper + `input`/`output`** | `.c.bv` — file becomes `cell <stem> { ... }` | 16D |
 | **Top-level scripting** | Implicit `[#]` + implicit `txn` wrapper | 16E |
-| **Stdlib `cli.c.bv`** | Extensible CLI framework in pure Brief | 16F |
+| **Stdlib `cli.c.bv`** | Extensible CLI framework in pure Briv | 16F |
 
 All are frontend-only. No backend, no `.dbvl` archive format, no SMT solver
 changes. Each can be implemented independently.
@@ -59,7 +59,7 @@ character-by-character and set boolean flags on `CompilationJob`.
 
 | Filename | Variant | Modifiers | Meaning |
 |----------|---------|-----------|---------|
-| `main.bv` | `bv` | — | Standard Brief |
+| `main.bv` | `bv` | — | Standard Briv |
 | `main.f.bv` | `bv` | `f` | Formatted (indentation) |
 | `main.s.bv` | `bv` | `s` | Strict checks |
 | `main.sf.bv` | `bv` | `s`, `f` | Strict + Formatted |
@@ -81,7 +81,7 @@ correct parser pipeline.
 /// 2026-07-12: Phase 16A.
 pub struct CompilationJob {
     pub source_path: PathBuf,
-    pub variant: BriefVariant,
+    pub variant: BrivVariant,
     pub layout_parser: bool,      // .f
     pub strict_mode: bool,        // .s
     pub cell_wrapper: bool,       // .c
@@ -99,7 +99,7 @@ fn analyze_file_pipeline(path: &Path) -> Result<CompilationJob, CompilerError> {
     let parts: Vec<&str> = filename.split('.').collect();
     match parts.len() {
         2 => {
-            let variant = BriefVariant::from_str(parts[1])?;
+            let variant = BrivVariant::from_str(parts[1])?;
             Ok(CompilationJob {
                 source_path: path.to_path_buf(),
                 variant,
@@ -110,7 +110,7 @@ fn analyze_file_pipeline(path: &Path) -> Result<CompilationJob, CompilerError> {
         }
         3 => {
             let flags = parts[1];
-            let variant = BriefVariant::from_str(parts[2])?;
+            let variant = BrivVariant::from_str(parts[2])?;
             let layout_parser = flags.contains('f');
             let strict_mode = flags.contains('s');
             let cell_wrapper = flags.contains('c');
@@ -202,7 +202,7 @@ backend generates a lightweight argument parser from the function signature.
 
 ### Semantics
 
-```brief
+```briv
 defn build(project: String, clean: Bool) -> Int
     [#]
     [project != ""]
@@ -215,7 +215,7 @@ defn build(project: String, clean: Bool) -> Int
    `argc`/`argv` parser from the function's parameter names, types, and
    preconditions.
 
-2. **Call graph isolation:** No internal Brief code can call `build()`.
+2. **Call graph isolation:** No internal Briv code can call `build()`.
    The SMT verifier enforces this statically.
 
 3. **Precondition validation:** `[project != ""]` is validated at runtime
@@ -498,7 +498,7 @@ impl LayoutPreprocessor {
 ```
 
 **Mixed indentation detection:** If the file mixes tabs and spaces, emit a
-clear error: `error: mixed indentation (tabs and spaces) in formatted Brief
+clear error: `error: mixed indentation (tabs and spaces) in formatted Briv
 (.f.bv)`. Only one indentation style per file.
 
 **Tests:**
@@ -572,7 +572,7 @@ Output,
 `output` as top-level declarations that define the cell's parameters and
 return type.
 
-```brief
+```briv
 // server.c.bv
 input port: UInt16;
 input verbose: Bool;
@@ -677,7 +677,7 @@ fn wrap_in_cell(program: Program, cell_name: &str) -> Result<TopLevel, CompilerE
 
 ### Goal
 
-Allow writing linear Brief code at the top level without explicitly wrapping
+Allow writing linear Briv code at the top level without explicitly wrapping
 it in a `txn { ... }` block. The compiler automatically:
 1. Wraps statements in an implicit `txn` with the file stem as the name
 2. Adds `[#]` as the implicit precondition
@@ -767,7 +767,7 @@ A programmer building a CLI tool never writes argv parsing, never matches
 subcommands manually. They import the cell, wire it with a `trg` binding,
 and react to the outputs:
 
-```brief
+```briv
 // myapp.bv
 import cli from "std/cli";
 
@@ -788,7 +788,7 @@ txn handle_test {
 
 ### Design sketch
 
-```brief
+```briv
 // lib/std/cli.c.bv
 // Reactive CLI parser cell.
 // Reads environment entry data via metadata, emits structured results

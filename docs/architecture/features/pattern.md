@@ -5,19 +5,19 @@
 
 ## Overview
 
-Pattern matching tests a value against a pattern, binding variables from the match. Brief supports several pattern forms used in `match` expressions and `uni` blocks.
+Pattern matching tests a value against a pattern, binding variables from the match. Briv supports several pattern forms used in `match` expressions and `uni` blocks.
 
 ## Pattern Types
 
 ### Wildcard
 
-```brief
+```briv
 _  // matches anything, binds nothing
 ```
 
 ### Literal Patterns
 
-```brief
+```briv
 42        // matches integer 42
 "hello"   // matches string "hello"
 true      // matches boolean true
@@ -27,7 +27,7 @@ true      // matches boolean true
 
 ### Variant Patterns
 
-```brief
+```briv
 Some(val)     // matches Value::Enum where variant == "Some"
 Ok(result)    // matches Result::Ok variant
 None          // matches fieldless variant
@@ -35,20 +35,20 @@ None          // matches fieldless variant
 
 ### Tuple Patterns
 
-```brief
+```briv
 (1, "a")      // matches 2-element tuple with specific values
 (x, y)        // matches 2-element tuple, binds to x, y
 ```
 
 ### Field Patterns
 
-```brief
+```briv
 { x: 1, y: _ }  // matches struct-like value with fields
 ```
 
 ## Match Expressions
 
-```brief
+```briv
 match value {
     pattern1 => expr1,
     pattern2 if guard => expr2,
@@ -63,7 +63,7 @@ Arms are tried in order. The first matching arm evaluates its body expression. G
 
 `uni` blocks are statement-level pattern matching on enum values:
 
-```brief
+```briv
 uni result(Ok(val)) = {
     println#("Success: " + val);
 };

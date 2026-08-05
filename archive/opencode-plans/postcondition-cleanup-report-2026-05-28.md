@@ -28,7 +28,7 @@ Replaced the ad-hoc magic-string `"result"` convention for referring to function
 | `src/symbolic.rs` | `Expr::Term` → `SymbolicValue::Unknown` |
 
 ### Not changed (correct as-is):
-- `src/dbrief/parser.rs:829` — `"result"` is the Dbrief `Result<S,E>` type keyword, unrelated
+- `src/dbriv/parser.rs:829` — `"result"` is the Dbriv `Result<S,E>` type keyword, unrelated
 - `src/assertion_verify.rs:278,283` — `"result"` is a regular variable in test helper, unrelated
 - `src/ffi/error.rs:197` — `"result"` is a generated FFI variable name, unrelated
 
@@ -131,7 +131,7 @@ Checked all `.bv` files for `term` used as a regular variable name (which would 
 
 ## Remaining Work
 
-1. **Brief-in-Brief parser (`parser.bv`)**: Does not yet recognize `term` in postconditions — it still expects `result`. When the self-hosted compiler reaches parity with the Rust parser, this needs updating.
+1. **Briv-in-Briv parser (`parser.bv`)**: Does not yet recognize `term` in postconditions — it still expects `result`. When the self-hosted compiler reaches parity with the Rust parser, this needs updating.
 2. **Method-call syntax in postconditions**: Postconditions like `term.len()` use method-call syntax (parsed as `Call("len", [Term])` at the AST level). Per the language philosophy, these should be function-call style `len(term)`. This is cosmetic (AST is identical) and was deferred.
 
 ---

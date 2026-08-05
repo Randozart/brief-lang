@@ -1,4 +1,4 @@
-# Rendered Brief (.rbv) — Specification v1.0
+# Rendered Briv (.rbv) — Specification v1.0
 
 **Version:** 1.0  
 **Date:** 2026-04-04  
@@ -8,14 +8,14 @@
 
 ## 1. Overview
 
-Rendered Brief (`.rbv`) is a single-file reactive UI format where Brief logic and HTML/CSS views coexist. Brief is the reactive state engine; HTML and CSS are declarative projections of that state.
+Rendered Briv (`.rbv`) is a single-file reactive UI format where Briv logic and HTML/CSS views coexist. Briv is the reactive state engine; HTML and CSS are declarative projections of that state.
 
 ### Design Philosophy
 
-- **Brief owns all state.** The view is a passive mirror.
+- **Briv owns all state.** The view is a passive mirror.
 - **No component tree.** Each `.rbv` is a complete page. No props drilling, no context, no hierarchy.
 - **No virtual DOM.** Bindings map directly to DOM nodes via pre-computed references.
-- **Compile-time proofs extend to the view.** Directive references are validated against Brief state at compile time.
+- **Compile-time proofs extend to the view.** Directive references are validated against Briv state at compile time.
 
 ---
 
@@ -26,12 +26,12 @@ Rendered Brief (`.rbv`) is a single-file reactive UI format where Brief logic an
 An `.rbv` file contains three sections:
 
 ```html
-<script type="brief">
-  // Brief code: imports, state, transactions, definitions
+<script type="briv">
+  // Briv code: imports, state, transactions, definitions
 </script>
 
 <view>
-  <!-- HTML with Brief directives -->
+  <!-- HTML with Briv directives -->
 </view>
 
 <style>
@@ -43,7 +43,7 @@ An `.rbv` file contains three sections:
 
 | Rule | Enforcement |
 |------|-------------|
-| Exactly one `<script type="brief">` block | Compile error if missing or duplicate |
+| Exactly one `<script type="briv">` block | Compile error if missing or duplicate |
 | Exactly one `<view>` block | Compile error if missing or duplicate |
 | `<style>` block | Optional, 0 or 1 |
 | `<script>` must precede `<view>` | Compile error if reversed |
@@ -53,7 +53,7 @@ An `.rbv` file contains three sections:
 ### 2.3 Example
 
 ```html
-<script type="brief">
+<script type="briv">
   let count: Int = 0;
   let message: String = "Hello";
 
@@ -85,11 +85,11 @@ An `.rbv` file contains three sections:
 
 ---
 
-## 3. Brief Section
+## 3. Briv Section
 
 ### 3.1 Allowed Constructs
 
-The `<script type="brief">` block accepts standard Brief syntax:
+The `<script type="briv">` block accepts standard Briv syntax:
 
 - `import` statements
 - `let` state declarations
@@ -104,7 +104,7 @@ The `<script type="brief">` block accepts standard Brief syntax:
 
 All `let` declarations at the top level become reactive signals. The compiler generates a signal store from these declarations.
 
-```brief
+```briv
 let username: String = "";
 let age: Int = 0;
 let active: Bool = true;
@@ -113,9 +113,9 @@ let items: List<Int> = [1, 2, 3];
 
 ### 3.3 Generic Types
 
-Brief supports the `List<T>` generic type for homogeneous collections:
+Briv supports the `List<T>` generic type for homogeneous collections:
 
-```brief
+```briv
 let numbers: List<Int> = [1, 2, 3, 4, 5];
 let names: List<String> = ["Alice", "Bob", "Charlie"];
 ```
@@ -129,7 +129,7 @@ let names: List<String> = ["Alice", "Bob", "Charlie"];
 
 Transactions marked with `rct` self-fire when their preconditions are satisfied:
 
-```brief
+```briv
 node update_display [count > 10][true] {
   // This fires whenever count > 10
   term;
@@ -144,7 +144,7 @@ Transactions without `rct` are passive and must be triggered explicitly via `b-t
 
 ### 4.1 Directives
 
-Directives are HTML attributes prefixed with `b-`. They bind DOM elements to Brief state.
+Directives are HTML attributes prefixed with `b-`. They bind DOM elements to Briv state.
 
 #### `b-text`
 
@@ -231,7 +231,7 @@ Each item in the list is rendered using the element's inner HTML as a template.
 
 ### 4.2 Directive Expression Grammar
 
-Expressions in directive values are a subset of Brief expressions:
+Expressions in directive values are a subset of Briv expressions:
 
 ```
 expr       ::= bool_expr | string_expr | ident
@@ -302,8 +302,8 @@ CSS is global by default. Build tools may offer scoped CSS via hash-based class 
               │
               ▼
 ┌─────────────────────────────┐
-│  Brief Compilation          │
-│  - Parse Brief AST          │
+│  Briv Compilation          │
+│  - Parse Briv AST          │
 │  - Type check               │
 │  - Prove transactions       │
 │  - Generate WASM            │
@@ -338,17 +338,17 @@ CSS is global by default. Build tools may offer scoped CSS via hash-based class 
 ### 6.2 Extraction
 
 ```rust
-fn extract_blocks(source: &str) -> Result<(BriefSource, ViewSource, Option<CssSource>), Error> {
-    // Find <script type="brief">...</script>
+fn extract_blocks(source: &str) -> Result<(BrivSource, ViewSource, Option<CssSource>), Error> {
+    // Find <script type="briv">...</script>
     // Find <view>...</view>
     // Find <style>...</style> (optional)
     // Validate order and uniqueness
 }
 ```
 
-### 6.3 Brief Compilation
+### 6.3 Briv Compilation
 
-The Brief section is compiled using the existing Brief compiler infrastructure:
+The Briv section is compiled using the existing Briv compiler infrastructure:
 - Lexer
 - Parser
 - Type checker
@@ -451,7 +451,7 @@ The JS glue is generated, not handwritten. It contains zero business logic.
 ### 7.1 Signal Flow
 
 ```
-Brief state changes (via txn)
+Briv state changes (via txn)
         │
         ▼
 WASM marks dirty signals
@@ -488,9 +488,9 @@ JS drains queue, applies to DOM
 
 | Code | Message |
 |------|---------|
-| RBV001 | Missing `<script type="brief">` block |
+| RBV001 | Missing `<script type="briv">` block |
 | RBV002 | Missing `<view>` block |
-| RBV003 | Duplicate `<script type="brief">` block |
+| RBV003 | Duplicate `<script type="briv">` block |
 | RBV004 | Duplicate `<view>` block |
 | RBV005 | `<script>` block must precede `<view>` |
 
@@ -503,9 +503,9 @@ JS drains queue, applies to DOM
 | RBV012 | Type mismatch: cannot bind {type} to directive |
 | RBV013 | b-trigger on non-interactive element |
 
-### 8.3 Brief Errors
+### 8.3 Briv Errors
 
-All Brief compilation errors pass through with RBV prefix.
+All Briv compilation errors pass through with RBV prefix.
 
 ---
 
@@ -515,7 +515,7 @@ All Brief compilation errors pass through with RBV prefix.
 
 ```
 dist/
-├── component.wasm    # Compiled Brief → WASM
+├── component.wasm    # Compiled Briv → WASM
 ├── component.js     # Generated JS glue
 └── component.css    # Extracted CSS (if style block exists)
 ```
@@ -524,10 +524,10 @@ dist/
 
 ```bash
 # Compile single file
-briefc compile component.rbv --out dist/
+brivc compile component.rbv --out dist/
 
 # Watch mode
-briefc watch src/ --out dist/
+brivc watch src/ --out dist/
 ```
 
 ---
@@ -546,7 +546,7 @@ briefc watch src/ --out dist/
 ## Appendix A: Full Example
 
 ```html
-<script type="brief">
+<script type="briv">
   let username: String = "";
   let password: String = "";
   let error: String? = null;

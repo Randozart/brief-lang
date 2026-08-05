@@ -14,7 +14,7 @@
 #include <time.h>
 
 #define SHM_SIZE 64
-#define SHM_NAME "/brief_bridge"
+#define SHM_NAME "/briv_bridge"
 
 static volatile uint8_t* shm = NULL;
 

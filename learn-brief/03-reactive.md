@@ -7,7 +7,7 @@ Reactive transactions fire **automatically** when their precondition becomes tru
 A `node` is a reactive transaction — it fires **automatically** when its
 precondition becomes true, with no parameters and no return value:
 
-```brief
+```briv
 // Callable (must be called by a txn or node)
 txn increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
@@ -31,7 +31,7 @@ node auto_increment [counter < 100][counter == @counter + 1] {
 
 The compiler **proves** reactive transactions can terminate:
 
-```brief
+```briv
 // ✅ VERIFIES - provably terminates
 node increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
@@ -54,7 +54,7 @@ node bad_increment [counter < 100][counter == @counter + 1] {
 
 Once termination is proven, the compiler optimizes:
 
-```brief
+```briv
 node fill_buffer [buffer .^Len < 100][buffer .^Len == 100] {
     &buffer = buffer.append(read_item());
     term;
@@ -74,7 +74,7 @@ while buffer .^Len < 100 {
 
 Reactive transactions can trigger each other:
 
-```brief
+```briv
 let count: Int = 0;
 let done: Bool = false;
 
@@ -100,7 +100,7 @@ node finish [count >= 10 && !done][done == true] {
 
 Add `async` for concurrent execution (compiler verifies safety):
 
-```brief
+```briv
 let needs_update: Bool = false;
 let data: Int = 0;
 let processed_data: Int = -1;
@@ -126,7 +126,7 @@ async node process_data [data != processed_data][processed == true] {
 ## 6. Common Patterns
 
 ### Event Handler
-```brief
+```briv
 node on_button_click [button_clicked][handled == true] {
     do_something();
     &button_clicked = false;
@@ -136,7 +136,7 @@ node on_button_click [button_clicked][handled == true] {
 ```
 
 ### State Machine
-```brief
+```briv
 enum State { Idle, Running, Done }
 let state: State = State::Idle;
 
@@ -157,7 +157,7 @@ node reset [state == State::Done][state == State::Idle] {
 ```
 
 ### Observer Pattern
-```brief
+```briv
 let observers: List<String> = [];
 let subject_value: Int = 0;
 
@@ -173,7 +173,7 @@ node notify_observers [subject_value != @notified_value][true] {
 ```
 
 ### Debouncer
-```brief
+```briv
 let last_trigger: Int = 0;
 let debounce_time: Int = 100;  // ms
 
@@ -197,7 +197,7 @@ Fixed tick-rate polling (a `@Hz` annotation) is a planned scheduler feature;
 today all firing is dependency-driven. Hardware-polling loops are written
 with an explicit counter node instead:
 
-```brief
+```briv
 // Explicit tick-driven polling loop
 node poll_sensor [sample_count < total][sample_count == total] {
     &value = read_adc();
@@ -223,7 +223,7 @@ node poll_sensor [sample_count < total][sample_count == total] {
 Log from inside a driver node with a `when` guard (a node whose precondition
 it doesn't change would re-fire forever):
 
-```brief
+```briv
 let total: Int = GetEnvInt!("BOUND");
 
 node tick [counter < total][counter == total] {
@@ -238,7 +238,7 @@ node tick [counter < total][counter == total] {
 
 Or use explicit state checks with `escape` for rollback:
 
-```brief
+```briv
 node check_invariants [counter >= 0][counter >= 0] {
     when counter < 0 {
         escape;  // Invariant violated!
@@ -249,7 +249,7 @@ node check_invariants [counter >= 0][counter >= 0] {
 
 ## 9. Complete Example: Shopping Cart
 
-```brief
+```briv
 // shopping_cart.bv
 let items: Int = 0;
 let total: Float = 0.0;

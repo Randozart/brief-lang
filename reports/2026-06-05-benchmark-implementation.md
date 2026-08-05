@@ -19,13 +19,13 @@ that caused `__print_int` elimination in small loops. Updated AGENTS.md with
 
 ## Results
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
-| **cancel_math** | 0.0410s | 0.0555s | **0.73×** | Brief |
+| **cancel_math** | 0.0410s | 0.0555s | **0.73×** | Briv |
 | **bit_clear** | 0.0008s | 0.0006s | 1.33× | C (63 iters, negligible) |
-| **queue_drain** | 0.0423s | 0.0491s | **0.86×** | Brief |
+| **queue_drain** | 0.0423s | 0.0491s | **0.86×** | Briv |
 | **interval_step** | 0.0583s | 0.0591s | **0.98×** | Parity |
-| print_loop | 0.0364s | 0.0518s | 0.70× | Brief (baseline) |
+| print_loop | 0.0364s | 0.0518s | 0.70× | Briv (baseline) |
 | nbody_newton | 19.7s | 8.57s | 2.30× | C (pre-existing sqrtf wrapper) |
 
 ## Bug Fixes
@@ -33,7 +33,7 @@ that caused `__print_int` elimination in small loops. Updated AGENTS.md with
 ### 1. Unused `io_pending` import forces reactor (06-05)
 
 **File**: `bit_clear.bv`, `queue_drain.bv`
-**Root Cause**: Importing `io_pending` from `std/brief_rt.bv` without referencing
+**Root Cause**: Importing `io_pending` from `std/briv_rt.bv` without referencing
 it in any precondition activates the reactive runtime (`__rt_wait()` 100ms per
 tick), even for pure-state convergence.
 **Fix**: Removed unused imports. Benchmarks now run in SSA mode (tight while-loop).

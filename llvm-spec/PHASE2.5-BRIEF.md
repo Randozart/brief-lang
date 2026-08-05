@@ -1,4 +1,4 @@
-# Phase 2.5 Brief: Transition Fusing + Trigger Sampling
+# Phase 2.5 Briv: Transition Fusing + Trigger Sampling
 
 **Date:** 2026-05-29  
 **Spec Reference:** `08a-TRIGGERS.md`, `08b-TRANSITION-FUSING.md`  
@@ -15,8 +15,8 @@ Fuse guaranteed-sequential transactions into single-tick atomic transitions. Sam
 
 At the entry of `reactor_tick()`, emit `load volatile` for every `TriggerDeclaration` in the program. Store results in SSA registers. All downstream precondition checks use the sampled value, never the raw pointer.
 
-**Brief source:**
-```brief
+**Briv source:**
+```briv
 trg button: Bool @ 0x40001000;
 
 rstruct Counter {
@@ -100,7 +100,7 @@ commit:
 
 ```bash
 for f in tests/fixtures/phase2_5/*.bv; do
-  brief-compiler llvm "$f" --out /tmp/p25/
+  briv-compiler llvm "$f" --out /tmp/p25/
   llc /tmp/p25/$(basename "$f" .bv).ll -o /dev/null  # Must succeed
 done
 grep "load volatile" /tmp/p25/triggers_mmio.ll   # Trigger sampling present

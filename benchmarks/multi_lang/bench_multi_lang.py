@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Multi-language bridge benchmark: Brief export defn called from Python.
+"""Multi-language bridge benchmark: Briv export defn called from Python.
 
 Compares:
   1. Direct ctypes FFI (fastest FFI path)
@@ -75,7 +75,7 @@ def run_bench(name, fn, *args, iterations=10000):
 
 def main():
     print("=" * 65)
-    print("Multi-Language Bridge Benchmark — Brief export defn from Python")
+    print("Multi-Language Bridge Benchmark — Briv export defn from Python")
     print("=" * 65)
 
     a, b = 3, 4

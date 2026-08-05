@@ -1,10 +1,10 @@
 [package]
-name = "brief-compiler"
+name = "briv-compiler"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "brief_compiler"
+name = "briv_compiler"
 path = "src/lib.rs"
 
 [features]
@@ -13,7 +13,7 @@ kani = []
 kani_full = []
 
 [[bin]]
-name = "briefc"
+name = "brivc"
 path = "src/main.rs"
 
 [dependencies]

@@ -2,7 +2,7 @@
 
 ## Phase 0: Scaffold (1-2 days)
 
-**Goal**: `brief llvm file.bv` runs and produces a `.ll` file.
+**Goal**: `briv llvm file.bv` runs and produces a `.ll` file.
 
 | Step | Rust (`src/backend/llvm.rs`) | Self-Hosted (`lib/compiler/backends/llvm.bv`) |
 |------|------------------------------|-----------------------------------------------|
@@ -153,11 +153,11 @@
 
 ## Phase 7: Self-Hosted Parity (1 week)
 
-**Goal**: `brief-compiler selfhost file.bv --target llvm` produces the same `.ll` as `brief llvm file.bv`.
+**Goal**: `briv-compiler selfhost file.bv --target llvm` produces the same `.ll` as `briv llvm file.bv`.
 
 | Step | What | Details |
 |------|------|---------|
-| 7.1 | `llvm.bv` — module header + `%State` type | Mirror Phase 0 in Brief |
+| 7.1 | `llvm.bv` — module header + `%State` type | Mirror Phase 0 in Briv |
 | 7.2 | `llvm.bv` — load/store/arith | Mirror Phase 1 |
 | 7.3 | `llvm.bv` — `noalias` + `!range` | Mirror Phase 2 |
 | 7.4 | `llvm.bv` — transition fusing + triggers | Mirror Phase 2.5 |

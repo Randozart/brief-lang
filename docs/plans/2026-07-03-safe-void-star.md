@@ -1,4 +1,4 @@
-# Safe `void*` — A Plan for Universal, Verified Pointers in Brief
+# Safe `void*` — A Plan for Universal, Verified Pointers in Briv
 
 **Date:** 2026-07-03  
 **Status:** Plan  
@@ -24,11 +24,11 @@
 
 ## 1. Executive Summary
 
-**The question:** Can Brief have a pointer system as powerful as C's `void*` while being provably safe?
+**The question:** Can Briv have a pointer system as powerful as C's `void*` while being provably safe?
 
 **The answer:** Yes — and the architecture is already 60% built. The Bits Thesis provides the foundation. What's missing is a structured bridge between "fully typed" pointers and "fully untyped" pointers, expressed as spatial layout constraints rather than nominal type abandonment.
 
-**The core thesis:** The `void*` in C is not powerful because it is untyped. It is powerful because it escapes *nominal* restrictions. Brief already has this escape mechanism: `Bits` with layout constraints. The plan makes that escape safe, explicit, and architecturally complete.
+**The core thesis:** The `void*` in C is not powerful because it is untyped. It is powerful because it escapes *nominal* restrictions. Briv already has this escape mechanism: `Bits` with layout constraints. The plan makes that escape safe, explicit, and architecturally complete.
 
 **Key insight from the Bits Thesis:** A pointer is `Bits @/0..63` (an address) with a projection lens over the pointee. `Ptr<Int>` = address + Int lens. `Ptr<Bits @/0..63>` = address + raw layout lens (safe `void*`). The only "magic" is crossing the LLVM `inttoptr` barrier for `load#`/`store#` — everything else falls out of Bits naturally.
 
@@ -63,7 +63,7 @@ The pointer value (address) is always target-pointer-width. The number suffix re
 
 ### 2.3 Casting Rules
 
-```brief
+```briv
 // Layout-compatible: compiler checks bytes + alignment match
 let f: Ptr<Float> = addr as Ptr<Float>;
 let i: Ptr<Int32> = f as Ptr<Int32>;       // ✅ Float.bytes == Int32.bytes
@@ -339,7 +339,7 @@ The typechecker tries layout check first, falls through to meld check if layout 
 
 ### 7.1 Pattern
 
-```brief
+```briv
 // Write once, compile once per (bytes, alignment) shape
 defn block_copy<T: bytes == S, align == A>(
     src: Ptr<T>,
@@ -408,7 +408,7 @@ These map directly to LLVM `@llvm.memcpy`, `@llvm.memcmp`, `@llvm.memset`, and a
 
 ### 8.1 Pattern
 
-```brief
+```briv
 // Library: returns opaque handle
 defn open_db(path: String) -> Ptr<Bits @/0..191> {
     let alloc = malloc(24);
@@ -470,10 +470,10 @@ fn validate_ptr_cast(
 
 ### 9.1 Design Decision
 
-Instead of `&f` (which conflicts with Brief's mutable `&` operator) or a new
+Instead of `&f` (which conflicts with Briv's mutable `&` operator) or a new
 AST variant, function references use the existing `.#Ptr` projection:
 
-```brief
+```briv
 let cmp: Ptr<fn(Int, Int) -> Bool> = my_cmp .#Ptr;
 let result = cmp(ptr_a, ptr_b);  // indirect call via Expr::Call on fn-ptr variable
 ```
@@ -528,7 +528,7 @@ This is already produced by the parser for `(Int) -> Bool` syntax.
 
 ### 10.1 Pattern
 
-```brief
+```briv
 meld Meters <:> Int;
 
 defn scale<T: T <:> Int>(val: T, factor: Int) -> T {

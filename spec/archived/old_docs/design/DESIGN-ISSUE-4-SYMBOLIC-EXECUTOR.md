@@ -13,7 +13,7 @@
 
 The proof engine cannot verify postconditions that rely on tracking variable assignments:
 
-```brief
+```briv
 txn test [true][flag == true] {
   &flag = true;
   term;
@@ -101,7 +101,7 @@ Build a **symbolic executor** that:
 - Good balance of effort vs. benefit
 
 **What it handles:**
-```brief
+```briv
 // All of these verify correctly at Level 2:
 
 txn increment [x > 0][y == @y + 1] { &y = y + 1; term; };
@@ -561,7 +561,7 @@ fn test_path_enumeration() {
 
 Create `examples/symbolic_execution.bv`:
 
-```brief
+```briv
 let x: Int = 0;
 let result: Bool = false;
 

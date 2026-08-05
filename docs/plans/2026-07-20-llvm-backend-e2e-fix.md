@@ -16,7 +16,7 @@ pass) but has known issues:
 4. `phi.rs` + `function.rs` are entirely dead code (placeholder backedge logic)
 5. Triplicate type resolution (`lower_type`, `TypedRegister::llvm`, `llvm_type`)
 6. `<-` operator silently no-ops for non-ringbuf types with OperatorDefs
-7. Baseline worktree at `../brief-compiler-baseline` (commit `8a827db1`) available
+7. Baseline worktree at `../briv-compiler-baseline` (commit `8a827db1`) available
 
 ## Prerequisites
 
@@ -96,7 +96,7 @@ Change to proper `#[test]` functions using the new Parser API.
 
 Steps:
 1. Change `fn main()` to individual `#[test]` functions
-2. Add `use brief_compiler::lexer::tokenize;`
+2. Add `use briv_compiler::lexer::tokenize;`
 3. Change `Parser::new(s1)` to `Parser::new(tokenize(s1).unwrap(), s1)`
 4. Change `parser.parse()` to `parser.parse_program()`
 5. Change `prog.items[N]` to `prog[N]`
@@ -141,7 +141,7 @@ Files: `tests/test_aarch64.rs`, `tests/test_verilog.rs`, `tests/test_vhdl.rs`,
 `tests/test_x86_64.rs`, `tests/test_wasm.rs`
 
 **Strategy**: The Parser API change affects ALL these files. Quickest fix:
-- Add `use brief_compiler::lexer::tokenize;`
+- Add `use briv_compiler::lexer::tokenize;`
 - Change `Parser::new(source)` to `Parser::new(tokenize(source).unwrap(), source)`
 - Change `.parse()` to `.parse_program()`
 - Change `Program` type references to `Vec<TopLevel>`
@@ -161,7 +161,7 @@ subtle differences (`Bool → "i1"` instead of `Bool → "i8"`).
 
 Centralized helpers exist at `helpers.rs:2031-2092`:
 - `emit_state_gep()` — returns GEP register name
-- `emit_state_load_i64()` — GEP + load, returns (reg, brief_type)
+- `emit_state_load_i64()` — GEP + load, returns (reg, briv_type)
 - `emit_state_store_i64()` — GEP + store
 - `emit_state_load_i64_by_idx()` — by field index
 - `emit_state_store_i64_by_idx()` — by field index

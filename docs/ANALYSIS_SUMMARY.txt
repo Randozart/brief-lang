@@ -3,7 +3,7 @@ BRIEF COMPILER - THREE CRITICAL PARSER BUGS - TECHNICAL ANALYSIS COMPLETE
 ================================================================================
 
 ANALYSIS GENERATED: April 5, 2026
-PROJECT: brief-compiler
+PROJECT: briv-compiler
 STATUS: Comprehensive technical documentation created
 
 ================================================================================
@@ -202,7 +202,7 @@ Why It Fails:
   - Runtime error: method doesn't exist on WASM State object
 
 Name Transformation:
-  Brief source:      txn Counter.increment
+  Briv source:      txn Counter.increment
          ↓
   Rust generation:   invoke_Counter_increment (line 338)
          ↓

@@ -1,6 +1,6 @@
 // str_prepend.c — C reference for bridge benchmark
 // 2026-07-22: Implements pp_type_bits ("Bits(" + s + ")") in C,
-// matching the Brief pp_type_bits function.
+// matching the Briv pp_type_bits function.
 //
 // Compile: gcc -shared -fPIC -O2 -o libstr_prepend_c.so str_prepend.c
 
@@ -9,7 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/// Echo a string — matching Brief's brief_test_cstr_roundtrip.
+/// Echo a string — matching Briv's briv_test_cstr_roundtrip.
 /// Input: C string pointer passed as int64_t
 /// Output: Copy of input C string pointer as int64_t
 /// Caller must free the returned pointer.

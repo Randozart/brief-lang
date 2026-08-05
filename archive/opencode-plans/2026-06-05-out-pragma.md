@@ -1,12 +1,12 @@
 # Plan: `#out` Observability Contract — 2026-06-05 23:45 UTC
 
-## Brief's Pragma Philosophy
+## Briv's Pragma Philosophy
 
 Documented: 2026-06-06 00:15 UTC
 
 In other languages, pragmas exist so the programmer can feed the compiler hints to optimize better. They require deep systems-level insight — the programmer must understand what the compiler struggles with and help it along.
 
-In Brief, the compiler is already running at full speed by default — inlining, folding, precomputing, dead-field-eliminating — with maximum zealotry. **Pragmas are the programmer's way to request the compiler calm down on a specific point.** Not "help me optimize" but "I understand you can prove this is dead, but I need it alive anyway."
+In Briv, the compiler is already running at full speed by default — inlining, folding, precomputing, dead-field-eliminating — with maximum zealotry. **Pragmas are the programmer's way to request the compiler calm down on a specific point.** Not "help me optimize" but "I understand you can prove this is dead, but I need it alive anyway."
 
 Every pragma follows this pattern:
 - `#out` — "Calm down, this FFI call has external effects you can't see"
@@ -14,11 +14,11 @@ Every pragma follows this pattern:
 - `#assume_event(x)` — "Calm down proof engine, trust that `x` fires"
 - `#assume_shape(g, a)` — "Calm down, the guard+action contract is valid; keep the txn alive"
 
-This is teachable in one sentence: **"Brief runs at full speed by default. A pragma is a request to the compiler to hold back its zealotry on a specific point."** The programmer holds the authority — the compiler defers.
+This is teachable in one sentence: **"Briv runs at full speed by default. A pragma is a request to the compiler to hold back its zealotry on a specific point."** The programmer holds the authority — the compiler defers.
 
 ## The Problem
 
-After LTO merges `brief_rt.c` with the program IR, LLVM sees `fprintf(stderr, ...)` in the inlined body of `__print_int`. LLVM's GlobalOpt recognizes `fprintf` via TargetLibraryInfo as a stdio write to `stderr`. Since nothing in the merged module ever re-reads `stderr`'s buffer, LLVM proves the write is dead and eliminates the entire call chain. Same for `__print_float` and `__putchar`.
+After LTO merges `briv_rt.c` with the program IR, LLVM sees `fprintf(stderr, ...)` in the inlined body of `__print_int`. LLVM's GlobalOpt recognizes `fprintf` via TargetLibraryInfo as a stdio write to `stderr`. Since nothing in the merged module ever re-reads `stderr`'s buffer, LLVM proves the write is dead and eliminates the entire call chain. Same for `__print_float` and `__putchar`.
 
 The result: benchmark binaries that should print output at exit run silently. The program is "correct" by LLVM's definition — the output is never re-read — but it's wrong by user expectation.
 
@@ -26,7 +26,7 @@ A pure FFI like `__sqrtf` should be inlined and optimized. An output FFI like `_
 
 ## Existing Language Precedent
 
-Brief already has native syntax for distinguishing call kinds:
+Briv already has native syntax for distinguishing call kinds:
 
 | Syntax | Kind | Precedent |
 |--------|------|-----------|
@@ -53,17 +53,17 @@ The `#!out(x)` pragma at program level declares that field `x` is externally obs
 
 ### Stdlib hides it transparently
 
-```brief
-// lib/std/brief_rt.bv
+```briv
+// lib/std/briv_rt.bv
 frgn __print_int(n: Int) -> Bool #out;     ← one annotation in stdlib source
 frgn __print_float(d: Float) -> Bool #out;
 frgn __putchar(c: Int) -> Int #out;
 frgn! __print_str(msg: String);
 ```
 
-A Brief programmer writes:
-```brief
-import { __print_int } from "std/brief_rt.bv";
+A Briv programmer writes:
+```briv
+import { __print_int } from "std/briv_rt.bv";
 __print_int(checksum);  // Always alive. Always works.
 ```
 
@@ -80,7 +80,7 @@ to:
 declare i64 @__print_int(i64) #1       // #1 unchanged (pure FFI still gets full optimization)
 ```
 
-The `#out` modifier emits `memory(write)` on the ***individual declaration***, not on the shared attribute group. This survives LTO: even after `llvm-link` merges `brief_rt.bc`, the program's declaration side keeps `memory(write)`. LLVM knows the call "might write to memory that's later read" and preserves it.
+The `#out` modifier emits `memory(write)` on the ***individual declaration***, not on the shared attribute group. This survives LTO: even after `llvm-link` merges `briv_rt.bc`, the program's declaration side keeps `memory(write)`. LLVM knows the call "might write to memory that's later read" and preserves it.
 
 `frgn!` additionally emits a void return — matching `syscall!` and `term!` semantics.
 
@@ -158,7 +158,7 @@ warning: field 'energy' is written but never observed by any #out call
 
 ### Phase 5 — Stdlib: add `#out` to output functions
 
-`lib/std/brief_rt.bv`:
+`lib/std/briv_rt.bv`:
 - `frgn __print_int(n: Int) -> Bool #out;`
 - `frgn __print_float(d: Float) -> Bool #out;`
 - `frgn __putchar(c: Int) -> Int #out;`
@@ -169,7 +169,7 @@ warning: field 'energy' is written but never observed by any #out call
 
 ### Phase 6 — Cleanup: revert runtime & codegen hacks
 
-`runtime/brief_rt.c`:
+`runtime/briv_rt.c`:
 - Restore `static inline __attribute__((always_inline))` on `__putchar`
 - Restore `static inline` on `__print_str_len`, `__write_bytes`
 
@@ -196,7 +196,7 @@ warning: field 'energy' is written but never observed by any #out call
 | `src/ast.rs` | Add `is_out: bool` to `ForeignSignature`, `out_pragmas` to `Program` |
 | `src/backend/llvm.rs` | Emit `memory(write)` for `#out`, void for `frgn!`, volatile for `#!out()`. Restore `attributes #1`. |
 | `src/analysis/transition_graph.rs` | `#!out(x)` marks `x` live in liveness analysis |
-| `lib/std/brief_rt.bv` | Add `#out` to output function declarations |
-| `runtime/brief_rt.c` | Restore `static inline` on runtime helpers |
+| `lib/std/briv_rt.bv` | Add `#out` to output function declarations |
+| `runtime/briv_rt.c` | Restore `static inline` on runtime helpers |
 | `benchmarks/*.bv` | Remove `frgn __print_int` declarations (now from stdlib). Clean up `io_pending` remnants. |
 | `BUGS.md` | Log this plan and all prior slip-ups |

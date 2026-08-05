@@ -1,6 +1,6 @@
-// Brief GPU Runtime — Vulkan Compute Backend
+// Briv GPU Runtime — Vulkan Compute Backend
 //
-// Provides a portable GPU dispatch layer for Brief's #gpu / #?gpu offloading.
+// Provides a portable GPU dispatch layer for Briv's #gpu / #?gpu offloading.
 // Uses Vulkan compute for maximum hardware portability (NVIDIA, AMD, Intel,
 // Apple via MoltenVK, software via LLVMPipe/Mesa).
 //
@@ -68,7 +68,7 @@ typedef void* cl_kernel;
 typedef void* cl_mem;
 typedef struct { void* data; } cl_event;
 
-// OpenCL state — declared early so brief_gpu_is_available can check both backends
+// OpenCL state — declared early so briv_gpu_is_available can check both backends
 static void* cl_lib = NULL;
 static int cl_available = 0;
 static cl_platform_id cl_platform;
@@ -223,13 +223,13 @@ static int load_vulkan_symbols() {
 // Public API
 // ---------------------------------------------------------------------------
 
-static int brief_gpu_init_vulkan_inner();
-static int brief_gpu_init_opencl_inner();
+static int briv_gpu_init_vulkan_inner();
+static int briv_gpu_init_opencl_inner();
 
 /// Initialize GPU compute runtime (Vulkan preferred, OpenCL fallback).
 /// Returns 1 on success, 0 on failure (no GPU runtime available).
 /// Safe to call multiple times; subsequent calls are no-ops.
-int brief_gpu_init() {
+int briv_gpu_init() {
     if (vk_initialized) return vk_available;
 
     vk_initialized = 1;
@@ -238,7 +238,7 @@ int brief_gpu_init() {
     vk_lib = dlopen("libvulkan.so.1", RTLD_LAZY | RTLD_LOCAL);
     if (vk_lib) {
         if (load_vulkan_symbols()) {
-            if (brief_gpu_init_vulkan_inner()) {
+            if (briv_gpu_init_vulkan_inner()) {
                 vk_available = 1;
                 return 1;
             }
@@ -251,7 +251,7 @@ int brief_gpu_init() {
     }
 
     // Vulkan failed — try OpenCL
-    if (brief_gpu_init_opencl_inner()) {
+    if (briv_gpu_init_opencl_inner()) {
         vk_available = 1;
         return 1;
     }
@@ -259,7 +259,7 @@ int brief_gpu_init() {
     return 0;
 }
 
-static int brief_gpu_init_vulkan_inner() {
+static int briv_gpu_init_vulkan_inner() {
 
     // Create Vulkan instance (no extensions needed for compute-only)
     struct { uint32_t version; uint32_t count; const char** names; } app_info = {
@@ -394,11 +394,11 @@ static int brief_gpu_init_vulkan_inner() {
 }
 
 /// Returns 1 if a GPU backend (Vulkan or OpenCL) is available and initialized, 0 otherwise.
-int brief_gpu_is_available() {
+int briv_gpu_is_available() {
     if (!vk_initialized && !cl_available) {
-        brief_gpu_init();  // tries Vulkan first
+        briv_gpu_init();  // tries Vulkan first
         if (!vk_available) {
-            brief_gpu_init_opencl_inner();  // fallback to OpenCL
+            briv_gpu_init_opencl_inner();  // fallback to OpenCL
         }
     }
     return vk_available || cl_available;
@@ -406,8 +406,8 @@ int brief_gpu_is_available() {
 
 /// Allocate a GPU buffer of `bytes` size.
 /// Returns a buffer handle (positive int64_t), or 0 on failure.
-int64_t brief_gpu_malloc(size_t bytes) {
-    if (!brief_gpu_is_available()) return 0;
+int64_t briv_gpu_malloc(size_t bytes) {
+    if (!briv_gpu_is_available()) return 0;
 
     // Find a free slot
     int slot = -1;
@@ -468,8 +468,8 @@ int64_t brief_gpu_malloc(size_t bytes) {
     return handle;
 }
 
-/// Free a GPU buffer previously allocated with brief_gpu_malloc.
-void brief_gpu_free(int64_t handle) {
+/// Free a GPU buffer previously allocated with briv_gpu_malloc.
+void briv_gpu_free(int64_t handle) {
     if (!vk_available || handle <= 0) return;
     int slot = (int)(handle - 1);
     if (slot < 0 || slot >= MAX_GPU_BUFFERS || !gpu_buffers[slot].used) return;
@@ -486,7 +486,7 @@ void brief_gpu_free(int64_t handle) {
 
 /// Copy data between host and device.
 /// dir: 0 = host→device, 1 = device→host
-void brief_gpu_memcpy(int64_t dst_handle, int64_t src_handle, size_t bytes, int dir) {
+void briv_gpu_memcpy(int64_t dst_handle, int64_t src_handle, size_t bytes, int dir) {
     if (!vk_available) return;
 
     if (dir == 0) {
@@ -513,18 +513,18 @@ void brief_gpu_memcpy(int64_t dst_handle, int64_t src_handle, size_t bytes, int 
 /// `num_buffers` — count of buffer handles
 
 // Forward declarations for backend-specific dispatch functions
-static void brief_gpu_launch_vulkan(
+static void briv_gpu_launch_vulkan(
     const void* kernel_spirv, size_t kernel_size,
     int grid_x, int grid_y, int grid_z, int block_x,
     const int64_t* buffer_handles, int num_buffers
 );
-static void brief_gpu_launch_opencl(
+static void briv_gpu_launch_opencl(
     const void* kernel_spirv, size_t kernel_size,
     int grid_x, int grid_y, int grid_z, int block_x,
     const int64_t* buffer_handles, int num_buffers
 );
 
-void brief_gpu_launch(
+void briv_gpu_launch(
     const void* kernel_spirv,
     size_t kernel_size,
     int grid_x,
@@ -535,18 +535,18 @@ void brief_gpu_launch(
     int num_buffers
 ) {
     if (vk_available) {
-        brief_gpu_launch_vulkan(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
+        briv_gpu_launch_vulkan(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
         return;
     }
     if (cl_available) {
-        brief_gpu_launch_opencl(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
+        briv_gpu_launch_opencl(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
         return;
     }
 }
 
 // ── Vulkan dispatch (primary) ──────────────────────────────────
 
-static void brief_gpu_launch_vulkan(
+static void briv_gpu_launch_vulkan(
     const void* kernel_spirv,
     size_t kernel_size,
     int grid_x,
@@ -665,7 +665,7 @@ static void brief_gpu_launch_vulkan(
 
 // ── OpenCL dispatch (fallback when Vulkan is unavailable) ──────
 
-static void brief_gpu_launch_opencl(
+static void briv_gpu_launch_opencl(
     const void* kernel_spirv,
     size_t kernel_size,
     int grid_x,
@@ -783,13 +783,13 @@ static void brief_gpu_launch_opencl(
 }
 
 /// Shutdown the GPU runtime, releasing all Vulkan resources.
-void brief_gpu_shutdown() {
+void briv_gpu_shutdown() {
     if (!vk_available) return;
 
     // Free all buffers
     for (int i = 0; i < MAX_GPU_BUFFERS; i++) {
         if (gpu_buffers[i].used) {
-            brief_gpu_free((int64_t)(i + 1));
+            briv_gpu_free((int64_t)(i + 1));
         }
     }
 
@@ -850,7 +850,7 @@ static int load_opencl_symbols() {
 #undef CL_LOAD
 }
 
-static int brief_gpu_init_opencl_inner() {
+static int briv_gpu_init_opencl_inner() {
     cl_lib = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_LOCAL);
     if (!cl_lib) return 0;
     if (!load_opencl_symbols()) { dlclose(cl_lib); cl_lib = NULL; return 0; }

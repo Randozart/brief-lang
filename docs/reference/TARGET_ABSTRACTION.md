@@ -1,4 +1,4 @@
-# Brief Compiler Target Abstraction Layer (TAL)
+# Briv Compiler Target Abstraction Layer (TAL)
 
 **Date:** 2026-04-23
 **Status:** Proposed Architecture
@@ -7,7 +7,7 @@
 
 ## Problem Statement
 
-The Brief compiler currently embeds vendor-specific "magic" words directly in its Rust source code:
+The Briv compiler currently embeds vendor-specific "magic" words directly in its Rust source code:
 
 1. **Hardcoded Synthesis Pragmas** in `verilog.rs`:
    ```rust
@@ -39,7 +39,7 @@ Move all vendor-specific configuration to TOML files. The compiler becomes a tem
 ## Architecture
 
 ```
-brief-compiler/
+briv-compiler/
 ├── hardware_lib/
 │   ├── targets/                    # Vendor definitions
 │   │   ├── xilinx_ultrascale_plus.toml
@@ -131,7 +131,7 @@ type = "memory_mapped_slave"
 address_width = 18
 data_width = 32
 
-# Map clean Brief names to AXI physical port names
+# Map clean Briv names to AXI physical port names
 [port_map]
 clock = "s_axi_aclk"
 reset_n = "s_axi_aresetn"
@@ -182,14 +182,14 @@ module {module_name}_axi_wrapper (
     output wire [1:0] {read_response},
     output wire {read_valid},
     
-    // User Logic Outputs (connected to clean Brief module)
+    // User Logic Outputs (connected to clean Briv module)
     output wire [{addr_width}-1:0] user_addr,
     output wire [{data_width}-1:0] user_wdata,
     output wire user_valid,
     input wire user_ready
 );
 
-    // Instantiate the clean Brief module
+    // Instantiate the clean Briv module
     {module_name} core_inst (
         .clk({clock}),
         .rst_n({reset_n}),
@@ -401,7 +401,7 @@ compiler generates:
 |-----------|-------------|
 | **Extensible** | Add new FPGA vendors without compiler changes |
 | **Clean Compiler** | Backend stays generic, profiles do the work |
-| **No Magic Leakage** | Users write pure Brief, magic stays in TOML |
+| **No Magic Leakage** | Users write pure Briv, magic stays in TOML |
 | **Multi-Vendor Support** | Same compiler targets Xilinx, Intel, Lattice |
 | **Testable** | Profiles are just data files, easy to validate |
 

@@ -2,7 +2,7 @@
 // Non-zero initial values + coupled matrix prevent clang from eliminating
 // the matrix multiply via constant propagation.
 //
-// Brief version: float_math_nonzero.bv — same computation in reactive model
+// Briv version: float_math_nonzero.bv — same computation in reactive model
 // with enum dispatch + SSA-mode folded loop.
 
 #include <stdlib.h>

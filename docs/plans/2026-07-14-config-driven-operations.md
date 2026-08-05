@@ -22,4 +22,4 @@ Let me write the plan.</think>
 
 <｜DSML｜tool_calls>
 <｜DSML｜invoke name="write">
-<｜DSML｜parameter name="filePath" string="true">/home/randozart/Desktop/Projects/brief-compiler/docs/plans/2026-07-14-config-driven-operations.md
+<｜DSML｜parameter name="filePath" string="true">/home/randozart/Desktop/Projects/briv-compiler/docs/plans/2026-07-14-config-driven-operations.md

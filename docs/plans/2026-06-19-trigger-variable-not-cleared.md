@@ -15,7 +15,7 @@ Three-phased work: (A) immediate fixes for the officina character-repeat bug, (B
 
 `emit_trg_step` hardcodes `load volatile i64` / `store volatile i64` for all trigger fields regardless of their actual LLVM type in `%State`:
 
-| Brief type | LLVM type |
+| Briv type | LLVM type |
 |------------|-----------|
 | `Char`     | `i32`     |
 | `Bool`     | `i8`      |
@@ -33,7 +33,7 @@ Add `&keypress = '\0';` unconditionally before `term;` so the guard `[booted && 
 
 ```bash
 cargo test --lib
-./target/release/brief-compiler build ~/Projects/officina-cli/officina.bv
+./target/release/briv-compiler build ~/Projects/officina-cli/officina.bv
 printf "hello\x03" | timeout 3 ./officina
 ```
 
@@ -78,7 +78,7 @@ Extend `apply_hygiene` to walk top-level items (not just statements), so `let tr
 
 ### B6: `lib/std/tty.bv` — `keyboard_input` macro
 
-```brief
+```briv
 macro keyboard_input(body, guard, name) {
     let trg_name = gensym#();
     term quote_top {
@@ -109,7 +109,7 @@ Defaults for each handler are defined inside the macro as fallback blocks:
 
 ### B7: User API
 
-```brief
+```briv
 // With defaults only — works as-is:
 $!keyboard_input
 node process_input [needs_redraw]] {
@@ -157,7 +157,7 @@ cargo test --lib                                          # all existing tests p
 # New test: decorator macro expands trg + augmented txn
 cargo test --lib macro_decorator_test
 # Build officina using $!keyboard_input decorator
-./target/release/brief-compiler build officina.bv
+./target/release/briv-compiler build officina.bv
 printf "hello\x03" | timeout 3 ./officina                 # one "hello", no repeats
 ```
 
@@ -169,7 +169,7 @@ printf "hello\x03" | timeout 3 ./officina                 # one "hello", no repe
 
 Currently, a struct's `node` is promoted once at compile time — all instances share one reactor-slot. The vision for independent reactivity per instance:
 
-```brief
+```briv
 struct Enemy {
     hp: Int,
     position: Vec2,
@@ -275,7 +275,7 @@ On a REAL wakeup (user types a key), `read()` returns 1, store+step+process_inpu
 
 ```bash
 cargo test --lib             # all tests pass
-./target/release/brief-compiler build ~/Desktop/Projects/officina-cli/officina.bv
+./target/release/briv-compiler build ~/Desktop/Projects/officina-cli/officina.bv
 # Interactive: run ./officina, type characters — no repeats, no freeze
 printf "hello\x03" | timeout 3 ./officina    # pipe test still works
 ```
@@ -294,7 +294,7 @@ printf "hello\x03" | timeout 3 ./officina    # pipe test still works
 
 ### Philosophy
 
-A `trg` is a **mailbox** — the outside world drops a value, Brief reads it. Writing to the `trg` variable mutates the local copy; the external source neither sees nor cares.
+A `trg` is a **mailbox** — the outside world drops a value, Briv reads it. Writing to the `trg` variable mutates the local copy; the external source neither sees nor cares.
 
 For software triggers (`@stdin#`), writing is fine — you consumed the event and clear the latch. For hardware triggers (`@0x...`, `@mmio`), the register is **sovereign** — the program must never pretend to own what the hardware holds.
 
@@ -302,7 +302,7 @@ Hence `const trg` exists: "I, the code, cannot mutate this."
 
 ### Syntax
 
-```brief
+```briv
 trg  keypress: Char @stdin#;            // software — writable by code
 const trg status: Int @0xFFFF0000;      // hardware — read-only from code
 ```
@@ -319,9 +319,9 @@ const trg status: Int @0xFFFF0000;      // hardware — read-only from code
 
 The first catches any write to a const trigger. The second catches the common embedded bug: declaring a hardware trigger as mutable, then writing to the shadow field thinking you're writing to the register.
 
-### Rendered Brief (`.rbv`)
+### Rendered Briv (`.rbv`)
 
-Same rule applies. a front-end button press emits a one-time signal into a `trg`. Brief can read and optionally write back (`&trg = ...`), but the front end never listens. The mailbox is one-directional regardless.
+Same rule applies. a front-end button press emits a one-time signal into a `trg`. Briv can read and optionally write back (`&trg = ...`), but the front end never listens. The mailbox is one-directional regardless.
 
 ### Implementation (committed)
 
@@ -338,6 +338,6 @@ Same rule applies. a front-end button press emits a one-time signal into a `trg`
 
 ```bash
 cargo test --lib                     # 1082 passed, 0 failed
-./target/release/brief-compiler build officina.bv
+./target/release/briv-compiler build officina.bv
 printf "hello\x03" | timeout 3 ./officina   # each char once, exit 0
 ```

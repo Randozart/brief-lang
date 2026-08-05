@@ -164,7 +164,7 @@ if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || ...)
 ("Int" | "UInt", "Float") => { ... }
 
 // src/backend/llvm/builder.rs:546
-BriefType::Custom(__t) if __t == "Bool" => { ... }
+BrivType::Custom(__t) if __t == "Bool" => { ... }
 ```
 
 This is ~200+ sites. Each one reads a type name and decides behavior — a violation of the Bits thesis which says all semantics are in metadata, not names.

@@ -1,4 +1,4 @@
-# Brief Compiler Infrastructure
+# Briv Compiler Infrastructure
 
 **Version:** 0.11.0  
 **Status:** Complete frontend, partial backends
@@ -51,7 +51,7 @@ Source (.bv)
 
 ## Usage
 
-```brief
+```briv
 import "compiler/token";
 import "compiler/lexer";
 import "compiler/parser";

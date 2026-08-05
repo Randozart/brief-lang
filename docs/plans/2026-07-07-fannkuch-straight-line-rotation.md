@@ -67,7 +67,7 @@ exit-check strategy.
 
 Commit `d4e3e14` (pre-optimization):
 
-| Benchmark | Brief | C | Ratio | Correct |
+| Benchmark | Briv | C | Ratio | Correct |
 |-----------|-------|---|-------|---------|
 | fannkuch_redux | .0966s | .0745s | **1.29x** | MATCH |
 
@@ -196,7 +196,7 @@ Implementation: detect body_has_no_ffi before the unrolling loop;
 skip the overflow guard emission in the for-i-in-1..rotation_step
 loop.  Advanced ssa_old caches between copies unchanged.
 
-Baseline: .0966s Brief vs .0745s C (1.29x).
+Baseline: .0966s Briv vs .0745s C (1.29x).
 Expected: ~.075s → ~1.00x.
 All 1403 tests pass, all benchmarks MATCH.
 ```

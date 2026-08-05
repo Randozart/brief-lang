@@ -115,19 +115,19 @@
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__print_int", from: Literal("std/brief_rt.bv"), target: C, inputs: [("n", Custom("Int"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__print_int", from: Literal("std/briv_rt.bv"), target: C, inputs: [("n", Custom("Int"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__print_str", from: Literal("std/brief_rt.bv"), target: C, inputs: [("msg", Custom("String"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__print_str", from: Literal("std/briv_rt.bv"), target: C, inputs: [("msg", Custom("String"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__print_float", from: Literal("std/brief_rt.bv"), target: C, inputs: [("f", Custom("Float"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__print_float", from: Literal("std/briv_rt.bv"), target: C, inputs: [("f", Custom("Float"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__print_char", from: Literal("std/brief_rt.bv"), target: C, inputs: [("c", Custom("Int"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__print_char", from: Literal("std/briv_rt.bv"), target: C, inputs: [("c", Custom("Int"))], success_output: [("", Void)], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   ("constant" "CAP" "Int" 1024)
   ("constant" "TOTAL" "Int" 50000000)
@@ -1517,11 +1517,11 @@
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__getenv_brief", from: Literal("std/brief_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("String"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__getenv_briv", from: Literal("std/briv_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("String"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__getenv_int", from: Literal("std/brief_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("Int"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__getenv_int", from: Literal("std/briv_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("Int"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "defn"
@@ -1530,7 +1530,7 @@
   ("outputs")
   ("contract" ("pre" true) ("post" true))
   ("body")
-  ("term" ("call" "__getenv_brief" ("ident" "key")))
+  ("term" ("call" "__getenv_briv" ("ident" "key")))
 )
   (
   "defn"

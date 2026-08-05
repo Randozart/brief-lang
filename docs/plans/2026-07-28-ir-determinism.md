@@ -66,8 +66,8 @@ Before and after each change:
 ```bash
 cargo build --release 2>/dev/null
 # Compile same benchmark twice, diff the IR — must be identical
-./target/release/briefc build benchmarks/ring_buffer.bv --llvm --out /tmp/ring1
-./target/release/briefc build benchmarks/ring_buffer.bv --llvm --out /tmp/ring2
+./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out /tmp/ring1
+./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out /tmp/ring2
 diff /tmp/ring1.ll /tmp/ring2.ll
 # Expected: no output (identical IR)
 ```

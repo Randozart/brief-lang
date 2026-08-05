@@ -2,7 +2,7 @@
 
 ## Why This Works
 
-Brief prohibits arbitrary pointers. There is no `&` operator, no pointer arithmetic, no reference escaping. Every `rstruct` field access is a named GEP on the global `%State*`. Therefore:
+Briv prohibits arbitrary pointers. There is no `&` operator, no pointer arithmetic, no reference escaping. Every `rstruct` field access is a named GEP on the global `%State*`. Therefore:
 
 > **No two pointers in any transaction can ever alias.**
 
@@ -41,7 +41,7 @@ store i64 %new_a, i64* %field_a_ptr  ; single store at commit
 With register promotion, intermediate stores inside the transaction body become dead:
 
 ```llvm
-; Brief: &count = count + 1; &count = count * 2;
+; Briv: &count = count + 1; &count = count * 2;
 ; Without noalias: two stores
 store i64 %tmp, i64* %count_ptr
 store i64 %result, i64* %count_ptr  ; first store is dead

@@ -1,7 +1,7 @@
 // Language Mapper Template
 //
-// Brief FFI mapper for <LANGUAGE>.
-// Transforms between <LANGUAGE> types and Brief types.
+// Briv FFI mapper for <LANGUAGE>.
+// Transforms between <LANGUAGE> types and Briv types.
 //
 // For documentation, see: spec/MAPPER-GUIDE.md
 //
@@ -32,17 +32,17 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // String Conversions
 // ============================================================
 
-// Convert <LANG> string to Brief String
+// Convert <LANG> string to Briv String
 // Precondition: <lang>_str is valid and not null
-// Postcondition: Returns Brief String with same content
-// defn <lang>_string_to_brief(<lang>_str: <LangString>) -> String [<lang>_str.is_valid() && <lang>_str.not_null()][true] {
+// Postcondition: Returns Briv String with same content
+// defn <lang>_string_to_briv(<lang>_str: <LangString>) -> String [<lang>_str.is_valid() && <lang>_str.not_null()][true] {
 //     term <lang>_str.to_string();
 // };
 
-// Convert Brief String to <LANG> string
-// Precondition: Brief String is valid UTF-8
+// Convert Briv String to <LANG> string
+// Precondition: Briv String is valid UTF-8
 // Postcondition: Returns <LANG> string (caller must free if applicable)
-// defn brief_string_to_<lang>(s: String) -> <LangString> [true][true] {
+// defn briv_string_to_<lang>(s: String) -> <LangString> [true][true] {
 //     term <LangString>::new(s);
 // };
 
@@ -50,23 +50,23 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // Numeric Conversions
 // ============================================================
 
-// Convert <LANG> integer to Brief Int
-// defn <lang>_int_to_brief(<lang>_int: <LangInt>) -> Int [true][true] {
+// Convert <LANG> integer to Briv Int
+// defn <lang>_int_to_briv(<lang>_int: <LangInt>) -> Int [true][true] {
 //     term <lang>_int.value;
 // };
 
-// Convert Brief Int to <LANG> integer
-// defn brief_int_to_<lang>(n: Int) -> <LangInt> [true][true] {
+// Convert Briv Int to <LANG> integer
+// defn briv_int_to_<lang>(n: Int) -> <LangInt> [true][true] {
 //     term <LangInt> { value: n };
 // };
 
-// Convert <LANG> float to Brief Float
-// defn <lang>_float_to_brief(<lang>_float: <LangFloat>) -> Float [true][true] {
+// Convert <LANG> float to Briv Float
+// defn <lang>_float_to_briv(<lang>_float: <LangFloat>) -> Float [true][true] {
 //     term <lang>_float.value;
 // };
 
-// Convert Brief Float to <LANG> float
-// defn brief_float_to_<lang>(f: Float) -> <LangFloat> [true][true] {
+// Convert Briv Float to <LANG> float
+// defn briv_float_to_<lang>(f: Float) -> <LangFloat> [true][true] {
 //     term <LangFloat> { value: f };
 // };
 
@@ -74,23 +74,23 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // Complex Type Conversions
 // ============================================================
 
-// Convert <LANG> bytes/buffer to Brief Data
-// defn <lang>_bytes_to_brief(<lang>_bytes: <LangBytes>) -> Data [<lang>_bytes.is_valid()][term.len() == <lang>_bytes.len()] {
+// Convert <LANG> bytes/buffer to Briv Data
+// defn <lang>_bytes_to_briv(<lang>_bytes: <LangBytes>) -> Data [<lang>_bytes.is_valid()][term.len() == <lang>_bytes.len()] {
 //     term <lang>_bytes.to_data();
 // };
 
-// Convert Brief Data to <LANG> bytes/buffer
-// defn brief_data_to_<lang>(data: Data) -> <LangBytes> [data.is_valid()][term.len() == data.len()] {
+// Convert Briv Data to <LANG> bytes/buffer
+// defn briv_data_to_<lang>(data: Data) -> <LangBytes> [data.is_valid()][term.len() == data.len()] {
 //     term <LangBytes>::from_data(data);
 // };
 
-// Convert <LANG> list to Brief List
-// defn <lang>_list_to_brief(<lang>_list: <LangList>, elem_type: Type) -> List<Value> [<lang>_list.is_valid()][term.len() == <lang>_list.len()] {
+// Convert <LANG> list to Briv List
+// defn <lang>_list_to_briv(<lang>_list: <LangList>, elem_type: Type) -> List<Value> [<lang>_list.is_valid()][term.len() == <lang>_list.len()] {
 //     term <lang>_list.to_list();
 // };
 
-// Convert Brief List to <LANG> list
-// defn brief_list_to_<lang>(list: List<Value>) -> <LangList> [list.is_valid()][term.len() == list.len()] {
+// Convert Briv List to <LANG> list
+// defn briv_list_to_<lang>(list: List<Value>) -> <LangList> [list.is_valid()][term.len() == list.len()] {
 //     term <LangList>::from_list(list);
 // };
 
@@ -113,13 +113,13 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // Error Handling
 // ============================================================
 
-// Convert <LANG> error to Brief Error
-// defn <lang>_error_to_brief(<lang>_err: <LangError>) -> Error [true][true] {
+// Convert <LANG> error to Briv Error
+// defn <lang>_error_to_briv(<lang>_err: <LangError>) -> Error [true][true] {
 //     term Error { message: <lang>_err.message };
 // };
 
-// Convert Brief Error to <LANG> error
-// defn brief_error_to_<lang>(err: Error) -> <LangError> [true][true] {
+// Convert Briv Error to <LANG> error
+// defn briv_error_to_<lang>(err: Error) -> <LangError> [true][true] {
 //     term <LangError>::new(err.message);
 // };
 

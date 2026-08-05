@@ -1,4 +1,4 @@
-# Phase 6 Brief: SIMD Vector Alignment + Loop Metadata
+# Phase 6 Briv: SIMD Vector Alignment + Loop Metadata
 
 **Date:** 2026-05-29  
 **Spec Reference:** `09-SIMD.md`  
@@ -49,7 +49,7 @@ This is emitted via proper `align N` on loads/stores in `Expr::ListLiteral` / `E
 ## Acceptance Criteria
 
 ```bash
-brief-compiler llvm tests/fixtures/phase6/loop_vectorize.bv --out /tmp/p6/
+briv-compiler llvm tests/fixtures/phase6/loop_vectorize.bv --out /tmp/p6/
 llc /tmp/p6/loop_vectorize.ll -o /dev/null  # Must succeed
 grep "llvm.loop.vectorize.enable" /tmp/p6/loop_vectorize.ll  # Metadata present
 grep "align" /tmp/p6/loop_vectorize.ll  # Alignment on loads/stores

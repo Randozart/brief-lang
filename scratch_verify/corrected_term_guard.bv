@@ -1,0 +1,11 @@
+let a: Int = 0;
+
+// Corrected transition_validate pattern (2026-08-04): `term! ->` closes the
+// program inside the guard, so Print#(2) never runs — only "1" is printed.
+// The termination pass must NOT flag Print#(2): the guard is conditional, so
+// Print#(2) is reachable when a != 1.
+node n [a == 0][a == 1] {
+  a = 1;
+  when a == 1 { term! -> Print#(1); };
+  Print#(2);
+};

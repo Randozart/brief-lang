@@ -1,4 +1,4 @@
-// gate_c.c — Gate A + B for C: Brief feature_hash/add vs native feature_hash/add.
+// gate_c.c — Gate A + B for C: Briv feature_hash/add vs native feature_hash/add.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,12 +6,12 @@
 typedef long long ll;
 ll feature_hash(ll state, ll count, ll seed);
 ll add(ll a, ll b);
-ll __brief_init_state();
+ll __briv_init_state();
 #include "native_fh.c"
 static double now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e9 + t.tv_nsec; }
 int main(int argc, char** argv) {
     ll r = atoll(argv[1]);
-    ll st = __brief_init_state();
+    ll st = __briv_init_state();
     const int N = 200000, N2 = 2000000;
     volatile ll sink = 0;
     feature_hash(st, 1000, r);

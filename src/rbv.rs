@@ -34,7 +34,7 @@ pub enum RbvError {
 
 #[derive(Debug, Clone)]
 pub struct RbvFile {
-    pub brief_source: String,
+    pub briv_source: String,
     pub view_html: String,
     pub style_css: Option<String>,
 }
@@ -42,17 +42,17 @@ pub struct RbvFile {
 impl RbvFile {
     /// Parse an `.rbv` file.
     ///
-    /// Brief code is the default content — everything outside `<view>` and
-    /// `<style>` tags is treated as Brief source.
+    /// Briv code is the default content — everything outside `<view>` and
+    /// `<style>` tags is treated as Briv source.
     ///
-    /// Backward compatible: if `<script>` or `<script type="brief">` tags are
+    /// Backward compatible: if `<script>` or `<script type="briv">` tags are
     /// present, their content is used instead (old format).
     pub fn parse(source: &str) -> Result<Self, RbvError> {
         let view = extract_tag(source, "<view>", "</view>").ok_or(RbvError::MissingView)?;
 
         let style = extract_tag(source, "<style>", "</style>");
 
-        let brief_source = if let Some(script) = extract_script_tags(source) {
+        let briv_source = if let Some(script) = extract_script_tags(source) {
             script.trim().to_string()
         } else {
             let stripped = strip_known_blocks(source);
@@ -60,7 +60,7 @@ impl RbvFile {
         };
 
         Ok(RbvFile {
-            brief_source,
+            briv_source,
             view_html: view.trim().to_string(),
             style_css: style.map(|s| s.trim().to_string()),
         })
@@ -74,7 +74,7 @@ fn extract_tag(source: &str, start_tag: &str, end_tag: &str) -> Option<String> {
 }
 
 fn extract_script_tags(source: &str) -> Option<String> {
-    extract_tag(source, "<script type=\"brief\">", "</script>")
+    extract_tag(source, "<script type=\"briv\">", "</script>")
         .or_else(|| extract_tag(source, "<script>", "</script>"))
 }
 
@@ -83,7 +83,7 @@ fn strip_known_blocks(source: &str) -> String {
         ("<view>", "</view>"),
         ("<style>", "</style>"),
         ("<script>", "</script>"),
-        ("<script type=\"brief\">", "</script>"),
+        ("<script type=\"briv\">", "</script>"),
     ];
     let mut result = source.to_string();
     for &(start_tag, end_tag) in &known_blocks {
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn test_parse_rbv_script_backward_compat() {
         let source = r#"
-<script type="brief">
+<script type="briv">
 let count: Int = 0;
 </script>
 
@@ -115,13 +115,13 @@ p { color: red; }
 </style>
 "#;
         let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.brief_source.contains("count"));
+        assert!(rbv.briv_source.contains("count"));
         assert!(rbv.view_html.contains("b-text"));
         assert!(rbv.style_css.is_some());
     }
 
     #[test]
-    fn test_parse_rbv_brief_as_default() {
+    fn test_parse_rbv_briv_as_default() {
         let source = r#"
 let count: Int = 0;
 
@@ -136,15 +136,15 @@ txn increment [true][@count + 1 == count] {
 </view>
 "#;
         let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.brief_source.contains("count"));
-        assert!(rbv.brief_source.contains("increment"));
+        assert!(rbv.briv_source.contains("count"));
+        assert!(rbv.briv_source.contains("increment"));
         assert!(rbv.view_html.contains("b-text"));
         assert!(rbv.style_css.is_none());
     }
 
     #[test]
     fn test_parse_rbv_no_script_style_is_extracted() {
-        // Brief code interleaved with view — everything outside <view> is source
+        // Briv code interleaved with view — everything outside <view> is source
         let source = r#"
 let x: Int = 42;
 
@@ -158,8 +158,8 @@ txn double [true][@x * 2 == x] {
 };
 "#;
         let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.brief_source.contains("let x: Int = 42"));
-        assert!(rbv.brief_source.contains("txn double"));
+        assert!(rbv.briv_source.contains("let x: Int = 42"));
+        assert!(rbv.briv_source.contains("txn double"));
         assert!(rbv.view_html.contains("b-text"));
     }
 }

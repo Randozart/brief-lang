@@ -1,4 +1,4 @@
-# WebAssembly Language Profile for Brief FFI
+# WebAssembly Language Profile for Briv FFI
 # Defines type mappings and conventions for speaking to WASM modules
 
 [language]
@@ -30,7 +30,7 @@ Void = { size = 0 }
 Bool = { size = 1 }
 
 [mapping]
-# Default mappings for Brief types
+# Default mappings for Briv types
 Int = "i32"
 UInt = "i32"
 Int64 = "i64"

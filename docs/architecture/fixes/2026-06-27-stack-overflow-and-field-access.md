@@ -4,7 +4,7 @@
 
 ### Symptoms
 
-`brief build officina.bv` in debug mode crashes with `fatal runtime error: stack overflow` at `build_budget_plan` entry.
+`briv build officina.bv` in debug mode crashes with `fatal runtime error: stack overflow` at `build_budget_plan` entry.
 
 ### Root Cause
 
@@ -39,9 +39,9 @@ analyzer's `substitute_expr` (converted to iterative in this session).
 
 ```bash
 cargo build                     # default debug build
-brief build officina.bv          # no stack overflow
+briv build officina.bv          # no stack overflow
 cargo build --release           # release build
-brief build officina.bv          # no stack overflow
+briv build officina.bv          # no stack overflow
 cargo test --lib                 # 1300 tests pass
 ```
 
@@ -49,7 +49,7 @@ cargo test --lib                 # 1300 tests pass
 
 ### Symptoms
 
-`brief build officina.bv` panics at `emit_expr.rs:2999`:
+`briv build officina.bv` panics at `emit_expr.rs:2999`:
 ```
 emit_expr: FieldAccess: field 'slot_count' not found on object
 ```
@@ -81,5 +81,5 @@ downstream `FieldAccess` can resolve struct fields.
 ### Verification
 
 ```bash
-brief build officina.bv          # no field access panic
+briv build officina.bv          # no field access panic
 ```

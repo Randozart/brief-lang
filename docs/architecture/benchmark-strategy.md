@@ -4,23 +4,23 @@
 
 ## Philosophy
 
-Benchmarks exist to find flaws in Brief, not to produce flattering numbers.
+Benchmarks exist to find flaws in Briv, not to produce flattering numbers.
 
-A benchmark that reports `0.0002s vs 0.088s` (440x Brief win) is a diagnostic
+A benchmark that reports `0.0002s vs 0.088s` (440x Briv win) is a diagnostic
 signal — it tells you the compiler folded the loop. The compiler is correct.
 The benchmark is measuring the wrong thing.
 
 ### Symmetric by Default
 
-Every Brief benchmark must compute the **same output** as its C reference for
-the same input. If Brief's idiomatic approach to a problem differs
+Every Briv benchmark must compute the **same output** as its C reference for
+the same input. If Briv's idiomatic approach to a problem differs
 fundamentally from C's (different data structures, different control flow,
 different algorithm), create **two** benchmarks:
 
 | Variant | Intent |
 |---------|--------|
-| **Symmetric** (`_sym`) | Mirrors C's approach step-for-step using Brief features. Answers: "Given the same algorithm, does Brief's throughput match C's?" |
-| **Idiomatic** (`_idio`) | Uses Brief-native patterns (contract-proven loops, reactive transactions, etc.) to achieve the same semantic result. Answers: "Given the same semantic goal, can Brief's optimizer find a better path?" |
+| **Symmetric** (`_sym`) | Mirrors C's approach step-for-step using Briv features. Answers: "Given the same algorithm, does Briv's throughput match C's?" |
+| **Idiomatic** (`_idio`) | Uses Briv-native patterns (contract-proven loops, reactive transactions, etc.) to achieve the same semantic result. Answers: "Given the same semantic goal, can Briv's optimizer find a better path?" |
 
 Both must produce identical output for the same input. Neither claims to be
 the single "fair" comparison — both are tagged with their intent.
@@ -28,7 +28,7 @@ the single "fair" comparison — both are tagged with their intent.
 When a bug is discovered in a benchmark (e.g. wrong output), fix the bug.
 Do not create two variants unless the approaches genuinely differ. Hillel
 Wayne's observation about `queue_drain` is the canonical example: the C
-and Brief versions were computing the same result through different
+and Briv versions were computing the same result through different
 algorithms, making the comparison asymmetric. The fix is not to hobble
 either version, but to create a symmetric pair and label them.
 
@@ -39,7 +39,7 @@ Every benchmark belongs to exactly one category:
 | Category | Tag | What it measures | Criteria |
 |----------|-----|------------------|----------|
 | **Runtime** | `--runtime` | Throughput of compiled code | FFI call or observable intrinsic in the hot loop body. LLVM cannot eliminate the loop. |
-| **Optimizer** | `--optimizer` | Compile-time folding power | All `const` inputs + no FFI in the hot loop. LLVM may eliminate the loop. Both Brief and C must produce identical outputs. |
+| **Optimizer** | `--optimizer` | Compile-time folding power | All `const` inputs + no FFI in the hot loop. LLVM may eliminate the loop. Both Briv and C must produce identical outputs. |
 
 A benchmark cannot be both. If it has no observable side effects in its hot
 loop, it is an optimizer benchmark — runtime timing is meaningless.
@@ -84,7 +84,7 @@ irrelevant — they are `precompute_ok`.
 After compilation, the harness (`build_and_bench.sh`) inspects the emitted
 IR or binary for evidence of an observable loop:
 
-1. **Binary size check**: If Brief `.text` < 25% of C `.text`, flag as
+1. **Binary size check**: If Briv `.text` < 25% of C `.text`, flag as
    `precompute_ok` (compiler folded the loop).
 2. **IR check**: If the emitted `main()` contains `ret i32 0` and no loop
    back-edge, flag as `precompute_ok`.
@@ -92,9 +92,9 @@ IR or binary for evidence of an observable loop:
 
 ```
 === iir_filter ===
-  brief:     1 KB  (precompute_ok — skip runtime)
+  briv:     1 KB  (precompute_ok — skip runtime)
   c:        36 KB
-  brief out: <correctness: match>
+  briv out: <correctness: match>
   c out:     <correctness: match>
 ```
 

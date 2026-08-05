@@ -4,7 +4,7 @@
 **Updated:** 2026-06-19  
 **Status:** ✅ All phases complete
 
-**Governing Principle:** Brief shall not break under valid syntax. If the compiler accepts a program, the binary must be correct or the compiler must emit a compile-time error. A silently-crashing binary is a compiler bug — always.
+**Governing Principle:** Briv shall not break under valid syntax. If the compiler accepts a program, the binary must be correct or the compiler must emit a compile-time error. A silently-crashing binary is a compiler bug — always.
 
 **Current State:** 1072 tests pass, 0 fail. All 9 hardening items verified FIXED in Phase 1–3.
 
@@ -149,22 +149,22 @@ ai = bitcast i8* %raw to i64*   // type-erased, valid anywhere
 
 ## Phase 3: Infrastructure — C Shim Bitcode Pipeline
 
-### 3a. Convert `brief_rt.c` to Bitcode Pipeline
+### 3a. Convert `briv_rt.c` to Bitcode Pipeline
 
-**Files:** `src/backend/llvm/mod.rs`, `lib/runtime/brief_rt.c`
+**Files:** `src/backend/llvm/mod.rs`, `lib/runtime/briv_rt.c`
 
-**Problem:** Current pipeline compiles Brief → LLVM IR (`program.ll`), then assembles to `.s` with `llc`, then links `brief_rt.o` as a native `.o` file. This prevents cross-module inlining and constant propagation through the C shim boundary.
+**Problem:** Current pipeline compiles Briv → LLVM IR (`program.ll`), then assembles to `.s` with `llc`, then links `briv_rt.o` as a native `.o` file. This prevents cross-module inlining and constant propagation through the C shim boundary.
 
 **Fix:** Add an `llvm-link` step in the backend pipeline:
 
-1. Pre-compile `brief_rt.c` to bitcode once (build.rs or manual):
+1. Pre-compile `briv_rt.c` to bitcode once (build.rs or manual):
    ```bash
-   clang -O3 -emit-llvm -c lib/runtime/brief_rt.c -o lib/runtime/brief_rt.bc
+   clang -O3 -emit-llvm -c lib/runtime/briv_rt.c -o lib/runtime/briv_rt.bc
    ```
 
 2. After generating `program.ll`, merge with runtime bitcode:
    ```bash
-   llvm-link program.ll lib/runtime/brief_rt.bc -S -o linked.ll
+   llvm-link program.ll lib/runtime/briv_rt.bc -S -o linked.ll
    ```
 
 3. Run `opt -O3` on the merged module:
@@ -178,7 +178,7 @@ ai = bitcast i8* %raw to i64*   // type-erased, valid anywhere
    clang program.s -o program -lm -lpthread -lrt
    ```
 
-**Implementation:** Add `link_bitcode` method to the LLVM backend that runs `llvm-link` and `opt` via `std::process::Command`, gated on existence of `brief_rt.bc` (fall back to current .o linking if not found).
+**Implementation:** Add `link_bitcode` method to the LLVM backend that runs `llvm-link` and `opt` via `std::process::Command`, gated on existence of `briv_rt.bc` (fall back to current .o linking if not found).
 
 ### 3b. Clang IR Reference Workflow
 
@@ -187,8 +187,8 @@ ai = bitcast i8* %raw to i64*   // type-erased, valid anywhere
 For each construct where correctness is uncertain:
 1. Write minimal C test case
 2. Compile to LLVM IR with Clang
-3. Compare with emitted Brief IR
-4. Adjust Brief IR to match if Clang's version is more correct/optimizable
+3. Compare with emitted Briv IR
+4. Adjust Briv IR to match if Clang's version is more correct/optimizable
 
 **Key targets for Clang reference:**
 - `write_file` (fopen/fwrite/fclose)
@@ -233,7 +233,7 @@ For each construct where correctness is uncertain:
 After each phase:
 1. `cargo build` — no warnings
 2. `cargo test --lib` — 915+ tests pass (no regressions)
-3. If officina is fixed by other agent: `./target/release/brief-compiler llvm officina.bv -o officina` + run
+3. If officina is fixed by other agent: `./target/release/briv-compiler llvm officina.bv -o officina` + run
 
 Final:
 4. Commit plan document alongside code
@@ -247,10 +247,10 @@ Use Clang as a reference for correct LLVM IR patterns:
 # See how Clang emits variadic function calls, structs, loops, etc.
 clang -S -emit-llvm -O3 -fno-discard-value-names test.c -o -
 # Pre-compile C shims to bitcode for cross-module inlining:
-clang -O3 -emit-llvm -c brief_rt.c -o brief_rt.bc
-# Merge with generated Brief IR:
-llvm-link program.ll brief_rt.bc -S -o final.ll
-# The compiler now auto-detects brief_rt.c and runs this pipeline
+clang -O3 -emit-llvm -c briv_rt.c -o briv_rt.bc
+# Merge with generated Briv IR:
+llvm-link program.ll briv_rt.bc -S -o final.ll
+# The compiler now auto-detects briv_rt.c and runs this pipeline
 # before falling back to cc compilation.
 ```
 

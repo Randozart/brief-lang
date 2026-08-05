@@ -1,17 +1,17 @@
-# Brief Compiler - Development Guidelines
+# Briv Compiler - Development Guidelines
 
 ## Project Overview
 
-**Brief** is a pure declarative specification language for reactive state machines. It defines valid states, transitions, and contracts.
+**Briv** is a pure declarative specification language for reactive state machines. It defines valid states, transitions, and contracts.
 
-**Rendered Brief** is Brief with embedded view/UI bindings for frontend integration. It adds:
+**Rendered Briv** is Briv with embedded view/UI bindings for frontend integration. It adds:
 - HTML/JSX-like view templates
 - Signal bindings (b-text, b-show, b-trigger)
 - Compiles to WebAssembly + JavaScript glue
 
 **File Types**:
-- `.br` - Pure Brief (specification only)
-- `.rbv` - Rendered Brief (Brief + View) - like how `.tsx` relates to `.ts`
+- `.br` - Pure Briv (specification only)
+- `.rbv` - Rendered Briv (Briv + View) - like how `.tsx` relates to `.ts`
 
 The project consists of:
 - A Rust compiler (`src/`)
@@ -28,39 +28,39 @@ The project consists of:
 - **Typecheck**: `cargo check`
 
 ### Running the Compiler
-- **Unified Compile**: `./target/release/brief-compiler compile <file> --target <spec.toml>`
-- **Build (Default)**: `./target/release/brief-compiler build <file>`
-- **WASM Generation**: `./target/release/brief-compiler wasm <file>`
-- **Compile RBV File**: `./target/release/brief-compiler rbv <file.rbv>`
-- **Run with Server**: `./target/release/brief-compiler run <file.rbv>`
-- **Install to PATH**: `cp target/release/brief-compiler ~/.local/bin/brief`
+- **Unified Compile**: `./target/release/briv-compiler compile <file> --target <spec.toml>`
+- **Build (Default)**: `./target/release/briv-compiler build <file>`
+- **WASM Generation**: `./target/release/briv-compiler wasm <file>`
+- **Compile RBV File**: `./target/release/briv-compiler rbv <file.rbv>`
+- **Run with Server**: `./target/release/briv-compiler run <file.rbv>`
+- **Install to PATH**: `cp target/release/briv-compiler ~/.local/bin/briv`
 
 ### New CLI Commands & Build System (as of May 2026)
 
 The build and compilation system has been refactored to be more explicit and powerful.
 
-#### `brief build`
+#### `briv build`
 
-The `build` command is now the primary way to compile a Brief file to its default target. The behavior depends on the file extension:
+The `build` command is now the primary way to compile a Briv file to its default target. The behavior depends on the file extension:
 
--   **`.bv` (Brief Volume)**: Transpiles to Rust and attempts to compile to a native executable using `rustc`.
+-   **`.bv` (Briv Volume)**: Transpiles to Rust and attempts to compile to a native executable using `rustc`.
     -   *Default Target*: Native Rust application.
--   **`.rbv` (Rendered Brief Volume)**: Compiles to a full web application (WASM + JS + Frontend), similar to the old `run` command.
+-   **`.rbv` (Rendered Briv Volume)**: Compiles to a full web application (WASM + JS + Frontend), similar to the old `run` command.
     -   *Default Target*: Web application.
--   **`.ebv` (Embedded Brief Volume)**: **No default target**. These files are hardware-specific and must be compiled with an explicit target using `brief compile`.
+-   **`.ebv` (Embedded Briv Volume)**: **No default target**. These files are hardware-specific and must be compiled with an explicit target using `briv compile`.
 
-#### `brief wasm`
+#### `briv wasm`
 
 This new command is dedicated to WASM generation:
 
 -   **`.bv` file**: Generates a pure, standalone WASM binary. No JS glue or frontend is created.
--   **`.rbv` file**: Generates a full web application (WASM + JS + Frontend), identical to `brief build` for `.rbv` files.
+-   **`.rbv` file**: Generates a full web application (WASM + JS + Frontend), identical to `briv build` for `.rbv` files.
 
-#### `brief compile` (Unified)
+#### `briv compile` (Unified)
 
-This is the most flexible command, allowing you to compile any Brief file to any supported target by specifying a target specification file.
+This is the most flexible command, allowing you to compile any Briv file to any supported target by specifying a target specification file.
 
-`brief compile <file> --target <spec.toml>`
+`briv compile <file> --target <spec.toml>`
 
 **New Target Specs**:
 -   `vhdl_fpga.toml`: Compiles to VHDL for FPGAs.
@@ -70,9 +70,9 @@ This is the most flexible command, allowing you to compile any Brief file to any
 
 See `lib/targets/` for all available target specifications.
 
-### Data Brief for Configuration
+### Data Briv for Configuration
 
-The old `hardware.toml` files are being replaced by **Data Brief** (`.dbv`, `.dbvs`). This allows for schema-enforced hardware configuration and validation. See `DATABRIEF.md` for more details.
+The old `hardware.toml` files are being replaced by **Data Briv** (`.dbv`, `.dbvs`). This allows for schema-enforced hardware configuration and validation. See `DATABRIEF.md` for more details.
 
 
 ### Example Files
@@ -83,7 +83,7 @@ The old `hardware.toml` files are being replaced by **Data Brief** (`.dbv`, `.db
 ## Architecture
 
 ### Key Source Files
-- `src/parser.rs` - Brief language parser (handles both .br and .rbv)
+- `src/parser.rs` - Briv language parser (handles both .br and .rbv)
 - `src/lexer.rs` - Tokenization
 - `src/ast.rs` - Abstract syntax tree definitions
 - `src/typechecker.rs` - Type checking, contract verification, FFI error enforcement
@@ -91,12 +91,12 @@ The old `hardware.toml` files are being replaced by **Data Brief** (`.dbv`, `.db
 - `src/symbolic.rs` - Symbolic execution for contract verification
 - `src/proof_engine.rs` - Proof generation, mutual exclusion checking, contract proofs
 - `src/wasm_gen.rs` - WASM code generation
-- `src/rbv.rs` - .rbv file parsing (Rendered Brief view extraction)
+- `src/rbv.rs` - .rbv file parsing (Rendered Briv view extraction)
 - `src/view_compiler.rs` - View/HTML compilation with bindings
 - `src/reactor.rs` - Reactor runtime
 
 ### Generated Output
-- WASM artifacts go to `/tmp/brief-run-<name>/`
+- WASM artifacts go to `/tmp/briv-run-<name>/`
 - Includes: `.rbv` → Rust → WASM → Browser
 
 ## Code Style
@@ -116,7 +116,7 @@ The old `hardware.toml` files are being replaced by **Data Brief** (`.dbv`, `.db
 
 > **Contracts are the source of truth. Code is generated to satisfy contracts. Never weaken contracts to match lazy implementation code.**
 
-When writing Brief code (.rbv files) or modifying the compiler:
+When writing Briv code (.rbv files) or modifying the compiler:
 1. Write/improve the CONTRACT first
 2. Generate CODE that satisfies the contract
 3. If code cannot satisfy the contract, PROVE it's impossible
@@ -168,7 +168,7 @@ When code cannot satisfy a contract:
 
 **NEVER silently weaken a contract** (e.g., changing `[product > 0]` to `[true]` just because code doesn't set product).
 
-## Brief-Specific Rules
+## Briv-Specific Rules
 
 ### For .rbv Files (Shopping Cart, Counter, etc.)
 
@@ -306,7 +306,7 @@ Implement the solution:
 
 ## Contact
 
-This file is used by AI coding assistants (Claude Code, OpenCode) when working in the Brief compiler project. All changes should maintain the Contract-First Philosophy.
+This file is used by AI coding assistants (Claude Code, OpenCode) when working in the Briv compiler project. All changes should maintain the Contract-First Philosophy.
 
 ---
 
@@ -371,7 +371,7 @@ This file is used by AI coding assistants (Claude Code, OpenCode) when working i
 #### Bugs and recoveries during session
 1. **`[post ready]` in test input is invalid** — the spec example uses `[post ready]` as shorthand, but the contract parser reads sequential bracketed expressions. `ready` alone works (`[post == ready]` or `[ready]`). The spec `[post condition]` is aspirational sugar, not current grammar.
 2. **Misplaced test code** — I accidentally placed `#[test] fn test_multi_body...` inside the `impl Parser` block after `parse_statement`. This caused 94 cascading errors. The correct location is inside the `mod parser_tests { }` block at the end of the file. Three rounds of cleanup needed (removing duplicate, fixing extra closing braces, restoring `None` return in `parse_map_pair`).
-3. **`return` not a keyword in Brief** — used `return x * 2;` in a test which failed because `return` is an identifier token. Replaced with `&result = x * 2;` (standard Brief assignment).
+3. **`return` not a keyword in Briv** — used `return x * 2;` in a test which failed because `return` is an identifier token. Replaced with `&result = x * 2;` (standard Briv assignment).
 4. **Editor edit was too greedy** — my `String.replace("oldText", "newText")` pattern matched a larger region than intended, copying test functions into the wrong location while also removing them from the right one. Should have verified the edit region before applying.
 
 #### What I'd do differently this session
@@ -389,7 +389,7 @@ This file is used by AI coding assistants (Claude Code, OpenCode) when working i
 
 #### Bugs and recoveries
 1. **Misplaced test code (round 2)** — despite cleaning up in session 2, remnant `#[test]` functions were still inside `impl Parser` at ~line 449. These closed `impl Parser` prematurely at line 481, causing ALL subsequent methods to be outside the impl block. Fixed by removing the full remaining test block.
-2. **`type` not a keyword** — test used `type GPU { ... }` but Brief uses `struct` keyword. Fixed test input.
+2. **`type` not a keyword** — test used `type GPU { ... }` but Briv uses `struct` keyword. Fixed test input.
 3. **`spanned_err` return type** — in `parse_struct_variant_fields`, the `_ =>` error arm calls `spanned_err` which returns `Err(SyntaxError)`. The function's `Result<..., SyntaxError>` return type means `return self.spanned_err(...)` works directly (no `.unwrap_err()` needed) since the `?` operator coerces the error variant.
 
 #### Commits
@@ -413,7 +413,7 @@ This file is used by AI coding assistants (Claude Code, OpenCode) when working i
 - **7 unit tests** — supported tag, unknown advisory warning, unknown mandatory error, fallback chain success, fallback chain failure, scoped skip, scoped validate
 
 #### Key findings
-- `supported_hashtags()` is a simple string list, but the tags themselves are not standardized. `volatile` is used by C/Rust/Cobol but not by Verilog (`clock`, `register`). If a Brief file has `#!volatile` targeting Verilog, the error message tells the user exactly that.
+- `supported_hashtags()` is a simple string list, but the tags themselves are not standardized. `volatile` is used by C/Rust/Cobol but not by Verilog (`clock`, `register`). If a Briv file has `#!volatile` targeting Verilog, the error message tells the user exactly that.
 - Fallback chain `#!A|B|C` only works if at least one alternative is supported. The validation correctly skips the primary `name` when checking fallbacks.
 - Scoped tags `#[verilog]clock` are only validated when `scope == backend`. This means a C target never sees the Verilog-specific `clock` tag.
 - `StateDecl` (top-level let) doesn't have a `modifiers` field — hashtags on top-level lets are not yet supported. This is fine because top-level state declarations don't need backend-specific modifiers in practice.

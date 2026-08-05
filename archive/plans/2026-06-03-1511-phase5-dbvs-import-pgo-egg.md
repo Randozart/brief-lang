@@ -7,7 +7,7 @@
 
 ## Context
 
-The LTO+MMIO+Handoff pipeline (Phases 1-4) is complete but has a critical gap: the compiler cannot enforce that a Brief program's state declarations match its imported `.dbvs` schema. The `validate_schema_imports()` function exists but is only called in Verilog/VHDL paths. The LLVM path never invokes it. Additionally, `--target-dbv` is a required explicit CLI flag — the compiler should automatically detect the target from schema imports.
+The LTO+MMIO+Handoff pipeline (Phases 1-4) is complete but has a critical gap: the compiler cannot enforce that a Briv program's state declarations match its imported `.dbvs` schema. The `validate_schema_imports()` function exists but is only called in Verilog/VHDL paths. The LLVM path never invokes it. Additionally, `--target-dbv` is a required explicit CLI flag — the compiler should automatically detect the target from schema imports.
 
 Two optimization passes (N3 PGO, N2 egg) are planned but need efficiency gates: they must only activate when they'll actually help, not add overhead.
 
@@ -26,34 +26,34 @@ In `run_llvm_compile()` (line ~2000), after import resolution but before type ch
 
 1. Scan `program.items` for `TopLevel::Import` items with `.dbvs` paths
 2. Call `hardware_validator::HardwareValidator::validate_schema_imports(&program, source_path)` — this returns HW005/HW006/HW007 diagnostics for parse failures, missing files, and undeclared aliases
-3. For each `.dbvs` import found, read the file, call `crate::dbrief::parse_dbvs(&content)`, and collect:
-   - `schema_aliases: HashMap<String, (DbriefType, String)>` — alias name → (type, schema_path)
-   - `schema_registers: HashMap<String, (DbriefAddress, DbriefType)>` — register address → type
+3. For each `.dbvs` import found, read the file, call `crate::dbriv::parse_dbvs(&content)`, and collect:
+   - `schema_aliases: HashMap<String, (DbrivType, String)>` — alias name → (type, schema_path)
+   - `schema_registers: HashMap<String, (DbrivAddress, DbrivType)>` — register address → type
 4. Pass the schema alias map to `LlvmBackend` via a new method
 
 #### `src/backend/llvm.rs` — Schema type cross-checking
 
-1. Add field: `schema_aliases: HashMap<String, DbriefType>` to `LlvmBackend`
-2. New method: `pub fn with_schema_aliases(mut self, aliases: HashMap<String, DbriefType>) -> Self`
+1. Add field: `schema_aliases: HashMap<String, DbrivType>` to `LlvmBackend`
+2. New method: `pub fn with_schema_aliases(mut self, aliases: HashMap<String, DbrivType>) -> Self`
 3. In `generate()`, after `build_field_index()`, call `self.validate_schema_types()`:
    - For each `StateDecl` that matches a schema alias, check type compatibility
-   - DBrief types mapped to Brief types:
-     - `Int(n)`, `UInt(n)`, `Addr` → Brief `Int` (OK, with warning if `UInt(n)` and Brief type is `Int` — signed/unsigned mismatch)
-     - `Float` → Brief `Float` (OK)
-     - `Bool` → Brief `Bool` (OK)
-     - `String` → Brief `String` (OK)
-     - `Data` → Brief `Data` (OK)
+   - DBriv types mapped to Briv types:
+     - `Int(n)`, `UInt(n)`, `Addr` → Briv `Int` (OK, with warning if `UInt(n)` and Briv type is `Int` — signed/unsigned mismatch)
+     - `Float` → Briv `Float` (OK)
+     - `Bool` → Briv `Bool` (OK)
+     - `String` → Briv `String` (OK)
+     - `Data` → Briv `Data` (OK)
      - `Vector(t, _)` → **error**
      - `Option(t)` → **error**
      - `Result(t, e)` → **error**
-     - `Trigger(t)` → Brief `Bool` (triggers are boolean in Brief)
+     - `Trigger(t)` → Briv `Bool` (triggers are boolean in Briv)
    - Signed/unsigned mismatch: emit warning, not error (64-bit target makes it safe)
 
-#### `src/dbrief/ast.rs` — Add type compatibility helper
+#### `src/dbriv/ast.rs` — Add type compatibility helper
 
 ```rust
-impl DbriefType {
-    pub fn to_brief_type_name(&self) -> Result<&str, String> { ... }
+impl DbrivType {
+    pub fn to_briv_type_name(&self) -> Result<&str, String> { ... }
 }
 ```
 
@@ -221,7 +221,7 @@ Step 6: N2 egg                   (independent)
 |------|--------|-------------|
 | `.gitignore` | Fix `*.rs` → `/*.rs` | 1 |
 | `Cargo.toml` | Add `egg = "0.9"` | 1 |
-| `src/dbrief/ast.rs` | Add `DbriefType::to_brief_type_name()` | 30 |
+| `src/dbriv/ast.rs` | Add `DbrivType::to_briv_type_name()` | 30 |
 | `src/main.rs` | Wire schema validation + auto-target + PGO flags | 80 |
 | `src/backend/llvm.rs` | Schema aliases + scoped MMIO + PGO metadata + egg call | 60 |
 | `src/analysis/schema_validator.rs` | New: cross-validation | 120 |
@@ -242,7 +242,7 @@ Step 6: N2 egg                   (independent)
 | HW009 | Warning | Target `.dbv` binds alias not in any imported schema |
 | HW010 | Error | Address overlap between schema registers |
 | HW011 | Warning | Signed/unsigned mismatch: UInt(n) vs Int |
-| HW012 | Error | Type incompatibility: schema type cannot map to Brief |
+| HW012 | Error | Type incompatibility: schema type cannot map to Briv |
 | B006 | Info | PGO skipped: branches balanced |
 | B007 | Info | PGO profile attached: N skewed branches |
 | B008 | Info | egg simplification applied: N→K nodes |

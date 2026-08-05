@@ -3,7 +3,7 @@
 ## Overview
 This plan distills three major architectural initiatives from the conversation:
 1. **Property-Based Differential Fuzzing** - Safe compiler testing with Unicorn emulator
-2. **`trg`/`trigger` Elevation to Core Brief** - Unified async I/O across all Brief flavors
+2. **`trg`/`trigger` Elevation to Core Briv** - Unified async I/O across all Briv flavors
 3. **Memory Spec Output** - `--emit-memory-spec` CLI flag for FFI coordination
 
 ---
@@ -11,7 +11,7 @@ This plan distills three major architectural initiatives from the conversation:
 ## 1. Property-Based Differential Fuzzing
 
 ### 1.1 AST Generator (Arbitrary/Procedural Generation)
-**Goal**: Procedurally generate valid and semi-valid Brief ASTs for fuzzing without manual test cases.
+**Goal**: Procedurally generate valid and semi-valid Briv ASTs for fuzzing without manual test cases.
 
 **Changes Required**:
 - [ ] Create `src/fuzzing/ast_generator.rs` with recursive generation functions:
@@ -35,7 +35,7 @@ This plan distills three major architectural initiatives from the conversation:
 
 **Changes Required**:
 - [ ] Create `tests/fuzz_frontend.rs` with proptest harness:
-  - Generate random strings (garbage bytes, structured-but-invalid Brief syntax)
+  - Generate random strings (garbage bytes, structured-but-invalid Briv syntax)
   - Feed through `tokenize()` and `parse_program()`
   - Assert: Returns `Ok(Program)` or `Err(String)`, never panics/unwraps/infinite-loops
   - Add timeout guard for parser (max 5 seconds per input)
@@ -54,8 +54,8 @@ This plan distills three major architectural initiatives from the conversation:
   - **Step D**: Execute with strict instruction timeout (max 10,000 instructions to prevent infinite loops)
   - **Step E**: Read final CPU registers (X0/X1 or RAX/RBX) and memory
   - **Assertion**: `assert_eq!(Symbolic_Result, Emulator_Result)`
-- [ ] Add register mapping layer (Brief variables → emulator registers)
-- [ ] Add memory mapping layer (Brief state → emulator memory regions)
+- [ ] Add register mapping layer (Briv variables → emulator registers)
+- [ ] Add memory mapping layer (Briv state → emulator memory regions)
 - [ ] Support both AArch64 and x86_64 backends
 
 **Files to modify**:
@@ -91,7 +91,7 @@ This plan distills three major architectural initiatives from the conversation:
 
 ---
 
-## 2. `trg`/`trigger` Elevation to Core Brief
+## 2. `trg`/`trigger` Elevation to Core Briv
 
 ### 2.1 Token Aliases
 **Goal**: Support `trg`, `TRG`, `trigger`, `TRIGGER` as equivalent tokens.
@@ -189,11 +189,11 @@ This plan distills three major architectural initiatives from the conversation:
 - `src/typechecker.rs`
 
 ### 2.4 System Triggers Standard Library
-**Goal**: Provide standard system triggers for Regular Brief I/O.
+**Goal**: Provide standard system triggers for Regular Briv I/O.
 
 **Changes Required**:
 - [ ] Create `lib/std/system.bv` with:
-  ```brief
+  ```briv
   trg stdin_line: String;
   trg sigint: Bool;        // Ctrl+C
   trg clock_tick_1hz: Int; // Fires every second
@@ -237,8 +237,8 @@ This plan distills three major architectural initiatives from the conversation:
 - New: `std/bindings/system_triggers.dbvs`
 - `src/ffi/registry.rs`
 - `src/ffi/loader.rs`
-- `src/dbrief/ast.rs` (add trigger schema support if needed)
-- `src/dbrief/parser.rs`
+- `src/dbriv/ast.rs` (add trigger schema support if needed)
+- `src/dbriv/parser.rs`
 
 ### 2.6 Pre-Evaluation Guard System (Two-Tier Execution)
 **Goal**: Minimize wasted FFI side effects by pre-evaluating escape conditions before running a transaction. Only run speculatively when escape conditions depend on future/unpredictable events.
@@ -481,5 +481,5 @@ serde_json = "1.0"  # For memory spec JSON output
 2. **Differential**: Symbolic proof results match emulator results for 10,000+ programs
 3. **Triggers**: `trg` works at top-level; `trg!` required inside transactions across all backends
 4. **Pre-Evaluation Guard**: Transactions with provably-escaping conditions are skipped before any FFI fires
-5. **Memory Spec**: `brief build --emit-memory-spec` produces valid JSON for any program
+5. **Memory Spec**: `briv build --emit-memory-spec` produces valid JSON for any program
 6. **Tests**: All 163 existing tests still pass, plus new fuzzing tests

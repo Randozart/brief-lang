@@ -1040,8 +1040,8 @@ Disassembly of section .text:
     11c4:	66 66 66 2e 0f 1f 84 	data16 data16 cs nopw 0x0(%rax,%rax,1)
     11cb:	00 00 00 00 00 
 
-00000000000011d0 <brief_rt_ctor>:
-    11d0:	e9 00 00 00 00       	jmp    11d5 <brief_rt_ctor+0x5>
+00000000000011d0 <briv_rt_ctor>:
+    11d0:	e9 00 00 00 00       	jmp    11d5 <briv_rt_ctor+0x5>
     11d5:	66 66 2e 0f 1f 84 00 	data16 cs nopw 0x0(%rax,%rax,1)
     11dc:	00 00 00 00 
 
@@ -1457,23 +1457,23 @@ Disassembly of section .text:
     17f8:	0f 1f 84 00 00 00 00 	nopl   0x0(%rax,%rax,1)
     17ff:	00 
 
-0000000000001800 <brief_thread_pool_init>:
+0000000000001800 <briv_thread_pool_init>:
     1800:	c3                   	ret
     1801:	66 66 66 66 66 66 2e 	data16 data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)
     1808:	0f 1f 84 00 00 00 00 
     180f:	00 
 
-0000000000001810 <brief_barrier_release>:
+0000000000001810 <briv_barrier_release>:
     1810:	c3                   	ret
     1811:	66 66 66 66 66 66 2e 	data16 data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)
     1818:	0f 1f 84 00 00 00 00 
     181f:	00 
 
-0000000000001820 <brief_barrier_wait>:
+0000000000001820 <briv_barrier_wait>:
     1820:	c3                   	ret
     1821:	66 66 66 66 66 66 2e 	data16 data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)
     1828:	0f 1f 84 00 00 00 00 
     182f:	00 
 
-0000000000001830 <brief_thread_pool_shutdown>:
+0000000000001830 <briv_thread_pool_shutdown>:
     1830:	c3                   	ret

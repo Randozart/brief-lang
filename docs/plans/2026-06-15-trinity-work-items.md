@@ -130,7 +130,7 @@ Update `docs/architecture/features/statement.md`:
 
 ### Background
 
-Brief already has two watchdog forms:
+Briv already has two watchdog forms:
 
 | Form | Name | Semantics |
 |------|------|-----------|
@@ -151,7 +151,7 @@ At **compile time**, the proof engine tries all available strategies in order. I
 
 If **no strategy succeeds**, the compiler desugars to:
 
-```brief
+```briv
 txn __fuel_guard [__fuel > 0][true] {
     // body
     &__fuel = __fuel - 1;
@@ -184,7 +184,7 @@ The handler is:
 
 ### Syntax
 
-```brief
+```briv
 // Simple — proof engine chooses strategy order
 ?#[&retries = retries + 1] {
     encode_video_frame(raw, params);
@@ -208,7 +208,7 @@ The handler `#[handler]` uses a single bracket `#[...]` to distinguish it from t
 
 ### Ordering Hints (Future)
 
-```brief
+```briv
 ?#[handler] @[structural > z3(3s) > fuel(10000)] {
     body;
 };
@@ -218,7 +218,7 @@ Deferred until we know which strategies actually fire in practice.
 
 ### Comparison to Existing Systems
 
-| System | Mechanism | Brief analogue |
+| System | Mechanism | Briv analogue |
 |--------|-----------|----------------|
 | **SPARK** | `Subprogram_Variant` (decreasing expression) | Structural recursion checker (new) |
 | **eBPF verifier** | Static loop bound analysis | Bounded counter (exists) |
@@ -265,7 +265,7 @@ Deferred until we know which strategies actually fire in practice.
 
 A transaction body like:
 
-```brief
+```briv
 node compute [ready][done] {
     &x = a + b;
     &y = c + d;

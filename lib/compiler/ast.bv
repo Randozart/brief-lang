@@ -233,7 +233,7 @@ enum EnumVariant {
     VariantStruct(String, List<StructField>)
 }
 
-// ===== VIEWS (Rendered Brief) =====
+// ===== VIEWS (Rendered Briv) =====
 
 obj ViewBody {
     elements: List<ViewElement>

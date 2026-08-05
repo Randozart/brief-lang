@@ -40,7 +40,7 @@ Two additional files need `#!exit` removed but have no FFI in the body:
 The two txns each accumulate (`acc_a += a`, `acc_b += b`). The final output is
 `acc_a + acc_b`. Add to each txn a terminating guard:
 
-```brief
+```briv
 [count == bound] {
     term! -> print_int#(acc_a + acc_b);
 };

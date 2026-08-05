@@ -1,5 +1,5 @@
 {
-  "name": "Brief Light",
+  "name": "Briv Light",
   "type": "light",
   "colors": {
     "editor.background": "#FFFFFF",
@@ -11,111 +11,111 @@
   },
   "tokenColors": [
     {
-      "scope": "keyword.control.txn.brief",
+      "scope": "keyword.control.txn.briv",
       "settings": { "foreground": "#0000FF", "fontStyle": "bold" }
     },
     {
-      "scope": "keyword.control.reactive.brief",
+      "scope": "keyword.control.reactive.briv",
       "settings": { "foreground": "#795E26", "fontStyle": "bold" }
     },
     {
-      "scope": "keyword.control.async.brief",
+      "scope": "keyword.control.async.briv",
       "settings": { "foreground": "#0000FF", "fontStyle": "italic" }
     },
     {
-      "scope": "keyword.control.flow.brief",
+      "scope": "keyword.control.flow.briv",
       "settings": { "foreground": "#AF00DB", "fontStyle": "bold" }
     },
     {
-      "scope": "keyword.declaration.brief",
+      "scope": "keyword.declaration.briv",
       "settings": { "foreground": "#0000FF" }
     },
     {
-      "scope": "keyword.import.brief",
+      "scope": "keyword.import.briv",
       "settings": { "foreground": "#0000FF" }
     },
     {
-      "scope": "support.type.primitive.brief",
+      "scope": "support.type.primitive.briv",
       "settings": { "foreground": "#267F99" }
     },
     {
-      "scope": "entity.name.type.custom.brief",
+      "scope": "entity.name.type.custom.briv",
       "settings": { "foreground": "#267F99" }
     },
     {
-      "scope": "string.quoted.double.brief",
+      "scope": "string.quoted.double.briv",
       "settings": { "foreground": "#A31515" }
     },
     {
-      "scope": "constant.numeric.integer.brief",
+      "scope": "constant.numeric.integer.briv",
       "settings": { "foreground": "#098658" }
     },
     {
-      "scope": "constant.numeric.float.brief",
+      "scope": "constant.numeric.float.briv",
       "settings": { "foreground": "#098658" }
     },
     {
-      "scope": "constant.language.true.brief",
+      "scope": "constant.language.true.briv",
       "settings": { "foreground": "#0000FF", "fontStyle": "bold" }
     },
     {
-      "scope": "constant.language.false.brief",
+      "scope": "constant.language.false.briv",
       "settings": { "foreground": "#0000FF", "fontStyle": "bold" }
     },
     {
-      "scope": "comment.line.brief",
+      "scope": "comment.line.briv",
       "settings": { "foreground": "#008000", "fontStyle": "italic" }
     },
     {
-      "scope": "comment.annotation.brief",
+      "scope": "comment.annotation.briv",
       "settings": { "foreground": "#008000", "fontStyle": "bold" }
     },
     {
-      "scope": "meta.annotation.brief",
+      "scope": "meta.annotation.briv",
       "settings": { "foreground": "#795E26", "fontStyle": "bold underline" }
     },
     {
-      "scope": "storage.modifier.ownership.brief",
+      "scope": "storage.modifier.ownership.briv",
       "settings": { "foreground": "#0000FF", "fontStyle": "bold" }
     },
     {
-      "scope": "keyword.operator.comparison.brief",
+      "scope": "keyword.operator.comparison.briv",
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "keyword.operator.logical.brief",
+      "scope": "keyword.operator.logical.briv",
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "keyword.operator.term-until.brief",
+      "scope": "keyword.operator.term-until.briv",
       "settings": { "foreground": "#795E26", "fontStyle": "bold" }
     },
     {
-      "scope": "entity.name.function.brief",
+      "scope": "entity.name.function.briv",
       "settings": { "foreground": "#795E26" }
     },
     {
-      "scope": "punctuation.terminator.brief",
+      "scope": "punctuation.terminator.briv",
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "punctuation.separator.comma.brief",
+      "scope": "punctuation.separator.comma.briv",
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "meta.attribute.brief-binding",
+      "scope": "meta.attribute.briv-binding",
       "settings": { "foreground": "#D04CA0" }
     },
     {
-      "scope": "tag.embedded.script.brief",
+      "scope": "tag.embedded.script.briv",
       "settings": { "foreground": "#0000FF" }
     },
     {
-      "scope": "tag.embedded.view.brief",
+      "scope": "tag.embedded.view.briv",
       "settings": { "foreground": "#0000FF" }
     },
     {
-      "scope": "tag.embedded.style.brief",
+      "scope": "tag.embedded.style.briv",
       "settings": { "foreground": "#0000FF" }
     },
     {
@@ -123,39 +123,39 @@
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "keyword.other.property.brief",
+      "scope": "keyword.other.property.briv",
       "settings": { "foreground": "#795E26" }
     },
     {
-      "scope": "entity.name.function.stage-block.brief",
+      "scope": "entity.name.function.stage-block.briv",
       "settings": { "foreground": "#A31515" }
     },
     {
-      "scope": "keyword.operator.property.brief",
+      "scope": "keyword.operator.property.briv",
       "settings": { "foreground": "#795E26" }
     },
     {
-      "scope": "keyword.operator.push.brief",
+      "scope": "keyword.operator.push.briv",
       "settings": { "foreground": "#A31515" }
     },
     {
-      "scope": "keyword.operator.bitwise.brief",
+      "scope": "keyword.operator.bitwise.briv",
       "settings": { "foreground": "#000000" }
     },
     {
-      "scope": "keyword.operator.arrow.brief",
+      "scope": "keyword.operator.arrow.briv",
       "settings": { "foreground": "#A31515" }
     },
     {
-      "scope": "keyword.operator.projection.brief",
+      "scope": "keyword.operator.projection.briv",
       "settings": { "foreground": "#267F99" }
     },
     {
-      "scope": "variable.other.constant.brief",
+      "scope": "variable.other.constant.briv",
       "settings": { "foreground": "#A31515" }
     },
     {
-      "scope": "constant.language.result.brief",
+      "scope": "constant.language.result.briv",
       "settings": { "foreground": "#D04CA0" }
     }
   ]

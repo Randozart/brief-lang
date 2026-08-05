@@ -11,7 +11,7 @@ Create a `Console` cell in the standard library (`lib/std/console.bv`) that enca
 
 ### Target API
 
-```brief
+```briv
 import "console.bv";
 
 $!console_input(inp) {
@@ -21,7 +21,7 @@ $!console_input(inp) {
 
 This expands to:
 
-```brief
+```briv
 trg inp: String @ Console!;
 
 node __ci_inp [inp != ""]] {
@@ -81,12 +81,12 @@ Key properties:
 
   **True solution**: Add a `line_id: Int` output that increments on every emit. Parent binds to `line_id` (guaranteed to change) and reads `line` as a secondary value.
 
-  ```brief
+  ```briv
   cell! Console -> line: String, line_id: Int { ... }
   ```
 
   Parent pattern:
-  ```brief
+  ```briv
   trg inp_id: Int @ Console.line_id;
 
   node handle [inp_id != last_id]] {
@@ -105,7 +105,7 @@ A `$!macro` that generates top-level items (trg binding + node handler).
 
 **Macro definition** (placed in `lib/std/console.bv`):
 
-```brief
+```briv
 macro console_input(line_var: String, body: Block) -> Block {
     quote {
         trg @line_var: String @ Console!;
@@ -134,7 +134,7 @@ The `$!console_input` macro must handle the case where the user enters the same 
 
 **Approach**: Use `line_id` counter. The macro generates:
 
-```brief
+```briv
 trg @line_var: String @ Console!;
 
 node __ci_@line_var [@line_var != ""]] {
@@ -148,7 +148,7 @@ With `line: String` as the sole output, the parent's trigger fires when the cell
 
 **True fix**: Use a `line_id` counter guaranteed to change each emit. Parent binds to `line_id` and reads `line` as a side channel:
 
-```brief
+```briv
 trg inp_id: Int @ Console.line_id;
 let last_inp_id: Int = -1;
 
@@ -195,7 +195,7 @@ The `$!console_input` macro would generate both trg bindings and the handler.
 
 The cell system has an architectural gap: `internal_triggers` are **parsed** and **stored** in `CellDef` but **never evaluated** during cell execution. Both interpreter paths — `call_cell` (sync) and `tick_persistent_cells` (persistent) — iterate only over `transactions` and skip internal trigger evaluation.
 
-A top-level Brief program has this flow each tick:
+A top-level Briv program has this flow each tick:
 
 ```
 1. Evaluate all trg sources (stdin#, timer#, mmio) → write to state
@@ -279,7 +279,7 @@ Push nested bodies. Call `expr_has_call` on assignment expressions.
 ### Verification
 
 - `cargo test --lib` — all 1300 tests pass
-- `brief build officina.bv` — no stack overflow in debug build
+- `briv build officina.bv` — no stack overflow in debug build
 
 ---
 

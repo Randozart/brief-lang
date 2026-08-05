@@ -14,14 +14,14 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}Brief Shopping Cart - Compilation${NC}"
+echo -e "${BLUE}Briv Shopping Cart - Compilation${NC}"
 echo "=================================="
 echo ""
 echo "Step 1: Building compiler (release mode)..."
 cargo build --release -q 2>/dev/null || echo "(compiler already built)"
 
 echo -e "Step 2: Compiling shopping cart to $OUTPUT_DIR..."
-./target/release/brief-compiler rbv examples/shopping_cart.rbv --out "$OUTPUT_DIR"
+./target/release/briv-compiler rbv examples/shopping_cart.rbv --out "$OUTPUT_DIR"
 
 echo ""
 echo -e "${GREEN}✓ Compilation complete!${NC}"

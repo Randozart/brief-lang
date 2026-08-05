@@ -1,4 +1,4 @@
-// 2026-07-25: Brief VM interpreter implementation.
+// 2026-07-25: Briv VM interpreter implementation.
 // Stack-based 64-bit virtual machine. All multi-byte reads use memcpy
 // to guarantee correct behavior on strict-alignment architectures (ARM, RISC-V).
 

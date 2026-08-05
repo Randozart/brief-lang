@@ -10,7 +10,7 @@ A `layout <~ <pattern>` metadata key on any type. The `< >` wrapper gives the fr
 
 ### Syntax
 
-```brief
+```briv
 // Fixed-width slicing — bits are known at compile time
 type Float32 : Bits {
     bytes <~ 4;
@@ -129,7 +129,7 @@ Max 2 levels deep. Use helper extraction for sub-parsers.
 
 Inside meld declarations, allow a `layout { ... }` block:
 
-```brief
+```briv
 meld Float32 <:> MyCustomFloat {
     layout {
         sign <:> sign;

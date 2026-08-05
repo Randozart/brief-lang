@@ -101,12 +101,12 @@ Convert `frgn` declarations in `lib/std/` where a matching `Intrinsic` variant e
 | 13 | `examples/process-spawn.bv` | `.bv` | `spawn#`, `spawn_with_output#`, `argv#`, `getpid#`, `getenv#`/`setenv#` |
 | 14 | `examples/mmap-demo.bv` | `.bv` | `mmap#`, `munmap#`, `mprotect#`, memory-mapped file I/O |
 
-### 3.4 Hardware / Brief Variants
+### 3.4 Hardware / Briv Variants
 
 | # | File | Type | Features |
 |---|------|------|----------|
 | 15 | `examples/inop-side-effect.bv` | `.bv` | `inop!` (side-effectful intrinsic), BILD body with side-effects |
-| 16 | `examples/data-brief` | `.dbv/.dbvs/.dbvl` | Data Brief schema, data files, validation |
+| 16 | `examples/data-briv` | `.dbv/.dbvs/.dbvl` | Data Briv schema, data files, validation |
 | 17 | `examples/glue-macro.bv` | `.bv` | `#export` with `frgn` + `meld`, full GLUE bridge pattern |
 | 18 | `examples/assume-pragma.bv` | `.bv` | `#assume_event(name)`, `#assume_shape(guard, action)` pragmas |
 
@@ -140,4 +140,4 @@ After all edits:
 - **Fix in place (18 files):** `wasm-import.rbv`, `shopping_cart.rbv`, `rbv-no-script-tags.rbv`, `todo.rbv`, `timeout_test.ebv`, `stdlib_usage.bv`, `main.bv`, `counter.rbv`, `hello/main.bv`, `fizzbuzz.bv`, `contract_verification.bv`, `hello-world/src/main.bv`, `constraint_range.bv`, `constraint_expression.bv`, `test_ffi_minimal.bv`, `test_ffi.bv`, `multi_output.bv`, `inop-sadd.bv`, `cobol/bank_system.bv`
 - **Rewrite (3 files):** `stdlib_usage.bv`, `multi_output.bv`, `contract_verification.bv`
 - **Stdlib migrate (4+ files):** `lib/std/env.bv`, `lib/std/process.bv`, `lib/std/shm.bv`, `lib/std/ffi/shm.bv`
-- **New files (19):** `macro-demo.bv`, `proof-oracle.bv`, `foreach.bv`, `sync-domain.bv`, `arrow-mutation.bv`, `projections.bv`, `map-set.bv`, `swan-song.bv`, `error-handling.bv`, `stdlib-demo.bv`, `gpu-compute.abv`, `networking.bv`, `process-spawn.bv`, `mmap-demo.bv`, `inop-side-effect.bv`, `data-brief/*`, `glue-macro.bv`, `assume-pragma.bv`, `view-directives.rbv`
+- **New files (19):** `macro-demo.bv`, `proof-oracle.bv`, `foreach.bv`, `sync-domain.bv`, `arrow-mutation.bv`, `projections.bv`, `map-set.bv`, `swan-song.bv`, `error-handling.bv`, `stdlib-demo.bv`, `gpu-compute.abv`, `networking.bv`, `process-spawn.bv`, `mmap-demo.bv`, `inop-side-effect.bv`, `data-briv/*`, `glue-macro.bv`, `assume-pragma.bv`, `view-directives.rbv`

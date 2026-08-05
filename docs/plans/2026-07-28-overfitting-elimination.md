@@ -45,5 +45,5 @@ Add [[post]] to each derivation benchmark:
 ## Verification
 
 - `cargo test --lib` — 1167+ tests pass
-- `brief derive --enumerative-depth 3 benchmarks/abs_derive.bv` finds
+- `briv derive --enumerative-depth 3 benchmarks/abs_derive.bv` finds
   general formula `when X < 0 { term -X; }; term X;` not ite chain

@@ -46,7 +46,7 @@ and the legacy String types. Both parts are complete and merged.
 - **`[#]` removed** (Phase 2): a syntax error with a clear message; the
   entry-point marker is replaced by `entry!`/`args!`.
 - **CLI argv capture** (3a): every loop-engine `main` is
-  `main(i32 %argc, ptr %argv)` storing into `@__brief_argc`/`@__brief_argv`;
+  `main(i32 %argc, ptr %argv)` storing into `@__briv_argc`/`@__briv_argv`;
   runtime helpers `__argv_count/__argv_get/__argv_has/__argv_value/
   __argv_command`; `lib/std/cli.bv`.
 - **`entry!`/`args!`** (3b): one-shot CLI subcommand guards
@@ -57,7 +57,7 @@ and the legacy String types. Both parts are complete and merged.
   subcommand-dispatch UNSAT pattern; `sync<group> node` parsing added;
   benchmarks audited (`async node` / `sync<counters>`).
 - **Flat scripting** (4): `defn main()` and bare top-level lets run exactly
-  once via a synthesized `node __script_main` (fixes the dead `brief_main`).
+  once via a synthesized `node __script_main` (fixes the dead `briv_main`).
 
 ## 4. Part B — Bits Model
 
@@ -68,19 +68,19 @@ and the legacy String types. Both parts are complete and merged.
   (derived from `int_bits`); `Int32`/`Int64` are absolute; String's primordial
   is flexible like Int/UInt.
 - **Content equality + bitwise** (B1): `Eq`/`Ne` compare payload bytes via
-  `brief_str_eq`; `& | ^ ~` operate on content via
-  `brief_str_band/bor/bxor/bnot`.
+  `briv_str_eq`; `& | ^ ~` operate on content via
+  `briv_str_band/bor/bxor/bnot`.
 - **Content view + encoding door** (B2): `#String → #Bit` = buffer address
-  (`ptrtoint`); `#Bit → #String` = UTF8 wrap via `brief_bits_to_str`
+  (`ptrtoint`); `#Bit → #String` = UTF8 wrap via `briv_bits_to_str`
   (header materialized by construction); `CastFrom(#Bit)` overrides.
-- **Length ops** (B3): `x.^Len` = UTF8 char count (`brief_char_len`);
+- **Length ops** (B3): `x.^Len` = UTF8 char count (`briv_char_len`);
   `x.^^Bytes` = O(1) header read.
 - **Legacy retirement** (B4): SSO layer + `is_string_like` (structural
   heuristic) + StaticString/UTF8View/SmallString64 deleted. `grep` over
   `src/` + `lib/std` returns zero for all of them.
 - **`!>` metadata syntax**: the `<~` metadata form was removed (writing `<~`
   is a parse error); `!> key: value;` is the sole form. SPEC grammar, learn-
-  brief, and architecture docs updated.
+  briv, and architecture docs updated.
 
 ## 5. Bugs found & fixed (all logged in BUGS.md)
 
@@ -88,7 +88,7 @@ and the legacy String types. Both parts are complete and merged.
    a `load i8` (Bool/UInt8/Int8) crashed clang — range bounds must match the
    load width; vacuous ranges are now skipped.
 2. **SSO tag bit corrupted String addresses** (B1): OR-1 static tag on literal
-   stores made `brief_str_eq` read a misaligned header.
+   stores made `briv_str_eq` read a misaligned header.
 3. **`async node` prefix dropped the flag** (3c): explicitly-async nodes were
    never classified.
 4. **Reflect-read String field eliminated as dead** (B3): `collect_identifiers`
@@ -97,7 +97,7 @@ and the legacy String types. Both parts are complete and merged.
    found no base lanes and silently fell through to invalid LLVM coercion.
 6. **Concat result tagged as i64** (B4a): the OR-2 temp bit broke `ptr`
    consumers (`__print_str`); now returns the untagged ptr.
-7. **`brief_main` dead code** (Phase 4): `defn main` was emitted but never
+7. **`briv_main` dead code** (Phase 4): `defn main` was emitted but never
    invoked; the script plugin fixed it.
 8. **Broken pre-commit hook** (Praetor): `--target <file>` silently no-op'd;
    removed per the no-hook decision.

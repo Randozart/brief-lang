@@ -1,4 +1,4 @@
-# Brief Standard Library and Foreign Functions
+# Briv Standard Library and Foreign Functions
 
 **Version:** 1.0  
 **Date:** 2026-04-04  
@@ -8,10 +8,10 @@
 
 ## 1. Philosophy
 
-Brief is a declarative language. Users write pure Brief code. Host/native functions are hidden inside the standard library, wrapped in `frgn defn` implementations.
+Briv is a declarative language. Users write pure Briv code. Host/native functions are hidden inside the standard library, wrapped in `frgn defn` implementations.
 
 **Users see:**
-```brief
+```briv
 import { println } from std.io;
 
 node greet [~/done] {
@@ -34,21 +34,21 @@ node greet [~/done] {
 
 ### Examples
 
-**Declaration (Brief side):**
-```brief
+**Declaration (Briv side):**
+```briv
 frgn sig print(msg: String) -> Bool;
 frgn sig read_file(path: String) -> String;
 ```
 
 **Implementation (Rust side):**
 ```rust
-#[brief_frgn]
+#[briv_frgn]
 fn print(msg: &str) -> bool {
     println!("{}", msg);
     true
 }
 
-#[brief_frgn]
+#[briv_frgn]
 fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
@@ -80,28 +80,28 @@ Design for extensibility:
 
 ### Option A: Transpilation
 
-Brief → Rust transpilation. Third parties:
-1. Write Brief code + `frgn defn` implementations
+Briv → Rust transpilation. Third parties:
+1. Write Briv code + `frgn defn` implementations
 2. Transpile to Rust
 3. Compile with their Rust code
 4. Link into final binary
 
-```brief
+```briv
 # my_lib/lib.bv
 frgn defn cool_thing(): Int {
-  // Brief code that calls native things
+  // Briv code that calls native things
 }
 ```
 
 ### Option B: Library Plugins
 
-Third party publishes a crate with `brief.toml`:
+Third party publishes a crate with `briv.toml`:
 
 ```
 my_cool_lib/
 ├── Cargo.toml
 ├── src/lib.rs        # Rust implementations
-└── brief.toml       # Describes available frgns
+└── briv.toml       # Describes available frgns
 ```
 
 Compiler loads at compile time.
@@ -116,7 +116,7 @@ Third party writes manifest, compiler generates FFI bindings.
 
 **Transpilation (Option A)** is recommended for v2:
 
-1. Brief already compiles to Rust/WASM
+1. Briv already compiles to Rust/WASM
 2. Transpilation is a natural extension
 3. Leverages Rust's ecosystem (crates.io)
 4. Users can link any Rust crate
@@ -124,8 +124,8 @@ Third party writes manifest, compiler generates FFI bindings.
 
 **Implementation steps:**
 1. Add `--target rust` to compiler
-2. Brief + `frgn defn` → Rust code
-3. User compiles Brief → Rust → links with their Rust code
+2. Briv + `frgn defn` → Rust code
+3. User compiles Briv → Rust → links with their Rust code
 4. Standard library becomes a Rust crate
 
 ---
@@ -153,8 +153,8 @@ When allowing third-party frgns:
 
 ## 8. Related Specifications
 
-- `brief-lang-spec.md` — Language syntax and semantics
-- `rendered-brief-spec-v4.md` — UI framework (uses stdlib)
+- `briv-lang-spec.md` — Language syntax and semantics
+- `rendered-briv-spec-v4.md` — UI framework (uses stdlib)
 
 ---
 

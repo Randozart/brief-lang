@@ -5,9 +5,9 @@
 
 ## Background
 
-Previously, every Brief program had to manually import stdlib modules:
+Previously, every Briv program had to manually import stdlib modules:
 
-```brief
+```briv
 import { Option, Some, None } from "std/option.bv";
 import { Result, Ok, Err } from "std/result.bv";
 ```
@@ -33,7 +33,7 @@ The stdlib is split into two directories under `{BRIEF_STDLIB_PATH}/std/`:
 
 ```
 std/
-  core/          # Safe — pure Brief, no frgn/link/trg — AUTO-IMPORTED
+  core/          # Safe — pure Briv, no frgn/link/trg — AUTO-IMPORTED
     option.bv
     result.bv
     collections.bv
@@ -62,9 +62,9 @@ std/
     encoding.bv
     system.bv
     metro_bridge.bv
-    brief_rt.bv
+    briv_rt.bv
 
-  ext/           # Pure Brief but niche — requires explicit import#
+  ext/           # Pure Briv but niche — requires explicit import#
     metropolitan_ffi.bv
     metrod_registry.bv
 ```
@@ -194,7 +194,7 @@ Previously these types were hardcoded as Rust `Vec<ResolvedType>` literals in
 ## Implementation Notes
 
 ### Auto-Core Whitelist
-Currently only `ptr.bv` is auto-imported. Most other `std/core/*.bv` files use Brief syntax
+Currently only `ptr.bv` is auto-imported. Most other `std/core/*.bv` files use Briv syntax
 features (unification, collection mutation) that the Rust parser doesn't fully support.
 These are documented in BUGS.md (see 2026-06-14 entries).
 

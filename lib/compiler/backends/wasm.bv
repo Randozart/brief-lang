@@ -1,5 +1,5 @@
-// WASM Backend for Brief Compiler
-// Generates .wasm binary modules from Brief programs
+// WASM Backend for Briv Compiler
+// Generates .wasm binary modules from Briv programs
 // Uses guard-based execution for branchless code generation
 
 import "call_graph";
@@ -141,13 +141,13 @@ defn encode_block(result_type: WasmValueType) -> List<u8> {
 
 // ===== BRIEF TYPE TO WASM TYPE =====
 
-defn brief_type_to_wasm(brief_type: Type) -> WasmType {
-    uni brief_type(TypeInt) = { term I32; };
-    uni brief_type(TypeUInt) = { term I32; };
-    uni brief_type(TypeFloat) = { term F64; };
-    uni brief_type(TypeBool) = { term I32; };
-    uni brief_type(TypeChar) = { term I32; };
-    uni brief_type(TypeString) = { term I32; }; // pointer to string data
+defn briv_type_to_wasm(briv_type: Type) -> WasmType {
+    uni briv_type(TypeInt) = { term I32; };
+    uni briv_type(TypeUInt) = { term I32; };
+    uni briv_type(TypeFloat) = { term F64; };
+    uni briv_type(TypeBool) = { term I32; };
+    uni briv_type(TypeChar) = { term I32; };
+    uni briv_type(TypeString) = { term I32; }; // pointer to string data
     term I32; // default
 }
 
@@ -184,7 +184,7 @@ defn build_wasm_module(program: Program, cg: CallGraphResult) -> List<u8> {
             // Map parameters to WASM types
             let j: Int = 0;
             [j < txn.params.len()] {
-                let param_type = brief_type_to_wasm(txn.params[j].param_type);
+                let param_type = briv_type_to_wasm(txn.params[j].param_type);
                 params = append(params, value_type(param_type));
                 j = j + 1;
             };

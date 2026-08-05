@@ -6,14 +6,14 @@
 //     2-thread pthread program to a trivial fold-target (long g_a = 25000000L;
 //     (void)g_a;), breaking the runtime comparison. This restores the original
 //     intent: two worker threads with dual-barrier synchronization matching
-//     Brief's thread pool implementation.
+//     Briv's thread pool implementation.
 //
-// Matches Brief's runtime pattern (brief_rt.c):
+// Matches Briv's runtime pattern (briv_rt.c):
 //   - Dual barriers (enter: main releases workers, exit: workers signal done)
 //   - main participates in both barriers (3 participants total: 2 workers + main)
 //   - Workers print progress every 5M iterations via __sync_fetch_and_add
 //   - No explicit thread pool shutdown — process exit kills workers (matches
-//     Brief's compiled behavior where main returns without brief_thread_pool_shutdown)
+//     Briv's compiled behavior where main returns without briv_thread_pool_shutdown)
 //
 // Build:
 //   clang -O3 -march=native -o benchmarks/async_counters_sym_c \
@@ -56,7 +56,7 @@ int main(void) {
         pthread_barrier_wait(&barrier_exit);
     }
 
-    // Process exit kills workers (same as Brief's ret without shutdown).
+    // Process exit kills workers (same as Briv's ret without shutdown).
     // Calling pthread_barrier_destroy while workers are blocked on the
     // barrier is undefined behavior (may hang). Just return — the OS
     // cleans up on process exit.

@@ -6,7 +6,7 @@ caller's assignment.
 
 ## 1. Basic Functions
 
-```brief
+```briv
 defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
@@ -31,7 +31,7 @@ A `defn` cannot read or write global state. Its return type is inferred from
 A `defn`'s return type may be **explicit** (`-> Int`) or **implicit**
 (omitted — inferred from the `term` value):
 
-```brief
+```briv
 // Explicit — self-documenting, useful for public interfaces
 defn add(a: Int, b: Int) -> Int {
     term a + b;
@@ -61,7 +61,7 @@ defn add_implicit(a: Int, b: Int) {
 Contracts come after the parameters and may appear **before** OR **after**
 the `-> Type` return type — both are equivalent:
 
-```brief
+```briv
 // ✅ Contract after the return type
 defn safe_divide(a: Int, b: Int) -> Int [b != 0][result == a / b] {
     term a / b;
@@ -81,7 +81,7 @@ defn divide(a: Int, b: Int) -> Int {
 When the return type is omitted, the contract follows the parameters
 directly:
 
-```brief
+```briv
 defn safe_divide3(a: Int, b: Int) [b != 0][result == a / b] {
     term a / b;
 };
@@ -89,7 +89,7 @@ defn safe_divide3(a: Int, b: Int) [b != 0][result == a / b] {
 
 ## 4. Multiple Return Values
 
-```brief
+```briv
 defn div_mod(a: Int, b: Int) [b != 0][quotient * b + remainder == a] -> (Int, Int) {
     term (a / b, a % b);
 };
@@ -113,7 +113,7 @@ to avoid the `>>` shift-right token.
 
 ## 5. Named Return Values
 
-```brief
+```briv
 defn get_person() -> (name: String, age: Int) {
     term ("Alice", 30);
 };
@@ -125,7 +125,7 @@ println(person.age);   // 30
 
 ## 6. Guards in Functions
 
-```brief
+```briv
 defn abs(n: Int) [true][result >= 0] {
     when n < 0 {
         term -n;
@@ -156,7 +156,7 @@ defn clamp(val: Int, min_val: Int, max_val: Int)
 
 ## 7. Recursive Functions
 
-```brief
+```briv
 defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] {
     when n == 0 || n == 1 {
         term 1;
@@ -184,7 +184,7 @@ defn gcd(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] {
 
 ## 8. Functions with Generics
 
-```brief
+```briv
 defn identity<T>(x: T) [true][result == x] {
     term x;
 };
@@ -206,7 +206,7 @@ defn first<T, U>(pair: (T, U)) -> T {
 Functions can be defined by examples rather than by hand-writing a body.
 The compiler searches for an expression that matches all examples.
 
-```brief
+```briv
 defn add(x: Int, y: Int) -> Int := {
     2, 3 -> 5;
     0, 0 -> 0;
@@ -214,14 +214,14 @@ defn add(x: Int, y: Int) -> Int := {
 };
 ```
 
-Run `brief derive` to synthesize the body, which produces a `.derive.bv`
-shadow file. Review it, then run `brief accept` to fold it back.
+Run `briv derive` to synthesize the body, which produces a `.derive.bv`
+shadow file. Review it, then run `briv accept` to fold it back.
 
 ### Reference Function
 
 Use an existing function as the specification:
 
-```brief
+```briv
 defn popcount_ref(x: Int) -> Int {
     term ((x & 1) + ((x >> 1) & 1));
 };
@@ -231,7 +231,7 @@ defn popcount(x: Int) -> Int := popcount_ref;
 The `:= ref_fn` form copies the reference's body directly.
 Combined with examples for verification:
 
-```brief
+```briv
 defn popcount(x: Int) -> Int := { 0 -> 0; 1 -> 1; } := popcount_ref;
 ```
 
@@ -239,7 +239,7 @@ defn popcount(x: Int) -> Int := { 0 -> 0; 1 -> 1; } := popcount_ref;
 
 The `[[post]` syntax defines postconditions verified during synthesis:
 
-```brief
+```briv
 defn popcount(x: Int) -> Int := {
     0 -> 0; 1 -> 1;
 } [[ #Term >= 0 && #Term < 64 ];
@@ -251,7 +251,7 @@ defn popcount(x: Int) -> Int := {
 
 Each example can specify a tolerance for fuzzy comparison:
 
-```brief
+```briv
 defn sqrt(x: Float) -> Float := {
     1.0 -> [0.01] 1.0;
     4.0 -> [0.01] 2.0;
@@ -261,16 +261,16 @@ defn sqrt(x: Float) -> Float := {
 ### CLI
 
 ```bash
-briefc derive file.bv                 # Synthesize all derivation blocks
-briefc derive --stochastic file.bv    # Also run MCMC superoptimizer
-briefc derive --enumerative-depth 4   # Search deeper for better formulas
-briefc accept file.bv                 # Fold bodies back into source
-briefc build file.derive.bv           # Build with assertion verification
+brivc derive file.bv                 # Synthesize all derivation blocks
+brivc derive --stochastic file.bv    # Also run MCMC superoptimizer
+brivc derive --enumerative-depth 4   # Search deeper for better formulas
+brivc accept file.bv                 # Fold bodies back into source
+brivc build file.derive.bv           # Build with assertion verification
 ```
 
 ## 10. Complete Example
 
-```brief
+```briv
 // math_utils.bv
 
 defn power(base: Int, exp: Int) 

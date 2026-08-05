@@ -1,9 +1,9 @@
 // nbody_sqrt_idio — 5-body gravity sim, energy computed every iteration
-// Idiomatic Brief variant: energy (10 extra sqrt calls) computed each tick,
+// Idiomatic Briv variant: energy (10 extra sqrt calls) computed each tick,
 // matching periodic output with C reference.
 //
 // Build:
-//   ./target/release/brief-compiler build --llvm benchmarks/nbody_sqrt_idio.bv \
+//   ./target/release/briv-compiler build --llvm benchmarks/nbody_sqrt_idio.bv \
 //       --out benchmarks --optimize-budget 2048
 
 

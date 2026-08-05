@@ -8,7 +8,7 @@
 ## Item 1: `--gpu-backend opencl`
 
 ### What
-Add an OpenCL dispatch path to `brief_gpu_rt.c`, toggled by `--gpu-backend`
+Add an OpenCL dispatch path to `briv_gpu_rt.c`, toggled by `--gpu-backend`
 flag. Default is `vulkan`. Both can coexist (`--gpu-backend vulkan,opencl`).
 
 ### Changes
@@ -17,16 +17,16 @@ flag. Default is `vulkan`. Both can coexist (`--gpu-backend vulkan,opencl`).
 |------|--------|
 | `main.rs` | Parse `--gpu-backend <vulkan,opencl,vulkan,opencl>` flag |
 | `backend/llvm/mod.rs` | Store `gpu_backend` on `LlvmBackend` |
-| `lib/runtime/brief_gpu_rt.c` | Add `dlopen("libOpenCL.so.1")` path, `clCreateProgramWithIL` dispatch, OpenCL kernel launch. Vulkan preferred, OpenCL fallback. |
+| `lib/runtime/briv_gpu_rt.c` | Add `dlopen("libOpenCL.so.1")` path, `clCreateProgramWithIL` dispatch, OpenCL kernel launch. Vulkan preferred, OpenCL fallback. |
 
 ### How it works
 SPIR-V is consumed natively by both Vulkan (`vkCreateShaderModule`) and
 OpenCL (`clCreateProgramWithIL`). The SPIR-V blobs are identical — only
 the runtime dispatch API changes.
 
-`brief_gpu_init()` tries Vulkan first. If `--gpu-backend` includes `opencl`
+`briv_gpu_init()` tries Vulkan first. If `--gpu-backend` includes `opencl`
 and Vulkan fails, it falls back to OpenCL. If neither is available,
-`brief_gpu_is_available()` returns 0.
+`briv_gpu_is_available()` returns 0.
 
 ---
 

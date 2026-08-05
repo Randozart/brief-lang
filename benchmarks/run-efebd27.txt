@@ -1,4 +1,4 @@
-=== Building Brief compiler (release) ===
+=== Building Briv compiler (release) ===
 warning: unexpected `cfg` condition name: `kani`
    --> src/annotator.rs:712:11
     |
@@ -326,7 +326,7 @@ note: but type `DbvlTableInner` is only usable at visibility `pub(crate)`
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: `#[warn(private_interfaces)]` on by default
 
-warning: `brief-compiler` (lib) generated 25 warnings
+warning: `briv-compiler` (lib) generated 25 warnings
     Finished `release` profile [optimized] target(s) in 0.13s
 
 
@@ -339,7 +339,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/iir_filter.ll
 warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
 1 warning generated.
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -352,7 +352,7 @@ note: not referenced by any precondition or #!exit; values computed but have no 
   Output: benchmarks/precompute_sum.ll
 warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
 1 warning generated.
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -361,7 +361,7 @@ warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverrid
 Compiling to LLVM IR: benchmarks/ring_buffer.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/ring_buffer.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -370,7 +370,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/async_counters.bv
 info: program dispatched via reactor loop (parallel thread pool)
   Output: benchmarks/async_counters.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -379,7 +379,7 @@ info: program dispatched via reactor loop (parallel thread pool)
 Compiling to LLVM IR: benchmarks/float_math.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/float_math.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -388,7 +388,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/float_math_nonzero.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/float_math_nonzero.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -397,7 +397,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/sparse_dispatch.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/sparse_dispatch.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -406,7 +406,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/const_heavy.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/const_heavy.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -415,7 +415,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/print_loop.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/print_loop.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -424,7 +424,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/nbody_newton.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/nbody_newton.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -433,7 +433,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/nbody_sqrt.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/nbody_sqrt.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -444,7 +444,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/nbody_sqrt_idio.ll
 warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
 1 warning generated.
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -453,7 +453,7 @@ warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverrid
 Compiling to LLVM IR: benchmarks/fasta.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/fasta.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -462,7 +462,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/fannkuch_redux.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/fannkuch_redux.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -473,7 +473,7 @@ info: program dispatched via direct SSA loop
 info: field(s) 't3', 't2', 'cr', 'ci', 't1' written by txn 'mb' are never read — wasted work
 note: not referenced by any precondition or #!exit; values computed but have no effect
   Output: benchmarks/mandelbrot.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -482,7 +482,7 @@ note: not referenced by any precondition or #!exit; values computed but have no 
 Compiling to LLVM IR: benchmarks/kalman_filter_runtime.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/kalman_filter_runtime.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -491,7 +491,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/knucleotide.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/knucleotide.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -500,7 +500,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/cancel_math.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/cancel_math.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -509,7 +509,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/bit_clear.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/bit_clear.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -522,7 +522,7 @@ info: program dispatched via direct SSA loop
 LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
 LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
   Output: benchmarks/queue_drain.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -531,7 +531,7 @@ LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
 Compiling to LLVM IR: benchmarks/queue_drain_sym.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/queue_drain_sym.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -544,7 +544,7 @@ info: program dispatched via direct SSA loop
 LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
 LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
   Output: benchmarks/queue_drain_idio.ll
-  Brief binary ready.
+  Briv binary ready.
   (no C reference — skipping)
 
 ================================================
@@ -553,7 +553,7 @@ LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
 Compiling to LLVM IR: benchmarks/interval_step.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/interval_step.ll
-  Brief binary ready.
+  Briv binary ready.
   C binary ready.
 
 ================================================
@@ -561,14 +561,14 @@ info: program dispatched via direct SSA loop
 ================================================
 
 === iir_filter ===
-  brief binary: 1486B  (precompute_ok — skip runtime)
+  briv binary: 1486B  (precompute_ok — skip runtime)
   c binary:     1375B
   correctness: MISMATCH
-    brief: "__FAIL__"
+    briv: "__FAIL__"
     c:     ""
 
 === precompute_sum ===
-  brief binary: 1734B  (precompute_ok — skip runtime)
+  briv binary: 1734B  (precompute_ok — skip runtime)
   c binary:     1386B
   correctness: MATCH (output: "249500")
 
@@ -773,7 +773,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 45000000
 50000000
 0 ")
-  Brief: .0007s  (min 0.000696s, max 0.000871s)
+  Briv: .0007s  (min 0.000696s, max 0.000871s)
   C:     5000000
 10000000
 15000000
@@ -879,7 +879,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
   correctness: MATCH (output: "")
 
 === async_counters ===
-  Brief: .0008s  (min 0.000777s, max 0.000932s)
+  Briv: .0008s  (min 0.000777s, max 0.000932s)
   C:     .0005s
   Ratio: 1.60x  →  C wins
   correctness: MATCH (output: "")
@@ -1085,7 +1085,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 6291456.000000000
 6291456.000000000
 0 ")
-  Brief: .0006s  (min 0.000663s, max 0.000694s)
+  Briv: .0006s  (min 0.000663s, max 0.000694s)
   C:     1434824.375000000
 3263811.000000000
 5138811.000000000
@@ -1388,7 +1388,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 0
 0
 0 ")
-  Brief: .0007s  (min 0.000608s, max 0.001139s)
+  Briv: .0007s  (min 0.000608s, max 0.001139s)
   C:     0
 0
 0
@@ -1693,7 +1693,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 45000000
 50000000
 0 ")
-  Brief: .0008s  (min 0.000699s, max 0.001371s)
+  Briv: .0008s  (min 0.000699s, max 0.001371s)
   C:     5000000
 10000000
 15000000
@@ -1799,7 +1799,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
   correctness: MATCH (output: "")
 
 === const_heavy ===
-  brief binary: 5511B  (precompute_ok — skip runtime)
+  briv binary: 5511B  (precompute_ok — skip runtime)
   c binary:     1825B
   correctness: MATCH (output: "")
 
@@ -11804,7 +11804,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 49900000
 50000000
 0 ")
-  Brief: .0007s  (min 0.000618s, max 0.000825s)
+  Briv: .0007s  (min 0.000618s, max 0.000825s)
   C:     100000
 200000
 300000
@@ -16808,7 +16808,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 50000000
 .0095x  →  ~tie wins
   correctness: MISMATCH
-    brief: ""
+    briv: ""
     c:     "100000
 200000
 300000
@@ -16840,7 +16840,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 8.312769016
 8.772323016
 1 ")
-  Brief: .0007s  (min 0.000688s, max 0.000892s)
+  Briv: .0007s  (min 0.000688s, max 0.000892s)
   C:     -.147468984
 8.432150016
 8.359324016
@@ -16854,7 +16854,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 0
 8.772323016
 1.7286x  →  ~tie wins
   correctness: MISMATCH
-    brief: ""
+    briv: ""
     c:     "-0.169203490"
 
 === nbody_sqrt ===
@@ -16930,7 +16930,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 17.10
 2.953388989
 2.995418989
 0 ")
-  Brief: 1.7486s  (min 1.690406s, max 1.804790s)
+  Briv: 1.7486s  (min 1.690406s, max 1.804790s)
   C:     .102234989
 2.921263989
 2.930187989
@@ -16944,7 +16944,7 @@ benchmarks/build_and_bench.sh: line 308: ((: 17.10
 2.995418989
 .5631x  →  ~tie wins
   correctness: MISMATCH
-    brief: "-0.169289857"
+    briv: "-0.169289857"
     c:     "-0.169288993"
 
 === nbody_sqrt_idio ===
@@ -17560,7 +17560,7 @@ benchmarks/build_and_bench.sh: line 308: ((: -.169001147
 -.190349609
 -.190409601
 0 ")
-  Brief: -.169001147
+  Briv: -.169001147
 -.169058412
 -.169060633
 -.167785168
@@ -17764,7 +17764,7 @@ benchmarks/build_and_bench.sh: line 308: ((: -.169001147
 -.190409601
 .7349x  →  ~tie wins
   correctness: MISMATCH
-    brief: ""
+    briv: ""
     c:     "-0.169289753"
 
 === fasta ===

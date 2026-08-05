@@ -155,7 +155,7 @@ pub enum AllocStrategy {
     RingBuffer,
     /// 2026-07-18: Named strategy from config/alloc-strategies.dbvl.
     Config(String),
-    /// 2026-07-18: User-provided Brief function as allocator.
+    /// 2026-07-18: User-provided Briv function as allocator.
     Custom(String),
 }
 
@@ -349,7 +349,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
     }
 }
 
-/// LLVM IR backend — the definitive compiler from Brief AST to `.ll`.
+/// LLVM IR backend — the definitive compiler from Briv AST to `.ll`.
 ///
 /// Every lesson from phases 0–5.5 integrated into one coherent pass:
 /// - \`noalias nocapture\` on all \`ptr\` — LLVM sees no pointer aliasing
@@ -366,7 +366,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// - `@ link` triggers → `external global` + `load volatile`
 ///
 /// Design philosophy: the backend is a single monolithic pass (not a pipeline
-/// of small passes) because Brief's contract system provides structural
+/// of small passes) because Briv's contract system provides structural
 /// guarantees that LLVM cannot infer from generic IR. By emitting contract-
 /// aware IR directly (TBAA, !range, noalias), we avoid the need for an
 /// expensive LLVM analysis pass to rediscover what the contracts already state.
@@ -476,7 +476,7 @@ pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::Ty
     }
 }
 
-/// Map a Brief type to its TBAA metadata node index via universe lookup.
+/// Map a Briv type to its TBAA metadata node index via universe lookup.
 /// 2026-07-13: Simplified for new ResolvedType (tbaa_node removed).
 /// Uses type name as the TBAA group. Falls back to 1 (Int) when not found.
 pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
@@ -837,13 +837,13 @@ impl LlvmBackend {
     }
 
     // 2026-06-29: Push a field type, recording both the LLVM type string and
-    // the original Brief Type. Parallel to field_types/field_brief_types.
-    // The Brief Type is needed when reading fields back from %State to
+    // the original Briv Type. Parallel to field_types/field_briv_types.
+    // The Briv Type is needed when reading fields back from %State to
     // distinguish types that share the same LLVM representation (e.g. Char
     // and Int32 both → "i32", Bool and Int8 both → "i8").
     pub(super) fn push_field_type(&mut self, ty: &Type) {
         // 2026-07-17: ALL state fields are stored as i64 in %State, regardless
-        // of their Brief type (Float, Float64, Ptr, etc.). The adapt_to_i64 /
+        // of their Briv type (Float, Float64, Ptr, etc.). The adapt_to_i64 /
         // ensure_typed_value functions handle the conversion between i64 and
         // the field's natural type at load/store time. Override llvm_type(ty)
         // to always return "i64" for state fields — this keeps %State struct
@@ -863,7 +863,7 @@ impl LlvmBackend {
             if cap > 0 {
                 for _ in 0..=cap {  // cap + 1 slots
                     self.ctx.field_types.push("i64".to_string());
-                    self.ctx.field_brief_types.push(ty.clone());
+                    self.ctx.field_briv_types.push(ty.clone());
                 }
                 return;
             }
@@ -878,7 +878,7 @@ impl LlvmBackend {
                         else { "i64".to_string() };
                     let arr_ty = format!("[{} x {}]", n, inner_llvm);
                     self.ctx.field_types.push(arr_ty);
-                    self.ctx.field_brief_types.push(ty.clone());
+                    self.ctx.field_briv_types.push(ty.clone());
                     return;
                 }
             }
@@ -912,7 +912,7 @@ impl LlvmBackend {
             "i64".to_string()
         };
         self.ctx.field_types.push(llvm_ty);
-        self.ctx.field_brief_types.push(ty.clone());
+        self.ctx.field_briv_types.push(ty.clone());
     }
 
     pub fn with_optimize_size(mut self, byte_limit: u64) -> Self {
@@ -1517,7 +1517,7 @@ impl LlvmBackend {
     ///
     /// 2026-08-04 (Phase 4, .ebv heap reframe): heap types (#String/#Data/List/
     /// HashMap/…) are now LEGAL on the embedded target — the static bump arena
-    /// (@embedded_heap) provides a heap without @malloc/brief_rt.c. The old
+    /// (@embedded_heap) provides a heap without @malloc/briv_rt.c. The old
     /// hard rejection was a vestige of the pre-split .ebv/.cbv entanglement
     /// (the .cbv CIRCT target synthesizes hardware and truly has no heap; .ebv
     /// is LLVM embedded and does). We still WARN when the program uses heap
@@ -1730,11 +1730,11 @@ impl LlvmBackend {
         self.ctx.observable_names = analysis.observable_names.clone();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
-        // 2026-08-04 (compiler-in-Brief, P4): the Brief pass (brief_pass.rs)
+        // 2026-08-04 (compiler-in-Briv, P4): the Briv pass (briv_pass.rs)
         // computes it through the GLUE C ABI when its library is present;
         // otherwise the Rust reference runs.
         self.ctx.export_needs_state =
-            crate::glue::brief_pass::compute_export_needs_state(items);
+            crate::glue::briv_pass::compute_export_needs_state(items);
         // 2026-08-01 (Phase 5): a `keep x;` on a field the scheduler would not
         // auto-free anyway is redundant — surface it as a warning.
         for k in &analysis.global_lifetime.redundant_keeps {
@@ -1805,10 +1805,10 @@ impl LlvmBackend {
         // index assignment. This makes same-component fields (bx0..bx4) have
         // consecutive indices, enabling the backend to form <N x float> vector
         // phi groups. See analysis/soa_reorder.rs for safety verification.
-        // 2026-08-04 (compiler-in-Brief, P5): the Brief soa_reorder pass
+        // 2026-08-04 (compiler-in-Briv, P5): the Briv soa_reorder pass
         // computes the permutation through the GLUE C ABI when its library is
         // present; otherwise the Rust reference runs.
-        let reordered_items = crate::analysis::soa_reorder::reorder_fields_brief(items);
+        let reordered_items = crate::analysis::soa_reorder::reorder_fields_briv(items);
         self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
@@ -1823,7 +1823,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__trg_epfd".to_string(), idx);
             self.ctx.field_types.push("i32".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
             self.ctx.field_initializers.insert("__trg_epfd".to_string(), None);
         }
         // Inject synthetic cycle_count field for watchdog timing
@@ -1831,7 +1831,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("cycle_count".to_string(), idx);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
             self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Decimal(0)));
         }
         // 2026-07-27: Arena system fields — injected only when program needs arena.
@@ -1842,19 +1842,19 @@ impl LlvmBackend {
             let aptr = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__arena_ptr".to_string(), aptr);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
             self.arena_ptr_idx = Some(aptr);
 
             let aend = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__arena_end".to_string(), aend);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
             self.arena_end_idx = Some(aend);
 
             let abase = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__arena_base".to_string(), abase);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
             self.arena_base_idx = Some(abase);
         }
         self.validate_schema_types();
@@ -1950,13 +1950,13 @@ impl LlvmBackend {
                         span: fb.span,
                     };
                     self.ctx.frgn_map.insert(fb.foreign_name.clone(), sig.clone());
-                    // 2026-07-22: Also index by Brief name so call resolution
-                    // (Expr::Call uses the Brief name, e.g. "frgn__getenv_brief")
+                    // 2026-07-22: Also index by Briv name so call resolution
+                    // (Expr::Call uses the Briv name, e.g. "frgn__getenv_briv")
                     // finds the frgn entry. The declare loop emits only for the
                     // foreign_name key to avoid duplicate declarations.
-                    let brief_name = fb.effective_brief_name();
-                    if brief_name != fb.foreign_name {
-                        self.ctx.frgn_map.insert(brief_name.to_string(), sig);
+                    let briv_name = fb.effective_briv_name();
+                    if briv_name != fb.foreign_name {
+                        self.ctx.frgn_map.insert(briv_name.to_string(), sig);
                     }
                 }
                 TopLevel::Obj(s) => {
@@ -2200,7 +2200,7 @@ impl LlvmBackend {
             })
             .collect();
         // 2026-07-22: Deduplicate by foreign_name — frgn_map may have dual
-        // keys (foreign_name + effective_brief_name) but declares use only the
+        // keys (foreign_name + effective_briv_name) but declares use only the
         // C linker symbol name (sig.name = foreign_name).
         // 2026-07-31: Sort by key before emitting — frgn_map is a HashMap with
         // a per-process SipHash seed; unsorted iteration produced run-to-run
@@ -2247,10 +2247,10 @@ impl LlvmBackend {
         // 2026-08-04 (Phase 4): the ExtCall lane emission (emit_cast_steps,
         // LaneKind::ExtCall) writes the `call` inline WITHOUT a declare, so
         // every lane symbol must be declared here or clang errors "use of
-        // undefined value". The C definitions live in brief_rt.c (the .bv
+        // undefined value". The C definitions live in briv_rt.c (the .bv
         // path); the .ebv freestanding path provides the same symbols as
-        // Brief defns in lib/std/*.ebv — in that case the program DEFINES the
-        // symbol (a Brief defn lowers to a global with the same name), so the
+        // Briv defns in lib/std/*.ebv — in that case the program DEFINES the
+        // symbol (a Briv defn lowers to a global with the same name), so the
         // declare must be skipped or clang errors "invalid redefinition".
         // Signatures match the lane ABI:
         //   String ABI = ptr to [len: i64][bytes]; Int/Bool = i64; Float = float.
@@ -2283,7 +2283,7 @@ impl LlvmBackend {
 
         // 2026-08-04 (Phase 4, .ebv heap reframe): the embedded freestanding
         // target gets a STATIC bump heap — a zero-initialized `.bss` global
-        // (no @malloc/@free, no brief_rt.c). Size is the configurable
+        // (no @malloc/@free, no briv_rt.c). Size is the configurable
         // ir-lowering arena_initial_size (default 64KB). The bump pointer
         // lives in %State (arena_ptr_idx); emit_arena_init points it at this
         // buffer and emit_arena_alloc bumps within it. Grow-on-overflow is
@@ -2294,66 +2294,66 @@ impl LlvmBackend {
                 self.ctx.arena_initial_size).ok();
         }
 
-        // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
+        // 2026-07-08: Phase 3 — briv_rt.c wrapper function declarations
         // These are called by inop declarations in lib/std/os/*.bv.
-        // All take/return i64 (boxed value) matching Brief's ABI.
-        writeln!(out, "declare i64 @brief_open(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_close(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_read(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_write(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_lseek(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_pread(i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_pwrite(i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_stat(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_fstat(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_truncate(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_ftruncate(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_fsync(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_dup(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_dup2(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_fcntl(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_socket(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_bind(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_listen(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_accept(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_connect(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_send(i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_recv(i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_sendto(i64, i64, i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_recvfrom(i64, i64, i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_setsockopt(i64, i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_getsockopt(i64, i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_shutdown(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_mkdir(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_rmdir(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_unlink(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_rename(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_symlink(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_link(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_chdir(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_chmod(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_chown(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_umask(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_access(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_mmap(i64, i64, i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_munmap(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_mprotect(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_brk(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_mlock(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_pipe(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_shm_open(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_shm_unlink(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_sem_open(i64, i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_sem_wait(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_sem_post(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_getpid() #1").ok();
-        writeln!(out, "declare i64 @brief_getppid() #1").ok();
-        writeln!(out, "declare i64 @brief_clock_gettime(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_nanosleep(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_getenv(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_setenv(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_unsetenv(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64) #1").ok();
+        // All take/return i64 (boxed value) matching Briv's ABI.
+        writeln!(out, "declare i64 @briv_open(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_close(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_read(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_write(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_lseek(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_pread(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_pwrite(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_stat(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_fstat(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_truncate(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_ftruncate(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_fsync(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_dup(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_dup2(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_fcntl(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_socket(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_bind(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_listen(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_accept(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_connect(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_send(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_recv(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_sendto(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_recvfrom(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_setsockopt(i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_getsockopt(i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_shutdown(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_mkdir(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_rmdir(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_unlink(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_rename(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_symlink(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_link(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_chdir(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_chmod(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_chown(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_umask(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_access(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_mmap(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_munmap(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_mprotect(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_brk(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_mlock(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_pipe(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_shm_open(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_shm_unlink(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_sem_open(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_sem_wait(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_sem_post(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_getpid() #1").ok();
+        writeln!(out, "declare i64 @briv_getppid() #1").ok();
+        writeln!(out, "declare i64 @briv_clock_gettime(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_nanosleep(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_getenv(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_setenv(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_unsetenv(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_futex(i64, i64, i64, i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__isatty__(i64) #1").ok();
         writeln!(out, "declare i64 @__print(ptr) #1").ok();
@@ -2364,51 +2364,51 @@ impl LlvmBackend {
         // length-prefixed [len][bytes] buffer.
         writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
         // 2026-08-01 (B1): content equality for String operands. The compiler
-        // emits a call to brief_str_eq(ptr, ptr) instead of `icmp eq ptr`
+        // emits a call to briv_str_eq(ptr, ptr) instead of `icmp eq ptr`
         // (address comparison) when both operands are #String — see
         // emit_binary_op's Eq/Ne arms. Takes two ptrs to [len][bytes].
-        writeln!(out, "declare i64 @brief_str_eq(ptr, ptr) #1").ok();
+        writeln!(out, "declare i64 @briv_str_eq(ptr, ptr) #1").ok();
         // 2026-08-01 (B1): content bitwise ops for String operands — return a
         // new heap [len][bytes] buffer with the per-byte op applied (band/bor/
-        // bxor/bnot). Same ABI as brief_str_eq: ptr to [len][bytes].
-        writeln!(out, "declare ptr @brief_str_band(ptr, ptr) #1").ok();
-        writeln!(out, "declare ptr @brief_str_bor(ptr, ptr) #1").ok();
-        writeln!(out, "declare ptr @brief_str_bxor(ptr, ptr) #1").ok();
-        writeln!(out, "declare ptr @brief_str_bnot(ptr) #1").ok();
+        // bxor/bnot). Same ABI as briv_str_eq: ptr to [len][bytes].
+        writeln!(out, "declare ptr @briv_str_band(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @briv_str_bor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @briv_str_bxor(ptr, ptr) #1").ok();
+        writeln!(out, "declare ptr @briv_str_bnot(ptr) #1").ok();
         // 2026-08-01 (B2): the #Bit → #String ENCODING DOOR default. The bits
-        // are a Brief [len][bytes] buffer (a String's content view); wrapping
+        // are a Briv [len][bytes] buffer (a String's content view); wrapping
         // re-materializes the header by construction (the bits carry their own
         // length — not a null-terminated C string). Sub-protocols override via
         // CastFrom(#Bit).
-        writeln!(out, "declare ptr @brief_bits_to_str(ptr) #1").ok();
+        writeln!(out, "declare ptr @briv_bits_to_str(ptr) #1").ok();
         // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
         // default (the O(1) byte-length header read is the `Bytes` prop).
-        writeln!(out, "declare i64 @brief_char_len(ptr) #1").ok();
+        writeln!(out, "declare i64 @briv_char_len(ptr) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
-        // (brief_rt.c) read them as externs. The compiler OWNS the globals
+        // (briv_rt.c) read them as externs. The compiler OWNS the globals
         // (it stores to them), so they are external (non-internal) for the
         // C runtime to link against. Helper FUNCTION signatures are declared
         // by lib/std/cli.bv's frgns (Int→i64, String→ptr).
-        writeln!(out, "@__brief_argc = global i32 0").ok();
-        writeln!(out, "@__brief_argv = global ptr null").ok();
+        writeln!(out, "@__briv_argc = global i32 0").ok();
+        writeln!(out, "@__briv_argv = global ptr null").ok();
         // 2026-08-03: host cancellation flag — CancelRequested#() loads it,
-        // __brief_set_cancel/__brief_clear_cancel (library shim) write it.
-        writeln!(out, "@__brief_cancel_flag = global i32 0").ok();
-        writeln!(out, "declare i64 @brief_getuid() #1").ok();
-        writeln!(out, "declare i64 @brief_geteuid() #1").ok();
-        writeln!(out, "declare i64 @brief_getgid() #1").ok();
-        writeln!(out, "declare i64 @brief_getegid() #1").ok();
-        writeln!(out, "declare i64 @brief_sched_yield() #1").ok();
-        writeln!(out, "declare i64 @brief_getpriority(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_setpriority(i64, i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_getrlimit(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_setrlimit(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_pagesize() #1").ok();
-        writeln!(out, "declare i64 @brief_cpu_count() #1").ok();
-        writeln!(out, "declare i64 @brief_ttyname(i64) #1").ok();
-        writeln!(out, "declare i64 @brief_ring_push(i64, i64) #1").ok();
-        writeln!(out, "declare i64 @brief_ring_pop(i64) #1").ok();
+        // __briv_set_cancel/__briv_clear_cancel (library shim) write it.
+        writeln!(out, "@__briv_cancel_flag = global i32 0").ok();
+        writeln!(out, "declare i64 @briv_getuid() #1").ok();
+        writeln!(out, "declare i64 @briv_geteuid() #1").ok();
+        writeln!(out, "declare i64 @briv_getgid() #1").ok();
+        writeln!(out, "declare i64 @briv_getegid() #1").ok();
+        writeln!(out, "declare i64 @briv_sched_yield() #1").ok();
+        writeln!(out, "declare i64 @briv_getpriority(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_setpriority(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_getrlimit(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_setrlimit(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_pagesize() #1").ok();
+        writeln!(out, "declare i64 @briv_cpu_count() #1").ok();
+        writeln!(out, "declare i64 @briv_ttyname(i64) #1").ok();
+        writeln!(out, "declare i64 @briv_ring_push(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @briv_ring_pop(i64) #1").ok();
         writeln!(out, "declare i64 @__tty_read_key__(i64) #1").ok();
         writeln!(out, "declare i64 @__tty_size__() #1").ok();
         writeln!(out, "declare i64 @cpu_count() #1").ok();
@@ -2430,7 +2430,7 @@ impl LlvmBackend {
         // 2026-07-15: Async dispatch runtime functions
         writeln!(out, "declare void @__wait_for_trigger__() #1").ok();
         // 2026-07-15: Removed conflicting POSIX declares (getuid, sched_yield,
-        // nanosleep, exit, etc.) — replaced by Brief defn wrappers using SysCall#.
+        // nanosleep, exit, etc.) — replaced by Briv defn wrappers using SysCall#.
 
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.ctx.triggers {
@@ -2578,7 +2578,7 @@ impl LlvmBackend {
                         // 2026-08-03: needs_state comes from the first-class
                         // export ABI analysis (transitive call graph). Pure
                         // exports keep a clean C ABI; exports calling any
-                        // Brief defn carry %state.
+                        // Briv defn carry %state.
                         let needs_state = self.ctx.export_needs_state.get(&d.name).copied()
                             .unwrap_or(false);
                         self.emit_definition(&mut out, d, needs_state);
@@ -3229,7 +3229,7 @@ impl LlvmBackend {
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(read)").ok();
         writeln!(out, "}}").ok();
         // 2026-07-04: #8 = argmemonly variant of #0 for definitions/callable txns.
-        // Brief functions only access memory through pointer arguments (%state).
+        // Briv functions only access memory through pointer arguments (%state).
         // No globals, no heap (beyond arena which is stack-allocated), no trigger
         // globals for defns. argmemonly lets LLVM promote allocas and eliminate
         // redundant loads across call boundaries.
@@ -3258,7 +3258,7 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
         // 2026-07-27: #11 = argmem:readwrite for reactive txns after cold-path
         // outlining. When FFI-containing guard blocks are outlined into separate
-        // cold functions, the remaining hot body is pure-Brief (only accesses %state).
+        // cold functions, the remaining hot body is pure-Briv (only accesses %state).
         // Unlike #8, does NOT include willreturn — reactive txns may loop forever
         // if their convergence condition is never met (though all benchmarks converge).
         writeln!(out, "attributes #11 = {{").ok();
@@ -3283,7 +3283,7 @@ impl LlvmBackend {
         // tbaa_node group name gets its own TBAA node. "Int" is always
         // first (index 1) since it's the fallback for unmatched types.
         writeln!(out).ok();
-        writeln!(out, "!0 = !{{!\"Brief\"}}").ok();
+        writeln!(out, "!0 = !{{!\"Briv\"}}").ok();
         if let Some(ref universe) = self.ctx.type_universe {
             let mut groups: Vec<String> = universe.types.keys().cloned().collect();
             // 2026-07-31: Phase 3 (§8.4-D6) — shared sort (alphabetical, #Int
@@ -3586,7 +3586,7 @@ impl LlvmBackend {
         if !bound_resolvable {
             return false;
         }
-        // 2026-07-29: Brief-level LICM — hoist loop-invariant let-bindings.
+        // 2026-07-29: Briv-level LICM — hoist loop-invariant let-bindings.
         // The hoisted bindings are prepended to the body so LLVM's LICM
         // can hoist them to the preheader. See analysis/licm.rs.
         let state_fields: HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
@@ -3865,22 +3865,22 @@ impl LlvmBackend {
                         let data_idx = self.ctx.field_types.len();
                         self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
                         self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_briv_types.push(Type::int());
                         self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
                         let head_idx = self.ctx.field_types.len();
                         self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
                         self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_briv_types.push(Type::int());
                         self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
                         let tail_idx = self.ctx.field_types.len();
                         self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
                         self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_briv_types.push(Type::int());
                         self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
                         let mask_idx = self.ctx.field_types.len();
                         self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
                         self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_brief_types.push(Type::int());
+                        self.ctx.field_briv_types.push(Type::int());
                         self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
                         self.ctx.ringbuf_inline.insert(s.name.clone(),
                             crate::backend::llvm::context::RingbufInlineFields {
@@ -4079,10 +4079,10 @@ impl LlvmBackend {
         // IMPORTANT: sort by original index to preserve deterministic field ordering.
         let mut old_pairs: Vec<(String, usize)> = self.ctx.field_index_map.drain().collect();
         let old_types = std::mem::take(&mut self.ctx.field_types);
-        let old_brief_types = std::mem::take(&mut self.ctx.field_brief_types);
+        let old_briv_types = std::mem::take(&mut self.ctx.field_briv_types);
         self.ctx.field_index_map.reserve(old_pairs.len());
         self.ctx.field_types.reserve(old_types.len());
-        self.ctx.field_brief_types.reserve(old_brief_types.len());
+        self.ctx.field_briv_types.reserve(old_briv_types.len());
         old_pairs.sort_by_key(|(_, idx)| *idx);
 
         for (name, _old_idx) in &old_pairs {
@@ -4103,9 +4103,9 @@ impl LlvmBackend {
                         .unwrap_or(0);
                     self.ctx.field_index_map.insert(name.clone(), new_idx);
                     self.ctx.field_types.push(old_types[orig_type_idx].clone());
-                    // 2026-06-29: Preserve the original Brief type alongside LLVM type
-                    self.ctx.field_brief_types.push(
-                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::int())
+                    // 2026-06-29: Preserve the original Briv type alongside LLVM type
+                    self.ctx.field_briv_types.push(
+                        old_briv_types.get(orig_type_idx).cloned().unwrap_or(Type::int())
                     );
                 }
             }
@@ -4137,10 +4137,10 @@ impl LlvmBackend {
                     for target_name in targets {
                         let cache_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
                         let valid_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::bool_());
+                        self.ctx.field_briv_types.push(Type::bool_());
                         target_map.insert(target_name.clone(), (cache_idx, valid_idx));
                     }
                 }
@@ -4148,10 +4148,10 @@ impl LlvmBackend {
                 if target_map.is_empty() {
                     let cache_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::int());
+            self.ctx.field_briv_types.push(Type::int());
                     let valid_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::bool_());
+                        self.ctx.field_briv_types.push(Type::bool_());
                     target_map.insert("_".to_string(), (cache_idx, valid_idx));
                 }
                 self.ctx.cache_slots.insert(name.clone(), target_map);

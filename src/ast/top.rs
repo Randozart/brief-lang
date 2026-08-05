@@ -702,7 +702,7 @@ impl Default for ForeignSignature {
 pub enum Fallback {
     /// Return a static expression (literal, constructor call, etc.)
     Static(Expr),
-    /// Call a Brief function with the frgn's parameters
+    /// Call a Briv function with the frgn's parameters
     FnCall(String, Vec<Expr>),
     /// Void-return frgn — just skip the call
     Implicit,
@@ -712,14 +712,14 @@ pub enum Fallback {
 
 /// Foreign function binding — a `frgn` declaration that wraps an external function.
 /// 2026-07-22: Treated as an import. `foreign_name` is the C/foreign symbol the
-/// linker looks for. `brief_name` (from `as` clause) is what Brief code calls it.
+/// linker looks for. `briv_name` (from `as` clause) is what Briv code calls it.
 #[derive(Debug, Clone)]
 pub struct ForeignBinding {
     /// The C/foreign symbol name — what the linker looks for in the foreign module.
     pub foreign_name: String,
-    /// The Brief name for this foreign function. `None` means `foreign_name` is used.
-    /// Set via the `as <brief_name>` clause in `frgn` declarations.
-    pub brief_name: Option<String>,
+    /// The Briv name for this foreign function. `None` means `foreign_name` is used.
+    /// Set via the `as <briv_name>` clause in `frgn` declarations.
+    pub briv_name: Option<String>,
     pub from: FromSpec,
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
@@ -751,14 +751,14 @@ impl ForeignBinding {
     /// 2026-07-22: Construct a ForeignBinding.
     pub fn new(
         foreign_name: String,
-        brief_name: Option<String>,
+        briv_name: Option<String>,
         from: FromSpec,
         target: ForeignTarget,
         fallback: Fallback,
     ) -> Self {
         ForeignBinding {
             foreign_name,
-            brief_name,
+            briv_name,
             from,
             target,
             inputs: vec![],
@@ -782,9 +782,9 @@ impl ForeignBinding {
         }
     }
 
-    /// The effective Brief name — uses `brief_name` if set, otherwise `foreign_name`.
-    pub fn effective_brief_name(&self) -> &str {
-        self.brief_name.as_deref().unwrap_or(&self.foreign_name)
+    /// The effective Briv name — uses `briv_name` if set, otherwise `foreign_name`.
+    pub fn effective_briv_name(&self) -> &str {
+        self.briv_name.as_deref().unwrap_or(&self.foreign_name)
     }
 }
 

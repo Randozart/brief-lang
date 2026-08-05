@@ -1,4 +1,4 @@
-# Brief 3.0 Specification
+# Briv 3.0 Specification
 
 **Version:** 3.0  
 **Date:** 2026-06-09  
@@ -6,13 +6,13 @@
 
 > **2026-06-09 Addendum — Phase 1.5: Type Derivation System**
 > 
-> Brief now supports `Type Name : Base { ... }` declarations. See §10 below.
+> Briv now supports `Type Name : Base { ... }` declarations. See §10 below.
 
 ---
 
 ## 1. Introduction
 
-Brief 3.0 is a **general-purpose systems programming language** built on a unified cognitive grammar. The computational primitive is the **reactive transaction** (`node`). Brief compiles to multiple targets — native assembly (x86_64, AArch64), LLVM IR, C, SystemVerilog — from a single source.
+Briv 3.0 is a **general-purpose systems programming language** built on a unified cognitive grammar. The computational primitive is the **reactive transaction** (`node`). Briv compiles to multiple targets — native assembly (x86_64, AArch64), LLVM IR, C, SystemVerilog — from a single source.
 
 ### 1.1 Core Philosophy
 
@@ -46,7 +46,7 @@ Brief 3.0 is a **general-purpose systems programming language** built on a unifi
 
 ## 2. The Universal Symbol Language
 
-Brief's symbols are not arbitrary. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+Briv's symbols are not arbitrary. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
 ### 2.1 Symbol-to-System Mapping
 
@@ -90,21 +90,21 @@ The dot `.` uses a strict two-tier priority:
 
 #### `<-` — Discard Operator
 `<- expr` explicitly discards the result of an expression. Required for syscall results that are intentionally ignored:
-```brief
+```briv
 <- syscall! @ 3 (fd);
 ```
 This ensures no system-level side-effect can ever be silently ignored.
 
 #### `:` — Ontological Identity
 Declares the static type of a symbol:
-```brief
+```briv
 let x: Int = 0;
 trg button: Bool @ 0x1000;
 ```
 
 #### `:>` — Metadata Projection (The Metadata Lens)
 Projects compiler-held metadata about an entity at compile time with zero runtime overhead:
-```brief
+```briv
 list .#Size     → element count
 str .#Bytes     → byte footprint
 list .#Ptr      → base memory address
@@ -130,7 +130,7 @@ Required for all state mutation. `&x = x + 1` — the `&` links the name to the 
 
 #### `!` — Cautionary Boundary
 Signals unusual control flow:
-```brief
+```briv
 frgn! log_message(msg);     // fire-and-forget FFI
 syscall! exit(code);        // kernel call, never returns
 term!;                       // immediate process termination
@@ -139,7 +139,7 @@ trg! interrupt();            // async trigger with rollback risk
 
 #### `~` — Boolean Toggle
 Shorthand for boolean state transitions:
-```brief
+```briv
 [~/ready]                    // Shorthand
 [~ready][ready]              // Expanded: "fire when ready is false, make it true"
 ```
@@ -147,7 +147,7 @@ Represents atomic lock acquisition or test-and-set barriers.
 
 #### `?` — Watchdog / Timeout
 Physical runtime bound on transaction execution:
-```brief
+```briv
 txn long_operation() [true][done] ?[5000ms] {
     do_work();
     &done = true;
@@ -163,7 +163,7 @@ txn long_operation() [true][done] ?[5000ms] {
 
 System calls are declared like foreign functions, using the `syscall` keyword:
 
-```brief
+```briv
 syscall SYS_WRITE(fd: Int, buf: Int, count: Int) -> Result<Int, Error>;
 syscall! SYS_EXIT(code: Int);   // fire-and-forget, no return
 ```
@@ -202,7 +202,7 @@ Syscall declarations compile to target-specific inline assembly:
 ### 3.4 Mandatory Result Handling
 
 Every syscall must either bind its result to a variable or explicitly discard it with `<-`:
-```brief
+```briv
 let bytes = syscall! @ SYS_WRITE(1, buf, count);   // bound
 <- syscall! @ 3 (fd);                                // explicitly discarded
 ```
@@ -215,7 +215,7 @@ let bytes = syscall! @ SYS_WRITE(1, buf, count);   // bound
 
 A transaction (`txn`) is the fundamental computational primitive. It executes atomically: either all state changes commit, or none do.
 
-```brief
+```briv
 txn withdraw(amount: Int)
     [amount > 0 && balance >= amount]
     [balance == @balance - amount]
@@ -229,7 +229,7 @@ txn withdraw(amount: Int)
 
 `node` auto-fires when its precondition is true and loops until its postcondition is satisfied:
 
-```brief
+```briv
 node fill_buffer()
     [buffer .#Size < 100]
     [buffer .#Size == 100]
@@ -242,14 +242,14 @@ node fill_buffer()
 ### 4.3 Swan Song (Commit Action)
 
 The `term ->` block is the **Atomic Commit Phase** — it only executes when the postcondition is proven satisfied:
-```brief
+```briv
 term -> &order_status = 1;
 ```
 
 ### 4.4 Variant Bodies (Multi-Guard Transactions)
 
 Multiple preconditions can select different execution paths:
-```brief
+```briv
 txn handle [x > 0] { &pos = x; }
          [x < 0] { &neg = -x; }
          [true]  { &zero = 1; };
@@ -262,7 +262,7 @@ txn handle [x > 0] { &pos = x; }
 ### 5.1 List<T>
 
 Dynamic, growable collection with 2-slot stack header `[data_ptr, length]`:
-```brief
+```briv
 let items: List<Int> = [1, 2, 3];
 &items <- 4;                     // push
 let x <- &items;                 // pop
@@ -273,7 +273,7 @@ items .#Size                    // length (compiler projection)
 ### 5.2 Vector<T, dims...>
 
 Fixed-size, contiguous, multidimensional. Hardware-friendly (compiles to BRAM on FPGA):
-```brief
+```briv
 let matrix: Vector<Int, 10, 20>;
 let tensor: Vector<Float, 3, 32, 32>;
 ```
@@ -281,7 +281,7 @@ let tensor: Vector<Float, 3, 32, 32>;
 ### 5.3 Structs & UFCS
 
 Structs are defined with named fields. Method-like calls use Uniform Function Call Syntax:
-```brief
+```briv
 struct Point { x: Int; y: Int; };
 let p = Point { x: 10, y: 20 };
 p.x                                       // field access
@@ -292,7 +292,7 @@ p.distance(origin)                        // UFCS → distance(p, origin)
 
 ## 6. Target Specifications
 
-Target behavior is driven by declarative TOML (`.toml`) and DBrief schema (`.dbvs`) files — never hardcoded in the compiler Rust source.
+Target behavior is driven by declarative TOML (`.toml`) and DBriv schema (`.dbvs`) files — never hardcoded in the compiler Rust source.
 
 ### 6.1 TOML Target Spec (Loaded at Compile Time)
 
@@ -313,7 +313,7 @@ SYS_OPEN = 2
 SYS_EXIT = 60
 ```
 
-### 6.2 DBrief Architecture Spec (Hardware Reference)
+### 6.2 DBriv Architecture Spec (Hardware Reference)
 
 ```dbvs
 schema X86_64Target {
@@ -338,7 +338,7 @@ schema SyscallMap {
 
 ### 7.1 Bit-Level Precision
 
-| Brief Type | SV Representation | Physical Implementation |
+| Briv Type | SV Representation | Physical Implementation |
 |:---|:---|:---|
 | `Bool` | `logic` | 1-bit wire/register |
 | `UInt @/0..7` | `logic [7:0]` | 8-bit unsigned bus |
@@ -396,11 +396,11 @@ Vector operations synthesize using SystemVerilog `generate` blocks: N elements =
 
 > **Added 2026-06-09 (Phase 1.5)**
 
-Brief types are defined using the `Type Name : Base { ... }` declaration. The `<:` operator (read as "derives from" or "is a refinement of") connects a new type to its base type. Properties and constraints within the `{ }` body define how the new type differs from the base.
+Briv types are defined using the `Type Name : Base { ... }` declaration. The `<:` operator (read as "derives from" or "is a refinement of") connects a new type to its base type. Properties and constraints within the `{ }` body define how the new type differs from the base.
 
 ### 10.1 Primitive Kernel
 
-The compiler natively understands a small set of ~13 type properties. These are the only hardcoded type concepts in the Rust compiler — everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is defined in user-space Brief in `lib/std/`.
+The compiler natively understands a small set of ~13 type properties. These are the only hardcoded type concepts in the Rust compiler — everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is defined in user-space Briv in `lib/std/`.
 
 | Property | Type | Default | Meaning |
 |----------|------|---------|---------|
@@ -434,7 +434,7 @@ Any unrecognized expression form is a compile-time error.
 
 ### 10.3 Example: Scalar Type Derivation
 
-```brief
+```briv
 Type U8  : Bits { Bytes = 1; Alignment = 1; };
 Type U16 : Bits { Bytes = 2; Alignment = 2; };
 Type U32 : Bits { Bytes = 4; Alignment = 4; };
@@ -446,7 +446,7 @@ Type MmioReg : U32 { Volatile = true; };
 
 ### 10.4 Example: Collection Type Derivation
 
-```brief
+```briv
 Type List<T> : Bits {
     ElementType = T;
     FixedSize = false;
@@ -470,7 +470,7 @@ Properties not overridden are inherited from the base type. `Stack` inherits `El
 
 Codecs are imported structs with `encode`/`decode` signatures, validated in Pass 1:
 
-```brief
+```briv
 import { UTF8 } from "std/UTF8.bv";
 
 Type String : List<U8> {
@@ -484,7 +484,7 @@ The compiler uses the codec to translate string literals at compile time — `"H
 
 Inline constraints with implicit `_` subject can appear in the type body:
 
-```brief
+```briv
 Type PositiveInt : Int {
     [ > 0 && < 100 ]
 };
@@ -522,7 +522,7 @@ PASS 2: Executable Pass
 | **Rust** | `struct`, `enum + impl` | Trait implementations, no layout control |
 | **Ada** | `subtype`, representation clauses | Layout control, no programmable codecs |
 | **Zig** | `comptime` + struct generation | Powerful but no formal refinement |
-| **Brief** | `Type ... : ... { ... }` | Layout, codecs, access gates, all in user-space |
+| **Briv** | `Type ... : ... { ... }` | Layout, codecs, access gates, all in user-space |
 
 ## 11. Type/Metadata Check Expressions: `is`, `from`, `like`
 
@@ -549,7 +549,7 @@ x from T == false → (x from T) == false
 
 ### `is` — Type and Variant Check
 
-```brief
+```briv
 let x: Int = 42;
 let is_int = x is Int;       // → true
 
@@ -564,7 +564,7 @@ The RHS of `is` can be:
 
 ### `from` — Derivation Check
 
-```brief
+```briv
 struct Foo { x: Int; }
 struct Bar : Foo { y: Int; }
 
@@ -577,7 +577,7 @@ Checks whether the LHS value's type is the target type or a subtype of it. For s
 
 ### `like` — Structural Equality
 
-```brief
+```briv
 42 like 42             // → true
 42 like 1              // → false
 "hello" like "hello"   // → true
@@ -594,4 +594,4 @@ Checks whether the LHS value's type is the target type or a subtype of it. For s
 
 ---
 
-*End of Brief 3.0 Specification*
+*End of Briv 3.0 Specification*

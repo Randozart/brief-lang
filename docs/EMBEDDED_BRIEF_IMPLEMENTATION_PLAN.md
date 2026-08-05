@@ -1,7 +1,7 @@
-# Embedded Brief 2.2 Implementation Plan
+# Embedded Briv 2.2 Implementation Plan
 
 ## 1. Goal
-Implement the features for Embedded Brief 2.2, unifying logic across Core (.bv), Rendered (.rbv), and Embedded (.ebv) variants with high-velocity hardware primitives.
+Implement the features for Embedded Briv 2.2, unifying logic across Core (.bv), Rendered (.rbv), and Embedded (.ebv) variants with high-velocity hardware primitives.
 
 ---
 

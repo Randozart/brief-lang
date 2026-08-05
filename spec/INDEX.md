@@ -1,9 +1,9 @@
-# Brief Documentation Index
+# Briv Documentation Index
 
 ## Quick Navigation
 
 ### Getting Started
-- [README](README.md) - What Brief is and how to install
+- [README](README.md) - What Briv is and how to install
 - [QUICK-REFERENCE](QUICK-REFERENCE.md) - Syntax at a glance, common patterns
 - [LANGUAGE-TUTORIAL](LANGUAGE-TUTORIAL.md) - Step-by-step guide (legacy reference)
 
@@ -49,11 +49,11 @@
 | Bit Packing | SPEC.md §4.2 | (advanced examples) |
 | Async Transactions | SPEC.md §3 | (see examples) |
 | Pattern Matching | SPEC.md §3 | (see language tutorial) |
-| Projection Operator (`:>`) | SPEC.md §3.15 | learn-brief/13-projections.md |
-| Ptr\<T\> Types | SPEC.md §3.16 | learn-brief/05-data-types.md §7 |
-| Bit Manipulation Intrinsics | SPEC.md §3.15 | std/bits.bv, learn-brief/13-projections.md |
+| Projection Operator (`:>`) | SPEC.md §3.15 | learn-briv/13-projections.md |
+| Ptr\<T\> Types | SPEC.md §3.16 | learn-briv/05-data-types.md §7 |
+| Bit Manipulation Intrinsics | SPEC.md §3.15 | std/bits.bv, learn-briv/13-projections.md |
 | Safe Pointer Ops | SPEC.md §6.9 | std/ptr.bv |
-| DFA Regex (`:> Match`) | SPEC.md §3.17 | learn-brief/13-projections.md |
+| DFA Regex (`:> Match`) | SPEC.md §3.17 | learn-briv/13-projections.md |
 | Roofline / Bottlenecks | SPEC.md §3.18 | lib/targets/bottlenecks.dbvs |
 | Collection Mutation (`<-`) | SPEC.md §3.14 | 05-data-types.md |
 
@@ -71,7 +71,7 @@ This documentation is generated from the compiler's understanding of the languag
 To test examples:
 ```bash
 cd examples/bank_transfer_system
-brief run
+briv run
 ```
 
 ---

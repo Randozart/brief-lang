@@ -9,18 +9,18 @@ Synthesize EVERY compiler pass from formal specifications using a CEGIS loop
 with Z3 as the verification oracle. No overfitting. No "probably correct."
 Every synthesized function is correct for ALL inputs — proven by SMT.
 
-## Why This Works: Brief == Bits == Z3
+## Why This Works: Briv == Bits == Z3
 
-Brief's type system and semantics are designed to map directly to SMT bitvector
+Briv's type system and semantics are designed to map directly to SMT bitvector
 logic. This is the architectural insight that makes exhaustive verification
 tractable:
 
 ### Type Correspondence
 
-Every Brief value is ultimately a fixed-width bit vector. Z3 handles these
+Every Briv value is ultimately a fixed-width bit vector. Z3 handles these
 natively via the bitvector (`QF_BV`) and quantified bitvector logics.
 
-| Brief type | Width | Z3 sort | Notes |
+| Briv type | Width | Z3 sort | Notes |
 |------------|-------|---------|-------|
 | `Int` | 64 | `(_ BitVec 64)` | Two's complement signed |
 | `Int8` | 8 | `(_ BitVec 8)` | Explicit narrow Int |
@@ -36,7 +36,7 @@ natively via the bitvector (`QF_BV`) and quantified bitvector logics.
 
 ### Operation Correspondence
 
-| Brief | Z3 | SMT-LIB2 |
+| Briv | Z3 | SMT-LIB2 |
 |-------|-----|----------|
 | `x + y` (wrapping) | `bvadd` | `(bvadd x y)` |
 | `x - y` (wrapping) | `bvsub` | `(bvsub x y)` |
@@ -84,7 +84,7 @@ Instantiation) engine handles it via counterexample-guided instantiation.
 
 ### 1.1 Convert Expr → SMT-LIB2 Term
 
-A function that takes a Brief `Expr` AST and produces an SMT-LIB2 term string:
+A function that takes a Briv `Expr` AST and produces an SMT-LIB2 term string:
 
 ```
 fn expr_to_smt_term(expr: &Expr, param_names: &[String]) -> String
@@ -209,9 +209,9 @@ the spec, not one that SATISFIES it.
 3. Then ask Z3: `(get-value ((spec <counterexample>)))` — gets what spec should return
 4. The new example becomes: `input → spec_output`
 
-Wait — `f` is the candidate function. Z3's counterexample model gives a VALUE for `f(x)`. But we also need `spec(x)` (the correct output). If the spec is a Brief expression `[[post]]`, we can evaluate it directly (in the interpreter) on the counterexample input to get the correct output.
+Wait — `f` is the candidate function. Z3's counterexample model gives a VALUE for `f(x)`. But we also need `spec(x)` (the correct output). If the spec is a Briv expression `[[post]]`, we can evaluate it directly (in the interpreter) on the counterexample input to get the correct output.
 
-Since the postcondition is a Brief expression, we can evaluate it in the
+Since the postcondition is a Briv expression, we can evaluate it in the
 `SynthesisEvalContext` after binding the parameter to the counterexample value.
 The expected output from the postcondition becomes the new example's output.
 
@@ -485,7 +485,7 @@ the correct output.
 ```
 
 But this requires encoding the spec as a Z3 function. The postcondition
-is already a Brief expression — might as well evaluate it directly.
+is already a Briv expression — might as well evaluate it directly.
 
 **Simplest approach**: The derivation examples IS the spec. For a
 counterexample input, add a NEW constraint: "this input must NOT produce
@@ -524,7 +524,7 @@ defn f(x: Int) -> Int
     [[ post = x + 1 ]]     // functional: post IS the correct output
 ```
 
-The `[[post]]` would be a Brief expression that computes the correct
+The `[[post]]` would be a Briv expression that computes the correct
 output from the input. Then:
 
 ```
@@ -541,10 +541,10 @@ output from the spec, add as new example, re-synthesize.
 
 ### 4.1 Datatype Encoding
 
-Brief structs and enums are encoded as Z3 `declare-datatypes`:
+Briv structs and enums are encoded as Z3 `declare-datatypes`:
 
 ```
-; Brief: type Expr = Const(Int) | Add(Expr, Expr) | ... (Recursive)
+; Briv: type Expr = Const(Int) | Add(Expr, Expr) | ... (Recursive)
 (declare-datatypes () ((Expr
     (Const (Const_val (_ BitVec 64)))
     (Add (Add_left Expr) (Add_right Expr))
@@ -563,10 +563,10 @@ For each constructor, Z3 provides:
 - Selectors: `(Const_val <Const-term>)`, `(Add_left <Add-term>)`
 - Testers: `(is-Const <term>)`, `(is-Add <term>)`
 
-These map naturally to Brief's `Match` and `Field` constructs:
+These map naturally to Briv's `Match` and `Field` constructs:
 
 ```
-// Brief Match on Expr
+// Briv Match on Expr
 match e {
     Const(val) => val,
     Add(l, r) => l + r,

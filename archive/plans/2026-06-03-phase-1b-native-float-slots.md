@@ -5,7 +5,7 @@
 
 ## Problem
 
-Brief's `%State` struct currently uses all-`i64` slots. Every float field goes through:
+Briv's `%State` struct currently uses all-`i64` slots. Every float field goes through:
 
 ```
 Write: i64 → trunc to i32 → bitcast to float → store float
@@ -14,7 +14,7 @@ Read:  GEP → load float → bitcast to i32 → zext to i64 → i64 register
 
 This is 4 boxing instructions per float access. At 50M iterations × 30 float fields × 2 accesses (read + write) = 12B unnecessary instructions. FFI float calls compound this: `i64 → trunc → bitcast → call → bitcast → zext → i64` adds 6 more per call.
 
-Other LLVM-based languages (Rust, Zig, Swift, Julia) keep native types in state/struct slots. Brief's boxing was an early-development simplification that is now the bottleneck.
+Other LLVM-based languages (Rust, Zig, Swift, Julia) keep native types in state/struct slots. Briv's boxing was an early-development simplification that is now the bottleneck.
 
 ## What Already Exists
 
@@ -25,7 +25,7 @@ The infrastructure for native float registers is ~80% complete:
 - `reg_float_cache: HashMap<String, String>` maps `i64` reg names to native `float` regs
 - `let_binding_types: HashMap<String, Type>` tracks let-binding types
 
-What's missing: the store and load boundaries between Brief's type system and LLVM's `%State` type.
+What's missing: the store and load boundaries between Briv's type system and LLVM's `%State` type.
 
 ## Changes Required
 

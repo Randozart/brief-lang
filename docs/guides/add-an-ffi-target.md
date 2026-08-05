@@ -1,16 +1,16 @@
 # How to add a new FFI target — a beginner's walkthrough
 
 **Date:** 2026-08-04
-**Audience:** a new Brief user who wants their language to call Brief
+**Audience:** a new Briv user who wants their language to call Briv
 **Other docs:** `docs/architecture/glue-ffi.md` (the complete method),
-`docs/guides/ffi-and-export.md` (hands-on how-to), `learn-brief/07-ffi.md`
+`docs/guides/ffi-and-export.md` (hands-on how-to), `learn-briv/07-ffi.md`
 (tutorial). This guide is the **step-by-step for adding a language**.
 
 ---
 
 ## 0. What you're actually doing
 
-Brief compiles to a native library. "Adding an FFI target" means teaching the
+Briv compiles to a native library. "Adding an FFI target" means teaching the
 compiler how to talk to **one more host language** (Python, Node, Go, …). You
 do **not** touch any Rust code. Everything lives in a folder:
 
@@ -20,8 +20,8 @@ lib/glue/<lang>/
     types.bv      # boundary type declarations (usually just re-export C's)
 ```
 
-`briefc bindings <bridge> <lang>`, `briefc export <bridge> <lang>`, and
-`briefc extension <bridge> <lang>` find `lib/glue/<lang>/` **by name**, load
+`brivc bindings <bridge> <lang>`, `brivc export <bridge> <lang>`, and
+`brivc extension <bridge> <lang>` find `lib/glue/<lang>/` **by name**, load
 its config, and render through one generic pipeline. The compiler has **zero
 knowledge of your language** — your folder is data.
 
@@ -36,14 +36,14 @@ other shapes.
 
 | Command | What it renders | When to use it |
 |---------|-----------------|----------------|
-| `brief bindings <b> <lang>` | Declarative files — a C header, a C# P/Invoke class | Your language can call a C ABI directly (C, C++, C#) |
-| `brief export <b> <lang>` | A language **package** — a Go package, a Java class, a Rust crate | Your language wants idiomatic wrappers over the C ABI |
-| `brief extension <b> <lang>` | A compiled **native extension** shim — Python `.so`, Node `.node`, Lua C module, Java JNI `lib*.so` | Your language loads a module and calls into it (no manual FFI) |
+| `briv bindings <b> <lang>` | Declarative files — a C header, a C# P/Invoke class | Your language can call a C ABI directly (C, C++, C#) |
+| `briv export <b> <lang>` | A language **package** — a Go package, a Java class, a Rust crate | Your language wants idiomatic wrappers over the C ABI |
+| `briv extension <b> <lang>` | A compiled **native extension** shim — Python `.so`, Node `.node`, Lua C module, Java JNI `lib*.so` | Your language loads a module and calls into it (no manual FFI) |
 
 Each shape uses a different set of templates (§4). A target can implement one,
 two, or all three (Java ships both an extension and a package).
 
-> **The one thing you must build first** (any shape): a Brief **bridge** — a
+> **The one thing you must build first** (any shape): a Briv **bridge** — a
 > `.bv` file that `import "glue/c.bv"` and `export defn`s your functions. See
 > `docs/guides/ffi-and-export.md` §2. Everything below is about the *other
 > side* — the target that consumes a bridge.
@@ -54,7 +54,7 @@ two, or all three (Java ships both an extension and a package).
 
 The boundary types your target needs. Almost always just:
 
-```brief
+```briv
 import "glue/c.bv";
 ```
 
@@ -66,7 +66,7 @@ That brings in the standard C boundary types (`CStr`, `CDouble`, `CI64`, `CBool`
 ## 3. Step 2 — `glue.dbvl`, field by field
 
 This is the whole game. Here is the **complete, shipped Lua config**, annotated.
-It is one line of a Data-Brief map (the file is literally one long line, but
+It is one line of a Data-Briv map (the file is literally one long line, but
 each value is `key: value;`).
 
 ```text
@@ -79,7 +79,7 @@ lua: {
   module_init: true;                   // does the shim have an init function
                                        // (luaopen_*, PyInit_*, JNI_OnLoad)?
 
-  // ── protocols: how each Brief protocol category maps to YOUR language ──
+  // ── protocols: how each Briv protocol category maps to YOUR language ──
   // native = the type as your language writes it
   // c_abi  = the type as your C shim sees it at the boundary
   protocols: {
@@ -101,7 +101,7 @@ lua: {
     from_abi: { "#Int": "result_abi"; "#Float": "result_abi"; "#String": "result_abi" };
   };
 
-  // ── state: how the Brief state handle appears in your generated code ──
+  // ── state: how the Briv state handle appears in your generated code ──
   // decl     = the state's declaration inside the shim
   // arg      = the state value at the call site
   // ffi_type = the type in an ffi/bindings signature (empty = omit)
@@ -115,7 +115,7 @@ lua: {
   // ── the toolchain recipe: how to COMPILE + LINK the extension ─────────
   // The compiler only knows "compile C, link a shared library". These
   // commands produce the flags it needs; each prints its answer on stdout.
-  native_include_cmd:  "for L in ~/brief-tools/lua-*/src /usr/include/lua5.4 /usr/include; do [ -f \"$L/lua.h\" ] && echo \"-I$L\" && break; done";
+  native_include_cmd:  "for L in ~/briv-tools/lua-*/src /usr/include/lua5.4 /usr/include; do [ -f \"$L/lua.h\" ] && echo \"-I$L\" && break; done";
   native_suffix:       ".so";          // output suffix (node uses ".node")
   // native_suffix_cmd: (optional) a command whose stdout IS the suffix
   // native_link_cmd:   (optional) prints link flags (python's --ldflags)
@@ -144,11 +144,11 @@ the file.
 
 ### 4.1 What a generated shim looks like (the `native.*` templates)
 
-For `bridge_kind: "native_module"` (Python, Node, Lua), `brief extension`
+For `bridge_kind: "native_module"` (Python, Node, Lua), `briv extension`
 renders **one C file** from three skeleton templates, then compiles it:
 
 - **`native.module`** — the whole file: includes, the extern prototypes for the
-  Brief exports, a module-global state, the per-export methods, and the
+  Briv exports, a module-global state, the per-export methods, and the
   module-init function (`luaopen_<bridge>`, `PyInit_<bridge>`, …). Placeholders:
   `{{bridge_name}}`, `{{export_protos}}`, `{{methods}}`, `{{method_defs}}`.
 - **`native.method`** — one export's wrapper C function. Placeholders:
@@ -173,7 +173,7 @@ static int lua_{{name}}(lua_State* L) {
     int _i = 1;
 {{parse_code}}            // one line per param, e.g.:
                           //   long long count = luaL_checkinteger(L, _i++);
-    {{ret_c}} r = {{call}};   // e.g.:  long long r = __brief_export_feature_hash(g_state, count);
+    {{ret_c}} r = {{call}};   // e.g.:  long long r = __briv_export_feature_hash(g_state, count);
 {{build_code}}            // e.g.:  lua_pushinteger(L, r);  return 1;
 }
 ```
@@ -193,7 +193,7 @@ long long
 The `{{call}}` uses the export under a **mangled C name** with an asm label:
 
 ```c
-extern long long __brief_export_feature_hash(BriefState* state, long long count)
+extern long long __briv_export_feature_hash(BrivState* state, long long count)
     asm("feature_hash");
 ```
 
@@ -204,7 +204,7 @@ always does this; your templates just reference `{{call}}`.
 
 ### 4.2 The `bindings.*` templates (declarative files)
 
-`brief bindings` renders every template whose name starts with `bindings.`.
+`briv bindings` renders every template whose name starts with `bindings.`.
 Two names are special:
 
 - **`bindings.ffi_template`** — rendered once per export and joined into the
@@ -218,8 +218,8 @@ Real C# example (rendered to the file named after the template key,
 ```text
 csharp.bindings.bridge.cs: "public static class {{bridge_name}} {
     [DllImport(\"{{bridge_name}}\")]
-    private static extern IntPtr __brief_init_state();
-    public static IntPtr Init() { return __brief_init_state(); }
+    private static extern IntPtr __briv_init_state();
+    public static IntPtr Init() { return __briv_init_state(); }
 {{ffi_decls}}
 }
 ";
@@ -230,7 +230,7 @@ csharp.bindings.ffi_template: "    [DllImport(\"{{bridge_name}}\")]
 
 ### 4.3 The `templates.*` templates (packages)
 
-`brief export` renders package files (Go/Java/Rust wrappers). Per-export
+`briv export` renders package files (Go/Java/Rust wrappers). Per-export
 wrapper functions come from **`fn_template`** (joined into `{{exports}}`);
 whole-file templates use `{{exports}}`.
 
@@ -255,7 +255,7 @@ Available inside a **per-export** template (`bindings.ffi_template`,
 | `{{s_param}}` / `{{s_ffi_param}}` / `{{s_ffi_type}}` | the state handle as a call arg / a signature param / a type (empty when the export is pure) |
 | `{{parse_code}}` | concatenated `native.parse.<cat>` lines (native shims) |
 | `{{ret_c}}` | `native.ret.<cat>` for the return (native shims) |
-| `{{call}}` | `__brief_export_<name>(…)` with the right args (native shims) |
+| `{{call}}` | `__briv_export_<name>(…)` with the right args (native shims) |
 | `{{build_code}}` | `native.build.<cat>` for the return (native shims) |
 | `{{sig_params}}` / `{{ret_jni}}` | JNI-style shims that take host values as direct signature params |
 | `{{nargs}}` / `{{nargs_arr}}` | parameter count / ≥1 for array sizing (Node) |
@@ -277,12 +277,12 @@ Available inside a **whole-file** template (`bindings.<file>`,
 Create a bridge and run the command:
 
 ```bash
-briefc extension examples/glue-host/bench.bv lua --out build/
+brivc extension examples/glue-host/bench.bv lua --out build/
 #   → build/bench.so   the Lua module (exports luaopen_bench AND the bridge's
 #                      own symbols); the static bridge lib is build/libbench.a
 ```
 
-Under the hood `brief extension`:
+Under the hood `briv extension`:
 1. builds the bridge as a shared library,
 2. renders the C shim from your `native.*` templates,
 3. asks your toolchain recipe for the include/link flags,
@@ -309,7 +309,7 @@ Add `tests/c_driver_<lang>.rs` following the shipped pattern — two tests:
 2. **A toolchain-guarded round-trip** (runs only where the toolchain exists):
    actually build the extension, drive it from the host, and assert the result.
    Discover the toolchain the same way the config does — **PATH first, then
-   `~/brief-tools/<tool>-*`** (the per-language downloads live there).
+   `~/briv-tools/<tool>-*`** (the per-language downloads live there).
 
 Example of the guard:
 
@@ -332,10 +332,10 @@ fn has(cmd: &str) -> bool { Command::new(cmd).arg("--version").output().is_ok() 
       shim needs (native modules), or you rely on a default.
 - [ ] `conversions.to_abi/from_abi` bridge the types that need it.
 - [ ] If `module_init: true`, your `native.module` defines the init function
-      and calls `__brief_init_state()` once into a global.
+      and calls `__briv_init_state()` once into a global.
 - [ ] `tests/c_driver_<lang>.rs` has the render assertion + a guarded
       round-trip.
-- [ ] `briefc extension|export|bindings <bridge> <lang>` runs clean.
+- [ ] `brivc extension|export|bindings <bridge> <lang>` runs clean.
 
 ---
 

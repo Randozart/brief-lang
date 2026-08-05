@@ -41,7 +41,7 @@ Add after line 556 (before `ForeignBinding` struct):
 pub enum Fallback {
     /// Return a static expression (literal, constructor call, etc.)
     Static(Expr),
-    /// Call a Brief function with the frgn's parameters
+    /// Call a Briv function with the frgn's parameters
     FnCall(String, Vec<Expr>),
     /// Void-return frgn — just skip the call
     Implicit,
@@ -196,9 +196,9 @@ create the per-language type `.bv` files.
 # Each section declares:
 #   types_module    — .bv file declaring foreign type representations
 #   extension       — native source file extension
-#   bridge_kind     — how to call into this language from compiled Brief
+#   bridge_kind     — how to call into this language from compiled Briv
 #   calling_convention — ABI at the boundary
-#   c_type_map      — Brief type → C ABI type for C ABI boundary
+#   c_type_map      — Briv type → C ABI type for C ABI boundary
 
 [python]
 types_module = "glue/python/types.bv"
@@ -235,8 +235,8 @@ calling_convention = "lto"
 
 **New directory/file:** `lib/glue/python/types.bv`
 
-```brief
-// 2026-07-22: Python type declarations for Brief's type universe.
+```briv
+// 2026-07-22: Python type declarations for Briv's type universe.
 // Types are defined against protocol haswords (#String<UTF8>, #Int, etc.)
 // so GLUE can find CastTo/CastFrom paths.
 
@@ -263,7 +263,7 @@ type PyInt : Bits {
     op CastFrom(#Int) = i64_to_pylong(#L);
 };
 
-// Zero-copy melds: if Brief CBuffer has same layout as PyBytes
+// Zero-copy melds: if Briv CBuffer has same layout as PyBytes
 meld PyBytes -> CBuffer {
     ptr -> ptr;
     len -> len;
@@ -274,8 +274,8 @@ meld PyBytes -> CBuffer {
 
 **New directory/file:** `lib/glue/node/types.bv`
 
-```brief
-// 2026-07-22: Node.js type declarations for Brief's type universe.
+```briv
+// 2026-07-22: Node.js type declarations for Briv's type universe.
 
 type JsBuffer : Bits {
     bytes <~ 8;
@@ -305,8 +305,8 @@ type JsNumber : Bits {
 
 **New directory/file:** `lib/glue/rust/types.bv`
 
-```brief
-// 2026-07-22: Rust type declarations for Brief's type universe.
+```briv
+// 2026-07-22: Rust type declarations for Briv's type universe.
 // Rust uses LLVM LTO for interop — no C ABI boundary for scalars.
 // Types are defined for documentation and meld compatibility.
 
@@ -431,7 +431,7 @@ use crate::glue::config::GlueTarget;
 pub enum ResolvedFrgn {
     /// Backend inlines directly (compile/link the source, call the symbol)
     Inline {
-        /// The foreign symbol name (from `as` or brief_name)
+        /// The foreign symbol name (from `as` or briv_name)
         symbol: String,
         /// If true, the backend should compile this source to .o first
         compile_source: bool,
@@ -483,11 +483,11 @@ Add a function to `src/analysis/frgn_dispatch.rs`:
 /// Compute the protocol path between two types for a frgn boundary.
 ///
 /// 2026-07-22: Uses the existing BFS in find_cast_path() + meld lookup
-/// to determine how to transform a Brief type to/from a foreign type.
+/// to determine how to transform a Briv type to/from a foreign type.
 /// Returns the shortest path by cost.
 pub fn compute_protocol_path(
     universe: &TypeUniverse,
-    brief_type: &Type,
+    briv_type: &Type,
     foreign_type: &Type,
     operator_defs: &HashMap<String, Vec<OperatorDef>>,
 ) -> Result<Vec<ProtocolStep>, String> {
@@ -536,14 +536,14 @@ After the normalizer + protocol_verify (around line 188), add:
 
 ```rust
 // ── Frgn dispatch resolution ───────────────────────────────────────────
-let glue_config = brief_compiler::glue::config::load_glue_config(
+let glue_config = briv_compiler::glue::config::load_glue_config(
     opts.glue_config.as_deref().map(|p| Path::new(p))
 )?;
 
 // For each ForeignBinding in items, resolve its dispatch strategy
 let mut resolved_frgns: HashMap<String, ResolvedFrgn> = HashMap::new();
 for item in &items {
-    let brief_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
+    let briv_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
     let ext = fb.from.extension().unwrap_or("");
     let dispatch = resolve_single_frgn(fb, ext, &glue_config, &universe, &operator_defs, opts.backend)?;
     resolved_frgns.insert(fb.name.clone(), dispatch);
@@ -811,7 +811,7 @@ fn emit_fallback_value(
 
 ## Phase 5: Export Unification + CLI Subcommands (DONE)
 
-**Goal:** Add `brief export` and `brief link` subcommands, unify the two
+**Goal:** Add `briv export` and `briv link` subcommands, unify the two
 export paths.
 
 ### 5.1 — Unify export extraction in `src/glue/export.rs`
@@ -840,7 +840,7 @@ fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
 
 **Tests:** Update existing `extract_exports` tests to cover `TopLevel::Export`.
 
-### 5.2 — Wire `brief export` CLI subcommand
+### 5.2 — Wire `briv export` CLI subcommand
 
 **File:** `src/main.rs`
 
@@ -855,8 +855,8 @@ Add the handler functions:
 
 ```rust
 fn run_export(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("usage: brief export <bridge.bv> <language> --out <dir>")?;
-    let language = args.get(1).ok_or("usage: brief export <bridge.bv> <language> --out <dir>")?;
+    let file_path = args.first().ok_or("usage: briv export <bridge.bv> <language> --out <dir>")?;
+    let language = args.get(1).ok_or("usage: briv export <bridge.bv> <language> --out <dir>")?;
     let mut out_dir = ".".to_string();
     let mut i = 2;
     while i < args.len() {
@@ -867,7 +867,7 @@ fn run_export(args: &[String]) -> Result<(), String> {
             return Err(format!("unknown flag: {}", args[i]));
         }
     }
-    brief_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
+    briv_compiler::glue::export::run_export_cli(file_path, language, &out_dir)
 }
 ```
 
@@ -875,10 +875,10 @@ And `run_link()`:
 
 ```rust
 fn run_link(args: &[String]) -> Result<(), String> {
-    let lib_path = args.first().ok_or("usage: brief link <library.so/a/o>")?;
-    let result = brief_compiler::glue::link::analyze_library(Path::new(lib_path))?;
-    brief_compiler::glue::link::print_link_summary(&result);
-    let bridge_bv = brief_compiler::glue::link::generate_bridge_bv(&result);
+    let lib_path = args.first().ok_or("usage: briv link <library.so/a/o>")?;
+    let result = briv_compiler::glue::link::analyze_library(Path::new(lib_path))?;
+    briv_compiler::glue::link::print_link_summary(&result);
+    let bridge_bv = briv_compiler::glue::link::generate_bridge_bv(&result);
     // Write to stdout or file
     println!("{}", bridge_bv);
     Ok(())
@@ -917,9 +917,9 @@ pub fn generate_python_wrapper(exports: &[ExportDecl], bridge_name: &str) -> Str
         _lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), "bridge.so"))
 
         def _init_state():
-            _lib.__brief_init_state.argtypes = []
-            _lib.__brief_init_state.restype = ctypes.c_void_p
-            return _lib.__brief_init_state()
+            _lib.__briv_init_state.argtypes = []
+            _lib.__briv_init_state.restype = ctypes.c_void_p
+            return _lib.__briv_init_state()
 
         _STATE = _init_state()
 "#, bridge_name));
@@ -1032,7 +1032,7 @@ Add the optimizer pass between protocol_verify and codegen:
 
 ```rust
 // ── Layout optimization (frgn/export boundary) ──────────────────────────
-let layout_changes = brief_compiler::analysis::layout_optimizer::optimize_layouts(
+let layout_changes = briv_compiler::analysis::layout_optimizer::optimize_layouts(
     &items, &universe, &resolved_frgns,
 )?;
 // Apply layout changes to the items
@@ -1076,7 +1076,7 @@ layout it receives.
 
 | File | Tests |
 |------|-------|
-| `tests/frgn_export_e2e_tests.rs` | End-to-end: write a bridge .bv, run `brief export`, verify outputs |
+| `tests/frgn_export_e2e_tests.rs` | End-to-end: write a bridge .bv, run `briv export`, verify outputs |
 | `tests/glue_bridge_tests.rs` | Unit tests for protocol chain computation, bridge codegen |
 | `tests/fallback_tests.rs` | Fallback: static, fn call, implicit void |
 | `tests/layout_optimizer_tests.rs` | Layout optimization scenarios |
@@ -1084,11 +1084,11 @@ layout it receives.
 ### 7.3 — Update example files
 
 **`examples/glue-rust-bridge/`:**
-- Update `build.rs` to work with `brief export` output
+- Update `build.rs` to work with `briv export` output
 - Add a `glue.toml` override (optional)
 
 **`examples/glue-python-bridge/`:**
-- Update `gluerun.py` to work with `brief export` output
+- Update `gluerun.py` to work with `briv export` output
 - Document the new workflow
 
 **`examples/test-bridge.bv`:**
@@ -1099,7 +1099,7 @@ layout it receives.
 
 Update the stale test script to:
 
-1. Use `brief-compiler export` instead of nonexistent `$BRIEF export`
+1. Use `briv-compiler export` instead of nonexistent `$BRIEF export`
 2. Build the compiler first: `cargo build`
 3. Test with a minimal `.bv` bridge file
 4. Verify the output `.so` or `.a` exists
@@ -1109,9 +1109,9 @@ Update the stale test script to:
 
 ## Phase 8: Ship of Theseus — AST Pretty-Printer Stress Test
 
-**Goal:** Port the AST pretty-printer (`src/ast/display.rs`) from Rust to Brief,
+**Goal:** Port the AST pretty-printer (`src/ast/display.rs`) from Rust to Briv,
 then call it through the GLUE bridge. This exercises the full FFI pipeline in
-reverse direction (Brief → Host), validates protocol transforms on recursive
+reverse direction (Briv → Host), validates protocol transforms on recursive
 types, and provides the foundation for incremental self-hosting.
 
 ### 8.1 — Identify the port boundary
@@ -1126,7 +1126,7 @@ The AST pretty-printer is a set of `Display` impls in `src/ast/display.rs`:
 - `Pattern`, `MatchArm`, `Modifier`, etc.
 
 Each is a pure function: `(AST node) -> String`. No global state, no I/O,
-no mutable references. Perfect Brief candidate.
+no mutable references. Perfect Briv candidate.
 
 **Porting order** (increasing complexity):
 1. `Type::Display` — flat, non-recursive shape, few variants
@@ -1136,13 +1136,13 @@ no mutable references. Perfect Brief candidate.
 5. `Definition::Display` — wraps exprs and statements
 6. `TopLevel::Display` — top-level dispatch
 
-### 8.2 — Brief implementation
+### 8.2 — Briv implementation
 
 **New file:** `lib/pp/types.bv` — pretty-print functions for types:
 
-```brief
+```briv
 // lib/pp/types.bv
-// 2026-07-22: AST pretty-printer ported to Brief (Phase 8).
+// 2026-07-22: AST pretty-printer ported to Briv (Phase 8).
 
 defn pp_type_int() -> String { term "Int"; }
 defn pp_type_float() -> String { term "Float"; }
@@ -1155,7 +1155,7 @@ defn pp_type_ptr(elem: String) -> String {
 
 **New file:** `lib/pp/exprs.bv` — recursive expression pretty-printing:
 
-```brief
+```briv
 // lib/pp/exprs.bv
 // 2026-07-22: Recursive expression printer. Each Expr variant is a
 // pure function taking sub-expression strings.
@@ -1175,24 +1175,24 @@ defn pp_call(name: String, args: String) -> String {
 
 **New file:** `bridge/pp-bridge.bv` — export the pretty-printer:
 
-```brief
+```briv
 // bridge/pp-bridge.bv
-// 2026-07-22: Bridge for calling Brief pretty-printer from Rust compiler.
+// 2026-07-22: Bridge for calling Briv pretty-printer from Rust compiler.
 // Import the pretty-printer implementation
 import "lib/pp/types.bv";
 import "lib/pp/exprs.bv";
 
-export defn brief_pp_type(type_tag: String, payload: String) -> String {
+export defn briv_pp_type(type_tag: String, payload: String) -> String {
     // Dispatch on type_tag, call the appropriate pp function
     // ...
 };
 ```
 
-The Rust compiler calls `brief_pp_type` via the GLUE bridge:
+The Rust compiler calls `briv_pp_type` via the GLUE bridge:
 ```rust
 // In src/ast/display.rs (modified):
 fn display_type(ty: &Type) -> String {
-    if let Ok(result) = glue::call("brief_pp_type", &[serialize_type(ty)]) {
+    if let Ok(result) = glue::call("briv_pp_type", &[serialize_type(ty)]) {
         return result;
     }
     // Fallback: native Rust implementation
@@ -1204,7 +1204,7 @@ fn display_type(ty: &Type) -> String {
 
 **Round-trip test**: For every AST in the test suite:
 1. Generate the pretty-printed string using the Rust implementation
-2. Generate it using the Brief implementation via GLUE bridge
+2. Generate it using the Briv implementation via GLUE bridge
 3. Assert they match exactly
 
 ```rust
@@ -1212,8 +1212,8 @@ fn display_type(ty: &Type) -> String {
 fn test_pp_ast_roundtrip() {
     let ast = make_test_ast();
     let rust_pp = format!("{}", ast);      // Rust Display impl
-    let brief_pp = call_brief_pp(&ast);    // Brief via GLUE
-    assert_eq!(rust_pp, brief_pp);
+    let briv_pp = call_briv_pp(&ast);    // Briv via GLUE
+    assert_eq!(rust_pp, briv_pp);
 }
 ```
 
@@ -1224,31 +1224,31 @@ disabled. Both must pass with identical output.
 
 | Phase 8 step | What changes | Risk |
 |-------------|-------------|------|
-| 8a — `Type` | 4-5 Brief functions, simple strings | Low |
-| 8b — `ForeignBinding` | Brief calls sub-printers | Low |
+| 8a — `Type` | 4-5 Briv functions, simple strings | Low |
+| 8b — `ForeignBinding` | Briv calls sub-printers | Low |
 | 8c — `Statement` | Keywords, block formatting | Medium |
 | 8d — `Expr` (all 30 variants) | Deeply recursive, stress-tests stack | **High** |
 | 8e — `Definition` | Wraps exprs + statements | Medium |
-| 8f — Full cutover | Rust Display impl delegates entirely to Brief | High |
+| 8f — Full cutover | Rust Display impl delegates entirely to Briv | High |
 
 ### 8.6 — What this validates about the GLUE pipeline
 
 | Requirement | How Phase 8 exercises it |
 |------------|-------------------------|
-| Protocol path resolution | Brief `String` ↔ Rust `String` via `#String<UTF8>` |
+| Protocol path resolution | Briv `String` ↔ Rust `String` via `#String<UTF8>` |
 | Recursive type serialization | AST nodes contain sub-nodes (Expr in Expr) |
 | Fallback correctness | If GLUE bridge fails, Rust fallback must produce identical output |
-| Export wrapper generation | `brief export pp-bridge.bv rust --out ...` |
+| Export wrapper generation | `briv export pp-bridge.bv rust --out ...` |
 | `calling_convention = "lto"` | Rust LTO path — no C ABI boundary overhead |
-| Performance | Pretty-printing is not hot code; tail-call optimization under Brief contracts |
+| Performance | Pretty-printing is not hot code; tail-call optimization under Briv contracts |
 
 ### 8.7 — When to consider Phase 8 done
 
-- `Type::Display` delegates to Brief (verified by round-trip test)
-- `ForeignBinding::Display` delegates to Brief
-- `Statement::Display` delegates to Brief
-- `Expr::Display` delegates to Brief (the big one — all 30+ variants)
-- `Definition::Display` and `TopLevel::Display` delegate to Brief
+- `Type::Display` delegates to Briv (verified by round-trip test)
+- `ForeignBinding::Display` delegates to Briv
+- `Statement::Display` delegates to Briv
+- `Expr::Display` delegates to Briv (the big one — all 30+ variants)
+- `Definition::Display` and `TopLevel::Display` delegate to Briv
 - Full test suite passes with GLUE bridge enabled
 - Native Rust fallback produces identical output (verified by CI)
 
@@ -1306,7 +1306,7 @@ Key sites:
 
 Already handled: `ResolvedFrgn::Unsupported` produces a compile error.
 
-### E2 — `as` with the same name as the Brief name
+### E2 — `as` with the same name as the Briv name
 
 Not an error, but redundant. The compiler should emit a note:
 ```
@@ -1336,11 +1336,11 @@ error: no protocol path from 'CustomStruct' to 'python' target.
     - Add op CastTo(#String) to 'CustomStruct' for string serialization
 ```
 
-### E5 — `brief export` with no exports
+### E5 — `briv export` with no exports
 
 Graceful: "No exports found in bridge file. Nothing to generate." Exit 0.
 
-### E6 — `brief link` on a library with no T (text) symbols
+### E6 — `briv link` on a library with no T (text) symbols
 
 Already handled by `analyze_library()` — returns error "No T (text) symbols found."
 

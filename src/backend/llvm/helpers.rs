@@ -321,8 +321,8 @@ impl LlvmBackend {
     ///
     /// 2026-08-01 (Phase 3): every loop-engine main is emitted as
     /// `define i32 @main(i32 %argc, ptr %argv)` and stores argc/argv into the
-    /// module globals `@__brief_argc` / `@__brief_argv`, which the runtime
-    /// argv helpers (brief_rt.c) read. The `entry:` label is emitted here
+    /// module globals `@__briv_argc` / `@__briv_argv`, which the runtime
+    /// argv helpers (briv_rt.c) read. The `entry:` label is emitted here
     /// (with the captures inside it) so callers do not write it again.
     /// `capture` is false for the precomputed main (pure-compile-time fold,
     /// no runtime argv needed — it still takes argv params for a uniform
@@ -341,8 +341,8 @@ impl LlvmBackend {
         .ok();
         writeln!(out, "entry:").ok();
         if capture {
-            writeln!(out, "  store i32 %argc, ptr @__brief_argc").ok();
-            writeln!(out, "  store ptr %argv, ptr @__brief_argv").ok();
+            writeln!(out, "  store i32 %argc, ptr @__briv_argc").ok();
+            writeln!(out, "  store ptr %argv, ptr @__briv_argv").ok();
         }
     }
 
@@ -439,7 +439,7 @@ impl LlvmBackend {
 
     /// Emit LLVM thread pool metadata for async transactions.
     /// Generates a constant array of function pointers consumed by
-    /// `brief_thread_pool_init` at startup.
+    /// `briv_thread_pool_init` at startup.
     pub(crate) fn emit_thread_pool_metadata(&self, out: &mut String) {
         if !self.has_async_txns || self.is_lightweight_async {
             return;
@@ -522,7 +522,7 @@ impl LlvmBackend {
             // Fusion would recreate a composite node — if A writes a field B
             // reads (or vice versa), fusing them puts the read and write in
             // the same loop body, reintroducing the interleaving the flat-node
-            // decomposition removes. Per Brief's reactor design, writing is a
+            // decomposition removes. Per Briv's reactor design, writing is a
             // XOR condition; a shared read-write dependency means the nodes
             // must stay sequential.
             let ar = crate::backend::collect_read_identifiers(&ta.body);
@@ -615,7 +615,7 @@ impl LlvmBackend {
         }
     }
 
-    /// Look up the LLVM codegen type for a Brief type.
+    /// Look up the LLVM codegen type for a Briv type.
     /// 2026-07-19: Uses stamped `llvm_type` from universe (set by normalizer's
     /// category inference). For float types, this returns the actual LLVM type
     /// (float, double, bfloat, half) instead of guessing from byte width.
@@ -787,7 +787,7 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
 
     /// Emit inline string concatenation: malloc + header setup + memcpy.
-    /// Both operands are i8* (Brief header pointers). Returns i64-tagged.
+    /// Both operands are i8* (Briv header pointers). Returns i64-tagged.
     ///
     /// Tag convention (2026-06-19):
     ///   bit 0 = static string constant (don't free, don't read header at -16)
@@ -1256,7 +1256,7 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#Float")
     }
 
-    /// 2026-08-01 (B1): Central #String operand check — a Brief String value
+    /// 2026-08-01 (B1): Central #String operand check — a Briv String value
     /// is a `ptr` to a length-prefixed `[len: i64][bytes]` buffer (bits model).
     /// This is the single decision point every #String op default uses (Eq/Ne
     /// content compare, band/bor/bxor/bnot content ops). Rule #16: the pattern
@@ -1268,7 +1268,7 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#String")
     }
 
-    /// 2026-08-04 (compiler-in-Brief): is the receiver of a String operation
+    /// 2026-08-04 (compiler-in-Briv): is the receiver of a String operation
     /// semantically a #String, even if its emitted register was boxed to an
     /// i64 handle (String param, frgn result) and is now typed Int/Custom?
     /// The physical value is still the [len][bytes] pointer. Check the reg
@@ -1289,11 +1289,11 @@ impl LlvmBackend {
         false
     }
 
-    /// 2026-08-04 (compiler-in-Brief): the pointer form of a string operand
+    /// 2026-08-04 (compiler-in-Briv): the pointer form of a string operand
     /// for a content compare. A #String operand that survived unboxed (a
     /// literal's `@str.N` global) is already a `ptr`; a boxed one
     /// (adapt_to_i64 lost the String type → i64 handle) must be inttoptr'd
-    /// back to the [len][bytes] pointer before `brief_str_eq`.
+    /// back to the [len][bytes] pointer before `briv_str_eq`.
     pub(super) fn string_ptr(
         &mut self,
         out: &mut String,
@@ -1689,7 +1689,7 @@ impl LlvmBackend {
     /// Emit native LLVM IR for well-known projection operations
     /// (Add/Sub/Mul/Div/Eq/Ne/Lt/Le/Gt/Ge on Int/Float/Bool).
     ///
-    /// Why this exists: Brief's projection system is generic (any operator
+    /// Why this exists: Briv's projection system is generic (any operator
     /// on any type dispatches through UserDefinedWithArg). But for primitive
     /// types, the generic dispatch would load i64 → convert to native →
     /// exec op → convert back. This fast path skips both conversions.
@@ -2320,7 +2320,7 @@ impl LlvmBackend {
         reg: &TypedRegister,
     ) -> String {
         // 2026-07-30: If already i64 (from state load), return as-is.
-        // State fields are always stored as i64 regardless of Brief type,
+        // State fields are always stored as i64 regardless of Briv type,
         // so loads from %State produce i64 values that need no conversion.
         if self.llvm_type(&reg.ty) == "i64" {
             return reg.name.clone();
@@ -2424,9 +2424,9 @@ impl LlvmBackend {
     // 2026-07-19: DRY consolidation helpers — centralized state field access.
     // All 44 hand-rolled GEP+load/store sites should migrate to these.
 
-    /// Load a state field as i64. Returns (register_name, brief_type).
-    /// The brief type can be passed to ensure_typed_value for float unboxing.
-    /// Load a state field with its native LLVM type. Returns (register_name, brief_type).
+    /// Load a state field as i64. Returns (register_name, briv_type).
+    /// The briv type can be passed to ensure_typed_value for float unboxing.
+    /// Load a state field with its native LLVM type. Returns (register_name, briv_type).
     pub(crate) fn emit_state_load_i64(
         &mut self,
         out: &mut String,
@@ -2450,7 +2450,7 @@ impl LlvmBackend {
         self.store_field_type(out, indent, idx, val)
     }
 
-    /// Load a state field with its native LLVM type by index. Returns (register_name, brief_type).
+    /// Load a state field with its native LLVM type by index. Returns (register_name, briv_type).
     pub(crate) fn emit_state_load_i64_by_idx(
         &mut self,
         out: &mut String,
@@ -2482,9 +2482,9 @@ impl LlvmBackend {
         indent: &str,
         idx: usize,
     ) -> Option<(String, Type)> {
-        let brief_ty = self
+        let briv_ty = self
             .ctx
-            .field_brief_types
+            .field_briv_types
             .get(idx)
             .cloned()
             .unwrap_or(Type::int());
@@ -2521,14 +2521,14 @@ impl LlvmBackend {
         // from inside the loop body to the preheader, eliminating one
         // GEP+load per iteration per pointer field.
         // See docs/plans/2026-07-29-frontend-ir-quality-improvements.md §B.
-        if matches!(brief_ty, Type::Ptr(_) | Type::PtrConst(_)) {
+        if matches!(briv_ty, Type::Ptr(_) | Type::PtrConst(_)) {
             let md_idx = self.fun.metadata_counter;
             self.fun.metadata_counter += 1;
             writeln!(self.fun.pending_metadata, "!{} = !{{}}", md_idx).ok();
             write!(out, ", !invariant.load !{}", md_idx).ok();
         }
         writeln!(out).ok();
-        Some((val, brief_ty))
+        Some((val, briv_ty))
     }
 
     /// Internal helper: store a value to a state field with its native LLVM type.
@@ -2573,10 +2573,10 @@ impl LlvmBackend {
         indent: &str,
         expected_llvm_ty: &str,
         val: &str,
-        brief_ty: Option<Type>,
+        briv_ty: Option<Type>,
         _universe: Option<&crate::type_universe::TypeUniverse>,
     ) -> String {
-        let Some(ref bt) = brief_ty else {
+        let Some(ref bt) = briv_ty else {
             return val.to_string();
         };
         let actual_ty = self.llvm_type(bt);

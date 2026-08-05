@@ -3,7 +3,7 @@
 //
 // All operations are pure `defn` wrappers over `:>` LLVM intrinsic projections.
 // Postconditions document the result range; proof engine verifies the body
-// satisfies them. No FFI, no TOML, no DBrief.
+// satisfies them. No FFI, no TOML, no DBriv.
 
 // ===== COUNTING =====
 

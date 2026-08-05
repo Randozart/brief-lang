@@ -43,7 +43,7 @@ Compiled into the binary via `include_str!`. The compiler reads the extension fr
 
 ### CLI flag precedence
 
-`brief build file.ebv --backend llvm` — explicit `--backend` overrides the config file.
+`briv build file.ebv --backend llvm` — explicit `--backend` overrides the config file.
 
 ### Dispatch in `compile_source()`
 
@@ -90,7 +90,7 @@ fn compile_source(file_path, source, opts) {
 
 | Kind | Defined by | Syntax | Dispatch |
 |------|-----------|--------|----------|
-| **Operation** | Backend config file (`llvm-ops.toml`) | Brief syntax: `+`, `==`, `++` | Config lookup: `(op, primitive, bytes)` |
+| **Operation** | Backend config file (`llvm-ops.toml`) | Briv syntax: `+`, `==`, `++` | Config lookup: `(op, primitive, bytes)` |
 | **Intrinsic** | Backend (hardware or builtin) | `Name#(args)` call syntax | Backend chooses: lookup, fallback, error |
 | **Override** | Source type definition | `op Add <~ custom_fn(#L, #R)` | Type registry lookup before config |
 
@@ -175,7 +175,7 @@ Template variables: `%v` = result register, `%a` = first operand, `%b` = second,
 
 Inside a type body (same-type override):
 
-```brief
+```briv
 type Int : Bits {
     bytes <~ 8;
     primitive <~ Int;
@@ -185,7 +185,7 @@ type Int : Bits {
 
 Top-level (cross-type override):
 
-```brief
+```briv
 op Add(Int, String) <~ add_int_string(#L, #R);
 op Add(String, Int) <~ add_string_int(#L, #R);
 ```
@@ -290,7 +290,7 @@ fn resolve_type_info(rt: &ResolvedType) -> TypeInfo {
 ### The `primitive` property
 
 Declared in source:
-```brief
+```briv
 type Int : Bits { bytes <~ 8; primitive <~ Int; }
 ```
 

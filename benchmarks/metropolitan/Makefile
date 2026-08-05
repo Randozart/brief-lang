@@ -5,7 +5,7 @@
 
 PROJECT_ROOT ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 OUT_DIR ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/out)
-BRIEFC ?= $(PROJECT_ROOT)/target/release/brief-compiler
+BRIEFC ?= $(PROJECT_ROOT)/target/release/briv-compiler
 CC ?= gcc
 LLC ?= llc
 LD ?= wasm-ld
@@ -35,7 +35,7 @@ $(OUT_DIR)/bench_c: bench_c.c $(OUT_DIR)/bench_add.so
 	$(CC) -O2 -o $@ bench_c.c -ldl
 
 # ── Tier 2: Python C extension ─────────────────────────────────────────
-$(OUT_DIR)/brief_bridge.so: $(OUT_DIR)/bridge.c
+$(OUT_DIR)/briv_bridge.so: $(OUT_DIR)/bridge.c
 	$(CC) -O2 -fPIC -shared -o $@ $(OUT_DIR)/bridge.c -ldl \
 	  $(shell python3-config --includes --ldflags --embed 2>/dev/null || python3-config --includes --ldflags 2>/dev/null || echo '-I/usr/include/python3.* -lpython3.*')
 

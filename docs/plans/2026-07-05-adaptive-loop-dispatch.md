@@ -320,7 +320,7 @@ Changes:
 1. Record benchmark baseline to `results/2026-07-05-baseline.txt`.
    Format:
    ```
-   benchmark_name brief_sec c_sec ratio winner source_commit
+   benchmark_name briv_sec c_sec ratio winner source_commit
    ```
    The `source_commit` column records the git hash where this ratio
    was measured, so regressions can be root-caused.

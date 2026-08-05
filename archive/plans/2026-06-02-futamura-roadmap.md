@@ -6,13 +6,13 @@
 
 ## Vision
 
-Brief's strict transactional state-machine model makes it uniquely suited to realize the **Futamura Projections** — an unbroken chain from self-hosting to a universal target-agnostic meta-compiler. The end state: a compiler that can analyze any Brief program and emit the absolute optimal hardware or software implementation, then generalize to compile any language expressed as a state machine.
+Briv's strict transactional state-machine model makes it uniquely suited to realize the **Futamura Projections** — an unbroken chain from self-hosting to a universal target-agnostic meta-compiler. The end state: a compiler that can analyze any Briv program and emit the absolute optimal hardware or software implementation, then generalize to compile any language expressed as a state machine.
 
-### Why Brief Succeeds Where MIX (1985) Failed
+### Why Briv Succeeds Where MIX (1985) Failed
 
 The Futamura Projections were proven at DIKU Copenhagen (1984-85) via MIX, the first self-applicable partial evaluator. It worked but never left academia:
 
-| Barrier | MIX (1985, Lisp) | Brief |
+| Barrier | MIX (1985, Lisp) | Briv |
 |---------|------------------|-------|
 | Source language | Mixwell (first-order Lisp) — recursive heap lists | Flat state machine — bounded, register-allocatable |
 | Binding-time analysis | Fragile; ambiguous loop boundaries → infinite loops | Trigger-gated preconditions make bounds explicit |
@@ -92,11 +92,11 @@ if name == "is_some" && args.len() == 1 {
 }
 ```
 
-**Verification after fix:** `./brief-compiler selfhost lib/compiler/lexer.bv lib/compiler/main.bv` tokenizes a brief source file correctly.
+**Verification after fix:** `./briv-compiler selfhost lib/compiler/lexer.bv lib/compiler/main.bv` tokenizes a briv source file correctly.
 
 ### Phase B2: Turtle Compiler (Acceleration Path)
 
-Instead of writing the full parser and typechecker before seeing results, write a **Turtle compiler** — a minimal Brief compiler that handles only:
+Instead of writing the full parser and typechecker before seeing results, write a **Turtle compiler** — a minimal Briv compiler that handles only:
 
 1. `node [pre]{body}` reactive transactions
 2. Integer arithmetic (`+`, `-`, `*`, `/`, `<`, `==`)
@@ -104,10 +104,10 @@ Instead of writing the full parser and typechecker before seeing results, write 
 4. Constants (`const BOUND = 50000000`)
 5. `#!exit <expr>;`
 
-**Turtle is just enough to compile the IIR filter and Kalman filter.** It proves the self-hosting pipeline works end-to-end with a small, verifiable codebase (~300 lines of Brief vs ~1500 for the full compiler).
+**Turtle is just enough to compile the IIR filter and Kalman filter.** It proves the self-hosting pipeline works end-to-end with a small, verifiable codebase (~300 lines of Briv vs ~1500 for the full compiler).
 
-```brief
-// Turtle.bv: Minimal Brief compiler (conceptual)
+```briv
+// Turtle.bv: Minimal Briv compiler (conceptual)
 enum ParserState { Idle, InTxnName, InPre, InBody, AfterTerm }
 
 struct CompilerState {
@@ -124,31 +124,31 @@ node next_char [pos < len(source)][true] {
 }
 ```
 
-**Milestone:** `./brief-compiler selfhost lib/compiler/turtle.bv benchmarks/iir_filter.bv -o a.ll && clang a.ll brief_rt.o -O2 -lm && ./a.out` produces correct output.
+**Milestone:** `./briv-compiler selfhost lib/compiler/turtle.bv benchmarks/iir_filter.bv -o a.ll && clang a.ll briv_rt.o -O2 -lm && ./a.out` produces correct output.
 
-### Phase B3: LUT Optimizer in Brief (Demonstration Path)
+### Phase B3: LUT Optimizer in Briv (Demonstration Path)
 
 Write `lib/compiler/lut_optimizer.bv` (~200 lines) that:
 1. Takes a list of trigger keys and target transitions
 2. Computes perfect hash parameters (M, S) using the same algorithm as Plan 1
-3. Outputs the optimal dispatch strategy as a Brief `const` declaration
+3. Outputs the optimal dispatch strategy as a Briv `const` declaration
 
 This is a pure data-processing program — no I/O, no FFI. It compiles via LLVM into a tight O(1) register pipeline.
 
-**Proof:** Brief can write optimization passes that run at register speed.
+**Proof:** Briv can write optimization passes that run at register speed.
 
 ### Phase B4: Full Parser + Typechecker
 
 After Turtle proves the pipeline:
 
-| Component | Brief LOC | Rust LOC | Ratio |
+| Component | Briv LOC | Rust LOC | Ratio |
 |-----------|-----------|----------|-------|
 | Lexer | 528 (existing) | ~300 | 1.8× |
 | Parser | ~800 (new) | ~2500 | 0.32× |
 | Typechecker | ~500 (new) | ~1500 | 0.33× |
 | **Total frontend** | **~1800** | **~4300** | **0.42×** |
 
-The Brief versions are shorter because they don't need memory management, error recovery, or complex trait dispatch — the state machine handles everything.
+The Briv versions are shorter because they don't need memory management, error recovery, or complex trait dispatch — the state machine handles everything.
 
 ## Phase C: The 2nd Projection — Self-Compiling Compiler
 
@@ -162,9 +162,9 @@ The Brief versions are shorter because they don't need memory management, error 
 
 ### What Stage 2 Looks Like
 
-The compiled Brief compiler is a **pure state machine with zero heap allocation:**
+The compiled Briv compiler is a **pure state machine with zero heap allocation:**
 
-| Compiler phase | When compiled via Brief's LLVM backend |
+| Compiler phase | When compiled via Briv's LLVM backend |
 |---------------|--------------------------------------|
 | Lexer | LUT lookup + switch dispatch (O(1) per byte) |
 | Parser | Enum state machine with perfect-hashed keyword dispatch |
@@ -174,7 +174,7 @@ The compiled Brief compiler is a **pure state machine with zero heap allocation:
 
 ### Compound Optimization (The Key Insight)
 
-Stage 1 is the Brief compiler compiled by Rust. Stage 2 is the Brief compiler compiled by Stage 1. **Stage 2 is faster because:**
+Stage 1 is the Briv compiler compiled by Rust. Stage 2 is the Briv compiler compiled by Stage 1. **Stage 2 is faster because:**
 
 1. Stage 1's parser state machine gets compiled through Path 4 (enum switch-dispatch) → O(1) dispatch
 2. Stage 2's lexer gets the LUT optimization applied to it
@@ -205,7 +205,7 @@ Round 2 (Stage 2):  5ms, 512KB,  800KB binary (2× faster again)
 ### Architecture
 
 ```
-              ┌─ Brief Source (.bv)
+              ┌─ Briv Source (.bv)
               │
               ▼
     ┌─────────────────────────────────────┐
@@ -259,7 +259,7 @@ Each backend maps the IR to target syntax — no optimization, no analysis:
 
 ## Phase E: Full-Spectrum Program Memoization
 
-The ultimate goal: any Brief program with bounded state and trigger spaces compiles into a flat lookup table. The program doesn't compute — it looks up the predetermined future.
+The ultimate goal: any Briv program with bounded state and trigger spaces compiles into a flat lookup table. The program doesn't compute — it looks up the predetermined future.
 
 ```
 f: (S × I) → (S', O)
@@ -274,28 +274,28 @@ f: (S × I) → (S', O)
 
 This is isomorphic to a ROM-based Finite State Machine in hardware — the most power-efficient, structurally minimal circuit possible on silicon.
 
-## How Brief Beats C on This
+## How Briv Beats C on This
 
 C cannot self-compile. C cannot specialize its own compiler. This is the fundamental advantage:
 
-| Capability | Brief | C | Advantage |
+| Capability | Briv | C | Advantage |
 |-----------|-------|---|-----------|
-| Self-compilation | `stage0 compiles llvm.bv → stage1` | Impossible | **Brief only** |
-| Compound optimization | Each cycle optimizes the optimizer | Fixed `clang -O2` | **Brief only** |
+| Self-compilation | `stage0 compiles llvm.bv → stage1` | Impossible | **Briv only** |
+| Compound optimization | Each cycle optimizes the optimizer | Fixed `clang -O2` | **Briv only** |
 | Target-agnostic optimization | One pass → N backends | Per-target optimization | **10× fewer LOC** |
 | Full-spectrum memoization | LUT replaces computation | Must execute code | **O(1) vs O(N)** |
-| ROM-based FSM synthesis | One IR → hardware or software | Two separate toolchains | **Brief only** |
+| ROM-based FSM synthesis | One IR → hardware or software | Two separate toolchains | **Briv only** |
 
 ### The Definitively-Beat-C Argument
 
 C's `clang -O2 -march=native` is a fixed optimization pipeline. It cannot improve itself. It cannot learn from previous compilations. It cannot specialize itself to the program being compiled.
 
-Brief's self-compiling compiler:
-1. **Round 1:** Brief compiler compiles itself through the full optimization pipeline
+Briv's self-compiling compiler:
+1. **Round 1:** Briv compiler compiles itself through the full optimization pipeline
 2. **Round 2:** The compiled compiler is itself optimized — every match arm is a LUT, every recursive descent is an enum state machine
 3. **Round N:** Asymptotically approaching a single O(1) lookup table for compilation
 
-C compiles code into a binary that runs. Brief compiles code into a binary that runs, then compiles itself into a better binary that runs faster. **The optimization compounds with each cycle.**
+C compiles code into a binary that runs. Briv compiles code into a binary that runs, then compiles itself into a better binary that runs faster. **The optimization compounds with each cycle.**
 
 ## Implementation Roadmap
 
@@ -314,7 +314,7 @@ C compiles code into a binary that runs. Brief compiles code into a binary that 
 |------|------|-------------|
 | B1: Fix `is_none`/`is_some` interpreter dispatch | 1 day | `selfhost lexer.bv` succeeds |
 | B2: Write Turtle compiler (~300 lines) | 1 week | Turtle compiles IIR filter correctly |
-| B3: Write LUT optimizer in Brief (~200 lines) | 3 days | LUT optimizer produces correct hash params |
+| B3: Write LUT optimizer in Briv (~200 lines) | 3 days | LUT optimizer produces correct hash params |
 | B4: Write full parser.bv | 2 weeks | Parser parses 10 test files |
 | B5: Write full typechecker.bv | 1 week | Typechecker validates 10 test files |
 

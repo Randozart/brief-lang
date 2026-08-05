@@ -1,8 +1,8 @@
-# Brief Compiler - Hardware Backend Development Guide
+# Briv Compiler - Hardware Backend Development Guide
 
 ## Overview
 
-The Brief compiler's hardware backend generates production-ready Verilog and Vivado build scripts from `.rbv` files and `hardware.toml` configuration.
+The Briv compiler's hardware backend generates production-ready Verilog and Vivado build scripts from `.rbv` files and `hardware.toml` configuration.
 
 ## Architecture
 
@@ -20,8 +20,8 @@ src/backend/
 ### Generate Verilog
 
 ```rust
-use brief_compiler::backend::{verilog::VerilogGenerator, tcl_generator::TclGenerator};
-use brief_compiler::ast::HardwareConfig;
+use briv_compiler::backend::{verilog::VerilogGenerator, tcl_generator::TclGenerator};
+use briv_compiler::ast::HardwareConfig;
 
 // Parse hardware.toml
 let hw_config: HardwareConfig = toml::from_str(&std::fs::read_to_string("hardware.toml")?)?;
@@ -41,7 +41,7 @@ std::fs::write("build.tcl", tcl)?;
 
 ```bash
 cargo build --release
-./target/release/brief-compiler rbv examples/shopping_cart.rbv
+./target/release/briv-compiler rbv examples/shopping_cart.rbv
 ```
 
 ---
@@ -311,7 +311,7 @@ cargo test --lib tcl_generation
 cargo build --release
 
 # Compile example
-./target/release/brief-compiler rbv examples/shopping_cart.rbv
+./target/release/briv-compiler rbv examples/shopping_cart.rbv
 ```
 
 ---
@@ -319,7 +319,7 @@ cargo build --release
 ## File Structure
 
 ```
-brief-compiler/
+briv-compiler/
 ├── src/
 │   ├── backend/
 │   │   ├── mod.rs           # Module exports
@@ -329,7 +329,7 @@ brief-compiler/
 │   └── main.rs              # CLI entry point
 ├── examples/
 │   ├── hardware.toml       # Example configuration
-│   ├── shopping_cart.rbv   # Example Brief program
+│   ├── shopping_cart.rbv   # Example Briv program
 │   └── ...
 └── HARDWARE_BUG_FIX_PLAN.md # Bug fix history
 ```

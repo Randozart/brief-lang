@@ -9,25 +9,25 @@
 
 ## 1. Motivation
 
-Brief's reactive transaction model already enables elegant loop/iteration semantics.
+Briv's reactive transaction model already enables elegant loop/iteration semantics.
 But chaining function calls sequentially — especially the data-transformation pattern
 of "take X, apply f, apply g, apply h" — is currently expressed as nested calls:
 
-```brief
+```briv
 h(g(f(x)))
 ```
 
 This is hard to read, hard to extend, and gets worse with each step. Pipe chaining
 (`|>`) flips the order to match the dataflow direction:
 
-```brief
+```briv
 x |> f() |> g() |> h()
 ```
 
 The innovation is the **dot-skip `.N|>` variant**, which lets a downstream step reach
 back to an earlier pipeline value — not just the immediately preceding result:
 
-```brief
+```briv
 x |> f() |> g() .|> h()
 // h receives f(x) (the value at position 1, skipping position 2)
 ```
@@ -66,7 +66,7 @@ use explicit `_` placeholder syntax (future work) or wrap in a lambda.
 
 ### Basic chaining
 
-```brief
+```briv
 // Input: x = 42
 // f: Int -> String, g: String -> Bool
 x |> to_string() |> parse_bool()
@@ -75,7 +75,7 @@ x |> to_string() |> parse_bool()
 
 ### Dot-skip chaining
 
-```brief
+```briv
 // a |> f() produces T1
 // |> g() produces T2  
 // .|> h() receives T1 (skip=1)
@@ -84,7 +84,7 @@ a |> f() |> g() .|> h()
 
 ### With `<:` subtype query (two-statement form)
 
-```brief
+```briv
 // Step 1: query produces a filtered subset
 let result : database { FILTER(.active); };
 // Step 2: pipe the subset to a print function
@@ -93,7 +93,7 @@ result |> print_rows();
 
 ### Multiple skip levels
 
-```brief
+```briv
 a |> f()   // pos 1: reads __p0
   |> g()   // pos 2: reads __p1
   .|> h()  // pos 3: reads __p1 (skip=1 from pos 2)
@@ -107,7 +107,7 @@ interpreter, or any backend. This means zero runtime overhead and zero codegen c
 
 For `x |> f() |> g() .|> h()`:
 
-```brief
+```briv
 // Desugared to block expression:
 {
     let __pipe_0 = x;
@@ -122,7 +122,7 @@ For `x |> f() |> g() .|> h()`:
 
 If the target is a bare `Identifier`, wrap it as a call with the pipeline value:
 
-```brief
+```briv
 x |> f
 // → { let __p0 = x; let __p1 = f(__p0); __p1 }
 ```
@@ -187,7 +187,7 @@ parse_expression → parse_pipe_chain
     5. If steps consumed → return Expr::PipeChain
 ```
 
-**Dot ambiguity:** The `.` token in Brief is used for field access (`.field`).
+**Dot ambiguity:** The `.` token in Briv is used for field access (`.field`).
 `.N|>` parsing only activates when `.` is immediately followed by `|>` (with
 optional integer in between). At the parse_pipe level, we're already past
 postfix operators, so `.` at this level is unambiguous — field access is
@@ -284,7 +284,7 @@ after the subtype projection block. Future work if needed.
 | `src/proof_engine.rs` | `unreachable!` arm |
 | `src/symbolic.rs` | `unreachable!` arm |
 | `docs/architecture/features/pipe.md` | Architecture doc |
-| `learn-brief/01-basics.md` | Pipe chaining tutorial section |
+| `learn-briv/01-basics.md` | Pipe chaining tutorial section |
 | `examples/pipe-chain.bv` | Example program |
 | `examples/pipe-skip.bv` | Example program |
 | `docs/plans/2026-06-22-pipe-chaining.md` | This file |
@@ -293,7 +293,7 @@ after the subtype projection block. Future work if needed.
 
 ### `examples/pipe-chain.bv` — Basic pipe chaining
 
-```brief
+```briv
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };
 
@@ -305,7 +305,7 @@ txn main() [true][true] -> Bool {
 
 ### `examples/pipe-skip.bv` — Dot-skip chaining
 
-```brief
+```briv
 defn square(x: Int) -> Int { term x * x; };
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };
@@ -318,7 +318,7 @@ txn main() [true][true] -> Bool {
 
 ### `examples/pipe-query.bv` — Pipe with `<:` query (two-statement form)
 
-```brief
+```briv
 struct Record { id: Int, active: Bool };
 
 defn print_count(n: Int) -> Bool { term print_int#(n); };

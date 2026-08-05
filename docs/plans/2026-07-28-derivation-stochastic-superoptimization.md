@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 **Status:** Active implementation
-**Worktree:** `../brief-compiler-derive`
+**Worktree:** `../briv-compiler-derive`
 **Depends on:** Completion of `!>` metadata syntax (`docs/plans/2026-07-28-metadata-syntax-bang.md`);
 existing `DerivationBlock` / `DerivationExample` AST nodes; existing `src/derive/` module skeleton.
 **See also:** `docs/plans/2026-07-11-derivation-synthesis-comprehensive.md` for Phases 8–11
@@ -16,7 +16,7 @@ vocabulary reference.
 ## Overview
 
 This plan adds a **nine-phase implementation** (A–I) implementing a four-stage derivation pipeline, with non-destructive doppelganger
-output files and an optional stochastic superoptimization pass. The `brief derive` command
+output files and an optional stochastic superoptimization pass. The `briv derive` command
 synthesizes function bodies from `:= { ... }` examples, then optionally optimizes them via
 STOKE-style MCMC random search at the normalized IR layer.
 
@@ -25,13 +25,13 @@ STOKE-style MCMC random search at the normalized IR layer.
 | Capability | Mechanism | Flag |
 |------------|-----------|------|
 | **Compile-Time Assertions** | Examples verified against body via interpreter | Always-on (build gate) |
-| **Enumerative Synthesis** | Depth-bounded expression enumeration | `brief derive` (default) |
-| **SMT Synthesis** | SyGuS query to Z3, QF_BV | `brief derive` (fallback) |
+| **Enumerative Synthesis** | Depth-bounded expression enumeration | `briv derive` (default) |
+| **SMT Synthesis** | SyGuS query to Z3, QF_BV | `briv derive` (fallback) |
 | **Stochastic Superoptimization** | MCMC Metropolis-Hastings on normalized IR | `--stochastic` |
 | **Doppelganger Output** | Full-source shadow files, never mutates originals | Always-on |
 | **!> Metadata Vocabulary** | Cross-backend optimization hints | First-class language |
 | **Metadata-Driven Codegen** | Backends consume `!>` via `MetadataRegistry` | Automatic (Phase H) |
-| **`brief accept`** | Fold synthesized bodies into source | User-initiated (Phase I) |
+| **`briv accept`** | Fold synthesized bodies into source | User-initiated (Phase I) |
 
 ### Pipeline
 
@@ -41,7 +41,7 @@ Source foo.bv
   │  := { 2, 3 -> 6; 0, 5 -> 0; };
   ▼
 ┌─────────────────────────────────────────────────────────┐
-│ brief derive foo.bv                                     │
+│ briv derive foo.bv                                     │
 │                                                         │
 │  Phase 1  Enumerative Search     Depth ≤ 5, constants   │
 │           (typed AST layer)      from {0,1,-1,powers2} │
@@ -64,7 +64,7 @@ Source foo.bv
   │  Writes: foo.opt.bv    (only if --stochastic)
   ▼
 ┌─────────────────────────────────────────────────────────┐
-│ brief build foo.bv                                      │
+│ briv build foo.bv                                      │
 │                                                         │
 │  Lookup chain: foo.opt.bv > foo.derive.bv > foo.bv     │
 │  If body present → assertion mode: interpreter evaluates│
@@ -229,7 +229,7 @@ A function or transaction with a derivation block takes one of three forms:
 In the **derivation only** form, `:= { examples }` appears directly where a
 `{ body }` would normally go. The parser must not error on `:=` — it checks
 for `{` first, and if absent, leaves `body` empty and delegates to the
-derivation block. This is the primary `brief derive` target.
+derivation block. This is the primary `briv derive` target.
 
 In the **body + derivation** form, the body is written by the developer and
 the derivation examples serve as assertions. This is the "build gate" mode
@@ -241,7 +241,7 @@ the derivation examples serve as assertions. This is the "build gate" mode
 
 **What**: Allow an optional `[tolerance]` annotation before the output expression:
 
-```brief
+```briv
 // Hard constraint (default): output must match exactly
 { 2, 3 -> 6; }
 
@@ -305,7 +305,7 @@ if let Some(tol) = self.tolerance {
 
 ### Goal
 
-When a function has BOTH a body and a derivation block, every `brief build` evaluates
+When a function has BOTH a body and a derivation block, every `briv build` evaluates
 each example through the compile-time interpreter and compares the result to the expected
 output. A mismatch is a build error (exit code 64).
 
@@ -645,7 +645,7 @@ pub fn synthesize_enumerative(
 ### Goal
 
 Replace the stub `src/derive/smt.rs` with a real SMT-LIB query builder that converts
-Brief types to QF_BV sorts, emits example constraints, calls Z3, and parses the
+Briv types to QF_BV sorts, emits example constraints, calls Z3, and parses the
 `define-fun` response back into `Expr` trees.
 
 ### Step D.0 — Build SMT-LIB query from typed examples
@@ -658,7 +658,7 @@ constraint. The grammar of `synth-fun` includes all relevant bitvector operation
 
 **Type mapping**:
 
-| Brief Type | SMT Sort |
+| Briv Type | SMT Sort |
 |------------|----------|
 | `Int`, `Int64`, `UInt64` | `(_ BitVec 64)` |
 | `Int32`, `UInt32` | `(_ BitVec 32)` |
@@ -814,20 +814,20 @@ fn parse_smt_response(
     let sexpr = parse_sexpr(response)?;
     let body_expr = extract_define_fun_body(&sexpr)?;
 
-    // Convert SMT expression to Brief Expr tree
-    let brief_expr = smt_to_brief_expr(body_expr, params, ret_type)?;
+    // Convert SMT expression to Briv Expr tree
+    let briv_expr = smt_to_briv_expr(body_expr, params, ret_type)?;
 
     Ok(SynthesizedProgram {
-        body: vec![Statement::Term { values: vec![Some(brief_expr)], swan_song: None, modifiers: vec![] }],
+        body: vec![Statement::Term { values: vec![Some(briv_expr)], swan_song: None, modifiers: vec![] }],
         cost: 0, // Cost is recomputed by the caller
         operators_used: vec![],
     })
 }
 ```
 
-**SMT to Brief expression mapping**:
+**SMT to Briv expression mapping**:
 
-| SMT expression | Brief expression |
+| SMT expression | Briv expression |
 |---------------|-----------------|
 | `(bvadd a b)` | `a + b` |
 | `(bvsub a b)` | `a - b` |
@@ -1036,7 +1036,7 @@ pub fn write_doppelganger(
     })
 }
 
-/// Format a synthesized program as a readable Brief body string.
+/// Format a synthesized program as a readable Briv body string.
 /// 2026-07-28: Phase E.1 — body formatter.
 fn format_body(prog: &SynthesizedProgram) -> String {
     let mut out = String::new();
@@ -1077,7 +1077,7 @@ fn resolve_source_path(requested_path: &Path) -> PathBuf {
 **CLI output**:
 
 ```
-$ brief build foo.bv
+$ briv build foo.bv
 [derive] using foo.opt.bv (stochastic superoptimized, 3 iterations)
   or
 [derive] using foo.derive.bv (synthesized, enumerative depth=4)
@@ -1090,25 +1090,25 @@ $ brief build foo.bv
 - `test_resolve_no_doppelganger`: No doppelganger → builds original
 - `test_resolve_opt_overrides_derive`: Both exist → `.opt.bv` wins
 
-### Step E.3 — `brief derive` CLI command
+### Step E.3 — `briv derive` CLI command
 
 **File**: `src/main.rs`, `src/derive/cli.rs`
 
-**What**: Add `brief derive <file>` command with flags:
+**What**: Add `briv derive <file>` command with flags:
 
 ```
-brief derive <file>           # Phase 1+2: enumerative + SMT → foo.derive.bv
-brief derive --stochastic     # Phase 3: also run MCMC → foo.opt.bv
-brief derive --iterations N   # MCMC iterations (default: 10000)
-brief derive --temperature T  # MCMC initial temperature (default: 1.0)
-brief derive --enumerative-depth N  # Max enumerative depth (default: 5)
-brief derive --all            # Process all transitive imports
+briv derive <file>           # Phase 1+2: enumerative + SMT → foo.derive.bv
+briv derive --stochastic     # Phase 3: also run MCMC → foo.opt.bv
+briv derive --iterations N   # MCMC iterations (default: 10000)
+briv derive --temperature T  # MCMC initial temperature (default: 1.0)
+briv derive --enumerative-depth N  # Max enumerative depth (default: 5)
+briv derive --all            # Process all transitive imports
 ```
 
 **CLI handler**:
 
 ```rust
-/// 2026-07-28: Phase E.3 — `brief derive` command handler.
+/// 2026-07-28: Phase E.3 — `briv derive` command handler.
 pub fn handle_derive_command(
     file_path: &str,
     config: &DeriveConfig,
@@ -1142,23 +1142,23 @@ pub fn handle_derive_command(
 ```
 
 **Tests**:
-- `test_derive_command_basic`: Run `brief derive foo.bv` → `foo.derive.bv` exists
+- `test_derive_command_basic`: Run `briv derive foo.bv` → `foo.derive.bv` exists
 - `test_derive_command_no_derivation`: No `:=` blocks → no doppelganger written
 - `test_derive_command_already_synthesized`: Body already present → assertion mode only
 - `test_derive_command_nonexistent_file`: File not found → error
 
-### Step E.4 — `brief accept` subcommand (user-approved folding)
+### Step E.4 — `briv accept` subcommand (user-approved folding)
 
 **File**: `src/main.rs`, `src/derive/accept.rs` (new)
 
 **What**: An explicit user command that folds a doppelganger's synthesized bodies
-back into the source `.bv` file. The compiler NEVER mutates source — `brief accept`
+back into the source `.bv` file. The compiler NEVER mutates source — `briv accept`
 is an intentional user action after reviewing the generated `foo.derive.bv`.
 
 ```
-brief accept <file>              # fold foo.derive.bv bodies into foo.bv
-brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
-brief accept <file> --all        # accept all derivation blocks in file
+briv accept <file>              # fold foo.derive.bv bodies into foo.bv
+briv accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+briv accept <file> --all        # accept all derivation blocks in file
 ```
 
 **Semantics**:
@@ -1174,20 +1174,20 @@ brief accept <file> --all        # accept all derivation blocks in file
 4. The trailing comment preserves the derivation block as specification for future
    assertion builds or re-derivation.
 
-**Why separate from `brief derive`**: The derive step is automatic and lossless
+**Why separate from `briv derive`**: The derive step is automatic and lossless
 (original file untouched). The accept step is an explicit review gate — the
 developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
 This separation prevents accidental source mutation from a failed synthesis or
 from synthesizing a correct-but-suboptimal body.
 
-**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+**Relation to assertion mode**: After acceptance, `briv build foo.bv` runs in
 assertion mode by default (verifies `// := { 2, 2 -> 4; }` matches the body).
 Pass `--no-assert` to skip this verification.
 
 **CLI handler**:
 
 ```rust
-/// 2026-07-28: Phase E.4 — `brief accept` command.
+/// 2026-07-28: Phase E.4 — `briv accept` command.
 /// Folds doppelganger bodies into the source file.
 /// Never mutates source without explicit user invocation.
 pub fn handle_accept_command(
@@ -1206,7 +1206,7 @@ pub fn handle_accept_command(
     };
 
     if !shadow_path.exists() {
-        return Err(format!("no doppelganger found at '{}' — run 'brief derive' first", shadow_path.display()));
+        return Err(format!("no doppelganger found at '{}' — run 'briv derive' first", shadow_path.display()));
     }
 
     let shadow_source = std::fs::read_to_string(&shadow_path)
@@ -1233,15 +1233,15 @@ pub fn handle_accept_command(
   builds and re-derivation runs.
 - Insertions happen in reverse byte offset order (same as doppelganger writer) to
   preserve span positions during replacement.
-- If no doppelganger exists, the error message tells the user to run `brief derive` first.
+- If no doppelganger exists, the error message tells the user to run `briv derive` first.
 
 **Nesting check**: The handler validates inputs, finds the shadow, calls the
 replacement helper, writes — one `?` chain, depth ≤ 2.
 
 **Tests**:
-- `test_accept_basic`: Run `brief accept foo.bv` after derive → `foo.bv` has bodies inlined
+- `test_accept_basic`: Run `briv accept foo.bv` after derive → `foo.bv` has bodies inlined
 - `test_accept_opt`: Accept from `foo.opt.bv` → `foo.bv` has MCMC-optimized bodies
-- `test_accept_no_shadow`: No `foo.derive.bv` → error message points to `brief derive`
+- `test_accept_no_shadow`: No `foo.derive.bv` → error message points to `briv derive`
 - `test_accept_preserves_derivation_block`: `// := { ... }` comment emitted after body
 - `test_accept_without_derivation`: Source has no `:=` blocks → no-op, file unchanged
 - `test_accept_idempotent`: Accept twice → second run sees no `:=` blocks → no-op
@@ -1252,8 +1252,8 @@ The commit sequence for Phase E becomes:
 
 ```
 5a. Doppelganger writer + resolver       (Step E.0–E.2)
-5b. `brief derive` CLI with flags        (Step E.3)
-5c. `brief accept` subcommand            (Step E.4)
+5b. `briv derive` CLI with flags        (Step E.3)
+5c. `briv accept` subcommand            (Step E.4)
 ```
 
 ---
@@ -1961,10 +1961,10 @@ mapping tables for each backend. The MCMC optimizer reads derivation-related key
 Each backend reads the remaining keys and maps them to target-specific semantics.
 
 **Architecture decision (2026-07-28)**: Vocabulary definitions and backend mapping
-rules are stored in a single `config/meta-vocab.dbv` file (Data Brief `.dbv` format
+rules are stored in a single `config/meta-vocab.dbv` file (Data Briv `.dbv` format
 with inline schemas). This replaces hardcoded Rust match arms for metadata→attribute
 lookups. The DBV file is parsed at compile time via `include_str!` +
-`dbrief::v2::parse_document_quoted`. A `MetadataRegistry` in `src/backend/metadata.rs`
+`dbriv::v2::parse_document_quoted`. A `MetadataRegistry` in `src/backend/metadata.rs`
 provides typed lookup functions for each backend.
 
 Rationale: Adding a new backend or metadata key only requires editing
@@ -2000,7 +2000,7 @@ The machine-readable source is `config/meta-vocab.dbv`.
 
 **Nesting check**: Flat markdown document with tables — no nesting concern.
 
-### Step G.1 — Data Brief vocabulary file
+### Step G.1 — Data Briv vocabulary file
 
 **File**: `config/meta-vocab.dbv` (new)
 
@@ -2084,7 +2084,7 @@ as BackendMapping {
 ```
 
 **Loading**: The `MetadataRegistry` uses `include_str!("../../config/meta-vocab.dbv")`
-and `dbrief::v2::parse_document_quoted()`. The `parse_document_quoted` variant is
+and `dbriv::v2::parse_document_quoted()`. The `parse_document_quoted` variant is
 required because mapping values use `"..."` quotation (e.g., `"wrapping"`, `"fast"`).
 Parse failure at compile time is a hard error (invariant: the `.dbv` file is always
 valid in a working copy).
@@ -2141,7 +2141,7 @@ impl MetadataRegistry {
 
 **Loading logic**:
 1. `include_str!("../../config/meta-vocab.dbv")` gets the file content
-2. `parse_document_quoted(&content).expect("...")` parses into `DbriefDocument`
+2. `parse_document_quoted(&content).expect("...")` parses into `DbrivDocument`
 3. Iterate `data_groups`, matching `schema_name == "MetaField"` → extract field defs
 4. Match `schema_name == "BackendMapping"` → collect all mappings
 5. Build per-backend index vectors (`llvm_idx` = indices where `backend == "llvm"`)
@@ -2259,7 +2259,7 @@ fn mcmc_config_from_metadata(metadata: &HashMap<String, PropertyValue>) -> McmcC
 
 ### Test: Full derivation cycle
 
-```brief
+```briv
 // test_functions.bv
 defn add(x: Int, y: Int) -> Int
     !> overflow: "wrapping";
@@ -2275,31 +2275,31 @@ defn add(x: Int, y: Int) -> Int
 #[test]
 fn test_end_to_end_derive_and_build() {
     // 1. Parse the source
-    // 2. Run brief derive (enumerative + SMT)
+    // 2. Run briv derive (enumerative + SMT)
     //   → Should synthesize: term x + y;
     // 3. Verify foo.derive.bv exists
     // 4. Read foo.derive.bv → parse → body is present
-    // 5. Run brief build on foo.derive.bv
+    // 5. Run briv build on foo.derive.bv
     //   → Assertion mode verifies {2,3→6, 0,5→5, 10,20→30}
-    // 6. Run brief derive --stochastic
+    // 6. Run briv derive --stochastic
     //   → MCMC should find x + y (already optimal, no change)
     //   → Or find commutativity swap y + x (equivalent cost)
     // 7. Verify foo.opt.bv exists (same as derive.bv for optimal case)
     // 8. Build foo.opt.bv → passes assertions
-    // 9. Run brief accept foo.bv
+    // 9. Run briv accept foo.bv
     //   → Folds x + y body into test_functions.bv
     //   → Derivation block demoted to // := { ... } comment
     // 10. Read foo.bv → body present, // := comment preserved
-    // 11. Run brief build foo.bv
+    // 11. Run briv build foo.bv
     //   → Assertion mode verifies body matches the // := spec
-    // 12. Run brief accept foo.bv again (idempotent)
+    // 12. Run briv accept foo.bv again (idempotent)
     //   → No := blocks remain → no-op, file unchanged
 }
 ```
 
 ### Test: MCMC finds optimization
 
-```brief
+```briv
 // test_optimize.bv
 defn double(x: Int) -> Int := {
     0 -> 0;
@@ -2314,7 +2314,7 @@ interesting) or potentially better on target hardware.
 
 ### Test: Tolerance for floating-point
 
-```brief
+```briv
 defn celsius_to_fahrenheit(c: Float) -> Float := {
     0.0 -> [0.001] 32.0;
     100.0 -> [0.001] 212.0;
@@ -2391,26 +2391,26 @@ CIRCT-level options via `MetadataRegistry::circt_option()`.
 
 ---
 
-## Phase I — CLI Completion (`brief derive` flags + `brief accept`)
+## Phase I — CLI Completion (`briv derive` flags + `briv accept`)
 
 **Goal**: Complete the phase E sub-steps that were deferred. Phase E committed
-the doppelganger infrastructure and a bare `brief derive` command, but omitted
-flag parsing (`--stochastic`, `--iterations`, etc.) and the `brief accept`
+the doppelganger infrastructure and a bare `briv derive` command, but omitted
+flag parsing (`--stochastic`, `--iterations`, etc.) and the `briv accept`
 subcommand. Phase I finishes both.
 
-### Step I.0 — `brief derive` CLI Flags
+### Step I.0 — `briv derive` CLI Flags
 
 **File**: `src/derive/cli.rs`, `src/main.rs`
 
-**What**: Add flag parsing to the `brief derive` command:
+**What**: Add flag parsing to the `briv derive` command:
 
 ```
-brief derive <file>                # enumerative + SMT → foo.derive.bv
-brief derive --stochastic <file>   # also run MCMC → foo.opt.bv
-brief derive --iterations N        # MCMC iterations (default: 10000)
-brief derive --temperature T       # initial temperature (default: 1.0)
-brief derive --enumerative-depth N # max depth (default: 5)
-brief derive --all                 # process all transitive imports
+briv derive <file>                # enumerative + SMT → foo.derive.bv
+briv derive --stochastic <file>   # also run MCMC → foo.opt.bv
+briv derive --iterations N        # MCMC iterations (default: 10000)
+briv derive --temperature T       # initial temperature (default: 1.0)
+briv derive --enumerative-depth N # max depth (default: 5)
+briv derive --all                 # process all transitive imports
 ```
 
 Flags are parsed with a simple hand-written loop (no clap dependency in
@@ -2445,18 +2445,18 @@ temperature: 1.0, enumerative_depth: 5, process_all: false }`.
 - `test_derive_with_iterations`: Non-default iteration count passed to MCMC
 - `test_derive_all_flag`: Imported derivation blocks also processed
 
-### Step I.1 — `brief accept` Subcommand
+### Step I.1 — `briv accept` Subcommand
 
 **File**: `src/derive/accept.rs` (new), `src/main.rs`, `src/derive/mod.rs`
 
-**What**: Add `brief accept <file>` that folds doppelganger bodies back into
-the source `.bv` file. The compiler NEVER mutates source — `brief accept` is
+**What**: Add `briv accept <file>` that folds doppelganger bodies back into
+the source `.bv` file. The compiler NEVER mutates source — `briv accept` is
 an intentional user action after reviewing the generated `foo.derive.bv`.
 
 ```
-brief accept <file>              # fold foo.derive.bv bodies into foo.bv
-brief accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
-brief accept <file> --all        # accept all derivation blocks in file
+briv accept <file>              # fold foo.derive.bv bodies into foo.bv
+briv accept <file> --opt        # fold from foo.opt.bv instead (MCMC result)
+briv accept <file> --all        # accept all derivation blocks in file
 ```
 
 **Algorithm**:
@@ -2466,7 +2466,7 @@ brief accept <file> --all        # accept all derivation blocks in file
 4. Replace the derivation comment with the actual body
 5. Write `foo.bv` (with `.bak` backup of original)
 
-**Why separate from `brief derive`**: The derive step is automatic and lossless
+**Why separate from `briv derive`**: The derive step is automatic and lossless
 (original file untouched). The accept step is an explicit review gate — the
 developer inspects `foo.derive.bv`, decides "this looks correct," then folds it in.
 
@@ -2474,7 +2474,7 @@ developer inspects `foo.derive.bv`, decides "this looks correct," then folds it 
 The developer should review each synthesized body before accepting. `--all`
 is available for CI/scripted workflows.
 
-**Relation to assertion mode**: After acceptance, `brief build foo.bv` runs in
+**Relation to assertion mode**: After acceptance, `briv build foo.bv` runs in
 assertion mode (`verify_derivation_assertions` in compile pipeline) — if the
 body and examples disagree, the build fails. This ensures accepted results
 stay correct after source changes.
@@ -2482,7 +2482,7 @@ stay correct after source changes.
 **Tests**:
 - `test_accept_basic`: derive → accept → `foo.bv` has inlined bodies
 - `test_accept_opt`: accept from `foo.opt.bv` → MCMC-optimized bodies
-- `test_accept_no_shadow`: no `.derive.bv` → error points to `brief derive`
+- `test_accept_no_shadow`: no `.derive.bv` → error points to `briv derive`
 - `test_accept_preserves_derivation_block`: `// := { ... }` comment retained
 - `test_accept_without_derivation`: source has no `:=` blocks → no-op
 - `test_accept_idempotent`: accept twice → second run sees no `:=` → no-op
@@ -2500,11 +2500,11 @@ Every phase must update the following documentation in the same commit:
 | B | `docs/architecture/features/derivation-blocks.md` — assertion build gate |
 | C | `docs/architecture/features/derivation-blocks.md` — enumerative synthesis |
 | D | `docs/architecture/features/derivation-blocks.md` — SMT synthesis |
-| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system + `brief accept` |
+| E | `docs/architecture/features/derivation-blocks.md` — doppelganger system + `briv accept` |
 | F | `docs/architecture/features/mcmc-superoptimizer.md` — new doc |
 | G | `docs/architecture/optimization-hints.md` — new vocabulary reference |
 | H | `docs/architecture/optimization-hints.md` — backend wiring section |
-| I | `docs/architecture/features/derivation-blocks.md` — `brief accept` docs |
+| I | `docs/architecture/features/derivation-blocks.md` — `briv accept` docs |
 
 ---
 
@@ -2519,7 +2519,7 @@ Every phase must update the following documentation in the same commit:
  6. Phase F: MCMC superoptimizer (mutations, equivalence, sampler, Pareto)            ✓ (a272dc11)
  7. Phase G: Metadata vocabulary reference + backend mappings                         ✓ (09cfc234)
  8. Phase H: Metadata-driven codegen (LLVM, Webstack, CIRCT wiring)                   ✓ (9d54f263+)
- 9. Phase I: CLI completion (`brief derive` flags + `brief accept`)                   ✓ (cb02b43b+)
+ 9. Phase I: CLI completion (`briv derive` flags + `briv accept`)                   ✓ (cb02b43b+)
   -- Parse fix: `:= { ... }` without body (I.1 dependency)                           ✓ (755aa08c)
  10. Integration tests: end-to-end pipeline
  11. Benchmark baseline + MCMC comparison

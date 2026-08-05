@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29  
 **Branch:** `recovery-branch`  
-**Worktree:** `../brief-compiler-recovery`  
+**Worktree:** `../briv-compiler-recovery`  
 **Baseline:** `b39461e2` (SLP stride gate — all 19 benchmarks at parity or better)  
 
 ---
@@ -47,7 +47,7 @@ Three architectural axioms that every decision in this plan follows:
 
 ### 2a. Protocol-Driven Type System
 
-Brief has no "types" — only protocols. A type is a bundle of bits subscribed to one or more protocols:
+Briv has no "types" — only protocols. A type is a bundle of bits subscribed to one or more protocols:
 
 ```
 type Int: Bit #Int;       // Bits subscribing to #Int and #Bit protocols
@@ -329,7 +329,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
 // BEFORE (line ~389-404):
 match opts.backend {
     BackendKind::Llvm | BackendKind::Gpu => {
-        brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe)?;
+        briv_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe)?;
     }
     ...
 }
@@ -340,16 +340,16 @@ let int_bits = opts.int_bits; // default 64, may be overridden by --int-bits
 
 match opts.backend {
     BackendKind::Llvm | BackendKind::Gpu => {
-        brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+        briv_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
     }
     BackendKind::Circt => {
-        brief_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe, int_bits)?;
+        briv_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe, int_bits)?;
     }
     BackendKind::Webstack => {
-        brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe, 32)?;
+        briv_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe, 32)?;
     }
     BackendKind::Spirv => {
-        brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+        briv_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
     }
     BackendKind::Vm => {}
 }
@@ -555,7 +555,7 @@ Parse, Lex
 
 **What it does:** Kahn topological sort of transaction body statements to group independent operations for ILP.
 
-**Why delete:** Proven ineffective (Finding #10 from recovery). No benchmark benefited. LLVM's instruction scheduler does this better within each basic block. The reordering at the Brief statement level is a premature optimization that LLVM undoes and redoes.
+**Why delete:** Proven ineffective (Finding #10 from recovery). No benchmark benefited. LLVM's instruction scheduler does this better within each basic block. The reordering at the Briv statement level is a premature optimization that LLVM undoes and redoes.
 
 **Files:**
 - `src/backend/llvm/reorder.rs` — entire file. `git rm` it.
@@ -886,14 +886,14 @@ This kills SLP vectorization because LLVM sees independent (dead) instructions i
 
 In `emit_expr`, identifier resolution for state fields checks `phi_field_regs` (loop header phi) BEFORE `last_val_temps` (most recent write this iteration). When the body has:
 
-```brief
+```briv
 &bx0 = body0.x - body1.x;
 &bx0 = body0.x - body2.x;  // second write to bx0
 ```
 
 The expression for the second assignment contains a reference to `body2.x`, NOT to the previous value of `bx0`. But if the expression DOES reference `bx0` (true accumulation):
 
-```brief
+```briv
 &energy = energy + body0.mass * body1.mass;  // first energy write
 &energy = energy + body0.mass * body2.mass;  // second — energy on RHS
 ```
@@ -1095,22 +1095,22 @@ Target outcomes by benchmark:
 | Benchmark | Current Ratio | Target | Pass/Fail |
 |---|---|---|---|
 | nbody_newton | 1.09x C | ≤ 0.85x C | |
-| nbody_sqrt | 0.85x Brief | ≤ 0.85x Brief | |
-| nbody_sqrt_idio | 0.67x Brief | ≤ 0.67x Brief | |
-| sparse_dispatch | 0.81x Brief | ≤ 0.81x Brief | |
-| queue_drain | 0.96x Brief | ≤ 0.96x Brief | |
+| nbody_sqrt | 0.85x Briv | ≤ 0.85x Briv | |
+| nbody_sqrt_idio | 0.67x Briv | ≤ 0.67x Briv | |
+| sparse_dispatch | 0.81x Briv | ≤ 0.81x Briv | |
+| queue_drain | 0.96x Briv | ≤ 0.96x Briv | |
 | queue_drain_sym | Parity | ≤ 1.00x | |
 | queue_drain_idio | Parity | ≤ 1.00x | |
 | ring_buffer | 1.06x C | ≤ 1.06x C | |
-| float_math | 0.96x Brief | ≤ 0.96x Brief | |
-| float_math_nonzero | 0.98x Brief | ≤ 0.98x Brief | |
-| fannkuch_redux | 0.90x Brief | ≤ 0.96x Brief | |
-| kalman_filter_runtime | 0.99x Brief | ≤ 1.00x | |
-| mandelbrot | 0.99x Brief | ≤ 1.00x | |
-| fasta | 0.95x Brief | ≤ 0.95x Brief | |
-| cancel_math | 0.96x Brief | ≤ 0.96x Brief | |
+| float_math | 0.96x Briv | ≤ 0.96x Briv | |
+| float_math_nonzero | 0.98x Briv | ≤ 0.98x Briv | |
+| fannkuch_redux | 0.90x Briv | ≤ 0.96x Briv | |
+| kalman_filter_runtime | 0.99x Briv | ≤ 1.00x | |
+| mandelbrot | 0.99x Briv | ≤ 1.00x | |
+| fasta | 0.95x Briv | ≤ 0.95x Briv | |
+| cancel_math | 0.96x Briv | ≤ 0.96x Briv | |
 | print_loop | Parity | ≤ 1.00x | |
-| bit_clear | 0.50x Brief | ≤ 0.50x Brief | |
+| bit_clear | 0.50x Briv | ≤ 0.50x Briv | |
 | knucleotide | Parity | ≤ 1.00x | |
 | interval_step | Parity | ≤ 1.00x | |
 
@@ -1142,7 +1142,7 @@ bash benchmarks/compare_baseline.sh queue_drain
 bash benchmarks/compare_baseline.sh ring_buffer
 ```
 
-The baseline worktree at `../brief-compiler-baseline` is pinned at `b39461e2`. Any regression against this baseline is a blocker unless the improvement in another benchmark is strictly greater than the regression (trade-off must be documented).
+The baseline worktree at `../briv-compiler-baseline` is pinned at `b39461e2`. Any regression against this baseline is a blocker unless the improvement in another benchmark is strictly greater than the regression (trade-off must be documented).
 
 ---
 
@@ -1278,7 +1278,7 @@ For each risk that materializes:
 - [ ] All 19 benchmarks MATCH (correctness)
 - [ ] All 19 benchmarks at parity or better vs recovery-branch tip
 - [ ] nbody_newton IR structurally similar to Era 5 reference
-- [ ] No regression against baseline worktree at `../brief-compiler-baseline`
+- [ ] No regression against baseline worktree at `../briv-compiler-baseline`
 - [ ] If regressions found: triage per §14 Risk Mitigation Strategy
 
 ---

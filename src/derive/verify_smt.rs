@@ -1,5 +1,5 @@
 // ── Phase 1 — SMT Verification Query Builder ──────────────────────────
-// 2026-07-28: Converts Brief Expr to SMT-LIB2 terms, builds forall
+// 2026-07-28: Converts Briv Expr to SMT-LIB2 terms, builds forall
 // verification queries, invokes Z3, and extracts counterexamples.
 // This is the core of the CEGIS verification loop.
 
@@ -9,7 +9,7 @@ use crate::derive::SynthesizeError;
 use std::process::Command;
 use std::io::Write;
 
-/// Convert a Brief expression to an SMT-LIB2 term string.
+/// Convert a Briv expression to an SMT-LIB2 term string.
 /// `param_names` are the names of bound variables (function parameters).
 /// 2026-07-29: Convert a block of statements to a single SMT expression.
 /// Inlines let bindings via β-reduction (substitution) and returns the
@@ -262,7 +262,7 @@ fn binary_op_to_smt(op: BinaryOpKind) -> &'static str {
     }
 }
 
-/// Convert a Brief Type to an SMT-LIB2 sort string.
+/// Convert a Briv Type to an SMT-LIB2 sort string.
 pub fn type_to_smt_sort(ty: &Type) -> String {
     match ty {
         Type::Custom(name) => match name.as_str() {
@@ -294,7 +294,7 @@ fn is_compound_type(name: &str) -> bool {
     matches!(name, "Expr")
 }
 
-/// Get Z3 datatype declaration for a Brief type, if it's a compound type.
+/// Get Z3 datatype declaration for a Briv type, if it's a compound type.
 fn datatype_decl_for_type(ty: &Type) -> Option<String> {
     match ty {
         Type::Custom(name) => get_datatype_declaration(name),

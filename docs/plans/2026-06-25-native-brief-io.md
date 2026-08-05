@@ -1,4 +1,4 @@
-# Native Brief I/O: Eliminating the C Runtime Dependency
+# Native Briv I/O: Eliminating the C Runtime Dependency
 
 **Date:** 2026-06-25
 **Status:** Planned (awaiting implementation start)
@@ -6,8 +6,8 @@
 
 ## Goal
 
-Make the C runtime (`brief_rt.c`) optional by expressing all I/O through three
-Brief-native primitives: `Ptr<T>`, `volatile_load#`/`volatile_store#`, and
+Make the C runtime (`briv_rt.c`) optional by expressing all I/O through three
+Briv-native primitives: `Ptr<T>`, `volatile_load#`/`volatile_store#`, and
 BILD-inline syscalls. Platform descriptions live in DBS/DBL files — data,
 not code.
 
@@ -21,18 +21,18 @@ not code.
   bounds. No borrow checker, no GC, no runtime tag. Just `[ptr >= BASE][ptr < END]`.
 - **C runtime becomes optional** — Thread pool and arch startup remain as a
   compatibility shim; terminal/file/socket/timer I/O all go native.
-- **BILD is just LLVM IR with Brief conventions** — The emission is verbatim
+- **BILD is just LLVM IR with Briv conventions** — The emission is verbatim
   paste. Any LLVM IR instruction works. BILD adds only label-based params,
   automatic `term`→`ret` lowering, and the new `asm target { }` desugaring.
 - **Every new syntax gets an example file** — `examples/` receives a working
   `.bv` file demonstrating each new construct before it lands in stdlib.
-- **Arch docs and learn-brief updated in the same commit** — structural
+- **Arch docs and learn-briv updated in the same commit** — structural
   language changes always include documentation in the same diff.
 
 ## Language extensions beyond Phases 1-6
 
 Three language extensions make every "not replaced" case expressible in
-pure Brief. They are prerequisites that run alongside Phases 1-3.
+pure Briv. They are prerequisites that run alongside Phases 1-3.
 
 ### Extension A: Universal asm in BILD — `asm target { }`
 
@@ -80,7 +80,7 @@ and assembled at BILD compile time.
 
 ### Extension B: Function pointer type `fn(T) -> U` and `&f` address-of
 
-```brief
+```briv
 type SignalHandler = fn(Int) -> Void;
 
 defn my_handler(sig: Int) -> Void { ... };
@@ -91,7 +91,7 @@ h(signum);
 
 Also works for `inop!` declarations:
 
-```brief
+```briv
 inop! __trampoline(fn: fn(Int) -> Int, arg: Int) -> Int {
     %res = call i64 %fn(i64 %arg);
     term %res;
@@ -115,7 +115,7 @@ let handler_addr: Int = &__trampoline as Int;
 
 ### Extension C: `#section("name")` attribute on `inop!` declarations
 
-```brief
+```briv
 #section(".init_array")
 inop! __constructor() -> Void {
     call void @__rt_init();
@@ -160,7 +160,7 @@ This means:
 | Item | Previously "not replaced" | Now expressible via |
 |------|--------------------------|---------------------|
 | **Thread creation** | Needed C trampoline | `clone` syscall via `asm target { }`, stack via `mmap` syscall, thread entry via `fn` pointer — all in an `inop!` body |
-| **Dynamic linking** | Needed `dlopen`/`dlsym` from C | `openat` + `mmap` syscalls + pure Brief ELF parser on `Ptr<Byte>`; `dlsym` is a symbol table walk |
+| **Dynamic linking** | Needed `dlopen`/`dlsym` from C | `openat` + `mmap` syscalls + pure Briv ELF parser on `Ptr<Byte>`; `dlsym` is a symbol table walk |
 | **Signal handlers** | C function with specific ABI | `sigaction` syscall via `asm target { }`, handler is an `inop!` with `#section` if needed, passed as `fn` pointer |
 | **Arch startup** | C `__attribute__((constructor))` | `#section(".init_array") inop! __ctor() { ... }` |
 | **TLS setup** | Inline asm in C | `asm target { [arch("x86_64")]: "wrfsbase %0" : ... }` in an `inop!` body |
@@ -169,7 +169,7 @@ The "not replaced" list in Phase 6 is removed — everything is expressible.
 
 ---
 
-## Phase 1: `Ptr<T>` as a first-class Brief type
+## Phase 1: `Ptr<T>` as a first-class Briv type
 
 ### Type system
 
@@ -200,7 +200,7 @@ All arithmetic operations preserve `T`:
 - `ptr :> as_int` extracts the underlying address in contract expressions
 - The proof engine reasons about pointer bounds via existing integer reasoning:
 
-```brief
+```briv
 defn read_device(reg: Ptr<Byte>) -> Byte
     [reg :> as_int >= UART0_BASE]
     [reg :> as_int <  UART0_END]
@@ -226,7 +226,7 @@ defn read_device(reg: Ptr<Byte>) -> Byte
 
 ### Signatures
 
-```brief
+```briv
 volatile_load#<T>(addr: Ptr<T>) -> T;
 volatile_store#<T>(addr: Ptr<T>, val: T);
 ```
@@ -264,7 +264,7 @@ auto-generated `volatile_load#`/`volatile_store#` accessor.
 
 - Contracts prove pointer validity at compile time
 - Without a proven contract, the compiler emits a **compile error**
-  (not a runtime check — Brief is not a "blame the programmer" language
+  (not a runtime check — Briv is not a "blame the programmer" language
   for MMIO)
 
 ---
@@ -277,7 +277,7 @@ within a single `inop!` body.
 
 ### Universal syscall (one `inop!` for all architectures)
 
-```brief
+```briv
 // lib/std/syscall.bv
 inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int
     [nr > 0][nr < 512]
@@ -314,7 +314,7 @@ inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) ->
 
 ### Syntax (extends existing `#!` pragma system)
 
-```brief
+```briv
 // Guard a single definition
 #!cfg(target_os == "linux")
 defn __read_key() -> Int { syscall#(SYS_read, 0, buf, 1) };
@@ -354,8 +354,8 @@ Compound: `target_os == "freestanding" && target_arch == "thumbv7em"`
 ### Compiler CLI
 
 ```bash
-brief compile --board stm32f407 --os freestanding my_program.bv
-brief compile --target x86_64-unknown-linux-gnu my_program.bv  # auto-detects target_os=linux, target_arch=x86_64
+briv compile --board stm32f407 --os freestanding my_program.bv
+briv compile --target x86_64-unknown-linux-gnu my_program.bv  # auto-detects target_os=linux, target_arch=x86_64
 ```
 
 ---
@@ -407,9 +407,9 @@ entry PeripheralEntry {
 };
 ```
 
-### Import in Brief code
+### Import in Briv code
 
-```brief
+```briv
 // import "target" is a compiler directive that reads the board DBL
 // and populates typed constants for each peripheral
 import "target";
@@ -470,17 +470,17 @@ defn read_char() -> Byte
 ### What remains as `frgn` after all phases
 
 With the language extensions (A–D), nothing is fundamentally inexpressible in
-pure Brief. The following remain as `frgn` only for pragmatic reasons:
+pure Briv. The following remain as `frgn` only for pragmatic reasons:
 
 - **GPU intrinsics** (`get_global_id#` etc.) — hardware-specific, no C involved
 - **Math intrinsics** (`sqrt#`, `sin#`, etc.) — LLVM native, zero C needed
-- **Collection helpers** (`sort#`, `reverse#`, `trim_left#`) — pure Brief now,
+- **Collection helpers** (`sort#`, `reverse#`, `trim_left#`) — pure Briv now,
   already being migrated; no C dependency
 
 Thread creation, dynamic linking, signal handling, and arch startup are all
 expressible via syscalls + BILD + function pointers. See Extensions A–D above.
 
-### Impact on `brief_rt.c`
+### Impact on `briv_rt.c`
 
 - Shrinks from ~1744 lines to ~200
 - Remaining: thread pool (`pthread_create`), arch startup (`__rt_init`),
@@ -510,7 +510,7 @@ Each intrinsic migration:
 1. Add `inop!` BILD version in the appropriate `lib/std/<arch>/<os>/` directory
 2. Guard with `#!cfg` alongside the old C-calling version
 3. When the C-free version is stable, remove the C-calling version
-4. The C runtime function becomes dead code — removed from `brief_rt.c`
+4. The C runtime function becomes dead code — removed from `briv_rt.c`
 
 ---
 
@@ -541,13 +541,13 @@ Every new syntax construct MUST ship with:
 | `docs/architecture/features/fn-ptr.md` | Function pointer type, `&f` syntax |
 | `docs/architecture/features/target-import.md` | DBL-based board import |
 
-### Learn Brief (`learn-brief/`)
+### Learn Briv (`learn-briv/`)
 
 Add or update lessons covering:
-- Pointers and MMIO (`learn-brief/07-pointers-and-mmio.md`)
-- Platform-aware code with `#!cfg` (`learn-brief/08-platform-code.md`)
-- BILD and inline assembly (`learn-brief/09-bild-and-asm.md`)
-- Targets and device trees (`learn-brief/10-targets-and-boards.md`)
+- Pointers and MMIO (`learn-briv/07-pointers-and-mmio.md`)
+- Platform-aware code with `#!cfg` (`learn-briv/08-platform-code.md`)
+- BILD and inline assembly (`learn-briv/09-bild-and-asm.md`)
+- Targets and device trees (`learn-briv/10-targets-and-boards.md`)
 
 All documentation changes must land in the **same commit** as the structural
 change they describe.
@@ -558,7 +558,7 @@ change they describe.
 - `cargo build` — no warnings
 - Praetor on new/changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6)
 - Update architecture docs if API contracts changed
-- Update `learn-brief/` for any user-facing syntax change
+- Update `learn-briv/` for any user-facing syntax change
 - Create or update example `.bv` file for every new construct
 - Kani harnesses for all safety-critical `Ptr<T>` operations
 - `_ => return None;` fallthrough unchanged in all optimization passes

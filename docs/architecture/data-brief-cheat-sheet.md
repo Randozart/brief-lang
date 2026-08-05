@@ -1,4 +1,4 @@
-# Data Brief — Syntax Cheat Sheet
+# Data Briv — Syntax Cheat Sheet
 
 **One-page reference for `.dbv` and `.dbvl` formats.**
 

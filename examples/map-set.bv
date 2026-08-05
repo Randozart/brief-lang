@@ -25,10 +25,10 @@ txn remove_timeout [config .#Size > 0][config .#Size == @config .#Size - 1] {
 };
 
 // SetLiteral creates a HashSet
-let tags: HashSet<String> = {"brief", "language", "compiler"};
+let tags: HashSet<String> = {"briv", "language", "compiler"};
 
 // Check membership
-let has_brief: Bool = tags :> Contains("brief");
+let has_briv: Bool = tags :> Contains("briv");
 
 // Add via <-
 txn add_tag [true][tags .#Size == @tags .#Size + 1] {

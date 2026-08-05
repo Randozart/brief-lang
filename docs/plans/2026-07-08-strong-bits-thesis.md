@@ -187,7 +187,7 @@ pub struct StructField {
 
 Per design decision, endianness is a per-value annotation using `<~`:
 
-```brief
+```briv
 // In type definition: default endianness for the type
 type NetworkPacket : Bits<1024> {
     endian <~ "big";
@@ -227,7 +227,7 @@ Metadata projections are constant-folded at compile time — they produce `Expr:
 
 The `bootstrap.bv` file gains operator annotations for each numeric type:
 
-```brief
+```briv
 type Int : Bits {
     bytes <~ 8;
     alignment <~ 8;
@@ -520,7 +520,7 @@ pub fn llvm_type_for_width(&self, base_name: &str, width: u64) -> Option<Cow<'st
 
 Add operator annotations, `default_width`, and `commuting` to every numeric type:
 
-```brief
+```briv
 type Int : Bits {
     bytes <~ 8;
     alignment <~ 8;
@@ -612,7 +612,7 @@ fn normalize_type(ty: &Type, universe: &TypeUniverse) -> Type {
 
 ### 7.2 String Literal → Struct Literal Desugaring
 
-```brief
+```briv
 // Before normalize_types:
 let s: String = "hello";
 
@@ -873,7 +873,7 @@ fn fold_projection(expr: &Expr, universe: &TypeUniverse) -> Option<Expr> {
 
 ### 10.2 Endianness Annotation
 
-```brief
+```briv
 // Per-value syntax:
 let x: Bits<32> <~ (endian: big);
 
@@ -957,7 +957,7 @@ This is the SAME LLVM that `fallback_llvm_type` + match on `Type::String` produc
 
 ### 11.3 Data Removal
 
-```brief
+```briv
 // In bootstrap.bv:
 type Data = Ptr<Bits<8>>;    // Simple alias — no struct layout needed
 ```
@@ -1001,7 +1001,7 @@ bash benchmarks/build_and_bench.sh --optimizer  # optimizer benchmarks
 
 ### 12.4 String Behavior Tests
 
-```brief
+```briv
 // test_string_len.bv
 import# "std/io.bv";
 defn main() -> Int {

@@ -6,10 +6,10 @@
 
 ## Goal
 
-Reduce the C surface (`lib/runtime/brief_rt.c`, 710 lines) so a freestanding
+Reduce the C surface (`lib/runtime/briv_rt.c`, 710 lines) so a freestanding
 `.ebv` build needs no libc. Classify every function as *syscall shim* (stays C,
-the OS boundary) or *logic* (movable to pure Brief `.ebv`). The `.bv` variants
-keep the OS/libc calls; the `.ebv` variants hold the pure-Brief logic; the
+the OS boundary) or *logic* (movable to pure Briv `.ebv`). The `.bv` variants
+keep the OS/libc calls; the `.ebv` variants hold the pure-Briv logic; the
 import resolver prefers `.bv` on OS targets and `.ebv` on freestanding.
 
 ## Classification (2026-08-01 audit)
@@ -18,66 +18,66 @@ import resolver prefers `.bv` on OS targets and `.ebv` on freestanding.
 
 | Function | OS surface | Notes |
 |---|---|---|
-| `brief_syscall` | raw `syscall(2)` | the universal shim; no libc needed |
-| `brief_sysconf` | `sysconf(3)` | replaceable via `brief_syscall` |
-| `__getenv_*` (`__getenv_brief`/`__getenv_int`/`__get_environ`) | `getenv`/`environ` | |
+| `briv_syscall` | raw `syscall(2)` | the universal shim; no libc needed |
+| `briv_sysconf` | `sysconf(3)` | replaceable via `briv_syscall` |
+| `__getenv_*` (`__getenv_briv`/`__getenv_int`/`__get_environ`) | `getenv`/`environ` | |
 | `__argv_*` (`__argv_count`/`__argv_get`/`__argv_has`/`__argv_value`/`__argv_command`) | `argv`/`main` | |
 | `__trg_timerfd_*`, `__trg_signalfd_*` | `timerfd`/`signalfd` (Linux) | trigger sources |
 | `ShellCmd` | `popen`/`system` | |
 | `__read_file__`/`__write_file__` | `open`/`read`/`write` | via syscall |
-| `tty_*`/`brief_ttyname`/`__tty_raw_mode__`/`__tty_size__`/`__tty_read_key__` | `tcgetattr`/`tcsetattr`/`ioctl`/`ttyname` | |
+| `tty_*`/`briv_ttyname`/`__tty_raw_mode__`/`__tty_size__`/`__tty_read_key__` | `tcgetattr`/`tcsetattr`/`ioctl`/`ttyname` | |
 | `__readln__` | `read`/stdin | |
 | `__rt_init`/`__rt_wait`/`__rt_poll`/`__wait_for_trigger__` | `poll`/`epoll` | reactor loop |
 | `__watchdog_fail` | `fprintf(stderr)` | |
 | `__exit` | `_exit` | |
-| `__brief_now` | `clock_gettime` | watchdog deadlines |
-| `__brief_free`/`__brief_free_count` | `free` | the counting free |
+| `__briv_now` | `clock_gettime` | watchdog deadlines |
+| `__briv_free`/`__briv_free_count` | `free` | the counting free |
 | `worker_thread`/`__thread_pool_init__`/`__barrier_*`/`__set_async_state__` | pthreads | async/sync groups |
 
-### Logic — movable to pure Brief `.ebv`
+### Logic — movable to pure Briv `.ebv`
 
 | Function | Logic | Move target |
 |---|---|---|
-| `brief_str_to_c` / `brief_cstr_to_brief` | the `[len][bytes]` ↔ C string marshalling | `.ebv` string module |
-| `brief_free_brief_str` | string buffer free | `.ebv` |
-| `brief_bits_to_str` | bits → string | `.ebv` |
-| `brief_char_len` | char length | `.ebv` |
-| `brief_str_eq` | content equality | `.ebv` |
-| `brief_str_band`/`bor`/`bxor`/`bnot` + `brief_str_bitop` | string bitwise | `.ebv` |
+| `briv_str_to_c` / `briv_cstr_to_briv` | the `[len][bytes]` ↔ C string marshalling | `.ebv` string module |
+| `briv_free_briv_str` | string buffer free | `.ebv` |
+| `briv_bits_to_str` | bits → string | `.ebv` |
+| `briv_char_len` | char length | `.ebv` |
+| `briv_str_eq` | content equality | `.ebv` |
+| `briv_str_band`/`bor`/`bxor`/`bnot` + `briv_str_bitop` | string bitwise | `.ebv` |
 | `__print_*` (`__print`/`__print_int`/`__print_bool`/`__print_float`/`__print_float64`/`__print_char`/`__print_str`/`__eprint_str`) | formatting | `.ebv` via a `WriteByte`/`WriteStr` syscall shim |
 | `__sort_list__`/`__reverse_list__` | sorting/reversal | `.ebv` collections |
 
 ### The split
 
-- **`.bv` (OS):** the `import "link/brief_rt.c"` shims + `std/ffi/*.bv` keep the
+- **`.bv` (OS):** the `import "link/briv_rt.c"` shims + `std/ffi/*.bv` keep the
   syscall boundary. The print family stays C here (fast path, `fputs`/`printf`).
-- **`.ebv` (freestanding):** the logic modules are reimplemented in pure Brief
+- **`.ebv` (freestanding):** the logic modules are reimplemented in pure Briv
   over a minimal shim: `syscall(num, args...)` (the single raw syscall),
   `_start`/`_exit`, and a `Write` syscall for output. The string marshalling,
   formatting, equality, and list ops move into `.ebv` files.
 
 ## The no-libc target sketch
 
-1. `_start` (assembly) calls `brief_main` with the stack-aligned `argc`/`argv`,
+1. `_start` (assembly) calls `briv_main` with the stack-aligned `argc`/`argv`,
    then `_exit` with the return code.
-2. `brief_syscall` is the ONLY C function (or inline assembly) — `syscall(2)`
+2. `briv_syscall` is the ONLY C function (or inline assembly) — `syscall(2)`
    numbers for `read`/`write`/`exit`/`brk`/`clock_gettime`.
-3. The `.ebv` stdlib: string layout + formatting + collections in pure Brief;
+3. The `.ebv` stdlib: string layout + formatting + collections in pure Briv;
    output via `write(1, buf, len)`.
 4. The allocator: a bump/`brk` allocator in `.ebv` (or C), with
-   `__brief_free` counting removed (no free on freestanding).
+   `__briv_free` counting removed (no free on freestanding).
 
 ## Next steps — blocking prerequisites (2026-08-01 audit)
 
 The `.ebv` string/formatting modules cannot be written and verified yet:
 
-1. **String construction from bytes** — pure-Brief int→string formatting needs a
+1. **String construction from bytes** — pure-Briv int→string formatting needs a
    `bytes → String` primitive (build a `[len][bytes]` buffer). Today the buffer
    is only READ via `StrBytes#` (String → List<Int>); the inverse does not exist
    (the C runtime does all formatting). A `CharStr#`/`StrFromBytes#` intrinsic
    (or a stdlib op) is the prerequisite.
-2. **A verified write-syscall shim** — `brief_syscall` exists (the raw
-   `syscall(2)`), but there is no Brief-level `write(fd, ptr, len)` wrapper that
+2. **A verified write-syscall shim** — `briv_syscall` exists (the raw
+   `syscall(2)`), but there is no Briv-level `write(fd, ptr, len)` wrapper that
    the `.ebv` print family can call. The `.bv` print path uses `fputs`/`printf`
    (libc); the `.ebv` path needs the raw-syscall write.
 3. **The no-libc build flow** — a freestanding target in `config/targets.toml` +

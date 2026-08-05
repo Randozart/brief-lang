@@ -1,24 +1,24 @@
-# Data Brief Implementation — New Syntax & Parser Rewrite
+# Data Briv Implementation — New Syntax & Parser Rewrite
 
 **Date:** 2026-07-26
 **Status:** Complete (merged 2026-07-26)
-**Worktree:** `../brief-compiler-data-brief` (branch: `feat/data-brief`)
+**Worktree:** `../briv-compiler-data-briv` (branch: `feat/data-briv`)
 
 ---
 
 ## 1. Scope
 
-Implement the new Data Brief syntax as specified in
-`docs/architecture/data-brief.md`. The changes span three parser layers,
+Implement the new Data Briv syntax as specified in
+`docs/architecture/data-briv.md`. The changes span three parser layers,
 one bridge layer, and one feature module, plus removal of `.dbvs` support.
 
 ### What Changes
 
 | Component | File | Change |
 |-----------|------|--------|
-| **Parser V1** (legacy) | `src/dbrief/parser.rs` | Rewrite: `;` separator, `>` directives, no quotes default |
-| **Parser V2** (modern) | `src/dbrief/v2.rs` | Rewrite: same changes, remove `.dbvs` schema support |
-| **Bridge** | `src/dbrief/bridge.rs` | Update AST conversion for new parser output |
+| **Parser V1** (legacy) | `src/dbriv/parser.rs` | Rewrite: `;` separator, `>` directives, no quotes default |
+| **Parser V2** (modern) | `src/dbriv/v2.rs` | Rewrite: same changes, remove `.dbvs` schema support |
+| **Bridge** | `src/dbriv/bridge.rs` | Update AST conversion for new parser output |
 | **GLUE dbvl reader** | `src/glue/dbvl_reader.rs` | Rewrite: `;` not `,`, `>` not `#` |
 | **GLUE dbvs validator** | `src/glue/dbvs_validator.rs` | **Delete** — replaced by `.dbv` schema import |
 | **Features dbvl** | `src/features/dbvl.rs` | Update for new line format |
@@ -36,8 +36,8 @@ one bridge layer, and one feature module, plus removal of `.dbvs` support.
 
 | Component | Reason |
 |-----------|--------|
-| `src/dbrief/ast.rs` | AST types need only minor field additions (props, `>` flag) |
-| `src/dbrief/mod.rs` | Module declaration stays; re-exports updated |
+| `src/dbriv/ast.rs` | AST types need only minor field additions (props, `>` flag) |
+| `src/dbriv/mod.rs` | Module declaration stays; re-exports updated |
 | `src/backend/llvm/bindings.dbvl` | Already uses the new-compatible line format |
 
 ---
@@ -102,7 +102,7 @@ rust; glue/rust/types.bv; rs; x86_64-unknown-linux-gnu
 
 ## 3. Implementation Order
 
-### Phase 1: Parser V2 (`src/dbrief/v2.rs`) — The Primary Parser
+### Phase 1: Parser V2 (`src/dbriv/v2.rs`) — The Primary Parser
 
 V2 is the modern parser used by both the import resolver and the bridge.
 All other consumers read through V2. Fixing V2 first cascades fixes everywhere.
@@ -124,11 +124,11 @@ All other consumers read through V2. Fixing V2 first cascades fixes everywhere.
 **Tests:**
 - Each syntax change must have a unit test in v2.rs
 - Fixtures in a `test_data/` subdirectory
-- Run `cargo test --lib -- dbrief::v2` after every sub-phase
+- Run `cargo test --lib -- dbriv::v2` after every sub-phase
 
-### Phase 2: Bridge (`src/dbrief/bridge.rs`)
+### Phase 2: Bridge (`src/dbriv/bridge.rs`)
 
-The bridge converts `DbriefDocument` (V2 output) to Brief AST `TopLevel` items.
+The bridge converts `DbrivDocument` (V2 output) to Briv AST `TopLevel` items.
 
 **Changes:**
 1. Update `import` conversion — emit `schema Name from "path"` instead of old import
@@ -137,12 +137,12 @@ The bridge converts `DbriefDocument` (V2 output) to Brief AST `TopLevel` items.
 4. Remove any `.dbvs` -> `.dbv` path rewriting
 
 **Tests:**
-- Round-trip tests: `.dbv` → parse → bridge → Brief AST
+- Round-trip tests: `.dbv` → parse → bridge → Briv AST
 - Validate that schema key annotations survive the bridge
 
 ### Phase 3: GLUE dbvl Reader (`src/glue/dbvl_reader.rs`)
 
-The GLUE reader is separate from `dbrief::v2` — it has its own comma-splitting
+The GLUE reader is separate from `dbriv::v2` — it has its own comma-splitting
 logic that must be updated.
 
 **Changes:**
@@ -164,7 +164,7 @@ logic that must be updated.
 | `src/glue/dbvs_validator.rs` | Delete file, remove `pub mod` from `glue/mod.rs` |
 | `src/import_resolver.rs` | Remove `.dbvs` from extension check and import dispatch |
 | `src/lsp.rs` | Remove `.dbvs` from file type switch |
-| `src/dbrief/mod.rs` | Remove `pub mod dbvs_*` re-exports |
+| `src/dbriv/mod.rs` | Remove `pub mod dbvs_*` re-exports |
 
 ### Phase 5: Update Consumers (7 files)
 
@@ -185,8 +185,8 @@ They need minimal changes — mostly updating output formatting.
 
 | File | Change |
 |------|--------|
-| `syntax-highlighter/syntaxes/brief.tmLanguage.json` | Remove `.dbvs` from file types |
-| `syntax-highlighter/syntaxes/dbrief.tmLanguage.json` | Update grammar for `>`, `;`, bare tokens |
+| `syntax-highlighter/syntaxes/briv.tmLanguage.json` | Remove `.dbvs` from file types |
+| `syntax-highlighter/syntaxes/dbriv.tmLanguage.json` | Update grammar for `>`, `;`, bare tokens |
 | `syntax-highlighter/package.json` | Remove `.dbvs` extension entry |
 
 ---
@@ -290,7 +290,7 @@ New error cases specific to this rewrite:
 | File | Reason |
 |------|--------|
 | `src/glue/dbvs_validator.rs` | `.dbvs` is removed; validation moves to V2 parser |
-| `examples/data-brief/schema.dbvs` | Already deleted in main branch |
+| `examples/data-briv/schema.dbvs` | Already deleted in main branch |
 | `docs/DATABRIEF.md` | Archived (forwarding note present) |
 | `docs/DATABRIEF_GUIDE.md` | Archived (forwarding note present) |
 
@@ -301,9 +301,9 @@ New error cases specific to this rewrite:
 | File | New Format |
 |------|------------|
 | `src/backend/llvm/bindings.dbvl` | `;` sep, `>` directives |
-| `examples/data-brief/adapters.dbvl` | Already updated |
-| `examples/data-brief/config.dbv` | Already updated |
-| `examples/data-brief/hardware.dbv` | Already updated |
+| `examples/data-briv/adapters.dbvl` | Already updated |
+| `examples/data-briv/config.dbv` | Already updated |
+| `examples/data-briv/hardware.dbv` | Already updated |
 | `glue/rust/types.bv` (comments only) | No change needed |
 | `lib/std/ffi/metro_bridge.bv` (comments only) | No change needed |
 
@@ -335,17 +335,17 @@ The speedup comes from:
 
 | Module | Test | What it checks |
 |--------|------|----------------|
-| `dbrief::v2` | `test_bare_token_default` | No quotes → parse succeeds |
-| `dbrief::v2` | `test_semicolon_separator` | `;` works everywhere `,` used to |
-| `dbrief::v2` | `test_gt_directive` | `>schema` parsed as directive |
-| `dbrief::v2` | `test_gt_positional` | `>` inside block = positional entry |
-| `dbrief::v2` | `test_key_field_annotation` | `schema X (key) { ... }` |
-| `dbrief::v2` | `test_trailing_semicolon_optional` | Last field without `;` accepted |
-| `dbrief::v2` | `test_quoted_flag` | `--quoted` enables `"..."` |
-| `dbrief::v2` | `test_nested_blocks` | `{ }` with and without keys |
-| `dbrief::v2` | `test_map_syntax` | `{ k: v; k2: v2; }` |
-| `dbrief::v2` | `test_dbvs_rejected` | `.dbvs` reference → clear error |
-| `dbrief::bridge` | `test_roundtrip` | `.dbv` → parse → bridge → validate AST |
+| `dbriv::v2` | `test_bare_token_default` | No quotes → parse succeeds |
+| `dbriv::v2` | `test_semicolon_separator` | `;` works everywhere `,` used to |
+| `dbriv::v2` | `test_gt_directive` | `>schema` parsed as directive |
+| `dbriv::v2` | `test_gt_positional` | `>` inside block = positional entry |
+| `dbriv::v2` | `test_key_field_annotation` | `schema X (key) { ... }` |
+| `dbriv::v2` | `test_trailing_semicolon_optional` | Last field without `;` accepted |
+| `dbriv::v2` | `test_quoted_flag` | `--quoted` enables `"..."` |
+| `dbriv::v2` | `test_nested_blocks` | `{ }` with and without keys |
+| `dbriv::v2` | `test_map_syntax` | `{ k: v; k2: v2; }` |
+| `dbriv::v2` | `test_dbvs_rejected` | `.dbvs` reference → clear error |
+| `dbriv::bridge` | `test_roundtrip` | `.dbv` → parse → bridge → validate AST |
 | `glue::dbvl_reader` | `test_semicolon_split` | `;` splitting with maps |
 | `glue::dbvl_reader` | `test_gt_directive` | `>schema` in GLUE context |
 
@@ -372,12 +372,12 @@ weakened or removed** — only updated for new syntax.
 
 ## 10. Branch and Commit Strategy
 
-All work on branch `feat/data-brief` in worktree `../brief-compiler-data-brief`.
+All work on branch `feat/data-briv` in worktree `../briv-compiler-data-briv`.
 
 ### Commit Order
 
-1. **Parser V2**: `src/dbrief/v2.rs` — new syntax, remove old
-2. **Bridge**: `src/dbrief/bridge.rs` — update AST conversion
+1. **Parser V2**: `src/dbriv/v2.rs` — new syntax, remove old
+2. **Bridge**: `src/dbriv/bridge.rs` — update AST conversion
 3. **GLUE reader**: `src/glue/dbvl_reader.rs` — semicolons and `>`
 4. **Remove `.dbvs`**: Delete `dbvs_validator.rs`, update mod.rs, import_resolver, LSP
 5. **Update consumers**: hardware, analysis, handoff, wrapper, archive, ffi, features
@@ -390,12 +390,12 @@ Each commit must pass `cargo test --lib` and `cargo build`.
 
 ## 11. Post-Merge Cleanup
 
-After `feat/data-brief` merges to `main`:
+After `feat/data-briv` merges to `main`:
 
 1. Remove the old `docs/DATABRIEF.md` and `docs/DATABRIEF_GUIDE.md` files
    (archival period: one release cycle)
 2. Update `spec/SPEC.md` section 8 to reference new spec
-3. Remove worktree `../brief-compiler-data-brief`
+3. Remove worktree `../briv-compiler-data-briv`
 4. Update CI config if it references `.dbvs`
 
 ---
@@ -407,18 +407,18 @@ After `feat/data-brief` merges to `main`:
 Every file modified must add provenance comments at each changed code site:
 
 ```
-// 2026-07-26: Data Brief syntax migration
+// 2026-07-26: Data Briv syntax migration
 // ; replaces , as universal terminator. > replaces # and @.
 // Bare tokens are the default; --quoted flag enables ".
-// See docs/architecture/data-brief.md for full spec.
+// See docs/architecture/data-briv.md for full spec.
 ```
 
 ### Doc Comments to Update
 
 | Module | Update |
 |--------|--------|
-| `dbrief::v2` | Module-level doc: "New syntax parser for .dbv and .dbvl" |
-| `dbrief::bridge` | Module-level doc: "Converts DbriefDocument to Brief AST" |
+| `dbriv::v2` | Module-level doc: "New syntax parser for .dbv and .dbvl" |
+| `dbriv::bridge` | Module-level doc: "Converts DbrivDocument to Briv AST" |
 | `glue::dbvl_reader` | Module-level doc: "Line-based .dbvl reader using ; sep" |
 
 No doc comments should reference the old comma/quote syntax.
@@ -430,7 +430,7 @@ No doc comments should reference the old comma/quote syntax.
 | Risk | Probability | Mitigation |
 |------|-------------|------------|
 | Existing `.dbvl` files in `bindings.dbvl` break | Low | Its format is already compatible with `;`-sep |
-| `.dbvs` removal breaks third-party Brief projects | Medium | Detection in V2 parser produces clear error: "'.dbvs' is removed. Use .dbv." |
+| `.dbvs` removal breaks third-party Briv projects | Medium | Detection in V2 parser produces clear error: "'.dbvs' is removed. Use .dbv." |
 | `--quoted` flag overlooked by users migrating old data | Medium | Error message for `;` inside field mentions `--quoted` |
 | Performance regression from unbounded bare tokens | Low | Bare token lexing is simpler than quote-tracking; should be faster |
 | GLUE pipeline breaks from `.dbvl` format change | Low | Test fixtures in `glue::tests` cover the reader |

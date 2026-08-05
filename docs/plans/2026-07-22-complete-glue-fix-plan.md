@@ -32,8 +32,8 @@ define i64 @func(i64 %arg0) {
 
 ### Target state
 
-After fix, `brief export pp-types.bv rust --out /tmp/x` produces a `.ll` with
-real function bodies, identical to what `brief build --llvm` produces.
+After fix, `briv export pp-types.bv rust --out /tmp/x` produces a `.ll` with
+real function bodies, identical to what `briv build --llvm` produces.
 
 ### Implementation
 
@@ -62,7 +62,7 @@ but is no longer called by the export CLI. Can be kept or removed (kept for now)
 ### Verification
 
 ```bash
-brief export pp-types.bv rust --out /tmp/test
+briv export pp-types.bv rust --out /tmp/test
 grep 'ret i64 0' /tmp/test/pp-types-bridge/bridge.ll  # should NOT match
 grep 'call.*@pp_type_bits' /tmp/test/pp-types-bridge/bridge.ll  # should match
 ```
@@ -75,7 +75,7 @@ grep 'call.*@pp_type_bits' /tmp/test/pp-types-bridge/bridge.ll  # should match
 
 The Rust `ffi_template` declares functions without the `%state` parameter:
 ```rust
-fn brief_pp_binop(kind: *mut u8) -> *mut u8;
+fn briv_pp_binop(kind: *mut u8) -> *mut u8;
 ```
 
 But the actual LLVM function takes `ptr %state` as the first parameter.
@@ -86,13 +86,13 @@ The `fn_template` generates safe wrappers that don't pass state to the FFI call.
 
 Generated `src/ffi.rs`:
 ```rust
-fn brief_pp_binop(state: *mut c_void, kind: *mut u8) -> *mut u8;
+fn briv_pp_binop(state: *mut c_void, kind: *mut u8) -> *mut u8;
 ```
 
 Generated `src/lib.rs`:
 ```rust
-pub fn brief_pp_binop(kind: *mut u8) -> *mut u8 {
-    unsafe { ffi::brief_pp_binop(STATE, kind) }
+pub fn briv_pp_binop(kind: *mut u8) -> *mut u8 {
+    unsafe { ffi::briv_pp_binop(STATE, kind) }
 }
 ```
 
@@ -142,7 +142,7 @@ For C ABI (Python/Node): `s_param` = `"_STATE, "` with space after comma
 ### Verification
 
 ```bash
-brief export pp-types.bv rust --out /tmp/test
+briv export pp-types.bv rust --out /tmp/test
 cat /tmp/test/pp-types-bridge/src/ffi.rs  # should have state: *mut c_void
 cat /tmp/test/pp-types-bridge/src/lib.rs  # should have STATE in calls
 cargo build --manifest-path /tmp/test/pp-types-bridge/Cargo.toml  # should compile
@@ -174,7 +174,7 @@ When a frgn is resolved as `ResolvedFrgn::Bridge`:
 2. `compute_protocol_path` uses `find_cast_path` via TypeUniverse
 3. `emit_protocol_chain` emits actual LLVM IR for each transform kind
 
-For example, converting `{i64, i64}` (Brief SSO String) to `*mut u8` (Rust `&str`):
+For example, converting `{i64, i64}` (Briv SSO String) to `*mut u8` (Rust `&str`):
 - `MeldShuffle`: `extractvalue {i64, i64} %val, 0` (extract data pointer)
 - `Bitcast`: `bitcast i64 %ptr to ptr` (inttoptr)
 - `ProtocolTransform(#String<UTF8>)`: Call the `CastTo(#String<UTF8>)` func if registered
@@ -203,7 +203,7 @@ let return_path = fb.success_output.first()
     .transpose()?;
 ```
 
-Where `map_to_foreign_type` maps a Brief type name (like `"String"`) to a
+Where `map_to_foreign_type` maps a Briv type name (like `"String"`) to a
 foreign type name (like `"*mut u8"`) using `target.c_type_map`.
 
 **Sub-issue 2.2 — Fix `compute_protocol_path`:**
@@ -213,15 +213,15 @@ At `frgn_dispatch.rs:165-185`, replace the Bitcast fallback with a call to
 
 ```rust
 pub fn compute_protocol_path(
-    brief_type: &crate::ast::Type,
+    briv_type: &crate::ast::Type,
     foreign_type: &str,
 ) -> Result<Vec<ProtocolStep>, String> {
-    let brief_str = format_type(brief_type);
-    if brief_str == foreign_type {
-        return Ok(vec![ProtocolStep::identity(brief_type.clone())]);
+    let briv_str = format_type(briv_type);
+    if briv_str == foreign_type {
+        return Ok(vec![ProtocolStep::identity(briv_type.clone())]);
     }
     if let Some(universe) = ... {  // TypeUniverse from context
-        if let Some(cast_path) = find_cast_path(universe, &brief_str, foreign_type) {
+        if let Some(cast_path) = find_cast_path(universe, &briv_str, foreign_type) {
             return Ok(cast_path.into_iter().map(|type_name| {
                 ProtocolStep {
                     source: parse_type(&type_name),

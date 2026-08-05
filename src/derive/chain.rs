@@ -17,7 +17,7 @@ pub enum Body {
     Synthesized(Expr),
 }
 
-/// 2026-07-29: Evaluate a Brief expression against test inputs.
+/// 2026-07-29: Evaluate a Briv expression against test inputs.
 /// `param_names` is the list of parameter names used in the expression.
 /// Inputs are bound to these names by position.
 fn evaluate_ref_expr(expr: &Expr, input: &[Value], param_names: &[String]) -> Result<Value, String> {
@@ -74,7 +74,7 @@ fn evaluate_body(
             }
 
             let pid = std::process::id();
-            let tmp = std::env::temp_dir().join(format!("brief_asm_{}", pid));
+            let tmp = std::env::temp_dir().join(format!("briv_asm_{}", pid));
             std::fs::create_dir_all(&tmp).map_err(|e| format!("tmp: {}", e))?;
             let asm_file = tmp.join("f.s");
             let c_file = tmp.join("f.c");

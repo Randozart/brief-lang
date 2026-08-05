@@ -1,21 +1,21 @@
-// Bridge: converts DBrief v2 parsed types into Brief AST types (TopLevel, Type, Expr).
+// Bridge: converts DBriv v2 parsed types into Briv AST types (TopLevel, Type, Expr).
 
 use crate::ast;
-use crate::dbrief::v2::*;
+use crate::dbriv::v2::*;
 use std::collections::HashMap;
 
-/// Convert a parsed DbriefDocument into a Vec of Brief TopLevel items.
+/// Convert a parsed DbrivDocument into a Vec of Briv TopLevel items.
 /// `name` is the import alias (e.g. "data" from `import data from "file.dbv"`).
 /// `use_lazy` — if true, creates Expr::DbvlTable for schema-typed data with key_offsets.
-pub fn document_to_program(doc: &DbriefDocument, name: &str) -> Vec<ast::TopLevel> {
+pub fn document_to_program(doc: &DbrivDocument, name: &str) -> Vec<ast::TopLevel> {
     document_to_program_flags(doc, name, false)
 }
 
 /// Like `document_to_program` but with option for lazy DBVL loading.
-pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: bool) -> Vec<ast::TopLevel> {
+pub fn document_to_program_flags(doc: &DbrivDocument, name: &str, use_lazy: bool) -> Vec<ast::TopLevel> {
     let mut items: Vec<ast::TopLevel> = Vec::new();
 
-    // 0. Convert imports to Brief import statements
+    // 0. Convert imports to Briv import statements
     // 2026-07-26: New syntax — imports are stored as paths in doc.imports.
     for import_path in &doc.imports {
         items.push(ast::TopLevel::Import(ast::Import {
@@ -118,7 +118,7 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
 ///   const uart1_sr: Int = 0x40011001;
 ///   const uart1_cr1: Int = 0x4001100C;
 ///   const uart1_cr2: Int = 0x40011010;
-fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
+fn flatten_peripheral_constants(doc: &DbrivDocument) -> Vec<ast::TopLevel> {
     let mut result = Vec::new();
 
     for group in &doc.data_groups {
@@ -213,7 +213,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
     let mut fields: Vec<ast::StructField> = Vec::new();
 
     // Emit the key field annotation as a synthetic first field if present.
-    // The ~ prefix is reserved for compiler-internal metadata in Brief.
+    // The ~ prefix is reserved for compiler-internal metadata in Briv.
     // 2026-07-26: Key field annotation (name) in schema Person (name) { ... }
     if let Some(ref kf) = schema.key_field {
         fields.push(ast::StructField {
@@ -225,7 +225,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
     }
 
     for f in &schema.fields {
-        let ty = field_type_to_brief(&f.ty);
+        let ty = field_type_to_briv(&f.ty);
         fields.push(ast::StructField {
             name: f.name.clone(),
             ty,
@@ -248,7 +248,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
 }
 
 /// Convert a FieldType → ast::Type
-fn field_type_to_brief(ft: &FieldType) -> ast::Type {
+fn field_type_to_briv(ft: &FieldType) -> ast::Type {
     match ft {
         FieldType::String => ast::Type::string(),
         FieldType::Int => ast::Type::int(),
@@ -256,14 +256,14 @@ fn field_type_to_brief(ft: &FieldType) -> ast::Type {
         FieldType::Bool => ast::Type::bool_(),
         FieldType::UInt(_) => ast::Type::int(),
         FieldType::Vec(inner) => {
-            ast::Type::Applied("List".to_string(), vec![field_type_to_brief(inner)])
+            ast::Type::Applied("List".to_string(), vec![field_type_to_briv(inner)])
         }
         FieldType::Map(k, v) => ast::Type::Applied(
             "Map".to_string(),
-            vec![field_type_to_brief(k), field_type_to_brief(v)],
+            vec![field_type_to_briv(k), field_type_to_briv(v)],
         ),
         FieldType::Option(inner) => {
-            ast::Type::Applied("Option".to_string(), vec![field_type_to_brief(inner)])
+            ast::Type::Applied("Option".to_string(), vec![field_type_to_briv(inner)])
         }
         FieldType::Named(n) => ast::Type::Custom(n.clone()),
     }
@@ -372,9 +372,9 @@ fn data_value_to_expr(dv: &DataValue) -> ast::Expr {    match dv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dbrief::v2::*;
+    use crate::dbriv::v2::*;
 
-    fn parse(input: &str) -> DbriefDocument {
+    fn parse(input: &str) -> DbrivDocument {
         parse_document(input).unwrap()
     }
 
@@ -535,7 +535,7 @@ as Item {
             (FieldType::Named("IoResult".into()), "Custom(\"IoResult\")"),
         ];
         for (ft, _desc) in cases {
-            let ty = field_type_to_brief(&ft);
+            let ty = field_type_to_briv(&ft);
             let ty_str = format!("{:?}", ty);
             assert!(!ty_str.is_empty());
         }

@@ -1,4 +1,4 @@
-// 2026-07-22: Rust type declarations for Brief's type universe.
+// 2026-07-22: Rust type declarations for Briv's type universe.
 // Rust uses LLVM LTO for interop — no C ABI boundary for scalars.
 // Types are defined for documentation and meld compatibility.
 

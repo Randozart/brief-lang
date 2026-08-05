@@ -13,7 +13,7 @@
 
 With multi-output functions, callers must handle all declared types. But sometimes you only need one type from a union:
 
-```brief
+```briv
 defn api_call() -> JSON | Error {
   term json;  // or Error
 };
@@ -29,7 +29,7 @@ let error: Error = api_call();  // Exhaustive
 
 Use **sig casting** to project specific output types:
 
-```brief
+```briv
 sig json_only: void -> JSON;
 
 // Now we can guarantee JSON output and reject the Error path
@@ -64,7 +64,7 @@ sig status: Int -> Bool | String;        # Project union (if defn allows)
 
 **Type Projection:** Extract specific type from union
 
-```brief
+```briv
 defn complex() -> Bool | String, Int {
   [ok] { term true; term 42; };
   [fail] { term "error"; term 0; };
@@ -82,7 +82,7 @@ sig status_tuple: void -> Bool, Int;     // Takes both slots 0 and 1
 
 ### 2.3 Sig Casting at Call Site
 
-```brief
+```briv
 let data = json_only();  // Implicitly casts to sig -> JSON
 
 // Only one type bound:
@@ -282,7 +282,7 @@ fn test_projection_multiple_paths() {
 
 Create `examples/sig_casting.bv`:
 
-```brief
+```briv
 defn fetch_data(url: String) -> JSON | Error {
   [valid] term parse_json(url);
   [invalid] term Error("Bad URL");

@@ -6,7 +6,7 @@
 
 ## Problem
 
-Brief's runtime benchmarks are 1.08×–4.36× slower than C. All share the same root
+Briv's runtime benchmarks are 1.08×–4.36× slower than C. All share the same root
 cause: the `%State` struct forces GEP + load/store for every field access, while
 Clang uses phi nodes with zero memory overhead.
 
@@ -17,7 +17,7 @@ Compiled C reference for each benchmark with:
 clang -O3 -ffast-math -march=native -S -emit-llvm
 ```
 
-Compared against Brief's IR compiled with:
+Compared against Briv's IR compiled with:
 ```
 opt -O3 -ffast-math -mtriple=x86_64-pc-linux-gnu
 llc -O3 --mcpu=native
@@ -27,16 +27,16 @@ llc -O3 --mcpu=native
 
 ### Instruction Counts in Hot Loop
 
-| Operation | Clang (phi) | Brief (struct) | Ratio |
+| Operation | Clang (phi) | Briv (struct) | Ratio |
 |---|---|---|---|
-| **Load/store (kalman)** | 1 (stderr) | 132 + 29 | Brief 161× worse |
-| **Load/store (fannkuch)** | 1 (stderr) | 36 + 38 | Brief 74× worse |
-| **Load/store (nbody_sqrt)** | 1 (stderr) | 433 + 110 | Brief 543× worse |
-| **Load/store (float_math)** | 1 (stderr) | 40 + 17 | Brief 57× worse |
-| **Load/store (knucleotide)** | 1 (stderr) | 26 + 14 | Brief 40× worse |
-| **Load/store (nbody_newton)** | 1 (stderr) | 372 + 110 | Brief 482× worse |
-| **GEP** | 0 | 69–419 | Brief ∞ worse |
-| **Phi nodes** | 6–35 | 0 | Clang phi, Brief struct |
+| **Load/store (kalman)** | 1 (stderr) | 132 + 29 | Briv 161× worse |
+| **Load/store (fannkuch)** | 1 (stderr) | 36 + 38 | Briv 74× worse |
+| **Load/store (nbody_sqrt)** | 1 (stderr) | 433 + 110 | Briv 543× worse |
+| **Load/store (float_math)** | 1 (stderr) | 40 + 17 | Briv 57× worse |
+| **Load/store (knucleotide)** | 1 (stderr) | 26 + 14 | Briv 40× worse |
+| **Load/store (nbody_newton)** | 1 (stderr) | 372 + 110 | Briv 482× worse |
+| **GEP** | 0 | 69–419 | Briv ∞ worse |
+| **Phi nodes** | 6–35 | 0 | Clang phi, Briv struct |
 | **Arithmetic** | ~equal | ~equal | Same |
 
 ### Key Observation
@@ -45,7 +45,7 @@ The ONLY memory operation in Clang's hot loop is the `load @stderr` for `fprintf
 Everything else — state variables (x0, p00, count, etc.) — exists as **SSA phi
 nodes** at the loop back-edge. Zero GEP, zero load, zero store.
 
-Brief's `%State` struct forces:
+Briv's `%State` struct forces:
 1. `getelementptr %State, %State* %state, i32 0, i32 N` — address computation
 2. `load/store type, type* %gep` — memory access
 

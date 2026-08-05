@@ -2,8 +2,8 @@
 
 ## Status Summary
 
-Current: Brief wins 8, C wins 8 (of 18 benchmarks).
-Target: Brief wins 14+, C wins 2-3 (only fannkuch_redux fencepost and
+Current: Briv wins 8, C wins 8 (of 18 benchmarks).
+Target: Briv wins 14+, C wins 2-3 (only fannkuch_redux fencepost and
         irreducible gaps).
 
 ## Gap Analysis
@@ -20,7 +20,7 @@ Target: Brief wins 14+, C wins 2-3 (only fannkuch_redux fencepost and
 | nbody_newton | 1.45× | A005d memory loop (31 fields > 8 threshold). Counter loaded from %State at header every iteration. Stores to all fields in body. No per-field phis. | Counter phi in A005d | ~1.1× |
 | nbody_sqrt | 1.26× | Same as nbody_newton. | Same | ~1.1× |
 | nbody_sqrt_idio | 1.05× | Same + idiomatic structure slightly different. | Same | ~0.9× |
-| fannkuch_redux | 1.76× | Pre-existing fencepost bug (6 vs 10 lines). Codegen is correct for what it compiles. | Bug fix in Brief source | ~1.0× |
+| fannkuch_redux | 1.76× | Pre-existing fencepost bug (6 vs 10 lines). Codegen is correct for what it compiles. | Bug fix in Briv source | ~1.0× |
 | mandelbrot | 1.09× | Small gap, likely from loop structure differences. | Minor tuning | ~1.0× |
 | print_loop | 1.07× | Small gap, noise-dominated. | Minor tuning | ~1.0× |
 | queue_drain_sym | 1.04× | Small gap. | Minor tuning | ~1.0× |
@@ -116,7 +116,7 @@ This is the SINGLE BIGGEST change. It eliminates:
 
 ### Problem
 
-Brief's sequential mutation semantics create serial dependency chains
+Briv's sequential mutation semantics create serial dependency chains
 that prevent SIMD vectorization. Example:
 
 ```
@@ -206,7 +206,7 @@ Then for `&x1 = ...`:
 2. Compute using `%bfr147` instead of `phi_x0`
 
 So the backend intentionally uses the new x0 for subsequent computations.
-This is CORRECT Brief semantics — `&x0 = ...` mutates x0, subsequent uses
+This is CORRECT Briv semantics — `&x0 = ...` mutates x0, subsequent uses
 see the new value.
 
 The problem is that this creates a data dependency. The fix would be to
@@ -233,7 +233,7 @@ let nx2 = A20*x0 + A21*x1 + A22*x2;    // all old
 &x0 = nx0; &x1 = nx1; &x2 = nx2;
 ```
 
-But this changes semantics — the C reference does this, but Brief's semantics
+But this changes semantics — the C reference does this, but Briv's semantics
 say x1 should use new x0. If the user wrote this pattern intentionally to
 express Gauss-Seidel iteration, parallel-update would break it.
 
@@ -243,13 +243,13 @@ parallel semantics, they'd write `let nx0 = ...; let nx1 = ...; &x0 = nx0; &x1 =
 
 Instead, focus on making the sequential phi loop as fast as possible (which
 we already do — the phi loop with Path A has zero memory traffic). The
-sequential dependency is a fundamental Brief semantics choice.
+sequential dependency is a fundamental Briv semantics choice.
 
 The remaining gap (2.12×) is because C auto-vectorizes the three independent
-computations. Brief cannot do this because the semantics are different. The
+computations. Briv cannot do this because the semantics are different. The
 gap is inherent, not a codegen regression.
 
-**Remove from scope**: This optimization changes Brief semantics. Drop it.
+**Remove from scope**: This optimization changes Briv semantics. Drop it.
 
 ## Optimization 3: Counted-Down Loop
 
@@ -420,7 +420,7 @@ Keeping A005d is dead weight — two code paths to maintain, and the
 
 ### Problem
 
-Brief's sequential semantics create data dependencies between `&`
+Briv's sequential semantics create data dependencies between `&`
 assignments. When `&x1 = A10*x0 + ...` follows `&x0 = ...`, the
 backend updates `ssa_old_*_regs` so subsequent reads see the NEW
 x0 value. This serializes the computations — LLVM's vectorizer

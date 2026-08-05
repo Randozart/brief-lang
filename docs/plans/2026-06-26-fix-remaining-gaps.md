@@ -15,7 +15,7 @@ In `Statement::Let` evaluation, skip state insertion when `name == "_"`.
 ## Fix 3: Replace `list + [val]` in skiplist.bv
 
 `+` on collections is SIMD, not concatenation. Use a helper defn with `<-`:
-```brief
+```briv
 defn sl_append(list: List<Int>, val: Int) -> List<Int> {
     &list <- val;
     term list;
@@ -35,7 +35,7 @@ Since defns don't require contracts, remove them.
 
 ```bash
 cargo test --lib
-cargo run --bin brief-compiler -- check examples/inop-sadd.bv
-cargo run --bin brief-compiler -- check examples/inop-side-effect.bv
-cargo run --bin brief-compiler -- check lib/std/string_builder.bv
+cargo run --bin briv-compiler -- check examples/inop-sadd.bv
+cargo run --bin briv-compiler -- check examples/inop-side-effect.bv
+cargo run --bin briv-compiler -- check lib/std/string_builder.bv
 ```

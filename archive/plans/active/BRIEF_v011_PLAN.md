@@ -1,4 +1,4 @@
-# Brief v0.11 Overhaul Plan
+# Briv v0.11 Overhaul Plan
 
 **Date:** 2026-04-23
 **Status:** Planning
@@ -118,12 +118,12 @@ Reference files (do not modify):
 
 ### Philosophy
 
-Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
+Briv-native syntax. Each word must be clear, predictable, inferrable. No magic.
 
 ### 3.1 File Type Inference
 
-**Rule:** `.ebv` = embedded brief (no_std implied, MMIO volatility inferred)
-**Rule:** `.bv` = standard Brief (full stdlib)
+**Rule:** `.ebv` = embedded briv (no_std implied, MMIO volatility inferred)
+**Rule:** `.bv` = standard Briv (full stdlib)
 
 **Implementation:** Different compilation pipelines for each extension
 
@@ -142,7 +142,7 @@ Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
 **Goal:** Don't require explicit pointer syntax
 
 **Inference flow:**
-1. Brief declares `let state: State @ 0x8000A000`
+1. Briv declares `let state: State @ 0x8000A000`
 2. Compiler knows this is MMIO (from hardware.toml)
 3. Compiler generates:
    ```rust
@@ -150,7 +150,7 @@ Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
    pub fn get() -> &'static mut State { unsafe { &mut *STATE_BASE } }
    ```
 
-**No explicit `*mut` syntax needed in Brief source**
+**No explicit `*mut` syntax needed in Briv source**
 
 ### 3.4 Entry Point Generation
 
@@ -174,7 +174,7 @@ Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
 
 ### 3.7 Static Buffers (No Heap)
 
-**Rule:** Brief vectors compile to fixed-size arrays in Rust (no Vec)
+**Rule:** Briv vectors compile to fixed-size arrays in Rust (no Vec)
 **Inference:** Length known at compile time → stack/static allocation
 
 ### 3.8 Embedded Data
@@ -189,7 +189,7 @@ Brief-native syntax. Each word must be clear, predictable, inferrable. No magic.
 
 ### 3.10 Inline Assembly
 
-**Status:** Defer - likely expressible in Brief
+**Status:** Defer - likely expressible in Briv
 **Future:** If needed, `asm!` block
 
 ### 3.11 Watchdog (Commit Guard)
@@ -237,7 +237,7 @@ If `frame_processed` doesn't change from initial, transaction rolls back.
 
 #### 3.12.1 Type Mapping from Bit Range
 
-| Bit Range | Brief Type | Rust Type |
+| Bit Range | Briv Type | Rust Type |
 |-----------|------------|-----------|
 | `@/x1` - `@/x8` | `UInt[N]` | `u8` |
 | `@/x1` - `@/x8` | `Int[N]` | `i8` |
@@ -250,7 +250,7 @@ If `frame_processed` doesn't change from initial, transaction rolls back.
 
 #### 3.12.2 Vector Generation
 
-```brief
+```briv
 let buf: Int[1024] @ 0x8000A000 /x16;
 ```
 Should generate:
@@ -264,7 +264,7 @@ pub struct State {
 
 For `@/x33` and above, implement manual bit packing:
 
-```brief
+```briv
 let wide: UInt[1] @ 0x8000A000 /x64;
 ```
 Should generate:
@@ -279,7 +279,7 @@ With getter/setter methods that mask.
 
 #### 3.12.4 Vector Operations (Lifting)
 
-```brief
+```briv
 let vec: Int[1024];
 vec + 1;  // Add 1 to all elements
 ```
@@ -331,7 +331,7 @@ for elem in self.vec.iter_mut() {
 ```
 
 **Example - Shared Address:**
-```brief
+```briv
 let flags: UInt @ 0x8000A000;
 let counter: UInt @ 0x8000A000;
 let flag: Bool @ 0x8000A000;
@@ -360,7 +360,7 @@ impl State {
 #### 3.13.3 Overflow Verification
 
 **For explicit bit ranges:**
-```brief
+```briv
 let danger: UInt @/x8;  // User claims max 255
 ```
 **Proof check:**
@@ -393,7 +393,7 @@ WARNING: Cannot verify bit range for 'external_input'
 ### 4.1 Hardware Library Structure
 
 ```
-brief-compiler/
+briv-compiler/
 ├── hardware_lib/
 │   ├── targets/
 │   │   ├── xilinx_ultrascale_plus.toml

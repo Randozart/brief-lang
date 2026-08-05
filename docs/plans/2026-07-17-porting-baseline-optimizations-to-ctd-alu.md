@@ -9,7 +9,7 @@
 
 ## 1. Overview & Motivation
 
-The baseline at commit `8a827db` achieved **all benchmarks MATCH with competitive runtime** — Brief beat C on 9 of 15 runtime benchmarks (ratio 0.01x–0.95x). Two major changes since then have degraded performance:
+The baseline at commit `8a827db` achieved **all benchmarks MATCH with competitive runtime** — Briv beat C on 9 of 15 runtime benchmarks (ratio 0.01x–0.95x). Two major changes since then have degraded performance:
 
 1. **Massive backend refactor at `fb3c335`**: The monolithic `loop_engine.rs` (4398 lines) was split into `loop_engine/{mod,counter,ssa,analysis}.rs` but ALL per-field phi optimizations were lost. The current loop engine uses a single counter phi with unconditional GEP+load+store for all field access — zero register SSA, zero stores suppression, zero vector phi groups.
 
@@ -23,26 +23,26 @@ The baseline at commit `8a827db` achieved **all benchmarks MATCH with competitiv
 
 All MATCH. Run with: `cargo build --release && bash benchmarks/build_and_bench.sh --runtime`
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
 | ring_buffer | 0.0686s | 0.0676s | 1.01x | C |
-| float_math | 0.0631s | 0.0771s | 0.81x | Brief |
+| float_math | 0.0631s | 0.0771s | 0.81x | Briv |
 | float_math_nonzero | 0.1920s | 0.1727s | 1.11x | C |
-| sparse_dispatch | 0.0060s | 0.0657s | 0.09x | Brief |
-| print_loop | 0.0639s | 0.0670s | 0.95x | Brief |
-| nbody_newton | 7.4132s | 9.8522s | 0.75x | Brief |
-| nbody_sqrt | 3.0046s | 3.5218s | 0.85x | Brief |
-| nbody_sqrt_idio | 2.9578s | 4.3184s | 0.68x | Brief |
+| sparse_dispatch | 0.0060s | 0.0657s | 0.09x | Briv |
+| print_loop | 0.0639s | 0.0670s | 0.95x | Briv |
+| nbody_newton | 7.4132s | 9.8522s | 0.75x | Briv |
+| nbody_sqrt | 3.0046s | 3.5218s | 0.85x | Briv |
+| nbody_sqrt_idio | 2.9578s | 4.3184s | 0.68x | Briv |
 | fasta | 0.2695s | 0.2636s | 1.02x | C |
-| fannkuch_redux | 0.0763s | 0.0789s | 0.96x | Brief |
-| mandelbrot | 0.7514s | 0.7538s | 0.99x | Brief |
-| kalman_filter_runtime | 0.1876s | 0.1887s | 0.99x | Brief |
+| fannkuch_redux | 0.0763s | 0.0789s | 0.96x | Briv |
+| mandelbrot | 0.7514s | 0.7538s | 0.99x | Briv |
+| kalman_filter_runtime | 0.1876s | 0.1887s | 0.99x | Briv |
 | knucleotide | 0.2093s | 0.2060s | 1.01x | C |
 | cancel_math | 0.0682s | 0.0672s | 1.01x | C |
 | bit_clear | 0.0010s | 0.0009s | 1.11x | C |
-| queue_drain | 0.0007s | 0.0632s | 0.01x | Brief |
-| queue_drain_sym | 0.0639s | 0.0672s | 0.95x | Brief |
-| interval_step | 0.0009s | 0.0669s | 0.01x | Brief |
+| queue_drain | 0.0007s | 0.0632s | 0.01x | Briv |
+| queue_drain_sym | 0.0639s | 0.0672s | 0.95x | Briv |
+| interval_step | 0.0009s | 0.0669s | 0.01x | Briv |
 
 Optimizer benchmarks: all MATCH / SKIP (precomputed).
 
@@ -242,7 +242,7 @@ let is_float = l.ty == Type::float() || r.ty == Type::float()
     || l.ty == Type::float64() || r.ty == Type::float64();
 ```
 
-This checks the `TypedRegister.ty` field, which is the Brief type (e.g., `Type::Custom("Float")`). If the identifier lookup returns `TypedRegister { ty: Type::int() }` for a float field (because it loaded `i64` from `%State`), then `is_float` would be false, and the binary op would emit `add` or `sub` instead of `fadd`/`fsub`!
+This checks the `TypedRegister.ty` field, which is the Briv type (e.g., `Type::Custom("Float")`). If the identifier lookup returns `TypedRegister { ty: Type::int() }` for a float field (because it loaded `i64` from `%State`), then `is_float` would be false, and the binary op would emit `add` or `sub` instead of `fadd`/`fsub`!
 
 That's a **correctness bug**! Let me verify by looking at how the identifier handles type info...
 
@@ -274,7 +274,7 @@ This IS a bug — but tests pass, which suggests:
 
 Wait, for nbody benchmarks which DO float field arithmetic and ARE correct (MATCH) at baseline... unless the CTD+ALU changes broke something and nbody no longer compiles correctly. But we haven't run correctness since our changes — we only know 913 unit tests pass.
 
-Actually, the identifier lookup for local bindings (first branch) uses `self.get_local_type(name)` which returns the actual Brief type from `let_binding_types`. So if a float value was assigned to a `let` binding, it would carry the correct type. But GEP+load from `%State` always returns `Type::int()`.
+Actually, the identifier lookup for local bindings (first branch) uses `self.get_local_type(name)` which returns the actual Briv type from `let_binding_types`. So if a float value was assigned to a `let` binding, it would carry the correct type. But GEP+load from `%State` always returns `Type::int()`.
 
 For the nbody benchmark, the state fields (vx, vy, vz, etc.) are Float type. When the body reads them via `pre_load_all_fields`, that function emits:
 ```
@@ -305,7 +305,7 @@ But wait — if this were really a correctness bug, tests would fail. Unless no 
 1. Fix `Expr::Identifier` to return the correct `ty` for state fields (look up `field_types` or type universe)
 2. Fix `pre_load_all_fields` to actually store results in accessible caches (with correct types)
 3. Alternatively, eliminate `pre_load_all_fields` entirely and use per-field phi registers instead
-4. `ensure_float_reg` should check `rt.storage` — since CTD+ALU has no explicit "Native" storage flag, the equivalent check is: if the register's LLVM type (from `llvm_type`) is `float` or `double`, return as-is. If it's `i64` but the Brief type is Float, emit trunc+bitcast.
+4. `ensure_float_reg` should check `rt.storage` — since CTD+ALU has no explicit "Native" storage flag, the equivalent check is: if the register's LLVM type (from `llvm_type`) is `float` or `double`, return as-is. If it's `i64` but the Briv type is Float, emit trunc+bitcast.
 
 Actually, with CTD+ALU, ALL types have `alu=Float` mapping to native float LLVM types. So `ensure_float_reg` should work like this:
 ```rust
@@ -318,7 +318,7 @@ fn ensure_float_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegist
     if let Some(cached) = self.fun.reg_float_cache.get(&reg.name) {
         return cached.clone();
     }
-    // Is the Brief type a float? Then we have an i64 boxed value
+    // Is the Briv type a float? Then we have an i64 boxed value
     let is_float_ty = match &reg.ty {
         Type::Custom(t) => {
             let alu = self.ctx.type_universe.as_ref()
@@ -437,7 +437,7 @@ The optimizations below are ordered by impact and dependency. Each step must com
 
 ### Phase A: Correctness Fixes (commits A1-A3)
 
-**A1 — Fix identifier type info:** Ensure `Expr::Identifier` returns the correct Brief type for state fields (not always `Type::int()`). This fixes float arithmetic in the loop body.
+**A1 — Fix identifier type info:** Ensure `Expr::Identifier` returns the correct Briv type for state fields (not always `Type::int()`). This fixes float arithmetic in the loop body.
 
 **A2 — Fix emit_user_call return type:** Use `operator_llvm_type` instead of `lower_type` for defn return types. This fixes float-returning defn calls.
 

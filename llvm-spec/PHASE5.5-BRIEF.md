@@ -1,4 +1,4 @@
-# Phase 5.5 Brief: AST Completeness + Definition Support
+# Phase 5.5 Briv: AST Completeness + Definition Support
 
 **Date:** 2026-05-29  
 **Goal:** The LLVM backend can compile every AST node that `lib/compiler/` emits, producing a `.ll` file that passes `llc`.  
@@ -6,7 +6,7 @@
 
 ## Gap Analysis
 
-The litmus test (`brief-compiler llvm lib/compiler/main.bv`) revealed zero codegen crashes — all hits fell through to the `_ =>` fallback generating `add i64 0, 0`. Every file compiled cleanly. But the output is wrong for any file using the following AST nodes:
+The litmus test (`briv-compiler llvm lib/compiler/main.bv`) revealed zero codegen crashes — all hits fell through to the `_ =>` fallback generating `add i64 0, 0`. Every file compiled cleanly. But the output is wrong for any file using the following AST nodes:
 
 ### Expr nodes missing (produce `; fallback` comments instead of real IR)
 
@@ -50,8 +50,8 @@ The litmus test (`brief-compiler llvm lib/compiler/main.bv`) revealed zero codeg
 ## Litmus Test
 
 ```bash
-# Step 1: Compile the Brief-in-Brief compiler to LLVM IR
-brief-compiler llvm lib/compiler/main.bv --out /tmp/stage1/
+# Step 1: Compile the Briv-in-Briv compiler to LLVM IR
+briv-compiler llvm lib/compiler/main.bv --out /tmp/stage1/
 
 # Step 2: Validate the IR with LLVM's assembler
 llc /tmp/stage1/main.ll -o /tmp/stage1/main.o

@@ -150,14 +150,14 @@ pub enum OpRune {
 pub enum OpImpl {
     Intrinsic(Intrinsic),
     Inop(String),      // backend-defined inop by name
-    Defn(String),      // Brief defn by name
+    Defn(String),      // Briv defn by name
     Composed(Vec<OpImpl>),  // automatic composition (e.g., Box + Add + Unbox)
 }
 ```
 
 ### 3d. Example: Float's Complete Property Table
 
-```brief
+```briv
 // Float is a primitive. Its properties are defined by the compiler,
 // but this is what they LOOK like:
 type Float <: Bits {
@@ -187,7 +187,7 @@ type Float <: Bits {
 
 ### 3e. Example: User-Defined BFloat16
 
-```brief
+```briv
 type BFloat16 <: Bits {
     Bytes = 2;
     Alignment = 2;
@@ -218,7 +218,7 @@ impl Intrinsic {
 
 For `bf16_add#`, it returns the inop body. The backend:
 - LLVM: attempts to lower via `llvm.fadd.bf16` if available, otherwise
-  uses the inop body (which compiles to plain Brief→LLVM)
+  uses the inop body (which compiles to plain Briv→LLVM)
 - Webstack: uses the inop body (no bfloat support, but it works)
 - CIRCT: uses the inop body
 
@@ -647,7 +647,7 @@ impl TypeUniverse {
 }
 ```
 
-### Performance: Runtime (Compiled Brief Programs)
+### Performance: Runtime (Compiled Briv Programs)
 
 The universe approach produces **byte-for-byte identical** machine code for
 built-in types. The `fadd` instruction emitted for `Float + Float` is the
@@ -661,7 +661,7 @@ output is the same. The binary has no trace of the decision path.
 **User-defined types** get the same optimization treatment as built-in
 types when they use the same intrinsics:
 
-```brief
+```briv
 type MyFloat <: Float {}               // inherits — identical codegen
 type MyFloat <: Bits { Add = fadd#; }  // same intrinsic — same IR
 ```
@@ -669,7 +669,7 @@ type MyFloat <: Bits { Add = fadd#; }  // same intrinsic — same IR
 A user-defined type is only slower when the type author makes an explicit
 choice that trades performance for semantics:
 
-```brief
+```briv
 type SaturatingU8 <: Bits {
     Add = llvm.uadd.sat.i8#;  // saturating add: different intrinsic, ~1 extra instr
 }
@@ -697,7 +697,7 @@ fn tbaa_node(ty_str: &str) -> i32 {
 }
 ```
 
-This is fragile — it matches on LLVM type strings, not Brief types. A
+This is fragile — it matches on LLVM type strings, not Briv types. A
 `Custom("MyStruct")` type whose underlying LLVM type is `"float"` gets
 TBAA node 1 (Int) instead of 5 (Float).
 
@@ -715,7 +715,7 @@ At module emission, a pass collects all unique `tbaa_group` values from
 types referenced in the current compilation unit and generates:
 
 ```llvm
-!0 = !{!"Brief"}            ; root
+!0 = !{!"Briv"}            ; root
 !1 = !{!"Int", !0}          ; all boxed integers
 !2 = !{!"Float", !0}        ; all float types (Float, Float64, user float types)
 !3 = !{!"Bool", !0}

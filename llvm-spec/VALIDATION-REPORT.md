@@ -135,7 +135,7 @@ All 5 tests passing. Full suite: 270 tests passing.
 For future commits, repeat:
 ```bash
 cargo build --release
-brief-compiler llvm tests/fixtures/counter.bv --out /tmp/v/
+briv-compiler llvm tests/fixtures/counter.bv --out /tmp/v/
 llc /tmp/v/counter.ll -o /dev/null          # Must succeed
 opt -O3 -S /tmp/v/counter.ll -o /dev/null   # Must succeed
 grep -c "noalias" /tmp/v/counter.ll          # Must be > 0

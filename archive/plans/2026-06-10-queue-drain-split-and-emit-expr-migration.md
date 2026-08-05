@@ -13,7 +13,7 @@ guideline, these should be split into two variants.
 
 #### Create `queue_drain_sym.bv` (symmetric — mirrors C)
 Straight-line counter loop matching C's algorithm:
-```brief
+```briv
 frgn __print_int(n: Int) -> Bool ;
 let N: Int = __get_env_int("BOUND");
 let count: Int = 0;
@@ -29,13 +29,13 @@ node work [count < N][count == N] {
 #### Keep `queue_drain_c.c` → rename to `queue_drain_sym_c.c`
 Same as current `queue_drain_c.c` — counter-only loop with periodic print.
 
-#### Create `queue_drain_idio.bv` (idiomatic — Brief-native)
+#### Create `queue_drain_idio.bv` (idiomatic — Briv-native)
 Rename current `queue_drain.bv` → `queue_drain_idio.bv`:
 Reactive txn with `<- &queue` + `&queue <- count` — exercises collection
 drain analysis in the compiler.
 
 #### No `queue_drain_idio_c.c`
-The idiomatic variant tests if Brief's optimizer can find a better path.
+The idiomatic variant tests if Briv's optimizer can find a better path.
 No C reference needed (compared against `_sym`'s C for correctness, or
 compared internally in the harness).
 

@@ -1,4 +1,4 @@
-# Kernel Target & Attribute System for Brief Transpiler
+# Kernel Target & Attribute System for Briv Transpiler
 
 **Created**: 2026-04-29
 **Status**: Implementation Started
@@ -6,13 +6,13 @@
 
 ## Executive Summary
 
-Add kernel-space compilation support to Brief with a **convention-over-configuration** approach. Leverage existing reactor equilibrium logic (`entry_point.rs`) to auto-detect `module_init()`, and introduce minimal `#[...]` attribute syntax only for cases where the transpiler needs explicit guidance.
+Add kernel-space compilation support to Briv with a **convention-over-configuration** approach. Leverage existing reactor equilibrium logic (`entry_point.rs`) to auto-detect `module_init()`, and introduce minimal `#[...]` attribute syntax only for cases where the transpiler needs explicit guidance.
 
 ---
 
 ## 1. Current State Analysis
 
-### What Brief Already Handles
+### What Briv Already Handles
 | Feature | Location | Status |
 |---------|----------|--------|
 | **Entry point detection** | `src/analysis/entry_point.rs:6-47` | ✅ Finds txn that fires first based on initial state |
@@ -37,15 +37,15 @@ Add kernel-space compilation support to Brief with a **convention-over-configura
 
 ### CLI Target Selection (No File-Level Declaration)
 ```bash
-brief compile --target linux_kernel file.bv
-brief compile --target windows_kernel file.bv  # Future
-brief compile --target web file.rbv              # Implicit
+briv compile --target linux_kernel file.bv
+briv compile --target windows_kernel file.bv  # Future
+briv compile --target web file.rbv              # Implicit
 ```
 
 **Rationale**: Target is a compilation decision, not a source property. Keeps `.bv` files portable.
 
 ### Attribute Syntax (Override-Only)
-```brief
+```briv
 // Only when transpiler defaults need override
 #[c, section(".init.text")]
 txn init [done == false][...] { ... }
@@ -174,7 +174,7 @@ pub struct CBackend {
 
 **3.3 Known issues** (2026-04-29):
 - Duplicate includes in generated C (kernel headers added twice)
-- `brief_init()` uses `malloc()` instead of `kmalloc()` for kernel mode
+- `briv_init()` uses `malloc()` instead of `kmalloc()` for kernel mode
 
 ---
 
@@ -232,7 +232,7 @@ for attr in &item.attrs {
 ## 6. Example: Complete Kernel Module
 
 ### Input (`gpu_dma.bv`)
-```brief
+```briv
 let gpu_bar_mapped: Bool = false;
 let dma_complete: Bool = false;
 
@@ -270,32 +270,32 @@ MODULE_LICENSE("GPL");
 static bool gpu_bar_mapped = false;
 static bool dma_complete = false;
 
-static int __init brief_init(void) {
+static int __init briv_init(void) {
     // Entry point txn executes here
     gpu_bar_mapped = true;
     // Reactor thread starts
     return 0;
 }
-module_init(brief_init);
+module_init(briv_init);
 
-static void __exit brief_exit(void) {
+static void __exit briv_exit(void) {
     // Exit txn executes here
 }
-module_exit(brief_exit);
+module_exit(briv_exit);
 ```
 
 ---
 
 ## 7. Success Criteria
 
-- [ ] `brief compile --target linux_kernel file.bv` produces valid `.c` + `Makefile`
+- [ ] `briv compile --target linux_kernel file.bv` produces valid `.c` + `Makefile`
 - [ ] Entry point analysis auto-detects `module_init()` correctly
 - [ ] `<linux/module.h>` auto-included for `linux_kernel` target
 - [ ] Reactor pattern becomes `kthread` in kernel mode
 - [ ] `#[c, section(".init.text")]` overrides work in C backend
 - [ ] Multiple initial-fire txns → error (not silent ambiguity)
 - [ ] `cargo test --lib` passes after all changes
-- [ ] Brief contracts (pre/post) verified in kernel-space output
+- [ ] Briv contracts (pre/post) verified in kernel-space output
 
 ---
 

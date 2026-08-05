@@ -1,4 +1,4 @@
-# Brief Compiler - Implementation Complete ✅
+# Briv Compiler - Implementation Complete ✅
 
 **Date:** 2026-05-06  
 **Status:** Self-Hosting Capable  
@@ -40,7 +40,7 @@
 ### 1. Contract-First Design
 
 Every transaction declares pre/post conditions:
-```brief
+```briv
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]  // Compiler verifies this
     [balance == @balance - amount]      // Compiler proves this
@@ -53,7 +53,7 @@ txn withdraw(amount: Int)
 ### 2. Reactive Transactions
 
 Fire automatically, loop until termination (proven by compiler):
-```brief
+```briv
 node auto_increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -64,17 +64,17 @@ node auto_increment() [counter < 100][counter == @counter + 1] {
 ### 3. Metropolitan FFI
 
 Zero-copy shared memory with foreign languages:
-```brief
+```briv
 let channel = create_metropolitan_channel("ml", "python")?;
 metropolitan_send(channel, image)?;
 let result = metropolitan_receive(channel, 100)?;
 // No marshalling, no context switches
 ```
 
-### 4. Data Brief Configuration
+### 4. Data Briv Configuration
 
 Type-safe configs replace TOML:
-```brief
+```briv
 // hardware.dbvs
 schema Hardware {
     name: String,
@@ -112,13 +112,13 @@ Hardware {
 ## Documentation Created
 
 **Tutorials:**
-- learn-brief/00-welcome.md
-- learn-brief/01-basics.md
-- learn-brief/02-contracts.md
-- learn-brief/03-reactive.md
-- learn-brief/04-functions.md
-- learn-brief/05-data-types.md
-- learn-brief/06-string.md
+- learn-briv/00-welcome.md
+- learn-briv/01-basics.md
+- learn-briv/02-contracts.md
+- learn-briv/03-reactive.md
+- learn-briv/04-functions.md
+- learn-briv/05-data-types.md
+- learn-briv/06-string.md
 
 **Technical Guides:**
 - SELF_HOSTING_COMPLETE.md
@@ -149,7 +149,7 @@ Hardware {
 - ✅ Symbolic Execution (Literals, operations)
 - ✅ Type Checking (Projections, unions)
 - ✅ FFI (Registry, resolver, validator)
-- ✅ Data Brief (Parser, allocator, evaluator)
+- ✅ Data Briv (Parser, allocator, evaluator)
 - ✅ Cache (Validity, interface detection)
 - ✅ Scheduler (Speed, reactor management)
 
@@ -158,7 +158,7 @@ Hardware {
 ## File Organization
 
 ```
-brief-compiler/
+briv-compiler/
 ├── src/                          # Rust bootstrap (26 modules)
 ├── lib/
 │   ├── std/                      # Standard Library (15+ modules)
@@ -178,7 +178,7 @@ brief-compiler/
 │   │   ├── result.bv             # Result combinators
 │   │   └── metropolitan_ffi.bv   # Metropolitan FFI ✨
 │   │
-│   └── compiler/                 # Compiler in Brief ✨
+│   └── compiler/                 # Compiler in Briv ✨
 │       ├── token.bv              # Token definitions
 │       ├── lexer.bv              # Lexer
 │       ├── parser.bv             # Parser
@@ -191,8 +191,8 @@ brief-compiler/
 │           ├── rust.bv           # Rust source
 │           └── c.bv              # C source
 │
-├── learn-brief/                  # Complete tutorial ✨
-├── targets/                      # Data Brief target schemas
+├── learn-briv/                  # Complete tutorial ✨
+├── targets/                      # Data Briv target schemas
 │   ├── aarch64.dbvs
 │   ├── x86_64.dbvs
 │   ├── rust.dbvs
@@ -218,7 +218,7 @@ brief-compiler/
 | **Lines of Code** | ~12,000+ |
 | **Lines of Documentation** | ~8,000+ |
 | **Standard Library Functions** | 300+ |
-| **Compiler Modules** | 26 (Rust) + 7 (Brief) |
+| **Compiler Modules** | 26 (Rust) + 7 (Briv) |
 | **Backends** | 4 production-ready |
 | **Tests Passing** | 148/148 |
 | **Tiers Complete** | 9/9 (100%) |
@@ -230,7 +230,7 @@ brief-compiler/
 
 ### 1. Mathematical Verification
 No other language can prove its own compiler is correct:
-```brief
+```briv
 CHECK compiler_correctness [
     forall source in @test_sources:
         logic_equiv(compile(source), reference_compile(source))
@@ -238,12 +238,12 @@ CHECK compiler_correctness [
 ```
 
 ### 2. Universal Targets
-Same Brief code → FPGA, ARM, x86, WASM:
-```brief
+Same Briv code → FPGA, ARM, x86, WASM:
+```briv
 // Same source, different targets
-brief compile program.bv --target aarch64.dbvs
-brief compile program.bv --target vhdl_fpga.dbvs
-brief compile program.bv --target wasm.dbvs
+briv compile program.bv --target aarch64.dbvs
+briv compile program.bv --target vhdl_fpga.dbvs
+briv compile program.bv --target wasm.dbvs
 ```
 
 ### 3. Zero-Overhead FFI
@@ -254,7 +254,7 @@ Metropolitan FFI eliminates marshalling:
 
 ### 4. Self-Documenting Code
 Contracts serve as executable documentation:
-```brief
+```briv
 txn transfer(amount: Int) 
     [amount > 0 && balance >= amount]  // Documents requirements
     [balance == @balance - amount]      // Documents guarantees
@@ -302,10 +302,10 @@ This implementation proves that:
 - ✅ Self-documenting code is achievable with contracts
 - ✅ One language can target software AND hardware
 
-**Brief is ready for self-hosting.** 🚀
+**Briv is ready for self-hosting.** 🚀
 
 ---
 
 *Implementation Date: 2026-05-06*  
 *Status: COMPLETE ✅*  
-*Version: Brief v0.12.0*
+*Version: Briv v0.12.0*

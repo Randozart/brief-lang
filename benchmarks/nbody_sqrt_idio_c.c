@@ -87,7 +87,7 @@ int main(void) {
             bz[i] += dt * vz[i];
         }
 
-        // Energy computation every iteration — matches idiomatic Brief
+        // Energy computation every iteration — matches idiomatic Briv
         float energy = 0.0f;
         #define EPAIR(ia, ib) { \
             float dx = bx[ia] - bx[ib]; \

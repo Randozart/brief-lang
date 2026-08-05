@@ -1,6 +1,6 @@
 // Metropolitan FFI Bindings
 // Low-level shared memory and atomic primitives for the Metropolitan protocol
-// These bindings bridge Brief's shm.bv to the Rust MetropolitanHub runtime
+// These bindings bridge Briv's shm.bv to the Rust MetropolitanHub runtime
 
 // Error types are defined in lib/std/shm.bv (ShmError, MmapError, AtomicError)
 // and returned from the Rust implementations as Value::Enum variants.

@@ -1,6 +1,6 @@
 -- gate.lua — Gate A + B for Lua. args: cpath, runtime seed.
 -- N is scaled: native Lua feature_hash is interpreted (~30us/call), so it gets
--- fewer iterations than the C-native Brief path.
+-- fewer iterations than the C-native Briv path.
 package.cpath = package.cpath .. ';' .. arg[1] .. '/?.so'
 local b = require('bench')
 

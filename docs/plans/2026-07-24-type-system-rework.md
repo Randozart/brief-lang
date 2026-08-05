@@ -19,7 +19,7 @@ The current type system has three architectural problems:
 
 ### Type declarations
 
-```brief
+```briv
 // Before:
 type Int : Bits { bytes <~ 8; alignment <~ 8; op Add(#Int, #Int); };
 type String : Bits { bytes <~ 16; alignment <~ 8; };
@@ -35,7 +35,7 @@ type MyCustom: #String;    // implements #String protocol
 
 ### Property access
 
-```brief
+```briv
 // Before:
 x .#Size
 list .#Size
@@ -75,7 +75,7 @@ list.#Size
 8. **Difference-only op bodies.** The protocol body is optional. An empty body
    means "all default ops apply." A non-empty body lists only the ops that
    differ from the protocol default:
-   ```brief
+   ```briv
    type Int: #Int;                             // everything default
    type MyString: String {                      // only override what differs
        op Add(#String) = tree_concat(#L, #R);

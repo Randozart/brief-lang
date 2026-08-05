@@ -95,7 +95,7 @@ mod tests {
 
         let binding = ForeignBinding {
             foreign_name: "read_file".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::Literal(PathBuf::from("std::fs::read_to_string")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
@@ -116,7 +116,7 @@ mod tests {
 
         let binding2 = ForeignBinding {
             foreign_name: "write_file".to_string(),
-            brief_name: None,
+            briv_name: None,
             from: FromSpec::Literal(PathBuf::from("test")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,

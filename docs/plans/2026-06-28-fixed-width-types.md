@@ -5,7 +5,7 @@
 
 ## Overview
 
-Add explicit fixed-width integer and float types to Brief's type system, with Rust-like literal suffixes, context inference, and no implicit widening. Then add an analysis pass that makes `Int` and `Float` adaptive — inferring the minimal width from contracts and usage.
+Add explicit fixed-width integer and float types to Briv's type system, with Rust-like literal suffixes, context inference, and no implicit widening. Then add an analysis pass that makes `Int` and `Float` adaptive — inferring the minimal width from contracts and usage.
 
 ---
 

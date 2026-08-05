@@ -9,7 +9,7 @@
 // can verify correctness against the C reference.
 //
 // Build:
-//   cargo run --bin brief-compiler -- build --llvm benchmarks/precompute_sum.bv --out benchmarks --optimize-budget 256
+//   cargo run --bin briv-compiler -- build --llvm benchmarks/precompute_sum.bv --out benchmarks --optimize-budget 256
 //   clang -O3 -march=native -o benchmarks/precompute benchmarks/precompute_sum.ll
 //
 // C reference: precompute_sum_c.c

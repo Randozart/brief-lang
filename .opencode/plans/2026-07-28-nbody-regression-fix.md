@@ -19,7 +19,7 @@ pure computation body from FFI-containing guard bodies. The natural split:
     #8                                     ← willreturn memory(argmem: readwrite)
 {
   loop: (emitted by emit_countable_body for body_stmts)
-    ... pure Brief computation ...
+    ... pure Briv computation ...
     %count_updated = add %count, 1
     store %count_updated, %state.count
     %guard_fired = ...                     ← computed from body (mod check)

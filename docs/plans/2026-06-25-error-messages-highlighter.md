@@ -103,7 +103,7 @@ is not a pointer, list, string, or struct:
 
 ## Part 2: Highlighter Updates
 
-**File:** `syntax-highlighter/syntaxes/brief.tmLanguage.json`
+**File:** `syntax-highlighter/syntaxes/briv.tmLanguage.json`
 
 ### Keywords (keyword.declaration)
 
@@ -130,14 +130,14 @@ Add to `\b(Int|Float|String|Bool|Data|Void|UInt)\b`:
 ### Intrinsic functions (support.function.intrinsic)
 
 New pattern for `identifier#` calls:
-- Match `\b[a-z_][a-zA-Z0-9_]*#` scope as `support.function.intrinsic.brief`
+- Match `\b[a-z_][a-zA-Z0-9_]*#` scope as `support.function.intrinsic.briv`
 - This catches `volatile_load#`, `volatile_store#`, `strlen#`, `bytes#`, etc.
 
 ### Operators
 
 Add:
-- `:>` — `keyword.operator.projection.brief`
-- `<-` — `keyword.operator.push.brief`
+- `:>` — `keyword.operator.projection.briv`
+- `<-` — `keyword.operator.push.briv`
 - `!` after `term`/`escape` — scope as part of control flow
 
 ## Implementation Order
@@ -158,33 +158,33 @@ Add:
 ### Icon files
 
 Copy from `assets/` to `syntax-highlighter/images/`:
-- `assets/a-brief-icon.svg` → `images/a-brief-logo.svg` (Accelerated Brief)
-- `assets/c-brief-icon.svg` → `images/c-brief-logo.svg` (Circuit Brief)
+- `assets/a-briv-icon.svg` → `images/a-briv-logo.svg` (Accelerated Briv)
+- `assets/c-briv-icon.svg` → `images/c-briv-logo.svg` (Circuit Briv)
 
-All icon files in `images/` follow the `{prefix}-brief-logo.svg` naming convention.
+All icon files in `images/` follow the `{prefix}-briv-logo.svg` naming convention.
 
 ### package.json changes
 
-1. **Main Brief language icon**: change from `./images/brief-logo.svg` to
+1. **Main Briv language icon**: change from `./images/briv-logo.svg` to
    `./images/extension-logo.svg` (tighter crop, viewBox="242 242 540 540")
 
 2. **ActivationEvents**: append `onLanguage:abv` and `onLanguage:cbv`
 
-3. **New language: abv** (Accelerated Brief, `.abv`):
-   - Icon: `./images/a-brief-logo.svg`
-   - Grammar: `source.brief` → `./syntaxes/brief.tmLanguage.json`
+3. **New language: abv** (Accelerated Briv, `.abv`):
+   - Icon: `./images/a-briv-logo.svg`
+   - Grammar: `source.briv` → `./syntaxes/briv.tmLanguage.json`
 
-4. **New language: cbv** (Circuit Brief, `.cbv`):
-   - Icon: `./images/c-brief-logo.svg`
-   - Grammar: `source.brief` → `./syntaxes/brief.tmLanguage.json`
+4. **New language: cbv** (Circuit Briv, `.cbv`):
+   - Icon: `./images/c-briv-logo.svg`
+   - Grammar: `source.briv` → `./syntaxes/briv.tmLanguage.json`
 
-5. **Grammar entries**: add `abv → source.brief` and `cbv → source.brief`
+5. **Grammar entries**: add `abv → source.briv` and `cbv → source.briv`
 
-### brief.tmLanguage.json
+### briv.tmLanguage.json
 
 Add `<:` (subtype operator) pattern before `<` to prevent partial matching:
 ```
-"keyword.operator.subtype.brief" → match "<:"
+"keyword.operator.subtype.briv" → match "<:"
 ```
 
 ## Part 4: Future

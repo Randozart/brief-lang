@@ -1,4 +1,4 @@
-// 2026-07-26: Web/WASM type declarations for Brief's type universe.
+// 2026-07-26: Web/WASM type declarations for Briv's type universe.
 // Types are defined against the #Web protocol hashword so GLUE can
 // route frgn declarations through the wasm_runtime bridge target.
 //

@@ -21,7 +21,7 @@ it's optional.
 
 ## Syntax
 
-```brief
+```briv
 // The chain: := body1 := body2 := ... := bodyN
 // Last body is always unguarded (guaranteed fallback).
 
@@ -36,7 +36,7 @@ defn popcount(x: Int) -> Int
   := { 0->0; 1->1; 3->2; 7->3 }
   := popcount_ref;
 
-// Pure chain — multiple Brief implementations cross-verified
+// Pure chain — multiple Briv implementations cross-verified
 defn abs(x: Int) -> Int
   := defn abs_branch(x: Int) -> Int { if x < 0 then -x else x }
   := defn abs_math(x: Int) -> Int { sqrt(x * x) };
@@ -60,13 +60,13 @@ For each body in order (left to right):
 | Body source | Syntax | Needs target? | Cross-verified? |
 |------------|--------|---------------|-----------------|
 | **Assembly** | `asm<target> fn name(args) -> T { ... }` | Yes | Yes — against all other bodies |
-| **Brief reference** | `defn name(args) -> T { ... }` | No | Yes — against all other bodies |
+| **Briv reference** | `defn name(args) -> T { ... }` | No | Yes — against all other bodies |
 | **Examples** | `{ input->output; ... }` | No | Yes — examples serve as test cases; the examples body is cross-verified too |
 | **Derivation** | `{ examples } := ref_fn` | No | Yes — synthesis tries to find a formula; if it passes cross-verification against the chain, use it |
 
 ## Assembly body syntax
 
-```brief
+```briv
 asm<x86_64> fn popcount_x86(x: Int) -> Int {
     // Braced variables {name} are substituted with the ABI register
     // for the given parameter/return value on the target architecture.
@@ -130,7 +130,7 @@ selection is an optimization for later.
 The existing derivation logic (CEGIS loop, anti-unification, SMT synthesis)
 becomes one way to generate a body for the chain. When the user writes:
 
-```brief
+```briv
 defn f(x: Int) -> Int
   := { 0->0; 1->1; 3->2; }
   := ref_fn;
@@ -150,7 +150,7 @@ independently of how each body was generated.
 
 Assembly is the hardest implementation to verify because the compiler
 can't reason about its semantics. Cross-verification solves this: the asm
-body is tested against a Brief reference function on random inputs. If
+body is tested against a Briv reference function on random inputs. If
 all outputs match, the asm is provably equivalent for the tested inputs.
 
 The confidence depends on the number of test samples:

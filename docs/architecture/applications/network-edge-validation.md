@@ -12,7 +12,7 @@ security vulnerabilities in distributed systems: buffer overflows, OOM crashes
 from nested bomb payloads, and deserialization exploits. JSON, XML, CBOR, and
 Protocol Buffers each have well-known attack surfaces at the parsing layer.
 
-`.dbvl` (Data Brief Lines) has structural properties that make it a natural
+`.dbvl` (Data Briv Lines) has structural properties that make it a natural
 candidate for **contract-driven edge validation**: a streaming, single-pass,
 zero-allocation byte scanner that can reject invalid or incomplete payloads
 before any application code touches the data.
@@ -117,7 +117,7 @@ store the payload in memory beyond a small staging buffer.
 
 The schema defines the exact structure the endpoint expects:
 
-```brief
+```briv
 schema SensorReading {
     temperature: Float;
     humidity: Float;
@@ -171,7 +171,7 @@ violation. The sender can correct and retry without ambiguity.
 
 ---
 
-## 6. Integration with Brief's Type System
+## 6. Integration with Briv's Type System
 
 The edge validator uses `.dbvl` for syntax validation only. Type validation
 (Is `28.5` a valid Float? Is `1013.25` within range?) happens at the
@@ -184,7 +184,7 @@ access to the full type universe:
 
 ```
 Edge (byte scanner):          counts fields, checks brace balance
-Application (Brief node):     parses values, validates ranges, processes
+Application (Briv node):     parses values, validates ranges, processes
 ```
 
 ---

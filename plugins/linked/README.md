@@ -14,7 +14,7 @@ binary is produced.  They operate on the binary file path via `Bin$`.
 
 Use binary operations on the explicit `Bin$` target:
 
-```brief
+```briv
 $(Linked) {
     Bin$.Run$("strip --strip-unnecessary {{path}}");
 };

@@ -5,7 +5,7 @@
 
 ## Motivation
 
-The Brief compiler's analysis pipeline proves everything that the following programmer-supplied pragmas/annotations currently require:
+The Briv compiler's analysis pipeline proves everything that the following programmer-supplied pragmas/annotations currently require:
 
 | Pragma/Keyword | What the compiler already proves |
 |---|---|
@@ -125,14 +125,14 @@ do_wait:
 
 **Fix:**
 1. In `emit_main`, detect async txn groups (conflict-free sets). Emit per-group thread body functions.
-2. Emit `brief_spawn_threads()` / `brief_barrier_wait()` calls in `@main` via the C runtime bridge.
-3. Add `brief_thread_entry(void(*body)(void))` and `brief_barrier_wait()` to `runtime/brief_rt.c` using `pthread_create`/`pthread_join`.
+2. Emit `briv_spawn_threads()` / `briv_barrier_wait()` calls in `@main` via the C runtime bridge.
+3. Add `briv_thread_entry(void(*body)(void))` and `briv_barrier_wait()` to `runtime/briv_rt.c` using `pthread_create`/`pthread_join`.
 4. State struct remains shared — disjoint GEP offsets guarantee no data races (C11 5.1.2.4p25).
 5. Add `-lpthread` to the link step.
 
 **No atomics are needed** in the minimal implementation because the proof engine guarantees disjoint field access. The only synchronization is the tick-start barrier (trigger snapshot load) and tick-end barrier (`pthread_join`).
 
-**Files:** `src/backend/llvm.rs` (~200 lines), `runtime/brief_rt.c` (~50 lines), `src/backend/mod.rs` (builtins list)
+**Files:** `src/backend/llvm.rs` (~200 lines), `runtime/briv_rt.c` (~50 lines), `src/backend/mod.rs` (builtins list)
 
 ## Validation: The SPSC Ring Buffer Benchmark
 

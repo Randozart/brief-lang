@@ -1,12 +1,12 @@
-// needs_state.bv — the first compiler pass written in Brief.
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi): the compiler
+// needs_state.bv — the first compiler pass written in Briv.
+// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi): the compiler
 // dogfoods its own GLUE FFI. This pass reads the tagged projection produced by
 // src/analysis/needs_state_projection.rs and computes, per exported defn,
 // whether it carries `ptr %state` — exactly the analysis in
 // src/analysis/export_abi.rs — then returns a needs_state bitmask (bit i =
 // export[i] needs state). The compiler loads this through the GLUE C ABI at
-// runtime (build.rs → target/compiler-in-brief/needs_state.so → dlopen in
-// src/glue/brief_pass.rs), the same way any host language calls Brief.
+// runtime (build.rs → target/compiler-in-briv/needs_state.so → dlopen in
+// src/glue/briv_pass.rs), the same way any host language calls Briv.
 //
 // Projection format (see needs_state_projection.rs):
 //   ns 1

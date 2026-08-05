@@ -1,6 +1,6 @@
 @echo off
 REM Rebuild Compiler Script
-REM Rebuilds the Brief compiler and reinstalls the VSIX extension
+REM Rebuilds the Briv compiler and reinstalls the VSIX extension
 REM
 REM Usage: rebuild-compiler.bat
 
@@ -9,7 +9,7 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
-echo === Building Brief Compiler ===
+echo === Building Briv Compiler ===
 cargo build --release
 if errorlevel 1 (
     echo Build failed!
@@ -33,11 +33,11 @@ if errorlevel 1 (
 
 echo.
 echo === Installing Extension ===
-copy /y brief-language-0.1.0.vsix ..\brief-language.vsix >nul
-call flatpak run com.vscodium.codium --install-extension ..\brief-language.vsix
+copy /y briv-language-0.1.0.vsix ..\briv-language.vsix >nul
+call flatpak run com.vscodium.codium --install-extension ..\briv-language.vsix
 
 cd ..
-del /q syntax-highlighter\brief-language-0.1.0.vsix 2>nul
+del /q syntax-highlighter\briv-language-0.1.0.vsix 2>nul
 
 echo.
 echo === Done ===

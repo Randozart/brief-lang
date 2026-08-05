@@ -1,7 +1,7 @@
 // ── Phase D — Full SMT Synthesis ───────────────────────────────────────
 // 2026-07-12: Phase 6.2 — Original SMT solver interface stub.
 // 2026-07-28: Phase D — Rewritten: proper SyGuS QF_BV query builder,
-// Z3 subprocess integration, define-fun response parser, S-expr → Brief
+// Z3 subprocess integration, define-fun response parser, S-expr → Briv
 // conversion. Falls back gracefully if Z3 is unavailable.
 // Flat code: each function max 2 levels of nesting.
 
@@ -12,7 +12,7 @@ use std::process::Command;
 
 // ── D.0 — Type Mappings ───────────────────────────────────────────────
 
-/// 2026-07-28: Phase D.0 — Convert Brief Type to SMT-LIB sort string.
+/// 2026-07-28: Phase D.0 — Convert Briv Type to SMT-LIB sort string.
 fn type_to_smt_sort(ty: &Type) -> String {
     match ty {
         Type::Custom(name) => match name.as_str() {
@@ -30,7 +30,7 @@ fn type_to_smt_sort(ty: &Type) -> String {
     }
 }
 
-/// 2026-07-28: Phase D.0 — Convert a Brief constant expression to an SMT constant string.
+/// 2026-07-28: Phase D.0 — Convert a Briv constant expression to an SMT constant string.
 fn expr_to_smt_const(expr: &Expr) -> String {
     match expr {
         Expr::Decimal(n) => format_smt_int(*n),
@@ -294,10 +294,10 @@ fn parse_smt_response(
         None => return Err(SynthesizeError::SolverError("no define-fun in response".into())),
     };
 
-    let brief_expr = smt_to_brief_expr(&body, params, ret_type)?;
+    let briv_expr = smt_to_briv_expr(&body, params, ret_type)?;
 
     Ok(SynthesizedProgram {
-        body: vec![brief_expr],
+        body: vec![briv_expr],
         cost: 0,
         depth: 0,
         helpers: vec![],
@@ -432,10 +432,10 @@ impl<'a> SexprParser<'a> {
     }
 }
 
-// ── D.1 — SMT to Brief Expression Converter ───────────────────────────
+// ── D.1 — SMT to Briv Expression Converter ───────────────────────────
 
-/// 2026-07-28: Phase D.1 — Convert an SMT expression to a Brief Expr.
-fn smt_to_brief_expr(
+/// 2026-07-28: Phase D.1 — Convert an SMT expression to a Briv Expr.
+fn smt_to_briv_expr(
     sexpr: &SExpr,
     params: &[(String, Type)],
     ret_type: &Type,
@@ -462,11 +462,11 @@ fn smt_to_brief_expr(
                 "bvshl" => smt_binary_op(items, BinaryOpKind::Shl, params, ret_type),
                 "bvlshr" => smt_binary_op(items, BinaryOpKind::Shr, params, ret_type),
                 "bvneg" => {
-                    let inner = smt_to_brief_expr(&items[1], params, ret_type)?;
+                    let inner = smt_to_briv_expr(&items[1], params, ret_type)?;
                     Ok(Expr::UnaryOp(UnaryOpKind::Neg, Box::new(inner)))
                 }
                 "bvnot" => {
-                    let inner = smt_to_brief_expr(&items[1], params, ret_type)?;
+                    let inner = smt_to_briv_expr(&items[1], params, ret_type)?;
                     Ok(Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(inner)))
                 }
                 "bvslt" => smt_binary_op(items, BinaryOpKind::Lt, params, ret_type),
@@ -476,9 +476,9 @@ fn smt_to_brief_expr(
                     if items.len() < 4 {
                         return Err(SynthesizeError::SolverError("malformed ite".into()));
                     }
-                    let cond = smt_to_brief_expr(&items[1], params, &Type::bool_())?;
-                    let then_ = smt_to_brief_expr(&items[2], params, ret_type)?;
-                    let else_ = smt_to_brief_expr(&items[3], params, ret_type)?;
+                    let cond = smt_to_briv_expr(&items[1], params, &Type::bool_())?;
+                    let then_ = smt_to_briv_expr(&items[2], params, ret_type)?;
+                    let else_ = smt_to_briv_expr(&items[3], params, ret_type)?;
                     Ok(Expr::If(Box::new(cond), Box::new(then_), Some(Box::new(else_))))
                 }
                 "and" | "or" | "not" => {
@@ -495,7 +495,7 @@ fn smt_to_brief_expr(
                         return Err(SynthesizeError::SolverError("malformed let".into()));
                     }
                     let body = &items[items.len() - 1];
-                    let mut result = smt_to_brief_expr(body, params, ret_type)?;
+                    let mut result = smt_to_briv_expr(body, params, ret_type)?;
                     // The bindings are in a single sublist at items[1]
                     if let SExpr::List(bindings_list) = &items[1] {
                         // Process bindings in reverse (innermost first)
@@ -507,7 +507,7 @@ fn smt_to_brief_expr(
                                 let SExpr::Atom(var_name) = &pair[0] else {
                                     return Err(SynthesizeError::SolverError("expected variable name in let".into()));
                                 };
-                                let val_expr = smt_to_brief_expr(&pair[1], params, ret_type)?;
+                                let val_expr = smt_to_briv_expr(&pair[1], params, ret_type)?;
                                 result = substitute_var(&result, var_name, &val_expr);
                             }
                         }
@@ -522,7 +522,7 @@ fn smt_to_brief_expr(
     }
 }
 
-/// Convert an SMT atom (variable, constant) to a Brief Expr.
+/// Convert an SMT atom (variable, constant) to a Briv Expr.
 fn smt_atom_to_expr(
     s: &str,
     params: &[(String, Type)],
@@ -588,8 +588,8 @@ fn smt_binary_op(
     if items.len() < 3 {
         return Err(SynthesizeError::SolverError("binary op needs 2 args".into()));
     }
-    let lhs = smt_to_brief_expr(&items[1], params, ret_type)?;
-    let rhs = smt_to_brief_expr(&items[2], params, ret_type)?;
+    let lhs = smt_to_briv_expr(&items[1], params, ret_type)?;
+    let rhs = smt_to_briv_expr(&items[2], params, ret_type)?;
     Ok(Expr::BinaryOp(kind, Box::new(lhs), Box::new(rhs)))
 }
 
@@ -605,15 +605,15 @@ fn smt_boolean_op(
             if items.len() < 2 {
                 return Err(SynthesizeError::SolverError("not needs 1 arg".into()));
             }
-            let inner = smt_to_brief_expr(&items[1], params, ret_type)?;
+            let inner = smt_to_briv_expr(&items[1], params, ret_type)?;
             Ok(Expr::UnaryOp(UnaryOpKind::Not, Box::new(inner)))
         }
         "and" | "or" => {
             if items.len() < 3 {
                 return Err(SynthesizeError::SolverError("and/or needs 2 args".into()));
             }
-            let lhs = smt_to_brief_expr(&items[1], params, &Type::bool_())?;
-            let rhs = smt_to_brief_expr(&items[2], params, &Type::bool_())?;
+            let lhs = smt_to_briv_expr(&items[1], params, &Type::bool_())?;
+            let rhs = smt_to_briv_expr(&items[2], params, &Type::bool_())?;
             let kind = if op == "and" { BinaryOpKind::And } else { BinaryOpKind::Or };
             Ok(Expr::BinaryOp(kind, Box::new(lhs), Box::new(rhs)))
         }
@@ -885,14 +885,14 @@ mod tests {
     }
 
     #[test]
-    fn test_smt_to_brief_expr_bvadd() {
+    fn test_smt_to_briv_expr_bvadd() {
         let params = vec![("x".into(), Type::int())];
         let sexpr = SExpr::List(vec![
             SExpr::Atom("bvadd".into()),
             SExpr::Atom("x0".into()),
             SExpr::Atom("#x0000000000000001".into()),
         ]);
-        let result = smt_to_brief_expr(&sexpr, &params, &Type::int()).unwrap();
+        let result = smt_to_briv_expr(&sexpr, &params, &Type::int()).unwrap();
         assert_eq!(
             result,
             Expr::BinaryOp(
@@ -904,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn test_smt_to_brief_expr_ite() {
+    fn test_smt_to_briv_expr_ite() {
         let params = vec![("x".into(), Type::int())];
         let sexpr = SExpr::List(vec![
             SExpr::Atom("ite".into()),
@@ -919,7 +919,7 @@ mod tests {
             ]),
             SExpr::Atom("x0".into()),
         ]);
-        let result = smt_to_brief_expr(&sexpr, &params, &Type::int()).unwrap();
+        let result = smt_to_briv_expr(&sexpr, &params, &Type::int()).unwrap();
         assert!(matches!(result, Expr::If(..)));
     }
 

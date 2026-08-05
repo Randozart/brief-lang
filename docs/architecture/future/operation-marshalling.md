@@ -6,7 +6,7 @@
 ## Summary
 
 Instead of marshalling data at runtime (like every other language does at FFI
-boundaries), Brief would marshal operations at compile time — adapting the
+boundaries), Briv would marshal operations at compile time — adapting the
 program's abstract operations to the target platform's native ABI without
 changing source code.
 

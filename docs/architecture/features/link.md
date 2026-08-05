@@ -6,11 +6,11 @@
 
 ## Overview
 
-Link dependencies tell the Brief compiler to compile foreign source files and link them into the final binary. They use the `import` keyword with a `link/`-prefixed path, which differentiates them from regular Brief module imports.
+Link dependencies tell the Briv compiler to compile foreign source files and link them into the final binary. They use the `import` keyword with a `link/`-prefixed path, which differentiates them from regular Briv module imports.
 
 ## Syntax
 
-```brief
+```briv
 import "link/path/to/file.c";
 import "link/some_library.o";
 import "link/xxhash/xxhash.c";
@@ -44,13 +44,13 @@ The compiler searches for linked files in this order:
 
 ## LTO Pipeline
 
-All linked bitcode files are merged with the program's IR module, then `opt -O3` runs on the merged module before `llc` produces the final object. This enables cross-language LTO — a C file linked via `import "link/file.c"` gets the same optimization as Brief code.
+All linked bitcode files are merged with the program's IR module, then `opt -O3` runs on the merged module before `llc` produces the final object. This enables cross-language LTO — a C file linked via `import "link/file.c"` gets the same optimization as Briv code.
 
 ## Common Patterns
 
-```brief
+```briv
 // Link the runtime C support library
-import "link/brief_rt.c";
+import "link/briv_rt.c";
 
 // Link a third-party library
 import "link/xxhash/xxhash.c";
@@ -65,7 +65,7 @@ import "link/rust_lib.bc";
 ## Restrictions
 
 Named imports are rejected for link dependencies:
-```brief
+```briv
 import { someFunc } from "link/file.c";  // ERROR: cannot name-import from link target
 ```
 

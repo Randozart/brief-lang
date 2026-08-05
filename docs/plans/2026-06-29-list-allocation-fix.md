@@ -43,12 +43,12 @@ This is the **opposite direction** of the current broken approach:
 
 ### Why Not Use an Escape Analysis Pass in the Compiler
 
-An explicit escape analysis in the Brief compiler is possible but adds:
+An explicit escape analysis in the Briv compiler is possible but adds:
 - A new analysis pass (or extension to liveness analysis)
 - A context parameter threaded through `emit_expr` indicating "this will be stored in state"
 - Conditional logic in the hot codegen path
 
-LLVM already has this analysis. Leveraging LLVM's pass is zero additional compile-time complexity in Brief, is maintained by the LLVM community, and handles edge cases (partial escape, phi nodes, etc.) that we'd have to reimplement poorly.
+LLVM already has this analysis. Leveraging LLVM's pass is zero additional compile-time complexity in Briv, is maintained by the LLVM community, and handles edge cases (partial escape, phi nodes, etc.) that we'd have to reimplement poorly.
 
 ## Implementation
 
@@ -260,7 +260,7 @@ To verify: ensure the `add i64 0, 0 ; push void` branch in the assertion (line 4
 - **Benchmark impact:** Should be neutral or positive (empty lists are faster, non-empty lists that escape to state were previously broken).
 
 ### Garbage Collection / Free
-The current code never `free`s heap-allocated list headers. This is pre-existing (the `alloca`-based pattern also leaked — stack memory is freed on function return, but the data pointed to by the header was never freed). The Brief runtime currently has no garbage collector.
+The current code never `free`s heap-allocated list headers. This is pre-existing (the `alloca`-based pattern also leaked — stack memory is freed on function return, but the data pointed to by the header was never freed). The Briv runtime currently has no garbage collector.
 
 This is a **known limitation** that predates this fix. Adding `free` calls is a separate concern (requires tracking ownership or reference counting). For the ticket (officina SIGSEGV fix), this leak is acceptable — it's the same situation as strings, which also use heap allocation without free.
 
@@ -274,6 +274,6 @@ Both conditions hold for local list literals. Verified across LLVM 14-18.
 ## Future Work
 
 Beyond this fix:
-1. **Add `free` for heap-allocated list headers** — Brief needs a GC or ownership system. Currently not blocking any feature.
-2. **Escape-analysis pass in Brief** — if LLVM's promotion proves insufficient (e.g., partial escape through phi nodes), add a Brief-level analysis that chooses `alloca` vs `malloc` directly. This would be additive — default to `malloc`, override to `alloca` when escape is disproven.
+1. **Add `free` for heap-allocated list headers** — Briv needs a GC or ownership system. Currently not blocking any feature.
+2. **Escape-analysis pass in Briv** — if LLVM's promotion proves insufficient (e.g., partial escape through phi nodes), add a Briv-level analysis that chooses `alloca` vs `malloc` directly. This would be additive — default to `malloc`, override to `alloca` when escape is disproven.
 3. **Tuple allocation** — apply same `malloc` pattern to tuples if tests show similar elimination issues.

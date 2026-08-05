@@ -1,4 +1,4 @@
-# Phase 2 Brief: Contract Optimization (!range + @llvm.assume + nuw nsw)
+# Phase 2 Briv: Contract Optimization (!range + @llvm.assume + nuw nsw)
 
 **Date:** 2026-05-29  
 **Spec Reference:** `05-CONTRACT-TO-METADATA.md`  
@@ -91,7 +91,7 @@ store i64 %new, i64* %ptr
 
 ```bash
 for f in tests/fixtures/phase2/*.bv; do
-  brief-compiler llvm "$f" --out /tmp/p2/
+  briv-compiler llvm "$f" --out /tmp/p2/
   llc /tmp/p2/$(basename "$f" .bv).ll -o /dev/null  # Must succeed
 done
 grep "!range" /tmp/p2/range_contract.ll              # !range metadata present

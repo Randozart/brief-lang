@@ -149,7 +149,7 @@ Intrinsic '<name>' is not supported by the webstack/WebAssembly backend.
 | `GetNumGroups#` | Same. |
 | `WorkgroupSize#` | Same. |
 | `Dims#` | Same. |
-| `StrSplit#` | No WASM string model. Use `import "string.bv"` at the Brief level. |
+| `StrSplit#` | No WASM string model. Use `import "string.bv"` at the Briv level. |
 | `EnvGet#` | No environment. Use `frgn from #Web` to expose JS env vars if needed. |
 | `SysQuery#` | No system query mechanism. |
 | `TimeNow#` | No nanosecond clock. Use `time.bv` `now()` for milliseconds. |

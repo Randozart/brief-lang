@@ -1,4 +1,4 @@
-# Stress-Test the GLUE/FFI Pipeline via `brief export`
+# Stress-Test the GLUE/FFI Pipeline via `briv export`
 
 **Date:** 2026-07-22
 **Status:** Complete — all three gaps resolved
@@ -8,8 +8,8 @@
 
 ## Goal
 
-Run `brief export pp-types.bv rust --out /tmp/pp-bridge` end-to-end and have it
-produce a working Rust crate that Rust can call with `brief_pp_type_bits("42")`
+Run `briv export pp-types.bv rust --out /tmp/pp-bridge` end-to-end and have it
+produce a working Rust crate that Rust can call with `briv_pp_type_bits("42")`
 and get back `"Bits(42)"`.
 
 Each failure reveals a gap in the GLUE pipeline. Fix each gap, repeat, until
@@ -23,7 +23,7 @@ The key insight: **the export command must not know about specific languages.**
 Every target language is configured entirely through `lib/glue.toml`. The TOML
 provides:
 
-1. **Type mapping** (`c_type_map`) — Brief types to foreign ABI types
+1. **Type mapping** (`c_type_map`) — Briv types to foreign ABI types
 2. **Calling convention** (`calling_convention`) — `"lto"` for LLVM-linked,
    `"c_abi"` for dynamic FFI
 3. **Output templates** — file names and their content templates, using
@@ -44,7 +44,7 @@ No Rust code branches on language. Adding a new language = adding a TOML section
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `{{bridge_name}}` | Name of the bridge | `"pp-types"` |
-| `{{name}}` | Function name | `"brief_pp_type_bits"` |
+| `{{name}}` | Function name | `"briv_pp_type_bits"` |
 | `{{params}}` | Parameter list (name: Type) | `"n: &str"` |
 | `{{ffi_params}}` | FFI parameter list | `"state: *mut c_void, n: i64"` |
 | `{{ffi_call_args}}` | FFI call arguments | `"state, n_as_i64"` |
@@ -87,13 +87,13 @@ Then add C-ABI export wrappers on top.
 ### Step 4 — Test end-to-end
 
 ```bash
-brief export pp-types.bv rust --out /tmp/pp-bridge
+briv export pp-types.bv rust --out /tmp/pp-bridge
 cd /tmp/pp-bridge/pp-types-bridge
 cargo build
 ```
 
 The generated crate should compile and produce a binary that can call
-the exported Brief functions.
+the exported Briv functions.
 
 ---
 
@@ -101,10 +101,10 @@ the exported Brief functions.
 
 | Gap | What's tested | Success Criteria |
 |-----|---------------|-----------------|
-| **1** | TOML-driven template generation works | `brief export` produces files without hardcoded branches |
+| **1** | TOML-driven template generation works | `briv export` produces files without hardcoded branches |
 | **2** | Full backend codegen for exports | Generated `.ll` has real function bodies, not `ret i64 0` |
 | **3** | Generated Rust crate compiles | `cargo build` in the output dir succeeds |
-| **4** | Bridge functions return correct results | `brief_pp_type_bits("42")` returns `"Bits(42)"` |
+| **4** | Bridge functions return correct results | `briv_pp_type_bits("42")` returns `"Bits(42)"` |
 
 The stress test is the pipeline itself. Each gap we discover and fix proves
 the architecture is sound.

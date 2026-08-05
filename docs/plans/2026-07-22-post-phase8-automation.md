@@ -20,10 +20,10 @@ previous).
 ### Current state
 
 `resolve_single_frgn()` at `src/analysis/frgn_dispatch.rs:126` computes the
-protocol path between `brief_type` and `brief_type` — the same type twice.
+protocol path between `briv_type` and `briv_type` — the same type twice.
 
 ```rust
-compute_protocol_path(brief_type, brief_type, universe)
+compute_protocol_path(briv_type, briv_type, universe)
 ```
 
 The foreign type from the target's `c_type_map` is **never passed**. The BFS
@@ -44,9 +44,9 @@ the target's type map:
 
 ```rust
 let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
-    .map(|(_, brief_type)| {
-        let foreign_type = lookup_foreign_type(brief_type, target);
-        compute_protocol_path(brief_type, &foreign_type, universe)
+    .map(|(_, briv_type)| {
+        let foreign_type = lookup_foreign_type(briv_type, target);
+        compute_protocol_path(briv_type, &foreign_type, universe)
             .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
     })
     .collect::<Result<Vec<_>, _>>()?;
@@ -57,15 +57,15 @@ let return_path: Option<ProtocolStep> = fb.success_output.first()
     });
 ```
 
-Where `lookup_foreign_type` maps a Brief type to its foreign counterpart:
+Where `lookup_foreign_type` maps a Briv type to its foreign counterpart:
 
 ```rust
-fn lookup_foreign_type(brief_type: &Type, target: &GlueTarget) -> Type {
-    match brief_type {
+fn lookup_foreign_type(briv_type: &Type, target: &GlueTarget) -> Type {
+    match briv_type {
         Type::Custom(name) => target.c_type_map.get(name)
             .map(|s| Type::Custom(s.clone()))
-            .unwrap_or_else(|| brief_type.clone()),
-        _ => brief_type.clone(),
+            .unwrap_or_else(|| briv_type.clone()),
+        _ => briv_type.clone(),
     }
 }
 ```
@@ -103,10 +103,10 @@ path exists.
 ### Verification
 
 ```bash
-# Before: param_paths are all Identity (brief_type == brief_type)
+# Before: param_paths are all Identity (briv_type == briv_type)
 # After: param_paths have actual transforms (Bitcast, etc.)
 # The generated Rust crate should work identically
-brief export pp-types.bv rust --out /tmp/test
+briv export pp-types.bv rust --out /tmp/test
 cd /tmp/test/pp-types-bridge && cargo build
 ```
 
@@ -235,11 +235,11 @@ pub arena_initial_size: u64,
 
 ```bash
 # Low budget → direct malloc (simpler IR, fast compile)
-brief build pp-types.bv --llvm --optimize-budget 0
+briv build pp-types.bv --llvm --optimize-budget 0
 grep -c 'realloc\|arena.*grow' target/pp-types.ll  # should be 0
 
 # High budget → bump arena (optimal runtime)
-brief build pp-types.bv --llvm --optimize-budget 256
+briv build pp-types.bv --llvm --optimize-budget 256
 grep -c 'realloc\|arena.*grow' target/pp-types.ll  # should be >0
 ```
 
@@ -250,12 +250,12 @@ grep -c 'realloc\|arena.*grow' target/pp-types.ll  # should be >0
 ### Current state
 
 `optimize_layouts()` at `src/analysis/layout_optimizer.rs:52` is fully wired
-in `compile.rs:239-244`. It scans bridge-path frgns, compares Brief type
+in `compile.rs:239-244`. It scans bridge-path frgns, compares Briv type
 layouts to foreign type layouts, and proposes `LayoutChange` to adopt the
 foreign layout.
 
 **BUT it's never triggered** — because `resolve_single_frgn` at line 126
-always produces `Identity` paths (since it compares `brief_type == brief_type`).
+always produces `Identity` paths (since it compares `briv_type == briv_type`).
 No bridge frgn is ever found with a non-identity protocol path, so
 `optimize_layouts` sees no benefit in changing layouts.
 
@@ -303,7 +303,7 @@ The optimizer is already called. After fixing the protocol path computation
 
 ```bash
 # Build with a bridge frgn, check if layout changes are proposed
-brief build pp-types.bv --llvm --emit-beast all 2>&1
+briv build pp-types.bv --llvm --emit-beast all 2>&1
 grep 'layout optimizer' pp-types.beast.codegen  # should show changes
 ```
 

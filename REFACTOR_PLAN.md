@@ -1,4 +1,4 @@
-# Brief Compiler Refactor: Pattern B Architecture
+# Briv Compiler Refactor: Pattern B Architecture
 
 **Date**: 2026-06-09  
 **Branch**: `refactor/pattern-b` (from `main`)  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Refactor the ~78K-line Brief compiler from monolithic match-arm dispatching to a **Pattern B (Struct-Variant Delegation)** architecture, where each AST construct lives in its own feature file with co-located parsing, typechecking, evaluation, and codegen logic.
+Refactor the ~78K-line Briv compiler from monolithic match-arm dispatching to a **Pattern B (Struct-Variant Delegation)** architecture, where each AST construct lives in its own feature file with co-located parsing, typechecking, evaluation, and codegen logic.
 
 This eliminates ~232 Praetor complexity violations, makes the codebase navigable by feature ("open one file, see one concept"), and prepares the compiler for self-hosting.
 
@@ -18,7 +18,7 @@ This eliminates ~232 Praetor complexity violations, makes the codebase navigable
 
 ### `#test("group1", "group2")` — Per-item decoration, no semicolon
 
-```brief
+```briv
 #test("config")
 txn test_parse_config() [true][true] { ... };
 
@@ -32,7 +32,7 @@ txn test_validate_vars() [true][true] { ... };
 
 ### `#assert [pre] -> fnY -> fnZ` — Inline assertion, no semicolon
 
-```brief
+```briv
 #assert [number == 5] -> funcY -> funcZ
 txn my_func() [true][true] { ... };
 ```
@@ -42,7 +42,7 @@ txn my_func() [true][true] { ... };
 
 ### `#!assert [pre] fnX -> fnY -> fnZ;` — Global assertion, semicolon required
 
-```brief
+```briv
 #!assert [trigger == true] funcX -> funcY -> funcZ;
 ```
 
@@ -58,7 +58,7 @@ txn my_func() [true][true] { ... };
 | `--prod --include-tests` | ✅ Included | `u64::MAX` |
 | `--dev --exclude-tests` | ❌ Excluded | 256 |
 
-CLI: `brief run --test --group config` runs only tests tagged with `"config"`.
+CLI: `briv run --test --group config` runs only tests tagged with `"config"`.
 
 ---
 
@@ -400,9 +400,9 @@ Deleted only in Phase 8 after full test parity is confirmed.
 
 > ⚠️ **Supersedes prior 1.5 design.** The original—hardcoded `ProjectionTarget` variants (Volatile, Atomic, Endian, etc.) as settable type properties—is preserved as-is below under **"Superseded Design"** for reference. The new design drastically shrinks the primitive kernel. Old content is non-destructively retained.
 
-**Rationale**: "What is the smallest set of primitives the Rust compiler must hardcode so that everything else can be defined in Brief?"
+**Rationale**: "What is the smallest set of primitives the Rust compiler must hardcode so that everything else can be defined in Briv?"
 
-The answer: **~10 primitives.** `Bytes`, `Alignment`, `Endian`, `Volatile`, `Atomic` describe physical layout. `ElementType`, `FixedSize`, `InsertAt`, `ExtractFrom`, `AllowIndex`, `AllowSlice`, `AllowArrow` describe collection behavior. Codecs provide encoding/decoding. Everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is user-space Brief in `std/core.bv`.
+The answer: **~10 primitives.** `Bytes`, `Alignment`, `Endian`, `Volatile`, `Atomic` describe physical layout. `ElementType`, `FixedSize`, `InsertAt`, `ExtractFrom`, `AllowIndex`, `AllowSlice`, `AllowArrow` describe collection behavior. Codecs provide encoding/decoding. Everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is user-space Briv in `std/core.bv`.
 
 #### Primitive Kernel (compiler natively understands these)
 
@@ -463,7 +463,7 @@ Any other expression form is a **compile-time error** in Pass 1.
 
 **What lives in `std/core.bv` (user-space, not in Rust compiler):**
 
-```brief
+```briv
 Type U8    <: Bits { Bytes = 1; Alignment = 1; };
 Type U16   <: Bits { Bytes = 2; Alignment = 2; };
 Type U32   <: Bits { Bytes = 4; Alignment = 4; };
@@ -506,7 +506,7 @@ Type String <: List<U8> { Codec = UTF8; };
 
 The original plan hardcoded a fixed set of `ProjectionTarget` variants as settable type properties within `<:` blocks:
 
-```brief
+```briv
 Type Queue<T> <: List<T> {
     Access = "FIFO";
     IndexAccess = false;
@@ -531,7 +531,7 @@ The Phase 1.5 design conversation surfaced several profound ideas that are **NOT
 
 Instead of hardcoding `KeyExpr` or field names like `.priority`, a generic type like `KeyedQueue<T, K>` receives the ordering expression as a type parameter. The compiler validates at instantiation that `T → K` is a valid projection.
 
-```brief
+```briv
 // DEFERRED — syntax and instantiation rules TBD
 Type KeyedQueue<T, K: Ordered> <: List<T> {
     ExtractFrom = <: { MAX(K) };
@@ -587,7 +587,7 @@ The design decision: `#volatile` pragma on field declarations for ergonomics, `V
 
 Refinement constraints in type bodies use implicit self:
 
-```brief
+```briv
 Type PositiveInt <: Int {
     [ > 0 && < 100 ]
 };
@@ -898,7 +898,7 @@ Both risks are detected by the benchmark harness, not unit tests.
 | Doc section | Content | Length |
 |-------------|---------|--------|
 | Header | Purpose, date added, which phase | 2 lines |
-| Syntax | Brief syntax for the construct, with examples | 10–30 lines |
+| Syntax | Briv syntax for the construct, with examples | 10–30 lines |
 | Typechecking | How types are inferred/checked | 5–15 lines |
 | Evaluation | How it evaluates in the interpreter | 5–15 lines |
 | Codegen | Per-backend codegen notes (LLVM, VHDL, Webstack) | 10–30 lines |
@@ -979,7 +979,7 @@ cargo kani --lib
 | **Doc-per-cycle** | Architecture docs ship in the same commit as the code change. No batch documentation phases. |
 | **Praetor-clean from day one** | Every new function ≤ 100 lines, complexity ≤ 15, params ≤ 6. Old code quarantined in `_monolithic/`. |
 | **Semicolon rule** | `#!` global directives get `;`. `#` decorations do not — they belong to the item they prepend. |
-| **Benchmark as guard** | `build_and_bench.sh` after every phase — if Brief beats C by an implausible margin, something is wrong. |
+| **Benchmark as guard** | `build_and_bench.sh` after every phase — if Briv beats C by an implausible margin, something is wrong. |
 | **Feature files 100–500 lines** | Leaf nodes fit in working memory. Coordinators 1,000–2,000 lines. |
 
 ---

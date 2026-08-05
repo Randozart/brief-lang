@@ -1,60 +1,60 @@
-# Getting Started with Brief
+# Getting Started with Briv
 
 **Version:** 1.0  
-**Purpose:** Your first steps learning Brief programming  
+**Purpose:** Your first steps learning Briv programming  
 
 ---
 
 ## Table of Contents
 
-1. [What is Brief?](#what-is-brief)
+1. [What is Briv?](#what-is-briv)
 2. [Prerequisites](#prerequisites)
-3. [Installing Brief](#installing-brief)
+3. [Installing Briv](#installing-briv)
 4. [Your First Project: Hello World](#your-first-project-hello-world)
 5. [Understanding What You Wrote](#understanding-what-you-wrote)
 6. [Your Second Project: A Counter](#your-second-project-a-counter)
-7. [Key Concepts in Brief](#key-concepts-in-brief)
+7. [Key Concepts in Briv](#key-concepts-in-briv)
 8. [Where to Go Next](#where-to-go-next)
 
 ---
 
-## What is Brief?
+## What is Briv?
 
-Brief is a programming language designed to help you write **bug-free code** from the start.
+Briv is a programming language designed to help you write **bug-free code** from the start.
 
-Most programming languages let you write anything, even things that don't make sense, and then you spend hours debugging later. Brief takes a different approach: **you write a contract first, then write the code**.
+Most programming languages let you write anything, even things that don't make sense, and then you spend hours debugging later. Briv takes a different approach: **you write a contract first, then write the code**.
 
 Think of it like writing a recipe with quality checks built in. Before you cook, you specify what ingredients you need and what the finished dish should look like. If something goes wrong during cooking, you know immediately because the contract wasn't met.
 
 ### The Key Idea: Contracts
 
-A **contract** in Brief has two parts:
+A **contract** in Briv has two parts:
 
 1. **Precondition** - What must be true before your code runs
 2. **Postcondition** - What must be true after your code runs
 
-If the preconditions aren't met, Brief won't let the code run. If the postconditions aren't met, Brief tells you something went wrong. This catches bugs at the moment they happen, not hours later when you're trying to figure out why your program crashed.
+If the preconditions aren't met, Briv won't let the code run. If the postconditions aren't met, Briv tells you something went wrong. This catches bugs at the moment they happen, not hours later when you're trying to figure out why your program crashed.
 
-### What Can You Build with Brief?
+### What Can You Build with Briv?
 
-Brief is designed to work in multiple contexts:
+Briv is designed to work in multiple contexts:
 
-- **Web applications** - Brief compiles to WebAssembly, so it runs in browsers
+- **Web applications** - Briv compiles to WebAssembly, so it runs in browsers
 - **Backend services** - Can handle business logic with contracts ensuring correctness
-- **FFI libraries** - Brief can call functions from other languages (Rust, C, Python, JavaScript, Go, and more)
+- **FFI libraries** - Briv can call functions from other languages (Rust, C, Python, JavaScript, Go, and more)
 
-### Why Learn Brief?
+### Why Learn Briv?
 
 - **Catch bugs early** - Contracts tell you immediately when something goes wrong
 - **Self-documenting code** - Contracts explain what each piece of code expects and guarantees
-- **Symbolic verification** - Brief can mathematically prove your contracts are achievable
+- **Symbolic verification** - Briv can mathematically prove your contracts are achievable
 - **Simple syntax** - No complex type system to learn upfront
 
 ---
 
 ## Prerequisites
 
-Before learning Brief, you should have:
+Before learning Briv, you should have:
 
 ### Basic Programming Knowledge
 
@@ -62,13 +62,13 @@ Before learning Brief, you should have:
 - Understanding of functions (reusable pieces of code)
 - Basic understanding of programming concepts like "if statements" and "loops"
 
-If you have experience in any programming language—JavaScript, Python, C, Rust, or even BASIC—you have enough background for Brief.
+If you have experience in any programming language—JavaScript, Python, C, Rust, or even BASIC—you have enough background for Briv.
 
 ### Software You Need
 
-1. **A text editor** - We recommend [Visual Studio Code](https://code.visualstudio.com/) because it's free and works well with Brief
-2. **A terminal/command line** - Brief runs from the command line. On Windows, this is PowerShell or Command Prompt. On Mac/Linux, it's called Terminal.
-3. **Rust** (for building Brief from source) - Installation instructions below
+1. **A text editor** - We recommend [Visual Studio Code](https://code.visualstudio.com/) because it's free and works well with Briv
+2. **A terminal/command line** - Briv runs from the command line. On Windows, this is PowerShell or Command Prompt. On Mac/Linux, it's called Terminal.
+3. **Rust** (for building Briv from source) - Installation instructions below
 
 ### Understanding Your Terminal
 
@@ -85,13 +85,13 @@ Don't worry if these are new to you—they're straightforward and we'll explain 
 
 ---
 
-## Installing Brief
+## Installing Briv
 
-Brief is currently distributed as source code that you compile yourself. This sounds intimidating but is actually quite simple.
+Briv is currently distributed as source code that you compile yourself. This sounds intimidating but is actually quite simple.
 
 ### Step 1: Install Rust
 
-Brief is written in Rust, so you need Rust installed first.
+Briv is written in Rust, so you need Rust installed first.
 
 1. Go to [https://rustup.rs](https://rustup.rs)
 2. Follow the instructions (it mostly just involves running one command)
@@ -103,52 +103,52 @@ rustc --version
 
 You should see something like `rustc 1.75.0` (version numbers change over time).
 
-### Step 2: Build Brief
+### Step 2: Build Briv
 
 Open your terminal and run these commands:
 
 ```bash
-# Clone the Brief repository (or navigate to where you downloaded it)
-git clone https://github.com/your-username/brief-compiler.git
-cd brief-compiler
+# Clone the Briv repository (or navigate to where you downloaded it)
+git clone https://github.com/your-username/briv-compiler.git
+cd briv-compiler
 
-# Build Brief in release mode (this takes a few minutes the first time)
+# Build Briv in release mode (this takes a few minutes the first time)
 cargo build --release
 ```
 
 The `--release` flag makes the compiled program run faster. The first build might take 5-10 minutes. Future builds will be faster.
 
-### Step 3: Add Brief to Your PATH
+### Step 3: Add Briv to Your PATH
 
 After building, you can either:
 
 **Option A: Add to PATH temporarily (for one terminal session)**
 
 ```bash
-export PATH="$PATH:/path/to/brief-compiler/target/release"
+export PATH="$PATH:/path/to/briv-compiler/target/release"
 ```
 
 **Option B: Install system-wide**
 
 ```bash
-# From the brief-compiler directory
-./target/release/brief install
+# From the briv-compiler directory
+./target/release/briv install
 ```
 
-This installs Brief to `~/.local/bin/brief`.
+This installs Briv to `~/.local/bin/briv`.
 
 ### Step 4: Verify Installation
 
 ```bash
-brief --help
+briv --help
 ```
 
 You should see:
 
 ```
-Brief Compiler v0.1.0
+Briv Compiler v0.1.0
 
-Usage: brief <command> [options] [file]
+Usage: briv <command> [options] [file]
 
 Commands:
   check <file>     Type check without execution (fast)
@@ -161,9 +161,9 @@ If you see this, you're ready to start programming!
 
 ### Troubleshooting
 
-**"brief: command not found"**
+**"briv: command not found"**
 
-- Make sure the PATH includes where Brief is installed (`~/.local/bin` or the target directory)
+- Make sure the PATH includes where Briv is installed (`~/.local/bin` or the target directory)
 - Try opening a new terminal window
 
 **"cargo: command not found"**
@@ -179,34 +179,34 @@ If you see this, you're ready to start programming!
 
 ## Your First Project: Hello World
 
-Let's create your first Brief program. We'll make a simple program that says "Hello, World!"
+Let's create your first Briv program. We'll make a simple program that says "Hello, World!"
 
 ### Step 1: Create a New Project
 
 ```bash
 # Create a new folder for your project
-mkdir hello-brief
-cd hello-brief
+mkdir hello-briv
+cd hello-briv
 
-# Initialize with Brief
-brief init
+# Initialize with Briv
+briv init
 ```
 
 This creates a basic project structure:
 
 ```
-hello-brief/
+hello-briv/
 ├── src/
-│   └── main.bv      # Your Brief code lives here
+│   └── main.bv      # Your Briv code lives here
 ├── Cargo.toml        # Rust project settings (for compiling to WebAssembly)
-└── brief.toml       # Brief project settings
+└── briv.toml       # Briv project settings
 ```
 
 ### Step 2: Open and Edit main.bv
 
 Open `src/main.bv` in your text editor. You'll see some default content. Replace everything with this:
 
-```brief
+```briv
 txn greet [true][result == "Hello, World!"] {
     term "Hello, World!";
 };
@@ -214,17 +214,17 @@ txn greet [true][result == "Hello, World!"] {
 
 ### Step 3: Run Your Program
 
-Back in your terminal, from the `hello-brief` folder:
+Back in your terminal, from the `hello-briv` folder:
 
 ```bash
-brief run src/main.bv
+briv run src/main.bv
 ```
 
 You should see your browser open (or a message saying the server started). Your "Hello, World!" program is running!
 
 ### Congratulations!
 
-You've just written and run your first Brief program. Let's break down exactly what you wrote.
+You've just written and run your first Briv program. Let's break down exactly what you wrote.
 
 ---
 
@@ -232,7 +232,7 @@ You've just written and run your first Brief program. Let's break down exactly w
 
 Here's your first program again, with each part labeled:
 
-```brief
+```briv
 txn greet         // 1. Transaction named "greet"
 [                 // 2. Contract starts with bracket
   true            // 3. Precondition: always runs (no requirements)
@@ -248,13 +248,13 @@ txn greet         // 1. Transaction named "greet"
 
 **1. `txn greet`**
 
-The word `txn` is short for "transaction." A transaction is a unit of work in Brief—it's how you define something your program can *do*.
+The word `txn` is short for "transaction." A transaction is a unit of work in Briv—it's how you define something your program can *do*.
 
 The name `greet` is what you call it. You can use this name to trigger this work from elsewhere in your program.
 
 **2-6. The Contract `[true][result == "Hello, World!"]`**
 
-The contract is where Brief's magic happens. It has two parts:
+The contract is where Briv's magic happens. It has two parts:
 
 - **Precondition** (`true`) - What must be true *before* this code runs
 - **Postcondition** (`result == "Hello, World!"`) - What must be true *after* this code runs
@@ -267,7 +267,7 @@ The preconditions are in the first set of brackets `[ ]`. The postconditions are
 
 **5. Postcondition: `result == "Hello, World!"`**
 
-After the transaction runs, the result should equal `"Hello, World!"`. The variable `result` is special in Brief—it holds the value that the transaction produces.
+After the transaction runs, the result should equal `"Hello, World!"`. The variable `result` is special in Briv—it holds the value that the transaction produces.
 
 **8. `term "Hello, World!";`**
 
@@ -277,7 +277,7 @@ The keyword `term` means "terminate and return this value." It ends the transact
 
 When you see `result == "Hello, World!"`, read it as: "The output should equal Hello World."
 
-When Brief verifies your program, it checks that `result` will indeed equal `"Hello, World!"` when the transaction completes. If it can't prove this mathematically, it will give you an error.
+When Briv verifies your program, it checks that `result` will indeed equal `"Hello, World!"` when the transaction completes. If it can't prove this mathematically, it will give you an error.
 
 ---
 
@@ -291,14 +291,14 @@ Let's build something more interesting: a counter that can go up, down, and rese
 cd ..              # Go back to parent folder
 mkdir simple-counter
 cd simple-counter
-brief init
+briv init
 ```
 
 ### Step 2: Write the Counter Code
 
 Open `src/main.bv` and replace the content with:
 
-```brief
+```briv
 // A simple counter that tracks a number
 // State variable: the current count
 let count: Int = 0;
@@ -363,7 +363,7 @@ Actually, for our counter, `[~/count]` means the postcondition of the *previous*
 
 Let's use the explicit form for clarity in our transactions. Update the `reset` transaction:
 
-```brief
+```briv
 txn reset [count != 0][count == 0] {
     &count = 0;
     term;
@@ -373,23 +373,23 @@ txn reset [count != 0][count == 0] {
 ### Step 4: Run the Program
 
 ```bash
-brief run src/main.bv
+briv run src/main.bv
 ```
 
 You'll see the counter running in your browser. You can click buttons to increment, decrement, and reset.
 
 ### The Power of Contracts
 
-Here's what makes Brief special: try changing `[count < 100]` to `[true]` and running:
+Here's what makes Briv special: try changing `[count < 100]` to `[true]` and running:
 
-```brief
+```briv
 txn increment [true][count == @count + 1] {
     &count = count + 1;
     term;
 };
 ```
 
-Brief will warn you:
+Briv will warn you:
 
 ```
 error[P009]: trivial precondition
@@ -397,13 +397,13 @@ error[P009]: trivial precondition
   = transaction 'increment' has precondition '[true]' which is always satisfied
 ```
 
-Brief noticed that `[true]` accepts any state, and that's suspicious. If increment can run *always*, what's stopping it from running when count is already 100?
+Briv noticed that `[true]` accepts any state, and that's suspicious. If increment can run *always*, what's stopping it from running when count is already 100?
 
-This is Brief catching a potential bug before you even run the code.
+This is Briv catching a potential bug before you even run the code.
 
 ---
 
-## Key Concepts in Brief
+## Key Concepts in Briv
 
 Now that you've written two programs, let's formalize the key concepts.
 
@@ -415,13 +415,13 @@ A **transaction** (`txn`) is a named unit of work. It has:
 2. A contract (precondition and postcondition)
 3. A body (the code that runs)
 
-```brief
+```briv
 txn transaction_name [precondition][postcondition] {
     // code
 };
 ```
 
-Transactions are the main building blocks of Brief programs. When something needs to happen, you write a transaction for it.
+Transactions are the main building blocks of Briv programs. When something needs to happen, you write a transaction for it.
 
 ### Contracts
 
@@ -453,13 +453,13 @@ Contracts are written in brackets `[pre][post]`.
 
 State variables are defined at the top level with `let`:
 
-```brief
+```briv
 let name: Type = initial_value;
 ```
 
 They persist across transactions. To modify them, use `&`:
 
-```brief
+```briv
 &count = count + 1;  // Increment
 &count = count - 1;  // Decrement
 &count = 0;         // Reset
@@ -469,7 +469,7 @@ They persist across transactions. To modify them, use `&`:
 
 A **definition** (`defn`) is like a function or subroutine. It computes a value without changing state:
 
-```brief
+```briv
 defn double(x: Int) -> Int [true][result == x * 2] {
     term x * 2;
 };
@@ -485,7 +485,7 @@ Unlike transactions, definitions:
 
 A **struct** defines a structure with named fields:
 
-```brief
+```briv
 struct Counter {
     count: Int;
     
@@ -498,7 +498,7 @@ struct Counter {
 
 An **instance** is a specific Counter with its own fields:
 
-```brief
+```briv
 let my_counter = Counter {};           // Default values
 let big_counter = Counter { count: 50 };  // Custom values
 
@@ -510,7 +510,7 @@ big_counter.count;       // Access its field
 
 `term` ends a transaction or definition and specifies its result:
 
-```brief
+```briv
 term "hello";           // Return the string "hello"
 term count + 1;        // Return count plus 1
 term;                   // Return nothing (Void)
@@ -520,7 +520,7 @@ For transactions with postconditions about state (like `count == @count + 1`), u
 
 ### Boolean Values and Conditions
 
-Brief uses these boolean values:
+Briv uses these boolean values:
 
 | Value | Meaning |
 |-------|---------|
@@ -545,7 +545,7 @@ Conditions in contracts use comparison operators:
 
 ## Where to Go Next
 
-You've learned the basics of Brief! Here's where to go from here.
+You've learned the basics of Briv! Here's where to go from here.
 
 ### Learn More
 
@@ -555,20 +555,20 @@ You've learned the basics of Brief! Here's where to go from here.
 
 ### Example Projects
 
-- **[hello-world](../examples/hello-world/)** - The simplest possible Brief project
+- **[hello-world](../examples/hello-world/)** - The simplest possible Briv project
 - **[simple-counter](../examples/simple-counter/)** - A counter with state variables (what you just built)
 - **[counter.rbv](../examples/counter.rbv)** - A more complete counter with a visual display
 
 ### FFI (Calling Other Languages)
 
-Brief can call functions from other languages:
+Briv can call functions from other languages:
 
 - **[FFI-GUIDE.md](../spec/FFI-GUIDE.md)** - How to use external libraries
 - **[MAPPER-GUIDE.md](../spec/MAPPER-GUIDE.md)** - How to add support for new languages
 
 ### CLI Reference
 
-- **[CLI-GUIDE.md](../spec/CLI-GUIDE.md)** - Complete command reference for the Brief compiler
+- **[CLI-GUIDE.md](../spec/CLI-GUIDE.md)** - Complete command reference for the Briv compiler
 
 ---
 
@@ -580,13 +580,13 @@ Brief can call functions from other languages:
 
 **Definition (`defn`)** - A named computation that returns a value without modifying state.
 
-**FFI (Foreign Function Interface)** - How Brief calls functions written in other languages.
+**FFI (Foreign Function Interface)** - How Briv calls functions written in other languages.
 
 **Instance** - A specific struct with its own field values.
 
 **Lambda-style termination** - Using `term;` without a value when the postcondition describes state changes.
 
-**Mapper** - A component that translates between Brief types and foreign language types.
+**Mapper** - A component that translates between Briv types and foreign language types.
 
 **Postcondition** - The second part of a contract; what must be true after the code runs.
 
@@ -598,10 +598,10 @@ Brief can call functions from other languages:
 
 **Struct** - A named structure with fields and methods, defined with the `struct` keyword.
 
-**Symbolic verification** - Brief's ability to mathematically prove that contracts can be satisfied.
+**Symbolic verification** - Briv's ability to mathematically prove that contracts can be satisfied.
 
 **Transaction (`txn`)** - A named unit of work with a contract and a body.
 
 ---
 
-*Welcome to Brief! We're glad you're here.*
+*Welcome to Briv! We're glad you're here.*

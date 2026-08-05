@@ -3,10 +3,10 @@
 // Defines the core types that bridge files need without pulling in the
 // full prelude plugin (which adds OS runtime dependencies).
 // Use `--disable-plugin prelude` + import "glue/bridge-prelude.bv" to avoid
-// pulling in brief_rt.c dependencies.
+// pulling in briv_rt.c dependencies.
 //
 // Usage:
-//   brief build --disable-plugin prelude --library bridge.bv --out .
+//   briv build --disable-plugin prelude --library bridge.bv --out .
 
 type Int <: Bits {
     maxbits <~ 64;

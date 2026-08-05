@@ -4,7 +4,7 @@
 **Status:** Plan — pre-implementation
 **Depends on:** Phases 0–14 (Extensible Types → Derivation & Synthesis →
 `.dbvl` archive); GLUE v2 (`docs/plans/2026-07-10-glue-v2-ffi-unification.md`)
-**Proposal by:** [@revred](https://github.com/revred) — review of Brief's
+**Proposal by:** [@revred](https://github.com/revred) — review of Briv's
 FFI export pipeline identified five gaps between the existing infrastructure
 (`library_mode`, `emit_library_shim`, bindgen) and a consumable C-callable
 library. This plan closes those gaps.
@@ -17,14 +17,14 @@ end-to-end testing.
 
 ## Overview
 
-Brief's `--library` mode currently emits a `.ll` file with `#export` wrappers
-and `__brief_init_state`, but stops there. The external reviewer identified
+Briv's `--library` mode currently emits a `.ll` file with `#export` wrappers
+and `__briv_init_state`, but stops there. The external reviewer identified
 five gaps that prevent shipping a consumable C-callable library:
 
 | # | Gap | Source |
 |---|-----|--------|
 | 1 | `.ll` → `.o` → `.a`/`.so` packaging missing | External review |
-| 2 | `__brief_init_state`/`__glue_release` not in generated headers | External review |
+| 2 | `__briv_init_state`/`__glue_release` not in generated headers | External review |
 | 3 | `Bool`/`String` not marshaled at the FFI boundary | External review |
 | 4 | No end-to-end C driver test | External review |
 | 5 | `#export` is a pragma, not a keyword | Internal design |
@@ -35,13 +35,13 @@ natural continuation after derivation Phases 8–14.
 
 ### What we are taking from @revred's review
 
-The external review identified the exact boundary where Brief's existing
+The external review identified the exact boundary where Briv's existing
 infrastructure (which we built) stops and the consumable artifact begins.
 We adopt their analysis of the five gaps, their proposed v1 scope (pure
 `defn`s only, no transactions), and their acceptance criterion (a C program
 links the archive and gets correct results). The implementation details
 (marshal via `zext`/`trunc` for `Bool`, `getelementptr`/`bitcast` for
-`String`, `ar rcs` for static libs) are our own design within Brief's
+`String`, `ar rcs` for static libs) are our own design within Briv's
 existing backend conventions.
 
 ---
@@ -52,17 +52,17 @@ existing backend conventions.
 # The three output modes, fully orthogonal:
 
 # 1. Archive for decoupled backends (Phase 12)
-brief compile main.bv --archive build/main.dbvl
+briv compile main.bv --archive build/main.dbvl
 
 # 2. Library for C/foreign linking (Phase 15)
-brief build --library main.bv --out out/
+briv build --library main.bv --out out/
   → out/main.ll       (LLVM IR — already planned)
   → out/main.o        (llc -filetype=obj — Phase 15.1)
   → out/libmain.a     (ar rcs — Phase 15.2)
-  → out/brief_types.h (bindgen + init_state/release — Phase 15.3)
+  → out/briv_types.h (bindgen + init_state/release — Phase 15.3)
 
 # 3. GLUE bridge metadata (GLUE v2)
-brief export main.bv rust --out out/
+briv export main.bv rust --out out/
   → out/bridge-exports.dbvl
 ```
 
@@ -107,7 +107,7 @@ Token::Export => {
 ```
 
 **Syntax:**
-```brief
+```briv
 export defn add(a: Int, b: Int) -> Int { term a + b; };
 ```
 
@@ -160,7 +160,7 @@ if library_mode {
 can eliminate external globals like `@stdout`. We match the existing comment.
 
 **Tests:**
-- Manual: `brief build --library test.bv --out /tmp/lib` → produces `.ll`
+- Manual: `briv build --library test.bv --out /tmp/lib` → produces `.ll`
   AND `.o`
 - `test_library_mode_obj_exists`: After compile, `.o` file exists and is
   non-empty
@@ -209,21 +209,21 @@ if library_mode {
 **Test artifact:** C driver links with `-L. -l<stem>` and succeeds.
 
 **Tests:**
-- Manual: `brief build --library test.bv --out /tmp/lib` → `.a` exists
+- Manual: `briv build --library test.bv --out /tmp/lib` → `.a` exists
 - `test_library_mode_ar_fails`: If `ar` not on PATH, graceful error
 - `test_library_mode_a_has_correct_symbols`: `nm libtest.a | grep add`
   contains the expected export symbol
 
 ---
 
-## Step 15.3 — `__brief_init_state` and `__glue_release` in generated headers
+## Step 15.3 — `__briv_init_state` and `__glue_release` in generated headers
 
 **File:** `src/backend/bindgen.rs`
 
-**What:** The C header (`brief_types.h`), Rust bindings (`brief_bindings.rs`),
-and Python stubs (`brief_bindings.py`) currently emit function declarations
-for exported definitions with a `struct BriefState* state` first parameter,
-but they do not declare `__brief_init_state` or `__glue_release`. Add them.
+**What:** The C header (`briv_types.h`), Rust bindings (`briv_bindings.rs`),
+and Python stubs (`briv_bindings.py`) currently emit function declarations
+for exported definitions with a `struct BrivState* state` first parameter,
+but they do not declare `__briv_init_state` or `__glue_release`. Add them.
 
 **C header additions (`emit_c_header`):**
 ```rust
@@ -231,41 +231,41 @@ but they do not declare `__brief_init_state` or `__glue_release`. Add them.
 out.push_str("// ── Runtime State Handle ──\n");
 out.push_str("#ifndef BRIEF_STATE_DEFINED\n");
 out.push_str("#define BRIEF_STATE_DEFINED\n");
-out.push_str("typedef struct BriefState BriefState;\n");
+out.push_str("typedef struct BrivState BrivState;\n");
 out.push_str("#endif\n\n");
-out.push_str("// Initialize the Brief runtime state. Returns an opaque handle.\n");
+out.push_str("// Initialize the Briv runtime state. Returns an opaque handle.\n");
 out.push_str("// Must be called before any exported function.\n");
-out.push_str("BriefState* __brief_init_state(void);\n\n");
-out.push_str("// Release the Brief runtime state.\n");
-out.push_str("void __glue_release(BriefState* state);\n\n");
+out.push_str("BrivState* __briv_init_state(void);\n\n");
+out.push_str("// Release the Briv runtime state.\n");
+out.push_str("void __glue_release(BrivState* state);\n\n");
 ```
 
 **Rust additions (`emit_rust_bindings`):**
 ```rust
 out.push_str("extern \"C\" {\n");
-out.push_str("    pub fn __brief_init_state() -> *mut c_void;\n");
+out.push_str("    pub fn __briv_init_state() -> *mut c_void;\n");
 out.push_str("    pub fn __glue_release(state: *mut c_void);\n");
 out.push_str("}\n");
 ```
 
 **Python additions (`emit_python_stubs`):**
 ```python
-_lib.__brief_init_state.argtypes = []
-_lib.__brief_init_state.restype = ctypes.c_void_p
+_lib.__briv_init_state.argtypes = []
+_lib.__briv_init_state.restype = ctypes.c_void_p
 _lib.__glue_release.argtypes = [ctypes.c_void_p]
 _lib.__glue_release.restype = None
 ```
 
-**Also:** Change the first parameter from the current `struct BriefState* state`
+**Also:** Change the first parameter from the current `struct BrivState* state`
 to use the opaque typedef. The consumer should not need to know the struct
 layout — just the opaque handle.
 
 **Tests:**
 - `test_bindgen_c_header_has_init_release`: Generated C header contains
-  `__brief_init_state` and `__glue_release`
+  `__briv_init_state` and `__glue_release`
 - `test_bindgen_rust_has_init_release`: Generated Rust bindings have both
 - `test_bindgen_python_has_init_release`: Generated Python stubs have both
-- `test_bindgen_c_typedef_opaque`: `BriefState` is declared as `typedef struct BriefState BriefState;` not a struct definition
+- `test_bindgen_c_typedef_opaque`: `BrivState` is declared as `typedef struct BrivState BrivState;` not a struct definition
 
 ---
 
@@ -276,12 +276,12 @@ layout — just the opaque handle.
 
 **What:** The LLVM export wrapper (the `define dso_local` shim that forwards
 from the C-ABI entry point to the inner definition) must marshal types
-between C calling convention and Brief's internal representation. Bindgen's
+between C calling convention and Briv's internal representation. Bindgen's
 type maps must agree with the wrapper's emitted IR.
 
 ### Bool: `i1` ↔ `uint8_t`
 
-Brief's internal `Bool` type is `i1` (1-bit integer in LLVM). The C ABI
+Briv's internal `Bool` type is `i1` (1-bit integer in LLVM). The C ABI
 passes `_Bool`/`uint8_t` as `i8`. The export wrapper must `zext`/`trunc`:
 
 ```llvm
@@ -308,7 +308,7 @@ fn emit_export_wrapper(
     for (i, (name, ty)) in defn.parameters.iter().enumerate() {
         match ty {
             Type::Custom(t) if t == "Bool" => {
-                // C ABI passes as i8 — trunc to i1 for Brief
+                // C ABI passes as i8 — trunc to i1 for Briv
                 let i1_reg = format!("%inner_{}", name);
                 writeln!(out, "  {} = trunc i8 %{} to i1", i1_reg, name).ok();
                 // Use i1_reg as the argument to the inner call
@@ -326,7 +326,7 @@ fn emit_export_wrapper(
 
 ### String: `{ptr, len}` struct ↔ `const char*`
 
-Brief's internal `String` is a `%String` struct `{ i64, i64, i8 }` (ptr, len,
+Briv's internal `String` is a `%String` struct `{ i64, i64, i8 }` (ptr, len,
 codec). C callers expect `const char*` (a null-terminated `i8*`). The export
 wrapper must extract the `.ptr` field and pass/return it as `i8*`.
 
@@ -339,8 +339,8 @@ wrapper must extract the `.ptr` field and pass/return it as `i8*`.
 
 **For exports:** Return type marshaling:
 ```llvm
-; Brief function returned %String (i64 handle)
-%str_ptr = inttoptr i64 %brief_ret to %String*
+; Briv function returned %String (i64 handle)
+%str_ptr = inttoptr i64 %briv_ret to %String*
 %c_str_ptr = getelementptr %String, %String* %str_ptr, i32 0, i32 0
 %c_char_ptr = bitcast i64* %c_str_ptr to i8*
 ret i8* %c_char_ptr
@@ -352,8 +352,8 @@ ret i8* %c_char_ptr
 - `Bool` → `uint8_t` (already correct at line 183; verify wrapper emits
   `zext`/`trunc`)
 - `String` → `const char*` for function declarations (currently emits
-  `struct BriefString` at line 185 — change to `const char*` for the
-  export API, keep `struct BriefString` for GLUE meld paths that need
+  `struct BrivString` at line 185 — change to `const char*` for the
+  export API, keep `struct BrivString` for GLUE meld paths that need
   the full struct)
 
 **Reject complex types at compile time:** If an `export defn` has `List`,
@@ -369,7 +369,7 @@ String are supported in v1."` This matches the v1 scope.
 - `test_export_rejects_complex_types`: `export defn f(l: List<Int>)` →
   compile error
 - `test_bindgen_string_is_const_char_ptr`: C header shows `const char*`
-  not `struct BriefString`
+  not `struct BrivString`
 
 ---
 
@@ -377,7 +377,7 @@ String are supported in v1."` This matches the v1 scope.
 
 **New file:** `tests/library_mode/` directory
 
-**What:** A C program that links a compiled Brief library and calls an
+**What:** A C program that links a compiled Briv library and calls an
 exported function, verifying correct results. Guarded by toolchain
 availability (skip if `llc`/`ar`/`cc` not found, not `#[ignore]`).
 
@@ -385,11 +385,11 @@ availability (skip if `llc`/`ar`/`cc` not found, not `#[ignore]`).
 
 ```c
 // tests/library_mode/c_driver.c
-#include "brief_types.h"
+#include "briv_types.h"
 #include <stdio.h>
 
 int main() {
-    BriefState* state = __brief_init_state();
+    BrivState* state = __briv_init_state();
     int64_t result = add(state, 2, 3);
     printf("add(2, 3) = %ld\n", result);
     __glue_release(state);
@@ -423,18 +423,18 @@ fn test_library_mode_c_driver() {
     let bv_path = dir.path().join("test.bv");
     fs::write(&bv_path, bv_source).unwrap();
 
-    let status = std::process::Command::new(env!("CARGO_BIN_EXE_brief"))
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_briv"))
         .args(["build", "--library"])
         .arg(&bv_path)
         .arg("--out")
         .arg(dir.path())
         .status()
         .unwrap();
-    assert!(status.success(), "brief build --library failed");
+    assert!(status.success(), "briv build --library failed");
 
     // 2. Verify artifacts exist
     assert!(dir.path().join("libtest.a").exists());
-    assert!(dir.path().join("brief_types.h").exists());
+    assert!(dir.path().join("briv_types.h").exists());
 
     // 3. Compile C driver
     // (writes c_driver.c, compiles with cc, links libtest.a, runs)
@@ -517,7 +517,7 @@ transition, `#export` support is removed.
 |-----|------|
 | `docs/architecture/features/export.md` | `export` keyword syntax, library mode CLI, type marshaling rules |
 | `docs/architecture/glue-pipeline.md` | Add library-mode path alongside GLUE export path |
-| `docs/architecture/features/bindgen.md` | Generated header API: `BriefState`, `__brief_init_state`, `__glue_release` |
+| `docs/architecture/features/bindgen.md` | Generated header API: `BrivState`, `__briv_init_state`, `__glue_release` |
 
 ---
 

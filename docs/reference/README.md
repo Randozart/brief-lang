@@ -1,6 +1,6 @@
 # Reference Documentation
 
-Historical and supplementary documentation for the Brief compiler.
+Historical and supplementary documentation for the Briv compiler.
 
 ## Files
 

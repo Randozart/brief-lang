@@ -26,7 +26,7 @@ impl WasmBackend {
         }
     }
 
-    /// Intent: Generate WAT text output for the given Brief program.
+    /// Intent: Generate WAT text output for the given Briv program.
     pub fn generate(&mut self, program: &Program) -> String {
         let _analysis = crate::backend::analyze_program(program, false);
         let cg = &_analysis.call_graph;
@@ -644,8 +644,8 @@ impl WasmModuleBuilder {
     }
 }
 
-/// Intent: Map a Brief type to the nearest WASM value type.
-fn map_brief_type(val_type: &Type) -> ValType {
+/// Intent: Map a Briv type to the nearest WASM value type.
+fn map_briv_type(val_type: &Type) -> ValType {
     match val_type {
         Type::Int | Type::Bool | Type::UInt | Type::Data => ValType::I32,
         Type::Float => ValType::F64,
@@ -655,7 +655,7 @@ fn map_brief_type(val_type: &Type) -> ValType {
     }
 }
 
-/// Intent: Compile a Brief expression into a sequence of WASM opcodes.
+/// Intent: Compile a Briv expression into a sequence of WASM opcodes.
 fn expression_to_wasm(expr: &Expr, builder: &mut WasmModuleBuilder) -> Vec<u8> {
     match expr {
         Expr::Integer(value) => {
@@ -767,7 +767,7 @@ fn compile_guard(guard: &Expr, builder: &mut WasmModuleBuilder) -> Vec<u8> {
     expression_to_wasm(guard, builder)
 }
 
-/// Intent: Compile a list of Brief statements into WASM opcode bytes.
+/// Intent: Compile a list of Briv statements into WASM opcode bytes.
 fn compile_body(body: &[Statement], builder: &mut WasmModuleBuilder) -> Vec<u8> {
     let mut code = Vec::new();
     for stmt in body {
@@ -818,7 +818,7 @@ fn compile_body(body: &[Statement], builder: &mut WasmModuleBuilder) -> Vec<u8> 
     code
 }
 
-/// Intent: Compile an entire Brief Program into a WASM binary module.
+/// Intent: Compile an entire Briv Program into a WASM binary module.
 pub fn compile_program(program: &Program, config: WasmConfig) -> WasmModule {
     let mut builder = WasmModuleBuilder::new(config.clone());
 
@@ -871,7 +871,7 @@ pub fn compile_program(program: &Program, config: WasmConfig) -> WasmModule {
     }
 }
 
-/// Intent: Generate a WASM module from a Brief program using default configuration.
+/// Intent: Generate a WASM module from a Briv program using default configuration.
 pub fn generate_wasm(program: &Program) -> WasmModule {
     compile_program(program, WasmConfig::default())
 }

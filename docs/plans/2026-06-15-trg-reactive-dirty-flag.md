@@ -181,7 +181,7 @@ event_loop:
 - Delete `emit_trg_load_finish()` (no longer needed)
 - Remove `__trg_stdin_read`, `__trg_timerfd_open`, `__trg_timerfd_read`,
   `__trg_signalfd_open`, `__trg_signalfd_read` declares from `mod.rs`
-- Remove `brief_trg` section variables from `brief_rt.c` (`__io_pending`,
+- Remove `briv_trg` section variables from `briv_rt.c` (`__io_pending`,
   `__sigint_flag`, `__sigterm_flag`, `__sighup_flag`, `__timer_1hz`,
   `__timer_100hz`, `__stdin_ready`, `__stdin_buffer`, `__tty_read_key`)
 
@@ -200,7 +200,7 @@ the LLVM backend's `.ll` text emission.
 
 #### 4a. Dialect mapping
 
-| Brief construct | CIRCT dialect | Example |
+| Briv construct | CIRCT dialect | Example |
 |---|---|---|
 | `trg x: Int @ 0x4000` | HW | `hw.module port %x : !hw.inout<i64>` |
 | `trg y: Bool @ link btn` | HW | `hw.module port %y : i1` (input) |
@@ -257,7 +257,7 @@ For state variables (`let` with initializer and `node` updates):
 The compiler invokes `circt-opt` and `circt-translate` externally:
 
 ```
-brief-compiler --target circt program.bv -o program.mlir
+briv-compiler --target circt program.bv -o program.mlir
 circt-opt --lower-hw --lower-seq program.mlir -o program.lowered.mlir
 circt-translate --export-verilog program.lowered.mlir -o program.v
 ```
@@ -336,14 +336,14 @@ granularity using the dependency graph from Phase 1.
 
 ### Phase 6 — Remove Polling `__trg_*` C Runtime
 
-**Changes to `lib/runtime/brief_rt.c` and `src/backend/llvm/mod.rs`:**
+**Changes to `lib/runtime/briv_rt.c` and `src/backend/llvm/mod.rs`:**
 
 Delete:
-- `__trg_stdin_read()` — C function in `brief_rt.c`
-- `__trg_timerfd_open()` / `__trg_timerfd_read()` — C functions in `brief_rt.c`
-- `__trg_signalfd_open()` / `__trg_signalfd_read()` — C functions in `brief_rt.c`
+- `__trg_stdin_read()` — C function in `briv_rt.c`
+- `__trg_timerfd_open()` / `__trg_timerfd_read()` — C functions in `briv_rt.c`
+- `__trg_signalfd_open()` / `__trg_signalfd_read()` — C functions in `briv_rt.c`
 - All `__trg_*` `declare` stubs in `src/backend/llvm/mod.rs` lines 767–771
-- `brief_trg` section variables: `__io_pending`, `__sigint_flag`, `__sigterm_flag`,
+- `briv_trg` section variables: `__io_pending`, `__sigint_flag`, `__sigterm_flag`,
   `__sighup_flag`, `__timer_1hz`, `__timer_100hz`, `__stdin_ready`, `__stdin_buffer`,
   `__tty_read_key`
 
@@ -388,7 +388,7 @@ use `#[allow(...)]` — never implement new behavior.
 | 4 | `src/backend/router.rs` | Add --target circt dispatch |
 | 4 | `src/main.rs` | Add circt target flag, circt-opt/circt-translate pipeline |
 | 5 | `src/backend/webstack.rs` | Wire TopLevel::Trigger, step() gen |
-| 6 | `lib/runtime/brief_rt.c` | Remove ~80 lines of __trg_* |
+| 6 | `lib/runtime/briv_rt.c` | Remove ~80 lines of __trg_* |
 | 6 | `src/backend/llvm/mod.rs` | Remove __trg_* declare stubs |
 
 ## Dependencies Between Phases

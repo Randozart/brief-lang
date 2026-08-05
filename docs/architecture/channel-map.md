@@ -37,7 +37,7 @@ graph TD
     Codegen -->|MLIR| CIRCT[CIRCT]
     Codegen -->|WASM + JS shim| Web[Webstack]
 
-    LLVM --> Link[llvm-link LTO with brief_rt.c]
+    LLVM --> Link[llvm-link LTO with briv_rt.c]
     Link --> Opt[opt O3 ffast-math]
     Opt --> LLC[llc O3 mcpu=native]
     LLC --> Bin[Binary]

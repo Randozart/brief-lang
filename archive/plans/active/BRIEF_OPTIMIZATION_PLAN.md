@@ -1,4 +1,4 @@
-# Brief Optimization Plan
+# Briv Optimization Plan
 
 **Created:** 2026-05-27
 **Status:** Ready for implementation
@@ -8,12 +8,12 @@
 
 ## 1. Dual-Mode Architecture
 
-Brief supports two build modes:
+Briv supports two build modes:
 
-### Full Mode (`brief build`, default)
+### Full Mode (`briv build`, default)
 Current behavior. Idiomatic, debuggable target-native output. All 10 backends unchanged. Suitable for development, debugging, and cyclic code that cannot be pre-scheduled.
 
-### Optimized Mode (`brief build -O`)
+### Optimized Mode (`briv build -O`)
 Thin DAG emission. The shared pipeline pre-computes everything (call graph, parameter ranges, dataflow, fusable pairs, peephole transformations, memory overlay, guard caching) and backends receive pre-resolved acyclic instruction sequences. Output is smaller and faster but unreadable.
 
 ### Gating
@@ -58,9 +58,9 @@ All 10 `generate()` methods need new signatures accepting `&CallGraph` + `&Param
 
 ---
 
-## 3. Fix Brief Self-Hosted Bugs
+## 3. Fix Briv Self-Hosted Bugs
 
-These bugs prevent Brief from compiling itself. Fixing them is a prerequisite for the self-hosted compiler to be a viable development platform.
+These bugs prevent Briv from compiling itself. Fixing them is a prerequisite for the self-hosted compiler to be a viable development platform.
 
 ### 3.1 `backend_aarch64.bv` — undefined `NOT()` call
 - **Location:** `lib/compiler/backends/backend_aarch64.bv:507`
@@ -74,19 +74,19 @@ These bugs prevent Brief from compiling itself. Fixing them is a prerequisite fo
 
 ### 3.3 `wasm.bv`, `vhdl.bv`, `verilog.bv` — pseudo-code
 - **Bug:** Rust-flavored pseudo-code. Uses `transaction`, `vec!`, `HashMap::new()`, `format!`, `&mut`, `&ctx`, `||`, pattern matching with `=>`, `use std::*`.
-- **Fix:** Full rewrite in valid Brief. These are 360-500 lines each.
+- **Fix:** Full rewrite in valid Briv. These are 360-500 lines each.
 
 ### 3.4 `rust.bv:210`, `c.bv:197` — Rust syntax
 - **Bug:** `String::new()` — Rust method syntax
-- **Fix:** Replace with Brief-idiomatic string construction.
+- **Fix:** Replace with Briv-idiomatic string construction.
 
 ### 3.5 `parser.bv` — unimplemented dispatch
 - **Functions:** `parse_render()`, `parse_rstruct()`, `parse_foreign_signature()` — called from `parse_top_level`, never implemented
 - **Fix:** Implement these to parse `render {}`, `rstruct {}`, and `frgn` declarations.
 
 ### 3.6 `main.bv` — backend stubs
-- **Backends:** `compile_to_wasm`, `compile_to_webstack`, `generate_rust` — all emit `"Hello from Brief"` only
-- **Fix:** Real implementations matching the Brief self-hosted backend files.
+- **Backends:** `compile_to_wasm`, `compile_to_webstack`, `generate_rust` — all emit `"Hello from Briv"` only
+- **Fix:** Real implementations matching the Briv self-hosted backend files.
 
 ---
 
@@ -128,7 +128,7 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 - `TopLevel::Stylesheet(String)`
 - `TopLevel::SvgComponent { name, content }`
 
-### Brief Parser — AST nodes defined but not parsable
+### Briv Parser — AST nodes defined but not parsable
 - `ExprTuple(List<Expr>)`
 - `ExprFieldAccess(Expr, String)`
 - `ExprIndex(Expr, Expr)`
@@ -140,11 +140,11 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 - `StmtAsm(String, List<String>)`
 
 ### Missing from both (language design gap)
-- `if/else` — Brief token.bv has `KeywordIf`/`KeywordElse`, Rust lexer.rs does not
+- `if/else` — Briv token.bv has `KeywordIf`/`KeywordElse`, Rust lexer.rs does not
 - `while` loops — no tokens in either
 - `for` loops — no tokens in either
 - `loop` (infinite) — no tokens in either
-- `match/switch` — Rust lexer has `Match`, Brief tokens do not
+- `match/switch` — Rust lexer has `Match`, Briv tokens do not
 - `bank` — both lexers have it, no parser handler
 - `stage` / `on` — both lexers have them, used only inside `trg` parsing
 - Closures/lambdas — no tokens in either
@@ -170,14 +170,14 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 | P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions | ✅ DONE |
 | P2 | Rewrite `wasm.bv`, `vhdl.bv`, `verilog.bv` | P0 above | 2-3 sessions | PENDING |
 | P3 | Rust parser: missing AST nodes (ListLen, ForAll, Exists, Block, ContractBound, TypeVar, Sig, Enum) | None | 2-3 sessions | ✅ DONE |
-| P3 | Brief parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions | PENDING |
+| P3 | Briv parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions | PENDING |
 | P3 | Language design: if/else, loops, match | CLAUDE.md discussion | Varies | PENDING |
 
 ---
 
 ## 7. Commit Log
 
-- `15742b2` (2026-05-27): Fix Brief bugs (NOT(), range.bv, String::new()), implement stub parsers, wire analyze_program into all backends
+- `15742b2` (2026-05-27): Fix Briv bugs (NOT(), range.bv, String::new()), implement stub parsers, wire analyze_program into all backends
 - `current` (2026-05-27): Implement shared peephole optimizer (constant folding, redundant elimination, guard simplification). Extract MemoryOverlay + GuardTracker to shared pipeline. Both wired into --optimize path.
 - `c2728c5` (2026-05-27): [same as above - amend for final extraction]
 

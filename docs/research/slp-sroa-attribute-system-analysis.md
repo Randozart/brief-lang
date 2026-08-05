@@ -1,4 +1,4 @@
-# Full System Analysis: SLP, SROA, and Attribute-Gated Optimization in the Brief Compiler
+# Full System Analysis: SLP, SROA, and Attribute-Gated Optimization in the Briv Compiler
 
 **Date:** 2026-07-28
 **Author:** Systems analysis agent (recovery-branch)
@@ -25,7 +25,7 @@
 
 ## 1. Executive Summary
 
-The Brief compiler has 19 benchmarks whose all-time-best performance is spread across six
+The Briv compiler has 19 benchmarks whose all-time-best performance is spread across six
 different optimization eras. No single compiler version achieves all bests simultaneously.
 The conventional explanation ("SLP stride gate trade-off") is incorrect — the real cause is
 a **single attribute selection heuristic** in `dispatch.rs` that determines whether LLVM's
@@ -73,7 +73,7 @@ correct criterion is **state field count vs target register file size**:
 
 ### 2.1 Complete All-Time Best Per Benchmark
 
-| Benchmark | Best Ratio | Brief Time | C Time | Era | Commit | Configuration |
+| Benchmark | Best Ratio | Briv Time | C Time | Era | Commit | Configuration |
 |-----------|-----------|------------|--------|-----|--------|--------------|
 | ring_buffer | **0.99x** | 0.0664s | 0.0666s | 4 | `f598584` | No SLP, no outlining, fold detection |
 | float_math | **0.81x** | 0.0631s | 0.0771s | 5 | `8a827db` | Phase 3, no SLP, arena |
@@ -97,23 +97,23 @@ correct criterion is **state field count vs target register file size**:
 
 ### 2.2 Full Baseline Table (Era 12 — `b39461e2`)
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
 | ring_buffer | 0.0550s | 0.0480s | 1.14x | C |
 | float_math | 0.0744s | 0.0743s | 1.00x | ~tie |
-| float_math_nonzero | 0.1656s | 0.1675s | **0.98x** | Brief |
-| sparse_dispatch | 0.0500s | 0.0610s | **0.81x** | Brief |
+| float_math_nonzero | 0.1656s | 0.1675s | **0.98x** | Briv |
+| sparse_dispatch | 0.0500s | 0.0610s | **0.81x** | Briv |
 | print_loop | 0.0604s | 0.0587s | 1.02x | C |
 | nbody_newton | 9.0467s | 8.2689s | 1.09x | C |
-| nbody_sqrt | 2.7347s | 2.7684s | **0.98x** | Brief |
-| nbody_sqrt_idio | 3.3417s | 3.6030s | **0.92x** | Brief |
-| fasta | 0.2099s | 0.2109s | **0.99x** | Brief |
-| fannkuch_redux | 0.0653s | 0.0657s | **0.99x** | Brief |
+| nbody_sqrt | 2.7347s | 2.7684s | **0.98x** | Briv |
+| nbody_sqrt_idio | 3.3417s | 3.6030s | **0.92x** | Briv |
+| fasta | 0.2099s | 0.2109s | **0.99x** | Briv |
+| fannkuch_redux | 0.0653s | 0.0657s | **0.99x** | Briv |
 | mandelbrot | 0.6569s | 0.6528s | 1.00x | ~tie |
 | kalman_filter_runtime | 0.1813s | 0.1790s | 1.01x | C |
-| knucleotide | 0.1883s | 0.1909s | **0.98x** | Brief |
+| knucleotide | 0.1883s | 0.1909s | **0.98x** | Briv |
 | cancel_math | 0.0626s | 0.0614s | 1.01x | C |
-| bit_clear | 0.0001s | 0.0002s | **0.50x** | Brief |
+| bit_clear | 0.0001s | 0.0002s | **0.50x** | Briv |
 | queue_drain | 0.0623s | 0.0612s | 1.01x | C |
 | queue_drain_sym | 0.0618s | 0.0611s | 1.01x | C |
 | queue_drain_idio | 0.0624s | 0.0618s | 1.00x | ~tie |
@@ -121,51 +121,51 @@ correct criterion is **state field count vs target register file size**:
 
 ### 2.3 Era 10 Full Table (`33d42397` — "No SLP, Post-Fixes")
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
 | ring_buffer | 0.0603s | 0.0458s | 1.31x | C |
 | float_math | 0.0748s | 0.0697s | 1.07x | C |
-| float_math_nonzero | 0.1611s | 0.1620s | **0.99x** | Brief |
-| sparse_dispatch | 0.0551s | 0.0604s | **0.91x** | Brief |
+| float_math_nonzero | 0.1611s | 0.1620s | **0.99x** | Briv |
+| sparse_dispatch | 0.0551s | 0.0604s | **0.91x** | Briv |
 | print_loop | 0.0568s | 0.0559s | 1.01x | C |
 | nbody_newton | 10.6217s | 7.8560s | 1.35x | C |
-| nbody_sqrt | 2.2434s | 2.6339s | **0.85x** | Brief |
-| nbody_sqrt_idio | 2.3270s | 3.4561s | **0.67x** | Brief |
+| nbody_sqrt | 2.2434s | 2.6339s | **0.85x** | Briv |
+| nbody_sqrt_idio | 2.3270s | 3.4561s | **0.67x** | Briv |
 | fasta | 0.1987s | 0.1980s | 1.00x | ~tie |
-| fannkuch_redux | 0.0599s | 0.0612s | **0.97x** | Brief |
+| fannkuch_redux | 0.0599s | 0.0612s | **0.97x** | Briv |
 | mandelbrot | 0.6317s | 0.6277s | 1.00x | ~tie |
 | kalman_filter_runtime | 0.1741s | 0.1725s | 1.00x | ~tie |
-| queue_drain | 0.0601s | 0.0612s | **0.98x** | Brief |
-| queue_drain_sym | 0.0575s | 0.0588s | **0.97x** | Brief |
+| queue_drain | 0.0601s | 0.0612s | **0.98x** | Briv |
+| queue_drain_sym | 0.0575s | 0.0588s | **0.97x** | Briv |
 | interval_step | 0.0599s | 0.0592s | 1.01x | C |
 
 ### 2.4 Era 5 Full Table (`8a827db` — "Phase 3 Complete")
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
 | ring_buffer | 0.0686s | 0.0676s | 1.01x | C |
-| float_math | 0.0631s | 0.0771s | **0.81x** | Brief |
-| sparse_dispatch | 0.0060s | 0.0657s | **0.09x** | Brief |
-| print_loop | 0.0639s | 0.0670s | **0.95x** | Brief |
-| nbody_newton | 7.4132s | 9.8522s | **0.75x** | Brief |
-| nbody_sqrt | 3.0046s | 3.5218s | **0.85x** | Brief |
-| nbody_sqrt_idio | 2.9578s | 4.3184s | **0.68x** | Brief |
+| float_math | 0.0631s | 0.0771s | **0.81x** | Briv |
+| sparse_dispatch | 0.0060s | 0.0657s | **0.09x** | Briv |
+| print_loop | 0.0639s | 0.0670s | **0.95x** | Briv |
+| nbody_newton | 7.4132s | 9.8522s | **0.75x** | Briv |
+| nbody_sqrt | 3.0046s | 3.5218s | **0.85x** | Briv |
+| nbody_sqrt_idio | 2.9578s | 4.3184s | **0.68x** | Briv |
 | fasta | 0.2695s | 0.2636s | 1.02x | C |
-| mandelbrot | 0.7514s | 0.7538s | **0.99x** | Brief |
-| kalman_filter_runtime | 0.1876s | 0.1887s | **0.99x** | Brief |
-| queue_drain | 0.0007s | 0.0632s | **0.01x** | Brief |
-| queue_drain_sym | 0.0639s | 0.0672s | **0.95x** | Brief |
-| interval_step | 0.0009s | 0.0669s | **0.01x** | Brief |
+| mandelbrot | 0.7514s | 0.7538s | **0.99x** | Briv |
+| kalman_filter_runtime | 0.1876s | 0.1887s | **0.99x** | Briv |
+| queue_drain | 0.0007s | 0.0632s | **0.01x** | Briv |
+| queue_drain_sym | 0.0639s | 0.0672s | **0.95x** | Briv |
+| interval_step | 0.0009s | 0.0669s | **0.01x** | Briv |
 
 ### 2.5 Era 4 Full Table (`f598584` — "All 22 MATCH")
 
-| Benchmark | Brief | C | Ratio | Winner |
+| Benchmark | Briv | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
-| ring_buffer | 0.0664s | 0.0666s | **0.99x** | Brief |
-| float_math | 0.0626s | 0.0739s | **0.84x** | Brief |
-| nbody_newton | 7.2391s | 9.4519s | **0.76x** | Brief |
-| nbody_sqrt | 2.9267s | 3.2106s | **0.91x** | Brief |
-| nbody_sqrt_idio | 3.0738s | 4.0939s | **0.75x** | Brief |
+| ring_buffer | 0.0664s | 0.0666s | **0.99x** | Briv |
+| float_math | 0.0626s | 0.0739s | **0.84x** | Briv |
+| nbody_newton | 7.2391s | 9.4519s | **0.76x** | Briv |
+| nbody_sqrt | 2.9267s | 3.2106s | **0.91x** | Briv |
+| nbody_sqrt_idio | 3.0738s | 4.0939s | **0.75x** | Briv |
 | kalman_filter_runtime | 0.1844s | 0.1836s | 1.00x | ~tie |
 
 ---
@@ -286,8 +286,8 @@ where reactor_tick has `#2` (memory(readwrite)). Only 3 benchmarks achieve their
 
 | # | Used by | Attributes | Purpose |
 |---|---------|-----------|---------|
-| 0 | `init_state`, `__brief_init_state` | `nofree norecurse nosync nounwind memory(argmem: write)` | State initializer — write-only |
-| 1 | `__brief_member_fn` | `nofree nosync nounwind` | Member function (may read/write heap) |
+| 0 | `init_state`, `__briv_init_state` | `nofree norecurse nosync nounwind memory(argmem: write)` | State initializer — write-only |
+| 1 | `__briv_member_fn` | `nofree nosync nounwind` | Member function (may read/write heap) |
 | 2 | `reactor_tick` (fallback), `cell_persistent_ticks` | `memory(readwrite)` | Default tick — unrestricted |
 | 3 | `@main` | `nofree norecurse nosync nounwind memory(readwrite)` | Entry point — unrestricted |
 | 4 | `reactor_tick` (hazardous) | `nofree nocapture nosync nounwind memory(readwrite)` | Hazard protection |
@@ -322,7 +322,7 @@ The heuristic: "Does any reactive txn have FFI OUTSIDE a `when` guard?"
 
 **Why the heuristic exists:** When FFI calls are inside `when` guards, those guards are
 outlined into separate "cold" functions (cold-path outlining). The hot path of reactor_tick
-has no FFI — only pure Brief operations on %State. So `argmem:readwrite` is accurate.
+has no FFI — only pure Briv operations on %State. So `argmem:readwrite` is accurate.
 
 When FFI calls are UNGUARDED (top-level frgn calls), they cannot be outlined — they're in
 the hot path. The frgn call might access global memory (like `@stdout` for `__print_int`),
@@ -408,7 +408,7 @@ mechanism: PrintInt# changed the guard detection logic, which changed the attrib
 numbering, which caused the #11 attribute (argmem:readwrite) to be assigned to
 reactor_tick instead of #12. The #11 attribute did NOT include `willreturn`, so the
 auto-vectorizer was NOT enabled. The regression came from a collision in the attribute
-numbering scheme that caused a DIFFERENT feature (#1 on `__brief_member_fn`) to be applied
+numbering scheme that caused a DIFFERENT feature (#1 on `__briv_member_fn`) to be applied
 to reactor_tick.
 
 This means `willreturn` is SAFE for all benchmark programs — the auto-vectorizer does

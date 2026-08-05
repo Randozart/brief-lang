@@ -8,7 +8,7 @@ Two immediate problems, one architectural opportunity:
 `pre_load_all_fields` which emits GEP+load from `%State` in the `done:`
 block. Those 30+ GEP references keep `%State` alive across the function,
 preventing SROA from decomposing the struct. Result: LLVM vectorizer can't
-analyze individual float fields → 0 vector ops in Brief vs 233 in C.
+analyze individual float fields → 0 vector ops in Briv vs 233 in C.
 
 **Problem 2: ~2000 inline `writeln!` calls.** The backend emits LLVM IR as
 flat strings via `writeln!` throughout. This means:

@@ -1,8 +1,8 @@
-# Research: Brief + DBrief Text Adventure Engine
+# Research: Briv + DBriv Text Adventure Engine
 
-## Concept: "The Brief Adventures"
+## Concept: "The Briv Adventures"
 
-This document explores how to build a Zork-style text adventure using Brief + DBrief. This is **research**, not an implementation plan.
+This document explores how to build a Zork-style text adventure using Briv + DBriv. This is **research**, not an implementation plan.
 
 ---
 
@@ -16,7 +16,7 @@ This document explores how to build a Zork-style text adventure using Brief + DB
 
 ---
 
-## 2. Data Layer (DBrief)
+## 2. Data Layer (DBriv)
 
 ### 2.1 World Database
 
@@ -84,7 +84,7 @@ This document explores how to build a Zork-style text adventure using Brief + DB
 
 ### 2.2 Room Lookup Rules (Inference)
 
-```brief
+```briv
 // rules.dbvs - Logical rules for the game world
 
 // Can we go this direction?
@@ -104,11 +104,11 @@ RULE can_take(Item, Room) :-
 
 ---
 
-## 3. Game Logic Layer (Brief)
+## 3. Game Logic Layer (Briv)
 
 ### 3.1 Core Transactions
 
-```brief
+```briv
 // game.bv - Game logic
 
 STATE current_room: String = "start"
@@ -183,13 +183,13 @@ node inventory [
 
 ### 4.1 Terminal Output
 
-```brief
+```briv
 // game.rbv - Terminal interface
 
 RENDER terminal {
     CLEAR
     
-    HEADER "The Brief Adventures"
+    HEADER "The Briv Adventures"
     DIV banner {
         "═══════════════════════════════════"
     }
@@ -209,7 +209,7 @@ RENDER terminal {
 
 ### 4.2 Enhanced Web View
 
-```brief
+```briv
 // game_web.rbv - Rich web interface
 
 RENDER game {
@@ -246,7 +246,7 @@ RENDER game {
 
 ### 5.1 Quest Rules
 
-```brief
+```briv
 // quests.dbvs - Quest logic
 
 RULE quest_unlocked(quest) :-
@@ -263,7 +263,7 @@ RULE reward_rat_king [
 
 ### 5.2 Conditional Descriptions
 
-```brief
+```briv
 node look [true][message == enhanced_desc] {
     // Base description
     message = @rooms[current_room].desc
@@ -282,9 +282,9 @@ node look [true][message == enhanced_desc] {
 
 ### 6.1 Serialization
 
-DBrief naturally supports save/load:
+DBriv naturally supports save/load:
 
-```brief
+```briv
 // Save game
 TXN save_game [
     true
@@ -314,7 +314,7 @@ TXN load_game [
 
 ## 7. Key Game Features
 
-| Feature | DBrief | Brief |
+| Feature | DBriv | Briv |
 |---------|--------|-------|
 | **Room definitions** | `@rooms` vector | - |
 | **Item tracking** | `@items` vector | - |
@@ -330,8 +330,8 @@ TXN load_game [
 
 1. **Separation of concerns**: Data (world) vs Logic (transactions)
 2. **Declarative rules**: "Can I go there?" is a query, not nested ifs
-3. **Natural save/load**: DBrief data is inherently serializable
-4. **Reactive UI**: Brief + RBV updates views automatically
+3. **Natural save/load**: DBriv data is inherently serializable
+4. **Reactive UI**: Briv + RBV updates views automatically
 5. **Extensible**: Add rooms/items without changing game logic
 
 ---
@@ -342,15 +342,15 @@ TXN load_game [
 - [ ] Time-based events (day/night cycle)
 - [ ] Random encounters
 - [ ] Sound effects via FFI
-- [ ] Graphics view (SVG from DBrief geometry data)
+- [ ] Graphics view (SVG from DBriv geometry data)
 
 ---
 
 ## 10. Conclusion
 
-Brief + DBrief provides a clean separation for game development:
-- **DBrief** handles the declarative world state
-- **Brief** handles the imperative logic
+Briv + DBriv provides a clean separation for game development:
+- **DBriv** handles the declarative world state
+- **Briv** handles the imperative logic
 - **RBV** handles the presentation
 
 This mirrors classic adventure engines but with modern verification:
@@ -358,4 +358,4 @@ This mirrors classic adventure engines but with modern verification:
 - Contract analysis catches impossible states  
 - Type safety prevents invalid item operations
 
-*The text adventure was the perfect testing ground for languages. Brief + DBrief could be too.*
+*The text adventure was the perfect testing ground for languages. Briv + DBriv could be too.*

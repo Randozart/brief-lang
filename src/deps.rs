@@ -1,10 +1,10 @@
 // ── Optional Dependency Manager ────────────────────────────────────
 // 2026-07-25: Downloads and installs optional external deps
 // (z3, dwarfdump) from pinned GitHub release URLs.
-// Called via `briefc install-deps`.
+// Called via `brivc install-deps`.
 //
 // Uses curl/wget for transport — no external Rust dependencies.
-// Binaries go to ~/.local/share/brief-compiler/bin/.
+// Binaries go to ~/.local/share/briv-compiler/bin/.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,7 +15,7 @@ const Z3_URL: &str = "https://github.com/Z3Prover/z3/releases/download/z3-4.13.0
 const DWARFDUMP_URL: &str = "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.0/llvm-dwarfdump-19.1.0-x86_64-unknown-linux-gnu.tar.xz";
 
 /// Get the binary directory for compiler-managed dependencies.
-/// Returns ~/.local/share/brief-compiler/bin/
+/// Returns ~/.local/share/briv-compiler/bin/
 pub fn dep_bin_dir() -> PathBuf {
     let base = if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
         PathBuf::from(dir)
@@ -23,7 +23,7 @@ pub fn dep_bin_dir() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(home).join(".local").join("share")
     };
-    base.join("brief-compiler").join("bin")
+    base.join("briv-compiler").join("bin")
 }
 
 /// Check if z3 is available on PATH or in the managed binary directory.

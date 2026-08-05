@@ -15,7 +15,7 @@ See BUGS.md (2026-06-13 entry) for root cause analysis.
 - LLVM -O3 handles all redundant ops (add i64 0, %x → %x) that simplify
   was catching. No measurable performance regression on 7 runtime benchmarks.
 - Without simplify, emit_expr no longer does peephole constant folding
-  on the Brief AST before codegen. This means slightly more verbose IR,
+  on the Briv AST before codegen. This means slightly more verbose IR,
   but the final binary is identical after LLVM optimization.
 
 == Current state (emit_expr.rs:9) ==

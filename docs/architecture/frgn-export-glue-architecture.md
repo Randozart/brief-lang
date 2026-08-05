@@ -9,18 +9,18 @@
 
 ## Overview
 
-Brief's **Metropolitan FFI** architecture has three pillars:
+Briv's **Metropolitan FFI** architecture has three pillars:
 
 | Pillar | Direction | Purpose |
 |--------|-----------|---------|
-| **`frgn`** | Host → Brief | Declare an external function so Brief can call it |
-| **`export`** | Brief → Host | Expose a Brief function so foreign code can call it |
+| **`frgn`** | Host → Briv | Declare an external function so Briv can call it |
+| **`export`** | Briv → Host | Expose a Briv function so foreign code can call it |
 | **GLUE** | Broker (compile-time) | Negotiate protocol paths, meld data, generate bridge code |
 | **Metropipe** | Runtime | Shared memory IPC between running processes |
 
 GLUE and Metropipe are the two mechanisms under the Metropolitan FFI umbrella.
 GLUE handles **compile-time bridge generation** — it's what runs when you
-invoke `brief export`. Metropipe handles **runtime shared memory** — it's
+invoke `briv export`. Metropipe handles **runtime shared memory** — it's
 what runs when two processes communicate through a `MetropolitanChannel`.
 
 **Protocol types** drive the boundary between languages. See
@@ -45,23 +45,23 @@ framework.
 
 ### 1.1 Syntax
 
-```brief
-frgn <foreign_symbol>(<params>) [-> <ret>] [as <brief_name>] from <source> [fallback <expr>];
+```briv
+frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [fallback <expr>];
 ```
 
 `frgn` is an **import**. The first name after `frgn` is the **foreign/C
-symbol name**. The `as` clause gives the Brief-side name (what callsites use).
+symbol name**. The `as` clause gives the Briv-side name (what callsites use).
 `from` is **required** — every frgn must specify its provenance.
 
 Examples:
-```brief
-// C symbol is "__getenv_brief", Brief calls it "frgn__getenv_brief"
-frgn __getenv_brief(key: String) -> String as frgn__getenv_brief
-  from "lib/runtime/brief_rt.c" fallback "";
+```briv
+// C symbol is "__getenv_briv", Briv calls it "frgn__getenv_briv"
+frgn __getenv_briv(key: String) -> String as frgn__getenv_briv
+  from "lib/runtime/briv_rt.c" fallback "";
 
-// No as clause: foreign and Brief names are the same
-frgn brief_cstr_to_brief(ptr: Int) -> String as cstr_to_brief
-  from "lib/runtime/brief_rt.c" fallback "";
+// No as clause: foreign and Briv names are the same
+frgn briv_cstr_to_briv(ptr: Int) -> String as cstr_to_briv
+  from "lib/runtime/briv_rt.c" fallback "";
 
 // With compiler-resolved registry path:
 frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64
@@ -80,14 +80,14 @@ frgn_decl ::= "frgn" identifier "(" [param_list] ")" ["->" type]
 
 ### 1.3 Naming Convention
 
-Raw FFI declarations visible to Brief code use the `frgn__` prefix. When the
+Raw FFI declarations visible to Briv code use the `frgn__` prefix. When the
 C symbol differs, `as` provides the mapping:
-```brief
+```briv
 frgn XXH64(data: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "lib/xxhash.c" fallback 0;
 ```
 
 The `frgn__` naming is a convention, not enforced by the compiler. It makes
-FFI boundaries visually distinct from pure Brief function calls.
+FFI boundaries visually distinct from pure Briv function calls.
 
 ### 1.4 Fallback
 
@@ -96,7 +96,7 @@ Every frgn must have a `fallback` clause (parser requires it). Three forms:
 | Form | Example | Behavior |
 |------|---------|----------|
 | Static | `fallback 0` | Return zero-initialized value on failure |
-| Function | `fallback default_val()` | Call a Brief function as fallback |
+| Function | `fallback default_val()` | Call a Briv function as fallback |
 | Implicit | `fallback;` | Skip the call, return zero-value |
 
 The fallback fires when the contract is violated (postcondition check on the
@@ -160,7 +160,7 @@ now calls `compute_protocol_path()`, which uses the BFS in
 `find_cast_path()` (via TypeUniverse):
 
 ```
-Source = Brief String
+Source = Briv String
 Target = Foreign *mut u8
 
 BFS finds: [String, #Bits, *mut u8]
@@ -197,7 +197,7 @@ pub enum TransformKind {
 
 ### 3.1 What GLUE Does
 
-GLUE mediates between Brief and a foreign language when the backend cannot
+GLUE mediates between Briv and a foreign language when the backend cannot
 inline the foreign code directly. It:
 
 1. **Negotiates protocol paths** — BFS via `find_cast_path()`
@@ -262,11 +262,11 @@ merge:
 
 ---
 
-## 4. `export` — Brief Dressed Up as the Foreign Language
+## 4. `export` — Briv Dressed Up as the Foreign Language
 
 ### 4.1 Syntax
 
-```brief
+```briv
 export defn <name>(<params>) -> <ret> { <body> };
 ```
 
@@ -276,7 +276,7 @@ language-specific wrapper in the export output.
 
 ### 4.2 The Export Pipeline (Phase 8)
 
-`brief export <bridge.bv> <language> --out <dir>`
+`briv export <bridge.bv> <language> --out <dir>`
 
 ```
 1. Parse + typecheck bridge.bv (with import resolution)
@@ -291,7 +291,7 @@ language-specific wrapper in the export output.
 8. Write metadata (.dbvl)
 ```
 
-**Key: Step 4 uses the full LLVM backend** (the same as `brief build --llvm`),
+**Key: Step 4 uses the full LLVM backend** (the same as `briv build --llvm`),
 not the stub generator from `library.rs`. The `library.rs` `generate_with_exports`
 function is no longer called by the export CLI.
 
@@ -349,8 +349,8 @@ fn init_state() {
     STATE = buf;
 }
 
-pub fn brief_pp_type_bits(n: *mut u8) -> *mut u8 {
-    unsafe { ffi::brief_pp_type_bits(STATE, n) }
+pub fn briv_pp_type_bits(n: *mut u8) -> *mut u8 {
+    unsafe { ffi::briv_pp_type_bits(STATE, n) }
 }
 ```
 
@@ -372,8 +372,8 @@ Each language section declares:
 | `extension` | File extension used for extension→language lookup |
 | `bridge_kind` | How to bridge: `"native_module"`, `"esm_module"`, `"extern_c_crate"` |
 | `calling_convention` | ABI at the boundary: `"lto"` (LLVM link, zero-cost) or `"c_abi"` (FFI) |
-| `type_map` | Brief type → language-native wrapper type |
-| `c_type_map` | Brief type → C ABI type for FFI declarations |
+| `type_map` | Briv type → language-native wrapper type |
+| `c_type_map` | Briv type → C ABI type for FFI declarations |
 | `conversions` | Per-type `to_abi` / `from_abi` conversion expressions |
 | `templates` | Output file paths and content with `{{mustache}}` substitution |
 
@@ -397,7 +397,7 @@ at LTO time. The C ABI path generates a `.so` shared library loaded via
 
 The protocol system provides the infrastructure for layout optimization.
 `find_cast_path()` BFS finds the shortest protocol path. If a meld exists
-between a Brief type and a foreign type with identity transform, the boundary
+between a Briv type and a foreign type with identity transform, the boundary
 cost is zero. The layout optimizer (proposed) would specialize data layouts
 at the boundary to eliminate protocol transforms entirely.
 
@@ -415,7 +415,7 @@ Offset 8: data bytes
 Offset 8+len: null terminator (for C compatibility)
 ```
 
-This is the SAME format that `brief_rt.c` uses. The old format had a
+This is the SAME format that `briv_rt.c` uses. The old format had a
 `{data_ptr, length, chars}` struct that was incompatible with the C runtime.
 
 ### 7.2 Global String Constants
@@ -435,11 +435,11 @@ Tags are stored in the bottom 2 bits of the string handle:
 - Bit 0: SSO inline (packed data)
 - Bit 1: Temporary concat result (safe to free when consumed)
 
-The `brief_str_to_c` function in `brief_rt.c` strips tag bits via `& ~3ULL`
+The `briv_str_to_c` function in `briv_rt.c` strips tag bits via `& ~3ULL`
 before reading the string data:
 
 ```c
-char* brief_str_to_c(int64_t handle) {
+char* briv_str_to_c(int64_t handle) {
     int64_t ptr = handle & ~3ULL;  // strip SSO + temp flags
     ...
     int64_t len = *(int64_t*)(uintptr_t)ptr;
@@ -454,9 +454,9 @@ Added as part of the round-trip test infrastructure:
 
 | Function | Purpose |
 |----------|---------|
-| `brief_cstr_to_brief(const char*)` | C string → Brief string handle (heap-allocated) |
-| `brief_str_to_c(int64_t handle)` | Brief string handle → C string (heap-allocated) |
-| `brief_free_brief_str(int64_t handle)` | Free a Brief string allocated by `brief_cstr_to_brief` |
+| `briv_cstr_to_briv(const char*)` | C string → Briv string handle (heap-allocated) |
+| `briv_str_to_c(int64_t handle)` | Briv string handle → C string (heap-allocated) |
+| `briv_free_briv_str(int64_t handle)` | Free a Briv string allocated by `briv_cstr_to_briv` |
 
 ---
 
@@ -465,7 +465,7 @@ Added as part of the round-trip test infrastructure:
 Located in `tests/pp_roundtrip_tests.rs` (gitignored by `tests/` entry).
 
 Tests the full pipeline end-to-end:
-1. `brief build pp-types.bv --llvm` → `.ll` with real function bodies
+1. `briv build pp-types.bv --llvm` → `.ll` with real function bodies
 2. `llc` → `.o`, `cc -shared` → `.so`
 3. `libloading::Library::new(&so_path)` → load the bridge
 4. `func(state, input)` → call via FFI
@@ -478,8 +478,8 @@ Tests the full pipeline end-to-end:
 | `test_bridge_compiles_to_valid_llvm_ir` | IR has expected exports, typed args |
 | `test_bridge_compiles_to_shared_library` | `.so` builds and has valid size |
 | `test_bridge_loads_and_resolves` | Symbols resolve at runtime |
-| `test_pp_void_via_ffi` | `brief_test_type_void()` returns `"void"` |
-| `test_cstr_roundtrip_via_ffi` | `"42"` → cstr_to_brief → str_to_c → `"42"` |
+| `test_pp_void_via_ffi` | `briv_test_type_void()` returns `"void"` |
+| `test_cstr_roundtrip_via_ffi` | `"42"` → cstr_to_briv → str_to_c → `"42"` |
 | `test_custom_echo_via_ffi` | Pass-through string works |
 | `test_pp_bits_via_ffi` | `"42"` → pp_type_bits → `"Bits(42)"` |
 | `test_bits_static_via_ffi` | Static string return works |
@@ -488,7 +488,7 @@ Tests the full pipeline end-to-end:
 
 ## 9. CLI Subcommands
 
-### 9.1 `brief export <bridge.bv> <language> --out <dir>`
+### 9.1 `briv export <bridge.bv> <language> --out <dir>`
 
 ```
 1. Read + parse bridge.bv (with import resolution)
@@ -501,7 +501,7 @@ Tests the full pipeline end-to-end:
 8. Write bridge-exports.dbvl metadata
 ```
 
-### 9.2 `brief library <file.bv>`
+### 9.2 `briv library <file.bv>`
 
 ```
 1. Parse + typecheck
@@ -510,8 +510,8 @@ Tests the full pipeline end-to-end:
 4. Create .a archive via ar
 ```
 
-Note: `brief library` uses stub codegen (still in `library.rs`). For real
-function bodies, use `brief build --llvm`. The `brief export` command also
+Note: `briv library` uses stub codegen (still in `library.rs`). For real
+function bodies, use `briv build --llvm`. The `briv export` command also
 uses the full backend.
 
 ---

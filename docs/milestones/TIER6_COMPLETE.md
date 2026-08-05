@@ -27,7 +27,7 @@ Tier 6 implements symbolic execution and contract verification. The proof engine
 
 ### Symbolic Value Enum
 
-```brief
+```briv
 enum SymbolicValue {
     SymInt(Int),
     SymFloat(Float),
@@ -42,7 +42,7 @@ enum SymbolicValue {
 ```
 
 **Examples:**
-```brief
+```briv
 // Concrete value
 SymInt(42)
 
@@ -69,7 +69,7 @@ SymBinaryOp("==",
 
 ### State Structure
 
-```brief
+```briv
 struct SymbolicState {
     vars: HashMap<String, SymbolicValue>,  // Variable bindings
     path_constraints: List<SymbolicValue>,  // Path conditions
@@ -79,7 +79,7 @@ struct SymbolicState {
 
 ### State Operations
 
-```brief
+```briv
 defn initial_state() -> SymbolicState
 defn state_assign(state: SymbolicState, name: String, value: SymbolicValue) -> SymbolicState
 defn state_lookup(state: SymbolicState, name: String) -> Option<SymbolicValue>
@@ -89,7 +89,7 @@ defn state_is_visited(state: SymbolicState, key: String) -> Bool
 ```
 
 **Usage:**
-```brief
+```briv
 let state = initial_state();
 state = state_assign(state, "x", SymInt(42));
 state = state_assign(state, "y", SymVar("x"));  // y = x
@@ -103,26 +103,26 @@ state = state_add_constraint(state, SymBinaryOp(">", SymVar("x"), SymInt(0)));
 
 ### Expression Evaluation
 
-```brief
+```briv
 defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue
 ```
 
 **Evaluation Rules:**
 
 **Literals:**
-```brief
+```briv
 ExprInt(42) → SymInt(42)
 ExprBool(true) → SymBool(true)
 ```
 
 **Variables:**
-```brief
+```briv
 ExprVar("x") → state.vars.get("x") or SymVar("x")
 ExprPriorState("counter") → SymVar("@counter")
 ```
 
 **Operations:**
-```brief
+```briv
 ExprBinOp("+", left, right) → 
   SymBinaryOp("+", eval_symbolic(left), eval_symbolic(right))
 
@@ -132,19 +132,19 @@ ExprUnaryOp("-", operand) →
 
 ### Simplification
 
-```brief
+```briv
 defn simplify(sym: SymbolicValue) -> SymbolicValue
 ```
 
 **Constant Folding:**
-```brief
+```briv
 SymBinaryOp("+", SymInt(5), SymInt(3)) → SymInt(8)
 SymBinaryOp("*", SymInt(2), SymInt(3)) → SymInt(6)
 SymUnaryOp("-", SymInt(5)) → SymInt(-5)
 ```
 
 **Identity Operations:**
-```brief
+```briv
 SymBinaryOp("+", SymInt(0), expr) → expr
 SymBinaryOp("+", expr, SymInt(0)) → expr
 SymBinaryOp("*", SymInt(1), expr) → expr
@@ -153,7 +153,7 @@ SymBinaryOp("*", SymInt(0), _) → SymInt(0)
 ```
 
 **Boolean Operations:**
-```brief
+```briv
 SymBinaryOp("&&", SymBool(true), b) → b
 SymBinaryOp("||", SymBool(false), b) → b
 SymBinaryOp("==", SymBool(a), SymBool(b)) → SymBool(a == b)
@@ -165,13 +165,13 @@ SymBinaryOp("==", SymBool(a), SymBool(b)) → SymBool(a == b)
 
 ### Constraint Checking
 
-```brief
+```briv
 defn check_constraint(constraint: SymbolicValue) -> Bool
 defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool
 ```
 
 **Examples:**
-```brief
+```briv
 check_constraint(SymBool(true)) → true
 check_constraint(SymBool(false)) → false
 check_constraint(SymBinaryOp(">", SymInt(5), SymInt(3))) → true
@@ -184,7 +184,7 @@ check_constraint(SymBinaryOp("==", SymVar("x"), SymInt(0))) → true (unknown as
 
 ### Execution Path
 
-```brief
+```briv
 struct ExecutionPath {
     statements: List<Statement>,
     constraints: List<SymbolicValue>,
@@ -195,7 +195,7 @@ struct ExecutionPath {
 
 ### Path Exploration Algorithm
 
-```brief
+```briv
 defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<ExecutionPath>
 ```
 
@@ -209,7 +209,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 3. Return all feasible paths
 
 **Branching on Guards:**
-```brief
+```briv
 StmtGuarded(condition, body):
   - Evaluate condition symbolically
   - If true → execute body
@@ -223,7 +223,7 @@ StmtGuarded(condition, body):
 
 ### Proof Result
 
-```brief
+```briv
 struct ProofResult {
     verified: Bool,
     counterexample: Option<CounterExample>,
@@ -239,7 +239,7 @@ struct CounterExample {
 
 ### Verification Algorithm
 
-```brief
+```briv
 defn verify_contract(txn: Transaction) -> ProofResult
 ```
 
@@ -252,7 +252,7 @@ defn verify_contract(txn: Transaction) -> ProofResult
 4. Return verification result
 
 **Example:**
-```brief
+```briv
 txn increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -268,7 +268,7 @@ txn increment() [counter < 100][counter == @counter + 1] {
 
 ### Precondition/Postcondition Checking
 
-```brief
+```briv
 defn verify_precondition(precondition: Expr, state: SymbolicState) -> Bool
 defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool
 ```
@@ -279,7 +279,7 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool
 
 ### Conflict Detection
 
-```brief
+```briv
 struct ConflictResult {
     has_conflict: Bool,
     conflicting_txns: List<String>,
@@ -295,7 +295,7 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
 3. If any variable is written by both → conflict
 
 **Example:**
-```brief
+```briv
 async node reader() [!writing][reading = true] { ... }
 async node writer() [!reading][writing = true] { ... }
 
@@ -319,7 +319,7 @@ async node bad2() [true][x = @x * 2] { ... }
 
 ### Deadlock Result
 
-```brief
+```briv
 struct DeadlockResult {
     has_deadlock: Bool,
     cycle: List<String>,
@@ -335,7 +335,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult
 3. If cycle found → potential deadlock
 
 **Example:**
-```brief
+```briv
 async node A() [!y_done][x_done = true] { ... }  // Reads y_done, writes x_done
 async node B() [!x_done][y_done = true] { ... }  // Reads x_done, writes y_done
 
@@ -352,7 +352,7 @@ async node B() [!x_done][y_done = true] { ... }  // Reads x_done, writes y_done
 
 ### VC Structure
 
-```brief
+```briv
 struct VerificationCondition {
     assumptions: List<SymbolicValue>,
     conclusion: SymbolicValue
@@ -363,7 +363,7 @@ defn check_vc(vc: VerificationCondition) -> Result<(), String>
 ```
 
 **Example:**
-```brief
+```briv
 txn add(x: Int, y: Int) [x > 0][result == @x + @y] { ... }
 
 // Verification Condition:
@@ -382,7 +382,7 @@ txn add(x: Int, y: Int) [x > 0][result == @x + @y] { ... }
 
 ### Verify Transaction
 
-```brief
+```briv
 import std.proof_engine;
 
 txn increment() [counter < 100][counter == @counter + 1] {
@@ -403,7 +403,7 @@ let result = verify_contract(increment);
 
 ### Check Mutual Exclusion
 
-```brief
+```briv
 async node reader() [!writing][reading = true] { ... }
 async node writer() [!reading][writing = true] { ... }
 
@@ -419,7 +419,7 @@ let conflict = check_mutual_exclusion(reader, writer);
 
 ### Detect Deadlock
 
-```brief
+```briv
 let txns = [txn_a, txn_b, txn_c];
 let deadlock = detect_deadlock(txns);
 
@@ -439,7 +439,7 @@ let deadlock = detect_deadlock(txns);
 
 The symbolic execution engine evaluates expressions symbolically:
 
-```brief
+```briv
 defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     // Literals become concrete symbolic values
     unification expr(ExprInt(n)) = {
@@ -469,7 +469,7 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
 
 Uses BFS with work queue:
 
-```brief
+```briv
 defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<ExecutionPath> {
     let paths: List<ExecutionPath> = [];
     let work_queue = [(stmts, initial, [])];
@@ -531,7 +531,7 @@ All proof engine features tested:
 
 ### Complete Verification Pipeline
 
-```brief
+```briv
 import std.lexer;
 import std.parser;
 import std.typechecker;

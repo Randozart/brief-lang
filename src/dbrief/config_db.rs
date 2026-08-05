@@ -1,6 +1,6 @@
 // ── ConfigDb — DB-backed shared config/board loader ─────────────────────
 //
-// 2026-08-03 (Phase 1a, plan docs/plans/2026-08-03-data-brief-config-and-
+// 2026-08-03 (Phase 1a, plan docs/plans/2026-08-03-data-briv-config-and-
 // board-hardware-map.md): the single routing point for reading .dbv/.dbvl
 // configuration and board-map files. It dispatches through the v2 parser
 // (`v2::parse_document` / `v2::parse_document_quoted`) and exposes a keyed
@@ -20,13 +20,13 @@
 // - Hex literals parse as DataValue::String; typed accessors return the raw
 //   string and let the caller radix-parse (matches the resolver today).
 
-use crate::dbrief::v2::{parse_document, parse_document_quoted, DataEntry, DataField, DataValue, DbriefDocument};
+use crate::dbriv::v2::{parse_document, parse_document_quoted, DataEntry, DataField, DataValue, DbrivDocument};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Keyed access to a parsed .dbv/.dbvl document.
 pub struct ConfigDb {
-    doc: DbriefDocument,
+    doc: DbrivDocument,
     /// Uppercased key → index into `entries`.
     index: HashMap<String, usize>,
     /// Flat keyed entries in source order.
@@ -56,7 +56,7 @@ impl ConfigDb {
     }
 
     /// Build the flattened index from a parsed document.
-    fn from_doc(doc: DbriefDocument) -> Result<Self, String> {
+    fn from_doc(doc: DbrivDocument) -> Result<Self, String> {
         let mut index = HashMap::new();
         let mut entries = Vec::new();
         // Flat iteration over every group's entries — each standalone .dbvl
@@ -167,13 +167,13 @@ impl ConfigDb {
     }
 
     /// Raw parsed document (schemas, imports).
-    pub fn doc(&self) -> &DbriefDocument {
+    pub fn doc(&self) -> &DbrivDocument {
         &self.doc
     }
 }
 
 /// Resolve a logical config name to a concrete file in `config_dir`.
-/// Data Brief extensions only: `<name>.dbvl`, then `<name>.dbv`.
+/// Data Briv extensions only: `<name>.dbvl`, then `<name>.dbv`.
 ///
 /// 2026-08-03 (Phase 1a → 3): migration seam — as configs moved TOML → DB the
 /// resolved path just changed extension. 2026-08-03 (Phase 3-complete): all
@@ -198,7 +198,7 @@ pub fn resolve_config_file(config_dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Load a registry-style config (`name → string`) from the resolved config
-/// dir, as a Data Brief line table.
+/// dir, as a Data Briv line table.
 ///
 /// 2026-08-03 (Phase 3): the shared seam for `module-registry`. `config_dir`
 /// is the already-resolved dir (or `"__baked__"`). Absent or unparseable →
@@ -216,7 +216,7 @@ pub fn load_string_registry(config_dir: &Path, name: &str) -> HashMap<String, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dbrief::v2::DataValue;
+    use crate::dbriv::v2::DataValue;
 
     const ADDRESSES: &str = "\
 >schema Device from \"map.dbv\"\n\
@@ -263,7 +263,7 @@ TIMER: 0xFE002000; 0x4;\n";
 "xxhash"          = "std/xxhash.bv"
 "skiplist"        = "std/skiplist.bv"
 "shm"             = "std/shm.bv"
-"brief_rt"        = "std/brief_rt.bv"
+"briv_rt"        = "std/briv_rt.bv"
 "types"           = "std/types.bv"
 "core"            = "std/core"
 "c"               = "std/c"
@@ -357,7 +357,7 @@ TIMER: 0xFE002000; 0x4;\n";
     fn schema_imports_resolve_across_files() {
         // Write a map.dbv + addresses.dbvl into a temp dir and resolve the
         // `>schema Device from "map.dbv"` import.
-        let dir = std::env::temp_dir().join("brief-configdb-test");
+        let dir = std::env::temp_dir().join("briv-configdb-test");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("map.dbv"),
@@ -391,7 +391,7 @@ TIMER: 0xFE002000; 0x4;\n";
 
     #[test]
     fn resolve_config_file_prefers_db_extension() {
-        // Real baked config dir: only Data Brief extensions resolve.
+        // Real baked config dir: only Data Briv extensions resolve.
         let baked = Path::new("__baked__");
         // targets migrated to .dbvl (Phase 3) — resolves to .dbvl.
         let t = resolve_config_file(baked, "targets").unwrap();
@@ -403,8 +403,8 @@ TIMER: 0xFE002000; 0x4;\n";
 
     #[test]
     fn resolve_config_file_prefers_db_extension_in_dir() {
-        // A directory with both forms resolves to the Data Brief one.
-        let dir = std::env::temp_dir().join("brief-configdb-resolve");
+        // A directory with both forms resolves to the Data Briv one.
+        let dir = std::env::temp_dir().join("briv-configdb-resolve");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("demo.dbv"), "schema Demo { a: Int; };\n").unwrap();
 
@@ -516,7 +516,7 @@ DMA0: 0xFE005000; 0x1000;\n";
     #[test]
     fn load_string_registry_reads_dbvl() {
         // A temp config dir with a .dbvl line table loads via the registry.
-        let dir = std::env::temp_dir().join("brief-configdb-registry");
+        let dir = std::env::temp_dir().join("briv-configdb-registry");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("demo.dbvl"), "a: one;\nb: two;\n").unwrap();
 

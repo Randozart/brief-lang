@@ -11,7 +11,7 @@ either a `#Protocol` hashword or a concrete type name.
 
 ### Syntax Summary
 
-```brief
+```briv
 // Protocol-level declarations (type bodies)
 type Posit32: #Float {
     op Add(#Float): posit_add(#L, #R);     // RHS follows #Float
@@ -199,7 +199,7 @@ removed. All such bindings use `op Name(...): expr` instead.
 
 New file with `#Heap` and `#Stack` container types:
 
-```brief
+```briv
 // ── Collections ──────────────────────────────────────────────────
 // 2026-07-26: Standard collection types. No compiler magic.
 // Memory annotations: #Heap for dynamic, #Stack for static.
@@ -322,7 +322,7 @@ obj HashMap<K, V> {
 
 Replace the old `import "std/core/ring_buffer.bv"` + `[0]` initialization with:
 
-```brief
+```briv
 import { RingBuffer } from "std/collections.bv";
 
 let N: Int = GetEnvInt!("BOUND");
@@ -348,7 +348,7 @@ node work [count < N][count == N] {
 |----------|--------|
 | `AGENTS.md` | Add `op`/`prop` syntax items (item ~35). Remove old `op` syntax references. Update item 26 (`type`/`struct`/`obj` table) with new op/prop rules. |
 | `spec/SPEC.md` | Update grammar for `op_decl` and add `prop_decl`. Update type body parsing grammar. |
-| `learn-brief/15-custom-types.md` | Add `op` and `prop` declaration examples. |
+| `learn-briv/15-custom-types.md` | Add `op` and `prop` declaration examples. |
 | `docs/architecture/overview.md` | Note Phase 2.7 changes. |
 | `docs/architecture/backend-type-dispatch.md` | Update if type dispatch logic changes. |
 
@@ -391,7 +391,7 @@ node work [count < N][count == N] {
 | `.bv` stdlib | ~30 | All `op` declarations migrated, new collections.bv |
 | `.bv` tamer | ~8 | Tamer type declarations |
 | `.bv` benchmarks | ~5 | Benchmark type + queue_drain |
-| Documentation | ~5 | AGENTS.md, SPEC.md, learn-brief, arch docs |
+| Documentation | ~5 | AGENTS.md, SPEC.md, learn-briv, arch docs |
 | Tests | ~10 | New parser/typechecker/codegen tests |
 
 ## 7. Architecture Impact

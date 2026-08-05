@@ -4,7 +4,7 @@
 // plugins: list of system plugin names to enable for this extension.
 //          Defaults to ["prelude"] if not specified.
 //
-// 2026-08-03 (Phase 3, data-brief-config plan): migrated from targets.toml.
+// 2026-08-03 (Phase 3, data-briv-config plan): migrated from targets.toml.
 // Two key families in one flat .dbvl file:
 //   - extension entries `<.ext>: <backend>; <defaults space-sep>; <plugins
 //     space-sep>; <assembler>; <cross_verify_samples>;` — read by

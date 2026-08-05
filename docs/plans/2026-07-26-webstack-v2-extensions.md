@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-26
 **Status:** Planning phase — not yet implemented
-**Depends on:** `docs/plans/2026-07-26-rendered-brief-webstack-v2.md` (Phases 1-7 complete)
+**Depends on:** `docs/plans/2026-07-26-rendered-briv-webstack-v2.md` (Phases 1-7 complete)
 
 ## Overview
 
@@ -79,12 +79,12 @@ The `"wasm_runtime"` library name is a sentinel — the resolver returns it as `
 
 Users currently write raw `frgn from #Web` declarations for common browser APIs:
 
-```brief
+```briv
 frgn performance_now() -> Float from #Web;
 frgn console_log(msg: String) from #Web;
 ```
 
-These are boilerplate. The GLUE `[web]` target generates type-correct stubs, but the Brief-side declarations should live in stdlib so users can `import "web/console.bv"` and get them.
+These are boilerplate. The GLUE `[web]` target generates type-correct stubs, but the Briv-side declarations should live in stdlib so users can `import "web/console.bv"` and get them.
 
 ### Solution
 
@@ -99,33 +99,33 @@ lib/std/web/
   fetch.bv         # fetch(url) -> String
 ```
 
-Each file is 3-5 lines of Brief:
+Each file is 3-5 lines of Briv:
 
-```brief
+```briv
 // lib/std/web/time.bv
 frgn performance_now() -> Float as now from #Web;
 ```
 
-```brief
+```briv
 // lib/std/web/console.bv
 frgn console_log(msg: String) as log from #Web;
 frgn console_warn(msg: String) as warn from #Web;
 frgn console_error(msg: String) as error from #Web;
 ```
 
-```brief
+```briv
 // lib/std/web/dom.bv
 frgn set_text(elem: Element, text: String) from #Web;
 frgn get_element_by_id(id: String) -> Element from #Web;
 ```
 
-```brief
+```briv
 // lib/std/web/canvas.bv
 frgn get_canvas(id: String) -> CanvasContext from #Web;
 frgn present_frame(ctx: CanvasContext) from #Web;
 ```
 
-```brief
+```briv
 // lib/std/web/fetch.bv
 frgn fetch_url(url: String) -> String as fetch from #Web;
 ```
@@ -159,7 +159,7 @@ A WASM runtime server would need to:
 - Call `state_layout()` to read initial values
 - Render the template
 
-This is architecturally clean but adds a runtime dependency (`wasmtime` or the Brief interpreter). The compile-time approach is simpler and zero-cost — if the initial state is fully determined at compile time (no `GetEnvInt#` or `frgn from #Web` in initializers), the SSR is a pure function of the source.
+This is architecturally clean but adds a runtime dependency (`wasmtime` or the Briv interpreter). The compile-time approach is simpler and zero-cost — if the initial state is fully determined at compile time (no `GetEnvInt#` or `frgn from #Web` in initializers), the SSR is a pure function of the source.
 
 For cases with runtime-determined initial state (e.g., `let count: Int = frgn get_initial_count() from #Web`), SSR falls through to the runtime path — deferred to a future enhancement.
 
@@ -195,7 +195,7 @@ The output `app.html` is a **fully rendered page** containing:
 #### SS2: `--ssr` CLI flag
 
 ```bash
-briefc build app.rbv --backend webstack --ssr
+brivc build app.rbv --backend webstack --ssr
 ```
 
 When `--ssr` is set, the compiler runs `render_ssr()` before writing `app.html`. The boot script is a minimal `<script>` that:
@@ -215,7 +215,7 @@ The WASM module exports an `init_ssr(state_ptr: i32, state_len: i32)` function. 
 | `src/ssr.rs` | New module — `SsrOutput`, `render_ssr()` function |
 | `src/compile.rs` | Add `--ssr` flag to `BuildOptions`, run SSR pass for webstack |
 | `src/backend/llvm/mod.rs` | Add `init_ssr` export for pre-rendered state |
-| `docs/architecture/features/rendered-brief-wasm.md` | Update spec with SSR section |
+| `docs/architecture/features/rendered-briv-wasm.md` | Update spec with SSR section |
 
 ### Test
 
@@ -250,7 +250,7 @@ HMR uses the **generation counter** (exported as `generation` global in Phase 4)
 ### Prerequisites
 
 - SSR (this plan's item 3) — the "state serialization" mechanism is shared with HMR
-- A dev server — a small file watcher + HTTP server (can be a Brief tool or a thin shell)
+- A dev server — a small file watcher + HTTP server (can be a Briv tool or a thin shell)
 
 ### Implementation
 
@@ -290,10 +290,10 @@ class WasmDomRuntime {
 
 #### HM2: Dev server
 
-A small tool (`briefc dev`) that:
+A small tool (`brivc dev`) that:
 1. Starts an HTTP server serving the build directory
 2. Watches for `.rbv` changes via `inotify` or polling
-3. On change: recompiles with `briefc build` and emits a WebSocket message
+3. On change: recompiles with `brivc build` and emits a WebSocket message
 4. The `dev-shim.mjs` listens for the WebSocket message and calls `hotReload`
 
 #### HM3: Dev shim variant
@@ -310,7 +310,7 @@ A separate `dev-shim.mjs` that extends `dom-shim.mjs` with the WebSocket listene
 |------|--------|
 | `src/glue/web_generator.rs` | Add `_serializeState`, `_deserializeState`, `hotReload` methods to the generated JS template |
 | `src/compile.rs` | Add `--dev` flag, emit `dev-shim.mjs` variant |
-| `tools/briefc-dev/` | New dev server (file watcher + HTTP + WebSocket) |
+| `tools/brivc-dev/` | New dev server (file watcher + HTTP + WebSocket) |
 
 ### Test
 
@@ -330,7 +330,7 @@ A separate `dev-shim.mjs` that extends `dom-shim.mjs` with the WebSocket listene
 
 | Document | Update |
 |----------|--------|
-| `docs/architecture/features/rendered-brief-wasm.md` | Add SSR section under "Outputs", add HMR section under "Future" |
+| `docs/architecture/features/rendered-briv-wasm.md` | Add SSR section under "Outputs", add HMR section under "Future" |
 | `docs/plans/2026-07-26-webstack-v2-extensions.md` | (this plan) — definitive reference |
 
 ---

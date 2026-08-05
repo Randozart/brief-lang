@@ -1,6 +1,6 @@
 // lib/glue/python.bv — Python C API bridge declarations
 // 2026-07-23: FFI functions and obj layouts for Python C extensions.
-// Used by generator.bv to emit Brief-native bridge wrappers.
+// Used by generator.bv to emit Briv-native bridge wrappers.
 
 // ── Python C API frgn declarations ──────────────────────────────────────
 frgn PyArg_ParseTuple(Ptr, Ptr, ...) -> Int from #POSIX fallback 0;
