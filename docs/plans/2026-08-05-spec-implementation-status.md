@@ -25,10 +25,10 @@ Status legend:
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
 | 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
-| 8 | Declarations | In progress | Phase 3 removed `prop`, `Ptr!`; `meld`/`rstruct`/`term!`/`escape` remain |
-| 9 | Functions, transactions, nodes, objects, cells | In progress | `term!`/`escape` renames remain (Phase 3) |
+| 8 | Declarations | In progress | Phase 3 removed `prop`, `Ptr!`, `rstruct`, dotted extensions; `meld` deferred to Phase 12 |
+| 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done |
 | 10 | Contracts, invariants, watchdogs | Not started | Phase 6 (`[true][true]` rejection) |
-| 11 | Control flow | In progress | `escape`→`rollback`, `term!`→`exit program`, `defer` remain |
+| 11 | Control flow | In progress | `rollback`, `exit program` done; `defer`/`mutex`/`barrier` are new statements (Phase 11) |
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
