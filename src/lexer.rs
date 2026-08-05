@@ -106,9 +106,6 @@ pub enum Token {
     #[token("frgn")]
     Frgn,
 
-    #[token("frgn!")]
-    FrgnBang,
-
     // 2026-07-12: inop/inop! removed — all ops are # intrinsics
     #[token("meld")]
     Meld,
@@ -518,7 +515,6 @@ impl std::fmt::Display for Token {
             Token::From => write!(f, "from"),
             Token::As => write!(f, "as"),
             Token::Frgn => write!(f, "frgn"),
-            Token::FrgnBang => write!(f, "frgn!"),
             Token::Meld => write!(f, "meld"),
             Token::Reg => write!(f, "reg"),
             Token::Op => write!(f, "op"),
@@ -641,7 +637,7 @@ mod tests {
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
             "vol", "out", "await", "term", "term!", "rollback", "import",
-            "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
+            "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",
             "sync", "true", "false", "cycles", "cyc", "ms", "seconds",

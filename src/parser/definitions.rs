@@ -150,23 +150,14 @@ impl<'a> Parser<'a> {
                     self.error_at_current(&format!("unexpected top-level item '{}'", name))
                 }
             }
-            // 2026-07-16: P3 — Parse `frgn` and `frgn!` declarations
-            Some(Token::Frgn) | Some(Token::FrgnBang) => {
-                let is_bang = matches!(self.peek(), Some(Token::FrgnBang));
+            // 2026-08-05 (Phase 3): `frgn` declarations. `optional frgn` is the
+            // only modifier; `frgn!`, `frgn?`, `frgn?!` are removed (SPEC §19.3).
+            Some(Token::Frgn) => {
                 self.advance();
-                // 2026-07-25: frgn? / frgn! / frgn?! modifiers
-                // frgn? → optional. frgn! → fire-and-forget (via FrgnBang token).
-                // frgn?! → frgn! + immediate question check for delivery.
-                let is_optional = !is_bang && self.eat(&Token::Question);
-                let is_fire_forget = is_bang;
-                let mut is_delivery = false;
-                if is_fire_forget && self.eat(&Token::Question) {
-                    is_delivery = true;
-                }
                 let mut fb = self.parse_frgn_decl()?;
-                fb.is_optional = is_optional;
-                fb.is_fire_forget = is_fire_forget;
-                fb.is_delivery = is_delivery;
+                fb.is_optional = false;
+                fb.is_fire_forget = false;
+                fb.is_delivery = false;
                 Ok(TopLevel::ForeignBinding(fb))
             }
             _ => {
@@ -188,6 +179,17 @@ impl<'a> Parser<'a> {
                 }
                 if self.check_identifier("$txn") {
                     return self.parse_compile_time_txn();
+                }
+                // 2026-08-05 (Phase 3): `optional frgn` — optional foreign
+                // symbol availability (SPEC §19.3). `frgn?` is removed.
+                if self.check_identifier("optional") && self.peek_next_is_frgn() {
+                    self.pos += 1; // consume 'optional'
+                    self.advance(); // consume 'frgn'
+                    let mut fb = self.parse_frgn_decl()?;
+                    fb.is_optional = true;
+                    fb.is_fire_forget = false;
+                    fb.is_delivery = false;
+                    return Ok(TopLevel::ForeignBinding(fb));
                 }
                 // 2026-07-25: $let and $const — compile-time variables
                 if self.check_identifier("$let") {

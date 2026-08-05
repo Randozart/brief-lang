@@ -93,6 +93,12 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.pos + 1).map(|(t, _)| t)
     }
 
+    /// 2026-08-05 (Phase 3): `optional frgn` — true when the current token is
+    /// the identifier `optional` and the following token is the `frgn` keyword.
+    pub fn peek_next_is_frgn(&self) -> bool {
+        matches!(self.peek_next(), Some(Token::Frgn))
+    }
+
     /// Peek at the current token and its span.
     pub fn peek_with_span(&self) -> Option<(&Token, &std::ops::Range<usize>)> {
         self.tokens.get(self.pos).map(|(t, s)| (t, s))
@@ -374,7 +380,7 @@ impl<'a> Parser<'a> {
             Token::Rollback => "rollback".into(),
             Token::Import => "import".into(),
             Token::From => "from".into(), Token::As => "as".into(),
-            Token::Frgn => "frgn".into(), Token::FrgnBang => "frgn!".into(),
+            Token::Frgn => "frgn".into(),
             Token::Meld => "meld".into(), Token::Reg => "reg".into(),
             Token::Op => "op".into(), Token::Type => "type".into(),
             Token::Cell => "cell".into(),             Token::Struct => "struct".into(),
