@@ -12,8 +12,6 @@ pub struct Parser<'a> {
     pub pos: usize,
     pub source: &'a str,
     pub strict_mode: bool,
-    /// 2026-07-16: P2 — Extension group expansion stores extra TypeDefs here.
-    pub pending_types: std::vec::IntoIter<TopLevel>,
     /// 2026-07-24: Pending doc comment to attach to the next definition.
     pub pending_doc: Option<String>,
     /// 2026-07-25: Pending `>` split from `>>` in nested generics.
@@ -36,7 +34,6 @@ impl<'a> Parser<'a> {
             pos: 0,
             source,
             strict_mode: false,
-            pending_types: Vec::new().into_iter(),
             pending_doc: None,
             pending_gt: false,
         };

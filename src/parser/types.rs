@@ -65,15 +65,9 @@ impl<'a> Parser<'a> {
             Some(Token::LParen) => return self.parse_tuple_type(),
             _ => return self.error_at_current("expected type"),
         };
-        // 2026-07-16: P2 — Check for .ext suffix on keyword types (e.g. String.c, Int.c.sso)
-        if let Some(ext) = self.try_parse_dot_extension() {
-            let mut full = format!("{}.{}", base.0, ext);
-            // Allow deeper extensions: "Int.c.sso"
-            while let Some(next) = self.try_parse_dot_extension() {
-                full = format!("{}.{}", full, next);
-            }
-            return Ok(Type::Custom(full));
-        }
+        // 2026-08-05 (Phase 3): free-form dot-extension type suffixes
+        // (`String.c`, `Int.c.sso`) are removed; host/target qualifiers live
+        // in configured GLUE bindings and protocol variants (SPEC §8.7).
         // 2026-07-25: Array syntax: Int[1024] → Type::Vector.
         // 2026-07-31: `[` is an array suffix ONLY when the next token is an
         // integer literal (`Int[8]`) or an identifier directly followed by
@@ -117,28 +111,7 @@ impl<'a> Parser<'a> {
         Ok(base.1)
     }
 
-    /// 2026-07-16: P2 — If the next token is `.ident`, consume and return the identifier.
-    /// Used to parse extension type names like String.c.
-    fn try_parse_dot_extension(&mut self) -> Option<String> {
-        if !self.eat(&Token::Dot) {
-            return None;
-        }
-        match self.peek() {
-            Some(Token::Identifier(name)) => {
-                let name = name.clone();
-                self.pos += 1;
-                Some(name)
-            }
-            _ => {
-                // Dot without following identifier — restore position.
-                // We can't easily un-eat the Dot, but in practice this shouldn't occur
-                // in valid programs.
-                None
-            }
-        }
-    }
-
-    /// Parse a named type, possibly with generic parameters, pointer prefix, or extension.
+    /// Parse a named type, possibly with generic parameters or pointer prefix.
     fn parse_named_type_body(&mut self, name: &str) -> Result<Type, SyntaxError> {
         // Bits<N> — numeric bit width, no annotation = flexible
         if name == "Bit" || name == "bits" {
@@ -195,16 +168,6 @@ impl<'a> Parser<'a> {
                 return self.error_at_current("expected '>' or '>>' to close generic type");
             }
             return Ok(Type::Applied(name.to_string(), args));
-        }
-
-        // 2026-07-16: P2 — Check for .ext suffix (e.g., "MyType.c", "MyType.c.sso")
-        if let Some(ext) = self.try_parse_dot_extension() {
-            let mut full = format!("{}.{}", name, ext);
-            // Allow deeper: "Int.c.sso"
-            while let Some(next) = self.try_parse_dot_extension() {
-                full = format!("{}.{}", full, next);
-            }
-            return Ok(Type::Custom(full));
         }
 
         // 2026-07-25: Array syntax for custom types: MyStruct[1024].

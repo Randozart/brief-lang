@@ -14,10 +14,6 @@ use crate::lexer::Token;
 impl<'a> Parser<'a> {
     /// Parse a top-level item: defn, txn, cell, import, etc.
     pub fn parse_top_level(&mut self) -> Result<TopLevel, SyntaxError> {
-        // 2026-07-16: P2 — Drain extension group leftovers first
-        if let Some(item) = self.pending_types.next() {
-            return Ok(item);
-        }
         if self.eat(&Token::Export) {
             return self.parse_export();
         }
@@ -1447,145 +1443,15 @@ impl<'a> Parser<'a> {
     }
 
     /// 2026-07-14: Parse: type Name : Parent { slot; slot; }
-    /// 2026-07-16: P2 — Parse `type Name` or `type Name.[a,b,c]` (extension group).
-    /// For groups, stores extra TypeDefs in self.pending_types for subsequent drain.
     fn parse_type_or_group(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
         self.pos += 1; // consume `type` token
         // 2026-07-16: All type names are Token::Identifier after Type token removal.
         let name = self.expect_identifier()?;
         // 2026-07-20: Parse type parameters: type List<T: #String, V>
         let type_params = self.parse_type_params()?;
-        // 2026-07-16: P2 — Check for .[ext, ...] extension group syntax
-        if self.eat(&Token::Dot) && self.eat(&Token::LBracket) {
-            return self.parse_extension_group_body(&name);
-        }
+        // 2026-08-05 (Phase 3): dotted extension groups (`type Foo.[a,b]`) are
+        // removed with the free-form dot-extension mechanism.
         self.parse_type_body(name, type_params)
-    }
-
-    /// 2026-07-16: P2 — Parse extension group body after `Name.[` has been consumed.
-    /// Expands into one TypeDef per extension, stores extras in pending_types.
-    fn parse_extension_group_body(&mut self, base_name: &str) -> Result<Box<TypeDef>, SyntaxError> {
-        let mut exts = Vec::new();
-        loop {
-            let ext = self.expect_identifier()?;
-            exts.push(ext);
-            if !self.eat(&Token::Comma) {
-                break;
-            }
-        }
-        self.expect(Token::RBracket)?;
-        let base = if self.eat(&Token::Colon) {
-            self.parse_expression()?
-        } else {
-            Expr::Identifier(base_name.to_string())
-        };
-        let mut slots = Vec::new();
-        let mut metadata = std::collections::HashMap::new();
-        let mut operators: Vec<OperatorDef> = Vec::new();
-        let mut op_bindings: Vec<OperatorBinding> = Vec::new();
-        if self.eat(&Token::LBrace) {
-            while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // !> key: value; — metadata assignment (new syntax)
-                if self.check(&Token::ExclaimArrow) {
-                    self.advance();
-                    let key = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    match key.as_str() {
-                        "ctd" => {
-                            let ctd_name = self.expect_identifier()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
-                        }
-                        "alu" => {
-                            match self.peek() {
-                                Some(Token::Identifier(_)) => {
-                                    let alu_name = self.expect_identifier()?;
-                                    metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
-                                }
-                                _ => {
-                                    let alu_str = self.expect_string()?;
-                                    metadata.insert("alu".into(), PropertyValue::String(alu_str));
-                                }
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        "layout" => {
-                            if self.check(&Token::LBrace) {
-                                let fields = self.parse_layout_struct_body()?;
-                                metadata.insert("layout_struct".into(), fields);
-                            } else {
-                                let raw = self.read_layout_body()?;
-                                metadata.insert("layout".into(), PropertyValue::String(raw));
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        _ => {
-                            let pv = self.parse_metadata_value_standalone()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert(key, pv);
-                        }
-                    }
-                    continue;
-                }
-                let slot_name = self.expect_identifier()?;
-                if slot_name == "op" {
-                    self.parse_op_definition(&mut op_bindings)?;
-                    continue;
-                }
-                self.expect(Token::Colon)?;
-                let slot_ty = self.parse_type()?;
-                self.eat(&Token::Semicolon);
-                slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
-            }
-            self.expect(Token::RBrace)?;
-        }
-        if exts.is_empty() {
-            return self.error_at_current("extension group cannot be empty");
-        }
-        let first_ext = exts.remove(0);
-        let mut extra_types = Vec::new();
-        for ext in exts {
-            let full_name = format!("{}.{}", base_name, ext);
-            extra_types.push(TopLevel::TypeDef(Box::new(TypeDef {
-                name: full_name,
-                type_params: vec![],
-                parent: Some(Box::new(base.clone())),
-            protocol: None,
-                bit_range: None,
-                body: TypeDefBody {
-                    slots: slots.clone(),
-                    metadata: metadata.clone(),
-                    projections: vec![],
-                    bindings: vec![],
-                    operators: operators.clone(), op_bindings: op_bindings.clone(),
-                    constraints: vec![],
-                    members: vec![],
-                    span: None,
-                },
-                span: None,
-            })));
-        }
-        self.pending_types = extra_types.into_iter();
-        let first_name = format!("{}.{}", base_name, first_ext);
-        Ok(Box::new(TypeDef {
-            name: first_name,
-            type_params: vec![],
-            parent: Some(Box::new(base)),
-            protocol: None,
-            bit_range: None,
-            body: TypeDefBody {
-                slots,
-                metadata,
-                projections: vec![],
-                bindings: vec![],
-                operators,
-                op_bindings,
-                constraints: vec![],
-                members: vec![],
-                span: None,
-            },
-            span: None,
-        }))
     }
 
     /// 2026-07-24: Parse `type Name [ : [Parent] [Protocol] ] { body }`.
@@ -2252,10 +2118,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_dotted_type_extension() {
-        // "String.c" should parse as Type::Custom("String.c")
+    fn test_parse_dotted_type_extension_rejected() {
+        // 2026-08-05 (Phase 3): free-form dotted type extensions (`String.c`)
+        // are removed; the keyword type parses and the trailing `.` is left
+        // unconsumed (a full declaration therefore fails to parse).
         let ty = parse_type("String.c").unwrap();
-        assert_eq!(ty, crate::ast::Type::Custom("String.c".into()));
+        assert_eq!(ty, crate::ast::Type::string());
     }
 
     #[test]
@@ -2266,10 +2134,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_dotted_type_double_extension() {
-        // "Int.c.sso" should parse as Type::Custom("Int.c.sso")
+    fn test_parse_dotted_type_double_extension_rejected() {
+        // "Int.c.sso" — the `Int` parses and the dotted suffix is not consumed.
         let ty = parse_type("Int.c.sso").unwrap();
-        assert_eq!(ty, crate::ast::Type::Custom("Int.c.sso".into()));
+        assert_eq!(ty, crate::ast::Type::int());
     }
 
     // ── P3: frgn declaration parsing ─────────────────────────────────
