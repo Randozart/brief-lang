@@ -556,34 +556,42 @@ impl LspServer {
     }
 
     fn handle_completion(&self, id: lsp_server::RequestId, _params: Value) {
-        let mut keywords = vec![
-            "txn", "rct", "let", "const", "sig", "defn", "trg", "trg!", "trigger", "trigger!",
-            "import", "from", "term", "escape",
-            "async", "Int", "UInt", "Float", "String", "Bool", "Data", "Void",
-            "TXN", "RCT", "LET", "CONST", "SIG", "DEFN", "TRG", "TRG!", "TRIGGER", "TRIGGER!",
-            "IMPORT", "FROM", "TERM", "ESCAPE",
-            "ASYNC", "REGISTER", "ALIAS", "RULE", "CHECK", "IMPORT", "Ok", "Err", "Some", "None",
-            "TRUE", "FALSE", "null", "NULL",
-            "pvt", "sed", "match", "uni", "frgn", "frgn!", "syscall", "syscall!",
-        ];
+        // 2026-08-05 (Phase 1): completions derive from the canonical language
+        // vocab (`src/vocab.rs`), not a hand-maintained list. The lexer, LSP,
+        // highlighter, and formatter must agree on the vocabulary.
+        let vocab = crate::vocab::LanguageVocab::canonical();
+        let mut keywords: Vec<String> = vocab
+            .canonical_keywords()
+            .map(|k| k.name.clone())
+            .collect();
+        keywords.extend(vocab.intrinsics.iter().cloned());
+        // Bootstrap type names and operand hashwords are offered as bare
+        // completions (the lexer tokenizes them as identifiers/hashwords).
+        keywords.extend(
+            ["Int", "Float", "Bool", "String", "Char", "Void", "Ptr", "Bits"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        keywords.sort();
+        keywords.dedup();
 
         // Add Codicil-specific completions when in Codicil mode
         if self.codicil_mode {
             keywords.extend(vec![
-                "[route]",
-                "[pre]",
-                "[post]",
-                "method = \"GET\"",
-                "method = \"POST\"",
-                "method = \"PUT\"",
-                "method = \"DELETE\"",
-                "method = \"PATCH\"",
-                "path = \"/\"",
-                "middleware = []",
-                "context = \"server\"",
-                "response.status",
-                "response.body",
-                "params.",
+                "[route]".to_string(),
+                "[pre]".to_string(),
+                "[post]".to_string(),
+                "method = \"GET\"".to_string(),
+                "method = \"POST\"".to_string(),
+                "method = \"PUT\"".to_string(),
+                "method = \"DELETE\"".to_string(),
+                "method = \"PATCH\"".to_string(),
+                "path = \"/\"".to_string(),
+                "middleware = []".to_string(),
+                "context = \"server\"".to_string(),
+                "response.status".to_string(),
+                "response.body".to_string(),
+                "params.".to_string(),
             ]);
         }
 

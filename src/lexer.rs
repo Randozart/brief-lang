@@ -740,6 +740,39 @@ impl std::fmt::Display for Token {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vocab::{LanguageVocab, VocabStatus};
+
+    /// 2026-08-05 (Phase 1 parity): every keyword the lexer recognizes as a
+    /// dedicated token must be recorded in the canonical vocab as canonical,
+    /// removed, or reserved. This prevents unaccounted language surface.
+    #[test]
+    fn lexer_keywords_are_accounted_in_vocab() {
+        let vocab = LanguageVocab::canonical();
+        // Keyword tokens: identifiers are excluded (handled by pattern),
+        // literals/punctuation are covered by their own checks. This list is
+        // the dedicated keyword tokens that Phase 3 will converge with the
+        // vocab (removing Removed/Reserved tokens that are not canonical).
+        let keyword_tokens: &[&str] = &[
+            "sig", "export", "defn", "let", "const", "txn", "node", "async", "seq",
+            "vol", "out", "await", "term", "term!", "escape", "uni", "is", "like",
+            "import", "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
+            "type", "cell", "obj", "struct", "rstruct", "render", "enum", "trg",
+            "within", "Ptr!", "Ok", "Err", "match", "quote", "foreach", "pvt", "sed",
+            "sync", "some", "none", "true", "false", "cycles", "cyc", "ms", "seconds",
+            "minute", "minutes", "nanoseconds",
+        ];
+        for name in keyword_tokens {
+            assert!(
+                vocab.keyword_status(name).is_some(),
+                "lexer keyword '{name}' is not recorded in the canonical vocab"
+            );
+        }
+        // Canonical keywords must not be recorded as removed/reserved.
+        for kw in vocab.canonical_keywords() {
+            assert_ne!(kw.status, VocabStatus::Removed);
+            assert_ne!(kw.status, VocabStatus::Reserved);
+        }
+    }
 
     #[test]
     fn test_lexer() {

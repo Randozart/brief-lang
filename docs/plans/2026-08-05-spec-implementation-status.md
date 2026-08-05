@@ -21,7 +21,7 @@ Status legend:
 | 1 | Scope and conformance | In progress | Conformance runner in Phase 0 |
 | 2 | Core model | In progress | No-layout frontend; interpreter Value migration is Phase 17 |
 | 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2 |
-| 4 | Lexical conventions | Not started | Phase 1 manifest / Phase 3 removal |
+| 4 | Lexical conventions | In progress | Phase 1 vocab; Phase 3 exact-casing/removal |
 | 5 | Delimiters and arrows | Not started | Phase 3 (remove `|>`, `++`, `<:`, `:>`) |
 | 6 | Grammar overview | Not started | Phase 3/4 AST+parser |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
@@ -40,7 +40,7 @@ Status legend:
 | 20 | Assembly declarations | Not started | Phase 16 (`asm<target>` + effect profile) |
 | 21 | Rendered Briv | Not started | Phase 14 (`render Name`, `b-when`) |
 | 22 | Data Briv | Not started | Phase 13 (`.dbv`/`.dbvl` modes) |
-| 23 | Diagnostics, tooling, documentation | In progress | Manifest Phase 1; docs Phase 20 |
+| 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; docs Phase 20 |
 | 24 | Standard-library boundary | Not started | Phase 18 (no compiler collection knowledge) |
 | 25 | Implementation staging | In progress | `SyntaxError::StagedFeature` added in Phase 0 |
 

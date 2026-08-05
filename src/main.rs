@@ -12,6 +12,7 @@ use std::path::Path;
 
 use briv_compiler::library;
 use briv_compiler::target::{BackendKind, TargetConfig, get_extension};
+use briv_compiler::vocab;
 use compile::BeastFilter;
 
 fn main() {
@@ -39,6 +40,8 @@ fn main() {
         "bounty" => run_bounty(&args[2..]),
         "registry" => run_registry(&args[2..]),
         "register" => run_register(&args[2..]),
+        "vocab" => run_vocab(&args[2..]),
+        "grammar" => run_grammar(&args[2..]),
         "install-deps" => deps::install_all(),
         "install-highlighter" => run_install_highlighter(&args[2..]),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
@@ -106,7 +109,36 @@ fn print_usage(program: &str) {
     eprintln!("  {} init <name>                   Create a new project", name);
     eprintln!("  {} install-deps                 Download optional deps (z3, dwarfdump)", name);
     eprintln!("  {} install-highlighter [--vsix-only]  Build & install the syntax highlighter .vsix for VS Code / VSCodium", name);
+    eprintln!("  {} vocab [path]                 Emit the canonical language vocabulary manifest (default: stdout)", name);
+    eprintln!("  {} grammar <path>               Regenerate the TextMate grammar keyword/type patterns from the vocab", name);
     eprintln!("  {} help                          Show this help", name);
+}
+
+/// 2026-08-05 (Phase 1): emit the canonical language vocabulary manifest for
+/// tooling (LSP/highlighter generation, CI parity checks). `brivc vocab`
+/// prints TOML to stdout; `brivc vocab <path>` writes the file.
+fn run_vocab(args: &[String]) -> Result<(), String> {
+    let vocab = vocab::LanguageVocab::canonical();
+    let text = vocab::serialize_vocab(&vocab).map_err(|e| e.to_string())?;
+    match args.first() {
+        Some(path) => {
+            std::fs::write(path, text).map_err(|e| format!("failed to write vocab: {}", e))
+        }
+        None => {
+            print!("{}", text);
+            Ok(())
+        }
+    }
+}
+
+/// 2026-08-05 (Phase 1): regenerate the TextMate grammar's keyword/type
+/// patterns from the canonical vocab so the highlighter cannot drift.
+/// `brivc grammar <path-to-briv.tmLanguage.json>`.
+fn run_grammar(args: &[String]) -> Result<(), String> {
+    let path = args
+        .first()
+        .ok_or("usage: brivc grammar <path/to/briv.tmLanguage.json>")?;
+    vocab::regenerate_highlighter_grammar(std::path::Path::new(path))
 }
 
 /// Parse `build` subcommand arguments into a `BuildOptions`.
