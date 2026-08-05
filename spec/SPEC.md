@@ -517,7 +517,7 @@ when invalid_input {
 A node is a reactive transition that may fire when its precondition is satisfied.
 
 ```briv
-node update()[pending][!pending] {
+node update [pending][!pending] {
     pending = false;
     term;
 };
@@ -713,10 +713,10 @@ The reference interpreter uses a deterministic semantic scheduler for normal exe
 The reactive input keyword is `trg`.
 
 ```briv
-trg input_ready: Bool @ device;
+trg input_ready @ device;
 ```
 
-`@` binds a trigger to its source. Trigger source forms are target/profile validated.
+`@` binds a trigger to its source. Trigger source forms are target/profile validated. Typed event ports on `obj`/`cell` declarations are the staged replacement for a typed trigger surface.
 
 `trg!` does not exist. Local asynchronous suspension uses ports, nodes, spawned tasks, and `await`.
 

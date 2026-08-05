@@ -204,6 +204,10 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
+        // 2026-08-05 (Phase 2 canonical formatter): consume an optional
+        // trailing `;` so `if ... {} else {};` round-trips without producing a
+        // spurious empty `0;` statement. Mirrors `when`/`match` termination.
+        self.eat(&Token::Semicolon);
         Ok(Statement::If(cond, then_branch, else_branch))
     }
 
@@ -216,6 +220,9 @@ impl<'a> Parser<'a> {
         let list = self.parse_expression()?;
         self.expect(Token::RParen)?;
         let body = self.parse_block()?;
+        // 2026-08-05 (Phase 2 canonical formatter): consume optional `;`
+        // (matches when/match termination).
+        self.eat(&Token::Semicolon);
         Ok(Statement::Foreach {
             item,
             list: Box::new(list),
@@ -254,12 +261,16 @@ impl<'a> Parser<'a> {
     fn parse_sync_block(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
         let body = self.parse_block()?;
+        // 2026-08-05 (Phase 2 canonical formatter): consume optional `;`.
+        self.eat(&Token::Semicolon);
         Ok(Statement::SyncBlock(body))
     }
 
     /// { stmt; stmt; ... }
     fn parse_block_statement(&mut self) -> Result<Statement, SyntaxError> {
         let stmts = self.parse_block()?;
+        // 2026-08-05 (Phase 2 canonical formatter): consume optional `;`.
+        self.eat(&Token::Semicolon);
         Ok(Statement::Block(stmts))
     }
 

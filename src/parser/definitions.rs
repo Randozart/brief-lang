@@ -693,9 +693,16 @@ impl<'a> Parser<'a> {
 
         // Helper: parse a string path or angle-bracketed registry name.
         // Must be a local fn to avoid borrow conflicts with &mut self.
+        // 2026-08-05 (Phase 2/11): angle paths accept slash-separated
+        // components (`import <std/collections>;`) per SPEC §7.1.
         fn parse_import_path(parser: &mut Parser) -> Result<ImportKind, SyntaxError> {
             if parser.eat(&Token::Lt) {
-                let name = parser.expect_identifier()?;
+                let first = parser.expect_identifier()?;
+                let mut name = first;
+                while parser.eat(&Token::Slash) {
+                    let part = parser.expect_identifier()?;
+                    name = format!("{}/{}", name, part);
+                }
                 parser.expect(Token::Gt)?;
                 Ok(ImportKind::Registry(name))
             } else {
@@ -731,9 +738,13 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // Check for < without LBrace: import <name>
+        // Check for < without LBrace: import <name> (slash-separated path)
         if self.eat(&Token::Lt) {
-            let name = self.expect_identifier()?;
+            let mut name = self.expect_identifier()?;
+            while self.eat(&Token::Slash) {
+                let part = self.expect_identifier()?;
+                name = format!("{}/{}", name, part);
+            }
             self.expect(Token::Gt)?;
             self.expect(Token::Semicolon)?;
             return Ok(Import {

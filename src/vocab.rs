@@ -236,7 +236,10 @@ impl LanguageVocab {
                 "And", "Or", "Not", "BitAnd", "BitOr", "BitXor", "BitNot", "Shl", "Shr",
                 "At", "Slice", "InsertAt", "ExtractFrom", "CopyFrom", "Append", "Prepend",
             ]),
-            stages: ss(&["Parsed", "Allocated", "Typed", "Optimized", "IR"]),
+            stages: ss(&[
+                "PreLex", "Parsed", "Resolved", "Typed", "Normalized", "Verified",
+                "Allocated", "Provenanced", "Generated", "Optimized", "Linked",
+            ]),
             staged_features: ss(&[
                 "dyn Trait", "const generics", "spawn/await handles",
                 "rollback", "exit program", "defer", "mutex", "barrier",

@@ -42,6 +42,7 @@ fn main() {
         "register" => run_register(&args[2..]),
         "vocab" => run_vocab(&args[2..]),
         "grammar" => run_grammar(&args[2..]),
+        "fmt" => run_fmt(&args[2..]),
         "install-deps" => deps::install_all(),
         "install-highlighter" => run_install_highlighter(&args[2..]),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
@@ -111,6 +112,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} install-highlighter [--vsix-only]  Build & install the syntax highlighter .vsix for VS Code / VSCodium", name);
     eprintln!("  {} vocab [path]                 Emit the canonical language vocabulary manifest (default: stdout)", name);
     eprintln!("  {} grammar <path>               Regenerate the TextMate grammar keyword/type patterns from the vocab", name);
+    eprintln!("  {} fmt <file> [--stdout|--check]  Format a source file canonically (round-trip safe)", name);
     eprintln!("  {} help                          Show this help", name);
 }
 
@@ -139,6 +141,61 @@ fn run_grammar(args: &[String]) -> Result<(), String> {
         .first()
         .ok_or("usage: brivc grammar <path/to/briv.tmLanguage.json>")?;
     vocab::regenerate_highlighter_grammar(std::path::Path::new(path))
+}
+
+/// 2026-08-05 (Phase 2): canonical formatting. `brivc fmt <file>` parses,
+/// formats with the canonical formatter, and writes the file back.
+/// `--stdout` prints instead of writing; `--check` verifies idempotence.
+fn run_fmt(args: &[String]) -> Result<(), String> {
+    let mut stdout = false;
+    let mut check = false;
+    let mut file: Option<&str> = None;
+    for arg in args {
+        match arg.as_str() {
+            "--stdout" => stdout = true,
+            "--check" => check = true,
+            other => file = Some(other),
+        }
+    }
+    let file = file.ok_or("usage: brivc fmt <file.bv> [--stdout|--check]")?;
+    let source = std::fs::read_to_string(file)
+        .map_err(|e| format!("cannot read '{}': {}", file, e))?;
+    let tokens = briv_compiler::lexer::tokenize(&source)
+        .map_err(|e| format!("lex failed: {}", e))?;
+    let mut parser = briv_compiler::parser::Parser::new(tokens, &source);
+    let items = parser
+        .parse_program()
+        .map_err(|e| format!("parse failed: {}", e))?;
+    let formatted = briv_compiler::ast::format_program(&items);
+
+    if check {
+        // Round-trip: reformat the formatted output and require a fixed point.
+        let tokens2 = briv_compiler::lexer::tokenize(&formatted)
+            .map_err(|e| format!("re-lex failed: {}", e))?;
+        let mut parser2 = briv_compiler::parser::Parser::new(tokens2, &formatted);
+        let items2 = parser2
+            .parse_program()
+            .map_err(|e| format!("re-parse of formatted output failed: {}", e))?;
+        let reformatted = briv_compiler::ast::format_program(&items2);
+        if formatted != reformatted {
+            return Err(format!(
+                "formatting is not idempotent for '{}'\n--- first pass:\n{}\n--- second pass:\n{}",
+                file, formatted, reformatted
+            ));
+        }
+        if formatted != source && formatted != format!("{}\n", source.trim_end()) {
+            return Err(format!("'{}' is not canonically formatted", file));
+        }
+        return Ok(());
+    }
+
+    if stdout {
+        print!("{}", formatted);
+    } else {
+        std::fs::write(file, formatted)
+            .map_err(|e| format!("cannot write '{}': {}", file, e))?;
+    }
+    Ok(())
 }
 
 /// Parse `build` subcommand arguments into a `BuildOptions`.

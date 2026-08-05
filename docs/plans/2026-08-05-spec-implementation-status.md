@@ -23,7 +23,7 @@ Status legend:
 | 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2 |
 | 4 | Lexical conventions | In progress | Phase 1 vocab; Phase 3 exact-casing/removal |
 | 5 | Delimiters and arrows | Not started | Phase 3 (remove `|>`, `++`, `<:`, `:>`) |
-| 6 | Grammar overview | Not started | Phase 3/4 AST+parser |
+| 6 | Grammar overview | In progress | Phase 2 canonical formatter + round-trip; Phase 3/4 AST+parser |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
 | 8 | Declarations | Not started | Phase 4 (`type`/`trait`/`proto`/`struct`/`enum`/`impl`) |
 | 9 | Functions, transactions, nodes, objects, cells | Not started | Phases 4/8/10 |

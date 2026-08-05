@@ -11,11 +11,13 @@
 // replaced by the entry!/args! macros in Phase 3).
 
 mod display;
+mod canonical;
 mod expr;
 pub mod layout;
 pub mod top;
 mod types;
 
+pub use canonical::*;
 pub use display::*;
 pub use expr::*;
 pub use top::*;
