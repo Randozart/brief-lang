@@ -113,8 +113,6 @@ pub enum Token {
     #[token("meld")]
     Meld,
 
-    #[token("syscall!")]
-
     #[token("reg")]
     Reg,
 
@@ -338,26 +336,9 @@ ExclaimArrow,
     #[token("_")]
     Underscore,
 
-    // ── Pragma tokens (kept for backward compat, to migrate) ──
-    #[token("#[")]
-    HashBracket,
-
-    #[token("#![")]
-    HashBangBracket,
-
-    #[token("#pragma")]
-    Pragma,
-
-    #[token("#!pragma")]
-    PragmaBang,
-
-    #[token("#?")]
-    HashQuestion,
-
-    /// 2026-07-12: #! kept for backward compat. # alone is now
-    /// an identifier character (e.g. Sqrt# -> single ident).
-    #[token("#!")]
-    HashBang,
+    // 2026-08-05 (Phase 3): legacy pragma/attribute tokens (#[, #![, #pragma,
+    // #!pragma, #?, #!) removed — no parser used them and the SPEC forbids
+    // legacy pragma syntax.
 
     // 2026-07-18: Compiler-internal hash words for strategy op bindings.
     // #L = left operand, #R = right operand, #T = type parameter.
@@ -647,9 +628,6 @@ impl std::fmt::Display for Token {
             Token::ArrowLeft => write!(f, "<-"),
             Token::ExclaimArrow => write!(f, "!>"),
             Token::Underscore => write!(f, "_"),
-            Token::HashBracket => write!(f, "#["),
-            Token::HashBangBracket => write!(f, "#!["),
-            Token::Pragma => write!(f, "#pragma"),
             Token::Semicolon => write!(f, ";"),
             Token::DotCaretCaret => write!(f, ".^^"),
             Token::DotCaret => write!(f, ".^"),
@@ -687,13 +665,10 @@ impl std::fmt::Display for Token {
             Token::DocComment(s) => write!(f, "///{}", s),
             Token::DocCommentBang(s) => write!(f, "//!{}", s),
             Token::Slash => write!(f, "/"),
-            Token::HashBang => write!(f, "#!"),
-            Token::HashQuestion => write!(f, "#?"),
             Token::HashL => write!(f, "#L"),
             Token::HashR => write!(f, "#R"),
             Token::HashT => write!(f, "#T"),
             Token::HashSelf => write!(f, "#Self"),
-            Token::PragmaBang => write!(f, "#pragma!"),
         }
     }
 }
@@ -825,9 +800,16 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_question_as_single_token() {
+    fn test_hash_question_is_identifier_char() {
+        // 2026-08-05 (Phase 3): the `#?` pragma token is removed. `#?inline`
+        // lexes as identifier "#", then the question token, then "inline",
+        // because `?` is not an identifier character.
         let mut lexer = Token::lexer("#?inline");
-        assert_eq!(lexer.next(), Some(Ok(Token::HashQuestion)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("#".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::Question)));
         assert_eq!(
             lexer.next(),
             Some(Ok(Token::Identifier("inline".to_string())))
@@ -956,10 +938,15 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_bracket_still_works() {
-        // #[...] attribute syntax should still lex as HashBracket
+    fn test_hash_bracket_lexes_as_identifiers() {
+        // 2026-08-05 (Phase 3): legacy `#[...]` attribute tokens are removed;
+        // `#[inline]` lexes as identifier "#", then "[inline]".
         let mut lexer = Token::lexer("#[inline]");
-        assert_eq!(lexer.next(), Some(Ok(Token::HashBracket)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("#".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::LBracket)));
         assert_eq!(
             lexer.next(),
             Some(Ok(Token::Identifier("inline".to_string())))
