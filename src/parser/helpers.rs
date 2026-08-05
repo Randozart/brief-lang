@@ -99,6 +99,19 @@ impl<'a> Parser<'a> {
         matches!(self.peek_next(), Some(Token::Frgn))
     }
 
+    /// 2026-08-05 (Phase 3): true when the current token is a canonical
+    /// duration unit — the `cyc`/`ms` tokens or the contextual identifiers
+    /// `cyc`, `ns`, `ms`, `s`, `min` (SPEC §16.1).
+    pub fn lookahead_is_duration_unit(&self) -> bool {
+        match self.peek() {
+            Some(Token::Cyc) | Some(Token::Ms) => true,
+            Some(Token::Identifier(u)) => {
+                matches!(u.as_str(), "cyc" | "ns" | "ms" | "s" | "min")
+            }
+            _ => false,
+        }
+    }
+
     /// Peek at the current token and its span.
     pub fn peek_with_span(&self) -> Option<(&Token, &std::ops::Range<usize>)> {
         self.tokens.get(self.pos).map(|(t, s)| (t, s))
@@ -394,10 +407,9 @@ impl<'a> Parser<'a> {
             Token::Foreach => "foreach".into(), Token::Pvt => "pvt".into(),
             Token::Sed => "sed".into(), Token::Sync => "sync".into(),
             Token::Underscore => "_".into(),
-            Token::When => "when".into(), Token::Cycles => "cycles".into(),
-            Token::Cyc => "cyc".into(), Token::Ms => "ms".into(),
-            Token::Seconds => "seconds".into(), Token::Minute => "minute".into(),
-            Token::Minutes => "minutes".into(), Token::Nanoseconds => "nanoseconds".into(),
+            Token::When => "when".into(),
+            Token::Cyc => "cyc".into(),
+            Token::Ms => "ms".into(),
             Token::Input => "input".into(), Token::Output => "output".into(),
             Token::BoolTrue => "true".into(), Token::BoolFalse => "false".into(),
             _ => return None,

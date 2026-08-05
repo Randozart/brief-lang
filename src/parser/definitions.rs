@@ -1049,14 +1049,10 @@ impl<'a> Parser<'a> {
             self.expect(Token::LBracket)?;
             let cond = self.parse_expression()?;
             // 2026-07-31: Optional duration unit: `?[5000 ms]` / `?[5000ms]`.
-            // The condition carries the numeric bound; the unit token is
-            // consumed so the documented `ms`/`cyc`/`seconds` forms parse.
-            match self.peek() {
-                Some(Token::Ms) | Some(Token::Cyc)
-                | Some(Token::Seconds) | Some(Token::Minute) => {
-                    self.pos += 1;
-                }
-                _ => {}
+            // 2026-08-05 (Phase 3): canonical units are cyc/ns/ms/s/min
+            // (SPEC §16.1); s/ns/min are contextual identifiers.
+            if self.lookahead_is_duration_unit() {
+                self.pos += 1;
             }
             self.expect(Token::RBracket)?;
             // 2026-08-01 (D2): optional `within N <unit>` deadline — the
@@ -1089,17 +1085,36 @@ impl<'a> Parser<'a> {
                         self.pos += 1;
                         deadline_ns = Some(bound.saturating_mul(1_000_000));
                     }
-                    Some(Token::Seconds) => {
-                        self.pos += 1;
-                        deadline_ns = Some(bound.saturating_mul(1_000_000_000));
-                    }
-                    Some(Token::Minute) => {
-                        self.pos += 1;
-                        deadline_ns = Some(bound.saturating_mul(60_000_000_000));
-                    }
+                    Some(Token::Identifier(unit)) => match unit.as_str() {
+                        "cyc" => {
+                            self.pos += 1;
+                            cycles_bound = Some(bound);
+                        }
+                        "ns" => {
+                            self.pos += 1;
+                            deadline_ns = Some(bound);
+                        }
+                        "ms" => {
+                            self.pos += 1;
+                            deadline_ns = Some(bound.saturating_mul(1_000_000));
+                        }
+                        "s" => {
+                            self.pos += 1;
+                            deadline_ns = Some(bound.saturating_mul(1_000_000_000));
+                        }
+                        "min" => {
+                            self.pos += 1;
+                            deadline_ns = Some(bound.saturating_mul(60_000_000_000));
+                        }
+                        _ => {
+                            return self.error_at_current(
+                                "expected a unit (cyc, ns, ms, s, min) after the 'within' bound",
+                            );
+                        }
+                    },
                     _ => {
                         return self.error_at_current(
-                            "expected a unit (ms, cyc, seconds, minute) after the 'within' bound",
+                            "expected a unit (cyc, ns, ms, s, min) after the 'within' bound",
                         );
                     }
                 }

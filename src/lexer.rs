@@ -175,27 +175,15 @@ pub enum Token {
     #[token("false")]
     BoolFalse,
 
-    #[token("cycles")]
-    Cycles,
-
+    // 2026-08-05 (Phase 3): canonical duration units are cyc/ns/ms/s/min
+    // (SPEC §16.1). The alias tokens cycles/sec/seconds/minute/minutes/
+    // nanoseconds are removed; s/ns/min are parsed contextually as
+    // identifiers after a numeric bound.
     #[token("cyc")]
     Cyc,
 
     #[token("ms")]
     Ms,
-
-    #[token("sec")]
-    #[token("seconds")]
-    Seconds,
-
-    #[token("minute")]
-    Minute,
-
-    #[token("minutes")]
-    Minutes,
-
-    #[token("nanoseconds")]
-    Nanoseconds,
 
     // ── Phase 16A/16D: Cell file keywords ─────────────────────
     /// 2026-07-12: .c.bv cell parameter declaration
@@ -538,13 +526,8 @@ impl std::fmt::Display for Token {
             Token::Sync => write!(f, "sync"),
             Token::BoolTrue => write!(f, "true"),
             Token::BoolFalse => write!(f, "false"),
-            Token::Cycles => write!(f, "cycles"),
             Token::Cyc => write!(f, "cyc"),
             Token::Ms => write!(f, "ms"),
-            Token::Seconds => write!(f, "seconds"),
-            Token::Minute => write!(f, "minute"),
-            Token::Minutes => write!(f, "minutes"),
-            Token::Nanoseconds => write!(f, "nanoseconds"),
             Token::Input => write!(f, "input"),
             Token::Output => write!(f, "output"),
             Token::When => write!(f, "when"),
@@ -640,8 +623,7 @@ mod tests {
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",
-            "sync", "true", "false", "cycles", "cyc", "ms", "seconds",
-            "minute", "minutes", "nanoseconds",
+            "sync", "true", "false", "cyc", "ms",
         ];
         for name in keyword_tokens {
             assert!(
