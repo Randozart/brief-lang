@@ -366,7 +366,7 @@ impl<'a> Parser<'a> {
     /// Maps keyword tokens (Frgn, Struct, Enum, Ok, etc.) to their string representations.
     pub fn keyword_as_identifier(&self, tok: &Token) -> Option<String> {
         Some(match tok {
-            Token::Sig => "sig".into(), Token::Export => "export".into(),
+            Token::Export => "export".into(),
             Token::Defn => "defn".into(), Token::Let => "let".into(),
             Token::Const => "const".into(), Token::Txn => "txn".into(),
             Token::Node => "node".into(), Token::Async => "async".into(),

@@ -42,9 +42,6 @@ pub enum Token {
     DocCommentBang(String),
 
     // ── Keywords ──────────────────────────────────────────────────────
-    #[token("sig")]
-    Sig,
-
     /// Phase 15: export defn — replaces #export pragma
     #[token("export")]
     Export,
@@ -562,7 +559,6 @@ ExclaimArrow,
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Token::Sig => write!(f, "sig"),
             Token::Export => write!(f, "export"),
             Token::Defn => write!(f, "defn"),
             Token::Let => write!(f, "let"),
@@ -721,12 +717,12 @@ mod tests {
         // the dedicated keyword tokens that Phase 3 will converge with the
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
-            "sig", "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "await", "term", "term!", "escape", "uni", "is", "like",
-            "import", "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
+            "export", "defn", "let", "const", "txn", "node", "async", "seq",
+            "vol", "out", "await", "term", "term!", "escape", "import",
+            "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
             "type", "cell", "obj", "struct", "rstruct", "render", "enum", "trg",
-            "within", "Ptr!", "Ok", "Err", "match", "quote", "foreach", "pvt", "sed",
-            "sync", "some", "none", "true", "false", "cycles", "cyc", "ms", "seconds",
+            "within", "Ptr!", "match", "quote", "foreach", "pvt", "sed",
+            "sync", "true", "false", "cycles", "cyc", "ms", "seconds",
             "minute", "minutes", "nanoseconds",
         ];
         for name in keyword_tokens {
@@ -744,8 +740,7 @@ mod tests {
 
     #[test]
     fn test_lexer() {
-        let mut lexer = Token::lexer("sig fetch: Int -> Int;");
-        assert_eq!(lexer.next(), Some(Ok(Token::Sig)));
+        let mut lexer = Token::lexer("fetch: Int -> Int;");
         assert_eq!(
             lexer.next(),
             Some(Ok(Token::Identifier("fetch".to_string())))
