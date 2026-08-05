@@ -23,22 +23,22 @@ Status legend:
 | 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2 |
 | 4 | Lexical conventions | In progress | Phase 3 removed dead tokens, `sig`, `++`, pragmas, `prop`, `Ptr!`, `@`/prefix literals, width suffixes |
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
-| 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name` |
+| 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
-| 8 | Declarations | Not started | Phase 4 (`type`/`trait`/`proto`/`struct`/`enum`/`impl`) |
-| 9 | Functions, transactions, nodes, objects, cells | Not started | Phases 4/8/10 |
+| 8 | Declarations | In progress | Phase 3 removed `prop`, `Ptr!`; `meld`/`rstruct`/`term!`/`escape` remain |
+| 9 | Functions, transactions, nodes, objects, cells | In progress | `term!`/`escape` renames remain (Phase 3) |
 | 10 | Contracts, invariants, watchdogs | Not started | Phase 6 (`[true][true]` rejection) |
-| 11 | Control flow | Not started | Phase 3 (`rollback`, `exit program`, `defer`, `mutex`, `barrier`) |
+| 11 | Control flow | In progress | `escape`→`rollback`, `term!`→`exit program`, `defer` remain |
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
-| 13 | Triggers and external events | Not started | Phase 10 (`trg`, remove `#assume_event`) |
+| 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
-| 15 | Expressions and operations | Not started | Phase 5 (`op` resolution, no `++`) |
-| 16 | Literals, ranges, slicing | Not started | Phase 7 (`#r`/`#b`, Python slices, const dims) |
+| 15 | Expressions and operations | In progress | `++`/`@`/prefix literals removed; op resolution Phase 5 |
+| 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
 | 17 | Reflection | Not started | Phase 7 (`.^`/`.^^`) |
 | 18 | Compile-time execution and macros | Not started | Phase 8 |
 | 19 | Foreign functions, export, GLUE | Not started | Phase 12 (four provenance forms, no meld) |
 | 20 | Assembly declarations | Not started | Phase 16 (`asm<target>` + effect profile) |
-| 21 | Rendered Briv | Not started | Phase 14 (`render Name`, `b-when`) |
+| 21 | Rendered Briv | In progress | Phase 3 `render Name`, `b-when`; full lifecycle Phase 14 |
 | 22 | Data Briv | Not started | Phase 13 (`.dbv`/`.dbvl` modes) |
 | 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; docs Phase 20 |
 | 24 | Standard-library boundary | Not started | Phase 18 (no compiler collection knowledge) |
