@@ -1,8 +1,8 @@
-// render-struct-demo.rbv — render struct component definition
-// 2026-07-26: Migrated from rstruct to render struct syntax
+// render-struct-demo.rbv — render component definition
+// 2026-07-26: Migrated from rstruct to render syntax
 //
-// A render struct attaches view HTML to state fields and transactions.
-// The struct defines the data layout; render struct defines the view.
+// A render attaches view HTML to state fields and transactions.
+// The struct defines the data layout; render defines the view.
 
 let name: String = "World";
 let count: Int = 0;
@@ -12,12 +12,12 @@ txn set_name [true][name == new_name] {
     term;
 };
 
-txn greet [count < 100][count == @count + 1] {
+txn greet [count < 100][true] {
     count = count + 1;
     term;
 };
 
-render struct Greeter {
+render Greeter {
     <div class="greeter">
         <h1 b-text="'Hello, ' + name + '!'">Hello, World!</h1>
         <p>Greeted <span b-text="count">0</span> times</p>

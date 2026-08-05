@@ -233,10 +233,9 @@ impl<'a> Parser<'a> {
             .unwrap_or(Span::dummy());
         // Consume 'render' keyword
         self.advance();
-        // Check for 'struct' or 'obj' keyword
-        if !self.eat(&Token::Struct) && !self.eat(&Token::Obj) {
-            return self.error_at_current("expected 'struct' or 'obj' after 'render'");
-        }
+        // 2026-08-05 (Phase 3): `render Name { ... }` is the sole attachment
+        // form (SPEC §21.2). The compiler resolves whether Name is a struct,
+        // obj, or cell; `render struct`/`render obj` keywords are removed.
         let struct_name = self.expect_identifier()?;
         self.expect(Token::LBrace)?;
         let view_html = self.read_html_body()?;
@@ -2579,16 +2578,18 @@ mod tests {
     #[test]
     fn test_parse_render_struct() {
         let rb = parse_render_block(
-            "render struct Foo { <div>Hello</div> };");
+            "render Foo { <div>Hello</div> };");
         assert_eq!(rb.struct_name, "Foo");
         assert!(rb.view_html.contains("<div>Hello</div>"),
             "HTML content should be preserved: got '{}'", rb.view_html);
     }
 
     #[test]
-    fn test_parse_render_obj() {
+    fn test_parse_render_accepts_any_declaration_kind() {
+        // 2026-08-05 (Phase 3): `render Name` resolves the kind; struct/obj
+        // keywords are gone from the attachment form.
         let rb = parse_render_block(
-            "render obj Bar { <span b-text=\"x\">0</span> };");
+            "render Bar { <span b-text=\"x\">0</span> };");
         assert_eq!(rb.struct_name, "Bar");
         assert!(rb.view_html.contains("b-text"),
             "HTML should include b-* attribute: got '{}'", rb.view_html);
@@ -2597,7 +2598,7 @@ mod tests {
     #[test]
     fn test_parse_render_struct_with_style_attr() {
         let rb = parse_render_block(
-            "render struct Styled { <div class=\"box\" style=\"color: red;\">Content</div> };");
+            "render Styled { <div class=\"box\" style=\"color: red;\">Content</div> };");
         assert_eq!(rb.struct_name, "Styled");
         assert!(rb.view_html.contains("class=\"box\""),
             "HTML should preserve attributes: got '{}'", rb.view_html);
@@ -2606,19 +2607,20 @@ mod tests {
     #[test]
     fn test_parse_render_struct_nested_tags() {
         let rb = parse_render_block(
-            "render struct Nest { <ul><li b-each:item=\"list\" b-text=\"item\"></li></ul> };");
+            "render Nest { <ul><li b-each:item=\"list\" b-text=\"item\"></li></ul> };");
         assert_eq!(rb.struct_name, "Nest");
         assert!(rb.view_html.contains("b-each:item"),
             "HTML should preserve b-each: got '{}'", rb.view_html);
     }
 
     #[test]
-    fn test_parse_render_rejects_bare_identifier() {
-        let src = "render foo { <div></div> };";
+    fn test_parse_render_rejects_legacy_kind_keyword() {
+        // 2026-08-05 (Phase 3): `render struct` is no longer accepted.
+        let src = "render struct foo { <div></div> };";
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let result = p.parse_top_level();
-        assert!(result.is_err(), "bare 'render foo' should be rejected");
+        assert!(result.is_err(), "'render struct' should be rejected");
     }
 
     // ── Tagged literal + Parse op discriminator tests ────────────────────

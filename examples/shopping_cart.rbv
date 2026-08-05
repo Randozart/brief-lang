@@ -1,5 +1,5 @@
 // shopping_cart.rbv — Shopping cart component using render struct
-// 2026-07-26: Migrated from rstruct to render struct syntax
+// 2026-07-26: Migrated from rstruct to render syntax
 
 let product: Int = 0;
 let items: Int = 0;
@@ -11,28 +11,28 @@ txn select_keyboard [product != 2][product == 2] { product = 2; term; };
 txn select_mouse [product != 3][product == 3] { product = 3; term; };
 txn select_monitor [product != 4][product == 4] { product = 4; term; };
 
-txn add_laptop [product == 1][items == @items + 1] { 
+txn add_laptop [product == 1][true] {
     product = 1;
     items = items + 1;
     total = total + 1299;
     term; 
 };
 
-txn add_keyboard [product == 2][items == @items + 1] { 
+txn add_keyboard [product == 2][true] {
     product = 2;
     items = items + 1;
     total = total + 149;
     term; 
 };
 
-txn add_mouse [product == 3][items == @items + 1] { 
+txn add_mouse [product == 3][true] {
     product = 3;
     items = items + 1;
     total = total + 49;
     term; 
 };
 
-txn add_monitor [product == 4][items == @items + 1] { 
+txn add_monitor [product == 4][true] {
     product = 4;
     items = items + 1;
     total = total + 399;
@@ -43,7 +43,7 @@ txn checkout [items > 0 && step == 0][step == 1] { step = 1; term; };
 txn confirm [step == 1][step == 2] { step = 2; term; };
 txn reset [step > 0][step == 0] { step = 0; items = 0; total = 0; product = 0; term; };
 
-render struct ShoppingCart {
+render ShoppingCart {
     <div class="app">
         <span class="header">
             <h1>Briv Store</h1>

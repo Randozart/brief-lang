@@ -496,11 +496,16 @@ Closures capture lexical bindings. Captures participate in ownership, lifetime, 
 ### 9.3 Transactions
 
 ```briv
-txn increment()[counter < Max][counter == @counter + 1] {
+txn increment()[counter < Max][counter >= 0] {
     counter = counter + 1;
     term;
 };
 ```
+
+Prior-state `@value` references (for postconditions such as
+`counter == @counter + 1`) are **staged**: the `@` raw-literal prefix is
+removed, and prior-state expression syntax is not yet implemented. Until then,
+transactions must express their postconditions without prior-state reads.
 
 A transaction is atomic with respect to its declared state transition. `rollback;` or `rollback reason;` aborts and reverts the current transaction/reactive firing.
 
