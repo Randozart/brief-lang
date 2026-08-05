@@ -306,9 +306,6 @@ pub enum Token {
     #[token("~")]
     Tilde,
 
-    #[token("++")]
-    PlusPlus,
-
     #[token("+=")]
     PlusEq,
 
@@ -639,7 +636,7 @@ impl std::fmt::Display for Token {
             Token::TildeMinus => write!(f, "~-"),
             Token::TildePlus => write!(f, "~+"),
             Token::Tilde => write!(f, "~"),
-            Token::PlusPlus => write!(f, "++"),
+
             Token::PlusEq => write!(f, "+="),
             Token::Plus => write!(f, "+"),
             Token::StarEq => write!(f, "*="),

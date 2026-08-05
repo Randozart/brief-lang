@@ -2,7 +2,7 @@ let a: String = "foo";
 let b: String = "bar";
 let tick: Int = 0;
 node report [tick < 1][tick == 1] {
-    let c: String = a ++ b;
+    let c: String = a + b;
     println!("{}", c);
     tick = 1;
     term;

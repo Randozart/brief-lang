@@ -6,7 +6,7 @@
 // the GLUE bridge export mechanism.
 
 defn pp_type_bits(n: String) -> String {
-    term "Bits(" ++ n ++ ")";
+    term "Bits(" + n + ")";
 };
 
 defn pp_type_void() -> String {
@@ -22,15 +22,15 @@ defn pp_type_hashword(name: String) -> String {
 };
 
 defn pp_type_hashword_variant(name: String, var: String) -> String {
-    term name ++ "<" ++ var ++ ">";
+    term name + "<" + var + ">";
 };
 
 defn pp_type_generic(name: String, args: String) -> String {
-    term name ++ "<" ++ args ++ ">";
+    term name + "<" + args + ">";
 };
 
 defn pp_type_applied(name: String, args: String) -> String {
-    term name ++ "<" ++ args ++ ">";
+    term name + "<" + args + ">";
 };
 
 defn pp_type_union(types: String) -> String {
@@ -38,7 +38,7 @@ defn pp_type_union(types: String) -> String {
 };
 
 defn pp_type_tuple(types: String) -> String {
-    term "(" ++ types ++ ")";
+    term "(" + types + ")";
 };
 
 defn pp_type_typevar(name: String) -> String {
@@ -46,15 +46,15 @@ defn pp_type_typevar(name: String) -> String {
 };
 
 defn pp_type_ptr(inner: String) -> String {
-    term "Ptr<" ++ inner ++ ">";
+    term "Ptr<" + inner + ">";
 };
 
 defn pp_type_ptr_const(inner: String) -> String {
-    term "Ptr<const " ++ inner ++ ">";
+    term "Ptr<const " + inner + ">";
 };
 
 defn pp_type_function(params: String, ret: String) -> String {
-    term "(" ++ params ++ ") -> " ++ ret;
+    term "(" + params + ") -> " + ret;
 };
 
 defn pp_type_width(n: String) -> String {
@@ -62,13 +62,13 @@ defn pp_type_width(n: String) -> String {
 };
 
 defn pp_type_vector(ty: String, dims: String) -> String {
-    term ty ++ dims;
+    term ty + dims;
 };
 
 defn pp_type_constrained(ty: String, range: String) -> String {
-    term ty ++ " @/ " ++ range;
+    term ty + " @/ " + range;
 };
 
 defn pp_type_layout_ptr(c: String) -> String {
-    term "Ptr<Bits @/" ++ c ++ ">";
+    term "Ptr<Bits @/" + c + ">";
 };

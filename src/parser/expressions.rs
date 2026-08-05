@@ -151,9 +151,6 @@ impl<'a> Parser<'a> {
             } else if self.eat(&Token::Minus) {
                 let rhs = self.parse_factor()?;
                 expr = Expr::BinaryOp(BinaryOpKind::Sub, Box::new(expr), Box::new(rhs));
-            } else if self.eat(&Token::PlusPlus) {
-                let rhs = self.parse_factor()?;
-                expr = Expr::BinaryOp(BinaryOpKind::Concat, Box::new(expr), Box::new(rhs));
             } else if self.eat(&Token::TildePlus) {
                 // 2026-08-01 (Phase 3): `a ~+ b` — add, then consume b.
                 let rhs = self.parse_factor()?;

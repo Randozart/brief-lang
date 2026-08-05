@@ -21,7 +21,7 @@ frgn briv_cstring_concat(a: Int, b: Int) -> Int as cstring_concat from "lib/runt
 
 // The C string sub-protocol of #String: nul-terminated bytes vs the base's
 // [len][data] encoding. `Concat` is the variant's own operation — a CStr
-// concatenated with + / ++ uses it directly (zero cast), not the [len][data]
+// concatenated with + uses it directly (zero cast), not the [len][data]
 // inline concat.
 proto C_String: #String {
     CastTo(#String<UTF8>) = cstr_to_briv(#L);
