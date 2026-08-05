@@ -601,7 +601,7 @@ mod tests {
         "const Max: Int = 10;\n",
         "defn add(a: Int, b: Int) -> Int [a >= 0][b >= 0] {\n  term a + b;\n};\n",
         "defn empty() [true][true] {};\n",
-        "txn increment()[count < Max][count == @count + 1] {\n  count = count + 1;\n  term;\n};\n",
+        "txn increment()[count < Max][count == count] {\n  count = count + 1;\n  term;\n};\n",
         "node update [ready][!ready] {\n  ready = false;\n  term;\n};\n",
         "async node tick [pending][!pending] {\n  pending = false;\n  term;\n};\n",
         "struct Point {\n  x: Float;\n  y: Float;\n};\n",

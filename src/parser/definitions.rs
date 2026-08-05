@@ -2667,23 +2667,25 @@ mod tests {
     }
 
     #[test]
-    fn test_tagged_quoted_prefix() {
+    fn test_tagged_quoted_prefix_rejected() {
+        // 2026-08-05 (Phase 3): adjacent prefix-discriminator literals
+        // (`sql"SELECT"`) are removed. `sql"..."` parses as the identifier
+        // `sql`; the adjacent string is NOT consumed as a tagged literal.
         let src = r#"sql"SELECT * FROM users""#;
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let expr = p.parse_expression().unwrap();
-        match expr {
-            crate::ast::Expr::TaggedQuotedLiteral(ref bytes, ref prefix) => {
-                assert_eq!(bytes, b"SELECT * FROM users");
-                assert_eq!(prefix, "sql");
-            }
-            _ => panic!("expected TaggedQuotedLiteral, got {:?}", expr),
-        }
+        assert_eq!(expr, crate::ast::Expr::Identifier("sql".to_string()));
+        assert!(
+            matches!(p.peek(), Some(&crate::lexer::Token::String(_))),
+            "the adjacent string must remain unconsumed"
+        );
     }
 
     #[test]
-    fn test_tagged_quoted_prefix_no_false_positive_with_space() {
-        // Space between identifier and string: not a prefix
+    fn test_identifier_then_string_not_consumed() {
+        // A string after an identifier is a separate expression — never a
+        // prefix-discriminator literal.
         let src = r#"my "hello""#;
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);

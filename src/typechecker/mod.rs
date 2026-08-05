@@ -2494,7 +2494,7 @@ node probe [true][true] {
     fn reflect_compile_time_resolves() {
         let src = r#"
 let items: Int[8];
-node probe [items.^^Size > 0][items == @items] {
+node probe [items.^^Size > 0][true] {
     let sz: Int = items.^^Size;
     term;
 };

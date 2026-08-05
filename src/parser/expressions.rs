@@ -414,34 +414,17 @@ impl<'a> Parser<'a> {
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
             Some((Token::BoolFalse, _)) => Ok(Expr::Bool(false)),
 
-            // ── @ prefix: force literal to Quoted raw bytes ─────────
-            Some((Token::At, span)) => {
-                // Capture the raw source bytes of the next token
-                let start = span.start;
-                let end = match self.advance() {
-                    Some((_, next_span)) => next_span.end,
-                    None => return self.error_at_current("expected expression after @"),
-                };
-                let raw = self.source[start + 1..end].as_bytes().to_vec();
-                Ok(Expr::Quoted(raw))
-            }
+            // 2026-08-05 (Phase 3): the `@` raw-literal prefix is removed.
+            // Raw/byte literals are `#r`/`#b` (SPEC §16.2). `@` in expression
+            // position is no longer an expression start; prior-state `@`
+            // references are a staged feature and will be implemented with
+            // explicit syntax in a later phase.
 
             // ── Identifiers (including # names like Sqrt#) ──────────
             Some((Token::Identifier(name), span)) => {
-                // 2026-07-27: Prefix discriminator: identifier directly before a
-                // string (no whitespace gap). e.g., sql"SELECT", my"hello".
-                // Check if next token is an adjacent string literal.
-                if let Some((next_tok, next_span)) = self.tokens.get(self.pos) {
-                    if next_span.start == span.end {
-                        if let Token::String(s) = next_tok {
-                            self.pos += 1; // consume string token
-                            return Ok(Expr::TaggedQuotedLiteral(
-                                s.clone().into_bytes(),
-                                name,
-                            ));
-                        }
-                    }
-                }
+                // 2026-08-05 (Phase 3): adjacent prefix-discriminator literals
+                // (`sql"SELECT"`) are removed; domain literals use explicit
+                // macro calls such as `sql!("SELECT")` (SPEC §16.2).
                 // 2026-07-24: Struct literal: TypeName { field: expr; ... }
                 // Only parse as struct literal when the name starts with
                 // uppercase (PascalCase type names). This prevents `!first { ... }`
@@ -614,7 +597,6 @@ impl<'a> Parser<'a> {
                 | Token::LParen
                 | Token::LBracket
                 | Token::LBrace
-                | Token::At
                 | Token::Not
                 | Token::Minus
                 | Token::Tilde
