@@ -27,8 +27,8 @@ Status legend:
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
 | 8 | Declarations | In progress | Phase 3 removed `prop`, `Ptr!`, `rstruct`, dotted extensions; `meld` deferred to Phase 12 |
 | 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done |
-| 10 | Contracts, invariants, watchdogs | Not started | Phase 6 (`[true][true]` rejection) |
-| 11 | Control flow | In progress | `rollback`, `exit program` done; `defer`/`mutex`/`barrier` are new statements (Phase 11) |
+| 10 | Contracts, invariants, watchdogs | In progress | Phase 6: mandatory non-trivial contracts on node/txn/asm; explicit `[true][true]` rejected |
+| 11 | Control flow | In progress | `rollback`, `exit program` done; `defer`/`mutex`/`barrier` are new statements (Phase 11); no `main` — first-firing-node entry |
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
