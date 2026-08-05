@@ -1,5 +1,25 @@
 # Bugs
 
+## Runtime `lib/runtime/briv_rt.c` Is Untracked — OPEN (rename/gitignore artifact)
+
+**Date:** 2026-08-05
+**Status:** Open
+**Root cause:** The Brief→Briv rename (`d026c002`) renamed `lib/runtime/brief_rt.c`
+to `lib/runtime/briv_rt.c`, but `.gitignore:180` contains a bare `briv_rt.c`
+pattern (added for "root-level runtime artifacts (compiled outside benchmarks/)").
+Because the pattern has no path, it hides the renamed runtime too. `git ls-files`
+shows only `lib/runtime/briv_gpu_rt.c` tracked; `briv_rt.c` is untracked.
+**Impact:** A fresh clone cannot link any runtime benchmark or FFI bridge — the
+harness links `lib/runtime/briv_rt.c` directly
+(`benchmarks/build_and_bench.sh:231`). The baseline worktree at `46f4f741`
+lacked the file until it was copied in manually for the Phase 3 nbody A/B.
+**Fix (planned):** Narrow the `.gitignore` pattern (keep `briv_rt.o` and
+`benchmarks/briv_rt.c`, which is covered by the "Generated copy" entry at line
+107) and `git add lib/runtime/briv_rt.c` so the runtime is version-controlled.
+**Undo:** none (tracking infrastructure the harness already requires).
+
+---
+
 ## Baseline Harness Defects Blocking Trustworthy A/B Comparison — OPEN
 
 **Date:** 2026-08-05
