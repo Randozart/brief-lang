@@ -29,7 +29,7 @@ fn walk_stmts(stmts: &mut [Statement]) {
             Statement::Expression(expr)
             | Statement::Term(Some(expr))
             | Statement::TermBang(Some(expr))
-            | Statement::Escape(Some(expr)) => {
+            | Statement::Rollback(Some(expr)) => {
                 walk_expr(expr);
             }
             Statement::Let { expr: Some(e), .. } => walk_expr(e),

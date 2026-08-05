@@ -671,7 +671,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             last
         }
-        Statement::Escape(_) => {
+        Statement::Rollback(_) => {
             writeln!(out, "{}ret i64 0", indent).ok();
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }

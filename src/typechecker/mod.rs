@@ -1517,7 +1517,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
-        Statement::Escape(_) => Ok(()),
+        Statement::Rollback(_) => Ok(()),
         Statement::Foreach { item, list, body } => {
             let list_ty = infer_type_only(list, ctx)?;
             // Element type: assume List<T> has element T

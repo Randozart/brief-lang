@@ -50,7 +50,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Term) => self.parse_term_statement(false),
             Some(Token::TermBang) => self.parse_term_statement(true),
-            Some(Token::Escape) => self.parse_escape_statement(),
+            Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
             Some(Token::Sync) => self.parse_sync_block(),
@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
     }
 
     /// escape expr;
-    fn parse_escape_statement(&mut self) -> Result<Statement, SyntaxError> {
+    fn parse_rollback_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
         let val = if !self.check(&Token::Semicolon) {
             Some(self.parse_expression()?)
@@ -184,7 +184,7 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect(Token::Semicolon)?;
-        Ok(Statement::Escape(val))
+        Ok(Statement::Rollback(val))
     }
 
     /// if expr { ... } else { ... }

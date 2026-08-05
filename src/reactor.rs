@@ -117,7 +117,7 @@ impl Reactor {
 
     /// Check if a statement is an escape
     fn contains_escape(&self, stmt: &Statement) -> bool {
-        matches!(stmt, Statement::Escape(_))
+        matches!(stmt, Statement::Rollback(_))
     }
 
     /// Check if an expression contains patterns that would lead to escape
@@ -292,7 +292,7 @@ impl Reactor {
             Statement::Term(None) | Statement::TermBang(None) => {
                 Ok(StmtResult::TermSuccess)
             }
-            Statement::Escape(_) => Ok(StmtResult::Escaped),
+            Statement::Rollback(_) => Ok(StmtResult::Escaped),
             Statement::Guarded(condition, statements) => {
                 let cond_val = interp.eval_expr(condition)?;
                 if cond_val .is_true() {
@@ -561,7 +561,7 @@ mod tests {
         let body = vec![
             Statement::Guarded(
                 Expr::Bool(true),
-                vec![Statement::Escape(None)],
+                vec![Statement::Rollback(None)],
             ),
         ];
         let txn = make_rct_txn("escape_test", Expr::Bool(true), Expr::Bool(true), body);
@@ -574,7 +574,7 @@ mod tests {
     fn test_run_escape_triggers_rollback() {
         let body = vec![
             Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(10)),
-            Statement::Guarded(Expr::Bool(true), vec![Statement::Escape(None)]),
+            Statement::Guarded(Expr::Bool(true), vec![Statement::Rollback(None)]),
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();

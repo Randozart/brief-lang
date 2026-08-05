@@ -527,7 +527,7 @@ impl WebstackGenerator {
                 }
                 out.push_str("}\n");
             }
-            Statement::Escape(..) => {
+            Statement::Rollback(..) => {
                 out.push_str("break;\n");
             }
             Statement::InlineAsm { .. } => {
@@ -841,7 +841,7 @@ impl WebstackGenerator {
                 }
                 out.push_str("}\n");
             }
-            Statement::Escape(..) => {
+            Statement::Rollback(..) => {
                 out.push_str("break;\n");
             }
             Statement::InlineAsm { asm_string, .. } => {

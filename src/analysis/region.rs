@@ -1459,7 +1459,7 @@ fn expr_has_call(expr: &Expr) -> bool {
 fn has_term_or_unify_escape(body: &[Statement]) -> bool {
     body.iter().any(|s| matches!(s,
 //         Statement::Term(None) | Statement::TermBang(None) | Statement::Unification { .. }
-        | Statement::Escape(_) | Statement::InlineAsm { .. }
+        | Statement::Rollback(_) | Statement::InlineAsm { .. }
     ))
 }
 
@@ -1546,8 +1546,8 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
         Statement::Term(None) => Statement::Term(None),
         Statement::TermBang(Some(e)) => Statement::TermBang(Some(substitute_expr(e, old_var, new_expr))),
         Statement::TermBang(None) => Statement::TermBang(None),
-        Statement::Escape(Some(e)) => Statement::Escape(Some(substitute_expr(e, old_var, new_expr))),
-        Statement::Escape(None) => Statement::Escape(None),
+        Statement::Rollback(Some(e)) => Statement::Rollback(Some(substitute_expr(e, old_var, new_expr))),
+        Statement::Rollback(None) => Statement::Rollback(None),
         Statement::SyncBlock(body) => Statement::SyncBlock(body.clone()),
         other => other.clone(),
     }

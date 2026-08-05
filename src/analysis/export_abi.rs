@@ -126,7 +126,7 @@ fn stmt_needs_state(
     match stmt {
         Statement::Term(opt)
         | Statement::TermBang(opt)
-        | Statement::Escape(opt) => {
+        | Statement::Rollback(opt) => {
             opt.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }
         Statement::Expression(expr) => expr_needs_state(expr, regular, txns, exports, state_fields, memo, visiting),

@@ -79,7 +79,7 @@ impl Annotator {
                         self.collect_calls_from_expr(v, calls);
                     }
                 }
-                Statement::Escape(val) => {
+                Statement::Rollback(val) => {
                     if let Some(v) = val {
                         self.collect_calls_from_expr(v, calls);
                     }
@@ -419,7 +419,7 @@ impl Annotator {
                 let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
                 format!("{}term! {};\n", spaces, val_str)
             }
-            Statement::Escape(val) => {
+            Statement::Rollback(val) => {
                 let val_str = val
                     .as_ref()
                     .map(|e| format!(" {}", self.format_expr(e)))

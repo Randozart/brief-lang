@@ -275,8 +275,8 @@ fn arb_term_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
 /// Generate a random escape statement
 fn arb_escape_statement() -> impl Strategy<Value = Statement> {
     prop_oneof![
-        Just(Statement::Escape(None)),
-        arb_simple_expr().prop_map(|e| Statement::Escape(Some(e))),
+        Just(Statement::Rollback(None)),
+        arb_simple_expr().prop_map(|e| Statement::Rollback(Some(e))),
     ]
 }
 
@@ -507,7 +507,7 @@ mod tests {
                     | Statement::Guarded(_, _)
                     | Statement::Gate(_)
                     | Statement::Term(_) | Statement::TermBang(_)
-                    | Statement::Escape(_)
+                    | Statement::Rollback(_)
                     | Statement::Expression(_)
             );
             prop_assert!(is_valid, "Generated invalid statement type: {:?}", stmt);

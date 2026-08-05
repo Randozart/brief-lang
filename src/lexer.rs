@@ -91,8 +91,8 @@ pub enum Token {
     #[token("term!")]
     TermBang,
 
-    #[token("escape")]
-    Escape,
+    #[token("rollback")]
+    Rollback,
 
     #[token("import")]
     Import,
@@ -513,7 +513,7 @@ impl std::fmt::Display for Token {
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),
-            Token::Escape => write!(f, "escape"),
+            Token::Rollback => write!(f, "rollback"),
             Token::Import => write!(f, "import"),
             Token::From => write!(f, "from"),
             Token::As => write!(f, "as"),
@@ -640,7 +640,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "await", "term", "term!", "escape", "import",
+            "vol", "out", "await", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
             "type", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

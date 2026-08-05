@@ -104,7 +104,7 @@ fn emit_stmt_flat(out: &mut Vec<String>, stmt: &Statement) {
     match stmt {
         Statement::Term(opt) => { out.push("t:".into()); emit_opt_expr_flat(out, opt); }
         Statement::TermBang(opt) => { out.push("b:".into()); emit_opt_expr_flat(out, opt); }
-        Statement::Escape(opt) => { out.push("e:".into()); emit_opt_expr_flat(out, opt); }
+        Statement::Rollback(opt) => { out.push("e:".into()); emit_opt_expr_flat(out, opt); }
         Statement::Expression(expr) => { out.push("x:".into()); emit_expr_flat(out, expr); }
         Statement::Let { name, expr, .. } => {
             out.push(format!("l:{}", name));

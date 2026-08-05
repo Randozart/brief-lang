@@ -183,7 +183,7 @@ fn rewrite_body(
         match stmt {
             Statement::Term(opt)
             | Statement::TermBang(opt)
-            | Statement::Escape(opt) => {
+            | Statement::Rollback(opt) => {
                 if let Some(expr) = opt.as_mut() {
                     rewrite_expr(ctx, env, expr);
                     // 2026-08-03 (P3): an implicit meld conversion at the

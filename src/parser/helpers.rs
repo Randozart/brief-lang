@@ -371,7 +371,7 @@ impl<'a> Parser<'a> {
             Token::Const => "const".into(), Token::Txn => "txn".into(),
             Token::Node => "node".into(), Token::Async => "async".into(),
             Token::Await => "await".into(), Token::Term => "term".into(),
-            Token::TermBang => "term!".into(), Token::Escape => "escape".into(),
+            Token::TermBang => "term!".into(), Token::Rollback => "rollback".into(),
             Token::Import => "import".into(),
             Token::From => "from".into(), Token::As => "as".into(),
             Token::Frgn => "frgn".into(), Token::FrgnBang => "frgn!".into(),

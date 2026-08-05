@@ -712,7 +712,7 @@ fn evaluate_stage_stmt(
             Ok(Some(NavValue::Void))
         }
         // 2026-07-23: Escape — abort compile-time function with error.
-        Statement::Escape(opt) => {
+        Statement::Rollback(opt) => {
             let msg = match opt {
                 Some(expr) => format!("{:?}", eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?),
                 None => "compile-time escape".into(),
@@ -2090,7 +2090,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
         }
         Statement::FreeHint(_) | Statement::KeepHint(_) => Ok(()),
         Statement::Term(expr) | Statement::TermBang(expr)
-        | Statement::Escape(expr) => {
+        | Statement::Rollback(expr) => {
             if let Some(e) = expr {
                 resolve_dollar_refs_in_expr(e, scope)?;
             }

@@ -322,7 +322,7 @@ impl fmt::Display for Statement {
             Statement::MetadataAssignment(key, val) => {
                 write!(f, "!> {}: {:?};", key, val)
             }
-            Statement::Escape(val) => {
+            Statement::Rollback(val) => {
                 if let Some(val) = val {
                     write!(f, "escape {};", val)
                 } else {

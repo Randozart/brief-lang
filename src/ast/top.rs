@@ -224,7 +224,7 @@ pub enum Statement {
     /// key <~ value;
     MetadataAssignment(String, PropertyValue),
     /// escape expr;
-    Escape(Option<Expr>),
+    Rollback(Option<Expr>),
     /// 2026-08-01 (Phase 5): `free x;` — a VERIFIED lifetime hint: the backing
     /// of the local/field `x` is freed here; a later read of `x` is a compile
     /// error. The scheduler excludes a manually-freed field from its auto-free.
@@ -309,7 +309,7 @@ impl PartialEq for Statement {
             (Statement::If(c1, t1, e1), Statement::If(c2, t2, e2)) => c1 == c2 && t1 == t2 && e1 == e2,
             (Statement::Block(b1), Statement::Block(b2)) => b1 == b2,
             (Statement::MetadataAssignment(k1, v1), Statement::MetadataAssignment(k2, v2)) => k1 == k2 && v1 == v2,
-            (Statement::Escape(e1), Statement::Escape(e2)) => e1 == e2,
+            (Statement::Rollback(e1), Statement::Rollback(e2)) => e1 == e2,
             (Statement::Foreach { item: i1, list: l1, body: b1 },
              Statement::Foreach { item: i2, list: l2, body: b2 }) => i1 == i2 && l1 == l2 && b1 == b2,
             (Statement::TrgBinding { name: n1, instance: i1 },

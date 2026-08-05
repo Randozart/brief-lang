@@ -576,7 +576,7 @@ impl ReadGraph {
                 Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
                     read.extend(expr.collect_vars());
                 }
-                Statement::Escape(Some(expr)) => {
+                Statement::Rollback(Some(expr)) => {
                     read.extend(expr.collect_vars());
                 }
                 Statement::Expression(expr) => {

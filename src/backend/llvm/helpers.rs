@@ -235,7 +235,7 @@ impl LlvmBackend {
                 e.as_ref()
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
             ),
-            Statement::Escape(e) => Statement::Escape(
+            Statement::Rollback(e) => Statement::Rollback(
                 e.as_ref()
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
             ),

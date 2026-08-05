@@ -71,8 +71,8 @@ fn weight_of_stmt(stmt: &Statement) -> u32 {
         Statement::Block(b) => 1 + weight_of_body(b),
         Statement::Foreach { list, body, .. } => 1 + weight_of_expr(list) + weight_of_body(body),
         Statement::MetadataAssignment(_, _) => 1,
-        Statement::Escape(Some(e)) => 1 + weight_of_expr(e),
-        Statement::Escape(None) => 1,
+        Statement::Rollback(Some(e)) => 1 + weight_of_expr(e),
+        Statement::Rollback(None) => 1,
         _ => 1,
     }
 }

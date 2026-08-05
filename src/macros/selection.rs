@@ -452,7 +452,7 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
         Statement::If(_, _, _) => "if",
         Statement::Block(_) => "block",
         Statement::MetadataAssignment(_, _) => "metadata",
-        Statement::Escape(_) => "escape",
+        Statement::Rollback(_) => "escape",
         Statement::Foreach { .. } => "foreach",
         Statement::TrgBinding { .. } => "trg",
         Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => "inline",

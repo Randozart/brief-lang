@@ -258,8 +258,8 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Block(body) | Statement::SyncBlock(body) => {
             for s in body { collect_strings_stmt(s, seen, out); }
         }
-        Statement::Escape(Some(e)) => { collect_strings_expr(e, seen, out); }
-        Statement::Escape(None) => {}
+        Statement::Rollback(Some(e)) => { collect_strings_expr(e, seen, out); }
+        Statement::Rollback(None) => {}
         Statement::Foreach { list, body, .. } => {
             collect_strings_expr(list, seen, out);
             for s in body { collect_strings_stmt(s, seen, out); }
@@ -1626,10 +1626,10 @@ impl LlvmBackend {
                     self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
                 }
             }
-            Statement::Escape(Some(e)) => {
+            Statement::Rollback(Some(e)) => {
                 self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::Escape(None) => {}
+            Statement::Rollback(None) => {}
             _ => {}
         }
     }

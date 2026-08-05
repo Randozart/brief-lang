@@ -756,7 +756,7 @@ fn is_pure_body(
                 }
             }
             Statement::Term(_) | Statement::TermBang(_) => {}
-            Statement::Escape(_) => return false,
+            Statement::Rollback(_) => return false,
             Statement::Guarded(condition, statements) => {
                 if references_triggers_or_ffi_with_decls(condition) {
                     return false;
@@ -1012,10 +1012,10 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
                 collect_state_identifiers(expr, state_fields, out);
             }
             Statement::Term(None) | Statement::TermBang(None) => {}
-            Statement::Escape(Some(expr)) => {
+            Statement::Rollback(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
-            Statement::Escape(None) => {}
+            Statement::Rollback(None) => {}
             Statement::SyncBlock(body) => {
                 scan_for_state_identifiers(body, state_fields, out);
             }

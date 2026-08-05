@@ -201,10 +201,10 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(e, ids);
             }
             Statement::Term(None) | Statement::TermBang(None) => {}
-            Statement::Escape(Some(e)) => {
+            Statement::Rollback(Some(e)) => {
                 self.extract_ids_recursive(e, ids);
             }
-            Statement::Escape(None) => {}
+            Statement::Rollback(None) => {}
             Statement::SyncBlock(body) => {
                 for s in body {
                     self.extract_ids_from_statement(s, ids);

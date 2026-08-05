@@ -2731,7 +2731,7 @@ impl LlvmBackend {
     //   that A and B do not conflict on any state field.
     pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
-            .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_)))
+            .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Rollback(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = "#0";
