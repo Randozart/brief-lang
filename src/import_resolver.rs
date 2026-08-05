@@ -73,6 +73,8 @@ fn item_name(item: &TopLevel) -> Option<&str> {
         TopLevel::Constant(c) => Some(c.name.as_str()),
         TopLevel::Obj(s) => Some(s.name.as_str()),
         TopLevel::TypeDef(t) => Some(t.name.as_str()),
+        TopLevel::Trait(t) => Some(t.name.as_str()),
+        TopLevel::Impl(i) => Some(i.target.as_str()),
         TopLevel::StaticStruct(s) => Some(s.name.as_str()),
         TopLevel::StateDecl(s) => Some(s.name.as_str()),
         TopLevel::Trigger(trg) => Some(trg.name.as_str()),
@@ -803,6 +805,8 @@ impl ImportResolver {
                     TopLevel::Cell(c) => Some(c.name.as_str()),
                     TopLevel::StateDecl(s) => Some(s.name.as_str()),
                     TopLevel::TypeDef(t) => Some(t.name.as_str()),
+                    TopLevel::Trait(t) => Some(t.name.as_str()),
+                    TopLevel::Impl(i) => Some(i.target.as_str()),
                     // 2026-08-03: protocol declarations (proto C_String:
                     // #String) must survive imports so the casting graph gets
                     // the variant edges (marshalling paths) from library
@@ -977,6 +981,8 @@ fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
             TopLevel::Obj(s) => Some(("struct", &s.name)),
             TopLevel::Enum(e) => Some(("enum", &e.name)),
             TopLevel::TypeDef(t) => Some(("typedef", &t.name)),
+            TopLevel::Trait(t) => Some(("trait", &t.name)),
+            TopLevel::Impl(i) => Some(("impl", &i.target)),
             TopLevel::RenderBlock(r) => Some(("render", &r.struct_name)),
             TopLevel::LinkDependency(l) => Some(("link", &l.path)),
             TopLevel::ResourceDecl(r) => Some(("rsrc", &r.name)),

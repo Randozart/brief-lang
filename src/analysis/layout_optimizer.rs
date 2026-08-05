@@ -415,6 +415,7 @@ mod tests {
             type_params: vec![],
             parent: None,
             protocol: None,
+            traits: vec![],
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![],

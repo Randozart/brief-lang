@@ -1634,6 +1634,137 @@ fn check_contract_obligations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
     }
 }
 
+/// 2026-08-05 (Phase 5): validate trait declarations and `impl` blocks.
+/// - Every `impl X` must target a declared type (coherence).
+/// - A type with an explicitly asserted trait must provide the trait's
+///   required functions, logical fields, and op bindings (structural
+///   conformance; defaults never satisfy a trait's own requirements).
+fn check_trait_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
+    let mut traits: std::collections::HashMap<&str, &TraitDef> = std::collections::HashMap::new();
+    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut impls: std::collections::HashMap<&str, Vec<&ImplDef>> = std::collections::HashMap::new();
+    let mut type_defs: Vec<&TypeDef> = Vec::new();
+    for item in items {
+        match item {
+            TopLevel::Trait(t) => {
+                traits.insert(&t.name, t);
+            }
+            TopLevel::Impl(i) => {
+                impls.entry(i.target.as_str()).or_default().push(i);
+            }
+            TopLevel::TypeDef(t) => {
+                declared.insert(&t.name);
+                type_defs.push(t);
+            }
+            TopLevel::StaticStruct(s) => {
+                declared.insert(&s.name);
+            }
+            TopLevel::Enum(e) => {
+                declared.insert(&e.name);
+            }
+            TopLevel::Obj(o) => {
+                declared.insert(&o.name);
+            }
+            TopLevel::Export(e) => match e.inner.as_ref() {
+                TopLevel::TypeDef(t) => {
+                    declared.insert(&t.name);
+                    type_defs.push(t);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    // Impl coherence: every impl targets a declared type.
+    for (target, _) in &impls {
+        if !declared.contains(*target) {
+            errors.push(TypeError::InvalidOperation {
+                operation: format!("impl"),
+                type_name: (*target).to_string(),
+            });
+        }
+    }
+    // Structural conformance for explicitly asserted traits.
+    let assertions: Vec<(&&TypeDef, &str)> = type_defs
+        .iter()
+        .flat_map(|t| t.traits.iter().map(move |n| (t, n.as_str())))
+        .collect();
+    for (t, trait_name) in assertions {
+        check_trait_assertion(t, trait_name, &traits, &impls, errors);
+    }
+}
+
+/// 2026-08-05 (Phase 5): verify one explicitly asserted trait on a type. The
+/// type must provide each of the trait's required functions and op bindings.
+fn check_trait_assertion<'a>(
+    t: &TypeDef,
+    trait_name: &str,
+    traits: &std::collections::HashMap<&'a str, &'a TraitDef>,
+    impls: &std::collections::HashMap<&str, Vec<&ImplDef>>,
+    errors: &mut Vec<TypeError>,
+) {
+    let Some(trait_def) = traits.get(trait_name) else {
+        errors.push(TypeError::UndefinedVariable {
+            name: trait_name.to_string(),
+            available: Vec::new(),
+        });
+        return;
+    };
+    let type_impls = impls.get(t.name.as_str()).cloned().unwrap_or_default();
+    let provided_fns = type_function_names(t, type_impls.clone());
+    for f in &trait_def.functions {
+        if f.body.is_empty() && !provided_fns.contains(f.name.as_str()) {
+            errors.push(TypeError::InvalidOperation {
+                operation: format!("trait '{}' requires '{}'", trait_name, f.name),
+                type_name: t.name.clone(),
+            });
+        }
+    }
+    let provided_ops = type_op_names(t, type_impls);
+    for op in &trait_def.op_bindings {
+        if !provided_ops.contains(&op.name) {
+            errors.push(TypeError::InvalidOperation {
+                operation: format!("trait '{}' requires op '{}'", trait_name, op.name),
+                type_name: t.name.clone(),
+            });
+        }
+    }
+}
+
+/// 2026-08-05 (Phase 5): the function names a type provides — its own defn
+/// members plus the functions attached through `impl` blocks.
+fn type_function_names(t: &TypeDef, impls: Vec<&ImplDef>) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for m in &t.body.members {
+        if let TopLevel::Definition(d) = m {
+            names.insert(d.name.clone());
+        }
+    }
+    names.extend(
+        impls
+            .iter()
+            .flat_map(|i| i.functions.iter().map(|f| f.name.clone())),
+    );
+    names
+}
+
+/// 2026-08-05 (Phase 5): the op binding names a type provides — its own
+/// bindings plus those attached through `impl` blocks.
+fn type_op_names(t: &TypeDef, impls: Vec<&ImplDef>) -> std::collections::HashSet<String> {
+    let mut names: std::collections::HashSet<String> = t
+        .body
+        .op_bindings
+        .iter()
+        .map(|op| op.name.clone())
+        .collect();
+    names.extend(
+        impls
+            .iter()
+            .flat_map(|i| i.op_bindings.iter().map(|op| op.name.clone())),
+    );
+    names
+}
+
 /// 2026-08-05 (Phase 6): a contract is a tautology when both pre and post are
 /// the literal `true` expression — `true ⇒ true` holds trivially.
 fn is_tautological(contract: &Contract) -> bool {
@@ -1692,6 +1823,9 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // - `node`/`txn`/`asm`: contract required (present and non-trivial).
     // - `cell`: not required.
     check_contract_obligations(items, &mut errors);
+    // 2026-08-05 (Phase 5): trait declarations, impl coherence, and explicit
+    // trait conformance.
+    check_trait_declarations(items, &mut errors);
 
     // 2026-07-25: Pre-collect function return types for call inference.
     let fn_return_types: HashMap<String, Type> = items.iter().filter_map(|item| {
@@ -2529,7 +2663,7 @@ node t [a < 5][a == 5] {
 type Base : #Int {
     op Add(#Int): func(#L, #R);
 };
-type MyNum : #Int Base { };
+type MyNum : Base, #Int { };
 let a: MyNum = 0;
 let b: MyNum = 0;
 node t [a < 5][a == 5] {
@@ -2596,6 +2730,47 @@ node probe [p.name != ""][true] {
         assert!(
             matches!(e, Err(ref errs) if errs.iter().any(|er| matches!(er, TypeError::TautologicalContract))),
             "expected TautologicalContract, got: {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn type_asserting_trait_must_provide_requirements() {
+        // 2026-08-05 (Phase 5): structural conformance for explicit traits.
+        // `Comparable` requires `compare`; `Tagged` provides it via `impl`.
+        let ok_src = r#"
+trait Comparable<T> { defn compare(left: Self, right: T) -> Int; };
+type Tagged: Comparable<Int> { tag: Int; };
+impl Tagged { defn compare(left: Tagged, right: Int) -> Int { term 0; }; };
+let done: Bool = false;
+node probe [done == false][done == true] { done = true; term; };
+"#;
+        let e = check(ok_src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+
+        // Missing requirement: `Unrelated` does not provide `compare`.
+        let bad_src = r#"
+trait Comparable<T> { defn compare(left: Self, right: T) -> Int; };
+type Unrelated: Comparable<Int> { x: Int; };
+let done: Bool = false;
+node probe [done == false][done == true] { done = true; term; };
+"#;
+        let e = check(bad_src);
+        assert!(
+            matches!(e, Err(ref errs) if errs.iter().any(|er| matches!(er, TypeError::InvalidOperation { .. }))),
+            "expected conformance error, got: {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn impl_must_target_declared_type() {
+        // 2026-08-05 (Phase 5): impl coherence.
+        let src = "impl Ghost { defn haunt() -> Int { term 0; }; };\n";
+        let e = check(src);
+        assert!(
+            matches!(e, Err(ref errs) if errs.iter().any(|er| matches!(er, TypeError::InvalidOperation { .. }))),
+            "expected invalid impl target, got: {:?}",
             e
         );
     }

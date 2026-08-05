@@ -690,6 +690,7 @@ fn test_type_with_slots_populates_struct_types() {
             type_params: vec![],
             parent: None,
             protocol: None,
+            traits: vec![],
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![

@@ -1538,36 +1538,46 @@ impl<'a> Parser<'a> {
     fn parse_type_body(&mut self, name: String, type_params: Vec<crate::ast::top::TypeParam>) -> Result<Box<TypeDef>, SyntaxError> {
         let mut parent: Option<Box<Expr>> = None;
         let mut protocol: Option<String> = None;
+        let mut traits: Vec<String> = Vec::new();
         if self.eat(&Token::Colon) {
-            // 2026-07-26: Parse type X: #Proto Parent or type X: Parent or type X: #Proto
-            // Hashwords always sit left of what they attach to.
-            match self.peek() {
-                Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
-                    let mut proto = s.clone(); self.pos += 1;
-                    // 2026-08-03 (P1.4): variant base — `type CStr: #String<C_String>`
-                    // declares a sub-protocol representation, not just the category.
-                    if self.eat(&Token::Lt) {
-                        let variant = self.expect_identifier()?;
-                        if !self.eat_type_close() {
-                            return self.error_at_current("expected '>' in protocol variant base");
+            // 2026-08-05 (Phase 5): comma-separated relationship list:
+            //   type X: Parent, Trait1, #Proto { ... }
+            // A hashword entry sets the protocol; the first non-hashword is the
+            // single refinement parent; the rest are explicitly asserted traits.
+            loop {
+                match self.peek() {
+                    Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
+                        let mut proto = s.clone(); self.pos += 1;
+                        if self.eat(&Token::Lt) {
+                            let variant = self.expect_identifier()?;
+                            if !self.eat_type_close() {
+                                return self.error_at_current("expected '>' in protocol variant base");
+                            }
+                            proto = format!("{}<{}>", proto, variant);
                         }
-                        proto = format!("{}<{}>", proto, variant);
+                        protocol = Some(proto);
                     }
-                    protocol = Some(proto);
-                    // Optional parent type after protocol hashword
-                    match self.peek() {
-                        Some(&Token::Identifier(ref s)) if !s.starts_with('#') => {
-                            let pname = s.clone(); self.pos += 1;
+                    Some(&Token::Identifier(_)) => {
+                        let pname = self.expect_identifier()?;
+                        // 2026-08-05 (Phase 5): an entry with generic arguments
+                        // (`Comparable<Point>`) is always a trait. A bare name
+                        // is the single refinement parent only if none is set;
+                        // otherwise it is an explicitly asserted trait.
+                        let has_args = self.check(&Token::Lt);
+                        if has_args {
+                            self.parse_type_params()?;
+                            traits.push(pname);
+                        } else if parent.is_none() {
                             parent = Some(Box::new(Expr::Identifier(pname)));
+                        } else {
+                            traits.push(pname);
                         }
-                        _ => {}
                     }
+                    _ => return self.error_at_current("expected a parent, trait, or protocol hashword after ':'"),
                 }
-                Some(&Token::Identifier(_)) => {
-                    let pname = self.expect_identifier()?;
-                    parent = Some(Box::new(Expr::Identifier(pname)));
+                if !self.eat(&Token::Comma) {
+                    break;
                 }
-                _ => {}
             }
         }
         let mut slots = Vec::new();
@@ -1635,6 +1645,7 @@ impl<'a> Parser<'a> {
             type_params,
             parent,
             protocol,
+            traits,
             bit_range: None,
             body: TypeDefBody {
                 slots,
@@ -1880,6 +1891,7 @@ impl<'a> Parser<'a> {
         Ok(Box::new(TypeDef {
             name, type_params, parent: None,
             protocol: None,
+            traits: vec![],
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, constraints: vec![], members, span: None,
@@ -1963,6 +1975,7 @@ impl<'a> Parser<'a> {
         Ok(Box::new(TypeDef {
             name, type_params, parent: None,
             protocol: None,
+            traits: vec![],
             bit_range: None, span: None,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),

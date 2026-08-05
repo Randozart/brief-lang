@@ -929,6 +929,9 @@ pub struct TypeDef {
     /// 2026-07-24: Protocol hashword (e.g., "#Int", "#String"). Optional.
     /// If both parent and protocol are None, the type is abstract.
     pub protocol: Option<String>,
+    /// 2026-08-05 (Phase 5): explicitly asserted traits in the relationship
+    /// list (`type Name: Parent, Comparable, #Int`). Conformance is structural.
+    pub traits: Vec<String>,
     pub bit_range: Option<BitRange>,
     pub body: TypeDefBody,
     pub span: Option<Span>,

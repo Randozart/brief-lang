@@ -474,6 +474,7 @@ mod tests {
             type_params: vec![],
             protocol: Some("#String<C_String>".to_string()),
             parent: None,
+            traits: vec![],
             bit_range: None,
             body: crate::ast::top::TypeDefBody {
                 slots: vec![],
