@@ -386,17 +386,16 @@ fn arb_identifier() -> impl Strategy<Value = String> {
 fn is_reserved_keyword(s: &str) -> bool {
     matches!(
         s,
-        "txn" | "defn" | "sig" | "let" | "term" | "escape"
-            | "true" | "false" | "Int" | "UInt" | "Float"
+        "txn" | "defn" | "let" | "term" | "true" | "false"
+            | "Int" | "UInt" | "Float"
             | "Bool" | "String" | "void" | "Data" | "Char"
             | "frgn" | "import" | "from" | "as" | "struct"
-            | "enum" | "trg" | "trigger" | "node" | "async"
-            | "match" | "uni" | "unification" | "unify"
+            | "enum" | "trg" | "node" | "async"
+            | "match"
             | "resource" | "rsrc" | "registry" | "reg"
-            | "render" | "rstruct" | "stage" | "on"
+            | "render" | "stage" | "on"
             | "forall" | "exists" | "within" | "link"
-            | "asm" | "bank" | "Ok" | "Err" | "some"
-            | "none" | "const" | "constant"
+            | "asm" | "bank" | "const"
     )
 }
 

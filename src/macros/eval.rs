@@ -2244,7 +2244,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
         | TopLevel::Meld(_) | TopLevel::Trigger(_) | TopLevel::Signature(_)
         | TopLevel::StateDecl(_) | TopLevel::TriggerBinding { .. }
         | TopLevel::LinkDependency(_) | TopLevel::ResourceDecl(_)
-        | TopLevel::RStruct(_) | TopLevel::TypeDef(_) | TopLevel::Codec(_)
+        | TopLevel::TypeDef(_) | TopLevel::Codec(_)
         | TopLevel::Assertion { .. } | TopLevel::Fuzzed { .. }
         | TopLevel::RenderBlock(_) | TopLevel::Stylesheet(_)
         | TopLevel::SvgComponent { .. } | TopLevel::SyncGroup { .. }

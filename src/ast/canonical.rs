@@ -224,7 +224,6 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
         }
         TopLevel::ResourceDecl(_)
         | TopLevel::ForeignBinding(_)
-        | TopLevel::RStruct(_)
         | TopLevel::Codec(_)
         | TopLevel::Assertion { .. }
         | TopLevel::Stylesheet(_)

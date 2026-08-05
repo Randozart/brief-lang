@@ -130,9 +130,6 @@ pub enum Token {
     #[token("struct")]
     Struct,
 
-    #[token("rstruct")]
-    Rstruct,
-
     #[token("render")]
     Render,
 
@@ -529,7 +526,6 @@ impl std::fmt::Display for Token {
             Token::Cell => write!(f, "cell"),
             Token::Obj => write!(f, "obj"),
             Token::Struct => write!(f, "struct"),
-            Token::Rstruct => write!(f, "rstruct"),
             Token::Render => write!(f, "render"),
             Token::Enum => write!(f, "enum"),
             Token::Trg => write!(f, "trg"),
@@ -646,7 +642,7 @@ mod tests {
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
             "vol", "out", "await", "term", "term!", "escape", "import",
             "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
-            "type", "cell", "obj", "struct", "rstruct", "render", "enum", "trg",
+            "type", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",
             "sync", "true", "false", "cycles", "cyc", "ms", "seconds",
             "minute", "minutes", "nanoseconds",
