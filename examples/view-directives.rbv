@@ -23,8 +23,8 @@ txn select_item [true][selected == item] {
 
 <view>
 <div>
-    <!-- b-if: conditionally render element -->
-    <div b-if="dark_mode" b-style="background: #333; color: white;">
+    <!-- b-when: conditionally mount element (structurally mounts/unmounts) -->
+    <div b-when="dark_mode" b-style="background: #333; color: white;">
         Dark mode active
     </div>
 
