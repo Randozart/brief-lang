@@ -664,6 +664,14 @@ pub enum SyntaxError {
         type_name: String,
         span: Span,
     },
+    /// 2026-08-05 (normative spec Phase 0): a construct is normative in
+    /// spec/SPEC.md but is not yet implemented. The compiler must reject it
+    /// explicitly instead of accepting a placeholder/subset semantics. See
+    /// SPEC §25 and docs/plans/2026-08-05-implement-normative-language-spec.md.
+    StagedFeature {
+        feature: String,
+        span: Span,
+    },
 }
 
 impl fmt::Display for SyntaxError {
@@ -674,6 +682,7 @@ impl fmt::Display for SyntaxError {
             SyntaxError::InvalidExpression { span, .. } => format!(" at {}", span),
             SyntaxError::InvalidStatement { span, .. } => format!(" at {}", span),
             SyntaxError::InvalidType { span, .. } => format!(" at {}", span),
+            SyntaxError::StagedFeature { span, .. } => format!(" at {}", span),
         };
 
         match self {
@@ -693,6 +702,15 @@ impl fmt::Display for SyntaxError {
             }
             SyntaxError::InvalidType { type_name, .. } => {
                 write!(f, "invalid type: '{}'{}", type_name, span_str)
+            }
+            SyntaxError::StagedFeature { feature, .. } => {
+                write!(
+                    f,
+                    "staged feature '{}' is normative but not yet implemented; \
+                     the compiler must reject this construct until implemented{}. \
+                     See spec/SPEC.md §25.",
+                    feature, span_str
+                )
             }
         }
     }
@@ -1242,6 +1260,18 @@ impl std::error::Error for CompilerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_staged_feature_diagnostic_display() {
+        let err = SyntaxError::StagedFeature {
+            feature: "dyn Trait".into(),
+            span: Span::dummy(),
+        };
+        let text = format!("{}", err);
+        assert!(text.contains("staged feature 'dyn Trait'"));
+        assert!(text.contains("not yet implemented"));
+        assert!(text.contains("spec/SPEC.md §25"));
+    }
 
     #[test]
     fn test_span_new_and_dummy() {

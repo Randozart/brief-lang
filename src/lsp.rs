@@ -471,6 +471,10 @@ impl LspServer {
             SyntaxError::InvalidType { type_name, span } => {
                 (format!("Invalid type: {}", type_name), *span)
             }
+            SyntaxError::StagedFeature { feature, span } => (
+                format!("Staged feature '{}' is normative but not yet implemented", feature),
+                *span,
+            ),
         };
 
         serde_json::json!({

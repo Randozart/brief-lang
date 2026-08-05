@@ -1,5 +1,44 @@
 # Bugs
 
+## Baseline Harness Defects Blocking Trustworthy A/B Comparison — OPEN
+
+**Date:** 2026-08-05
+**Status:** Open (baseline captured at `46f4f741`; see
+`docs/plans/2026-08-05-implement-normative-language-spec.md` §4.3)
+**Root cause:** The runtime benchmark harness has four pre-existing
+correctness/reporting defects that make the captured baseline partially
+untrustworthy. They are logged here before any implementation phase relies on
+the harness. Each must be fixed before the final migration benchmark gate.
+**Findings:**
+1. **`deep_recursion` prints divide-by-zero but reports `MATCH`.** The harness
+   printed `Runtime error (func=(main), adr=15): Divide by zero`, then two
+   `(standard_in) 1: syntax error` lines, yet recorded
+   `correctness: MATCH (output: "15")` with a C duration of `0s` and an
+   undefined ratio. The comparison is not valid.
+2. **`bridge_glue` produces `<null>` vs `42` and reports `SKIP`.** The GLUE
+   string round-trip printed `Briv:  '<null>'`, `❌ MISMATCH` (C and native
+   produce `'42'`), then the summary recorded `SKIP (briv binary missing)`.
+   A wrong result must never be classified as skip.
+3. **Protocol round-trip proofs are silently skipped.** ASCII, UTF16, and
+   Posit32 emit `warning: round-trip proof skipped for ... — bodies not found`.
+   The normative SPEC (`spec/SPEC.md` §8.7) requires proof or an explicitly
+   trusted axiom; silent skip is not acceptable.
+4. **Unresolved representation widths/alignments fall back silently.** The
+   normalizer prints `has no primordial entry and no `!> bits` metadata —
+   defaulting max width to target int width (64)` and
+   `assuming alignment 8` for `Slice`, `List`, `Stack`, `HashMap`,
+   `RingBuffer`, and others. SPEC §2.1 forbids silent representation fallback.
+5. **`#!exit` benchmarks warn their exit condition is never checked.** Many
+   benchmarks warn `#!exit declared but program has no tick loop`; their
+   migration to `exit program`/ports/entry macros must preserve observability.
+**Fix (planned):** Make the harness fail hard on runtime errors and wrong
+output instead of `MATCH`/`SKIP`; supply proof bodies or explicit trusted
+axioms for ASCII/UTF16/Posit32; require explicit representation resolution in
+the normalizer; migrate benchmark exits to canonical entry semantics.
+**Undo:** none (correctness fixes; do not restore silent fallbacks).
+
+---
+
 ## Runtime: Stale `free()` of Zero-Copy `briv_str_to_c` Results Crashed `get_env_int`/`__print` — FIXED
 
 **Date:** 2026-08-04

@@ -283,6 +283,20 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// 2026-08-05 (normative spec Phase 0): report a construct that is
+    /// normative in spec/SPEC.md but not yet implemented. The compiler must
+    /// reject it explicitly rather than accept placeholder/subset semantics.
+    pub fn error_staged<T>(&self, feature: &str) -> Result<T, SyntaxError> {
+        let span = self
+            .peek_with_span()
+            .map(|(_, s)| self.make_span(s.clone()))
+            .unwrap_or(Span::dummy());
+        Err(SyntaxError::StagedFeature {
+            feature: feature.to_string(),
+            span,
+        })
+    }
+
     /// 2026-07-26: Read the body of a `render struct/obj { ... }` block.
     /// The open brace `{` must already be consumed (via expect(LBrace)).
     /// Tracks brace depth through the token stream. Returns the raw HTML
