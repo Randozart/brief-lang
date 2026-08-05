@@ -159,7 +159,7 @@ impl<'a> Parser<'a> {
         }
 
         // Ptr<T> handling
-        if name == "Ptr" || name == "Ptr!" {
+        if name == "Ptr" {
             if self.eat(&Token::Lt) {
                 let inner = self.parse_type()?;
                 if !self.eat_type_close() {

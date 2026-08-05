@@ -51,7 +51,7 @@ impl<'a> Parser<'a> {
     fn prescan_known_types(&mut self) {
         for name in [
             "Int", "UInt", "Float", "Float32", "F32", "Float64", "F64", "Double",
-            "String", "Bool", "Void", "Char", "Data", "Bit", "bits", "Ptr", "Ptr!",
+            "String", "Bool", "Void", "Char", "Data", "Bit", "bits", "Ptr",
         ] {
             self.known_types.insert(name.to_string());
         }
@@ -380,7 +380,7 @@ impl<'a> Parser<'a> {
             Token::Cell => "cell".into(), Token::Struct => "struct".into(),
             Token::Rstruct => "rstruct".into(), Token::Render => "render".into(),
             Token::Enum => "enum".into(), Token::Trg => "trg".into(),
-            Token::Within => "within".into(), Token::PtrBang => "Ptr!".into(),
+            Token::Within => "within".into(),
             Token::Match => "match".into(),
             // 2026-07-15: Template/Macro tokens removed
             Token::Quote => "quote".into(),

@@ -149,10 +149,6 @@ pub enum Token {
     #[token("within")]
     Within,
 
-
-    #[token("Ptr!")]
-    PtrBang,
-
     #[token("match")]
     Match,
 
@@ -565,7 +561,6 @@ impl std::fmt::Display for Token {
             Token::Enum => write!(f, "enum"),
             Token::Trg => write!(f, "trg"),
             Token::Within => write!(f, "within"),
-            Token::PtrBang => write!(f, "Ptr!"),
             Token::Match => write!(f, "match"),
             // 2026-07-15: Template/Macro tokens removed
 
@@ -689,7 +684,7 @@ mod tests {
             "vol", "out", "await", "term", "term!", "escape", "import",
             "from", "as", "frgn", "frgn!", "meld", "reg", "op", "prop",
             "type", "cell", "obj", "struct", "rstruct", "render", "enum", "trg",
-            "within", "Ptr!", "match", "quote", "foreach", "pvt", "sed",
+            "within", "match", "quote", "foreach", "pvt", "sed",
             "sync", "true", "false", "cycles", "cyc", "ms", "seconds",
             "minute", "minutes", "nanoseconds",
         ];

@@ -4,8 +4,6 @@
 // All operations use `Ptr<T>` typed pointers created via `&x .^Ptr` or `list .^Ptr`.
 // Safety is verified by the PointerVerifier pass using contract preconditions.
 // The LLVM backend emits raw load/store/GEP — zero runtime overhead.
-//
-// For raw unchecked access, use `x .^Ptr!` (returns Int, no safety envelope).
 
 // ===== READ =====
 
