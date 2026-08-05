@@ -1621,6 +1621,49 @@ fn collect_contract_checks<'a>(
     }
 }
 
+/// 2026-08-05 (Phase 6): validate contract obligations. `node`/`txn`/`asm`
+/// require a present, non-trivial contract; `defn` contracts are optional but
+/// an explicit `[true][true]` is rejected everywhere.
+fn check_contract_obligations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
+    let mut contract_checks = Vec::new();
+    for item in items {
+        collect_contract_checks(item, &mut contract_checks);
+    }
+    for (kind, name, contract) in contract_checks {
+        validate_contract(kind, name, contract, errors);
+    }
+}
+
+/// 2026-08-05 (Phase 6): a contract is a tautology when both pre and post are
+/// the literal `true` expression — `true ⇒ true` holds trivially.
+fn is_tautological(contract: &Contract) -> bool {
+    matches!(contract.pre_condition, Expr::Bool(true))
+        && matches!(contract.post_condition, Expr::Bool(true))
+}
+
+/// 2026-08-05 (Phase 6): validate one declaration's contract.
+fn validate_contract(
+    kind: ContractKind,
+    name: &str,
+    contract: &Contract,
+    errors: &mut Vec<TypeError>,
+) {
+    if kind == ContractKind::Optional && contract.explicit && is_tautological(contract) {
+        errors.push(TypeError::TautologicalContract);
+        return;
+    }
+    if kind != ContractKind::Required {
+        return;
+    }
+    if !contract.explicit {
+        errors.push(TypeError::MissingContract {
+            declaration: name.to_string(),
+        });
+    } else if is_tautological(contract) {
+        errors.push(TypeError::TautologicalContract);
+    }
+}
+
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
@@ -1648,37 +1691,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // - `defn`: contract optional; an explicit [true][true] is rejected.
     // - `node`/`txn`/`asm`: contract required (present and non-trivial).
     // - `cell`: not required.
-    // Member transactions inside obj/cell/type bodies are walked too.
-    let mut contract_checks = Vec::new();
-    for item in items {
-        collect_contract_checks(item, &mut contract_checks);
-    }
-    for (kind, name, contract) in contract_checks {
-        match kind {
-            ContractKind::Optional => {
-                if contract.explicit
-                    && matches!(contract.pre_condition, Expr::Bool(true))
-                    && matches!(contract.post_condition, Expr::Bool(true))
-                {
-                    errors.push(TypeError::TautologicalContract);
-                }
-            }
-            ContractKind::Required => {
-                if !contract.explicit {
-                    errors.push(TypeError::MissingContract {
-                        declaration: name.to_string(),
-                    });
-                } else if matches!(contract.pre_condition, Expr::Bool(true))
-                    && matches!(contract.post_condition, Expr::Bool(true))
-                {
-                    errors.push(TypeError::TautologicalContract);
-                }
-            }
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    check_contract_obligations(items, &mut errors);
 
     // 2026-07-25: Pre-collect function return types for call inference.
     let fn_return_types: HashMap<String, Type> = items.iter().filter_map(|item| {
