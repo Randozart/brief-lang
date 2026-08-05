@@ -33,8 +33,6 @@ pub struct ReactorNode {
     pub write_set: HashSet<String>,
     pub is_effectively_pure: bool,
     pub lexicographic_vars: Vec<String>,
-    pub assume_events: Vec<String>,
-    pub assume_shape_action: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,38 +115,6 @@ impl ReactorTransitionGraph {
                     let write_set = extract_write_set(&simplified_body, &state_field_names);
                     let lexicographic_vars = detect_lexicographic_ranking(&txn.contract.pre_condition, &simplified_body);
 
-                    let assume_events: Vec<String> = txn.modifiers.iter()
-                        .filter(|m| m.name == "assume_event")
-                        .filter_map(|m| m.value.as_ref().and_then(|v| {
-                            if let Expr::Quoted(bytes) = v {
-                                Some(String::from_utf8_lossy(bytes).to_string())
-                            } else {
-                                None
-                            }
-                        }))
-                        .collect();
-
-                    let assume_shape_action = txn.modifiers.iter()
-                        .find(|m| m.name == "assume_shape")
-                        .and_then(|m| m.value.as_ref().and_then(|v| {
-                            if let Expr::Quoted(bytes) = v {
-                                let s = String::from_utf8_lossy(bytes);
-                                let parts: Vec<&str> = s.splitn(2, ", ").collect();
-                                if parts.len() == 2 {
-                                    let action = parts[1].trim();
-                                    if action == "run" || action == "exit" {
-                                        Some(action.to_string())
-                                    } else {
-                                        Some("escape".to_string())
-                                    }
-                                } else {
-                                    Some("escape".to_string())
-                                }
-                            } else {
-                                None
-                            }
-                        }));
-
                     nodes.push(ReactorNode {
                         name: txn.name.clone(),
                         is_reactive: txn.is_reactive,
@@ -160,8 +126,6 @@ impl ReactorTransitionGraph {
                         write_set,
                         is_effectively_pure: false,
                         lexicographic_vars,
-                        assume_events,
-                        assume_shape_action,
                     });
                 }
                 TopLevel::Trigger(_) => {
