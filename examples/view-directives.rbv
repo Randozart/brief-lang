@@ -1,5 +1,5 @@
 // view-directives.rbv — Advanced RBV view directives
-// Demonstrates: b-style, b-class, b-if, b-show, b-each
+// Demonstrates: b-style, b-class, b-when, b-show, b-each
 
 let items: List<String> = ["A", "B", "C"];
 let selected: String = "";
