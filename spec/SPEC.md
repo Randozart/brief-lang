@@ -576,9 +576,9 @@ defn divide(a: Int, b: Int) -> Int [b != 0][#R * b == a] {
 
 Omitted clauses retain implicit provenance. The compiler must distinguish omission from an explicitly written tautology.
 
-Explicit `[true][true]` is invalid everywhere.
+Explicit `[true][true]` is invalid everywhere: it asserts nothing (`true ⇒ true` is trivial), so it is indistinguishable from an omitted contract and records no obligation.
 
-An omitted or implicit-true postcondition on a node/transaction means immediate completion and does not request convergence.
+Contracts are **mandatory** (present and non-trivial) on `node`, `txn`, and `asm` declarations: the reactor uses the pre/post pair to prove and classify the transition. `defn` contracts are optional; `cell` declarations do not require a contract.
 
 Type invariants must be proven across construction and every mutating transformation.
 
@@ -665,6 +665,8 @@ There are no `for`, `while`, or `loop` keywords. Counted iteration uses iterable
 - `defer { ... };`: register cleanup for the enclosing scope.
 
 `exit program` runs applicable `defer` cleanup. Abrupt termination is not currently a source-language feature.
+
+There is no `main` declaration in Briv. The program entry is whichever reactive node fires first: the reactor evaluates node preconditions and the first satisfiable one fires. A program converges (and exits) when no node can fire.
 
 ### 11.6 Critical sections and barriers
 

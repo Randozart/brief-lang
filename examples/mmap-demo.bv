@@ -1,8 +1,12 @@
 // mmap-demo.bv — Memory-mapped I/O demonstration
 // 2026-07-15: Rewritten to use std/os (auto-imported via prelude).
+// 2026-08-05 (Phase 6): no `main` in Briv — the entry is the first-firing node.
 
-defn main() -> Int {
+let done: Bool = false;
+
+node start [done == false][done == true] {
     let mapped: Int = mmap(0, 4096, 3, 0x22, -1, 0);
     let ret: Int = munmap(mapped, 4096);
-    term 0;
+    done = true;
+    term;
 };

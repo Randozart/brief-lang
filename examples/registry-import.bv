@@ -12,7 +12,11 @@ import <collections>;
 // Selective import from registry — only bring in one symbol
 import { map } from <collections>;
 
-defn main() -> Int {
+// 2026-08-05 (Phase 6): no `main` in Briv — the entry is the first-firing node.
+let done: Bool = false;
+
+node start [done == false][done == true] {
     // Both <collections> and the selective import provide map
-    term 0;
+    done = true;
+    term;
 };

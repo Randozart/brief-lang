@@ -220,6 +220,14 @@ contracts.
 
 ## Working Rules
 
+- **Helpful diagnostics** — every user-facing error/warning must state what is
+  wrong, supply the relevant proof/why where one exists (e.g. which obligation
+  failed), and give the concrete fix. Never dismiss the code or author, and do
+  not reference compiler-internal mechanics or documentation file paths.
+  Terse, factual, and kind beats verbose. Supply the trivial proof where the
+  failure is about proving (e.g. `[true][true]` → "true ⇒ true is trivial").
+  See `src/errors.rs` for the house style; sweep existing messages
+  opportunistically when a file is touched.
 - **Flat control flow** — max 2 nesting levels. Use `?`, `if let`, guard
   clauses, early returns. Deeper logic goes in named helpers. `else if` chains
   deeper than one level are forbidden.

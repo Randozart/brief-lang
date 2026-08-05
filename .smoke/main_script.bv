@@ -1,4 +1,8 @@
-defn main() -> Int {
+// 2026-08-05 (Phase 6): no `main` in Briv — the entry is the first-firing node.
+let done: Bool = false;
+
+node start [done == false][done == true] {
     println!("main ran");
-    term 0;
+    done = true;
+    term;
 };

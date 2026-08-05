@@ -1224,15 +1224,11 @@ impl LlvmBackend {
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = has_ret;
-        // Rename user `main` to `briv_main` to avoid collision with
-        // the runtime entry point `define i32 @main()` in loop_engine.rs.
-        // 2026-07-19: In --shared mode, internal functions keep original names.
-        // Export wrappers use a unique suffix to avoid name collision.
-        let ll_name: String = if d.name == "main" {
-            "briv_main".to_string()
-        } else {
-            d.name.clone()
-        };
+        // 2026-08-05 (Phase 6): there is no `main` in Briv. The entry point is
+        // whichever node fires first (reactor-driven). User declarations named
+        // `main` are rejected by name-collision with the runtime `@main`, so no
+        // renaming is performed here.
+        let ll_name = d.name.clone();
         if self.ctx.is_shared_lib {
             write!(out, "define dso_local {} @{}(", ll_ret_ty, ll_name).ok();
         } else {

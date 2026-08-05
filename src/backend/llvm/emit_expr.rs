@@ -2225,11 +2225,9 @@ impl LlvmBackend {
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
         let ret_llvm = self.llvm_ret_abi_type(&ret_type);
-        // 2026-08-01 (Phase 4): `defn main` is renamed to `briv_main` at
-        // emission (emit_definition) to avoid colliding with the runtime
-        // entry point; calls to `main` must use the same renamed symbol or
-        // they hit an undefined `@main`.
-        let symbol = if name == "main" { "briv_main" } else { name };
+        // 2026-08-05 (Phase 6): there is no `main` in Briv — no call-site
+        // renaming to `briv_main`; the symbol is the declaration name.
+        let symbol = name;
         writeln!(
             out,
             "{}{} = call {} @{}({})",
