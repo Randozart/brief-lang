@@ -79,6 +79,12 @@ pub enum TopLevel {
     Cfg(CfgGuard),
     // 2026-07-23: Protocol variant declaration: proto name: #Category { ... }
     ProtocolDef(ProtocolDef),
+    /// 2026-08-05 (Phase 4): `trait Name<T> { ... }` — reusable behavioral
+    /// requirements/defaults (SPEC §8.6). No storage or target meaning.
+    Trait(TraitDef),
+    /// 2026-08-05 (Phase 4): `impl Name<T> { ... }` — inherent behavior for
+    /// data-only declarations (struct/enum/imported shape) (SPEC §8.8).
+    Impl(ImplDef),
     /// $let name = expr; — compile-time mutable variable.
     /// 2026-07-25: Persists across stage blocks, removed before codegen.
     CompileTimeLet(String, Expr),
@@ -925,6 +931,34 @@ pub struct TypeDef {
     pub protocol: Option<String>,
     pub bit_range: Option<BitRange>,
     pub body: TypeDefBody,
+    pub span: Option<Span>,
+}
+
+/// 2026-08-05 (Phase 4): `trait Name<T> { ... }` — reusable behavioral
+/// requirements, logical field requirements, defaults, and op bindings.
+/// Structural conformance is verified in Phase 5.
+#[derive(Debug, Clone)]
+pub struct TraitDef {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    /// Required function signatures (no body) and default functions (body).
+    pub functions: Vec<Definition>,
+    /// Required/default op bindings.
+    pub op_bindings: Vec<OperatorBinding>,
+    /// Logical field requirements (`Size: Int;`).
+    pub fields: Vec<(String, Type)>,
+    pub span: Option<Span>,
+}
+
+/// 2026-08-05 (Phase 4): `impl Name<T> { ... }` — inherent behavior attached to
+/// a data-only declaration. Coherence rules enforced in Phase 5.
+#[derive(Debug, Clone)]
+pub struct ImplDef {
+    /// The target declaration name (`impl Point { ... }`).
+    pub target: String,
+    pub type_params: Vec<TypeParam>,
+    pub functions: Vec<Definition>,
+    pub op_bindings: Vec<OperatorBinding>,
     pub span: Option<Span>,
 }
 

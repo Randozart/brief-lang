@@ -119,6 +119,12 @@ pub enum Token {
     #[token("type")]
     Type,
 
+    #[token("trait")]
+    Trait,
+
+    #[token("impl")]
+    Impl,
+
     #[token("cell")]
     Cell,
 
@@ -507,6 +513,8 @@ impl std::fmt::Display for Token {
             Token::Reg => write!(f, "reg"),
             Token::Op => write!(f, "op"),
             Token::Type => write!(f, "type"),
+            Token::Trait => write!(f, "trait"),
+            Token::Impl => write!(f, "impl"),
             Token::Cell => write!(f, "cell"),
             Token::Obj => write!(f, "obj"),
             Token::Struct => write!(f, "struct"),
@@ -621,7 +629,7 @@ mod tests {
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
             "vol", "out", "await", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
-            "type", "cell", "obj", "struct", "render", "enum", "trg",
+            "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",
             "sync", "true", "false", "cyc", "ms",
         ];

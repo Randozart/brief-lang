@@ -169,6 +169,38 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             }
             let _ = write!(out, "}};");
         }
+        TopLevel::Trait(t) => {
+            indent(out, level);
+            let _ = write!(out, "trait {}", t.name);
+            if !t.type_params.is_empty() {
+                let params: Vec<String> = t.type_params.iter().map(|p| p.name.clone()).collect();
+                let _ = write!(out, "<{}>", params.join(", "));
+            }
+            let _ = write!(out, " {{ ");
+            for (i, (fname, fty)) in t.fields.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                let _ = write!(out, "{}: {};", fname, fty);
+            }
+            for f in &t.functions {
+                let _ = write!(out, " {};", TopLevel::Definition(f.clone()));
+            }
+            let _ = write!(out, " }};");
+        }
+        TopLevel::Impl(i) => {
+            indent(out, level);
+            let _ = write!(out, "impl {}", i.target);
+            if !i.type_params.is_empty() {
+                let params: Vec<String> = i.type_params.iter().map(|p| p.name.clone()).collect();
+                let _ = write!(out, "<{}>", params.join(", "));
+            }
+            let _ = write!(out, " {{ ");
+            for f in &i.functions {
+                let _ = write!(out, " {};", TopLevel::Definition(f.clone()));
+            }
+            let _ = write!(out, " }};");
+        }
         TopLevel::RenderBlock(r) => {
             indent(out, level);
             let _ = write!(out, "render {} {{ {} }};", r.struct_name, r.view_html);

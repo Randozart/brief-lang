@@ -2184,7 +2184,7 @@ fn resolve_dollar_refs_in_type(ty: &mut Type, scope: &Scope) -> Result<(), Strin
 fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(), String> {
     match tl {
         TopLevel::Statement(stmt) => resolve_dollar_refs_in_stmt(stmt, scope),
-        TopLevel::StaticStruct(_) => Ok(()),
+        TopLevel::StaticStruct(_) | TopLevel::Trait(_) | TopLevel::Impl(_) => Ok(()),
         TopLevel::Definition(def) => {
             for stmt in &mut def.body {
                 resolve_dollar_refs_in_stmt(stmt, scope)?;

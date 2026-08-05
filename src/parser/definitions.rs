@@ -125,6 +125,9 @@ impl<'a> Parser<'a> {
             // 2026-07-14: Handle `type Name : Parent { slots }` definitions
             // 2026-07-16: P2 — Check for extension group Type.[a,b,c] before single type
             Some(Token::Type) => self.parse_type_or_group().map(TopLevel::TypeDef),
+            // 2026-08-05 (Phase 4): trait / impl declarations
+            Some(Token::Trait) => self.parse_trait().map(TopLevel::Trait),
+            Some(Token::Impl) => self.parse_impl().map(TopLevel::Impl),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
             Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
             Some(Token::Struct) => self.parse_struct_def().map(TopLevel::StaticStruct),
@@ -1457,6 +1460,75 @@ impl<'a> Parser<'a> {
         // 2026-08-05 (Phase 3): dotted extension groups (`type Foo.[a,b]`) are
         // removed with the free-form dot-extension mechanism.
         self.parse_type_body(name, type_params)
+    }
+
+    /// 2026-08-05 (Phase 4): `trait Name<T> { ... }` — reusable behavioral
+    /// requirements and defaults (SPEC §8.6). The body accepts logical field
+    /// requirements, required/default function signatures, and op bindings.
+    fn parse_trait(&mut self) -> Result<TraitDef, SyntaxError> {
+        self.pos += 1; // consume 'trait'
+        let name = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
+        let mut functions = Vec::new();
+        let mut op_bindings = Vec::new();
+        let mut fields = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                if self.check(&Token::Defn) {
+                    functions.push(self.parse_definition()?);
+                    self.eat(&Token::Semicolon);
+                } else if self.check(&Token::Op) {
+                    self.parse_op_definition(&mut op_bindings)?;
+                } else {
+                    let fname = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let fty = self.parse_type()?;
+                    self.eat(&Token::Semicolon);
+                    fields.push((fname, fty));
+                }
+            }
+            self.expect(Token::RBrace)?;
+        }
+        self.eat(&Token::Semicolon);
+        Ok(TraitDef {
+            name,
+            type_params,
+            functions,
+            op_bindings,
+            fields,
+            span: None,
+        })
+    }
+
+    /// 2026-08-05 (Phase 4): `impl Name<T> { ... }` — inherent behavior for a
+    /// data-only declaration (SPEC §8.8).
+    fn parse_impl(&mut self) -> Result<ImplDef, SyntaxError> {
+        self.pos += 1; // consume 'impl'
+        let target = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
+        let mut functions = Vec::new();
+        let mut op_bindings = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                if self.check(&Token::Defn) {
+                    functions.push(self.parse_definition()?);
+                    self.eat(&Token::Semicolon);
+                } else if self.check(&Token::Op) {
+                    self.parse_op_definition(&mut op_bindings)?;
+                } else {
+                    return self.error_at_current("expected 'defn' or 'op' in impl block");
+                }
+            }
+            self.expect(Token::RBrace)?;
+        }
+        self.eat(&Token::Semicolon);
+        Ok(ImplDef {
+            target,
+            type_params,
+            functions,
+            op_bindings,
+            span: None,
+        })
     }
 
     /// 2026-07-24: Parse `type Name [ : [Parent] [Protocol] ] { body }`.
@@ -3125,5 +3197,39 @@ mod phase3_tests {
             _ => None,
         });
         assert_eq!(plain, Some(false), "plain struct must not set the seq flag");
+    }
+
+    #[test]
+    fn test_parse_trait_declaration() {
+        // 2026-08-05 (Phase 4): trait requirements, fields, and defaults.
+        let items = parse_prog(
+            "trait Sized {\n  Size: Int;\n  defn compare(left: Self, right: Self) -> Int;\n};\n",
+        );
+        let t = items.iter().find_map(|t| match t {
+            crate::ast::TopLevel::Trait(t) => Some(t),
+            _ => None,
+        });
+        let t = t.expect("trait must parse");
+        assert_eq!(t.name, "Sized");
+        assert_eq!(t.fields.len(), 1);
+        assert_eq!(t.fields[0].0, "Size");
+        assert_eq!(t.functions.len(), 1);
+        assert_eq!(t.functions[0].name, "compare");
+    }
+
+    #[test]
+    fn test_parse_impl_declaration() {
+        // 2026-08-05 (Phase 4): impl attaches behavior to a data declaration.
+        let items = parse_prog(
+            "impl Point<Float> {\n  defn add_point(left: Point, right: Point) -> Point { term left; };\n};\n",
+        );
+        let i = items.iter().find_map(|t| match t {
+            crate::ast::TopLevel::Impl(i) => Some(i),
+            _ => None,
+        });
+        let i = i.expect("impl must parse");
+        assert_eq!(i.target, "Point");
+        assert_eq!(i.functions.len(), 1);
+        assert_eq!(i.functions[0].name, "add_point");
     }
 }
