@@ -128,7 +128,7 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             },
         ),
         TopLevel::StaticStruct(s) => {
-            format_struct_into(out, level, &s.name, &s.type_params, &s.fields);
+            format_struct_into(out, level, &s.name, &s.type_params, &s.fields, s.seq);
         }
         TopLevel::Enum(e) => format_enum_into(e, out, level),
         TopLevel::TypeDef(t) => format_typedef_into(t, out, level),
@@ -241,8 +241,12 @@ fn format_struct_into(
     name: &str,
     type_params: &[TypeParam],
     fields: &[(String, Type)],
+    seq: bool,
 ) {
     indent(out, level);
+    if seq {
+        out.push_str("seq ");
+    }
     let _ = write!(out, "struct {}", name);
     if !type_params.is_empty() {
         let params: Vec<String> = type_params.iter().map(|p| p.name.clone()).collect();

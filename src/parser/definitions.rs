@@ -32,6 +32,11 @@ impl<'a> Parser<'a> {
             // and/or non-vectorized array access. Recorded as a modifier
             // annotation; the backend consumes it (never a speed win — a
             // modifier-beaten default is a compiler bug).
+            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct)) => {
+                // 2026-08-05 (Phase 4): `seq struct` — parse_struct_def consumes
+                // the seq modifier itself.
+                self.parse_struct_def().map(TopLevel::StaticStruct)
+            }
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
                 self.pos += 1; // consume seq
                 let mut txn = if matches!(self.tokens.get(self.pos).map(|(t, _)| t), Some(Token::Node)) {
@@ -1811,6 +1816,8 @@ impl<'a> Parser<'a> {
     /// Pure data, C-compatible, no methods, no contracts.
     /// 2026-07-24: Fields are space-separated, semicolon-terminated.
     fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
+        // 2026-08-05 (Phase 4): `seq struct` preserves field order/containment.
+        let seq = self.eat(&Token::Seq);
         self.pos += 1; // consume struct
         let name = self.expect_identifier()?;
         // 2026-07-31: Generic struct: struct ListBuffer<T> { ... }.
@@ -1849,6 +1856,7 @@ impl<'a> Parser<'a> {
             name, type_params, fields,
             metadata,
             span: None,
+            seq,
         })
     }
 
@@ -3099,5 +3107,23 @@ mod phase3_tests {
         let pre_not = matches!(n.pre_condition, crate::ast::Expr::UnaryOp(crate::ast::UnaryOpKind::Not, _));
         assert!(pre_not, "node n pre must be !(a > 0)");
         assert!(!matches!(n.post_condition, crate::ast::Expr::UnaryOp(crate::ast::UnaryOpKind::Not, _)));
+    }
+
+    #[test]
+    fn test_parse_seq_struct_preserves_flag() {
+        // 2026-08-05 (Phase 4): `seq struct` sets the order/containment flag.
+        let seq_items = parse_prog("seq struct Header { tag: Int; len: Int; };");
+        let seq = seq_items.iter().find_map(|t| match t {
+            crate::ast::TopLevel::StaticStruct(s) => Some(s.seq),
+            _ => None,
+        });
+        assert_eq!(seq, Some(true), "seq struct must set the seq flag");
+
+        let plain_items = parse_prog("struct Point { x: Int; };");
+        let plain = plain_items.iter().find_map(|t| match t {
+            crate::ast::TopLevel::StaticStruct(s) => Some(s.seq),
+            _ => None,
+        });
+        assert_eq!(plain, Some(false), "plain struct must not set the seq flag");
     }
 }

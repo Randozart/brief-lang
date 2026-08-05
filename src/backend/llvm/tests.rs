@@ -2411,6 +2411,7 @@ fn test_struct_literal_field_offsets() {
                 ("c".to_string(), Type::char_()),
             ],
             metadata: HashMap::new(),
+            seq: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -2466,6 +2467,7 @@ fn test_addr_of_struct_literal() {
                 ("y".to_string(), Type::int()),
             ],
             metadata: HashMap::new(),
+            seq: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -2552,6 +2554,7 @@ fn test_frgn_ptr_param_inttoptr() {
                 ("y".to_string(), Type::int()),
             ],
             metadata: HashMap::new(),
+            seq: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -2732,6 +2735,7 @@ fn test_struct_array_list_literal() {
                 ("y".to_string(), Type::int()),
             ],
             metadata: HashMap::new(),
+            seq: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -2803,6 +2807,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
                 ("flags".to_string(), Type::int()),
             ],
             metadata: HashMap::new(),
+            seq: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {

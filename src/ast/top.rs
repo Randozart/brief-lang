@@ -872,6 +872,9 @@ pub struct StructDef {
     pub fields: Vec<(String, Type)>,
     pub metadata: HashMap<String, PropertyValue>,
     pub span: Option<Span>,
+    /// 2026-08-05 (Phase 4): `seq struct` preserves field order and
+    /// containment (SPEC §8.2). A plain struct is layout-adaptive.
+    pub seq: bool,
 }
 
 #[derive(Debug, Clone)]
