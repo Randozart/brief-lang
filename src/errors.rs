@@ -329,6 +329,15 @@ pub enum TypeError {
         name: String,
         module: String,
     },
+    /// 2026-08-05 (Phase 6): an explicitly written `[true][true]` contract.
+    /// Omitted contracts are fine; a written tautology is rejected (SPEC §10.1).
+    TautologicalContract,
+    /// 2026-08-05 (Phase 6): a `node`, `txn`, or `asm` declaration without a
+    /// contract. These declarations must declare pre/post conditions so the
+    /// compiler can prove and classify the transition.
+    MissingContract {
+        declaration: String,
+    },
 }
 
 impl fmt::Display for TypeError {
@@ -367,6 +376,12 @@ impl fmt::Display for TypeError {
             }
             TypeError::RemovedIntrinsic { name, module, .. } => {
                 write!(f, "intrinsic '{}' was moved to {} (auto-imported via prelude). If using --no-std, add: import \"{}\";", name, module, module)
+            }
+            TypeError::TautologicalContract => {
+                write!(f, "the contract [true][true] asserts nothing (true ⇒ true is trivial), so it is indistinguishable from an omitted contract and the compiler records no obligation; omit the brackets, or state the conditions you want proven")
+            }
+            TypeError::MissingContract { declaration } => {
+                write!(f, "'{}' must declare a contract with pre and post conditions so the compiler can prove and classify the transition", declaration)
             }
         }
     }
@@ -706,9 +721,7 @@ impl fmt::Display for SyntaxError {
             SyntaxError::StagedFeature { feature, .. } => {
                 write!(
                     f,
-                    "staged feature '{}' is normative but not yet implemented; \
-                     the compiler must reject this construct until implemented{}. \
-                     See spec/SPEC.md §25.",
+                    "feature '{}' is specified in the language but not yet implemented in this build{}",
                     feature, span_str
                 )
             }
@@ -1268,9 +1281,8 @@ mod tests {
             span: Span::dummy(),
         };
         let text = format!("{}", err);
-        assert!(text.contains("staged feature 'dyn Trait'"));
+        assert!(text.contains("feature 'dyn Trait'"));
         assert!(text.contains("not yet implemented"));
-        assert!(text.contains("spec/SPEC.md §25"));
     }
 
     #[test]

@@ -136,7 +136,7 @@ pub struct Transaction {
 
 // ── Contract ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Contract {
     pub pre_condition: Expr,
     pub post_condition: Expr,
@@ -366,7 +366,7 @@ impl OutputType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WatchdogSpec {
     pub condition: Expr,
     pub is_required: bool,
@@ -387,7 +387,7 @@ pub struct WatchdogSpec {
 }
 
 /// The `-> handler(val)` on-fire callback of a watchdog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WatchdogOnFire {
     pub handler: String,
     /// 2026-08-01 (C2): the value passed to the handler — `val` in
@@ -1122,6 +1122,9 @@ pub struct AsmFn {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub ret_type: Type,
+    /// 2026-08-05 (Phase 6): contracts are mandatory (present and non-trivial)
+    /// on asm declarations (SPEC §20).
+    pub contract: Contract,
     pub body: Vec<String>,
     pub span: Span,
 }

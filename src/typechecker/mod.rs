@@ -1579,6 +1579,48 @@ fn output_type_to_type(ot: &OutputType) -> Type {
 }
 
 /// Type-check a complete program.
+/// 2026-08-05 (Phase 6): whether a declaration's contract is required.
+/// `node`/`txn`/`asm` require a present, non-trivial contract; `defn` is
+/// optional; `cell` is not checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractKind {
+    Optional,
+    Required,
+}
+
+/// 2026-08-05 (Phase 6): collect `(kind, declaration-name, contract)` for every
+/// contract-carrying declaration, including member transactions nested inside
+/// `obj`/`cell`/`type` bodies.
+fn collect_contract_checks<'a>(
+    item: &'a TopLevel,
+    out: &mut Vec<(ContractKind, &'a str, &'a Contract)>,
+) {
+    match item {
+        TopLevel::Definition(d) => out.push((ContractKind::Optional, &d.name, &d.contract)),
+        TopLevel::Transaction(t) => out.push((ContractKind::Required, &t.name, &t.contract)),
+        TopLevel::AsmFn(a) => out.push((ContractKind::Required, &a.name, &a.contract)),
+        TopLevel::Export(e) => collect_contract_checks(&e.inner, out),
+        TopLevel::TypeDef(t) => {
+            for m in &t.body.members {
+                collect_contract_checks(m, out);
+            }
+        }
+        TopLevel::Obj(o) => {
+            for t in &o.transactions {
+                out.push((ContractKind::Required, &t.name, &t.contract));
+            }
+        }
+        TopLevel::Cell(c) => {
+            for t in &c.transactions {
+                out.push((ContractKind::Required, &t.name, &t.contract));
+            }
+        }
+        TopLevel::Fuzzed { item, .. } => collect_contract_checks(item, out),
+        TopLevel::SyncGroup { item, .. } => collect_contract_checks(item, out),
+        _ => {}
+    }
+}
+
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
@@ -1601,6 +1643,42 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         .collect();
 
     let mut errors = Vec::new();
+
+    // 2026-08-05 (Phase 6): contract obligations.
+    // - `defn`: contract optional; an explicit [true][true] is rejected.
+    // - `node`/`txn`/`asm`: contract required (present and non-trivial).
+    // - `cell`: not required.
+    // Member transactions inside obj/cell/type bodies are walked too.
+    let mut contract_checks = Vec::new();
+    for item in items {
+        collect_contract_checks(item, &mut contract_checks);
+    }
+    for (kind, name, contract) in contract_checks {
+        match kind {
+            ContractKind::Optional => {
+                if contract.explicit
+                    && matches!(contract.pre_condition, Expr::Bool(true))
+                    && matches!(contract.post_condition, Expr::Bool(true))
+                {
+                    errors.push(TypeError::TautologicalContract);
+                }
+            }
+            ContractKind::Required => {
+                if !contract.explicit {
+                    errors.push(TypeError::MissingContract {
+                        declaration: name.to_string(),
+                    });
+                } else if matches!(contract.pre_condition, Expr::Bool(true))
+                    && matches!(contract.post_condition, Expr::Bool(true))
+                {
+                    errors.push(TypeError::TautologicalContract);
+                }
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
 
     // 2026-07-25: Pre-collect function return types for call inference.
     let fn_return_types: HashMap<String, Type> = items.iter().filter_map(|item| {
@@ -2467,7 +2545,7 @@ node probe [true][true] {
         let src = r#"
 obj Person { name: String; age: Int; }
 let p: Person = Person("Alice", 30);
-node probe [true][true] {
+node probe [p.name != ""][true] {
     let n: String = p.name;
     let a: Int = p.age;
     term;
@@ -2475,6 +2553,38 @@ node probe [true][true] {
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn node_without_contract_is_rejected() {
+        // 2026-08-05 (Phase 6): node/txn must declare a contract.
+        let src = "let count: Int = 0;\nnode tick { count = count + 1; term; };\n";
+        let e = check(src);
+        assert!(
+            matches!(e, Err(ref errs) if errs.iter().any(|er| matches!(er, TypeError::MissingContract { .. }))),
+            "expected MissingContract, got: {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn defn_without_contract_is_allowed() {
+        // 2026-08-05 (Phase 6): defn contracts are optional.
+        let src = "defn add(a: Int, b: Int) -> Int { term a + b; };\n";
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn explicit_tautology_contract_is_rejected() {
+        // 2026-08-05 (Phase 6): explicit [true][true] asserts nothing.
+        let src = "let done: Bool = false;\nnode tick [true][true] { done = true; term; };\n";
+        let e = check(src);
+        assert!(
+            matches!(e, Err(ref errs) if errs.iter().any(|er| matches!(er, TypeError::TautologicalContract))),
+            "expected TautologicalContract, got: {:?}",
+            e
+        );
     }
 
     #[test]
@@ -2551,8 +2661,8 @@ obj Stack {
     };
     defn size() -> Int { term len; };
 }
-let st: Stack = Stack();
-node probe [true][true] {
+ let st: Stack = Stack();
+node probe [st.len <= 8][true] {
     st.push(5);
     let n: Int = st.size();
     term;
@@ -2610,7 +2720,7 @@ node probe [true][true] {
         // `let f: Float = 5` remains legal via numeric literal construction.
         let src = r#"
 let f: Float = 5;
-node probe [true][true] { term; };
+node probe [f >= 0.0][true] { term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
@@ -2623,7 +2733,7 @@ struct ListBuffer<T> {
     cap: Int;
 };
 let lb: ListBuffer<Int> = ListBuffer { data: 0 as Ptr<Int>, cap: 8 };
-node probe [true][true] { term; };
+node probe [lb.cap >= 0][true] { term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
@@ -2639,7 +2749,7 @@ enum Option<T> {
     None
 };
 let o: Int = 0;
-node probe [true][true] { term; };
+node probe [o >= 0][true] { term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
@@ -2652,7 +2762,7 @@ struct Arena { base: Ptr<Int>; offset: Int; }
 let base: Ptr<Int> = 0 as Ptr<Int>;
 let offset: Int = 0;
 defn mk() -> Arena { term Arena { base, offset }; };
-node probe [true][true] { term; };
+node probe [offset >= 0][true] { term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
@@ -2682,7 +2792,7 @@ obj Stack {
     };
 }
 let st: Stack = Stack();
-node probe [true][true] { st.push(5); term; };
+node probe [st.len <= 8][true] { st.push(5); term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);

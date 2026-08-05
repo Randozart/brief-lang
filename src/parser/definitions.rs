@@ -1269,6 +1269,9 @@ impl<'a> Parser<'a> {
         self.expect(Token::Arrow)?;
         // parse return type
         let ret_type = self.parse_type()?;
+        // 2026-08-05 (Phase 6): contracts are mandatory on asm declarations;
+        // parse the [pre][post] pair before the body.
+        let contract = self.parse_contract()?;
         // expect '{'
         self.expect(Token::LBrace)?;
         // parse asm body (string literals separated by semicolons)
@@ -1281,7 +1284,7 @@ impl<'a> Parser<'a> {
             .and_then(|(_, s1)| self.tokens.get(self.pos - 1).map(|(_, s2)| (s1, s2)))
             .map(|(s1, s2)| Span::new(s1.start, s2.end, 0, 0))
             .unwrap_or(Span::new(0, 0, 0, 0));
-        Ok(AsmFn { target, name, params, ret_type, body, span })
+        Ok(AsmFn { target, name, params, ret_type, contract, body, span })
     }
 
     /// 2026-07-29: Parse the body of an asm block: string literals separated by semicolons.
