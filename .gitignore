@@ -296,3 +296,6 @@ benchmarks/series_converge
 benchmarks/hash_ops
 benchmarks/hash_ops_idio
 benchmarks/linked_list
+
+# Renamify workspace
+.renamify/

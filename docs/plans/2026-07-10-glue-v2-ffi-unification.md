@@ -324,7 +324,7 @@ Remove the following from `run_export()`:
 - `collect_macro_defs()` call
 - Synthetic `Expr::MacroCall` construction
 - `expand_macros()` call
-- `std::env::set_var("BRIEF_OUTPUT_DIR", ...)` — no longer needed
+- `std::env::set_var("BRIV_OUTPUT_DIR", ...)` — no longer needed
 - All imports related to features::macros
 
 Replace with:

@@ -13,7 +13,7 @@ BRIDGE_DIR ?= $(PROJECT_ROOT)/target/bridge_bench
 
 CC ?= gcc
 CFLAGS ?= -shared -fPIC -O2
-BRIEFC ?= $(PROJECT_ROOT)/target/debug/briv-compiler
+BRIVC ?= $(PROJECT_ROOT)/target/debug/briv-compiler
 
 .PHONY: all c briv run clean
 
@@ -36,10 +36,10 @@ $(BRIDGE_DIR)/libstr_prepend_c.so: str_prepend.c
 
 briv: $(BRIDGE_DIR)/libpp_types.so
 
-$(BRIDGE_DIR)/libpp_types.so: $(PROJECT_ROOT)/pp-types.bv $(PROJECT_ROOT)/lib/pp/types.bv $(PROJECT_ROOT)/lib/pp/exprs.bv $(BRIEFC)
+$(BRIDGE_DIR)/libpp_types.so: $(PROJECT_ROOT)/pp-types.bv $(PROJECT_ROOT)/lib/pp/types.bv $(PROJECT_ROOT)/lib/pp/exprs.bv $(BRIVC)
 	@mkdir -p $(BRIDGE_DIR)
 	cd $(PROJECT_ROOT) && \
-	  $(BRIEFC) build pp-types.bv --llvm --out $(BRIDGE_DIR) 2>&1 && \
+	  $(BRIVC) build pp-types.bv --llvm --out $(BRIDGE_DIR) 2>&1 && \
 	  llc -filetype=obj -relocation-model=pic \
 	    -o $(BRIDGE_DIR)/pp-types.o $(BRIDGE_DIR)/pp-types.ll 2>&1 && \
 	  $(CC) -c -fPIC -o $(BRIDGE_DIR)/briv_rt.o lib/runtime/briv_rt.c 2>&1 && \
@@ -65,10 +65,10 @@ clean:
 speed: $(BRIDGE_DIR) $(BRIDGE_DIR)/librank.so $(BRIDGE_DIR)/librank_ref.so
 	python3 bench_glue_speed.py
 
-$(BRIDGE_DIR)/librank.so: $(PROJECT_ROOT)/examples/glue-host/rank.bv $(BRIEFC)
+$(BRIDGE_DIR)/librank.so: $(PROJECT_ROOT)/examples/glue-host/rank.bv $(BRIVC)
 	@mkdir -p $(BRIDGE_DIR)
 	cd $(PROJECT_ROOT) && \
-	  $(BRIEFC) build examples/glue-host/rank.bv --library --out $(BRIDGE_DIR) && \
+	  $(BRIVC) build examples/glue-host/rank.bv --library --out $(BRIDGE_DIR) && \
 	  cp $(BRIDGE_DIR)/rank.so $(BRIDGE_DIR)/librank.so && \
 	  rm -f $(BRIDGE_DIR)/rank.ll $(BRIDGE_DIR)/rank.o $(BRIDGE_DIR)/rank.briv_rt.o
 	@echo "  Briv .so: $@"

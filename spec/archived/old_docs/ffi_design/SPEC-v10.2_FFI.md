@@ -231,7 +231,7 @@ syscall open(path: String, flags: Int) -> Result<FileDescriptor, Error>;
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    BRIEF MEMORY MODELS                       │
+│                    BRIV MEMORY MODELS                       │
 ├────────────────┬──────────────────────────────────────────┤
 │   .ebv          │           .bv / .rbv                     │
 │  (Embedded)     │        (OS / Browser)                   │

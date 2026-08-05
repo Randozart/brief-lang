@@ -127,7 +127,7 @@ Completed, in order:
 **P2 complete.** **P3 complete (Option 1 — runtime dlopen):** the root
 `build.rs` compiles `needs_state.bv` with a prebuilt brivc into
 `target/compiler-in-briv/needs_state.so` and embeds its path via
-`cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO`; `src/glue/briv_pass.rs` dlopens
+`cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SO`; `src/glue/briv_pass.rs` dlopens
 it at first use (the GLUE host model) and resolves `needs_state_compute` +
 `__briv_init_state` through the C ABI. First build has no brivc yet (self
 -hosted bootstrap) — the runtime falls back to the Rust reference; every later

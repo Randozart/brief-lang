@@ -1,9 +1,9 @@
-// ── Compiler-in-Brief: build the needs_state pass library ──────────────
-// 2026-08-04 (plan 2026-08-04-compiler-in-brief-dogfood-ffi, P3): produce
-// `target/compiler-in-brief/needs_state.so` (the Brief pass compiled by
+// ── Compiler-in-Briv: build the needs_state pass library ──────────────
+// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi, P3): produce
+// `target/compiler-in-briv/needs_state.so` (the Briv pass compiled by
 // briefc) so the crate can dlopen it at runtime. The .so is EMBEDDED via
-// cargo:rustc-env (BRIEF_COMPILER_IN_BRIEF_SO) and loaded on first use by
-// src/glue/brief_pass.rs — the same way a host language loads a Brief bridge.
+// cargo:rustc-env (BRIV_COMPILER_IN_BRIV_SO) and loaded on first use by
+// src/glue/briv_pass.rs — the same way a host language loads a Briv bridge.
 //
 // Bootstrap ordering: `briefc` IS this crate's binary, so the FIRST cargo
 // build has no briefc yet and skips the pass (the runtime falls back to the
@@ -32,7 +32,7 @@ fn build_pass(briefc: &Path, bv: &str, out_root: &Path) -> Option<PathBuf> {
 
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    let out_root = Path::new(&manifest).join("target").join("compiler-in-brief");
+    let out_root = Path::new(&manifest).join("target").join("compiler-in-briv");
     println!("cargo:rerun-if-changed=lib/compiler/needs_state.bv");
     println!("cargo:rerun-if-changed=lib/compiler/soa_reorder.bv");
     println!("cargo:rerun-if-changed=lib/compiler/reader.bv");
@@ -45,31 +45,31 @@ fn main() {
     });
 
     let Some(briefc) = briefc else {
-        println!("cargo:warning=compiler-in-Brief: no prebuilt briefc found on first build — pass libraries skipped (runtime falls back to the Rust references)");
-        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
-        println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO=");
+        println!("cargo:warning=compiler-in-Briv: no prebuilt briefc found on first build — pass libraries skipped (runtime falls back to the Rust references)");
+        println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SO=");
+        println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SOA_SO=");
         return;
     };
 
-    // Each pass is an independent .so, dlopen'd by src/glue/brief_pass.rs.
+    // Each pass is an independent .so, dlopen'd by src/glue/briv_pass.rs.
     match build_pass(&briefc, "lib/compiler/needs_state.bv", &out_root) {
         Some(so) => {
-            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO={}", so.display());
-            println!("cargo:warning=compiler-in-Brief: needs_state pass ready at {}", so.display());
+            println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SO={}", so.display());
+            println!("cargo:warning=compiler-in-Briv: needs_state pass ready at {}", so.display());
         }
         None => {
-            println!("cargo:warning=compiler-in-Brief: needs_state pass build failed — runtime falls back to the Rust reference");
-            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SO=");
+            println!("cargo:warning=compiler-in-Briv: needs_state pass build failed — runtime falls back to the Rust reference");
+            println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SO=");
         }
     }
     match build_pass(&briefc, "lib/compiler/soa_reorder.bv", &out_root) {
         Some(so) => {
-            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO={}", so.display());
-            println!("cargo:warning=compiler-in-Brief: soa_reorder pass ready at {}", so.display());
+            println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SOA_SO={}", so.display());
+            println!("cargo:warning=compiler-in-Briv: soa_reorder pass ready at {}", so.display());
         }
         None => {
-            println!("cargo:warning=compiler-in-Brief: soa_reorder pass build failed — runtime falls back to the Rust reference");
-            println!("cargo:rustc-env=BRIEF_COMPILER_IN_BRIEF_SOA_SO=");
+            println!("cargo:warning=compiler-in-Briv: soa_reorder pass build failed — runtime falls back to the Rust reference");
+            println!("cargo:rustc-env=BRIV_COMPILER_IN_BRIV_SOA_SO=");
         }
     }
 }

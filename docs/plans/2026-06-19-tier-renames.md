@@ -36,7 +36,7 @@
 
 ### Documentation
 - `README.md` — file type table, briv references
-- `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` — file type descriptions
+- `docs/reference/BRIV_LANGUAGE_REFERENCE.md` — file type descriptions
 - `docs/architecture/features/graphic-briv.md` → rename to `accelerated-briv.md` + content update
 - `docs/plans/2026-06-18-graphic-briv.md` — update references
 - `docs/plans/2026-06-18-gpu-io-intrinsics.md` — update references

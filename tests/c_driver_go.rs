@@ -1,10 +1,10 @@
 // ── Go Round-Trip Test (cgo) ───────────────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `brief
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
 // export <bridge> go` renders a cgo Go package — the preamble includes the C
 // header, the per-export wrappers convert natively (string ↔ *C.char via the
 // composite pointer-as-int64 handle, C.GoString reads the NUL-invariant data
 // zero-copy). Toolchain-guarded: finds `go` on PATH or the portable
-// ~/brief-tools/go/bin/go.
+// ~/briv-tools/go/bin/go.
 
 use std::process::Command;
 
@@ -21,7 +21,7 @@ fn go_bin() -> Option<std::path::PathBuf> {
         }
     }
     let portable = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
-        .join("brief-tools/go/bin/go");
+        .join("briv-tools/go/bin/go");
     if portable.exists() {
         Some(portable)
     } else {
@@ -38,11 +38,11 @@ fn go_roundtrip() {
         }
     }
     let Some(go) = go_bin() else {
-        eprintln!("SKIP: go not found (PATH or ~/brief-tools/go/bin/go)");
+        eprintln!("SKIP: go not found (PATH or ~/briv-tools/go/bin/go)");
         return;
     };
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("brief_go_test");
+    let base = std::env::temp_dir().join("briv_go_test");
     let _ = std::fs::remove_dir_all(&base);
     let pkg = base.join("boundary");
     std::fs::create_dir_all(&pkg).unwrap();
@@ -58,7 +58,7 @@ fn go_roundtrip() {
         .args(["bindings", &bv, "c", "--out", &base.to_string_lossy()])
         .output().expect("failed briefc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
-    std::fs::copy(base.join("boundary-bindings/brief_types.h"), pkg.join("brief_types.h")).unwrap();
+    std::fs::copy(base.join("boundary-bindings/briv_types.h"), pkg.join("briv_types.h")).unwrap();
 
     let export = Command::new(briefc)
         .args(["export", &bv, "go", "--out", &base.to_string_lossy()])

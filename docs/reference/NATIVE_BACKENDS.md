@@ -175,7 +175,7 @@ __asm__ __volatile__("DC CIVAC X0, X1" : : : "x0", "x1");
 - `src/reactor.rs` - Added `InlineAsm` handler
 - `src/backend/wasm.rs` - Added `InlineAsm` handler (generates comment)
 - `CHANGELOG.md` - Documented changes
-- `BRIEF_LANGUAGE_REFERENCE.md` - Documented inline asm syntax
+- `BRIV_LANGUAGE_REFERENCE.md` - Documented inline asm syntax
 
 ---
 

@@ -291,8 +291,8 @@ New error cases specific to this rewrite:
 |------|--------|
 | `src/glue/dbvs_validator.rs` | `.dbvs` is removed; validation moves to V2 parser |
 | `examples/data-briv/schema.dbvs` | Already deleted in main branch |
-| `docs/DATABRIEF.md` | Archived (forwarding note present) |
-| `docs/DATABRIEF_GUIDE.md` | Archived (forwarding note present) |
+| `docs/DATABRIV.md` | Archived (forwarding note present) |
+| `docs/DATABRIV_GUIDE.md` | Archived (forwarding note present) |
 
 ---
 
@@ -392,7 +392,7 @@ Each commit must pass `cargo test --lib` and `cargo build`.
 
 After `feat/data-briv` merges to `main`:
 
-1. Remove the old `docs/DATABRIEF.md` and `docs/DATABRIEF_GUIDE.md` files
+1. Remove the old `docs/DATABRIV.md` and `docs/DATABRIV_GUIDE.md` files
    (archival period: one release cycle)
 2. Update `spec/SPEC.md` section 8 to reference new spec
 3. Remove worktree `../briv-compiler-data-briv`

@@ -317,7 +317,7 @@ This draft is based on analysis of the following existing documents:
 - `spec/LANGUAGE-TUTORIAL.md` — Step-by-step language guide
 - `spec/QUICK-REFERENCE.md` — Syntax reference
 - `spec/old_docs/language_specs/` — Archived spec versions (v4–v8)
-  - `EMBEDDED_BRIEF_2.0_SPEC.md`, `EMBEDDED_BRIEF_2.1_SPEC.md` — Embedded Briv (.ebv) design
+  - `EMBEDDED_BRIV_2.0_SPEC.md`, `EMBEDDED_BRIV_2.1_SPEC.md` — Embedded Briv (.ebv) design
 - `spec/old_docs/ffi_design/` — FFI system evolution
 - `spec/old_docs/hardware_design/` — Hardware validation and config guides
 - `spec/old_docs/design/` — Individual design decisions (guard blocks, symbolic execution, etc.)

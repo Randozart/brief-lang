@@ -470,7 +470,7 @@ briv-compiler/
 | `src/hardware/mod.rs` | New: TOML loader |
 | `hardware_lib/targets/*.toml` | New: target profiles |
 | `hardware_lib/interfaces/*.toml` | New: interface profiles |
-| `BRIEF_v011_PLAN.md` | This document |
+| `BRIV_v011_PLAN.md` | This document |
 
 ---
 

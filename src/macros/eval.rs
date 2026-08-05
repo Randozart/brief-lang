@@ -2524,8 +2524,8 @@ mod tests {
         let mut universe = TypeUniverse::new();
         // Set a test env var
         // SAFETY: single-threaded test environment — no concurrent reads
-        unsafe { std::env::set_var("BRIEF_TEST_VAR", "hello_world"); }
-        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEF_TEST_VAR".into())], None);
+        unsafe { std::env::set_var("BRIV_TEST_VAR", "hello_world"); }
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIV_TEST_VAR".into())], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
             StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result {
@@ -2538,7 +2538,7 @@ mod tests {
     fn test_env_get_missing_var() {
         let mut program = vec![];
         let mut universe = TypeUniverse::new();
-        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEF_VAR_THAT_DOES_NOT_EXIST_XYZ".into())], None);
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIV_VAR_THAT_DOES_NOT_EXIST_XYZ".into())], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
             StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result {

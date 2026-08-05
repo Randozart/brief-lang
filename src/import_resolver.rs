@@ -184,7 +184,7 @@ impl ImportResolver {
 
     /// Resolve the stdlib root path, trying multiple sources in order:
     /// 1. Explicitly configured path (from --stdlib-path)
-    /// 2. BRIEF_STDLIB_PATH env var
+    /// 2. BRIV_STDLIB_PATH env var
     /// 3. Executable-relative (dev layout: target/release/ -> ../../lib/)
     /// 4. root_path/lib/ (project-local)
     pub fn resolve_stdlib_root(&self) -> Option<PathBuf> {
@@ -196,7 +196,7 @@ impl ImportResolver {
         }
 
         // 2. Environment variable
-        if let Ok(env_path) = std::env::var("BRIEF_STDLIB_PATH") {
+        if let Ok(env_path) = std::env::var("BRIV_STDLIB_PATH") {
             let p = PathBuf::from(env_path);
             if p.exists() {
                 return Some(p);
@@ -888,7 +888,7 @@ impl ImportResolver {
         let stdlib_root = self.resolve_stdlib_root().ok_or_else(|| {
             format!(
                 "Cannot resolve import '{}': no stdlib path configured. \
-                 Use --stdlib-path or set BRIEF_STDLIB_PATH.",
+                 Use --stdlib-path or set BRIV_STDLIB_PATH.",
                 module
             )
         })?;

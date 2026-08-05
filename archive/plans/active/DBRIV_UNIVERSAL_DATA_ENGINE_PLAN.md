@@ -3,7 +3,7 @@
 **Date:** 2026-05-09
 **Status:** Planning
 **Version:** 1.0
-**Related:** `docs/reference/DBRIEF_SPEC.md`, `docs/reference/BRIEF-DATALOG_RESEARCH.md`, `plans/active/DBRIEF_IMPLEMENTATION_PLAN.md`
+**Related:** `docs/reference/DBRIV_SPEC.md`, `docs/reference/BRIV-DATALOG_RESEARCH.md`, `plans/active/DBRIV_IMPLEMENTATION_PLAN.md`
 
 ---
 
@@ -796,11 +796,11 @@ briv-compiler/
 │
 ├── docs/
 │   └── reference/
-│       └── DBRIEF_SPEC.md       # Update with v1 spec
+│       └── DBRIV_SPEC.md       # Update with v1 spec
 │
 └── plans/
     └── active/
-        └── DBRIEF_UNIVERSAL_DATA_ENGINE_PLAN.md  # This file
+        └── DBRIV_UNIVERSAL_DATA_ENGINE_PLAN.md  # This file
 ```
 
 ---
@@ -837,10 +837,10 @@ briv-compiler/
 
 ## 12. Related Documents
 
-- `docs/reference/DBRIEF_SPEC.md` - Language specification
-- `docs/reference/BRIEF-DATALOG_RESEARCH.md` - Datalog research
-- `plans/active/DBRIEF_IMPLEMENTATION_PLAN.md` - Previous plan (superseded)
-- `docs/EMBEDDED_BRIEF_2.2_SPEC.md` - E-Briv specification
+- `docs/reference/DBRIV_SPEC.md` - Language specification
+- `docs/reference/BRIV-DATALOG_RESEARCH.md` - Datalog research
+- `plans/active/DBRIV_IMPLEMENTATION_PLAN.md` - Previous plan (superseded)
+- `docs/EMBEDDED_BRIV_2.2_SPEC.md` - E-Briv specification
 
 ---
 

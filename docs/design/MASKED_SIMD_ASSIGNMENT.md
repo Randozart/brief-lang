@@ -344,10 +344,10 @@ let source: Int[8] = [10, 20, 30, 40, 50, 60, 70, 80];
 
 ## References
 
-- **Current slice syntax**: `docs/EMBEDDED_BRIEF_2.2_SPEC.md:62-68`
+- **Current slice syntax**: `docs/EMBEDDED_BRIV_2.2_SPEC.md:62-68`
 - **Vector type definition**: `src/ast.rs:119`
 - **Slice parsing**: `src/parser.rs:2726-2770`
-- **SIMD lifting**: `docs/EMBEDDED_BRIEF_2.2_SPEC.md:54-57`
+- **SIMD lifting**: `docs/EMBEDDED_BRIV_2.2_SPEC.md:54-57`
 - **Verilog vector codegen**: `src/backend/verilog.rs:977-1292`
 
 ---

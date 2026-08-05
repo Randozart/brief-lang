@@ -63,7 +63,7 @@ fn member_inline_term_links_in_countdown_loop() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_term_member_inline_test");
+    let out_dir = std::env::temp_dir().join("briv_term_member_inline_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
@@ -84,7 +84,7 @@ fn member_inline_term_links_in_countdown_loop() {
     let link = Command::new("clang")
         .args(["-O3", "-flto", "-march=native", "-ffast-math", "-fdata-sections", "-ffunction-sections",
                "-Wl,--gc-sections", &ll.to_string_lossy(),
-               &format!("{}/lib/runtime/brief_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
+               &format!("{}/lib/runtime/briv_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
         .output()
         .expect("failed clang link");
     assert!(link.status.success(),
@@ -117,7 +117,7 @@ fn guard_value_form_term_unwinds_body() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_term_guard_value_form_test");
+    let out_dir = std::env::temp_dir().join("briv_term_guard_value_form_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
@@ -142,7 +142,7 @@ fn guard_value_form_term_unwinds_body() {
     let link = Command::new("clang")
         .args(["-O3", "-flto", "-march=native", "-ffast-math", "-fdata-sections", "-ffunction-sections",
                "-Wl,--gc-sections", &ll.to_string_lossy(),
-               &format!("{}/lib/runtime/brief_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
+               &format!("{}/lib/runtime/briv_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
         .output()
         .expect("failed clang link");
     assert!(link.status.success(),

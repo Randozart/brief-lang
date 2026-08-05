@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-26
 **Status:** Specification
-**Supersedes:** `docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`
+**Supersedes:** `docs/DATABRIV.md`, `docs/DATABRIV_GUIDE.md`
 
 ---
 
@@ -855,7 +855,7 @@ expected vs found.
 
 ## 14. Migration from Legacy Syntax
 
-The old Data Briv syntax (`docs/DATABRIEF.md`, `docs/DATABRIEF_GUIDE.md`) used
+The old Data Briv syntax (`docs/DATABRIV.md`, `docs/DATABRIV_GUIDE.md`) used
 commas, quotes, and `schema { }` blocks with different token rules. Migration:
 
 | Old | New |

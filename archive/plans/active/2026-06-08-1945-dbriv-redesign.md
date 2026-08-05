@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-08 19:45
 **Status:** Approved for implementation
-**Supersedes:** `plans/active/DBRIEF_IMPLEMENTATION_PLAN.md`, `plans/active/DBRIEF_UNIVERSAL_DATA_ENGINE_PLAN.md`
+**Supersedes:** `plans/active/DBRIV_IMPLEMENTATION_PLAN.md`, `plans/active/DBRIV_UNIVERSAL_DATA_ENGINE_PLAN.md`
 
 ---
 

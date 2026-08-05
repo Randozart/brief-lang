@@ -109,7 +109,7 @@ All documentation updated to v7.0:
 - `spec/LANGUAGE-REFERENCE.md`
 - `spec/LANGUAGE-TUTORIAL.md`
 - `spec/FFI-GUIDE.md`
-- `spec/RENDERED-BRIEF-GUIDE.md`
+- `spec/RENDERED-BRIV-GUIDE.md`
 - `spec/QUICK-REFERENCE.md`
 
 **Commits:** `7d0d513`, `a6929ad`
@@ -263,8 +263,8 @@ Each mapper includes `mapper.json` for discovery:
 Search order (first found wins):
 1. `./mappers/<lang>/` (project-local)
 2. `~/.briv/mappers/<lang>/` (user-wide)
-3. `$BRIEF_MAPPERS_PATH/` (custom directory)
-4. `$BRIEF_REGISTRY/<lang>/` (registry URL)
+3. `$BRIV_MAPPERS_PATH/` (custom directory)
+4. `$BRIV_REGISTRY/<lang>/` (registry URL)
 5. Built-in (bundled with compiler)
 
 ### Mapper Installation

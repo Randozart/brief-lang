@@ -139,7 +139,7 @@ defn encode_block(result_type: WasmValueType) -> List<u8> {
     term [0x02, block_type]; // block opcode + block type
 }
 
-// ===== BRIEF TYPE TO WASM TYPE =====
+// ===== BRIV TYPE TO WASM TYPE =====
 
 defn briv_type_to_wasm(briv_type: Type) -> WasmType {
     uni briv_type(TypeInt) = { term I32; };

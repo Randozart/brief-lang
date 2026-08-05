@@ -19,7 +19,7 @@ local N, N2, Nn = 200000, 2000000, 2000
 local t0 = os.clock()
 local sink = 0
 for i = 1, N do sink = sink + b.feature_hash(1000, r) end
-print(string.format('BRIEF_FH %.1f', (os.clock() - t0) * 1e9 / N))
+print(string.format('BRIV_FH %.1f', (os.clock() - t0) * 1e9 / N))
 native_fh(1000, r)
 t0 = os.clock()
 for i = 1, Nn do sink = sink + native_fh(1000, r + i) end
@@ -27,7 +27,7 @@ print(string.format('NATIVE_FH %.1f', (os.clock() - t0) * 1e9 / Nn))
 b.add(r, 4)
 t0 = os.clock()
 for i = 1, N2 do sink = sink + b.add(r, 4) end
-print(string.format('BRIEF_ADD %.2f', (os.clock() - t0) * 1e9 / N2))
+print(string.format('BRIV_ADD %.2f', (os.clock() - t0) * 1e9 / N2))
 native_add(r, 4)
 t0 = os.clock()
 for i = 1, N2 do sink = sink + native_add(r, i % 8) end

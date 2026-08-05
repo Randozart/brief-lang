@@ -2,7 +2,7 @@
 
 **Created**: 2026-04-29
 **Status**: Implementation Started
-**Related**: `/home/randozart/Desktop/Projects/linux-pipe-module/BRIEF_COMPILER_CHECKLIST.md`
+**Related**: `/home/randozart/Desktop/Projects/linux-pipe-module/BRIV_COMPILER_CHECKLIST.md`
 
 ## Executive Summary
 

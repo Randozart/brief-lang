@@ -24,12 +24,12 @@ Three-tier system:
 | Tier | Mechanism | What it provides | Control |
 |------|-----------|------------------|---------|
 | Built-in | Compiler-injected | `Option<T>`, `Some`, `None`, `Result<T,E>`, `Ok`, `Err` | Always present. Required for FFI error handling. |
-| Auto-core | Compiler scans `{BRIEF_STDLIB_PATH}/std/core/` | All "safe" modules (pure `defn`/`enum`, no `frgn`/`link`/`trg`) | \`--disable-plugin prelude\` disables |
-| `import#` | Compiler-relative path resolution | Anything in `BRIEF_STDLIB_PATH` | Explicit opt-in per module/glob |
+| Auto-core | Compiler scans `{BRIV_STDLIB_PATH}/std/core/` | All "safe" modules (pure `defn`/`enum`, no `frgn`/`link`/`trg`) | \`--disable-plugin prelude\` disables |
+| `import#` | Compiler-relative path resolution | Anything in `BRIV_STDLIB_PATH` | Explicit opt-in per module/glob |
 
 ## Directory Structure
 
-The stdlib is split into two directories under `{BRIEF_STDLIB_PATH}/std/`:
+The stdlib is split into two directories under `{BRIV_STDLIB_PATH}/std/`:
 
 ```
 std/
@@ -77,7 +77,7 @@ compiler-relative:
 | Syntax | Search root | Use case |
 |--------|-------------|----------|
 | `import "foo.bar"` | Project paths (`lib/`, `imports/`, `./`) | Project-local modules |
-| `import# "std/ffi/string.bv"` | `BRIEF_STDLIB_PATH` | Compiler's stdlib |
+| `import# "std/ffi/string.bv"` | `BRIV_STDLIB_PATH` | Compiler's stdlib |
 
 The `#` suffix is parsed in the parser: after consuming `import`, check for
 a trailing `Hash` token.
@@ -113,9 +113,9 @@ the compiler guarantees their availability without imports.
 
 By default (without `--disable-plugin prelude`), the compiler:
 
-1. Locates `{BRIEF_STDLIB_PATH}` (from `--stdlib-path`, `BRIEF_STDLIB_PATH`
+1. Locates `{BRIV_STDLIB_PATH}` (from `--stdlib-path`, `BRIV_STDLIB_PATH`
    env var, or executable-relative default)
-2. Lists all `.bv` files in `{BRIEF_STDLIB_PATH}/std/core/`
+2. Lists all `.bv` files in `{BRIV_STDLIB_PATH}/std/core/`
 3. Injects a synthetic `import# "std/core/<file>"` for each file
 4. Resolves through normal import resolution (recursive, dedup'd)
 
@@ -165,14 +165,14 @@ Previously these types were hardcoded as Rust `Vec<ResolvedType>` literals in
 - Cache results as with normal imports
 
 ### Phase 4: Import Resolver — Magic Path Resolution
-- When `is_magic` is true, resolve path relative to `BRIEF_STDLIB_PATH`
+- When `is_magic` is true, resolve path relative to `BRIV_STDLIB_PATH`
 - Add `stdlib_path: Option<PathBuf>` field to `ImportResolver`
 - Add builder method `.with_stdlib_path(path)`
 
 ### Phase 5: Import Resolver — Auto-Core Import
 - Add `use_stdlib: bool` field to `ImportResolver` (default: true)
 - In `resolve_imports()`, if `use_stdlib`, inject auto-core imports first
-- Also handle when `BRIEF_STDLIB_PATH` env var is set
+- Also handle when `BRIV_STDLIB_PATH` env var is set
 
 ### Phase 6: CLI
 - Add `--disable-plugin prelude` flag (replaces `--no-std` / `--no-stdlib` internally)
@@ -206,7 +206,7 @@ duplication. Called from both `run_llvm_compile` and `run_compile_unified` in `s
 ### Glob Expansion
 Implemented in `ImportResolver::resolve_glob()`. Non-recursive `*` lists direct children of
 the matched directory. Recursive `**` walks all subdirectories via `walkdir`. Magic globs
-resolve relative to `BRIEF_STDLIB_PATH`; non-magic globs resolve relative to project paths.
+resolve relative to `BRIV_STDLIB_PATH`; non-magic globs resolve relative to project paths.
 
 ## No Magic Compliance
 
@@ -215,7 +215,7 @@ Each mechanism is explicitly traceable:
 | Mechanism | Why it's not magic |
 |-----------|-------------------|
 | Built-in Option/Result | Required for FFI; definitions in stdlib are the source of truth |
-| Auto-core import | Uses `BRIEF_STDLIB_PATH` — a configurable path. Scans a real directory. Resolves through normal imports. |
+| Auto-core import | Uses `BRIV_STDLIB_PATH` — a configurable path. Scans a real directory. Resolves through normal imports. |
 | `import#` | `#` suffix explicitly signals compiler-relative path. Same resolution as normal imports, different root. |
 | Glob `*`/`**` | Standard glob semantics. No hidden allowlists. List directory and import everything found. |
 
@@ -223,7 +223,7 @@ Each mechanism is explicitly traceable:
 
 Existing `import "std/option.bv"` will still work because the import
 resolver's project-relative search paths (`lib/`, `imports/`, `./`) still
-apply. The `core/`, `ffi/`, `ext/` split is internal to `BRIEF_STDLIB_PATH`;
+apply. The `core/`, `ffi/`, `ext/` split is internal to `BRIV_STDLIB_PATH`;
 project-relative imports can still resolve old paths if a project has its
 own `lib/std/` mirror.
 

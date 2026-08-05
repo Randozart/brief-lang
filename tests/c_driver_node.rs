@@ -1,10 +1,10 @@
 // ── Python ↔ Node Cross-Language Bridge Test ────────────────────────────
 // 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): Python and Node have
-// no mature native binding between them. Brief's composite (the CStr <-> String
+// no mature native binding between them. Briv's composite (the CStr <-> String
 // meld, NUL-invariant String, zero-copy str_to_c) is their only common
 // interface. Both call the same bridge exports; the composite String crosses
 // the process boundary via the runtime's file I/O (persist/load) — the only
-// transport both languages share is Brief itself.
+// transport both languages share is Briv itself.
 //
 // Flow: Node saves+persists → Python loads (a Node-originated value consumed
 // by Python) → Python saves+persists → Node loads (the reverse). Numeric bump
@@ -27,7 +27,7 @@ fn python_node_cross_language_bridge() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("brief_py_node_bridge");
+    let base = std::env::temp_dir().join("briv_py_node_bridge");
     let _ = std::fs::remove_dir_all(&base);
     let node_dir = base.join("node");
     let py_dir = base.join("py");

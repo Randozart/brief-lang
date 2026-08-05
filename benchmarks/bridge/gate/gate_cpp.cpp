@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     feature_hash(st, 1000, r);
     double t0 = now_ns();
     for (int i = 0; i < N; i++) sink += feature_hash(st, 1000, r);
-    printf("BRIEF_FH %.1f\n", (now_ns() - t0) / N);
+    printf("BRIV_FH %.1f\n", (now_ns() - t0) / N);
     native_fh(1000, r);
     t0 = now_ns();
     for (int i = 0; i < N; i++) sink += native_fh(1000, r + i);
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     add(r, 4);
     t0 = now_ns();
     for (int i = 0; i < N2; i++) sink += add(r, 4);
-    printf("BRIEF_ADD %.2f\n", (now_ns() - t0) / N2);
+    printf("BRIV_ADD %.2f\n", (now_ns() - t0) / N2);
     native_add(r, 4);
     t0 = now_ns();
     for (int i = 0; i < N2; i++) sink += native_add(r, i & 7);

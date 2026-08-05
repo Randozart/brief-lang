@@ -1,10 +1,10 @@
 // ── Java Round-Trip Test (JNI) ─────────────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `brief
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
 // extension <bridge> java` renders + builds a JNI shim (lib<bridge>.so; the
 // composite String crosses via GetStringUTFChars / NewStringUTF on the
-// NUL-invariant data); `brief export <bridge> java` renders the Java class
+// NUL-invariant data); `briv export <bridge> java` renders the Java class
 // with `native` methods. Toolchain-guarded: finds javac/java on PATH or the
-// portable ~/brief-tools/jdk-* JDK.
+// portable ~/briv-tools/jdk-* JDK.
 
 use std::process::Command;
 
@@ -22,7 +22,7 @@ fn jdk_bin() -> Option<std::path::PathBuf> {
         }
     }
     let home = std::env::var("HOME").unwrap_or_default();
-    let tools = std::path::Path::new(&home).join("brief-tools");
+    let tools = std::path::Path::new(&home).join("briv-tools");
     if let Ok(entries) = std::fs::read_dir(&tools) {
         for entry in entries.flatten() {
             let dir = entry.path();
@@ -46,11 +46,11 @@ fn java_roundtrip() {
         }
     }
     let Some(jbin) = jdk_bin() else {
-        eprintln!("SKIP: JDK not found (PATH or ~/brief-tools/jdk-*)");
+        eprintln!("SKIP: JDK not found (PATH or ~/briv-tools/jdk-*)");
         return;
     };
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("brief_java_test");
+    let base = std::env::temp_dir().join("briv_java_test");
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
 

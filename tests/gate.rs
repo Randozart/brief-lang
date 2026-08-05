@@ -3,9 +3,9 @@
 // benchmarks/bridge/gate/run_gate.sh and asserts the gate ratios stay sane.
 // These are GENEROUS canaries (catching gross regressions, not flaky under
 // load), not tight perf assertions:
-//   - every present host: Brief feature_hash / native feature_hash < 1.6
-//     (Brief's real work must never be 60%+ slower than the host itself)
-//   - Python/Lua/Node: that ratio < 0.6 (Brief must still win big for
+//   - every present host: Briv feature_hash / native feature_hash < 1.6
+//     (Briv's real work must never be 60%+ slower than the host itself)
+//   - Python/Lua/Node: that ratio < 0.6 (Briv must still win big for
 //     interpreted hosts — its compute is native machine code)
 //   - Python add ratio < 2.0 (the METH_FASTCALL dispatch stays tight)
 // Toolchain-guarded: needs cc+clang (C baseline); other hosts run if present.
@@ -21,10 +21,10 @@ fn has(cmd: &str) -> bool {
 #[test]
 fn zero_friction_gate() {
     // Opt-in: this gate builds every host's bridge + runs 3 interleaved rounds
-    // (~3 min). Run explicitly with BRIEF_RUN_GATE=1 before perf-affecting
+    // (~3 min). Run explicitly with BRIV_RUN_GATE=1 before perf-affecting
     // commits; the default suite stays fast.
-    if std::env::var("BRIEF_RUN_GATE").unwrap_or_default() != "1" {
-        eprintln!("SKIP: set BRIEF_RUN_GATE=1 to run the zero-friction gate");
+    if std::env::var("BRIV_RUN_GATE").unwrap_or_default() != "1" {
+        eprintln!("SKIP: set BRIV_RUN_GATE=1 to run the zero-friction gate");
         return;
     }
     for tool in ["cc", "clang"] {
@@ -53,11 +53,11 @@ fn zero_friction_gate() {
         let fh_ratio: f64 = f[3].parse().unwrap_or(f64::MAX);
         let add_ratio: f64 = f[6].parse().unwrap_or(f64::MAX);
         assert!(fh_ratio < 1.6,
-            "{}: Brief feature_hash {:.2}x native — real work regressed", host, fh_ratio);
+            "{}: Briv feature_hash {:.2}x native — real work regressed", host, fh_ratio);
         match host {
             "Py" | "Lua" | "Node" => {
                 assert!(fh_ratio < 0.6,
-                    "{}: Brief must beat interpreted-native by >1.7x, got {:.2}x", host, fh_ratio);
+                    "{}: Briv must beat interpreted-native by >1.7x, got {:.2}x", host, fh_ratio);
             }
             "Py" => {
                 assert!(add_ratio < 2.0,

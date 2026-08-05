@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-05
 **Status:** Planning
-**Related:** `docs/reference/DBRIEF_SPEC.md`, `docs/reference/BRIEF-DATALOG_RESEARCH.md`
+**Related:** `docs/reference/DBRIV_SPEC.md`, `docs/reference/BRIV-DATALOG_RESEARCH.md`
 
 ---
 

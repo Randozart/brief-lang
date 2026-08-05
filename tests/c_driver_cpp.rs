@@ -21,7 +21,7 @@ fn cpp_roundtrip() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_cpp_test");
+    let out_dir = std::env::temp_dir().join("briv_cpp_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
@@ -39,12 +39,12 @@ fn cpp_roundtrip() {
     let inc = out_dir.join("boundary-bindings");
     let driver_cpp = out_dir.join("driver.cpp");
     std::fs::write(&driver_cpp, r#"
-#include "boundary-bindings/brief_types.h"
+#include "boundary-bindings/briv_types.h"
 #include <cstdio>
 #include <cstring>
 
 int main() {
-    BriefState* st = __brief_init_state();
+    BrivState* st = __briv_init_state();
     int64_t echoed = echo((int64_t)"hello");
     int64_t greeted = greet((int64_t)"hello");
     int64_t joined = join((int64_t)"foo", (int64_t)"bar");

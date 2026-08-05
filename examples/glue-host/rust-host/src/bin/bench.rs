@@ -4,7 +4,7 @@
 // single C ABI call (zero marshalling); the work is FNV-1a folding over
 // `count` features, identical in Briv and native Rust.
 //
-// Run: BRIEFC=<repo>/target/release/brivc cargo run --release --bin bench
+// Run: BRIVC=<repo>/target/release/brivc cargo run --release --bin bench
 
 #[path = "../briv_bindings.rs"]
 mod briv_bindings;

@@ -229,8 +229,8 @@ but they do not declare `__briv_init_state` or `__glue_release`. Add them.
 ```rust
 // After the #include guard, before struct definitions:
 out.push_str("// ── Runtime State Handle ──\n");
-out.push_str("#ifndef BRIEF_STATE_DEFINED\n");
-out.push_str("#define BRIEF_STATE_DEFINED\n");
+out.push_str("#ifndef BRIV_STATE_DEFINED\n");
+out.push_str("#define BRIV_STATE_DEFINED\n");
 out.push_str("typedef struct BrivState BrivState;\n");
 out.push_str("#endif\n\n");
 out.push_str("// Initialize the Briv runtime state. Returns an opaque handle.\n");

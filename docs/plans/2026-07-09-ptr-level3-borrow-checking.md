@@ -1099,7 +1099,7 @@ bash benchmarks/build_and_bench.sh --runtime
 |-----|--------|
 | `docs/learn/types.md` | Add `Ptr<T>` and `Ptr<const T>` section: address-of, dereference, const inference, borrow warnings |
 | `docs/learn/ffi.md` | Add Ptr FFI section: passing `&buf` to C functions |
-| `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` | Add `&expr` and `*expr` to Expressions section |
+| `docs/reference/BRIV_LANGUAGE_REFERENCE.md` | Add `&expr` and `*expr` to Expressions section |
 | `docs/architecture/features/borrow-checking.md` | NEW: design doc for pointer provenance, borrow warnings, const inference |
 | `spec/SPEC.md` | Update type system section with Ptr types, dereference, and safety rules |
 | `AGENTS.md` | Update "No Magic" table: `Expr::OwnedRef` → `Expr::AddrOf` |

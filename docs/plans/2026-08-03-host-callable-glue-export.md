@@ -190,7 +190,7 @@ as phases complete, never retroactively edited.
 
 ### Phase 3 benchmark (2026-08-03, `benchmarks/bridge/bench_glue_speed.py`)
 
-`make speed BRIEFC=<repo>/target/debug/brivc` — per-call latency over 20000
+`make speed BRIVC=<repo>/target/debug/brivc` — per-call latency over 20000
 calls, `feature_hash(count=1000, seed=42)` (FNV-1a folding over 1000 features):
 
 | Path | median ns/call | mean ns/call |

@@ -1,7 +1,7 @@
-use brief_compiler::ast::*;
-use brief_compiler::interpreter::{Interpreter, Value};
-use brief_compiler::parser::Parser;
-use brief_compiler::lexer::tokenize;
+use briv_compiler::ast::*;
+use briv_compiler::interpreter::{Interpreter, Value};
+use briv_compiler::parser::Parser;
+use briv_compiler::lexer::tokenize;
 
 fn parse_and_init(source: &str) -> (Interpreter, Vec<TopLevel>) {
     let tokens = tokenize(source).unwrap();

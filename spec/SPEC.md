@@ -770,7 +770,7 @@ The `resolve_link_source()` function searches in this order, returning the first
 1. Project-relative (same directory as source file)
 2. `lib/runtime/` — built-in runtime modules (`briv_rt.c`)
 3. `lib/std/c/` — vendored C libraries (`xxhash/`, `yyjson/`, etc.)
-4. `BRIEF_STDLIB_PATH` environment variable
+4. `BRIV_STDLIB_PATH` environment variable
 5. Absolute path resolution
 
 The `import "link/..."` directive's `"..."` path is the file name (e.g., `"briv_rt.c"`, `"xxhash/xxhash.c"`). The resolver appends this to each search directory. This means `import "link/xxhash/xxhash.c"` resolves to `lib/std/c/xxhash/xxhash.c` via the `lib/std/c/` prefix.
@@ -1842,7 +1842,7 @@ let out: String = args!("--out", String); // __argv_value("--out")
 ```
 
 **Command semantics:** `entry_cmd()` returns the first non-flag `argv[1..]`
-token (`<prog> --verbose build` → `"build"`), honoring `$BRIEF_ENTRY_CMD` as
+token (`<prog> --verbose build` → `"build"`), honoring `$BRIV_ENTRY_CMD` as
 the sole environment fallback.
 
 **Rules:**

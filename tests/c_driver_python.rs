@@ -1,7 +1,7 @@
 // ── Native Python Extension Round-Trip Test ─────────────────────────────
-// 2026-08-03 (plan 2026-08-03-native-python-meld-composite): `brief extension
+// 2026-08-03 (plan 2026-08-03-native-python-meld-composite): `briv extension
 // <bridge.bv> python` generates a CPython C-extension module that calls the
-// Brief exports directly — no ctypes. The shim accepts native Python str/int/
+// Briv exports directly — no ctypes. The shim accepts native Python str/int/
 // float and returns native Python values. The CStr <-> String meld makes the
 // boundary functions cast-free; the shim's per-category parse/build snippets
 // (config/glue.dbvl native.*) marshal natively. Toolchain-guarded.
@@ -23,7 +23,7 @@ fn python_native_extension_roundtrip() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_python_native_test");
+    let out_dir = std::env::temp_dir().join("briv_python_native_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 

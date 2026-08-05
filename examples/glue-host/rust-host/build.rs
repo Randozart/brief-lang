@@ -10,7 +10,7 @@ use std::process::Command;
 
 fn main() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let brivc = std::env::var("BRIEFC").unwrap_or_else(|_| {
+    let brivc = std::env::var("BRIVC").unwrap_or_else(|_| {
         let rel = manifest.join("../../../target/release/brivc");
         if rel.exists() { rel.to_string_lossy().into_owned() } else { "brivc".into() }
     });

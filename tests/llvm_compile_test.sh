@@ -14,9 +14,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="/tmp/brief-llvm-test-$$"
+BUILD_DIR="/tmp/briv-llvm-test-$$"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
-BRIEF="$PROJECT_DIR/target/release/brief-compiler"
+BRIV="$PROJECT_DIR/target/release/briv-compiler"
 PASS=0
 FAIL=0
 SKIP=0
@@ -37,7 +37,7 @@ trap cleanup EXIT
 mkdir -p "$BUILD_DIR"/{ir,obj,run}
 
 build_compiler() {
-    echo "--- Building brief-compiler ---"
+    echo "--- Building briv-compiler ---"
     cargo build --release -q 2>/dev/null
 }
 
@@ -49,7 +49,7 @@ test_compile() {
 
     echo "  compile: $name.bv"
 
-    if ! "$BRIEF" llvm "$fixture" --out "$BUILD_DIR/ir" 2>/dev/null; then
+    if ! "$BRIV" llvm "$fixture" --out "$BUILD_DIR/ir" 2>/dev/null; then
         fail_msg "compile $name.bv → exit non-zero"
         return 1
     fi
@@ -188,7 +188,7 @@ run_suite() {
 # --- Main ---
 
 echo "============================================"
-echo "  Brief LLVM Backend Validation Pipeline"
+echo "  Briv LLVM Backend Validation Pipeline"
 echo "============================================"
 echo ""
 

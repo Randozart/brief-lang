@@ -36,7 +36,7 @@ main loop:
 | WASM/Emscripten | `pthread_barrier_t` with `-s USE_PTHREADS=1` | Yes |
 | Bare metal ARM/x86 | N/A | No — no OS scheduler |
 
-Gated behind `#if defined(BRIEF_THREAD_POOL)` in `briv_rt.c`, activated by `@llvm.thread_pool` metadata in generated IR.
+Gated behind `#if defined(BRIV_THREAD_POOL)` in `briv_rt.c`, activated by `@llvm.thread_pool` metadata in generated IR.
 
 ## Compiler Auto-Inference
 
@@ -117,7 +117,7 @@ done:
 | `src/backend/llvm.rs` | ~100 | Auto-split txns into enum/async/seq groups in `generate()`; emit hybrid `@main` |
 | `src/backend/llvm.rs` | ~30 | `emit_enum_main` extended for async phase after switch arms |
 | `src/backend/mod.rs` | ~10 | Builtins: `briv_thread_pool_init`, `briv_barrier_release`, `briv_barrier_wait` |
-| `src/main.rs` | ~10 | Detect `@llvm.thread_pool` metadata, add `-DBRIEF_THREAD_POOL -lpthread` to link step |
+| `src/main.rs` | ~10 | Detect `@llvm.thread_pool` metadata, add `-DBRIV_THREAD_POOL -lpthread` to link step |
 | `src/proof_engine.rs` | 0 | Already done — `suggest_async_promotion` from Step 4 |
 
 ## Key Design Decisions

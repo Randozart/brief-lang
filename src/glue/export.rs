@@ -474,7 +474,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
 
     let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
-    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+    if std::env::var("BRIV_DEBUG_BINDINGS").is_ok() {
         eprintln!("DBG target.templates keys: {:?}", target.templates.keys().collect::<Vec<_>>());
         eprintln!("DBG exports: {:?}", info.exports.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
     }
@@ -595,7 +595,7 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
         return Err(format!("link failed:\n{}", String::from_utf8_lossy(&cc_link.stderr)));
     }
     let _ = std::fs::remove_file(&shim_o);
-    if std::env::var("BRIEF_KEEP_SHIM").is_ok() {
+    if std::env::var("BRIV_KEEP_SHIM").is_ok() {
         println!("  Shim:    {}", shim_path.display());
     } else {
         let _ = std::fs::remove_file(&shim_path);
@@ -886,7 +886,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 
     template_vars.insert("exports".to_string(), exports_buf.clone());
     template_vars.insert("ffi_decls".to_string(), ffi_buf.clone());
-    if std::env::var("BRIEF_DEBUG_BINDINGS").is_ok() {
+    if std::env::var("BRIV_DEBUG_BINDINGS").is_ok() {
         eprintln!("DBG exports_buf=[{}]", exports_buf);
     }
 

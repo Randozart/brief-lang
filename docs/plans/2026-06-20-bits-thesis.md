@@ -1659,7 +1659,7 @@ Estimated: 1 day
 | 2. Cover: Bits thesis, tier tables, silent rules, desugaring, TBAA, optimization | — | None | — |
 | 3. Include FAQ: "But what about Float?" / "CBV doesn't recognize String?" / "Performance?" | — | None | — |
 | 4. Update `docs/architecture/glossary.md` with new terms | `glossary.md` | None | — |
-| 5. Update `docs/BRIEF_3.0_SPEC.md` section 2 with refined `:>` specs | `BRIEF_3.0_SPEC.md` | None | — |
+| 5. Update `docs/BRIV_3.0_SPEC.md` section 2 with refined `:>` specs | `BRIV_3.0_SPEC.md` | None | — |
 
 ---
 

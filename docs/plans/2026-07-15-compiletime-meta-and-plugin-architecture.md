@@ -139,7 +139,7 @@ System plugins are loaded from the compiler's configured plugin directory.
 The compiler searches:
 
 1. `--plugin-dir` CLI flag
-2. `BRIEF_PLUGIN_DIR` environment variable
+2. `BRIV_PLUGIN_DIR` environment variable
 3. Compiler installation path: `<executable_dir>/../share/briv/plugins/`
 4. Project-local: `<project_root>/plugins/`
 
@@ -508,7 +508,7 @@ Reads compiler configuration. See description under `$(Post)`.
 GetEnv$(var_name: String) -> String
 ```
 Reads an environment variable at compile time. Returns `""` if unset.
-Replaces: `std::env::var("BRIEF_STDLIB_PATH")` magic.
+Replaces: `std::env::var("BRIV_STDLIB_PATH")` magic.
 
 ```
 EmitWarning$(message: String)

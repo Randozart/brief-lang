@@ -8,7 +8,7 @@
 
 PROJECT_ROOT ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 BUILD_DIR ?= $(PROJECT_ROOT)/target/multi_lang
-BRIEFC ?= $(PROJECT_ROOT)/target/release/briv-compiler
+BRIVC ?= $(PROJECT_ROOT)/target/release/briv-compiler
 CC ?= gcc
 
 .PHONY: all run clean
@@ -21,10 +21,10 @@ $(BUILD_DIR):
 # ── Briv .so ───────────────────────────────────────────────────────────
 # Build the shared library with export defn add/mul
 
-$(BUILD_DIR)/export_add.so: $(PROJECT_ROOT)/benchmarks/multi_lang/export_add.bv $(BRIEFC)
+$(BUILD_DIR)/export_add.so: $(PROJECT_ROOT)/benchmarks/multi_lang/export_add.bv $(BRIVC)
 	@mkdir -p $(BUILD_DIR)
 	cd $(PROJECT_ROOT) && \
-	  $(BRIEFC) build benchmarks/multi_lang/export_add.bv --shared --out $(BUILD_DIR) 2>&1
+	  $(BRIVC) build benchmarks/multi_lang/export_add.bv --shared --out $(BUILD_DIR) 2>&1
 
 # ── Protocol shim ───────────────────────────────────────────────────────
 # Standalone executable that dlopens the .so and communicates via stdin/stdout

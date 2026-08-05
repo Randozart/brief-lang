@@ -13,7 +13,7 @@ style = "cobol"
 [codegen.templates]
 header = """
        IDENTIFICATION DIVISION.
-       PROGRAM-ID. BRIEF01.
+       PROGRAM-ID. BRIV01.
        DATA DIVISION.
        WORKING-STORAGE SECTION.
 """

@@ -268,7 +268,7 @@ their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
 whose toolchain is present — **Gate A** (real work: Briv vs native
 `feature_hash`) and **Gate B** (dispatch: Briv vs native internal `add`), 3
 interleaved rounds, medians. Committed as an opt-in regression canary:
-`BRIEF_RUN_GATE=1 cargo test --test gate` (~3 min).
+`BRIV_RUN_GATE=1 cargo test --test gate` (~3 min).
 
 **Gate hygiene** (a fair gate is hard to get right):
 - Native functions take a **runtime-varying argument** so no compiler hoists the

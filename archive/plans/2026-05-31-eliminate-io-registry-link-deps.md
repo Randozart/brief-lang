@@ -53,7 +53,7 @@ files, the driver links them directly.
 ```rust
 pub struct LinkDependency {
     pub path: String,          // e.g., "briv_rt.o", "lib/mysensor.a"
-    pub is_bundled_rt: bool,   // true if path == "briv_rt.o" → use BRIEF_RT_SOURCE
+    pub is_bundled_rt: bool,   // true if path == "briv_rt.o" → use BRIV_RT_SOURCE
 }
 ```
 Add `TopLevel::LinkDependency(LinkDependency)` to the `TopLevel` enum.
@@ -107,8 +107,8 @@ The flag becomes obsolete — the source code declares link dependencies.
 For each `LinkDependency` in the program:
 ```
 if dep.is_bundled_rt:
-    fs::write(briv_rt.c, BRIEF_RT_SOURCE)
-    cc_status = cc -c -O2 briv_rt.c -o briv_rt.o [+ -DBRIEF_THREAD_POOL]
+    fs::write(briv_rt.c, BRIV_RT_SOURCE)
+    cc_status = cc -c -O2 briv_rt.c -o briv_rt.o [+ -DBRIV_THREAD_POOL]
     link_objects.push(briv_rt.o)
 else:
     # User-provided .o/.a — just link it

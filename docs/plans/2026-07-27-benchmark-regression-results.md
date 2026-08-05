@@ -106,7 +106,7 @@ address computation (`%t29`) is dead and will be eliminated by LLVM DCE.
 The Briv time (0.0603s) matches queue_drain_sym (0.0575s) — no codegen regression.
 
 **The 301.50x is a benchmark harness artifact:**
-- `BRIEF_CROSS_REF["queue_drain_idio"]="queue_drain_sym"` (build_and_bench.sh:285)
+- `BRIV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"` (build_and_bench.sh:285)
 - The C binary for queue_drain_sym timed at 0.0002s — physically impossible for
   50M iterations (would need ~0.012 cycles/iter at 3GHz)
 - The C binary was likely stale, miscompiled, or ran without `BOUND` env var

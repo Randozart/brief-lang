@@ -1,4 +1,4 @@
-<script type="brief">
+<script type="briv">
 rstruct Counter {
   count: Int = 0;
 

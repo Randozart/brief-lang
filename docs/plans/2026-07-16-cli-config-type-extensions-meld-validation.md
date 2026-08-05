@@ -53,7 +53,7 @@ pub struct ConfigResolver {
 impl ConfigResolver {
     /// Follow the resolution chain to find config files.
     /// 1. --config-dir CLI flag
-    /// 2. BRIEF_CONFIG_DIR env var
+    /// 2. BRIV_CONFIG_DIR env var
     /// 3. ./.briv/config/ (project-local)
     /// 4. ~/.config/briv-compiler/active_profile symlink
     /// 5. Compile-time baked fallback
@@ -73,7 +73,7 @@ fn resolve_config_dir(override_dir: Option<&Path>) -> PathBuf {
         return dir.to_path_buf();
     }
     // 2. Environment variable
-    if let Ok(env) = std::env::var("BRIEF_CONFIG_DIR") {
+    if let Ok(env) = std::env::var("BRIV_CONFIG_DIR") {
         return PathBuf::from(env);
     }
     // 3. Project-local
@@ -534,7 +534,7 @@ impl FromSpec {
             }
             Self::Registry(name) => {
                 // Same resolution as resolve_stdlib_root():
-                // 1. BRIEF_STDLIB_PATH/ffi/<name>
+                // 1. BRIV_STDLIB_PATH/ffi/<name>
                 // 2. exe_dir/../../lib/ffi/<name> (dev layout)
                 // 3. exe_dir/../share/briv/ffi/<name> (installed)
                 resolver.resolve_stdlib_relative_path(&format!("ffi/{}", name))
@@ -620,7 +620,7 @@ Expose `resolve_stdlib_root()` from `src/import_resolver.rs` (currently private)
 ```rust
 impl ImportResolver {
     /// Resolve a path relative to the stdlib root.
-    /// Searches: BRIEF_STDLIB_PATH, exe-relative dev/installed paths.
+    /// Searches: BRIV_STDLIB_PATH, exe-relative dev/installed paths.
     pub fn resolve_stdlib_relative_path(&self, relative: &str) -> Option<PathBuf> {
         for root in self.stdlib_search_roots() {
             let candidate = root.join(relative);
@@ -639,7 +639,7 @@ impl ImportResolver {
             roots.push(path.clone());
         }
         // 2. Environment variable
-        if let Ok(env_path) = std::env::var("BRIEF_STDLIB_PATH") {
+        if let Ok(env_path) = std::env::var("BRIV_STDLIB_PATH") {
             roots.push(PathBuf::from(env_path));
         }
         // 3. Executable-relative (dev)

@@ -19,7 +19,7 @@ let sink = 0n;
 b.feature_hash(1000, 42);
 let t0 = process.hrtime.bigint();
 for (let i = 0; i < N; i++) sink += BigInt(b.feature_hash(1000, 42));
-console.log('BRIEF_FH ' + (Number(process.hrtime.bigint() - t0) / N).toFixed(1));
+console.log('BRIV_FH ' + (Number(process.hrtime.bigint() - t0) / N).toFixed(1));
 nativeFh(1000, 42);
 t0 = process.hrtime.bigint();
 for (let i = 0; i < N; i++) sink += nativeFh(1000, 42n + BigInt(i));
@@ -27,7 +27,7 @@ console.log('NATIVE_FH ' + (Number(process.hrtime.bigint() - t0) / N).toFixed(1)
 b.add(3, 4);
 t0 = process.hrtime.bigint();
 for (let i = 0; i < N2; i++) sink += BigInt(b.add(3, 4));
-console.log('BRIEF_ADD ' + (Number(process.hrtime.bigint() - t0) / N2).toFixed(2));
+console.log('BRIV_ADD ' + (Number(process.hrtime.bigint() - t0) / N2).toFixed(2));
 nativeAdd(3, 4);
 t0 = process.hrtime.bigint();
 for (let i = 0; i < N2; i++) sink += BigInt(nativeAdd(3, i % 8));

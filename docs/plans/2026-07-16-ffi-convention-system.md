@@ -430,7 +430,7 @@ impl ImportResolver {
         if let Some(ref path) = self.stdlib_path {
             roots.push(path.clone());
         }
-        if let Ok(env_path) = std::env::var("BRIEF_STDLIB_PATH") {
+        if let Ok(env_path) = std::env::var("BRIV_STDLIB_PATH") {
             roots.push(PathBuf::from(env_path));
         }
         if let Ok(exe) = std::env::current_exe() {

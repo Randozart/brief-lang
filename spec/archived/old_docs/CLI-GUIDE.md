@@ -454,9 +454,9 @@ search_paths = ["lib", "vendor"]
 
 | Variable | Description |
 |----------|-------------|
-| `BRIEF_HOME` | Briv home directory |
-| `BRIEF_OUT` | Default output directory |
-| `BRIEF_PORT` | Default server port |
+| `BRIV_HOME` | Briv home directory |
+| `BRIV_OUT` | Default output directory |
+| `BRIV_PORT` | Default server port |
 
 ---
 

@@ -119,7 +119,7 @@ compiles the Briv library with `brivc` and links it:
 
 ```bash
 cd examples/glue-host/rust-host
-BRIEFC=$PWD/../../../target/release/brivc cargo run --release
+BRIVC=$PWD/../../../target/release/brivc cargo run --release
 ```
 
 The generated `briv_bindings.rs` exposes plain `extern "C"` functions. The
@@ -359,7 +359,7 @@ Java 1.00, Go 1.07), interpreted hosts won by Briv 1–2 orders of magnitude
 `benchmarks/bridge/gate/run_gate.sh` is the committed regression gate: Briv's
 `feature_hash` vs each host's *own* native `feature_hash` (Gate A — real work)
 and Briv's `add` vs the host's pure-internal `add` (Gate B — dispatch). Run it
-with `BRIEF_RUN_GATE=1 cargo test --test gate`.
+with `BRIV_RUN_GATE=1 cargo test --test gate`.
 
 **Gate A — Briv vs native feature_hash (median):**
 | host | ratio | |

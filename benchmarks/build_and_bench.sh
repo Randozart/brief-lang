@@ -289,7 +289,7 @@ build_c() {
         src="benchmarks/${name}_c.c"
     else
         # 2026-07-27: No direct C source — check for cross-reference.
-        local ref_name="${BRIEF_CROSS_REF[$name]:-}"
+        local ref_name="${BRIV_CROSS_REF[$name]:-}"
         if [ -n "$ref_name" ]; then
             echo "  No C source — uses ${ref_name}_c for cross-reference timing"
         fi
@@ -381,9 +381,9 @@ is_precompute_ok() {
 # ── Cross-benchmark correctness references ──────────────────────────
 # Some benchmarks (e.g. queue_drain_idio) have no C reference of their own —
 # they are compared against a different benchmark's C reference (e.g.
-# queue_drain_sym_c). The BRIEF_CROSS_REF array maps (benchmark, c_ref).
-declare -A BRIEF_CROSS_REF
-BRIEF_CROSS_REF["queue_drain_idio"]="queue_drain_sym"
+# queue_drain_sym_c). The BRIV_CROSS_REF array maps (benchmark, c_ref).
+declare -A BRIV_CROSS_REF
+BRIV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"
 
 # ── CORRECTNESS CHECK ────────────────────────────────────────────────
 
@@ -394,7 +394,7 @@ check_correctness() {
     local briv_bin="benchmarks/${name}"
 
     local c_bin="benchmarks/${name}_c"
-    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
+    local ref_name="${BRIV_CROSS_REF[$name]:-$name}"
     local ref_c_bin="benchmarks/${ref_name}_c"
 
     if [ ! -f "$briv_bin" ]; then
@@ -482,7 +482,7 @@ bench_self_term() {
     local c_bin="benchmarks/${name}_c"
     # 2026-07-27: Cross-reference C binary — for benchmarks like queue_drain_idio
     # that compare against a different benchmark's C reference (queue_drain_sym_c).
-    local ref_name="${BRIEF_CROSS_REF[$name]:-$name}"
+    local ref_name="${BRIV_CROSS_REF[$name]:-$name}"
     local ref_c_bin="benchmarks/${ref_name}_c"
 
     echo ""
@@ -751,10 +751,10 @@ for name in "${BENCHMARKS[@]}"; do
     build_bench "$name"
     if [ "$name" = "bridge_glue" ]; then
         echo "  bridge_glue: building C + Briv .so files..."
-        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" BRIEFC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
+        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" BRIVC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
     elif [ "$name" = "bridge_multi" ]; then
         echo "  bridge_multi: building Briv .so + protocol shim..."
-        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" BRIEFC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
+        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" BRIVC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
     else
         build_c "$name" || true
     fi

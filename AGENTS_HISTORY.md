@@ -299,15 +299,15 @@ briv-compiler selfhost <file.bv>
 ### New CLBG Benchmarks (2026-06-04)
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
-- **Phase 5a**: Thread pool primitives in `runtime/briv_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `briv_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
+- **Phase 5a**: Thread pool primitives in `runtime/briv_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `briv_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIV_THREAD_POOL)`
 - **Phase 5b**: Builtin declares (`briv_thread_pool_init`, `briv_barrier_release`, `briv_barrier_wait`)
 - **Phase 5c**: Auto-categorize txns in `generate()` — enum candidates (trigger-gated), async candidates (conflict-free pairwise), enum beats async
 - **Phase 5d**: `emit_async_body` — per-txn worker functions (`pre→fire` pattern)
 - **Phase 5e**: Async phase injection in `emit_main` and `emit_enum_main` — thread pool init at entry, `barrier_release → reactor_tick → barrier_wait`
-- **Phase 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
+- **Phase 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIV_THREAD_POOL -lpthread`
 - **4 new tests** (async body emission, thread pool metadata, barrier calls in main, no thread pool without async txns)
 - **No atomics on state fields** — the proof engine guarantees disjoint field access per txn group, so plain loads/stores are data-race-free (C11 5.1.2.4p25)
-- **Step 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
+- **Step 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIV_THREAD_POOL -lpthread`
 - **Step 6**: Eliminate `io_registry.rs` and `#io` pragma — replaced by `import "link/briv_rt.o"` auto-dependency mechanism
   - Deleted `src/io_registry.rs` (94 lines of hardcoded concept→symbol table)
   - Deleted `parse_io_declaration()` (~80 lines) and `#io` parsing loop (~15 lines)
@@ -715,7 +715,7 @@ Replaced illegal patterns (`[true]`, `[x==x]`, `[true][true]`) with meaningful c
 - `src/backend/llvm/emit_expr.rs`, `src/backend/llvm/tests.rs` — LLVM codegen + tests
 - `docs/architecture/features/is-from-like.md` — architecture doc (design → implementation)
 - `docs/architecture/channel-map.md` — updated parser pipeline
-- `docs/BRIEF_3.0_SPEC.md` — added Section 11
+- `docs/BRIV_3.0_SPEC.md` — added Section 11
 - `learn-briv/05-data-types.md` — added Section 8
 - `learn-briv/README.md` — updated TOC
 - `lib/runtime/briv_rt.c` — unchanged (pre-existing change)
@@ -831,7 +831,7 @@ across the entire codebase, including alternative names for all tiers.
 - Internal GPU-mode names (`StrictMode::Gpu`, `is_gpu_extension`, `with_gpu_mode`) — these
   describe the compilation mode, not a brand name. Regular Briv can declare GPU-accelerated
   code without a `.abv` file.
-- `learn-briv/` and `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` and `spec/SPEC.md` — had
+- `learn-briv/` and `docs/reference/BRIV_LANGUAGE_REFERENCE.md` and `spec/SPEC.md` — had
   zero old references
 
 ### Verification

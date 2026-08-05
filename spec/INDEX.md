@@ -16,8 +16,8 @@
   - [Implementation Status](SPEC.md#7-implementation-status)
 
 ### Language Variants
-- [RENDERED-BRIEF](RENDERED-BRIEF-GUIDE.md) - Web UI components (`rstruct`, directives)
-- [EMBEDDED BRIEF](EMBEDDED_BRIEF_2.1_SPEC.md) - Float types, vectors, bit ranges
+- [RENDERED-BRIV](RENDERED-BRIV-GUIDE.md) - Web UI components (`rstruct`, directives)
+- [EMBEDDED BRIV](EMBEDDED_BRIV_2.1_SPEC.md) - Float types, vectors, bit ranges
 
 ### Reference
 - [QUICK-REFERENCE](QUICK-REFERENCE.md) - Cheat sheet
@@ -45,7 +45,7 @@
 | FFI (`frgn`, `syscall`) | SPEC.md §4 | test_ffi.bv |
 | Fire-and-forget FFI | SPEC.md §4.1 | (see FFI guide) |
 | Resource System | SPEC.md §4.3 | (see FFI guide) |
-| Float Types | EMBEDDED_BRIEF §2.4 | (see embedded spec) |
+| Float Types | EMBEDDED_BRIV §2.4 | (see embedded spec) |
 | Bit Packing | SPEC.md §4.2 | (advanced examples) |
 | Async Transactions | SPEC.md §3 | (see examples) |
 | Pattern Matching | SPEC.md §3 | (see language tutorial) |

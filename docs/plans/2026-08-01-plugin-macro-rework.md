@@ -239,7 +239,7 @@ stdlib imports) before rewriting intercept expressions.
 tokens beginning with `-`, and returns the first remaining token; `""` if none.
 So `<prog> --verbose build` → `"build"`.
 
-**Env-var fallback:** `entry_cmd()` also honors `$BRIEF_ENTRY_CMD` if set (test /
+**Env-var fallback:** `entry_cmd()` also honors `$BRIV_ENTRY_CMD` if set (test /
 embedded path without argv); documented in the runtime helper. This is the sole
 environment dependency and is additive.
 
@@ -721,7 +721,7 @@ main is now `define i32 @main(i32 %argc, ptr %argv)` via a central
 `emit_main_header` helper (helpers.rs) that stores argc/argv into
 `@__briv_argc`/`@__briv_argv` (external globals the runtime links against).
 `lib/runtime/briv_rt.c` gains `__argv_count/__argv_get/__argv_has/__argv_value/
-__argv_command` (command = first non-flag argv[1..], honoring `$BRIEF_ENTRY_CMD`).
+__argv_command` (command = first non-flag argv[1..], honoring `$BRIV_ENTRY_CMD`).
 `lib/std/cli.bv` declares the frgns + `entry_cmd`/`arg_present`. Verified
 end-to-end in `.smoke/cli_demo.bv` (build/run/flag/env fallback) and a backend
 IR test (`test_main_signature_and_argv_capture`). Remaining: 3c (concurrency

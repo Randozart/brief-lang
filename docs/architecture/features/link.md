@@ -39,7 +39,7 @@ The compiler searches for linked files in this order:
 2. `lib/runtime/<path>`
 3. `lib/std/<path>`
 4. `lib/std/c/<path>`
-5. `BRIEF_STDLIB_PATH` env var
+5. `BRIV_STDLIB_PATH` env var
 6. Absolute path
 
 ## LTO Pipeline

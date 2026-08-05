@@ -1,5 +1,5 @@
 // Spec header from verilog-fpga
-module brief_top (input wire clk, input wire rst_n);
+module briv_top (input wire clk, input wire rst_n);
 
 module simple_contract (
     input logic clk,

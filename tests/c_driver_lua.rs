@@ -1,9 +1,9 @@
 // ── Lua Round-Trip Test (native C module) ──────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `brief
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
 // extension <bridge> lua` renders + builds a Lua C module (luaopen_<bridge>);
 // strings cross via luaL_checkstring / lua_pushstring on the composite
 // NUL-invariant data. Toolchain-guarded on a Lua built from source at
-// ~/brief-tools/lua-*/src/lua (dlopen + -Wl,-E).
+// ~/briv-tools/lua-*/src/lua (dlopen + -Wl,-E).
 
 use std::process::Command;
 
@@ -15,7 +15,7 @@ fn has(cmd: &str) -> bool {
 
 fn lua_bin() -> Option<std::path::PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
-    let tools = std::path::Path::new(&home).join("brief-tools");
+    let tools = std::path::Path::new(&home).join("briv-tools");
     if let Ok(entries) = std::fs::read_dir(&tools) {
         for entry in entries.flatten() {
             let dir = entry.path();
@@ -39,11 +39,11 @@ fn lua_roundtrip() {
         }
     }
     let Some(lua) = lua_bin() else {
-        eprintln!("SKIP: lua not found at ~/brief-tools/lua-*/src/lua");
+        eprintln!("SKIP: lua not found at ~/briv-tools/lua-*/src/lua");
         return;
     };
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("brief_lua_test");
+    let base = std::env::temp_dir().join("briv_lua_test");
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
 

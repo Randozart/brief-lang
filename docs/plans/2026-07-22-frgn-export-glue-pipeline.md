@@ -1099,7 +1099,7 @@ layout it receives.
 
 Update the stale test script to:
 
-1. Use `briv-compiler export` instead of nonexistent `$BRIEF export`
+1. Use `briv-compiler export` instead of nonexistent `$BRIV export`
 2. Build the compiler first: `cargo build`
 3. Test with a minimal `.bv` bridge file
 4. Verify the output `.so` or `.a` exists

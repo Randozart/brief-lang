@@ -1,6 +1,6 @@
 // ── Host Cancellation Round-Trip Test ──────────────────────────────────
-// 2026-08-03: a C driver spawns a thread that raises __brief_set_cancel;
-// the exported Brief loop polls CancelRequested#() explicitly and stops
+// 2026-08-03: a C driver spawns a thread that raises __briv_set_cancel;
+// the exported Briv loop polls CancelRequested#() explicitly and stops
 // early (partial result << the uncancelled full result).
 
 use std::process::Command;
@@ -12,7 +12,7 @@ fn has(cmd: &str) -> bool {
 }
 
 #[test]
-fn host_cancellation_stops_brief_loop() {
+fn host_cancellation_stops_briv_loop() {
     for tool in ["cc", "ar", "llc", "clang", "pkg-config"] {
         if !has(tool) && tool != "pkg-config" {
             eprintln!("SKIP: {} not available", tool);
@@ -20,7 +20,7 @@ fn host_cancellation_stops_brief_loop() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_cancel_test");
+    let out_dir = std::env::temp_dir().join("briv_cancel_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
@@ -37,25 +37,25 @@ fn host_cancellation_stops_brief_loop() {
 
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "cancel-bindings/brief_types.h"
+#include "cancel-bindings/briv_types.h"
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
 
-static BriefState* g_st;
+static BrivState* g_st;
 
 static void* canceller(void* arg) {
     (void)arg;
     usleep(20000);
-    __brief_set_cancel(g_st, 1);
+    __briv_set_cancel(g_st, 1);
     return NULL;
 }
 
 int main(void) {
-    g_st = __brief_init_state();
+    g_st = __briv_init_state();
     int64_t small = cancellable_sum(g_st, 100000);      // full, small
     int64_t mid   = cancellable_sum(g_st, 50000000);    // full, computable (~0.1s)
-    __brief_clear_cancel(g_st);
+    __briv_clear_cancel(g_st);
     pthread_t th;
     pthread_create(&th, NULL, canceller, NULL);
     int64_t partial = cancellable_sum(g_st, 2000000000LL); // stops early (~20ms)

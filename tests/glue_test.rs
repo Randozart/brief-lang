@@ -5,13 +5,13 @@
 // as `cargo test --test glue_test` (separate binary from lib tests). Only
 // uses `pub` items from the library crate.
 
-use brief_compiler::glue::config::find_language_by_extension;
-use brief_compiler::glue::config::load_glue_config;
-use brief_compiler::glue::export::extract_bridge_info;
-use brief_compiler::glue::link::generate_bridge_bv;
-use brief_compiler::glue::link::{ForeignFunction, LinkResult};
-use brief_compiler::lexer::Token;
-use brief_compiler::parser::Parser;
+use briv_compiler::glue::config::find_language_by_extension;
+use briv_compiler::glue::config::load_glue_config;
+use briv_compiler::glue::export::extract_bridge_info;
+use briv_compiler::glue::link::generate_bridge_bv;
+use briv_compiler::glue::link::{ForeignFunction, LinkResult};
+use briv_compiler::lexer::Token;
+use briv_compiler::parser::Parser;
 use std::path::Path;
 
 // ============ TOML Registry ============
@@ -88,7 +88,7 @@ fn test_find_language_by_extension_nonexistent() {
 
 // ============ Bridge Info Extraction ============
 
-fn parse_bv(source: &str) -> Vec<brief_compiler::ast::TopLevel> {
+fn parse_bv(source: &str) -> Vec<briv_compiler::ast::TopLevel> {
     use logos::Logos;
     let tokens: Vec<(Token, std::ops::Range<usize>)> = Token::lexer(source)
         .map(|r| (r.unwrap(), 0..0))

@@ -3,9 +3,9 @@
 **Date:** 2026-05-05
 **Status:** Implementation Complete
 **Related:**
-- `DBRIEF_SPEC.md` - Language specification
+- `DBRIV_SPEC.md` - Language specification
 - `VHDL_TARGET_RESEARCH.md` - VHDL research notes
-- `BRIEF_ADVENTURES_RESEARCH.md` - Game engine concept (research only)
+- `BRIV_ADVENTURES_RESEARCH.md` - Game engine concept (research only)
 - `../briv-adventures/IMPLEMENTATION_PLAN.md` - Adventure demo plan (separate)
 
 ---

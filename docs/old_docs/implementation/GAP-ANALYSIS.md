@@ -450,7 +450,7 @@ let counters = [Counter {}, Counter {}];
 - **SPEC.md:** `spec/SPEC.md`
 - **LANGUAGE-REFERENCE.md:** `spec/LANGUAGE-REFERENCE.md`
 - **QUICK-REFERENCE.md:** `spec/QUICK-REFERENCE.md`
-- **RENDERED-BRIEF-GUIDE.md:** `spec/RENDERED-BRIEF-GUIDE.md`
+- **RENDERED-BRIV-GUIDE.md:** `spec/RENDERED-BRIV-GUIDE.md`
 - **Lexer:** `src/lexer.rs`
 - **Parser:** `src/parser.rs`
 - **Proof Engine:** `src/proof_engine.rs`

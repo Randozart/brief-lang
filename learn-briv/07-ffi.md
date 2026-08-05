@@ -141,7 +141,7 @@ name and renders through the generic pipeline.
 ## 4. The speed table (zero friction)
 
 `feature_hash(count=1000)` — **Briv vs the host writing it natively**
-(median ns/call; run the gate with `BRIEF_RUN_GATE=1 cargo test --test gate`):
+(median ns/call; run the gate with `BRIV_RUN_GATE=1 cargo test --test gate`):
 
 | host | Briv | native | ratio |
 |------|-------|--------|-------|
@@ -171,6 +171,6 @@ faster than Python's own function call (the `METH_FASTCALL` shim).
 | Native extension (Python/Node/Java/Lua) | `brivc extension <bridge> <lang>` |
 | Language package (Go/Java/Rust) | `brivc export <bridge> <lang>` |
 | Add a language | a `lib/glue/<lang>/` folder |
-| Verify the zero-friction gate | `BRIEF_RUN_GATE=1 cargo test --test gate` |
+| Verify the zero-friction gate | `BRIV_RUN_GATE=1 cargo test --test gate` |
 
 Deep reference: `docs/architecture/glue-ffi.md` and `docs/guides/ffi-and-export.md`.

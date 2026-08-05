@@ -1,6 +1,6 @@
 #!/bin/bash
 # GLUE Integration Tests
-# Tests the full brief link + brief export pipeline.
+# Tests the full briv link + briv export pipeline.
 # Run from the compiler project root.
 #
 # Usage: ./tests/glue_integration.sh [--keep]
@@ -35,11 +35,11 @@ if [ ! -f "$ROOT/target/debug/briefc" ]; then
     }
 fi
 
-BRIEF="$ROOT/target/debug/briefc"
+BRIV="$ROOT/target/debug/briefc"
 
-# ---- Test 1: brief link ----
+# ---- Test 1: briv link ----
 
-echo "--- Test 1: brief link on a C object file ---"
+echo "--- Test 1: briv link on a C object file ---"
 
 # Create a minimal C function
 cat > "$TMPDIR/math_ops.c" << 'CEOF'
@@ -54,28 +54,28 @@ gcc -c -o "$TMPDIR/math_ops.o" "$TMPDIR/math_ops.c" 2>/dev/null || {
 }
 
 if [ -z "$skip_link" ]; then
-    LINK_OUTPUT=$($BRIEF link "$TMPDIR/math_ops.o" 2>/dev/null) && {
+    LINK_OUTPUT=$($BRIV link "$TMPDIR/math_ops.o" 2>/dev/null) && {
         if echo "$LINK_OUTPUT" | grep -q "add"; then
-            pass "brief link discovers the add symbol"
+            pass "briv link discovers the add symbol"
         else
-            fail "brief link output missing expected symbols"
+            fail "briv link output missing expected symbols"
         fi
 
-        # brief link prints the generated bridge .bv to stdout.
+        # briv link prints the generated bridge .bv to stdout.
         if echo "$LINK_OUTPUT" | grep -q "frgn add"; then
             pass "generated bridge .bv contains frgn declarations"
         else
             fail "generated bridge .bv missing frgn declarations"
         fi
     } || {
-        fail "brief link failed"
+        fail "briv link failed"
     }
 fi
 
-# ---- Test 2: brief export (rust) ----
+# ---- Test 2: briv export (rust) ----
 
 echo ""
-echo "--- Test 2: brief export (rust) ---"
+echo "--- Test 2: briv export (rust) ---"
 
 cat > "$TMPDIR/test_bridge.bv" << 'BVEOF'
 // Test bridge for GLUE export
@@ -89,10 +89,10 @@ export defn multiply(a: Int, b: Int) -> Int {
 };
 BVEOF
 
-EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/dev/null) && {
+EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'" && \
        echo "$EXPORT_OUTPUT" | grep -q "2 exports"; then
-        pass "brief export rust completed (2 exports detected)"
+        pass "briv export rust completed (2 exports detected)"
 
         # Check Rust crate structure
         RUST_DIR="$TMPDIR/test_bridge-bridge"
@@ -112,20 +112,20 @@ EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/d
             fail "rust: bridge name not interpolated"
         fi
     else
-        fail "brief export rust failed"
+        fail "briv export rust failed"
     fi
 } || {
-    fail "brief export rust error"
+    fail "briv export rust error"
 }
 
-# ---- Test 3: brief export (python) ----
+# ---- Test 3: briv export (python) ----
 
 echo ""
-echo "--- Test 3: brief export (python) ---"
+echo "--- Test 3: briv export (python) ---"
 
-EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>/dev/null) && {
+EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
-        pass "brief export python completed"
+        pass "briv export python completed"
 
         PY_DIR="$TMPDIR/test_bridge-bridge"
         if [ -f "$PY_DIR/__init__.py" ]; then
@@ -141,20 +141,20 @@ EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>
             fail "python: missing __init__.py"
         fi
     else
-        fail "brief export python failed"
+        fail "briv export python failed"
     fi
 } || {
-    fail "brief export python error"
+    fail "briv export python error"
 }
 
-# ---- Test 4: brief export (node) ----
+# ---- Test 4: briv export (node) ----
 
 echo ""
-echo "--- Test 4: brief export (node) ---"
+echo "--- Test 4: briv export (node) ---"
 
-EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/dev/null) && {
+EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
-        pass "brief export node completed"
+        pass "briv export node completed"
 
         NODE_DIR="$TMPDIR/test_bridge-bridge"
         if [ -f "$NODE_DIR/index.mjs" ]; then
@@ -163,16 +163,16 @@ EXPORT_OUTPUT=$($BRIEF export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/d
             fail "node: missing index.mjs"
         fi
     else
-        fail "brief export node failed"
+        fail "briv export node failed"
     fi
 } || {
-    fail "brief export node error"
+    fail "briv export node error"
 }
 
-# ---- Test 5: glue config (Data Brief) ----
+# ---- Test 5: glue config (Data Briv) ----
 
 echo ""
-echo "--- Test 5: GLUE registry is Data Brief ---"
+echo "--- Test 5: GLUE registry is Data Briv ---"
 
 if [ -f "$ROOT/config/glue.dbvl" ]; then
     if grep -q "python:" "$ROOT/config/glue.dbvl" && grep -q "rust:" "$ROOT/config/glue.dbvl"; then

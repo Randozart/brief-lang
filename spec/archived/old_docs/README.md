@@ -8,7 +8,7 @@ Archived documentation from earlier Briv compiler versions. These documents are 
 Version-specific language specifications and architecture documents.
 - `v4-*.md` — v4.x era specifications (2026-04-04)
 - `SPEC-v*.md` — Stubs indicating consolidation into spec/SPEC.md
-- `EMBEDDED_BRIEF_*.md` — Embedded Briv version stubs
+- `EMBEDDED_BRIV_*.md` — Embedded Briv version stubs
 
 ### getting_started/
 Historical getting started guides and onboarding documentation.

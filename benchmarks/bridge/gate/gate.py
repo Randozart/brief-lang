@@ -27,7 +27,7 @@ def main():
     t0 = time.perf_counter()
     for _ in range(N):
         bench.feature_hash(1000, r)
-    print("BRIEF_FH %.1f" % ((time.perf_counter() - t0) / N * 1e9))
+    print("BRIV_FH %.1f" % ((time.perf_counter() - t0) / N * 1e9))
     native_fh(1000, r)
     t0 = time.perf_counter()
     for i in range(Nn):
@@ -37,7 +37,7 @@ def main():
     t0 = time.perf_counter()
     for _ in range(N2):
         bench.add(r, 4)
-    print("BRIEF_ADD %.2f" % ((time.perf_counter() - t0) / N2 * 1e9))
+    print("BRIV_ADD %.2f" % ((time.perf_counter() - t0) / N2 * 1e9))
     native_add(r, 4)
     t0 = time.perf_counter()
     for i in range(N2):

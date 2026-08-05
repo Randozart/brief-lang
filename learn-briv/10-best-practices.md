@@ -412,7 +412,7 @@ You've completed the Briv tutorial! 🎉
 - [SPEC.md](../spec/SPEC.md) - Complete language specification
 - [QUICK-REFERENCE.md](../spec/QUICK-REFERENCE.md) - Syntax cheat sheet
 - [METROPOLITAN_FFI.md](../METROPOLITAN_FFI.md) - FFI guide
-- [DATABRIEF_GUIDE.md](../DATABRIEF_GUIDE.md) - Configuration guide
+- [DATABRIV_GUIDE.md](../DATABRIV_GUIDE.md) - Configuration guide
 - [OPTIMIZATIONS.md](../OPTIMIZATIONS.md) - Performance guide
 
 **Get Involved:**

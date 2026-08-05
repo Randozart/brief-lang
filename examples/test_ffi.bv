@@ -1,4 +1,4 @@
-// Pure Brief FFI Test
+// Pure Briv FFI Test
 // Intrinsic calls (println#, sqrt#, sin#, pow#) replace old frgn
 // counterparts. GLUE-style frgn declarations for string ops use
 // the FFI registry directly without TOML bindings.
@@ -12,7 +12,7 @@ frgn string_concat(a: String, b: String) -> Result<String, StringError> ;
 
 // Test 1: println via intrinsic
 txn test1 [true][term == void] {
-    term Print#("Hello from Brief FFI!");
+    term Print#("Hello from Briv FFI!");
 };
 
 // Test 2: sqrt via intrinsic  

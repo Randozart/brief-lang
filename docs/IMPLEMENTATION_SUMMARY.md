@@ -240,7 +240,7 @@ Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.46s
 
 ## Relevant Documentation
 
-- `docs/EMBEDDED_BRIEF_2.2_SPEC.md` - Final spec
-- `docs/EMBEDDED_BRIEF_IMPLEMENTATION_PLAN.md` - Implementation plan
-- `spec/EMBEDDED-BRIEF-SPEC.md` - Original Embedded Briv 1.0 spec
+- `docs/EMBEDDED_BRIV_2.2_SPEC.md` - Final spec
+- `docs/EMBEDDED_BRIV_IMPLEMENTATION_PLAN.md` - Implementation plan
+- `spec/EMBEDDED-BRIV-SPEC.md` - Original Embedded Briv 1.0 spec
 - `CLAUDE.md` - Compiler documentation

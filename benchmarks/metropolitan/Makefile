@@ -5,7 +5,7 @@
 
 PROJECT_ROOT ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 OUT_DIR ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/out)
-BRIEFC ?= $(PROJECT_ROOT)/target/release/briv-compiler
+BRIVC ?= $(PROJECT_ROOT)/target/release/briv-compiler
 CC ?= gcc
 LLC ?= llc
 LD ?= wasm-ld
@@ -21,13 +21,13 @@ $(OUT_DIR):
 # ── Generate: Build .so + all bridge files via metropolitan plugin ─────
 generate: $(OUT_DIR)/bench_add.so
 	cd $(PROJECT_ROOT) && echo 'import "lib/ffi/metropolitan";' > _metro.bv && cat $(BV_SRC) >> _metro.bv
-	cd $(PROJECT_ROOT) && $(BRIEFC) build _metro.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
+	cd $(PROJECT_ROOT) && $(BRIVC) build _metro.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
 	rm -f $(PROJECT_ROOT)/_metro.bv
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
 	mv $(OUT_DIR)/bench_add.ll $(OUT_DIR)/bench_add_wasm.ll
 
-$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
+$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
 	ln -sf bench_add.so $(OUT_DIR)/libbench_add.so
 
 # ── Tier 1: C (dlopen dlsym) ───────────────────────────────────────────
@@ -43,9 +43,9 @@ $(OUT_DIR)/briv_bridge.so: $(OUT_DIR)/bridge.c
 $(OUT_DIR)/proto_shim: $(OUT_DIR)/proto_shim.c
 	$(CC) -O2 -o $@ $(OUT_DIR)/proto_shim.c -ldl
 
-$(OUT_DIR)/proto_shim.c: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
+$(OUT_DIR)/proto_shim.c: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
 	cd $(PROJECT_ROOT) && echo 'import "lib/ffi/gen_protocol";' > _metro_proto.bv && cat $(BV_SRC) >> _metro_proto.bv
-	cd $(PROJECT_ROOT) && $(BRIEFC) build _metro_proto.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
+	cd $(PROJECT_ROOT) && $(BRIVC) build _metro_proto.bv --llvm --out $(OUT_DIR) --allow-write --allow-run 2>&1
 	rm -f $(PROJECT_ROOT)/_metro_proto.bv
 	mkdir -p $(PROJECT_ROOT)/ffi-out/protocol
 	cp $(PROJECT_ROOT)/ffi-out/protocol/proto_shim.c $(OUT_DIR)/proto_shim.c 2>/dev/null || touch $(OUT_DIR)/proto_shim.c
@@ -55,8 +55,8 @@ $(OUT_DIR)/bench_add.wasm: $(OUT_DIR)/bench_add_wasm.ll
 	$(LLC) -march=wasm32 -filetype=obj $< -o $(OUT_DIR)/bench_add.o
 	$(LD) --no-entry --export-all $(OUT_DIR)/bench_add.o -o $@
 
-$(OUT_DIR)/bench_add_wasm.ll: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+$(OUT_DIR)/bench_add_wasm.ll: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
 	mv $(OUT_DIR)/bench_add.ll $(OUT_DIR)/bench_add_wasm.ll
 
 # ── Tier 1: Rust (direct extern C) ─────────────────────────────────────
@@ -76,7 +76,7 @@ $(OUT_DIR)/proto_shm.c: shm_gen_bv
 
 .PHONY: shm_gen_bv
 shm_gen_bv: shm_test.bv
-	cd $(PROJECT_ROOT) && $(BRIEFC) build shm_test.bv --llvm --out /tmp --allow-write 2>&1
+	cd $(PROJECT_ROOT) && $(BRIVC) build shm_test.bv --llvm --out /tmp --allow-write 2>&1
 
 # ── Run all benchmarks ─────────────────────────────────────────────────
 run: all

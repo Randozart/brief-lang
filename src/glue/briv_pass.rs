@@ -87,7 +87,7 @@ static NEEDS_STATE_PASS: OnceCell<Option<LoadedPass>> = OnceCell::new();
 
 fn needs_state_pass() -> Option<&'static LoadedPass> {
     NEEDS_STATE_PASS
-        .get_or_init(|| LoadedPass::load(option_env!("BRIEF_COMPILER_IN_BRIEF_SO"), "needs_state_compute"))
+        .get_or_init(|| LoadedPass::load(option_env!("BRIV_COMPILER_IN_BRIV_SO"), "needs_state_compute"))
         .as_ref()
 }
 
@@ -125,7 +125,7 @@ static SOA_REORDER_PASS: OnceCell<Option<LoadedPass>> = OnceCell::new();
 
 fn soa_reorder_pass() -> Option<&'static LoadedPass> {
     SOA_REORDER_PASS
-        .get_or_init(|| LoadedPass::load(option_env!("BRIEF_COMPILER_IN_BRIEF_SOA_SO"), "soa_reorder_compute"))
+        .get_or_init(|| LoadedPass::load(option_env!("BRIV_COMPILER_IN_BRIV_SOA_SO"), "soa_reorder_compute"))
         .as_ref()
 }
 
@@ -216,7 +216,7 @@ mod tests {
                 used_briv = true;
             }
         }
-        if option_env!("BRIEF_COMPILER_IN_BRIEF_SO").map_or(false, |p| !p.is_empty()) {
+        if option_env!("BRIV_COMPILER_IN_BRIV_SO").map_or(false, |p| !p.is_empty()) {
             assert!(used_briv, "pass library was built but never used");
         }
     }
@@ -246,7 +246,7 @@ mod tests {
         if let Some(perm) = compute_soa_permutation(&items) {
             assert_eq!(perm, vec![0, 2, 1], "soa pass diverged from reorder_fields");
         }
-        if option_env!("BRIEF_COMPILER_IN_BRIEF_SOA_SO").map_or(false, |p| !p.is_empty()) {
+        if option_env!("BRIV_COMPILER_IN_BRIV_SOA_SO").map_or(false, |p| !p.is_empty()) {
             assert!(soa_pass_available(), "soa pass library was built but never used");
         }
     }

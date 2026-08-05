@@ -1,7 +1,7 @@
 // ── ConfigResolver — Runtime Config File Resolution ────────────────────
 // 2026-07-16: P1 — Centralizes config loading so profiles can be swapped
 // at runtime via `briv-compiler config set <profile>`.
-// Resolution chain: --config-dir CLI flag → BRIEF_CONFIG_DIR env var →
+// Resolution chain: --config-dir CLI flag → BRIV_CONFIG_DIR env var →
 // ./.briv/config/ (project) → ~/.config/briv-compiler/active_profile →
 // compile-time baked fallback.
 
@@ -24,7 +24,7 @@ impl ConfigResolver {
     /// Follow the resolution chain to find config files and load them.
     /// Priority:
     ///   1. --config-dir CLI flag override
-    ///   2. BRIEF_CONFIG_DIR env var
+    ///   2. BRIV_CONFIG_DIR env var
     ///   3. ./.briv/config/ (project-local)
     ///   4. ~/.config/briv-compiler/active_profile symlink/text
     ///   5. Compile-time baked fallback (path = "__baked__")
@@ -62,7 +62,7 @@ impl ConfigResolver {
             return dir.to_path_buf();
         }
         // 2. Environment variable
-        if let Ok(env) = std::env::var("BRIEF_CONFIG_DIR") {
+        if let Ok(env) = std::env::var("BRIV_CONFIG_DIR") {
             return PathBuf::from(env);
         }
         // 3. Project-local

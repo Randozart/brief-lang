@@ -31,15 +31,15 @@ BC extension "$BV" lua --out "$WORK" >/dev/null 2>&1
 median() { # median of the numbers on stdin (one per line)
     sort -n | awk '{a[NR]=$1} END{print (NR%2?a[(NR+1)/2]:(a[NR/2]+a[NR/2+1])/2)}'
 }
-collect() { # label; then the driver prints BRIEF_FH etc. Runs in $WORK. 3 interleaved rounds, median.
+collect() { # label; then the driver prints BRIV_FH etc. Runs in $WORK. 3 interleaved rounds, median.
     local label="$1"; shift
     local bf nf ba na
     for r in 1 2 3; do
         local out
         out=$( (cd "$WORK" && "$@") 2>/dev/null)
-        echo "$out" | awk '/BRIEF_FH/{print $2}' >> "$WORK/m.bf"
+        echo "$out" | awk '/BRIV_FH/{print $2}' >> "$WORK/m.bf"
         echo "$out" | awk '/NATIVE_FH/{print $2}' >> "$WORK/m.nf"
-        echo "$out" | awk '/BRIEF_ADD/{print $2}' >> "$WORK/m.ba"
+        echo "$out" | awk '/BRIV_ADD/{print $2}' >> "$WORK/m.ba"
         echo "$out" | awk '/NATIVE_ADD/{print $2}' >> "$WORK/m.na"
     done
     bf=$(median < "$WORK/m.bf"); nf=$(median < "$WORK/m.nf")
@@ -66,12 +66,12 @@ go="go"; [ -x "$HOME/briv-tools/go/bin/go" ] && go="$HOME/briv-tools/go/bin/go"
 if command -v "$go" >/dev/null 2>&1; then
     mkdir -p "$WORK/gogo" && cp "$WORK/libbench.a" "$WORK/gogo/" && cp "$HERE/gate.go" "$WORK/gogo/" \
       && printf 'module gatego\n\ngo 1.22\n' > "$WORK/gogo/go.mod" \
-      && (cd "$WORK/gogo" && CGO_ENABLED=1 "$go" run . "$SEED" | awk '/BRIEF_FH|BRIEF_ADD/{print}') > "$WORK/go_out" 2>/dev/null \
+      && (cd "$WORK/gogo" && CGO_ENABLED=1 "$go" run . "$SEED" | awk '/BRIV_FH|BRIV_ADD/{print}') > "$WORK/go_out" 2>/dev/null \
       && mkdir -p "$WORK/gonat" && cp "$HERE/gate_go_native.go" "$WORK/gonat/" \
       && printf 'module gonat\n\ngo 1.22\n' > "$WORK/gonat/go.mod" \
       && (cd "$WORK/gonat" && CGO_ENABLED=0 "$go" run . "$SEED" | awk '/NATIVE_FH|NATIVE_ADD/{print}') > "$WORK/gonat_out" 2>/dev/null \
-      && bf=$(awk '/BRIEF_FH/{print $2}' "$WORK/go_out") && nf=$(awk '/NATIVE_FH/{print $2}' "$WORK/gonat_out") \
-      && ba=$(awk '/BRIEF_ADD/{print $2}' "$WORK/go_out") && na=$(awk '/NATIVE_ADD/{print $2}' "$WORK/gonat_out") \
+      && bf=$(awk '/BRIV_FH/{print $2}' "$WORK/go_out") && nf=$(awk '/NATIVE_FH/{print $2}' "$WORK/gonat_out") \
+      && ba=$(awk '/BRIV_ADD/{print $2}' "$WORK/go_out") && na=$(awk '/NATIVE_ADD/{print $2}' "$WORK/gonat_out") \
       && printf "%-6s %8s %8s %6.2f %8s %8s %6.2f\n" "Go" "$bf" "$nf" "$(awk "BEGIN{print $bf/$nf}")" "$ba" "$na" "$(awk "BEGIN{print $ba/$na}")"
 fi
 # Java
@@ -81,8 +81,8 @@ if [ -n "$J" ]; then JAVAC="$J/javac"; JAVA="$J/java"; fi
 if [ -x "$JAVAC" ]; then
     cp "$HERE/Gate.java" "$WORK/" \
       && (cd "$WORK" && "$JAVAC" Gate.java && "$JAVA" -Djava.library.path="$WORK" bench "$SEED") > "$WORK/java_out" 2>/dev/null \
-      && bf=$(awk '/BRIEF_FH/{print $2}' "$WORK/java_out") && nf=$(awk '/NATIVE_FH/{print $2}' "$WORK/java_out") \
-      && ba=$(awk '/BRIEF_ADD/{print $2}' "$WORK/java_out") && na=$(awk '/NATIVE_ADD/{print $2}' "$WORK/java_out") \
+      && bf=$(awk '/BRIV_FH/{print $2}' "$WORK/java_out") && nf=$(awk '/NATIVE_FH/{print $2}' "$WORK/java_out") \
+      && ba=$(awk '/BRIV_ADD/{print $2}' "$WORK/java_out") && na=$(awk '/NATIVE_ADD/{print $2}' "$WORK/java_out") \
       && printf "%-6s %8s %8s %6.2f %8s %8s %6.2f\n" "Java" "$bf" "$nf" "$(awk "BEGIN{print $bf/$nf}")" "$ba" "$na" "$(awk "BEGIN{print $ba/$na}")"
 fi
 # Lua

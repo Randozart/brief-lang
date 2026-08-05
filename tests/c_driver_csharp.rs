@@ -1,5 +1,5 @@
 // ── C# Render Test (P/Invoke bindings) ────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `brief
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
 // bindings <bridge> csharp` renders a .cs class with DllImport externs against
 // the bridge .so (the composite String is an IntPtr handle). No .NET runtime
 // here, so this asserts the RENDERED shape; a full round-trip runs where
@@ -22,7 +22,7 @@ fn csharp_bindings_render() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_csharp_test");
+    let out_dir = std::env::temp_dir().join("briv_csharp_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 

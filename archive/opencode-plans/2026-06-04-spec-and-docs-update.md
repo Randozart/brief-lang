@@ -139,8 +139,8 @@ in spec docs.
 
 ### `docs/` files
 - `docs/design/determinism-and-optimization-frontier.md`: `len(s) <= 140` → `s :> Size <= 140`
-- `docs/reference/BRIEF_ADVENTURES_RESEARCH.md`: `inventory.len() > 0` → `inventory :> Size > 0`
-- `docs/reference/DBRIEF_SPEC.md`: `name.len() > 0` → `name :> Size > 0`
+- `docs/reference/BRIV_ADVENTURES_RESEARCH.md`: `inventory.len() > 0` → `inventory :> Size > 0`
+- `docs/reference/DBRIV_SPEC.md`: `name.len() > 0` → `name :> Size > 0`
 - `docs/milestones/` (TIER1-6, SELF_HOSTING_PLAN): same pattern
 - `docs/old_docs/guides/GUIDE.md`: ~15 sites
 
@@ -167,7 +167,7 @@ Already up to date (written as the plan for this change).
 
 ### Other plan files in `plans/` and `llvm-spec/`
 - `plans/2026-06-02-typed-ssa-and-commutativity.md`: `Expr::ListLen(a)` → removed
-- `plans/active/BRIEF_OPTIMIZATION_PLAN.md`: `Expr::ListLen(Expr)` → removed
+- `plans/active/BRIV_OPTIMIZATION_PLAN.md`: `Expr::ListLen(Expr)` → removed
 - `plans/2026-06-03-llvm-backend-completion.md`: Phase 3a ListLen → now Projection
 - `llvm-spec/08e-AOT-SIZE-INFERENCE.md`: `list_len_ptr` → update
 

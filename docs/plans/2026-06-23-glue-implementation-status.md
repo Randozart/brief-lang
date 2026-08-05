@@ -84,8 +84,8 @@ melds dbvl:    from_type, to_type, route
 ### 2.6 `emit_file#()` Intrinsic
 
 New compile-time-only intrinsic: `emit_file#(filename: String, content: String)`.
-Writes `content` to `BRIEF_OUTPUT_DIR/filename` during `$!macro` expansion. Uses
-the `BRIEF_OUTPUT_DIR` environment variable (set by `export.rs`) to determine the
+Writes `content` to `BRIV_OUTPUT_DIR/filename` during `$!macro` expansion. Uses
+the `BRIV_OUTPUT_DIR` environment variable (set by `export.rs`) to determine the
 output directory. This avoids passing Rust-side state into the macro sandbox.
 
 ### 2.7 File Extensions
@@ -124,7 +124,7 @@ Added to the `Intrinsic` enum:
 - `Intrinsic::EmitFile => "emit_file"` in `name()`
 - Included in `is_compile_time_only()` — removed by `validate_no_compile_time_intrinsics()`
 - **Interpreter**: reads `(filename, content)` String args, creates parent dirs,
-  writes to `BRIEF_OUTPUT_DIR` (or `.`), returns `Value::Void`
+  writes to `BRIV_OUTPUT_DIR` (or `.`), returns `Value::Void`
 - **LLVM backend**: `panic!("emit_file#() called at runtime — this is a compiler bug")`
 
 ### 3.3 Export Pipeline (`src/glue/export.rs`, 457 lines)
@@ -272,7 +272,7 @@ LLVM backend (requires touching LLVM files).
 | File | Changes |
 |---|---|
 | `src/ast.rs` | Added `Intrinsic::EmitFile` variant, `from_name`, `name`, `is_compile_time_only` |
-| `src/interpreter.rs` | Added `EmitFile` handler: reads `(filename, content)`, writes to `BRIEF_OUTPUT_DIR` |
+| `src/interpreter.rs` | Added `EmitFile` handler: reads `(filename, content)`, writes to `BRIV_OUTPUT_DIR` |
 | `src/backend/llvm/emit_expr.rs` | Added `EmitFile` panic guard |
 | `src/main.rs` | Added `briv export` and `briv link` subcommands + `run_export_main()`/`run_link_main()` |
 | `src/lib.rs` | (unchanged — already had `pub mod glue`) |

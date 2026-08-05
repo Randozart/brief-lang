@@ -2,8 +2,8 @@
 // Executes .lair bytecode for the install-time compilation pipeline.
 // Hosted in the tamer system tool (tamer/main.c). No dependencies beyond C99.
 
-#ifndef BRIEF_VM_H
-#define BRIEF_VM_H
+#ifndef BRIV_VM_H
+#define BRIV_VM_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -187,4 +187,4 @@ int vm_find_function(VmState* vm, const char* name);
 // Get the last error message.
 const char* vm_error(VmState* vm);
 
-#endif // BRIEF_VM_H
+#endif // BRIV_VM_H

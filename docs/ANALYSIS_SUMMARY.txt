@@ -1,5 +1,5 @@
 ================================================================================
-BRIEF COMPILER - THREE CRITICAL PARSER BUGS - TECHNICAL ANALYSIS COMPLETE
+BRIV COMPILER - THREE CRITICAL PARSER BUGS - TECHNICAL ANALYSIS COMPLETE
 ================================================================================
 
 ANALYSIS GENERATED: April 5, 2026

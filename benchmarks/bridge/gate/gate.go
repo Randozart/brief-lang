@@ -38,7 +38,7 @@ func main() {
     for i := 0; i < N; i++ {
         sink += int64(C.feature_hash(state, 1000, C.int64_t(r)))
     }
-    fmt.Printf("BRIEF_FH %.1f\n", float64(time.Since(t0).Nanoseconds())/N)
+    fmt.Printf("BRIV_FH %.1f\n", float64(time.Since(t0).Nanoseconds())/N)
     nativeFh(1000, r)
     t0 = time.Now()
     for i := 0; i < N; i++ {
@@ -50,12 +50,12 @@ func main() {
     for i := 0; i < N2; i++ {
         sink += int64(C.add(C.int64_t(r), 4))
     }
-    fmt.Printf("BRIEF_ADD %.2f\n", float64(time.Since(t0).Nanoseconds())/N2)
+    fmt.Printf("BRIV_ADD %.2f\n", float64(time.Since(t0).Nanoseconds())/N2)
     nativeAdd(r, 4)
     t0 = time.Now()
     for i := 0; i < N2; i++ {
         sink += nativeAdd(r, 4)
     }
-    fmt.Printf("BRIEF_ADD %.2f\n", float64(time.Since(t0).Nanoseconds())/N2)
+    fmt.Printf("BRIV_ADD %.2f\n", float64(time.Since(t0).Nanoseconds())/N2)
     fmt.Println("sink", sink) // keep sink live
 }

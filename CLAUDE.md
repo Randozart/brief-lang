@@ -72,7 +72,7 @@ See `lib/targets/` for all available target specifications.
 
 ### Data Briv for Configuration
 
-The old `hardware.toml` files are being replaced by **Data Briv** (`.dbv`, `.dbvs`). This allows for schema-enforced hardware configuration and validation. See `DATABRIEF.md` for more details.
+The old `hardware.toml` files are being replaced by **Data Briv** (`.dbv`, `.dbvs`). This allows for schema-enforced hardware configuration and validation. See `DATABRIV.md` for more details.
 
 
 ### Example Files

@@ -1,4 +1,4 @@
-// Test: Embedded Brief with vector type and bit-range addressing
+// Test: Embedded Briv with vector type and bit-range addressing
 // Category: Embedded - Vectors
 // Expected: Compiles to SystemVerilog with proper bit widths
 

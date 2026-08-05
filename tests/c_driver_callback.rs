@@ -1,6 +1,6 @@
 // ── Callback Round-Trip Test ───────────────────────────────────────────
-// 2026-08-03: host → Brief → host. The C driver passes a function pointer
-// into an exported Brief function (`apply(cb: fn(Int) -> Int, x)`); Brief
+// 2026-08-03: host → Briv → host. The C driver passes a function pointer
+// into an exported Briv function (`apply(cb: fn(Int) -> Int, x)`); Briv
 // calls it back via CallPtr# (call-through-pointer) and returns the result.
 // Toolchain-guarded (cc/ar/llc/clang).
 
@@ -14,7 +14,7 @@ fn has(cmd: &str) -> bool {
 }
 
 #[test]
-fn host_callback_into_brief_roundtrip() {
+fn host_callback_into_briv_roundtrip() {
     for tool in ["cc", "ar", "llc", "clang"] {
         if !has(tool) {
             eprintln!("SKIP: {} not available", tool);
@@ -22,7 +22,7 @@ fn host_callback_into_brief_roundtrip() {
         }
     }
     let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("brief_cb_driver_test");
+    let out_dir = std::env::temp_dir().join("briv_cb_driver_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
@@ -40,14 +40,14 @@ fn host_callback_into_brief_roundtrip() {
 
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "callback-bindings/brief_types.h"
+#include "callback-bindings/briv_types.h"
 #include <stdio.h>
 
 static int64_t doubler(int64_t x) { return x * 2; }
 static int64_t plus_one(int64_t x) { return x + 1; }
 
 int main(void) {
-    BriefState* st = __brief_init_state();
+    BrivState* st = __briv_init_state();
     printf("double:%ld\n", apply(doubler, 21));
     printf("inc:%ld\n", apply(plus_one, 41));
     __glue_release(st);

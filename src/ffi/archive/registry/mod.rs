@@ -41,7 +41,7 @@ impl FunctionRegistry {
     }
 
     pub fn load_syscall_bindings(&mut self) -> Result<(), String> {
-        let binding_dir = std::env::var("BRIEF_STDLIB_PATH")
+        let binding_dir = std::env::var("BRIV_STDLIB_PATH")
             .map(|p| PathBuf::from(p).join("syscalls"))
             .unwrap_or_else(|_| PathBuf::from("std/bindings/syscalls"));
         if binding_dir.exists() {

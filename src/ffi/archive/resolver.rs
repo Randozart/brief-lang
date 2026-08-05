@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 /// This is resolved at runtime based on the compiler's installation location
 fn std_lib_path() -> Option<PathBuf> {
     // Try environment variable first (explicit override)
-    if let Ok(path) = std::env::var("BRIEF_STDLIB_PATH") {
+    if let Ok(path) = std::env::var("BRIV_STDLIB_PATH") {
         let stdlib_path = PathBuf::from(path);
         if stdlib_path.exists() {
             return Some(stdlib_path);

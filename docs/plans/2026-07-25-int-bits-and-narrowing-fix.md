@@ -193,15 +193,15 @@ No change needed to `fallback_llvm_type()` — it's only reached for non-Int typ
 
 Add `--int-bits 32` to the LLVM IR generation target:
 ```makefile
-$(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+$(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
 ```
 
 Also update the `.so` build for consistency (though the .so is native x86_64
 so it stays at i64 — the flag only matters for WASM targets):
 ```makefile
-$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEFC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIEFC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
+$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
 	ln -sf bench_add.so $(OUT_DIR)/libbench_add.so
 ```
 (No change needed for .so — it naturally stays i64.)

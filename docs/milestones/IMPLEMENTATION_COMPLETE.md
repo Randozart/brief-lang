@@ -126,7 +126,7 @@ Hardware {
 - OPTIMIZATIONS.md
 - TESTING_SUMMARY.md
 - METROPOLITAN_FFI.md
-- DATABRIEF_GUIDE.md
+- DATABRIV_GUIDE.md
 
 **Reference:**
 - README.md (complete rewrite)
@@ -204,7 +204,7 @@ briv-compiler/
     ├── OPTIMIZATIONS.md
     ├── TESTING_SUMMARY.md
     ├── METROPOLITAN_FFI.md
-    ├── DATABRIEF_GUIDE.md
+    ├── DATABRIV_GUIDE.md
     └── IMPLEMENTATION_COMPLETE.md
 ```
 

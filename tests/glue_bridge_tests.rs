@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use brief_compiler::analysis::frgn_dispatch::{
+use briv_compiler::analysis::frgn_dispatch::{
     compute_protocol_path, resolve_single_frgn, ResolvedFrgn, TransformKind,
 };
-use brief_compiler::ast::top::{Fallback, ForeignBinding, ForeignTarget, FromSpec};
-use brief_compiler::ast::Type;
-use brief_compiler::glue::config::{find_language_by_extension, load_glue_config, GlueTarget};
+use briv_compiler::ast::top::{Fallback, ForeignBinding, ForeignTarget, FromSpec};
+use briv_compiler::ast::Type;
+use briv_compiler::glue::config::{find_language_by_extension, load_glue_config, GlueTarget};
 
 fn sample_glue_targets() -> HashMap<String, GlueTarget> {
     HashMap::from([
@@ -26,8 +26,8 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 module_init: false,
                 protocols: HashMap::new(),
                 templates: HashMap::new(),
-            conversions: brief_compiler::glue::config::Conversions::default(),
-            state: brief_compiler::glue::config::StateAbi::default(),
+            conversions: briv_compiler::glue::config::Conversions::default(),
+            state: briv_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
             native_include_cmd: None,
@@ -49,8 +49,8 @@ fn sample_glue_targets() -> HashMap<String, GlueTarget> {
                 module_init: false,
                 protocols: HashMap::new(),
                 templates: HashMap::new(),
-            conversions: brief_compiler::glue::config::Conversions::default(),
-            state: brief_compiler::glue::config::StateAbi::default(),
+            conversions: briv_compiler::glue::config::Conversions::default(),
+            state: briv_compiler::glue::config::StateAbi::default(),
             param_decl: "{name}: {type}".to_string(),
             fn_param_decl: "{name}: {type}".to_string(),
             native_include_cmd: None,
@@ -125,7 +125,7 @@ fn test_resolve_single_frgn_inline_c() {
     let fb = make_frgn("my_func", "c", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm, None)
+        resolve_single_frgn(&fb, "c", &targets, briv_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Inline { symbol, compile_source, .. } => {
@@ -141,7 +141,7 @@ fn test_resolve_single_frgn_bridge_python() {
     let fb = make_frgn("py_func", "py", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "py", &targets, brief_compiler::target::BackendKind::Llvm, None)
+        resolve_single_frgn(&fb, "py", &targets, briv_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Bridge { language, .. } => {
@@ -156,7 +156,7 @@ fn test_resolve_single_frgn_unsupported() {
     let fb = make_frgn("kotlin_func", "kt", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "kt", &targets, brief_compiler::target::BackendKind::Llvm, None)
+        resolve_single_frgn(&fb, "kt", &targets, briv_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Unsupported(msg) => {
@@ -171,7 +171,7 @@ fn test_resolve_single_frgn_empty_extension() {
     let fb = make_frgn("no_ext", "", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "", &targets, brief_compiler::target::BackendKind::Llvm, None).unwrap();
+        resolve_single_frgn(&fb, "", &targets, briv_compiler::target::BackendKind::Llvm, None).unwrap();
     match result {
         ResolvedFrgn::Unsupported(msg) => {
             assert!(msg.contains("no file extension"), "msg: {}", msg);
@@ -182,12 +182,12 @@ fn test_resolve_single_frgn_empty_extension() {
 
 #[test]
 fn test_resolve_single_frgn_with_as() {
-    // frgn <foreign_symbol> ... as <brief_name>: foreign_name is the linker
-    // symbol; the `as` clause renames the Brief-side callsite.
-    let fb = make_frgn("foreign_sym", "c", Some("brief_name"), Fallback::None);
+    // frgn <foreign_symbol> ... as <briv_name>: foreign_name is the linker
+    // symbol; the `as` clause renames the Briv-side callsite.
+    let fb = make_frgn("foreign_sym", "c", Some("briv_name"), Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "c", &targets, brief_compiler::target::BackendKind::Llvm, None)
+        resolve_single_frgn(&fb, "c", &targets, briv_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Inline { symbol, .. } => {
@@ -202,7 +202,7 @@ fn test_resolve_single_frgn_native_so() {
     let fb = make_frgn("native_fn", "so", None, Fallback::None);
     let targets = sample_glue_targets();
     let result =
-        resolve_single_frgn(&fb, "so", &targets, brief_compiler::target::BackendKind::Llvm, None)
+        resolve_single_frgn(&fb, "so", &targets, briv_compiler::target::BackendKind::Llvm, None)
             .unwrap();
     match result {
         ResolvedFrgn::Inline { symbol, compile_source, .. } => {

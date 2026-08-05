@@ -1,5 +1,5 @@
-// test_bridge.bv — Pure-Brief GLUE bridge demo
-// Build: brief build lib/glue/test_bridge.bv --allow-write
+// test_bridge.bv — Pure-Briv GLUE bridge demo
+// Build: briv build lib/glue/test_bridge.bv --allow-write
 
 export defn add(a: Int, b: Int) -> Int {
     term a + b;
@@ -10,7 +10,7 @@ export defn mul(a: Int, b: Int) -> Int {
 };
 
 $defn generate_pure_bridge(exports: Selection, bridge_name: String) -> String {
-    let code = "// Pure-Brief GLUE bridge for " + bridge_name + "\n\n";
+    let code = "// Pure-Briv GLUE bridge for " + bridge_name + "\n\n";
 
     code += "struct PyMethodDef { name: Ptr; meth: Ptr; flags: Int; doc: Ptr; };\n";
     code += "struct PyModuleDef_Base { ob_refcnt: Int; ob_type: Ptr; m_init: Ptr; };\n";
@@ -74,5 +74,5 @@ $(Normalized @ highest) {
 
     let bridge_code = generate_pure_bridge(exports, "bridge");
     FileWrite$("glue-out/bridge_pure.bv", bridge_code, true);
-    EmitInfo$("pure-Brief GLUE bridge: glue-out/bridge_pure.bv");
+    EmitInfo$("pure-Briv GLUE bridge: glue-out/bridge_pure.bv");
 };

@@ -41,7 +41,7 @@ Briv has accumulated syntax bloat across six dimensions:
 - Rust compiler warnings (currently 29) must be eliminated.
 - Kani harnesses (`src/backend/llvm/kani.rs`) that only generate warnings without proving anything new must be removed or converted to unit tests.
 - Every step that could affect benchmarks must be verified with `bash benchmarks/build_and_bench.sh`.
-- Every syntax change must update `docs/learn/types.md`, `docs/learn/*.md`, `docs/reference/BRIEF_LANGUAGE_REFERENCE.md`, and `spec/SPEC.md`.
+- Every syntax change must update `docs/learn/types.md`, `docs/learn/*.md`, `docs/reference/BRIV_LANGUAGE_REFERENCE.md`, and `spec/SPEC.md`.
 
 ---
 
@@ -229,7 +229,7 @@ Remove every `#[token("UPPERCASE")]` variant from the `Token` enum. For each key
 
 **Pre-removal test**: Verify that lowercase keywords parse correctly (existing tests already exercise this).
 
-**Doc update**: `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` keywords table — remove the "Aliases" column for case.
+**Doc update**: `docs/reference/BRIV_LANGUAGE_REFERENCE.md` keywords table — remove the "Aliases" column for case.
 
 **Commit**: `declutter(0a): drop UPPERCASE keyword variants`
 
@@ -975,7 +975,7 @@ if !no_stdlib && !prelude_injected {
 }
 ```
 
-The `is_magic: true` flag means paths resolve relative to `BRIEF_STDLIB_PATH`, same as existing `import#` behavior.
+The `is_magic: true` flag means paths resolve relative to `BRIV_STDLIB_PATH`, same as existing `import#` behavior.
 
 **Duplicate import protection**: Before injecting a prelude import, check if the user has already explicitly imported the same module. If `items` already contains `TopLevel::Import { path: "std/os/fs.bv", ... }`, skip injecting it. This prevents "duplicate import" errors when a user explicitly writes `import# "std/os/fs.bv"` and the prelude also provides it.
 
@@ -1072,7 +1072,7 @@ The correctness check is critical — it verifies that the inop declarations pro
 | `docs/learn/types.md` | Document `Bits` as fundamental type, `Int<N>` syntax, short forms. Remove mention of old concrete variants. |
 | `docs/learn/ffi.md` | Document prelude auto-import and `std/os/` module availability. Remove mention of removed intrinsics. |
 | `docs/learn/macros.md` | No changes expected. |
-| `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` | Major revision: annotation system, type system, intrinsic list, keyword table, prelude docs. |
+| `docs/reference/BRIV_LANGUAGE_REFERENCE.md` | Major revision: annotation system, type system, intrinsic list, keyword table, prelude docs. |
 | `spec/SPEC.md` | Update language spec to reflect all changes: type system, annotations, intrinsic relocation. |
 | `docs/architecture/intrinsics.md` | Remove ~60 relocated intrinsic entries. List only remaining ~40. |
 | `docs/architecture/bits-thesis.md` | Update to reflect completed migration from concrete variants to canonical Bits form. |
