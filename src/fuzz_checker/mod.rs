@@ -274,9 +274,15 @@ fn format_value(val: &Value) -> String {
             let s = String::from_utf8_lossy(d);
             format!("\"{}\"", s)
         }
+        Value::Atom(crate::interpreter::Atom::Int(n)) => n.to_string(),
+        Value::Atom(crate::interpreter::Atom::Float(f)) => f.to_string(),
+        Value::Atom(crate::interpreter::Atom::Bool(b)) => b.to_string(),
+        Value::Atom(crate::interpreter::Atom::Char(c)) => c.to_string(),
         Value::Void => "void".to_string(),
-        Value::List(items) => {
-            let inner: Vec<String> = items.iter().map(format_value).collect();
+        // 2026-08-06 (Slice G): Expr::List evaluates to a Product; format it
+        // like the legacy List.
+        Value::Product { fields, .. } | Value::List(fields) => {
+            let inner: Vec<String> = fields.iter().map(format_value).collect();
             format!("({})", inner.join(", "))
         }
         _ => format!("{:?}", val),

@@ -33,7 +33,10 @@ pub fn run_profile(program: &[TopLevel], max_ticks: u64, _txn_convergence_max_it
                 if let crate::ast::TopLevel::Transaction(txn) = item {
                     if txn.is_reactive {
                         let pre_val = interpreter.eval_expr(&txn.contract.pre_condition).ok();
-                        if pre_val == Some(crate::interpreter::Value::Bits(vec![1u8])) {
+                        // 2026-08-06 (Slice G): conditions evaluate to Bool
+                        // atoms (Slice A); compare via is_true, not against
+                        // the old Value::Bits([1]) bool encoding.
+                        if pre_val.as_ref().is_some_and(|v| v.is_true()) {
                             interpreter.prior_state = interpreter.state.clone();
                             let mut transaction_escaped = false;
                             let mut transaction_failed = false;
@@ -53,7 +56,7 @@ pub fn run_profile(program: &[TopLevel], max_ticks: u64, _txn_convergence_max_it
                             }
                             if !transaction_failed && !transaction_escaped {
                                 let post_val = interpreter.eval_expr(&txn.contract.post_condition).ok();
-                                if post_val != Some(crate::interpreter::Value::Bits(vec![1u8])) {
+                                if !post_val.as_ref().is_some_and(|v| v.is_true()) {
                                     interpreter.state = interpreter.prior_state.clone();
                                 } else if interpreter.state != interpreter.prior_state {
                                     executed = true;

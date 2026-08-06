@@ -345,6 +345,6 @@ leaked into codegen — investigate, don't accept.
 - [x] D — Struct/enum construction, field access, method calls — 2026-08-06
 - [x] E — Closures — 2026-08-06
 - [x] F — Slices, ranges, strings — 2026-08-06
-- [ ] G — Reflection value-side + reactor/fuzz/pgo migration
+- [x] G — Reflection value-side + reactor/fuzz/pgo migration — 2026-08-06
 - [ ] H — Derive (CEGIS) constructor migration
 - [ ] I — FFI boundary + Phase 17 close (grep guarantees, status matrix)

@@ -165,33 +165,7 @@ pub fn eval_expr(
         }
 
         // ── Field / reflection / method ─────────────────────────
-        Expr::Reflect(recv, name, _kind) => {
-            // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
-            // = UTF8 character count, `Bytes` = byte length. A String is
-            // `Value::Bits(bytes)` (direct) or a heap handle `Value::Atom(Atom::Int(addr))`
-            // (`[len: i64][bytes]`). Mirrors the backend's briv_char_len /
-            // header-read emission (rule #4: interpreter is the reference).
-            let val = eval_expr(recv, heap, bindings)?;
-            match name.as_str() {
-                "Len" => {
-                    let bytes = val
-                        .string_bytes(heap)
-                        .unwrap_or_default();
-                    let chars = bytes
-                        .iter()
-                        .filter(|b| (**b & 0xC0) != 0x80)
-                        .count();
-                    Ok(i64_to_bits(chars as i64))
-                }
-                "Bytes" => {
-                    let bytes = val
-                        .string_bytes(heap)
-                        .unwrap_or_default();
-                    Ok(i64_to_bits(bytes.len() as i64))
-                }
-                _ => Ok(Value::Void),
-            }
-        }
+        Expr::Reflect(recv, name, kind) => eval_reflect(recv, name, *kind, heap, bindings),
         Expr::MethodCall(recv, name, args, _) => eval_method_call(recv, name, args, heap, bindings),
 
         // ── Formatting annotation ────────────────────────────────
@@ -499,6 +473,75 @@ fn slice_indices(
 /// Negative slice bounds wrap by the sequence length (Python convention).
 fn wrap_bound(v: i64, len: i64) -> i64 {
     if v < 0 { v + len } else { v }
+}
+
+/// 2026-08-06 (Slice G): value-side reflection (typechecker's D1 table is the
+/// authority on kind/target validity; this is the value computation).
+/// Runtime targets: `Len` (String char count, product/sum field count),
+/// `Absolute` (Int/Float abs). Compile-time targets: `Size`/`Bytes`
+/// (field count or byte length), `Type` (the value's category string, or the
+/// sum-variant tag for a Constructor). Unhandled targets return Void.
+fn eval_reflect(
+    recv: &Expr,
+    name: &str,
+    kind: ReflectKind,
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let val = eval_expr(recv, heap, bindings)?;
+    let ct = matches!(kind, ReflectKind::CompileTime);
+    match (name, ct) {
+        // 2026-08-01 (B3): String `Len` = UTF8 character count (not bytes).
+        // A String is Value::Bits(bytes) or a heap handle Int atom.
+        ("Len", false) => match val {
+            Value::Bits(_) => {
+                let bytes = val.string_bytes(heap).unwrap_or_default();
+                let chars = bytes
+                    .iter()
+                    .filter(|b| (**b & 0xC0) != 0x80)
+                    .count();
+                Ok(Value::int(chars as i64))
+            }
+            (Value::Product { fields, .. } | Value::Constructor(_, fields)) => {
+                Ok(Value::int(fields.len() as i64))
+            }
+            _ => Ok(Value::Void),
+        },
+        ("Absolute", false) => match val {
+            Value::Atom(Atom::Int(n)) => Ok(Value::int(n.wrapping_abs())),
+            Value::Atom(Atom::Float(f)) => Ok(Value::float(f.abs())),
+            _ => Ok(Value::Void),
+        },
+        ("Size", true) | ("Bytes", true) => match val {
+            Value::Bits(bytes) => Ok(Value::int(bytes.len() as i64)),
+            (Value::Product { fields, .. } | Value::Constructor(_, fields)) => {
+                Ok(Value::int(fields.len() as i64))
+            }
+            _ => Ok(Value::Void),
+        },
+        // `Type` (compile-time) is the value-side category; a Constructor
+        // reflects its sum-variant tag.
+        ("Type", true) => Ok(Value::bits(reflect_type_name(&val).into_bytes())),
+        _ => Ok(Value::Void),
+    }
+}
+
+/// The value's category name for `Type` reflection — the sum-variant tag for
+/// a Constructor, otherwise the semantic category.
+fn reflect_type_name(v: &Value) -> String {
+    match v {
+        Value::Atom(Atom::Int(_)) => "Int".into(),
+        Value::Atom(Atom::Float(_)) => "Float".into(),
+        Value::Atom(Atom::Bool(_)) => "Bool".into(),
+        Value::Atom(Atom::Char(_)) => "Char".into(),
+        Value::Bits(_) => "Bits".into(),
+        Value::Product { .. } => "Product".into(),
+        Value::Constructor(name, _) => name.clone(),
+        Value::Closure { .. } => "Closure".into(),
+        Value::Ref(_) => "Ptr".into(),
+        Value::List(_) => "List".into(),
+        Value::Void => "Void".into(),
+    }
 }
 
 /// 2026-08-06 (Slice C): Evaluate a match expression. The scrutinee is
@@ -1725,5 +1768,82 @@ mod tests {
     fn test_slice_non_sliceable_errors() {
         let e = slice_expr(Expr::Decimal(5), Some(0), Some(1), None);
         assert!(eval1_err(&e).contains("sliceable"));
+    }
+
+    // 2026-08-06 (Slice G): reflection value-side.
+
+    #[test]
+    fn test_reflect_len_on_product_is_field_count() {
+        let r = Expr::Reflect(
+            Box::new(person()),
+            "Len".into(),
+            ReflectKind::Runtime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_reflect_size_on_product_is_field_count() {
+        let r = Expr::Reflect(
+            Box::new(person()),
+            "Size".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_reflect_bytes_on_string_is_byte_length() {
+        let r = Expr::Reflect(
+            Box::new(Expr::Quoted(b"abc".to_vec())),
+            "Bytes".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(3));
+    }
+
+    #[test]
+    fn test_reflect_absolute_on_int() {
+        let r = Expr::Reflect(
+            Box::new(Expr::Decimal(-7)),
+            "Absolute".into(),
+            ReflectKind::Runtime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(7));
+    }
+
+    #[test]
+    fn test_reflect_type_on_constructor_is_sum_tag() {
+        let r = Expr::Reflect(
+            Box::new(Expr::Identifier("c".into())),
+            "Type".into(),
+            ReflectKind::CompileTime,
+        );
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("c".into(), Value::Constructor("Some".into(), vec![Value::int(1)]));
+        let out = eval_expr(&r, &mut heap, &mut bindings).unwrap();
+        assert_eq!(out.string_bytes(&heap), Some(b"Some".to_vec()));
+    }
+
+    #[test]
+    fn test_reflect_type_on_int_atom_is_category() {
+        let r = Expr::Reflect(
+            Box::new(Expr::Decimal(5)),
+            "Type".into(),
+            ReflectKind::CompileTime,
+        );
+        let out = eval1(&r);
+        assert_eq!(out.string_bytes(&VirtualHeap::new()), Some(b"Int".to_vec()));
+    }
+
+    #[test]
+    fn test_reflect_unknown_target_is_void() {
+        let r = Expr::Reflect(
+            Box::new(Expr::Decimal(5)),
+            "Bogus".into(),
+            ReflectKind::Runtime,
+        );
+        assert_eq!(eval1(&r), Value::Void);
     }
 }
