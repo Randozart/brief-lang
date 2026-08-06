@@ -617,14 +617,25 @@ impl<'a> Parser<'a> {
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             let pattern = self.parse_pattern()?;
-            let guard = if self.eat_identifier("if") {
+            // 2026-08-06: Guards use `when` (Briv has no `if`; SPEC §10.2/§11).
+            // Previously parsed a bare identifier "if" — silently accepting a
+            // non-keyword and rejecting the normative `when` guard.
+            let guard = if self.eat(&Token::When) {
                 Some(self.parse_expression()?)
             } else {
                 None
             };
-            self.expect(Token::Arrow)?;
+            // 2026-08-06: Match arms use `=>` (FatArrow), matching the
+            // statement form (SPEC §8, line 194). Previously expected `->`
+            // (Arrow), so `=>` failed to parse.
+            self.expect(Token::FatArrow)?;
             let body = self.parse_expression()?;
-            self.eat(&Token::Comma); // optional comma
+            // 2026-08-06: Accept optional `;` as well as `,`. Canonical arms
+            // are comma-separated (last arm may omit); the `.f` layout pass
+            // terminates same-indent lines with `;`. Both produce the
+            // identical AST.
+            self.eat(&Token::Comma);
+            self.eat(&Token::Semicolon);
             arms.push(crate::ast::MatchArm {
                 pattern,
                 guard,
@@ -833,5 +844,42 @@ mod tests {
     fn tuple_grouping_unchanged() {
         let e = parse_expr("(a, b)").unwrap();
         assert!(matches!(e, Expr::Tuple(ref v) if v.len() == 2));
+    }
+
+    #[test]
+    fn match_expr_uses_when_guard_and_fat_arrow() {
+        let e = parse_expr("match n { _ when n < 0 => -1, 0 => 0, _ => 1 }").unwrap();
+        let Expr::Match(scrutinee, arms) = e else {
+            panic!("expected Expr::Match");
+        };
+        assert!(matches!(*scrutinee, Expr::Identifier(ref n) if n == "n"));
+        assert_eq!(arms.len(), 3);
+        assert!(arms[0].guard.is_some());
+        assert!(arms[1].guard.is_none());
+    }
+
+    #[test]
+    fn match_expr_accepts_semicolon_separators() {
+        // 2026-08-06: The `.f` layout pass terminates same-indent match arms
+        // with `;`. Canonical comma-separated form and the `.f` form must
+        // produce the identical AST.
+        let comma = parse_expr("match n { _ when n < 0 => -1, 0 => 0 }").unwrap();
+        let semi = parse_expr("match n { _ when n < 0 => -1; 0 => 0; }").unwrap();
+        assert_eq!(comma, semi, "`,` and `;` arm separators must parse identically");
+    }
+
+    #[test]
+    fn match_expr_single_arm_without_trailing_separator() {
+        let e = parse_expr("match n { 0 => 0 }").unwrap();
+        let Expr::Match(_, arms) = e else { panic!("expected Expr::Match") };
+        assert_eq!(arms.len(), 1);
+    }
+
+    #[test]
+    fn match_expr_rejects_if_guard() {
+        // 2026-08-06: `if` is not a Briv keyword; guards are `when`. A guard
+        // written with `if` must fail to parse, not be silently accepted as an
+        // identifier.
+        assert!(parse_expr("match n { _ if n < 0 => -1 }").is_err());
     }
 }
