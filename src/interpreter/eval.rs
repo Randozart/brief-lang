@@ -205,7 +205,16 @@ pub fn eval_expr(
         // hint for the deprecated PascalCase names.
         Expr::PluginIntercept { name, args, .. } => eval_intercept(name, args, heap, bindings),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
-            Expr::Slice { array, .. } => eval_expr(array, heap, bindings),
+        Expr::Slice { array, start, end, stride } => eval_slice(
+            array,
+            SliceBounds {
+                start: start.as_deref(),
+                end: end.as_deref(),
+                stride: stride.as_deref(),
+            },
+            heap,
+            bindings,
+        ),
 
     }
 }
@@ -366,6 +375,130 @@ fn eval_method_call(
         return execute_intrinsic(name, &all, heap);
     }
     Ok(bindings.get(name).cloned().unwrap_or(Value::Void))
+}
+
+/// The three optional slice bounds (`array[start:end:stride]`), borrowed.
+struct SliceBounds<'a> {
+    start: Option<&'a Expr>,
+    end: Option<&'a Expr>,
+    stride: Option<&'a Expr>,
+}
+
+/// 2026-08-06 (Slice F): `array[start:end:stride]` — Python-style slicing
+/// (SPEC §16.5) over raw `Bits` (string/bytes content) and `Product`
+/// (list/tuple). Bounds follow the CPython algorithm: negative indices wrap,
+/// out-of-range bounds clamp, defaults are start=0/end=len/stride=1, and a
+/// negative stride walks the sequence in reverse. Stride 0 is an error.
+fn eval_slice(
+    array: &Expr,
+    bounds: SliceBounds<'_>,
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let arr = eval_expr(array, heap, bindings)?;
+    let start = eval_opt_int(bounds.start, heap, bindings)?;
+    let end = eval_opt_int(bounds.end, heap, bindings)?;
+    let stride = match bounds.stride {
+        Some(s) => eval_expr(s, heap, bindings)?
+            .as_i64()
+            .ok_or_else(|| RuntimeError::TypeError {
+                expected: "an integer slice stride".into(),
+                found: "non-integer stride".into(),
+            })?,
+        None => 1,
+    };
+    match arr {
+        Value::Bits(bytes) => {
+            let sel = slice_indices(bytes.len(), start, end, stride)?;
+            Ok(Value::bits(sel.into_iter().map(|i| bytes[i]).collect()))
+        }
+        Value::Product { fields, names } => {
+            let sel = slice_indices(fields.len(), start, end, stride)?;
+            let sliced: Vec<Value> = sel.iter().map(|&i| fields[i].clone()).collect();
+            let sliced_names = names.map(|ns| {
+                Arc::new(
+                    ns.iter()
+                        .enumerate()
+                        .filter(|(i, _)| sel.contains(i))
+                        .map(|(_, n)| n.clone())
+                        .collect(),
+                )
+            });
+            Ok(Value::Product { fields: sliced, names: sliced_names })
+        }
+        other => Err(RuntimeError::TypeError {
+            expected: "a sliceable value (string or list)".into(),
+            found: describe_value(&other),
+        }),
+    }
+}
+
+/// Evaluate an optional slice bound expression to an optional integer.
+fn eval_opt_int(
+    opt: Option<&Expr>,
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Option<i64>, RuntimeError> {
+    match opt {
+        Some(e) => eval_expr(e, heap, bindings)?
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| RuntimeError::TypeError {
+                expected: "an integer slice bound".into(),
+                found: "non-integer bound".into(),
+            }),
+        None => Ok(None),
+    }
+}
+
+/// CPython `slice.indices` normalization: map (start, stop, step) to the
+/// concrete index list. Negative bounds wrap by length; positive-step
+/// clamps into [0, len], negative-step into [-1, len-1]; step 0 is an error.
+fn slice_indices(
+    length: usize,
+    start: Option<i64>,
+    stop: Option<i64>,
+    step: i64,
+) -> Result<Vec<usize>, RuntimeError> {
+    if step == 0 {
+        return Err(RuntimeError::TypeError {
+            expected: "a non-zero slice stride".into(),
+            found: "stride 0".into(),
+        });
+    }
+    let len = length as i64;
+    if step > 0 {
+        let lo = start.map(|s| wrap_bound(s, len)).unwrap_or(0).clamp(0, len);
+        let hi = stop.map(|s| wrap_bound(s, len)).unwrap_or(len).clamp(0, len);
+        let mut out = Vec::new();
+        let mut i = lo;
+        while i < hi {
+            out.push(i as usize);
+            i += step;
+        }
+        Ok(out)
+    } else {
+        let lo = start
+            .map(|s| wrap_bound(s, len))
+            .unwrap_or(len - 1)
+            .clamp(-1, len - 1);
+        let hi = stop
+            .map(|s| wrap_bound(s, len))
+            .unwrap_or(-1)
+            .clamp(-1, len - 1);
+        let mut out = Vec::new();
+        let mut i = lo;
+        while i > hi {
+            out.push(i as usize);
+            i += step;
+        }
+        Ok(out)
+    }
+}
+
+/// Negative slice bounds wrap by the sequence length (Python convention).
+fn wrap_bound(v: i64, len: i64) -> i64 {
+    if v < 0 { v + len } else { v }
 }
 
 /// 2026-08-06 (Slice C): Evaluate a match expression. The scrutinee is
@@ -1509,5 +1642,88 @@ mod tests {
         assert_eq!(eval_expr(&c1, &mut heap, &mut bindings).unwrap().as_i64(), Some(2));
         let c2 = Expr::Call("f".into(), vec![Expr::Decimal(100)], None);
         assert_eq!(eval_expr(&c2, &mut heap, &mut bindings).unwrap().as_i64(), Some(101));
+    }
+
+    // 2026-08-06 (Slice F): slicing.
+
+    fn slice_expr(array: Expr, start: Option<i64>, end: Option<i64>, stride: Option<i64>) -> Expr {
+        let bound = |v: i64| Some(Box::new(Expr::Decimal(v)));
+        Expr::Slice {
+            array: Box::new(array),
+            start: start.and_then(bound),
+            end: end.and_then(bound),
+            stride: stride.and_then(bound),
+        }
+    }
+
+    fn abcdef() -> Expr {
+        Expr::Quoted(b"abcdef".to_vec())
+    }
+
+    fn sliced_bytes(r: Value) -> Vec<u8> {
+        match r {
+            Value::Bits(b) => b,
+            other => panic!("expected Bits, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_slice_string_range() {
+        let r = eval1(&slice_expr(abcdef(), Some(1), Some(3), None));
+        assert_eq!(sliced_bytes(r), b"bc".to_vec());
+    }
+
+    #[test]
+    fn test_slice_string_open_bounds() {
+        let r = eval1(&slice_expr(abcdef(), None, Some(3), None));
+        assert_eq!(sliced_bytes(r), b"abc".to_vec());
+        let r = eval1(&slice_expr(abcdef(), Some(3), None, None));
+        assert_eq!(sliced_bytes(r), b"def".to_vec());
+    }
+
+    #[test]
+    fn test_slice_string_positive_stride() {
+        let r = eval1(&slice_expr(abcdef(), None, None, Some(2)));
+        assert_eq!(sliced_bytes(r), b"ace".to_vec());
+    }
+
+    #[test]
+    fn test_slice_string_reverse() {
+        let r = eval1(&slice_expr(abcdef(), None, None, Some(-1)));
+        assert_eq!(sliced_bytes(r), b"fedcba".to_vec());
+    }
+
+    #[test]
+    fn test_slice_string_negative_index() {
+        let r = eval1(&slice_expr(abcdef(), Some(-2), None, None));
+        assert_eq!(sliced_bytes(r), b"ef".to_vec());
+    }
+
+    #[test]
+    fn test_slice_string_bounds_clamp() {
+        let r = eval1(&slice_expr(abcdef(), Some(0), Some(100), None));
+        assert_eq!(sliced_bytes(r), b"abcdef".to_vec());
+        let r = eval1(&slice_expr(abcdef(), Some(100), None, None));
+        assert_eq!(sliced_bytes(r), b"".to_vec());
+    }
+
+    #[test]
+    fn test_slice_list_product() {
+        let l = Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)]);
+        let r = eval1(&slice_expr(l, Some(1), None, None));
+        assert_eq!(r, Value::product(vec![Value::int(20), Value::int(30)]));
+    }
+
+    #[test]
+    fn test_slice_stride_zero_errors() {
+        let e = slice_expr(abcdef(), None, None, Some(0));
+        let err = eval1_err(&e);
+        assert!(err.contains("stride"), "got: {err}");
+    }
+
+    #[test]
+    fn test_slice_non_sliceable_errors() {
+        let e = slice_expr(Expr::Decimal(5), Some(0), Some(1), None);
+        assert!(eval1_err(&e).contains("sliceable"));
     }
 }
