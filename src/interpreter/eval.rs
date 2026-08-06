@@ -9,6 +9,7 @@ use crate::interpreter::{
     Atom, bool_to_bits, execute_intrinsic, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Evaluate an expression to a Value.
 /// Flat dispatch: one match arm per Expr variant.
@@ -115,7 +116,15 @@ pub fn eval_expr(
         Expr::Match(scrutinee, arms) => eval_match(scrutinee, arms, heap, bindings),
 
         // ── Lambda ───────────────────────────────────────────────
-        Expr::Lambda(_, _) => Ok(Value::Void),
+        // 2026-08-06 (Slice E): capture the current bindings as the closure
+        // environment. Application binds params into a fresh env seeded from
+        // this snapshot (see eval_call), so captures are by-value and
+        // re-entrant.
+        Expr::Lambda(params, body) => Ok(Value::Closure {
+            params: Arc::new(params.clone()),
+            body: Arc::new((**body).clone()),
+            env: Arc::new(bindings.clone()),
+        }),
 
         // ── Derivation block ─────────────────────────────────────
         // 2026-08-06 (Slice D): a derivation block is a meta-declaration, not
@@ -216,11 +225,27 @@ fn eval_call(
     if name.ends_with('#') {
         execute_intrinsic(name, &evaluated, heap)
     } else {
-        // User function call (simplified: looks up binding)
-        bindings
-            .get(name)
-            .cloned()
-            .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.into() })
+        // 2026-08-06 (Slice E): a closure binding applies — params bind into a
+        // fresh env seeded from the captured snapshot, body evaluates in it.
+        // A non-closure binding is returned as-is (the simplified Call model);
+        // an absent name is an error.
+        match bindings.get(name) {
+            Some(Value::Closure { params, body, env }) => {
+                if params.len() != evaluated.len() {
+                    return Err(RuntimeError::TypeError {
+                        expected: format!("{} arguments", params.len()),
+                        found: format!("{} arguments", evaluated.len()),
+                    });
+                }
+                let mut local: HashMap<String, Value> = (**env).clone();
+                for (p, v) in params.iter().zip(evaluated.into_iter()) {
+                    local.insert(p.clone(), v);
+                }
+                eval_expr(body, heap, &mut local)
+            }
+            Some(v) => Ok(v.clone()),
+            None => Err(RuntimeError::UndefinedVariable { name: name.into() }),
+        }
     }
 }
 
@@ -279,6 +304,7 @@ fn describe_value(v: &Value) -> String {
         Value::Product { .. } => "product".into(),
         Value::Void => "void".into(),
         Value::Ref(_) => "reference".into(),
+        Value::Closure { .. } => "closure".into(),
         Value::Constructor(_, _) => "constructor".into(),
         Value::List(_) => "list".into(),
     }
@@ -1380,5 +1406,108 @@ mod tests {
         bindings.insert("seven".into(), Value::int(7));
         let r = eval_expr(&m2, &mut heap, &mut bindings).unwrap();
         assert_eq!(r.as_i64(), Some(7));
+    }
+
+    // 2026-08-06 (Slice E): closures.
+
+    fn inc_by_one() -> Expr {
+        Expr::Lambda(
+            vec!["x".into()],
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Decimal(1)),
+            )),
+        )
+    }
+
+    #[test]
+    fn test_lambda_is_closure_value() {
+        assert!(matches!(eval1(&inc_by_one()), Value::Closure { .. }));
+    }
+
+    #[test]
+    fn test_closure_applies_via_call() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("f".into(), eval1(&inc_by_one()));
+        let call = Expr::Call("f".into(), vec![Expr::Decimal(41)], None);
+        let r = eval_expr(&call, &mut heap, &mut bindings).unwrap();
+        assert_eq!(r.as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_closure_captures_outer_binding() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("k".into(), Value::int(5));
+        // (x) => x + k  — k is captured from the enclosing scope.
+        let lam = Expr::Lambda(
+            vec!["x".into()],
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Identifier("k".into())),
+            )),
+        );
+        let f = eval_expr(&lam, &mut heap, &mut bindings).unwrap();
+        bindings.insert("f".into(), f);
+        let call = Expr::Call("f".into(), vec![Expr::Decimal(1)], None);
+        assert_eq!(eval_expr(&call, &mut heap, &mut bindings).unwrap().as_i64(), Some(6));
+    }
+
+    #[test]
+    fn test_closure_arity_mismatch_errors() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("f".into(), eval1(&inc_by_one()));
+        let call = Expr::Call("f".into(), vec![Expr::Decimal(1), Expr::Decimal(2)], None);
+        let err = eval_expr(&call, &mut heap, &mut bindings).err().unwrap().to_string();
+        assert!(err.contains("arguments"), "got: {err}");
+    }
+
+    #[test]
+    fn test_closure_call_unbound_name_errors() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        let call = Expr::Call("missing".into(), vec![], None);
+        let err = eval_expr(&call, &mut heap, &mut bindings).err().unwrap().to_string();
+        assert!(err.contains("undefined variable"), "got: {err}");
+    }
+
+    #[test]
+    fn test_nested_closure_currying() {
+        // (x) => (y) => x + y ; f(2)(3) = 5
+        let inner = Expr::Lambda(
+            vec!["y".into()],
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Identifier("y".into())),
+            )),
+        );
+        let outer = Expr::Lambda(vec!["x".into()], Box::new(inner));
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("f".into(), eval1(&outer));
+        let call1 = Expr::Call("f".into(), vec![Expr::Decimal(2)], None);
+        let g = eval_expr(&call1, &mut heap, &mut bindings).unwrap();
+        assert!(matches!(g, Value::Closure { .. }));
+        bindings.insert("g".into(), g);
+        let call2 = Expr::Call("g".into(), vec![Expr::Decimal(3)], None);
+        assert_eq!(eval_expr(&call2, &mut heap, &mut bindings).unwrap().as_i64(), Some(5));
+    }
+
+    #[test]
+    fn test_closure_reentrant_applications() {
+        // Applying the same closure twice with different args must not leak
+        // state between applications.
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("f".into(), eval1(&inc_by_one()));
+        let c1 = Expr::Call("f".into(), vec![Expr::Decimal(1)], None);
+        assert_eq!(eval_expr(&c1, &mut heap, &mut bindings).unwrap().as_i64(), Some(2));
+        let c2 = Expr::Call("f".into(), vec![Expr::Decimal(100)], None);
+        assert_eq!(eval_expr(&c2, &mut heap, &mut bindings).unwrap().as_i64(), Some(101));
     }
 }

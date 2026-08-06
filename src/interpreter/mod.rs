@@ -259,6 +259,16 @@ pub enum Value {
     Void,
     Ref(Box<Value>),
 
+    /// 2026-08-06 (Slice E): a closure — lambda params, body, and the captured
+    /// environment snapshot at creation. Application (Expr::Call on a closure
+    /// binding) binds params into a fresh env seeded from the captured one;
+    /// mutations never leak to the captured env or the caller (re-entrant).
+    Closure {
+        params: Arc<Vec<String>>,
+        body: Arc<Expr>,
+        env: Arc<HashMap<String, Value>>,
+    },
+
     // ── Compound types (synthesis engine) ────────────────────────────
     // 2026-07-28: Constructor for enum variants and struct-like values.
     // Produced by Expr::Constructor during synthesis evaluation.

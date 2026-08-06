@@ -343,7 +343,7 @@ leaked into codegen — investigate, don't accept.
 - [x] B — Correct primitive eval arms (IsType/Tuple/List/Index) — 2026-08-06
 - [x] C — Match with patterns, guards, exhaustiveness — 2026-08-06
 - [x] D — Struct/enum construction, field access, method calls — 2026-08-06
-- [ ] E — Closures
+- [x] E — Closures — 2026-08-06
 - [ ] F — Slices, ranges, strings
 - [ ] G — Reflection value-side + reactor/fuzz/pgo migration
 - [ ] H — Derive (CEGIS) constructor migration
