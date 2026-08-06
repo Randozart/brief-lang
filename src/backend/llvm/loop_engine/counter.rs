@@ -494,15 +494,39 @@ impl LlvmBackend {
         let hoist = self.fun.pending_post_hoist.clone();
         self.emit_hoisted_post_loop_prints(out, &hoist);
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
+        // 2026-08-06 (Phase 9): garbage scheduling for the PerFieldPhi
+        // countable-loop path — free the fields the scheduler PROVED this txn
+        // is the last consumer of, AFTER the loop closes (the loop-exit block,
+        // so a free never fires inside a body that iterates again). Mirrors the
+        // countdown + non-loop paths.
+        if let Some(fields) = self.ctx.global_free_after.get(txn_name).cloned() {
+            self.emit_scheduled_frees(out, &fields);
+        }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
 
+    // ── Garbage-scheduler free emission ───────────────────────────────
+
+    /// 2026-08-06 (Phase 9): emit `__briv_free` for each scheduled state
+    /// field whose reactor-ordered last consumer is the enclosing fold. The
+    /// handle is the field's STORED value (the ptrtoint of the allocation),
+    /// loaded from %State — re-evaluating the initializer would re-malloc.
+    /// Shared by the countdown, PerFieldPhi, and version-DAG fold paths.
+    fn emit_scheduled_frees(&mut self, out: &mut String, fields: &[String]) {
+        for f in fields {
+            let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
+            let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
+            let ptr = self.fun.gen_reg();
+            writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
+            writeln!(out, "  call void @__briv_free(ptr {})", ptr).ok();
+        }
+    }
+
     // ── Batch-Loop Emission ───────────────────────────────────────────
     //
-    // 2026-07-31: Rebuilt from the Phase-6-removed emit_countable_batched_main
-    // (docs/plans/2026-07-30-flat-node-decomposition.md §4), now consuming the
+    // 2026-07-31: Rebuilt from the Phase-6-removed emit_countable_batched_main    // (docs/plans/2026-07-30-flat-node-decomposition.md §4), now consuming the
     // frontend BatchShape (analysis/batch_shape.rs) instead of the
     // extract_batch_size / split_hoistable heuristics. The io boundary is the
     // guard precondition's interval (`count % N == 0`), derived structurally.
@@ -1145,13 +1169,7 @@ impl LlvmBackend {
         // loaded from %State — re-evaluating the initializer would re-malloc.
         // Routed through __briv_free so the benchmark can assert frees ==
         // allocs (no leak).
-        for f in free_after {
-            let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
-            let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
-            let ptr = self.fun.gen_reg();
-            writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
-            writeln!(out, "  call void @__briv_free(ptr {})", ptr).ok();
-        }
+        self.emit_scheduled_frees(out, free_after);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -1186,6 +1204,7 @@ impl LlvmBackend {
         write_set: &HashSet<String>,
         is_decreasing: bool,
         counter_var: Option<&str>,
+        free_after: &[String],
     ) -> bool {
         use crate::analysis::node_decompose::{PredicateClass, Segment, split_into_segments};
         let segments = split_into_segments(body);
@@ -1465,6 +1484,9 @@ impl LlvmBackend {
                 self.emit_countable_body(out, group, &HashSet::new(), &mut vec![]);
             }
         }
+        // 2026-08-06 (Phase 9): garbage scheduling for the version-DAG fold
+        // path — free after the loop closes, like the other fold emitters.
+        self.emit_scheduled_frees(out, free_after);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();

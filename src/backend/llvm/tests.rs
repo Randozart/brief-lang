@@ -4326,3 +4326,45 @@ node start [true][false] {
     );
 }
 
+// ── Phase 9: garbage scheduler — loop-exit Free# emission ───────────
+
+#[test]
+fn test_loop_txn_last_consumer_emits_free_after_loop() {
+    // A countable-loop txn (the benchmark's countdown shape, with a periodic
+    // `when` guard) that is a heap-backed field's last consumer must emit
+    // __briv_free AFTER the loop exits (never inside the iterating body).
+    let src = r#"
+let N: Int = GetEnvInt#("BOUND");
+let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
+let sum: Int = 0;
+node life [sum < N][sum == N] {
+    buf[sum % 64] = sum;
+    sum = sum + 1;
+    when sum % 5000000 == 0 {
+        buf[sum % 64] = 0;
+    };
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call void @__briv_free"),
+        "the scheduler must free the heap buffer after the loop; got:\n{ir}"
+    );
+    // The free must be in a terminal block (after the loop) — find its
+    // position and ensure it precedes a `ret`.
+    let free_line = ir
+        .lines()
+        .position(|l| l.contains("call void @__briv_free"))
+        .expect("free call line");
+    let tail: Vec<&str> = ir.lines().skip(free_line).take(6).collect();
+    assert!(
+        tail.iter().any(|l| l.contains("ret ")),
+        "the free must precede a return (post-loop), got: {tail:?}"
+    );
+}
+

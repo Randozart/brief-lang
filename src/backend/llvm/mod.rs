@@ -3673,6 +3673,8 @@ impl LlvmBackend {
         if self.emit_version_dag_main(
             out, counter_idx, total_idx, total_const_name,
             &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),
+            analysis.global_lifetime.free_after.get(&node.name)
+                .map(|v| v.as_slice()).unwrap_or(&[]),
         ) {
             return true;
         }
