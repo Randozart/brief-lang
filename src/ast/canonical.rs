@@ -658,8 +658,8 @@ mod tests {
         "defn lifetime(x: Int) -> Int [true][true] {\n  let buf: Ptr<Int> = Malloc#(4);\n  keep buf;\n  term x;\n};\n",
         "defn watchdog(a: Int) -> Int [a >= 0][a >= 0] ?[progress] within 10ms {\n  term a;\n};\n",
         // 2026-08-06 (accel plan): module-level `!>` metadata round-trips.
-        "!> accel: TRY_ALL;\n",
-        "!> accel: OFF;\n!> target: spirv;\n",
+        "!> accel: try_all;\n",
+        "!> accel: force;\n!> target: spirv;\n",
         "!> flags: [fast, contract];\n",
     ];
 

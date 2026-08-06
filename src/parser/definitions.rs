@@ -3094,7 +3094,7 @@ mod tests {
     fn test_top_level_module_metadata_parses() {
         // 2026-08-06 (accel plan): top-level `!> key: value;` becomes
         // TopLevel::ModuleMetadata (SPEC §8.9).
-        let src = "!> accel: TRY_ALL;";
+        let src = "!> accel: try_all;";
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let item = p.parse_top_level().unwrap();
@@ -3102,7 +3102,7 @@ mod tests {
             crate::ast::TopLevel::ModuleMetadata(map) => {
                 assert_eq!(map.len(), 1, "expected one metadata key");
                 assert!(matches!(map.get("accel"),
-                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "TRY_ALL"));
+                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "try_all"));
             }
             other => panic!("expected ModuleMetadata, got {other:?}"),
         }
@@ -3112,7 +3112,7 @@ mod tests {
     fn test_top_level_module_metadata_merges_last_wins() {
         // 2026-08-06 (accel plan): consecutive top-level `!>` lines merge
         // into one ModuleMetadata node; last binding wins per key.
-        let src = "!> accel: TRY_ALL;\n!> accel: OFF;\n!> target: spirv;";
+        let src = "!> accel: try_all;\n!> accel: force;\n!> target: spirv;";
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let item = p.parse_top_level().unwrap();
@@ -3120,7 +3120,7 @@ mod tests {
             crate::ast::TopLevel::ModuleMetadata(map) => {
                 assert_eq!(map.len(), 2, "expected two merged keys, got {map:?}");
                 assert!(matches!(map.get("accel"),
-                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "OFF"),
+                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "force"),
                     "last binding must win, got {map:?}");
                 assert!(matches!(map.get("target"),
                     Some(crate::ast::PropertyValue::Identifier(s)) if s == "spirv"));
@@ -3133,7 +3133,7 @@ mod tests {
     fn test_module_metadata_then_node_parses_both() {
         // 2026-08-06 (accel plan): module metadata and following declarations
         // parse as separate top-level items.
-        let src = "!> accel: TRY_ALL;\nnode work [true][done] { done = true; term; };";
+        let src = "!> accel: try_all;\nnode work [true][done] { done = true; term; };";
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let items = p.parse_program().unwrap();

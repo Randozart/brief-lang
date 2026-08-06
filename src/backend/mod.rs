@@ -983,9 +983,9 @@ mod tests {
         // `!>` metadata; multiple ModuleMetadata nodes merge, last wins.
         use crate::ast::PropertyValue;
         let mut m1 = std::collections::HashMap::new();
-        m1.insert("accel".to_string(), PropertyValue::Identifier("TRY_ALL".into()));
+        m1.insert("accel".to_string(), PropertyValue::Identifier("try_all".into()));
         let mut m2 = std::collections::HashMap::new();
-        m2.insert("accel".to_string(), PropertyValue::Identifier("OFF".into()));
+        m2.insert("accel".to_string(), PropertyValue::Identifier("force".into()));
         m2.insert("target".to_string(), PropertyValue::Identifier("spirv".into()));
         let items = vec![
             TopLevel::ModuleMetadata(m1),
@@ -994,7 +994,7 @@ mod tests {
         let merged = collect_module_metadata(&items);
         assert_eq!(merged.len(), 2);
         assert!(matches!(merged.get("accel"),
-            Some(PropertyValue::Identifier(s)) if s == "OFF"),
+            Some(PropertyValue::Identifier(s)) if s == "force"),
             "last ModuleMetadata node must win");
         assert!(matches!(merged.get("target"),
             Some(PropertyValue::Identifier(s)) if s == "spirv"));
