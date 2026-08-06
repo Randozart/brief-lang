@@ -19,8 +19,8 @@ Status legend:
 | SPEC § | Normative section | Status | Notes |
 |---:|---|---|---|
 | 1 | Scope and conformance | In progress | Conformance runner in Phase 0 |
-| 2 | Core model | In progress | No-layout frontend; interpreter Value migration is Phase 17 |
-| 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2 |
+| 2 | Core model | In progress | Token-aware layout frontend (`.f`) wired in Phase 15; interpreter Value migration is Phase 17 |
+| 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2; `.f` layout frontend + profile detection in Phase 15 |
 | 4 | Lexical conventions | In progress | Phase 3 removed dead tokens, `sig`, `++`, pragmas, `prop`, `Ptr!`, `@`/prefix literals, width suffixes |
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
 | 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |

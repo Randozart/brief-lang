@@ -1,0 +1,16 @@
+// smoke-formatted.f.bv — exercises the .f indentation frontend.
+// Canonical twin: the AST must equal the brace-syntax form (SPEC §25).
+
+let tick: Int = 0
+
+defn classify(n: Int) -> Int
+    [n >= 0][true]
+    term match n
+        _ when n < 0 => -1
+        0 => 0
+        _ => 1
+
+node start [tick == 0][tick > 0]
+    let step: Int = classify(tick)
+    tick = tick + 1
+    term Print#(step)

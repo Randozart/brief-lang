@@ -63,6 +63,33 @@ impl SourceKind {
     }
 }
 
+/// 2026-08-06 (Phase 15): whether an active source carries the `.f` formatted
+/// profile (SPEC §3.2). The `.f` dialect uses indentation instead of braces;
+/// the compile pipeline routes these sources through `layout::layout_process`
+/// before parsing. Governs any base extension (`.f.bv`, `.f.ebv`, `.f.rbv`, …).
+pub fn is_formatted(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map_or(false, |name| {
+            let segments: Vec<&str> = name.split('.').collect();
+            segments.len() >= 2 && segments[1..segments.len() - 1].contains(&"f")
+        })
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    #[test]
+    fn detects_formatted_profile() {
+        assert!(is_formatted(Path::new("main.f.bv")));
+        assert!(is_formatted(Path::new("kernel.f.ebv")));
+        assert!(is_formatted(Path::new("ui.s.f.rbv")));
+        assert!(!is_formatted(Path::new("main.bv")));
+        assert!(!is_formatted(Path::new("main.s.bv")));
+        assert!(!is_formatted(Path::new("noext")));
+    }
+}
+
 /// 2026-08-05: classify an active source path by its canonical base extension.
 /// Dotted profile segments (`.s`, `.f`) are stripped before classification;
 /// unknown or removed profile segments are rejected. Contract: the base

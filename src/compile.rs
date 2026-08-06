@@ -317,7 +317,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
-    let tokens = lex(&source)?;
+    let tokens = lex_for_path(file_path, &source)?;
     let mut items = parse(file_path, &tokens, &source)?;
 
     // Extract inline $(Stage) blocks from the AST — they are plugins,
@@ -1398,7 +1398,7 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
     }
     let mut source = source.to_string();
     pm.run_source(StageKind::PreLex, &mut source)?;
-    let tokens = lex(&source)?;
+    let tokens = lex_for_path(file_path, &source)?;
     let mut items = parse(file_path, &tokens, &source)?;
     extract_inline_stage_blocks(&mut items, &mut pm);
     {
@@ -1708,7 +1708,7 @@ fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
 
 /// Lex + parse + resolve imports + typecheck, returning items and universe.
 fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<briv_compiler::ast::TopLevel>, TypeUniverse), String> {
-    let tokens = lex(source)?;
+    let tokens = lex_for_path(file_path, source)?;
     let items = parse(file_path, &tokens, source)?;
 
     let mut resolver = briv_compiler::import_resolver::ImportResolver::new();
@@ -1776,6 +1776,24 @@ fn lex(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
         tokens.push((token, span));
     }
     Ok(tokens)
+}
+
+/// 2026-08-06 (Phase 3): Lex `source`, routing `.f`-profile sources through
+/// the token-aware layout frontend first. `.f` sources delimit blocks with
+/// indentation; the layout pass synthesizes braces/semicolons so the parser
+/// produces the SAME AST as canonical brace syntax. The canonical path is
+/// untouched (build-safe additive routing).
+fn lex_for_path(
+    file_path: &str,
+    source: &str,
+) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
+    if briv_compiler::conformance::is_formatted(std::path::Path::new(file_path)) {
+        briv_compiler::layout::layout_process(source).map_err(|e| {
+            format!("{}: formatted-source error: {}", file_path, e)
+        })
+    } else {
+        lex(source)
+    }
 }
 
 /// Parse tokens into an AST.
