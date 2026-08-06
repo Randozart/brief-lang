@@ -5,13 +5,40 @@
 
 use crate::ast::{Expr, Type};
 use crate::errors::RuntimeError;
-use crate::interpreter::{f64_to_bits, i64_to_bits, Value};
+use crate::interpreter::{Atom, f64_to_bits, i64_to_bits, Value};
 
-/// Check whether a value matches a type.
-/// With Bits-only values, this checks byte width against the expected type.
+/// 2026-08-06 (Slice B): Whether a value is a member of a target type.
+/// Membership is decided by the value's semantic category, not by byte width:
+/// an Int atom is a member of the Int family, a Float atom of the Float
+/// family, raw Bits of `#Bit`/String/Data, a `Product` of tuple/collection
+/// types, a `Ref` of pointer types. `Union` is a member when any variant is.
+/// Returns an Atom::Bool.
 pub fn eval_is_type(val: &Value, target: &Type) -> Result<Value, RuntimeError> {
-    let matches = val.bits_len() == type_byte_width(target);
-    Ok(Value::Bits(vec![if matches { 1u8 } else { 0u8 }]))
+    let is_member = match target {
+        Type::Custom(name) => match name.as_str() {
+            "Int" | "UInt" | "Int64" | "UInt64" | "Int32" | "UInt32" | "Int16" | "UInt16"
+            | "Int8" | "UInt8" => matches!(val, Value::Atom(Atom::Int(_))),
+            "Float" | "Float64" | "Float32" | "Double" => matches!(val, Value::Atom(Atom::Float(_))),
+            "Bool" => matches!(val, Value::Atom(Atom::Bool(_))),
+            "Char" => matches!(val, Value::Atom(Atom::Char(_))),
+            "String" | "Data" => matches!(val, Value::Bits(_)),
+            _ => false,
+        },
+        Type::Bits(_) => matches!(val, Value::Bits(_)),
+        // 2026-08-01 (B2): `#Bit` hashword target — the content view; a
+        // String IS its content bytes in the interpreter, so every Bits value
+        // is a member.
+        Type::HashWord(name) if name == "#Bit" => matches!(val, Value::Bits(_)),
+        Type::HashWordVariant(name, _) if name == "#Bit" => matches!(val, Value::Bits(_)),
+        Type::Tuple(_) | Type::Applied(_, _) | Type::Generic(_, _) => matches!(val, Value::Product(_)),
+        Type::Ptr(_) | Type::PtrConst(_) => matches!(val, Value::Ref(_)),
+        Type::Void => matches!(val, Value::Void),
+        Type::Union(variants) => variants
+            .iter()
+            .any(|t| eval_is_type(val, t).map_or(false, |r| r.as_bool().unwrap_or(false))),
+        _ => false,
+    };
+    Ok(Value::Atom(Atom::Bool(is_member)))
 }
 
 /// Evaluate a type cast: reinterpret Value::Bits bytes between types.
@@ -53,14 +80,6 @@ pub fn eval_like(lhs: &Value, rhs: &Value) -> Result<Value, RuntimeError> {
     Ok(Value::Bits(vec![if result { 1u8 } else { 0u8 }]))
 }
 
-/// Get the byte length of a Bits value.
-fn value_bits_len(v: &Value) -> usize {
-    match v {
-        Value::Bits(bytes) => bytes.len(),
-        _ => 0,
-    }
-}
-
 /// Convert value to Vec<u8> of given minimum size (padding with zeros).
 fn value_bits_to_vec(v: &Value, min_len: usize) -> Vec<u8> {
     match v {
@@ -72,26 +91,6 @@ fn value_bits_to_vec(v: &Value, min_len: usize) -> Vec<u8> {
             result
         }
         _ => vec![0u8; min_len],
-    }
-}
-
-/// Determine the byte width of a type for compatibility checking.
-fn type_byte_width(ty: &Type) -> usize {
-    match ty {
-        Type::Custom(name) => match name.as_str() {
-            "Int" | "UInt" | "Float" | "Float64" | "Double" | "Int64" | "UInt64" => 8,
-            "Float32" | "F32" | "Int32" | "UInt32" | "Char" => 4,
-            "Int16" | "UInt16" => 2,
-            "Bool" | "Int8" | "UInt8" => 1,
-            "String" | "Data" => 8,
-            _ => 8,
-        },
-        Type::Applied(name, _) => match name.as_str() {
-            "Ptr" => 8,
-            _ => 8,
-        },
-        Type::Bits(n) => *n as usize,
-        _ => 8,
     }
 }
 
@@ -113,14 +112,10 @@ fn bits_to_string(val: &Value) -> String {
 
 // Helper methods on Value for this module
 trait ValueExt {
-    fn bits_len(&self) -> usize;
     fn bits_to_vec(&self, min_len: usize) -> Vec<u8>;
 }
 
 impl ValueExt for Value {
-    fn bits_len(&self) -> usize {
-        value_bits_len(self)
-    }
     fn bits_to_vec(&self, min_len: usize) -> Vec<u8> {
         value_bits_to_vec(self, min_len)
     }

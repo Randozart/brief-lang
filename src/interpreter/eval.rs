@@ -55,26 +55,21 @@ pub fn eval_expr(
         Expr::Tuple(exprs) => {
             let values: Result<Vec<Value>, _> =
                 exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
-            // Return first element for single-element tuples (simplified)
-            Ok(values?.into_iter().next().unwrap_or(Value::Void))
+            Ok(Value::Product(values?))
         }
 
         // ── List ─────────────────────────────────────────────────
         Expr::List(exprs) => {
-            let _values: Result<Vec<Value>, _> =
+            let values: Result<Vec<Value>, _> =
                 exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
-            Ok(zero_bits(8)) // placeholder
+            Ok(Value::Product(values?))
         }
 
         // ── Field access ─────────────────────────────────────────
         Expr::Field(obj, _name) => eval_expr(obj, heap, bindings),
 
         // ── Index ────────────────────────────────────────────────
-        Expr::Index(obj, index) => {
-            let _obj = eval_expr(obj, heap, bindings)?;
-            let _idx = eval_expr(index, heap, bindings)?;
-            Ok(zero_bits(8)) // placeholder
-        }
+        Expr::Index(obj, index) => eval_index(obj, index, heap, bindings),
 
         // ── Cast ─────────────────────────────────────────────────
         // 2026-08-01 (audit): the codegen emits a real conversion when the
@@ -108,7 +103,10 @@ pub fn eval_expr(
         }
 
         // ── IsType ───────────────────────────────────────────────
-        Expr::IsType(_, _) => Ok(Value::Atom(Atom::Bool(true))),
+        Expr::IsType(expr, ty) => {
+            let val = eval_expr(expr, heap, bindings)?;
+            crate::interpreter::casts::eval_is_type(&val, ty)
+        }
 
         // ── Within ───────────────────────────────────────────────
         Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings),
@@ -221,6 +219,63 @@ fn eval_call(
             .get(name)
             .cloned()
             .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.into() })
+    }
+}
+
+/// 2026-08-06 (Slice B): Index a value. A `Product` is indexed by element
+/// position; raw `Bits` by byte offset (String/Data content). Out-of-bounds
+/// or non-indexable values are errors — no placeholder, no silent `zero_bits`.
+fn eval_index(
+    obj: &Expr,
+    index: &Expr,
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let obj_val = eval_expr(obj, heap, bindings)?;
+    let idx = eval_expr(index, heap, bindings)?
+        .as_i64()
+        .ok_or_else(|| RuntimeError::TypeError {
+            expected: "an integer index".into(),
+            found: "non-integer index".into(),
+        })?;
+    if idx < 0 {
+        return Err(RuntimeError::TypeError {
+            expected: "a non-negative index".into(),
+            found: format!("negative index {}", idx),
+        });
+    }
+    let idx = idx as usize;
+    match obj_val {
+        Value::Product(fields) => fields.get(idx).cloned().ok_or_else(|| index_oob(idx, fields.len())),
+        Value::Bits(bytes) => bytes.get(idx).copied().map(|b| Value::bits(vec![b])).ok_or_else(|| index_oob(idx, bytes.len())),
+        other => Err(RuntimeError::TypeError {
+            expected: "an indexable value (list, tuple, or bits)".into(),
+            found: format!("{}", describe_value(&other)),
+        }),
+    }
+}
+
+/// A user-facing out-of-bounds index error (house style: what's wrong + fix).
+fn index_oob(index: usize, len: usize) -> RuntimeError {
+    RuntimeError::TypeError {
+        expected: format!("an index in 0..{}", len),
+        found: format!("index {} (length {})", index, len),
+    }
+}
+
+/// Short value description for error messages (not Debug — stay terse).
+fn describe_value(v: &Value) -> String {
+    match v {
+        Value::Atom(Atom::Int(n)) => format!("integer {}", n),
+        Value::Atom(Atom::Float(f)) => format!("float {}", f),
+        Value::Atom(Atom::Bool(b)) => format!("boolean {}", b),
+        Value::Atom(Atom::Char(c)) => format!("character '{}'", c),
+        Value::Bits(_) => "raw bits".into(),
+        Value::Product(_) => "product".into(),
+        Value::Void => "void".into(),
+        Value::Ref(_) => "reference".into(),
+        Value::Constructor(_, _) => "constructor".into(),
+        Value::List(_) => "list".into(),
     }
 }
 
@@ -733,6 +788,14 @@ mod tests {
         eval_expr(expr, &mut VirtualHeap::new(), &mut HashMap::new()).unwrap()
     }
 
+    /// Evaluate expecting an error — the error-testing twin of `eval1`.
+    fn eval1_err(expr: &Expr) -> String {
+        eval_expr(expr, &mut VirtualHeap::new(), &mut HashMap::new())
+            .err()
+            .unwrap_or_else(|| panic!("expected error for {expr:?}"))
+            .to_string()
+    }
+
     // 2026-08-01 (audit): #Char/#Bool are first-class values — literals
     // produce Value::Atom(Atom::Char)/Value::Atom(Atom::Bool), and casts convert across categories
     // (mirroring codegen, so Print# prints the same thing on both backends).
@@ -820,6 +883,73 @@ mod tests {
         );
         assert_eq!(eval1(&eq), Value::Atom(Atom::Bool(true)));
         assert!(eval1(&eq).is_true());
+    }
+
+    // 2026-08-06 (Slice B): unnamed products, indexing, and membership.
+
+    #[test]
+    fn test_tuple_evaluates_to_product() {
+        let t = Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]);
+        assert_eq!(
+            eval1(&t),
+            Value::Product(vec![Value::int(1), Value::int(2), Value::int(3)])
+        );
+    }
+
+    #[test]
+    fn test_list_evaluates_to_product() {
+        let l = Expr::List(vec![Expr::Bool(true), Expr::Decimal(7)]);
+        assert_eq!(
+            eval1(&l),
+            Value::Product(vec![Value::bool(true), Value::int(7)])
+        );
+    }
+
+    #[test]
+    fn test_index_product_element() {
+        let l = Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)]);
+        let idx = Expr::Index(Box::new(l), Box::new(Expr::Decimal(1)));
+        assert_eq!(eval1(&idx).as_i64(), Some(20));
+    }
+
+    #[test]
+    fn test_index_product_out_of_bounds_errors() {
+        let l = Expr::List(vec![Expr::Decimal(10)]);
+        let idx = Expr::Index(Box::new(l), Box::new(Expr::Decimal(5)));
+        let err = eval1_err(&idx);
+        assert!(err.contains("index"), "got: {err}");
+    }
+
+    #[test]
+    fn test_index_negative_errors() {
+        let l = Expr::List(vec![Expr::Decimal(10)]);
+        let idx = Expr::Index(Box::new(l), Box::new(Expr::Decimal(-1)));
+        assert!(eval1_err(&idx).contains("negative"));
+    }
+
+    #[test]
+    fn test_index_bits_byte() {
+        let s = Expr::Quoted(b"abc".to_vec());
+        let idx = Expr::Index(Box::new(s), Box::new(Expr::Decimal(1)));
+        assert_eq!(eval1(&idx), Value::bits(vec![b'b']));
+    }
+
+    #[test]
+    fn test_index_non_indexable_errors() {
+        let idx = Expr::Index(Box::new(Expr::Decimal(42)), Box::new(Expr::Decimal(0)));
+        assert!(eval1_err(&idx).contains("indexable"));
+    }
+
+    #[test]
+    fn test_is_type_int_atom_membership() {
+        let e = Expr::IsType(Box::new(Expr::Decimal(42)), Type::int());
+        assert_eq!(eval1(&e), Value::Atom(Atom::Bool(true)));
+    }
+
+    #[test]
+    fn test_is_type_float_atom_rejects_int_type() {
+        let e = Expr::IsType(Box::new(Expr::Float(1.5)), Type::int());
+        assert_eq!(eval1(&e), Value::Atom(Atom::Bool(false)));
     }
 
     #[test]

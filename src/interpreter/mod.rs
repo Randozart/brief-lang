@@ -185,19 +185,20 @@ impl Interpreter {
             }
             crate::ast::Pattern::EnumVariant(_, _) => false,
             crate::ast::Pattern::Tuple(patterns) => {
-                if let Value::List(items) = val {
-                    if items.len() != patterns.len() {
+                let items = match val {
+                    Value::Product(items) => items,
+                    Value::List(items) => items,
+                    _ => return false,
+                };
+                if items.len() != patterns.len() {
+                    return false;
+                }
+                for (pat, item) in patterns.iter().zip(items.iter()) {
+                    if !Self::pattern_match(pat, item, bindings) {
                         return false;
                     }
-                    for (pat, item) in patterns.iter().zip(items.iter()) {
-                        if !Self::pattern_match(pat, item, bindings) {
-                            return false;
-                        }
-                    }
-                    true
-                } else {
-                    false
                 }
+                true
             }
             crate::ast::Pattern::Range(_, _) => false,
         }
@@ -256,6 +257,11 @@ pub enum Atom {
 /// `Char` now live under `Atom`. `List` survives only for reactor state
 /// collections and is slated for replacement by a product in a later slice;
 /// `Constructor` is the derive (CEGIS) engine's synthesis shape.
+///
+/// 2026-08-06 (Slice B): `Product` added as the unnamed-product value
+/// (tuples, list literals, struct fields in declared order). SPEC §2.2 —
+/// stdlib list/map behavior is NOT interpreter knowledge; the interpreter
+/// holds the field sequence, stdlib owns the semantics.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// The sole representational storage cell for opaque program data.
@@ -265,6 +271,10 @@ pub enum Value {
     /// These allow the interpreter to distinguish int from float values
     /// when both would be valid as raw Bits(Vec<u8>).
     Atom(Atom),
+
+    /// An unnamed product: tuple/list-literal field sequence in declared
+    /// order. Named struct behavior stays at the typechecker/stdlib level.
+    Product(Vec<Value>),
 
     Void,
     Ref(Box<Value>),
