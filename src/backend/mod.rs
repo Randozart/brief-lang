@@ -69,6 +69,10 @@ pub struct AnalysisResults {
     // backend or plugin may consume it; the `accel` key gates the GPU
     // offload analysis (src/analysis/accel.rs).
     pub module_metadata: HashMap<String, crate::ast::PropertyValue>,
+    // 2026-08-06 (accel plan): per-txn GPU-deferral analysis (SPEC §9.7) —
+    // policy, eligibility proof, kernel shape, and decision. Computed once in
+    // the frontend, consumed by the LLVM backend as a deterministic switch.
+    pub accel: HashMap<String, crate::analysis::accel::AccelEntry>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -83,7 +87,12 @@ pub struct AnalysisResults {
 // 2026-07-31: Phase 3 (§8.1) — `min_width` is the target-config vector-phi
 // promotion gate (config/targets.dbvl `vector_min_width`), threaded into
 // loop-shape building.
-pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> AnalysisResults {
+pub fn analyze_program(
+    items: &[TopLevel],
+    optimize: bool,
+    min_width: usize,
+    type_universe: Option<&crate::type_universe::TypeUniverse>,
+) -> AnalysisResults {
     let transition_graph = crate::analysis::transition_graph::ReactorTransitionGraph::build(
         items, &None, &vec![],
     );
@@ -129,6 +138,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
     let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
     let observable_names = collect_observable_names(items);
     let module_metadata = collect_module_metadata(items);
+    let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -148,6 +158,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         global_lifetime,
         observable_names,
         module_metadata,
+        accel,
     }
 }
 

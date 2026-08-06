@@ -1724,6 +1724,10 @@ impl LlvmBackend {
             // 2026-07-31: Phase 3 (§8.1) — vector-phi promotion gate from
             // config/targets.dbvl `vector_min_width` for this target.
             crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
+            // 2026-08-06 (accel plan): the populated TypeUniverse for the
+            // flat-type proof in src/analysis/accel.rs (rule 18 — never name
+            // matching). Built by the normalizer before the backend runs.
+            self.ctx.type_universe.as_ref(),
         );
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
