@@ -579,21 +579,38 @@ cell Timer(period: Duration) -> tick: Event {
 ### 9.7 Acceleration (`accel`)
 
 **Staged.** `accel` is a keyword that may prefix a `node` or `txn` declaration.
-It marks the body as a *per-firing parallel map over work-items*: the
-declaration fires as one dispatch of N work-items, where N is bound by the
-contract precondition `[i < N]` and `i` is a virtual work-item index (never a
-state field). Each work-item runs the body once with its index.
+It marks a native counted loop as a *parallel map over work-items*: the work
+is expressed as an ordinary loop over a real counter, and the compiler may
+coalesce the loop into one GPU dispatch of N work-items.
+
+**Design A — the counter is a real state field, never virtual.** The program
+declares and initializes the work-item counter explicitly (`let i: Int = 0;`),
+bounds it with a counted-loop contract, and advances it in the body. No
+compiler-synthesized variables: everything the loop does is visible in source.
 
 ```briv
-accel node force [i < nbodies][true] {
+let i: Int = 0;                       // work-item counter, explicit init
+accel node force [i < nbodies][i == nbodies] {
+    dv[i] = force_on(i);              // per-work-item compute
+    i = i + 1;                        // native counted-loop advance
     term;
 };
 ```
 
-Cross-work-item data exchange is permitted only through host-sequenced
-separate `accel` declarations, never within a single firing. A firing's
-writes must be disjoint across work-items (each write targets a slot affine in
-`i` or a per-work-item local); shared reads are permitted.
+- The precondition `[i < N]` is the loop bound and the firing gate; the
+  postcondition `[i == N]` is the goal ("loop until true"). Both reference the
+  real counter — valid runtime checks, never an undefined variable.
+- The compiler **proves** the counted loop is a parallel map: `i` is the
+  counter (incremented in the body), every write targets a slot affine in `i`
+  (disjoint across work-items), shared reads are permitted, and value types are
+  flat. An unproven body is silently kept on the CPU path with a remark.
+
+**Dispatch.** On the GPU path, one dispatch of N work-items replaces the
+N-firing loop: the runtime launches the kernel (the work-item id is the
+counter value) and fast-forwards the counter to N so the loop's bound is met
+after a single firing. On the CPU path, the loop runs natively — each firing
+is one work-item. Cross-work-item data exchange is permitted only through
+host-sequenced separate `accel` declarations, never within a single firing.
 
 **Verification requirement.** In try modes, GPU deferral happens only when
 the compiler verifies a speedup. The compiler must prove eligibility (bound,

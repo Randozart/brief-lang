@@ -24,6 +24,12 @@ fn accel_kernel_program() -> Vec<TopLevel> {
         ty: Type::int(),
         span: None,
     });
+    // Design A: the work-item counter is a REAL state field.
+    let i_state = TopLevel::StateDecl(StateDecl {
+        name: "i".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
     let force = TopLevel::Transaction(Transaction {
         name: "force".to_string(),
         is_reactive: true,
@@ -49,6 +55,14 @@ fn accel_kernel_program() -> Vec<TopLevel> {
                 Expr::Identifier("i".to_string()),
             ),
             Statement::Assign(
+                Expr::Identifier("i".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Assign(
                 Expr::Identifier("count".to_string()),
                 Expr::BinaryOp(
                     BinaryOpKind::Add,
@@ -64,7 +78,7 @@ fn accel_kernel_program() -> Vec<TopLevel> {
         span: None,
         doc: None,
     });
-    vec![array_state, n_state, count_state, force]
+    vec![array_state, n_state, count_state, i_state, force]
 }
 
 #[test]
@@ -431,9 +445,14 @@ fn test_accel_descriptors_emit() {
 fn test_accel_wrapper_emits_dispatch() {
     // 2026-08-06 (accel plan): the reactor calls @txn_<name> by name; an accel
     // body's @txn_<name> is a dispatch wrapper (lazy init + gate → launch,
-    // else the CPU body @txn_<name>_cpu). Tested directly (llc-independent).
+    // else the CPU body @txn_<name>_cpu). The GPU lane fast-forwards the
+    // work-item counter to the bound, coalescing the counted loop into one
+    // dispatch (Design A). Tested directly (llc-independent).
     let mut backend = LlvmBackend::new();
     backend.accel_kernel_idx.insert("force".to_string(), 0);
+    backend.ctx.field_index_map.insert("i".to_string(), 0);
+    backend.ctx.field_types.push("i64".to_string());
+    backend.ctx.field_briv_types.push(Type::int());
     let entry = accel_test_entry("a", false); // Probe: verdict gate
     backend.accel_entries.insert("force".to_string(), entry);
     let mut out = String::new();
@@ -442,6 +461,9 @@ fn test_accel_wrapper_emits_dispatch() {
     assert!(out.contains("@briv_accel_init(ptr @briv_accel_descs, i32 1)"), "lazy init");
     assert!(out.contains("load i32, ptr @briv_accel_verdict"), "probe verdict gate");
     assert!(out.contains("call i32 @briv_accel_launch(i32 0, ptr %state, i64 16)"), "launch call: {out}");
+    // Design A: one dispatch covers all N work-items → fast-forward i to 16 so
+    // the `[i < N]` counted loop exits after this single firing.
+    assert!(out.contains("store i64 16, ptr %"), "counter fast-forward: {out}");
     assert!(out.contains("call void @txn_force_cpu(ptr %state)"), "cpu fallback");
 }
 

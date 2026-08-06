@@ -117,7 +117,7 @@ two mechanisms Briv already considers non-pragma:
 | D3 | Metadata scope | Top-level `!>` is **module-level only** (a shortcut to attach metadata to the script), not declaration-attached |
 | D4 | Candidate resolution | Two axes — *target* (all bodies vs `accel`-keyword bodies) and *mode* (try vs force). See §4.4 for the resolution matrix. Per-body `accel` keyword marks the body in every mode |
 | D5 | GPU target | SPIR-V kernel emission (one blob serves every SPIR-V consumer) + device-agnostic `briv_accel_rt` glue with a pluggable driver table (Vulkan + OpenCL static; see §7) |
-| D6 | Kernel model | Whole body = per-firing parallel map over work-items; contract `[i < N]` binds the virtual work-item index `i` |
+| D6 | Kernel model | Design A: the work-item counter is a REAL state field (`let i: Int = 0;` + `i = i + 1`). `accel` marks a native counted loop `[i < N][i == N]` as a parallel map; the compiler proves the map and coalesces the loop into one GPU dispatch (fast-forwarding the counter to N). No virtual variables |
 | D7 | Speedup verification | Runtime auto-tuning probe at program start, minimal overhead, when the decision is `Probe` (runtime N). `try` modes only — `force` skips the speedup gate |
 | D8 | Static decision | When N is compile-time-known and N ≥ crossover, decision is `Gpu` with no probe |
 | D9 | Failure behavior | `try` modes: silent CPU fallback + optimization remark, never a compile error. `force` mode (keyword-marked bodies): ineligible = compile error, unverified speedup still offloads (developer asserts), no device available at runtime = runtime error |
@@ -264,28 +264,31 @@ directory (no build lock).
 
 ### 4.1 `accel` keyword (per-body)
 
-**Syntax:**
+**Syntax (Design A — real counter, no virtual variables):**
 
 ```briv
-accel node step [i < nbodies][true] {
-    // per-work-item body: writes only slots indexed by i (or per-item locals)
+let i: Int = 0;                      // work-item counter, explicit init
+accel node force [i < nbodies][i == nbodies] {
+    dv[i] = ...;                     // per-work-item compute
+    i = i + 1;                       // native counted-loop advance
     term;
 };
-
-accel txn kernel [i < N][true] { ... };
 ```
 
 - `accel` is a prefix keyword on `node`/`txn`, parsed like `seq`
   (`definitions.rs:40-54`), producing `Annotation { name: "accel" }` on
   `txn.modifiers`.
-- **Semantics:** the body is a *per-firing parallel map over work-items*. The
-  node/txn fires as **one dispatch of N work-items**; `N` is bound by the
-  contract precondition `[i < N]`, where `i` is a **virtual work-item index**
-  (not a state field). Each work-item runs the body once with its index.
+- **Semantics:** the node is an ordinary counted loop over the counter `i`
+  (precondition `[i < N]` = bound + access gate; postcondition `[i == N]` =
+  goal, "loop until true"). The compiler PROVES it is a parallel map over
+  work-items — `i` is the counter (incremented in the body), every write
+  targets a slot affine in `i` (disjoint), reads may be shared, types are flat.
+- **Dispatch:** on the GPU path, one dispatch of N work-items replaces the
+  N-firing loop; the runtime launches the kernel (work-item id = counter) and
+  fast-forwards the counter to N so the loop bound is met after one firing. On
+  the CPU path the loop runs natively — each firing is one work-item.
 - Cross-work-item data exchange is only legal through host-sequenced separate
-  accel nodes (reactor firing order), never within one firing. The borrowing
-  rules already guarantee write-set disjointness is a compile-time property
-  (see `docs/architecture/gpu-model.md`).
+  accel nodes, never within one firing.
 - **Eligibility is a proof obligation.** If the proof fails, the body falls
   back to CPU with a remark. It is never a compile error on its own (D9).
 
@@ -394,9 +397,12 @@ existing pattern of `loop_shape.rs` / `swan_song.rs`.
 
 Proves, in order, for each candidate body:
 
-1. **Bound:** the contract precondition is a comparison `i < N` with `N` a
-   state scalar/constant. Extracts `i` as the virtual index and `N` as the
-   work-item count expression.
+1. **Bound (Design A):** the contract precondition is a comparison `i < N`
+   where `i` is a **real state counter** — declared (`let i: Int = 0;`),
+   incremented in the body, and never a compiler-synthesized variable. The
+   analysis verifies `i` is a state field and that the body advances it
+   (`i = i + 1`) so the loop terminates. Extracts `i` as the work-item index
+   and `N` as the work-item count expression.
 2. **Write disjointness:** every statement that writes state writes either
    (a) an array slot `a[i * stride + base]` where the index expression is
    affine in `i`, or (b) a per-work-item local (`let`/temp) that is never
@@ -493,7 +499,8 @@ define spir_kernel void @kernel_step(
     i64 %N)
 ```
 
-- The virtual index maps to `@_Z13get_global_idj` (SPIR-V `GlobalInvocationId`).
+- The work-item index (the real counter `i`) maps to
+  `@_Z13get_global_idj` (SPIR-V `GlobalInvocationId`).
 - Array reads become `getelementptr + load` on the buffer; array writes become
   `getelementptr + store`; scalars come from a read-only uniform buffer or are
   splatted constants.
@@ -672,14 +679,17 @@ let vx: Float[MAXB]; let vy: Float[MAXB]; let vz: Float[MAXB];
 let dvx: Float[MAXB]; let dvy: Float[MAXB]; let dvz: Float[MAXB];
 const m: Float[MAXB];  // constant masses
 
-// per-firing parallel kernel: forces → dv[i]
-accel node force [i < nbodies][true] {
+// per-work-item force kernel — a native counted loop (Design A)
+let i: Int = 0;
+accel node force [i < nbodies][i == nbodies] {
     // O(N²) accumulation; reads all px/py/pz/m, writes dv[i] only
+    i = i + 1;
     term;
 };
 
-// per-firing parallel kernel: integrate → px/py/pz/vx/vy/vz[i]
-accel node integrate [i < nbodies][true] {
+// per-work-item integrate kernel
+accel node integrate [i < nbodies][i == nbodies] {
+    i = i + 1;
     term;
 };
 
@@ -692,8 +702,10 @@ node step [count < bound][count == bound] {
 ```
 
 Reactor order `force → integrate` per step (host-sequenced), `step` fires
-`bound` times. `BODYCOUNT` runtime exercises the `Probe` path; the
-auto-tuner compares CPU vs GPU per firing and commits.
+`bound` times. On the GPU path each step's force/integrate counted loops
+coalesce into one dispatch of `nbodies` work-items (counter fast-forwarded).
+`BODYCOUNT` runtime exercises the `Probe` path; the auto-tuner compares CPU vs
+GPU per firing and commits.
 
 ### 9.2 C reference
 
@@ -833,12 +845,14 @@ Each phase ends in a commit with green tests.
 
 ## 15. Open Items
 
-- **Reactor semantics of the accel node's `[i < N]` precondition** (found in
-  Phase 6b, BUGS.md): the precompute/reactor folds an accel node with a virtual
-  work-item index to an empty `reactor_tick`, eliminating host observables. The
-  reactor must treat the accel node as a ONE-SHOT work-item dispatch (the bound
-  is the GPU work-item count, not a firing count) rather than a
-  loop-while-precondition. Blocks the nbody `_accel` benchmark.
+- **Sync-group with mismatched member firing schedules blocks** (found in
+  Design A validation, BUGS.md): a `sync<group>` whose members fire different
+  numbers of times emits an empty `reactor_tick`. Pre-existing, independent of
+  accel. Phase 8 must structure the nbody group so members fire in lockstep
+  (or use `async` + a sequenced reset).
+- **Precompute fold evaluates Float-array indexed observables as 0**
+  (BUGS.md): pre-existing; affects plain and accel identically. Fold model
+  does not track Float array writes into the observable's value.
 - Whether `N` for nbody derives from the `[i < nbodies]` precondition or from
   `GetGlobalSize#` — resolved in Phase 4 against `parse_contract` capabilities.
 - Per-body in-body opt-out `!> accel: off;` (D13) — deferred.

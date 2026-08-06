@@ -187,6 +187,49 @@ fn is_flat_scalar(universe: &TypeUniverse, ty: &Type) -> bool {
     }
 }
 
+/// True when the body increments `var` by a positive delta (`var = var + d`,
+/// `var = var - d` decreasing). The accel node is a native counted loop — the
+/// counter must advance so the loop terminates and the map is well-defined.
+fn body_increments_counter(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        if let Statement::Assign(lhs, rhs) = stmt {
+            if let Expr::Identifier(n) = lhs {
+                if n == var && is_self_increment(rhs, var) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// `var = var ± delta` with a positive literal delta — the counted-loop
+/// advance (Design A: `i = i + 1`).
+fn is_self_increment(rhs: &Expr, var: &str) -> bool {
+    match rhs {
+        Expr::BinaryOp(BinaryOpKind::Add, a, b) => {
+            (matches!(a.as_ref(), Expr::Identifier(v) if v == var)
+                && const_delta(b).map_or(false, |d| d > 0))
+                || (matches!(b.as_ref(), Expr::Identifier(v) if v == var)
+                    && const_delta(a).map_or(false, |d| d > 0))
+        }
+        Expr::BinaryOp(BinaryOpKind::Sub, a, b) => {
+            matches!(a.as_ref(), Expr::Identifier(v) if v == var)
+                && const_delta(b).map_or(false, |d| d > 0)
+        }
+        _ => false,
+    }
+}
+
+/// Constant integer value of an expression, if it is a literal.
+fn const_delta(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Decimal(n) => Some(*n),
+        Expr::Char(c) => Some(*c as i64),
+        _ => None,
+    }
+}
+
 /// True when `expr` mentions `var` anywhere (used to require array-write
 /// indices to depend on the work-item index).
 fn expr_contains(expr: &Expr, var: &str) -> bool {
@@ -383,7 +426,9 @@ fn prove_kernel(
         reasons: Vec::new(),
     };
 
-    // 1. Bound: the contract precondition must be `[i < N]`.
+    // 1. Bound: the contract precondition must be `[i < N]` where `i` is a
+    //    REAL state counter that the body increments (Design A — no virtual
+    //    variables; the user declares `let i: Int = 0;` and writes `i = i + 1`).
     let (index_var, count_expr) = match &contract.pre_condition {
         Expr::BinaryOp(BinaryOpKind::Lt, left, right)
             if matches!(left.as_ref(), Expr::Identifier(_)) =>
@@ -396,13 +441,29 @@ fn prove_kernel(
         }
         _ => {
             reasons.push(format!(
-                "accel '{}' requires a work-item bound precondition '[i < N]'",
+                "accel '{}' requires a work-item bound precondition '[i < N]' over a real counter 'i'",
                 name
             ));
             shape.reasons = reasons;
             return shape;
         }
     };
+    if !info.state_fields.contains(&index_var) {
+        reasons.push(format!(
+            "accel '{}' bound variable '{}' is not a state counter — declare 'let {}: Int = 0;' and increment it in the body",
+            name, index_var, index_var
+        ));
+        shape.reasons = reasons;
+        return shape;
+    }
+    if !body_increments_counter(body, &index_var) {
+        reasons.push(format!(
+            "accel '{}' bound counter '{}' is never incremented ('{} = {} + 1') — the node would not terminate",
+            name, index_var, index_var, index_var
+        ));
+        shape.reasons = reasons;
+        return shape;
+    }
     shape.index_var = index_var.clone();
     shape.count_expr = count_expr;
 
@@ -427,8 +488,10 @@ fn prove_kernel(
     }
 
     // 3. Buffer contracts: array reads (shared) + array writes (disjoint) +
-    //    read-only scalars. Rejected types are collected for flatness.
-    let (reads, writes, scalars) = collect_buffers(&shape.kernel_stmts, info);
+    //    read-only scalars. The counter `i` is the work-item id in the kernel
+    //    (bound to get_global_id), never a device input — exclude it.
+    let (reads, writes, mut scalars) = collect_buffers(&shape.kernel_stmts, info);
+    scalars.retain(|s| s != &index_var);
     shape.read_buffers = reads;
     shape.write_buffers = writes;
     shape.scalar_ins = scalars;
@@ -666,6 +729,31 @@ mod tests {
             ty: Type::int(),
             span: None,
         }));
+        // Design A: the work-item counter is a REAL state field, declared 0
+        // and incremented in the body.
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "i".into(),
+            ty: Type::int(),
+            span: None,
+        }));
+    }
+
+    /// `i = i + 1` — the counter advance of the native counted loop.
+    fn inc_i() -> Statement {
+        Statement::Assign(
+            Expr::Identifier("i".into()),
+            Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("i".into())),
+                Box::new(Expr::Decimal(1)),
+            ),
+        )
+    }
+
+    /// Append the counter advance to a kernel body.
+    fn with_inc(mut stmts: Vec<Statement>) -> Vec<Statement> {
+        stmts.push(inc_i());
+        stmts
     }
 
     fn universe() -> TypeUniverse {
@@ -705,10 +793,13 @@ mod tests {
     fn bound_requires_lt_precondition() {
         let mut items = vec![];
         state(&mut items);
-        let body = vec![Statement::Assign(
-            Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+        let body = vec![
+            Statement::Assign(
+                Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         items.push(txn_with("ok", pre_lt("i", Expr::Identifier("nb".into())), body.clone()));
         // Non-`[i < N]` precondition → ineligible.
         items.push(txn_with("bad", Expr::Bool(true), body));
@@ -716,6 +807,47 @@ mod tests {
         assert!(entry(&map, "ok").shape.eligible);
         assert!(!entry(&map, "bad").shape.eligible);
         assert!(entry(&map, "bad").shape.reasons.iter().any(|r| r.contains("[i < N]")));
+    }
+
+    #[test]
+    fn counter_must_be_a_state_field() {
+        // Design A: the bound variable is a REAL state counter (let i: Int = 0),
+        // never a virtual index.
+        let mut items = vec![];
+        state(&mut items);
+        // Use `k` (not declared) as the bound var → ineligible.
+        let body = vec![
+            Statement::Assign(
+                Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("k".into()))),
+                Expr::Decimal(1),
+            ),
+            Statement::Assign(
+                Expr::Identifier("k".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("k".into())), Box::new(Expr::Decimal(1))),
+            ),
+        ];
+        items.push(txn_with("t", pre_lt("k", Expr::Identifier("nb".into())), body));
+        let map = analyze(&items, &HashMap::new(), Some(&universe()));
+        let e = entry(&map, "t");
+        assert!(!e.shape.eligible, "undeclared counter must be rejected");
+        assert!(e.shape.reasons.iter().any(|r| r.contains("not a state counter")));
+    }
+
+    #[test]
+    fn counter_must_increment_in_body() {
+        // Design A: the counter must advance (`i = i + 1`) — a `[i < N]` bound
+        // over a never-incremented counter would never terminate.
+        let mut items = vec![];
+        state(&mut items);
+        let body = vec![Statement::Assign(
+            Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
+            Expr::Decimal(1),
+        )];
+        items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body));
+        let map = analyze(&items, &HashMap::new(), Some(&universe()));
+        let e = entry(&map, "t");
+        assert!(!e.shape.eligible, "never-incremented counter must be rejected");
+        assert!(e.shape.reasons.iter().any(|r| r.contains("never incremented")));
     }
 
     // ── eligibility: write disjointness ───────────────────────────
@@ -726,18 +858,24 @@ mod tests {
         state(&mut items);
         let ok_body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         // a[0] — constant slot written by every work-item → cross-work-item.
         let cross_body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Decimal(0))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         // a[j] with free j → not affine in i → cross-work-item.
         let free_j = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("j".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         let pre = pre_lt("i", Expr::Identifier("nb".into()));
         items.push(txn_with("affine", pre.clone(), ok_body));
         items.push(txn_with("const_slot", pre.clone(), cross_body));
@@ -758,6 +896,7 @@ mod tests {
                 Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
                 Expr::Decimal(1),
             ),
+            inc_i(),
             Statement::Assign(
                 Expr::Identifier("nb".into()),
                 Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("nb".into())), Box::new(Expr::Decimal(1))),
@@ -768,7 +907,7 @@ mod tests {
         let e = entry(&map, "t");
         assert!(e.shape.eligible);
         assert_eq!(e.shape.kernel_stmts.len(), 1);
-        assert_eq!(e.shape.host_stmts.len(), 1);
+        assert_eq!(e.shape.host_stmts.len(), 2, "i = i + 1 and nb = nb + 1 are host");
     }
 
     // ── eligibility: purity ───────────────────────────────────────
@@ -781,7 +920,7 @@ mod tests {
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
             Expr::Call("println!".into(), vec![Expr::Decimal(1)], None),
         )];
-        items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body));
+        items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), with_inc(body)));
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
         assert!(!entry(&map, "t").shape.eligible);
         assert!(entry(&map, "t").shape.reasons.iter().any(|r| r.contains("no offloadable statements")));
@@ -803,7 +942,7 @@ mod tests {
             Expr::Index(Box::new(Expr::Identifier("ss".into())), Box::new(Expr::Identifier("i".into()))),
             Expr::Identifier("x".into()),
         )];
-        items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body));
+        items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), with_inc(body)));
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
         let e = entry(&map, "t");
         assert!(!e.shape.eligible);
@@ -818,8 +957,10 @@ mod tests {
         state(&mut items);
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         // `[i < nb]` with nb a runtime state scalar → Probe (try mode).
         items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body));
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
@@ -839,8 +980,10 @@ mod tests {
         }));
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         items.push(txn_with("t", pre_lt("i", Expr::Identifier("N".into())), body));
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
         // N=4 below the PCIe crossover → CPU.
@@ -856,8 +999,10 @@ mod tests {
         // …but the body is accel-keyword-marked and the policy is force → Gpu.
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         items.push(txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body));
         let mut meta = HashMap::new();
         meta.insert("accel".into(), PropertyValue::Identifier("force".into()));
@@ -873,8 +1018,10 @@ mod tests {
         state(&mut items);
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         // No accel modifier on the txn itself.
         let mut t = match txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body) {
             TopLevel::Transaction(t) => t,
@@ -895,8 +1042,10 @@ mod tests {
         state(&mut items);
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
-            Expr::Decimal(1),
-        )];
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
         let mut t = match txn_with("t", pre_lt("i", Expr::Identifier("nb".into())), body) {
             TopLevel::Transaction(t) => t,
             _ => unreachable!(),

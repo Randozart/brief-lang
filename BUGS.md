@@ -1,27 +1,54 @@
 # Bugs
 
-## Accel Node With Virtual Work-Item Index Folds the Reactor to Nothing — OPEN
+## Sync Group Blocks When Members Have Unequal Firing Schedules — OPEN (pre-existing)
 
 **Date:** 2026-08-06
-**Status:** Open
-**Root cause:** An `accel` node's `[i < N]` precondition binds a *virtual*
-work-item index `i` (SPEC §9.7) — the node fires as ONE dispatch of N
-work-items, NOT as a loop-while-precondition over a state counter. The reactor
-analysis / precompute (EmitPureCounterFold) does not know this: it tries to
-model the `[i < N]` firing over an unbound `i`, and the whole program
-(including an independent `step` node's `println!` observable) folds to an
-empty `reactor_tick` — the observable is eliminated.
-**Impact:** A program with an `accel` node compiles and links (the 6b dispatch
-infrastructure is intact) but the reactor folds it to dead code. Blocks the
-nbody `_accel` benchmark until fixed.
-**Repro:** `accel_smoke.bv` (worktree): `sync<step> accel node force [i < n]`
-+ `sync<step> node step` printing `a[3]`; run prints nothing, `reactor_tick`
-is `ret void`.
-**Fix (planned):** The reactor/precompute must recognize accel nodes: skip the
-loop-while-`[i < N]` interpretation (the bound is the GPU work-item count, not
-a firing count), fire the node once per group activation, and keep host
-observables live. Verify `AnalysisResults.accel` during precompute eligibility.
-**Undo:** none (correctness of the accel firing model).
+**Status:** Open (pre-existing; found while validating Design A)
+**Root cause:** A `sync<group>` whose members have different firing counts
+(e.g. `force [i < n]` fires n times, `step [count < 1]` fires once) emits an
+empty `reactor_tick` — the group barrier holds members until "all fired
+members have finished," and the mismatched schedules never align. Reproduced
+with a NON-accel plain program, so it is independent of accel.
+**Impact:** Blocks the nbody `_accel` structure if force/integrate + step are
+grouped with mismatched firing counts. Phase 8 must structure the group so
+members fire in lockstep (or use `async` + a sequenced reset).
+**Repro:** two `sync<step>` nodes `[i < n]` (n fires) + `[count < 1]` (1 fire);
+run prints nothing, `reactor_tick` is `ret void`.
+**Fix (planned):** investigate the sync-group dispatch readiness/barrier for
+mismatched member schedules (Phase 8).
+
+## Precompute Fold Evaluates Float-Array Indexed Observables as 0 — OPEN (pre-existing)
+
+**Date:** 2026-08-06
+**Status:** Open (pre-existing; found while validating Design A)
+**Root cause:** a foldable single bounded-counter node writing a `Float[]`
+array and printing `a[i]` from a `when` guard prints `0` — the
+`collect_final_values` i64-binding model does not model Float array writes, so
+the folded observable reads the unwritten value. Affects accel and plain
+programs identically (IR is byte-identical).
+**Impact:** Cosmetic for accel (the GPU path is runtime); would mislead a
+folded benchmark.
+**Fix (planned):** extend the fold's final-value model to array-indexed
+observables, or keep such observables out of the fold.
+
+## Accel Node Folds the Reactor to Nothing — RESOLVED BY DESIGN (Design A)
+
+**Date:** 2026-08-06
+**Status:** Resolved (2026-08-06, Design A)
+**Root cause:** The old "virtual work-item index" model bound `i` only via the
+contract; the runtime precondition machinery (`@pre_<name>`,
+`emit_precondition_check`) emitted `i < N` against the undefined `i`, letting
+LLVM dead-code-eliminate the whole dispatch → empty `reactor_tick`, host
+observables eliminated.
+**Fix (applied):** Design A — the work-item counter is a REAL state field
+(`let i: Int = 0;` + `i = i + 1` in the body). `i` is a genuine counted loop
+(`[i < N][i == N]`); every reference is valid IR; the accel analysis PROVES the
+loop is a parallel map (disjoint affine writes, counter increments). The GPU
+path coalesces the counted loop into one dispatch: the wrapper launches N
+work-items and fast-forwards the counter to N so the loop exits after one
+firing. Verified: accel IR is byte-identical to the plain node's (no
+regression), 14 accel unit tests + wrapper fast-forward test green.
+**Undo:** none — the virtual-index model is superseded.
 
 ## Runtime `lib/runtime/briv_rt.c` Is Untracked — OPEN (rename/gitignore artifact)
 

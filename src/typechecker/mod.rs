@@ -2136,20 +2136,6 @@ fn cross_op_fn_name(impl_args: &Option<PropertyValue>) -> Option<String> {
     }
 }
 
-/// 2026-08-06 (accel plan): bind the virtual work-item index of an `accel`
-/// body as an Int local. The `[i < N]` precondition names `i`, which is not a
-/// state field — it is the per-firing work-item id (SPEC §9.7).
-fn bind_accel_work_item_index(txn: &crate::ast::Transaction, ctx: &mut TypecheckContext) {
-    if !txn.modifiers.iter().any(|m| m.name == "accel") {
-        return;
-    }
-    if let Expr::BinaryOp(BinaryOpKind::Lt, left, _) = &txn.contract.pre_condition {
-        if let Expr::Identifier(v) = left.as_ref() {
-            ctx.bindings.insert(v.clone(), Type::int());
-        }
-    }
-}
-
 fn check_top_level(
     item: &TopLevel,
     universe: &TypeUniverse,
@@ -2224,9 +2210,6 @@ fn check_top_level(
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
             }
-            // 2026-08-06 (accel plan): an `accel` body's `[i < N]` precondition
-            // binds the virtual work-item index `i` as an Int local (SPEC §9.7).
-            bind_accel_work_item_index(txn, &mut ctx);
             ctx.current_output_type = txn.output_type.as_ref().map(output_type_to_type);
             for stmt in &txn.body {
                 infer_statement(stmt, &mut ctx)?;

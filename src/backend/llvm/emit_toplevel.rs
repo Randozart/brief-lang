@@ -2318,6 +2318,16 @@ impl LlvmBackend {
         writeln!(out, "accel_gpu:").ok();
         let work = self.emit_work_item_count(out, name);
         writeln!(out, "  %r = call i32 @briv_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
+        // 2026-08-06 (Design A): the accel node is a NATIVE counted loop over
+        // the counter (`[i < N]`, `i = i + 1`). One GPU dispatch covers all N
+        // work-items, so fast-forward the counter to N — the loop's `i < N`
+        // exit is then satisfied after this single firing, coalescing the
+        // N-firing loop into one dispatch without touching loop emission.
+        let counter_var = self.accel_entries[name].shape.index_var.clone();
+        if let Some(&cfidx) = self.ctx.field_index_map.get(&counter_var) {
+            let gp = self.emit_state_gep(out, "  ", "ff", "%state", cfidx);
+            writeln!(out, "  store i64 {}, ptr {}, align 8", work, gp).ok();
+        }
         writeln!(out, "  ret void").ok();
         writeln!(out, "accel_cpu:").ok();
         writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
