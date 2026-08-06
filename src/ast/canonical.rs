@@ -254,6 +254,15 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             indent(out, level);
             let _ = write!(out, "link \"{}\";", l.path);
         }
+        TopLevel::ModuleMetadata(meta) => {
+            // Deterministic output: sort keys (HashMap iteration order varies).
+            let mut keys: Vec<&String> = meta.keys().collect();
+            keys.sort();
+            for key in keys {
+                indent(out, level);
+                let _ = write!(out, "!> {}: {};", key, meta[key]);
+            }
+        }
         TopLevel::ResourceDecl(_)
         | TopLevel::ForeignBinding(_)
         | TopLevel::Codec(_)
@@ -648,6 +657,10 @@ mod tests {
         "defn looped(items: List<Int>) -> Int [true][true] {\n  let acc: Int = 0;\n  foreach(item in items) {\n    acc = acc + item;\n  };\n  term acc;\n};\n",
         "defn lifetime(x: Int) -> Int [true][true] {\n  let buf: Ptr<Int> = Malloc#(4);\n  keep buf;\n  term x;\n};\n",
         "defn watchdog(a: Int) -> Int [a >= 0][a >= 0] ?[progress] within 10ms {\n  term a;\n};\n",
+        // 2026-08-06 (accel plan): module-level `!>` metadata round-trips.
+        "!> accel: TRY_ALL;\n",
+        "!> accel: OFF;\n!> target: spirv;\n",
+        "!> flags: [fast, contract];\n",
     ];
 
     #[test]

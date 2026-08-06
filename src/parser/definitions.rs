@@ -144,6 +144,21 @@ impl<'a> Parser<'a> {
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
+            // 2026-08-06 (accel plan): top-level `!> key: value;` module
+            // metadata (SPEC §8.9). Multiple consecutive bindings merge into
+            // one ModuleMetadata node; last binding wins per key.
+            Some(Token::ExclaimArrow) => {
+                let mut map = std::collections::HashMap::new();
+                while self.check(&Token::ExclaimArrow) {
+                    self.pos += 1; // consume '!>'
+                    let key = self.parse_metadata_key()?;
+                    self.expect(Token::Colon)?;
+                    let val = self.parse_metadata_value()?;
+                    self.expect(Token::Semicolon)?;
+                    map.insert(key, val);
+                }
+                Ok(TopLevel::ModuleMetadata(map))
+            }
             // 2026-07-14: Handle `type Name : Parent { slots }` definitions
             // 2026-07-16: P2 — Check for extension group Type.[a,b,c] before single type
             Some(Token::Type) => self.parse_type_or_group().map(TopLevel::TypeDef),
@@ -3073,6 +3088,77 @@ mod tests {
         let err = p.parse_top_level().unwrap_err();
         assert!(err.to_string().contains("'node' or 'txn'"),
             "expected helpful diagnostic, got: {err}");
+    }
+
+    #[test]
+    fn test_top_level_module_metadata_parses() {
+        // 2026-08-06 (accel plan): top-level `!> key: value;` becomes
+        // TopLevel::ModuleMetadata (SPEC §8.9).
+        let src = "!> accel: TRY_ALL;";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        match item {
+            crate::ast::TopLevel::ModuleMetadata(map) => {
+                assert_eq!(map.len(), 1, "expected one metadata key");
+                assert!(matches!(map.get("accel"),
+                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "TRY_ALL"));
+            }
+            other => panic!("expected ModuleMetadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_top_level_module_metadata_merges_last_wins() {
+        // 2026-08-06 (accel plan): consecutive top-level `!>` lines merge
+        // into one ModuleMetadata node; last binding wins per key.
+        let src = "!> accel: TRY_ALL;\n!> accel: OFF;\n!> target: spirv;";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        match item {
+            crate::ast::TopLevel::ModuleMetadata(map) => {
+                assert_eq!(map.len(), 2, "expected two merged keys, got {map:?}");
+                assert!(matches!(map.get("accel"),
+                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "OFF"),
+                    "last binding must win, got {map:?}");
+                assert!(matches!(map.get("target"),
+                    Some(crate::ast::PropertyValue::Identifier(s)) if s == "spirv"));
+            }
+            other => panic!("expected ModuleMetadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_module_metadata_then_node_parses_both() {
+        // 2026-08-06 (accel plan): module metadata and following declarations
+        // parse as separate top-level items.
+        let src = "!> accel: TRY_ALL;\nnode work [true][done] { done = true; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        assert_eq!(items.len(), 2, "expected ModuleMetadata + node, got {items:?}");
+        assert!(matches!(items[0], crate::ast::TopLevel::ModuleMetadata(_)));
+        assert!(matches!(items[1], crate::ast::TopLevel::Transaction(_)));
+    }
+
+    #[test]
+    fn test_module_metadata_value_grammar() {
+        // 2026-08-06 (accel plan): module metadata accepts the full value
+        // grammar (identifier/int/bool/string/list).
+        let src = "!> a: 7;\n!> b: true;\n!> c: \"hi\";\n!> d: [1, two];";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        match item {
+            crate::ast::TopLevel::ModuleMetadata(map) => {
+                assert!(matches!(map.get("a"), Some(crate::ast::PropertyValue::Int(7))));
+                assert!(matches!(map.get("b"), Some(crate::ast::PropertyValue::Bool(true))));
+                assert!(matches!(map.get("c"), Some(crate::ast::PropertyValue::String(s)) if s == "hi"));
+                assert!(matches!(map.get("d"), Some(crate::ast::PropertyValue::List(_))));
+            }
+            other => panic!("expected ModuleMetadata, got {other:?}"),
+        }
     }
 
     #[test]

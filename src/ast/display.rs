@@ -129,6 +129,35 @@ impl fmt::Display for Expr {
     }
 }
 
+/// Round-trippable rendering of `!>` metadata values (inverse of
+/// `Parser::parse_metadata_value`): identifiers are bare, strings quoted,
+/// lists bracketed. Used by the canonical formatter for module-level `!>` and
+/// by statement metadata display.
+impl fmt::Display for PropertyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PropertyValue::Int(n) => write!(f, "{}", n),
+            PropertyValue::Float(n) => write!(f, "{}", n),
+            PropertyValue::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
+            PropertyValue::String(s) => write!(f, "\"{}\"", s),
+            PropertyValue::Identifier(s) => write!(f, "{}", s),
+            PropertyValue::List(items) => {
+                write!(f, "[")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "]")
+            }
+            PropertyValue::HashL => write!(f, "#L"),
+            PropertyValue::HashR => write!(f, "#R"),
+            PropertyValue::HashT => write!(f, "#T"),
+        }
+    }
+}
+
 impl fmt::Display for BinaryOpKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -320,7 +349,7 @@ impl fmt::Display for Statement {
                 write!(f, "}}")
             }
             Statement::MetadataAssignment(key, val) => {
-                write!(f, "!> {}: {:?};", key, val)
+                write!(f, "!> {}: {};", key, val)
             }
             Statement::Rollback(val) => {
                 if let Some(val) = val {

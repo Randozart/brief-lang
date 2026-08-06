@@ -64,6 +64,11 @@ pub struct AnalysisResults {
     // stdlib-side twin of the intrinsic `observable: true` flag. Direct-only:
     // a pure function calling an `out` function is not itself pinned.
     pub observable_names: std::collections::HashSet<String>,
+    // 2026-08-06 (accel plan): module-level `!>` metadata (SPEC §8.9) merged
+    // from TopLevel::ModuleMetadata nodes, last binding wins per key. Any
+    // backend or plugin may consume it; the `accel` key gates the GPU
+    // offload analysis (src/analysis/accel.rs).
+    pub module_metadata: HashMap<String, crate::ast::PropertyValue>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -123,6 +128,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
     let node_order: Vec<String> = transition_graph.nodes.iter().map(|n| n.name.clone()).collect();
     let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
     let observable_names = collect_observable_names(items);
+    let module_metadata = collect_module_metadata(items);
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -141,7 +147,23 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         batch_shape,
         global_lifetime,
         observable_names,
+        module_metadata,
     }
+}
+
+/// 2026-08-06 (accel plan): merge `TopLevel::ModuleMetadata` nodes into one
+/// module map (SPEC §8.9). Last binding wins per key, matching the parser's
+/// merge semantics across consecutive top-level `!>` lines.
+fn collect_module_metadata(
+    items: &[TopLevel],
+) -> HashMap<String, crate::ast::PropertyValue> {
+    let mut out = HashMap::new();
+    for item in items {
+        if let TopLevel::ModuleMetadata(map) = item {
+            out.extend(map.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+    }
+    out
 }
 
 /// 2026-08-04 (out-observability plan): collect the liveness-root names —
@@ -953,5 +975,28 @@ mod tests {
         assert!(ids.contains(&"x".to_string()));
         assert!(ids.contains(&"y".to_string()));
         assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_module_metadata_merges_nodes() {
+        // 2026-08-06 (accel plan): analyze_program surfaces module-level
+        // `!>` metadata; multiple ModuleMetadata nodes merge, last wins.
+        use crate::ast::PropertyValue;
+        let mut m1 = std::collections::HashMap::new();
+        m1.insert("accel".to_string(), PropertyValue::Identifier("TRY_ALL".into()));
+        let mut m2 = std::collections::HashMap::new();
+        m2.insert("accel".to_string(), PropertyValue::Identifier("OFF".into()));
+        m2.insert("target".to_string(), PropertyValue::Identifier("spirv".into()));
+        let items = vec![
+            TopLevel::ModuleMetadata(m1),
+            TopLevel::ModuleMetadata(m2),
+        ];
+        let merged = collect_module_metadata(&items);
+        assert_eq!(merged.len(), 2);
+        assert!(matches!(merged.get("accel"),
+            Some(PropertyValue::Identifier(s)) if s == "OFF"),
+            "last ModuleMetadata node must win");
+        assert!(matches!(merged.get("target"),
+            Some(PropertyValue::Identifier(s)) if s == "spirv"));
     }
 }

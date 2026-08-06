@@ -17,7 +17,7 @@ impl<'a> Parser<'a> {
         while self.check(&Token::ExclaimArrow) || self.check_identifier_prefix("#") {
             let key = if self.eat(&Token::ExclaimArrow) {
                 // !> key: value; — inline metadata
-                let key = self.expect_identifier()?;
+                let key = self.parse_metadata_key()?;
                 self.expect(Token::Colon)?;
                 self.parse_metadata_value().map(|val| (key, val))?
             } else {
@@ -32,8 +32,32 @@ impl<'a> Parser<'a> {
         Ok(metadata)
     }
 
+    /// Parse a metadata key. Accepts plain identifiers and keyword tokens
+    /// (e.g. `!> accel: TRY_ALL;` — `accel` is a keyword). The keyword's
+    /// spelling comes from `Token::Display`, so the emitted key matches the
+    /// source spelling.
+    pub(crate) fn parse_metadata_key(&mut self) -> Result<String, SyntaxError> {
+        match self.peek() {
+            Some(Token::Identifier(s)) => {
+                let s = s.clone();
+                self.pos += 1;
+                Ok(s)
+            }
+            Some(t) => {
+                let s = t.to_string();
+                if !s.is_empty() && s.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) {
+                    self.pos += 1;
+                    Ok(s)
+                } else {
+                    self.error_at_current("expected metadata key (identifier or keyword)")
+                }
+            }
+            None => self.error_at_current("expected metadata key (identifier or keyword)"),
+        }
+    }
+
     /// Parse a single metadata value after `<~`.
-    fn parse_metadata_value(&mut self) -> Result<PropertyValue, SyntaxError> {
+    pub(crate) fn parse_metadata_value(&mut self) -> Result<PropertyValue, SyntaxError> {
         match self.peek() {
             Some(Token::Identifier(s)) => {
                 // formatting <~ Quoted — identifier value
