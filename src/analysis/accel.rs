@@ -187,6 +187,26 @@ fn is_flat_scalar(universe: &TypeUniverse, ty: &Type) -> bool {
     }
 }
 
+/// Remove `Expr::BeginProgram` conjuncts from a precondition, returning the
+/// remaining state expression (or `[true]` if only the marker is present).
+/// An `accel` entry-loop (`[beginprogram && i < N]`) reads its bound from the
+/// stripped form.
+fn strip_beginprogram(pre: &Expr) -> Expr {
+    match pre {
+        Expr::BeginProgram => Expr::Bool(true),
+        Expr::BinaryOp(BinaryOpKind::And, a, b) => {
+            let a = strip_beginprogram(a);
+            let b = strip_beginprogram(b);
+            match (a, b) {
+                (Expr::Bool(true), b) => b,
+                (a, Expr::Bool(true)) => a,
+                (a, b) => Expr::BinaryOp(BinaryOpKind::And, Box::new(a), Box::new(b)),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
 /// True when the body increments `var` by a positive delta (`var = var + d`,
 /// `var = var - d` decreasing). The accel node is a native counted loop — the
 /// counter must advance so the loop terminates and the map is well-defined.
@@ -429,7 +449,9 @@ fn prove_kernel(
     // 1. Bound: the contract precondition must be `[i < N]` where `i` is a
     //    REAL state counter that the body increments (Design A — no virtual
     //    variables; the user declares `let i: Int = 0;` and writes `i = i + 1`).
-    let (index_var, count_expr) = match &contract.pre_condition {
+    //    A `beginprogram` entry marker (`[beginprogram && i < N]`) is stripped
+    //    before the bound is read.
+    let (index_var, count_expr) = match strip_beginprogram(&contract.pre_condition) {
         Expr::BinaryOp(BinaryOpKind::Lt, left, right)
             if matches!(left.as_ref(), Expr::Identifier(_)) =>
         {

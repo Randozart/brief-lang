@@ -32,8 +32,12 @@ let i: Int = 0;
 let count: Int = 0;
 let phase: Int = 0;   // 0 = init, 1 = step, 2 = step-complete, 3 = done
 
-// init_bodies: one parallel pass seeding positions/velocities.
-async accel node init_bodies [phase == 0 && i < nb][true] {
+// init_bodies: the program entry (beginprogram marker) — one parallel pass
+// seeding positions/velocities. The `[i == nb]` goal is provably reachable
+// (i++); the `phase == 0` gate keeps the init from re-firing during the step
+// phase (the backend entry-loop — beginprogram true only until the goal, pre
+// not re-checked — is the documented follow-up).
+async accel node init_bodies [beginprogram && phase == 0 && i < nb][i == nb] {
     px[i] = i as Float * 0.1 + 0.5;
     py[i] = i as Float * 0.05 + 0.3;
     pz[i] = 0.0;

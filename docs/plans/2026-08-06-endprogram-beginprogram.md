@@ -278,3 +278,14 @@ node entry1 [beginprogram && startingnumber == 1][done] {
 - `endprogram` inside an accel body's host statements (the GPU wrapper skips
   host statements — a pre-existing gap; the exit would run on the CPU path
   only).
+- **Backend entry-loop semantics (the core beginprogram gap).** The keyword,
+  typechecker proofs (goal reachability + entry conflict), and the
+  `[i == nb]` goal validation are in. The backend still emits
+  `Expr::BeginProgram` as constant `true`, so a beginprogram node fires like a
+  normal node (pre re-checked every tick) and must be gated by a phase flag in
+  the benchmark. The full semantic — beginprogram true only until the node's
+  goal is met, the precondition evaluated once at entry and never re-checked,
+  entered once at startup — requires a per-node begin flag
+  (`@briv_begin_<name> = global i1 1`, read in the precondition, cleared when
+  the goal is met in the reactor's post check). Then `[beginprogram && i < N]`
+  alone drives an entry loop with no phase gate.
