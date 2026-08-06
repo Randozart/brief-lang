@@ -669,10 +669,22 @@ impl<'a> Parser<'a> {
             vec![]
         };
         // parse_node consumes `node [async] name ...` itself.
-        let node = self.parse_node()?;
+        // 2026-08-06 (accel plan): `sync<group> accel node name ...` — an
+        // accel kernel classified into a group barrier.
+        let node = if self.check(&Token::Accel) {
+            self.pos += 1; // consume accel
+            let mut txn = self.parse_node()?;
+            txn.modifiers.push(Annotation {
+                name: "accel".to_string(),
+                value: None,
+            });
+            TopLevel::Transaction(txn)
+        } else {
+            TopLevel::Transaction(self.parse_node()?)
+        };
         Ok(TopLevel::SyncGroup {
             domains,
-            item: Box::new(TopLevel::Transaction(node)),
+            item: Box::new(node),
         })
     }
 

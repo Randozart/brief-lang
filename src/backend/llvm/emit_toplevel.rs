@@ -1789,8 +1789,7 @@ impl LlvmBackend {
             // Arena for body emission — same rationale as the standard path:
             // the reactor dispatch calls @txn_name as a separate function,
             // so arena allocas must live here, not in main().
-            self.emit_arena_init(out, "  ");
-            self.fun.ssa_old_int_regs.clear();
+            self.emit_arena_init(out, "  ");            self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();
             // 2026-06-28: Do NOT reset txn_counter here — this emits into the
             // existing @main() function. Resetting would produce duplicate
@@ -1975,8 +1974,16 @@ impl LlvmBackend {
                 }
             }
 
-            // Emit the txn function
-            writeln!(out, "define void @txn_{}({}) local_unnamed_addr {}{}{} {{", name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline, meta_attrs).ok();
+            // Emit the txn function. An accel body's CPU path is emitted as
+            // @txn_<name>_cpu; @txn_<name> becomes the dispatch wrapper the
+            // reactor calls (2026-08-06, accel plan).
+            let is_accel = self.accel_kernel_idx.contains_key(name);
+            let cpu_name = if is_accel {
+                format!("txn_{}_cpu", name)
+            } else {
+                format!("txn_{}", name)
+            };
+            writeln!(out, "define void @{}({}) local_unnamed_addr {}{}{} {{", cpu_name, self.ctx.state_ptr_param, local_txn_attr, alwaysinline, meta_attrs).ok();
             writeln!(out, "  entry:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();
@@ -2212,6 +2219,12 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
 
+            // 2026-08-06 (accel plan): emit the dispatch wrapper for an accel
+            // body (Gpu: device-availability gate; Probe: verdict global).
+            if is_accel {
+                self.emit_accel_dispatch_wrapper(out, name);
+            }
+
             // Emit cold functions after the txn function
             for (ri, cold_name, fields) in &outlined_info {
                 let body = match &reordered[*ri] {
@@ -2271,6 +2284,63 @@ impl LlvmBackend {
                 self.fun.reg_float_cache = saved_reg_float_cache;
                 self.fun.reg_type_cache = saved_reg_type_cache;
             }
+        }
+    }
+
+    /// 2026-08-06 (accel plan): emit `@txn_<name>` as the dispatch wrapper for
+    /// an accel body. The reactor calls `@txn_<name>` by name at every
+    /// dispatch site (loop_engine counter/ssa paths), so the wrapper — lazy
+    /// registry init + device/verdict gate → `briv_accel_launch`, else the CPU
+    /// body `@txn_<name>_cpu` — is picked up automatically.
+    pub(super) fn emit_accel_dispatch_wrapper(&mut self, out: &mut String, name: &str) {
+        let Some(&idx) = self.accel_kernel_idx.get(name) else { return; };
+        let entry = &self.accel_entries[name];
+        let n_kernels = self.accel_kernel_idx.len();
+        writeln!(out, "define void @txn_{}({}) local_unnamed_addr {{", name, self.ctx.state_ptr_param).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %ready = load i32, ptr @briv_accel_ready").ok();
+        writeln!(out, "  %need = icmp eq i32 %ready, 0").ok();
+        writeln!(out, "  br i1 %need, label %accel_init, label %accel_gate").ok();
+        writeln!(out, "accel_init:").ok();
+        writeln!(out, "  %ok = call i32 @briv_accel_init(ptr @briv_accel_descs, i32 {})", n_kernels).ok();
+        writeln!(out, "  store i32 1, ptr @briv_accel_ready").ok();
+        writeln!(out, "  br label %accel_gate").ok();
+        writeln!(out, "accel_gate:").ok();
+        // Gpu decision → gate on device availability. Probe → gate on the
+        // committed verdict global (default 0 = CPU; the Phase 7 probe sets it).
+        if entry.forced {
+            writeln!(out, "  %dev = call i32 @briv_accel_available()").ok();
+        } else {
+            writeln!(out, "  %dev = load i32, ptr @briv_accel_verdict").ok();
+        }
+        writeln!(out, "  %use = icmp ne i32 %dev, 0").ok();
+        writeln!(out, "  br i1 %use, label %accel_gpu, label %accel_cpu").ok();
+        writeln!(out, "accel_gpu:").ok();
+        let work = self.emit_work_item_count(out, name);
+        writeln!(out, "  %r = call i32 @briv_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "accel_cpu:").ok();
+        writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+    }
+
+    /// The kernel's work-item count (the `[i < N]` bound) as an i64 register
+    /// or constant. State scalars are loaded; literals inline; anything else
+    /// resolves to 0 (the kernel dispatch then no-ops — callers should verify
+    /// the bound shape at analysis time).
+    fn emit_work_item_count(&mut self, out: &mut String, name: &str) -> String {
+        let entry = &self.accel_entries[name];
+        match &entry.shape.count_expr {
+            Some(Expr::Decimal(n)) => n.to_string(),
+            Some(Expr::Identifier(f)) => {
+                if let Some(&fidx) = self.ctx.field_index_map.get(f) {
+                    let (reg, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
+                    return reg;
+                }
+                "0".to_string()
+            }
+            _ => "0".to_string(),
         }
     }
 

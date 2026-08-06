@@ -663,6 +663,14 @@ pub struct LlvmBackend {
     pub(crate) remarks: Vec<crate::backend::llvm::directive::OptimizationRemark>,
     llvm_extra_flags: Vec<String>,
     pub(crate) pending_async_await_count: usize,
+    // 2026-08-06 (accel plan): frontend accel analysis (SPEC §9.7), copied
+    // from AnalysisResults so emit_toplevel can emit dispatch wrappers.
+    pub(crate) accel_entries: HashMap<String, crate::analysis::accel::AccelEntry>,
+    /// txn name → descriptor index into @briv_accel_descs.
+    pub(crate) accel_kernel_idx: HashMap<String, u32>,
+    /// True when at least one SPIR-V kernel blob was embedded → link
+    /// briv_accel_rt.c.
+    pub(crate) has_accel_kernels: bool,
 
     // ── Arena Allocator (cross-function) ────────────────────
     // 2026-07-19: Arena system field indices in %State. Set during generate(),
@@ -777,6 +785,9 @@ impl LlvmBackend {
             remarks: Vec::new(),
             llvm_extra_flags: Vec::new(),
             pending_async_await_count: 0,
+            accel_entries: HashMap::new(),
+            accel_kernel_idx: HashMap::new(),
+            has_accel_kernels: false,
             trg_unresolved_action: TrgUnresolvedAction::Warn,
             arena_ptr_idx: None,
             arena_end_idx: None,
@@ -3356,10 +3367,16 @@ impl LlvmBackend {
         // frontend's Gpu/Probe accel bodies (AnalysisResults.accel). Runs after
         // all host emission so the shared emitter's function state is free.
         // Deterministic txn order; each blob is embedded as a private constant.
+        self.accel_entries = analysis.accel.clone();
         let kernel_blobs = self.collect_accel_kernels(&analysis.accel);
+        self.has_accel_kernels = !kernel_blobs.is_empty();
         for blob in &kernel_blobs {
             out.push_str(&kernel::embed_spirv_blob(&blob.bytes, &blob.txn_name));
         }
+        // Descriptor tables + ABI declares the host dispatch wrappers use.
+        let (desc_ir, idx_of) = kernel::emit_accel_descriptors(self, &kernel_blobs);
+        self.accel_kernel_idx = idx_of;
+        out.push_str(&desc_ir);
 
         // Phase 4: --layout diagnostic flag — print field layout after generation
         if self.ctx.dump_layout {

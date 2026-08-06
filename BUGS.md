@@ -1,5 +1,28 @@
 # Bugs
 
+## Accel Node With Virtual Work-Item Index Folds the Reactor to Nothing — OPEN
+
+**Date:** 2026-08-06
+**Status:** Open
+**Root cause:** An `accel` node's `[i < N]` precondition binds a *virtual*
+work-item index `i` (SPEC §9.7) — the node fires as ONE dispatch of N
+work-items, NOT as a loop-while-precondition over a state counter. The reactor
+analysis / precompute (EmitPureCounterFold) does not know this: it tries to
+model the `[i < N]` firing over an unbound `i`, and the whole program
+(including an independent `step` node's `println!` observable) folds to an
+empty `reactor_tick` — the observable is eliminated.
+**Impact:** A program with an `accel` node compiles and links (the 6b dispatch
+infrastructure is intact) but the reactor folds it to dead code. Blocks the
+nbody `_accel` benchmark until fixed.
+**Repro:** `accel_smoke.bv` (worktree): `sync<step> accel node force [i < n]`
++ `sync<step> node step` printing `a[3]`; run prints nothing, `reactor_tick`
+is `ret void`.
+**Fix (planned):** The reactor/precompute must recognize accel nodes: skip the
+loop-while-`[i < N]` interpretation (the bound is the GPU work-item count, not
+a firing count), fire the node once per group activation, and keep host
+observables live. Verify `AnalysisResults.accel` during precompute eligibility.
+**Undo:** none (correctness of the accel firing model).
+
 ## Runtime `lib/runtime/briv_rt.c` Is Untracked — OPEN (rename/gitignore artifact)
 
 **Date:** 2026-08-05

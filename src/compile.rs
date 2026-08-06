@@ -724,6 +724,13 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             // .c source (e.g., briv_rt.c), producing identical cached .o paths.
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
+            // 2026-08-06 (accel plan): always link the device-agnostic accel
+            // runtime (briv_accel_rt.c). It is LTO + --gc-sections'd away when
+            // the program has no accel kernels, so the cost is a cached .o.
+            let accel_rt = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("lib/runtime/briv_accel_rt.c");
+            let accel_obj = compile_source_to_object(&accel_rt, &get_ffi_cache_dir())?;
+            all_objects.push(accel_obj);
             all_objects.sort();
             all_objects.dedup();
             compile_ll_to_binary(&out_path, &binary_path, &all_objects, &protocol_libs, opts.shared)?;
@@ -1527,7 +1534,7 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
     for lib in protocol_libs {
         cmd.arg(format!("-l{}", lib));
     }
-    cmd.args(["-o", binary_path, "-lm"]);
+    cmd.args(["-o", binary_path, "-lm", "-ldl"]);
     let status = cmd.status()
         .map_err(|e| format!(
             "failed to invoke clang: {} (is clang installed? use --llvm to emit IR only)",

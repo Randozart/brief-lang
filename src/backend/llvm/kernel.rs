@@ -199,6 +199,180 @@ impl super::LlvmBackend {
     }
 }
 
+/// Size in bytes of an LLVM aggregate-type string from the host `%State`
+/// layout (`field_types`), e.g. `[16 x float]` → 64, `i64` → 8, `float` → 4.
+/// Unknown shapes fall back to 8 (the %State scalar default).
+fn llvm_agg_size(s: &str) -> u64 {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(x) = rest.find(" x ") {
+            let n: u64 = rest[..x].trim().parse().unwrap_or(0);
+            let elem = rest[x + 3..].trim_end_matches(']').trim();
+            return n.saturating_mul(llvm_agg_size(elem));
+        }
+        return 8;
+    }
+    match s {
+        "i8" => 1,
+        "i16" => 2,
+        "i32" => 4,
+        "i64" => 8,
+        "float" => 4,
+        "double" => 8,
+        "ptr" => 8,
+        _ => 8,
+    }
+}
+
+/// Byte offset of host `%State` field `fidx` (sum of preceding field sizes).
+fn host_field_offset(field_types: &[String], fidx: usize) -> u64 {
+    field_types[..fidx].iter().map(|t| llvm_agg_size(t)).sum()
+}
+
+/// One kernel's descriptor fields in kernel `%State` order (arrays sorted,
+/// then scalars sorted), as IR text + the field names.
+struct KernelFieldTable {
+    fields: Vec<String>,
+    names: Vec<String>,
+}
+
+/// Field IR entry for one kernel field.
+fn field_entry_ir(
+    host_off: u64,
+    ty: &str,
+    name: &str,
+    txn: &str,
+    write_set: &std::collections::HashSet<&str>,
+) -> String {
+    let (kind, elem_bytes, count, w) = if ty.starts_with('[') {
+        let n: u64 = ty
+            .strip_prefix('[')
+            .and_then(|r| r.split(" x ").next())
+            .and_then(|n| n.trim().parse().ok())
+            .unwrap_or(0);
+        let write = if write_set.contains(name) { 1u32 } else { 0u32 };
+        (1u32, llvm_agg_size(ty) / n.max(1), n, write)
+    } else {
+        (2u32, llvm_agg_size(ty), 1u64, 0u32)
+    };
+    format!(
+        "%briv.field {{ ptr @str.briv.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
+        txn, name, kind, host_off, elem_bytes, count, w
+    )
+}
+
+/// Build one kernel's field table (kernel field order, host offsets).
+fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTable {
+    let entry = &backend.accel_entries[txn];
+    let shape = &entry.shape;
+    let mut arrays: Vec<&String> = shape.read_buffers.iter().collect();
+    let read_set: std::collections::HashSet<&String> = arrays.iter().copied().collect();
+    for w in &shape.write_buffers {
+        if !read_set.contains(w) {
+            arrays.push(w);
+        }
+    }
+    arrays.sort();
+    let mut scalars: Vec<&String> = shape.scalar_ins.iter().collect();
+    scalars.sort();
+    let write_set: std::collections::HashSet<&str> =
+        shape.write_buffers.iter().map(|s| s.as_str()).collect();
+
+    let field_types = &backend.ctx.field_types;
+    let mut fields = Vec::new();
+    let mut names = Vec::new();
+    for name in arrays.iter().chain(scalars.iter()) {
+        let fidx = backend.ctx.field_index_map[*name];
+        fields.push(field_entry_ir(
+            host_field_offset(field_types, fidx),
+            &field_types[fidx],
+            name,
+            txn,
+            &write_set,
+        ));
+        names.push((*name).clone());
+    }
+    KernelFieldTable { fields, names }
+}
+
+/// Emit one kernel's descriptor: name/field string constants, the fields
+/// table, and the descriptor entry. Returns the `%briv.kernel` entry text.
+fn emit_one_kernel_desc(
+    backend: &super::LlvmBackend,
+    out: &mut String,
+    k: &AccelKernelBlob,
+) -> String {
+    let txn = &k.txn_name;
+    let table = kernel_field_table(backend, txn);
+    for name in &table.names {
+        let bytes = format!("{}\0", name);
+        out.push_str(&format!(
+            "@str.briv.{}.{} = private constant [{} x i8] c\"{}\\00\"\n",
+            txn,
+            name,
+            bytes.len(),
+            name
+        ));
+    }
+    out.push_str(&format!(
+        "@briv_kernel_{}_fields = private constant [{} x %briv.field] [{}]\n",
+        txn,
+        table.fields.len(),
+        table.fields.join(", ")
+    ));
+    out.push_str(&format!(
+        "@str.briv.{} = private constant [{} x i8] c\"{}\\00\"\n",
+        txn,
+        txn.len() + 1,
+        txn
+    ));
+    format!(
+        "%briv.kernel {{ ptr @str.briv.{}, i32 ptrtoint (ptr @briv_kernel_{} to i32), i32 {}, i32 {}, ptr @briv_kernel_{}_fields }}",
+        txn,
+        txn,
+        k.bytes.len(),
+        table.fields.len(),
+        txn
+    )
+}
+
+/// Emit the accel descriptor tables + ABI declares the host program links
+/// against (`briv_accel_rt.c`). Each kernel's fields are listed in KERNEL
+/// `%State` order (arrays sorted, then scalars sorted) with their HOST
+/// offsets, so the runtime's generic pack/unpack matches the kernel's GEPs.
+/// Returns the IR text and the txn-name → descriptor-index map the host
+/// dispatch wrappers use.
+pub(crate) fn emit_accel_descriptors(
+    backend: &super::LlvmBackend,
+    kernels: &[AccelKernelBlob],
+) -> (String, HashMap<String, u32>) {
+    let mut out = String::new();
+    let mut idx_of: HashMap<String, u32> = HashMap::new();
+    if kernels.is_empty() {
+        return (out, idx_of);
+    }
+    out.push_str("\n; === Accel kernel descriptors ===\n");
+    out.push_str("%briv.field = type { ptr, i32, i64, i64, i64, i32 }\n");
+    out.push_str("%briv.kernel = type { ptr, i32, i32, i32, ptr }\n");
+    out.push_str("@briv_accel_ready = private global i32 0\n");
+    out.push_str("@briv_accel_verdict = private global i32 0\n");
+
+    let mut desc_entries: Vec<String> = Vec::new();
+    for (i, k) in kernels.iter().enumerate() {
+        idx_of.insert(k.txn_name.clone(), i as u32);
+        desc_entries.push(emit_one_kernel_desc(backend, &mut out, k));
+    }
+    out.push_str(&format!(
+        "@briv_accel_descs = private constant [{} x %briv.kernel] [{}]\n",
+        desc_entries.len(),
+        desc_entries.join(", ")
+    ));
+    out.push_str("declare i32 @briv_accel_init(ptr, i32)\n");
+    out.push_str("declare i32 @briv_accel_launch(i32, ptr, i64)\n");
+    out.push_str("declare i32 @briv_accel_available()\n");
+    (out, idx_of)
+}
+///
+/// Runs `llc --mtriple=spirv64-unknown-unknown` on the kernel IR. Shelling out
 /// Compile kernel LLVM IR to SPIR-V binary via `llc`.
 ///
 /// Runs `llc --mtriple=spirv64-unknown-unknown` on the kernel IR. Shelling out
@@ -206,8 +380,7 @@ impl super::LlvmBackend {
 /// separate target not enabled in the default LLVM build used by inkwell.
 /// Uses unique temp filenames (process + atomic counter) — a fixed path
 /// corrupted parallel test runs (TOCTOU, 2026-06-29).
-pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
-    use std::io::Write;
+pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {    use std::io::Write;
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -833,10 +833,16 @@ Each phase ends in a commit with green tests.
 
 ## 15. Open Items
 
-- Exact `[i < N]` binding against the current contract parser (Phase 1 settles
-  the syntax against `parse_contract`).
+- **Reactor semantics of the accel node's `[i < N]` precondition** (found in
+  Phase 6b, BUGS.md): the precompute/reactor folds an accel node with a virtual
+  work-item index to an empty `reactor_tick`, eliminating host observables. The
+  reactor must treat the accel node as a ONE-SHOT work-item dispatch (the bound
+  is the GPU work-item count, not a firing count) rather than a
+  loop-while-precondition. Blocks the nbody `_accel` benchmark.
 - Whether `N` for nbody derives from the `[i < nbodies]` precondition or from
   `GetGlobalSize#` — resolved in Phase 4 against `parse_contract` capabilities.
 - Per-body in-body opt-out `!> accel: off;` (D13) — deferred.
 - Device-constant calibration procedure for `config` (measured once per
   machine, documented in the config audit trail).
+- Library (`--library`) builds do not yet package `briv_accel_rt.c` (Phase 6b
+  wires the executable link only).

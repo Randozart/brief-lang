@@ -398,6 +398,80 @@ fn test_briv_accel_rt_self_test() {
 }
 
 #[test]
+fn test_accel_descriptors_emit() {
+    // 2026-08-06 (accel plan): the descriptor table + ABI declares are emitted
+    // with each field's HOST offset (kernel field order), so the runtime's
+    // generic pack matches the kernel's %State GEPs. Tested directly — SPIR-V
+    // blob compilation (llc) is machine-gated.
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    backend.ctx.field_index_map.insert("a".to_string(), 0);
+    backend.ctx.field_types.push("[16 x float]".to_string());
+    backend.ctx.field_briv_types.push(Type::Vector(
+        Box::new(Type::Custom("Float".to_string())),
+        vec![crate::ast::Dimension::Anonymous(16)],
+    ));
+    let entry = accel_test_entry("a", true);
+    backend.accel_entries.insert("force".to_string(), entry);
+    let blob = crate::backend::llvm::kernel::AccelKernelBlob {
+        txn_name: "force".to_string(),
+        bytes: vec![0x03, 0x02, 0x23, 0x07],
+    };
+    let (ir, idx_of) = crate::backend::llvm::kernel::emit_accel_descriptors(&backend, &[blob]);
+    assert_eq!(idx_of["force"], 0, "txn → descriptor index");
+    assert!(ir.contains("%briv.field = type { ptr, i32, i64, i64, i64, i32 }"), "field type");
+    assert!(ir.contains("%briv.kernel = type { ptr, i32, i32, i32, ptr }"), "kernel type");
+    assert!(ir.contains("@briv_accel_descs"), "descs table");
+    assert!(ir.contains("declare i32 @briv_accel_init(ptr, i32)"), "init decl");
+    assert!(ir.contains("declare i32 @briv_accel_launch(i32, ptr, i64)"), "launch decl");
+    // a: array, host_offset 0 (fidx 0), elem 4 (float), count 16, write.
+    assert!(ir.contains("i32 1, i64 0, i64 4, i64 16, i32 1"), "field entry: {ir}");
+}
+
+#[test]
+fn test_accel_wrapper_emits_dispatch() {
+    // 2026-08-06 (accel plan): the reactor calls @txn_<name> by name; an accel
+    // body's @txn_<name> is a dispatch wrapper (lazy init + gate → launch,
+    // else the CPU body @txn_<name>_cpu). Tested directly (llc-independent).
+    let mut backend = LlvmBackend::new();
+    backend.accel_kernel_idx.insert("force".to_string(), 0);
+    let entry = accel_test_entry("a", false); // Probe: verdict gate
+    backend.accel_entries.insert("force".to_string(), entry);
+    let mut out = String::new();
+    backend.emit_accel_dispatch_wrapper(&mut out, "force");
+    assert!(out.contains("define void @txn_force("), "wrapper define: {out}");
+    assert!(out.contains("@briv_accel_init(ptr @briv_accel_descs, i32 1)"), "lazy init");
+    assert!(out.contains("load i32, ptr @briv_accel_verdict"), "probe verdict gate");
+    assert!(out.contains("call i32 @briv_accel_launch(i32 0, ptr %state, i64 16)"), "launch call: {out}");
+    assert!(out.contains("call void @txn_force_cpu(ptr %state)"), "cpu fallback");
+}
+
+fn accel_test_entry(buffer: &str, write: bool) -> crate::analysis::accel::AccelEntry {
+    use crate::analysis::accel::{AccelDecision, AccelEntry, AccelMode, KernelShape};
+    let mut read_buffers = vec![buffer.to_string()];
+    let mut write_buffers = Vec::new();
+    if write {
+        write_buffers.push(buffer.to_string());
+    }
+    let shape = KernelShape {
+        index_var: "i".to_string(),
+        count_expr: Some(Expr::Decimal(16)),
+        kernel_stmts: vec![],
+        host_stmts: vec![],
+        read_buffers,
+        write_buffers,
+        scalar_ins: vec![],
+        eligible: true,
+        reasons: vec![],
+    };
+    AccelEntry {
+        mode: AccelMode::TryKeyword,
+        forced: false,
+        shape,
+        decision: AccelDecision::Probe,
+    }
+}
+
+#[test]
 fn test_escape_non_ASCII_string() {
     let output = escape_llvm_string("héllo");
     assert!(output.contains("\\c3"), "Should hex-escape byte C3");
