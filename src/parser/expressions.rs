@@ -413,6 +413,9 @@ impl<'a> Parser<'a> {
             Some((Token::Char(c), _)) => Ok(Expr::Char(c)),
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
             Some((Token::BoolFalse, _)) => Ok(Expr::Bool(false)),
+            // 2026-08-06 (beginprogram plan): the `beginprogram` precondition
+            // marker — true exactly once at program start (SPEC entry-loop).
+            Some((Token::BeginProgram, _)) => Ok(Expr::BeginProgram),
 
             // 2026-08-05 (Phase 3): the `@` raw-literal prefix is removed.
             // Raw/byte literals are `#r`/`#b` (SPEC §16.2). `@` in expression

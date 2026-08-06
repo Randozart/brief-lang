@@ -39,6 +39,7 @@ impl LlvmBackend {
             Expr::Decimal(_)
             | Expr::Char(_)
             | Expr::Bool(_)
+            | Expr::BeginProgram
             | Expr::Float(_)
             | Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _)
             | Expr::StructLiteral { .. }

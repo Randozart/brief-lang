@@ -16,6 +16,7 @@ impl fmt::Display for Expr {
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => write!(f, "{}", n),
             Expr::Char(c) => write!(f, "'{}'", c),
             Expr::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
+            Expr::BeginProgram => write!(f, "beginprogram"),
             Expr::Float(n) => write!(f, "{}", n),
             Expr::Identifier(name) => write!(f, "{}", name),
             Expr::Call(name, args, _) => {

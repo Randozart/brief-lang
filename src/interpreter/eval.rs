@@ -27,6 +27,7 @@ pub fn eval_expr(
         // char/bool-ness to print characters / true-false. as_i64/as_f64
         // promote both (C-style), so arithmetic/comparisons are unchanged.
         Expr::Bool(b) => Ok(Value::Atom(Atom::Bool(*b))),
+        Expr::BeginProgram => Ok(Value::Atom(Atom::Bool(true))),
         Expr::Char(c) => Ok(Value::Atom(Atom::Char(*c))),
         Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => Ok(Value::bits(bytes.clone())),
 

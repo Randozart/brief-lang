@@ -108,6 +108,16 @@ impl LlvmBackend {
                     ty: Type::bool_(),
                 }
             }
+            Expr::BeginProgram => {
+                // True exactly once at program start — the entry marker. In
+                // precondition position the transition graph handles it; here it
+                // evaluates as `true`.
+                writeln!(out, "{}{} = add i8 0, 1", indent, v).ok();
+                TypedRegister {
+                    name: v.to_string(),
+                    ty: Type::bool_(),
+                }
+            }
             Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => self.emit_string_literal(out, v, bytes, indent),
 
             // ── Identifier ───────────────────────────────────────────

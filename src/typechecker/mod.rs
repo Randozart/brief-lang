@@ -550,6 +550,7 @@ pub fn infer_expression(
         Expr::Char(_) => Ok((Type::Custom("Char".to_string()), Provenance::Unknown)),
         Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
         Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
+        Expr::BeginProgram => Ok((Type::bool_(), Provenance::Unknown)),
         Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => Ok((Type::string(), Provenance::Unknown)),
 
         // ── References ──────────────────────────────────────────
@@ -2113,10 +2114,196 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         }
     }
 
+    // 2026-08-06 (beginprogram plan): entry-loop validation — termination
+    // (the goal must be provably reachable) and entry conflict (at most one
+    // beginprogram node can be eligible at program start).
+    let beginprogram_nodes: Vec<(&Transaction, Expr)> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::Transaction(t) => {
+                beginprogram_entry(&t.contract.pre_condition).map(|entry| (t, entry))
+            }
+            _ => None,
+        })
+        .collect();
+    check_beginprogram_program(&beginprogram_nodes, &mut errors);
+
     if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+/// The entry condition of a beginprogram node: the precondition with the
+/// `beginprogram` marker removed (the marker takes no conditions; the node's
+/// other precondition terms are the state-based entry gate). Returns None for
+/// non-beginprogram nodes.
+fn beginprogram_entry(pre: &Expr) -> Option<Expr> {
+    match pre {
+        Expr::BeginProgram => Some(Expr::Bool(true)),
+        Expr::BinaryOp(BinaryOpKind::And, a, b) => {
+            let a_begin = contains_beginprogram(a);
+            let b_begin = contains_beginprogram(b);
+            if a_begin || b_begin {
+                let a_entry = if a_begin { Expr::Bool(true) } else { a.as_ref().clone() };
+                let b_entry = if b_begin { Expr::Bool(true) } else { b.as_ref().clone() };
+                Some(conjoin(a_entry, b_entry))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn contains_beginprogram(e: &Expr) -> bool {
+    match e {
+        Expr::BeginProgram => true,
+        Expr::BinaryOp(BinaryOpKind::And, a, b) => {
+            contains_beginprogram(a) || contains_beginprogram(b)
+        }
+        _ => false,
+    }
+}
+
+fn conjoin(a: Expr, b: Expr) -> Expr {
+    match (a, b) {
+        (Expr::Bool(true), b) => b,
+        (a, Expr::Bool(true)) => a,
+        (a, b) => Expr::BinaryOp(BinaryOpKind::And, Box::new(a), Box::new(b)),
+    }
+}
+
+/// Entry-loop validation: every beginprogram node's goal (postcondition) must
+/// be provably reachable, and at most one beginprogram node may be eligible at
+/// program start.
+fn check_beginprogram_program(nodes: &[(&Transaction, Expr)], errors: &mut Vec<TypeError>) {
+    for (txn, _entry) in nodes {
+        if let Err(msg) = check_goal_reachable(&txn.body, &txn.contract.post_condition) {
+            errors.push(TypeError::InvalidOperation {
+                operation: format!(
+                    "beginprogram node '{}': {}",
+                    txn.name, msg
+                ),
+                type_name: "beginprogram".into(),
+            });
+        }
+    }
+    for i in 0..nodes.len() {
+        for j in (i + 1)..nodes.len() {
+            if entries_may_both_hold(&nodes[i].1, &nodes[j].1) {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!(
+                        "beginprogram nodes '{}' and '{}' have conflicting entry conditions — at most one may fire at program start",
+                        nodes[i].0.name, nodes[j].0.name
+                    ),
+                    type_name: "beginprogram".into(),
+                });
+            }
+        }
+    }
+}
+
+/// The goal must be provably reachable: `[true]` runs exactly once; a
+/// comparison over a counter (`[i == N]`, `[i >= N]`, `[i <= N]`, ...) whose
+/// body advances the counter toward the goal terminates; anything else is
+/// unprovable ⇒ compile error.
+fn check_goal_reachable(body: &[Statement], goal: &Expr) -> Result<(), String> {
+    match goal {
+        Expr::Bool(true) => Ok(()),
+        Expr::Bool(false) => Err("goal '[false]' is never reachable — the entry loop cannot halt".into()),
+        Expr::BinaryOp(op, left, right) => counter_goal_reachable(body, op, left, right),
+        _ => Err(unreachable_goal(goal)),
+    }
+}
+
+/// A comparison goal over a counter is reachable when the body advances the
+/// counter toward the bound (increment for an increasing goal, decrement for
+/// a decreasing one).
+fn counter_goal_reachable(
+    body: &[Statement],
+    op: &BinaryOpKind,
+    left: &Expr,
+    right: &Expr,
+) -> Result<(), String> {
+    let goal = Expr::BinaryOp(*op, Box::new(left.clone()), Box::new(right.clone()));
+    let var = match left {
+        Expr::Identifier(v) => v,
+        _ => return Err(unreachable_goal(&goal)),
+    };
+    if !right_side_terminal(right) {
+        return Err(unreachable_goal(&goal));
+    }
+    let increasing = matches!(op, BinaryOpKind::Eq | BinaryOpKind::Ge | BinaryOpKind::Gt);
+    let decreasing = matches!(op, BinaryOpKind::Eq | BinaryOpKind::Le | BinaryOpKind::Lt);
+    if increasing && body_advances_counter(body, var, true) {
+        return Ok(());
+    }
+    if decreasing && body_advances_counter(body, var, false) {
+        return Ok(());
+    }
+    Err(unreachable_goal(&goal))
+}
+
+fn unreachable_goal(goal: &Expr) -> String {
+    format!(
+        "goal '{}' is not provably reachable — the body must advance a counter toward it (or use '[true]' for a single pass)",
+        goal
+    )
+}
+
+/// Whether the right side of a goal comparison is a literal/state reference
+/// (a bound the counter advances toward).
+fn right_side_terminal(e: &Expr) -> bool {
+    matches!(
+        e,
+        Expr::Decimal(_) | Expr::Identifier(_) | Expr::Char(_)
+    )
+}
+
+/// Whether the body advances `var` toward a bound: `var = var + d` for an
+/// increasing goal, `var = var - d` for a decreasing one.
+fn body_advances_counter(body: &[Statement], var: &str, increasing: bool) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Statement::Assign(lhs, rhs) => match lhs {
+            Expr::Identifier(n) => n == var && counter_advance(rhs, var, increasing),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+/// `var = var ± d` with a positive literal delta in the goal's direction.
+fn counter_advance(rhs: &Expr, var: &str, increasing: bool) -> bool {
+    match rhs {
+        Expr::BinaryOp(BinaryOpKind::Add, a, b) => {
+            increasing
+                && ((matches!(a.as_ref(), Expr::Identifier(v) if v == var) && literal_positive(b))
+                    || (matches!(b.as_ref(), Expr::Identifier(v) if v == var)
+                        && literal_positive(a)))
+        }
+        Expr::BinaryOp(BinaryOpKind::Sub, a, b) => {
+            !increasing
+                && matches!(a.as_ref(), Expr::Identifier(v) if v == var)
+                && literal_positive(b)
+        }
+        _ => false,
+    }
+}
+
+fn literal_positive(e: &Expr) -> bool {
+    matches!(e, Expr::Decimal(n) if *n > 0)
+}
+
+/// Whether two beginprogram entry conditions may both hold at program start.
+/// Conservative: unconditional (both `true`) or syntactically identical
+/// conditions conflict; distinct conditions are assumed mutually exclusive
+/// (a full satisfiability proof is a follow-up).
+fn entries_may_both_hold(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Bool(true), _) | (_, Expr::Bool(true)) => true,
+        _ => a == b,
     }
 }
 
@@ -2596,6 +2783,77 @@ node t [count < 5][count == 5] {
 };
 "#;
         assert!(check(src).is_ok(), "explicit cast must typecheck");
+    }
+
+    // ── beginprogram entry-loops ─────────────────────────────────
+
+    #[test]
+    fn beginprogram_counter_goal_typechecks() {
+        // 2026-08-06 (beginprogram plan): an entry-loop whose goal is a counter
+        // bound with the body advancing the counter is provably reachable.
+        let src = r#"
+let i: Int = 0;
+node init [beginprogram && i < 4][i == 4] {
+    i = i + 1;
+    term;
+};
+"#;
+        check(src).expect("counter goal must typecheck");
+    }
+
+    #[test]
+    fn beginprogram_true_goal_typechecks() {
+        // A `[true]` goal runs exactly once — immediately satisfied.
+        let src = r#"
+let i: Int = 0;
+node init [beginprogram][true] {
+    i = i + 1;
+    term;
+};
+"#;
+        check(src).expect("[true] goal must typecheck");
+    }
+
+    #[test]
+    fn beginprogram_unreachable_goal_errors() {
+        // 2026-08-06 (beginprogram plan): a goal the body does not advance
+        // toward is unprovably reachable ⇒ compile error.
+        let src = r#"
+let i: Int = 0;
+node init [beginprogram][i == 4] {
+    i = 0;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("not provably reachable")),
+            "expected an unreachable-goal error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn beginprogram_conflicting_entries_error() {
+        // 2026-08-06 (beginprogram plan): two unconditional beginprogram nodes
+        // conflict — at most one may fire at program start.
+        let src = r#"
+let a: Int = 0;
+node one [beginprogram][a == 1] {
+    a = 1;
+    term;
+};
+node two [beginprogram][a == 2] {
+    a = 2;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("conflicting entry conditions")),
+            "expected a conflict error, got {:?}",
+            err
+        );
     }
 
     /// A custom type declaring `op Mul(#Int)` authorizes `Int * MyType`

@@ -25,6 +25,10 @@ pub enum Expr {
     TaggedQuotedLiteral(Vec<u8>, String),
     Bool(bool),      // true, false
     Float(f64),      // 3.14
+    /// 2026-08-06 (beginprogram plan): the `beginprogram` precondition marker —
+    /// true exactly once at program start. Only meaningful in a node's
+    /// precondition; the node it annotates is an entry loop.
+    BeginProgram,
 
     // ── References ──────────────────────────────────────────────
     Identifier(String), // foo, Sqrt#, AddI64#

@@ -90,7 +90,7 @@ fn is_invariant_expression(
     state_fields: &HashSet<String>,
 ) -> bool {
     match expr {
-        Expr::Decimal(_) | Expr::Char(_) | Expr::Float(_) | Expr::Bool(_) => true,
+        Expr::Decimal(_) | Expr::Char(_) | Expr::Float(_) | Expr::Bool(_) | Expr::BeginProgram => true,
         Expr::Quoted(_) => true,
         Expr::Identifier(name) => {
             // Previously proven invariant let-binding

@@ -115,6 +115,7 @@ impl Annotator {
     fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
         match expr {
             Expr::Exists(_) => {},
+            Expr::BeginProgram => {},
             Expr::Slice { array, start, end, stride } => {
                 self.collect_calls_from_expr(array, calls);
                 if let Some(e) = start.as_deref() { self.collect_calls_from_expr(e, calls); }
@@ -504,6 +505,7 @@ impl Annotator {
         match expr {
             Expr::Char(c) => format!("'{}'", c),
             Expr::Consume(inner) => format!("~{}", self.format_expr(inner)),
+            Expr::BeginProgram => "beginprogram".to_string(),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => format!("\"{}\"", String::from_utf8_lossy(s)),
