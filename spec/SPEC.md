@@ -472,13 +472,14 @@ Top-level `!>` is a shortcut for attaching metadata to the script; it never
 attaches to the following declaration.
 
 ```briv
-!> accel: TRY_ALL;
+!> accel: try_all;
 ```
 
-Multiple top-level `!>` bindings merge into one module metadata map
-(last binding wins per key). Values use the same grammar as declaration
-metadata (identifier, integer, boolean, string, or list). Module metadata is
-available to any backend or plugin that consults the metadata vocabulary.
+Metadata keys and values are lowercase. Multiple top-level `!>` bindings merge
+into one module metadata map (last binding wins per key). Values use the same
+grammar as declaration metadata (identifier, integer, boolean, string, or
+list). Module metadata is available to any backend or plugin that consults
+the metadata vocabulary.
 
 ## 9. Functions, transactions, nodes, objects, and cells
 
@@ -594,9 +595,9 @@ separate `accel` declarations, never within a single firing. A firing's
 writes must be disjoint across work-items (each write targets a slot affine in
 `i` or a per-work-item local); shared reads are permitted.
 
-**Verification requirement.** GPU deferral happens only when the compiler
-verifies a speedup. The compiler must prove eligibility (bound, write
-disjointness, flat value types, purity) and then either
+**Verification requirement.** In try modes, GPU deferral happens only when
+the compiler verifies a speedup. The compiler must prove eligibility (bound,
+write disjointness, flat value types, purity) and then either
 
 - prove statically, for a compile-time-known N, that N exceeds the device
   crossover, or
@@ -608,11 +609,24 @@ If eligibility cannot be proven or the speedup is not verified, execution
 silently uses the CPU path. An ineligible or unverified `accel` body is never
 an error by itself.
 
-**Module shortcut.** Top-level module metadata `!> accel: TRY_ALL;` (§8.9)
-makes every eligible body in the module a candidate; `!> accel: OFF;`
-suppresses the blanket. A per-body `accel` keyword overrides the module-level
-value. The keyword and the module shortcut feed the same verification
-pipeline.
+**Force mode.** Under `!> accel: force;` or `!> accel: try_all_force;`, an
+`accel`-keyword-marked body must offload: eligibility must be provable or the
+compiler rejects the program, the speedup gate is skipped (the developer
+asserts GPU wins), and a missing GPU at runtime is a runtime error — never a
+silent CPU fallback.
+
+**Module shortcut.** Top-level module metadata `!> accel:` (§8.9) takes
+lowercase policy values:
+
+- `try_all` — every eligible body in the module is a candidate, verified;
+- `force` — `accel`-keyword bodies must offload (see Force mode);
+- `try_all_force` — every body is tried and keyword bodies are forced.
+
+Absent means only bodies carrying the `accel` keyword are candidates, in try
+mode. There is no `off` value; absence is the default. `!> accel_report:
+verbose;` is a separate observability key that emits an optimization remark
+for every analyzed body. The keyword and the module shortcut feed the same
+verification pipeline.
 
 ## 10. Contracts, invariants, and watchdogs
 

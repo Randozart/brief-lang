@@ -103,7 +103,7 @@ two mechanisms Briv already considers non-pragma:
   `sync<g>`), per SPEC §8.9/§12.1 — this is what `accel` is.
 - **`!>` metadata bindings** (`!> key: value;`) for compiler-known,
   typed, config-driven behavior (SPEC §8.9) — this is what module-level
-  `!> accel: TRY_ALL;` is.
+  `!> accel: try_all;` is.
 
 ---
 
@@ -112,19 +112,21 @@ two mechanisms Briv already considers non-pragma:
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Primary trigger | `accel` keyword prefix on `node`/`txn` (per-body), same surface as `seq`/`out` |
-| D2 | Module shortcut | Top-level `!> accel: TRY_ALL;` attaches `accel` metadata to the **module**; all eligible bodies become candidates |
+| D2 | Module shortcut | Top-level `!>` metadata attaches `accel` policy to the **module**. Values are lowercase policy atoms (see §4.3): `try_all`, `force`, `try_all_force`. Absent key = keyword-marked bodies only |
 | D3 | Metadata scope | Top-level `!>` is **module-level only** (a shortcut to attach metadata to the script), not declaration-attached |
-| D4 | Candidate resolution | Body is a candidate if it carries the `accel` keyword OR module metadata is `TRY_ALL`/`ON`. Per-body keyword overrides module `OFF`. Absent module key = no blanket |
+| D4 | Candidate resolution | Two axes — *target* (all bodies vs `accel`-keyword bodies) and *mode* (try vs force). See §4.4 for the resolution matrix. Per-body `accel` keyword marks the body in every mode |
 | D5 | GPU target | SPIR-V + Vulkan compute (rewrite `briv_gpu_rt.c`); kernel emission reuses the LLVM backend emitter |
 | D6 | Kernel model | Whole body = per-firing parallel map over work-items; contract `[i < N]` binds the virtual work-item index `i` |
-| D7 | Speedup verification | Runtime auto-tuning probe at program start, minimal overhead, when the decision is `Probe` (runtime N) |
+| D7 | Speedup verification | Runtime auto-tuning probe at program start, minimal overhead, when the decision is `Probe` (runtime N). `try` modes only — `force` skips the speedup gate |
 | D8 | Static decision | When N is compile-time-known and N ≥ crossover, decision is `Gpu` with no probe |
-| D9 | Failure behavior | Silent CPU fallback + optimization remark. Never a compile error for unverifiable speedup |
+| D9 | Failure behavior | `try` modes: silent CPU fallback + optimization remark, never a compile error. `force` mode (keyword-marked bodies): ineligible = compile error, unverified speedup still offloads (developer asserts), Vulkan absent at runtime = runtime error |
 | D10 | `_accel` correctness | Tolerance-based comparison vs C reference (harness epsilon override) |
 | D11 | Worktree | `../briv-compiler-accel`, branch `feat/accel-gpu`, isolated from `feat/out-observability` agent |
 | D12 | Removals | `#gpu`/`#?gpu`/`#!gpu` directives, `--gpu-offload` flag, `.abv: spirv; --gpu-offload` default, old `gpu.rs` emitter, backend-side `gpu_cost` invocation |
-| D13 | Per-body opt-out | Deferred. v1 resolves candidate eligibility silently (ineligible ⇒ CPU). In-body `!> accel: OFF;` on transactions is a follow-up |
+| D13 | Per-body opt-out | Deferred. v1 has no per-body opt-out (an unmarked body is never a candidate unless the mode targets all bodies). In-body `!> accel: off;` on transactions is a follow-up |
 | D14 | Baseline discipline | `cargo test --lib` green per commit; baseline A/B via `../briv-compiler-baseline` + `compare_baseline.sh` before/after performance work |
+| D15 | Casing | Metadata keys and values are lowercase (matching the existing `!>` vocabulary: `bits`, `overflow`, `fp_math`, ...). ALL_CAPS rejected — breaking churn for zero benefit |
+| D16 | Observability axis | `!> accel_report: verbose;` is a separate key (composes with any `accel` policy value). Emits a remark for every analyzed body — offloaded, CPU-fallback, and ineligibility reasons |
 
 ---
 
@@ -289,7 +291,7 @@ accel txn kernel [i < N][true] { ... };
 
 ```briv
 //! script-level metadata; accumulates into one module map
-!> accel: TRY_ALL;
+!> accel: try_all;
 !> target: spirv;
 
 node foo [pre][post] { ... };
@@ -300,29 +302,81 @@ node bar [pre][post] { ... };
   merges into `ModuleMetadata` (last-wins per key). It is a shortcut for
   attaching metadata to the script, not to the next declaration.
 - Value grammar reuses `parse_metadata_value` (identifier/int/bool/string/list).
+- Keys and values are **lowercase** (D15) — the entire existing `!>` vocabulary
+  (`bits`, `overflow`, `fp_math`, `inline_hint`, ...) is lowercase snake_case,
+  and `!> accel: TRY_ALL;` would be off-beat.
 - The module map is exposed as `AnalysisResults.module_metadata` and consumed
   by any backend/plugin through `MetadataRegistry`.
 
 ### 4.3 `accel` value vocabulary (v1)
 
-| Value | Meaning |
-|---|---|
-| `TRY_ALL` / `ON` / bare `!> accel;` | Every eligible body in the module is a candidate |
-| `OFF` | No body is a candidate via module metadata (per-body `accel` keyword still wins, D4) |
-| (absent) | No blanket; only keyword-marked bodies are candidates |
+The policy is two orthogonal axes: **target** (which bodies are candidates)
+× **mode** (whether GPU is required or merely tried). There is no `off` value
+— absent is off.
 
-D13 (per-body in-body `!> accel: OFF;`) is deferred.
+| Value | Target | Mode | Behavior |
+|---|---|---|---|
+| *(absent)* | `accel`-keyword bodies | try | default: bodies carrying the `accel` keyword are candidates; speedup verified (probe), silent CPU fallback |
+| `try_all` | all bodies | try | every eligible body is a candidate; verified probe per body |
+| `force` | `accel`-keyword bodies | force | keyword-marked bodies MUST offload: ineligible = compile error; speedup not verified (developer asserts); Vulkan absent at runtime = runtime error |
+| `try_all_force` | all bodies try + keyword bodies force | hybrid | union of `try_all` and `force` |
 
-### 4.4 Candidate resolution (D4)
+The three values cover the design space the developer asked for: *trying on
+all bodies*, *forcing on keyword-marked bodies*, and *trying on all while
+forcing on the marked ones*. Absent is the conservative default.
+
+`!> accel_report: verbose;` (D16) is a **separate** observability key and
+composes with any policy value:
+
+```briv
+!> accel: try_all;
+!> accel_report: verbose;
+```
+
+`verbose` emits an optimization remark for every analyzed body (offloaded,
+CPU-fallback, or ineligible, with reasons and the crossover evidence). Absent
+= default remark level. It is intentionally *not* a value of the `accel` key:
+verbosity is orthogonal to policy, and last-wins single-key semantics would
+make `!> accel: verbose;` mutually exclusive with `try_all`/`force`.
+
+D13 (per-body in-body `!> accel: off;`) is deferred.
+
+### 4.4 Policy resolution (D4)
+
+`accel.rs` resolves the module policy into an `AccelMode` once:
+
+```rust
+pub enum AccelMode {
+    /// Absent: keyword-marked bodies, try mode.
+    TryKeyword,
+    /// `try_all`: every body, try mode.
+    TryAll,
+    /// `force`: keyword-marked bodies, force mode.
+    Force,
+    /// `try_all_force`: every body tried; keyword-marked forced.
+    TryAllForce,
+}
+```
+
+Per-body candidate status and mode:
 
 ```
-is_candidate(body) =
-    body.modifiers.contains("accel")
-    || module_metadata["accel"] ∈ { TRY_ALL, ON, true }
+mode = resolve(module_metadata["accel"])
+is_marked(body) = body.modifiers.contains("accel")
+
+targets(body) =
+    mode ∈ { TryAll, TryAllForce }                       // all bodies
+    || (mode ∈ { TryKeyword, Force, TryAllForce } && is_marked(body))
+
+mode_for(body) =
+    Force if (mode == Force || mode == TryAllForce) && is_marked(body)
+    else Try
 ```
 
-Ineligible candidates are silently CPU + remark. Verifiable candidates get an
-`AccelDecision` (below).
+`Try`-mode candidates: speedup verified (probe / static crossover); any miss
+⇒ silent CPU + remark (D9). `Force`-mode candidates: eligibility must prove
+(compile error otherwise); speedup gate skipped; runtime errors if Vulkan is
+unavailable (D9). Verifiable candidates get an `AccelDecision` (below).
 
 ---
 
@@ -389,22 +443,30 @@ Estimate:
 
 ### 5.3 Decision
 
+The per-body `AccelDecision` is the outcome of policy resolution (§4.4) +
+eligibility proof (§5.1) + cost model (§5.2):
+
 ```rust
 pub enum AccelDecision {
     Gpu,   // compile-time N ≥ crossover → dispatch, no probe
     Probe, // runtime N → emit both paths + auto-tuning probe
-    Cpu,   // unverifiable or ineligible → CPU + remark
+    Cpu,   // try-mode: unverifiable or ineligible → CPU + remark
 }
 ```
 
-- N compile-time-constant (a `const`/literal bound): `n >= crossover` ⇒ `Gpu`,
-  else `Cpu`.
-- N runtime (e.g. `get_env_int!`): `Probe`.
-- Ineligible: `Cpu` with `reasons`.
+- **Try mode:** N compile-time-constant (`const`/literal bound): `n >= crossover`
+  ⇒ `Gpu`, else `Cpu`. N runtime (`get_env_int!`): `Probe`. Ineligible: `Cpu`
+  with `reasons`. Any miss is a silent CPU fallback — never an error (D9).
+- **Force mode** (keyword-marked bodies under `force`/`try_all_force`): the
+  speedup gate is skipped — eligibility proven ⇒ `Gpu` unconditionally;
+  eligibility unprovable ⇒ **compile error** (D9). At runtime, a missing Vulkan
+  is an error, never a silent CPU fallback.
 
 Remark emission reuses `directive::OptimizationRemark`
 (`src/backend/llvm/directive.rs:179`) — e.g. *"accel 'step' kept on CPU —
 intensity 0.04 ops/byte, crossover N=3.2e5"*, or the ineligibility reasons.
+`!> accel_report: verbose;` (D16) emits a remark for **every** analyzed body,
+not just fallbacks.
 
 ---
 
@@ -535,7 +597,7 @@ or before the first dispatch, guarded by a static flag so it runs once.
 ### 9.1 Structure
 
 ```briv
-!> accel: TRY_ALL;
+!> accel: try_all;
 
 const MAXB: Int = 4096;
 let nbodies: Int = get_env_int!("BODYCOUNT");   // runtime, ≤ MAXB
@@ -623,7 +685,7 @@ targets the better device when verified.
 
 ### 10.2 Integration (`backend::tests`, end-to-end)
 
-- `!> accel: TRY_ALL;` + a pure parallel body compiles to a binary containing
+- `!> accel: try_all;` + a pure parallel body compiles to a binary containing
   both CPU body and embedded SPIR-V blob.
 - `accel` keyword fixture: decision `Cpu` emits no blob.
 - Correctness at `BOUND=5` unchanged (probe or CPU fallback still yields the
@@ -661,7 +723,7 @@ Each phase ends in a commit with green tests.
 |---|---|---|
 | 1 | `accel` keyword: lexer token, `parse_top_level` arm, modifier annotation, parser tests | lexer/parser tests green |
 | 2 | Top-level `!>` metadata: `TopLevel::ModuleMetadata`, module map, `analyze_program` wiring, `match TopLevel` audit (transition_graph, dependency_graph, canonical, display, LSP), `AnalysisResults.module_metadata` | unit tests green, no match-site regression |
-| 3 | meta-vocab.dbv: `accel` MetaField + BackendMapping; registry consumption helpers | registry tests green |
+| 3 | meta-vocab.dbv: `accel` + `accel_report` MetaFields (typed vocab; no BackendMapping rows — the backend consumes accel via analysis, not IR attributes); registry tests | registry tests green |
 | 4 | `src/analysis/accel.rs`: eligibility proof, cost model (absorb gpu_cost), `AccelDecision`, `AnalysisResults.accel` | accel.rs unit tests green |
 | 5 | Kernel emission via LLVM emitter reuse → SPIR-V blob; host dispatch stub; delete legacy GPU paths (`gpu.rs`, `#gpu`, `--gpu-offload`, `collect_gpu_kernel`, backend gpu_cost) | integration tests green, no legacy refs |
 | 6 | `briv_gpu_rt.c` rewrite: dual-path, marshalling, probe API, Vulkan-absent fallback | runtime smoke test, Kani |
@@ -712,6 +774,6 @@ Each phase ends in a commit with green tests.
   the syntax against `parse_contract`).
 - Whether `N` for nbody derives from the `[i < nbodies]` precondition or from
   `GetGlobalSize#` — resolved in Phase 4 against `parse_contract` capabilities.
-- Per-body in-body opt-out `!> accel: OFF;` (D13) — deferred.
+- Per-body in-body opt-out `!> accel: off;` (D13) — deferred.
 - Device-constant calibration procedure for `config` (measured once per
   machine, documented in the config audit trail).
