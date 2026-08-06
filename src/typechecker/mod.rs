@@ -509,6 +509,37 @@ fn matches_parse_identity(params: &[Type], form: &str) -> bool {
 /// Infer the type of an expression. Returns both the type and provenance.
 /// 2026-07-18: Phase 2 — Thread Provenance through type inference for
 /// pointer tracking and dangling-borrow detection.
+/// 2026-08-05 (Phase 5): enforce that one written `as` traverses at most one
+/// cross-protocol edge (SPEC §8.7). Intra-protocol refinement is free; crossing
+/// more than one protocol category requires chained casts (`value as A as B`).
+fn validate_cast_protocol_crossing(
+    ctx: &TypecheckContext,
+    src_ty: &Type,
+    target_ty: &Type,
+) -> Result<(), TypeError> {
+    let graph = &ctx.casting_graph;
+    let (src_cat, src_var) = graph.type_to_protocol(ctx.universe, src_ty);
+    let (dst_cat, dst_var) = graph.type_to_protocol(ctx.universe, target_ty);
+    let Some(path) = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var) else {
+        return Ok(());
+    };
+    let cross_steps = path
+        .iter()
+        .filter(|s| s.src_category != s.dst_category)
+        .count();
+    if cross_steps > 1 {
+        return Err(TypeError::InvalidOperation {
+            operation: format!(
+                "a single cast crosses {} protocol categories ({} → {}); \
+                 chain the casts (value as A as B)",
+                cross_steps, src_ty, target_ty
+            ),
+            type_name: src_ty.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub fn infer_expression(
     expr: &Expr,
     ctx: &mut TypecheckContext,
@@ -650,28 +681,8 @@ pub fn infer_expression(
         Expr::Cast(expr, target_ty) => {
             let (src_ty, prov) = infer_expression(expr, ctx)?;
             // 2026-08-05 (Phase 5): one written `as` traverses at most one
-            // cross-protocol edge (SPEC §8.7). Intra-protocol refinement is
-            // free; crossing more than one protocol category requires chained
-            // casts (`value as A as B`), never a single `as`.
-            let graph = &ctx.casting_graph;
-            let (src_cat, src_var) = graph.type_to_protocol(ctx.universe, &src_ty);
-            let (dst_cat, dst_var) = graph.type_to_protocol(ctx.universe, target_ty);
-            if let Some(path) = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var) {
-                let cross_steps = path
-                    .iter()
-                    .filter(|s| s.src_category != s.dst_category)
-                    .count();
-                if cross_steps > 1 {
-                    return Err(TypeError::InvalidOperation {
-                        operation: format!(
-                            "a single cast crosses {} protocol categories ({} → {}); \
-                             chain the casts (value as A as B)",
-                            cross_steps, src_ty, target_ty
-                        ),
-                        type_name: src_ty.to_string(),
-                    });
-                }
-            }
+            // cross-protocol edge (SPEC §8.7).
+            validate_cast_protocol_crossing(ctx, &src_ty, target_ty)?;
             // 2026-07-26: Vector-to-Vector view cast validation.
             if let (Type::Vector(src_inner, src_dims), Type::Vector(tgt_inner, tgt_dims)) = (&src_ty, target_ty) {
                 if src_inner != tgt_inner || src_dims != tgt_dims {
