@@ -108,6 +108,8 @@ benchmarks/briv_rt.c
 # Compiled binary executables
 benchmarks/bit_clear
 benchmarks/cancel_math
+benchmarks/nbody_newton_accel
+benchmarks/nbody_newton_accel_c
 benchmarks/queue_drain
 benchmarks/queue_drain_sym
 benchmarks/queue_drain_idio

@@ -152,17 +152,18 @@ Annotations use `#` before an item to tell the compiler what to do, not what
 the item is. They appear on the signature line before the keyword:
 
 ```briv
-#?gpu defn my_compute() -> Int { term 42; };
 #!out txn write_port() [*][*] { &port = value; term; };
 ```
 
 | Form | Meaning |
 |------|---------|
-| `#gpu` | Advisory hint: prefer GPU offloading |
 | `#!out` | Mandatory: this has external effects |
-| `#?gpu` | Advisory + **explain** why the compiler chose its path |
-| `#?!gpu` | Mandatory + explain |
 | bare `#?` | Enable pass diagnostics for all decisions on this item |
+
+> **Removed 2026-08-06:** the `#gpu` / `#?gpu` / `#!gpu` directive family and
+> the `--gpu-offload` flag are gone — GPU deferral is the `accel` keyword /
+> `!> accel:` module metadata (see `14-accel.md`). The `#`-prefix is reserved
+> for compiler directives that are *not* performance/offload requests.
 
 Diagnostic output shows the compiler's reasoning at compile time:
 ```

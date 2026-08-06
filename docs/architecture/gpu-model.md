@@ -1,8 +1,17 @@
 # Briv GPU Model — Borrowing, Not Barriers
 
-**Date:** 2026-07-15  
-**Status:** Foundational  
+**Date:** 2026-07-15
+**Status:** Foundational — thesis intact; reconciled 2026-08-06 for Design A
 **Applies to:** GPU backend, SPIR-V emission, parallel execution model
+
+> **Reconciliation (2026-08-06, accel plan):** the thesis — disjointness
+> proven at compile time ⇒ no runtime barriers — stands. The mechanism moved
+> from the `#gpu` pragma + virtual `[idx < N]` index to the **`accel` keyword
+> over a real counter** (Design A, SPEC §9.7): the work-item index is a state
+> field (`let i: Int = 0;` + `i = i + 1`), and the counted loop
+> `[i < N][i == N]` is proven a disjoint per-`i` map. There IS a syntactic
+> marker now (`accel`) — it discloses the offload instead of hiding it behind
+> an opaque pragma. See `docs/architecture/gpu-offloading.md`.
 
 ---
 
@@ -30,22 +39,24 @@ simultaneously. This is enforced at compile time, not at runtime.
 For GPU code, this means:
 
 ```briv
-// Each work-item has a unique idx, guaranteed by precondition
-// Each access is idx * stride — provably non-overlapping
-txn kernel [idx < N][idx >= N] {
-    Store#(out + idx * 8, Load#(a + idx * 8) + Load#(b + idx * 8));
+// Each work-item has a unique i, guaranteed by the counted-loop counter
+// Each write is a slot affine in i — provably non-overlapping
+let i: Int = 0;
+accel node kernel [i < N][i == N] {
+    out[i] = a[i] + b[i];    // per-work-item write, disjoint across i
+    i = i + 1;
     term;
 };
 ```
 
 The compiler proves:
-- `idx` is unique per work-item (precondition `[idx < N]`)
-- `idx * 8` gives non-overlapping addresses for distinct `idx` values
+- `i` is unique per work-item (the counter advances 0 → N)
+- `i` indexes non-overlapping slots for distinct values
 - **No two work-items access the same memory location**
 
-Therefore no barrier is needed. The GPU backend simply:
+Therefore no barrier is needed. The backend simply:
 1. Allocates N work-items
-2. Gives each an `idx`
+2. Gives each the counter value as its index
 3. Lets them run independently
 
 **No `__syncthreads()`. No `OpControlBarrier`. Zero synchronization emitted.**
@@ -56,21 +67,23 @@ Therefore no barrier is needed. The GPU backend simply:
 
 | Briv construct | GPU meaning |
 |----------------|-------------|
-| `txn kernel [idx < N][done]` | Work-item with unique idx |
-| `[idx < N]` precondition | Work-item is active |
-| `[idx >= N]` postcondition | Work-item terminates |
-| `Load#(ptr)` | SPIR-V load instruction |
-| `Store#(ptr, val)` | SPIR-V store instruction |
-| `GetGlobalId#(dim)` | SPIR-V `GlobalInvocationId` |
-| Term on convergence | Work-item completion |
+| `accel node k [i < N][i == N]` | Work-item map over counter i |
+| `[i < N]` precondition | The work-item bound (firing gate) |
+| `[i == N]` postcondition | The goal — loop until all work-items done |
+| `i = i + 1` | The work-item counter advance |
+| `let i: Int = 0;` | Counter starts at 0 |
+| `out[i] = ...` | Per-work-item disjoint write (SPIR-V store) |
+| `a[i]` read | Shared read (SPIR-V load) |
+| `endprogram` | Process exit after the map completes |
 
-There is **no syntactic difference** between a GPU kernel and a CPU parallel
-loop. The same code compiles for both backends. The backend decides:
+The `accel` keyword is the explicit offload marker (SPEC §9.7); the same
+counted loop runs natively on CPU (each firing = one work-item). The backend
+decides:
 
 | Backend | Work-item dispatch |
 |---------|-------------------|
-| CPU (LLVM) | Parallel for-loop with thread pool |
-| GPU (SPIR-V) | `OpDispatch` with N work-items |
+| CPU (LLVM) | The counted loop runs natively (each firing = one work-item) |
+| GPU (SPIR-V) | One dispatch of N work-items; the counter is `GlobalInvocationId` |
 | CIRCT | Sequential unroll (one work-item at a time) |
 
 ---
@@ -87,33 +100,30 @@ keyword is CPU-only infrastructure.
 
 ---
 
-## The Complete GPU Intrinsic Set
+## The GPU Intrinsics
 
-Only four `#` intrinsics are needed for GPU programming:
+The `#` intrinsics (`Load#`, `Store#`, `GetGlobalId#`, `GetGlobalSize#`,
+`GetLocalId#`) exist in the stdlib (`lib/std/gpu.bv`) for explicit
+pointer-based kernels. Design A kernels (SPEC §9.7) usually do not need them:
+the counted loop's array writes/reads are emitted directly against the
+kernel's buffer projection, and the work-item id is bound to
+`GlobalInvocationId` internally.
 
-| Intrinsic | Purpose | GPUs without |
-|-----------|---------|--------------|
-| `Load#(addr, bytes)` | Read memory | CUDA: no intrinsic needed |
-| `Store#(addr, val, bytes)` | Write memory | CUDA: `atomic_store` only |
-| `GetGlobalId#(dim)` | Work-item index | CUDA: `blockIdx * blockDim + threadIdx` |
-| `GetGlobalSize#(dim)` | Grid extent | CUDA: `gridDim * blockDim` |
-| `GetLocalId#(dim)` | Local index within group | CUDA: `threadIdx` |
-
-No `Barrier#`. No `WorkgroupSize#`. No `WorkgroupId#`. All derived values
-are computed in Briv from the four primitives above.
+No `Barrier#`. No `WorkgroupSize#`. No `WorkgroupId#`.
 
 ---
 
 ## What This Means for the Backend
 
-The SPIR-V backend (when implemented) has a trivial job:
+The SPIR-V kernel emission (`src/backend/llvm/kernel.rs`) reuses the LLVM
+expression/statement emitter against a kernel-scoped `%State` projection:
 
-1. **Prologue:** Emit `OpEntryPoint`, `OpVariable` for idx
-2. **Body:** Emit each transaction as a SPIR-V function
-3. **Load#:** `OpLoad` with pointer operand
-4. **Store#:** `OpStore` with pointer and value operands
-5. **GetGlobalId#:** `OpLoad` from `GlobalInvocationId` built-in
-6. **Termination:** `OpReturn` on convergence
+1. **Prologue:** `define spir_kernel void @main(ptr %state, i64 %n)` + the
+   entry flag/bounds; the work-item id (`get_global_id`) is the counter
+2. **Body:** the proven kernel statements emitted via the standard emitter
+   (array reads/writes become GEP + load/store on the buffer projection)
+3. **Scalars/constants:** read-only inputs; module-local constant globals
+4. **Termination:** `unreachable` after the (noreturn) exit
 
 No barrier analysis. No shared memory allocation. No synchronization pass.
-The borrowing rules have already done the hard work at the Briv level.
+The eligibility proof has already done the hard work at the Briv level.

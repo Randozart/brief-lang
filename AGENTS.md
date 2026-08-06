@@ -299,6 +299,8 @@ contracts.
 | **Intrinsics vs stdlib** | `docs/architecture/intrinsics-vs-stdlib.md` |
 | **Frontend-driven dispatch (active plan)** | `docs/plans/2026-07-31-frontend-driven-dispatch.md` |
 | **kalman/float_math parity (active plan)** | `docs/plans/2026-07-31-regain-kalman-float-math-parity.md` |
+| **accel GPU deferral (active plan)** | `docs/plans/2026-08-06-accel-gpu-offload.md` |
+| **endprogram/beginprogram (active plan)** | `docs/plans/2026-08-06-endprogram-beginprogram.md` |
 | **Spec / tutorial** | `spec/SPEC.md`, `learn-briv/` |
 
 ## For OpenCode

@@ -61,6 +61,13 @@ print_summary_table() {
 #   optimizer: All const inputs, no FFI in hot loop → LLVM may eliminate
 
 declare -A TAG
+# 2026-08-06 (accel plan): per-benchmark extra env + default timing bound.
+# nbody_newton_accel needs BODYCOUNT (get_env_int! default 0 → empty sim) and a
+# modest bound (each step is O(BODYCOUNT); 50M steps × 2048 bodies is ~1e11).
+declare -A BENCH_ENV
+BENCH_ENV[nbody_newton_accel]="BODYCOUNT=2048"
+declare -A BENCH_BOUND
+BENCH_BOUND[nbody_newton_accel]=50000
 TAG[iir_filter]=optimizer
 TAG[precompute_sum]=optimizer
 TAG[const_heavy]=optimizer
@@ -73,6 +80,7 @@ TAG[float_math_nonzero]=runtime
 TAG[sparse_dispatch]=runtime
 TAG[print_loop]=runtime
 TAG[nbody_newton]=runtime
+TAG[nbody_newton_accel]=runtime
 TAG[nbody_sqrt]=runtime
 TAG[nbody_sqrt_idio]=runtime
 TAG[fasta]=runtime
@@ -128,6 +136,7 @@ BENCHMARKS=(
     "sparse_dispatch"
     "print_loop"
     "nbody_newton"
+    "nbody_newton_accel"   # accel entry-loop over bodies (Design A); needs BODYCOUNT env
     "nbody_sqrt"
     "nbody_sqrt_idio"
     "fasta"
@@ -200,9 +209,9 @@ build_bench() {
     local gpu_flag=""
     case "$name" in
         nbody_newton) budget=2048 ;;
+        nbody_newton_accel) budget=2048 ;;
         nbody_sqrt)   budget=2048 ;;
         nbody_sqrt_idio) budget=2048 ;;
-        gpu/*) gpu_flag="--gpu-offload" ;;
     esac
 
     # 2026-07-10: Set BOUND so getenv_int# at module init evaluates correctly.
@@ -213,6 +222,9 @@ build_bench() {
     # The one-step `clang .ll lib/runtime/briv_rt.c` avoids cached .o conflicts.
     rm -f ~/.cache/briv-compiler/ffi/*.o /tmp/briv_rt*.o 2>/dev/null || true
     local bound="${BOUND:-50000000}"
+    if [ -n "${BENCH_BOUND[$name]:-}" ]; then
+        bound="${BENCH_BOUND[$name]}"
+    fi
     if [ "${QUICK:-0}" = "1" ]; then
         case "$name" in
             nbody_newton|nbody_sqrt|nbody_sqrt_idio)
@@ -220,7 +232,7 @@ build_bench() {
                 ;;
         esac
     fi
-    BOUND="$bound" ./target/release/brivc build "benchmarks/${name}.bv" \
+    BOUND="$bound" ${BENCH_ENV[$name]:-} ./target/release/brivc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
@@ -413,11 +425,11 @@ check_correctness() {
     fi
 
     local briv_out c_out
-    briv_out=$(BOUND=5 timeout 10 "$briv_bin" 2>&1 || echo "__FAIL__")
+    briv_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$briv_bin" 2>&1 || echo "__FAIL__")
     if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
-        c_out=$(BOUND=5 timeout 10 "$ref_c_bin" 2>&1 || echo "__FAIL__")
+        c_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$ref_c_bin" 2>&1 || echo "__FAIL__")
     else
-        c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+        c_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
     fi
 
     if [ "$briv_out" = "$c_out" ]; then
@@ -574,6 +586,9 @@ bench_self_term() {
     local c_sum=0
 
     local bound="${BOUND:-50000000}"
+    if [ -n "${BENCH_BOUND[$name]:-}" ]; then
+        bound="${BENCH_BOUND[$name]}"
+    fi
     if [ "${QUICK:-0}" = "1" ]; then
         case "$name" in
             nbody_newton|nbody_sqrt|nbody_sqrt_idio)
@@ -583,8 +598,8 @@ bench_self_term() {
     fi
 
     for i in 1 2 3 4 5; do
-        local bt=$(env BOUND="$bound" "$TIMER_BIN" "$briv_bin")
-        local ct=$(env BOUND="$bound" "$TIMER_BIN" "$ref_c_bin")
+        local bt=$(env ${BENCH_ENV[$name]:-} BOUND="$bound" "$TIMER_BIN" "$briv_bin")
+        local ct=$(env ${BENCH_ENV[$name]:-} BOUND="$bound" "$TIMER_BIN" "$ref_c_bin")
         briv_sum=$(echo "$briv_sum + $bt" | bc)
         c_sum=$(echo "$c_sum + $ct" | bc)
         if (( $(echo "$bt < $briv_min" | bc -l) )); then briv_min=$bt; fi

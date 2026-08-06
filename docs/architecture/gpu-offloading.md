@@ -1,21 +1,25 @@
-# GPU Offloading via SPIR-V + Vulkan Compute
+# GPU Offloading — `accel` Keyword, Device-Agnostic Runtime
 
-**Date added:** 2026-06-18
-**Phase:** 4
+**Date added:** 2026-06-18 · **Rewritten:** 2026-08-06 (accel plan,
+Design A)
+**Status:** Active — the `accel` keyword + `briv_accel_rt` runtime replace the
+removed `#gpu` pragma family.
 
 ---
 
-## Architecture
+## Model
 
-Briv's GPU offloading uses a **dual compilation** model. When `--gpu-offload`
-is active (or `#gpu`/`#?gpu` directives are present), the compiler emits TWO
-outputs from a single source:
+GPU offloading is requested with the **`accel` keyword** on a `node`/`txn`
+(`accel node name [i < N][i == N] { ... }`) or the module shortcut
+`!> accel: try_all;`. The work-item counter `i` is a REAL state field
+(`let i: Int = 0;` + `i = i + 1`); `accel` marks the native counted loop as a
+parallel map over work-items. The compiler PROVES the map (disjoint affine
+per-`i` writes, counter advance, flat types) and then either coalesces the
+loop into one GPU dispatch or runs it natively on CPU.
 
-1. **Native CPU binary** via the existing LLVM x86/ARM backend
-2. **SPIR-V blobs** via `llc --mtriple=spirv64-unknown-unknown`
-
-At runtime, `briv_gpu_rt.c` dispatches the SPIR-V kernels via Vulkan compute,
-with a transparent CPU fallback when Vulkan is unavailable.
+See `docs/plans/2026-08-06-accel-gpu-offload.md` (design + phases),
+`docs/plans/2026-08-06-endprogram-beginprogram.md` (process-boundary
+keywords), and SPEC §9.7.
 
 ---
 
@@ -24,84 +28,114 @@ with a transparent CPU fallback when Vulkan is unavailable.
 ```
 Briv source
     │
-    ├──→ Normal LLVM IR codegen →
-    │       GPU loops become dispatch calls to briv_gpu_rt functions
-    │       (with CPU fallback baked in)
+    ├──→ Frontend analysis (src/analysis/accel.rs) →
+    │       For each accel candidate:
+    │         1. Eligibility proof (bound, disjoint writes, purity, flat types)
+    │         2. Cost model (crossover) → AccelDecision { Gpu | Probe | Cpu }
+    │         Stored in AnalysisResults.accel (frontend-driven dispatch)
     │
-    └──→ SPIR-V kernel extraction (gpu.rs) →
-            For each GPU-eligible loop:
-              1. Clone + rewrite AST for SPIR-V buffer semantics
-              2. Emit as LLVM IR with spirv64-unknown-unknown triple
-              3. llc → .spv binary blob
-              4. Embed in .rodata of the native binary
+    ├──→ Native CPU binary (LLVM backend) — always emitted:
+    │       • the counted loop runs natively (each firing = one work-item)
+    │       • Gpu/Probe bodies get a dispatch wrapper @txn_<name> that calls
+    │         briv_accel_launch (with device/verdict gate) or @txn_<name>_cpu
+    │       • per-node entry flags for beginprogram entry loops
+    │
+    └──→ SPIR-V kernel emission (src/backend/llvm/kernel.rs) →
+            Reuses the LLVM expression/statement emitter against a
+            kernel-scoped %State (the buffer/scalar projection); work-item id
+            bound to get_global_id; llc --mtriple=spirv64 → blob embedded.
 ```
 
 ---
 
-## CLI Flags
+## `accel` Keyword (Design A — no virtual variables)
 
-| Flag | Effect |
-|------|--------|
-| `--gpu-offload` | Treat all transactions as candidates for GPU offloading |
-| `--target spirv64` | Emit standalone SPIR-V module (no native binary) |
+```briv
+let i: Int = 0;
+accel node force [i < nb][i == nb] {
+    dv[i] = force_on(i);       // per-work-item compute (disjoint affine write)
+    i = i + 1;                 // native counted-loop advance
+    term;
+};
+```
+
+- `i` is a real state counter; every reference is valid runtime state.
+- The precondition `[i < N]` is the loop bound and firing gate; the
+  postcondition `[i == N]` is the goal ("loop until true").
+- **Eligibility proof** (`accel.rs`): `i` is a state counter incremented in
+  the body; every write is an array slot affine in `i` (disjoint across
+  work-items); value types are flat (TypeUniverse, never name-matching);
+  kernel statements are pure.
+- **Dispatch**: the GPU path launches N work-items once and fast-forwards the
+  counter to N (the loop exits after one firing); the CPU path runs the
+  counted loop natively.
+- Module shortcut: `!> accel: try_all;` / `force;` / `try_all_force;` — see
+  SPEC §9.7.
 
 ---
 
-## Kernel Eligibility (gpu.rs)
+## Process Boundary Keywords
 
-A transaction body is GPU-eligible when:
-
-1. No FFI calls in the body (purity)
-2. No loop-carried dependencies (parallelizable)
-3. Contiguous memory access patterns (coalesced reads/writes)
-4. Bounded iteration count (known or provably finite)
-5. No `term`/`term!`/`unification`/`escape` statements
-6. Only integer and float types (no String, HashMap, struct, enum)
-
-`GpuEligibility` struct reports eligibility + reasons for rejection.
+- `endprogram [code];` — genuinely exits the process (SPEC §11.5). LLVM emits
+  `call @__exit(i64 code)` (briv_rt.c, runs atexit cleanup). Unlike `term`
+  (transaction end), a node with an always-true precondition cannot re-fire
+  after `endprogram`.
+- `beginprogram` — an optional precondition conjunct marking the program
+  entry (SPEC §11.5.1). A `[beginprogram && <state>][<goal>]` node is an
+  **entry loop**: entered once when its state conditions hold, the body loops
+  until the goal. The goal must be provably reachable (compile error
+  otherwise); at most one beginprogram node may be eligible at start
+  (compile-time conflict proof). A per-node `@briv_begin_<name>` flag gates
+  the precondition and is cleared when the goal is met.
 
 ---
 
-## Runtime Library (briv_gpu_rt.c)
+## Runtime — `briv_accel_rt` (device-agnostic)
 
-The Vulkan compute runtime is a C library that:
-
-- Loads `libvulkan.so.1` dynamically via `dlopen`
-- Creates a Vulkan instance + compute device
-- Manages device memory allocation for storage buffers
-- Loads embedded SPIR-V as shader modules
-- Dispatches compute pipelines with configurable workgroup sizes
-- Falls back gracefully: `briv_gpu_is_available()` returns 0 when Vulkan
-  is not present, triggering the CPU path
-
-**API:**
+`lib/runtime/briv_accel_rt.c` is a **dispatcher over a pluggable
+device-driver table**. The compiler never names a device: it emits SPIR-V
+blobs + per-kernel layout descriptors + calls a stable `briv_accel_*` ABI.
 
 ```c
-int     briv_gpu_init();
-int     briv_gpu_is_available();
-int64_t briv_gpu_malloc(size_t bytes);
-void    briv_gpu_free(int64_t handle);
-void    briv_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
-void    briv_gpu_launch(void* kernel_spirv, size_t kernel_size,
-                         int grid_x, int block_x,
-                         const int64_t* buffer_handles, int num_buffers);
-void    briv_gpu_shutdown();
+int  briv_accel_init(const BrivKernelDesc* descs, uint32_t n);
+int  briv_accel_launch(uint32_t idx, const void* state, uint64_t work_n);
+int  briv_accel_available(void);
+int  briv_accel_probe(...);   // auto-tuning probe
 ```
 
-SPIR-V is the Vulkan shader format — no translation needed. The same `.spv`
-binary works on NVIDIA (NVK), AMD (RADV), Intel (ANV), Apple (MoltenVK),
-and software (LLVMPipe/Mesa).
+- `BrivDeviceDriver` function-pointer table; drivers consume SPIR-V:
+  `briv_dev_vulkan` (Vulkan compute) + `briv_dev_opencl` (OpenCL 3.0 IL),
+  loaded via `dlopen`, selected by `BRIV_ACCEL_DEVICE` env + fallback chain
+  (Vulkan → OpenCL → CPU).
+- Generic pack/unpack: the runtime packs the kernel `%State` projection
+  (arrays + scalars, kernel field order) into one flat device buffer per
+  launch; each driver only uploads, dispatches, downloads.
+- **Auto-tuning probe** (`Probe` decisions): runs the CPU and GPU lanes on
+  separate state copies, times each over `accel_probe_k` full-map runs, and
+  commits GPU only when `GPU×(1+margin) < CPU` AND the outputs match within
+  tolerance (the correctness gate). Tunables:
+  `config/ir-lowering.dbvl` (`accel_probe_k`/`_tolerance`/`_margin`).
+
+SPIR-V is the portable device format (NVIDIA NVK, AMD RADV, Intel ANV, Apple
+MoltenVK, LLVMPipe). A CUDA driver would need a PTX emitter — a compiler
+backend, never a glue change.
+
+---
+
+## CLI
+
+- `--backend gpu` routes to the LLVM backend (the accel path is keyword-
+  driven; no `--gpu-offload` flag — removed 2026-08-06).
 
 ---
 
 ## Performance Considerations
 
-The Vulkan runtime uses storage buffers (`VK_DESCRIPTOR_TYPE_STORAGE_BUFFER`)
-for state field access. Key optimization opportunities:
-
-1. **Buffer coalescing**: Map multiple state fields into one storage buffer
-   at different byte offsets (fewer descriptor bindings)
-2. **PGO integration**: Record actual loop bounds during instrumented runs
-   to compute precise crossover points for `#?gpu` decisions
-3. **Workgroup sizing**: Tune `block_x` based on field access patterns and
-   GPU architecture (warp/wavefront size)
+1. **Crossover**: the cost model's device constants belong in config
+   (measured per device, not guessed) — calibration is a documented follow-up.
+2. **Buffer coalescing**: array fields are emitted as one flat projection per
+   kernel (SoA layout), so coalesced access falls out of the layout.
+3. **Workgroup sizing**: tunable in the drivers; the kernel's global-id is the
+   work-item counter.
+4. **Probe overhead**: bounded by `accel_probe_k` full-map runs, once per
+   process; Gpu-decision bodies skip the probe.
