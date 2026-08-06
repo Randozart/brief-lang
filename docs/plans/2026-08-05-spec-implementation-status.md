@@ -25,24 +25,25 @@ Status legend:
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
 | 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
-| 8 | Declarations | In progress | Phase 3 removed `prop`, `Ptr!`, `rstruct`, dotted extensions; `meld` deferred to Phase 12 |
+| 8 | Declarations | In progress | Phase 5: `trait`/`impl` declarations, relationship list `type X: Parent, Trait, #Proto`, impl coherence, structural conformance; `meld` deferred to Phase 12 |
 | 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done |
 | 10 | Contracts, invariants, watchdogs | In progress | Phase 6: mandatory non-trivial contracts on node/txn/asm; explicit `[true][true]` rejected |
 | 11 | Control flow | In progress | `rollback`, `exit program` done; `defer`/`mutex`/`barrier` are new statements (Phase 11); no `main` — first-firing-node entry |
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
-| 15 | Expressions and operations | In progress | `++`/`@`/prefix literals removed; op resolution Phase 5 |
+| 15 | Expressions and operations | In progress | Phase 5: `+`-class ops still type-dispatched; op elaboration pending |
 | 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
 | 17 | Reflection | Not started | Phase 7 (`.^`/`.^^`) |
 | 18 | Compile-time execution and macros | Not started | Phase 8 |
 | 19 | Foreign functions, export, GLUE | Not started | Phase 12 (four provenance forms, no meld) |
-| 20 | Assembly declarations | Not started | Phase 16 (`asm<target>` + effect profile) |
+| 20 | Assembly declarations | In progress | Phase 6: contracts mandatory on asm; full effect profile Phase 16 |
 | 21 | Rendered Briv | In progress | Phase 3 `render Name`, `b-when`; full lifecycle Phase 14 |
 | 22 | Data Briv | Not started | Phase 13 (`.dbv`/`.dbvl` modes) |
-| 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; docs Phase 20 |
+| 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; Phase 6 helpful-messages rule; docs Phase 20 |
 | 24 | Standard-library boundary | Not started | Phase 18 (no compiler collection knowledge) |
 | 25 | Implementation staging | In progress | `SyntaxError::StagedFeature` added in Phase 0 |
+| 26 | Casting and protocols | In progress | Phase 5: one cross-protocol edge per written `as` enforced |
 
 ## Fixture runner
 
