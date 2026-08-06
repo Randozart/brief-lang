@@ -467,6 +467,19 @@ type Int32: #Int {
 
 `!> observable: true` is not valid; use the `out` modifier.
 
+**Staged.** At module top level, `!>` binds metadata to the module as a whole.
+Top-level `!>` is a shortcut for attaching metadata to the script; it never
+attaches to the following declaration.
+
+```briv
+!> accel: TRY_ALL;
+```
+
+Multiple top-level `!>` bindings merge into one module metadata map
+(last binding wins per key). Values use the same grammar as declaration
+metadata (identifier, integer, boolean, string, or list). Module metadata is
+available to any backend or plugin that consults the metadata vocabulary.
+
 ## 9. Functions, transactions, nodes, objects, and cells
 
 ### 9.1 Functions
@@ -561,6 +574,45 @@ cell Timer(period: Duration) -> tick: Event {
 - Internal state is not externally visible.
 - Cells and objects share input `(...)` and named output `->` syntax.
 - Multiple outputs form a complete named product on every target.
+
+### 9.7 Acceleration (`accel`)
+
+**Staged.** `accel` is a keyword that may prefix a `node` or `txn` declaration.
+It marks the body as a *per-firing parallel map over work-items*: the
+declaration fires as one dispatch of N work-items, where N is bound by the
+contract precondition `[i < N]` and `i` is a virtual work-item index (never a
+state field). Each work-item runs the body once with its index.
+
+```briv
+accel node force [i < nbodies][true] {
+    term;
+};
+```
+
+Cross-work-item data exchange is permitted only through host-sequenced
+separate `accel` declarations, never within a single firing. A firing's
+writes must be disjoint across work-items (each write targets a slot affine in
+`i` or a per-work-item local); shared reads are permitted.
+
+**Verification requirement.** GPU deferral happens only when the compiler
+verifies a speedup. The compiler must prove eligibility (bound, write
+disjointness, flat value types, purity) and then either
+
+- prove statically, for a compile-time-known N, that N exceeds the device
+  crossover, or
+- emit a runtime auto-tuning probe that measures both the CPU and the GPU path
+  at program start, checks output equality within tolerance, and commits to
+  the faster path.
+
+If eligibility cannot be proven or the speedup is not verified, execution
+silently uses the CPU path. An ineligible or unverified `accel` body is never
+an error by itself.
+
+**Module shortcut.** Top-level module metadata `!> accel: TRY_ALL;` (§8.9)
+makes every eligible body in the module a candidate; `!> accel: OFF;`
+suppresses the blanket. A per-body `accel` keyword overrides the module-level
+value. The keyword and the module shortcut feed the same verification
+pipeline.
 
 ## 10. Contracts, invariants, and watchdogs
 
