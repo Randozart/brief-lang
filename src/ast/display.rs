@@ -386,8 +386,17 @@ impl fmt::Display for Statement {
     }
 }
 
-impl fmt::Display for TopLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+/// 2026-08-06 (Phase 11): render selective-import symbols — `a` for an
+/// unrenamed symbol, `Local: Exported` for a rename.
+fn import_symbols(symbols: &[(String, String)]) -> String {
+    symbols
+        .iter()
+        .map(|(l, e)| if l == e { l.clone() } else { format!("{}: {}", l, e) })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+impl fmt::Display for TopLevel {    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TopLevel::Definition(defn) => {
                 write!(f, "defn {}(", defn.name)?;
@@ -440,14 +449,14 @@ impl fmt::Display for TopLevel {
                         if import.symbols.is_empty() {
                             write!(f, "import \"{}\";", path)
                         } else {
-                            write!(f, "import {{ {} }} from \"{}\";", import.symbols.join(", "), path)
+                            write!(f, "import {{ {} }} from \"{}\";", import_symbols(&import.symbols), path)
                         }
                     }
                     ImportKind::Registry(name) => {
                         if import.symbols.is_empty() {
                             write!(f, "import <{}>;", name)
                         } else {
-                            write!(f, "import {{ {} }} from <{}>;", import.symbols.join(", "), name)
+                            write!(f, "import {{ {} }} from <{}>;", import_symbols(&import.symbols), name)
                         }
                     }
                 }

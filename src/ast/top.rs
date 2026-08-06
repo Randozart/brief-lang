@@ -419,9 +419,12 @@ pub enum ImportKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct Import {
+ pub struct Import {
     pub kind: ImportKind,
-    pub symbols: Vec<String>,
+    /// 2026-08-06 (Phase 11): (local_name, exported_name) pairs. A selective
+    /// rename `import { Local: Exported }` binds the module's `Exported` name
+    /// as `Local`; unrenamed symbols push `(name, name)`.
+    pub symbols: Vec<(String, String)>,
     pub span: Option<Span>,
 }
 
@@ -444,7 +447,7 @@ impl Import {
     }
 
     /// Create a new literal import with the given path.
-    pub fn literal(path: impl Into<String>, symbols: Vec<String>) -> Self {
+    pub fn literal(path: impl Into<String>, symbols: Vec<(String, String)>) -> Self {
         Import {
             kind: ImportKind::Literal(path.into()),
             symbols,
@@ -453,7 +456,7 @@ impl Import {
     }
 
     /// Create a new registry import with the given name.
-    pub fn registry(name: impl Into<String>, symbols: Vec<String>) -> Self {
+    pub fn registry(name: impl Into<String>, symbols: Vec<(String, String)>) -> Self {
         Import {
             kind: ImportKind::Registry(name.into()),
             symbols,

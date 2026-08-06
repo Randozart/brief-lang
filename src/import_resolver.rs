@@ -249,16 +249,33 @@ impl ImportResolver {
 
         let mut items = items;
 
+        // 2026-08-06 (Phase 11): track which module path each imported name
+        // came from. Two DIFFERENT modules providing the same unqualified name
+        // is a hard error (SPEC 7.2); the same path (diamond) is fine.
+        let mut imported_names: HashMap<String, (String, String)> = HashMap::new();
+
         let mut index = 0;
 
         while index < items.len() {
-            if let TopLevel::Import(import) = &items[index] {
-                let resolved = self.resolve_import(import, file_path)?;
-                items.remove(index);
-                items.splice(index..index, resolved);
-            } else {
+            let import = match &items[index] {
+                TopLevel::Import(import) => Some((import.clone(), false)),
+                // `export import` — the only re-export form (SPEC 7.3). The
+                // resolved names become module-level (imports are inlined), so
+                // importers of this module see them.
+                TopLevel::Export(e) => match e.inner.as_ref() {
+                    TopLevel::Import(import) => Some((import.clone(), true)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some((import, _is_reexport)) = import else {
                 index += 1;
-            }
+                continue;
+            };
+            let resolved = self.resolve_import(&import, file_path)?;
+            Self::record_imported_names(&mut imported_names, &resolved, import.path())?;
+            items.remove(index);
+            items.splice(index..index, resolved);
         }
 
         // 2026-06-13: Dedup items
@@ -268,6 +285,34 @@ impl ImportResolver {
     }
 
     /// Resolve `import "target"` — loads the board D-briv description and emits typed constants.
+    /// 2026-08-06 (Phase 11): record which module path each imported name came
+    /// from. Two DIFFERENT modules providing the same unqualified name is a
+    /// hard error (SPEC 7.2) UNLESS the definitions are IDENTICAL (a benign
+    /// duplicate, e.g. `SYS_WRITE` declared in both fs.bv and net.bv); the
+    /// same path (diamond) is fine.
+    fn record_imported_names(
+        imported: &mut HashMap<String, (String, String)>,
+        resolved: &[TopLevel],
+        path: &str,
+    ) -> Result<(), String> {
+        for item in resolved {
+            if let Some(n) = Self::item_name(item) {
+                if let Some((src, prior)) = imported.get(n) {
+                    if src != path && *prior != format!("{:?}", item) {
+                        return Err(format!(
+                            "import name '{}' conflicts: provided by both '{}' and '{}' — \
+                             use a selective rename (`{{ Local: Exported }}`) or a module alias",
+                            n, src, path
+                        ));
+                    }
+                } else {
+                    imported.insert(n.to_string(), (path.to_string(), format!("{:?}", item)));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn resolve_target_import(&mut self) -> Result<Vec<TopLevel>, String> {
         let board = self.board_name.as_deref().unwrap_or("stm32f407");
 
@@ -442,7 +487,7 @@ impl ImportResolver {
                 let component_name = import
                     .symbols
                     .first()
-                    .cloned()
+                    .map(|(local, _)| local.clone())
                     .unwrap_or_else(|| {
                         let file_name = if let Some(last_slash) = import.path().rfind('/') {
                             &import.path()[last_slash + 1..]
@@ -514,7 +559,7 @@ impl ImportResolver {
             let constant_name = import
                 .symbols
                 .first()
-                .cloned()
+                .map(|(local, _)| local.clone())
                 .unwrap_or_else(|| {
                     let fname = dbriv_path
                         .file_stem()
@@ -695,6 +740,8 @@ impl ImportResolver {
         };
 
         let resolved = self.resolve_imports(imported_program, &resolved_path)?;
+        if import.path().contains("glue/c") {
+        }
 
         // Cache the fully resolved program
         self.loaded_modules
@@ -777,109 +824,132 @@ impl ImportResolver {
         Ok(items)
     }
 
-    fn filter_items(&self, items: &[TopLevel], sed_names: &[String], symbols: &[String]) -> Result<Vec<TopLevel>, String> {
-        let filtered: Vec<TopLevel> = items
+    /// 2026-08-06 (Phase 11): filter imported items by the EXPORTED names and
+    /// apply selective renames (`{ Local: Exported }`). Preserves the D3
+    /// transitive-referenced-type closure and the file-private (sed) filter.
+    fn filter_items(&self, items: &[TopLevel], sed_names: &[String], symbols: &[(String, String)]) -> Result<Vec<TopLevel>, String> {
+        if items.iter().any(|i| matches!(i, TopLevel::Meld(_))) {
+        }
+        let rename: HashMap<String, String> = symbols
             .iter()
-            .filter(|item| {
-                if matches!(item, TopLevel::ForeignBinding { .. }) {
-                    return true;
+            .filter(|(l, e)| l != e)
+            .map(|(l, e)| (e.clone(), l.clone()))
+            .collect();
+        let exported_names: std::collections::HashSet<String> =
+            symbols.iter().map(|(_, e)| e.clone()).collect();
+        let keep_all = symbols.is_empty();
+
+        let always = |item: &TopLevel| {
+            matches!(
+                item,
+                TopLevel::ForeignBinding { .. }
+                    | TopLevel::LinkDependency(_)
+                    | TopLevel::StageBlock(_)
+                    | TopLevel::CompileTimeDefn(_)
+                    | TopLevel::CompileTimeTxn(_)
+                    | TopLevel::CompileTimeLet(_, _)
+                    | TopLevel::CompileTimeConst(_, _)
+            )
+        };
+        let wanted = |n: &str| keep_all || exported_names.contains(n);
+
+        let mut keep: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in items {
+            if always(item) {
+                continue;
+            }
+            if let Some(n) = Self::item_name(item) {
+                if matches!(item, TopLevel::Meld(_)) {
                 }
-                if matches!(item, TopLevel::LinkDependency(_)) {
-                    return true;
+                if !sed_names.iter().any(|s| s == n) && wanted(n) {
+                    keep.insert(n.to_string());
                 }
-                // 2026-07-24: Keep stage blocks and compile-time defns from
-                // imported files so plugins in library modules can auto-execute.
-                if matches!(item, TopLevel::StageBlock(_) | TopLevel::CompileTimeDefn(_) | TopLevel::CompileTimeTxn(_) | TopLevel::CompileTimeLet(_, _) | TopLevel::CompileTimeConst(_, _)) {
-                    return true;
-                }
-                let name = match item {
-                    TopLevel::Definition(d) => Some(d.name.as_str()),
-                    TopLevel::Signature(s) => Some(s.name.as_str()),
-                    TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
-                    TopLevel::Transaction(t) => Some(t.name.as_str()),
-                    TopLevel::Constant(c) => Some(c.name.as_str()),
-                    TopLevel::Obj(s) => Some(s.name.as_str()),
-                    TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
-                    TopLevel::Trigger(trg) => Some(trg.name.as_str()),
-                    TopLevel::TriggerBinding { name, .. } => Some(name.as_str()),
-                    TopLevel::Cell(c) => Some(c.name.as_str()),
-                    TopLevel::StateDecl(s) => Some(s.name.as_str()),
-                    TopLevel::TypeDef(t) => Some(t.name.as_str()),
-                    TopLevel::Trait(t) => Some(t.name.as_str()),
-                    TopLevel::Impl(i) => Some(i.target.as_str()),
-                    // 2026-08-03: protocol declarations (proto C_String:
-                    // #String) must survive imports so the casting graph gets
-                    // the variant edges (marshalling paths) from library
-                    // boundary modules like lib/glue/c.bv.
-                    TopLevel::ProtocolDef(p) => Some(p.name.as_str()),
-                    // 2026-08-03 (P3): meld declarations (meld CStr -> String)
-                    // must survive imports so a boundary module's composite
-                    // interchangeability applies to the importing bridge.
-                    TopLevel::Meld(m) => Some(m.name.as_str()),
-                    // 2026-08-01 (D3): a generic `struct ListBuffer<T>` is a
-                    // StaticStruct — without an arm here it was DROPPED from
-                    // every import, so `List<T>.inner: ListBuffer<T>` lost its
-                    // slot type (field access failed on imported collections).
-                    TopLevel::StaticStruct(s) => Some(s.name.as_str()),
-                    _ => None,
-                };
-                let name: &str = match name {
-                    Some(n) => n,
-                    None => return false,
-                };
-                // Filter out sed (file-private) items
-                if sed_names.iter().any(|s| s == name) {
-                    return false;
-                }
-                // If specific symbols are requested, only include matches
-                if symbols.is_empty() {
-                    true
-                } else {
-                    symbols.contains(&name.to_string())
-                }
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        // 2026-08-01 (D3): a named import (`{ List }`) must ALSO bring the
-        // requested item's dependencies — `List` slots reference
-        // `ListBuffer<T>`, which the name filter would otherwise drop. Collect
-        // the transitive referenced-type closure of the kept items.
-        if !symbols.is_empty() {
-            let mut keep: std::collections::HashSet<String> = filtered
-                .iter()
-                .filter_map(top_level_name)
-                .collect();
-            let mut changed = true;
-            while changed {
-                changed = false;
-                // The DEPENDENCY direction: a kept item (List) REFERENCES a
-                // candidate (ListBuffer) — so collect every referenced name
-                // from the kept items and add items bearing those names.
-                let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
-                for item in items {
-                    if item_name(item).map_or(false, |n| keep.contains(n)) {
-                        for r in referenced_type_names(item) {
-                            refs.insert(r);
-                        }
-                    }
-                }
-                for item in items {
-                    if item_name(item).map_or(false, |n| keep.contains(n)) {
-                        continue;
-                    }
-                    if item_name(item).map_or(false, |n| refs.contains(n)) {
-                        if let Some(n) = item_name(item) {
-                            keep.insert(n.to_string());
-                            changed = true;
-                        }
+            }
+        }
+        // 2026-08-01 (D3): a named import must ALSO bring the requested item's
+        // transitive referenced types (List -> ListBuffer<T>).
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for item in items {
+                if Self::item_name(item).map_or(false, |n| keep.contains(n)) {
+                    for r in referenced_type_names(item) {
+                        refs.insert(r);
                     }
                 }
             }
-            return Ok(items.iter().cloned().filter(|i| {
-                item_name(i).map_or(false, |n| keep.contains(n))
-            }).collect());
+            for item in items {
+                if Self::item_name(item).map_or(false, |n| keep.contains(n)) {
+                    continue;
+                }
+                if Self::item_name(item).map_or(false, |n| refs.contains(n)) {
+                    if let Some(n) = Self::item_name(item) {
+                        keep.insert(n.to_string());
+                        changed = true;
+                    }
+                }
+            }
         }
-        Ok(filtered)
+        let mut out: Vec<TopLevel> = Vec::new();
+        for item in items {
+            if always(item) {
+                out.push(item.clone());
+                continue;
+            }
+            match Self::item_name(item) {
+                Some(n) if keep.contains(n) => {
+                    if let Some(local) = rename.get(n) {
+                        out.push(Self::rename_item(item, local));
+                    } else {
+                        out.push(item.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// The unqualified name of a top-level item (import filtering + renames).
+    fn item_name(item: &TopLevel) -> Option<&str> {
+        match item {
+            TopLevel::Definition(d) => Some(d.name.as_str()),
+            TopLevel::Signature(s) => Some(s.name.as_str()),
+            TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
+            TopLevel::Transaction(t) => Some(t.name.as_str()),
+            TopLevel::Constant(c) => Some(c.name.as_str()),
+            TopLevel::Obj(s) => Some(s.name.as_str()),
+            TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
+            TopLevel::Trigger(trg) => Some(trg.name.as_str()),
+            TopLevel::TriggerBinding { name, .. } => Some(name.as_str()),
+            TopLevel::Cell(c) => Some(c.name.as_str()),
+            TopLevel::StateDecl(s) => Some(s.name.as_str()),
+            TopLevel::TypeDef(t) => Some(t.name.as_str()),
+            TopLevel::Trait(t) => Some(t.name.as_str()),
+            TopLevel::Impl(i) => Some(i.target.as_str()),
+            TopLevel::ProtocolDef(p) => Some(p.name.as_str()),
+            TopLevel::Meld(m) => Some(m.name.as_str()),
+            TopLevel::StaticStruct(s) => Some(s.name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Apply a selective-import rename to a top-level item's name.
+    fn rename_item(item: &TopLevel, local: &str) -> TopLevel {
+        match item.clone() {
+            TopLevel::Definition(mut d) => { d.name = local.to_string(); TopLevel::Definition(d) }
+            TopLevel::Signature(mut s) => { s.name = local.to_string(); TopLevel::Signature(s) }
+            TopLevel::Constant(mut c) => { c.name = local.to_string(); TopLevel::Constant(c) }
+            TopLevel::Obj(mut s) => { s.name = local.to_string(); TopLevel::Obj(s) }
+            TopLevel::Transaction(mut t) => { t.name = local.to_string(); TopLevel::Transaction(t) }
+            TopLevel::Trigger(mut t) => { t.name = local.to_string(); TopLevel::Trigger(t) }
+            TopLevel::Cell(mut c) => { c.name = local.to_string(); TopLevel::Cell(c) }
+            TopLevel::StateDecl(mut s) => { s.name = local.to_string(); TopLevel::StateDecl(s) }
+            TopLevel::TypeDef(mut t) => { t.name = local.to_string(); TopLevel::TypeDef(t) }
+            TopLevel::Trait(mut t) => { t.name = local.to_string(); TopLevel::Trait(t) }
+            other => other,
+        }
     }
 
     /// Resolve an import from the stdlib path.
@@ -1012,6 +1082,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn import_program(path: &str, symbols: Vec<String>) -> Vec<TopLevel> {
+        let symbols: Vec<(String, String)> = symbols.into_iter().map(|s| (s.clone(), s)).collect();
         vec![TopLevel::Import(Import::literal(path.to_string(), symbols))]
     }
 
@@ -1216,4 +1287,125 @@ mod tests {
         );
         assert_eq!(crate::address_resolver::resolve_address("uart1"), 0x40011000);
     }
+
+
+#[test]
+fn test_selective_rename_binds_local_name() {
+    // import { Local: Exported } — the module's `Exported` is bound as `Local`.
+    let dir = TempDir::new().unwrap();
+    let bv = dir.path().join("rename_mod.bv");
+    fs::write(&bv, "defn Exported -> Int { term 7; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![TopLevel::Import(Import::literal(
+        "rename_mod.bv".to_string(),
+        vec![("Local".to_string(), "Exported".to_string())],
+    ))];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let result = resolver.resolve_imports(items, &src).unwrap();
+    assert!(
+        result.iter().any(|i| matches!(i, TopLevel::Definition(d) if d.name == "Local")),
+        "the imported defn must be renamed to Local; got: {:?}",
+        result.iter().map(|i| item_name(i).unwrap_or("?")).collect::<Vec<_>>()
+    );
+    assert!(
+        !result.iter().any(|i| matches!(i, TopLevel::Definition(d) if d.name == "Exported")),
+        "the original exported name must not leak"
+    );
+}
+
+#[test]
+fn test_import_collision_is_an_error() {
+    // Two different modules both exporting `foo` is a hard error (SPEC 7.2).
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("m1.bv"), "defn foo -> Int { term 1; };").unwrap();
+    fs::write(dir.path().join("m2.bv"), "defn foo -> Int { term 2; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![
+        TopLevel::Import(Import::literal("m1.bv".to_string(), vec![])),
+        TopLevel::Import(Import::literal("m2.bv".to_string(), vec![])),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let err = resolver.resolve_imports(items, &src).unwrap_err();
+    assert!(err.contains("conflicts"), "expected a collision error, got: {err}");
+}
+
+#[test]
+fn test_rename_resolves_collision() {
+    // Renaming one import resolves the collision.
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("m1.bv"), "defn foo -> Int { term 1; };").unwrap();
+    fs::write(dir.path().join("m2.bv"), "defn foo -> Int { term 2; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![
+        TopLevel::Import(Import::literal("m1.bv".to_string(), vec![])),
+        TopLevel::Import(Import::literal(
+            "m2.bv".to_string(),
+            vec![("renamed".to_string(), "foo".to_string())],
+        )),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let result = resolver.resolve_imports(items, &src).unwrap();
+    assert!(result.iter().any(|i| matches!(i, TopLevel::Definition(d) if d.name == "renamed")));
+}
+
+#[test]
+fn test_glob_import_is_rejected() {
+    // import * from "x" is invalid (SPEC 7.2).
+    let src = r#"import * from "m.bv";"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    assert!(
+        p.parse_program().is_err(),
+        "glob imports must be rejected"
+    );
+}
+
+#[test]
+fn test_export_import_propagates() {
+    // A module that re-exports (export import) provides the names to importers.
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("internal.bv"), "defn pub -> Int { term 5; };").unwrap();
+    fs::write(
+        dir.path().join("facade.bv"),
+        "export import { pub } from \"internal.bv\";",
+    )
+    .unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![TopLevel::Import(Import::literal("facade.bv".to_string(), vec![]))];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let result = resolver.resolve_imports(items, &src).unwrap();
+    assert!(
+        result.iter().any(|i| matches!(i, TopLevel::Definition(d) if d.name == "pub")),
+        "the re-exported defn must be visible to importers"
+    );
+}
+
+#[test]
+fn test_identical_duplicate_imports_do_not_conflict() {
+    // Two modules declaring the SAME constant (e.g. SYS_WRITE in fs.bv +
+    // net.bv) are a benign duplicate, not a collision.
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("d1.bv"), "const SYS_WRITE: Int = 4;").unwrap();
+    fs::write(dir.path().join("d2.bv"), "const SYS_WRITE: Int = 4;").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![
+        TopLevel::Import(Import::literal("d1.bv".to_string(), vec![])),
+        TopLevel::Import(Import::literal("d2.bv".to_string(), vec![])),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    assert!(
+        resolver.resolve_imports(items, &src).is_ok(),
+        "identical duplicate definitions must not conflict"
+    );
+}
 }

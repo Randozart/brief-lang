@@ -779,10 +779,24 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat(&Token::LBrace) {
-            // Import with symbols: import { a, b } from "module" or from <name>
-            let mut symbols = Vec::new();
+            // Import with symbols: import { a, b: Renamed } from "module".
+            // A `:` records a selective rename (local : exported). Globs are
+            // invalid (SPEC §7.2).
+            let mut symbols: Vec<(String, String)> = Vec::new();
             loop {
-                symbols.push(self.expect_identifier()?);
+                if self.check(&Token::Star) {
+                    return Err(SyntaxError::StagedFeature {
+                        feature: "glob imports are invalid (SPEC 7.2) — import explicit symbols instead".into(),
+                        span: self.make_span(self.peek_with_span().map(|(_, s)| s.clone()).unwrap_or(0..0)),
+                    });
+                }
+                let local = self.expect_identifier()?;
+                let exported = if self.eat(&Token::Colon) {
+                    self.expect_identifier()?
+                } else {
+                    local.clone()
+                };
+                symbols.push((local, exported));
                 if !self.eat(&Token::Comma) {
                     break;
                 }
@@ -839,16 +853,17 @@ impl<'a> Parser<'a> {
             self.expect(Token::Semicolon)?;
             Ok(Import {
                 kind,
-                symbols: vec![first],
+                symbols: vec![(first.clone(), first)],
                 span: None,
             })
         } else {
-            let mut symbols = vec![first];
+            let mut symbols = vec![(first.clone(), first)];
             loop {
                 if !self.eat(&Token::Comma) {
                     break;
                 }
-                symbols.push(self.expect_identifier()?);
+                let name = self.expect_identifier()?;
+                symbols.push((name.clone(), name));
             }
             self.eat_identifier("from");
             let kind = parse_import_path(self)?;

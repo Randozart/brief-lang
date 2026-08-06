@@ -554,7 +554,12 @@ fn format_deadline(out: &mut String, ns: u64) {
 /// 2026-08-05: format an `import` item.
 fn format_import_into(import: &Import, out: &mut String, level: usize) {
     indent(out, level);
-    let symbols = import.symbols.join(", ");
+    let symbols: Vec<String> = import
+        .symbols
+        .iter()
+        .map(|(l, e)| if l == e { l.clone() } else { format!("{}: {}", l, e) })
+        .collect();
+    let symbols = symbols.join(", ");
     match &import.kind {
         ImportKind::Literal(path) => {
             if symbols.is_empty() {
