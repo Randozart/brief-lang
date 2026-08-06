@@ -494,6 +494,37 @@ fn accel_test_entry(buffer: &str, write: bool) -> crate::analysis::accel::AccelE
 }
 
 #[test]
+fn test_accel_probe_functions_emit() {
+    // 2026-08-06 (Phase 7): a Probe-decision accel body emits the auto-tuning
+    // probe functions — CPU lane (loop to completion), GPU lane (one dispatch +
+    // fast-forward), output-equality gate, run_probe → verdict global. Tested
+    // directly (llc-independent).
+    let mut backend = LlvmBackend::new();
+    backend.accel_kernel_idx.insert("force".to_string(), 0);
+    backend.ctx.state_size_bytes = 32;
+    backend.ctx.field_index_map.insert("i".to_string(), 0);
+    backend.ctx.field_types.push("i64".to_string());
+    backend.ctx.field_briv_types.push(Type::int());
+    backend.ctx.field_index_map.insert("a".to_string(), 1);
+    backend.ctx.field_types.push("[4 x float]".to_string());
+    backend.ctx.field_briv_types.push(Type::Vector(
+        Box::new(Type::Custom("Float".to_string())),
+        vec![crate::ast::Dimension::Anonymous(4)],
+    ));
+    backend.accel_entries.insert("force".to_string(), accel_test_entry("a", true));
+    let mut out = String::new();
+    backend.emit_accel_probe_functions(&mut out, "force");
+    assert!(out.contains("define void @briv_accel_probe_cpu_force(ptr %state)"), "cpu lane: {out}");
+    assert!(out.contains("call void @txn_force_cpu(ptr %state)"), "cpu lane runs the loop");
+    assert!(out.contains("define void @briv_accel_probe_gpu_force(ptr %state)"), "gpu lane: {out}");
+    assert!(out.contains("call i32 @briv_accel_launch(i32 0, ptr %state, i64 16)"), "gpu lane launch");
+    assert!(out.contains("define i8 @briv_accel_gpu_ok_force(ptr %a, ptr %b, double %tol)"), "gate: {out}");
+    assert!(out.contains("fcmp oge float"), "float tolerance compare");
+    assert!(out.contains("define void @briv_accel_run_probe_force(ptr %state)"), "run_probe: {out}");
+    assert!(out.contains("store i32 %v, ptr @briv_accel_verdict_force"), "verdict commit");
+}
+
+#[test]
 fn test_escape_non_ASCII_string() {
     let output = escape_llvm_string("héllo");
     assert!(output.contains("\\c3"), "Should hex-escape byte C3");

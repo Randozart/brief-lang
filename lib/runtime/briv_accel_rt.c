@@ -243,31 +243,54 @@ static double now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-/// `cpu_fn`/`gpu_fn` run one firing each; `gpu_ok` reports whether the GPU
-/// lane's output matched the CPU lane within `tolerance`.
+/// Auto-tuning probe (D7): runs the CPU and GPU lanes on SEPARATE state
+/// copies, times each over `probe_k` full-map runs, and commits to the GPU
+/// path only when its wall time beats CPU by the margin AND `gpu_ok`
+/// confirms the outputs match within `tolerance`. Returns 1 = GPU, 0 = CPU.
+/// `state_size` is the host %State byte count (the compiler emits it).
 int briv_accel_probe(void (*cpu_fn)(void*), void (*gpu_fn)(void*), void* ctx,
-                     int64_t probe_k, double tolerance,
+                     uint64_t state_size, int64_t probe_k, double tolerance,
+                     double margin,
                      int (*gpu_ok)(const void*, const void*, double, void*)) {
     if (!briv_accel_available() || probe_k <= 0) {
         return 0;
     }
-    // Warm-up: one dummy launch each (first device dispatch is slow).
-    cpu_fn(ctx);
-    gpu_fn(ctx);
+    uint8_t* cpu_state = malloc(state_size == 0 ? 1 : state_size);
+    uint8_t* gpu_state = malloc(state_size == 0 ? 1 : state_size);
+    if (cpu_state == NULL || gpu_state == NULL) {
+        free(cpu_state);
+        free(gpu_state);
+        return 0;
+    }
+    memcpy(cpu_state, ctx, state_size);
+    memcpy(gpu_state, ctx, state_size);
+
+    // Warm-up: one dummy full-map run each (first device dispatch is slow).
+    cpu_fn(cpu_state);
+    gpu_fn(gpu_state);
+
     double t0 = now_seconds();
     for (int64_t i = 0; i < probe_k; i++) {
-        cpu_fn(ctx);
+        cpu_fn(cpu_state);
     }
     double cpu_t = now_seconds() - t0;
+
     t0 = now_seconds();
     for (int64_t i = 0; i < probe_k; i++) {
-        gpu_fn(ctx);
+        gpu_fn(gpu_state);
     }
     double gpu_t = now_seconds() - t0;
-    if (gpu_ok != NULL && !gpu_ok(ctx, ctx, tolerance, ctx)) {
-        return 0;  // correctness gate: GPU diverged → stay CPU.
+
+    // Correctness gate: the GPU lane's result must match the CPU lane's within
+    // tolerance — the probe doubles as the safety net against GPU codegen bugs.
+    if (gpu_ok != NULL && !gpu_ok(cpu_state, gpu_state, tolerance, ctx)) {
+        free(cpu_state);
+        free(gpu_state);
+        return 0;
     }
-    return (gpu_t < cpu_t) ? 1 : 0;
+    free(cpu_state);
+    free(gpu_state);
+    return (gpu_t * (1.0 + margin) < cpu_t) ? 1 : 0;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -352,7 +375,9 @@ int main(void) {
     // loop with the fake driver installed above (gpu_ok always rejects).
     {
         static struct ProbeCtx { int n; } pctx = { 4 };
-        int verdict = briv_accel_probe(probe_cpu_fn, probe_gpu_fn, &pctx, 2, 0.001, probe_reject_ok);
+        int verdict = briv_accel_probe(probe_cpu_fn, probe_gpu_fn, &pctx,
+                                       sizeof(pctx), 2, 0.001, 0.05,
+                                       probe_reject_ok);
         expect(verdict == 0, "rejecting gate forces CPU");
     }
     (void)reject_hits;

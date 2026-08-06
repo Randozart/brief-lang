@@ -34,3 +34,11 @@ svo_max_elements: 3;
 
 // Weighted body-cost threshold for callable-txn auto-inline (analysis/inline_cost.rs).
 callable_inline_weight_threshold: 40;
+
+// ── Accel auto-tuning probe (2026-08-06, Phase 7) ────────────────
+// briv_accel_probe runs each lane `accel_probe_k` full-map times, commits GPU
+// only when GPU time × (1 + margin) < CPU time AND outputs match within
+// tolerance (the correctness gate).
+accel_probe_k: 2;
+accel_probe_tolerance: 0.0001;
+accel_probe_margin: 0.05;

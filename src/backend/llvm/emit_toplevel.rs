@@ -6,6 +6,14 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
+/// Arguments for one output-equality-gate element comparison (probe).
+struct ProbeCmpArg<'a> {
+    elem: &'a str,
+    x: &'a str,
+    y: &'a str,
+    next: &'a str,
+}
+
 impl LlvmBackend {
     /// 2026-08-04 (compiler-in-Briv): top-level `let` names in a body that are
     /// ASSIGNED later (incl. inside when/if/foreach/sync blocks). Such lets get
@@ -2294,7 +2302,9 @@ impl LlvmBackend {
     /// body `@txn_<name>_cpu` — is picked up automatically.
     pub(super) fn emit_accel_dispatch_wrapper(&mut self, out: &mut String, name: &str) {
         let Some(&idx) = self.accel_kernel_idx.get(name) else { return; };
-        let entry = &self.accel_entries[name];
+        // Copy the decision data up front — the emission methods below borrow
+        // `self` mutably (gen_reg, emit_state_gep, emit_work_item_count).
+        let forced = self.accel_entries[name].forced;
         let n_kernels = self.accel_kernel_idx.len();
         writeln!(out, "define void @txn_{}({}) local_unnamed_addr {{", name, self.ctx.state_ptr_param).ok();
         writeln!(out, "entry:").ok();
@@ -2304,14 +2314,21 @@ impl LlvmBackend {
         writeln!(out, "accel_init:").ok();
         writeln!(out, "  %ok = call i32 @briv_accel_init(ptr @briv_accel_descs, i32 {})", n_kernels).ok();
         writeln!(out, "  store i32 1, ptr @briv_accel_ready").ok();
+        // 2026-08-06 (Design A / probe): a Probe-decision body runs the
+        // auto-tuning probe once here (device + workload measurement, output
+        // equality gate), committing its own verdict global. Gpu-decision
+        // bodies skip the probe (static crossover already decided).
+        if !forced {
+            writeln!(out, "  call void @briv_accel_run_probe_{}(ptr %state)", name).ok();
+        }
         writeln!(out, "  br label %accel_gate").ok();
         writeln!(out, "accel_gate:").ok();
         // Gpu decision → gate on device availability. Probe → gate on the
-        // committed verdict global (default 0 = CPU; the Phase 7 probe sets it).
-        if entry.forced {
+        // committed verdict global (set by briv_accel_run_probe_<name>).
+        if forced {
             writeln!(out, "  %dev = call i32 @briv_accel_available()").ok();
         } else {
-            writeln!(out, "  %dev = load i32, ptr @briv_accel_verdict").ok();
+            writeln!(out, "  %dev = load i32, ptr @briv_accel_verdict_{}", name).ok();
         }
         writeln!(out, "  %use = icmp ne i32 %dev, 0").ok();
         writeln!(out, "  br i1 %use, label %accel_gpu, label %accel_cpu").ok();
@@ -2333,6 +2350,11 @@ impl LlvmBackend {
         writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
+        // Probe-decision bodies (not forced) get the auto-tuning probe
+        // functions: CPU lane, GPU lane, output-equality gate, run_probe.
+        if !forced {
+            self.emit_accel_probe_functions(out, name);
+        }
     }
 
     /// The kernel's work-item count (the `[i < N]` bound) as an i64 register
@@ -2352,6 +2374,186 @@ impl LlvmBackend {
             }
             _ => "0".to_string(),
         }
+    }
+
+    /// Emit the auto-tuning probe functions for one Probe-decision accel body
+    /// (Design A): CPU lane (run the counted loop to completion), GPU lane (one
+    /// dispatch + counter fast-forward), output-equality gate (write buffers
+    /// within tolerance), and the run_probe that times both lanes and commits
+    /// the verdict global. The runtime (`briv_accel_probe`) manages the two
+    /// lane state copies.
+    pub(super) fn emit_accel_probe_functions(&mut self, out: &mut String, name: &str) {
+        let Some(&idx) = self.accel_kernel_idx.get(name) else { return; };
+        let entry = &self.accel_entries[name];
+        let counter = entry.shape.index_var.clone();
+        let Some(&cfidx) = self.ctx.field_index_map.get(&counter) else { return; };
+        let state_size = self.ctx.state_size_bytes;
+
+        // ── CPU lane: reset the counter to 0, then run the counted loop to
+        //    completion (each @txn_<name>_cpu firing advances `i`).
+        writeln!(out, "define void @briv_accel_probe_cpu_{}(ptr %state) {{", name).ok();
+        writeln!(out, "entry:").ok();
+        let cg = self.emit_state_gep(out, "  ", "pc", "%state", cfidx);
+        writeln!(out, "  store i64 0, ptr {}", cg).ok();
+        writeln!(out, "  br label %pc.cond").ok();
+        writeln!(out, "pc.cond:").ok();
+        let ic = self.fun.gen_reg();
+        writeln!(out, "  {} = load i64, ptr {}", ic, cg).ok();
+        let n = self.emit_work_item_count(out, name);
+        let cmp = self.fun.gen_reg();
+        writeln!(out, "  {} = icmp ult i64 {}, {}", cmp, ic, n).ok();
+        writeln!(out, "  br i1 {}, label %pc.body, label %pc.done", cmp).ok();
+        writeln!(out, "pc.body:").ok();
+        writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
+        writeln!(out, "  br label %pc.cond").ok();
+        writeln!(out, "pc.done:").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+
+        // ── GPU lane: reset the counter, one dispatch of N work-items, then
+        //    fast-forward the counter so the state matches the CPU lane's.
+        writeln!(out, "define void @briv_accel_probe_gpu_{}(ptr %state) {{", name).ok();
+        writeln!(out, "entry:").ok();
+        let cg2 = self.emit_state_gep(out, "  ", "pg", "%state", cfidx);
+        writeln!(out, "  store i64 0, ptr {}", cg2).ok();
+        let ng = self.emit_work_item_count(out, name);
+        writeln!(out, "  %r = call i32 @briv_accel_launch(i32 {}, ptr %state, i64 {})", idx, ng).ok();
+        writeln!(out, "  store i64 {}, ptr {}", ng, cg2).ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+
+        // ── Output-equality gate: compare every write buffer element-wise
+        //    within tolerance (Float) / exactly (Int). The gate doubles as the
+        //    safety net against GPU codegen bugs (D7).
+        writeln!(out, "define i8 @briv_accel_gpu_ok_{}(ptr %a, ptr %b, double %tol) {{", name).ok();
+        writeln!(out, "entry:").ok();
+        self.emit_probe_ok_body(out, name, cfidx);
+        writeln!(out, "fail:").ok();
+        writeln!(out, "  ret i8 0").ok();
+        writeln!(out, "}}").ok();
+
+        // ── run_probe: time both lanes on separate state copies via the
+        //    runtime, commit the verdict global. Tunables from
+        //    config/ir-lowering.dbvl (config_tuning::ir_lowering).
+        let tuning = crate::config_tuning::ir_lowering();
+        writeln!(out, "define void @briv_accel_run_probe_{}(ptr %state) {{", name).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %v = call i32 @briv_accel_probe(").ok();
+        writeln!(out, "    ptr @briv_accel_probe_cpu_{}, ptr @briv_accel_probe_gpu_{},", name, name).ok();
+        writeln!(out, "    ptr %state, i64 {}, i64 {}, double {:e}, double {:e},", state_size, tuning.accel_probe_k, tuning.accel_probe_tolerance, tuning.accel_probe_margin).ok();
+        writeln!(out, "    ptr @briv_accel_gpu_ok_{})", name).ok();
+        writeln!(out, "  store i32 %v, ptr @briv_accel_verdict_{}", name).ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+    }
+
+    /// Emit the write-buffer comparison body of the output-equality gate.
+    /// Each write buffer is checked element-wise; the first mismatch branches
+    /// to the shared `fail:` label (which the caller emits after this body).
+    fn emit_probe_ok_body(&mut self, out: &mut String, name: &str, counter_fidx: usize) {
+        let entry = &self.accel_entries[name];
+        // Collect the element checks (buffer field, element index, type) so the
+        // control flow can chain them with deterministic next labels.
+        let checks = Self::probe_ok_checks(
+            &entry.shape,
+            &self.ctx.field_index_map,
+            &self.ctx.field_types,
+            counter_fidx,
+        );
+        let n_checks = checks.len();
+        for (ci, (fidx, k, elem, is_float)) in checks.into_iter().enumerate() {
+            if ci > 0 {
+                writeln!(out, "ok.{}:", ci).ok();
+            }
+            let next = if ci + 1 < n_checks {
+                format!("ok.{}", ci + 1)
+            } else {
+                "ok.final".to_string()
+            };
+            let xa = self.fun.gen_reg();
+            let ya = self.fun.gen_reg();
+            let x = self.fun.gen_reg();
+            let y = self.fun.gen_reg();
+            if k == 0 && !self.ctx.field_types[fidx].starts_with('[') {
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %a, i32 0, i32 {}", xa, fidx).ok();
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %b, i32 0, i32 {}", ya, fidx).ok();
+            } else {
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %a, i32 0, i32 {}, i32 {}", xa, fidx, k).ok();
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %b, i32 0, i32 {}, i32 {}", ya, fidx, k).ok();
+            }
+            writeln!(out, "  {} = load {}, ptr {}", x, elem, xa).ok();
+            writeln!(out, "  {} = load {}, ptr {}", y, elem, ya).ok();
+            self.emit_probe_cmp(
+                out,
+                ProbeCmpArg { elem: &elem, x: &x, y: &y, next: &next },
+            );
+        }
+        writeln!(out, "ok.final:").ok();
+        writeln!(out, "  ret i8 1").ok();
+    }
+
+    /// The output-equality gate's element checks: (field index, element index,
+/// LLVM element type, is-float) for every write-buffer element, skipping the
+/// work-item counter (it diverges by design — the GPU lane fast-forwards it).
+/// Flat iteration keeps the gate's emission single-loop.
+fn probe_ok_checks(
+    shape: &crate::analysis::accel::KernelShape,
+    field_index_map: &std::collections::HashMap<String, usize>,
+    field_types: &[String],
+    counter_fidx: usize,
+) -> Vec<(usize, u64, String, bool)> {
+    shape
+        .write_buffers
+        .iter()
+        .filter_map(|buf| field_index_map.get(buf).copied())
+        .filter(|&fidx| fidx != counter_fidx)
+        .flat_map(|fidx| {
+            let ty = &field_types[fidx];
+            if let Some(rest) = ty.strip_prefix('[') {
+                let mut parts = rest.split(" x ");
+                let count: u64 = parts.next().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+                let elem = parts.next().unwrap_or("i64").trim_end_matches(']').trim().to_string();
+                let is_float = elem == "float" || elem == "double";
+                (0..count.max(1))
+                    .map(move |k| (fidx, k, elem.clone(), is_float))
+                    .collect::<Vec<_>>()
+            } else {
+                let elem = ty.clone();
+                let is_float = elem == "float" || elem == "double";
+                vec![(fidx, 0u64, elem, is_float)]
+            }
+        })
+        .collect()
+}
+
+    /// Emit `if !(x within tol of y) br fail, else br <next>` — Float within
+    /// tolerance, Int exact equality.
+    fn emit_probe_cmp(&mut self, out: &mut String, a: ProbeCmpArg<'_>) {
+        let elem = a.elem;
+        let x = a.x;
+        let y = a.y;
+        let next = a.next;
+        let is_float = elem == "float" || elem == "double";
+        let cmp = self.fun.gen_reg();
+        if is_float {
+            let tol = self.fun.gen_reg();
+            let lo = self.fun.gen_reg();
+            let hi = self.fun.gen_reg();
+            let g1 = self.fun.gen_reg();
+            let g2 = self.fun.gen_reg();
+            let cast = if elem == "float" { "fptrunc double %tol to float" } else { "double %tol" };
+            writeln!(out, "  {} = {}", tol, cast).ok();
+            writeln!(out, "  {} = fsub {} {}, {}", lo, elem, y, tol).ok();
+            writeln!(out, "  {} = fadd {} {}, {}", hi, elem, y, tol).ok();
+            writeln!(out, "  {} = fcmp oge {} {}, {}", g1, elem, x, lo).ok();
+            writeln!(out, "  {} = fcmp ole {} {}, {}", g2, elem, x, hi).ok();
+            writeln!(out, "  {} = and i1 {}, {}", cmp, g1, g2).ok();
+        } else {
+            writeln!(out, "  {} = icmp eq i64 {}, {}", cmp, x, y).ok();
+        }
+        let not = self.fun.gen_reg();
+        writeln!(out, "  {} = xor i1 {}, true", not, cmp).ok();
+        writeln!(out, "  br i1 {}, label %fail, label %{}", not, next).ok();
     }
 
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {

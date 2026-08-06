@@ -325,6 +325,13 @@ fn emit_one_kernel_desc(
         txn.len() + 1,
         txn
     ));
+    // Per-txn auto-tuning verdict (Probe decisions): 0 = CPU, 1 = GPU.
+    // The emitted run_probe sets it once at startup; the dispatch wrapper gates
+    // on it. Per-txn so independent accel bodies can commit independently.
+    out.push_str(&format!(
+        "@briv_accel_verdict_{} = private global i32 0\n",
+        txn
+    ));
     format!(
         "%briv.kernel {{ ptr @str.briv.{}, i32 ptrtoint (ptr @briv_kernel_{} to i32), i32 {}, i32 {}, ptr @briv_kernel_{}_fields }}",
         txn,
@@ -354,7 +361,6 @@ pub(crate) fn emit_accel_descriptors(
     out.push_str("%briv.field = type { ptr, i32, i64, i64, i64, i32 }\n");
     out.push_str("%briv.kernel = type { ptr, i32, i32, i32, ptr }\n");
     out.push_str("@briv_accel_ready = private global i32 0\n");
-    out.push_str("@briv_accel_verdict = private global i32 0\n");
 
     let mut desc_entries: Vec<String> = Vec::new();
     for (i, k) in kernels.iter().enumerate() {
@@ -369,6 +375,7 @@ pub(crate) fn emit_accel_descriptors(
     out.push_str("declare i32 @briv_accel_init(ptr, i32)\n");
     out.push_str("declare i32 @briv_accel_launch(i32, ptr, i64)\n");
     out.push_str("declare i32 @briv_accel_available()\n");
+    out.push_str("declare i32 @briv_accel_probe(ptr, ptr, ptr, i64, i64, double, double, ptr)\n");
     (out, idx_of)
 }
 ///

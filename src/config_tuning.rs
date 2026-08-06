@@ -50,6 +50,12 @@ pub struct IrLoweringSettings {
     pub svo_max_elements: usize,
     /// Weighted body-cost threshold for callable-txn auto-inline.
     pub callable_inline_weight_threshold: u32,
+    /// Accel auto-tuning probe: full-map runs per lane (Phase 7).
+    pub accel_probe_k: u64,
+    /// Accel probe output-equality tolerance (relative per element).
+    pub accel_probe_tolerance: f64,
+    /// Accel probe commit margin: GPU must beat CPU by 1 + margin.
+    pub accel_probe_margin: f64,
 }
 
 /// x86_64 defaults — also the fallback for unknown target prefixes.
@@ -67,6 +73,9 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     sso_max_bytes: 6,
     svo_max_elements: 3,
     callable_inline_weight_threshold: 40,
+    accel_probe_k: 2,
+    accel_probe_tolerance: 0.0001,
+    accel_probe_margin: 0.05,
 };
 
 /// Per-target-prefix tuning tables, keyed by triple prefix (e.g. "x86_64").
@@ -171,6 +180,16 @@ fn load_ir_lowering() -> IrLoweringSettings {
         callable_inline_weight_threshold: db
             .field_int("callable_inline_weight_threshold", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.callable_inline_weight_threshold as i64) as u32,
+        accel_probe_k: db
+            .field_int("accel_probe_k", 0)
+            .map(|v| v.max(1) as u64)
+            .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_k),
+        accel_probe_tolerance: db
+            .field_float("accel_probe_tolerance", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_tolerance),
+        accel_probe_margin: db
+            .field_float("accel_probe_margin", 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_margin),
     }
 }
 
@@ -189,6 +208,9 @@ max_fields_per_alloca = 15
 sso_max_bytes = 6
 svo_max_elements = 3
 callable_inline_weight_threshold = 40
+accel_probe_k = 2
+accel_probe_tolerance = 0.0001
+accel_probe_margin = 0.05
 "#;
 
     /// Pre-migration config/targets.toml, frozen as the golden reference for
