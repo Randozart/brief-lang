@@ -81,7 +81,7 @@ pub fn parse_and_check(file_path: &str, source: &str) -> Result<(Vec<TopLevel>, 
         .map_err(|e| format!("import resolution error: {}", e))?;
 
     let universe = TypeUniverse::new();
-    typechecker::check_program(&items, &universe)
+    typechecker::check_program(&mut items, &universe)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
             format!("type errors:\n  {}", msgs.join("\n  "))

@@ -32,7 +32,7 @@ Status legend:
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
-| 15 | Expressions and operations | In progress | Phase 5: `+`-class ops still type-dispatched; op elaboration pending |
+| 15 | Expressions and operations | In progress | Phase 5: op elaboration — declared variant ops lower to their functions (`resolve_binary_op_binding` + `elaborate_ops`, 2026-08-06); remaining: effects/access-shape carrying, dyn Trait |
 | 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
 | 17 | Reflection | In progress | Phase 7: `^^Type` descriptor (category code) + value-side eval shipped 2026-08-06; remaining: const generics |
 | 18 | Compile-time execution and macros | In progress | Phase 8: closures (interpreter + inline codegen) shipped 2026-08-06; `$name`/`name!` macros + stage timing pending |

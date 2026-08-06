@@ -4291,3 +4291,38 @@ fn test_reflect_type_emits_category_constant() {
     );
 }
 
+// ── Phase 5: op elaboration → declared function call ────────────────
+
+#[test]
+fn test_declared_op_elaborates_to_function_call() {
+    // A declared `op Add(Int): my_add(#L, #R)` must lower `MyNum + Int` to a
+    // call of my_add (the typechecker's elaboration rewrites the BinaryOp).
+    let src = r#"
+defn my_add(a: Int, b: Int) -> Int { term (a * 3) + b; };
+type MyNum : #Int {
+    op Add(Int): my_add(#L, #R);
+};
+node start [true][false] {
+    let x: MyNum = 4;
+    let y: Int = 2;
+    let z: MyNum = x + y;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let mut items = p.parse_program().unwrap();
+    let universe = crate::type_universe::TypeUniverse::new();
+    crate::typechecker::check_program(&mut items, &universe).unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @my_add"),
+        "declared op must lower to a my_add call; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @add("),
+        "Int + Int must not lower to the undefined bootstrap 'add' symbol; got:\n{ir}"
+    );
+}
+
