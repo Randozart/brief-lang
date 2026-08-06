@@ -347,4 +347,12 @@ leaked into codegen — investigate, don't accept.
 - [x] F — Slices, ranges, strings — 2026-08-06
 - [x] G — Reflection value-side + reactor/fuzz/pgo migration — 2026-08-06
 - [x] H — Derive (CEGIS) constructor migration — 2026-08-06
-- [ ] I — FFI boundary + Phase 17 close (grep guarantees, status matrix)
+- [x] I — FFI boundary + Phase 17 close (grep guarantees, status matrix) — 2026-08-06
+
+**Phase 17 complete** (2026-08-06). The interpreter Value model now matches
+SPEC §2.2 exactly: atoms, bits, products, sums, references, closures, void.
+`dispatch_ffi` marshals at the boundary (marshal/unmarshal conversion +
+intrinsic-surface dispatch); compound construction from named types happens
+only in `ffi.rs` and the derive engine. Grep guarantees verified: no
+`Value::List`/`HashMap`/`Enum`/`Instance`/`Constructor`/`Defn` in live code,
+no eval path matches stdlib type names.

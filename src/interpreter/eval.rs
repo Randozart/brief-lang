@@ -289,7 +289,6 @@ fn describe_value(v: &Value) -> String {
         Value::Ref(_) => "reference".into(),
         Value::Closure { .. } => "closure".into(),
         Value::Sum { .. } => "sum".into(),
-        Value::List(_) => "list".into(),
     }
 }
 
@@ -539,7 +538,6 @@ fn reflect_type_name(v: &Value) -> String {
         Value::Sum { name, .. } => name.clone(),
         Value::Closure { .. } => "Closure".into(),
         Value::Ref(_) => "Ptr".into(),
-        Value::List(_) => "List".into(),
         Value::Void => "Void".into(),
     }
 }
@@ -574,8 +572,7 @@ fn eval_match(
 /// Match a pattern against a value, inserting pattern bindings into
 /// `bindings`. A failed match may leave partial bindings — callers use a
 /// scratch binding map per arm. `EnumVariant` matches the derive CEGIS
-/// `Sum { name, payload }` carrier; `Tuple` matches `Product` (and the
-/// reactor's `List` for compatibility).
+/// `Sum { name, payload }` carrier; `Tuple` matches `Product`.
 pub fn pattern_match(
     pat: &Pattern,
     val: &Value,
@@ -608,7 +605,6 @@ pub fn pattern_match(
         Pattern::Tuple(pats) => {
             let items = match val {
                 Value::Product { fields, .. } => fields,
-                Value::List(items) => items,
                 _ => return false,
             };
             items.len() == pats.len()

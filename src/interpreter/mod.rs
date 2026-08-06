@@ -174,11 +174,11 @@ impl Interpreter {
         crate::interpreter::pattern_match(pat, val, bindings)
     }
 
-    /// Compute the nesting depth of a list value (for FFI).
+    /// Compute the nesting depth of a product value (for FFI marshalling).
     pub fn list_nesting_depth(val: &Value) -> usize {
         match val {
-            Value::List(items) => {
-                items.iter().map(|v| Self::list_nesting_depth(v)).max().unwrap_or(0) + 1
+            Value::Product { fields, .. } => {
+                fields.iter().map(|v| Self::list_nesting_depth(v)).max().unwrap_or(0) + 1
             }
             _ => 0,
         }
@@ -282,14 +282,18 @@ pub enum Value {
     /// Renamed from `Constructor` (the synthesis-tree name was misleading —
     /// the value is a tagged compound, not a constructor expression).
     Sum { name: String, payload: Vec<Value> },
-
-    // ── FFI bridge variants ─────────────────────────────────────────
-    // 2026-07-14: These are produced/consumed only by the FFI layer
-    // when marshalling structured data to/from native libraries.
-    // No interpreter eval path should produce or match these.
-    /// Heterogeneous list of values — used for JSON arrays, SHM lists.
-    List(Vec<Value>),
 }
+
+// 2026-08-06 (Slice I): the last ad-hoc variant (`List`) is dropped — no
+// producer remained (eval yields Product; FFI marshals through
+// ffi::marshal_value). The semantic model is now atoms, bits, products,
+// sums, references, closures, void (SPEC §2.2).
+//
+// 2026-07-14: Re-added List/Enum/Instance/HashMap variants for FFI bridge
+// code that marshals structured types between native libraries and the
+// interpreter. These are FFI-only — no interpreter eval path produces
+// them. (All dropped by 2026-08-06 Slice A/I; FFI marshalling lives in
+// ffi.rs.)
 
 impl Value {
     pub fn int(n: i64) -> Self {

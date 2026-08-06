@@ -279,9 +279,7 @@ fn format_value(val: &Value) -> String {
         Value::Atom(crate::interpreter::Atom::Bool(b)) => b.to_string(),
         Value::Atom(crate::interpreter::Atom::Char(c)) => c.to_string(),
         Value::Void => "void".to_string(),
-        // 2026-08-06 (Slice G): Expr::List evaluates to a Product; format it
-        // like the legacy List.
-        Value::Product { fields, .. } | Value::List(fields) => {
+        Value::Product { fields, .. } => {
             let inner: Vec<String> = fields.iter().map(format_value).collect();
             format!("({})", inner.join(", "))
         }

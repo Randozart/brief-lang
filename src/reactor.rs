@@ -315,12 +315,9 @@ impl Reactor {
             }
             Statement::Foreach { item, list, body, .. } => {
                 let list_val = interp.eval_expr(list)?;
-                // 2026-08-06 (Slice G): Expr::List evaluates to a Product now;
-                // accept the legacy List form too until the reactor emits
-                // products everywhere.
+                // 2026-08-06 (Slice G/I): Expr::List evaluates to a Product.
                 let fields = match list_val {
                     Value::Product { fields, .. } => fields,
-                    Value::List(items) => items,
                     _ => Vec::new(),
                 };
                 for elem in fields {
@@ -553,7 +550,7 @@ mod tests {
     #[test]
     fn test_foreach_iterates_product_list() {
         // 2026-08-06 (Slice G): Expr::List evaluates to a Product; foreach
-        // must iterate it (was Value::List only, which nothing produces now).
+        // must iterate it.
         let foreach = Statement::Foreach {
             item: "v".into(),
             list: Box::new(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
