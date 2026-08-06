@@ -406,45 +406,26 @@ ExclaimArrow,
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
-        let inner = &s[1..s.len()-1];
-        let mut out = String::with_capacity(inner.len());
-        let mut chars = inner.chars();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                match chars.next() {
-                    Some('n') => out.push('\n'),
-                    Some('t') => out.push('\t'),
-                    Some('\\') => out.push('\\'),
-                    Some('"') => out.push('"'),
-                    Some('0') => out.push('\0'),
-                    Some('x') => {
-                        let hex_str: String = chars.by_ref().take(2).collect();
-                        if let Ok(h) = u8::from_str_radix(&hex_str, 16) {
-                            out.push(h as char);
-                        }
-                    }
-                    Some('u') => {
-                        if chars.next() == Some('{') {
-                            let mut hex = String::new();
-                            while let Some(h) = chars.next() {
-                                if h == '}' { break; }
-                                hex.push(h);
-                            }
-                            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
-                                out.push(char::from_u32(cp).unwrap_or('?'));
-        }
-    }
-                    }
-                    Some(c) => { out.push('\\'); out.push(c); }
-                    None => out.push('\\'),
-                }
-            } else {
-                out.push(c);
-            }
-        }
-        Some(out)
+        Some(unescape_string(&s[1..s.len()-1]))
     })]
     String(String),
+
+    /// 2026-08-05 (Phase 7): raw string literal `#r"..."` — content is
+    /// verbatim; escapes are NOT interpreted (SPEC §16.2).
+    #[regex(r#"#r"([^"\\]|\\.)*""#, |lex| {
+        let s = lex.slice();
+        Some(s[3..s.len()-1].to_string())
+    })]
+    RawString(String),
+
+    /// 2026-08-05 (Phase 7): byte literal `#b"..."` — escapes ARE interpreted
+    /// (SPEC §16.2), producing the exact byte content.
+    #[regex(r#"#b"([^"\\]|\\.)*""#, |lex| {
+        let s = lex.slice();
+        let inner = &s[3..s.len()-1];
+        Some(unescape_string(inner))
+    })]
+    ByteString(String),
 
     #[regex(r"'([^'\\]|\\.)*'", |lex| {
         let s = lex.slice();
@@ -597,6 +578,8 @@ impl std::fmt::Display for Token {
             Token::Integer(n) => write!(f, "{}", n),
             Token::Float(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
+            Token::RawString(s) => write!(f, "#r\"{}\"", s),
+            Token::ByteString(s) => write!(f, "#b\"{}\"", s),
             Token::Char(c) => write!(f, "'{}'", c),
             Token::Identifier(s) => write!(f, "{}", s),
             Token::DocComment(s) => write!(f, "///{}", s),
@@ -892,6 +875,22 @@ mod tests {
     }
 
     #[test]
+    fn test_raw_and_byte_literals() {
+        // 2026-08-05 (Phase 7): `#r"..."` raw (verbatim) and `#b"..."` bytes
+        // (escapes interpreted) lex as single tokens (SPEC §16.2).
+        let mut lexer = Token::lexer(r#"#r"a\nb""#);
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::RawString("a\\nb".to_string())))
+        );
+        assert_eq!(lexer.next(), None);
+
+        let mut lexer = Token::lexer(r#"#b"\x41\x42""#);
+        assert_eq!(lexer.next(), Some(Ok(Token::ByteString("AB".to_string()))));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
     fn test_colon_eq_derivation() {
         let mut lexer = Token::lexer("defn add(a: Int, b: Int) -> Int := { 1, 2 -> 3 };");
         assert_eq!(lexer.next(), Some(Ok(Token::Defn)));
@@ -929,6 +928,52 @@ mod tests {
 }
 
 /// Convenience: tokenize a source string into (Token, Range) pairs.
+/// 2026-08-05 (Phase 7): process string-literal escapes into a value.
+/// Shared by the quoted-string token and the `#b` byte literal.
+fn unescape_string(inner: &str) -> String {
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('0') => out.push('\0'),
+                Some('x') => {
+                    let hex_str: String = chars.by_ref().take(2).collect();
+                    if let Ok(h) = u8::from_str_radix(&hex_str, 16) {
+                        out.push(h as char);
+                    }
+                }
+                Some('u') => {
+                    if chars.next() == Some('{') {
+                        let mut hex = String::new();
+                        while let Some(h) = chars.next() {
+                            if h == '}' {
+                                break;
+                            }
+                            hex.push(h);
+                        }
+                        if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                            out.push(char::from_u32(cp).unwrap_or('?'));
+                        }
+                    }
+                }
+                Some(c) => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Returns Ok(tokens) on success, Err on lex failure.
 /// 2026-07-15: Phase 2 — Added for system plugin discovery (plugin loader)
 /// and other programmatic use outside the compile pipeline.

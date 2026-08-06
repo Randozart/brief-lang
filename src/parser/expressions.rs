@@ -408,6 +408,8 @@ impl<'a> Parser<'a> {
                 }
             }
             Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
+            Some((Token::RawString(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
+            Some((Token::ByteString(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::Char(c), _)) => Ok(Expr::Char(c)),
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
             Some((Token::BoolFalse, _)) => Ok(Expr::Bool(false)),
