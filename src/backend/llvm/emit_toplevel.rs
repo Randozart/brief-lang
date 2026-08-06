@@ -1818,11 +1818,12 @@ impl LlvmBackend {
             }
             // 2026-07-29: Statement reordering removed — proven counterproductive.
             // LLVM's scheduler does this better within each basic block.
-            for s in &txn.body {
-                if self.fun.terminated { break; }
-                emit_statement(self, out, s, "  ");
-            }
+        for s in &txn.body {
+            if self.fun.terminated { break; }
+            emit_statement(self, out, s, "  ");
+        }
             if !self.fun.terminated {
+                self.emit_beginprogram_goal_check(out, txn);
                 self.emit_arena_fini(out, "  ");
                 // 2026-08-01 (D2): garbage scheduling — a non-loop transaction
                 // that is a heap-backed field's last consumer frees it after
@@ -2217,6 +2218,8 @@ impl LlvmBackend {
                 }
             }
             if !self.fun.terminated {
+                // 2026-08-06 (beginprogram plan): clear the entry flag on goal.
+                self.emit_beginprogram_goal_check(out, txn);
                 self.emit_arena_fini(out, "  ");
             }
             // 2026-08-04 (term-termination-diagnostics): a value-form term in
@@ -2556,6 +2559,45 @@ fn probe_ok_checks(
         writeln!(out, "  br i1 {}, label %fail, label %{}", not, next).ok();
     }
 
+    /// Emit the beginprogram entry-loop goal check: after a firing, evaluate
+    /// the postcondition; when it is met, clear `@briv_begin_<name>` so the
+    /// precondition (which reads the flag) stops gating future ticks. This
+    /// makes `[beginprogram && <state>]` drive a one-shot entry loop without a
+    /// phase gate.
+    pub(crate) fn emit_beginprogram_goal_check(&mut self, out: &mut String, txn: &crate::ast::Transaction) {
+        if !Self::expr_has_beginprogram(&txn.contract.pre_condition) {
+            return;
+        }
+        let goal = self.emit_expr(out, &txn.contract.post_condition, "  ");        let goal_i1 = if goal.ty == Type::bool_() {
+            let r = self.fun.gen_reg();
+            writeln!(out, "  {} = trunc i8 {} to i1", r, goal.name).ok();
+            r
+        } else {
+            return;
+        };
+        let label_n = self.fun.txn_counter;
+        self.fun.txn_counter += 1;
+        let done_lbl = format!("begin.done{}", label_n);
+        let cont_lbl = format!("begin.cont{}", label_n);
+        writeln!(out, "  br i1 {}, label %{}, label %{}", goal_i1, done_lbl, cont_lbl).ok();
+        writeln!(out, "{}:", done_lbl).ok();
+        writeln!(out, "  store i1 false, ptr @briv_begin_{}", txn.name).ok();
+        writeln!(out, "  br label %{}", cont_lbl).ok();
+        writeln!(out, "{}:", cont_lbl).ok();
+    }
+
+    /// Whether an expression contains the `beginprogram` marker (an entry-loop
+    /// precondition conjunct).
+    pub(crate) fn expr_has_beginprogram(e: &Expr) -> bool {
+        match e {
+            Expr::BeginProgram => true,
+            Expr::BinaryOp(BinaryOpKind::And, a, b) => {
+                Self::expr_has_beginprogram(a) || Self::expr_has_beginprogram(b)
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         // 2026-07-27: Set txn_name for per-function arena gating.
         self.fun.txn_name = name.to_string();
@@ -2872,6 +2914,10 @@ fn probe_ok_checks(
     //   allocas that would otherwise escape to the @pre_* call.
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
+        // 2026-08-06 (beginprogram plan): the precondition may read the node's
+        // `@briv_begin_<name>` entry flag — set the txn name so
+        // `Expr::BeginProgram` resolves it.
+        self.fun.txn_name = name.to_string();
         // 2026-07-04: Use #7 (memory(readonly)) for @pre_* functions.
         // Precondition expressions never write to %State — they only read
         // state fields via GEP+load. readonly tells LLVM the function has
@@ -2926,6 +2972,10 @@ fn probe_ok_checks(
     //   dispatch strategies. The only difference is the function boundary, which
     //   enables the async runtime to call each body independently.
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+        // 2026-08-06 (beginprogram plan): the precondition may read the node's
+        // `@briv_begin_<name>` entry flag — bind the txn name for the body's
+        // precondition check.
+        self.fun.txn_name = name.to_string();
         let async_name = format!("async_body_{}", name);
         let async_attr = "#0".to_string();
         writeln!(out, "define void @{}({}) local_unnamed_addr {} {{", async_name, self.ctx.state_ptr_param, async_attr).ok();

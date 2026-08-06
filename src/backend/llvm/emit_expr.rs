@@ -109,10 +109,19 @@ impl LlvmBackend {
                 }
             }
             Expr::BeginProgram => {
-                // True exactly once at program start — the entry marker. In
-                // precondition position the transition graph handles it; here it
-                // evaluates as `true`.
-                writeln!(out, "{}{} = add i8 0, 1", indent, v).ok();
+                // True exactly once at program start (entry-loop). Reads the
+                // node's `@briv_begin_<name>` flag; the node's body clears it
+                // when its goal is met, so the precondition stops gating after
+                // the entry loop completes. Outside a transaction (no txn_name)
+                // it evaluates as `true`.
+                let flag = format!("@briv_begin_{}", self.fun.txn_name);
+                if self.fun.txn_name.is_empty() {
+                    writeln!(out, "{}{} = add i8 0, 1", indent, v).ok();
+                } else {
+                    let loaded = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load i1, ptr {}", indent, loaded, flag).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i8", indent, v, loaded).ok();
+                }
                 TypedRegister {
                     name: v.to_string(),
                     ty: Type::bool_(),

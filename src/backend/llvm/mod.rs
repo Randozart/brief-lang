@@ -2116,6 +2116,16 @@ impl LlvmBackend {
 
         let mut out = String::new();
         self.emit_header(&mut out);
+        // 2026-08-06 (beginprogram plan): per-node entry flags — true until the
+        // node's goal is met; the precondition reads the flag, the body clears
+        // it on goal (one-shot entry loop).
+        for item in items {
+            if let TopLevel::Transaction(t) = item {
+                if LlvmBackend::expr_has_beginprogram(&t.contract.pre_condition) {
+                    writeln!(out, "@briv_begin_{} = private global i1 1", t.name).ok();
+                }
+            }
+        }
         // 2026-07-10: Phase 1 — emit struct type declarations before
         // function definitions so foreign callers see named types.
         self.declare_struct_types(&mut out);

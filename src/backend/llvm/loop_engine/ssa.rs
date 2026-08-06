@@ -354,6 +354,9 @@ impl LlvmBackend {
         for (name, txn) in txns {
             if txn.is_reactive {
                 let pre = &txn.contract.pre_condition;
+                // 2026-08-06 (beginprogram plan): the precondition may read the
+                // node's `@briv_begin_<name>` entry flag — bind the txn name.
+                self.fun.txn_name = name.clone();
                 let cond_val = self.emit_expr(out, pre, "  ");
                 let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
                 let body_label = format!(".ssb_{}", name);
@@ -377,6 +380,9 @@ impl LlvmBackend {
                 }
                 self.fun.void_txn_abort_label = None;
                 if !self.fun.terminated {
+                    // 2026-08-06 (beginprogram plan): clear the entry flag when
+                    // the entry loop's goal is met.
+                    self.emit_beginprogram_goal_check(out, txn);
                     writeln!(out, "  br label %{}", next_label).ok();
                 }
                 writeln!(out, "{}:", next_label).ok();

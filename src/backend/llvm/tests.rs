@@ -557,6 +557,73 @@ fn test_endprogram_emits_process_exit() {
 }
 
 #[test]
+fn test_beginprogram_entry_loop_emits_flag_and_goal_clear() {
+    // 2026-08-06 (beginprogram plan): a beginprogram node emits its entry flag
+    // (@briv_begin_<name>, true until the goal) and a goal-check that clears
+    // it — `[beginprogram && i < N]` drives a one-shot entry loop with no
+    // phase gate.
+    let mut backend = LlvmBackend::new();
+    let i_state = TopLevel::StateDecl(StateDecl {
+        name: "i".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
+    let init = TopLevel::Transaction(Transaction {
+        name: "init".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(
+                BinaryOpKind::And,
+                Box::new(Expr::BeginProgram),
+                Box::new(Expr::BinaryOp(
+                    BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Decimal(4)),
+                )),
+            ),
+            post_condition: Expr::BinaryOp(
+                BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("i".to_string())),
+                Box::new(Expr::Decimal(4)),
+            ),
+            watchdog: None,
+            explicit: true,
+            span: None,
+        },
+        body: vec![
+            Statement::Assign(
+                Expr::Identifier("i".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    let output = backend.generate(&vec![i_state, init], None);
+    assert!(
+        output.contains("@briv_begin_init = private global i1 1"),
+        "entry flag must emit: {output}"
+    );
+    assert!(
+        output.contains("store i1 false, ptr @briv_begin_init"),
+        "goal-check must clear the flag: {output}"
+    );
+}
+
+#[test]
 fn test_escape_non_ASCII_string() {
     let output = escape_llvm_string("héllo");
     assert!(output.contains("\\c3"), "Should hex-escape byte C3");
