@@ -228,10 +228,14 @@ pub enum Atom {
 /// collections and is slated for replacement by a product in a later slice;
 /// `Constructor` is the derive (CEGIS) engine's synthesis shape.
 ///
-/// 2026-08-06 (Slice B): `Product` added as the unnamed-product value
-/// (tuples, list literals, struct fields in declared order). SPEC §2.2 —
-/// stdlib list/map behavior is NOT interpreter knowledge; the interpreter
-/// holds the field sequence, stdlib owns the semantics.
+/// 2026-08-06 (Slice B): `Product` added as the product value (tuples, list
+/// literals, struct fields in declared order). SPEC §2.2 — stdlib list/map
+/// behavior is NOT interpreter knowledge; the interpreter holds the field
+/// sequence, stdlib owns the semantics.
+///
+/// 2026-08-06 (Slice D): struct literals produce a product carrying its
+/// declared field names (`names: Some(...)`); field access resolves the
+/// index from that map. Tuples and list literals stay unnamed (`names: None`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// The sole representational storage cell for opaque program data.
@@ -242,9 +246,15 @@ pub enum Value {
     /// when both would be valid as raw Bits(Vec<u8>).
     Atom(Atom),
 
-    /// An unnamed product: tuple/list-literal field sequence in declared
-    /// order. Named struct behavior stays at the typechecker/stdlib level.
-    Product(Vec<Value>),
+    /// A product: field sequence in declared order. `names` is present for
+    /// struct literals (drives `Expr::Field`), absent for tuples/list
+    /// literals (positional only). The interpreter is dynamically typed, so
+    /// the name→index map is carried with the value rather than resolved from
+    /// type context (which eval has none of).
+    Product {
+        fields: Vec<Value>,
+        names: Option<std::sync::Arc<Vec<String>>>,
+    },
 
     Void,
     Ref(Box<Value>),
@@ -282,6 +292,17 @@ impl Value {
 
     pub fn bits(data: Vec<u8>) -> Self {
         Value::Bits(data)
+    }
+
+    pub fn product(fields: Vec<Value>) -> Self {
+        Value::Product { fields, names: None }
+    }
+
+    pub fn named_product(fields: Vec<Value>, names: Vec<String>) -> Self {
+        Value::Product {
+            fields,
+            names: Some(std::sync::Arc::new(names)),
+        }
     }
 
     pub fn void() -> Self {

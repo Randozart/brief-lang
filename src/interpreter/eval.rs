@@ -55,18 +55,18 @@ pub fn eval_expr(
         Expr::Tuple(exprs) => {
             let values: Result<Vec<Value>, _> =
                 exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
-            Ok(Value::Product(values?))
+            Ok(Value::product(values?))
         }
 
         // ── List ─────────────────────────────────────────────────
         Expr::List(exprs) => {
             let values: Result<Vec<Value>, _> =
                 exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
-            Ok(Value::Product(values?))
+            Ok(Value::product(values?))
         }
 
         // ── Field access ─────────────────────────────────────────
-        Expr::Field(obj, _name) => eval_expr(obj, heap, bindings),
+        Expr::Field(obj, name) => eval_field(obj, name, heap, bindings),
 
         // ── Index ────────────────────────────────────────────────
         Expr::Index(obj, index) => eval_index(obj, index, heap, bindings),
@@ -118,7 +118,25 @@ pub fn eval_expr(
         Expr::Lambda(_, _) => Ok(Value::Void),
 
         // ── Derivation block ─────────────────────────────────────
-        Expr::DerivationBlock(_) | Expr::StructLiteral { .. } => Ok(Value::Void),
+        // 2026-08-06 (Slice D): a derivation block is a meta-declaration, not
+        // a runtime value; codegen emits `add 0, 0` (void) for it, so the
+        // interpreter returns Void. Derivation example verification runs
+        // through derive::verify_derivation_assertions, not this path.
+        Expr::DerivationBlock(_) => Ok(Value::Void),
+
+        // ── Struct literal ───────────────────────────────────────
+        Expr::StructLiteral { type_name, fields } => {
+            let _ = type_name;
+            let mut names = Vec::with_capacity(fields.len());
+            let values: Result<Vec<Value>, _> = fields
+                .iter()
+                .map(|(name, expr)| {
+                    names.push(name.clone());
+                    eval_expr(expr, heap, bindings)
+                })
+                .collect();
+            Ok(Value::named_product(values?, names))
+        }
 
         // ── Dereference ──────────────────────────────────────────
         // 2026-07-18: Evaluate inner, expect Value::Ref(wrapped), return *wrapped.
@@ -138,10 +156,6 @@ pub fn eval_expr(
         }
 
         // ── Field / reflection / method ─────────────────────────
-        Expr::Field(recv, name) => {
-            let _ = (recv, name);
-            Ok(Value::Void)
-        }
         Expr::Reflect(recv, name, _kind) => {
             // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
             // = UTF8 character count, `Bytes` = byte length. A String is
@@ -169,13 +183,7 @@ pub fn eval_expr(
                 _ => Ok(Value::Void),
             }
         }
-        Expr::MethodCall(recv, _name, args, _) => {
-            eval_expr(recv, heap, bindings)?;
-            for a in args {
-                eval_expr(a, heap, bindings)?;
-            }
-            Ok(Value::Void)
-        }
+        Expr::MethodCall(recv, name, args, _) => eval_method_call(recv, name, args, heap, bindings),
 
         // ── Formatting annotation ────────────────────────────────
         Expr::FormattingAnnotation(_) => Ok(Value::Void),
@@ -240,7 +248,10 @@ fn eval_index(
     }
     let idx = idx as usize;
     match obj_val {
-        Value::Product(fields) => fields.get(idx).cloned().ok_or_else(|| index_oob(idx, fields.len())),
+        Value::Product { fields, .. } => fields
+            .get(idx)
+            .cloned()
+            .ok_or_else(|| index_oob(idx, fields.len())),
         Value::Bits(bytes) => bytes.get(idx).copied().map(|b| Value::bits(vec![b])).ok_or_else(|| index_oob(idx, bytes.len())),
         other => Err(RuntimeError::TypeError {
             expected: "an indexable value (list, tuple, or bits)".into(),
@@ -265,12 +276,70 @@ fn describe_value(v: &Value) -> String {
         Value::Atom(Atom::Bool(b)) => format!("boolean {}", b),
         Value::Atom(Atom::Char(c)) => format!("character '{}'", c),
         Value::Bits(_) => "raw bits".into(),
-        Value::Product(_) => "product".into(),
+        Value::Product { .. } => "product".into(),
         Value::Void => "void".into(),
         Value::Ref(_) => "reference".into(),
         Value::Constructor(_, _) => "constructor".into(),
         Value::List(_) => "list".into(),
     }
+}
+
+/// 2026-08-06 (Slice D): field access on a struct value. The receiver must be
+/// a named product (built by a struct literal); the field index is resolved
+/// from the value's declared field-name map — no type registry involved.
+fn eval_field(
+    obj: &Expr,
+    name: &str,
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let recv = eval_expr(obj, heap, bindings)?;
+    match recv {
+        Value::Product { fields, names } => match names.as_ref().and_then(|ns| ns.iter().position(|n| n == name)) {
+            Some(i) => fields.get(i).cloned().ok_or_else(|| field_oob(name, fields.len())),
+            None => Err(RuntimeError::TypeError {
+                expected: format!("a field named '{}'", name),
+                found: describe_value(&Value::Product { fields, names }),
+            }),
+        },
+        other => Err(RuntimeError::TypeError {
+            expected: "a struct value".into(),
+            found: describe_value(&other),
+        }),
+    }
+}
+
+/// A user-facing field-index error (house style: what's wrong + fix).
+fn field_oob(name: &str, len: usize) -> RuntimeError {
+    RuntimeError::TypeError {
+        expected: format!("a field in the declared struct ({} fields)", len),
+        found: format!("field '{}'", name),
+    }
+}
+
+/// 2026-08-06 (Slice D): a method call. The full method-body dispatch needs
+/// the typechecker's member registry (codegen uses obj_members), which the
+/// dynamic interpreter does not carry. Evaluate the receiver and args for
+/// side effects, then: an intrinsic (`name#`) dispatches with recv+args;
+/// otherwise the name is looked up as a binding (mirroring the Call
+/// simplification). No match returns Void rather than faking success.
+fn eval_method_call(
+    recv: &Expr,
+    name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let recv_val = eval_expr(recv, heap, bindings)?;
+    let arg_vals: Result<Vec<Value>, _> =
+        args.iter().map(|a| eval_expr(a, heap, bindings)).collect();
+    let arg_vals = arg_vals?;
+    if name.ends_with('#') {
+        let mut all = vec![recv_val];
+        all.extend(arg_vals);
+        return execute_intrinsic(name, &all, heap);
+    }
+    Ok(bindings.get(name).cloned().unwrap_or(Value::Void))
 }
 
 /// 2026-08-06 (Slice C): Evaluate a match expression. The scrutinee is
@@ -336,7 +405,7 @@ pub fn pattern_match(
         }
         Pattern::Tuple(pats) => {
             let items = match val {
-                Value::Product(items) => items,
+                Value::Product { fields, .. } => fields,
                 Value::List(items) => items,
                 _ => return false,
             };
@@ -987,7 +1056,7 @@ mod tests {
         let t = Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]);
         assert_eq!(
             eval1(&t),
-            Value::Product(vec![Value::int(1), Value::int(2), Value::int(3)])
+            Value::product(vec![Value::int(1), Value::int(2), Value::int(3)])
         );
     }
 
@@ -996,7 +1065,7 @@ mod tests {
         let l = Expr::List(vec![Expr::Bool(true), Expr::Decimal(7)]);
         assert_eq!(
             eval1(&l),
-            Value::Product(vec![Value::bool(true), Value::int(7)])
+            Value::product(vec![Value::bool(true), Value::int(7)])
         );
     }
 
@@ -1234,5 +1303,82 @@ mod tests {
     fn test_match_empty_arms_errors() {
         let m = Expr::Match(Box::new(Expr::Decimal(1)), vec![]);
         assert!(eval1_err(&m).contains("non-exhaustive"));
+    }
+
+    // 2026-08-06 (Slice D): struct literals, field access, method calls.
+
+    fn person() -> Expr {
+        Expr::StructLiteral {
+            type_name: "Person".into(),
+            fields: vec![
+                ("name".into(), Expr::Quoted(b"ada".to_vec())),
+                ("age".into(), Expr::Decimal(36)),
+            ],
+        }
+    }
+
+    #[test]
+    fn test_struct_literal_is_named_product() {
+        let r = eval1(&person());
+        match r {
+            Value::Product { fields, names } => {
+                assert_eq!(fields, vec![Value::bits(b"ada".to_vec()), Value::int(36)]);
+                assert_eq!(
+                    names.as_ref().map(|n| n.as_ref()),
+                    Some(&vec!["name".to_string(), "age".to_string()])
+                );
+            }
+            other => panic!("expected Product, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_field_access_on_struct_literal() {
+        let f = Expr::Field(Box::new(person()), "age".into());
+        assert_eq!(eval1(&f).as_i64(), Some(36));
+    }
+
+    #[test]
+    fn test_field_access_on_binding() {
+        let f = Expr::Field(Box::new(Expr::Identifier("p".into())), "age".into());
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert(
+            "p".into(),
+            Value::named_product(vec![Value::int(36)], vec!["age".into()]),
+        );
+        let r = eval_expr(&f, &mut heap, &mut bindings).unwrap();
+        assert_eq!(r.as_i64(), Some(36));
+    }
+
+    #[test]
+    fn test_field_access_unknown_field_errors() {
+        let f = Expr::Field(Box::new(person()), "height".into());
+        let err = eval1_err(&f);
+        assert!(err.contains("field"), "got: {err}");
+    }
+
+    #[test]
+    fn test_field_access_non_struct_errors() {
+        let f = Expr::Field(Box::new(Expr::Decimal(5)), "x".into());
+        assert!(eval1_err(&f).contains("struct"));
+    }
+
+    #[test]
+    fn test_method_call_intrinsic_dispatches_with_receiver() {
+        let m = Expr::MethodCall(Box::new(Expr::Decimal(-7)), "Abs#".into(), vec![], None);
+        assert_eq!(eval1(&m).as_i64(), Some(7));
+    }
+
+    #[test]
+    fn test_method_call_binding_lookup() {
+        let m = Expr::MethodCall(Box::new(Expr::Decimal(5)), "foo".into(), vec![], None);
+        assert_eq!(eval1(&m), Value::Void);
+        let m2 = Expr::MethodCall(Box::new(Expr::Decimal(5)), "seven".into(), vec![], None);
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("seven".into(), Value::int(7));
+        let r = eval_expr(&m2, &mut heap, &mut bindings).unwrap();
+        assert_eq!(r.as_i64(), Some(7));
     }
 }
