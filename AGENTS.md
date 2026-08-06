@@ -184,7 +184,7 @@ clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
 A program with no observable effect IS dead code — the compiler is right to
 eliminate it. **A value is live if an FFI call consumes it.** The fix for a
 folded loop is NOT liveness hacks (`x == x`, synthetic exit fields) — it's
-`term! -> __print_int(result)` (structurally live swan song) or a
+`endprogram __print_int(result)` (structurally live swan song) or a
 runtime-determined bound (`GetEnvInt#("BOUND")`, never `const N`).
 Precomputation is correct, not a bug. `--optimize-budget` (default 256)
 controls simulation depth; increase it or use runtime bounds — never weaken

@@ -743,13 +743,53 @@ There are no `for`, `while`, or `loop` keywords. Counted iteration uses iterable
 ### 11.5 Local and process completion
 
 - `term expression;`: complete the current callable/transition.
-- `exit program;`: complete the process boundary normally.
-- `exit program code;`: complete the process with an exit code.
+- `endprogram;`: complete the process boundary normally.
+- `endprogram code;`: complete the process with an exit code.
 - `defer { ... };`: register cleanup for the enclosing scope.
 
-`exit program` runs applicable `defer` cleanup. Abrupt termination is not currently a source-language feature.
+`endprogram` (formerly `exit program`, and before that the removed `term!`)
+runs applicable `defer` cleanup and terminates the process. Unlike `term`,
+which only ends the current transaction, `endprogram` exits the process even
+when a node's precondition remains satisfiable. Abrupt termination is not
+currently a source-language feature.
 
-There is no `main` declaration in Briv. The program entry is whichever reactive node fires first: the reactor evaluates node preconditions and the first satisfiable one fires. A program converges (and exits) when no node can fire.
+There is no `main` declaration in Briv. The program entry is either an
+explicit `beginprogram` node (§11.5.1) or, absent one, whichever reactive
+node fires first: the reactor evaluates node preconditions and the first
+satisfiable one fires. A program converges (and exits) when no node can fire.
+
+#### 11.5.1 Entry loops (`beginprogram`)
+
+**Staged.** `beginprogram` is a keyword usable as a conjunct in a node's
+precondition: `[beginprogram && <state>][<goal>]`. It is a pure marker — true
+exactly once at program start — and takes no conditions itself. The node's
+other precondition terms are ordinary state expressions over top-level
+bindings seeded from the environment or compile time at startup:
+
+```briv
+let startingnumber: Int = get_env_int!("env_var");
+
+node entry1 [beginprogram && startingnumber == 1][done] {
+    done = 1;
+    term;
+};
+```
+
+A `beginprogram` node is an **entry loop**:
+
+- It is entered exactly once at program start when its state conditions hold.
+- The precondition is evaluated once at entry and **never re-checked** during
+  the loop.
+- The node itself is a loop: the body runs repeatedly until the postcondition
+  (goal) is met.
+- The goal must be **provably reachable**: a counter comparison whose body
+  advances the counter toward the bound, or `[true]` (a single pass). A goal
+  that cannot be proven reachable is a compile error.
+- At most one `beginprogram` node may be eligible at program start: the
+  compiler proves the entry conditions are mutually exclusive. Unprovable
+  overlap is a compile error.
+
+`beginprogram` is scoped to `node` declarations.
 
 ### 11.6 Critical sections and barriers
 

@@ -139,6 +139,7 @@ impl LanguageVocab {
                 // Statements and control flow
                 kw("term", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("endprogram", VocabStatus::Canonical, KeywordContext::Statement),
+                kw("beginprogram", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("program", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("defer", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("rollback", VocabStatus::Canonical, KeywordContext::Statement),

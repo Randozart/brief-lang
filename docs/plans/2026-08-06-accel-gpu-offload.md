@@ -72,7 +72,7 @@ node simulate [count < bound][count == bound] {
     let dx01: Float32 = bx0 - bx1;
     // ... ~600 lines of scalar pair computations ...
     count = count + 1;
-    when count == bound { exit program println!(last_energy); };
+    when count == bound { endprogram println!(last_energy); };
     term;
 };
 ```
@@ -696,7 +696,7 @@ accel node integrate [i < nbodies][i == nbodies] {
 // host: sequential time loop
 node step [count < bound][count == bound] {
     count = count + 1;
-    when count == bound { exit program println!(energy); };
+    when count == bound { endprogram println!(energy); };
     term;
 };
 ```
