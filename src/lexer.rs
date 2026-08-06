@@ -82,6 +82,14 @@ pub enum Token {
     #[token("out")]
     Out,
 
+    /// 2026-08-06 (accel plan): `accel` — GPU-deferral modifier (prefix).
+    /// `accel node`/`accel txn` mark the body as a per-firing parallel map
+    /// over work-items; the compiler defers execution to the GPU only when it
+    /// verifies a speedup, else silent CPU fallback. See
+    /// docs/plans/2026-08-06-accel-gpu-offload.md.
+    #[token("accel")]
+    Accel,
+
     #[token("await")]
     Await,
 
@@ -482,6 +490,7 @@ impl std::fmt::Display for Token {
             Token::Seq => write!(f, "seq"),
             Token::Vol => write!(f, "vol"),
             Token::Out => write!(f, "out"),
+            Token::Accel => write!(f, "accel"),
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::Exit => write!(f, "exit"),

@@ -63,6 +63,28 @@ impl<'a> Parser<'a> {
                 txn.is_async = true;
                 Ok(TopLevel::Transaction(txn))
             }
+            // 2026-08-06 (accel plan): `accel node name` / `accel txn name` —
+            // GPU-deferral request. Marks the body as a per-firing parallel
+            // map over work-items; the backend defers execution to the GPU
+            // only when it verifies a speedup, else silent CPU fallback. See
+            // docs/plans/2026-08-06-accel-gpu-offload.md.
+            Some(Token::Accel) => {
+                self.pos += 1; // consume accel
+                let mut txn = if self.check(&Token::Node) {
+                    self.parse_node().map(TopLevel::Transaction)?
+                } else if self.check(&Token::Txn) {
+                    self.parse_transaction(false, false).map(TopLevel::Transaction)?
+                } else {
+                    return self.error_at_current("expected 'node' or 'txn' after 'accel'");
+                };
+                if let TopLevel::Transaction(t) = &mut txn {
+                    t.modifiers.push(Annotation {
+                        name: "accel".to_string(),
+                        value: None,
+                    });
+                }
+                Ok(txn)
+            }
             // 2026-08-04 (out-observability plan): `out defn` / `out node` /
             // `out txn` / `out let` — the observability pin. Marks the
             // callable's calls (or the variable's reads/writes) as liveness
@@ -3010,6 +3032,47 @@ mod tests {
         } else {
             panic!("expected Transaction, got {item:?}");
         }
+    }
+
+    #[test]
+    fn test_accel_node_records_accel_modifier() {
+        // 2026-08-06 (accel plan): `accel node name` records the "accel"
+        // modifier on the transaction.
+        let src = "accel node force [i < nb][true] { term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.modifiers.iter().any(|m| m.name == "accel"), "accel modifier must be recorded");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_accel_txn_records_accel_modifier() {
+        // 2026-08-06 (accel plan): `accel txn name` records the "accel"
+        // modifier on the transaction.
+        let src = "accel txn kernel [i < N][true] { term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let item = p.parse_top_level().unwrap();
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            assert!(t.modifiers.iter().any(|m| m.name == "accel"), "accel modifier must be recorded");
+        } else {
+            panic!("expected Transaction, got {item:?}");
+        }
+    }
+
+    #[test]
+    fn test_accel_requires_node_or_txn() {
+        // 2026-08-06 (accel plan): `accel` must precede a node or txn.
+        let src = "accel defn f(x: Int) -> Int { term x; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let err = p.parse_top_level().unwrap_err();
+        assert!(err.to_string().contains("'node' or 'txn'"),
+            "expected helpful diagnostic, got: {err}");
     }
 
     #[test]
