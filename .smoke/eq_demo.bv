@@ -1,4 +1,4 @@
-let a: String = get_env("VALUE");
+let a: String = get_env!("VALUE");
 let b: String = "same";
 let tick: Int = 0;
 

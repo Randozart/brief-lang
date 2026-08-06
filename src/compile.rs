@@ -1483,7 +1483,7 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
     // (e.g. -flto) produce fresh cache entries instead of reusing stale ones.
     let mut hasher = blake3::Hasher::new();
     hasher.update(&content);
-    hasher.update(b":flto");
+    hasher.update(b":flto:fPIC");
     let hash = hasher.finalize();
     let cache_path = cache_dir.join(format!("{}.o", hash.to_hex()));
     if cache_path.exists() {
@@ -1497,7 +1497,7 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
     };
     let status = Command::new("clang")
         .args([
-            "-O3", "-flto", "-march=native", "-ffast-math",
+            "-O3", "-flto", "-march=native", "-ffast-math", "-fPIC",
             "-x", lang_flag,
             "-c",
             source_path.to_str().unwrap(),

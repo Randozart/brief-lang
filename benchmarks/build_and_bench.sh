@@ -232,7 +232,11 @@ build_bench() {
                 ;;
         esac
     fi
-    BOUND="$bound" ${BENCH_ENV[$name]:-} ./target/release/brivc build "benchmarks/${name}.bv" \
+    # 2026-08-06 (fix): `env` is required — a variable EXPANSION (e.g.
+    # ${BENCH_ENV[$name]} -> "BODYCOUNT=2048") is treated by bash as a command
+    # name, not an env assignment, so the direct `BOUND=.. $EXP cmd` form
+    # fails with "BODYCOUNT=2048: command not found". `env` handles it.
+    env BOUND="$bound" ${BENCH_ENV[$name]:-} ./target/release/brivc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
