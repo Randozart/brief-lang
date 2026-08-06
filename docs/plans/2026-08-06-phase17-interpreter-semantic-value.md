@@ -324,12 +324,29 @@ leaked into codegen — investigate, don't accept.
 
 ---
 
-## 8. Out of Scope
+## 8. Out of Scope — and what was pulled in (2026-08-06)
 
-- Phase 7 reflection descriptor frontend (`.^`/`.^^` parse→descriptor); only the
-  value-side eval arm ships here.
-- Phase 8 closures in codegen (LLVM closure env lowering); interpreter closure
-  value ships here, backend lowering is separate.
+The items below were initially listed as deferred. After explicit request
+("I never signed off on deferring 7 and 8"), the Phase 7 reflection-descriptor
+and Phase 8 closure-codegen items were IMPLEMENTED in the follow-up commit:
+
+- ~~Phase 7 reflection descriptor frontend~~ → **done 2026-08-06**: `x.^^Type`
+  emits the protocol category code (Int=0, Float=1, Bool=2, Char=3, Bits=4,
+  Product=5, Sum=6, Ref=7, Closure=8, Void=9) as a compile-time i64 constant;
+  typechecker `resolve_reflect("Type")` returns `Type::int()`. Interpreter
+  (`reflect_type_code`) and codegen (`type_category_code`) share the codes
+  (rule #4 parity). `Size`/`Bytes`/`Alignment`/`Len`/`Ptr`/`Absolute` were
+  already emitted.
+- ~~Phase 8 closures in codegen~~ → **done 2026-08-06 (inline lowering)**:
+  `let f = x -> body` registers a `ClosureDef` in `FunctionContext::closure_lets`;
+  `Call(f, args)` inlines the body with params bound to the arg registers
+  (`last_val_temps` save/restore). Because let-bound SSA registers are
+  immutable, capture is by-value for let-bound immutables — matching the
+  interpreter (Slice E). **Remaining boundary:** escaping closures (stored,
+  passed as arguments, returned) need fn_ptr + heap env blocks + indirect
+  calls; not implemented.
+
+Still out of scope:
 - `analysis/region.rs` `eval_expr_simple` (own path, not `interpreter::`).
 - `PropertyValue`/`NavValue` (unrelated config types — do not confuse with
   `Value`).

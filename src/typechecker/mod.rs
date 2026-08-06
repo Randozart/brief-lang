@@ -2349,7 +2349,9 @@ fn resolve_reflect(
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
             }
-            Ok(Type::Custom("Type".into()))
+            // 2026-08-06 (Phase 8): `x.^^Type` is a frozen descriptor — the
+            // protocol category code, an i64 (matching interpreter + codegen).
+            Ok(Type::int())
         }
         _ => Err(TypeError::InvalidOperation {
             operation: format!("reflection target '{}'", target),

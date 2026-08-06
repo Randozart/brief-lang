@@ -70,6 +70,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Let { name, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
             let val = match expr {
+                Some(crate::ast::Expr::Lambda(params, body)) => {
+                    // 2026-08-06 (Phase 8): a `let f = (x) => body;` binds an
+                    // inline closure. Register the closure def for this
+                    // function; the binding register is a 0 placeholder (the
+                    // value is only used at call sites, which inline the body).
+                    backend
+                        .fun
+                        .closure_lets
+                        .insert(name.clone(), crate::backend::llvm::context::ClosureDef {
+                            params: params.clone(),
+                            body: body.clone(),
+                        });
+                    let v = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    TypedRegister { name: v, ty: Type::int() }
+                }
                 Some(e) => {
                     // 2026-08-01 (E): `vol let x = <rhs>` — loads inside the
                     // RHS are emitted `load volatile` (MMIO semantics: the

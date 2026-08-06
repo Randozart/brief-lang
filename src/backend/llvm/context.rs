@@ -376,9 +376,16 @@ impl CompilerContext {
 //
 // When inlining, clone this struct before entering the inline body and
 // restore it after. FunctionContext implements Clone for this purpose.
+/// A let-bound closure: its parameter names and body. Used for inline
+/// closure calls in codegen (see `FunctionContext::closure_lets`).
 #[derive(Debug, Clone)]
-pub struct FunctionContext {
-    // SSA register counters — NEVER rewound (prevents %t{N} collisions)
+pub struct ClosureDef {
+    pub params: Vec<String>,
+    pub body: Box<crate::ast::Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionContext {    // SSA register counters — NEVER rewound (prevents %t{N} collisions)
     pub txn_counter: usize,
     pub within_counter: usize,
     pub metadata_counter: usize,
@@ -617,6 +624,17 @@ pub struct FunctionContext {
     // return Type::int() because f0 is not in field_index_map.
     pub last_val_types: HashMap<String, Type>,
 
+    /// 2026-08-06 (Phase 8): closures bound by `let` in this function. A call
+    /// to a closure name INLINES the body with the params bound to the arg
+    /// registers; captured free variables resolve from the enclosing function
+    /// scope. Because let-bound SSA registers are immutable, capture is
+    /// by-value for let-bound immutables — matching the interpreter's closure
+    /// semantics (Slice E). Escaping closures (stored, passed as arguments,
+    /// returned) are not yet lowered — that needs fn_ptr + heap env blocks and
+    /// is the documented boundary. Undo: remove the let-intercept and the
+    /// emit_user_call inline branch; restore the Lambda arm's body emission.
+    pub closure_lets: HashMap<String, ClosureDef>,
+
     // 2026-07-05: Fields participating in a body rotation pattern.
     // Forces body stores for these fields so the latch can reload them
     // via GEP, breaking circular phi chains for SCEV analysis.
@@ -733,6 +751,7 @@ impl FunctionContext {
             volatile_locals: std::collections::HashSet::new(),
             member_result: None,
             last_val_types: HashMap::new(),
+            closure_lets: HashMap::new(),
             rotation_fields: HashSet::new(),
             active_vector_groups: Vec::new(),
             field_to_phi: HashMap::new(),

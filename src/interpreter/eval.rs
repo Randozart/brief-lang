@@ -518,27 +518,29 @@ fn eval_reflect(
             }
             _ => Ok(Value::Void),
         },
-        // `Type` (compile-time) is the value-side category; a Sum
-        // reflects its sum-variant tag.
-        ("Type", true) => Ok(Value::bits(reflect_type_name(&val).into_bytes())),
+        // `Type` (compile-time) is a frozen descriptor: the protocol category
+        // code (must match the codegen's type_category_code, rule #4).
+        ("Type", true) => Ok(Value::int(reflect_type_code(&val))),
         _ => Ok(Value::Void),
     }
 }
 
-/// The value's category name for `Type` reflection — the sum-variant tag for
-/// a Sum, otherwise the semantic category.
-fn reflect_type_name(v: &Value) -> String {
+/// 2026-08-06 (Phase 8): the semantic category code for `Type` reflection —
+/// must match backend/llvm/emit_expr.rs type_category_code.
+/// Codes: Int=0, Float=1, Bool=2, Char=3, Bits=4, Product=5, Sum=6,
+/// Ref=7, Closure=8, Void=9.
+fn reflect_type_code(v: &Value) -> i64 {
     match v {
-        Value::Atom(Atom::Int(_)) => "Int".into(),
-        Value::Atom(Atom::Float(_)) => "Float".into(),
-        Value::Atom(Atom::Bool(_)) => "Bool".into(),
-        Value::Atom(Atom::Char(_)) => "Char".into(),
-        Value::Bits(_) => "Bits".into(),
-        Value::Product { .. } => "Product".into(),
-        Value::Sum { name, .. } => name.clone(),
-        Value::Closure { .. } => "Closure".into(),
-        Value::Ref(_) => "Ptr".into(),
-        Value::Void => "Void".into(),
+        Value::Atom(Atom::Int(_)) => 0,
+        Value::Atom(Atom::Float(_)) => 1,
+        Value::Atom(Atom::Bool(_)) => 2,
+        Value::Atom(Atom::Char(_)) => 3,
+        Value::Bits(_) => 4,
+        Value::Product { .. } => 5,
+        Value::Sum { .. } => 6,
+        Value::Ref(_) => 7,
+        Value::Closure { .. } => 8,
+        Value::Void => 9,
     }
 }
 
@@ -1806,7 +1808,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reflect_type_on_sum_is_tag() {
+    fn test_reflect_type_on_sum_is_sum_category() {
         let r = Expr::Reflect(
             Box::new(Expr::Identifier("c".into())),
             "Type".into(),
@@ -1816,7 +1818,7 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert("c".into(), Value::sum("Some".into(), vec![Value::int(1)]));
         let out = eval_expr(&r, &mut heap, &mut bindings).unwrap();
-        assert_eq!(out.string_bytes(&heap), Some(b"Some".to_vec()));
+        assert_eq!(out.as_i64(), Some(6));
     }
 
     #[test]
@@ -1827,7 +1829,7 @@ mod tests {
             ReflectKind::CompileTime,
         );
         let out = eval1(&r);
-        assert_eq!(out.string_bytes(&VirtualHeap::new()), Some(b"Int".to_vec()));
+        assert_eq!(out.as_i64(), Some(0));
     }
 
     #[test]

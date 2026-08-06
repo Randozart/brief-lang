@@ -4205,3 +4205,89 @@ fn test_counter_loop_guard_read_uses_phi_not_state() {
     );
 }
 
+// ── Phase 8: closure inline lowering + `^^Type` descriptor ──────────
+
+fn txn_with_body(body: Vec<Statement>) -> TopLevel {
+    TopLevel::Transaction(Transaction {
+        name: "c".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: default_contract(),
+        body,
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    })
+}
+
+#[test]
+fn test_closure_let_inlines_call() {
+    // `let f = x -> x + 1; let y = f(41);` — the call must inline the body
+    // (no `call @f`), binding the param to the arg register.
+    let mut backend = LlvmBackend::new();
+    let txn = txn_with_body(vec![
+        Statement::Let {
+            name: "f".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Lambda(
+                vec!["x".into()],
+                Box::new(Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Decimal(1)),
+                )),
+            )),
+            modifiers: vec![],
+        },
+        Statement::Let {
+            name: "y".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Call("f".into(), vec![Expr::Decimal(41)], None)),
+            modifiers: vec![],
+        },
+        Statement::Term(None),
+    ]);
+    let ir = backend.generate(&vec![txn], None);
+    assert!(
+        !ir.contains("call i64 @f"),
+        "closure call must inline, not emit a symbol call; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("add nsw i64 %t"), // x + 1 with the arg register
+        "closure body must be emitted with the param bound; got:\n{ir}"
+    );
+}
+
+#[test]
+fn test_reflect_type_emits_category_constant() {
+    // `f.^^Type` on a Float receiver folds to the Float category code (1).
+    let mut backend = LlvmBackend::new();
+    let txn = txn_with_body(vec![
+        Statement::Let {
+            name: "f".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Reflect(
+                Box::new(Expr::Float(1.5)),
+                "Type".into(),
+                ReflectKind::CompileTime,
+            )),
+            modifiers: vec![],
+        },
+        Statement::Term(None),
+    ]);
+    let ir = backend.generate(&vec![txn], None);
+    assert!(
+        ir.contains("add i64 0, 1"),
+        "Float ^^Type must fold to category code 1; got:\n{ir}"
+    );
+}
+

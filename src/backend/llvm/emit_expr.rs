@@ -1615,6 +1615,17 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, r, recv_reg.name).ok();
                 TypedRegister { name: r, ty: Type::int() }
             }
+            // 2026-08-06 (Phase 8): `x.^^Type` — a frozen descriptor = the
+            // protocol category code (Int=0, Float=1, Bool=2, Char=3, Bits=4,
+            // Product=5, Sum=6, Ref=7, Closure=8, Void=9), matching the
+            // interpreter's reflect_type_code (rule #4 parity). A single
+            // constant — no globals, no address acquisition.
+            ("Type", ReflectKind::CompileTime) => {
+                let code = self.type_category_code(&recv_reg.ty);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, code).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
             _ => panic!(
                 "reflection '{}' with kind '{:?}' reached codegen without emission",
                 target, kind
@@ -1633,6 +1644,22 @@ impl LlvmBackend {
                 })
                 .product(),
             _ => 1,
+        }
+    }
+
+    /// 2026-08-06 (Phase 8): the `x.^^Type` frozen-descriptor category code.
+    /// MUST match interpreter::reflect_type_code (rule #4 parity).
+    fn type_category_code(&self, ty: &Type) -> i64 {
+        if self.is_string_operand(ty) || matches!(ty, Type::Bits(_)) {
+            return 4;
+        }
+        match ty {
+            Type::Custom(n) if n == "Float" || n == "Float64" || n == "Double" || n == "Float32" => 1,
+            Type::Custom(n) if n == "Bool" || n == "UInt8" || n == "Int8" => 2,
+            Type::Custom(n) if n == "Char" || n == "Byte" => 3,
+            Type::Ptr(_) | Type::PtrConst(_) | Type::LayoutPtr(_) => 7,
+            Type::Custom(n) if self.ctx.struct_types.contains_key(n) => 5,
+            _ => 0,
         }
     }
 
@@ -2161,6 +2188,12 @@ impl LlvmBackend {
         args: &[Expr],
         indent: &str,
     ) -> TypedRegister {
+        // 2026-08-06 (Phase 8): a let-bound closure call inlines the body with
+        // params bound to the arg registers.
+        let closure = self.fun.closure_lets.get(name).cloned();
+        if let Some(closure) = closure {
+            return self.emit_closure_inline(out, &closure, args, indent);
+        }
         // 2026-07-16: P5 — Check if this is a foreign function; if so, use emit_frgn_call
         // Clone the sig to avoid borrowing self.ctx while self.emit_expr needs &mut self.
         let frgn_sig = self.ctx.frgn_map.get(name).cloned();
@@ -2242,6 +2275,64 @@ impl LlvmBackend {
             name: v.to_string(),
             ty: ret_type,
         }
+    }
+
+    /// 2026-08-06 (Phase 8): inline a let-bound closure call. Args evaluate in
+    /// the caller scope; each param name is bound to its arg register in
+    /// `last_val_temps` (checked first by Identifier resolution), the body
+    /// emits, then the prior bindings restore. Captured free variables resolve
+    /// from the enclosing function scope — by-value for immutable let-bound
+    /// SSA registers, matching the interpreter's closure semantics.
+    fn emit_closure_inline(
+        &mut self,
+        out: &mut String,
+        closure: &crate::backend::llvm::context::ClosureDef,
+        args: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        if closure.params.len() != args.len() {
+            panic!(
+                "closure call: expected {} arguments, got {}",
+                closure.params.len(),
+                args.len()
+            );
+        }
+        let arg_regs: Vec<TypedRegister> = args
+            .iter()
+            .map(|a| self.emit_expr(out, a, indent))
+            .collect();
+        let mut saved: Vec<(String, Option<String>, Option<Type>)> = Vec::new();
+        for (i, p) in closure.params.iter().enumerate() {
+            let prior_t = self.fun.last_val_temps.get(p).cloned();
+            let prior_ty = self.fun.last_val_types.get(p).cloned();
+            self.fun
+                .last_val_temps
+                .insert(p.clone(), arg_regs[i].name.clone());
+            self.fun
+                .last_val_types
+                .insert(p.clone(), arg_regs[i].ty.clone());
+            saved.push((p.clone(), prior_t, prior_ty));
+        }
+        let result = self.emit_expr(out, &closure.body, indent);
+        for (p, prior_t, prior_ty) in saved {
+            match prior_t {
+                Some(t) => {
+                    self.fun.last_val_temps.insert(p.clone(), t);
+                }
+                None => {
+                    self.fun.last_val_temps.remove(&p);
+                }
+            }
+            match prior_ty {
+                Some(t) => {
+                    self.fun.last_val_types.insert(p.clone(), t);
+                }
+                None => {
+                    self.fun.last_val_types.remove(&p);
+                }
+            }
+        }
+        result
     }
 
     /// 2026-07-25: Return the integer type for binary operations based on
