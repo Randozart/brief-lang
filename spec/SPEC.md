@@ -760,11 +760,11 @@ satisfiable one fires. A program converges (and exits) when no node can fire.
 
 #### 11.5.1 Entry loops (`beginprogram`)
 
-**Staged.** `beginprogram` is a keyword usable as a conjunct in a node's
-precondition: `[beginprogram && <state>][<goal>]`. It is a pure marker — true
-exactly once at program start — and takes no conditions itself. The node's
-other precondition terms are ordinary state expressions over top-level
-bindings seeded from the environment or compile time at startup:
+`beginprogram` is a keyword usable as a conjunct in a node's precondition:
+`[beginprogram && <state>][<goal>]`. It is a pure marker — true exactly once
+at program start — and takes no conditions itself. The node's other
+precondition terms are ordinary state expressions over top-level bindings
+seeded from the environment or compile time at startup:
 
 ```briv
 let startingnumber: Int = get_env_int!("env_var");
