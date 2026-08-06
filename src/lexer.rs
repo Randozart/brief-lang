@@ -934,44 +934,56 @@ fn unescape_string(inner: &str) -> String {
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
     while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('t') => out.push('\t'),
-                Some('\\') => out.push('\\'),
-                Some('"') => out.push('"'),
-                Some('0') => out.push('\0'),
-                Some('x') => {
-                    let hex_str: String = chars.by_ref().take(2).collect();
-                    if let Ok(h) = u8::from_str_radix(&hex_str, 16) {
-                        out.push(h as char);
-                    }
-                }
-                Some('u') => {
-                    if chars.next() == Some('{') {
-                        let mut hex = String::new();
-                        while let Some(h) = chars.next() {
-                            if h == '}' {
-                                break;
-                            }
-                            hex.push(h);
-                        }
-                        if let Ok(cp) = u32::from_str_radix(&hex, 16) {
-                            out.push(char::from_u32(cp).unwrap_or('?'));
-                        }
-                    }
-                }
-                Some(c) => {
-                    out.push('\\');
-                    out.push(c);
-                }
-                None => out.push('\\'),
-            }
-        } else {
+        if c != '\\' {
             out.push(c);
+            continue;
+        }
+        let Some(esc) = chars.next() else {
+            out.push('\\');
+            continue;
+        };
+        match esc {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            '0' => out.push('\0'),
+            'x' => out.push(decode_hex2(&mut chars)),
+            'u' => out.push(decode_unicode(&mut chars)),
+            other => {
+                out.push('\\');
+                out.push(other);
+            }
         }
     }
     out
+}
+
+/// 2026-08-05 (Phase 7): decode `\xHH` into a char.
+fn decode_hex2(chars: &mut std::str::Chars) -> char {
+    let hex_str: String = chars.by_ref().take(2).collect();
+    match u8::from_str_radix(&hex_str, 16) {
+        Ok(h) => h as char,
+        Err(_) => '?',
+    }
+}
+
+/// 2026-08-05 (Phase 7): decode `\u{HEX}` into a char.
+fn decode_unicode(chars: &mut std::str::Chars) -> char {
+    if chars.next() != Some('{') {
+        return '{';
+    }
+    let mut hex = String::new();
+    while let Some(h) = chars.next() {
+        if h == '}' {
+            break;
+        }
+        hex.push(h);
+    }
+    match u32::from_str_radix(&hex, 16) {
+        Ok(cp) => char::from_u32(cp).unwrap_or('?'),
+        Err(_) => '?',
+    }
 }
 
 /// Returns Ok(tokens) on success, Err on lex failure.
