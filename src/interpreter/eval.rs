@@ -288,7 +288,7 @@ fn describe_value(v: &Value) -> String {
         Value::Void => "void".into(),
         Value::Ref(_) => "reference".into(),
         Value::Closure { .. } => "closure".into(),
-        Value::Constructor(_, _) => "constructor".into(),
+        Value::Sum { .. } => "sum".into(),
         Value::List(_) => "list".into(),
     }
 }
@@ -480,7 +480,7 @@ fn wrap_bound(v: i64, len: i64) -> i64 {
 /// Runtime targets: `Len` (String char count, product/sum field count),
 /// `Absolute` (Int/Float abs). Compile-time targets: `Size`/`Bytes`
 /// (field count or byte length), `Type` (the value's category string, or the
-/// sum-variant tag for a Constructor). Unhandled targets return Void.
+/// sum-variant name for a Sum). Unhandled targets return Void.
 fn eval_reflect(
     recv: &Expr,
     name: &str,
@@ -502,7 +502,7 @@ fn eval_reflect(
                     .count();
                 Ok(Value::int(chars as i64))
             }
-            (Value::Product { fields, .. } | Value::Constructor(_, fields)) => {
+            (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
                 Ok(Value::int(fields.len() as i64))
             }
             _ => Ok(Value::Void),
@@ -514,12 +514,12 @@ fn eval_reflect(
         },
         ("Size", true) | ("Bytes", true) => match val {
             Value::Bits(bytes) => Ok(Value::int(bytes.len() as i64)),
-            (Value::Product { fields, .. } | Value::Constructor(_, fields)) => {
+            (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
                 Ok(Value::int(fields.len() as i64))
             }
             _ => Ok(Value::Void),
         },
-        // `Type` (compile-time) is the value-side category; a Constructor
+        // `Type` (compile-time) is the value-side category; a Sum
         // reflects its sum-variant tag.
         ("Type", true) => Ok(Value::bits(reflect_type_name(&val).into_bytes())),
         _ => Ok(Value::Void),
@@ -527,7 +527,7 @@ fn eval_reflect(
 }
 
 /// The value's category name for `Type` reflection — the sum-variant tag for
-/// a Constructor, otherwise the semantic category.
+/// a Sum, otherwise the semantic category.
 fn reflect_type_name(v: &Value) -> String {
     match v {
         Value::Atom(Atom::Int(_)) => "Int".into(),
@@ -536,7 +536,7 @@ fn reflect_type_name(v: &Value) -> String {
         Value::Atom(Atom::Char(_)) => "Char".into(),
         Value::Bits(_) => "Bits".into(),
         Value::Product { .. } => "Product".into(),
-        Value::Constructor(name, _) => name.clone(),
+        Value::Sum { name, .. } => name.clone(),
         Value::Closure { .. } => "Closure".into(),
         Value::Ref(_) => "Ptr".into(),
         Value::List(_) => "List".into(),
@@ -574,7 +574,7 @@ fn eval_match(
 /// Match a pattern against a value, inserting pattern bindings into
 /// `bindings`. A failed match may leave partial bindings — callers use a
 /// scratch binding map per arm. `EnumVariant` matches the derive CEGIS
-/// `Constructor(name, fields)` carrier; `Tuple` matches `Product` (and the
+/// `Sum { name, payload }` carrier; `Tuple` matches `Product` (and the
 /// reactor's `List` for compatibility).
 pub fn pattern_match(
     pat: &Pattern,
@@ -618,7 +618,7 @@ pub fn pattern_match(
                     .all(|(p, item)| pattern_match(p, item, bindings))
         }
         Pattern::EnumVariant(name, subpats) => match val {
-            Value::Constructor(cname, fields) => {
+            Value::Sum { name: cname, payload: fields } => {
                 cname == name
                     && fields.len() == subpats.len()
                     && subpats
@@ -1468,11 +1468,8 @@ mod tests {
     }
 
     #[test]
-    fn test_match_enum_variant_over_constructor() {
-        let scrut = Value::Constructor(
-            "Foo".into(),
-            vec![Value::int(1), Value::int(2)],
-        );
+    fn test_match_enum_variant_over_sum() {
+        let scrut = Value::Sum { name: "Foo".into(), payload: vec![Value::int(1), Value::int(2)] };
         let m = Expr::Match(
             Box::new(Expr::Identifier("scrut".into())),
             vec![MatchArm {
@@ -1813,7 +1810,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reflect_type_on_constructor_is_sum_tag() {
+    fn test_reflect_type_on_sum_is_tag() {
         let r = Expr::Reflect(
             Box::new(Expr::Identifier("c".into())),
             "Type".into(),
@@ -1821,7 +1818,7 @@ mod tests {
         );
         let mut heap = VirtualHeap::new();
         let mut bindings = HashMap::new();
-        bindings.insert("c".into(), Value::Constructor("Some".into(), vec![Value::int(1)]));
+        bindings.insert("c".into(), Value::sum("Some".into(), vec![Value::int(1)]));
         let out = eval_expr(&r, &mut heap, &mut bindings).unwrap();
         assert_eq!(out.string_bytes(&heap), Some(b"Some".to_vec()));
     }

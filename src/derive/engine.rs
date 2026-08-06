@@ -148,19 +148,20 @@ pub fn evaluate_synthesized(
             }
         }
         Expr::Call(name, args, _) => {
-            // Treat calls as constructors for compound types.
+            // Treat calls as sums for compound types.
             // A constructor call like Add(Const(5), Const(3)) is represented
-            // as Call("Add", [Call("Const", [Decimal(5)]), ...], None).
+            // as Call("Add", [Call("Const", [Decimal(5)]), ...], None) — the
+            // applied name is the sum's variant tag.
             let mut values = Vec::new();
             for arg in args {
                 values.push(evaluate_synthesized(arg, ctx)?);
             }
-            Ok(Value::Constructor(name.clone(), values))
+            Ok(Value::Sum { name: name.clone(), payload: values })
         }
         Expr::Field(inner, field_name) => {
             let val = evaluate_synthesized(inner, ctx)?;
             match val {
-                Value::Constructor(_, ref fields) => {
+                Value::Sum { payload: fields, .. } => {
                     if let Ok(idx) = field_name.parse::<usize>() {
                         fields.get(idx).cloned().ok_or(
                             SynthesisEvalError::TypeMismatch(
@@ -174,14 +175,14 @@ pub fn evaluate_synthesized(
                     }
                 }
                 _ => Err(SynthesisEvalError::TypeMismatch(
-                    format!("field access on non-constructor: {:?}", val)
+                    format!("field access on non-sum: {:?}", val)
                 )),
             }
         }
         Expr::Match(expr, arms) => {
             let val = evaluate_synthesized(expr, ctx)?;
             match val {
-                Value::Constructor(name, fields) => {
+                Value::Sum { name, payload: fields } => {
                     for arm in arms {
                         if let Pattern::EnumVariant(ref arm_name, ref pat_fields) = arm.pattern {
                              if *arm_name == name {
@@ -202,11 +203,11 @@ pub fn evaluate_synthesized(
                         }
                     }
                     Err(SynthesisEvalError::TypeMismatch(
-                        format!("no matching arm for constructor '{}'", name)
+                        format!("no matching arm for sum variant '{}'", name)
                     ))
                 }
                 _ => Err(SynthesisEvalError::TypeMismatch(
-                    format!("match on non-constructor: {:?}", val)
+                    format!("match on non-sum: {:?}", val)
                 )),
             }
         }
@@ -1010,13 +1011,13 @@ fn prune_level(
                 Value::Atom(Atom::Int(n)) => (*n, 1),
                 Value::Atom(Atom::Float(f)) => (f.to_bits() as i64, 2),
                 Value::Bits(b) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
-                Value::Constructor(name, fields) => {
+                Value::Sum { name, payload: fields } => {
                     let name_hash = name.bytes().fold(0i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64));
                     let fields_hash = fields.iter().fold(0i64, |acc, f| match f {
                         Value::Atom(Atom::Int(n)) => acc.wrapping_mul(31).wrapping_add(*n),
                         Value::Atom(Atom::Float(fv)) => acc.wrapping_mul(31).wrapping_add(fv.to_bits() as i64),
                         Value::Bits(b) => acc.wrapping_mul(31).wrapping_add(b.first().copied().unwrap_or(0) as i64),
-                        Value::Constructor(n, fs) => {
+                        Value::Sum { name: n, payload: fs } => {
                             let h = n.bytes().fold(0i64, |a, b| a.wrapping_mul(31).wrapping_add(b as i64));
                             acc.wrapping_mul(31).wrapping_add(h).wrapping_add(fs.len() as i64)
                         }
@@ -1824,5 +1825,28 @@ mod tests {
         }
         assert!(result.is_ok(), "compound type search should succeed: {:?}", result);
         assert!(result.unwrap().is_some(), "should find a solution");
+    }
+
+    #[test]
+    fn test_evaluate_call_produces_sum_with_field_access() {
+        // 2026-08-06 (Slice H): a Call evaluates to Value::Sum; numeric field
+        // access extracts a payload element.
+        let call = Expr::Call(
+            "Pair".into(),
+            vec![Expr::Decimal(3), Expr::Decimal(9)],
+            None,
+        );
+        let mut ctx = SynthesisEvalContext::new();
+        let val = evaluate_synthesized(&call, &mut ctx).unwrap();
+        match &val {
+            crate::interpreter::Value::Sum { name, payload } => {
+                assert_eq!(name, "Pair");
+                assert_eq!(payload, &vec![crate::interpreter::Value::int(3), crate::interpreter::Value::int(9)]);
+            }
+            other => panic!("expected Sum, got {other:?}"),
+        }
+        let field = Expr::Field(Box::new(call), "1".into());
+        let v = evaluate_synthesized(&field, &mut ctx).unwrap();
+        assert_eq!(v.as_i64(), Some(9));
     }
 }

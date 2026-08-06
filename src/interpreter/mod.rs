@@ -270,10 +270,18 @@ pub enum Value {
     },
 
     // ── Compound types (synthesis engine) ────────────────────────────
-    // 2026-07-28: Constructor for enum variants and struct-like values.
-    // Produced by Expr::Constructor during synthesis evaluation.
-    // Used by the CEGIS loop to represent expressions in value space.
-    Constructor(String, Vec<Value>),
+    /// 2026-08-06 (Slice H): a sum — an enum variant with payload, produced by
+    /// the derive (CEGIS) engine's `evaluate_synthesized` for `Call`/variant
+    /// expressions. The variant NAME travels with the value (SPEC §2.2
+    /// "sums"): the interpreter has no separate type registry, so name-based
+    /// pattern matching (Pattern::EnumVariant) and `Type` reflection resolve
+    /// from the value itself. The plan sketched a tag-index + global table;
+    /// carrying the name avoids global mutable tag state and keeps derive's
+    /// name-based variant dispatch working unchanged. Undo: if a shared type
+    /// registry ever reaches the interpreter, replace the name with a tag.
+    /// Renamed from `Constructor` (the synthesis-tree name was misleading —
+    /// the value is a tagged compound, not a constructor expression).
+    Sum { name: String, payload: Vec<Value> },
 
     // ── FFI bridge variants ─────────────────────────────────────────
     // 2026-07-14: These are produced/consumed only by the FFI layer
@@ -313,6 +321,10 @@ impl Value {
             fields,
             names: Some(std::sync::Arc::new(names)),
         }
+    }
+
+    pub fn sum(name: String, payload: Vec<Value>) -> Self {
+        Value::Sum { name, payload }
     }
 
     pub fn void() -> Self {
