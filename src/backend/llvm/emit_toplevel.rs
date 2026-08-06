@@ -1822,15 +1822,23 @@ impl LlvmBackend {
                 // its body. The free fires exactly once, after the body (the
                 // reactor fires the node once).
                 if let Some(fields) = self.ctx.global_free_after.get(name).cloned() {
-                    for f in &fields {
-                        let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
-                        let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
-                        let ptr = self.fun.gen_reg();
-                        writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
-                        writeln!(out, "  call void @__briv_free(ptr {})", ptr).ok();
-                    }
+                    self.emit_scheduled_frees(out, &fields);
                 }
                 writeln!(out, "  ret void").ok();
+            } else if let Some(fields) = self.ctx.global_free_after.get(name) {
+                // 2026-08-06 (diagnostics): the body ended in `term`, so the
+                // free block above is skipped and the scheduled frees are
+                // never emitted — the heap fields leak. (A free inside the
+                // body would be a use-after-free for a node the reactor fires
+                // more than once, so the skip is the conservative choice.)
+                for f in fields {
+                    self.warnings.push(format!(
+                        "warning: heap state field '{}' is provably dead after '{}' but \
+                         the node ends in a term — the planned free has no sound emission \
+                         point and the field will leak",
+                        f, name
+                    ));
+                }
             }
             writeln!(out, "}}").ok();
         } else {
@@ -2209,6 +2217,32 @@ impl LlvmBackend {
             // against emitting a second ret after it.
             if !self.fun.terminated {
                 writeln!(out, "  ret void").ok();
+            }
+            // 2026-08-06 (diagnostics): a scheduled free whose last consumer is
+            // a NON-bounded reactive node is never emitted here (freeing inside
+            // the body would be a use-after-free for a multi-firing node) and
+            // such a node never reaches the fold dispatch — the field leaks.
+            let has_bounded_pre = self
+                .ctx
+                .transition_graph
+                .as_ref()
+                .map(|tg| {
+                    tg.nodes
+                        .iter()
+                        .any(|n| n.name == name && n.bounded_pre.is_some())
+                })
+                .unwrap_or(false);
+            if !has_bounded_pre {
+                if let Some(fields) = self.ctx.global_free_after.get(name) {
+                    for f in fields {
+                        self.warnings.push(format!(
+                            "warning: heap state field '{}' is provably dead after '{}' but \
+                             that node has no bounded loop — the planned free has no sound \
+                             emission point and the field will leak",
+                            f, name
+                        ));
+                    }
+                }
             }
             writeln!(out, "}}").ok();
 

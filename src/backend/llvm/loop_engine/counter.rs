@@ -514,8 +514,7 @@ impl LlvmBackend {
     /// handle is the field's STORED value (the ptrtoint of the allocation),
     /// loaded from %State — re-evaluating the initializer would re-malloc.
     /// Shared by the countdown, PerFieldPhi, and version-DAG fold paths.
-    fn emit_scheduled_frees(&mut self, out: &mut String, fields: &[String]) {
-        for f in fields {
+    pub(crate) fn emit_scheduled_frees(&mut self, out: &mut String, fields: &[String]) {        for f in fields {
             let Some(&fidx) = self.ctx.field_index_map.get(f) else { continue; };
             let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
             let ptr = self.fun.gen_reg();

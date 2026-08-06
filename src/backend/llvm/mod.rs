@@ -2793,8 +2793,29 @@ impl LlvmBackend {
                         // (build_loop_shapes mirrors this gate); a missing shape
                         // falls through to the conservative reactor path.
                         // See docs/plans/2026-07-31-frontend-driven-dispatch.md §6.5.
-                        match analysis.loop_shapes.get(&node.name) {
-                            None => false,
+                         match analysis.loop_shapes.get(&node.name) {
+                             None => {
+                                 // 2026-08-06 (diagnostics): a scheduled free
+                                 // whose last consumer has no bounded-loop shape
+                                 // is never emitted (the reactive path has no
+                                 // sound free point) — the field leaks.
+                                 if let Some(fields) = analysis
+                                     .global_lifetime
+                                     .free_after
+                                     .get(&node.name)
+                                 {
+                                     for f in fields {
+                                         self.warnings.push(format!(
+                                             "warning: heap state field '{}' is provably \
+                                              dead after '{}' but that node has no \
+                                              bounded-loop shape — the planned free has no \
+                                              sound emission point and the field will leak",
+                                             f, node.name
+                                         ));
+                                     }
+                                 }
+                                 false
+                             }
                             Some(shape) => {
                                 // 2026-07-31: Swan-song hoist consumed from the
                                 // frontend analysis (swan_song.rs) — the stripped
@@ -2804,10 +2825,33 @@ impl LlvmBackend {
                                     Some((stripped, hoisted)) => (stripped.clone(), hoisted.clone()),
                                     None => (txns[0].1.body.clone(), Vec::new()),
                                 };
-                                self.emit_folded_loop_shape(
+                                let folded = self.emit_folded_loop_shape(
                                     &mut out, &analysis, node, counter_idx, shape, &txn_body, post_hoist,
                                     txns[0].1.contract.watchdog.as_ref(),
-                                )
+                                );
+                                // 2026-08-06 (diagnostics): the fold was
+                                // attempted but could not be emitted for this
+                                // bounded counter — the scheduler-planned frees
+                                // fall through to the reactive emission, which
+                                // has no sound free point, so the fields leak.
+                                if !folded {
+                                    if let Some(fields) = analysis
+                                        .global_lifetime
+                                        .free_after
+                                        .get(&node.name)
+                                    {
+                                        for f in fields {
+                                            self.warnings.push(format!(
+                                                "warning: heap state field '{}' is provably \
+                                                 dead after '{}' but that node cannot fold — \
+                                                 the planned free has no sound emission point \
+                                                 and the field will leak",
+                                                f, node.name
+                                            ));
+                                        }
+                                    }
+                                }
+                                folded
                             }
                         }
                     }

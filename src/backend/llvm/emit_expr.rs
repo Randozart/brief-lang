@@ -112,6 +112,16 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
+                // 2026-08-06 (diagnostics): a closure bound by `let` is only
+                // meaningful as a CALL target; using it as a value would
+                // silently read the placeholder register (0).
+                if self.fun.closure_lets.contains_key(name) {
+                    panic!(
+                        "closure '{}' can only be applied as a call — using a closure \
+                         as a value is not supported yet",
+                        name
+                    );
+                }
                 // 2026-07-29: Accumulation chaining — check last_val_temps FIRST.
                 // When a field is written multiple times in one iteration, the second
                 // read must return the just-computed value, not the loop-header phi,

@@ -4368,3 +4368,31 @@ node life [sum < N][sum == N] {
     );
 }
 
+// ── Diagnostics sweep (2026-08-06): scheduler leak warning ──────────
+
+#[test]
+fn test_non_bounded_reactive_heap_txn_warns_will_leak() {
+    // A reactive last-consumer with NO bounded loop can never soundly free its
+    // heap field — the scheduler's plan is dropped and the field leaks. The
+    // backend must surface that as a warning (not stay silent).
+    let src = r#"
+let done: Bool = false;
+let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
+node t [done == false][done == true] {
+    buf[0] = 1;
+    done = true;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    backend.generate(&items, None);
+    assert!(
+        backend.warnings().iter().any(|w| w.contains("will leak")),
+        "expected a will-leak warning, got: {:?}",
+        backend.warnings()
+    );
+}
+

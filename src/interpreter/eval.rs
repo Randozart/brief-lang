@@ -227,7 +227,11 @@ fn eval_call(
                 eval_expr(body, heap, &mut local)
             }
             Some(v) => Ok(v.clone()),
-            None => Err(RuntimeError::UndefinedVariable { name: name.into() }),
+            // 2026-08-06 (diagnostics): a CALL context — if the name is not a
+            // binding, it is an undefined function (or a user-defined function
+            // the interpreter's expression evaluator cannot apply, which is
+            // reported the same way). "undefined variable" was misleading here.
+            None => Err(RuntimeError::UndefinedFunction(name.into())),
         }
     }
 }
@@ -1643,7 +1647,7 @@ mod tests {
         let mut bindings = HashMap::new();
         let call = Expr::Call("missing".into(), vec![], None);
         let err = eval_expr(&call, &mut heap, &mut bindings).err().unwrap().to_string();
-        assert!(err.contains("undefined variable"), "got: {err}");
+        assert!(err.contains("undefined function"), "got: {err}");
     }
 
     #[test]

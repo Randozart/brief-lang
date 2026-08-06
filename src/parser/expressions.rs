@@ -882,4 +882,20 @@ mod tests {
         // identifier.
         assert!(parse_expr("match n { _ if n < 0 => -1 }").is_err());
     }
+
+    #[test]
+    fn lambda_with_match_arrow_hints_at_arrow() {
+        // 2026-08-06 (diagnostics): `x => body` is a common lambda spelling —
+        // match arms use `=>`; lambda parameters use `->`. At statement level
+        // the `=>` is unexpected and the error must hint.
+        let src = "node s [true][false] { let f = x => x + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let err = p.parse_program().err().expect("`=>` lambda must fail");
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("hint: match arms use '=>'; lambda parameters use '->'"),
+            "expected the arrow hint, got: {msg}"
+        );
+    }
 }

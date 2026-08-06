@@ -40,7 +40,7 @@ Status legend:
 | 20 | Assembly declarations | In progress | Phase 6: contracts mandatory on asm; full effect profile Phase 16 |
 | 21 | Rendered Briv | In progress | Phase 3 `render Name`, `b-when`; full lifecycle Phase 14 |
 | 22 | Data Briv | Not started | Phase 13 (`.dbv`/`.dbvl` modes) |
-| 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; Phase 6 helpful-messages rule; docs Phase 20 |
+| 23 | Diagnostics, tooling, documentation | In progress | Phase 1 vocab + LSP + grammar; Phase 6 helpful-messages rule; docs Phase 20; 2026-08-06 diagnostics sweep (op-target, closure-as-value, scheduler-leak, GetEnvInt#, lambda arrow, interpreter user-fn) |
 | 24 | Standard-library boundary | Not started | Phase 18 (no compiler collection knowledge) |
 | 25 | Implementation staging | In progress | `SyntaxError::StagedFeature` added in Phase 0 |
 | 26 | Casting and protocols | In progress | Phase 5: one cross-protocol edge per written `as` enforced |

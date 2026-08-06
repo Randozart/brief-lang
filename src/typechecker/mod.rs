@@ -29,6 +29,10 @@ pub struct TypecheckContext<'a> {
     /// txn parameters). Used by is_mutable_location to distinguish mutable
     /// state fields from immutable let-bindings for PtrConst inference.
     pub state_keys: std::collections::HashSet<String>,
+    /// 2026-08-06 (diagnostics): every function/transaction name defined in the
+    /// program (defns, txns, imported bodies). Used to validate a declared
+    /// `op` binding's implementation target actually exists.
+    pub defined_fns: std::collections::HashSet<String>,
     /// 2026-08-01 (Phase 3): locals consumed by a `~op` (`a ~= b`, `dest ~<-
     /// src`, `~<- src;`). Reading a consumed local afterward is a use-after-move
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
@@ -118,6 +122,7 @@ impl<'a> TypecheckContext<'a> {
         TypecheckContext {
             bindings: HashMap::new(),
             state_keys: std::collections::HashSet::new(),
+            defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
             universe,
             casting_graph: crate::casting::graph::CastingGraph::new(),
@@ -1062,6 +1067,23 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
     // Intrinsic call (ends with #): look up signature
     if name.ends_with('#') {
         let sig = get_intrinsic_signature(name).ok_or_else(|| {
+            // 2026-08-06 (diagnostics): the PascalCase intrinsic forms of the
+            // env macros were renamed to lowercase macros — direct the user
+            // instead of reporting an "unknown intrinsic".
+            if matches!(name, "GetEnvInt#" | "GetEnv#" | "GetEnvOrDefault#") {
+                let macro_name = match name {
+                    "GetEnvInt#" => "get_env_int!",
+                    "GetEnvOrDefault#" => "get_env_or_default!",
+                    _ => "get_env!",
+                };
+                return TypeError::InvalidOperation {
+                    operation: format!("call to '{}'", name),
+                    type_name: format!(
+                        "the lowercase macro '{}' replaced this PascalCase name — rename the call site",
+                        macro_name
+                    ),
+                };
+            }
             let found: Vec<String> = args
                 .iter()
                 .filter_map(|a| infer_type_only(a, ctx).ok())
@@ -1205,9 +1227,10 @@ fn arithmetic_result_ty(
 /// declared implementation instead of re-dispatching by operand type. Protocol
 /// intrinsics stay as BinaryOp (their category-dispatch lowering is already
 /// correct and benchmark-stable). Runs after typechecking so types are known;
-/// mutates `items` in place. Additive: programs with no declared custom op are
-/// untouched.
-pub fn elaborate_ops<'a>(items: &mut [TopLevel], universe: &'a TypeUniverse, env: &CheckEnv<'a>) {
+/// mutates `items` in place. A declared op whose implementation target is not
+/// a defined function is an error (was a silent link-time undefined symbol).
+pub fn elaborate_ops(items: &mut [TopLevel], universe: &TypeUniverse, env: &CheckEnv) -> Vec<TypeError> {
+    let mut errors = Vec::new();
     for item in items.iter_mut() {
         let mut ctx = make_typecheck_context(env, universe);
         match item {
@@ -1215,36 +1238,37 @@ pub fn elaborate_ops<'a>(items: &mut [TopLevel], universe: &'a TypeUniverse, env
                 for (name, ty) in &d.parameters {
                     ctx.bindings.insert(name.clone(), ty.clone());
                 }
-                elaborate_stmts(&mut d.body, &mut ctx);
-                elaborate_expr(&mut d.contract.pre_condition, &mut ctx);
-                elaborate_expr(&mut d.contract.post_condition, &mut ctx);
+                elaborate_stmts(&mut d.body, &mut ctx, &mut errors);
+                elaborate_expr(&mut d.contract.pre_condition, &mut ctx, &mut errors);
+                elaborate_expr(&mut d.contract.post_condition, &mut ctx, &mut errors);
             }
             TopLevel::Transaction(t) => {
                 for (name, ty) in &t.parameters {
                     ctx.bindings.insert(name.clone(), ty.clone());
                 }
-                elaborate_stmts(&mut t.body, &mut ctx);
-                elaborate_expr(&mut t.contract.pre_condition, &mut ctx);
-                elaborate_expr(&mut t.contract.post_condition, &mut ctx);
+                elaborate_stmts(&mut t.body, &mut ctx, &mut errors);
+                elaborate_expr(&mut t.contract.pre_condition, &mut ctx, &mut errors);
+                elaborate_expr(&mut t.contract.post_condition, &mut ctx, &mut errors);
             }
-            TopLevel::Statement(stmt) => elaborate_stmt(stmt, &mut ctx),
-            TopLevel::Constant(c) => elaborate_expr(&mut c.expr, &mut ctx),
+            TopLevel::Statement(stmt) => elaborate_stmt(stmt, &mut ctx, &mut errors),
+            TopLevel::Constant(c) => elaborate_expr(&mut c.expr, &mut ctx, &mut errors),
             _ => {}
         }
     }
+    errors
 }
 
-fn elaborate_stmts(stmts: &mut [Statement], ctx: &mut TypecheckContext) {
+fn elaborate_stmts(stmts: &mut [Statement], ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
     for stmt in stmts.iter_mut() {
-        elaborate_stmt(stmt, ctx);
+        elaborate_stmt(stmt, ctx, errors);
     }
 }
 
-fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext) {
+fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
     match stmt {
         Statement::Let { name, names, ty, expr, .. } => {
             if let Some(e) = expr {
-                elaborate_expr(e, ctx);
+                elaborate_expr(e, ctx, errors);
             }
             // Track the binding so later statements resolve its type (mirrors
             // infer_statement). Declared type wins; else infer the initializer.
@@ -1258,107 +1282,138 @@ fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext) {
             }
         }
         Statement::Assign(l, r) => {
-            elaborate_expr(l, ctx);
-            elaborate_expr(r, ctx);
+            elaborate_expr(l, ctx, errors);
+            elaborate_expr(r, ctx, errors);
         }
-        Statement::ArrowAssign { value, .. } => elaborate_expr(value, ctx),
+        Statement::ArrowAssign { value, .. } => elaborate_expr(value, ctx, errors),
         Statement::Term(Some(e))
         | Statement::ExitProgram(Some(e))
-        | Statement::Rollback(Some(e)) => elaborate_expr(e, ctx),
-        Statement::Expression(e) | Statement::Gate(e) => elaborate_expr(e, ctx),
+        | Statement::Rollback(Some(e)) => elaborate_expr(e, ctx, errors),
+        Statement::Expression(e) | Statement::Gate(e) => elaborate_expr(e, ctx, errors),
         Statement::Guarded(cond, body) => {
-            elaborate_expr(cond, ctx);
-            elaborate_stmts(body, ctx);
+            elaborate_expr(cond, ctx, errors);
+            elaborate_stmts(body, ctx, errors);
         }
         Statement::If(cond, then, else_) => {
-            elaborate_expr(cond, ctx);
-            elaborate_stmts(then, ctx);
-            elaborate_stmts(else_, ctx);
+            elaborate_expr(cond, ctx, errors);
+            elaborate_stmts(then, ctx, errors);
+            elaborate_stmts(else_, ctx, errors);
         }
-        Statement::Block(body) | Statement::SyncBlock(body) => elaborate_stmts(body, ctx),
+        Statement::Block(body) | Statement::SyncBlock(body) => elaborate_stmts(body, ctx, errors),
         Statement::Foreach { list, body, .. } => {
-            elaborate_expr(list, ctx);
-            elaborate_stmts(body, ctx);
+            elaborate_expr(list, ctx, errors);
+            elaborate_stmts(body, ctx, errors);
         }
         _ => {}
     }
 }
 
-fn elaborate_expr(expr: &mut Expr, ctx: &mut TypecheckContext) {
+fn elaborate_expr(expr: &mut Expr, ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
     match expr {
+        Expr::Identifier(name) => {
+            // 2026-08-06 (diagnostics): a closure bound by `let` is only
+            // meaningful as a CALL target (`f(x)` is Expr::Call, whose callee
+            // is a String — this Identifier arm is never reached by it). Using
+            // one as a value would silently read the codegen placeholder 0.
+            if matches!(ctx.bindings.get(name), Some(Type::Function(_, _))) {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!("use of '{}' as a value", name),
+                    type_name: format!(
+                        "closure '{}' can only be applied as a call — using a closure as \
+                         a value is not supported yet",
+                        name
+                    ),
+                });
+            }
+        }
         Expr::BinaryOp(kind, l, r) => {
             let lt = infer_type_only(l, ctx).unwrap_or(Type::int());
             let rt = infer_type_only(r, ctx).unwrap_or(Type::int());
             if let Some(OpBinding::Function(fn_name)) = ctx.resolve_binary_op_binding(kind, &lt, &rt) {
+                // 2026-08-06 (diagnostics): the declared op's implementation
+                // target must be a defined function — a typo would otherwise
+                // surface as a link-time undefined symbol.
+                if !ctx.defined_fns.contains(&fn_name) {
+                    errors.push(TypeError::InvalidOperation {
+                        operation: format!("'{}'", kind),
+                        type_name: format!(
+                            "op target '{}' is not a defined function — declare it or fix the op binding",
+                            fn_name
+                        ),
+                    });
+                    elaborate_expr(l, ctx, errors);
+                    elaborate_expr(r, ctx, errors);
+                    return;
+                }
                 // Rewrite children bottom-up, then fold the op into a call to
                 // the declared implementation.
-                elaborate_expr(l, ctx);
-                elaborate_expr(r, ctx);
+                elaborate_expr(l, ctx, errors);
+                elaborate_expr(r, ctx, errors);
                 *expr = Expr::Call(fn_name, vec![(**l).clone(), (**r).clone()], None);
                 return;
             }
-            elaborate_expr(l, ctx);
-            elaborate_expr(r, ctx);
+            elaborate_expr(l, ctx, errors);
+            elaborate_expr(r, ctx, errors);
         }
-        Expr::Block(stmts) => elaborate_stmts(stmts, ctx),
+        Expr::Block(stmts) => elaborate_stmts(stmts, ctx, errors),
         Expr::If(c, t, e) => {
-            elaborate_expr(c, ctx);
-            elaborate_expr(t, ctx);
+            elaborate_expr(c, ctx, errors);
+            elaborate_expr(t, ctx, errors);
             if let Some(e) = e {
-                elaborate_expr(e, ctx);
+                elaborate_expr(e, ctx, errors);
             }
         }
         Expr::Match(scrut, arms) => {
-            elaborate_expr(scrut, ctx);
+            elaborate_expr(scrut, ctx, errors);
             for arm in arms.iter_mut() {
                 if let Some(g) = &mut arm.guard {
-                    elaborate_expr(g, ctx);
+                    elaborate_expr(g, ctx, errors);
                 }
-                elaborate_expr(&mut arm.body, ctx);
+                elaborate_expr(&mut arm.body, ctx, errors);
             }
         }
         Expr::Call(_, args, _) => {
             for a in args.iter_mut() {
-                elaborate_expr(a, ctx);
+                elaborate_expr(a, ctx, errors);
             }
         }
         Expr::List(es) | Expr::Tuple(es) => {
             for e in es.iter_mut() {
-                elaborate_expr(e, ctx);
+                elaborate_expr(e, ctx, errors);
             }
         }
         Expr::StructLiteral { fields, .. } => {
             for (_, f) in fields.iter_mut() {
-                elaborate_expr(f, ctx);
+                elaborate_expr(f, ctx, errors);
             }
         }
         Expr::Index(o, i) => {
-            elaborate_expr(o, ctx);
-            elaborate_expr(i, ctx);
+            elaborate_expr(o, ctx, errors);
+            elaborate_expr(i, ctx, errors);
         }
         Expr::Slice { array, start, end, stride } => {
-            elaborate_expr(array, ctx);
+            elaborate_expr(array, ctx, errors);
             for bound in [start, end, stride].into_iter().flatten() {
-                elaborate_expr(bound, ctx);
+                elaborate_expr(bound, ctx, errors);
             }
         }
-        Expr::Lambda(_, b) => elaborate_expr(b, ctx),
+        Expr::Lambda(_, b) => elaborate_expr(b, ctx, errors),
         Expr::Cast(e, _)
         | Expr::IsType(e, _)
         | Expr::Consume(e)
         | Expr::Deref(e)
         | Expr::AddrOf(e)
         | Expr::Reflect(e, _, _)
-        | Expr::Within(e, _) => elaborate_expr(e, ctx),
+        | Expr::Within(e, _) => elaborate_expr(e, ctx, errors),
         Expr::MethodCall(recv, _, args, _) => {
-            elaborate_expr(recv, ctx);
+            elaborate_expr(recv, ctx, errors);
             for a in args.iter_mut() {
-                elaborate_expr(a, ctx);
+                elaborate_expr(a, ctx, errors);
             }
         }
         Expr::PluginIntercept { args, .. } => {
             for a in args.iter_mut() {
-                elaborate_expr(a, ctx);
+                elaborate_expr(a, ctx, errors);
             }
         }
         _ => {}
@@ -2276,6 +2331,15 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         }
     }
 
+    let defined_fns: std::collections::HashSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::Definition(d) => Some(d.name.clone()),
+            TopLevel::Transaction(t) => Some(t.name.clone()),
+            _ => None,
+        })
+        .collect();
+
     let env = CheckEnv {
         state_bindings: &state_bindings,
         fn_return_types: &fn_return_types,
@@ -2290,6 +2354,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_type_protocols: &all_type_protocols,
         all_cross_ops: &all_cross_ops,
         melds: &melds,
+        defined_fns: &defined_fns,
     };
 
     for item in items.iter() {
@@ -2367,8 +2432,11 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
 
     if errors.is_empty() {
         // 2026-08-06 (Phase 5): with types known, elaborate declared ops into
-        // calls to their implementations (mutates items in place).
-        elaborate_ops(items, universe, &env);
+        // calls to their implementations (mutates items in place). Any error
+        // (e.g. an op target that is not a defined function) fails the check.
+        errors.extend(elaborate_ops(items, universe, &env));
+    }
+    if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
@@ -2407,6 +2475,8 @@ struct CheckEnv<'a> {
     all_type_protocols: &'a HashMap<String, String>,
     all_cross_ops: &'a HashMap<String, HashMap<String, String>>,
     melds: &'a std::collections::HashSet<(String, String)>,
+    /// 2026-08-06 (diagnostics): every defined function/transaction name.
+    defined_fns: &'a std::collections::HashSet<String>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -2438,6 +2508,7 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     for (name, ty) in env.fn_return_types {
         ctx.fn_return_types.insert(name.clone(), ty.clone());
     }
+    ctx.defined_fns = env.defined_fns.clone();
     ctx
 }
 
@@ -2971,6 +3042,65 @@ node start [true][false] {
         assert!(
             matches!(c_expr, Expr::BinaryOp(BinaryOpKind::Add, _, _)),
             "Int + Int must stay a BinaryOp (protocol lowering), got {c_expr:?}"
+        );
+    }
+
+    // ── Diagnostics sweep (2026-08-06) ─────────────────────────────
+
+    /// A declared op whose implementation target is not a defined function
+    /// must be a typecheck error (was a silent link-time undefined symbol).
+    #[test]
+    fn undefined_op_target_is_an_error() {
+        let src = r#"
+type MyNum : #Int {
+    op Add(Int): nonexistent(#L, #R);
+};
+node start [true][false] {
+    let x: MyNum = 1;
+    let y: Int = 2;
+    let z: MyNum = x + y;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("not a defined function")),
+            "expected an undefined-op-target error, got {err:?}"
+        );
+    }
+
+    /// A closure used as a value (not a call) must be an error — codegen
+    /// would otherwise silently read the placeholder register 0.
+    #[test]
+    fn closure_used_as_value_errors() {
+        let src = r#"
+node start [true][false] {
+    let f = x -> x + 1;
+    let g = f;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("only be applied as a call")),
+            "expected a closure-as-value error, got {err:?}"
+        );
+    }
+
+    /// The PascalCase intrinsic forms of the env macros must direct the user
+    /// to the lowercase macros, not report an "unknown intrinsic".
+    #[test]
+    fn get_env_int_hash_guides_to_lowercase_macro() {
+        let src = r#"
+node start [true][false] {
+    let n: Int = GetEnvInt#("BOUND");
+    term Print#(n);
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("get_env_int!")),
+            "expected a rename-guidance error, got {err:?}"
         );
     }
 
