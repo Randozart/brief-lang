@@ -167,41 +167,11 @@ impl Interpreter {
         eval_statement(stmt, &mut self.heap, &mut self.state)
     }
 
-    /// Pattern match a value against a pattern (delegated from features).
+    /// Pattern match a value against a pattern. Delegates to the full
+    /// implementation in eval.rs (used by eval_match and kept here for
+    /// API compatibility).
     pub fn pattern_match(pat: &crate::ast::Pattern, val: &Value, bindings: &mut HashMap<String, Value>) -> bool {
-        match pat {
-            crate::ast::Pattern::Wildcard => true,
-            crate::ast::Pattern::Literal(lit) => {
-                let lit_val = match lit {
-                    Expr::Decimal(n) => Value::int(*n),
-                    Expr::Bool(b) => Value::bool(*b),
-                    _ => return false,
-                };
-                *val == lit_val
-            }
-            crate::ast::Pattern::Binding(name) => {
-                bindings.insert(name.clone(), val.clone());
-                true
-            }
-            crate::ast::Pattern::EnumVariant(_, _) => false,
-            crate::ast::Pattern::Tuple(patterns) => {
-                let items = match val {
-                    Value::Product(items) => items,
-                    Value::List(items) => items,
-                    _ => return false,
-                };
-                if items.len() != patterns.len() {
-                    return false;
-                }
-                for (pat, item) in patterns.iter().zip(items.iter()) {
-                    if !Self::pattern_match(pat, item, bindings) {
-                        return false;
-                    }
-                }
-                true
-            }
-            crate::ast::Pattern::Range(_, _) => false,
-        }
+        crate::interpreter::pattern_match(pat, val, bindings)
     }
 
     /// Compute the nesting depth of a list value (for FFI).

@@ -112,13 +112,7 @@ pub fn eval_expr(
         Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings),
 
         // ── Match ────────────────────────────────────────────────
-        Expr::Match(_, arms) => {
-            if let Some(first) = arms.first() {
-                eval_expr(&first.body, heap, bindings)
-            } else {
-                Ok(Value::Void)
-            }
-        }
+        Expr::Match(scrutinee, arms) => eval_match(scrutinee, arms, heap, bindings),
 
         // ── Lambda ───────────────────────────────────────────────
         Expr::Lambda(_, _) => Ok(Value::Void),
@@ -276,6 +270,107 @@ fn describe_value(v: &Value) -> String {
         Value::Ref(_) => "reference".into(),
         Value::Constructor(_, _) => "constructor".into(),
         Value::List(_) => "list".into(),
+    }
+}
+
+/// 2026-08-06 (Slice C): Evaluate a match expression. The scrutinee is
+/// matched against each arm in order: a pattern match with the arm's bindings
+/// in scope, then a `when` guard if present. The first arm whose pattern
+/// matches AND guard passes wins; its body runs with the pattern bindings.
+/// No arm matching is a non-exhaustive match error.
+fn eval_match(
+    scrutinee: &Expr,
+    arms: &[MatchArm],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
+    let val = eval_expr(scrutinee, heap, bindings)?;
+    for arm in arms {
+        let mut arm_bindings = bindings.clone();
+        if pattern_match(&arm.pattern, &val, &mut arm_bindings) {
+            if let Some(guard) = &arm.guard {
+                let gv = eval_expr(guard, heap, &mut arm_bindings)?;
+                if !gv.is_true() {
+                    continue;
+                }
+            }
+            return eval_expr(&arm.body, heap, &mut arm_bindings);
+        }
+    }
+    Err(RuntimeError::NonExhaustiveMatch(describe_value(&val)))
+}
+
+/// Match a pattern against a value, inserting pattern bindings into
+/// `bindings`. A failed match may leave partial bindings — callers use a
+/// scratch binding map per arm. `EnumVariant` matches the derive CEGIS
+/// `Constructor(name, fields)` carrier; `Tuple` matches `Product` (and the
+/// reactor's `List` for compatibility).
+pub fn pattern_match(
+    pat: &Pattern,
+    val: &Value,
+    bindings: &mut HashMap<String, Value>,
+) -> bool {
+    match pat {
+        Pattern::Wildcard => true,
+        Pattern::Binding(name) => {
+            bindings.insert(name.clone(), val.clone());
+            true
+        }
+        Pattern::Literal(lit) => match literal_pattern_value(lit) {
+            Some(lv) => &lv == val,
+            None => false,
+        },
+        // 2026-08-06: `start..end` is a half-open range (SPEC §16.4) — matches
+        // n in [start, end). Integer ranges only; float/non-integer values
+        // fail to match.
+        Pattern::Range(start, end) => {
+            let s = match literal_pattern_value(start).and_then(|v| v.as_i64()) {
+                Some(n) => n,
+                None => return false,
+            };
+            let e = match literal_pattern_value(end).and_then(|v| v.as_i64()) {
+                Some(n) => n,
+                None => return false,
+            };
+            val.as_i64().is_some_and(|n| s <= n && n < e)
+        }
+        Pattern::Tuple(pats) => {
+            let items = match val {
+                Value::Product(items) => items,
+                Value::List(items) => items,
+                _ => return false,
+            };
+            items.len() == pats.len()
+                && pats
+                    .iter()
+                    .zip(items.iter())
+                    .all(|(p, item)| pattern_match(p, item, bindings))
+        }
+        Pattern::EnumVariant(name, subpats) => match val {
+            Value::Constructor(cname, fields) => {
+                cname == name
+                    && fields.len() == subpats.len()
+                    && subpats
+                        .iter()
+                        .zip(fields.iter())
+                        .all(|(p, field)| pattern_match(p, field, bindings))
+            }
+            _ => false,
+        },
+    }
+}
+
+/// The value a literal pattern denotes — no evaluation, only literals.
+/// Non-literal expressions in a pattern position fail to match.
+fn literal_pattern_value(lit: &Expr) -> Option<Value> {
+    match lit {
+        Expr::Decimal(n) => Some(Value::int(*n)),
+        Expr::TaggedLiteral(n, _) => Some(Value::int(*n)),
+        Expr::Float(f) => Some(Value::float(*f)),
+        Expr::Bool(b) => Some(Value::bool(*b)),
+        Expr::Char(c) => Some(Value::char(*c)),
+        Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => Some(Value::bits(bytes.clone())),
+        _ => None,
     }
 }
 
@@ -961,5 +1056,183 @@ mod tests {
         assert_eq!(r.as_i64(), Some(0));
         let r = execute_intrinsic("Print#", &[Value::Atom(Atom::Char('A'))], &mut heap).unwrap();
         assert_eq!(r.as_i64(), Some(0));
+    }
+
+    // 2026-08-06 (Slice C): match with patterns, guards, exhaustiveness.
+
+    fn arm(pattern: Pattern, guard: Option<Expr>, body: i64) -> MatchArm {
+        MatchArm {
+            pattern,
+            guard,
+            body: Box::new(Expr::Decimal(body)),
+        }
+    }
+
+    #[test]
+    fn test_match_literal_selects_arm() {
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(0)),
+            vec![
+                arm(Pattern::Literal(Expr::Decimal(0)), None, 10),
+                arm(Pattern::Wildcard, None, 99),
+            ],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(10));
+    }
+
+    #[test]
+    fn test_match_wildcard_fallback() {
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(5)),
+            vec![
+                arm(Pattern::Literal(Expr::Decimal(0)), None, 10),
+                arm(Pattern::Wildcard, None, 99),
+            ],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(99));
+    }
+
+    #[test]
+    fn test_match_guard_false_skips_arm() {
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(5)),
+            vec![
+                arm(Pattern::Literal(Expr::Decimal(5)), Some(Expr::Bool(false)), 10),
+                arm(Pattern::Wildcard, None, 99),
+            ],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(99));
+    }
+
+    #[test]
+    fn test_match_binding_in_body() {
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(42)),
+            vec![MatchArm {
+                pattern: Pattern::Binding("x".into()),
+                guard: None,
+                body: Box::new(Expr::Identifier("x".into())),
+            }],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_match_binding_in_guard() {
+        // `x when x > 5 => x` — the guard sees the pattern binding.
+        let gt = Expr::BinaryOp(
+            BinaryOpKind::Gt,
+            Box::new(Expr::Identifier("x".into())),
+            Box::new(Expr::Decimal(5)),
+        );
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(10)),
+            vec![MatchArm {
+                pattern: Pattern::Binding("x".into()),
+                guard: Some(gt),
+                body: Box::new(Expr::Identifier("x".into())),
+            }],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(10));
+    }
+
+    #[test]
+    fn test_match_binding_guard_fails_then_fallback() {
+        // x when x > 5 fails for x = 3; wildcard picks up.
+        let gt = Expr::BinaryOp(
+            BinaryOpKind::Gt,
+            Box::new(Expr::Identifier("x".into())),
+            Box::new(Expr::Decimal(5)),
+        );
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(3)),
+            vec![
+                MatchArm {
+                    pattern: Pattern::Binding("x".into()),
+                    guard: Some(gt),
+                    body: Box::new(Expr::Decimal(10)),
+                },
+                arm(Pattern::Wildcard, None, 99),
+            ],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(99));
+    }
+
+    #[test]
+    fn test_match_tuple_pattern_binds_fields() {
+        let scrut = Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)]);
+        let m = Expr::Match(
+            Box::new(scrut),
+            vec![MatchArm {
+                pattern: Pattern::Tuple(vec![
+                    Pattern::Literal(Expr::Decimal(1)),
+                    Pattern::Binding("y".into()),
+                ]),
+                guard: None,
+                body: Box::new(Expr::Identifier("y".into())),
+            }],
+        );
+        assert_eq!(eval1(&m).as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_match_range_half_open() {
+        // 1..5 is [1, 5): 3 matches, 5 does not.
+        let m = |n: i64| {
+            Expr::Match(
+                Box::new(Expr::Decimal(n)),
+                vec![
+                    arm(
+                        Pattern::Range(Expr::Decimal(1), Expr::Decimal(5)),
+                        None,
+                        7,
+                    ),
+                    arm(Pattern::Wildcard, None, 0),
+                ],
+            )
+        };
+        assert_eq!(eval1(&m(3)).as_i64(), Some(7));
+        assert_eq!(eval1(&m(1)).as_i64(), Some(7));
+        assert_eq!(eval1(&m(5)).as_i64(), Some(0));
+    }
+
+    #[test]
+    fn test_match_enum_variant_over_constructor() {
+        let scrut = Value::Constructor(
+            "Foo".into(),
+            vec![Value::int(1), Value::int(2)],
+        );
+        let m = Expr::Match(
+            Box::new(Expr::Identifier("scrut".into())),
+            vec![MatchArm {
+                pattern: Pattern::EnumVariant(
+                    "Foo".into(),
+                    vec![Pattern::Wildcard, Pattern::Literal(Expr::Decimal(2))],
+                ),
+                guard: None,
+                body: Box::new(Expr::Decimal(88)),
+            }],
+        );
+        let mut heap = VirtualHeap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("scrut".into(), scrut);
+        let r = eval_expr(&m, &mut heap, &mut bindings).unwrap();
+        assert_eq!(r.as_i64(), Some(88));
+    }
+
+    #[test]
+    fn test_match_non_exhaustive_errors() {
+        let m = Expr::Match(
+            Box::new(Expr::Decimal(5)),
+            vec![arm(Pattern::Literal(Expr::Decimal(0)), None, 10)],
+        );
+        let err = eval1_err(&m);
+        assert!(err.contains("non-exhaustive"), "got: {err}");
+    }
+
+    #[test]
+    fn test_match_empty_arms_errors() {
+        let m = Expr::Match(Box::new(Expr::Decimal(1)), vec![]);
+        assert!(eval1_err(&m).contains("non-exhaustive"));
     }
 }

@@ -1106,6 +1106,9 @@ pub enum RuntimeError {
     /// 2026-07-28: Term statement evaluated — early return with value.
     /// Used by the interpreter's call_function to detect termination.
     TermReturn(crate::interpreter::Value),
+    /// 2026-08-06 (Slice C): match expression where no arm's pattern matched
+    /// (or its `when` guard failed). Carries the scrutinee value description.
+    NonExhaustiveMatch(String),
 }
 
 impl fmt::Display for RuntimeError {
@@ -1130,6 +1133,9 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::ContractViolation(msg) => write!(f, "contract violation: {}", msg),
             RuntimeError::TermReturn(_) => write!(f, "term return"),
+            RuntimeError::NonExhaustiveMatch(desc) => {
+                write!(f, "non-exhaustive match: no arm matched {}", desc)
+            }
         }
     }
 }
