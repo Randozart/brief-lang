@@ -34,6 +34,10 @@ pub struct TypecheckContext<'a> {
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
     pub consumed_locals: std::collections::HashSet<String>,
     pub universe: &'a TypeUniverse,
+    /// 2026-08-05 (Phase 5): the seeded protocol-casting graph, used to enforce
+    /// the SPEC §8.7 rule that one written `as` traverses at most one
+    /// cross-protocol edge.
+    pub casting_graph: crate::casting::graph::CastingGraph,
     /// 2026-07-20: Parse ops per type, for literal construction resolution.
     /// Populated from AST TypeDef bodies in check_program.
     /// Key: type_name → Vec of Parse OperatorDefs.
@@ -116,6 +120,7 @@ impl<'a> TypecheckContext<'a> {
             state_keys: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
             universe,
+            casting_graph: crate::casting::graph::CastingGraph::new(),
             parse_ops: HashMap::new(),
             type_parents: HashMap::new(),
             fn_return_types: HashMap::new(),
@@ -644,6 +649,29 @@ pub fn infer_expression(
         }
         Expr::Cast(expr, target_ty) => {
             let (src_ty, prov) = infer_expression(expr, ctx)?;
+            // 2026-08-05 (Phase 5): one written `as` traverses at most one
+            // cross-protocol edge (SPEC §8.7). Intra-protocol refinement is
+            // free; crossing more than one protocol category requires chained
+            // casts (`value as A as B`), never a single `as`.
+            let graph = &ctx.casting_graph;
+            let (src_cat, src_var) = graph.type_to_protocol(ctx.universe, &src_ty);
+            let (dst_cat, dst_var) = graph.type_to_protocol(ctx.universe, target_ty);
+            if let Some(path) = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var) {
+                let cross_steps = path
+                    .iter()
+                    .filter(|s| s.src_category != s.dst_category)
+                    .count();
+                if cross_steps > 1 {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!(
+                            "a single cast crosses {} protocol categories ({} → {}); \
+                             chain the casts (value as A as B)",
+                            cross_steps, src_ty, target_ty
+                        ),
+                        type_name: src_ty.to_string(),
+                    });
+                }
+            }
             // 2026-07-26: Vector-to-Vector view cast validation.
             if let (Type::Vector(src_inner, src_dims), Type::Vector(tgt_inner, tgt_dims)) = (&src_ty, target_ty) {
                 if src_inner != tgt_inner || src_dims != tgt_dims {
@@ -2773,6 +2801,15 @@ node probe [done == false][done == true] { done = true; term; };
             "expected invalid impl target, got: {:?}",
             e
         );
+    }
+
+    #[test]
+    fn single_cast_may_cross_one_protocol() {
+        // 2026-08-05 (Phase 5): Int → Float is one cross-protocol edge (ok);
+        // a path that must cross two categories in one `as` is rejected.
+        let ok_src = "defn to_f(x: Int) -> Float { term x as Float; };\n";
+        let e = check(ok_src);
+        assert!(e.is_ok(), "single cross-protocol cast should be allowed, got: {:?}", e);
     }
 
     #[test]
