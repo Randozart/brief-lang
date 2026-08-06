@@ -3672,6 +3672,14 @@ impl LlvmBackend {
                 self.emit_folded_pure_counter(out, counter_idx, tv);
                 if self.ctx.exit_condition.is_some() {
                     self.emit_exit_check(out);
+                    // 2026-08-06 (fix): emit_exit_check emits a bare
+                    // `.continue:` label intended for a loop body. The pure
+                    // fold has no loop — the O(1) store already finished, so
+                    // the continue path just falls through to exit. Without
+                    // this bridge, `.continue:` is an empty, unterminated block
+                    // and clang rejects the module (`.end:` "expected
+                    // instruction opcode").
+                    writeln!(out, "  br label %.end").ok();
                     writeln!(out, ".end:").ok();
                 }
                 writeln!(out, "  ret i32 0").ok();

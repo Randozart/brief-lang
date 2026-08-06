@@ -121,7 +121,15 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool, min_width: usize) -> 
         }
     }
     let node_order: Vec<String> = transition_graph.nodes.iter().map(|n| n.name.clone()).collect();
-    let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
+    // 2026-08-06 (fix): only foldable txns (with a bounded_pre) are scheduled
+    // for frees — a non-bounded reactive last consumer has no sound free point.
+    let foldable: std::collections::HashSet<String> = transition_graph
+        .nodes
+        .iter()
+        .filter(|n| n.bounded_pre.is_some())
+        .map(|n| n.name.clone())
+        .collect();
+    let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order, &foldable);
     let observable_names = collect_observable_names(items);
     AnalysisResults {
         call_graph: CallGraph::new(),

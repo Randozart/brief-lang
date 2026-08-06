@@ -11,12 +11,22 @@ use crate::interpreter::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// 2026-08-06 (fix): the interpreter's scoped bindings + the function registry,
+/// bundled so eval helpers stay under the Praetor 6-param gate now that
+/// user-function dispatch (root-cause fix) threads the registry through.
+pub struct EvalScope<'a> {
+    pub bindings: &'a mut HashMap<String, Value>,
+    pub functions: &'a HashMap<String, crate::interpreter::FunctionDef>,
+}
+
 /// Evaluate an expression to a Value.
 /// Flat dispatch: one match arm per Expr variant.
 pub fn eval_expr(
     expr: &Expr,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
+
 ) -> Result<Value, RuntimeError> {
     match expr {
         // ── Literals ────────────────────────────────────────────
@@ -38,39 +48,39 @@ pub fn eval_expr(
             .ok_or_else(|| RuntimeError::UndefinedVariable { name: name.clone() }),
 
         // ── Calls ───────────────────────────────────────────────
-        Expr::Call(name, args, _) => eval_call(name, args, heap, bindings),
+        Expr::Call(name, args, _) => eval_call(name, args, heap, bindings, functions),
 
         // ── Binary operators ─────────────────────────────────────
-        Expr::BinaryOp(kind, lhs, rhs) => eval_binary_op(kind, lhs, rhs, heap, bindings),
+        Expr::BinaryOp(kind, lhs, rhs) => eval_binary_op(kind, lhs, rhs, heap, &mut EvalScope { bindings: &mut *bindings, functions: functions }),
 
         // ── Unary operators ──────────────────────────────────────
-        Expr::UnaryOp(kind, expr) => eval_unary_op(kind, expr, heap, bindings),
+        Expr::UnaryOp(kind, expr) => eval_unary_op(kind, expr, heap, bindings, functions),
 
         // ── Block ────────────────────────────────────────────────
-        Expr::Block(stmts) => eval_block(stmts, heap, bindings),
+        Expr::Block(stmts) => eval_block(stmts, heap, bindings, functions),
 
         // ── If ───────────────────────────────────────────────────
-        Expr::If(cond, then, else_) => eval_if(cond, then, else_, heap, bindings),
+        Expr::If(cond, then, else_) => eval_if(cond, then, else_, heap, &mut EvalScope { bindings: &mut *bindings, functions: functions }),
 
         // ── Tuple ────────────────────────────────────────────────
         Expr::Tuple(exprs) => {
             let values: Result<Vec<Value>, _> =
-                exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
+                exprs.iter().map(|e| eval_expr(e, heap, bindings, functions)).collect();
             Ok(Value::product(values?))
         }
 
         // ── List ─────────────────────────────────────────────────
         Expr::List(exprs) => {
             let values: Result<Vec<Value>, _> =
-                exprs.iter().map(|e| eval_expr(e, heap, bindings)).collect();
+                exprs.iter().map(|e| eval_expr(e, heap, bindings, functions)).collect();
             Ok(Value::product(values?))
         }
 
         // ── Field access ─────────────────────────────────────────
-        Expr::Field(obj, name) => eval_field(obj, name, heap, bindings),
+        Expr::Field(obj, name) => eval_field(obj, name, heap, bindings, functions),
 
         // ── Index ────────────────────────────────────────────────
-        Expr::Index(obj, index) => eval_index(obj, index, heap, bindings),
+        Expr::Index(obj, index) => eval_index(obj, index, heap, bindings, functions),
 
         // ── Cast ─────────────────────────────────────────────────
         // 2026-08-01 (audit): the codegen emits a real conversion when the
@@ -83,7 +93,7 @@ pub fn eval_expr(
         // resolve to "Bit" (identity reinterpretation, matching codegen's
         // fallback).
         Expr::Cast(expr, ty) => {
-            let v = eval_expr(expr, heap, bindings)?;
+            let v = eval_expr(expr, heap, bindings, functions)?;
             match target_protocol_category(ty).as_str() {
                 "Int" => match v {
                     Value::Atom(Atom::Bool(b)) => Ok(Value::Atom(Atom::Int(if b { 1 } else { 0 }))),
@@ -105,15 +115,15 @@ pub fn eval_expr(
 
         // ── IsType ───────────────────────────────────────────────
         Expr::IsType(expr, ty) => {
-            let val = eval_expr(expr, heap, bindings)?;
+            let val = eval_expr(expr, heap, bindings, functions)?;
             crate::interpreter::casts::eval_is_type(&val, ty)
         }
 
         // ── Within ───────────────────────────────────────────────
-        Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings),
+        Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings, functions),
 
         // ── Match ────────────────────────────────────────────────
-        Expr::Match(scrutinee, arms) => eval_match(scrutinee, arms, heap, bindings),
+        Expr::Match(scrutinee, arms) => eval_match(scrutinee, arms, heap, bindings, functions),
 
         // ── Lambda ───────────────────────────────────────────────
         // 2026-08-06 (Slice E): capture the current bindings as the closure
@@ -141,7 +151,7 @@ pub fn eval_expr(
                 .iter()
                 .map(|(name, expr)| {
                     names.push(name.clone());
-                    eval_expr(expr, heap, bindings)
+                    eval_expr(expr, heap, bindings, functions)
                 })
                 .collect();
             Ok(Value::named_product(values?, names))
@@ -150,7 +160,7 @@ pub fn eval_expr(
         // ── Dereference ──────────────────────────────────────────
         // 2026-07-18: Evaluate inner, expect Value::Ref(wrapped), return *wrapped.
         Expr::Deref(inner) => {
-            let val = eval_expr(inner, heap, bindings)?;
+            let val = eval_expr(inner, heap, bindings, functions)?;
             match val {
                 Value::Ref(wrapped) => Ok((*wrapped).clone()),
                 other => Ok(other),
@@ -158,15 +168,15 @@ pub fn eval_expr(
         }
         // ── Address-of ───────────────────────────────────────────
         // 2026-07-18: Wrap the inner value in Value::Ref to represent a pointer.
-        Expr::Consume(inner) => eval_expr(inner, heap, bindings),
+        Expr::Consume(inner) => eval_expr(inner, heap, bindings, functions),
         Expr::AddrOf(inner) => {
-            let val = eval_expr(inner, heap, bindings)?;
+            let val = eval_expr(inner, heap, bindings, functions)?;
             Ok(Value::Ref(Box::new(val)))
         }
 
         // ── Field / reflection / method ─────────────────────────
-        Expr::Reflect(recv, name, kind) => eval_reflect(recv, name, *kind, heap, bindings),
-        Expr::MethodCall(recv, name, args, _) => eval_method_call(recv, name, args, heap, bindings),
+        Expr::Reflect(recv, name, kind) => eval_reflect(recv, name, *kind, heap, &mut EvalScope { bindings: &mut *bindings, functions: functions }),
+        Expr::MethodCall(recv, name, args, _) => eval_method_call(recv, name, args, heap, &mut EvalScope { bindings: &mut *bindings, functions: functions }),
 
         // ── Formatting annotation ────────────────────────────────
         Expr::FormattingAnnotation(_) => Ok(Value::Void),
@@ -177,7 +187,7 @@ pub fn eval_expr(
         // Parsed stage; this native path keeps direct interpreter use correct
         // (rule #4: the interpreter is the reference) and reports a rename
         // hint for the deprecated PascalCase names.
-        Expr::PluginIntercept { name, args, .. } => eval_intercept(name, args, heap, bindings),
+        Expr::PluginIntercept { name, args, .. } => eval_intercept(name, args, heap, bindings, functions),
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
         Expr::Slice { array, start, end, stride } => eval_slice(
             array,
@@ -188,6 +198,7 @@ pub fn eval_expr(
             },
             heap,
             bindings,
+            functions,
         ),
 
     }
@@ -199,10 +210,11 @@ fn eval_call(
     args: &[Expr],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     let evaluated: Vec<Value> = args
         .iter()
-        .map(|a| eval_expr(a, heap, bindings))
+        .map(|a| eval_expr(a, heap, bindings, functions))
         .collect::<Result<Vec<_>, _>>()?;
 
     if name.ends_with('#') {
@@ -224,14 +236,33 @@ fn eval_call(
                 for (p, v) in params.iter().zip(evaluated.into_iter()) {
                     local.insert(p.clone(), v);
                 }
-                eval_expr(body, heap, &mut local)
+                eval_expr(body, heap, &mut local, functions)
             }
             Some(v) => Ok(v.clone()),
-            // 2026-08-06 (diagnostics): a CALL context — if the name is not a
-            // binding, it is an undefined function (or a user-defined function
-            // the interpreter's expression evaluator cannot apply, which is
-            // reported the same way). "undefined variable" was misleading here.
-            None => Err(RuntimeError::UndefinedFunction(name.into())),
+            // 2026-08-06 (fix): a user-defined function (defn/txn) applies with
+            // DYNAMIC scoping — its body reads the CALLER's state, so the local
+            // env is seeded from the caller's bindings (not a captured
+            // snapshot). A `term <value>` inside the body is the return.
+            None => match functions.get(name) {
+                Some(fn_def) => {
+                    if fn_def.parameters.len() != evaluated.len() {
+                        return Err(RuntimeError::TypeError {
+                            expected: format!("{} arguments", fn_def.parameters.len()),
+                            found: format!("{} arguments", evaluated.len()),
+                        });
+                    }
+                    let mut local: HashMap<String, Value> = bindings.clone();
+                    for (p, v) in fn_def.parameters.iter().zip(evaluated.into_iter()) {
+                        local.insert(p.clone(), v);
+                    }
+                    let block = Expr::Block(fn_def.body.clone());
+                    match eval_expr(&block, heap, &mut local, functions) {
+                        Err(RuntimeError::TermReturn(v)) => Ok(v),
+                        other => other,
+                    }
+                }
+                None => Err(RuntimeError::UndefinedFunction(name.into())),
+            },
         }
     }
 }
@@ -244,9 +275,10 @@ fn eval_index(
     index: &Expr,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
-    let obj_val = eval_expr(obj, heap, bindings)?;
-    let idx = eval_expr(index, heap, bindings)?
+    let obj_val = eval_expr(obj, heap, bindings, functions)?;
+    let idx = eval_expr(index, heap, bindings, functions)?
         .as_i64()
         .ok_or_else(|| RuntimeError::TypeError {
             expected: "an integer index".into(),
@@ -304,8 +336,9 @@ fn eval_field(
     name: &str,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
-    let recv = eval_expr(obj, heap, bindings)?;
+    let recv = eval_expr(obj, heap, bindings, functions)?;
     match recv {
         Value::Product { fields, names } => match names.as_ref().and_then(|ns| ns.iter().position(|n| n == name)) {
             Some(i) => fields.get(i).cloned().ok_or_else(|| field_oob(name, fields.len())),
@@ -340,18 +373,18 @@ fn eval_method_call(
     name: &str,
     args: &[Expr],
     heap: &mut VirtualHeap,
-    bindings: &mut HashMap<String, Value>,
+    scope: &mut EvalScope,
 ) -> Result<Value, RuntimeError> {
-    let recv_val = eval_expr(recv, heap, bindings)?;
+    let recv_val = eval_expr(recv, heap, scope.bindings, scope.functions)?;
     let arg_vals: Result<Vec<Value>, _> =
-        args.iter().map(|a| eval_expr(a, heap, bindings)).collect();
+        args.iter().map(|a| eval_expr(a, heap, scope.bindings, scope.functions)).collect();
     let arg_vals = arg_vals?;
     if name.ends_with('#') {
         let mut all = vec![recv_val];
         all.extend(arg_vals);
         return execute_intrinsic(name, &all, heap);
     }
-    Ok(bindings.get(name).cloned().unwrap_or(Value::Void))
+    Ok(scope.bindings.get(name).cloned().unwrap_or(Value::Void))
 }
 
 /// The three optional slice bounds (`array[start:end:stride]`), borrowed.
@@ -371,12 +404,13 @@ fn eval_slice(
     bounds: SliceBounds<'_>,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
-    let arr = eval_expr(array, heap, bindings)?;
-    let start = eval_opt_int(bounds.start, heap, bindings)?;
-    let end = eval_opt_int(bounds.end, heap, bindings)?;
+    let arr = eval_expr(array, heap, bindings, functions)?;
+    let start = eval_opt_int(bounds.start, heap, bindings, functions)?;
+    let end = eval_opt_int(bounds.end, heap, bindings, functions)?;
     let stride = match bounds.stride {
-        Some(s) => eval_expr(s, heap, bindings)?
+        Some(s) => eval_expr(s, heap, bindings, functions)?
             .as_i64()
             .ok_or_else(|| RuntimeError::TypeError {
                 expected: "an integer slice stride".into(),
@@ -415,9 +449,10 @@ fn eval_opt_int(
     opt: Option<&Expr>,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Option<i64>, RuntimeError> {
     match opt {
-        Some(e) => eval_expr(e, heap, bindings)?
+        Some(e) => eval_expr(e, heap, bindings, functions)?
             .as_i64()
             .map(Some)
             .ok_or_else(|| RuntimeError::TypeError {
@@ -489,9 +524,9 @@ fn eval_reflect(
     name: &str,
     kind: ReflectKind,
     heap: &mut VirtualHeap,
-    bindings: &mut HashMap<String, Value>,
+    scope: &mut EvalScope,
 ) -> Result<Value, RuntimeError> {
-    let val = eval_expr(recv, heap, bindings)?;
+    let val = eval_expr(recv, heap, scope.bindings, scope.functions)?;
     let ct = matches!(kind, ReflectKind::CompileTime);
     match (name, ct) {
         // 2026-08-01 (B3): String `Len` = UTF8 character count (not bytes).
@@ -558,18 +593,19 @@ fn eval_match(
     arms: &[MatchArm],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
-    let val = eval_expr(scrutinee, heap, bindings)?;
+    let val = eval_expr(scrutinee, heap, bindings, functions)?;
     for arm in arms {
         let mut arm_bindings = bindings.clone();
         if pattern_match(&arm.pattern, &val, &mut arm_bindings) {
             if let Some(guard) = &arm.guard {
-                let gv = eval_expr(guard, heap, &mut arm_bindings)?;
+                let gv = eval_expr(guard, heap, &mut arm_bindings, functions)?;
                 if !gv.is_true() {
                     continue;
                 }
             }
-            return eval_expr(&arm.body, heap, &mut arm_bindings);
+            return eval_expr(&arm.body, heap, &mut arm_bindings, functions);
         }
     }
     Err(RuntimeError::NonExhaustiveMatch(describe_value(&val)))
@@ -657,16 +693,17 @@ fn eval_intercept(
     args: &[Expr],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     match name {
-        "print" | "println" => eval_print_macro(name, args, heap, bindings),
+        "print" | "println" => eval_print_macro(name, args, heap, bindings, functions),
         "get_env" => {
-            let key = eval_string_arg(args, heap, bindings)?;
+            let key = eval_string_arg(args, heap, bindings, functions)?;
             let val = std::env::var(&key).unwrap_or_default();
             Ok(Value::bits(val.into_bytes()))
         }
         "get_env_int" => {
-            let key = eval_string_arg(args, heap, bindings)?;
+            let key = eval_string_arg(args, heap, bindings, functions)?;
             let val = std::env::var(&key).unwrap_or_default();
             Ok(i64_to_bits(val.parse::<i64>().unwrap_or(0)))
         }
@@ -695,6 +732,7 @@ fn eval_print_macro(
     args: &[Expr],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     let is_println = name == "println";
     if args.is_empty() {
@@ -720,18 +758,18 @@ fn eval_print_macro(
                     print!("{}", String::from_utf8_lossy(seg));
                 }
                 crate::plugin::print_plugin::FmtPart::Next => {
-                    let value = eval_expr(&value_args[next], heap, bindings)?;
+                    let value = eval_expr(&value_args[next], heap, bindings, functions)?;
                     print_value(&value, heap)?;
                     next += 1;
                 }
                 crate::plugin::print_plugin::FmtPart::Position(n) => {
-                    let value = eval_expr(&value_args[*n], heap, bindings)?;
+                    let value = eval_expr(&value_args[*n], heap, bindings, functions)?;
                     print_value(&value, heap)?;
                 }
             }
         }
     } else {
-        let value = eval_expr(&args[0], heap, bindings)?;
+        let value = eval_expr(&args[0], heap, bindings, functions)?;
         print_value(&value, heap)?;
     }
 
@@ -792,8 +830,9 @@ fn eval_string_arg(
     args: &[Expr],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<String, RuntimeError> {
-    let value = eval_expr(&args[0], heap, bindings)?;
+    let value = eval_expr(&args[0], heap, bindings, functions)?;
     match value {
         Value::Bits(bytes) => Ok(String::from_utf8_lossy(&bytes).to_string()),
         other => Err(RuntimeError::TypeError {
@@ -809,10 +848,10 @@ fn eval_binary_op(
     lhs: &Expr,
     rhs: &Expr,
     heap: &mut VirtualHeap,
-    bindings: &mut HashMap<String, Value>,
+    scope: &mut EvalScope,
 ) -> Result<Value, RuntimeError> {
-    let lv = eval_expr(lhs, heap, bindings)?;
-    let rv = eval_expr(rhs, heap, bindings)?;
+    let lv = eval_expr(lhs, heap, scope.bindings, scope.functions)?;
+    let rv = eval_expr(rhs, heap, scope.bindings, scope.functions)?;
 
     match kind {
         BinaryOpKind::Add => {
@@ -967,8 +1006,9 @@ fn eval_unary_op(
     expr: &Expr,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
-    let val = eval_expr(expr, heap, bindings)?;
+    let val = eval_expr(expr, heap, bindings, functions)?;
     match kind {
         UnaryOpKind::Neg => {
             let n = val.as_i64().unwrap_or(0);
@@ -996,10 +1036,11 @@ fn eval_block(
     stmts: &[Statement],
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     let mut result = Value::Void;
     for stmt in stmts {
-        result = eval_statement(stmt, heap, bindings)?;
+        result = eval_statement(stmt, heap, bindings, functions)?;
     }
     Ok(result)
 }
@@ -1010,13 +1051,13 @@ fn eval_if(
     then: &Expr,
     else_: &Option<Box<Expr>>,
     heap: &mut VirtualHeap,
-    bindings: &mut HashMap<String, Value>,
+    scope: &mut EvalScope,
 ) -> Result<Value, RuntimeError> {
-    let cv = eval_expr(cond, heap, bindings)?;
+    let cv = eval_expr(cond, heap, scope.bindings, scope.functions)?;
     if cv.is_true() {
-        eval_expr(then, heap, bindings)
+        eval_expr(then, heap, scope.bindings, scope.functions)
     } else if let Some(else_) = else_ {
-        eval_expr(else_, heap, bindings)
+        eval_expr(else_, heap, scope.bindings, scope.functions)
     } else {
         Ok(Value::Void)
     }
@@ -1027,17 +1068,18 @@ pub fn eval_statement(
     stmt: &Statement,
     heap: &mut VirtualHeap,
     bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     match stmt {
         Statement::Let { name, expr, .. } => {
             if let Some(expr) = expr {
-                let val = eval_expr(expr, heap, bindings)?;
+                let val = eval_expr(expr, heap, bindings, functions)?;
                 bindings.insert(name.clone(), val);
             }
             Ok(Value::Void)
         }
         Statement::Assign(lhs, rhs) => {
-            let val = eval_expr(rhs, heap, bindings)?;
+            let val = eval_expr(rhs, heap, bindings, functions)?;
             if let Expr::Identifier(name) = lhs {
                 bindings.insert(name.clone(), val);
             }
@@ -1050,7 +1092,7 @@ pub fn eval_statement(
         }
         Statement::KeepHint(_) => Ok(Value::Void),
         Statement::ArrowAssign { target, value, consume } => {
-            let val = eval_expr(value, heap, bindings)?;
+            let val = eval_expr(value, heap, bindings, functions)?;
             if let Some(t) = target.as_ref() {
                 if let Expr::Identifier(name) = t.as_ref() {
                     bindings.insert(name.clone(), val);
@@ -1065,12 +1107,12 @@ pub fn eval_statement(
             }
             Ok(Value::Void)
         }
-        Statement::Expression(expr) => eval_expr(expr, heap, bindings),
+        Statement::Expression(expr) => eval_expr(expr, heap, bindings, functions),
         Statement::Term(val) => {
             match val {
                 Some(val) => {
                     // 2026-07-28: Term with value signals early return.
-                    let result = eval_expr(val, heap, bindings)?;
+                    let result = eval_expr(val, heap, bindings, functions)?;
                     Err(RuntimeError::TermReturn(result))
                 }
                 None => {
@@ -1080,11 +1122,11 @@ pub fn eval_statement(
             }
         }
         Statement::Guarded(cond, body) => {
-            let cv = eval_expr(cond, heap, bindings)?;
+            let cv = eval_expr(cond, heap, bindings, functions)?;
             if cv.is_true() {
                 let mut result = Value::Void;
                 for stmt in body {
-                    result = eval_statement(stmt, heap, bindings)?;
+                    result = eval_statement(stmt, heap, bindings, functions)?;
                 }
                 Ok(result)
             } else {
@@ -1095,21 +1137,21 @@ pub fn eval_statement(
             // 2026-07-26: Convergence gate — evaluate condition.
             // If false, the caller (txn runner) is expected to retry the body.
             // The compile-time analysis must prove this eventually converges.
-            eval_expr(cond, heap, bindings)?;
+            eval_expr(cond, heap, bindings, functions)?;
             Ok(Value::Void)
         }
         Statement::If(cond, then, else_) => {
-            let cv = eval_expr(cond, heap, bindings)?;
+            let cv = eval_expr(cond, heap, bindings, functions)?;
             if cv.is_true() {
                 let mut result = Value::Void;
                 for stmt in then {
-                    result = eval_statement(stmt, heap, bindings)?;
+                    result = eval_statement(stmt, heap, bindings, functions)?;
                 }
                 Ok(result)
             } else {
                 let mut result = Value::Void;
                 for stmt in else_ {
-                    result = eval_statement(stmt, heap, bindings)?;
+                    result = eval_statement(stmt, heap, bindings, functions)?;
                 }
                 Ok(result)
             }
@@ -1117,14 +1159,14 @@ pub fn eval_statement(
         Statement::Block(stmts) => {
             let mut result = Value::Void;
             for stmt in stmts {
-                result = eval_statement(stmt, heap, bindings)?;
+                result = eval_statement(stmt, heap, bindings, functions)?;
             }
             Ok(result)
         }
         Statement::ExitProgram(val) => {
             match val {
                 Some(val) => {
-                    let result = eval_expr(val, heap, bindings)?;
+                    let result = eval_expr(val, heap, bindings, functions)?;
                     Err(RuntimeError::TermReturn(result))
                 }
                 None => {
@@ -1138,7 +1180,7 @@ pub fn eval_statement(
         Statement::SyncBlock(body) => {
             let mut result = Value::Void;
             for stmt in body {
-                result = eval_statement(stmt, heap, bindings)?;
+                result = eval_statement(stmt, heap, bindings, functions)?;
             }
             Ok(result)
         }
@@ -1153,15 +1195,26 @@ mod tests {
     use super::*;
 
     fn eval1(expr: &Expr) -> Value {
-        eval_expr(expr, &mut VirtualHeap::new(), &mut HashMap::new()).unwrap()
+        eval_expr(
+            expr,
+            &mut VirtualHeap::new(),
+            &mut HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap()
     }
 
     /// Evaluate expecting an error — the error-testing twin of `eval1`.
     fn eval1_err(expr: &Expr) -> String {
-        eval_expr(expr, &mut VirtualHeap::new(), &mut HashMap::new())
-            .err()
-            .unwrap_or_else(|| panic!("expected error for {expr:?}"))
-            .to_string()
+        eval_expr(
+            expr,
+            &mut VirtualHeap::new(),
+            &mut HashMap::new(),
+            &HashMap::new(),
+        )
+        .err()
+        .unwrap_or_else(|| panic!("expected error for {expr:?}"))
+        .to_string()
     }
 
     // 2026-08-01 (audit): #Char/#Bool are first-class values — literals
@@ -1486,7 +1539,7 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let mut bindings = HashMap::new();
         bindings.insert("scrut".into(), scrut);
-        let r = eval_expr(&m, &mut heap, &mut bindings).unwrap();
+        let r = eval_expr(&m, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(r.as_i64(), Some(88));
     }
 
@@ -1548,7 +1601,7 @@ mod tests {
             "p".into(),
             Value::named_product(vec![Value::int(36)], vec!["age".into()]),
         );
-        let r = eval_expr(&f, &mut heap, &mut bindings).unwrap();
+        let r = eval_expr(&f, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(r.as_i64(), Some(36));
     }
 
@@ -1579,7 +1632,7 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let mut bindings = HashMap::new();
         bindings.insert("seven".into(), Value::int(7));
-        let r = eval_expr(&m2, &mut heap, &mut bindings).unwrap();
+        let r = eval_expr(&m2, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(r.as_i64(), Some(7));
     }
 
@@ -1607,7 +1660,7 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert("f".into(), eval1(&inc_by_one()));
         let call = Expr::Call("f".into(), vec![Expr::Decimal(41)], None);
-        let r = eval_expr(&call, &mut heap, &mut bindings).unwrap();
+        let r = eval_expr(&call, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(r.as_i64(), Some(42));
     }
 
@@ -1625,10 +1678,10 @@ mod tests {
                 Box::new(Expr::Identifier("k".into())),
             )),
         );
-        let f = eval_expr(&lam, &mut heap, &mut bindings).unwrap();
+        let f = eval_expr(&lam, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         bindings.insert("f".into(), f);
         let call = Expr::Call("f".into(), vec![Expr::Decimal(1)], None);
-        assert_eq!(eval_expr(&call, &mut heap, &mut bindings).unwrap().as_i64(), Some(6));
+        assert_eq!(eval_expr(&call, &mut heap, &mut bindings, &HashMap::new()).unwrap().as_i64(), Some(6));
     }
 
     #[test]
@@ -1637,7 +1690,7 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert("f".into(), eval1(&inc_by_one()));
         let call = Expr::Call("f".into(), vec![Expr::Decimal(1), Expr::Decimal(2)], None);
-        let err = eval_expr(&call, &mut heap, &mut bindings).err().unwrap().to_string();
+        let err = eval_expr(&call, &mut heap, &mut bindings, &HashMap::new()).err().unwrap().to_string();
         assert!(err.contains("arguments"), "got: {err}");
     }
 
@@ -1646,7 +1699,7 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let mut bindings = HashMap::new();
         let call = Expr::Call("missing".into(), vec![], None);
-        let err = eval_expr(&call, &mut heap, &mut bindings).err().unwrap().to_string();
+        let err = eval_expr(&call, &mut heap, &mut bindings, &HashMap::new()).err().unwrap().to_string();
         assert!(err.contains("undefined function"), "got: {err}");
     }
 
@@ -1666,11 +1719,11 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert("f".into(), eval1(&outer));
         let call1 = Expr::Call("f".into(), vec![Expr::Decimal(2)], None);
-        let g = eval_expr(&call1, &mut heap, &mut bindings).unwrap();
+        let g = eval_expr(&call1, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert!(matches!(g, Value::Closure { .. }));
         bindings.insert("g".into(), g);
         let call2 = Expr::Call("g".into(), vec![Expr::Decimal(3)], None);
-        assert_eq!(eval_expr(&call2, &mut heap, &mut bindings).unwrap().as_i64(), Some(5));
+        assert_eq!(eval_expr(&call2, &mut heap, &mut bindings, &HashMap::new()).unwrap().as_i64(), Some(5));
     }
 
     #[test]
@@ -1681,9 +1734,64 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert("f".into(), eval1(&inc_by_one()));
         let c1 = Expr::Call("f".into(), vec![Expr::Decimal(1)], None);
-        assert_eq!(eval_expr(&c1, &mut heap, &mut bindings).unwrap().as_i64(), Some(2));
+        assert_eq!(eval_expr(&c1, &mut heap, &mut bindings, &HashMap::new()).unwrap().as_i64(), Some(2));
         let c2 = Expr::Call("f".into(), vec![Expr::Decimal(100)], None);
-        assert_eq!(eval_expr(&c2, &mut heap, &mut bindings).unwrap().as_i64(), Some(101));
+        assert_eq!(eval_expr(&c2, &mut heap, &mut bindings, &HashMap::new()).unwrap().as_i64(), Some(101));
+    }
+
+    // 2026-08-06 (fix): user-defined functions apply through the registry.
+
+    fn term_fn(name: &str, params: Vec<&str>, body: Expr) -> crate::interpreter::FunctionDef {
+        crate::interpreter::FunctionDef {
+            name: name.to_string(),
+            parameters: params.into_iter().map(|p| p.to_string()).collect(),
+            body: vec![Statement::Term(Some(body))],
+        }
+    }
+
+    #[test]
+    fn test_user_function_call_applies() {
+        // `defn my_add(a, b) { term a + b; }` — a call applies it.
+        let add = Expr::BinaryOp(
+            BinaryOpKind::Add,
+            Box::new(Expr::Identifier("a".into())),
+            Box::new(Expr::Identifier("b".into())),
+        );
+        let mut functions = HashMap::new();
+        functions.insert("my_add".into(), term_fn("my_add", vec!["a", "b"], add));
+        let call = Expr::Call("my_add".into(), vec![Expr::Decimal(2), Expr::Decimal(3)], None);
+        let r = eval_expr(&call, &mut VirtualHeap::new(), &mut HashMap::new(), &functions).unwrap();
+        assert_eq!(r.as_i64(), Some(5));
+    }
+
+    #[test]
+    fn test_user_function_reads_caller_state_dynamically() {
+        // The defn body reads `k` from the CALLER's bindings (dynamic scoping),
+        // not a captured snapshot.
+        let body = Expr::BinaryOp(
+            BinaryOpKind::Add,
+            Box::new(Expr::Identifier("x".into())),
+            Box::new(Expr::Identifier("k".into())),
+        );
+        let mut functions = HashMap::new();
+        functions.insert("add_k".into(), term_fn("add_k", vec!["x"], body));
+        let call = Expr::Call("add_k".into(), vec![Expr::Decimal(5)], None);
+        let mut bindings = HashMap::new();
+        bindings.insert("k".into(), Value::int(10));
+        let r = eval_expr(&call, &mut VirtualHeap::new(), &mut bindings, &functions).unwrap();
+        assert_eq!(r.as_i64(), Some(15));
+    }
+
+    #[test]
+    fn test_user_function_arity_mismatch_errors() {
+        let mut functions = HashMap::new();
+        functions.insert("f".into(), term_fn("f", vec!["x"], Expr::Identifier("x".into())));
+        let call = Expr::Call("f".into(), vec![Expr::Decimal(1), Expr::Decimal(2)], None);
+        let err = eval_expr(&call, &mut VirtualHeap::new(), &mut HashMap::new(), &functions)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("arguments"), "got: {err}");
     }
 
     // 2026-08-06 (Slice F): slicing.
@@ -1821,7 +1929,7 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let mut bindings = HashMap::new();
         bindings.insert("c".into(), Value::sum("Some".into(), vec![Value::int(1)]));
-        let out = eval_expr(&r, &mut heap, &mut bindings).unwrap();
+        let out = eval_expr(&r, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(out.as_i64(), Some(6));
     }
 

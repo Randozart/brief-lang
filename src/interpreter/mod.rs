@@ -138,7 +138,7 @@ impl Interpreter {
         // 2026-07-28: Term with value signals early return via TermReturn error.
         let mut result = Value::Void;
         for stmt in &defn.body {
-            match eval_statement(stmt, &mut self.heap, &mut self.state) {
+            match eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions) {
                 Ok(v) => result = v,
                 Err(RuntimeError::TermReturn(v)) => {
                     result = v;
@@ -160,11 +160,11 @@ impl Interpreter {
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
-        eval_expr(expr, &mut self.heap, &mut self.state)
+        eval_expr(expr, &mut self.heap, &mut self.state, &self.functions)
     }
 
     pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<Value, RuntimeError> {
-        eval_statement(stmt, &mut self.heap, &mut self.state)
+        eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions)
     }
 
     /// Pattern match a value against a pattern. Delegates to the full
@@ -656,7 +656,7 @@ mod tests {
         let inner_val = Value::int(42);
         bindings.insert("x".to_string(), Value::Ref(Box::new(inner_val)));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(42));
     }
 
@@ -667,7 +667,7 @@ mod tests {
         let mut bindings = std::collections::HashMap::new();
         bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(42));
     }
 
@@ -678,7 +678,7 @@ mod tests {
         let mut bindings = std::collections::HashMap::new();
         bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         match result {
             Value::Ref(wrapped) => assert_eq!(wrapped.as_i64(), Some(42)),
             _ => panic!("expected Ref, got {:?}", result),
@@ -693,7 +693,7 @@ mod tests {
         bindings.insert("x".to_string(), Value::int(99));
         let addrof = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
         let deref = Expr::Deref(Box::new(addrof));
-        let result = eval_expr(&deref, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&deref, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(99));
     }
 }

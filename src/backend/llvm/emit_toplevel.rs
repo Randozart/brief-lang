@@ -2218,32 +2218,6 @@ impl LlvmBackend {
             if !self.fun.terminated {
                 writeln!(out, "  ret void").ok();
             }
-            // 2026-08-06 (diagnostics): a scheduled free whose last consumer is
-            // a NON-bounded reactive node is never emitted here (freeing inside
-            // the body would be a use-after-free for a multi-firing node) and
-            // such a node never reaches the fold dispatch — the field leaks.
-            let has_bounded_pre = self
-                .ctx
-                .transition_graph
-                .as_ref()
-                .map(|tg| {
-                    tg.nodes
-                        .iter()
-                        .any(|n| n.name == name && n.bounded_pre.is_some())
-                })
-                .unwrap_or(false);
-            if !has_bounded_pre {
-                if let Some(fields) = self.ctx.global_free_after.get(name) {
-                    for f in fields {
-                        self.warnings.push(format!(
-                            "warning: heap state field '{}' is provably dead after '{}' but \
-                             that node has no bounded loop — the planned free has no sound \
-                             emission point and the field will leak",
-                            f, name
-                        ));
-                    }
-                }
-            }
             writeln!(out, "}}").ok();
 
             // Emit cold functions after the txn function

@@ -4371,10 +4371,11 @@ node life [sum < N][sum == N] {
 // ── Diagnostics sweep (2026-08-06): scheduler leak warning ──────────
 
 #[test]
-fn test_non_bounded_reactive_heap_txn_warns_will_leak() {
-    // A reactive last-consumer with NO bounded loop can never soundly free its
-    // heap field — the scheduler's plan is dropped and the field leaks. The
-    // backend must surface that as a warning (not stay silent).
+fn test_non_bounded_reactive_heap_txn_not_scheduled_for_free() {
+    // A reactive last-consumer with NO bounded loop has no sound free point.
+    // The scheduler must NOT plan a free for it (falls back to "lives for the
+    // program") — no spurious "will leak" warning, because the plan is never
+    // made in the first place (root-cause fix).
     let src = r#"
 let done: Bool = false;
 let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
@@ -4390,8 +4391,9 @@ node t [done == false][done == true] {
     let mut backend = LlvmBackend::new();
     backend.generate(&items, None);
     assert!(
-        backend.warnings().iter().any(|w| w.contains("will leak")),
-        "expected a will-leak warning, got: {:?}",
+        !backend.warnings().iter().any(|w| w.contains("will leak")),
+        "a non-bounded last consumer must not be scheduled for a free (lives for \
+         the program); got warnings: {:?}",
         backend.warnings()
     );
 }

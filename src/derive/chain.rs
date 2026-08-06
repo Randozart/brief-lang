@@ -27,7 +27,7 @@ fn evaluate_ref_expr(expr: &Expr, input: &[Value], param_names: &[String]) -> Re
         bindings.insert(name, val.clone());
     }
     let mut heap = VirtualHeap::new();
-    match eval_expr(expr, &mut heap, &mut bindings) {
+    match eval_expr(expr, &mut heap, &mut bindings, &HashMap::new()) {
         Ok(val) => Ok(val),
         Err(RuntimeError::TermReturn(v)) => Ok(v),
         Err(e) => Err(format!("evaluation error: {:?}", e)),

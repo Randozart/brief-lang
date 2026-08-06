@@ -28,10 +28,19 @@ pub struct GlobalLifetime {
 /// Compute the scheduled frees. `field_initializers` maps a state field to its
 /// initializer expression; `node_order` is the reactor's deterministic firing
 /// order (transition-graph node order) that makes "last consumer" well-defined.
+///
+/// 2026-08-06 (fix): a scheduled free must have a SOUND emission point. The
+/// backend emits frees only after a FOLDED bounded loop — a non-bounded
+/// reactive node has no sound point (freeing inside its body is a
+/// use-after-free), so its planned free would be silently dropped. `foldable`
+/// is the set of txns with a `bounded_pre`; a field whose last consumer is not
+/// foldable is NOT scheduled and falls back to the documented "lives for the
+/// program".
 pub fn analyze(
     items: &[TopLevel],
     field_initializers: &HashMap<String, Expr>,
     node_order: &[String],
+    foldable: &HashSet<String>,
 ) -> GlobalLifetime {
     let state_fields: HashSet<String> = field_initializers.keys().cloned().collect();
     // A field with a MANUAL Free# is user-managed — the scheduler must NOT
@@ -104,12 +113,13 @@ pub fn analyze(
             // Conservatively NOT freed (its initializer may still be live).
             continue;
         };
-        // Soundness: `last` must be the FINAL ordered touch. Since consumers is
-        // in reactor order, its last element IS the last touch — but verify the
-        // scheduler never emitted a field whose last touch is ambiguous: a
-        // field with a single consumer is unambiguous; a multi-consumer field
-        // requires the consumers to be totally ordered by node_order (true by
-        // construction here — node_order is the reactor's total order).
+        // 2026-08-06 (fix): only schedule a free when the last consumer has a
+        // bounded-loop shape the backend can fold (a sound post-loop emission
+        // point). A non-foldable last consumer falls back to "lives for the
+        // program" — scheduling here would be silently dropped.
+        if !foldable.contains(last.as_str()) {
+            continue;
+        }
         free_after.entry((*last).clone()).or_default().push(field.clone());
     }
 
@@ -257,7 +267,7 @@ mod tests {
             doc: None,
         })];
         let fields = HashMap::from([field("buf", true)]);
-        let gl = analyze(&items, &fields, &["life".to_string()]);
+        let gl = analyze(&items, &fields, &["life".to_string()], &["life".to_string()].iter().cloned().collect());
         assert_eq!(gl.free_after.get("life").cloned(), Some(vec!["buf".to_string()]));
     }
 
@@ -286,7 +296,7 @@ mod tests {
             doc: None,
         })];
         let fields = HashMap::from([field("plain", false)]);
-        let gl = analyze(&items, &fields, &["life".to_string()]);
+        let gl = analyze(&items, &fields, &["life".to_string()], &["life".to_string()].iter().cloned().collect());
         assert!(gl.free_after.is_empty());
     }
 
@@ -327,7 +337,7 @@ mod tests {
             doc: None,
         })];
         let fields = HashMap::from([field("buf", true)]);
-        let gl = analyze(&items, &fields, &["life".to_string()]);
+        let gl = analyze(&items, &fields, &["life".to_string()], &["life".to_string()].iter().cloned().collect());
         assert!(gl.free_after.is_empty(), "manually-freed field must be excluded");
     }
 
@@ -363,8 +373,46 @@ mod tests {
         ];
         let fields = HashMap::from([field("buf", true)]);
         // Reactor order: first, second. The last consumer is `second`.
-        let gl = analyze(&items, &fields, &["first".to_string(), "second".to_string()]);
+        let gl = analyze(&items, &fields, &["first".to_string(), "second".to_string()], &["first".to_string(), "second".to_string()].iter().cloned().collect());
         assert!(gl.free_after.get("first").is_none());
         assert_eq!(gl.free_after.get("second").cloned(), Some(vec!["buf".to_string()]));
+    }
+
+    /// 2026-08-06 (fix): a last consumer that is NOT foldable (no sound free
+    /// emission point) must NOT be scheduled — the field lives for the program.
+    #[test]
+    fn non_foldable_last_consumer_is_not_scheduled() {
+        let mk = |name: &str, body: Vec<crate::ast::Statement>| {
+            TopLevel::Transaction(crate::ast::Transaction {
+                name: name.into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: crate::ast::top::Contract {
+                    pre_condition: crate::ast::Expr::Bool(true),
+                    post_condition: crate::ast::Expr::Bool(true),
+                    watchdog: None,
+                    span: None,
+                    explicit: false,
+                },
+                body,
+                metadata: Default::default(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            })
+        };
+        let items = vec![mk("life", txn_body(&["buf"]))];
+        let fields = HashMap::from([field("buf", true)]);
+        // `life` touches buf but is NOT foldable — the free must not be planned.
+        let gl = analyze(&items, &fields, &["life".to_string()], &std::collections::HashSet::new());
+        assert!(
+            gl.free_after.is_empty(),
+            "a non-foldable last consumer must not be scheduled for a free"
+        );
     }
 }

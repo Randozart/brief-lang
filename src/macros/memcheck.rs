@@ -28,7 +28,13 @@ pub fn run_memcheck(items: &[crate::ast::TopLevel]) -> MemcheckReport {
         items, &None, &vec![],
     );
     let node_order: Vec<String> = transition_graph.nodes.iter().map(|n| n.name.clone()).collect();
-    let lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order);
+    let foldable: std::collections::HashSet<String> = transition_graph
+        .nodes
+        .iter()
+        .filter(|n| n.bounded_pre.is_some())
+        .map(|n| n.name.clone())
+        .collect();
+    let lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order, &foldable);
     // Only heap-backed fields are schedulable; scalars are never freed (a
     // "lives for the program" report on them would be misleading).
     let heap_fields: Vec<String> = field_inits
