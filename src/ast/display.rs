@@ -310,11 +310,11 @@ impl fmt::Display for Statement {
                     write!(f, "term;")
                 }
             }
-            Statement::ExitProgram(val) => {
+            Statement::EndProgram(val) => {
                 if let Some(val) = val {
-                    write!(f, "term! {};", val)
+                    write!(f, "endprogram {};", val)
                 } else {
-                    write!(f, "term!;")
+                    write!(f, "endprogram;")
                 }
             }
             Statement::Guarded(cond, body) => {

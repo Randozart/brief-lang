@@ -848,15 +848,16 @@ pub fn eval_statement(
             }
             Ok(result)
         }
-        Statement::ExitProgram(val) => {
+        Statement::EndProgram(val) => {
+            // 2026-08-06 (endprogram plan): process boundary — a distinct
+            // signal from TermReturn (which only ends the transaction). The
+            // reactor stops on ProgramExit.
             match val {
                 Some(val) => {
                     let result = eval_expr(val, heap, bindings)?;
-                    Err(RuntimeError::TermReturn(result))
+                    Err(RuntimeError::ProgramExit(result))
                 }
-                None => {
-                    Ok(Value::Void)
-                }
+                None => Err(RuntimeError::ProgramExit(Value::Void)),
             }
         }
         Statement::Rollback(_) => Ok(Value::Void),

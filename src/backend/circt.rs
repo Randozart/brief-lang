@@ -529,7 +529,7 @@ impl CirctBackend {
                     self.emit_expr(ng, out, expr, reg_names, "i64");
                 }
 
-                Statement::ExitProgram(..) => {
+                Statement::EndProgram(..) => {
                     writeln!(out, "  seq.always(posedge %clock) {{").ok();
                     writeln!(out, "    {} <= 1 : i1", halt_reg).ok();
                     writeln!(out, "  }}").ok();

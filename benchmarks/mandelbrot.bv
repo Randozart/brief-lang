@@ -36,6 +36,6 @@ node mb [count < N][count == N] {
     seed = ns2;  cr = ncr;  ci = nci;  t1 = nt1;  t2 = nt2;  t3 = nt3;  zr = nzr;  zi = nzi;  escapes = nesc;
     when count % 5000000 == 0 { println!(nesc); };
     count = count + 1;
-    when count == N { exit program println!(nesc); };
+    when count == N { endprogram println!(nesc); };
     term;
 };

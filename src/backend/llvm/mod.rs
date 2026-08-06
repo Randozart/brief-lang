@@ -244,8 +244,8 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         }
         Statement::FreeHint(_) | Statement::KeepHint(_) => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
-        Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => { collect_strings_expr(e, seen, out); }
-        Statement::Term(None) | Statement::ExitProgram(None) => {}
+        Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => { collect_strings_expr(e, seen, out); }
+        Statement::Term(None) | Statement::EndProgram(None) => {}
         Statement::Guarded(condition, statements) => {
             collect_strings_expr(condition, seen, out);
             for s in statements { collect_strings_stmt(s, seen, out); }
@@ -875,9 +875,25 @@ impl LlvmBackend {
         }
         // 2026-07-25: Fixed-size array: Int[1024] → [1024 x i64].
         // Emitted as a single LLVM array field. Index accesses become GEPs.
+        // 2026-08-06: const-sized `Float[MAXB]` yields Dimension::Named(name,
+        // 0) — the parser leaves the size unresolved, so resolve it from the
+        // program's compile-time constants (populated before build_field_index).
         if let Type::Vector(inner, dims) = ty {
             if dims.len() == 1 {
-                if let crate::ast::Dimension::Anonymous(n) = dims[0] {
+                let n = match dims[0] {
+                    crate::ast::Dimension::Anonymous(n) => Some(n),
+                    crate::ast::Dimension::Named(ref name, n) => {
+                        if n > 0 {
+                            Some(n)
+                        } else {
+                            self.ctx.constants.get(name).and_then(|(_, expr)| match expr {
+                                Expr::Decimal(v) if *v > 0 => Some(*v as usize),
+                                _ => None,
+                            })
+                        }
+                    }
+                };
+                if let Some(n) = n {
                     let inner_llvm = if **inner == Type::float64() { "double".to_string() }
                         else if **inner == Type::float() { "float".to_string() }
                         else { "i64".to_string() };
@@ -1500,10 +1516,10 @@ impl LlvmBackend {
             Statement::Expression(e) => {
                 self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => {
+            Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => {
                 self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::Term(None) | Statement::ExitProgram(None) => {}
+            Statement::Term(None) | Statement::EndProgram(None) => {}
             Statement::Guarded(condition, statements) => {
                 self.check_expr_embedded(condition, ctx_name, threading_intrinsics);
                 for s in statements {
@@ -1710,6 +1726,18 @@ impl LlvmBackend {
         // computes the permutation through the GLUE C ABI when its library is
         // present; otherwise the Rust reference runs.
         let reordered_items = crate::analysis::soa_reorder::reorder_fields_briv(items);
+        // 2026-08-06: populate compile-time constants BEFORE build_field_index
+        // so const-sized array dimensions (`Float[MAXB]` → Dimension::Named)
+        // resolve their size from `const MAXB: Int = 4096;`. Without this the
+        // derivation falls back to a scalar i64 / `[0 x T]`.
+        self.ctx.constants.clear();
+        for item in items {
+            if let TopLevel::Constant(c) = item {
+                self.ctx
+                    .constants
+                    .insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+            }
+        }
         self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
@@ -2254,6 +2282,9 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @briv_getenv(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @briv_setenv(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @briv_unsetenv(i64) #1").ok();
+        // 2026-08-06 (endprogram plan): process exit for `endprogram` — the
+        // runtime wrapper (lib/runtime/briv_rt.c) runs atexit cleanup.
+        writeln!(out, "declare void @__exit(i64) #6").ok();
         writeln!(out, "declare i64 @briv_futex(i64, i64, i64, i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @__isatty__(i64) #1").ok();

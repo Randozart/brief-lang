@@ -358,7 +358,7 @@ node simulate [
     // became visible. Keeping the benchmark symmetric: Briv prints the final
     // energy once, matching C.
     when count == bound {
-        exit program println!(last_energy);
+        endprogram println!(last_energy);
     };
     term;
 };

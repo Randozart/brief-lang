@@ -360,7 +360,7 @@ node simulate [
         let __periodic = println!(energy);
     };
     when count == bound {
-        exit program println!(last_energy);
+        endprogram println!(last_energy);
     };
     term;
 };

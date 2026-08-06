@@ -525,6 +525,38 @@ fn test_accel_probe_functions_emit() {
 }
 
 #[test]
+fn test_endprogram_emits_process_exit() {
+    // 2026-08-06 (endprogram plan): `endprogram` emits a real process exit
+    // (`@__exit`) with the value's i64 code, then an unreachable terminator —
+    // not a plain `ret`. Regression for the infinite-output bug (a node whose
+    // precondition stays true must terminate the process, not re-fire forever).
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        state_count(),
+        TopLevel::Transaction(Transaction {
+            name: "report".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: default_contract(),
+            body: vec![Statement::EndProgram(Some(Expr::Decimal(7)))],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("declare void @__exit(i64)"), "exit declare: {output}");
+    assert!(output.contains("call void @__exit(i64"), "exit call: {output}");
+    assert!(output.contains("unreachable"), "unreachable after exit: {output}");
+}
+
+#[test]
 fn test_escape_non_ASCII_string() {
     let output = escape_llvm_string("héllo");
     assert!(output.contains("\\c3"), "Should hex-escape byte C3");

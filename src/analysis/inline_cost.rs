@@ -60,10 +60,10 @@ fn weight_of_stmt(stmt: &Statement) -> u32 {
     match stmt {
         Statement::Let { expr, .. } => 1 + expr.as_ref().map_or(0, weight_of_expr),
         Statement::Assign(lhs, rhs) => 1 + weight_of_expr(lhs) + weight_of_expr(rhs),
-        Statement::Term(Some(e)) | Statement::ExitProgram(Some(e)) => {
+        Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => {
             1 + weight_of_expr(e)
         }
-        Statement::Term(None) | Statement::ExitProgram(None) => 1,
+        Statement::Term(None) | Statement::EndProgram(None) => 1,
         Statement::Expression(e) => 1 + weight_of_expr(e),
         Statement::Guarded(cond, body) => 1 + weight_of_expr(cond) + weight_of_body(body),
         Statement::Gate(e) => 1 + weight_of_expr(e),

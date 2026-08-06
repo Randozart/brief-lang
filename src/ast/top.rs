@@ -220,10 +220,10 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
-    /// exit program; or exit program code; — process boundary (replaces term!).
+    /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
     /// process-exit codegen is staged (SPEC §11.5).
-    ExitProgram(Option<Expr>),
+    EndProgram(Option<Expr>),
     /// when condition { body } or [condition] stmt;
     Guarded(Expr, Vec<Statement>),
     /// [condition]; — convergence gate (static assertion, re-convergence point)
@@ -315,7 +315,7 @@ impl PartialEq for Statement {
                 n1 == n2 && t1 == t2 && e1 == e2 && m1 == m2,
             (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
              (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
-             (Statement::ExitProgram(e1), Statement::ExitProgram(e2)) => e1 == e2,
+             (Statement::EndProgram(e1), Statement::EndProgram(e2)) => e1 == e2,
              (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,
             (Statement::Expression(e1), Statement::Expression(e2)) => e1 == e2,

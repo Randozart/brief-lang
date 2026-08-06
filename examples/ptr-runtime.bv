@@ -17,5 +17,5 @@ txn count_up [counter < limit][counter == limit] {
 // Uses * to read value through pointer and print it
 txn done [counter >= limit][[counter >= limit]] {
   let val = counter;
-  exit program Print#(val);
+  endprogram Print#(val);
 };

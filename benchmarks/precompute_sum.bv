@@ -4,7 +4,7 @@
 // state space fits within the --optimize-budget and precompute all final
 // values at compile time.
 //
-// Uses exit program __print_int at convergence so the program always produces
+// Uses endprogram __print_int at convergence so the program always produces
 // observable output — LLVM cannot eliminate the loop, and the benchmark
 // can verify correctness against the C reference.
 //
@@ -26,7 +26,7 @@ node compute [count < total][count == total] {
     acc_b = acc_b + count;
     count = count + 1;
     when count == total {
-        exit program println!(acc_a + acc_b);
+        endprogram println!(acc_a + acc_b);
     };
     term;
 };

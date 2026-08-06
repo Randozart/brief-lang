@@ -1,0 +1,13 @@
+!> accel: try_all;
+
+const MAXB: Int = 4096;
+let nb: Int = get_env_int!("BODYCOUNT");
+let px: Float[MAXB];
+let i: Int = 0;
+
+accel node step_bodies [phase == 1 && i < nb][phase == 1] {
+    let dx: Float = px[i];
+    px[i] = dx;
+    i = i + 1;
+    term;
+};

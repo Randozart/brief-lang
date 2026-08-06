@@ -212,6 +212,13 @@ impl Reactor {
                                 Ok(StmtResult::TermFailed) => {
                                     local_failed = true;
                                 }
+                                // 2026-08-06 (endprogram plan): the reactor
+                                // stops — the process boundary is reached.
+                                Ok(StmtResult::ProgramExit(code)) => {
+                                    return Err(
+                                        crate::interpreter::RuntimeError::ProgramExit(code),
+                                    );
+                                }
                                 Ok(StmtResult::Escaped) => {
                                     escape_triggered = true;
                                     local_failed = true;
@@ -281,7 +288,7 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term(Some(expr)) | Statement::ExitProgram(Some(expr)) => {
+            Statement::Term(Some(expr)) => {
                 let value = interp.eval_expr(expr)?;
                 if value .is_true() {
                     Ok(StmtResult::TermSuccess)
@@ -289,8 +296,18 @@ impl Reactor {
                     Ok(StmtResult::TermFailed)
                 }
             }
-            Statement::Term(None) | Statement::ExitProgram(None) => {
+            Statement::Term(None) => {
                 Ok(StmtResult::TermSuccess)
+            }
+            // 2026-08-06 (endprogram plan): process boundary — a distinct
+            // result the reactor stops on (unlike TermSuccess, which only ends
+            // the transaction). Carries the exit-code value.
+            Statement::EndProgram(Some(expr)) => {
+                let value = interp.eval_expr(expr)?;
+                Ok(StmtResult::ProgramExit(value))
+            }
+            Statement::EndProgram(None) => {
+                Ok(StmtResult::ProgramExit(crate::interpreter::Value::Void))
             }
             Statement::Rollback(_) => Ok(StmtResult::Escaped),
             Statement::Guarded(condition, statements) => {
@@ -365,6 +382,7 @@ enum StmtResult {
     TermSuccess,
     TermFailed,
     Escaped,
+    ProgramExit(crate::interpreter::Value),
 }
 
 pub fn run_reactor(

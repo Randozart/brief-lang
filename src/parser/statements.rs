@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
                 Ok(stmt)
             }
             Some(Token::Term) => self.parse_term_statement(),
-            Some(Token::Exit) => self.parse_exit_program_statement(),
+            Some(Token::EndProgram) => self.parse_endprogram_statement(),
             Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
@@ -169,20 +169,17 @@ impl<'a> Parser<'a> {
         Ok(Statement::Term(val))
     }
 
-    /// exit program; or exit program code; — process boundary (SPEC §11.5).
-    /// 2026-08-05 (Phase 3): replaces `term!`.
-    fn parse_exit_program_statement(&mut self) -> Result<Statement, SyntaxError> {
-        self.pos += 1; // consume 'exit'
-        if !self.eat_identifier("program") {
-            return self.error_at_current("expected 'program' after 'exit' (use `exit program;` or `exit program code;`)");
-        }
+    /// endprogram; or endprogram code; — process boundary (SPEC §11.5).
+    /// 2026-08-06: renamed from `exit program` (and, before that, `term!`).
+    fn parse_endprogram_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1; // consume 'endprogram'
         let val = if !self.check(&Token::Semicolon) {
             Some(self.parse_expression()?)
         } else {
             None
         };
         self.expect(Token::Semicolon)?;
-        Ok(Statement::ExitProgram(val))
+        Ok(Statement::EndProgram(val))
     }
 
     /// rollback expr;
@@ -572,5 +569,33 @@ mod tests {
         let mut p = Parser::new(tokens, src);
         let program = p.parse_program().unwrap();
         assert_eq!(program.len(), 2, "both defn and node must parse");
+    }
+
+    #[test]
+    fn endprogram_statements_parse() {
+        // 2026-08-06 (endprogram plan): `endprogram;` and `endprogram <expr>;`
+        // are process-boundary statements (SPEC §11.5) — a single keyword.
+        let src = "node n [a==0][a==1] { endprogram 5; };\nnode m [a==0][a==1] { endprogram; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let program = p.parse_program().unwrap();
+        assert_eq!(program.len(), 2);
+        let mut saw_value = false;
+        let mut saw_bare = false;
+        for item in &program {
+            if let crate::ast::TopLevel::Transaction(t) = item {
+                for s in &t.body {
+                    if let Statement::EndProgram(v) = s {
+                        if v.is_some() {
+                            saw_value = true;
+                        } else {
+                            saw_bare = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(saw_value, "endprogram 5; must parse as EndProgram(Some)");
+        assert!(saw_bare, "endprogram; must parse as EndProgram(None)");
     }
 }

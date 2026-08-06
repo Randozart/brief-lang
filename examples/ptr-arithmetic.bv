@@ -86,7 +86,7 @@ node run [tick < 1][tick == 1] {
         // volatile_load returns the register value (0 in interpreter)
         read_val = volatile_load#(uart_tx);
 
-        exit program Print#(result);
+        endprogram Print#(result);
     } else {
         tick = tick + 1;
         term;

@@ -96,8 +96,8 @@ pub enum Token {
     #[token("term")]
     Term,
 
-    #[token("exit")]
-    Exit,
+    #[token("endprogram")]
+    EndProgram,
 
     #[token("rollback")]
     Rollback,
@@ -493,7 +493,7 @@ impl std::fmt::Display for Token {
             Token::Accel => write!(f, "accel"),
             Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
-            Token::Exit => write!(f, "exit"),
+            Token::EndProgram => write!(f, "endprogram"),
             Token::Rollback => write!(f, "rollback"),
             Token::Import => write!(f, "import"),
             Token::From => write!(f, "from"),

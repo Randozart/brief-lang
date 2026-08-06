@@ -28,7 +28,7 @@ fn walk_stmts(stmts: &mut [Statement]) {
         match stmt {
             Statement::Expression(expr)
             | Statement::Term(Some(expr))
-            | Statement::ExitProgram(Some(expr))
+            | Statement::EndProgram(Some(expr))
             | Statement::Rollback(Some(expr)) => {
                 walk_expr(expr);
             }

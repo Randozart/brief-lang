@@ -96,7 +96,7 @@ fn collect_stmt_names(stmt: &Statement, names: &mut HashSet<String>) {
             collect_expr_names(target, names);
             collect_expr_names(value, names);
         }
-        Statement::Term(opt) | Statement::ExitProgram(opt) => {
+        Statement::Term(opt) | Statement::EndProgram(opt) => {
             if let Some(e) = opt {
                 collect_expr_names(e, names);
             }
@@ -281,7 +281,7 @@ fn rename_stmt(stmt: &Statement, map: &HashMap<String, String>) -> Statement {
             rename_expr(value, map),
         ),
         Statement::Term(opt) => Statement::Term(opt.as_ref().map(|e| rename_expr(e, map))),
-        Statement::ExitProgram(opt) => Statement::ExitProgram(opt.as_ref().map(|e| rename_expr(e, map))),
+        Statement::EndProgram(opt) => Statement::EndProgram(opt.as_ref().map(|e| rename_expr(e, map))),
         Statement::Expression(e) => Statement::Expression(rename_expr(e, map)),
         Statement::If(cond, then_s, else_s) => Statement::If(
             rename_expr(cond, map),

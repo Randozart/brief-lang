@@ -138,7 +138,7 @@ impl LanguageVocab {
                 kw("op", VocabStatus::Canonical, KeywordContext::Declaration),
                 // Statements and control flow
                 kw("term", VocabStatus::Canonical, KeywordContext::Statement),
-                kw("exit", VocabStatus::Canonical, KeywordContext::Statement),
+                kw("endprogram", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("program", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("defer", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("rollback", VocabStatus::Canonical, KeywordContext::Statement),
@@ -242,7 +242,7 @@ impl LanguageVocab {
             ]),
             staged_features: ss(&[
                 "dyn Trait", "const generics", "spawn/await handles",
-                "rollback", "exit program", "defer", "mutex", "barrier",
+                "rollback", "endprogram", "defer", "mutex", "barrier",
                 ".f strict indentation", "generic semantic Value",
             ]),
             casing: vec![

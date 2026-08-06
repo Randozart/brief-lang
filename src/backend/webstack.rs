@@ -513,11 +513,20 @@ impl WebstackGenerator {
                 let ts = self.expr_to_ts(e);
                 out.push_str(&format!("{};\n", ts));
             }
-            Statement::Term(swan_song) | Statement::ExitProgram(swan_song) => {
+            Statement::Term(swan_song) => {
                 if let Some(swan) = swan_song {
                     self.statement_to_ts(out, &Statement::Expression(swan.clone()));
                 }
                 out.push_str("return;\n");
+            }
+            // 2026-08-06 (endprogram plan): process boundary — exit the JS
+            // host, not just the current transaction. In browsers this would
+            // be the harness's exit hook; in Node it is process.exit.
+            Statement::EndProgram(swan_song) => {
+                if let Some(swan) = swan_song {
+                    self.statement_to_ts(out, &Statement::Expression(swan.clone()));
+                }
+                out.push_str("if (typeof process !== 'undefined') process.exit(0); throw new Error('endprogram');\n");
             }
             Statement::Guarded(condition, statements) => {
                 let cond = self.expr_to_ts(condition);
@@ -827,11 +836,19 @@ impl WebstackGenerator {
                 let r = self.expr_to_rust(e);
                 out.push_str(&format!("{};\n", r));
             }
-            Statement::Term(swan_song) | Statement::ExitProgram(swan_song) => {
+            Statement::Term(swan_song) => {
                 if let Some(swan) = swan_song {
                     self.statement_to_rust(out, &Statement::Expression(swan.clone()));
                 }
                 out.push_str("return true;\n");
+            }
+            // 2026-08-06 (endprogram plan): process boundary — exit the host,
+            // not just the transaction.
+            Statement::EndProgram(swan_song) => {
+                if let Some(swan) = swan_song {
+                    self.statement_to_rust(out, &Statement::Expression(swan.clone()));
+                }
+                out.push_str("std::process::exit(0);\n");
             }
             Statement::Guarded(condition, statements) => {
                 let cond = self.expr_to_rust(condition);

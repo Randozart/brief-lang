@@ -49,7 +49,7 @@ node fan [count < N][count == N] {
     let f: Int = p0;
     when f == 0 {
         checksum = checksum - ns;
-        exit program println!(count);
+        endprogram println!(count);
     };
     when f != 0 {
         checksum = checksum + ns;

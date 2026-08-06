@@ -60,11 +60,11 @@ impl ReactorTransitionGraph {
                 TopLevel::Transaction(txn) => {
                     let body_no_term: Vec<Statement> = {
                         let mut filtered: Vec<&Statement> = txn.body.iter()
-                            .filter(|s| !matches!(s, Statement::Term(None) | Statement::ExitProgram(None)))
+                            .filter(|s| !matches!(s, Statement::Term(None) | Statement::EndProgram(None)))
                             .collect();
                         while filtered.last().map_or(false, |s| {
                             if let Statement::Guarded(_, statements) = s {
-                                statements.iter().any(|s| matches!(s, Statement::ExitProgram(None)))
+                                statements.iter().any(|s| matches!(s, Statement::EndProgram(None)))
                             } else { false }
                         }) {
                             filtered.pop();
@@ -755,7 +755,7 @@ fn is_pure_body(
                     return false;
                 }
             }
-            Statement::Term(_) | Statement::ExitProgram(_) => {}
+            Statement::Term(_) | Statement::EndProgram(_) => {}
             Statement::Rollback(_) => return false,
             Statement::Guarded(condition, statements) => {
                 if references_triggers_or_ffi_with_decls(condition) {
@@ -903,7 +903,7 @@ fn scan_for_projections_in_stmts(stmts: &[Statement], state_fields: &HashSet<Str
             Statement::Guarded(_, statements) => {
                 scan_for_projections_in_stmts(statements, state_fields, usage);
             }
-            Statement::Term(_) | Statement::ExitProgram(_) => {}
+            Statement::Term(_) | Statement::EndProgram(_) => {}
             _ => {}
         }
     }
@@ -1008,10 +1008,10 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
             Statement::Term(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
-            Statement::ExitProgram(Some(expr)) => {
+            Statement::EndProgram(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
-            Statement::Term(None) | Statement::ExitProgram(None) => {}
+            Statement::Term(None) | Statement::EndProgram(None) => {}
             Statement::Rollback(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
@@ -1167,7 +1167,7 @@ pub(crate) fn collect_statement_identifiers(
                 collect_statement_identifiers(s, state_fields, out);
             }
         }
-        Statement::Term(val) | Statement::ExitProgram(val) => {
+        Statement::Term(val) | Statement::EndProgram(val) => {
             if let Some(v) = val {
                 collect_state_identifiers(v, state_fields, out);
             }
@@ -1276,7 +1276,7 @@ pub(crate) fn statement_contains_ffi_with_decls(stmt: &Statement) -> bool {
         Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi_with_decls(e)),
         Statement::Expression(e) => references_triggers_or_ffi_with_decls(e),
         Statement::Term(Some(e)) => references_triggers_or_ffi_with_decls(e),
-        Statement::ExitProgram(Some(e)) => references_triggers_or_ffi_with_decls(e),
+        Statement::EndProgram(Some(e)) => references_triggers_or_ffi_with_decls(e),
         Statement::Guarded(condition, statements) => {
             references_triggers_or_ffi_with_decls(condition)
                 || statements.iter().any(|s| statement_contains_ffi_with_decls(s))

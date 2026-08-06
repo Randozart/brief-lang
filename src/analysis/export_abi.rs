@@ -125,7 +125,7 @@ fn stmt_needs_state(
 ) -> bool {
     match stmt {
         Statement::Term(opt)
-        | Statement::ExitProgram(opt)
+        | Statement::EndProgram(opt)
         | Statement::Rollback(opt) => {
             opt.as_ref().is_some_and(|e| expr_needs_state(e, regular, txns, exports, state_fields, memo, visiting))
         }

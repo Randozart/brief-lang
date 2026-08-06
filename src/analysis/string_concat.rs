@@ -49,7 +49,7 @@ fn rewrite_body(
     for stmt in body {
         match stmt {
             Statement::Term(opt)
-            | Statement::ExitProgram(opt)
+            | Statement::EndProgram(opt)
             | Statement::Rollback(opt) => {
                 if let Some(expr) = opt.as_mut() {
                     rewrite_expr(expr, env, universe);

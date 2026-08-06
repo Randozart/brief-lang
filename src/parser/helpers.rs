@@ -386,7 +386,7 @@ impl<'a> Parser<'a> {
             Token::Defn => "defn".into(), Token::Let => "let".into(),
             Token::Const => "const".into(), Token::Txn => "txn".into(),
             Token::Node => "node".into(), Token::Async => "async".into(),
-            Token::Await => "await".into(),             Token::Term => "term".into(), Token::Exit => "exit".into(),
+            Token::Await => "await".into(),             Token::Term => "term".into(), Token::EndProgram => "endprogram".into(),
             Token::Rollback => "rollback".into(),
             Token::Import => "import".into(),
             Token::From => "from".into(), Token::As => "as".into(),

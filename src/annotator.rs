@@ -74,7 +74,7 @@ impl Annotator {
                         self.collect_calls_from_expr(v, calls);
                     }
                 }
-                Statement::ExitProgram(val) => {
+                Statement::EndProgram(val) => {
                     if let Some(v) = val {
                         self.collect_calls_from_expr(v, calls);
                     }
@@ -415,7 +415,7 @@ impl Annotator {
                 let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
                 format!("{}term {};\n", spaces, val_str)
             }
-            Statement::ExitProgram(val) => {
+            Statement::EndProgram(val) => {
                 let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
                 format!("{}term! {};\n", spaces, val_str)
             }

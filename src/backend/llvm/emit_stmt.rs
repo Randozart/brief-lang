@@ -463,7 +463,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
-        Statement::Term(val) | Statement::ExitProgram(val) => {
+        Statement::Term(val) => {
             // 2026-07-26: Phase 4 — webstack flush at term.
             // Emit __web_flush_state call before the return/branch so the
             // JS shim applies DOM updates before the transaction completes.            // Phase 6 will wire the actual flush buffer with modified fields.
@@ -582,6 +582,29 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // stays false so the body keeps emitting; the enclosing
                 // epilogue still terminates the function.
             }
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
+        Statement::EndProgram(val) => {
+            // 2026-08-06 (endprogram plan): `endprogram` genuinely exits the
+            // process (SPEC §11.5) — unlike `term`, which ends the transaction.
+            // Emit the value's side effects (the print), then call the
+            // runtime's `__exit` (briv_rt.c, runs atexit cleanup) with the
+            // value's i64 result as the exit code (adapt_to_i64); the bare
+            // form exits 0.
+            if backend.ctx.webstack_enabled {
+                writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
+            }
+            let code = if let Some(v) = val {
+                let reg = backend.emit_expr(out, v, indent);
+                backend.adapt_to_i64(out, indent, &reg)
+            } else {
+                "0".to_string()
+            };
+            writeln!(out, "{}call void @__exit(i64 {})", indent, code).ok();
+            // The process exit never returns — the terminator after it is
+            // unreachable, but LLVM requires one.
+            writeln!(out, "{}unreachable", indent).ok();
+            backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::Guarded(cond, body) => {

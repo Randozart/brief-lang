@@ -57,9 +57,22 @@ impl<'a> Parser<'a> {
             // flag. parse_node reads is_async via eat(Async) AFTER consuming
             // 'node'; with the prefix the async token is already consumed, so
             // we set it on the returned Transaction.
-            Some(Token::Async) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node)) => {
+            Some(Token::Async) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Accel)) => {
                 self.pos += 1; // consume async
-                let mut txn = self.parse_node()?;
+                // 2026-08-06 (accel plan): `async accel node name ...` — an
+                // accel body whose co-firing is explicitly acknowledged (the
+                // phase/counter flags sequence it at runtime).
+                let mut txn = if self.check(&Token::Accel) {
+                    self.pos += 1; // consume accel
+                    let mut t = self.parse_node()?;
+                    t.modifiers.push(Annotation {
+                        name: "accel".to_string(),
+                        value: None,
+                    });
+                    t
+                } else {
+                    self.parse_node()?
+                };
                 txn.is_async = true;
                 Ok(TopLevel::Transaction(txn))
             }

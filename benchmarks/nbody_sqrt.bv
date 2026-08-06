@@ -195,7 +195,7 @@ node simulate [
         let ek3: Float32 = 0.5 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
         let ek4: Float32 = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
         let energy: Float32 = ep + ek0 + ek1 + ek2 + ek3 + ek4;
-        exit program println!(energy);
+        endprogram println!(energy);
     };
     term;
 };

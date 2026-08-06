@@ -1,0 +1,88 @@
+!> accel: try_all;
+
+// nbody_newton_accel — many-body central-force simulation, parallel over
+// bodies (Design A: counted loops over the work-item counter `i`).
+//
+// Each step: an O(N) per-body velocity + position update (softened
+// central-force field). The per-body work is a pure, disjoint, flat-typed
+// map, so the accel analysis proves it and the GPU path coalesces the
+// counted loop into one dispatch of `nb` work-items. Phase/counter flags
+// sequence the nodes (no sync group — the reactor's unequal-schedule
+// barrier is not involved); every node is `async` to classify the pairs
+// (the flags make the actual order deterministic). `nb`/`bound` are read
+// only in CONTRACTS (get_env_int! lets are runtime state, safe there).
+//
+// The printed observable is body 0's x-position after BOUND steps, which
+// the C reference (nbody_newton_accel_c.c) computes identically.
+
+const MAXB: Int = 4096;
+let nb: Int = get_env_int!("BODYCOUNT");
+let bound: Int = get_env_int!("BOUND");
+const dt: Float = 0.001;
+const eps: Float = 0.01;
+
+let px: Float[MAXB];
+let py: Float[MAXB];
+let pz: Float[MAXB];
+let vx: Float[MAXB];
+let vy: Float[MAXB];
+let vz: Float[MAXB];
+
+let i: Int = 0;
+let count: Int = 0;
+let phase: Int = 0;   // 0 = init, 1 = step, 2 = step-complete, 3 = done
+
+// init_bodies: one parallel pass seeding positions/velocities.
+async accel node init_bodies [phase == 0 && i < nb][true] {
+    px[i] = i as Float * 0.1 + 0.5;
+    py[i] = i as Float * 0.05 + 0.3;
+    pz[i] = 0.0;
+    vx[i] = 0.01;
+    vy[i] = -0.02;
+    vz[i] = 0.0;
+    i = i + 1;
+    term;
+};
+
+// step_bodies: per-step parallel velocity + position update.
+async accel node step_bodies [phase == 1 && i < nb][true] {
+    let dx: Float = -px[i];
+    let dy: Float = -py[i];
+    let dz: Float = -pz[i];
+    let inv: Float = 1.0 / (dx*dx + dy*dy + dz*dz + eps);
+    vx[i] = vx[i] + dt * dx * inv;
+    vy[i] = vy[i] + dt * dy * inv;
+    vz[i] = vz[i] + dt * dz * inv;
+    px[i] = px[i] + dt * vx[i];
+    py[i] = py[i] + dt * vy[i];
+    pz[i] = pz[i] + dt * vz[i];
+    i = i + 1;
+    term;
+};
+
+// init_complete: init pass done → step phase.
+async node init_complete [phase == 0 && i == nb][phase == 1] {
+    phase = 1;
+    i = 0;
+    term;
+};
+
+// step_complete: bodies updated → bump the step count, then the report gate.
+async node step_complete [phase == 1 && i == nb][phase == 2] {
+    phase = 2;
+    i = 0;
+    count = count + 1;
+    term;
+};
+
+// next_step: if steps remain, back to the step phase.
+async node next_step [phase == 2 && count < bound][phase == 1] {
+    phase = 1;
+    term;
+};
+
+// report: print body 0's final x-position — `endprogram` genuinely exits the
+// process, so the always-true-after-count==bound precondition cannot re-fire.
+async node report [count == bound][true] {
+    endprogram println!(px[0]);
+};

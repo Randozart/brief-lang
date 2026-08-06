@@ -20,7 +20,7 @@ node comparator [done < 2][done == 2] {
     when done == 0 {
         let cmp = cmp_int .#Ptr;
         let r = cmp(2, 2);
-        exit program __print_int(r); // prints 1 (true)
+        endprogram __print_int(r); // prints 1 (true)
     };
     done = done + 1;
     term;
