@@ -19,7 +19,7 @@ Status legend:
 | SPEC § | Normative section | Status | Notes |
 |---:|---|---|---|
 | 1 | Scope and conformance | In progress | Conformance runner in Phase 0 |
-| 2 | Core model | In progress | Token-aware layout frontend (`.f`) wired in Phase 15; interpreter Value migration is Phase 17 |
+| 2 | Core model | In progress | Token-aware layout frontend (`.f`) wired in Phase 15; interpreter Value migration (Phase 17, slices A–I) complete 2026-08-06 |
 | 3 | Source files and target profiles | In progress | `.c`/`.sbv` removed; profiles per §3.2; `.f` layout frontend + profile detection in Phase 15 |
 | 4 | Lexical conventions | In progress | Phase 3 removed dead tokens, `sig`, `++`, pragmas, `prop`, `Ptr!`, `@`/prefix literals, width suffixes |
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
@@ -34,8 +34,8 @@ Status legend:
 | 14 | Ownership, lifetimes, effects | Not started | Phase 9 (ownership algebra, effects) |
 | 15 | Expressions and operations | In progress | Phase 5: `+`-class ops still type-dispatched; op elaboration pending |
 | 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
-| 17 | Reflection | Not started | Phase 7 (`.^`/`.^^`) |
-| 18 | Compile-time execution and macros | Not started | Phase 8 |
+| 17 | Reflection | In progress | Phase 7: `^^Type` descriptor (category code) + value-side eval shipped 2026-08-06; remaining: const generics |
+| 18 | Compile-time execution and macros | In progress | Phase 8: closures (interpreter + inline codegen) shipped 2026-08-06; `$name`/`name!` macros + stage timing pending |
 | 19 | Foreign functions, export, GLUE | Not started | Phase 12 (four provenance forms, no meld) |
 | 20 | Assembly declarations | In progress | Phase 6: contracts mandatory on asm; full effect profile Phase 16 |
 | 21 | Rendered Briv | In progress | Phase 3 `render Name`, `b-when`; full lifecycle Phase 14 |

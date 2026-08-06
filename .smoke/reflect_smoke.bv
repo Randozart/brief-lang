@@ -1,0 +1,7 @@
+node probe [true][false] {
+    let a: Int = 7;
+    let f: Float = 1.5;
+    let s: String = "hello";
+    let c: Int = a.^Absolute * 10 + s.^Len + f.^^Type;
+    term Print#(c);
+};
