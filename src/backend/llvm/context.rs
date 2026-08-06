@@ -188,10 +188,6 @@ pub struct CompilerContext {
     /// 2026-07-11: Phase 6.
     pub data_layout: Option<String>,
 
-    // GPU config
-    pub gpu_offload: bool,
-    pub gpu_backend: String,
-
     // Embedded mode
     pub is_embedded: bool,
     pub type_universe: Option<TypeUniverse>,
@@ -343,8 +339,6 @@ impl CompilerContext {
                 "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
                     .to_string(),
             ),
-            gpu_offload: false,
-            gpu_backend: "vulkan".to_string(),
             is_embedded: false,
             type_universe: None,
             operator_defs: HashMap::new(),

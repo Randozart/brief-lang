@@ -6,7 +6,7 @@ pub mod dispatch;
 pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
-pub mod gpu;
+pub(crate) mod kernel;
 pub mod helpers;
 pub mod intrinsics;
 pub mod loop_engine;
@@ -664,10 +664,6 @@ pub struct LlvmBackend {
     llvm_extra_flags: Vec<String>,
     pub(crate) pending_async_await_count: usize,
 
-    // ── GPU Offloading ─────────────────────────────────────
-    pub(crate) spirv_kernels: Vec<String>,
-    pub(crate) spirv_blobs: Vec<Vec<u8>>,
-
     // ── Arena Allocator (cross-function) ────────────────────
     // 2026-07-19: Arena system field indices in %State. Set during generate(),
     // used by emit_arena_init/emit_arena_alloc to access arena state.
@@ -781,8 +777,6 @@ impl LlvmBackend {
             remarks: Vec::new(),
             llvm_extra_flags: Vec::new(),
             pending_async_await_count: 0,
-            spirv_kernels: Vec::new(),
-            spirv_blobs: Vec::new(),
             trg_unresolved_action: TrgUnresolvedAction::Warn,
             arena_ptr_idx: None,
             arena_end_idx: None,
@@ -963,11 +957,6 @@ impl LlvmBackend {
         self
     }
 
-    pub fn with_gpu_offload(mut self, offload: bool) -> Self {
-        self.ctx.gpu_offload = offload;
-        self
-    }
-
     /// 2026-07-25: Set the native integer width for #Int protocol.
     /// WASM should use 32 to emit i32 instead of i64 (avoid BigInt).
     pub fn with_int_bits(mut self, bits: u64) -> Self {
@@ -977,11 +966,6 @@ impl LlvmBackend {
 
     pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
         self.trg_unresolved_action = action;
-        self
-    }
-
-    pub fn with_gpu_backend(mut self, backend: String) -> Self {
-        self.ctx.gpu_backend = backend;
         self
     }
 
@@ -1115,87 +1099,6 @@ impl LlvmBackend {
         }
         out.push_str("=== End Layout ===\n");
         out
-    }
-
-    pub fn gpu_backend(&self) -> &str {
-        &self.ctx.gpu_backend
-    }
-
-    pub(crate) fn collect_gpu_kernel(
-        &mut self,
-        txn_name: &str,
-        body: &[Statement],
-        is_speculative: bool,
-    ) {
-        let eligibility = gpu::check_eligibility(body);
-        eprintln!("[DBG] collect_gpu_kernel: txn={}, body_len={}, eligible={}, reasons={:?}", txn_name, body.len(), eligibility.eligible, eligibility.reasons);
-        if !eligibility.eligible {
-            if is_speculative {
-                let msg = format!("txn '{}' not eligible: {}", txn_name, eligibility.reasons.join(", "));
-                self.push_remark(directive::OptimizationRemark::skipped("gpu", msg));
-            }
-            return;
-        }
-
-        // Determine N for cost model: prefer PGO-derived bound, fall back to 0 (runtime).
-        let pgo_bound = if self.ctx.pgo_profile.is_some() {
-            let max_count = self.ctx.pgo_profile.as_ref().unwrap().branch_counts.values()
-                .map(|&(t, f)| t.max(f)).max().unwrap_or(0);
-            if max_count > 0 { Some(max_count) } else { None }
-        } else { None };
-        let cost_n = pgo_bound.unwrap_or(0);
-
-        // Run cost model for speculative directives.
-        if is_speculative {
-            let est = crate::analysis::gpu_cost::estimate(body, cost_n);
-            match est.recommended {
-                crate::analysis::gpu_cost::OffloadDecision::Cpu => {
-                    self.push_remark(directive::OptimizationRemark::skipped("gpu",
-                        format!("txn '{}' kept on CPU — intensity {:.2} ops/byte, crossover N={}",
-                            txn_name, est.arithmetic_intensity, est.crossover_point))
-                        .with_analysis(vec![
-                            format!("ops: {}, bytes: {}, intensity: {:.2}",
-                                est.total_ops, est.total_bytes, est.arithmetic_intensity),
-                            format!("estimated CPU: {:.0}ns, estimated GPU (incl. PCIe): {:.0}ns",
-                                est.estimated_cpu_ns, est.estimated_gpu_ns),
-                        ])
-                        .with_hints(vec![
-                            "Use #gpu (imperative) to force GPU offloading".to_string(),
-                        ]));
-                    return;
-                }
-                crate::analysis::gpu_cost::OffloadDecision::Runtime => {
-                    // N is runtime-determined — emit dispatch branch.
-                    self.push_remark(directive::OptimizationRemark::applied("gpu",
-                        format!("txn '{}' will dispatch at runtime — crossover N={}",
-                            txn_name, est.crossover_point))
-                        .with_analysis(vec![
-                            format!("crossing point: {} iterations", est.crossover_point),
-                        ]));
-                    // Fall through to collect kernel.
-                }
-                crate::analysis::gpu_cost::OffloadDecision::Gpu => {
-                    self.push_remark(directive::OptimizationRemark::applied("gpu",
-                        format!("txn '{}' offloaded to GPU — intensity {:.2} ops/byte",
-                            txn_name, est.arithmetic_intensity)));
-                }
-            }
-        }
-
-        // Build field type map from the backend's field_index_map + field_types
-        let field_types_map: std::collections::HashMap<String, String> = self.ctx.field_index_map.iter()
-            .map(|(name, idx)| (name.clone(), self.ctx.field_types[*idx].clone()))
-            .collect();
-        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Decimal(0), &[], field_types_map);
-        let spirv_ir = gpu::emit_spirv_module(&kernel);
-        self.spirv_kernels.push(spirv_ir.clone());
-
-        if let Ok(binary) = gpu::compile_to_spirv(&spirv_ir) {
-            self.spirv_blobs.push(binary);
-        } else if self.ctx.emit_remarks {
-            // llc not available — emit warning.
-            self.warnings.push("info: GPU kernel SPIR-V compilation skipped — llc not found. Install LLVM tools or use --no-gpu to suppress.".to_string());
-        }
     }
 
     /// Append embedded SPIR-V blobs to the output IR string.
@@ -1482,19 +1385,6 @@ impl LlvmBackend {
         false
     }
 
-    pub(crate) fn emit_spirv_embeds(&self) -> String {
-        let mut out = String::new();
-        if self.spirv_blobs.is_empty() && self.spirv_kernels.is_empty() {
-            return out;
-        }
-        out.push_str("\n; === GPU Kernel Blobs ===\n");
-        for (i, blob) in self.spirv_blobs.iter().enumerate() {
-            let name = format!("kernel_{}", i);
-            out.push_str(&gpu::embed_spirv_blob(blob, &name));
-        }
-        out
-    }
-
     /// Emit Python C extension module init metadata: PyMethodDef[],
     /// PyModuleDef, and PyInit_<name>. The struct layouts are read from
     /// the type universe (injected by InjectTypeLayout$ at compile time).
@@ -1507,10 +1397,6 @@ impl LlvmBackend {
 
     pub fn remarks(&self) -> &[crate::backend::llvm::directive::OptimizationRemark] {
         &self.remarks
-    }
-
-    pub fn spirv_kernels(&self) -> &[String] {
-        &self.spirv_kernels
     }
 
     /// Scan the typed program for constructs that are forbidden in embedded mode.
@@ -3466,9 +3352,13 @@ impl LlvmBackend {
             }
         }
 
-        // Append any compiled SPIR-V kernel blobs to the output for embedding.
-        if self.ctx.gpu_offload || !self.spirv_blobs.is_empty() {
-            out.push_str(&self.emit_spirv_embeds());
+        // 2026-08-06 (accel plan): emit + embed SPIR-V kernels for the
+        // frontend's Gpu/Probe accel bodies (AnalysisResults.accel). Runs after
+        // all host emission so the shared emitter's function state is free.
+        // Deterministic txn order; each blob is embedded as a private constant.
+        let kernel_blobs = self.collect_accel_kernels(&analysis.accel);
+        for blob in &kernel_blobs {
+            out.push_str(&kernel::embed_spirv_blob(&blob.bytes, &blob.txn_name));
         }
 
         // Phase 4: --layout diagnostic flag — print field layout after generation

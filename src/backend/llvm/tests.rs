@@ -6,6 +6,106 @@ fn empty_program() -> Vec<TopLevel> {
     vec![]
 }
 
+/// A minimal eligible accel kernel: `a[i] = i` under `[i < N]` with a host
+/// bookkeeping write (`count = count + 1`).
+fn accel_kernel_program() -> Vec<TopLevel> {
+    let array_state = TopLevel::StateDecl(StateDecl {
+        name: "a".to_string(),
+        ty: Type::Vector(Box::new(Type::Custom("Float".to_string())), vec![crate::ast::Dimension::Anonymous(16)]),
+        span: None,
+    });
+    let n_state = TopLevel::StateDecl(StateDecl {
+        name: "N".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
+    let count_state = TopLevel::StateDecl(StateDecl {
+        name: "count".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
+    let force = TopLevel::Transaction(Transaction {
+        name: "force".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(
+                BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("i".to_string())),
+                Box::new(Expr::Identifier("N".to_string())),
+            ),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: true,
+            span: None,
+        },
+        body: vec![
+            Statement::Assign(
+                Expr::Index(Box::new(Expr::Identifier("a".to_string())), Box::new(Expr::Identifier("i".to_string()))),
+                Expr::Identifier("i".to_string()),
+            ),
+            Statement::Assign(
+                Expr::Identifier("count".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![Annotation { name: "accel".to_string(), value: None }],
+        span: None,
+        doc: None,
+    });
+    vec![array_state, n_state, count_state, force]
+}
+
+#[test]
+fn test_accel_kernel_module_emits_projected_state() {
+    // 2026-08-06 (accel plan): an eligible `accel` body emits a self-contained
+    // SPIR-V kernel module by REUSING the host emitter against a kernel-scoped
+    // `%State` (the minimal buffer/scalar projection). The IR text is the
+    // deterministic contract — SPIR-V blob compilation (llc) is machine-gated.
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = accel_kernel_program();
+    let _host = backend.generate(&program, None); // populates field maps
+    let analysis = crate::backend::analyze_program(
+        &program,
+        false,
+        4,
+        Some(&crate::type_universe::TypeUniverse::new()),
+    );
+    let entry = analysis.accel.get("force").expect("accel entry for force");
+    assert!(entry.shape.eligible, "kernel shape must be eligible: {:?}", entry.shape.reasons);
+    let ir = backend.emit_kernel_module("force", &entry.shape).expect("kernel module emits");
+    assert!(ir.contains("target triple = \"spirv64-unknown-unknown\""), "kernel triple");
+    assert!(ir.contains("declare i64 @_Z13get_global_idj(i32)"), "global-id decl");
+    assert!(ir.contains("%State = type { [16 x float] }"), "projected state struct: {ir}");
+    assert!(ir.contains("define spir_kernel void @kernel_force(ptr %state, i64 %n)"), "kernel sig");
+    assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"), "work-item id");
+    assert!(ir.contains("getelementptr inbounds %State, ptr %state, i32 0, i32 0"), "buffer GEP");
+}
+
+#[test]
+fn test_no_accel_no_kernel_blob() {
+    // 2026-08-06 (accel plan): without accel request, no kernel blob embeds.
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![state_count(), make_txn("plain", vec![])];
+    let output = backend.generate(&program, None);
+    assert!(
+        !output.contains("briv_kernel_"),
+        "no accel body must not embed kernels; got:\n{}",
+        &output[output.len().saturating_sub(2000)..]
+    );
+}
+
 fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
     TopLevel::Transaction(Transaction {
         name: name.to_string(),
@@ -255,67 +355,6 @@ fn test_inline_directive_absent_no_extra_attr() {
     ];
     let output = backend.generate(&program, None);
     assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
-}
-
-#[test]
-fn test_gpu_directive_collects_spirv_kernel() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        state_count(),
-        make_txn("gpu_test", vec![Annotation { name: "gpu".to_string(), value: Some(Expr::Bool(true)) }]),
-    ];
-    let _output = backend.generate(&program, None);
-    assert!(backend.spirv_kernels().len() >= 1,
-        "gpu txn should produce at least one SPIR-V kernel");
-}
-
-#[test]
-fn test_gpu_directive_embeds_spirv_blob_in_output() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        state_count(),
-        make_txn("embed_test", vec![Annotation { name: "gpu".to_string(), value: Some(Expr::Bool(true)) }]),
-    ];
-    let output = backend.generate(&program, None);
-    assert!(output.contains("GPU Kernel Blobs") || backend.spirv_kernels().len() >= 1,
-        "gpu txn output should contain SPIR-V blob section");
-}
-
-#[test]
-fn test_gpu_offload_flag_collects_kernels() {
-    let mut backend = LlvmBackend::new().with_gpu_offload(true);
-    let program = vec![
-        state_count(),
-        make_txn("offload_test", vec![]),
-    ];
-    let _output = backend.generate(&program, None);
-    assert!(backend.spirv_kernels().len() >= 1,
-        "--gpu-offload should collect kernels for all txns");
-}
-
-#[test]
-fn test_gpu_e2e_simple_add() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        state_count(),
-        make_txn("e2e_add", vec![Annotation { name: "gpu".to_string(), value: Some(Expr::Bool(true)) }]),
-    ];
-    let _output = backend.generate(&program, None);
-    assert!(backend.spirv_kernels().len() >= 1,
-        "e2e: GPU txn should produce at least one SPIR-V kernel");
-}
-
-#[test]
-fn test_gpu_e2e_invocation_count() {
-    let mut backend = LlvmBackend::new().with_gpu_offload(true);
-    let program = vec![
-        state_count(),
-        make_txn("k1", vec![]),
-        make_txn("k2", vec![]),
-    ];
-    let _output = backend.generate(&program, None);
-    assert!(backend.spirv_kernels().len() == 2,
-        "e2e: two txns with --gpu-offload should produce 2 kernels");
 }
 
 #[test]

@@ -5,10 +5,11 @@ use crate::ast::{Annotation, Expr};
 // ── Directive Resolution ────────────────────────────────────────────
 //
 // Why a separate file for directive resolution: directives (#inline,
-// #unroll, #vectorize, #gpu, #export) are parsed in the frontend as
+// #unroll, #vectorize, #export) are parsed in the frontend as
 // Hashtag values and stored on AST nodes. The resolution logic maps
 // each hashtag to an LLVM IR effect (function attribute, loop metadata,
-// GPU offload request, export symbol).
+// export symbol). The legacy #gpu family is removed — GPU deferral is
+// the `accel` keyword / `!> accel:` metadata (SPEC §9.7).
 //
 // By keeping resolution in a dedicated file, adding a new directive
 // (e.g., #novector, #interleave) is a single-function addition here —
@@ -44,9 +45,6 @@ pub enum DirectiveEffect {
     /// Emit a `!llvm.loop.*` metadata key with the given value.
     /// The caller formats the key-value into the appropriate metadata node.
     LoopMetadata(String, String),
-    /// Request GPU offloading for the current loop/txn body.
-    /// The optional string is a user-specified threshold or config.
-    GpuOffload(Option<String>),
     /// Export this function with a globally-visible symbol for cross-language
     /// FFI. The string is the exported symbol name.
     Export(String),
@@ -66,7 +64,6 @@ pub fn resolve_directives(tags: &[Annotation], context: DirectiveCtx) -> Vec<Dir
             "inline" => resolve_inline(tag, context),
             "unroll" => resolve_unroll(tag, context),
             "vectorize" => resolve_vectorize(tag, context),
-            "gpu" => resolve_gpu(tag, context),
             "export" => resolve_export(tag, context),
             _ => None,
         };
@@ -129,17 +126,6 @@ fn resolve_vectorize(tag: &Annotation, context: DirectiveCtx) -> Option<Directiv
                     "true".to_string(),
                 ))
             }
-        }
-        _ => None,
-    }
-}
-
-/// Resolve #gpu / #?gpu / #!gpu for the given context.
-fn resolve_gpu(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
-    match context {
-        // GPU offloading is applicable to both loops and full transaction bodies.
-        DirectiveCtx::Loop | DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
-            Some(DirectiveEffect::GpuOffload(tag.string_value()))
         }
         _ => None,
     }
@@ -360,51 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn test_gpu_directive_on_loop() {
-        let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Loop);
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
-            DirectiveEffect::GpuOffload(val) => {
-                assert_eq!(*val, None);
-            }
-            _ => panic!("Expected GpuOffload"),
-        }
-    }
-
-    #[test]
-    fn test_gpu_directive_with_value() {
-        let t = Annotation {
-            name: "gpu".into(),
-            value: Some(Expr::Quoted("threshold=1000".into())),
-        };
-        let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
-            DirectiveEffect::GpuOffload(val) => {
-                assert_eq!(val.as_deref(), Some("threshold=1000"));
-            }
-            _ => panic!("Expected GpuOffload"),
-        }
-    }
-
-    #[test]
-    fn test_speculative_gpu_directive() {
-        let effects = resolve_directives(&[spec_tag("gpu")], DirectiveCtx::Loop);
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
-            DirectiveEffect::GpuOffload(_) => {} // OK
-            _ => panic!("Expected GpuOffload"),
-        }
-    }
-
-    #[test]
-    fn test_gpu_directive_on_body_is_none() {
-        let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Body);
-        assert_eq!(
-            effects.len(),
-            0,
-            "gpu should have no effect on Body context"
-        );
+    fn test_gpu_directive_removed() {
+        // 2026-08-06 (accel plan): the #gpu pragma family is removed — GPU
+        // deferral is the `accel` keyword / `!> accel:` metadata (SPEC §9.7).
+        let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Transaction);
+        assert_eq!(effects.len(), 0, "gpu directive must be gone");
     }
 
     #[test]

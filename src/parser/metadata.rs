@@ -22,7 +22,7 @@ impl<'a> Parser<'a> {
                 self.parse_metadata_value().map(|val| (key, val))?
             } else {
                 // #key value; or #key(value) — annotation syntax
-                let key = self.expect_identifier()?; // e.g. "#gpu"
+                let key = self.expect_identifier()?; // e.g. "#inline"
                 let val = PropertyValue::Bool(true);
                 (key, val)
             };

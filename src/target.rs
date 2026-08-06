@@ -293,7 +293,7 @@ plugins = ["prelude"]
 
 [".abv"]
 backend = "spirv"
-defaults = ["--gpu-offload"]
+defaults = []
 plugins = ["prelude"]
 
 [target.x86_64]

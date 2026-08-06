@@ -2272,13 +2272,6 @@ impl LlvmBackend {
                 self.fun.reg_type_cache = saved_reg_type_cache;
             }
         }
-
-        // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
-        if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
-            let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.name.starts_with('?'));
-            self.collect_gpu_kernel(name, &txn.body, is_speculative);
-        }
     }
 
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
@@ -2631,13 +2624,6 @@ impl LlvmBackend {
             writeln!(out, "  ret i8 {}", i8_reg).ok();
         }
         writeln!(out, "}}").ok();
-
-        // Collect GPU kernel for callable txns with #gpu directives.
-        if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
-            let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.name.starts_with('?'));
-            self.collect_gpu_kernel(name, &txn.body, is_speculative);
-        }
     }
 
     //

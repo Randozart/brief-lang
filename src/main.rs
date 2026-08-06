@@ -1,7 +1,7 @@
 // ── Briv Compiler CLI Entry Point ────────────────────────────────────
 // 2026-07-12: Phase 7 — Clean CLI dispatch.
 // Flat code: max 2 nesting. No unqualified unwraps.
-// 2026-07-14: Add --llvm, --out, --optimize-budget, --gpu-offload flags to build.
+// 2026-07-14: Add --llvm, --out, --optimize-budget flags to build.
 
 mod compile;
 mod deps;
@@ -205,7 +205,6 @@ fn run_fmt(args: &[String]) -> Result<(), String> {
 ///   --llvm                  emit IR only, no binary
 ///   --out <dir>             output directory
 ///   --optimize-budget <N>   simulation budget (default 256)
-///   --gpu-offload           enable GPU offload
 ///   --backend <name>        select backend (llvm, circt, webstack, gpu)
 ///   --emit-beast [stage]     emit BEAST snapshots (ast, mid, post, all; default all)
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
@@ -214,7 +213,6 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut config_dir: Option<String> = None;
     let mut out_dir: Option<String> = None;
     let mut optimize_budget = 256u64;
-    let mut gpu_offload = false;
     let mut shared = false;
     let mut library_mode = false;
     let mut emit_beast = Vec::new();
@@ -244,9 +242,6 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         let arg = &args[i];
         if arg == "--llvm" {
             emit_ir_only = true;
-            i += 1;
-        } else if arg == "--gpu-offload" {
-            gpu_offload = true;
             i += 1;
         } else if arg == "--config-dir" {
             let val = args.get(i + 1).ok_or("--config-dir requires a directory argument")?;
@@ -407,7 +402,6 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         emit_ir_only,
         out_dir,
         optimize_budget,
-        gpu_offload,
         emit_beast_stages: emit_beast,
         backend,
         no_stdlib,
@@ -456,7 +450,6 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         emit_ir_only: false,
         out_dir: None,
         optimize_budget: 256,
-        gpu_offload: false,
         emit_beast_stages: vec![],
         backend: briv_compiler::target::BackendKind::Vm,
         no_stdlib: false,

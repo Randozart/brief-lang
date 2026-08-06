@@ -129,7 +129,6 @@ pub struct BuildOptions {
     pub emit_ir_only: bool,
     pub out_dir: Option<String>,
     pub optimize_budget: u64,
-    pub gpu_offload: bool,
     /// BEAST snapshot stages to emit (--emit-beast). Empty = no emission.
     pub emit_beast_stages: Vec<BeastFilter>,
     /// Selected backend (resolved from extension + --backend flag).
@@ -885,8 +884,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         file_path: file_path.to_string(),
         emit_ir_only: false,
         out_dir: None,
-        optimize_budget: 0,
-        gpu_offload: false,
+        optimize_budget: 256,
         emit_beast_stages: vec![],
         backend: BackendKind::Llvm,
         no_stdlib: false,
@@ -1071,10 +1069,6 @@ fn codegen(
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-                b = b.with_svo(opts.feature_svo);
-            }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the
@@ -1132,10 +1126,6 @@ fn codegen(
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-                b = b.with_svo(opts.feature_svo);
-            }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the
@@ -1176,27 +1166,6 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_resolved_frgns(resolved_frgns)
                 .with_optimize_report(true);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-                b = b.with_svo(opts.feature_svo);
-            }
-            // Apply target config if available
-            let ext = get_extension(&opts.file_path);
-            // 2026-08-04 (Phase 4): an .ebv embedded target activates the
-            // restricted embedded mode (check_embedded_restrictions, term! ->
-            // wfi) — the freestanding bare-metal path.
-            if ext == ".ebv" {
-                b = b.with_embedded_mode(true);
-            }
-            let target_config = load_target_config(opts);
-            if let Some(entry) = target_config.lookup(&ext) {
-                if let Some(ref triple) = entry.target_triple {
-                    b = b.with_target_triple(triple);
-                }
-                if let Some(ref dl) = entry.data_layout {
-                    b = b.with_data_layout(dl);
-                }
-            }
             // Register proto declarations on the casting graph
             if let Some(ref mut graph) = b.ctx.casting_graph {
                 for item in items.iter() {
@@ -1237,9 +1206,6 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_resolved_frgns(resolved_frgns)
                 .with_optimize_report(true);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-            }
             // Register proto declarations on the casting graph
             if let Some(ref mut graph) = b.ctx.casting_graph {
                 for item in items.iter() {
@@ -1272,9 +1238,6 @@ fn codegen(
                 .with_type_universe(universe.clone())
                 .with_resolved_frgns(resolved_frgns)
                 .with_trg_unresolved_action(opts.trg_unresolved_action);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-            }
             // Apply target config (same logic as Llvm)
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the
