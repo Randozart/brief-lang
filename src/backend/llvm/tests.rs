@@ -4227,9 +4227,10 @@ fn txn_with_body(body: Vec<Statement>) -> TopLevel {
 }
 
 #[test]
-fn test_closure_let_inlines_call() {
-    // `let f = x -> x + 1; let y = f(41);` — the call must inline the body
-    // (no `call @f`), binding the param to the arg register.
+fn test_closure_let_emits_env_and_indirect_call() {
+    // `let f = x -> x + 1; let y = f(41);` — the closure is a heap env block
+    // (fn_ptr at slot 0); the call goes INDIRECT through it. The closure
+    // function is emitted at module end and must return the body's value.
     let mut backend = LlvmBackend::new();
     let txn = txn_with_body(vec![
         Statement::Let {
@@ -4257,12 +4258,20 @@ fn test_closure_let_inlines_call() {
     ]);
     let ir = backend.generate(&vec![txn], None);
     assert!(
-        !ir.contains("call i64 @f"),
-        "closure call must inline, not emit a symbol call; got:\n{ir}"
+        ir.contains("briv_closure_"),
+        "a closure function must be emitted; got:\n{ir}"
     );
     assert!(
-        ir.contains("add nsw i64 %t"), // x + 1 with the arg register
-        "closure body must be emitted with the param bound; got:\n{ir}"
+        ir.contains("call i64 %"),
+        "the closure call must go indirect through the fn_ptr; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        "the closure function must take env + the param; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("ret i64 %"),
+        "the closure function must return the body value; got:\n{ir}"
     );
 }
 
@@ -4398,3 +4407,64 @@ node t [done == false][done == true] {
     );
 }
 
+
+// ── Fix 4 (2026-08-06): escaping closures — env + indirect call ────
+
+#[test]
+fn test_escaping_closure_env_and_indirect_call() {
+    // `let f = x -> x * k; let a = f(2);` — f is a heap env block (captures k
+    // by value), the call is indirect through the stored fn_ptr.
+    let src = r#"
+node start [true][false] {
+    let k: Int = 5;
+    let f = x -> x * k;
+    let a: Int = f(2);
+    let b: Int = f(3);
+    let c: Int = a + b;
+    term Print#(c);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        "closure function must take env + param; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 %"),
+        "the call must go indirect through the fn_ptr; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("getelementptr i64, ptr %env, i64 1"),
+        "the captured var must be read from env slot 1; got:\n{ir}"
+    );
+}
+
+#[test]
+fn test_closure_alias_shares_env() {
+    // `let g = f;` — g aliases f's env block; calling g goes indirect too.
+    let src = r#"
+node start [true][false] {
+    let f = x -> x + 1;
+    let g = f;
+    let a: Int = g(41);
+    term Print#(a);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 %"),
+        "the alias call must go indirect; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @g("),
+        "no direct symbol call for the alias; got:\n{ir}"
+    );
+}

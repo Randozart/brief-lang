@@ -79,6 +79,9 @@ pub struct CompilerContext {
     /// 2026-08-01 (D2): garbage scheduling — txn name → heap-backed fields to
     /// free after that txn's body (the frontend-computed free_after map).
     pub global_free_after: HashMap<String, Vec<String>>,
+    /// 2026-08-06 (fix): closures collected during emission, emitted as
+    /// top-level functions at the end of the module.
+    pub pending_closures: Vec<PendingClosure>,
     /// 2026-08-04 (out-observability plan): names whose calls are liveness
     /// roots (`out defn`/`out node`/`out txn`) or whose reads/writes are live
     /// (`out`/`vol` lets). Frontend-computed into AnalysisResults; copied here
@@ -289,6 +292,7 @@ impl CompilerContext {
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
             global_free_after: HashMap::new(),
+            pending_closures: Vec::new(),
             observable_names: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
@@ -376,12 +380,158 @@ impl CompilerContext {
 //
 // When inlining, clone this struct before entering the inline body and
 // restore it after. FunctionContext implements Clone for this purpose.
-/// A let-bound closure: its parameter names and body. Used for inline
-/// closure calls in codegen (see `FunctionContext::closure_lets`).
+/// A let-bound closure: its parameter names, body, and the free variables it
+/// captures (env slots). Used by the escaping-closure lowering: `let f =
+/// lambda` allocates an env block `[fn_ptr, cap1..capN]`; calls go indirect
+/// through the stored fn_ptr.
 #[derive(Debug, Clone)]
 pub struct ClosureDef {
     pub params: Vec<String>,
     pub body: Box<crate::ast::Expr>,
+    /// Free variables of the body (idents not bound by params/lets) captured
+    /// by value into the env block at creation.
+    pub free_vars: Vec<String>,
+}
+
+/// A closure awaiting its top-level function emission at the end of the
+/// module. The closure value is a heap env block; the function reads captured
+/// vars from it and returns the body's value.
+#[derive(Debug, Clone)]
+pub struct PendingClosure {
+    pub symbol: String,
+    pub params: Vec<String>,
+    pub body: crate::ast::Expr,
+    pub free_vars: Vec<String>,
+}
+
+/// 2026-08-06 (fix): the free variables a closure captures — every identifier
+/// in the body not bound by the closure's params (or a nested lambda/block
+/// let). Intrinsic names (`x#`) are excluded. Order is deterministic (first
+/// appearance) so the env slot layout is stable.
+pub fn collect_free_vars(body: &crate::ast::Expr, params: &[String]) -> Vec<String> {
+    let mut bound: std::collections::HashSet<String> = params.iter().cloned().collect();
+    let mut free: Vec<String> = Vec::new();
+    collect_free_expr(body, &mut bound, &mut free);
+    free
+}
+
+fn collect_free_expr(
+    e: &crate::ast::Expr,
+    bound: &mut std::collections::HashSet<String>,
+    free: &mut Vec<String>,
+) {
+    match e {
+        crate::ast::Expr::Identifier(n) => {
+            if !bound.contains(n) && !n.ends_with('#') && !free.contains(n) {
+                free.push(n.clone());
+            }
+        }
+        crate::ast::Expr::Lambda(params, body) => {
+            let mut nested = bound.clone();
+            for p in params {
+                nested.insert(p.clone());
+            }
+            collect_free_expr(body, &mut nested, free);
+        }
+        crate::ast::Expr::Block(stmts) => {
+            let mut nested = bound.clone();
+            collect_free_stmts(stmts, &mut nested, free);
+        }
+        crate::ast::Expr::BinaryOp(_, l, r) => {
+            collect_free_expr(l, bound, free);
+            collect_free_expr(r, bound, free);
+        }
+        crate::ast::Expr::UnaryOp(_, v)
+        | crate::ast::Expr::Cast(v, _)
+        | crate::ast::Expr::IsType(v, _)
+        | crate::ast::Expr::Consume(v)
+        | crate::ast::Expr::Deref(v)
+        | crate::ast::Expr::AddrOf(v)
+        | crate::ast::Expr::Reflect(v, _, _)
+        | crate::ast::Expr::Within(v, _) => collect_free_expr(v, bound, free),
+        crate::ast::Expr::Call(_, args, _)
+        | crate::ast::Expr::List(args)
+        | crate::ast::Expr::Tuple(args) => collect_free_exprs(args, bound, free),
+        crate::ast::Expr::StructLiteral { fields, .. } => {
+            for (_, v) in fields {
+                collect_free_expr(v, bound, free);
+            }
+        }
+        crate::ast::Expr::Index(o, i) => {
+            collect_free_expr(o, bound, free);
+            collect_free_expr(i, bound, free);
+        }
+        crate::ast::Expr::Slice { array, start, end, stride } => {
+            collect_free_expr(array, bound, free);
+            for b in [start, end, stride].into_iter().flatten() {
+                collect_free_expr(b, bound, free);
+            }
+        }
+        crate::ast::Expr::Field(o, _) => collect_free_expr(o, bound, free),
+        crate::ast::Expr::If(c, t, f) => {
+            collect_free_expr(c, bound, free);
+            collect_free_expr(t, bound, free);
+            if let Some(f) = f {
+                collect_free_expr(f, bound, free);
+            }
+        }
+        crate::ast::Expr::Match(s, arms) => {
+            collect_free_expr(s, bound, free);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_free_expr(g, bound, free);
+                }
+                collect_free_expr(&arm.body, bound, free);
+            }
+        }
+        crate::ast::Expr::MethodCall(recv, _, args, _) => {
+            collect_free_expr(recv, bound, free);
+            collect_free_exprs(args, bound, free);
+        }
+        crate::ast::Expr::PluginIntercept { args, .. } => {
+            collect_free_exprs(args, bound, free);
+        }
+        crate::ast::Expr::Exists(_) => {}
+        _ => {}
+    }
+}
+
+/// Recurse into a list of expressions (list-like shapes).
+fn collect_free_exprs(
+    es: &[crate::ast::Expr],
+    bound: &mut std::collections::HashSet<String>,
+    free: &mut Vec<String>,
+) {
+    for e in es {
+        collect_free_expr(e, bound, free);
+    }
+}
+
+/// Recurse into a block's statements, tracking local `let` bindings so a
+/// local let is not captured as free.
+fn collect_free_stmts(
+    stmts: &[crate::ast::Statement],
+    bound: &mut std::collections::HashSet<String>,
+    free: &mut Vec<String>,
+) {
+    for s in stmts {
+        match s {
+            crate::ast::Statement::Let { name, expr, .. } => {
+                if let Some(e) = expr {
+                    collect_free_expr(e, bound, free);
+                }
+                bound.insert(name.clone());
+            }
+            crate::ast::Statement::Term(Some(v)) | crate::ast::Statement::ExitProgram(Some(v)) => {
+                collect_free_expr(v, bound, free)
+            }
+            crate::ast::Statement::Expression(v) | crate::ast::Statement::Gate(v) => {
+                collect_free_expr(v, bound, free)
+            }
+            crate::ast::Statement::Assign(_, v) => collect_free_expr(v, bound, free),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

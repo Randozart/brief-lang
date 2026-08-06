@@ -3541,7 +3541,63 @@ impl LlvmBackend {
             writeln!(out, "}}").ok();
         }
 
+        // 2026-08-06 (fix): escaping closures — emit the collected closure
+        // functions at the end of the module.
+        self.emit_pending_closures(&mut out);
+
         out
+    }
+
+    /// 2026-08-06 (fix): emit the top-level closure functions collected during
+    /// emission. Each reads its captured vars from the env block (slots 1..N)
+    /// and returns the body's value; params arrive as i64 arguments. The env is
+    /// the hidden first parameter.
+    fn emit_pending_closures(&mut self, out: &mut String) {
+        let closures = std::mem::take(&mut self.ctx.pending_closures);
+        if closures.is_empty() {
+            return;
+        }
+        let saved_fun = self.fun.clone();
+        for c in &closures {
+            self.emit_one_closure(out, c);
+        }
+        self.fun = saved_fun;
+    }
+
+    /// Emit a single closure function `define i64 @symbol(ptr %env, i64 %p..)`.
+    fn emit_one_closure(
+        &mut self,
+        out: &mut String,
+        c: &crate::backend::llvm::context::PendingClosure,
+    ) {
+        self.fun = crate::backend::llvm::context::FunctionContext::new();
+        let param_list: Vec<String> = (0..c.params.len())
+            .map(|i| format!("i64 %p{}", i))
+            .collect();
+        let params = if param_list.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", param_list.join(", "))
+        };
+        writeln!(out, "define i64 @{}(ptr %env{}) {{", c.symbol, params).ok();
+        for (i, p) in c.params.iter().enumerate() {
+            self.fun.let_bindings.insert(p.clone(), format!("%p{}", i));
+            self.fun.let_binding_types.insert(p.clone(), Type::int());
+            self.fun.let_original_types.insert(p.clone(), Type::int());
+        }
+        for (j, v) in c.free_vars.iter().enumerate() {
+            let slot = self.fun.gen_reg();
+            writeln!(out, "  {} = getelementptr i64, ptr %env, i64 {}", slot, 1 + j).ok();
+            let cap = self.fun.gen_reg();
+            writeln!(out, "  {} = load i64, ptr {}", cap, slot).ok();
+            self.fun.let_bindings.insert(v.clone(), cap.clone());
+            self.fun.let_binding_types.insert(v.clone(), Type::int());
+            self.fun.let_original_types.insert(v.clone(), Type::int());
+        }
+        let result = self.emit_expr(out, &c.body, "  ");
+        writeln!(out, "  ret i64 {}", result.name).ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
     }
 
     /// Emit the folded single-bounded-counter `main()` for a node, selecting the

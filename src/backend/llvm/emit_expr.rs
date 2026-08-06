@@ -112,16 +112,9 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-08-06 (diagnostics): a closure bound by `let` is only
-                // meaningful as a CALL target; using it as a value would
-                // silently read the placeholder register (0).
-                if self.fun.closure_lets.contains_key(name) {
-                    panic!(
-                        "closure '{}' can only be applied as a call — using a closure \
-                         as a value is not supported yet",
-                        name
-                    );
-                }
+                // 2026-08-06 (fix): a closure-let identifier reads its env
+                // block address (a real first-class value) — resolved by the
+                // normal let-binding path below.
                 // 2026-07-29: Accumulation chaining — check last_val_temps FIRST.
                 // When a field is written multiple times in one iteration, the second
                 // read must return the just-computed value, not the loop-header phi,
@@ -2198,11 +2191,13 @@ impl LlvmBackend {
         args: &[Expr],
         indent: &str,
     ) -> TypedRegister {
-        // 2026-08-06 (Phase 8): a let-bound closure call inlines the body with
-        // params bound to the arg registers.
-        let closure = self.fun.closure_lets.get(name).cloned();
-        if let Some(closure) = closure {
-            return self.emit_closure_inline(out, &closure, args, indent);
+        // 2026-08-06 (fix): a closure-let call goes INDIRECT through its env
+        // block — load the value (env address), then the fn_ptr, then call it
+        // with the env as the first (hidden) parameter. This makes the closure
+        // a real first-class value (it can be passed around), replacing the
+        // inline-at-call-site lowering.
+        if self.fun.closure_lets.contains_key(name) {
+            return self.emit_closure_indirect_call(out, name, args, indent);
         }
         // 2026-07-16: P5 — Check if this is a foreign function; if so, use emit_frgn_call
         // Clone the sig to avoid borrowing self.ctx while self.emit_expr needs &mut self.
@@ -2293,56 +2288,56 @@ impl LlvmBackend {
     /// emits, then the prior bindings restore. Captured free variables resolve
     /// from the enclosing function scope — by-value for immutable let-bound
     /// SSA registers, matching the interpreter's closure semantics.
-    fn emit_closure_inline(
+    /// 2026-08-06 (fix): a closure call loads the value (the env-block
+    /// address), then the fn_ptr from slot 0, and calls it indirectly with the
+    /// env as the hidden first parameter. Uniform for every closure value —
+    /// whether called by name or passed around and called through a parameter.
+    fn emit_closure_indirect_call(
         &mut self,
         out: &mut String,
-        closure: &crate::backend::llvm::context::ClosureDef,
+        name: &str,
         args: &[Expr],
         indent: &str,
     ) -> TypedRegister {
-        if closure.params.len() != args.len() {
-            panic!(
-                "closure call: expected {} arguments, got {}",
-                closure.params.len(),
-                args.len()
-            );
-        }
-        let arg_regs: Vec<TypedRegister> = args
+        let env_val = self.resolve_name_register(name);
+        let env_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, env_p, env_val).ok();
+        let fp = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, fp, env_p).ok();
+        let fp_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fp_p, fp).ok();
+        let arg_regs: Vec<String> = args
             .iter()
-            .map(|a| self.emit_expr(out, a, indent))
+            .map(|a| {
+                let r = self.emit_expr(out, a, indent);
+                format!("i64 {}", r.name)
+            })
             .collect();
-        let mut saved: Vec<(String, Option<String>, Option<Type>)> = Vec::new();
-        for (i, p) in closure.params.iter().enumerate() {
-            let prior_t = self.fun.last_val_temps.get(p).cloned();
-            let prior_ty = self.fun.last_val_types.get(p).cloned();
-            self.fun
-                .last_val_temps
-                .insert(p.clone(), arg_regs[i].name.clone());
-            self.fun
-                .last_val_types
-                .insert(p.clone(), arg_regs[i].ty.clone());
-            saved.push((p.clone(), prior_t, prior_ty));
-        }
-        let result = self.emit_expr(out, &closure.body, indent);
-        for (p, prior_t, prior_ty) in saved {
-            match prior_t {
-                Some(t) => {
-                    self.fun.last_val_temps.insert(p.clone(), t);
-                }
-                None => {
-                    self.fun.last_val_temps.remove(&p);
-                }
-            }
-            match prior_ty {
-                Some(t) => {
-                    self.fun.last_val_types.insert(p.clone(), t);
-                }
-                None => {
-                    self.fun.last_val_types.remove(&p);
-                }
-            }
-        }
-        result
+        let result = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = call i64 {}(ptr {}, {})",
+            indent,
+            result,
+            fp_p,
+            env_p,
+            arg_regs.join(", ")
+        )
+        .ok();
+        TypedRegister { name: result, ty: Type::int() }
+    }
+
+    /// Resolve the current register for a name bound by `let` (or a pending
+    /// last-value temp). Used to load a closure's env-address value.
+    fn resolve_name_register(&self, name: &str) -> String {
+        self.fun
+            .last_val_temps
+            .get(name)
+            .cloned()
+            .or_else(|| self.fun.let_bindings.get(name).cloned())
+            .unwrap_or_else(|| {
+                panic!("closure '{}' has no binding register", name)
+            })
     }
 
     /// 2026-07-25: Return the integer type for binary operations based on

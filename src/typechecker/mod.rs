@@ -1310,21 +1310,12 @@ fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext, errors: &mut
 
 fn elaborate_expr(expr: &mut Expr, ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
     match expr {
-        Expr::Identifier(name) => {
-            // 2026-08-06 (diagnostics): a closure bound by `let` is only
-            // meaningful as a CALL target (`f(x)` is Expr::Call, whose callee
-            // is a String — this Identifier arm is never reached by it). Using
-            // one as a value would silently read the codegen placeholder 0.
-            if matches!(ctx.bindings.get(name), Some(Type::Function(_, _))) {
-                errors.push(TypeError::InvalidOperation {
-                    operation: format!("use of '{}' as a value", name),
-                    type_name: format!(
-                        "closure '{}' can only be applied as a call — using a closure as \
-                         a value is not supported yet",
-                        name
-                    ),
-                });
-            }
+        Expr::Identifier(_) => {
+            // 2026-08-06 (fix): closures are real first-class values now (a
+            // let-bound lambda is a heap env block address in codegen), so a
+            // Function-typed binding used as a value is legal. The typechecker
+            // (infer_expression) still rejects a Function value where a
+            // non-Function is required.
         }
         Expr::BinaryOp(kind, l, r) => {
             let lt = infer_type_only(l, ctx).unwrap_or(Type::int());
@@ -3072,7 +3063,10 @@ node start [true][false] {
     /// A closure used as a value (not a call) must be an error — codegen
     /// would otherwise silently read the placeholder register 0.
     #[test]
-    fn closure_used_as_value_errors() {
+    fn closure_used_as_value_is_legal() {
+        // 2026-08-06 (fix): a closure is a real first-class value (env block
+        // address in codegen) — assigning one to a Function-typed binding is
+        // legal now.
         let src = r#"
 node start [true][false] {
     let f = x -> x + 1;
@@ -3080,10 +3074,9 @@ node start [true][false] {
     term;
 };
 "#;
-        let err = check(src).unwrap_err();
         assert!(
-            err.iter().any(|e| format!("{}", e).contains("only be applied as a call")),
-            "expected a closure-as-value error, got {err:?}"
+            check(src).is_ok(),
+            "closure-as-value must typecheck; the closure is a first-class value"
         );
     }
 

@@ -154,7 +154,7 @@ lowering is new capability.
 - [x] Fix 2: pure-fold `.continue` bridge — committed `4ef243d1`
 - [x] Fix 3: scheduler never plans unemittable frees — committed `4ef243d1`
 - [x] Fix 1: interpreter user-fn support — committed `4ef243d1`
-- [ ] Fix 4: escaping closures slice 1 — **scoped, not yet implemented**
+- [x] Fix 4: escaping closures slice 1 — committed (see §8)
 - [x] Tests + Praetor + benchmarks + commit
 
 ## 7. Fixes 1–3 delivered (commit `4ef243d1`)
@@ -172,24 +172,33 @@ lowering is new capability.
   behavior.
 - 1616 lib tests; Praetor no new diagnostics (36 identical); 36/36 MATCH.
 
-## 8. Fix 4 — escaping closures (remaining slice, needs a focused session)
+## 8. Fix 4 — escaping closures (delivered 2026-08-06)
 
-The full escaping-closure lowering is a large backend feature with type
-plumbing (function-typed values) and risk; it is deliberately NOT rushed at
-the tail of this session. Concrete scope for the next session:
+- **Capture analysis**: `collect_free_vars` / `collect_free_expr` /
+  `collect_free_stmts` (context.rs) — idents not bound by params/lets, `#`
+  names excluded, deterministic order. Nested lambdas/blocks shadow.
+- **Env allocation**: `let f = lambda` allocates `[fn_ptr, cap1..capN]`
+  (8-byte slots), stores `ptrtoint @briv_closure_N` + the captured values;
+  the closure VALUE is the block address (was the `add i64 0, 0` placeholder).
+- **Closure function emission**: `emit_pending_closures` /
+  `emit_one_closure` (mod.rs) emit `define i64 @briv_closure_N(ptr %env,
+  i64 %p..)` at module end; captured vars loaded from env slots, params bound,
+  body emitted, value returned.
+- **Indirect call**: `emit_closure_indirect_call` (emit_expr.rs) loads the
+  value → inttoptr env → load fn_ptr → indirect call. Replaces the inline
+  lowering; the inline helper removed.
+- **Alias flow**: `let g = f; g(x)` — g aliases f's env; calls to g go
+  indirect too (emit_stmt.rs closure-alias arm).
+- **Rejection lifted**: the diagnostics-sweep closure-as-value error is gone —
+  closures are real values now; the typechecker still rejects a Function value
+  where a non-Function is required.
+- Verified natively: `f(2)=10, f(3)=15, c=25` (capture of k); `g(41)=42`
+  (alias). 2 new backend tests (env+indirect, alias). 1618 lib tests.
+  Praetor: no NEW diagnostics (the +1 on pre-existing `emit_statement`
+  360→361 is from the necessary closure-alias arm on a 24x-over-limit
+  function). 36/36 MATCH.
 
-1. **Capture analysis**: free vars of each `Expr::Lambda` (idents not bound by
-   params/lets) → `ClosureDef { params, body, free_vars }` + stable symbol
-   `briv_closure_N`.
-2. **Env allocation**: `let f = lambda` allocates a heap block
-   `[fn_ptr, cap1..capN]`, stores `ptrtoint @briv_closure_N` + the captured
-   values; the closure VALUE is the block address (replaces the current
-   `add i64 0, 0` placeholder).
-3. **Closure function emission**: `define i64 @briv_closure_N(ptr %env,
-   i64 %p1..)` at module end; params + captured vars bound, body emitted.
-4. **Indirect call**: `Call` on any Function-typed name loads the value,
-   `%fp = load i64, ptr %env`, indirect `call i64 %fp(ptr %env, args...)`.
-5. **Lift the closure-as-value rejection** (diagnostics-sweep #3) for the
-   now-capable case; keep it for un-lowered escapes (stored in structs).
-6. Interpreter parity: `Value::Closure` already exists; verify by-value
-   capture matches the env-block snapshot.
+Known slice-1 boundaries (documented): closure values stored in structs /
+passed as `defn` arguments need function-typed parameter plumbing (the
+typechecker does not yet annotate untyped lets with their inferred Function
+type); closure functions always return i64 (int closures).
