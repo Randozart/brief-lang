@@ -1,7 +1,7 @@
 # `endprogram` + `beginprogram` — Process Boundary Keywords
 
 **Date:** 2026-08-06
-**Status:** Active implementation plan
+**Status:** Implemented (2026-08-06) — merged into main as `b3aff893`; backend entry-loop + real process exit delivered, SPEC 11.5 no longer staged
 **Branch:** `feat/accel-gpu` (worktree `../briv-compiler-accel`)
 **Companion SPEC change:** `spec/SPEC.md` §11.5 + a new entry-loop subsection,
 `src/vocab.rs`, `syntax-highlighter/syntaxes/briv.tmLanguage.json`.

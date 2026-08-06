@@ -26,17 +26,17 @@ Status legend:
 | 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |
 | 7 | Modules and imports | Not started | Phase 11 (`:` binding, no globs, no cycles) |
 | 8 | Declarations | In progress | Phase 5: `trait`/`impl` declarations, relationship list `type X: Parent, Trait, #Proto`, impl coherence, structural conformance; `meld` deferred to Phase 12 |
-| 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done |
+| 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done; `endprogram` real process exit + `beginprogram` entry-loop shipped 2026-08-06 |
 | 10 | Contracts, invariants, watchdogs | In progress | Phase 6: mandatory non-trivial contracts on node/txn/asm; explicit `[true][true]` rejected |
-| 11 | Control flow | In progress | `rollback`, `exit program` done; `defer`/`mutex`/`barrier` are new statements (Phase 11); no `main` — first-firing-node entry |
+| 11 | Control flow | In progress | `rollback`, `exit program` done; `endprogram`/`beginprogram` entry-loop implemented 2026-08-06 (SPEC 11.5 no longer staged); `defer`/`mutex`/`barrier` Phase 11; no `main` — first-firing-node entry |
 | 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
-| 14 | Ownership, lifetimes, effects | In progress | Phase 9: garbage scheduler wired across fold paths (PerFieldPhi + version-DAG free emission, 2026-08-06); ownership algebra + `.s` enforcement pending |
+| 14 | Ownership, lifetimes, effects | In progress | Phase 9: garbage scheduler wired across fold paths + only soundly-emittable frees planned (2026-08-06); ownership algebra + `.s` enforcement pending |
 | 15 | Expressions and operations | In progress | Phase 5: op elaboration — declared variant ops lower to their functions (`resolve_binary_op_binding` + `elaborate_ops`, 2026-08-06); remaining: effects/access-shape carrying, dyn Trait |
 | 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
 | 17 | Reflection | In progress | Phase 7: `^^Type` descriptor (category code) + value-side eval shipped 2026-08-06; remaining: const generics |
-| 18 | Compile-time execution and macros | In progress | Phase 8: closures (interpreter + inline codegen) shipped 2026-08-06; `$name`/`name!` macros + stage timing pending |
-| 19 | Foreign functions, export, GLUE | Not started | Phase 12 (four provenance forms, no meld) |
+| 18 | Compile-time execution and macros | In progress | Phase 8: escaping closures (interpreter + codegen env blocks) + interpreter user-fn support shipped 2026-08-06; `$name`/`name!` macros + stage timing pending |
+| 19 | Foreign functions, export, GLUE | In progress | GLUE FFI merged (per-language glue folders, native extensions for hosts); frgn/export + `--shared` PIC `.so`; four provenance forms Phase 12 |
 | 20 | Assembly declarations | In progress | Phase 6: contracts mandatory on asm; full effect profile Phase 16 |
 | 21 | Rendered Briv | In progress | Phase 3 `render Name`, `b-when`; full lifecycle Phase 14 |
 | 22 | Data Briv | Not started | Phase 13 (`.dbv`/`.dbvl` modes) |

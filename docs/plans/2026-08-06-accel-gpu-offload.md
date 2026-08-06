@@ -1,7 +1,7 @@
 # `accel` Keyword + Top-Level `!>` Metadata — Verifiable GPU Deferral
 
 **Date:** 2026-08-06
-**Status:** Active implementation plan
+**Status:** Implemented (2026-08-06) — merged into main as `b3aff893`; nbody_newton_accel MATCH (7.47x C wins), auto-tuning probe shipped
 **Branch:** `feat/accel-gpu` (worktree `../briv-compiler-accel`)
 **Baseline commit:** `0461a559`
 **Baseline worktree:** `../briv-compiler-baseline` (detached HEAD)
