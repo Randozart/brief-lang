@@ -4510,3 +4510,266 @@ fn test_counter_loop_guard_read_uses_phi_not_state() {
     );
 }
 
+// ── Phase 8: closure inline lowering + `^^Type` descriptor ──────────
+
+fn txn_with_body(body: Vec<Statement>) -> TopLevel {
+    TopLevel::Transaction(Transaction {
+        name: "c".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: default_contract(),
+        body,
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    })
+}
+
+#[test]
+fn test_closure_let_emits_env_and_indirect_call() {
+    // `let f = x -> x + 1; let y = f(41);` — the closure is a heap env block
+    // (fn_ptr at slot 0); the call goes INDIRECT through it. The closure
+    // function is emitted at module end and must return the body's value.
+    let mut backend = LlvmBackend::new();
+    let txn = txn_with_body(vec![
+        Statement::Let {
+            name: "f".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Lambda(
+                vec!["x".into()],
+                Box::new(Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Decimal(1)),
+                )),
+            )),
+            modifiers: vec![],
+        },
+        Statement::Let {
+            name: "y".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Call("f".into(), vec![Expr::Decimal(41)], None)),
+            modifiers: vec![],
+        },
+        Statement::Term(None),
+    ]);
+    let ir = backend.generate(&vec![txn], None);
+    assert!(
+        ir.contains("briv_closure_"),
+        "a closure function must be emitted; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 %"),
+        "the closure call must go indirect through the fn_ptr; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        "the closure function must take env + the param; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("ret i64 %"),
+        "the closure function must return the body value; got:\n{ir}"
+    );
+}
+
+#[test]
+fn test_reflect_type_emits_category_constant() {
+    // `f.^^Type` on a Float receiver folds to the Float category code (1).
+    let mut backend = LlvmBackend::new();
+    let txn = txn_with_body(vec![
+        Statement::Let {
+            name: "f".into(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Reflect(
+                Box::new(Expr::Float(1.5)),
+                "Type".into(),
+                ReflectKind::CompileTime,
+            )),
+            modifiers: vec![],
+        },
+        Statement::Term(None),
+    ]);
+    let ir = backend.generate(&vec![txn], None);
+    assert!(
+        ir.contains("add i64 0, 1"),
+        "Float ^^Type must fold to category code 1; got:\n{ir}"
+    );
+}
+
+// ── Phase 5: op elaboration → declared function call ────────────────
+
+#[test]
+fn test_declared_op_elaborates_to_function_call() {
+    // A declared `op Add(Int): my_add(#L, #R)` must lower `MyNum + Int` to a
+    // call of my_add (the typechecker's elaboration rewrites the BinaryOp).
+    let src = r#"
+defn my_add(a: Int, b: Int) -> Int { term (a * 3) + b; };
+type MyNum : #Int {
+    op Add(Int): my_add(#L, #R);
+};
+node start [true][false] {
+    let x: MyNum = 4;
+    let y: Int = 2;
+    let z: MyNum = x + y;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let mut items = p.parse_program().unwrap();
+    let universe = crate::type_universe::TypeUniverse::new();
+    crate::typechecker::check_program(&mut items, &universe).unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @my_add"),
+        "declared op must lower to a my_add call; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @add("),
+        "Int + Int must not lower to the undefined bootstrap 'add' symbol; got:\n{ir}"
+    );
+}
+
+// ── Phase 9: garbage scheduler — loop-exit Free# emission ───────────
+
+#[test]
+fn test_loop_txn_last_consumer_emits_free_after_loop() {
+    // A countable-loop txn (the benchmark's countdown shape, with a periodic
+    // `when` guard) that is a heap-backed field's last consumer must emit
+    // __briv_free AFTER the loop exits (never inside the iterating body).
+    let src = r#"
+let N: Int = GetEnvInt#("BOUND");
+let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
+let sum: Int = 0;
+node life [sum < N][sum == N] {
+    buf[sum % 64] = sum;
+    sum = sum + 1;
+    when sum % 5000000 == 0 {
+        buf[sum % 64] = 0;
+    };
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call void @__briv_free"),
+        "the scheduler must free the heap buffer after the loop; got:\n{ir}"
+    );
+    // The free must be in a terminal block (after the loop) — find its
+    // position and ensure it precedes a `ret`.
+    let free_line = ir
+        .lines()
+        .position(|l| l.contains("call void @__briv_free"))
+        .expect("free call line");
+    let tail: Vec<&str> = ir.lines().skip(free_line).take(6).collect();
+    assert!(
+        tail.iter().any(|l| l.contains("ret ")),
+        "the free must precede a return (post-loop), got: {tail:?}"
+    );
+}
+
+// ── Diagnostics sweep (2026-08-06): scheduler leak warning ──────────
+
+#[test]
+fn test_non_bounded_reactive_heap_txn_not_scheduled_for_free() {
+    // A reactive last-consumer with NO bounded loop has no sound free point.
+    // The scheduler must NOT plan a free for it (falls back to "lives for the
+    // program") — no spurious "will leak" warning, because the plan is never
+    // made in the first place (root-cause fix).
+    let src = r#"
+let done: Bool = false;
+let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
+node t [done == false][done == true] {
+    buf[0] = 1;
+    done = true;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    backend.generate(&items, None);
+    assert!(
+        !backend.warnings().iter().any(|w| w.contains("will leak")),
+        "a non-bounded last consumer must not be scheduled for a free (lives for \
+         the program); got warnings: {:?}",
+        backend.warnings()
+    );
+}
+
+
+// ── Fix 4 (2026-08-06): escaping closures — env + indirect call ────
+
+#[test]
+fn test_escaping_closure_env_and_indirect_call() {
+    // `let f = x -> x * k; let a = f(2);` — f is a heap env block (captures k
+    // by value), the call is indirect through the stored fn_ptr.
+    let src = r#"
+node start [true][false] {
+    let k: Int = 5;
+    let f = x -> x * k;
+    let a: Int = f(2);
+    let b: Int = f(3);
+    let c: Int = a + b;
+    term Print#(c);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        "closure function must take env + param; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call i64 %"),
+        "the call must go indirect through the fn_ptr; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("getelementptr i64, ptr %env, i64 1"),
+        "the captured var must be read from env slot 1; got:\n{ir}"
+    );
+}
+
+#[test]
+fn test_closure_alias_shares_env() {
+    // `let g = f;` — g aliases f's env block; calling g goes indirect too.
+    let src = r#"
+node start [true][false] {
+    let f = x -> x + 1;
+    let g = f;
+    let a: Int = g(41);
+    term Print#(a);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 %"),
+        "the alias call must go indirect; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @g("),
+        "no direct symbol call for the alias; got:\n{ir}"
+    );
+}

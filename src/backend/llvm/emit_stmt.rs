@@ -70,6 +70,65 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Let { name, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
             let val = match expr {
+                Some(crate::ast::Expr::Identifier(alias))
+                    if backend.fun.closure_lets.contains_key(alias) =>
+                {
+                    // 2026-08-06 (fix): `let g = f;` where f is a closure —
+                    // g aliases the same env block; calls to g go indirect too.
+                    let def = backend.fun.closure_lets.get(alias).cloned().unwrap();
+                    backend.fun.closure_lets.insert(name.clone(), def);
+                    backend.emit_expr(out, &crate::ast::Expr::Identifier(alias.clone()), indent)
+                }
+                Some(crate::ast::Expr::Lambda(params, body)) => {
+                    // 2026-08-06 (fix): escaping closures. The binding value is
+                    // a heap env block `[fn_ptr, cap1..capN]`; calls go indirect
+                    // through the stored fn_ptr, and the value can be passed
+                    // around (a closure is a real first-class value now).
+                    let free_vars =
+                        crate::backend::llvm::context::collect_free_vars(body, &params);
+                    let symbol =
+                        format!("briv_closure_{}", backend.ctx.pending_closures.len());
+                    backend
+                        .fun
+                        .closure_lets
+                        .insert(name.clone(), crate::backend::llvm::context::ClosureDef {
+                            params: params.clone(),
+                            body: body.clone(),
+                            free_vars: free_vars.clone(),
+                        });
+                    backend
+                        .ctx
+                        .pending_closures
+                        .push(crate::backend::llvm::context::PendingClosure {
+                            symbol: symbol.clone(),
+                            params: params.clone(),
+                            body: (**body).clone(),
+                            free_vars: free_vars.clone(),
+                        });
+                    // Env block: [fn_ptr][cap1..capN], 8 bytes per slot.
+                    let env_size = 8 * (1 + free_vars.len());
+                    let alloc = backend.fun.gen_reg();
+                    writeln!(out, "{}{}_p = call ptr @malloc(i64 {})", indent, alloc, env_size).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {}_p to i64", indent, alloc, alloc).ok();
+                    let env_p = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, env_p, alloc).ok();
+                    let fn_reg = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = ptrtoint ptr @{} to i64", indent, fn_reg, symbol).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}", indent, fn_reg, env_p).ok();
+                    for (j, var) in free_vars.iter().enumerate() {
+                        let cap = backend
+                            .emit_expr(out, &crate::ast::Expr::Identifier(var.clone()), indent);
+                        let slot = backend.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = getelementptr i64, ptr {}, i64 {}",
+                            indent, slot, env_p, 1 + j
+                        )
+                        .ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, cap.name, slot).ok();
+                    }
+                    TypedRegister { name: alloc, ty: Type::int() }
+                }
                 Some(e) => {
                     // 2026-08-01 (E): `vol let x = <rhs>` — loads inside the
                     // RHS are emitted `load volatile` (MMIO semantics: the

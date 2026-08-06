@@ -1,0 +1,7 @@
+let tick: Int = 0;
+node run [tick >= 0][tick > 0] {
+    let k: Int = 3;
+    let f = x -> x * k;
+    tick = f(2);
+    term Print#(tick);
+};

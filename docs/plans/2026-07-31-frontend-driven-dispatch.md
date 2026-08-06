@@ -1,7 +1,7 @@
 # Frontend-Driven Dispatch — Replacing LLVM Backend Heuristics
 
 **Date:** 2026-07-31
-**Status:** Active implementation plan
+**Status:** Implemented (2026-08-06) — phases 1a–3b + final delivered; benchmarks at/above parity per `benchmarks/results/` and the runtime MATCH table
 **Branch:** `feat/frontend-driven-dispatch`
 **Baseline commit:** `666fb502` (== `c2fe4402` compiler code; `c2fe4402` is doc-only)
 **Baseline worktree:** `../briv-compiler-baseline` (detached HEAD at `666fb502`)

@@ -183,6 +183,7 @@ pub fn verify_candidate(
             let mut heap = crate::interpreter::VirtualHeap::new();
             let ref_result = crate::interpreter::eval_expr(
                 ref_expr, &mut heap, &mut ref_ctx.bindings,
+                &std::collections::HashMap::new(),
             );
             let ref_val = match ref_result {
                 Ok(v) => v,

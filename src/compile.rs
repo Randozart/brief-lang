@@ -387,7 +387,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // and trg instance expressions before type checking.
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
-    check_types(&items, &universe)?;
+    check_types(&mut items, &universe)?;
     // 2026-08-04: term termination diagnostics — unreachable code after a
     // terminating `term <value>`/`term! <value>` and the bare-term-guard
     // hint. Runs here (typed AST, pre-normalizer) so the backend never sees
@@ -1393,7 +1393,7 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
     pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
-    check_types(&items, &universe)?;
+    check_types(&mut items, &universe)?;
     pm.run_ast(StageKind::Typed, &mut items, &mut universe)?;
     Ok((items, universe))
 }
@@ -1686,10 +1686,10 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
     resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
-    let items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+    let mut items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 
     let universe = TypeUniverse::new();
-    check_types(&items, &universe)?;
+    check_types(&mut items, &universe)?;
     // 2026-08-01 (C4): watchdog contract checks also run on the `check` path
     // (parse_and_check) — `brivc check` must catch trigger/handler violations
     // and missing on-fire handlers the same way `brivc build` does.
@@ -1809,7 +1809,7 @@ fn validate_constraints(items: &[briv_compiler::ast::TopLevel]) -> Result<(), St
 }
 
 /// Type-check the program against a TypeUniverse.
-fn check_types(items: &[briv_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
+fn check_types(items: &mut [briv_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
     validate_constraints(items)?;
     briv_compiler::typechecker::check_program(items, universe)
         .map_err(|errors| {

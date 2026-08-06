@@ -324,12 +324,29 @@ leaked into codegen — investigate, don't accept.
 
 ---
 
-## 8. Out of Scope
+## 8. Out of Scope — and what was pulled in (2026-08-06)
 
-- Phase 7 reflection descriptor frontend (`.^`/`.^^` parse→descriptor); only the
-  value-side eval arm ships here.
-- Phase 8 closures in codegen (LLVM closure env lowering); interpreter closure
-  value ships here, backend lowering is separate.
+The items below were initially listed as deferred. After explicit request
+("I never signed off on deferring 7 and 8"), the Phase 7 reflection-descriptor
+and Phase 8 closure-codegen items were IMPLEMENTED in the follow-up commit:
+
+- ~~Phase 7 reflection descriptor frontend~~ → **done 2026-08-06**: `x.^^Type`
+  emits the protocol category code (Int=0, Float=1, Bool=2, Char=3, Bits=4,
+  Product=5, Sum=6, Ref=7, Closure=8, Void=9) as a compile-time i64 constant;
+  typechecker `resolve_reflect("Type")` returns `Type::int()`. Interpreter
+  (`reflect_type_code`) and codegen (`type_category_code`) share the codes
+  (rule #4 parity). `Size`/`Bytes`/`Alignment`/`Len`/`Ptr`/`Absolute` were
+  already emitted.
+- ~~Phase 8 closures in codegen~~ → **done 2026-08-06 (inline lowering)**:
+  `let f = x -> body` registers a `ClosureDef` in `FunctionContext::closure_lets`;
+  `Call(f, args)` inlines the body with params bound to the arg registers
+  (`last_val_temps` save/restore). Because let-bound SSA registers are
+  immutable, capture is by-value for let-bound immutables — matching the
+  interpreter (Slice E). **Remaining boundary:** escaping closures (stored,
+  passed as arguments, returned) need fn_ptr + heap env blocks + indirect
+  calls; not implemented.
+
+Still out of scope:
 - `analysis/region.rs` `eval_expr_simple` (own path, not `interpreter::`).
 - `PropertyValue`/`NavValue` (unrelated config types — do not confuse with
   `Value`).
@@ -342,9 +359,17 @@ leaked into codegen — investigate, don't accept.
 - [x] A — Drop dead variants, introduce `Atom` (commit boundary) — 2026-08-06
 - [x] B — Correct primitive eval arms (IsType/Tuple/List/Index) — 2026-08-06
 - [x] C — Match with patterns, guards, exhaustiveness — 2026-08-06
-- [ ] D — Struct/enum construction, field access, method calls
-- [ ] E — Closures
-- [ ] F — Slices, ranges, strings
-- [ ] G — Reflection value-side + reactor/fuzz/pgo migration
-- [ ] H — Derive (CEGIS) constructor migration
-- [ ] I — FFI boundary + Phase 17 close (grep guarantees, status matrix)
+- [x] D — Struct/enum construction, field access, method calls — 2026-08-06
+- [x] E — Closures — 2026-08-06
+- [x] F — Slices, ranges, strings — 2026-08-06
+- [x] G — Reflection value-side + reactor/fuzz/pgo migration — 2026-08-06
+- [x] H — Derive (CEGIS) constructor migration — 2026-08-06
+- [x] I — FFI boundary + Phase 17 close (grep guarantees, status matrix) — 2026-08-06
+
+**Phase 17 complete** (2026-08-06). The interpreter Value model now matches
+SPEC §2.2 exactly: atoms, bits, products, sums, references, closures, void.
+`dispatch_ffi` marshals at the boundary (marshal/unmarshal conversion +
+intrinsic-surface dispatch); compound construction from named types happens
+only in `ffi.rs` and the derive engine. Grep guarantees verified: no
+`Value::List`/`HashMap`/`Enum`/`Instance`/`Constructor`/`Defn` in live code,
+no eval path matches stdlib type names.

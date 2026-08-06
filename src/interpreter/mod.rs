@@ -138,7 +138,7 @@ impl Interpreter {
         // 2026-07-28: Term with value signals early return via TermReturn error.
         let mut result = Value::Void;
         for stmt in &defn.body {
-            match eval_statement(stmt, &mut self.heap, &mut self.state) {
+            match eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions) {
                 Ok(v) => result = v,
                 Err(RuntimeError::TermReturn(v)) => {
                     result = v;
@@ -160,11 +160,11 @@ impl Interpreter {
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
-        eval_expr(expr, &mut self.heap, &mut self.state)
+        eval_expr(expr, &mut self.heap, &mut self.state, &self.functions)
     }
 
     pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<Value, RuntimeError> {
-        eval_statement(stmt, &mut self.heap, &mut self.state)
+        eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions)
     }
 
     /// Pattern match a value against a pattern. Delegates to the full
@@ -174,11 +174,11 @@ impl Interpreter {
         crate::interpreter::pattern_match(pat, val, bindings)
     }
 
-    /// Compute the nesting depth of a list value (for FFI).
+    /// Compute the nesting depth of a product value (for FFI marshalling).
     pub fn list_nesting_depth(val: &Value) -> usize {
         match val {
-            Value::List(items) => {
-                items.iter().map(|v| Self::list_nesting_depth(v)).max().unwrap_or(0) + 1
+            Value::Product { fields, .. } => {
+                fields.iter().map(|v| Self::list_nesting_depth(v)).max().unwrap_or(0) + 1
             }
             _ => 0,
         }
@@ -228,10 +228,14 @@ pub enum Atom {
 /// collections and is slated for replacement by a product in a later slice;
 /// `Constructor` is the derive (CEGIS) engine's synthesis shape.
 ///
-/// 2026-08-06 (Slice B): `Product` added as the unnamed-product value
-/// (tuples, list literals, struct fields in declared order). SPEC §2.2 —
-/// stdlib list/map behavior is NOT interpreter knowledge; the interpreter
-/// holds the field sequence, stdlib owns the semantics.
+/// 2026-08-06 (Slice B): `Product` added as the product value (tuples, list
+/// literals, struct fields in declared order). SPEC §2.2 — stdlib list/map
+/// behavior is NOT interpreter knowledge; the interpreter holds the field
+/// sequence, stdlib owns the semantics.
+///
+/// 2026-08-06 (Slice D): struct literals produce a product carrying its
+/// declared field names (`names: Some(...)`); field access resolves the
+/// index from that map. Tuples and list literals stay unnamed (`names: None`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// The sole representational storage cell for opaque program data.
@@ -242,26 +246,54 @@ pub enum Value {
     /// when both would be valid as raw Bits(Vec<u8>).
     Atom(Atom),
 
-    /// An unnamed product: tuple/list-literal field sequence in declared
-    /// order. Named struct behavior stays at the typechecker/stdlib level.
-    Product(Vec<Value>),
+    /// A product: field sequence in declared order. `names` is present for
+    /// struct literals (drives `Expr::Field`), absent for tuples/list
+    /// literals (positional only). The interpreter is dynamically typed, so
+    /// the name→index map is carried with the value rather than resolved from
+    /// type context (which eval has none of).
+    Product {
+        fields: Vec<Value>,
+        names: Option<std::sync::Arc<Vec<String>>>,
+    },
 
     Void,
     Ref(Box<Value>),
 
-    // ── Compound types (synthesis engine) ────────────────────────────
-    // 2026-07-28: Constructor for enum variants and struct-like values.
-    // Produced by Expr::Constructor during synthesis evaluation.
-    // Used by the CEGIS loop to represent expressions in value space.
-    Constructor(String, Vec<Value>),
+    /// 2026-08-06 (Slice E): a closure — lambda params, body, and the captured
+    /// environment snapshot at creation. Application (Expr::Call on a closure
+    /// binding) binds params into a fresh env seeded from the captured one;
+    /// mutations never leak to the captured env or the caller (re-entrant).
+    Closure {
+        params: Arc<Vec<String>>,
+        body: Arc<Expr>,
+        env: Arc<HashMap<String, Value>>,
+    },
 
-    // ── FFI bridge variants ─────────────────────────────────────────
-    // 2026-07-14: These are produced/consumed only by the FFI layer
-    // when marshalling structured data to/from native libraries.
-    // No interpreter eval path should produce or match these.
-    /// Heterogeneous list of values — used for JSON arrays, SHM lists.
-    List(Vec<Value>),
+    // ── Compound types (synthesis engine) ────────────────────────────
+    /// 2026-08-06 (Slice H): a sum — an enum variant with payload, produced by
+    /// the derive (CEGIS) engine's `evaluate_synthesized` for `Call`/variant
+    /// expressions. The variant NAME travels with the value (SPEC §2.2
+    /// "sums"): the interpreter has no separate type registry, so name-based
+    /// pattern matching (Pattern::EnumVariant) and `Type` reflection resolve
+    /// from the value itself. The plan sketched a tag-index + global table;
+    /// carrying the name avoids global mutable tag state and keeps derive's
+    /// name-based variant dispatch working unchanged. Undo: if a shared type
+    /// registry ever reaches the interpreter, replace the name with a tag.
+    /// Renamed from `Constructor` (the synthesis-tree name was misleading —
+    /// the value is a tagged compound, not a constructor expression).
+    Sum { name: String, payload: Vec<Value> },
 }
+
+// 2026-08-06 (Slice I): the last ad-hoc variant (`List`) is dropped — no
+// producer remained (eval yields Product; FFI marshals through
+// ffi::marshal_value). The semantic model is now atoms, bits, products,
+// sums, references, closures, void (SPEC §2.2).
+//
+// 2026-07-14: Re-added List/Enum/Instance/HashMap variants for FFI bridge
+// code that marshals structured types between native libraries and the
+// interpreter. These are FFI-only — no interpreter eval path produces
+// them. (All dropped by 2026-08-06 Slice A/I; FFI marshalling lives in
+// ffi.rs.)
 
 impl Value {
     pub fn int(n: i64) -> Self {
@@ -282,6 +314,21 @@ impl Value {
 
     pub fn bits(data: Vec<u8>) -> Self {
         Value::Bits(data)
+    }
+
+    pub fn product(fields: Vec<Value>) -> Self {
+        Value::Product { fields, names: None }
+    }
+
+    pub fn named_product(fields: Vec<Value>, names: Vec<String>) -> Self {
+        Value::Product {
+            fields,
+            names: Some(std::sync::Arc::new(names)),
+        }
+    }
+
+    pub fn sum(name: String, payload: Vec<Value>) -> Self {
+        Value::Sum { name, payload }
     }
 
     pub fn void() -> Self {
@@ -609,7 +656,7 @@ mod tests {
         let inner_val = Value::int(42);
         bindings.insert("x".to_string(), Value::Ref(Box::new(inner_val)));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(42));
     }
 
@@ -620,7 +667,7 @@ mod tests {
         let mut bindings = std::collections::HashMap::new();
         bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(42));
     }
 
@@ -631,7 +678,7 @@ mod tests {
         let mut bindings = std::collections::HashMap::new();
         bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
-        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         match result {
             Value::Ref(wrapped) => assert_eq!(wrapped.as_i64(), Some(42)),
             _ => panic!("expected Ref, got {:?}", result),
@@ -646,7 +693,7 @@ mod tests {
         bindings.insert("x".to_string(), Value::int(99));
         let addrof = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
         let deref = Expr::Deref(Box::new(addrof));
-        let result = eval_expr(&deref, &mut heap, &mut bindings).unwrap();
+        let result = eval_expr(&deref, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(99));
     }
 }

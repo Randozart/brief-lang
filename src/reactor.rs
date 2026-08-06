@@ -332,12 +332,15 @@ impl Reactor {
             }
             Statement::Foreach { item, list, body, .. } => {
                 let list_val = interp.eval_expr(list)?;
-                if let Value::List(items) = list_val {
-                    for elem in items {
-                        interp.state.insert(item.clone(), elem);
-                        for stmt in body {
-                            interp.exec_stmt(stmt)?;
-                        }
+                // 2026-08-06 (Slice G/I): Expr::List evaluates to a Product.
+                let fields = match list_val {
+                    Value::Product { fields, .. } => fields,
+                    _ => Vec::new(),
+                };
+                for elem in fields {
+                    interp.state.insert(item.clone(), elem);
+                    for stmt in body {
+                        interp.exec_stmt(stmt)?;
                     }
                 }
                 Ok(StmtResult::Continue)
@@ -560,6 +563,28 @@ mod tests {
         let result = reactor.run(&mut interp).unwrap();
         assert!(result);
         assert_eq!(interp.state.get("x"), Some(&crate::interpreter::i64_to_bits(42)));
+    }
+
+    #[test]
+    fn test_foreach_iterates_product_list() {
+        // 2026-08-06 (Slice G): Expr::List evaluates to a Product; foreach
+        // must iterate it.
+        let foreach = Statement::Foreach {
+            item: "v".into(),
+            list: Box::new(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
+            body: vec![],
+        };
+        let txn = make_rct_txn(
+            "iter",
+            Expr::Bool(true),
+            Expr::Bool(true),
+            vec![foreach, Statement::Term(None)],
+        );
+        let mut interp = Interpreter::new();
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        let result = reactor.run(&mut interp).unwrap();
+        assert!(result);
+        assert_eq!(interp.state.get("v").and_then(|v| v.as_i64()), Some(20));
     }
 
     #[test]

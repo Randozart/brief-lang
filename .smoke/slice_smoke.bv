@@ -1,0 +1,7 @@
+node probe [true][false] {
+    let s: String = "abcdef";
+    let sub: String = s[1:4];
+    let even: String = s[0:5:2];
+    let total: Int = sub.^Len * 100 + even.^Len;
+    term Print#(total);
+};

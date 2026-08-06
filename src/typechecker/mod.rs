@@ -29,6 +29,10 @@ pub struct TypecheckContext<'a> {
     /// txn parameters). Used by is_mutable_location to distinguish mutable
     /// state fields from immutable let-bindings for PtrConst inference.
     pub state_keys: std::collections::HashSet<String>,
+    /// 2026-08-06 (diagnostics): every function/transaction name defined in the
+    /// program (defns, txns, imported bodies). Used to validate a declared
+    /// `op` binding's implementation target actually exists.
+    pub defined_fns: std::collections::HashSet<String>,
     /// 2026-08-01 (Phase 3): locals consumed by a `~op` (`a ~= b`, `dest ~<-
     /// src`, `~<- src;`). Reading a consumed local afterward is a use-after-move
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
@@ -118,6 +122,7 @@ impl<'a> TypecheckContext<'a> {
         TypecheckContext {
             bindings: HashMap::new(),
             state_keys: std::collections::HashSet::new(),
+            defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
             universe,
             casting_graph: crate::casting::graph::CastingGraph::new(),
@@ -200,6 +205,89 @@ impl<'a> TypecheckContext<'a> {
                 None => return None,
             }
         }
+    }
+
+    /// 2026-08-06 (Phase 5): does `ty` declare `op <op_name>` covering
+    /// `operand`, and what function implements it? Like `type_declares_op`
+    /// but returns the implementation fn name (from the binding's
+    /// `Call(fn, ...)` expr or the operator's `impl_args`) instead of a bool.
+    /// Walks `type_parents` so a subtype inherits its parent's op.
+    fn type_declares_op_binding(&self, ty: &Type, op_name: &str, operand: &Type) -> Option<String> {
+        let mut current = match ty {
+            Type::Custom(n) => n.as_str(),
+            Type::Applied(n, _) => n.as_str(),
+            _ => return None,
+        };
+        loop {
+            if let Some(bindings) = self.regular_bindings.get(current) {
+                for b in bindings {
+                    if b.name != op_name {
+                        continue;
+                    }
+                    // Coverage mirrors `type_declares_op`: only a declared
+                    // protocol VARIANT (`op Add(Float)`) covers the operand.
+                    // A colon-form binding (`op Add: add(#L, #R)`) has no
+                    // variant — it is documentation/authorization; the
+                    // category's protocol binding governs its dispatch.
+                    let covers = b
+                        .protocol_variant
+                        .as_ref()
+                        .map_or(false, |v| self.variant_covers(v, operand));
+                    if covers {
+                        if let Expr::Call(fn_name, _, _) = &b.expr {
+                            return Some(fn_name.clone());
+                        }
+                    }
+                }
+            }
+            if let Some(ops) = self.regular_ops.get(current) {
+                for op in ops {
+                    if op.op != op_name {
+                        continue;
+                    }
+                    let covers = op.params.first().map_or(false, |p| self.param_covers(p, operand));
+                    if covers {
+                        if let Some(name) = cross_op_fn_name(&op.impl_args) {
+                            return Some(name);
+                        }
+                    }
+                }
+            }
+            match self.type_parents.get(current) {
+                Some(parent) => current = parent.as_str(),
+                None => return None,
+            }
+        }
+    }
+
+    /// 2026-08-06 (Phase 5): resolve a binary op to its semantic OpBinding —
+    /// the chain `arithmetic_result_ty` used, returning the binding instead of
+    /// dropping it. Declared ops (type-body `op Name: fn(...)`) resolve to
+    /// `Function(fn)`; protocol bindings to the intrinsic. This is the single
+    /// resolution chain for both typechecking and op elaboration.
+    fn resolve_binary_op_binding(
+        &self,
+        kind: &BinaryOpKind,
+        lhs: &Type,
+        rhs: &Type,
+    ) -> Option<OpBinding> {
+        let rune = format!("{}", kind);
+        let op_name = crate::type_universe::operators::rune_to_op_name(&rune)?;
+        if let Some(fn_name) = self.type_declares_op_binding(lhs, &op_name, rhs) {
+            return Some(OpBinding::Function(fn_name));
+        }
+        if let Some(binding) = self.protocol_binding_for(&rune, lhs) {
+            return Some(binding);
+        }
+        if let Some(binding) =
+            crate::type_universe::operators::get_operator_intrinsic(self.universe, &rune, lhs)
+        {
+            return Some(binding);
+        }
+        if let Some(binding) = self.protocol_binding_for(&rune, rhs) {
+            return Some(binding);
+        }
+        crate::type_universe::operators::get_operator_intrinsic(self.universe, &rune, rhs)
     }
 
     /// 2026-08-03 (P1.4): the variant of a declared protocol string —
@@ -980,6 +1068,23 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
     // Intrinsic call (ends with #): look up signature
     if name.ends_with('#') {
         let sig = get_intrinsic_signature(name).ok_or_else(|| {
+            // 2026-08-06 (diagnostics): the PascalCase intrinsic forms of the
+            // env macros were renamed to lowercase macros — direct the user
+            // instead of reporting an "unknown intrinsic".
+            if matches!(name, "GetEnvInt#" | "GetEnv#" | "GetEnvOrDefault#") {
+                let macro_name = match name {
+                    "GetEnvInt#" => "get_env_int!",
+                    "GetEnvOrDefault#" => "get_env_or_default!",
+                    _ => "get_env!",
+                };
+                return TypeError::InvalidOperation {
+                    operation: format!("call to '{}'", name),
+                    type_name: format!(
+                        "the lowercase macro '{}' replaced this PascalCase name — rename the call site",
+                        macro_name
+                    ),
+                };
+            }
             let found: Vec<String> = args
                 .iter()
                 .filter_map(|a| infer_type_only(a, ctx).ok())
@@ -1105,22 +1210,205 @@ fn arithmetic_result_ty(
     lhs_ty: &Type,
     rhs_ty: &Type,
     lhs_str: &str,
-    rune: &str,
 ) -> Result<Type, TypeError> {
-    if ctx.has_cross_type_overload(rune, lhs_ty, rhs_ty) {
-        return Ok(lhs_ty.clone());
-    }
-    let binding = ctx
-        .protocol_binding_for(rune, lhs_ty)
-        .or_else(|| get_operator_intrinsic(ctx.universe, rune, lhs_ty))
-        .or_else(|| ctx.protocol_binding_for(rune, rhs_ty))
-        .or_else(|| get_operator_intrinsic(ctx.universe, rune, rhs_ty));
+    let binding = ctx.resolve_binary_op_binding(kind, lhs_ty, rhs_ty);
     match binding {
         Some(_) => Ok(lhs_ty.clone()),
         None => Err(TypeError::InvalidOperation {
             operation: format!("'{}'", kind),
             type_name: lhs_str.to_string(),
         }),
+    }
+}
+
+// ── Op elaboration (Phase 5) ─────────────────────────────────────────
+
+/// 2026-08-06 (Phase 5): rewrite every `BinaryOp` whose resolved binding is a
+/// declared Function into `Expr::Call(fn, [l, r])`, so lowering invokes the
+/// declared implementation instead of re-dispatching by operand type. Protocol
+/// intrinsics stay as BinaryOp (their category-dispatch lowering is already
+/// correct and benchmark-stable). Runs after typechecking so types are known;
+/// mutates `items` in place. A declared op whose implementation target is not
+/// a defined function is an error (was a silent link-time undefined symbol).
+pub fn elaborate_ops(items: &mut [TopLevel], universe: &TypeUniverse, env: &CheckEnv) -> Vec<TypeError> {
+    let mut errors = Vec::new();
+    for item in items.iter_mut() {
+        let mut ctx = make_typecheck_context(env, universe);
+        match item {
+            TopLevel::Definition(d) => {
+                for (name, ty) in &d.parameters {
+                    ctx.bindings.insert(name.clone(), ty.clone());
+                }
+                elaborate_stmts(&mut d.body, &mut ctx, &mut errors);
+                elaborate_expr(&mut d.contract.pre_condition, &mut ctx, &mut errors);
+                elaborate_expr(&mut d.contract.post_condition, &mut ctx, &mut errors);
+            }
+            TopLevel::Transaction(t) => {
+                for (name, ty) in &t.parameters {
+                    ctx.bindings.insert(name.clone(), ty.clone());
+                }
+                elaborate_stmts(&mut t.body, &mut ctx, &mut errors);
+                elaborate_expr(&mut t.contract.pre_condition, &mut ctx, &mut errors);
+                elaborate_expr(&mut t.contract.post_condition, &mut ctx, &mut errors);
+            }
+            TopLevel::Statement(stmt) => elaborate_stmt(stmt, &mut ctx, &mut errors),
+            TopLevel::Constant(c) => elaborate_expr(&mut c.expr, &mut ctx, &mut errors),
+            _ => {}
+        }
+    }
+    errors
+}
+
+fn elaborate_stmts(stmts: &mut [Statement], ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
+    for stmt in stmts.iter_mut() {
+        elaborate_stmt(stmt, ctx, errors);
+    }
+}
+
+fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
+    match stmt {
+        Statement::Let { name, names, ty, expr, .. } => {
+            if let Some(e) = expr {
+                elaborate_expr(e, ctx, errors);
+            }
+            // Track the binding so later statements resolve its type (mirrors
+            // infer_statement). Declared type wins; else infer the initializer.
+            let bound_ty = ty.clone().or_else(|| {
+                expr.as_ref().and_then(|e| infer_type_only(e, ctx).ok())
+            });
+            for n in std::iter::once(&*name).chain(names.iter()) {
+                if let Some(t) = &bound_ty {
+                    ctx.bindings.insert(n.clone(), t.clone());
+                }
+            }
+        }
+        Statement::Assign(l, r) => {
+            elaborate_expr(l, ctx, errors);
+            elaborate_expr(r, ctx, errors);
+        }
+        Statement::ArrowAssign { value, .. } => elaborate_expr(value, ctx, errors),
+        Statement::Term(Some(e))
+        | Statement::EndProgram(Some(e))
+        | Statement::Rollback(Some(e)) => elaborate_expr(e, ctx, errors),
+        Statement::Expression(e) | Statement::Gate(e) => elaborate_expr(e, ctx, errors),
+        Statement::Guarded(cond, body) => {
+            elaborate_expr(cond, ctx, errors);
+            elaborate_stmts(body, ctx, errors);
+        }
+        Statement::If(cond, then, else_) => {
+            elaborate_expr(cond, ctx, errors);
+            elaborate_stmts(then, ctx, errors);
+            elaborate_stmts(else_, ctx, errors);
+        }
+        Statement::Block(body) | Statement::SyncBlock(body) => elaborate_stmts(body, ctx, errors),
+        Statement::Foreach { list, body, .. } => {
+            elaborate_expr(list, ctx, errors);
+            elaborate_stmts(body, ctx, errors);
+        }
+        _ => {}
+    }
+}
+
+fn elaborate_expr(expr: &mut Expr, ctx: &mut TypecheckContext, errors: &mut Vec<TypeError>) {
+    match expr {
+        Expr::Identifier(_) => {
+            // 2026-08-06 (fix): closures are real first-class values now (a
+            // let-bound lambda is a heap env block address in codegen), so a
+            // Function-typed binding used as a value is legal. The typechecker
+            // (infer_expression) still rejects a Function value where a
+            // non-Function is required.
+        }
+        Expr::BinaryOp(kind, l, r) => {
+            let lt = infer_type_only(l, ctx).unwrap_or(Type::int());
+            let rt = infer_type_only(r, ctx).unwrap_or(Type::int());
+            if let Some(OpBinding::Function(fn_name)) = ctx.resolve_binary_op_binding(kind, &lt, &rt) {
+                // 2026-08-06 (diagnostics): the declared op's implementation
+                // target must be a defined function — a typo would otherwise
+                // surface as a link-time undefined symbol.
+                if !ctx.defined_fns.contains(&fn_name) {
+                    errors.push(TypeError::InvalidOperation {
+                        operation: format!("'{}'", kind),
+                        type_name: format!(
+                            "op target '{}' is not a defined function — declare it or fix the op binding",
+                            fn_name
+                        ),
+                    });
+                    elaborate_expr(l, ctx, errors);
+                    elaborate_expr(r, ctx, errors);
+                    return;
+                }
+                // Rewrite children bottom-up, then fold the op into a call to
+                // the declared implementation.
+                elaborate_expr(l, ctx, errors);
+                elaborate_expr(r, ctx, errors);
+                *expr = Expr::Call(fn_name, vec![(**l).clone(), (**r).clone()], None);
+                return;
+            }
+            elaborate_expr(l, ctx, errors);
+            elaborate_expr(r, ctx, errors);
+        }
+        Expr::Block(stmts) => elaborate_stmts(stmts, ctx, errors),
+        Expr::If(c, t, e) => {
+            elaborate_expr(c, ctx, errors);
+            elaborate_expr(t, ctx, errors);
+            if let Some(e) = e {
+                elaborate_expr(e, ctx, errors);
+            }
+        }
+        Expr::Match(scrut, arms) => {
+            elaborate_expr(scrut, ctx, errors);
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard {
+                    elaborate_expr(g, ctx, errors);
+                }
+                elaborate_expr(&mut arm.body, ctx, errors);
+            }
+        }
+        Expr::Call(_, args, _) => {
+            for a in args.iter_mut() {
+                elaborate_expr(a, ctx, errors);
+            }
+        }
+        Expr::List(es) | Expr::Tuple(es) => {
+            for e in es.iter_mut() {
+                elaborate_expr(e, ctx, errors);
+            }
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for (_, f) in fields.iter_mut() {
+                elaborate_expr(f, ctx, errors);
+            }
+        }
+        Expr::Index(o, i) => {
+            elaborate_expr(o, ctx, errors);
+            elaborate_expr(i, ctx, errors);
+        }
+        Expr::Slice { array, start, end, stride } => {
+            elaborate_expr(array, ctx, errors);
+            for bound in [start, end, stride].into_iter().flatten() {
+                elaborate_expr(bound, ctx, errors);
+            }
+        }
+        Expr::Lambda(_, b) => elaborate_expr(b, ctx, errors),
+        Expr::Cast(e, _)
+        | Expr::IsType(e, _)
+        | Expr::Consume(e)
+        | Expr::Deref(e)
+        | Expr::AddrOf(e)
+        | Expr::Reflect(e, _, _)
+        | Expr::Within(e, _) => elaborate_expr(e, ctx, errors),
+        Expr::MethodCall(recv, _, args, _) => {
+            elaborate_expr(recv, ctx, errors);
+            for a in args.iter_mut() {
+                elaborate_expr(a, ctx, errors);
+            }
+        }
+        Expr::PluginIntercept { args, .. } => {
+            for a in args.iter_mut() {
+                elaborate_expr(a, ctx, errors);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1150,7 +1438,6 @@ fn infer_binary_op(
         _ => {
             // Arithmetic/bitwise: return LHS type
             // Check via operator resolution
-            let rune = format!("{}", kind);
             // 2026-08-03 (operator-resolution fix): resolution order is
             //   declared (own + parents) → protocol bindings.
             // A type declaring `op Add(#Float)`/`op Add(Float)` authorizes
@@ -1158,7 +1445,7 @@ fn infer_binary_op(
             // inherits #Int's protocol binding (Add → AddI64#). Only the
             // protocol bindings are hardcoded — keyed by category, never by
             // type name. Same-type custom ops now resolve here too.
-            arithmetic_result_ty(ctx, kind, &lhs_ty, &rhs_ty, &lhs_str, &rune)?
+            arithmetic_result_ty(ctx, kind, &lhs_ty, &rhs_ty, &lhs_str)?
         }
     };
 
@@ -1835,7 +2122,7 @@ fn validate_contract(
     }
 }
 
-pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
+pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
     let state_bindings: std::collections::HashMap<String, Type> = items
@@ -1950,7 +2237,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // 2026-07-27: Pre-collect Parse bindings and type parents from ALL TypeDef items.
     let mut all_parse_bindings: HashMap<String, Vec<OperatorBinding>> = HashMap::new();
     let mut all_type_parents: HashMap<String, String> = HashMap::new();
-    for item in items {
+    for item in items.iter() {
         if let TopLevel::TypeDef(td) = item {
             if !td.body.op_bindings.is_empty() {
                 all_parse_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
@@ -1979,7 +2266,7 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // cstring_concat). An op on a sub-protocol value prefers its own variant's
     // op (zero cast), falling back to the base binding via a delta cast.
     let mut all_cross_ops: HashMap<String, HashMap<String, String>> = HashMap::new();
-    for item in items {
+    for item in items.iter() {
         if let TopLevel::ProtocolDef(pd) = item {
             for op in &pd.cross_ops {
                 let Some(fn_name) = cross_op_fn_name(&op.impl_args) else { continue };
@@ -2036,20 +2323,41 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         }
     }
 
-    for item in items {
-        if let Err(e) = check_top_level(
-            item, universe, &state_bindings, &fn_return_types, &fn_param_types,
-            &all_parse_bindings, &all_type_parents, &all_regular_ops, &all_regular_bindings,
-            &all_type_slots, &all_type_members, &all_type_params, &all_type_protocols,
-            &all_cross_ops, &melds,
-        ) {
+    let defined_fns: std::collections::HashSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::Definition(d) => Some(d.name.clone()),
+            TopLevel::Transaction(t) => Some(t.name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let env = CheckEnv {
+        state_bindings: &state_bindings,
+        fn_return_types: &fn_return_types,
+        fn_param_types: &fn_param_types,
+        all_parse_bindings: &all_parse_bindings,
+        all_type_parents: &all_type_parents,
+        all_regular_ops: &all_regular_ops,
+        all_regular_bindings: &all_regular_bindings,
+        all_type_slots: &all_type_slots,
+        all_type_members: &all_type_members,
+        all_type_params: &all_type_params,
+        all_type_protocols: &all_type_protocols,
+        all_cross_ops: &all_cross_ops,
+        melds: &melds,
+        defined_fns: &defined_fns,
+    };
+
+    for item in items.iter() {
+        if let Err(e) = check_top_level(item, universe, &env) {
             errors.push(e);
         }
     }
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
     // bound. Without this, `len = "hello"` inside a member passes silently.
-    for item in items {
+    for item in items.iter() {
         if let TopLevel::TypeDef(td) = item {
             if td.body.members.is_empty() {
                 continue;
@@ -2128,6 +2436,12 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
         .collect();
     check_beginprogram_program(&beginprogram_nodes, &mut errors);
 
+    if errors.is_empty() {
+        // 2026-08-06 (Phase 5): with types known, elaborate declared ops into
+        // calls to their implementations (mutates items in place). Any error
+        // (e.g. an op target that is not a defined function) fails the check.
+        errors.extend(elaborate_ops(items, universe, &env));
+    }
     if errors.is_empty() {
         Ok(())
     } else {
@@ -2323,49 +2637,65 @@ fn cross_op_fn_name(impl_args: &Option<PropertyValue>) -> Option<String> {
     }
 }
 
-fn check_top_level(
-    item: &TopLevel,
-    universe: &TypeUniverse,
-    state_bindings: &HashMap<String, Type>,
-    fn_return_types: &HashMap<String, Type>,
-    fn_param_types: &HashMap<String, Vec<Type>>,
-    all_parse_bindings: &HashMap<String, Vec<OperatorBinding>>,
-    all_type_parents: &HashMap<String, String>,
-    all_regular_ops: &HashMap<String, Vec<crate::ast::top::OperatorDef>>,
-    all_regular_bindings: &HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
-    all_type_slots: &HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
-    all_type_members: &HashMap<String, Vec<TopLevel>>,
-    all_type_params: &HashMap<String, Vec<String>>,
-    all_type_protocols: &HashMap<String, String>,
-    all_cross_ops: &HashMap<String, HashMap<String, String>>,
-    melds: &std::collections::HashSet<(String, String)>,
-) -> Result<(), TypeError> {
+/// 2026-08-06 (Phase 5): the pre-collected typecheck maps, bundled so
+/// `check_top_level` and `elaborate_ops` share one signature (Praetor rule 4).
+struct CheckEnv<'a> {
+    state_bindings: &'a HashMap<String, Type>,
+    fn_return_types: &'a HashMap<String, Type>,
+    fn_param_types: &'a HashMap<String, Vec<Type>>,
+    all_parse_bindings: &'a HashMap<String, Vec<OperatorBinding>>,
+    all_type_parents: &'a HashMap<String, String>,
+    all_regular_ops: &'a HashMap<String, Vec<crate::ast::top::OperatorDef>>,
+    all_regular_bindings: &'a HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
+    all_type_slots: &'a HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
+    all_type_members: &'a HashMap<String, Vec<TopLevel>>,
+    all_type_params: &'a HashMap<String, Vec<String>>,
+    all_type_protocols: &'a HashMap<String, String>,
+    all_cross_ops: &'a HashMap<String, HashMap<String, String>>,
+    melds: &'a std::collections::HashSet<(String, String)>,
+    /// 2026-08-06 (diagnostics): every defined function/transaction name.
+    defined_fns: &'a std::collections::HashSet<String>,
+}
+
+/// Build a typecheck context from the pre-collected maps. Shared by
+/// `check_top_level` (typechecking) and `elaborate_ops` (Phase 5 op lowering).
+fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) -> TypecheckContext<'a> {
     let mut ctx = TypecheckContext::new(universe);
-    ctx.melds = melds.clone();
+    ctx.melds = env.melds.clone();
     // 2026-07-27: Inject pre-collected parse bindings and type parents.
-    for (type_name, bindings) in all_parse_bindings {
+    for (type_name, bindings) in env.all_parse_bindings {
         ctx.register_parse_bindings(type_name, bindings.clone(), None);
     }
-    ctx.type_parents = all_type_parents.clone();
+    ctx.type_parents = env.all_type_parents.clone();
     // 2026-07-31: Inject regular operator declarations for cross-type overloads.
-    ctx.regular_ops = all_regular_ops.clone();
-    ctx.regular_bindings = all_regular_bindings.clone();
+    ctx.regular_ops = env.all_regular_ops.clone();
+    ctx.regular_bindings = env.all_regular_bindings.clone();
     // 2026-07-31: Inject struct/obj slots and members for field/method access.
-    ctx.type_slots = all_type_slots.clone();
-    ctx.type_members = all_type_members.clone();
-    ctx.type_params = all_type_params.clone();
-    ctx.fn_param_types = fn_param_types.clone();
-    ctx.type_protocols = all_type_protocols.clone();
-    ctx.variant_cross_ops = all_cross_ops.clone();
+    ctx.type_slots = env.all_type_slots.clone();
+    ctx.type_members = env.all_type_members.clone();
+    ctx.type_params = env.all_type_params.clone();
+    ctx.fn_param_types = env.fn_param_types.clone();
+    ctx.type_protocols = env.all_type_protocols.clone();
+    ctx.variant_cross_ops = env.all_cross_ops.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
-    for (name, ty) in state_bindings {
+    for (name, ty) in env.state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
         ctx.state_keys.insert(name.clone());
     }
     // 2026-07-25: Inject function return types for call inference.
-    for (name, ty) in fn_return_types {
+    for (name, ty) in env.fn_return_types {
         ctx.fn_return_types.insert(name.clone(), ty.clone());
     }
+    ctx.defined_fns = env.defined_fns.clone();
+    ctx
+}
+
+fn check_top_level<'a>(
+    item: &TopLevel,
+    universe: &'a TypeUniverse,
+    env: &CheckEnv<'a>,
+) -> Result<(), TypeError> {
+    let mut ctx = make_typecheck_context(env, universe);
     // 2026-07-18: Txn parameters are also mutable state locations (they hold
     // state field values within the txn body).
     if let TopLevel::Transaction(txn) = item {
@@ -2392,7 +2722,7 @@ fn check_top_level(
             Ok(())
         }
         // 2026-07-25: Unwrap exports so exported defns are type-checked.
-        TopLevel::Export(e) => check_top_level(&e.inner, universe, state_bindings, fn_return_types, fn_param_types, all_parse_bindings, all_type_parents, all_regular_ops, all_regular_bindings, all_type_slots, all_type_members, all_type_params, all_type_protocols, all_cross_ops, melds),
+        TopLevel::Export(e) => check_top_level(&e.inner, universe, env),
         TopLevel::Transaction(txn) => {
             for (name, ty) in &txn.parameters {
                 ctx.bindings.insert(name.clone(), ty.clone());
@@ -2536,7 +2866,9 @@ fn resolve_reflect(
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
             }
-            Ok(Type::Custom("Type".into()))
+            // 2026-08-06 (Phase 8): `x.^^Type` is a frozen descriptor — the
+            // protocol category code, an i64 (matching interpreter + codegen).
+            Ok(Type::int())
         }
         _ => Err(TypeError::InvalidOperation {
             operation: format!("reflection target '{}'", target),
@@ -2745,9 +3077,9 @@ mod tests {
     fn check(src: &str) -> Result<(), Vec<TypeError>> {
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = crate::parser::Parser::new(tokens, src);
-        let items = p.parse_program().unwrap();
+        let mut items = p.parse_program().unwrap();
         let universe = crate::type_universe::TypeUniverse::new();
-        check_program(&items, &universe)
+        check_program(&mut items, &universe)
     }
 
     /// `Int * Float` is a type error — no implicit numeric coercion.
@@ -2874,10 +3206,158 @@ node t [count < 5][count == 5] {
         assert!(check(src).is_ok(), "cross-type op overload must authorize Int * MyNum");
     }
 
+    /// 2026-08-06 (Phase 5): a declared variant op (`op Add(Int): my_add`)
+    /// ELABORATES into a call to its implementation — the BinaryOp becomes
+    /// `Expr::Call("my_add", [l, r])` after check_program.
+    #[test]
+    fn declared_variant_op_elaborates_to_call() {
+        let src = r#"
+defn my_add(a: Int, b: Int) -> Int { term (a * 3) + b; };
+type MyNum : #Int {
+    op Add(Int): my_add(#L, #R);
+};
+node start [true][false] {
+    let x: MyNum = 4;
+    let y: Int = 2;
+    let z: MyNum = x + y;
+    term;
+};
+"#;
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let mut items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&mut items, &universe).unwrap();
+        let node = items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::Transaction(t) if t.name == "start" => Some(t),
+                _ => None,
+            })
+            .expect("node 'start'");
+        let z_expr = node
+            .body
+            .iter()
+            .find_map(|s| match s {
+                Statement::Let { name, expr, .. } if name == "z" => expr.as_ref(),
+                _ => None,
+            })
+            .expect("let z");
+        match z_expr {
+            Expr::Call(fn_name, args, _) => {
+                assert_eq!(fn_name, "my_add", "declared op must lower to its function");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected Call(my_add, ...), got {other:?}"),
+        }
+    }
+
+    /// 2026-08-06 (Phase 5): the bootstrap colon-form `op Add: add(#L, #R)`
+    /// is documentation — `Int + Int` stays a BinaryOp (protocol intrinsic
+    /// lowering), never rewritten to the undefined `add` symbol.
+    #[test]
+    fn colon_form_doc_binding_is_not_elaborated() {
+        let src = r#"
+type IntDoc : #Int {
+    op Add: add(#L, #R);
+};
+node start [true][false] {
+    let a: Int = 1;
+    let b: Int = 2;
+    let c: Int = a + b;
+    term;
+};
+"#;
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let mut items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&mut items, &universe).unwrap();
+        let node = items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::Transaction(t) if t.name == "start" => Some(t),
+                _ => None,
+            })
+            .expect("node 'start'");
+        let c_expr = node
+            .body
+            .iter()
+            .find_map(|s| match s {
+                Statement::Let { name, expr, .. } if name == "c" => expr.as_ref(),
+                _ => None,
+            })
+            .expect("let c");
+        assert!(
+            matches!(c_expr, Expr::BinaryOp(BinaryOpKind::Add, _, _)),
+            "Int + Int must stay a BinaryOp (protocol lowering), got {c_expr:?}"
+        );
+    }
+
+    // ── Diagnostics sweep (2026-08-06) ─────────────────────────────
+
+    /// A declared op whose implementation target is not a defined function
+    /// must be a typecheck error (was a silent link-time undefined symbol).
+    #[test]
+    fn undefined_op_target_is_an_error() {
+        let src = r#"
+type MyNum : #Int {
+    op Add(Int): nonexistent(#L, #R);
+};
+node start [true][false] {
+    let x: MyNum = 1;
+    let y: Int = 2;
+    let z: MyNum = x + y;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("not a defined function")),
+            "expected an undefined-op-target error, got {err:?}"
+        );
+    }
+
+    /// A closure used as a value (not a call) must be an error — codegen
+    /// would otherwise silently read the placeholder register 0.
+    #[test]
+    fn closure_used_as_value_is_legal() {
+        // 2026-08-06 (fix): a closure is a real first-class value (env block
+        // address in codegen) — assigning one to a Function-typed binding is
+        // legal now.
+        let src = r#"
+node start [true][false] {
+    let f = x -> x + 1;
+    let g = f;
+    term;
+};
+"#;
+        assert!(
+            check(src).is_ok(),
+            "closure-as-value must typecheck; the closure is a first-class value"
+        );
+    }
+
+    /// The PascalCase intrinsic forms of the env macros must direct the user
+    /// to the lowercase macros, not report an "unknown intrinsic".
+    #[test]
+    fn get_env_int_hash_guides_to_lowercase_macro() {
+        let src = r#"
+node start [true][false] {
+    let n: Int = GetEnvInt#("BOUND");
+    term Print#(n);
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("get_env_int!")),
+            "expected a rename-guidance error, got {err:?}"
+        );
+    }
+
     /// Without the cross-type overload, `Int * MyNum` errors.
     #[test]
-    fn missing_cross_type_overload_errors() {
-        let src = r#"
+    fn missing_cross_type_overload_errors() {        let src = r#"
 type MyNum : #Int {
     op Sub(#Int): func(#L, #R);
 };
@@ -3300,9 +3780,9 @@ mod phase3_tests {
     fn check(src: &str) -> Result<(), Vec<TypeError>> {
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = crate::parser::Parser::new(tokens, src);
-        let items = p.parse_program().unwrap();
+        let mut items = p.parse_program().unwrap();
         let universe = crate::type_universe::TypeUniverse::new();
-        check_program(&items, &universe)
+        check_program(&mut items, &universe)
     }
 
     fn err_is(src: &str, needle: &str) -> bool {
@@ -3391,9 +3871,9 @@ mod phase4_tests {
     fn check(src: &str) -> Result<(), Vec<TypeError>> {
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = crate::parser::Parser::new(tokens, src);
-        let items = p.parse_program().unwrap();
+        let mut items = p.parse_program().unwrap();
         let universe = crate::type_universe::TypeUniverse::new();
-        check_program(&items, &universe)
+        check_program(&mut items, &universe)
     }
 
     // 2026-08-01 (Phase 4): the stream symbols — `#StdOut` accepts any value,
@@ -3440,9 +3920,9 @@ mod phase5_tests {
     fn check(src: &str) -> Result<(), Vec<TypeError>> {
         let tokens = crate::lexer::tokenize(src).unwrap();
         let mut p = crate::parser::Parser::new(tokens, src);
-        let items = p.parse_program().unwrap();
+        let mut items = p.parse_program().unwrap();
         let universe = crate::type_universe::TypeUniverse::new();
-        check_program(&items, &universe)
+        check_program(&mut items, &universe)
     }
 
     fn err_is(src: &str, needle: &str) -> bool {

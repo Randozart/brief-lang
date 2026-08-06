@@ -138,9 +138,18 @@ impl<'a> Parser<'a> {
             self.pos += 1;
             Ok(())
         } else {
+            // 2026-08-06 (diagnostics): `x => body` is a common lambda spelling
+            // mistake — match arms use `=>`, lambda parameters use `->`.
+            let mut found = format!("{}", cur);
+            if matches!(kind, Token::Semicolon) && matches!(cur, Token::FatArrow) {
+                found = format!(
+                    "{} (hint: match arms use '=>'; lambda parameters use '->', e.g. `x -> body`)",
+                    found
+                );
+            }
             Err(SyntaxError::UnexpectedToken {
                 expected: format!("{:?}", kind),
-                found: format!("{}", cur),
+                found,
                 span: self.make_span(span.clone()),
             })
         }

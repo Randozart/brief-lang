@@ -611,6 +611,7 @@ fn resolve_address_for_interp(id: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_add_i64() {
@@ -672,7 +673,7 @@ mod tests {
                 Box::new(Expr::Quoted(a.as_bytes().to_vec())),
                 Box::new(Expr::Quoted(b.as_bytes().to_vec())),
             );
-            eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true()
+            eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true()
         };
         assert!(eq("hello", "hello"));
         assert!(!eq("hello", "world"));
@@ -710,7 +711,7 @@ mod tests {
         );
         bindings.insert("a".into(), Value::Atom(Atom::Int(a1)));
         bindings.insert("b".into(), Value::Atom(Atom::Int(a2)));
-        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+        assert!(eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true());
 
         // Ne on the same two handles is false.
         let expr_ne = Expr::BinaryOp(
@@ -718,7 +719,7 @@ mod tests {
             Box::new(Expr::Identifier("a".into())),
             Box::new(Expr::Identifier("b".into())),
         );
-        assert!(!eval_expr(&expr_ne, &mut heap, &mut bindings).unwrap().is_true());
+        assert!(!eval_expr(&expr_ne, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true());
 
         // Differing content at distinct addresses is unequal.
         let c = alloc_str(&mut heap, "different content");
@@ -728,7 +729,7 @@ mod tests {
             Box::new(Expr::Identifier("a".into())),
             Box::new(Expr::Identifier("c".into())),
         );
-        assert!(!eval_expr(&expr2, &mut heap, &mut bindings).unwrap().is_true());
+        assert!(!eval_expr(&expr2, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true());
     }
 
     #[test]
@@ -746,13 +747,13 @@ mod tests {
             Box::new(Expr::Decimal(5)),
             Box::new(Expr::Decimal(5)),
         );
-        assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+        assert!(eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true());
         let expr = Expr::BinaryOp(
             BinaryOpKind::Eq,
             Box::new(Expr::Decimal(5)),
             Box::new(Expr::Decimal(6)),
         );
-        assert!(!eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
+        assert!(!eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap().is_true());
     }
 
     #[test]
@@ -770,7 +771,7 @@ mod tests {
                 Box::new(Expr::Quoted(a.as_bytes().to_vec())),
                 Box::new(Expr::Quoted(b.as_bytes().to_vec())),
             );
-            match eval_expr(&expr, &mut heap, &mut bindings).unwrap() {
+            match eval_expr(&expr, &mut heap, &mut bindings, &HashMap::new()).unwrap() {
                 Value::Bits(bytes) => bytes,
                 other => panic!("expected Bits, got {other:?}"),
             }
@@ -784,7 +785,7 @@ mod tests {
         assert_eq!(eval(BinaryOpKind::BitXor, "a", "a"), vec![0]);
         // ~ on content bytes (unary)
         let un = Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(Expr::Quoted(b"a".to_vec())));
-        match eval_expr(&un, &mut heap, &mut bindings).unwrap() {
+        match eval_expr(&un, &mut heap, &mut bindings, &HashMap::new()).unwrap() {
             Value::Bits(bytes) => assert_eq!(bytes, vec![0x9E]), // ~0x61 = 0x9E
             other => panic!("expected Bits, got {other:?}"),
         }
@@ -883,14 +884,14 @@ mod tests {
             "Len".into(),
             ReflectKind::Runtime,
         );
-        let len = eval_expr(&len_expr, &mut heap, &mut bindings).unwrap();
+        let len = eval_expr(&len_expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(len.as_i64(), Some(5), "héllo has 5 UTF8 chars");
         let bytes_expr = Expr::Reflect(
             Box::new(Expr::Identifier("s".into())),
             "Bytes".into(),
             ReflectKind::CompileTime,
         );
-        let bytes = eval_expr(&bytes_expr, &mut heap, &mut bindings).unwrap();
+        let bytes = eval_expr(&bytes_expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(bytes.as_i64(), Some(6), "héllo is 6 bytes");
     }
 }

@@ -17,7 +17,7 @@ pub fn eval_cell_txn(
     let mut bindings = state.clone();
     let mut result = Value::Void;
     for stmt in &txn.body {
-        result = eval_statement(stmt, heap, &mut bindings)?;
+        result = eval_statement(stmt, heap, &mut bindings, &HashMap::new())?;
     }
     Ok(result)
 }

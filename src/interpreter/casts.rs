@@ -30,7 +30,9 @@ pub fn eval_is_type(val: &Value, target: &Type) -> Result<Value, RuntimeError> {
         // is a member.
         Type::HashWord(name) if name == "#Bit" => matches!(val, Value::Bits(_)),
         Type::HashWordVariant(name, _) if name == "#Bit" => matches!(val, Value::Bits(_)),
-        Type::Tuple(_) | Type::Applied(_, _) | Type::Generic(_, _) => matches!(val, Value::Product(_)),
+        Type::Tuple(_) | Type::Applied(_, _) | Type::Generic(_, _) => {
+            matches!(val, Value::Product { .. })
+        }
         Type::Ptr(_) | Type::PtrConst(_) => matches!(val, Value::Ref(_)),
         Type::Void => matches!(val, Value::Void),
         Type::Union(variants) => variants
