@@ -151,8 +151,45 @@ lowering is new capability.
 ## 6. Tracker
 
 - [x] Plan doc
-- [x] Fix 2: pure-fold `.continue` bridge
-- [ ] Fix 3: scheduler never plans unemittable frees
-- [ ] Fix 1: interpreter user-fn support
-- [ ] Fix 4: escaping closures slice 1
-- [ ] Tests + Praetor + benchmarks + commit
+- [x] Fix 2: pure-fold `.continue` bridge — committed `4ef243d1`
+- [x] Fix 3: scheduler never plans unemittable frees — committed `4ef243d1`
+- [x] Fix 1: interpreter user-fn support — committed `4ef243d1`
+- [ ] Fix 4: escaping closures slice 1 — **scoped, not yet implemented**
+- [x] Tests + Praetor + benchmarks + commit
+
+## 7. Fixes 1–3 delivered (commit `4ef243d1`)
+
+- **Interpreter user-fn support**: `eval_expr`/`eval_statement`/`eval_call`
+  thread a functions registry; `eval_call` applies a `FunctionDef` with
+  dynamic scoping (body reads the caller's state) and catches `term`-as-return.
+  `EvalScope` bundles bindings+functions so the four eval helpers stay under
+  the Praetor 6-param gate. 3 new tests.
+- **Pure-fold IR bug**: `.continue` → `.end` bridge. Verified the const-bound
+  reactive heap loop compiles.
+- **Scheduler planning**: `analyze` takes a foldable set (bounded_pre txns)
+  and skips non-foldable last consumers ("lives for the program"). 1 new
+  scheduler test; the leak-warning backend test now asserts the no-schedule
+  behavior.
+- 1616 lib tests; Praetor no new diagnostics (36 identical); 36/36 MATCH.
+
+## 8. Fix 4 — escaping closures (remaining slice, needs a focused session)
+
+The full escaping-closure lowering is a large backend feature with type
+plumbing (function-typed values) and risk; it is deliberately NOT rushed at
+the tail of this session. Concrete scope for the next session:
+
+1. **Capture analysis**: free vars of each `Expr::Lambda` (idents not bound by
+   params/lets) → `ClosureDef { params, body, free_vars }` + stable symbol
+   `briv_closure_N`.
+2. **Env allocation**: `let f = lambda` allocates a heap block
+   `[fn_ptr, cap1..capN]`, stores `ptrtoint @briv_closure_N` + the captured
+   values; the closure VALUE is the block address (replaces the current
+   `add i64 0, 0` placeholder).
+3. **Closure function emission**: `define i64 @briv_closure_N(ptr %env,
+   i64 %p1..)` at module end; params + captured vars bound, body emitted.
+4. **Indirect call**: `Call` on any Function-typed name loads the value,
+   `%fp = load i64, ptr %env`, indirect `call i64 %fp(ptr %env, args...)`.
+5. **Lift the closure-as-value rejection** (diagnostics-sweep #3) for the
+   now-capable case; keep it for un-lowered escapes (stored in structs).
+6. Interpreter parity: `Value::Closure` already exists; verify by-value
+   capture matches the env-block snapshot.
