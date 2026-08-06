@@ -7,7 +7,7 @@
 use crate::ast::{BinaryOpKind, DerivationExample, Expr, Pattern, Type, UnaryOpKind};
 use crate::derive::SynthesizeError;
 use crate::interpreter::values_within_tolerance;
-use crate::interpreter::Value;
+use crate::interpreter::{Atom, Value};
 
 // ── C.2 — Occam Cost Model ────────────────────────────────────────────
 
@@ -41,8 +41,8 @@ impl CostModel {
     #[allow(dead_code)]
     pub fn cost_of_constant(&self, val: &Value) -> u64 {
         let bits = match val {
-            Value::Int(n) => n.checked_abs().map(|a| 64 - a.leading_zeros()).unwrap_or(0) as u64,
-            Value::Float(_) => 64,
+            Value::Atom(Atom::Int(n)) => n.checked_abs().map(|a| 64 - a.leading_zeros()).unwrap_or(0) as u64,
+            Value::Atom(Atom::Float(_)) => 64,
             Value::Bits(bytes) if bytes.len() <= 1 => 1,
             _ => 8,
         };
@@ -114,8 +114,8 @@ pub fn evaluate_synthesized(
     ctx: &mut SynthesisEvalContext,
 ) -> Result<Value, SynthesisEvalError> {
     match expr {
-        Expr::Decimal(n) => Ok(Value::Int(*n)),
-        Expr::Float(f) => Ok(Value::Float(*f)),
+        Expr::Decimal(n) => Ok(Value::Atom(Atom::Int(*n))),
+        Expr::Float(f) => Ok(Value::Atom(Atom::Float(*f))),
         Expr::Bool(b) => Ok(Value::Bits(vec![if *b { 1u8 } else { 0u8 }])),
         Expr::Identifier(name) => ctx
             .bindings
@@ -135,8 +135,8 @@ pub fn evaluate_synthesized(
             let c = evaluate_synthesized(cond, ctx)?;
             let cbool = match c {
                 Value::Bits(ref bytes) => bytes.iter().any(|b| *b != 0),
-                Value::Int(n) => n != 0,
-                Value::Float(f) => f != 0.0,
+                Value::Atom(Atom::Int(n)) => n != 0,
+                Value::Atom(Atom::Float(f)) => f != 0.0,
                 _ => return Err(SynthesisEvalError::TypeMismatch("non-boolean condition".into())),
             };
             if cbool {
@@ -220,13 +220,13 @@ pub fn evaluate_synthesized(
 fn eval_unary(kind: &UnaryOpKind, val: Value) -> Result<Value, SynthesisEvalError> {
     match kind {
         UnaryOpKind::Neg => match val {
-            Value::Int(n) => Ok(Value::Int(n.wrapping_neg())),
-            Value::Float(f) => Ok(Value::Float(-f)),
+            Value::Atom(Atom::Int(n)) => Ok(Value::Atom(Atom::Int(n.wrapping_neg()))),
+            Value::Atom(Atom::Float(f)) => Ok(Value::Atom(Atom::Float(-f))),
             _ => Err(SynthesisEvalError::TypeMismatch("negation requires numeric type".into())),
         },
         UnaryOpKind::Not => match val {
             Value::Bits(ref bytes) => Ok(Value::Bits(vec![if bytes.iter().all(|b| *b == 0) { 1 } else { 0 }])),
-            Value::Int(n) => Ok(Value::Int(if n == 0 { 1 } else { 0 })),
+            Value::Atom(Atom::Int(n)) => Ok(Value::Atom(Atom::Int(if n == 0 { 1 } else { 0 }))),
             _ => Err(SynthesisEvalError::TypeMismatch("not requires boolean type".into())),
         },
         UnaryOpKind::BitNot => {
@@ -237,10 +237,10 @@ fn eval_unary(kind: &UnaryOpKind, val: Value) -> Result<Value, SynthesisEvalErro
 
 fn eval_binary(kind: &BinaryOpKind, l: Value, r: Value) -> Result<Value, SynthesisEvalError> {
     match (l, r) {
-        (Value::Int(a), Value::Int(b)) => eval_binary_int(kind, a, b),
-        (Value::Float(a), Value::Float(b)) => eval_binary_float(kind, a, b),
-        (Value::Int(a), Value::Float(b)) => eval_binary_float(kind, a as f64, b),
-        (Value::Float(a), Value::Int(b)) => eval_binary_float(kind, a, b as f64),
+        (Value::Atom(Atom::Int(a)), Value::Atom(Atom::Int(b))) => eval_binary_int(kind, a, b),
+        (Value::Atom(Atom::Float(a)), Value::Atom(Atom::Float(b))) => eval_binary_float(kind, a, b),
+        (Value::Atom(Atom::Int(a)), Value::Atom(Atom::Float(b))) => eval_binary_float(kind, a as f64, b),
+        (Value::Atom(Atom::Float(a)), Value::Atom(Atom::Int(b))) => eval_binary_float(kind, a, b as f64),
         _ => match kind {
             BinaryOpKind::Eq => Ok(Value::Bits(vec![0])),
             BinaryOpKind::Neq => Ok(Value::Bits(vec![1])),
@@ -251,20 +251,20 @@ fn eval_binary(kind: &BinaryOpKind, l: Value, r: Value) -> Result<Value, Synthes
 
 fn eval_binary_int(kind: &BinaryOpKind, a: i64, b: i64) -> Result<Value, SynthesisEvalError> {
     match kind {
-        BinaryOpKind::Add => Ok(Value::Int(a.wrapping_add(b))),
-        BinaryOpKind::Sub => Ok(Value::Int(a.wrapping_sub(b))),
-        BinaryOpKind::Mul => Ok(Value::Int(a.wrapping_mul(b))),
+        BinaryOpKind::Add => Ok(Value::Atom(Atom::Int(a.wrapping_add(b)))),
+        BinaryOpKind::Sub => Ok(Value::Atom(Atom::Int(a.wrapping_sub(b)))),
+        BinaryOpKind::Mul => Ok(Value::Atom(Atom::Int(a.wrapping_mul(b)))),
         BinaryOpKind::Div => {
             if b == 0 {
                 return Err(SynthesisEvalError::DivisionByZero);
             }
-            Ok(Value::Int(a.wrapping_div(b)))
+            Ok(Value::Atom(Atom::Int(a.wrapping_div(b))))
         }
         BinaryOpKind::Mod => {
             if b == 0 {
                 return Err(SynthesisEvalError::DivisionByZero);
             }
-            Ok(Value::Int(a.wrapping_rem(b)))
+            Ok(Value::Atom(Atom::Int(a.wrapping_rem(b))))
         }
         BinaryOpKind::Eq => Ok(Value::Bits(vec![if a == b { 1 } else { 0 }])),
         BinaryOpKind::Neq => Ok(Value::Bits(vec![if a != b { 1 } else { 0 }])),
@@ -272,24 +272,24 @@ fn eval_binary_int(kind: &BinaryOpKind, a: i64, b: i64) -> Result<Value, Synthes
         BinaryOpKind::Gt => Ok(Value::Bits(vec![if a > b { 1 } else { 0 }])),
         BinaryOpKind::Le => Ok(Value::Bits(vec![if a <= b { 1 } else { 0 }])),
         BinaryOpKind::Ge => Ok(Value::Bits(vec![if a >= b { 1 } else { 0 }])),
-        BinaryOpKind::And => Ok(Value::Int(if a != 0 && b != 0 { 1 } else { 0 })),
-        BinaryOpKind::Or => Ok(Value::Int(if a != 0 || b != 0 { 1 } else { 0 })),
-        BinaryOpKind::BitXor => Ok(Value::Int(a ^ b)),
-        BinaryOpKind::Shl => Ok(Value::Int(a.wrapping_shl(b as u32))),
-        BinaryOpKind::Shr => Ok(Value::Int(a.wrapping_shr(b as u32))),
-        BinaryOpKind::BitAnd => Ok(Value::Int(a & b)),
-        BinaryOpKind::BitOr => Ok(Value::Int(a | b)),
+        BinaryOpKind::And => Ok(Value::Atom(Atom::Int(if a != 0 && b != 0 { 1 } else { 0 }))),
+        BinaryOpKind::Or => Ok(Value::Atom(Atom::Int(if a != 0 || b != 0 { 1 } else { 0 }))),
+        BinaryOpKind::BitXor => Ok(Value::Atom(Atom::Int(a ^ b))),
+        BinaryOpKind::Shl => Ok(Value::Atom(Atom::Int(a.wrapping_shl(b as u32)))),
+        BinaryOpKind::Shr => Ok(Value::Atom(Atom::Int(a.wrapping_shr(b as u32)))),
+        BinaryOpKind::BitAnd => Ok(Value::Atom(Atom::Int(a & b))),
+        BinaryOpKind::BitOr => Ok(Value::Atom(Atom::Int(a | b))),
         BinaryOpKind::Concat => Err(SynthesisEvalError::TypeMismatch("concat not supported on int".into())),
     }
 }
 
 fn eval_binary_float(kind: &BinaryOpKind, a: f64, b: f64) -> Result<Value, SynthesisEvalError> {
     match kind {
-        BinaryOpKind::Add => Ok(Value::Float(a + b)),
-        BinaryOpKind::Sub => Ok(Value::Float(a - b)),
-        BinaryOpKind::Mul => Ok(Value::Float(a * b)),
-        BinaryOpKind::Div => Ok(Value::Float(a / b)),
-        BinaryOpKind::Mod => Ok(Value::Float(a % b)),
+        BinaryOpKind::Add => Ok(Value::Atom(Atom::Float(a + b))),
+        BinaryOpKind::Sub => Ok(Value::Atom(Atom::Float(a - b))),
+        BinaryOpKind::Mul => Ok(Value::Atom(Atom::Float(a * b))),
+        BinaryOpKind::Div => Ok(Value::Atom(Atom::Float(a / b))),
+        BinaryOpKind::Mod => Ok(Value::Atom(Atom::Float(a % b))),
         BinaryOpKind::Eq => Ok(Value::Bits(vec![if a == b { 1 } else { 0 }])),
         BinaryOpKind::Neq => Ok(Value::Bits(vec![if a != b { 1 } else { 0 }])),
         BinaryOpKind::Lt => Ok(Value::Bits(vec![if a < b { 1 } else { 0 }])),
@@ -1002,19 +1002,19 @@ fn prune_level(
             for (name, val) in param_names.iter().zip(input_values.iter()) {
                 ctx.bind(name, val.clone());
             }
-            evaluate_synthesized(expr, &mut ctx).unwrap_or(crate::interpreter::Value::Int(0))
+            evaluate_synthesized(expr, &mut ctx).unwrap_or(crate::interpreter::Value::Atom(Atom::Int(0)))
         }).collect();
         // Compute fingerprint from already-evaluated results
         let outputs: Vec<(i64, i64)> = eval_outputs.iter().map(|v| {
             match v {
-                Value::Int(n) => (*n, 1),
-                Value::Float(f) => (f.to_bits() as i64, 2),
+                Value::Atom(Atom::Int(n)) => (*n, 1),
+                Value::Atom(Atom::Float(f)) => (f.to_bits() as i64, 2),
                 Value::Bits(b) => (b.iter().fold(0i64, |acc, &x| (acc << 1) | x as i64), 3),
                 Value::Constructor(name, fields) => {
                     let name_hash = name.bytes().fold(0i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64));
                     let fields_hash = fields.iter().fold(0i64, |acc, f| match f {
-                        Value::Int(n) => acc.wrapping_mul(31).wrapping_add(*n),
-                        Value::Float(fv) => acc.wrapping_mul(31).wrapping_add(fv.to_bits() as i64),
+                        Value::Atom(Atom::Int(n)) => acc.wrapping_mul(31).wrapping_add(*n),
+                        Value::Atom(Atom::Float(fv)) => acc.wrapping_mul(31).wrapping_add(fv.to_bits() as i64),
                         Value::Bits(b) => acc.wrapping_mul(31).wrapping_add(b.first().copied().unwrap_or(0) as i64),
                         Value::Constructor(n, fs) => {
                             let h = n.bytes().fold(0i64, |a, b| a.wrapping_mul(31).wrapping_add(b as i64));
@@ -1406,12 +1406,12 @@ fn candidate_matches_all_examples(
 fn example_inputs_to_values(ex: &DerivationExample, param_names: &[String]) -> Vec<Value> {
     // 2026-07-28: Phase 5 — Use evaluate_synthesized for compound types.
     // The old expr_to_value only handles constants (Decimal, Float, Bool)
-    // and returns Value::Int(0) for constructors like Call("Const", ...).
+    // and returns Value::Atom(Atom::Int(0)) for constructors like Call("Const", ...).
     // evaluate_synthesized handles all expression types including constructors.
     ex.inputs.iter().map(|e| {
         if matches!(e, Expr::Call(_, _, _)) {
             let mut ctx = SynthesisEvalContext::new();
-            evaluate_synthesized(e, &mut ctx).unwrap_or(Value::Int(0))
+            evaluate_synthesized(e, &mut ctx).unwrap_or(Value::Atom(Atom::Int(0)))
         } else {
             expr_to_value(e)
         }
@@ -1421,16 +1421,16 @@ fn example_inputs_to_values(ex: &DerivationExample, param_names: &[String]) -> V
 /// Convert an expression to a Value (for constant inputs from examples).
 fn expr_to_value(expr: &Expr) -> Value {
     match expr {
-        Expr::Decimal(n) => Value::Int(*n),
-        Expr::Float(f) => Value::Float(*f),
+        Expr::Decimal(n) => Value::Atom(Atom::Int(*n)),
+        Expr::Float(f) => Value::Atom(Atom::Float(*f)),
         Expr::Bool(b) => Value::Bits(vec![if *b { 1 } else { 0 }]),
         Expr::UnaryOp(UnaryOpKind::Neg, inner) => match expr_to_value(inner) {
-            Value::Int(n) => Value::Int(-n),
-            Value::Float(f) => Value::Float(-f),
+            Value::Atom(Atom::Int(n)) => Value::Atom(Atom::Int(-n)),
+            Value::Atom(Atom::Float(f)) => Value::Atom(Atom::Float(-f)),
             _ => Value::Void,
         },
-        Expr::Identifier(_) => Value::Int(0),
-        _ => Value::Int(0),
+        Expr::Identifier(_) => Value::Atom(Atom::Int(0)),
+        _ => Value::Atom(Atom::Int(0)),
     }
 }
 
@@ -1565,10 +1565,10 @@ mod tests {
             Box::new(Expr::Identifier("y".into())),
         );
         let mut ctx = SynthesisEvalContext::new();
-        ctx.bind("x", Value::Int(2));
-        ctx.bind("y", Value::Int(3));
+        ctx.bind("x", Value::Atom(Atom::Int(2)));
+        ctx.bind("y", Value::Atom(Atom::Int(3)));
         let result = evaluate_synthesized(&expr, &mut ctx).unwrap();
-        assert_eq!(result, Value::Int(5));
+        assert_eq!(result, Value::Atom(Atom::Int(5)));
     }
 
     #[test]
@@ -1583,9 +1583,9 @@ mod tests {
             Some(Box::new(Expr::UnaryOp(UnaryOpKind::Neg, Box::new(Expr::Identifier("x".into()))))),
         );
         let mut ctx = SynthesisEvalContext::new();
-        ctx.bind("x", Value::Int(-3));
+        ctx.bind("x", Value::Atom(Atom::Int(-3)));
         let result = evaluate_synthesized(&expr, &mut ctx).unwrap();
-        assert_eq!(result, Value::Int(3));
+        assert_eq!(result, Value::Atom(Atom::Int(3)));
     }
 
     #[test]
@@ -1600,11 +1600,11 @@ mod tests {
             Box::new(Expr::Identifier("z".into())),
         );
         let mut ctx = SynthesisEvalContext::new();
-        ctx.bind("x", Value::Int(2));
-        ctx.bind("y", Value::Int(3));
-        ctx.bind("z", Value::Int(4));
+        ctx.bind("x", Value::Atom(Atom::Int(2)));
+        ctx.bind("y", Value::Atom(Atom::Int(3)));
+        ctx.bind("z", Value::Atom(Atom::Int(4)));
         let result = evaluate_synthesized(&expr, &mut ctx).unwrap();
-        assert_eq!(result, Value::Int(20));
+        assert_eq!(result, Value::Atom(Atom::Int(20)));
     }
 
     #[test]

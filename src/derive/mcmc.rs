@@ -3,6 +3,7 @@
 // Flat code: each function max 2 levels of nesting.
 
 use crate::ast::{DerivationExample, Expr, PropertyValue};
+use crate::interpreter::Atom;
 use crate::derive::engine::SynthesizedProgram;
 use crate::derive::SynthesizeError;
 use std::collections::HashMap;
@@ -341,15 +342,15 @@ fn cost_function(
 
 fn expr_to_value(expr: &Expr) -> crate::interpreter::Value {
     match expr {
-        Expr::Decimal(n) => crate::interpreter::Value::Int(*n),
-        Expr::Float(f) => crate::interpreter::Value::Float(*f),
+        Expr::Decimal(n) => crate::interpreter::Value::Atom(Atom::Int(*n)),
+        Expr::Float(f) => crate::interpreter::Value::Atom(Atom::Float(*f)),
         Expr::Bool(b) => crate::interpreter::Value::Bits(vec![if *b { 1 } else { 0 }]),
         Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match expr_to_value(inner) {
-            crate::interpreter::Value::Int(n) => crate::interpreter::Value::Int(-n),
-            crate::interpreter::Value::Float(f) => crate::interpreter::Value::Float(-f),
-            _ => crate::interpreter::Value::Int(0),
+            crate::interpreter::Value::Atom(Atom::Int(n)) => crate::interpreter::Value::Atom(Atom::Int(-n)),
+            crate::interpreter::Value::Atom(Atom::Float(f)) => crate::interpreter::Value::Atom(Atom::Float(-f)),
+            _ => crate::interpreter::Value::Atom(Atom::Int(0)),
         },
-        _ => crate::interpreter::Value::Int(0),
+        _ => crate::interpreter::Value::Atom(Atom::Int(0)),
     }
 }
 

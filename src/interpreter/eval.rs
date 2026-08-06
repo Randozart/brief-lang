@@ -6,7 +6,7 @@
 use crate::ast::*;
 use crate::errors::RuntimeError;
 use crate::interpreter::{
-    bool_to_bits, execute_intrinsic, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap,
+    Atom, bool_to_bits, execute_intrinsic, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap,
 };
 use std::collections::HashMap;
 
@@ -26,8 +26,8 @@ pub fn eval_expr(
         // dispatches Print# by protocol category, so the interpreter must carry
         // char/bool-ness to print characters / true-false. as_i64/as_f64
         // promote both (C-style), so arithmetic/comparisons are unchanged.
-        Expr::Bool(b) => Ok(Value::Bool(*b)),
-        Expr::Char(c) => Ok(Value::Char(*c)),
+        Expr::Bool(b) => Ok(Value::Atom(Atom::Bool(*b))),
+        Expr::Char(c) => Ok(Value::Atom(Atom::Char(*c))),
         Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => Ok(Value::bits(bytes.clone())),
 
         // ── References ──────────────────────────────────────────
@@ -90,17 +90,17 @@ pub fn eval_expr(
             let v = eval_expr(expr, heap, bindings)?;
             match target_protocol_category(ty).as_str() {
                 "Int" => match v {
-                    Value::Bool(b) => Ok(Value::Int(if b { 1 } else { 0 })),
-                    Value::Char(c) => Ok(Value::Int(c as i64)),
+                    Value::Atom(Atom::Bool(b)) => Ok(Value::Atom(Atom::Int(if b { 1 } else { 0 }))),
+                    Value::Atom(Atom::Char(c)) => Ok(Value::Atom(Atom::Int(c as i64))),
                     _ => Ok(v),
                 },
                 "Float" => match v {
-                    Value::Bool(b) => Ok(Value::Float(if b { 1.0 } else { 0.0 })),
-                    Value::Char(c) => Ok(Value::Float(c as i64 as f64)),
+                    Value::Atom(Atom::Bool(b)) => Ok(Value::Atom(Atom::Float(if b { 1.0 } else { 0.0 }))),
+                    Value::Atom(Atom::Char(c)) => Ok(Value::Atom(Atom::Float(c as i64 as f64))),
                     _ => Ok(v),
                 },
                 "Char" => match v {
-                    Value::Int(n) => Ok(Value::Char(char::from_u32(n as u32).unwrap_or('?'))),
+                    Value::Atom(Atom::Int(n)) => Ok(Value::Atom(Atom::Char(char::from_u32(n as u32).unwrap_or('?')))),
                     _ => Ok(v),
                 },
                 _ => Ok(v),
@@ -108,7 +108,7 @@ pub fn eval_expr(
         }
 
         // ── IsType ───────────────────────────────────────────────
-        Expr::IsType(_, _) => Ok(Value::Bool(true)),
+        Expr::IsType(_, _) => Ok(Value::Atom(Atom::Bool(true))),
 
         // ── Within ───────────────────────────────────────────────
         Expr::Within(expr, _scope) => eval_expr(expr, heap, bindings),
@@ -153,7 +153,7 @@ pub fn eval_expr(
         Expr::Reflect(recv, name, _kind) => {
             // 2026-08-01 (B3): reflection on String values — `Len` (Size prop)
             // = UTF8 character count, `Bytes` = byte length. A String is
-            // `Value::Bits(bytes)` (direct) or a heap handle `Value::Int(addr)`
+            // `Value::Bits(bytes)` (direct) or a heap handle `Value::Atom(Atom::Int(addr))`
             // (`[len: i64][bytes]`). Mirrors the backend's briv_char_len /
             // header-read emission (rule #4: interpreter is the reference).
             let val = eval_expr(recv, heap, bindings)?;
@@ -278,7 +278,7 @@ fn eval_print_macro(
         if is_println {
             // 2026-08-01 (audit): the newline is a Char literal printed through
             // the generic Print# path (line termination is the macro's job).
-            print_value(&Value::Char('\n'), heap)?;
+            print_value(&Value::Atom(Atom::Char('\n')), heap)?;
             return Ok(Value::Void);
         }
         return Err(RuntimeError::UnsupportedIntrinsic(
@@ -313,7 +313,7 @@ fn eval_print_macro(
     }
 
     if is_println {
-        print_value(&Value::Char('\n'), heap)?;
+        print_value(&Value::Atom(Atom::Char('\n')), heap)?;
     }
     Ok(Value::Void)
 }
@@ -324,16 +324,16 @@ fn eval_print_macro(
 /// cast to Int is what yields 1/0), matching `__print_bool`.
 fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError> {
     match value {
-        Value::Float(f) => {
+        Value::Atom(Atom::Float(f)) => {
             print!("{}", f);
         }
-        Value::Int(n) => {
+        Value::Atom(Atom::Int(n)) => {
             print!("{}", n);
         }
-        Value::Bool(b) => {
+        Value::Atom(Atom::Bool(b)) => {
             print!("{}", if *b { "true" } else { "false" });
         }
-        Value::Char(c) => {
+        Value::Atom(Atom::Char(c)) => {
             print!("{}", c);
         }
         Value::Bits(bytes) => {
@@ -444,59 +444,59 @@ fn eval_binary_op(
             // floats, bools). This is the interpreter-first half of B1 (rule
             // #4); the LLVM backend mirrors it in emit_expr.rs.
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a == b)),
-                _ => Ok(Value::Bool(lv.as_i64() == rv.as_i64())),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a == b))),
+                _ => Ok(Value::Atom(Atom::Bool(lv.as_i64() == rv.as_i64()))),
             }
         }
         BinaryOpKind::Lt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a < b)),
-                _ => Ok(Value::Bool(false)),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a < b))),
+                _ => Ok(Value::Atom(Atom::Bool(false))),
             }
         }
         BinaryOpKind::Gt => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a > b)),
-                _ => Ok(Value::Bool(false)),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a > b))),
+                _ => Ok(Value::Atom(Atom::Bool(false))),
             }
         }
         BinaryOpKind::Le => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a <= b)),
-                _ => Ok(Value::Bool(false)),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a <= b))),
+                _ => Ok(Value::Atom(Atom::Bool(false))),
             }
         }
         BinaryOpKind::Ge => {
             let la = lv.as_i64();
             let ra = rv.as_i64();
             match (la, ra) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a >= b)),
-                _ => Ok(Value::Bool(false)),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a >= b))),
+                _ => Ok(Value::Atom(Atom::Bool(false))),
             }
         }
         BinaryOpKind::Neq => {
             // 2026-08-01 (B1): content inequality — mirrors the Eq arm above
             // (deref both Strings, compare payload bytes).
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
-                (Some(a), Some(b)) => Ok(Value::Bool(a != b)),
-                _ => Ok(Value::Bool(lv.as_i64() != rv.as_i64())),
+                (Some(a), Some(b)) => Ok(Value::Atom(Atom::Bool(a != b))),
+                _ => Ok(Value::Atom(Atom::Bool(lv.as_i64() != rv.as_i64()))),
             }
         }
         BinaryOpKind::And => {
             let lb = lv.is_true();
             let rb = rv.is_true();
-            Ok(Value::Bool(lb && rb))
+            Ok(Value::Atom(Atom::Bool(lb && rb)))
         }
         BinaryOpKind::Or => {
             let lb = lv.is_true();
             let rb = rv.is_true();
-            Ok(Value::Bool(lb || rb))
+            Ok(Value::Atom(Atom::Bool(lb || rb)))
         }
         BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
             // 2026-08-01 (B1): #String bitwise defaults — operate on content
@@ -734,18 +734,18 @@ mod tests {
     }
 
     // 2026-08-01 (audit): #Char/#Bool are first-class values — literals
-    // produce Value::Char/Value::Bool, and casts convert across categories
+    // produce Value::Atom(Atom::Char)/Value::Atom(Atom::Bool), and casts convert across categories
     // (mirroring codegen, so Print# prints the same thing on both backends).
 
     #[test]
     fn test_char_literal_is_char_value() {
-        assert_eq!(eval1(&Expr::Char('A')), Value::Char('A'));
+        assert_eq!(eval1(&Expr::Char('A')), Value::Atom(Atom::Char('A')));
         assert_eq!(eval1(&Expr::Char('A')).as_i64(), Some(65));
     }
 
     #[test]
     fn test_bool_literal_is_bool_value() {
-        assert_eq!(eval1(&Expr::Bool(true)), Value::Bool(true));
+        assert_eq!(eval1(&Expr::Bool(true)), Value::Atom(Atom::Bool(true)));
         assert_eq!(eval1(&Expr::Bool(true)).as_i64(), Some(1));
         assert!(eval1(&Expr::Bool(false)).is_true() == false);
     }
@@ -754,11 +754,11 @@ mod tests {
     fn test_cast_bool_to_int_is_0_or_1() {
         assert_eq!(
             eval1(&Expr::Cast(Box::new(Expr::Bool(true)), Type::int())),
-            Value::Int(1)
+            Value::Atom(Atom::Int(1))
         );
         assert_eq!(
             eval1(&Expr::Cast(Box::new(Expr::Bool(false)), Type::int())),
-            Value::Int(0)
+            Value::Atom(Atom::Int(0))
         );
     }
 
@@ -766,7 +766,7 @@ mod tests {
     fn test_cast_char_to_int_is_code_point() {
         assert_eq!(
             eval1(&Expr::Cast(Box::new(Expr::Char('A')), Type::int())),
-            Value::Int(65)
+            Value::Atom(Atom::Int(65))
         );
     }
 
@@ -774,7 +774,7 @@ mod tests {
     fn test_cast_int_to_char_builds_character() {
         assert_eq!(
             eval1(&Expr::Cast(Box::new(Expr::Decimal(65)), Type::char_())),
-            Value::Char('A')
+            Value::Atom(Atom::Char('A'))
         );
     }
 
@@ -818,7 +818,7 @@ mod tests {
             Box::new(Expr::Decimal(42)),
             Box::new(Expr::Decimal(42)),
         );
-        assert_eq!(eval1(&eq), Value::Bool(true));
+        assert_eq!(eval1(&eq), Value::Atom(Atom::Bool(true)));
         assert!(eval1(&eq).is_true());
     }
 
@@ -827,9 +827,9 @@ mod tests {
         // Print# is the convenience intrinsic: Bool prints true/false, Char
         // prints the character. Both must dispatch without error.
         let mut heap = VirtualHeap::new();
-        let r = execute_intrinsic("Print#", &[Value::Bool(true)], &mut heap).unwrap();
+        let r = execute_intrinsic("Print#", &[Value::Atom(Atom::Bool(true))], &mut heap).unwrap();
         assert_eq!(r.as_i64(), Some(0));
-        let r = execute_intrinsic("Print#", &[Value::Char('A')], &mut heap).unwrap();
+        let r = execute_intrinsic("Print#", &[Value::Atom(Atom::Char('A'))], &mut heap).unwrap();
         assert_eq!(r.as_i64(), Some(0));
     }
 }

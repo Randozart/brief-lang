@@ -5,7 +5,7 @@
 
 use crate::ast::{ChainSegment, Expr};
 use crate::backend::assembler::{AsmAssembler, StubAssembler};
-use crate::interpreter::{eval_expr, Value, VirtualHeap};
+use crate::interpreter::{Atom, eval_expr, Value, VirtualHeap};
 use crate::interpreter::RuntimeError;
 use std::collections::HashMap;
 
@@ -58,7 +58,7 @@ fn evaluate_body(
     match body {
         Body::Asm(asm_fn) => {
             if asm_fn.body.is_empty() {
-                return Ok(Value::Int(0));
+                return Ok(Value::Atom(Atom::Int(0)));
             }
 
             // Substitute {param} and {result} with ABI register names for the target.
@@ -113,7 +113,7 @@ fn evaluate_body(
                     = lib.get(b"wrapper").map_err(|e| format!("sym: {}", e))?;
                 let mut args = [0i64; 6];
                 for (i, v) in input.iter().enumerate().take(6) {
-                    args[i] = match v { Value::Int(n) => *n, _ => 0 };
+                    args[i] = match v { Value::Atom(Atom::Int(n)) => *n, _ => 0 };
                 }
                 let val = f(args[0], args[1], args[2], args[3], args[4], args[5]);
                 lib.close().ok();
@@ -121,7 +121,7 @@ fn evaluate_body(
             };
 
             let _ = std::fs::remove_dir_all(&tmp);
-            Ok(Value::Int(result))
+            Ok(Value::Atom(Atom::Int(result)))
         }
         Body::Ref(expr) => evaluate_ref_expr(expr, input, param_names),
         Body::Synthesized(expr) => evaluate_ref_expr(expr, input, param_names),
@@ -133,9 +133,9 @@ fn generate_sample_input(params: &[(String, crate::ast::Type)]) -> Vec<Value> {
     params.iter().enumerate().map(|(i, (_, ty))| {
         let seed = (i as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         match ty {
-            crate::ast::Type::Custom(s) if s == "Int" => Value::Int((seed & 0x7FF) as i64 - 500),
-            crate::ast::Type::Custom(s) if s == "Float" => Value::Float((seed & 0x7FF) as f64 * 0.5),
-            _ => Value::Int(0),
+            crate::ast::Type::Custom(s) if s == "Int" => Value::Atom(Atom::Int((seed & 0x7FF) as i64 - 500)),
+            crate::ast::Type::Custom(s) if s == "Float" => Value::Atom(Atom::Float((seed & 0x7FF) as f64 * 0.5)),
+            _ => Value::Atom(Atom::Int(0)),
         }
     }).collect()
 }
@@ -143,8 +143,8 @@ fn generate_sample_input(params: &[(String, crate::ast::Type)]) -> Vec<Value> {
 /// 2026-07-29: Compare two values with tolerance for floats.
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int(ai), Value::Int(bi)) => ai == bi,
-        (Value::Float(af), Value::Float(bf)) => (af - bf).abs() < 0.0001,
+        (Value::Atom(Atom::Int(ai)), Value::Atom(Atom::Int(bi))) => ai == bi,
+        (Value::Atom(Atom::Float(af)), Value::Atom(Atom::Float(bf))) => (af - bf).abs() < 0.0001,
         _ => {
             let ba = a.as_bool().unwrap_or(false);
             let bb = b.as_bool().unwrap_or(false);
@@ -279,14 +279,14 @@ mod tests {
 
     #[test]
     fn test_values_equal_int() {
-        assert!(values_equal(&Value::Int(42), &Value::Int(42)));
-        assert!(!values_equal(&Value::Int(42), &Value::Int(43)));
+        assert!(values_equal(&Value::Atom(Atom::Int(42)), &Value::Atom(Atom::Int(42))));
+        assert!(!values_equal(&Value::Atom(Atom::Int(42)), &Value::Atom(Atom::Int(43))));
     }
 
     #[test]
     fn test_values_equal_float() {
-        assert!(values_equal(&Value::Float(3.14), &Value::Float(3.1401)));
-        assert!(!values_equal(&Value::Float(3.14), &Value::Float(4.0)));
+        assert!(values_equal(&Value::Atom(Atom::Float(3.14)), &Value::Atom(Atom::Float(3.1401))));
+        assert!(!values_equal(&Value::Atom(Atom::Float(3.14)), &Value::Atom(Atom::Float(4.0))));
     }
 
     #[test]
@@ -302,7 +302,7 @@ mod tests {
         let params = vec![("x".into(), crate::ast::Type::Custom("Int".into()))];
         let input = generate_sample_input(&params);
         assert_eq!(input.len(), 1);
-        assert!(matches!(input[0], Value::Int(_)));
+        assert!(matches!(input[0], Value::Atom(Atom::Int(_))));
     }
 
     #[test]
@@ -313,8 +313,8 @@ mod tests {
             Box::new(Expr::Decimal(1)),
         );
         let params = vec!["x0".to_string()];
-        let result = evaluate_ref_expr(&expr, &[Value::Int(5)], &params);
+        let result = evaluate_ref_expr(&expr, &[Value::Atom(Atom::Int(5))], &params);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Int(6));
+        assert_eq!(result.unwrap(), Value::Atom(Atom::Int(6)));
     }
 }

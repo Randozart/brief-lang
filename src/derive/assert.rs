@@ -7,7 +7,7 @@
 
 use crate::ast::{DerivationExample, TopLevel};
 use crate::errors::RuntimeError;
-use crate::interpreter::{values_within_tolerance, Interpreter, Value};
+use crate::interpreter::{Atom, values_within_tolerance, Interpreter, Value};
 
 /// 2026-07-28: Phase B.0 — Verify all derivation examples against their
 /// function bodies. Called after type-check, before codegen.
@@ -157,7 +157,7 @@ fn verify_postcondition(
     };
     interp.state.remove("#Term");
     let pass = match &post_result {
-        Value::Int(n) => *n != 0,
+        Value::Atom(Atom::Int(n)) => *n != 0,
         Value::Bits(b) => b.iter().any(|x| *x != 0),
         _ => false,
     };
@@ -175,7 +175,7 @@ fn verify_postcondition(
 mod tests {
     use super::*;
     use crate::ast::{BinaryOpKind, DerivationBlock, Expr, Statement};
-    use crate::interpreter::Value;
+    use crate::interpreter::{Atom, Value};
 
     /// Build a simple definition with body and derivation for testing.
     fn make_defn(

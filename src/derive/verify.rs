@@ -8,6 +8,7 @@
 // rejected and search continues for a different expression.
 
 use crate::ast::{Expr, Type};
+use crate::interpreter::Atom;
 use crate::derive::engine::evaluate_synthesized;
 use crate::derive::engine::SynthesisEvalContext;
 use crate::derive::SynthesizeError;
@@ -129,15 +130,15 @@ pub fn verify_candidate(
 
         // Record output for constant detection
         match &result {
-            crate::interpreter::Value::Int(n) => seen_outputs.push(*n),
+            crate::interpreter::Value::Atom(Atom::Int(n)) => seen_outputs.push(*n),
             _ => seen_outputs.push(0),
         }
 
         // Check postcondition if provided
         if let Some(post) = postcondition {
             let post_ctx = &mut SynthesisEvalContext::new();
-            if let crate::interpreter::Value::Int(n) = &result {
-                post_ctx.bind("#Term", crate::interpreter::Value::Int(*n));
+            if let crate::interpreter::Value::Atom(Atom::Int(n)) = &result {
+                post_ctx.bind("#Term", crate::interpreter::Value::Atom(Atom::Int(*n)));
             }
             let post_result = evaluate_synthesized(post, post_ctx);
             match post_result {
@@ -150,7 +151,7 @@ pub fn verify_candidate(
                         );
                     }
                 }
-                Ok(crate::interpreter::Value::Int(n)) => {
+                Ok(crate::interpreter::Value::Atom(Atom::Int(n))) => {
                     if n == 0 {
                         return VerifyResult::Fail(
                             vec![input_row.clone()],
@@ -229,8 +230,8 @@ pub fn verify_candidate(
 /// counterexample's correct output in DerivationExample.
 fn val_to_expr_output(val: &crate::interpreter::Value) -> Expr {
     match val {
-        crate::interpreter::Value::Int(n) => Expr::Decimal(*n),
-        crate::interpreter::Value::Float(f) => Expr::Float(*f),
+        crate::interpreter::Value::Atom(Atom::Int(n)) => Expr::Decimal(*n),
+        crate::interpreter::Value::Atom(Atom::Float(f)) => Expr::Float(*f),
         crate::interpreter::Value::Bits(b) => {
             if b.len() == 1 && (b[0] == 0 || b[0] == 1) {
                 Expr::Bool(b[0] == 1)
@@ -245,9 +246,9 @@ fn val_to_expr_output(val: &crate::interpreter::Value) -> Expr {
 /// Extract an i64 value from a constant expression (for test input generation).
 fn expr_to_decimal(expr: &Expr) -> crate::interpreter::Value {
     match expr {
-        Expr::Decimal(n) => crate::interpreter::Value::Int(*n),
+        Expr::Decimal(n) => crate::interpreter::Value::Atom(Atom::Int(*n)),
         Expr::Bool(b) => crate::interpreter::Value::Bits(vec![if *b { 1 } else { 0 }]),
-        _ => crate::interpreter::Value::Int(0),
+        _ => crate::interpreter::Value::Atom(Atom::Int(0)),
     }
 }
 

@@ -4,6 +4,8 @@
 // 2026-07-28: Phase B — Added assertion verification module.
 // Flat code: each function max 2 levels of nesting.
 
+use crate::interpreter::Atom;
+
 mod engine;
 mod smt;
 mod cli;
@@ -229,14 +231,14 @@ fn compute_correct_output(
             for (i, (name, _)) in params.iter().enumerate() {
                 if let Some(input_expr) = input_exprs.get(i) {
                     let val = match input_expr {
-                        Expr::Decimal(n) => crate::interpreter::Value::Int(*n),
-                        _ => crate::interpreter::Value::Int(0),
+                        Expr::Decimal(n) => crate::interpreter::Value::Atom(Atom::Int(*n)),
+                        _ => crate::interpreter::Value::Atom(Atom::Int(0)),
                     };
                     ctx.bind(name, val);
                 }
             }
             match evaluate_synthesized(rhs, &mut ctx) {
-                Ok(crate::interpreter::Value::Int(n)) => return Expr::Decimal(n),
+                Ok(crate::interpreter::Value::Atom(Atom::Int(n))) => return Expr::Decimal(n),
                 _ => {}
             }
         }

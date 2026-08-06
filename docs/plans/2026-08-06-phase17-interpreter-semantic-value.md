@@ -339,7 +339,7 @@ leaked into codegen — investigate, don't accept.
 
 ## 9. Slice Status Tracker
 
-- [ ] A — Drop dead variants, introduce `Atom` (commit boundary)
+- [x] A — Drop dead variants, introduce `Atom` (commit boundary) — 2026-08-06
 - [ ] B — Correct primitive eval arms (IsType/Tuple/List/Index)
 - [ ] C — Match with patterns, guards, exhaustiveness
 - [ ] D — Struct/enum construction, field access, method calls

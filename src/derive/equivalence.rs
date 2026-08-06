@@ -6,7 +6,7 @@
 use crate::ast::{DerivationExample, Expr};
 use crate::derive::engine::{evaluate_synthesized, SynthesisEvalContext, SynthesizedProgram};
 use crate::derive::mcmc::EquivalenceMode;
-use crate::interpreter::{values_within_tolerance, Value};
+use crate::interpreter::{Atom, values_within_tolerance, Value};
 
 /// Check if two programs are equivalent for the given examples.
 /// Returns true if equivalent, false if not.
@@ -61,15 +61,15 @@ fn check_examples_equivalent(
 
 fn expr_to_value(expr: &Expr) -> Value {
     match expr {
-        Expr::Decimal(n) => Value::Int(*n),
-        Expr::Float(f) => Value::Float(*f),
+        Expr::Decimal(n) => Value::Atom(Atom::Int(*n)),
+        Expr::Float(f) => Value::Atom(Atom::Float(*f)),
         Expr::Bool(b) => Value::Bits(vec![if *b { 1 } else { 0 }]),
         Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match expr_to_value(inner) {
-            Value::Int(n) => Value::Int(-n),
-            Value::Float(f) => Value::Float(-f),
-            _ => Value::Int(0),
+            Value::Atom(Atom::Int(n)) => Value::Atom(Atom::Int(-n)),
+            Value::Atom(Atom::Float(f)) => Value::Atom(Atom::Float(-f)),
+            _ => Value::Atom(Atom::Int(0)),
         },
-        _ => Value::Int(0),
+        _ => Value::Atom(Atom::Int(0)),
     }
 }
 

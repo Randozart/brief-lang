@@ -4,7 +4,7 @@
 // Flat dispatch: one match arm per intrinsic name, first match wins.
 
 use crate::errors::RuntimeError;
-use crate::interpreter::{bool_to_bits, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap};
+use crate::interpreter::{Atom, bool_to_bits, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap};
 
 // 2026-07-15: SysCall# abstract op → syscall number mapping (x86_64)
 fn resolve_syscall_number_interp(name: &str) -> Option<i64> {
@@ -93,17 +93,17 @@ pub fn execute_intrinsic(
         }
         // ── Pointer operations (interpreter: evaluate inner) ──────────
         "Deref#" => {
-            let ptr_val = args.get(0).cloned().unwrap_or(Value::Int(0));
+            let ptr_val = args.get(0).cloned().unwrap_or(Value::Atom(Atom::Int(0)));
             // In the interpreter, Deref# just returns the value (identity).
             Ok(ptr_val)
         }
         "Cast#" => {
             // Cast# is identity in the interpreter — type reinterpretation only.
-            Ok(args.get(0).cloned().unwrap_or(Value::Int(0)))
+            Ok(args.get(0).cloned().unwrap_or(Value::Atom(Atom::Int(0))))
         }
         "Ptr#" => {
             // Ptr# is identity — inttoptr doesn't change bits.
-            Ok(args.get(0).cloned().unwrap_or(Value::Int(0)))
+            Ok(args.get(0).cloned().unwrap_or(Value::Atom(Atom::Int(0))))
         }
         // ── Float math ──────────────────────────────────────────────
         "Sqrt#"  => { let x = arg_as_f64(args, 0)?; Ok(f64_to_bits(x.sqrt())) }
@@ -134,11 +134,11 @@ pub fn execute_intrinsic(
         // 2026-08-03: host cancellation. In-process there is no host to raise
         // the flag, so CancelRequested# is always false (the backend's
         // __briv_set_cancel is the real path).
-        "CancelRequested#" => Ok(Value::Bool(false)),
+        "CancelRequested#" => Ok(Value::Atom(Atom::Bool(false))),
         "ClearCancel#" => Ok(Value::Void),
          "Load#" => {
             let addr = arg_as_i64(args, 0)? as u64;
-            let bytes = args.get(1).and_then(|a| if let Value::Int(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+            let bytes = args.get(1).and_then(|a| if let Value::Atom(Atom::Int(n)) = a { Some(*n as usize) } else { None }).unwrap_or(8);
             let data = heap.read(addr, bytes)
                 .ok_or_else(|| RuntimeError::HeapError("Load# read failed".into()))?;
             let mut buf = data.to_vec();
@@ -149,7 +149,7 @@ pub fn execute_intrinsic(
         "Store#" => {
             let addr = arg_as_i64(args, 0)? as u64;
             let val = arg_as_i64(args, 1)?;
-            let bytes = args.get(2).and_then(|a| if let Value::Int(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+            let bytes = args.get(2).and_then(|a| if let Value::Atom(Atom::Int(n)) = a { Some(*n as usize) } else { None }).unwrap_or(8);
             let data = val.to_le_bytes()[..bytes].to_vec();
             heap.write(addr, &data)
                 .map_err(|_| RuntimeError::HeapError("Store# write failed".into()))?;
@@ -219,7 +219,7 @@ pub fn execute_intrinsic(
         "SysConf#" => {
             if args.is_empty() { return Ok(i64_to_bits(0)); }
             let name: i64 = match &args[0] {
-                Value::Int(n) => *n,
+                Value::Atom(Atom::Int(n)) => *n,
                 Value::Bits(b) => {
                     let mut arr = [0u8; 8];
                     let copy_len = b.len().min(8);
@@ -253,7 +253,7 @@ pub fn execute_intrinsic(
             if args.is_empty() { return Ok(zero_bits(0)); }
             let mut sysno: i64 = 0;
             match &args[0] {
-                Value::Int(n) => { sysno = *n; }
+                Value::Atom(Atom::Int(n)) => { sysno = *n; }
                 Value::Bits(b) => {
                     // Convert Vec<u8> to i64 (little-endian)
                     let mut arr = [0u8; 8];
@@ -269,7 +269,7 @@ pub fn execute_intrinsic(
             // Extract up to 6 Int arguments, default 0
             let arg_val = |i: usize| -> i64 {
                 args.get(i).map(|v| match v {
-                    Value::Int(n) => *n,
+                    Value::Atom(Atom::Int(n)) => *n,
                     Value::Bits(b) => {
                         let mut arr = [0u8; 8];
                         let copy_len = b.len().min(8);
@@ -497,19 +497,19 @@ pub fn execute_intrinsic(
             // dispatch. Bool prints true/false (natural); Char prints the
             // character; an explicit cast to Int is what yields 1/0.
             match args.get(0).cloned().unwrap_or(Value::Void) {
-                Value::Float(f) => {
+                Value::Atom(Atom::Float(f)) => {
                     print!("{}", f);
                 }
                 Value::Bits(bytes) => {
                     print!("{}", String::from_utf8_lossy(&bytes));
                 }
-                Value::Int(n) => {
+                Value::Atom(Atom::Int(n)) => {
                     print!("{}", n);
                 }
-                Value::Bool(b) => {
+                Value::Atom(Atom::Bool(b)) => {
                     print!("{}", if b { "true" } else { "false" });
                 }
-                Value::Char(c) => {
+                Value::Atom(Atom::Char(c)) => {
                     print!("{}", c);
                 }
                 Value::Void => {}
@@ -708,8 +708,8 @@ mod tests {
             Box::new(Expr::Identifier("a".into())),
             Box::new(Expr::Identifier("b".into())),
         );
-        bindings.insert("a".into(), Value::Int(a1));
-        bindings.insert("b".into(), Value::Int(a2));
+        bindings.insert("a".into(), Value::Atom(Atom::Int(a1)));
+        bindings.insert("b".into(), Value::Atom(Atom::Int(a2)));
         assert!(eval_expr(&expr, &mut heap, &mut bindings).unwrap().is_true());
 
         // Ne on the same two handles is false.
@@ -722,7 +722,7 @@ mod tests {
 
         // Differing content at distinct addresses is unequal.
         let c = alloc_str(&mut heap, "different content");
-        bindings.insert("c".into(), Value::Int(c));
+        bindings.insert("c".into(), Value::Atom(Atom::Int(c)));
         let expr2 = Expr::BinaryOp(
             BinaryOpKind::Eq,
             Box::new(Expr::Identifier("a".into())),

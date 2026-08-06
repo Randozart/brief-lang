@@ -12,6 +12,16 @@
 // lookup_function(), and call_function() for derivation assertion
 // verification. Functions are stored by name and called with raw Value
 // arguments via a frame save/restore pattern.
+//
+// 2026-08-06: Phase 17 (Slice A) — semantic-value migration start. Fold the
+// ad-hoc Int/Float/Bool/Char variants into the single `Atom` category and
+// drop Enum/Instance/HashMap/Defn, which had no live users (their consumers
+// were orphaned features/* modules and PropertyValue false positives). The
+// remaining surface (Bits, Atom, Void, Ref, Constructor, List) is the first
+// step toward the SPEC 2.2 generic model: atoms, bits, products, sums,
+// references, closures, void. Undo: re-introduce per-kind variants only if a
+// consumer needs the extra type safety; nothing outside interpreter/derive
+// pattern-matches the atom category.
 
 pub mod casts;
 mod cells;
@@ -163,8 +173,8 @@ impl Interpreter {
             crate::ast::Pattern::Wildcard => true,
             crate::ast::Pattern::Literal(lit) => {
                 let lit_val = match lit {
-                    Expr::Decimal(n) => Value::Int(*n),
-                    Expr::Bool(b) => Value::Bits(vec![if *b { 1 } else { 0 }]),
+                    Expr::Decimal(n) => Value::int(*n),
+                    Expr::Bool(b) => Value::bool(*b),
                     _ => return false,
                 };
                 *val == lit_val
@@ -208,7 +218,7 @@ impl Interpreter {
         let mut result = Vec::new();
         for coord in coords {
             match coord {
-                Expr::Decimal(n) => result.push(Value::Int(*n)),
+                Expr::Decimal(n) => result.push(Value::int(*n)),
                 _ => return Err(RuntimeError::TypeError { expected: "integer".to_string(), found: format!("{:?}", coord) }),
             }
         }
@@ -225,30 +235,37 @@ impl Default for Interpreter {
 /// Signature for foreign function implementations registered in the FFI registry.
 pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
 
-/// The only representational value in the Briv interpreter.
-/// All program data — Int, Float, Bool, String, pointers — is Bits(Vec<u8>).
+/// A primitive atom value. Grouped under `Value::Atom` (SPEC §2.2 "optimized
+/// primitive atoms") so the eval path can dispatch on one category while the
+/// atom kind stays first-class — `as_i64`/`as_f64`/`as_bool` promote every
+/// atom C-style (Bool→0|1, Char→code point), matching the backend's
+/// protocol-category dispatch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Atom {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Char(char),
+}
+
+/// The representational value in the Briv interpreter.
+///
+/// 2026-08-06 (Phase 17, Slice A): `Enum`, `Instance`, `HashMap`, and `Defn`
+/// were dropped — they had no live producers/consumers (only orphaned
+/// `features/*` and `PropertyValue` false positives). `Int`/`Float`/`Bool`/
+/// `Char` now live under `Atom`. `List` survives only for reactor state
+/// collections and is slated for replacement by a product in a later slice;
+/// `Constructor` is the derive (CEGIS) engine's synthesis shape.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    /// The sole representational storage cell for program data.
+    /// The sole representational storage cell for opaque program data.
     Bits(Vec<u8>),
 
     /// 2026-07-14: Typed value variants for generic op dispatch.
     /// These allow the interpreter to distinguish int from float values
     /// when both would be valid as raw Bits(Vec<u8>).
-    Int(i64),
-    Float(f64),
+    Atom(Atom),
 
-    /// 2026-08-01 (audit): first-class `#Char`/`#Bool` values. The codegen
-    /// dispatches the generic `Print#` by the arg's protocol category, so the
-    /// interpreter (which dispatches by value) must carry char/bool-ness to
-    /// match: Char prints a character, Bool prints true/false. Both promote to
-    /// their code point / 0|1 via as_i64/as_f64 (C-style), so arithmetic and
-    /// comparisons work unchanged.
-    Char(char),
-    Bool(bool),
-
-    // Compiler-internal meta-objects (never reach user code):
-    Defn(String),
     Void,
     Ref(Box<Value>),
 
@@ -264,18 +281,25 @@ pub enum Value {
     // No interpreter eval path should produce or match these.
     /// Heterogeneous list of values — used for JSON arrays, SHM lists.
     List(Vec<Value>),
-    /// Enum value with type name, variant name, and named fields.
-    Enum(String, String, HashMap<String, Value>),
-    /// Struct-like instance with a type name and named fields.
-    Instance {
-        typename: String,
-        fields: HashMap<String, Value>,
-    },
-    /// String-keyed map — used by JSON objects, Arrow IPC.
-    HashMap(HashMap<String, Value>),
 }
 
 impl Value {
+    pub fn int(n: i64) -> Self {
+        Value::Atom(Atom::Int(n))
+    }
+
+    pub fn float(f: f64) -> Self {
+        Value::Atom(Atom::Float(f))
+    }
+
+    pub fn bool(b: bool) -> Self {
+        Value::Atom(Atom::Bool(b))
+    }
+
+    pub fn char(c: char) -> Self {
+        Value::Atom(Atom::Char(c))
+    }
+
     pub fn bits(data: Vec<u8>) -> Self {
         Value::Bits(data)
     }
@@ -289,9 +313,9 @@ impl Value {
     // values (zero_bits(4), zext of 1-byte bool) convert correctly.
     pub fn as_i64(&self) -> Option<i64> {
         match self {
-            Value::Int(n) => Some(*n),
-            Value::Bool(b) => Some(if *b { 1 } else { 0 }),
-            Value::Char(c) => Some(*c as i64),
+            Value::Atom(Atom::Int(n)) => Some(*n),
+            Value::Atom(Atom::Bool(b)) => Some(if *b { 1 } else { 0 }),
+            Value::Atom(Atom::Char(c)) => Some(*c as i64),
             Value::Bits(bytes) => {
                 let mut arr = [0u8; 8];
                 let copy_len = bytes.len().min(8);
@@ -305,9 +329,9 @@ impl Value {
     /// Extract first 8 bytes as f64.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
-            Value::Float(f) => Some(*f),
-            Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-            Value::Char(c) => Some(*c as i64 as f64),
+            Value::Atom(Atom::Float(f)) => Some(*f),
+            Value::Atom(Atom::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
+            Value::Atom(Atom::Char(c)) => Some(*c as i64 as f64),
             Value::Bits(bytes) if bytes.len() >= 8 => {
                 let arr: [u8; 8] = bytes[..8].try_into().ok()?;
                 Some(f64::from_le_bytes(arr))
@@ -319,8 +343,8 @@ impl Value {
     /// Extract first byte as bool.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
-            Value::Bool(b) => Some(*b),
-            Value::Char(c) => Some(*c != '\0'),
+            Value::Atom(Atom::Bool(b)) => Some(*b),
+            Value::Atom(Atom::Char(c)) => Some(*c != '\0'),
             Value::Bits(bytes) => bytes.first().map(|b| *b != 0),
             _ => None,
         }
@@ -335,18 +359,18 @@ impl Value {
     ///
     /// 2026-08-01 (B1): A Briv String is either raw bytes (`Value::Bits`,
     /// produced by literals and the get_env! macro) or a heap handle
-    /// (`Value::Int(addr)` pointing at `[len: i64][payload]`, produced by
-    /// FFI marshalling like EnvGet#). This is the single deref used by
-    /// content equality (Eq/Ne) and any op that needs the string payload.
-    /// Returns `None` when the value is not a String (so numeric comparisons
-    /// fall through to their own paths). Undo: if the heap-handle encoding is
-    /// ever removed, drop the `Value::Int(addr)` arm and keep the Bits arm.
+    /// (`Value::Atom(Atom::Int(addr))` pointing at `[len: i64][payload]`,
+    /// produced by FFI marshalling like EnvGet#). This is the single deref
+    /// used by content equality (Eq/Ne) and any op that needs the string
+    /// payload. Returns `None` when the value is not a String (so numeric
+    /// comparisons fall through to their own paths). Undo: if the heap-handle
+    /// encoding is ever removed, drop the `Atom::Int` arm and keep the Bits arm.
     pub fn string_bytes(&self, heap: &VirtualHeap) -> Option<Vec<u8>> {
         match self {
             Value::Bits(bytes) => Some(bytes.clone()),
-            Value::Int(addr) if *addr > 0 => {
-                // 2026-08-01 (B1): i64_to_bits(n) produces Value::Int(n), so a
-                // Value::Int is ambiguous between a real int and a heap string
+            Value::Atom(Atom::Int(addr)) if *addr > 0 => {
+                // 2026-08-01 (B1): i64_to_bits(n) produces an Int atom, so an
+                // Int atom is ambiguous between a real int and a heap string
                 // handle. Only deref as a heap string when the address is an
                 // actual heap allocation with a readable [len: i64] header —
                 // otherwise return None so numeric comparisons fall through.
@@ -363,19 +387,19 @@ impl Value {
     }
 }
 
-/// Convert i64 to 8-byte little-endian Bits value.
+/// Convert i64 to an Int atom value.
 pub fn i64_to_bits(n: i64) -> Value {
-    Value::Int(n)
+    Value::int(n)
 }
 
-/// Convert f64 to 8-byte little-endian Bits value.
+/// Convert f64 to a Float atom value.
 pub fn f64_to_bits(f: f64) -> Value {
-    Value::Float(f)
+    Value::float(f)
 }
 
-/// Convert bool to 1-byte Bits value.
+/// Convert bool to a Bool atom value.
 pub fn bool_to_bits(b: bool) -> Value {
-    Value::Bits(vec![if b { 1 } else { 0 }])
+    Value::bool(b)
 }
 
 /// Create a zero-filled Bits value of the given byte size.
@@ -389,7 +413,7 @@ pub fn zero_bits(size: usize) -> Value {
 /// Non-float values must match exactly.
 pub fn values_within_tolerance(actual: &Value, expected: &Value, tol: f64) -> bool {
     match (actual, expected) {
-        (Value::Float(a), Value::Float(e)) => {
+        (Value::Atom(Atom::Float(a)), Value::Atom(Atom::Float(e))) => {
             let diff = (a - e).abs();
             let mag = e.abs().max(1e-10);
             diff / mag <= tol
@@ -494,6 +518,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_atom_constructors() {
+        assert_eq!(Value::int(42), Value::Atom(Atom::Int(42)));
+        assert_eq!(Value::float(1.5), Value::Atom(Atom::Float(1.5)));
+        assert_eq!(Value::bool(true), Value::Atom(Atom::Bool(true)));
+        assert_eq!(Value::char('x'), Value::Atom(Atom::Char('x')));
+    }
+
+    #[test]
+    fn test_atom_promotion_c_style() {
+        assert_eq!(Value::bool(true).as_i64(), Some(1));
+        assert_eq!(Value::bool(false).as_i64(), Some(0));
+        assert_eq!(Value::char('A').as_i64(), Some(65));
+        assert_eq!(Value::bool(true).as_f64(), Some(1.0));
+        assert_eq!(Value::char('A').as_bool(), Some(true));
+        assert!(Value::char('\0').as_bool() == Some(false));
+    }
+
+    #[test]
+    fn test_atom_category_matches_protocol_dispatch() {
+        let b = Value::bool(true);
+        assert!(matches!(b, Value::Atom(Atom::Bool(true))));
+        let c = Value::char('z');
+        assert!(matches!(c, Value::Atom(Atom::Char('z'))));
+    }
+
+    #[test]
     fn test_value_as_i64() {
         let v = i64_to_bits(42);
         assert_eq!(v.as_i64(), Some(42));
@@ -576,7 +626,7 @@ mod tests {
         // Deref of a Ref returns the wrapped value.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        let inner_val = Value::Int(42);
+        let inner_val = Value::int(42);
         bindings.insert("x".to_string(), Value::Ref(Box::new(inner_val)));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
         let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
@@ -588,7 +638,7 @@ mod tests {
         // Deref of a non-Ref value just returns the value as-is.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        bindings.insert("x".to_string(), Value::Int(42));
+        bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
         let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
         assert_eq!(result.as_i64(), Some(42));
@@ -599,7 +649,7 @@ mod tests {
         // AddrOf wraps the value in a Ref.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        bindings.insert("x".to_string(), Value::Int(42));
+        bindings.insert("x".to_string(), Value::int(42));
         let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
         let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
         match result {
@@ -613,7 +663,7 @@ mod tests {
         // *(x) wraps then unwraps.
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
-        bindings.insert("x".to_string(), Value::Int(99));
+        bindings.insert("x".to_string(), Value::int(99));
         let addrof = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
         let deref = Expr::Deref(Box::new(addrof));
         let result = eval_expr(&deref, &mut heap, &mut bindings).unwrap();
