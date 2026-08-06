@@ -157,9 +157,11 @@ impl super::LlvmBackend {
             ));
         }
         out.push_str(&format!("%State = type {{ {} }}\n", struct_fields.join(", ")));
+        // Entry point is `main`: each kernel module is self-contained (one
+        // function), and both device drivers (Vulkan pipeline entry + OpenCL
+        // clCreateKernel) expect "main".
         out.push_str(&format!(
-            "\ndefine spir_kernel void @kernel_{}(ptr %state, i64 %n) {{\n",
-            txn_name
+            "\ndefine spir_kernel void @main(ptr %state, i64 %n) {{\n",
         ));
         out.push_str("entry:\n");
         out.push_str("  %gtid = call i64 @_Z13get_global_idj(i32 0)\n");

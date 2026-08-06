@@ -88,7 +88,7 @@ fn test_accel_kernel_module_emits_projected_state() {
     assert!(ir.contains("target triple = \"spirv64-unknown-unknown\""), "kernel triple");
     assert!(ir.contains("declare i64 @_Z13get_global_idj(i32)"), "global-id decl");
     assert!(ir.contains("%State = type { [16 x float] }"), "projected state struct: {ir}");
-    assert!(ir.contains("define spir_kernel void @kernel_force(ptr %state, i64 %n)"), "kernel sig");
+    assert!(ir.contains("define spir_kernel void @main(ptr %state, i64 %n)"), "kernel sig");
     assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"), "work-item id");
     assert!(ir.contains("getelementptr inbounds %State, ptr %state, i32 0, i32 0"), "buffer GEP");
 }
@@ -355,6 +355,46 @@ fn test_inline_directive_absent_no_extra_attr() {
     ];
     let output = backend.generate(&program, None);
     assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
+}
+
+#[test]
+fn test_briv_accel_rt_self_test() {
+    // 2026-08-06 (accel plan): the device-agnostic runtime's generic layer
+    // (selection, pack math, dispatch, probe gate) is exercised standalone via
+    // its BRIV_ACCEL_SELF_TEST main — no device required. TOCTOU-safe temp
+    // output name (pid + atomic counter).
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SELFTEST_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SELFTEST_SEQ.fetch_add(1, Ordering::Relaxed);
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let rt = std::path::Path::new(&manifest).join("lib/runtime/briv_accel_rt.c");
+    let out = std::env::temp_dir().join(format!(
+        "briv_accel_selftest_{}_{}",
+        std::process::id(),
+        seq
+    ));
+    let compile = Command::new("cc")
+        .arg("-Wall")
+        .arg("-DBRIV_ACCEL_SELF_TEST")
+        .arg(&rt)
+        .arg("-ldl")
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "briv_accel_rt self-test must compile: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = Command::new(&out).output().unwrap();
+    assert!(
+        run.status.success(),
+        "briv_accel_rt self-test must pass: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let _ = std::fs::remove_file(&out);
 }
 
 #[test]
