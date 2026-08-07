@@ -416,6 +416,60 @@ fn test_foreach_range_emits_counted_loop() {
         "foreach must emit a loop exit label");
 }
 
+/// A program with `foreach(x in items)` over a heap `List<Int>` — exercises
+/// the collection index-loop lowering (2026-08-07, Phase 7).
+fn foreach_list_program() -> Vec<TopLevel> {
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "items".to_string(),
+                names: vec![],
+                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
+                expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
+                modifiers: vec![],
+            },
+            Statement::Foreach {
+                item: "x".to_string(),
+                list: Box::new(Expr::Identifier("items".to_string())),
+                body: vec![Statement::Term(None)],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![node]
+}
+
+#[test]
+fn test_foreach_list_emits_index_loop() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&foreach_list_program(), None);
+    assert!(output.contains("inttoptr"),
+        "a heap List iterable must be inttoptr'd back to a buffer");
+    assert!(output.contains("getelementptr i64, ptr"),
+        "the collection loop must GEP to each element slot");
+    assert!(output.contains("icmp slt"),
+        "a collection iteration compares the counter against the length");
+}
+
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
 /// (2026-08-06, Phase 7).

@@ -84,6 +84,49 @@ fn collect_foreach_assigned(stmts: &[Statement], out: &mut std::collections::Has
     }
 }
 
+/// 2026-08-07 (Phase 7): the iteration source of a `foreach` — how the loop
+/// counter compares against a bound and how each item value is derived.
+enum IterKind {
+    /// `0..n` / `0..=n` — the item IS the counter.
+    Counter { init: String, bound: String, inclusive: bool },
+    /// A heap List value (`[len, e0, …]` i64 buffer, boxed to a handle).
+    List { ptr: String, len: String },
+    /// A Data/String byte buffer ([len][bytes] ptr handle).
+    Data { ptr: String, len: String },
+    /// A vector state field (`[N x i64]`).
+    VectorField { gep: String, count: String },
+}
+
+/// 2026-08-07 (Phase 7): classify an emitted collection register as a
+/// foreach iteration source — a heap List value (`[len, e0, …]` i64 buffer
+/// boxed to an i64 handle) or a Data/String byte buffer ([len][bytes] ptr).
+/// Anything else is a hard error (no silent wrongness).
+impl LlvmBackend {
+    fn foreach_collection_kind(
+        &mut self,
+        out: &mut String,
+        lreg: &TypedRegister,
+        indent: &str,
+    ) -> IterKind {
+        if matches!(&lreg.ty, Type::Applied(n, _) if n == "List") {
+            let p = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, lreg.name).ok();
+            let len = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len, p).ok();
+            IterKind::List { ptr: p, len }
+        } else if self.is_string_operand(&lreg.ty) || self.is_data_operand(&lreg.ty) {
+            let len = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len, lreg.name).ok();
+            IterKind::Data { ptr: lreg.name.clone(), len }
+        } else {
+            panic!(
+                "foreach iterable must be a range, List, Data, or vector field — got {:?}",
+                lreg.ty
+            );
+        }
+    }
+}
+
 pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
     match stmt {
         Statement::Let { name, ty, expr, modifiers, .. } => {
@@ -783,14 +826,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         // Data / vector fields) are the interpreter reference today and a
         // codegen follow-up (hard error here, no silent wrongness).
         Statement::Foreach { item, list, body } => {
-            let Expr::Range { start, end, inclusive } = list.as_ref() else {
-                panic!(
-                    "foreach over a collection is not yet supported by codegen \
-                     (ranges `0..n`/`0..=n` are); the interpreter handles collections"
-                );
-            };
-            let start_reg = backend.emit_expr(out, start, indent);
-            let end_reg = backend.emit_expr(out, end, indent);
             // 2026-08-07 (Phase 7): loop-carried locals — a register-bound let
             // (e.g. `acc`) assigned in the body would read its STALE initial
             // register every iteration (the body IR is emitted once; runtime
@@ -812,6 +847,38 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                 }
             }
+            // Determine the iteration source (SPEC §11.4 — ranges AND
+            // collections are iterable). The loop counter is a memory slot;
+            // the item value is the counter (ranges) or a container element.
+            let iter = match list.as_ref() {
+                Expr::Range { start, end, inclusive } => {
+                    let s = backend.emit_expr(out, start, indent);
+                    let e = backend.emit_expr(out, end, indent);
+                    IterKind::Counter { init: s.name, bound: e.name, inclusive: *inclusive }
+                }
+                Expr::Identifier(name) if backend.ctx.field_index_map.get(name).is_some() => {
+                    let fidx = *backend.ctx.field_index_map.get(name).unwrap();
+                    let is_vector = matches!(backend.ctx.field_briv_types.get(fidx),
+                        Some(t) if matches!(t, Type::Vector(_, _)));
+                    if is_vector {
+                        let gep = backend.emit_state_gep(out, indent, "f", "%state", fidx);
+                        let n = backend.ctx.field_briv_types.get(fidx)
+                            .map(|t| backend.vector_element_count(t))
+                            .unwrap_or(0) as i64;
+                        let count = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, count, n).ok();
+                        IterKind::VectorField { gep, count }
+                    } else {
+                        // A non-vector state field is not iterable.
+                        let lreg = backend.emit_expr(out, list, indent);
+                        backend.foreach_collection_kind(out, &lreg, indent)
+                    }
+                }
+                _ => {
+                    let lreg = backend.emit_expr(out, list, indent);
+                    backend.foreach_collection_kind(out, &lreg, indent)
+                }
+            };
             let label_n = backend.fun.txn_counter;
             backend.fun.txn_counter += 1;
             let header = format!("foreach.hdr{}", label_n);
@@ -819,7 +886,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let end_lbl = format!("foreach.end{}", label_n);
             let slot = backend.fun.gen_reg();
             writeln!(out, "{}{} = alloca i64", indent, slot).ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, start_reg.name, slot).ok();
+            // Header compare setup.
+            let (init_reg, bound_reg, cmp_op) = match &iter {
+                IterKind::Counter { init, bound, inclusive } => {
+                    (init.clone(), bound.clone(), if *inclusive { "sle" } else { "slt" })
+                }
+                IterKind::List { len, .. } | IterKind::Data { len, .. } => {
+                    let zero = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
+                    (zero, len.clone(), "slt")
+                }
+                IterKind::VectorField { count, .. } => {
+                    let zero = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
+                    (zero, count.clone(), "slt")
+                }
+            };
+            writeln!(out, "{}store i64 {}, ptr {}", indent, init_reg, slot).ok();
             writeln!(out, "{}br label %{}", indent, header).ok();
             writeln!(out, "{}{}:", indent, header).ok();
             let cur = backend.fun.gen_reg();
@@ -828,19 +911,46 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             writeln!(
                 out,
                 "{}{} = icmp {} i64 {}, {}",
-                indent,
-                cmp,
-                if *inclusive { "sle" } else { "slt" },
-                cur,
-                end_reg.name
+                indent, cmp, cmp_op, cur, bound_reg
             )
             .ok();
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, body_lbl, end_lbl).ok();
             writeln!(out, "{}{}:", indent, body_lbl).ok();
+            // Derive the item value for this iteration.
+            let item_reg = match &iter {
+                IterKind::Counter { .. } => cur.clone(),
+                IterKind::List { ptr, .. } => {
+                    let off = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, off, cur).ok();
+                    let elem_p = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, elem_p, ptr, off).ok();
+                    let elem = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, elem, elem_p).ok();
+                    elem
+                }
+                IterKind::Data { ptr, .. } => {
+                    let off = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 {}, 8", indent, off, cur).ok();
+                    let elem_p = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, elem_p, ptr, off).ok();
+                    let raw = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = load i8, ptr {}", indent, raw, elem_p).ok();
+                    let elem = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = zext i8 {} to i64", indent, elem, raw).ok();
+                    elem
+                }
+                IterKind::VectorField { gep, .. } => {
+                    let elem_p = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, elem_p, gep, cur).ok();
+                    let elem = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, elem, elem_p).ok();
+                    elem
+                }
+            };
             // Bind the loop variable so the body resolves it like a `let`.
-            backend.fun.last_val_temps.insert(item.clone(), cur.clone());
+            backend.fun.last_val_temps.insert(item.clone(), item_reg.clone());
             backend.fun.last_val_types.insert(item.clone(), Type::int());
-            backend.fun.let_bindings.insert(item.clone(), cur.clone());
+            backend.fun.let_bindings.insert(item.clone(), item_reg.clone());
             backend.fun.let_binding_types.insert(item.clone(), Type::int());
             backend.fun.let_original_types.insert(item.clone(), Type::int());
             backend.fun.terminated = false;

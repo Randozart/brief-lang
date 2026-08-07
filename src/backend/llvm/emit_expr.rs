@@ -1917,7 +1917,7 @@ impl LlvmBackend {
     }
 
     /// 2026-07-31: Element count of a fixed-size vector type; 1 for scalars.
-    fn vector_element_count(&self, ty: &Type) -> u64 {
+    pub(super) fn vector_element_count(&self, ty: &Type) -> u64 {
         match ty {
             Type::Vector(_, dims) => dims
                 .iter()
