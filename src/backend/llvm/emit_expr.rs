@@ -127,7 +127,14 @@ impl LlvmBackend {
                     ty: Type::bool_(),
                 }
             }
-            Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => self.emit_string_literal(out, v, bytes, indent),
+            Expr::Quoted(bytes) => self.emit_string_literal(out, v, bytes, indent),
+            // 2026-08-06 (Phase 7): `#b"..."` is a raw-bytes Data literal —
+            // the [len][bytes] constant must carry the EXACT bytes (the lossy
+            // UTF-8 string path would turn \x89 into the replacement char).
+            Expr::TaggedQuotedLiteral(bytes, prefix) if prefix == "b" => {
+                self.emit_byte_literal(out, v, bytes, indent)
+            }
+            Expr::TaggedQuotedLiteral(bytes, _) => self.emit_string_literal(out, v, bytes, indent),
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
@@ -1285,6 +1292,32 @@ impl LlvmBackend {
         self.emit_legacy_string_literal(out, v, bytes, indent)
     }
 
+    /// 2026-08-06 (Phase 7): emit a raw-bytes Data literal — a `[len][bytes]`
+    /// constant with the EXACT bytes (`\xHH` escapes). Distinct from the
+    /// string path, which lossily re-encodes bytes as UTF-8 text.
+    fn emit_byte_literal(
+        &mut self,
+        out: &mut String,
+        _v: &str,
+        bytes: &[u8],
+        indent: &str,
+    ) -> TypedRegister {
+        let si = self
+            .ctx
+            .byte_constants
+            .iter()
+            .position(|x| x == bytes)
+            .unwrap_or_else(|| {
+                self.ctx.byte_constants.push(bytes.to_vec());
+                self.ctx.byte_constants.len() - 1
+            });
+        let g = format!("@bstr.{}", si);
+        let str_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",
+            indent, str_p, bytes.len(), g).ok();
+        TypedRegister { name: str_p, ty: Type::Custom("Data".into()) }
+    }
+
     // 2026-07-22: Legacy string literal emission (SSO OFF).
     // Uses global @str.N constants to avoid dangling stack pointers.
     // The old alloca-based approach caused use-after-free when string
@@ -1605,15 +1638,23 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
-                // default = UTF8 character count (runtime helper reads the
-                // [len][bytes] buffer and counts codepoints). The O(1) byte
-                // length (header) is `x.^^Bytes` below.
-                ty if self.is_string_operand(ty) => {
-                    let r = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @briv_char_len(ptr {})", indent, r, recv_reg.name).ok();
-                    TypedRegister { name: r, ty: Type::int() }
-                }
+                 // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
+                 // default = UTF8 character count (runtime helper reads the
+                 // [len][bytes] buffer and counts codepoints). The O(1) byte
+                 // length (header) is `x.^^Bytes` below.
+                 ty if self.is_string_operand(ty) => {
+                     let r = self.fun.gen_reg();
+                     writeln!(out, "{}{} = call i64 @briv_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                     TypedRegister { name: r, ty: Type::int() }
+                 }
+                 // 2026-08-06 (Phase 7): `x.^Len` on a #Data — the byte length
+                 // is the [len] header of the [len][bytes] handle (O(1), no
+                 // codepoint scan). Data values are ptr handles like Strings.
+                 ty if matches!(ty, Type::Custom(n) if n == "Data") => {
+                     let r = self.fun.gen_reg();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
+                     TypedRegister { name: r, ty: Type::int() }
+                 }
                 // 2026-08-04 (compiler-in-Briv): a String value boxed to an
                 // i64 HANDLE at a call/binding boundary (String param, frgn
                 // result) is typed Custom("Int")/Int here — the physical value

@@ -4,16 +4,16 @@
 // The compiler proves round-trip identity for each pair.
 
 proto ASCII: #String {
-    CastTo(#String<UTF8>) = ascii_to_utf8(#L);
-    CastFrom(#String<UTF8>) = utf8_to_ascii(#L);
+    CastTo(#String<UTF8>) = ascii_to_utf8(#Lh);
+    CastFrom(#String<UTF8>) = utf8_to_ascii(#Lh);
 };
 
 proto UTF16: #String {
-    CastTo(#String<UTF8>) = utf16_to_utf8(#L);
-    CastFrom(#String<UTF8>) = utf8_to_utf16(#L);
+    CastTo(#String<UTF8>) = utf16_to_utf8(#Lh);
+    CastFrom(#String<UTF8>) = utf8_to_utf16(#Lh);
 };
 
 proto Posit32: #Float {
-    CastTo(#Float<IEEE754>) = Posit32_to_IEEE754(#L);
-    CastFrom(#Float<IEEE754>) = IEEE754_to_Posit32(#L);
+    CastTo(#Float<IEEE754>) = Posit32_to_IEEE754(#Lh);
+    CastFrom(#Float<IEEE754>) = IEEE754_to_Posit32(#Lh);
 };

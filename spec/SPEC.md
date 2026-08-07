@@ -384,7 +384,7 @@ trait Sized {
 trait Comparable<T> {
     defn compare(left: Self, right: T) -> Int;
 
-    op Equal(T): equal(#L, #R);
+    op Equal(T): equal(#Lh, #Rh);
 };
 ```
 
@@ -447,7 +447,7 @@ Missing proof evidence is an error unless the edge is visibly declared as a trus
 
 ```briv
 impl Point<Float> {
-    op Add(Point<Float>): add_points(#L, #R);
+    op Add(Point<Float>): add_points(#Lh, #Rh);
 };
 ```
 
@@ -921,14 +921,15 @@ Syntax maps to operation identities, which types bind to functions.
 
 ```briv
 type Number: #Int {
-    op Add(Number): add(#L, #R);
+    op Add(Number): add(#Lh, #Rh);
 };
 ```
 
 Compiler-known operand hashwords include:
 
-- `#L`: left operand;
-- `#R`: right operand/result position according to operation signature;
+- `#Lh`: left operand;
+- `#Rh`: right operand;
+- `#R`: result position in operation contracts (per operation signature);
 - `#T`: type parameter;
 - `#Self`: semantic self-reference.
 

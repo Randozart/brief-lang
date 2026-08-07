@@ -1,8 +1,8 @@
 // ── Briv Collections ───────────────────────────────────────────────
 // 2026-07-26: Standard collection types. No compiler magic.
 // Protocol bindings let the <- operator work for any collection
-// via op InsertAt: fn(#L, #R) and op ExtractFrom: fn(#R).
-// op Init: fn(#L, #R) handles let x: T = val initialization.
+// via op InsertAt: fn(#Lh, #Rh) and op ExtractFrom: fn(#Rh).
+// op Init: fn(#Lh, #Rh) handles let x: T = val initialization.
 
 // ── Stack<T, N> — fixed-size stack ──────────────────────────────────
 
@@ -10,9 +10,9 @@ obj Stack<T, N> {
     data: T[N];
     len: Int;
 
-    op InsertAt: push(#L, #R);
-    op ExtractFrom: pop(#R);
-    op Init: init(#L, #R);
+    op InsertAt: push(#Lh, #Rh);
+    op ExtractFrom: pop(#Rh);
+    op Init: init(#Lh, #Rh);
 
     txn init(val: T) [true][len == 1] {
         data[0] = val;
@@ -37,10 +37,10 @@ obj RingBuffer<T> {
     read: Int;
     write: Int;
 
-    op InsertAt: push(#L, #R);
-    op ExtractFrom: pop(#R);
-    op CopyFrom: read(#R);
-    op Init: init(#L, #R);
+    op InsertAt: push(#Lh, #Rh);
+    op ExtractFrom: pop(#Rh);
+    op CopyFrom: read(#Rh);
+    op Init: init(#Lh, #Rh);
 
     txn init(val: T) [true][write == 1] {
         data[0] = val;
@@ -78,10 +78,10 @@ obj List<T> {
     inner: ListBuffer<T>;
     len: Int;
 
-    op InsertAt: push(#L, #R);
-    op ExtractFrom: pop(#R);
-    op CopyFrom: get(#R);
-    op Init: init(#L, #R);
+    op InsertAt: push(#Lh, #Rh);
+    op ExtractFrom: pop(#Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
 
     txn init(val: T) [true][len == 1] {
         // 2026-08-04 (compiler-in-Briv): allocate 16 ELEMENTS (128 bytes for
@@ -134,10 +134,10 @@ obj HashMap<K, V> {
     count: Int;
     cap: Int;
 
-    op InsertAt: insert(#L, #R);
-    op ExtractFrom: remove(#R);
-    op CopyFrom: get(#R);
-    op Init: init(#L, #R);
+    op InsertAt: insert(#Lh, #Rh);
+    op ExtractFrom: remove(#Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
 
     txn init(val: K) [true][count == 0] {
         keys = Malloc#(256 * 8) as Ptr<K>;

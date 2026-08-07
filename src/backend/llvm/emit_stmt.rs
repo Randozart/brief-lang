@@ -248,7 +248,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
                     // 2026-07-20: Uses find_insert_strategy (reads OperatorDef from context).
                     // 2026-07-31 (A6): when the InsertAt op is bound to an obj
-                    // member (`op InsertAt: push(#L, #R)`), emit a self-bound
+                    // member (`op InsertAt: push(#Lh, #Rh)`), emit a self-bound
                     // member call instead of the free-function marker dispatch.
                     let insert_strat = backend.find_insert_strategy(lhs).cloned();
                     if let Some(op_def) = &insert_strat {
@@ -406,7 +406,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // 2026-07-17: Discard: `<- &queue` → Expression(AddrOf(source)).
             // Pop from collection and discard the result.
             // 2026-07-20: Uses find_extract_strategy (reads OperatorDef from context).
-            // 2026-08-01 (A10): member-bound ExtractFrom (op ExtractFrom: pop(#R))
+            // 2026-08-01 (A10): member-bound ExtractFrom (op ExtractFrom: pop(#Rh))
             // dispatches to the self-bound member call first — the free-function
             // dispatch only applies to convention-based fn bindings.
             if let Expr::AddrOf(source) = expr {
@@ -886,7 +886,7 @@ pub(super) fn emit_array_state_store(
 }
 
 /// 2026-07-31 (A6): `<-` dispatch onto an obj MEMBER binding
-/// (`op InsertAt: push(#L, #R)` on an obj). Emits a self-bound member call
+/// (`op InsertAt: push(#Lh, #Rh)` on an obj). Emits a self-bound member call
 /// (receiver + value register) instead of the free-function marker dispatch.
 /// Flat guard clauses; returns false when the pattern does not apply.
 pub(super) fn emit_strategy_member_call(
@@ -950,7 +950,7 @@ pub(super) fn emit_strategy_member_call(
 ///   InsertAt/ExtractFrom in operator_defs gets the same <- behavior.
 /// Supports: PropertyValue::Identifier("ring_push") for convention-based dispatch,
 ///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
-///   explicit marker-based dispatch like InsertAt <~ ring_push(#L, #R).
+///   explicit marker-based dispatch like InsertAt <~ ring_push(#Lh, #Rh).
 pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String, indent: &str,
     target: &Expr, op_def: &crate::ast::top::OperatorDef, value: Option<&str>) -> Option<String> {
     let pv = op_def.impl_args.as_ref()?;
@@ -1002,7 +1002,7 @@ pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String,
             None => vec![handle.clone()],
         }
     } else {
-        // Marker-based: resolve #L, #R, #T to actual registers
+        // Marker-based: resolve #Lh, #Rh, #T to actual registers
         markers.iter().map(|m| match m {
             crate::ast::PropertyValue::HashL => handle.clone(),
             crate::ast::PropertyValue::HashR => value.map(|v| v.to_string()).unwrap_or(handle.clone()),

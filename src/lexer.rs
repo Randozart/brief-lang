@@ -333,10 +333,10 @@ ExclaimArrow,
     // legacy pragma syntax.
 
     // 2026-07-18: Compiler-internal hash words for strategy op bindings.
-    // #L = left operand, #R = right operand, #T = type parameter.
-    #[token("#L")]
+    // #Lh = left operand, #Rh = right operand, #T = type parameter.
+    #[token("#Lh")]
     HashL,
-    #[token("#R")]
+    #[token("#Rh")]
     HashR,
     #[token("#T")]
     HashT,
@@ -434,9 +434,9 @@ ExclaimArrow,
     #[regex(r#"#b"([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
         let inner = &s[3..s.len()-1];
-        Some(unescape_string(inner))
+        Some(unescape_bytes(inner))
     })]
-    ByteString(String),
+    ByteString(Vec<u8>),
 
     #[regex(r"'([^'\\]|\\.)*'", |lex| {
         let s = lex.slice();
@@ -592,14 +592,14 @@ impl std::fmt::Display for Token {
             Token::Float(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::RawString(s) => write!(f, "#r\"{}\"", s),
-            Token::ByteString(s) => write!(f, "#b\"{}\"", s),
+            Token::ByteString(s) => write!(f, "#b\"{}\"", String::from_utf8_lossy(s)),
             Token::Char(c) => write!(f, "'{}'", c),
             Token::Identifier(s) => write!(f, "{}", s),
             Token::DocComment(s) => write!(f, "///{}", s),
             Token::DocCommentBang(s) => write!(f, "//!{}", s),
             Token::Slash => write!(f, "/"),
-            Token::HashL => write!(f, "#L"),
-            Token::HashR => write!(f, "#R"),
+            Token::HashL => write!(f, "#Lh"),
+            Token::HashR => write!(f, "#Rh"),
             Token::HashT => write!(f, "#T"),
             Token::HashSelf => write!(f, "#Self"),
         }
@@ -899,7 +899,7 @@ mod tests {
         assert_eq!(lexer.next(), None);
 
         let mut lexer = Token::lexer(r#"#b"\x41\x42""#);
-        assert_eq!(lexer.next(), Some(Ok(Token::ByteString("AB".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::ByteString(b"AB".to_vec()))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -973,8 +973,56 @@ fn unescape_string(inner: &str) -> String {
 }
 
 /// 2026-08-05 (Phase 7): decode `\xHH` into a char.
-fn decode_hex2(chars: &mut std::str::Chars) -> char {
-    let hex_str: String = chars.by_ref().take(2).collect();
+/// 2026-08-06 (Phase 7): decode `#b"..."` escapes into RAW bytes. `\xHH`
+/// yields the exact byte HH (SPEC §16.2) — not the UTF-8 encoding of the
+/// codepoint. Other escapes and literal chars map to their byte content.
+fn unescape_bytes(inner: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            out.extend_from_slice(&decode_byte_escape(&mut chars));
+        } else {
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+        }
+    }
+    out
+}
+
+/// Decode a single backslash escape after `\` into its byte content.
+fn decode_byte_escape(chars: &mut std::str::Chars) -> Vec<u8> {
+    let mut out = Vec::new();
+    match chars.next() {
+        Some('n') => out.push(b'\n'),
+        Some('t') => out.push(b'\t'),
+        Some('r') => out.push(b'\r'),
+        Some('0') => out.push(0),
+        Some('\\') => out.push(b'\\'),
+        Some('"') => out.push(b'"'),
+        Some('x') => {
+            let mut hex = String::new();
+            for _ in 0..2 {
+                if let Some(h) = chars.next() {
+                    hex.push(h);
+                } else {
+                    break;
+                }
+            }
+            if let Ok(b) = u8::from_str_radix(&hex, 16) {
+                out.push(b);
+            }
+        }
+        Some(other) => {
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
+        }
+        None => out.push(b'\\'),
+    }
+    out
+}
+
+fn decode_hex2(chars: &mut std::str::Chars) -> char {    let hex_str: String = chars.by_ref().take(2).collect();
     match u8::from_str_radix(&hex_str, 16) {
         Ok(h) => h as char,
         Err(_) => '?',
@@ -1033,5 +1081,20 @@ mod consumptive_tests {
         assert!(joined.contains("TildeSlash"), "~/: {joined}");
         assert!(joined.contains("Tilde"), "bare ~: {joined}");
         assert!(!joined.contains("TildeQuestion"), "~? removed: {joined}");
+    }
+}
+
+#[cfg(test)]
+mod unescape_bytes_tests {
+    use super::unescape_bytes;
+
+    #[test]
+    fn hex_escape_is_exact_byte() {
+        assert_eq!(unescape_bytes(r"\x89PNG"), vec![0x89, b'P', b'N', b'G']);
+    }
+    #[test]
+    fn common_escapes() {
+        assert_eq!(unescape_bytes(r"a\nb"), vec![b'a', b'\n', b'b']);
+        assert_eq!(unescape_bytes(r"a\\b"), vec![b'a', b'\\', b'b']);
     }
 }

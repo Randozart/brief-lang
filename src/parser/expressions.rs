@@ -409,7 +409,12 @@ impl<'a> Parser<'a> {
             }
             Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::RawString(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
-            Some((Token::ByteString(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
+            Some((Token::ByteString(s), _)) => {
+                // 2026-08-06 (Phase 7): `#b"..."` is a Data byte literal (SPEC
+                // 16.2). Tagged with prefix "b" so the typechecker types it as
+                // Data, not String.
+                Ok(Expr::TaggedQuotedLiteral(s, "b".to_string()))
+            }
             Some((Token::Char(c), _)) => Ok(Expr::Char(c)),
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
             Some((Token::BoolFalse, _)) => Ok(Expr::Bool(false)),

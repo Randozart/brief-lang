@@ -16,7 +16,7 @@ type Int : Bits {
 };
 
 type Bfloat16 { data: Bits<16>;
-    op Add(#Float, #Float) = bfloat_add(#L, #R);  // override with custom fn
+    op Add(#Float, #Float) = bfloat_add(#Lh, #Rh);  // override with custom fn
 };
 ```
 
@@ -80,8 +80,8 @@ type Int {
 
 | Token | Meaning | Used In |
 |-------|---------|---------|
-| `#L` | Left operand of `<-` | Strategy op bindings: `op InsertAt: fn(#L, #R)` |
-| `#R` | Right operand of `<-` | Strategy op bindings: `op ExtractFrom: fn(#R)` |
+| `#Lh` | Left operand of `<-` | Strategy op bindings: `op InsertAt: fn(#Lh, #Rh)` |
+| `#Rh` | Right operand of `<-` | Strategy op bindings: `op ExtractFrom: fn(#Rh)` |
 | `#T` | Type parameter of generic collection | Strategy op bindings: `pop as #T` |
 | `#StdIn` / `#StdOut` / `#StdErr` | Stream symbols (Phase 4) | `#StdOut <- value` writes (→ `Print#`); `#StdErr <- <String>` writes to stderr (→ `__eprint_str`); `#StdIn` is a `Ptr<Int>` stream-handle value |
 
@@ -93,13 +93,13 @@ Resolved at codegen time by substituting the concrete operand:
 
 | Marker | `collection <- value` (InsertAt) | `dest <- collection` (ExtractFrom) | `<- collection` (Discard) |
 |--------|----------------------------------|------------------------------------|---------------------------|
-| `#L` | handle register for `collection` | pop target register for `dest` | void (no target) |
-| `#R` | value register for `value` | handle register for `collection` | handle register for `collection` |
+| `#Lh` | handle register for `collection` | pop target register for `dest` | void (no target) |
+| `#Rh` | value register for `value` | handle register for `collection` | handle register for `collection` |
 | `#T` | element type of collection | element type of collection | element type of collection |
 
 The handle register is computed via `emit_addr_of` on the collection variable,
 which produces a GEP into `%State` (for state fields) or an alloca address
-(for let bindings). The `#R`/`#L` substitution is a register name pass-through
+(for let bindings). The `#Rh`/`#Lh` substitution is a register name pass-through
 — the compiler resolves the expression to a register first, then substitutes.
 
 ### Stream symbols (`#StdIn`/`#StdOut`/`#StdErr`, Phase 4)

@@ -19,12 +19,12 @@
 
 let N: Int = get_env_int!("BOUND");
 import { RingBuffer } from "std/collections.bv";
-let queue: RingBuffer<Int> = 0;    // op Init: init(#L, #R)
+let queue: RingBuffer<Int> = 0;    // op Init: init(#Lh, #Rh)
 let count: Int = 0;
 
 node work [count < N][count == N] {
-    queue <- count;                 // op InsertAt: push(#L, #R)
-    <- queue;                       // op ExtractFrom: pop(#R) — discard
+    queue <- count;                 // op InsertAt: push(#Lh, #Rh)
+    <- queue;                       // op ExtractFrom: pop(#Rh) — discard
 count = count + 1;
 
     when count % 5000000 == 0 {

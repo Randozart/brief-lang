@@ -475,8 +475,8 @@ fn sexpr_to_pv(expr: &SExpr) -> Result<PropertyValue, String> {
         SExpr::Atom(Atom::String(s)) => {
             // 2026-07-18: Deserialize hash words from string tags
             Ok(match s.as_str() {
-                "#L" => PropertyValue::HashL,
-                "#R" => PropertyValue::HashR,
+                "#Lh" => PropertyValue::HashL,
+                "#Rh" => PropertyValue::HashR,
                 "#T" => PropertyValue::HashT,
                 _ => PropertyValue::String(s.clone()),
             })

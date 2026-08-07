@@ -783,7 +783,7 @@ impl LlvmBackend {
     /// emit_init_state and emit_inline_init_stores. Arguments:
     ///   - reg_suffix: suffix for intermediate register names (e.g. "s", "b").
     ///     Use format!("%ip_{}{}", idx, suffix) to generate stable names.
-    /// 2026-07-31 (A7): `let x: T = val` where T declares `op Init: init(#L,#R)`
+    /// 2026-07-31 (A7): `let x: T = val` where T declares `op Init: init(#Lh,#Rh)`
     /// — allocate the struct, call the Init member (self-bound) with the value,
     /// and store the instance address into the field slot. Returns false when
     /// the field's type has no Init-op binding.
@@ -1040,7 +1040,7 @@ impl LlvmBackend {
             let p = format!("%ip_{}", idx);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
-            // 2026-07-31 (A7): `op Init: init(#L, #R)` construction — a
+            // 2026-07-31 (A7): `op Init: init(#Lh, #Rh)` construction — a
             // struct-typed field initialized from a value is built by calling
             // the Init member (self-bound) instead of storing the raw value.
             if self.emit_init_op_construction(out, "  ", &name, idx, init_clone.as_ref()) {

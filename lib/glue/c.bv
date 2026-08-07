@@ -24,9 +24,9 @@ frgn briv_cstring_concat(a: Int, b: Int) -> Int as cstring_concat from "lib/runt
 // concatenated with + uses it directly (zero cast), not the [len][data]
 // inline concat.
 proto C_String: #String {
-    CastTo(#String<UTF8>) = cstr_to_briv(#L);
-    CastFrom(#String<UTF8>) = str_to_c(#L);
-    op Concat(#String) = cstring_concat(#L, #R);
+    CastTo(#String<UTF8>) = cstr_to_briv(#Lh);
+    CastFrom(#String<UTF8>) = str_to_c(#Lh);
+    op Concat(#String) = cstring_concat(#Lh, #Rh);
 };
 
 // Boundary types — the export signature IS the boundary contract. The ABI

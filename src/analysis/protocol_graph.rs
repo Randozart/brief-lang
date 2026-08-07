@@ -34,12 +34,12 @@ fn prove_composition_inverse(forward_body: &Expr, inverse_body: &Expr) -> bool {
     use crate::symbolic::{eval_symbolic_expr, SymbolicValue};
     let sym_input = {
         let mut m = std::collections::HashMap::new();
-        m.insert("#L".to_string(), SymbolicValue::Identifier("__x".into()));
+        m.insert("#Lh".to_string(), SymbolicValue::Identifier("__x".into()));
         m
     };
     let mid = eval_symbolic_expr(forward_body, &sym_input);
     let mut inv_input = std::collections::HashMap::new();
-    inv_input.insert("#L".to_string(), mid);
+    inv_input.insert("#Lh".to_string(), mid);
     let output = eval_symbolic_expr(inverse_body, &inv_input);
 
     if symbolic_deep_equals(&output, &SymbolicValue::Identifier("__x".into())) {
@@ -127,13 +127,13 @@ pub fn verify_protocol_roundtrip(
         (Some(fwd), Some(inv)) => {
             let sym_input = {
                 let mut m = std::collections::HashMap::new();
-                m.insert("#L".to_string(), crate::symbolic::SymbolicValue::Identifier("__x".into()));
+                m.insert("#Lh".to_string(), crate::symbolic::SymbolicValue::Identifier("__x".into()));
                 m
             };
 
             let mid = crate::symbolic::eval_symbolic_expr(fwd, &sym_input);
             let mut inv_input = std::collections::HashMap::new();
-            inv_input.insert("#L".to_string(), mid.clone());
+            inv_input.insert("#Lh".to_string(), mid.clone());
             let output = crate::symbolic::eval_symbolic_expr(inv, &inv_input);
 
             if symbolic_deep_equals(&output, &crate::symbolic::SymbolicValue::Identifier("__x".into())) {
@@ -330,7 +330,7 @@ mod tests {
                 target_variant: "UTF8".to_string(),
                 binding: Some(crate::ast::top::CastBinding {
                     fn_name: fn_name.to_string(),
-                    param: "#L".to_string(),
+                    param: "#Lh".to_string(),
                 }),
             }],
             cross_ops: vec![],

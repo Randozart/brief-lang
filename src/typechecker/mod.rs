@@ -54,12 +54,12 @@ pub struct TypecheckContext<'a> {
     /// Populated by check_program before type-checking bodies.
     fn_return_types: HashMap<String, Type>,
     /// 2026-07-31: Regular operator declarations from TypeDef bodies
-    /// (`op Add(#Float): func(#L,#R);` / `op Add(Float): ...;`), keyed by type
+    /// (`op Add(#Float): func(#Lh,#Rh);` / `op Add(Float): ...;`), keyed by type
     /// name. Used to ALLOW mixed-type arithmetic ONLY when a cross-type /
     /// cross-protocol overload is explicitly declared — otherwise
     /// `Int * Float` is a type error (no implicit numeric coercion).
     /// Both `td.body.operators` (ProtocolDef-style OperatorDefs) and
-    /// `td.body.op_bindings` (type-body `op Name(#Proto): fn(#L,#R);`) are
+    /// `td.body.op_bindings` (type-body `op Name(#Proto): fn(#Lh,#Rh);`) are
     /// collected; the operand type lives in OperatorDef.params or
     /// OperatorBinding.protocol_variant.
     regular_ops: HashMap<String, Vec<crate::ast::top::OperatorDef>>,
@@ -87,7 +87,7 @@ pub struct TypecheckContext<'a> {
     type_protocols: HashMap<String, String>,
     regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
     /// 2026-08-03 (P1.4): cross-variant op overrides from `proto` declarations
-    /// (`proto C_String: #String { op Concat(#String) = cstring_concat(#L,#R) }`).
+    /// (`proto C_String: #String { op Concat(#String) = cstring_concat(#Lh,#Rh) }`).
     /// Variant name → op name (e.g. "Add"/"Concat") → binding fn name. An op on
     /// a sub-protocol value prefers its variant's own op (zero cast) — "adopt
     /// whatever operations are most convenient."
@@ -226,7 +226,7 @@ impl<'a> TypecheckContext<'a> {
                     }
                     // Coverage mirrors `type_declares_op`: only a declared
                     // protocol VARIANT (`op Add(Float)`) covers the operand.
-                    // A colon-form binding (`op Add: add(#L, #R)`) has no
+                    // A colon-form binding (`op Add: add(#Lh, #Rh)`) has no
                     // variant — it is documentation/authorization; the
                     // category's protocol binding governs its dispatch.
                     let covers = b
@@ -557,7 +557,7 @@ impl<'a> TypecheckContext<'a> {
 /// Empty params = wildcard (matches all forms). Single param = exact match.
 fn matches_form(params: &[Type], form: &str) -> bool {
     // 2026-07-27: Empty params means wildcard (matches any form).
-    // This handles op Parse: parse_string(#L); (no protocol variant).
+    // This handles op Parse: parse_string(#Lh); (no protocol variant).
     if params.is_empty() {
         return true;
     }
@@ -639,7 +639,12 @@ pub fn infer_expression(
         Expr::Float(_) => Ok((Type::float(), Provenance::Unknown)),
         Expr::Bool(_) => Ok((Type::bool_(), Provenance::Unknown)),
         Expr::BeginProgram => Ok((Type::bool_(), Provenance::Unknown)),
-        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) => Ok((Type::string(), Provenance::Unknown)),
+        Expr::Quoted(_) => Ok((Type::string(), Provenance::Unknown)),
+        // 2026-08-06 (Phase 7): `#b"..."` (TaggedQuotedLiteral prefix "b") is a
+        // Data byte literal; other prefix-tagged literals are Strings.
+        Expr::TaggedQuotedLiteral(_, prefix) => {
+            Ok((quoted_literal_type(prefix), Provenance::Unknown))
+        }
 
         // ── References ──────────────────────────────────────────
         Expr::Identifier(name) => {
@@ -1027,7 +1032,7 @@ fn try_coerce_via_parse(
     if ctx.find_parse_op(target_name, form, discriminator).is_some() {
         return true;
     }
-    // 2026-07-31 (Phase 2): `op Init: init(#L, #R)` authorizes `let t: T = v`
+    // 2026-07-31 (Phase 2): `op Init: init(#Lh, #Rh)` authorizes `let t: T = v`
     // construction (the collection stdlib pattern).
     let has_init = ctx
         .regular_bindings
@@ -1204,8 +1209,17 @@ fn infer_intrinsic_call(
 /// LHS type when the op resolves (declared → protocol bindings), else an
 /// InvalidOperation error. 2026-08-03: extracted from infer_binary_op so the
 /// resolution chain stays flat (Praetor complexity gate).
-fn arithmetic_result_ty(
-    ctx: &TypecheckContext,
+/// 2026-08-06 (Phase 7): the type of a prefix-tagged literal — `#b` (prefix
+/// "b") is a Data byte literal; other tags are Strings.
+fn quoted_literal_type(prefix: &str) -> Type {
+    if prefix == "b" {
+        Type::Custom("Data".into())
+    } else {
+        Type::string()
+    }
+}
+
+fn arithmetic_result_ty(    ctx: &TypecheckContext,
     kind: &BinaryOpKind,
     lhs_ty: &Type,
     rhs_ty: &Type,
@@ -2623,7 +2637,7 @@ fn entries_may_both_hold(a: &Expr, b: &Expr) -> bool {
 
 /// Type-check a top-level item.
 /// 2026-08-03 (P1.4): extract the binding function name from a cross-op's
-/// `impl_args` (`= cstring_concat(#L, #R)` → "cstring_concat"). Accepts a bare
+/// `impl_args` (`= cstring_concat(#Lh, #Rh)` → "cstring_concat"). Accepts a bare
 /// identifier or a call list whose first element is the function name; other
 /// shapes yield None (the cross-op is skipped, the base binding is used).
 fn cross_op_fn_name(impl_args: &Option<PropertyValue>) -> Option<String> {
@@ -3194,7 +3208,7 @@ node two [beginprogram][a == 2] {
     fn cross_type_overload_allows_mixed_arithmetic() {
         let src = r#"
 type MyNum : #Int {
-    op Mul(#Int): func(#L, #R);
+    op Mul(#Int): func(#Lh, #Rh);
 };
 let count: Int = 0;
 let v: MyNum = 0;
@@ -3214,7 +3228,7 @@ node t [count < 5][count == 5] {
         let src = r#"
 defn my_add(a: Int, b: Int) -> Int { term (a * 3) + b; };
 type MyNum : #Int {
-    op Add(Int): my_add(#L, #R);
+    op Add(Int): my_add(#Lh, #Rh);
 };
 node start [true][false] {
     let x: MyNum = 4;
@@ -3252,14 +3266,14 @@ node start [true][false] {
         }
     }
 
-    /// 2026-08-06 (Phase 5): the bootstrap colon-form `op Add: add(#L, #R)`
+    /// 2026-08-06 (Phase 5): the bootstrap colon-form `op Add: add(#Lh, #Rh)`
     /// is documentation — `Int + Int` stays a BinaryOp (protocol intrinsic
     /// lowering), never rewritten to the undefined `add` symbol.
     #[test]
     fn colon_form_doc_binding_is_not_elaborated() {
         let src = r#"
 type IntDoc : #Int {
-    op Add: add(#L, #R);
+    op Add: add(#Lh, #Rh);
 };
 node start [true][false] {
     let a: Int = 1;
@@ -3302,7 +3316,7 @@ node start [true][false] {
     fn undefined_op_target_is_an_error() {
         let src = r#"
 type MyNum : #Int {
-    op Add(Int): nonexistent(#L, #R);
+    op Add(Int): nonexistent(#Lh, #Rh);
 };
 node start [true][false] {
     let x: MyNum = 1;
@@ -3359,7 +3373,7 @@ node start [true][false] {
     #[test]
     fn missing_cross_type_overload_errors() {        let src = r#"
 type MyNum : #Int {
-    op Sub(#Int): func(#L, #R);
+    op Sub(#Int): func(#Lh, #Rh);
 };
 let count: Int = 0;
 let v: MyNum = 0;
@@ -3400,7 +3414,7 @@ node t [a < 5][a == 5] {
     fn same_type_custom_op_declared_binding_wins() {
         let src = r#"
 type MyNum : #Int {
-    op Add(#Int): func(#L, #R);
+    op Add(#Int): func(#Lh, #Rh);
 };
 let a: MyNum = 0;
 let b: MyNum = 0;
@@ -3438,7 +3452,7 @@ node t [a < 5][a == 5] {
     fn subtype_inherits_parent_declared_op() {
         let src = r#"
 type Base : #Int {
-    op Add(#Int): func(#L, #R);
+    op Add(#Int): func(#Lh, #Rh);
 };
 type MyNum : Base, #Int { };
 let a: MyNum = 0;
@@ -3981,4 +3995,27 @@ mod phase5_tests {
         "#;
         assert!(check(src).is_err(), "keep of an unknown name must error");
     }
+
+/// 2026-08-06 (Phase 7): `#b"..."` is a Data byte literal; `#r"..."` a String.
+#[test]
+fn byte_literal_is_data_raw_string_is_string() {
+    let ok = r#"
+node start [true][false] {
+    let b: Data = #b"\x89PNG";
+    let r: String = #r"a\tb";
+    term;
+};
+"#;
+    assert!(check(ok).is_ok(), "a #b literal must type as Data");
+    let bad = r#"
+node start [true][false] {
+    let s: String = #b"\x89";
+    term;
+};
+"#;
+    assert!(
+        check(bad).is_err(),
+        "#b must NOT type as String (it is a raw Data literal)"
+    );
+}
 }

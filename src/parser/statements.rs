@@ -336,7 +336,7 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(s)) => {
                 let s = s.clone();
                 self.pos += 1;
-                // 2026-07-18: Property function call: ring_push(#L, #R).
+                // 2026-07-18: Property function call: ring_push(#Lh, #Rh).
                 // Parse as List([Identifier("ring_push"), HashL, HashR]).
                 if self.eat(&Token::LParen) {
                     let mut items = vec![PropertyValue::Identifier(s)];

@@ -12,9 +12,9 @@ type Float16 : Bits {
     !> alignment: 2;
     !> tbaa: "FloatNode";
 
-    op Add: FAdd16(#L, #R);
-    op Sub: FSub16(#L, #R);
-    op Mul: FMul16(#L, #R);
+    op Add: FAdd16(#Lh, #Rh);
+    op Sub: FSub16(#Lh, #Rh);
+    op Mul: FMul16(#Lh, #Rh);
 };
 
 // 4-lane SIMD float vector
@@ -23,7 +23,7 @@ type Float4 : Bits {
     !> alignment: 16;
     !> tbaa: "FloatNode";
 
-    op Add: FAddV4F32(#L, #R);
-    op Sub: FSubV4F32(#L, #R);
-    op Mul: FMulV4F32(#L, #R);
+    op Add: FAddV4F32(#Lh, #Rh);
+    op Sub: FSubV4F32(#Lh, #Rh);
+    op Mul: FMulV4F32(#Lh, #Rh);
 };

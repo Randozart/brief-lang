@@ -13,18 +13,18 @@
 // hardcoded codegen based on protocol membership.
 
 type Int: #Int {
-    op Add: add(#L, #R);
-    op Sub: sub(#L, #R);
-    op Mul: mul(#L, #R);
-    op Div: div(#L, #R);
-    op Mod: mod(#L, #R);
-    op Neg: neg(#L);
-    op Eq: eq(#L, #R);
-    op Ne: ne(#L, #R);
-    op Lt: lt(#L, #R);
-    op Le: le(#L, #R);
-    op Gt: gt(#L, #R);
-    op Ge: ge(#L, #R);
+    op Add: add(#Lh, #Rh);
+    op Sub: sub(#Lh, #Rh);
+    op Mul: mul(#Lh, #Rh);
+    op Div: div(#Lh, #Rh);
+    op Mod: mod(#Lh, #Rh);
+    op Neg: neg(#Lh);
+    op Eq: eq(#Lh, #Rh);
+    op Ne: ne(#Lh, #Rh);
+    op Lt: lt(#Lh, #Rh);
+    op Le: le(#Lh, #Rh);
+    op Gt: gt(#Lh, #Rh);
+    op Ge: ge(#Lh, #Rh);
 };
 
 type UInt: Int;
@@ -42,28 +42,28 @@ type Int64: Int { !> bits: 64; };
 type UInt64: Int { !> bits: 64; };
 
 type Float: #Float {
-    op Add: add(#L, #R);
-    op Sub: sub(#L, #R);
-    op Mul: mul(#L, #R);
-    op Div: div(#L, #R);
-    op Neg: neg(#L);
-    op Eq: eq(#L, #R);
-    op Ne: ne(#L, #R);
-    op Lt: lt(#L, #R);
-    op Le: le(#L, #R);
-    op Gt: gt(#L, #R);
-    op Ge: ge(#L, #R);
+    op Add: add(#Lh, #Rh);
+    op Sub: sub(#Lh, #Rh);
+    op Mul: mul(#Lh, #Rh);
+    op Div: div(#Lh, #Rh);
+    op Neg: neg(#Lh);
+    op Eq: eq(#Lh, #Rh);
+    op Ne: ne(#Lh, #Rh);
+    op Lt: lt(#Lh, #Rh);
+    op Le: le(#Lh, #Rh);
+    op Gt: gt(#Lh, #Rh);
+    op Ge: ge(#Lh, #Rh);
 };
 
 type Double: #Float { !> bits: 64; };
 
 type Bool: #Bool {
     !> bits: 8;
-    op Eq: eq(#L, #R);
-    op Ne: ne(#L, #R);
-    op And: band(#L, #R);
-    op Or: bor(#L, #R);
-    op Not: bnot(#L);
+    op Eq: eq(#Lh, #Rh);
+    op Ne: ne(#Lh, #Rh);
+    op And: band(#Lh, #Rh);
+    op Or: bor(#Lh, #Rh);
+    op Not: bnot(#Lh);
 };
 
 type Char: #Char { !> bits: 32;

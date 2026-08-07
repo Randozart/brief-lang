@@ -1742,7 +1742,7 @@ impl<'a> Parser<'a> {
     /// 2026-07-20: Parse an op binding within a type body.
     /// Two forms:
     ///   op Add(#Int, #Int);                                     — declarative hashword dispatch
-    ///   op Add(Posit32) = Posit32_add(#L, #R);                  — binding with explicit function
+    ///   op Add(Posit32) = Posit32_add(#Lh, #Rh);                  — binding with explicit function
 
     /// 2026-07-26: Parse prop Name: expr;
     /// Declares a metaproperty with an implementation expression.
@@ -1751,10 +1751,10 @@ impl<'a> Parser<'a> {
     /// Declares an operator binding. protocol_variant is optional.
     /// Optional discriminator fields: pre:"0x", suf:"f", reg:"[0-9]+"
     /// Examples:
-    ///   op InsertAt: push(#L, #R);
-    ///   op Add(#Int): int_add(#L, #R);
-    ///   op Parse(Decimal, pre:"0x"): parse_hex(#L);
-    ///   op Parse(Decimal, suf:"h"): to_f16(#L);
+    ///   op InsertAt: push(#Lh, #Rh);
+    ///   op Add(#Int): int_add(#Lh, #Rh);
+    ///   op Parse(Decimal, pre:"0x"): parse_hex(#Lh);
+    ///   op Parse(Decimal, suf:"h"): to_f16(#Lh);
     fn parse_op_definition(&mut self, op_bindings: &mut Vec<OperatorBinding>) -> Result<(), SyntaxError> {
         let name = self.expect_identifier()?;
         // Optional protocol variant: (#Proto) or (ConcreteType)
@@ -1797,7 +1797,7 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect(Token::Colon)?;
-        // Parse method call with #L, #R, #T placeholders as a raw expression
+        // Parse method call with #Lh, #Rh, #T placeholders as a raw expression
         let fn_name = self.expect_identifier()?;
         self.expect(Token::LParen)?;
         let mut args = Vec::new();
@@ -1854,11 +1854,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// 2026-07-26: Parse a hash marker (#L, #R, #T) or an identifier.
+    /// 2026-07-26: Parse a hash marker (#Lh, #Rh, #T) or an identifier.
     fn parse_hash_marker(&mut self) -> Result<Expr, SyntaxError> {
         match self.peek() {
-            Some(Token::HashL) => { self.pos += 1; Ok(Expr::Identifier("#L".to_string())) }
-            Some(Token::HashR) => { self.pos += 1; Ok(Expr::Identifier("#R".to_string())) }
+            Some(Token::HashL) => { self.pos += 1; Ok(Expr::Identifier("#Lh".to_string())) }
+            Some(Token::HashR) => { self.pos += 1; Ok(Expr::Identifier("#Rh".to_string())) }
             Some(Token::HashT) => { self.pos += 1; Ok(Expr::Identifier("#T".to_string())) }
             _ => {
                 let ident = self.expect_identifier()?;
@@ -2191,7 +2191,7 @@ impl<'a> Parser<'a> {
                         )),
                     };
                     self.expect(Token::RParen)?;
-                    // Check for binding: = fn_name(#L)
+                    // Check for binding: = fn_name(#Lh)
                     let binding = if self.eat(&Token::Eq) {
                         let impl_args = self.parse_metadata_value_standalone()?;
                         let fn_name = match &impl_args {
@@ -2227,7 +2227,7 @@ impl<'a> Parser<'a> {
                     if self.eat(&Token::Arrow) {
                         let _ret = self.parse_type()?;
                     }
-                    // Optional binding: = fn(#L, #R)
+                    // Optional binding: = fn(#Lh, #Rh)
                     let impl_args = if self.eat(&Token::Eq) {
                         Some(self.parse_metadata_value_standalone()?)
                     } else {
@@ -2435,7 +2435,7 @@ mod tests {
 
     #[test]
     fn test_op_declarative_hashword() {
-        let ops = parse_op_from_type_def("type T { op Add: int_add(#L, #R); };");
+        let ops = parse_op_from_type_def("type T { op Add: int_add(#Lh, #Rh); };");
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Add");
         assert!(ops[0].protocol_variant.is_none());
@@ -2446,7 +2446,7 @@ mod tests {
         // 2026-08-01 (B2): the variant parses as a TYPE, so the stored value
         // is the BARE category ("Int") — hashwords (`op Add(#Int)`) and
         // CastFrom(#Bit) overrides both go through parse_type now.
-        let ops = parse_op_from_type_def("type T { op Add(#Int): int_add(#L, #R); };");
+        let ops = parse_op_from_type_def("type T { op Add(#Int): int_add(#Lh, #Rh); };");
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Add");
         assert_eq!(ops[0].protocol_variant.as_deref(), Some("Int"));
@@ -2455,7 +2455,7 @@ mod tests {
     #[test]
     fn test_op_binding_with_markers() {
         let ops = parse_op_from_type_def(
-            "type T { op InsertAt: push(#L, #R); };"
+            "type T { op InsertAt: push(#Lh, #Rh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "InsertAt");
@@ -2490,7 +2490,7 @@ mod tests {
     #[test]
     fn test_protocol_def_cross_op() {
         let pd = parse_protocol(
-            "proto ASCII: #String { CastTo(#String<UTF8>); op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R); };"
+            "proto ASCII: #String { CastTo(#String<UTF8>); op Add(#String<UTF8>) = add_UTF8_to_ASCII(#Lh, #Rh); };"
         );
         assert_eq!(pd.name, "ASCII");
         assert_eq!(pd.cast_edges.len(), 1);
@@ -2762,7 +2762,7 @@ mod tests {
     #[test]
     fn test_op_parse_with_pre_discriminator() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Decimal, pre:\"0x\"): parse_hex(#L); };"
+            "type T { op Parse(Decimal, pre:\"0x\"): parse_hex(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Parse");
@@ -2775,7 +2775,7 @@ mod tests {
     #[test]
     fn test_op_parse_with_suf_discriminator() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Decimal, suf:\"km\"): parse_km(#L); };"
+            "type T { op Parse(Decimal, suf:\"km\"): parse_km(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].name, "Parse");
@@ -2785,7 +2785,7 @@ mod tests {
     #[test]
     fn test_op_parse_with_regex_discriminator() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Decimal, reg:\"[0-9]+\"): parse_num(#L); };"
+            "type T { op Parse(Decimal, reg:\"[0-9]+\"): parse_num(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].reg.as_deref(), Some("[0-9]+"));
@@ -2794,7 +2794,7 @@ mod tests {
     #[test]
     fn test_op_parse_multiple_discriminators() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Decimal, pre:\"0x\", suf:\"h\"): parse_hex(#L); };"
+            "type T { op Parse(Decimal, pre:\"0x\", suf:\"h\"): parse_hex(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].pre.as_deref(), Some("0x"));
@@ -2804,7 +2804,7 @@ mod tests {
     #[test]
     fn test_op_parse_quoted_form() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Quoted): parse_string(#L); };"
+            "type T { op Parse(Quoted): parse_string(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].protocol_variant.as_deref(), Some("Quoted"));
@@ -2813,7 +2813,7 @@ mod tests {
     #[test]
     fn test_op_parse_bare_form() {
         let ops = parse_op_from_type_def(
-            "type T { op Parse(Bare): parse_bool(#L); };"
+            "type T { op Parse(Bare): parse_bool(#Lh); };"
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].protocol_variant.as_deref(), Some("Bare"));

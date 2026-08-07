@@ -5,24 +5,24 @@
 type PyBytes {
     !> maxbits: 64;
     !> alignment: 8;
-    op CastTo(#Bits) = identity(#L);
-    op CastFrom(#Bits) = identity(#L);
+    op CastTo(#Bits) = identity(#Lh);
+    op CastFrom(#Bits) = identity(#Lh);
 };
 
 type PyString: #String {
     !> maxbits: 128;
     !> alignment: 8;
-    op CastTo(#String<UTF8>) = ucs4_to_utf8(#L);
-    op CastFrom(#String<UTF8>) = utf8_to_ucs4(#L);
-    op CastTo(#String<ASCII>) = ucs4_to_ascii(#L);
-    op CastFrom(#String<ASCII>) = ascii_to_ucs4(#L);
+    op CastTo(#String<UTF8>) = ucs4_to_utf8(#Lh);
+    op CastFrom(#String<UTF8>) = utf8_to_ucs4(#Lh);
+    op CastTo(#String<ASCII>) = ucs4_to_ascii(#Lh);
+    op CastFrom(#String<ASCII>) = ascii_to_ucs4(#Lh);
 };
 
 type PyInt: #Int {
     !> maxbits: 64;
     !> alignment: 8;
-    op CastTo(#Int) = pylong_to_i64(#L);
-    op CastFrom(#Int) = i64_to_pylong(#L);
+    op CastTo(#Int) = pylong_to_i64(#Lh);
+    op CastFrom(#Int) = i64_to_pylong(#Lh);
 };
 
 // Zero-copy melds: if Briv CBuffer has same layout as PyBytes

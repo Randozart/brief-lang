@@ -8,9 +8,9 @@ what operations it supports, not by how many bytes it occupies on the target.
 
 ```briv
 type Int: #Int {
-    op Add: add(#L, #R);
-    op Sub: sub(#L, #R);
-    op Mul: mul(#L, #R);
+    op Add: add(#Lh, #Rh);
+    op Sub: sub(#Lh, #Rh);
+    op Mul: mul(#Lh, #Rh);
     ...
 };
 ```
@@ -131,8 +131,8 @@ Cross-protocol conversion requires explicit operator declarations:
 
 ```briv
 type CustomType: #Int {
-    op CastTo(#String<UTF8>) = my_to_string(#L);
-    op CastFrom(#String<UTF8>) = my_from_string(#L);
+    op CastTo(#String<UTF8>) = my_to_string(#Lh);
+    op CastFrom(#String<UTF8>) = my_from_string(#Lh);
 };
 ```
 
@@ -203,7 +203,7 @@ without needing explicit per-type match arms in the compiler.
 When an operator like `+` is applied to a type with `#Int` protocol, the backend:
 
 1. Checks `operator_defs` for the type's `op Add` binding
-2. Falls back to the generic `add(#L, #R)` template from `config/llvm-ops.toml`
+2. Falls back to the generic `add(#Lh, #Rh)` template from `config/llvm-ops.toml`
 3. If no template exists for the type+width combination, errors at compile time
 
 ## 6. Protocol Variants and Backend Support

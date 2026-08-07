@@ -186,8 +186,119 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
 
 /// Collect all unique string literal values from the program for global emission.
-fn collect_strings(items: &[TopLevel]) -> Vec<String> {
+/// 2026-08-06 (Phase 7): pre-collect raw-bytes Data literals (`#b"..."`) so
+/// the `@bstr.N` globals are emitted before the functions reference them.
+fn collect_byte_literals(items: &[TopLevel]) -> Vec<Vec<u8>> {
     let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    for item in items {
+        collect_bytes_tl(item, &mut seen, &mut out);
+    }
+    out
+}
+
+fn collect_bytes_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match tl {
+        TopLevel::Transaction(t) => {
+            collect_bytes_expr(&t.contract.pre_condition, seen, out);
+            collect_bytes_expr(&t.contract.post_condition, seen, out);
+            for s in &t.body {
+                collect_bytes_stmt(s, seen, out);
+            }
+        }
+        TopLevel::Definition(d) => {
+            for s in &d.body {
+                collect_bytes_stmt(s, seen, out);
+            }
+        }
+        TopLevel::Constant(c) => collect_bytes_expr(&c.expr, seen, out),
+        TopLevel::Statement(stmt) => collect_bytes_stmt(stmt, seen, out),
+        _ => {}
+    }
+}
+
+fn collect_bytes_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match stmt {
+        Statement::Let { expr, .. } => {
+            if let Some(e) = expr {
+                collect_bytes_expr(e, seen, out);
+            }
+        }
+        Statement::Term(Some(expr)) => collect_bytes_expr(expr, seen, out),
+        Statement::Assign(_, rhs) => collect_bytes_expr(rhs, seen, out),
+        Statement::Expression(e) | Statement::Gate(e) => collect_bytes_expr(e, seen, out),
+        Statement::Guarded(_, body) | Statement::Block(body) | Statement::SyncBlock(body) => {
+            for s in body {
+                collect_bytes_stmt(s, seen, out);
+            }
+        }
+        Statement::If(_, then, els) => {
+            for s in then.iter().chain(els.iter()) {
+                collect_bytes_stmt(s, seen, out);
+            }
+        }
+        Statement::Foreach { list, body, .. } => {
+            collect_bytes_expr(list, seen, out);
+            for s in body {
+                collect_bytes_stmt(s, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_bytes_expr(expr: &Expr, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match expr {
+        Expr::TaggedQuotedLiteral(bytes, prefix) if prefix == "b" => {
+            if seen.insert(bytes.clone()) {
+                out.push(bytes.clone());
+            }
+        }
+        Expr::BinaryOp(_, l, r) => {
+            collect_bytes_expr(l, seen, out);
+            collect_bytes_expr(r, seen, out);
+        }
+        Expr::Call(_, args, _) | Expr::List(args) | Expr::Tuple(args) => {
+            for a in args {
+                collect_bytes_expr(a, seen, out);
+            }
+        }
+        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) => {
+            collect_bytes_expr(i, seen, out);
+        }
+        Expr::Field(o, _) | Expr::Index(o, _) => collect_bytes_expr(o, seen, out),
+        Expr::Slice { array, start, end, stride, .. } => {
+            collect_bytes_expr(array, seen, out);
+            for b in [start, end, stride].into_iter().flatten() {
+                collect_bytes_expr(b, seen, out);
+            }
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for (_, f) in fields {
+                collect_bytes_expr(f, seen, out);
+            }
+        }
+        Expr::If(c, t, e) => {
+            collect_bytes_expr(c, seen, out);
+            collect_bytes_expr(t, seen, out);
+            if let Some(e) = e {
+                collect_bytes_expr(e, seen, out);
+            }
+        }
+        Expr::Match(s, arms) => {
+            collect_bytes_expr(s, seen, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_bytes_expr(g, seen, out);
+                }
+                collect_bytes_expr(&arm.body, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_strings(items: &[TopLevel]) -> Vec<String> {    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     // 2026-07-17: Always start with the empty string at index 0.
     // emit_field_init_value references @str.0 as the uninitialized String
@@ -272,7 +383,17 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
     match expr {
         Expr::Consume(inner) => { collect_strings_expr(inner, seen, out); }
         Expr::BeginProgram => {}
-        Expr::Quoted(s) | Expr::TaggedQuotedLiteral(s, _) => {
+        Expr::Quoted(s) => {
+            let s_str = String::from_utf8_lossy(s).into_owned();
+            if !seen.contains(&s_str) {
+                seen.insert(s_str.clone());
+                out.push(s_str);
+            }
+        }
+        // 2026-08-06 (Phase 7): `#b"..."` is a raw Data literal — its exact
+        // bytes go to byte_constants, NOT the lossy string constants.
+        Expr::TaggedQuotedLiteral(s, prefix) if prefix == "b" => {}
+        Expr::TaggedQuotedLiteral(s, _) => {
             let s_str = String::from_utf8_lossy(s).into_owned();
             if !seen.contains(&s_str) {
                 seen.insert(s_str.clone());
@@ -1795,6 +1916,7 @@ impl LlvmBackend {
         self.ctx.defn_return_types.clear();
         self.ctx.constants.clear();
         self.ctx.string_constants = collect_strings(items);
+        self.ctx.byte_constants = collect_byte_literals(items);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in items {
@@ -2488,6 +2610,15 @@ impl LlvmBackend {
                 si, len + 1, len, len + 1, escaped).ok();
         }
         if !self.ctx.string_constants.is_empty() { writeln!(out).ok(); }
+        // 2026-08-06 (Phase 7): raw-bytes Data literals (`#b"..."`) — exact
+        // bytes via `\xHH`, no NUL terminator, no lossy re-encoding.
+        for (si, bytes) in self.ctx.byte_constants.iter().enumerate() {
+            // Explicit i8 array — avoids all C-string escape ambiguity.
+            let elems: Vec<String> = bytes.iter().map(|b| format!("i8 {}", *b as i8)).collect();
+            writeln!(out, "@bstr.{} = private unnamed_addr constant <{{ i64, [{} x i8] }}> <{{ i64 {}, [{} x i8] [{}] }}>, align 8",
+                si, bytes.len(), bytes.len(), bytes.len(), elems.join(", ")).ok();
+        }
+        if !self.ctx.byte_constants.is_empty() { writeln!(out).ok(); }
 
         // 2026-06-29: Global sentinel for all empty list literals `[]`.
         // LLVM eliminates stack-allocated empty lists (dead alloca elimination)

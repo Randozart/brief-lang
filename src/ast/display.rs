@@ -12,7 +12,15 @@ use std::fmt;
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::Quoted(bytes) | Expr::TaggedQuotedLiteral(bytes, _) => write!(f, "\"{}\"", String::from_utf8_lossy(bytes)),
+            Expr::Quoted(bytes) => write!(f, "\"{}\"", String::from_utf8_lossy(bytes)),
+            // 2026-08-06 (Phase 7): `#b"..."` renders with its Data tag.
+            Expr::TaggedQuotedLiteral(bytes, prefix) => {
+                if prefix == "b" {
+                    write!(f, "#b\"{}\"", String::from_utf8_lossy(bytes))
+                } else {
+                    write!(f, "{}\"{}\"", prefix, String::from_utf8_lossy(bytes))
+                }
+            }
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => write!(f, "{}", n),
             Expr::Char(c) => write!(f, "'{}'", c),
             Expr::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
@@ -152,8 +160,8 @@ impl fmt::Display for PropertyValue {
                 }
                 write!(f, "]")
             }
-            PropertyValue::HashL => write!(f, "#L"),
-            PropertyValue::HashR => write!(f, "#R"),
+            PropertyValue::HashL => write!(f, "#Lh"),
+            PropertyValue::HashR => write!(f, "#Rh"),
             PropertyValue::HashT => write!(f, "#T"),
         }
     }

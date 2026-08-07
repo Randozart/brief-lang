@@ -4609,12 +4609,12 @@ fn test_reflect_type_emits_category_constant() {
 
 #[test]
 fn test_declared_op_elaborates_to_function_call() {
-    // A declared `op Add(Int): my_add(#L, #R)` must lower `MyNum + Int` to a
+    // A declared `op Add(Int): my_add(#Lh, #Rh)` must lower `MyNum + Int` to a
     // call of my_add (the typechecker's elaboration rewrites the BinaryOp).
     let src = r#"
 defn my_add(a: Int, b: Int) -> Int { term (a * 3) + b; };
 type MyNum : #Int {
-    op Add(Int): my_add(#L, #R);
+    op Add(Int): my_add(#Lh, #Rh);
 };
 node start [true][false] {
     let x: MyNum = 4;
@@ -4771,5 +4771,33 @@ node start [true][false] {
     assert!(
         !ir.contains("call i64 @g("),
         "no direct symbol call for the alias; got:\n{ir}"
+    );
+}
+
+// ── Phase 7 (2026-08-06): `#b` raw-bytes Data literal ───────────────
+
+#[test]
+fn test_byte_literal_emits_raw_bstr_constant() {
+    // `#b"\x89PNG"` emits an @bstr.N constant with the EXACT bytes and a
+    // Data-typed value; `^Len` reads the [len] header (byte count).
+    let src = r#"
+node start [true][false] {
+    let b: Data = #b"\x89PNG";
+    let c: Int = b.^Len;
+    term Print#(c);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("@bstr.0") && ir.contains("i8 -119") && ir.contains("i8 80"),
+        "the byte literal must emit an @bstr constant with raw bytes; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("load i64, ptr %"),
+        "Data ^Len must load the [len] header; got:\n{ir}"
     );
 }

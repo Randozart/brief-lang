@@ -450,7 +450,7 @@ mod tests {
                     target_variant: "UTF8".to_string(),
                     binding: Some(crate::ast::top::CastBinding {
                         fn_name: "cstr_to_briv".to_string(),
-                        param: "#L".to_string(),
+                        param: "#Lh".to_string(),
                     }),
                 },
                 crate::ast::top::CastEdge {
@@ -459,7 +459,7 @@ mod tests {
                     target_variant: "UTF8".to_string(),
                     binding: Some(crate::ast::top::CastBinding {
                         fn_name: "str_to_c".to_string(),
-                        param: "#L".to_string(),
+                        param: "#Lh".to_string(),
                     }),
                 },
             ],
