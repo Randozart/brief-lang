@@ -527,6 +527,68 @@ fn test_foreach_list_emits_index_loop() {
         "a collection iteration compares the counter against the length");
 }
 
+/// A program with a `Int[2][3]` state field written and read at `[1][2]` —
+/// exercises the multi-dim array layout + row-view GEPs (2026-08-07, Phase 7).
+fn multidim_program() -> Vec<TopLevel> {
+    let field = TopLevel::Statement(Box::new(Statement::Let {
+        name: "m".to_string(),
+        names: vec![],
+        ty: Some(Type::Vector(
+            Box::new(Type::int()),
+            vec![crate::ast::Dimension::Anonymous(2), crate::ast::Dimension::Anonymous(3)],
+        )),
+        expr: None,
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Assign(
+                Expr::Index(
+                    Box::new(Expr::Index(
+                        Box::new(Expr::Identifier("m".to_string())),
+                        Box::new(Expr::Decimal(1)),
+                    )),
+                    Box::new(Expr::Decimal(2)),
+                ),
+                Expr::Decimal(42),
+            ),
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![field, node]
+}
+
+#[test]
+fn test_multidim_field_emits_nested_geps() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&multidim_program(), None);
+    assert!(output.contains("[2 x [3 x i64]]"),
+        "a 2-dim field must lay out as [2 x [3 x i64]]");
+    assert!(output.contains("getelementptr [3 x i64]"),
+        "the outer index must GEP the row as [3 x i64]");
+    assert!(output.contains("[2 x [3 x i64]]"),
+        "the inner index must GEP the full aggregate");
+}
+
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
 /// (2026-08-06, Phase 7).

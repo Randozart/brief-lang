@@ -823,6 +823,12 @@ pub fn infer_expression(
                 });
             }
             let elem_ty = match &obj_ty {
+                // 2026-08-07 (Phase 7): a multi-dim vector indexed once yields
+                // a ROW (the remaining dims) — `data[row]` is Vector(T, [N]);
+                // only the LAST index yields the element type.
+                Type::Vector(inner, dims) if dims.len() > 1 => {
+                    Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec())
+                }
                 Type::Vector(inner, _) => (**inner).clone(),
                 Type::Ptr(inner) | Type::PtrConst(inner) => (**inner).clone(),
                 Type::Custom(n) if n == "String" => Type::int(),

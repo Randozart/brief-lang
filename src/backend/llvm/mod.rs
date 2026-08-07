@@ -1135,25 +1135,11 @@ impl LlvmBackend {
         // 0) — the parser leaves the size unresolved, so resolve it from the
         // program's compile-time constants (populated before build_field_index).
         if let Type::Vector(inner, dims) = ty {
-            if dims.len() == 1 {
-                let n = match dims[0] {
-                    crate::ast::Dimension::Anonymous(n) => Some(n),
-                    crate::ast::Dimension::Named(ref name, n) => {
-                        if n > 0 {
-                            Some(n)
-                        } else {
-                            self.ctx.constants.get(name).and_then(|(_, expr)| match expr {
-                                Expr::Decimal(v) if *v > 0 => Some(*v as usize),
-                                _ => None,
-                            })
-                        }
-                    }
-                };
-                if let Some(n) = n {
-                    let inner_llvm = if **inner == Type::float64() { "double".to_string() }
-                        else if **inner == Type::float() { "float".to_string() }
-                        else { "i64".to_string() };
-                    let arr_ty = format!("[{} x {}]", n, inner_llvm);
+            // 2026-08-07: MULTI-dim — `T[M][N]` becomes `[M x [N x T]]`
+            // (the Matrix<T, Rows, Cols> enabler, SPEC §16.6). Each dim
+            // resolves from an anonymous count or a compile-time constant.
+            if !dims.is_empty() {
+                if let Some(arr_ty) = self.vector_array_llvm_type(ty) {
                     self.ctx.field_types.push(arr_ty);
                     self.ctx.field_briv_types.push(ty.clone());
                     return;

@@ -1321,6 +1321,44 @@ impl LlvmBackend {
         p
     }
 
+    /// 2026-08-07 (Phase 7): the nested LLVM array type for a Vector —
+    /// `Int[2][3]` → `[2 x [3 x i64]]`. Resolves each dimension (anonymous or
+    /// a compile-time constant), mirroring push_field_type. Used by the
+    /// multi-dim row-view GEPs.
+    pub(super) fn vector_array_llvm_type(&self, ty: &Type) -> Option<String> {
+        let Type::Vector(inner, dims) = ty else {
+            return None;
+        };
+        if dims.is_empty() {
+            return None;
+        }
+        let mut resolved = Vec::with_capacity(dims.len());
+        for d in dims {
+            match d {
+                crate::ast::Dimension::Anonymous(n) => resolved.push(*n),
+                crate::ast::Dimension::Named(name, n) if *n > 0 => resolved.push(*n),
+                crate::ast::Dimension::Named(name, _) => {
+                    match self.ctx.constants.get(name) {
+                        Some((_, Expr::Decimal(v))) if *v > 0 => resolved.push(*v as usize),
+                        _ => return None,
+                    }
+                }
+            }
+        }
+        let inner_llvm = if **inner == crate::ast::Type::float64() {
+            "double".to_string()
+        } else if **inner == crate::ast::Type::float() {
+            "float".to_string()
+        } else {
+            "i64".to_string()
+        };
+        let mut arr_ty = inner_llvm;
+        for n in resolved.iter().rev() {
+            arr_ty = format!("[{} x {}]", n, arr_ty);
+        }
+        Some(arr_ty)
+    }
+
     /// Choose the dedup opcode based on float vs int.
     fn dedup_op<'a>(
         a_is_native: bool,

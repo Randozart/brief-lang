@@ -401,6 +401,36 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         return TypedRegister { name: val.name, ty: Type::void() };
                     }
                     let obj_reg = backend.emit_expr(out, obj, indent);
+                    // 2026-08-07 (Phase 7): a multi-dim ROW VIEW store —
+                    // `m[i][j] = v`: the outer obj is `Index(m, i)`, whose
+                    // register is a ptr into the aggregate (typed Vector with
+                    // the remaining dims). GEP the row at `j` + store.
+                    if let Type::Vector(inner, dims) = &obj_reg.ty {
+                        if !dims.is_empty() {
+                            let idx_reg = backend.emit_expr(out, idx, indent);
+                            let agg_ty = backend.vector_array_llvm_type(&obj_reg.ty)
+                                .unwrap_or_else(|| "i64".to_string());
+                            let elem = backend.fun.gen_reg();
+                            writeln!(
+                                out,
+                                "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                                indent, elem, agg_ty, obj_reg.name, idx_reg.name
+                            )
+                            .ok();
+                            let inner_llvm = backend.llvm_type(inner);
+                            let universe = backend.ctx.type_universe.clone();
+                            let store_val = backend.ensure_typed_value(
+                                out,
+                                indent,
+                                &inner_llvm,
+                                &val.name,
+                                Some(val.ty.clone()),
+                                universe.as_ref(),
+                            );
+                            writeln!(out, "{}store {} {}, ptr {}", indent, inner_llvm, store_val, elem).ok();
+                            return TypedRegister { name: val.name, ty: Type::void() };
+                        }
+                    }
                     if matches!(obj_reg.ty, Type::Ptr(_)) {
                         let idx_reg = backend.emit_expr(out, idx, indent);
                         let ptr = backend.fun.gen_reg();

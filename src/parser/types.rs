@@ -69,11 +69,15 @@ impl<'a> Parser<'a> {
         // (`String.c`, `Int.c.sso`) are removed; host/target qualifiers live
         // in configured GLUE bindings and protocol variants (SPEC §8.7).
         // 2026-07-25: Array syntax: Int[1024] → Type::Vector.
+        // 2026-08-07: MULTI-dim — `T[M][N]` accumulates dimensions into one
+        // `Type::Vector(inner, [M, N])` (the `Matrix<T, Rows, Cols>` enabler,
+        // SPEC §16.6).
         // 2026-07-31: `[` is an array suffix ONLY when the next token is an
         // integer literal (`Int[8]`) or an identifier directly followed by
         // `]` (`T[N]` generic array). A contract bracket (`-> Int [b != 0]`)
         // is left for parse_contract.
-        if self.check(&Token::LBracket) {
+        let mut dims: Vec<Dimension> = Vec::new();
+        while self.check(&Token::LBracket) {
             if matches!(self.peek_next(), Some(Token::Integer(_))) {
                 self.pos += 1; // consume LBracket
                 let size = match self.peek() {
@@ -81,9 +85,8 @@ impl<'a> Parser<'a> {
                     _ => { return self.error_at_current("expected array size (integer)"); }
                 };
                 self.expect(Token::RBracket)?;
-                return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Anonymous(size)]));
-            }
-            if let Some(Token::Identifier(_)) = self.peek_next() {
+                dims.push(Dimension::Anonymous(size));
+            } else if let Some(Token::Identifier(_)) = self.peek_next() {
                 let after_ident = self.tokens.get(self.pos + 2).map(|(t, _)| t);
                 if matches!(after_ident, Some(Token::RBracket)) {
                     // 2026-08-01 (Phase 2): `Type[#]` (from `-> Int [#]`) is
@@ -104,9 +107,16 @@ impl<'a> Parser<'a> {
                     self.pos += 1; // consume LBracket
                     let name = self.expect_identifier()?;
                     self.expect(Token::RBracket)?;
-                    return Ok(Type::Vector(Box::new(base.1), vec![Dimension::Named(name, 0)]));
+                    dims.push(Dimension::Named(name, 0));
+                } else {
+                    break;
                 }
+            } else {
+                break;
             }
+        }
+        if !dims.is_empty() {
+            return Ok(Type::Vector(Box::new(base.1), dims));
         }
         Ok(base.1)
     }
@@ -174,7 +184,10 @@ impl<'a> Parser<'a> {
         // 2026-07-31: Same non-greedy lookahead as keyword types — an integer
         // size or a `[Name]` generic dimension; otherwise the `[` is a
         // contract bracket.
-        if self.check(&Token::LBracket) {
+        // 2026-08-07: MULTI-dim — accumulate dims so a generic base gets the
+        // same `T[M][N]` treatment as a keyword base (SPEC §16.6).
+        let mut dims: Vec<Dimension> = Vec::new();
+        while self.check(&Token::LBracket) {
             if matches!(self.peek_next(), Some(Token::Integer(_))) {
                 self.pos += 1; // consume LBracket
                 let size = match self.peek() {
@@ -182,20 +195,23 @@ impl<'a> Parser<'a> {
                     _ => { return self.error_at_current("expected array size (integer)"); }
                 };
                 self.expect(Token::RBracket)?;
-                return Ok(Type::Vector(Box::new(Type::Custom(name.to_string())), vec![Dimension::Anonymous(size)]));
-            }
-            if let Some(Token::Identifier(_)) = self.peek_next() {
+                dims.push(Dimension::Anonymous(size));
+            } else if let Some(Token::Identifier(_)) = self.peek_next() {
                 let after_ident = self.tokens.get(self.pos + 2).map(|(t, _)| t);
                 if matches!(after_ident, Some(Token::RBracket)) {
                     self.pos += 1;
                     let dim = self.expect_identifier()?;
                     self.expect(Token::RBracket)?;
-                    return Ok(Type::Vector(
-                        Box::new(Type::Custom(name.to_string())),
-                        vec![Dimension::Named(dim, 0)],
-                    ));
+                    dims.push(Dimension::Named(dim, 0));
+                } else {
+                    break;
                 }
+            } else {
+                break;
             }
+        }
+        if !dims.is_empty() {
+            return Ok(Type::Vector(Box::new(Type::Custom(name.to_string())), dims));
         }
 
         Ok(Type::Custom(name.to_string()))
@@ -304,6 +320,36 @@ mod tests {
     fn fn_type_annotation() {
         let t = parse_type_str("fn(Int) -> Int");
         assert!(matches!(t, Type::Function(params, ret) if params.len() == 1 && matches!(params[0], Type::Custom(ref n) if n == "Int") && matches!(*ret, Type::Custom(ref n) if n == "Int")));
+    }
+
+    #[test]
+    fn multi_dim_array_type() {
+        // 2026-08-07 (Phase 7): `T[M][N]` accumulates dims into one Vector —
+        // the Matrix<T, Rows, Cols> enabler (SPEC §16.6).
+        let t = parse_type_str("Int[2][3]");
+        match t {
+            Type::Vector(inner, dims) => {
+                assert!(matches!(*inner, Type::Custom(ref n) if n == "Int"));
+                assert_eq!(dims.len(), 2);
+                assert!(matches!(dims[0], Dimension::Anonymous(2)));
+                assert!(matches!(dims[1], Dimension::Anonymous(3)));
+            }
+            other => panic!("expected a 2-dim Vector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multi_dim_array_named_dims() {
+        // A generic base accumulates named dims too (`T[Rows][Cols]`).
+        let t = parse_type_str("T[Rows][Cols]");
+        match t {
+            Type::Vector(_, dims) => {
+                assert_eq!(dims.len(), 2);
+                assert!(matches!(dims[0], Dimension::Named(ref n, _) if n == "Rows"));
+                assert!(matches!(dims[1], Dimension::Named(ref n, _) if n == "Cols"));
+            }
+            other => panic!("expected a 2-dim Vector, got {other:?}"),
+        }
     }
 
     #[test]

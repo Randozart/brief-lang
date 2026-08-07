@@ -623,12 +623,16 @@ impl LlvmBackend {
                 let field_idx = self.resolve_field_index(&obj_reg.ty, field);
                 let field_ty = self.resolve_field_type(&obj_reg.ty, field);
                 if let Some(Type::Vector(inner, dims)) = &field_ty {
-                    if dims.len() == 1 && matches!(dims[0], crate::ast::Dimension::Anonymous(_)) {
+                    if !dims.is_empty() {
                         // Emit GEP to get a pointer to the array field.
                         // 2026-07-31 (A7): the receiver register holds the
                         // struct's ADDRESS (state-slot or struct-literal), so
                         // GEP the address + field offset directly — no alloca
                         // spill (which treated the address as a struct value).
+                        // 2026-08-07: MULTI-dim — the field read returns a PTR
+                        // to the array (typed with the FULL Vector) so a
+                        // following index (`m.data[i][j]`) GEPs through the
+                        // row-view path.
                         let obj_type = match &obj_reg.ty {
                             Type::Custom(n) => n.clone(),
                             _ => {
@@ -647,11 +651,10 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, obj_reg.name).ok();
                         let gep = self.fun.gen_reg();
                         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, base, offset).ok();
-                        let result = self.fun.gen_reg();
-                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, gep).ok();
+                        let _ = (field_idx, inner);
                         return TypedRegister {
-                            name: result,
-                            ty: Type::ptr(*inner.clone()),
+                            name: gep,
+                            ty: field_ty.clone().unwrap(),
                         };
                     }
                 }
@@ -732,20 +735,40 @@ impl LlvmBackend {
                              .and_then(|f| f.iter().find(|(n, _)| n == sname))
                          {
                              if let Type::Vector(inner, dims) = s_ty {
-                                 if dims.len() == 1 {
+                                 if dims.len() >= 1 {
                                      let offset = self.lookup_field_offset(&self_type, sname);
                                      let elem_size = crate::backend::llvm::types::type_size(inner.as_ref(), self.ctx.type_universe.as_ref());
+                                     // 2026-08-07: multi-dim — the row stride
+                                     // is the product of the REMAINING dims
+                                     // (`data[row]` jumps a whole row of the
+                                     // inner sub-array).
+                                     let row_elems: usize = dims.iter().skip(1)
+                                         .map(|d| match d {
+                                             crate::ast::Dimension::Anonymous(n) => *n,
+                                             crate::ast::Dimension::Named(n, c) if *c > 0 => *c,
+                                             _ => 1,
+                                         })
+                                         .product::<usize>().max(1);
                                      let scaled = self.fun.gen_reg();
-                                     writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, idx_reg.name, elem_size).ok();
+                                     writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, idx_reg.name, elem_size * row_elems as u64).ok();
                                      let total = self.fun.gen_reg();
                                      writeln!(out, "{}{} = add i64 {}, {}", indent, total, offset, scaled).ok();
                                      let gep = self.fun.gen_reg();
                                      writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, total).ok();
-                                     let elem_llvm = self.llvm_type(inner);
-                                     let val = self.fun.gen_reg();
-                                     writeln!(out, "{}{} = load {}, ptr {}", indent, val, elem_llvm, gep).ok();
+                                     if dims.len() == 1 {
+                                         let elem_llvm = self.llvm_type(inner);
+                                         let val = self.fun.gen_reg();
+                                         writeln!(out, "{}{} = load {}, ptr {}", indent, val, elem_llvm, gep).ok();
+                                         let _ = v;
+                                         return TypedRegister { name: val, ty: (**inner).clone() };
+                                     }
+                                     // A row view — the enclosing index GEPs
+                                     // into it (the row-view path below).
                                      let _ = v;
-                                     return TypedRegister { name: val, ty: (**inner).clone() };
+                                     return TypedRegister {
+                                         name: gep,
+                                         ty: Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec()),
+                                     };
                                  }
                              }
                          }
@@ -758,20 +781,21 @@ impl LlvmBackend {
                  if let Expr::Identifier(name) = obj.as_ref() {
                      if let Some(&fidx) = self.ctx.field_index_map.get(name) {
                          if let Type::Vector(inner, dims) = &obj_reg.ty {
+                             let base = self.emit_state_gep(out, indent, "f", "%state", fidx);
+                             // 2026-07-31: The GEP source type must be the
+                             // %State field's real aggregate type
+                             // (field_types[fidx] = "[16 x float]"), not
+                             // llvm_type(Vector), which resolves to the
+                             // scalar fallback.
+                             let agg_ty = self
+                                 .ctx
+                                 .field_types
+                                 .get(fidx)
+                                 .cloned()
+                                 .unwrap_or_else(|| "i64".into());
                              if dims.len() == 1 {
-                                 let base = self.emit_state_gep(out, indent, "f", "%state", fidx);
+                                 // 1-dim field → the element.
                                  let elem = self.fun.gen_reg();
-                                 // 2026-07-31: The GEP source type must be the
-                                 // %State field's real aggregate type
-                                 // (field_types[fidx] = "[16 x float]"), not
-                                 // llvm_type(Vector), which resolves to the
-                                 // scalar fallback.
-                                 let agg_ty = self
-                                     .ctx
-                                     .field_types
-                                     .get(fidx)
-                                     .cloned()
-                                     .unwrap_or_else(|| "i64".into());
                                  writeln!(
                                      out,
                                      "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
@@ -788,9 +812,61 @@ impl LlvmBackend {
                                  let _ = v;
                                  return TypedRegister { name: val, ty: (**inner).clone() };
                              }
+                             // 2026-08-07 (Phase 7): multi-dim field
+                             // (`[M x [N x T]]`) — the index selects a ROW: a
+                             // ptr into the aggregate typed with the remaining
+                             // dims. The enclosing index (or a whole-row use)
+                             // GEPs into it.
+                             let row = self.fun.gen_reg();
+                             writeln!(
+                                 out,
+                                 "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                                 indent, row, agg_ty, base, idx_reg.name
+                             )
+                             .ok();
+                             let _ = v;
+                             return TypedRegister {
+                                 name: row,
+                                 ty: Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec()),
+                             };
                          }
                      }
                  }
+                // 2026-08-07 (Phase 7): a ROW VIEW — the register is a ptr into
+                // a multi-dim aggregate (produced by indexing a multi-dim
+                // field, typed Vector with the REMAINING dims). GEP into it;
+                // the final dim yields the element, further dims yield a
+                // sub-row. The field-identifier paths above already handled
+                // whole fields; this handles a Vector-typed ROW register.
+                if let Type::Vector(inner, dims) = &obj_reg.ty {
+                    if !dims.is_empty() {
+                        let agg_ty = self.vector_array_llvm_type(&obj_reg.ty)
+                            .unwrap_or_else(|| "i64".to_string());
+                        let elem = self.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                            indent, elem, agg_ty, obj_reg.name, idx_reg.name
+                        )
+                        .ok();
+                        if dims.len() == 1 {
+                            let val = self.fun.gen_reg();
+                            writeln!(
+                                out,
+                                "{}{} = load {}, ptr {}",
+                                indent, val, self.llvm_type(inner), elem
+                            )
+                            .ok();
+                            let _ = v;
+                            return TypedRegister { name: val, ty: (**inner).clone() };
+                        }
+                        let _ = v;
+                        return TypedRegister {
+                            name: elem,
+                            ty: Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec()),
+                        };
+                    }
+                }
                 if matches!(obj_reg.ty, Type::Ptr(_))
                     || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
                 {
