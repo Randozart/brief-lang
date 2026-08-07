@@ -307,6 +307,21 @@ impl<'a> Parser<'a> {
                 let name = self.expect_identifier()?;
                 expr = Expr::Reflect(Box::new(expr), name, ReflectKind::Runtime);
             } else if self.eat(&Token::LBracket) {
+                // 2026-08-07 (Phase 7): NAMED selectors — `arr[name => sel]`
+                // (SPEC §16.5). For a 1-D array the name LABELS the single
+                // dimension; it lowers to the plain slice/index. The name is
+                // validated as an identifier here; cross-checking it against a
+                // declared dimension name is a follow-up once named dims
+                // (const generics, §16.6) exist.
+                let _named_dim = if matches!(self.peek(), Some(Token::Identifier(_)))
+                    && matches!(self.peek_next(), Some(&Token::FatArrow))
+                {
+                    self.pos += 1; // consume the name
+                    self.pos += 1; // consume `=>`
+                    true
+                } else {
+                    false
+                };
                 // Check for slice syntax: arr[start:end:stride]
                 if self.check(&Token::Colon) {
                     // Slice with implicit start: arr[:end] or arr[:]
@@ -837,6 +852,20 @@ mod tests {
             assert!(matches!(*start, Expr::Decimal(0)));
             assert!(matches!(*end, Expr::Decimal(5)));
         }
+    }
+
+    #[test]
+    fn named_selector_lowers_to_plain_form() {
+        // 2026-08-07 (Phase 7): `arr[name => sel]` (SPEC §16.5) is a LABEL on
+        // the single 1-D dimension — it must parse to the exact same AST as
+        // the plain slice/index. Cross-checking the name against a declared
+        // dimension arrives with named dims (const generics, §16.6).
+        let named = parse_expr("v[width => 1:3]").unwrap();
+        let plain = parse_expr("v[1:3]").unwrap();
+        assert_eq!(named, plain, "a named slice selector must equal the plain slice");
+        let named = parse_expr("v[time => 4]").unwrap();
+        let plain = parse_expr("v[4]").unwrap();
+        assert_eq!(named, plain, "a named index selector must equal the plain index");
     }
 
     #[test]
