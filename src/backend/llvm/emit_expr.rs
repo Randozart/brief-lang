@@ -3544,6 +3544,17 @@ impl LlvmBackend {
         let rt = universe.get(key)?;
         for (f, ft) in &rt.fields {
             if f == field {
+                // 2026-08-07 (Phase 7): an Applied generic obj's member keeps
+                // RAW const dims (`data: T[Rows][Cols]` → `Named("Rows", 0)`).
+                // Substitute the concrete instance args (the same map
+                // ensure_mono uses for struct_types) so the member's dims
+                // resolve (`Rows` → Number(3) → Anonymous(3)).
+                if let Type::Applied(base, args) = ty {
+                    let params = self.ctx.obj_type_params.get(base).cloned().unwrap_or_default();
+                    let subst: std::collections::HashMap<String, Type> =
+                        params.into_iter().zip(args.iter().cloned()).collect();
+                    return Some(crate::typechecker::substitute_type(ft, &subst));
+                }
                 return Some(ft.clone());
             }
         }

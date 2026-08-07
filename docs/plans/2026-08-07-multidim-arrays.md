@@ -53,3 +53,18 @@ the codegen only handles 1-dim vectors.
 ## Docs
 - `docs/plans/2026-08-05-spec-implementation-status.md` §16: mark const
   generics (multi-dim arrays) shipped.
+
+## Update 2026-08-07 (evening): const-param member substitution
+
+`resolve_field_type` (emit_expr.rs) now substitutes an Applied generic obj's
+member type against the instance's concrete args — `data: T[Rows][Cols]` for
+`Matrix<Int, 3, 4>` resolves to `Vector(Int, [Anonymous(3), Anonymous(4)])`
+(the same map `ensure_mono` uses for struct_types). Verified: 1654 tests, 75
+MATCH + 1 PASS, no regression.
+
+The FULL `Matrix<T, Rows, Cols>` end-to-end remains blocked by a PRE-EXISTING
+generic-obj MEMBER-ARRAY access gap (verified at the baseline `46f4f741`): a
+direct `obj.member[i]` read generates invalid IR there, and a direct member
+txn call (`m.set(...)`) segfaults. Member access via the `<-` ops (the Stack's
+self-slot path) works. A dedicated member-array-access fix (struct member-array
+layout + Field read + call dispatch) is the remaining Phase 7 work.
