@@ -840,7 +840,7 @@ impl LlvmBackend {
             arg_regs.push((vr.name, vr.ty));
         }
         let out_tmp = self.fun.gen_reg();
-        self.emit_member_body(out, &out_tmp, &recv_reg, &type_key, &member, &arg_regs, indent);
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: &type_key, member: &member, arg_regs: &arg_regs, prefix: None }, indent);
         // Store the instance address into the field slot.
         let gep = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
@@ -848,6 +848,43 @@ impl LlvmBackend {
         writeln!(out, "{}store i64 {}, ptr {}", indent, addr, gep).ok();
         let _ = field_name;
         true
+    }
+
+    /// 2026-08-07 (object instance pools): run an UNPACKED obj instance's
+    /// Init member against its prefixed top-level slots during init_state —
+    /// `let b: Box<Int, 5> = 0` runs `init` with `self_prefix` = "b", so
+    /// `data[0] = v` and `total = 1` write the `b.data`/`b.total` slots.
+    fn emit_instance_init(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        init: &(String, String, Expr),
+    ) {
+        let (name, base, init_expr) = init;
+        let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
+        let init_def = match defs.iter().find(|d| d.op == "Init") {
+            Some(d) => d.clone(),
+            None => return,
+        };
+        let fn_name = match init_def.impl_args.as_ref() {
+            Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
+            _ => return,
+        };
+        let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
+        let member = members.iter()
+            .find(|m| super::emit_expr::member_briv_name(m) == fn_name)
+            .cloned();
+        let Some(member) = member else { return; };
+        let mut arg_regs: Vec<(String, Type)> = Vec::new();
+        let tmp = self.fun.gen_reg();
+        let vr = self.emit_expr_inner(out, &tmp, init_expr, indent);
+        arg_regs.push((vr.name, vr.ty));
+        let out_tmp = self.fun.gen_reg();
+        let recv_reg = crate::backend::llvm::TypedRegister {
+            name: "0".to_string(),
+            ty: Type::Custom(base.clone()),
+        };
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some(name.clone()) }, indent);
     }
 
     /// 2026-07-31 (A8): monomorphize an applied obj type (`Stack<Int, 8>`):
@@ -883,6 +920,13 @@ impl LlvmBackend {
 
     /// 2026-07-31 (A8): resolve an obj type name (Custom or Applied) to its
     /// registered struct key, monomorphizing on first use.
+    /// 2026-08-07 (object instance pools): `Some(name)` when `name` is an
+    /// unpacked obj instance (its Init was recorded) — its member bodies
+    /// resolve bare member names against the prefixed top-level slots.
+    pub(crate) fn unpacked_instance_prefix(&self, name: &str) -> Option<String> {
+        self.ctx.obj_instance_inits.contains_key(name).then(|| name.to_string())
+    }
+
     pub(crate) fn resolve_obj_key(&mut self, ty: &crate::ast::Type) -> Option<String> {
         match ty {
             crate::ast::Type::Custom(n) if self.ctx.struct_types.contains_key(n) => Some(n.clone()),
@@ -1052,6 +1096,14 @@ impl LlvmBackend {
             // initializer falls through to emit_field_init_value as before.
             self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx);
         }
+        // 2026-08-07 (object instance pools): run the unpacked instances'
+        // Init members against their prefixed slots.
+        let instance_inits: Vec<(String, String, Expr)> = self.ctx.obj_instance_inits.iter()
+            .map(|(n, (b, e))| (n.clone(), b.clone(), e.clone()))
+            .collect();
+        for init in &instance_inits {
+            self.emit_instance_init(out, "  ", init);
+        }
         let mmio_inits: Vec<(u64, Expr)> = {
             let mut v = Vec::new();
             for (name, &addr) in &self.ctx.mmio_fields {
@@ -1111,6 +1163,15 @@ impl LlvmBackend {
             // 2026-07-31: Phase 3 (§8.5-E4) — always-false ringbuf-init branch
             // deleted; bracket-list initializers go through emit_field_init_value.
             self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx);
+        }
+        // 2026-08-07 (object instance pools): the unpacked instances' Init
+        // members run here too (the reactor uses the inline init stores, not
+        // @init_state).
+        let instance_inits: Vec<(String, String, Expr)> = self.ctx.obj_instance_inits.iter()
+            .map(|(n, (b, e))| (n.clone(), b.clone(), e.clone()))
+            .collect();
+        for init in &instance_inits {
+            self.emit_instance_init(out, indent, init);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         // 2026-07-19: Sorted for deterministic IR.

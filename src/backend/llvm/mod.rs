@@ -1980,6 +1980,32 @@ impl LlvmBackend {
                     .insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
             }
         }
+        // 2026-08-07 (object instance pools): pre-register the struct/obj
+        // member-field lists so build_field_index can unpack obj instances
+        // into prefixed slots (`st.data`, `st.len`). The full registration
+        // (universe, obj_members, ...) runs later in generate() — this pass
+        // only seeds the field lists build_field_index needs.
+        for item in items {
+            match item {
+                TopLevel::StaticStruct(s) => {
+                    let fields: Vec<(String, Type)> = s.fields.iter()
+                        .map(|(n, t)| (n.clone(), t.clone()))
+                        .collect();
+                    self.ctx.struct_types.entry(s.name.clone()).or_insert(fields);
+                }
+                TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
+                    let fields: Vec<(String, Type)> = td.body.slots.iter()
+                        .map(|s| (s.name.clone(), s.ty.clone()))
+                        .collect();
+                    self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
+                    if !td.type_params.is_empty() {
+                        self.ctx.obj_type_params.entry(td.name.clone())
+                            .or_insert_with(|| td.type_params.iter().map(|p| p.name.clone()).collect());
+                    }
+                }
+                _ => {}
+            }
+        }
         self.build_field_index(&reordered_items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
@@ -4242,11 +4268,50 @@ impl LlvmBackend {
             // can evaluate and store the runtime value at startup.
             } else if let TopLevel::Statement(stmt) = item {
                 if let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
-                                let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
-                    self.ctx.field_index_map
-                        .insert(name.clone(), self.ctx.field_types.len());
-                    self.push_field_type(&field_ty);
-                    self.ctx.field_initializers.insert(name.clone(), expr.clone());
+                    let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
+                    // 2026-08-07 (object instance pools): a top-level obj
+                    // instance (`let st: Stack<Int, 256> = 0`) UNPACKS its
+                    // members into prefixed top-level slots (`st.data`,
+                    // `st.len`) — no instance address slot, no boxed struct.
+                    // Member types are substituted with the concrete const
+                    // args (the mono_subst map ensure_mono uses).
+                    let unpacked: Option<Vec<(String, Type)>> = match &field_ty {
+                        Type::Applied(base, args) if self.ctx.struct_types.contains_key(base) => {
+                            let params = self.ctx.obj_type_params.get(base).cloned().unwrap_or_default();
+                            let subst: std::collections::HashMap<String, Type> =
+                                params.into_iter().zip(args.iter().cloned()).collect();
+                            Some(
+                                self.ctx.struct_types.get(base).unwrap().iter()
+                                    .map(|(mname, mty)| {
+                                        (mname.clone(), crate::typechecker::substitute_type(mty, &subst))
+                                    })
+                                    .collect(),
+                            )
+                        }
+                        _ => None,
+                    };
+                    if let Some(slots) = unpacked {
+                        if let Some(init_expr) = expr {
+                            let base = match &field_ty {
+                                Type::Applied(base, _) => base.clone(),
+                                _ => String::new(),
+                            };
+                            self.ctx.obj_instance_inits.insert(name.clone(), (base, init_expr.clone()));
+                        }
+                        for (mname, mty) in slots {
+                            let slot_name = format!("{}.{}", name, mname);
+                            self.ctx.field_index_map
+                                .insert(slot_name.clone(), self.ctx.field_types.len());
+                            self.push_field_type(&mty);
+                            self.ctx.field_initializers.insert(slot_name.clone(), None);
+                            self.ctx.instance_slots.insert(slot_name);
+                        }
+                    } else {
+                        self.ctx.field_index_map
+                            .insert(name.clone(), self.ctx.field_types.len());
+                        self.push_field_type(&field_ty);
+                        self.ctx.field_initializers.insert(name.clone(), expr.clone());
+                    }
                 }
             } else if let TopLevel::Cell(c) = item {
                 // Cell fields are handled differently depending on whether the
@@ -4425,7 +4490,14 @@ impl LlvmBackend {
             // Fields referenced only in defn bodies (not txn bodies) don't get a
             // field_modes entry — changing Never→Always prevents their accidental
             // elimination while still allowing explicitly-marked fields to be pruned.
-            let mode = self.ctx.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Always);
+            // 2026-08-07 (object instance pools): unpacked instance slots are
+            // ALWAYS live (the field-liveness scan does not yet walk member
+            // bodies — pruning them would drop the instance's state).
+            let mode = if self.ctx.instance_slots.contains(name) {
+                crate::analysis::FieldMode::Always
+            } else {
+                self.ctx.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Always)
+            };
             match mode {
                 crate::analysis::FieldMode::Never => {
                     // Eliminate this field from %State entirely

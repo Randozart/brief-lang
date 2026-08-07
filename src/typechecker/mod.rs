@@ -2885,10 +2885,17 @@ fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> O
         _ => return None,
     };
     let slots = ctx.type_slots.get(type_name)?;
-    slots
-        .iter()
-        .find(|s| s.name == field)
-        .map(|s| s.ty.clone())
+    let slot_ty = slots.iter().find(|s| s.name == field).map(|s| s.ty.clone())?;
+    // 2026-08-07 (object instance pools): an Applied generic obj's member
+    // keeps RAW const dims (`data: T[M]` → `Named("M", 0)`); substitute the
+    // concrete args so `b.data[2]` resolves to Int (M → Number(5) → 5).
+    if let Type::Applied(base, args) = receiver {
+        let params = ctx.type_params.get(base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, Type> =
+            params.into_iter().zip(args.iter().cloned()).collect();
+        return Some(substitute_type(&slot_ty, &subst));
+    }
+    Some(slot_ty)
 }
 
 /// 2026-07-31: Reflection table (D1). `^` = runtime, `^^` = compile-time.
@@ -3267,6 +3274,28 @@ node t [true][false] {
 };
 "#;
         check(src).expect("heap List<Float> mask index should typecheck to List<Float>");
+    }
+
+    #[test]
+    fn unpacked_instance_member_dims_substitute() {
+        // 2026-08-07 (object instance pools): `b.data[2]` on an unpacked
+        // `Box<Int, 5>` resolves the member's const dims (M → 5) so the
+        // element type is Int, not the raw generic param T.
+        let src = r#"
+obj Box<T, M> {
+    data: T[M];
+    total: Int;
+    op Init: init(#Lh, #Rh);
+    txn init(v: T) [true][total == 1] { data[0] = v; total = 1; };
+};
+let b: Box<Int, 5> = 0;
+node t [true][false] {
+    b.data[2] = 42;
+    let x: Int = b.data[2];
+    term;
+};
+"#;
+        check(src).expect("unpacked member access should typecheck with substituted dims");
     }
 
 

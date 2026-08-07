@@ -123,9 +123,20 @@ pub struct CompilerContext {
     /// `@bstr.N` globals carrying the exact bytes (`\xHH`), distinct from the
     /// lossy UTF-8 string constants.
     pub byte_constants: Vec<Vec<u8>>,
-    /// 2026-08-07 (Phase 7): `@bmask.N` globals — raw i8 arrays (0/1) built
+    /// 2026-08-07 (object instance pools): `@bmask.N` globals — raw i8 arrays (0/1) built
     /// from compile-time Boolean mask literals in `data[mask]`.
     pub mask_constants: Vec<Vec<u8>>,
+    /// 2026-08-07 (object instance pools): the prefixed member slots of
+    /// unpacked obj instances (`st.data`, `st.len`). They are ALWAYS live —
+    /// the field-liveness scan does not yet walk member bodies, so without
+    /// this an unpacked member referenced only inside a member txn would be
+    /// pruned as Never.
+    pub instance_slots: std::collections::HashSet<String>,
+    /// 2026-08-07 (object instance pools): unpacked obj instance name → (obj
+    /// base, its Init expression) — `let b: Box<Int, 5> = 0` → ("Box", 0).
+    /// The Init member runs against the instance's prefixed slots during
+    /// init_state.
+    pub obj_instance_inits: std::collections::HashMap<String, (String, Expr)>,
     pub constants: HashMap<String, (Type, Expr)>,
 
     // Type info
@@ -314,6 +325,8 @@ impl CompilerContext {
             string_constants: Vec::new(),
             byte_constants: Vec::new(),
             mask_constants: Vec::new(),
+            instance_slots: std::collections::HashSet::new(),
+            obj_instance_inits: std::collections::HashMap::new(),
             constants: HashMap::new(),
             struct_types: HashMap::new(),
             obj_members: HashMap::new(),
@@ -582,6 +595,11 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// store (write), so `txn push(val) { data[len] = val; len = len + 1; }`
     /// mutates the receiver instance.
     pub self_binding: Option<(String, String)>,
+    /// 2026-08-07 (object instance pools): the unpacked obj instance prefix
+    /// (`st`) while emitting a member body. Bare member names (`data`, `len`)
+    /// resolve to the `{prefix}.{member}` top-level field slots instead of a
+    /// boxed self address.
+    pub self_prefix: Option<String>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,
@@ -860,6 +878,7 @@ impl FunctionContext {
             pending_consumes: Vec::new(),
             struct_literal_allocas: HashMap::new(),
             self_binding: None,
+            self_prefix: None,
             reg_float_cache: HashMap::new(),
             reg_type_cache: HashMap::new(),
             ssa_old_int_regs: HashMap::new(),

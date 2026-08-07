@@ -278,6 +278,29 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let val = backend.emit_expr(out, rhs, indent);
             match lhs {
                 Expr::Identifier(name) => {
+                    // 2026-08-07 (object instance pools): a bare member
+                    // target in an UNPACKED member body writes the instance's
+                    // top-level slot — `total = 1` in `st`'s member → the
+                    // `st.total` field.
+                    if let Some(prefix) = backend.fun.self_prefix.clone() {
+                        let slot = format!("{}.{}", prefix, name);
+                        if let Some(&idx) = backend.ctx.field_index_map.get(&slot) {
+                            let gep = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                            // Mirror the standard top-level field store: use the
+                            // slot's actual LLVM type and box Ptr/float values.
+                            let field_ty = backend.ctx.field_types[idx].clone();
+                            let val_ty = backend.llvm_type(&val.ty);
+                            if val_ty == field_ty {
+                                writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, val.name, gep).ok();
+                            } else {
+                                let boxed = backend.adapt_to_i64(out, indent, &val);
+                                writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, gep).ok();
+                            }
+                            backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                            backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                            return TypedRegister { name: val.name, ty: Type::void() };
+                        }
+                    }
                     // 2026-07-31 (A5): obj member `self` slot write — a bare
                     // slot name in a member body stores to self+offset.
                     let self_binding = backend.fun.self_binding.clone();
@@ -632,7 +655,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // 2026-08-01 (D3): a defn MEMBER's `term <expr>` records its
                 // value register so emit_member_body can return it (callable
                 // txns use callable_txn_result; standalone defns use `ret`).
-                if backend.fun.self_binding.is_some() && backend.fun.callable_txn_result.is_none() {
+                // 2026-08-07 (object instance pools): an UNPACKED member body
+                // has self_binding = None (the self is the prefix) — the
+                // self_prefix path must record member_result too.
+                if (backend.fun.self_binding.is_some() || backend.fun.self_prefix.is_some())
+                    && backend.fun.callable_txn_result.is_none()
+                {
                     backend.fun.member_result = Some((reg.name.clone(), reg.ty.clone()));
                 }
                 if backend.fun.callable_txn_result.is_some() {
@@ -1176,7 +1204,7 @@ pub(super) fn emit_strategy_member_call(
     // txn member's `term` value); emit_member_body ignores `out_tmp` and
     // returns member_result. Side-effect members (push/pop without a term
     // result) return a fresh void register — fine for discards.
-    let result_reg = backend.emit_member_body(out, &out_tmp, &recv_reg, &self_key, &member, &arg_regs, indent);
+    let result_reg = backend.emit_member_body(out, &out_tmp, crate::backend::llvm::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: &self_key, member: &member, arg_regs: &arg_regs, prefix: backend.unpacked_instance_prefix(recv_name) }, indent);
     Some(result_reg.name)
 }
 

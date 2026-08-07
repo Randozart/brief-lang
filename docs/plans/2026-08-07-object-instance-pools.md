@@ -128,3 +128,31 @@ context (id 0 for a top-level `let`, or the handle for a spawned call).
 - Growable pools (re-layout) — deferred; fixed capacity first.
 - Obj-as-value (passing an instance handle across boundaries) — the handle (id)
   is the portable unit.
+
+## Migration progress 2026-08-07 (late): phases 1-4 shipped
+
+The unpacked single-instance representation works end-to-end:
+
+- **Instance state building**: build_field_index unpacks a top-level Applied
+  obj let into prefixed member slots (`st.data`, `st.len`) with the const
+  args substituted (M → 5 → `[5 x i64]`). A pre-pass seeds struct_types +
+  obj_type_params before build_field_index. Unpacked slots are ALWAYS-live
+  (the field-liveness scan does not walk member bodies yet).
+- **Init**: obj_instance_inits records the instance + its init expr; the Init
+  member runs against the prefixed slots during BOTH init_state and the
+  inline init stores (self_prefix = the instance name).
+- **Member access**: Field/Identifier resolution routes `b.total`/`b.data` (and
+  bare member names in member bodies) through the standard %State slot paths;
+  array members return the slot's array ptr (indexed via the row-view path).
+- **Member calls + ops**: emit_method_call / emit_strategy_member_call pass the
+  instance prefix (MemberInvocation) so member bodies resolve bare names to
+  the slots; the member-result term capture now fires for the prefix path.
+- **Typechecker**: resolve_field_type substitutes member const dims against the
+  instance args.
+- Verified: 1656 tests, 75 MATCH + 1 PASS (ring_buffer / queue_drain /
+  stack_push_pop / hash_ops all unpacked + correct), the Box end-to-end
+  (b.total=1, b.data writes, b.set member call, op dispatch).
+
+REMAINING: spawn/await/free/keep (id-pool allocator + linear handles, §12.2),
+the SoA pool dimension (capacity), member-body liveness wiring, retiring the
+boxed %Box/self-slot paths for instances.

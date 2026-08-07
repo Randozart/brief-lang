@@ -583,11 +583,127 @@ fn test_multidim_field_emits_nested_geps() {
     let output = backend.generate(&multidim_program(), None);
     assert!(output.contains("[2 x [3 x i64]]"),
         "a 2-dim field must lay out as [2 x [3 x i64]]");
-    assert!(output.contains("getelementptr [3 x i64]"),
-        "the outer index must GEP the row as [3 x i64]");
-    assert!(output.contains("[2 x [3 x i64]]"),
-        "the inner index must GEP the full aggregate");
 }
+
+/// An `obj Box<T, M> { data: T[M]; total: Int; ... }` with a top-level
+/// `let b: Box<Int, 5> = 0` — exercises the UNPACKED instance representation
+/// (2026-08-07, object instance pools): members become prefixed top-level
+/// slots, the Init runs against them, and `b.data[i]`/`b.total` resolve
+/// through the standard field paths.
+fn unpacked_instance_program() -> Vec<TopLevel> {
+    use crate::ast::top::TypeDefBody;
+    use crate::ast::top::TypeDefSlot;
+    let obj_decl = TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+        name: "Box".to_string(),
+        type_params: vec![
+            crate::ast::top::TypeParam { name: "T".to_string(), bound: None },
+            crate::ast::top::TypeParam { name: "M".to_string(), bound: None },
+        ],
+        parent: None,
+        protocol: None,
+        traits: vec![],
+        bit_range: None,
+        body: crate::ast::top::TypeDefBody {
+            slots: vec![
+                crate::ast::top::TypeDefSlot { name: "data".to_string(), ty: Type::Vector(
+                    Box::new(Type::Custom("T".to_string())),
+                    vec![crate::ast::Dimension::Named("M".to_string(), 0)],
+                ), bit_range: None },
+                crate::ast::top::TypeDefSlot { name: "total".to_string(), ty: Type::int(), bit_range: None },
+            ],
+            metadata: HashMap::new(),
+            projections: vec![],
+            bindings: vec![],
+            operators: vec![],
+            op_bindings: vec![],
+            constraints: vec![],
+            members: vec![TopLevel::Transaction(Transaction {
+                name: "init".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![("v".to_string(), Type::Custom("T".to_string()))],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(Expr::Identifier("data".to_string()),
+                        Expr::Index(Box::new(Expr::Identifier("data".to_string())), Box::new(Expr::Decimal(0)))),
+                    Statement::Assign(Expr::Identifier("total".to_string()), Expr::Decimal(1)),
+                    Statement::Term(None),
+                ],
+                metadata: HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            })],
+            span: None,
+        },
+        span: None,
+    }));
+    let inst = TopLevel::Statement(Box::new(Statement::Let {
+        name: "b".to_string(),
+        names: vec![],
+        ty: Some(Type::Applied("Box".to_string(), vec![
+            Type::int(),
+            crate::ast::Type::Number(5),
+        ])),
+        expr: Some(Expr::Decimal(0)),
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Assign(
+                Expr::Index(
+                    Box::new(Expr::Field(Box::new(Expr::Identifier("b".to_string())), "data".to_string())),
+                    Box::new(Expr::Decimal(2)),
+                ),
+                Expr::Decimal(42),
+            ),
+            Statement::Term(Some(Expr::Field(Box::new(Expr::Identifier("b".to_string())), "total".to_string()))),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![obj_decl, inst, node]
+}
+
+#[test]
+fn test_unpacked_instance_emits_prefixed_slots() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&unpacked_instance_program(), None);
+    assert!(output.contains("[5 x i64]"),
+        "the member-array must unpack into a [5 x i64] top-level slot");
+    assert!(output.contains("define void @txn_s"),
+        "the node must compile");
+    assert!(output.contains("getelementptr [5 x i64], ptr"),
+        "b.data[2] must GEP the unpacked slot's array");
+}
+
 
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering

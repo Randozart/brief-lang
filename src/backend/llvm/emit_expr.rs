@@ -21,13 +21,25 @@ enum MaskSource {
     StateField(usize),
 }
 
-/// 2026-08-07 (Phase 7): the operands of a mask index — the object expression
-/// + register, and the mask source. Bundled so `emit_masked_index` stays under
-/// the parameter budget.
+/// 2026-08-07 (object instance pools): the operands of a mask index — the object
+/// expression + register, and the mask source. Bundled so
+/// `emit_masked_index` stays under the parameter budget.
 struct MaskIndexOperands<'a> {
     obj: &'a Expr,
     obj_reg: &'a TypedRegister,
     source: MaskSource,
+}
+
+/// 2026-08-07 (object instance pools): everything a member body needs — the
+/// receiver (a boxed struct address OR an unpacked instance prefix), the
+/// member top-level, and the bound argument registers. Bundled so
+/// `emit_member_body` stays under the parameter budget.
+pub(crate) struct MemberInvocation<'a> {
+    pub recv_reg: &'a TypedRegister,
+    pub type_name: &'a str,
+    pub member: &'a crate::ast::TopLevel,
+    pub arg_regs: &'a [(String, Type)],
+    pub prefix: Option<String>,
 }
 
 /// Pack an SVO inline header: `len` and `cap` into disjoint bit ranges with
@@ -155,6 +167,21 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
+                // 2026-08-07 (object instance pools): a bare member name in an
+                // UNPACKED member body resolves to the instance's top-level
+                // slot — `data` inside `st`'s push → the `st.data` field.
+                if let Some(prefix) = self.fun.self_prefix.clone() {
+                    let slot = format!("{}.{}", prefix, name);
+                    if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
+                        if matches!(&slot_ty, Type::Vector(_, _)) {
+                            let base = self.emit_state_gep(out, indent, "i", "%state", idx);
+                            return TypedRegister { name: base, ty: slot_ty };
+                        }
+                        let (loaded, briv_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
+                        return TypedRegister { name: loaded, ty: briv_ty };
+                    }
+                }
                 // 2026-08-07 (Phase 7): a let MUTATED via `x = ...` is
                 // redirected to an alloca slot by the assign — reads must load
                 // from the slot (fresh across loop iterations), NOT resolve a
@@ -613,6 +640,26 @@ impl LlvmBackend {
 
             // ── Field access ─────────────────────────────────────────
             Expr::Field(obj, field) => {
+                // 2026-08-07 (object instance pools): an unpacked obj
+                // instance's member (`b.total`, `b.data`) is a top-level field
+                // slot `{recv}.{member}`. A scalar member loads the slot; an
+                // array member returns a PTR to the slot's array (typed with
+                // its Vector), so a following `[i]` indexes it via the
+                // row-view path. Checked BEFORE emitting the receiver — `b`
+                // itself has no slot (it unpacked), so emitting it would
+                // produce an undefined `@b` global.
+                if let Expr::Identifier(recv_name) = obj.as_ref() {
+                    let slot = format!("{}.{}", recv_name, field);
+                    if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
+                        if matches!(&slot_ty, Type::Vector(_, _)) {
+                            let base = self.emit_state_gep(out, indent, "i", "%state", idx);
+                            return TypedRegister { name: base, ty: slot_ty };
+                        }
+                        let (loaded, briv_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
+                        return TypedRegister { name: loaded, ty: briv_ty };
+                    }
+                }
                 let obj_reg = self.emit_expr(out, obj, indent);
                 // 2026-07-14: Layout field access — #fieldname triggers bit-shift/mask
                 if field.starts_with('#') {
@@ -1819,13 +1866,38 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         let recv_tmp = self.fun.gen_reg();
-        let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+        // 2026-08-07 (object instance pools): an unpacked instance receiver
+        // (`b.set(...)`) — `b` has no slot (its members unpacked), so emitting
+        // it would produce an undefined `@b`. The member body resolves bare
+        // member names against the instance PREFIX; the base obj type comes
+        // from the recorded instance Init.
+        let recv_prefix = match recv {
+            Expr::Identifier(n) => self.unpacked_instance_prefix(n),
+            _ => None,
+        };
+        let (recv_reg, mut type_name) = if let Some(prefix) = &recv_prefix {
+            let base = self.ctx.obj_instance_inits.get(prefix)
+                .map(|(b, _)| b.clone())
+                .unwrap_or_default();
+            let dummy = self.fun.gen_reg();
+            writeln!(out, "{}{} = add i64 0, 0", indent, dummy).ok();
+            (
+                crate::backend::llvm::TypedRegister {
+                    name: dummy,
+                    ty: Type::Custom(base.clone()),
+                },
+                base,
+            )
+        } else {
+            let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+            let type_name = match self.resolve_obj_key(&recv_reg.ty) {
+                Some(n) => n,
+                None => String::new(),
+            };
+            (recv_reg, type_name)
+        };
         // 2026-07-31: a struct-typed state field loads as i64 (its address);
         // recover the struct type from field_briv_types for member lookup.
-        let mut type_name = match self.resolve_obj_key(&recv_reg.ty) {
-            Some(n) => n,
-            None => String::new(),
-        };
         if type_name.is_empty() {
             if let Expr::Identifier(rname) = recv {
                 if let Some(&ridx) = self.ctx.field_index_map.get(rname) {
@@ -1845,7 +1917,7 @@ impl LlvmBackend {
             let r = self.emit_expr_inner(out, &arg_tmp, a, indent);
             (r.name, r.ty)
         }).collect();
-        self.emit_member_body(out, v, &recv_reg, &type_name, &member, &arg_regs, indent)
+        self.emit_member_body(out, v, MemberInvocation { recv_reg: &recv_reg, type_name: &type_name, member: &member, arg_regs: &arg_regs, prefix: recv_prefix }, indent)
     }
 
     /// 2026-07-31 (A5/A6): emit a member body with `self` bound to the
@@ -1856,18 +1928,28 @@ impl LlvmBackend {
         &mut self,
         out: &mut String,
         v: &str,
-        recv_reg: &TypedRegister,
-        type_name: &str,
-        member: &crate::ast::TopLevel,
-        arg_regs: &[(String, Type)],
+        inv: MemberInvocation<'_>,
         indent: &str,
     ) -> TypedRegister {
-        // self = the receiver's struct address (struct literals emit ptrtoint;
-        // a struct-typed local's alloca is alive in this function).
-        let self_ptr = self.fun.gen_reg();
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
+        let recv_reg = inv.recv_reg;
+        let type_name = inv.type_name;
+        let member = inv.member;
+        let arg_regs = inv.arg_regs;
+        let self_prefix = inv.prefix;
+        // 2026-08-07 (object instance pools): an UNPACKED instance's member
+        // body resolves bare member names against the instance's top-level
+        // slots (`st` → `st.data`/`st.len`) via `self_prefix`. The boxed
+        // address self is the fallback (self_prefix None).
+        let saved_prefix = self.fun.self_prefix.clone();
         let saved = self.fun.self_binding.clone();
-        self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));
+        if let Some(prefix) = &self_prefix {
+            self.fun.self_prefix = Some(prefix.clone());
+            self.fun.self_binding = None;
+        } else {
+            let self_ptr = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
+            self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));
+        }
         let saved_bindings = self.fun.let_bindings.clone();
         let saved_types = self.fun.let_binding_types.clone();
         let saved_orig = self.fun.let_original_types.clone();
@@ -1914,6 +1996,7 @@ impl LlvmBackend {
         }
         crate::backend::llvm::emit_stmt::emit_statement_sequence(self, out, &body, indent);
         self.fun.self_binding = saved;
+        self.fun.self_prefix = saved_prefix;
         self.fun.let_bindings = saved_bindings;
         self.fun.let_binding_types = saved_types;
         self.fun.let_original_types = saved_orig;
