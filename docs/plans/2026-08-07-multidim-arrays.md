@@ -68,3 +68,12 @@ direct `obj.member[i]` read generates invalid IR there, and a direct member
 txn call (`m.set(...)`) segfaults. Member access via the `<-` ops (the Stack's
 self-slot path) works. A dedicated member-array-access fix (struct member-array
 layout + Field read + call dispatch) is the remaining Phase 7 work.
+
+## Update 2026-08-07 (late): superseded by the instance-pools decision
+
+The follow-up ("generic-obj member-array access") is superseded: the
+architecture decision `docs/plans/2026-08-07-object-instance-pools.md`
+replaces the boxed obj-instance representation with SoA instance pools
+unpacked into top-level state. Member access becomes the standard field
+machinery — the boxed self-slot/struct/address paths are retired, so the
+boxed member-array bugs are retired with them.
