@@ -789,17 +789,23 @@ pub fn infer_expression(
                     ));
                 }
                 // A typed vector field (Int/Bool — i64-slot %State arrays)
-                // masks into a heap List of its element type. Float vectors
-                // scalarize in the backend (no contiguous array to gather
-                // from), so they stay an error.
-                if let Type::Vector(inner, _) = &obj_ty {
+                // or a heap List (Applied("List", [Int/Bool])) masks into a
+                // heap List of its element type. Float vectors scalarize in
+                // the backend (no contiguous array to gather from), so they
+                // stay an error.
+                let i64_slot_elem = match &obj_ty {
+                    Type::Vector(inner, _) => Some(inner.as_ref()),
+                    Type::Applied(n, args) if n == "List" => args.first(),
+                    _ => None,
+                };
+                if let Some(elem) = i64_slot_elem {
                     let cat = crate::type_universe::operators::protocol_category(
                         ctx.universe,
-                        inner,
+                        elem,
                     );
                     if cat.as_deref() == Some("Int") || cat.as_deref() == Some("Bool") {
                         return Ok((
-                            Type::Applied("List".into(), vec![(**inner).clone()]),
+                            Type::Applied("List".into(), vec![elem.clone()]),
                             Provenance::Index {
                                 base: Box::new(obj_prov),
                                 index: Box::new(idx_prov),
@@ -3221,6 +3227,37 @@ node t [true][false] {
         assert!(
             err.iter().any(|e| format!("{}", e).contains("mask index")),
             "expected a mask-index error for Float vectors, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn mask_index_on_heap_list_types_to_list() {
+        // 2026-08-07 (Phase 7): a Boolean mask over a heap `List<Int>` value
+        // selects its elements into a new `List<Int>`.
+        let src = r#"
+node t [true][false] {
+    let l: List<Int> = [10, 20, 30];
+    let m: List<Int> = l[[true, false, true]];
+    term;
+};
+"#;
+        check(src).expect("heap List mask index should typecheck to List<Int>");
+    }
+
+    #[test]
+    fn mask_index_on_float_list_still_errors() {
+        let src = r#"
+node t [true][false] {
+    let l: List<Float> = [1.0, 2.0];
+    let m: List<Float> = l[[true, false]];
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("mask index")),
+            "expected a mask-index error for Float lists, got {:?}",
             err
         );
     }

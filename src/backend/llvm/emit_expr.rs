@@ -1157,6 +1157,29 @@ impl LlvmBackend {
                 ty: Type::Custom("Data".into()),
             };
         }
+        // Heap List value (`List<Int>` — a `[len, e0, e1, …]` i64 buffer
+        // boxed to an i64 handle) → the typed gather over its elements.
+        if matches!(&op.obj_reg.ty, Type::Applied(n, _) if n == "List") {
+            let list_p = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, list_p, op.obj_reg.name).ok();
+            let len = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len, list_p).ok();
+            let elems = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, elems, list_p).ok();
+            let buf = self.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = call ptr @briv_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
+                indent, buf, elems, len, mask_ptr, mask_len
+            )
+            .ok();
+            let handle = self.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+            return TypedRegister {
+                name: handle,
+                ty: op.obj_reg.ty.clone(),
+            };
+        }
         // Int/Bool vector state field → the typed gather; result is a heap
         // List handle (ptrtoint'd, like emit_heap_seq).
         let Expr::Identifier(name) = op.obj else {

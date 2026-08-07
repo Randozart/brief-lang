@@ -294,6 +294,63 @@ fn test_mask_index_typed_emits_select64() {
         "the List result must be boxed to an i64 handle like emit_heap_seq");
 }
 
+/// A program with `let m: List<Int> = l[[true, false]]` where `l` is a heap
+/// `List<Int>` — exercises the heap-List mask gather.
+fn mask_index_list_program() -> Vec<TopLevel> {
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "l".to_string(),
+                names: vec![],
+                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
+                expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
+                modifiers: vec![],
+            },
+            Statement::Let {
+                name: "m".to_string(),
+                names: vec![],
+                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
+                expr: Some(Expr::Index(
+                    Box::new(Expr::Identifier("l".to_string())),
+                    Box::new(Expr::List(vec![Expr::Bool(true), Expr::Bool(false)])),
+                )),
+                modifiers: vec![],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![node]
+}
+
+#[test]
+fn test_mask_index_list_emits_element_gep() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&mask_index_list_program(), None);
+    assert!(output.contains("getelementptr i64, ptr"),
+        "the heap-List mask gather must GEP past the length header");
+    assert!(output.contains("@briv_mask_select64"),
+        "the heap-List mask index must call the typed gather helper");
+}
+
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
 /// (2026-08-06, Phase 7).
