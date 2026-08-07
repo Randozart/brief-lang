@@ -213,6 +213,9 @@ benchmarks/nbody_sqrt_c
 # Scratch
 scratch/
 
+# Smoke build artifacts
+.smoke/out/
+
 scripts/benchmark-results.sh
 .bench_times
 

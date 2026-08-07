@@ -164,6 +164,7 @@ fn is_trailing_op(tok: &Token) -> bool {
             | Token::TildeArrowLeft
             | Token::Comma
             | Token::DotDot
+            | Token::DotDotEq
             | Token::Ellipsis
             | Token::ColonEq
             | Token::Ampersand

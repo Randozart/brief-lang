@@ -70,8 +70,11 @@ impl fmt::Display for Expr {
             }
             Expr::Match(expr, arms) => {
                 write!(f, "match {} {{ ", expr)?;
-                for arm in arms {
-                    write!(f, "{} => {}", arm.pattern, arm.body)?;
+                for (i, arm) in arms.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arm)?;
                 }
                 write!(f, " }}")
             }
@@ -135,6 +138,20 @@ impl fmt::Display for Expr {
             Expr::FormattingAnnotation(fmt_) => write!(f, "formatting <~ {}", fmt_.name()),
             Expr::StructLiteral { type_name, .. } => write!(f, "{} {{ ... }}", type_name),
         }
+    }
+}
+
+/// Round-trippable rendering of `!>` metadata values (inverse of
+/// `Parser::parse_metadata_value`): identifiers are bare, strings quoted,
+/// lists bracketed. Used by the canonical formatter for module-level `!>` and
+/// by statement metadata display.
+impl fmt::Display for MatchArm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.pattern)?;
+        if let Some(guard) = &self.guard {
+            write!(f, " when {}", guard)?;
+        }
+        write!(f, " => {}", self.body)
     }
 }
 
@@ -556,6 +573,7 @@ impl fmt::Display for Pattern {
                 write!(f, ")")
             }
             Pattern::Range(start, end) => write!(f, "{}..{}", start, end),
+            Pattern::RangeInclusive(start, end) => write!(f, "{}..={}", start, end),
         }
     }
 }

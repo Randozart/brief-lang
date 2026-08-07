@@ -398,6 +398,9 @@ ExclaimArrow,
     #[token("...")]
     Ellipsis,
 
+    #[token("..=")]
+    DotDotEq,
+
     #[token("..")]
     DotDot,
 
@@ -584,6 +587,7 @@ impl std::fmt::Display for Token {
             Token::Comma => write!(f, ","),
             Token::Percent => write!(f, "%"),
             Token::Ellipsis => write!(f, "..."),
+            Token::DotDotEq => write!(f, "..="),
             Token::DotDot => write!(f, ".."),
             Token::Dot => write!(f, "."),
             Token::Ampersand => write!(f, "&"),

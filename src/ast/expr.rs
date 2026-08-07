@@ -164,6 +164,8 @@ pub enum Pattern {
     EnumVariant(String, Vec<Pattern>),
     Tuple(Vec<Pattern>),
     Range(Expr, Expr),
+    /// 2026-08-06 (Phase 7): inclusive `a..=b` range pattern.
+    RangeInclusive(Expr, Expr),
 }
 
 /// A derivation block attached to a definition or transaction via `:=`.

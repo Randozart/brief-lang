@@ -701,10 +701,13 @@ impl<'a> Parser<'a> {
             | Some(Token::BoolTrue)
             | Some(Token::BoolFalse) => {
                 let lit = self.parse_primary()?;
-                // Range pattern: 1..5
+                // Range pattern: 1..5 (half-open) / 1..=5 (inclusive)
                 if self.eat(&Token::DotDot) {
                     let end = self.parse_primary()?;
                     Ok(crate::ast::Pattern::Range(lit, end))
+                } else if self.eat(&Token::DotDotEq) {
+                    let end = self.parse_primary()?;
+                    Ok(crate::ast::Pattern::RangeInclusive(lit, end))
                 } else {
                     Ok(crate::ast::Pattern::Literal(lit))
                 }
@@ -793,6 +796,23 @@ mod tests {
     #[test]
     fn c_style_cast_string_matches_as() {
         assert_cast_equiv("n as String", "(String) n");
+    }
+
+    #[test]
+    fn range_inclusive_pattern_parses() {
+        // 2026-08-06 (Phase 7): `a..=b` lexes as DotDotEq and parses to a
+        // RangeInclusive pattern; `a..b` stays half-open.
+        let expr = parse_expr("match 5 { 1..=5 => 7, 1..5 => 3, _ => 0 }").unwrap();
+        match expr {
+            Expr::Match(_, arms) => {
+                assert_eq!(arms.len(), 3);
+                assert!(matches!(arms[0].pattern, crate::ast::Pattern::RangeInclusive(..)),
+                    "first arm must be inclusive");
+                assert!(matches!(arms[1].pattern, crate::ast::Pattern::Range(..)),
+                    "second arm must stay half-open");
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
     }
 
     #[test]

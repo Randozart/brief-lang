@@ -645,6 +645,18 @@ pub fn pattern_match(
             };
             val.as_i64().is_some_and(|n| s <= n && n < e)
         }
+        // 2026-08-06 (Phase 7): inclusive `a..=b` — n in [start, end].
+        Pattern::RangeInclusive(start, end) => {
+            let s = match literal_pattern_value(start).and_then(|v| v.as_i64()) {
+                Some(n) => n,
+                None => return false,
+            };
+            let e = match literal_pattern_value(end).and_then(|v| v.as_i64()) {
+                Some(n) => n,
+                None => return false,
+            };
+            val.as_i64().is_some_and(|n| s <= n && n <= e)
+        }
         Pattern::Tuple(pats) => {
             let items = match val {
                 Value::Product { fields, .. } => fields,
@@ -1522,6 +1534,27 @@ mod tests {
         assert_eq!(eval1(&m(3)).as_i64(), Some(7));
         assert_eq!(eval1(&m(1)).as_i64(), Some(7));
         assert_eq!(eval1(&m(5)).as_i64(), Some(0));
+    }
+
+    #[test]
+    fn test_match_range_inclusive() {
+        // 2026-08-06 (Phase 7): 1..=5 is [1, 5]: 3 and 5 match, 6 does not.
+        let m = |n: i64| {
+            Expr::Match(
+                Box::new(Expr::Decimal(n)),
+                vec![
+                    arm(
+                        Pattern::RangeInclusive(Expr::Decimal(1), Expr::Decimal(5)),
+                        None,
+                        7,
+                    ),
+                    arm(Pattern::Wildcard, None, 0),
+                ],
+            )
+        };
+        assert_eq!(eval1(&m(3)).as_i64(), Some(7));
+        assert_eq!(eval1(&m(5)).as_i64(), Some(7));
+        assert_eq!(eval1(&m(6)).as_i64(), Some(0));
     }
 
     #[test]

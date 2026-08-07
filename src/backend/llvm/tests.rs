@@ -174,6 +174,64 @@ fn test_llvm_generates_module() {
     assert!(output.contains("target triple"));
 }
 
+/// A reactive node whose term is a match over the `n` state field:
+/// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
+/// (2026-08-06, Phase 7).
+fn match_range_program() -> Vec<TopLevel> {
+    let n_state = TopLevel::StateDecl(StateDecl {
+        name: "n".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![Statement::Term(Some(Expr::Match(
+            Box::new(Expr::Identifier("n".to_string())),
+            vec![
+                MatchArm {
+                    pattern: Pattern::RangeInclusive(Expr::Decimal(1), Expr::Decimal(5)),
+                    guard: None,
+                    body: Box::new(Expr::Decimal(7)),
+                },
+                MatchArm {
+                    pattern: Pattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Decimal(0)),
+                },
+            ],
+        )))],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![n_state, node]
+}
+
+#[test]
+fn test_match_emits_arm_chain_and_phi() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&match_range_program(), None);
+    assert!(output.contains(".match_arm_"), "match arms must be emitted as blocks");
+    assert!(output.contains("phi i64"), "match results must merge in a phi");
+    assert!(output.contains("icmp sle"), "inclusive range must use sle");
+    assert!(output.contains("icmp sge"), "range lower bound must use sge");
+}
+
 #[test]
 fn test_webstack_enabled_emits_flush_state() {
     // 2026-07-26: Phase 4 — with_webstack(true) should emit __web_flush_state

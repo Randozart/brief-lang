@@ -1096,8 +1096,17 @@ fn collect_state_identifiers(expr: &Expr, state_fields: &HashSet<String>, out: &
                 collect_state_identifiers(e, state_fields, out);
             }
         }
-        Expr::Match(_, arms) => {
+        Expr::Match(scrutinee, arms) => {
+            // 2026-08-06 (Phase 7): the SCRUTINEE is a read — a match on a
+            // state field (`match tick { ... }`) must keep the field alive.
+            // Previously discarded, so the field was marked Never and pruned,
+            // leaving an undefined `@tick` in the match's load.
+            collect_state_identifiers(scrutinee, state_fields, out);
             for arm in arms {
+                // Guards may reference state fields too (`x when tick < 5`).
+                if let Some(guard) = &arm.guard {
+                    collect_state_identifiers(guard, state_fields, out);
+                }
                 collect_state_identifiers(&arm.body, state_fields, out);
             }
         }
@@ -1733,6 +1742,37 @@ mod tests {
         let modes = assign_field_modes(&all, &referenced, &usage);
         let mode = modes.get("x").expect("x should have a mode");
         assert_eq!(*mode, crate::analysis::FieldMode::Never, "unreferenced + no projection → Never");
+    }
+
+    #[test]
+    fn test_collect_state_identifiers_match_scrutinee_is_a_read() {
+        // 2026-08-06 (Phase 7): the field liveness collector must treat a
+        // match SCRUTINEE as a read. Before the fix it only walked arm bodies,
+        // so `match tick { ... }` marked `tick` Never and pruned it — leaving
+        // an undefined `@tick` in the generated IR.
+        let mut out = HashSet::new();
+        let state_fields: HashSet<String> = ["tick"].iter().map(|s| s.to_string()).collect();
+        let m = Expr::Match(
+            Box::new(Expr::Identifier("tick".to_string())),
+            vec![
+                crate::ast::MatchArm {
+                    pattern: crate::ast::Pattern::RangeInclusive(
+                        Expr::Decimal(1),
+                        Expr::Decimal(5),
+                    ),
+                    guard: None,
+                    body: Box::new(Expr::Decimal(7)),
+                },
+                crate::ast::MatchArm {
+                    pattern: crate::ast::Pattern::Wildcard,
+                    guard: Some(Expr::Identifier("tick".to_string())),
+                    body: Box::new(Expr::Decimal(0)),
+                },
+            ],
+        );
+        collect_state_identifiers(&m, &state_fields, &mut out);
+        assert!(out.contains("tick"),
+            "match scrutinee (and any guard) must count as a field read");
     }
 
     #[test]

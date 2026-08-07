@@ -862,15 +862,11 @@ impl LlvmBackend {
             Expr::Within(expr, _) => self.emit_expr(out, expr, indent),
 
             // ── Match ────────────────────────────────────────────────
-            Expr::Match(_, arms) => {
-                if let Some(first) = arms.first() {
-                    self.emit_expr(out, &first.body, indent)
-                } else {
-                    TypedRegister {
-                        name: v.to_string(),
-                        ty: Type::void(),
-                    }
+            Expr::Match(scrutinee, arms) => {
+                if arms.is_empty() {
+                    return TypedRegister { name: v.to_string(), ty: Type::void() };
                 }
+                self.emit_match(out, v, scrutinee, arms, indent)
             }
 
             // ── Lambda ───────────────────────────────────────────────
@@ -2387,10 +2383,171 @@ impl LlvmBackend {
         TypedRegister { name: result, ty: Type::int() }
     }
 
+        /// 2026-08-06 (Phase 7): lower a match expression. The scrutinee is
+    /// evaluated once; each arm's pattern condition branches to the arm block
+    /// or the next arm; the arm block binds pattern names, evaluates the
+    /// `when` guard, and emits the body; the results merge at a phi. The
+    /// no-match path (after the last arm) contributes a default 0.
+    fn emit_match(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        scrutinee: &Expr,
+        arms: &[crate::ast::MatchArm],
+        indent: &str,
+    ) -> TypedRegister {
+        let scrut = self.emit_expr(out, scrutinee, indent);
+        let counter = self.fun.txn_counter;
+        self.fun.txn_counter += 1;
+        let end_label = format!(".match_end_{}", counter);
+        let n = arms.len();
+        let mut arm_labels: Vec<String> = Vec::with_capacity(n);
+        let mut next_labels: Vec<String> = Vec::with_capacity(n);
+        // Phase 1: the condition chain — each arm's condition branches to the
+        // arm block or the next arm's condition.
+        for (i, arm) in arms.iter().enumerate() {
+            let arm_label = format!(".match_arm_{}_{}", counter, i);
+            let next_label = format!(".match_next_{}_{}", counter, i);
+            let cond = self.emit_pattern_condition(&arm.pattern, &scrut.name, out, indent);
+            writeln!(out, "  br i1 {}, label %{}, label %{}", cond, arm_label, next_label).ok();
+            writeln!(out, "{}:", next_label).ok();
+            arm_labels.push(arm_label);
+            next_labels.push(next_label);
+        }
+        // No arm matched — default to 0 and merge at the end.
+        writeln!(out, "  br label %{}", end_label).ok();
+        // Phase 2: the arm blocks.
+        let mut phi_incoming: Vec<(String, String)> = Vec::with_capacity(n);
+        for (i, arm) in arms.iter().enumerate() {
+            writeln!(out, "{}:", arm_labels[i]).ok();
+            self.bind_pattern(&arm.pattern, &scrut.name, out, indent);
+            let body_reg;
+            let body_block_label;
+            if let Some(guard) = &arm.guard {
+                let gv = self.emit_expr(out, guard, indent);
+                // Briv bool comparisons emit i8 (0/1) — narrow to i1 for `br`.
+                let g1 = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, g1, gv.name).ok();
+                let body_label = format!(".match_guard_{}_{}", counter, i);
+                // Guard false falls into the NEXT arm's condition block —
+                // `next_labels[i]` is where arm i+1's condition begins (for
+                // the last arm it is the no-match default to the end).
+                writeln!(out, "  br i1 {}, label %{}, label %{}", g1, body_label, next_labels[i]).ok();
+                writeln!(out, "{}:", body_label).ok();
+                body_reg = self.emit_expr(out, &arm.body, indent);
+                // The body lives in the guard block — that block branches to
+                // the end, so the phi edge must come from it.
+                body_block_label = body_label;
+            } else {
+                body_reg = self.emit_expr(out, &arm.body, indent);
+                body_block_label = arm_labels[i].clone();
+            }
+            phi_incoming.push((body_reg.name.clone(), body_block_label));
+            writeln!(out, "  br label %{}", end_label).ok();
+        }
+        // Phase 3: the end block merges the arm results (and the default).
+        writeln!(out, "{}:", end_label).ok();
+        let mut phi = format!("  {} = phi i64 [ 0, %{} ]", v, next_labels[n - 1]);
+        for (reg, label) in phi_incoming {
+            phi.push_str(&format!(", [ {}, %{} ]", reg, label));
+        }
+        writeln!(out, "{}", phi).ok();
+        TypedRegister { name: v.to_string(), ty: Type::int() }
+    }
+
+    /// Emit the i1 condition a pattern matches the scrutinee register.
+    /// Unimplemented patterns (Tuple/EnumVariant) emit `false` — the arm is
+    /// never taken (documented boundary; the interpreter handles all forms).
+    fn emit_pattern_condition(
+        &mut self,
+        pat: &crate::ast::Pattern,
+        scrut: &str,
+        out: &mut String,
+        indent: &str,
+    ) -> String {
+        match pat {
+            crate::ast::Pattern::Wildcard | crate::ast::Pattern::Binding(_) => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp eq i64 0, 0", indent, r).ok();
+                r
+            }
+            crate::ast::Pattern::Literal(lit) => {
+                let lv = self.emit_pattern_literal(out, lit, indent);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, r, scrut, lv).ok();
+                r
+            }
+            crate::ast::Pattern::Range(start, end)
+            | crate::ast::Pattern::RangeInclusive(start, end) => {
+                let ls = self.emit_pattern_literal(out, start, indent);
+                let le = self.emit_pattern_literal(out, end, indent);
+                let inclusive = matches!(pat, crate::ast::Pattern::RangeInclusive(_, _));
+                let ge = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, ge, scrut, ls).ok();
+                let cmp = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, cmp,
+                    if inclusive { "sle" } else { "slt" }, scrut, le).ok();
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = and i1 {}, {}", indent, r, ge, cmp).ok();
+                r
+            }
+            _ => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp eq i64 1, 0", indent, r).ok();
+                r
+            }
+        }
+    }
+
+    /// Emit a literal pattern's integer value register.
+    fn emit_pattern_literal(&mut self, out: &mut String, lit: &Expr, indent: &str) -> String {
+        match lit {
+            Expr::Decimal(n) => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, n).ok();
+                r
+            }
+            Expr::Bool(b) => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, if *b { 1 } else { 0 }).ok();
+                r
+            }
+            Expr::Float(f) => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = fptosi double {} to i64", indent, r, f).ok();
+                r
+            }
+            _ => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, 0", indent, r).ok();
+                r
+            }
+        }
+    }
+
+    /// Bind a pattern's Binding names to the scrutinee register (or sub-values)
+    /// so the arm body resolves them. Tuple/EnumVariant bindings are not
+    /// lowered (their conditions emit false, so the block is unreachable).
+    fn bind_pattern(
+        &mut self,
+        pat: &crate::ast::Pattern,
+        scrut: &str,
+        out: &mut String,
+        indent: &str,
+    ) {
+        if let crate::ast::Pattern::Binding(name) = pat {
+            self.fun.last_val_temps.insert(name.clone(), scrut.to_string());
+            self.fun.last_val_types.insert(name.clone(), Type::int());
+            self.fun.let_bindings.insert(name.clone(), scrut.to_string());
+            self.fun.let_binding_types.insert(name.clone(), Type::int());
+            self.fun.let_original_types.insert(name.clone(), Type::int());
+        }
+        let _ = (out, indent);
+    }
+
     /// Resolve the current register for a name bound by `let` (or a pending
     /// last-value temp). Used to load a closure's env-address value.
-    fn resolve_name_register(&self, name: &str) -> String {
-        self.fun
+    fn resolve_name_register(&self, name: &str) -> String {        self.fun
             .last_val_temps
             .get(name)
             .cloned()

@@ -388,6 +388,10 @@ fn rename_pattern(pattern: &Pattern, map: &HashMap<String, String>) -> Pattern {
             rename_expr(l, map),
             rename_expr(r, map),
         ),
+        Pattern::RangeInclusive(l, r) => Pattern::RangeInclusive(
+            rename_expr(l, map),
+            rename_expr(r, map),
+        ),
         other => other.clone(),
     }
 }
