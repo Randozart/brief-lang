@@ -179,8 +179,12 @@ benchmarks/kalman_filter_runtime_c
 *_merged*
 
 # Root-level runtime artifacts (compiled outside benchmarks/)
-briv_rt.c
-briv_rt.o
+# Anchored: `/briv_rt.c` — the pattern previously matched lib/runtime/briv_rt.c
+# too, leaving the tracked runtime out of the repo (the baseline worktree
+# tracks it). lib/runtime/briv_rt.c holds the runtime helpers (__print_int,
+# briv_char_len, briv_mask_select, ...) and MUST be tracked.
+/briv_rt.c
+/briv_rt.o
 
 # New calibration benchmarks (2026-06-02)
 benchmarks/const_heavy

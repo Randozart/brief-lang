@@ -1269,6 +1269,13 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#String")
     }
 
+    /// 2026-08-07 (Phase 7): is `ty` a #Data operand (the [len][bytes]
+    /// byte-buffer protocol)? Resolved via the casting graph — never by type
+    /// name (rules 14/18).
+    pub(super) fn is_data_operand(&self, ty: &Type) -> bool {
+        self.is_protocol_member(ty, "#Data")
+    }
+
     /// 2026-08-04 (compiler-in-Briv): is the receiver of a String operation
     /// semantically a #String, even if its emitted register was boxed to an
     /// i64 handle (String param, frgn result) and is now typed Int/Custom?

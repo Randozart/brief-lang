@@ -298,6 +298,136 @@ fn collect_bytes_expr(expr: &Expr, seen: &mut std::collections::HashSet<Vec<u8>>
     }
 }
 
+/// 2026-08-07 (Phase 7): pre-collect compile-time Boolean mask literals
+/// (`data[mask]` where mask is `[true, false, …]`) as 0/1 byte arrays. They
+/// are interned as `@bmask.N` globals BEFORE the module header is emitted —
+/// pushing during body emission would leave an undefined `@bmask` reference.
+fn collect_mask_literals(items: &[TopLevel]) -> Vec<Vec<u8>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    for item in items {
+        collect_masks_tl(item, &mut seen, &mut out);
+    }
+    out
+}
+
+fn collect_masks_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match tl {
+        TopLevel::Transaction(t) => {
+            collect_masks_expr(&t.contract.pre_condition, seen, out);
+            collect_masks_expr(&t.contract.post_condition, seen, out);
+            for s in &t.body {
+                collect_masks_stmt(s, seen, out);
+            }
+        }
+        TopLevel::Definition(d) => {
+            for s in &d.body {
+                collect_masks_stmt(s, seen, out);
+            }
+        }
+        TopLevel::Constant(c) => collect_masks_expr(&c.expr, seen, out),
+        TopLevel::Statement(stmt) => collect_masks_stmt(stmt, seen, out),
+        _ => {}
+    }
+}
+
+fn collect_masks_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match stmt {
+        Statement::Let { expr: Some(e), .. } => collect_masks_expr(e, seen, out),
+        Statement::Term(Some(expr)) | Statement::EndProgram(Some(expr)) => collect_masks_expr(expr, seen, out),
+        Statement::Assign(_, rhs) => collect_masks_expr(rhs, seen, out),
+        Statement::Expression(e) | Statement::Gate(e) => collect_masks_expr(e, seen, out),
+        Statement::Guarded(_, body) | Statement::Block(body) | Statement::SyncBlock(body) => {
+            for s in body {
+                collect_masks_stmt(s, seen, out);
+            }
+        }
+        Statement::If(_, then, els) => {
+            for s in then.iter().chain(els.iter()) {
+                collect_masks_stmt(s, seen, out);
+            }
+        }
+        Statement::Foreach { list, body, .. } => {
+            collect_masks_expr(list, seen, out);
+            for s in body {
+                collect_masks_stmt(s, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_masks_expr(expr: &Expr, seen: &mut std::collections::HashSet<Vec<u8>>, out: &mut Vec<Vec<u8>>) {
+    match expr {
+        Expr::Index(obj, index) => {
+            if let Some(bytes) = const_bool_mask_bytes(index) {
+                if seen.insert(bytes.clone()) {
+                    out.push(bytes);
+                }
+            }
+            collect_masks_expr(obj, seen, out);
+            collect_masks_expr(index, seen, out);
+        }
+        Expr::BinaryOp(_, l, r) => {
+            collect_masks_expr(l, seen, out);
+            collect_masks_expr(r, seen, out);
+        }
+        Expr::Call(_, args, _) | Expr::List(args) | Expr::Tuple(args) => {
+            for a in args {
+                collect_masks_expr(a, seen, out);
+            }
+        }
+        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) => {
+            collect_masks_expr(i, seen, out);
+        }
+        Expr::Field(o, _) => collect_masks_expr(o, seen, out),
+        Expr::Slice { array, start, end, stride, .. } => {
+            collect_masks_expr(array, seen, out);
+            for b in [start, end, stride].into_iter().flatten() {
+                collect_masks_expr(b, seen, out);
+            }
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for (_, f) in fields {
+                collect_masks_expr(f, seen, out);
+            }
+        }
+        Expr::If(c, t, e) => {
+            collect_masks_expr(c, seen, out);
+            collect_masks_expr(t, seen, out);
+            if let Some(e) = e {
+                collect_masks_expr(e, seen, out);
+            }
+        }
+        Expr::Match(s, arms) => {
+            collect_masks_expr(s, seen, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_masks_expr(g, seen, out);
+                }
+                collect_masks_expr(&arm.body, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The 0/1 bytes of a compile-time Boolean mask literal (`[true, false, …]`),
+/// or None if `expr` is not one.
+fn const_bool_mask_bytes(expr: &Expr) -> Option<Vec<u8>> {
+    let Expr::List(elems) = expr else {
+        return None;
+    };
+    let mut out = Vec::with_capacity(elems.len());
+    for e in elems {
+        match e {
+            Expr::Bool(b) => out.push(if *b { 1 } else { 0 }),
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
 fn collect_strings(items: &[TopLevel]) -> Vec<String> {    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     // 2026-07-17: Always start with the empty string at index 0.
@@ -1917,6 +2047,7 @@ impl LlvmBackend {
         self.ctx.constants.clear();
         self.ctx.string_constants = collect_strings(items);
         self.ctx.byte_constants = collect_byte_literals(items);
+        self.ctx.mask_constants = collect_mask_literals(items);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in items {
@@ -2449,6 +2580,9 @@ impl LlvmBackend {
         // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
         // default (the O(1) byte-length header read is the `Bytes` prop).
         writeln!(out, "declare i64 @briv_char_len(ptr) #1").ok();
+        // 2026-08-07 (Phase 7): boolean mask select over a Data buffer —
+        // `data[mask]` returns a new [len][bytes] buffer (SPEC §16.5).
+        writeln!(out, "declare ptr @briv_mask_select(ptr, ptr, i64) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (briv_rt.c) read them as externs. The compiler OWNS the globals
@@ -2619,6 +2753,16 @@ impl LlvmBackend {
                 si, bytes.len(), bytes.len(), bytes.len(), elems.join(", ")).ok();
         }
         if !self.ctx.byte_constants.is_empty() { writeln!(out).ok(); }
+
+        // 2026-08-07 (Phase 7): Boolean mask constants for `data[mask]` —
+        // i64 slots (0/1), matching the uniform %State slot width of
+        // Bool-vector state fields and the runtime helper's ABI.
+        for (mi, mask) in self.ctx.mask_constants.iter().enumerate() {
+            let elems: Vec<String> = mask.iter().map(|b| format!("i64 {}", *b as i64)).collect();
+            writeln!(out, "@bmask.{} = private unnamed_addr constant [{} x i64] [{}]",
+                mi, mask.len(), elems.join(", ")).ok();
+        }
+        if !self.ctx.mask_constants.is_empty() { writeln!(out).ok(); }
 
         // 2026-06-29: Global sentinel for all empty list literals `[]`.
         // LLVM eliminates stack-allocated empty lists (dead alloca elimination)

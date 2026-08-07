@@ -752,7 +752,50 @@ pub fn infer_expression(
             // 2026-07-31 (A4): indexing a Vector resolves the element type
             // (`f[0]` where f: Float[16] is Float, not Int).
             let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
-            let (_, idx_prov) = infer_expression(index, ctx)?;
+            let (idx_ty, idx_prov) = infer_expression(index, ctx)?;
+            // 2026-08-07 (Phase 7): a Bool-vector index is a MASK —
+            // `data[mask]` selects the bytes at the true positions, so the
+            // result is the byte-buffer container kind (Data), not the scalar
+            // element type. Categories resolve via the universe (rule 18).
+            // A mask is a Bool vector (`Bool[N]`) or a Bool list literal
+            // (`[true, false, …]`, typed Applied("List", [Bool])).
+            let idx_is_bool_vector = {
+                let elem = match &idx_ty {
+                    Type::Vector(inner, _) => Some(inner.as_ref()),
+                    Type::Applied(_, args) => args.first(),
+                    _ => None,
+                };
+                elem.map_or(false, |e| {
+                    crate::type_universe::operators::protocol_category(ctx.universe, e)
+                        .as_deref()
+                        == Some("Bool")
+                })
+            };
+            if idx_is_bool_vector {
+                let obj_is_byte_buffer = matches!(obj_ty, Type::Bits(_))
+                    || crate::type_universe::operators::protocol_category(ctx.universe, &obj_ty)
+                        .as_deref()
+                        == Some("Data")
+                    || crate::type_universe::operators::protocol_category(ctx.universe, &obj_ty)
+                        .as_deref()
+                        == Some("String");
+                if obj_is_byte_buffer {
+                    return Ok((
+                        Type::data(),
+                        Provenance::Index {
+                            base: Box::new(obj_prov),
+                            index: Box::new(idx_prov),
+                        },
+                    ));
+                }
+                // A Boolean mask selects bytes — only byte-buffer containers
+                // (Data/String/Bits) accept it. Anything else is a hard type
+                // error (not a silent element-type fallback).
+                return Err(TypeError::InvalidOperation {
+                    operation: "mask index with a Boolean vector".into(),
+                    type_name: format!("{}", obj_ty),
+                });
+            }
             let elem_ty = match &obj_ty {
                 Type::Vector(inner, _) => (**inner).clone(),
                 Type::Ptr(inner) | Type::PtrConst(inner) => (**inner).clone(),
@@ -3115,6 +3158,40 @@ node t [count < 5][count == 5] {
             err
         );
     }
+
+    #[test]
+    fn mask_index_on_data_types_to_data() {
+        // 2026-08-07 (Phase 7): `data[mask]` on a #Data buffer types to Data
+        // (the byte-buffer container kind), not the scalar element type.
+        let src = r#"
+let data: Data = #b"\x01\x02\x03";
+node t [true][false] {
+    let masked: Data = data[[true, false, true]];
+    term;
+};
+"#;
+        check(src).expect("Data mask index should typecheck");
+    }
+
+    #[test]
+    fn mask_index_on_int_vector_errors() {
+        // A Boolean mask selects BYTES — a non-byte-buffer container is a hard
+        // type error (not a silent element-type fallback).
+        let src = r#"
+let v: Int[3];
+node t [true][false] {
+    let masked: Data = v[[true, false, true]];
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("mask index")),
+            "expected a mask-index error, got {:?}",
+            err
+        );
+    }
+
 
     /// An explicit `as Float` cast resolves the mixed operation.
     #[test]

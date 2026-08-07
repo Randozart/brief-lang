@@ -123,6 +123,9 @@ pub struct CompilerContext {
     /// `@bstr.N` globals carrying the exact bytes (`\xHH`), distinct from the
     /// lossy UTF-8 string constants.
     pub byte_constants: Vec<Vec<u8>>,
+    /// 2026-08-07 (Phase 7): `@bmask.N` globals — raw i8 arrays (0/1) built
+    /// from compile-time Boolean mask literals in `data[mask]`.
+    pub mask_constants: Vec<Vec<u8>>,
     pub constants: HashMap<String, (Type, Expr)>,
 
     // Type info
@@ -310,6 +313,7 @@ impl CompilerContext {
             defn_return_types: HashMap::new(),
             string_constants: Vec::new(),
             byte_constants: Vec::new(),
+            mask_constants: Vec::new(),
             constants: HashMap::new(),
             struct_types: HashMap::new(),
             obj_members: HashMap::new(),

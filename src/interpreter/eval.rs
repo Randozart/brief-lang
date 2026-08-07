@@ -279,7 +279,14 @@ fn eval_index(
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     let obj_val = eval_expr(obj, heap, bindings, functions)?;
-    let idx = eval_expr(index, heap, bindings, functions)?
+    let idx_val = eval_expr(index, heap, bindings, functions)?;
+    // 2026-08-07 (Phase 7): a Bool-vector index is a MASK — `data[mask]`
+    // selects the bytes at the true positions (SPEC §16.5). Otherwise the
+    // scalar integer-index path below applies.
+    if let Some(mask) = bool_mask_from_value(&idx_val) {
+        return eval_masked_index(obj_val, &mask);
+    }
+    let idx = idx_val
         .as_i64()
         .ok_or_else(|| RuntimeError::TypeError {
             expected: "an integer index".into(),
@@ -300,6 +307,44 @@ fn eval_index(
         Value::Bits(bytes) => bytes.get(idx).copied().map(|b| Value::bits(vec![b])).ok_or_else(|| index_oob(idx, bytes.len())),
         other => Err(RuntimeError::TypeError {
             expected: "an indexable value (list, tuple, or bits)".into(),
+            found: format!("{}", describe_value(&other)),
+        }),
+    }
+}
+
+/// 2026-08-07 (Phase 7): a Bool-vector value (a product of Bool atoms) used
+/// as a mask index. Returns the mask bits, or None if the value is not a
+/// Bool vector.
+fn bool_mask_from_value(v: &Value) -> Option<Vec<bool>> {
+    let Value::Product { fields, .. } = v else {
+        return None;
+    };
+    let mut bits = Vec::with_capacity(fields.len());
+    for f in fields {
+        match f {
+            Value::Atom(Atom::Bool(b)) => bits.push(*b),
+            _ => return None,
+        }
+    }
+    Some(bits)
+}
+
+/// 2026-08-07 (Phase 7): masked select over byte data — the bytes at the
+/// true mask positions, in ascending order. A mask longer than the data is
+/// truncated (the mask governs), matching the runtime helper.
+fn eval_masked_index(obj_val: Value, mask: &[bool]) -> Result<Value, RuntimeError> {
+    match obj_val {
+        Value::Bits(bytes) => {
+            let selected: Vec<u8> = bytes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask.get(*i).copied().unwrap_or(false))
+                .map(|(_, b)| *b)
+                .collect();
+            Ok(Value::bits(selected))
+        }
+        other => Err(RuntimeError::TypeError {
+            expected: "byte data (Data)".into(),
             found: format!("{}", describe_value(&other)),
         }),
     }
@@ -1373,6 +1418,57 @@ mod tests {
     fn test_index_non_indexable_errors() {
         let idx = Expr::Index(Box::new(Expr::Decimal(42)), Box::new(Expr::Decimal(0)));
         assert!(eval1_err(&idx).contains("indexable"));
+    }
+
+    #[test]
+    fn test_mask_index_bits_selects_true_positions() {
+        // 2026-08-07 (Phase 7): `data[mask]` — a Bool-vector index selects
+        // the bytes at the true positions (SPEC §16.5).
+        let data = Expr::Quoted(b"\x01\x02\x03\x04\x05".to_vec());
+        let mask = Expr::List(vec![
+            Expr::Bool(true), Expr::Bool(false), Expr::Bool(true),
+            Expr::Bool(false), Expr::Bool(true),
+        ]);
+        let idx = Expr::Index(Box::new(data), Box::new(mask));
+        assert_eq!(eval1(&idx), Value::bits(vec![0x01, 0x03, 0x05]));
+    }
+
+    #[test]
+    fn test_mask_index_all_false_yields_empty() {
+        let data = Expr::Quoted(b"abc".to_vec());
+        let mask = Expr::List(vec![Expr::Bool(false), Expr::Bool(false), Expr::Bool(false)]);
+        let idx = Expr::Index(Box::new(data), Box::new(mask));
+        assert_eq!(eval1(&idx), Value::bits(vec![]));
+    }
+
+    #[test]
+    fn test_mask_index_longer_than_data_truncates() {
+        // A mask longer than the data truncates (the mask governs), matching
+        // the runtime helper.
+        let data = Expr::Quoted(b"ab".to_vec());
+        let mask = Expr::List(vec![Expr::Bool(true), Expr::Bool(false), Expr::Bool(true)]);
+        let idx = Expr::Index(Box::new(data), Box::new(mask));
+        assert_eq!(eval1(&idx), Value::bits(vec![b'a']));
+    }
+
+    #[test]
+    fn test_mask_index_non_bits_source_errors() {
+        // The mask path requires a byte-buffer source, mirroring the
+        // typechecker/codegen boundary (Data only).
+        let data = Expr::Decimal(42);
+        let mask = Expr::List(vec![Expr::Bool(true)]);
+        let idx = Expr::Index(Box::new(data), Box::new(mask));
+        assert!(eval1_err(&idx).contains("byte data"), "got: {}", eval1_err(&idx));
+    }
+
+    #[test]
+    fn test_mask_index_mixed_mask_is_not_a_mask() {
+        // A list with a non-Bool element is NOT a mask — it falls to the
+        // scalar path and errors on the non-integer index.
+        let data = Expr::Quoted(b"abc".to_vec());
+        let mask = Expr::List(vec![Expr::Bool(true), Expr::Decimal(7)]);
+        let idx = Expr::Index(Box::new(data), Box::new(mask));
+        assert!(eval1_err(&idx).contains("integer index"));
     }
 
     #[test]

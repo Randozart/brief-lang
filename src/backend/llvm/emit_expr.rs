@@ -13,6 +13,14 @@ use crate::ast::*;
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::emit_stmt;
 
+/// 2026-08-07 (Phase 7): the source of a Boolean mask in `data[mask]` — a
+/// compile-time Boolean list literal, or a Bool[N] state field (by its %State
+/// field index).
+enum MaskSource {
+    Constant(Vec<bool>),
+    StateField(usize),
+}
+
 /// Pack an SVO inline header: `len` and `cap` into disjoint bit ranges with
 /// bit 0 as the inline tag.
 ///
@@ -338,7 +346,7 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
-                    } else if self.is_string_operand(&briv_ty) {
+                    } else if self.is_string_operand(&briv_ty) || self.is_data_operand(&briv_ty) {
                         // 2026-08-01 (B0): A Briv String value is a ptr to a
                         // length-prefixed [len][bytes] buffer. State slots hold
                         // the address as an i64 machine word (uniform %State
@@ -346,6 +354,9 @@ impl LlvmBackend {
                         // inttoptr the slot back to the ptr representation —
                         // mirroring the float unboxing branches above and the
                         // Ptr<T> state-adapter pattern.
+                        // 2026-08-07 (Phase 7): Data shares the [len][bytes]
+                        // representation (#Data protocol) — its state slots
+                        // must inttoptr the same way.
                         let str_p = self.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_p, loaded).ok();
                         TypedRegister {
@@ -630,6 +641,30 @@ impl LlvmBackend {
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-07 (Phase 7): a Boolean-vector index is a MASK —
+                // `data[mask]` selects the bytes at the true positions
+                // (SPEC §16.5). Supported sources: a compile-time Boolean
+                // list literal or a Bool[N] state field.
+                let mask_source = {
+                    let const_bits = Self::constant_bool_mask(index);
+                    let field_idx = match index.as_ref() {
+                        Expr::Identifier(name) => self.ctx.field_index_map.get(name).copied().filter(
+                            |fidx| matches!(
+                                self.ctx.field_briv_types.get(*fidx),
+                                Some(t) if matches!(t, Type::Vector(inner, _)
+                                    if self.is_protocol_member(inner, "#Bool"))
+                            ),
+                        ),
+                        _ => None,
+                    };
+                    match const_bits {
+                        Some(bits) => Some(MaskSource::Constant(bits)),
+                        None => field_idx.map(MaskSource::StateField),
+                    }
+                };
+                if let Some(source) = mask_source {
+                    return self.emit_masked_index(out, &obj_reg, source, indent);
+                }
                 // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
                 // (`buckets[h]` on a Ptr<List<...>> → List<...>); a heap List
                 // index returns its ELEMENT type (`List<String>[i]` → String).
@@ -1028,6 +1063,86 @@ impl LlvmBackend {
     }
 
     // ── Sub-helpers ──────────────────────────────────────────────────
+
+    /// 2026-08-07 (Phase 7): lower `data[mask]` — a masked select over a Data
+    /// buffer (SPEC §16.5). The mask is either a compile-time Boolean list
+    /// (interned as a `@bmask` constant) or a Bool[N] state field (an i64
+    /// slot array in %State). The result is a NEW [len][bytes] buffer returned
+    /// by the runtime helper — a ptr-typed Data value like a byte literal.
+    /// Mask lengths longer than the data truncate (the mask governs), matching
+    /// the interpreter. The typechecker has already rejected non-byte
+    /// containers, so the object here is always a byte buffer.
+    fn emit_masked_index(
+        &mut self,
+        out: &mut String,
+        obj_reg: &TypedRegister,
+        source: MaskSource,
+        indent: &str,
+    ) -> TypedRegister {
+        // A Data/string operand register is already a [len][bytes] ptr (a
+        // literal's @bstr/@str global, or a state-field read inttoptr'd back);
+        // a boxed i64 handle is inttoptr'd.
+        let data_ptr = if self.is_string_operand(&obj_reg.ty) || self.is_data_operand(&obj_reg.ty) {
+            obj_reg.name.clone()
+        } else {
+            let p = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, obj_reg.name).ok();
+            p
+        };
+        // The mask pointer + mask length.
+        let (mask_ptr, mask_len) = match source {
+            MaskSource::Constant(bits) => {
+                let bytes: Vec<u8> = bits.iter().map(|b| if *b { 1 } else { 0 }).collect();
+                let mi = self
+                    .ctx
+                    .mask_constants
+                    .iter()
+                    .position(|m| m == &bytes)
+                    .unwrap_or_else(|| {
+                        self.ctx.mask_constants.push(bytes.clone());
+                        self.ctx.mask_constants.len() - 1
+                    });
+                let cast = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast [{} x i64]* @bmask.{} to ptr",
+                    indent, cast, bytes.len(), mi).ok();
+                (cast, bytes.len() as i64)
+            }
+            MaskSource::StateField(fidx) => {
+                let gep = self.emit_state_gep(out, indent, "m", "%state", fidx);
+                let n = self.ctx.field_briv_types.get(fidx)
+                    .map(|t| self.vector_element_count(t))
+                    .unwrap_or(0);
+                (gep, n as i64)
+            }
+        };
+        let r = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
+            indent, r, data_ptr, mask_ptr, mask_len
+        )
+        .ok();
+        TypedRegister {
+            name: r,
+            ty: Type::Custom("Data".into()),
+        }
+    }
+
+    /// 2026-08-07 (Phase 7): the bits of a compile-time Boolean mask literal
+    /// (`[true, false, …]`), or None if `expr` is not one.
+    fn constant_bool_mask(expr: &Expr) -> Option<Vec<bool>> {
+        let Expr::List(elems) = expr else {
+            return None;
+        };
+        let mut bits = Vec::with_capacity(elems.len());
+        for e in elems {
+            match e {
+                Expr::Bool(b) => bits.push(*b),
+                _ => return None,
+            }
+        }
+        Some(bits)
+    }
 
     /// 2026-07-14: Emit a heap-allocated sequence (list/tuple) with 2-slot header.
     /// Protocol: slot 0 = length (i64), slots 1..N = elements.
