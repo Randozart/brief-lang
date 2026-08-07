@@ -53,6 +53,14 @@ pub enum Expr {
         end: Option<Box<Expr>>,
         stride: Option<Box<Expr>>,
     },
+    /// 2026-08-07 (Phase 7): an iterable range — `start..end` (half-open) or
+    /// `start..=end` (inclusive). Consumed by `foreach` (SPEC §11.4 counted
+    /// iteration).
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
 
     // ── Control flow ────────────────────────────────────────────
     Block(Vec<super::Statement>),

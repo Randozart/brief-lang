@@ -293,6 +293,10 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             if let Some(e) = end.as_deref() { collect_expr_ids_inner(e, ids); }
             if let Some(e) = stride.as_deref() { collect_expr_ids_inner(e, ids); }
         }
+        Expr::Range { start, end, inclusive: _ } => {
+            collect_expr_ids_inner(start, ids);
+            collect_expr_ids_inner(end, ids);
+        }
 
     }
 }

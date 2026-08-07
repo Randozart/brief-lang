@@ -317,6 +317,8 @@ impl<'a> DagBuilder<'a> {
             }
             Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
             Expr::Slice { .. } => {},
+Expr::Slice { .. } => {},
+            Expr::Range { .. } => {},
         }
     }
 }

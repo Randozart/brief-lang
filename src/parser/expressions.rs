@@ -239,7 +239,15 @@ impl<'a> Parser<'a> {
     fn parse_postfix(&mut self) -> Result<Expr, SyntaxError> {
         let mut expr = self.parse_primary()?;
         loop {
-            if self.eat(&Token::LParen) {
+            // 2026-08-07 (Phase 7): iterable ranges — `a..b` (half-open) /
+            // `a..=b` (inclusive), consumed by `foreach` (SPEC §11.4).
+            if self.eat(&Token::DotDot) {
+                let end = self.parse_postfix()?;
+                expr = Expr::Range { start: Box::new(expr), end: Box::new(end), inclusive: false };
+            } else if self.eat(&Token::DotDotEq) {
+                let end = self.parse_postfix()?;
+                expr = Expr::Range { start: Box::new(expr), end: Box::new(end), inclusive: true };
+            } else if self.eat(&Token::LParen) {
                 // Call: f(args)
                 let mut args = Vec::new();
                 if !self.check(&Token::RParen) {
@@ -812,6 +820,22 @@ mod tests {
                     "second arm must stay half-open");
             }
             other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_expression_parses() {
+        // 2026-08-07 (Phase 7): `a..b` / `a..=b` are iterable range
+        // EXPRESSIONS (distinct from range patterns) — consumed by foreach.
+        let expr = parse_expr("0..=5").unwrap();
+        assert!(matches!(expr, Expr::Range { inclusive: true, .. }),
+            "0..=5 must parse as an inclusive range, got {expr:?}");
+        let expr = parse_expr("0..5").unwrap();
+        assert!(matches!(expr, Expr::Range { inclusive: false, .. }),
+            "0..5 must parse as a half-open range, got {expr:?}");
+        if let Expr::Range { start, end, .. } = expr {
+            assert!(matches!(*start, Expr::Decimal(0)));
+            assert!(matches!(*end, Expr::Decimal(5)));
         }
     }
 

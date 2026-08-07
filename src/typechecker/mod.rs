@@ -1057,6 +1057,13 @@ pub fn infer_expression(
                 if let Some(e) = stride.as_deref() { infer_type_only(e, ctx)?; }
                 Ok((elem_ty, Provenance::Unknown))
             }
+            // 2026-08-07 (Phase 7): an iterable integer range — `start..end`
+            // / `start..=end`. Consumed by `foreach` (SPEC §11.4).
+            Expr::Range { start, end, inclusive: _ } => {
+                infer_type_only(start, ctx)?;
+                infer_type_only(end, ctx)?;
+                Ok((Type::Applied("Range".into(), vec![Type::int()]), Provenance::Unknown))
+            }
 
     }
 }

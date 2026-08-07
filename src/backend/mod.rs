@@ -497,6 +497,10 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
             if let Some(e) = end.as_deref() { collect_expr_identifiers(e, ids); }
             if let Some(e) = stride.as_deref() { collect_expr_identifiers(e, ids); }
         }
+        Expr::Range { start, end, inclusive: _ } => {
+            collect_expr_identifiers(start, ids);
+            collect_expr_identifiers(end, ids);
+        }
 
     }
 }

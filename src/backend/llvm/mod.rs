@@ -597,6 +597,10 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
                 if let Some(e) = end.as_deref() { collect_strings_expr(e, seen, out); }
                 if let Some(e) = stride.as_deref() { collect_strings_expr(e, seen, out); }
             }
+            Expr::Range { start, end, inclusive: _ } => {
+                collect_strings_expr(start, seen, out);
+                collect_strings_expr(end, seen, out);
+            }
 
     }
 }

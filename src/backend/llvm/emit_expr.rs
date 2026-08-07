@@ -155,6 +155,29 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
+                // 2026-08-07 (Phase 7): a let MUTATED via `x = ...` is
+                // redirected to an alloca slot by the assign — reads must load
+                // from the slot (fresh across loop iterations), NOT resolve a
+                // stale `last_val_temps` register that is not dominated in a
+                // loop (accumulating `acc = acc + i` in a foreach summed to
+                // zero). Checked before last_val_temps.
+                let slot_opt: Option<String> = self
+                    .fun
+                    .let_bindings
+                    .get(name)
+                    .filter(|r| self.fun.let_binding_allocas.contains(*r))
+                    .cloned();
+                if let Some(slot) = slot_opt {
+                    let briv_ty = self.get_local_type(name);
+                    let llvm_ty = self.llvm_type(&briv_ty);
+                    let loaded = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, loaded,
+                        llvm_ty, slot).ok();
+                    return TypedRegister {
+                        name: loaded,
+                        ty: briv_ty,
+                    };
+                }
                 // 2026-08-06 (fix): a closure-let identifier reads its env
                 // block address (a real first-class value) — resolved by the
                 // normal let-binding path below.
@@ -1076,6 +1099,13 @@ impl LlvmBackend {
                 if let Some(s) = stride { self.emit_expr(out, s, indent); }
                 array_reg
             }
+            // 2026-08-07 (Phase 7): a range is an ITERABLE, consumed only by
+            // `foreach` (SPEC §11.4) — the foreach arm lowers the counted
+            // loop directly from the Expr::Range node, so this arm is only
+            // reached for a range used as a scalar value (a hard error).
+            Expr::Range { .. } => panic!(
+                "a range expression is only valid as a `foreach` iterable, not as a value"
+            ),
         }
     }
 

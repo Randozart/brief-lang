@@ -53,6 +53,14 @@ impl fmt::Display for Expr {
                 if let Some(s) = stride { write!(f, ":{}", s)?; }
                 write!(f, "]")
             }
+            // 2026-08-07 (Phase 7): `start..end` / `start..=end` ranges.
+            Expr::Range { start, end, inclusive } => write!(
+                f,
+                "{}..{}{}",
+                start,
+                if *inclusive { "=" } else { "" },
+                end
+            ),
             Expr::Exists(name) => write!(f, "{}?", name),
             Expr::Block(stmts) => {
                 write!(f, "{{ ")?;

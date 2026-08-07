@@ -1032,6 +1032,14 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
                 }
                 collect_state_identifiers(value, state_fields, out);
             }
+            // 2026-08-07 (Phase 7): a foreach's iterable is a read — a range
+            // bound (`foreach(i in 0..=n)`) or a collection iterated over
+            // keeps its fields alive (previously skipped entirely, so the
+            // bound field was pruned as Never → undefined `@n`).
+            Statement::Foreach { list, body, .. } => {
+                collect_state_identifiers(list, state_fields, out);
+                scan_for_state_identifiers(body, state_fields, out);
+            }
             _ => {}
         }
     }
@@ -1123,6 +1131,12 @@ fn collect_state_identifiers(expr: &Expr, state_fields: &HashSet<String>, out: &
         Expr::Lambda(_, body) => {
             collect_state_identifiers(body, state_fields, out);
         }
+        // 2026-08-07 (Phase 7): a range's bounds are reads — a foreach over
+        // `0..=n` keeps the bound field alive (previously pruned as Never).
+        Expr::Range { start, end, inclusive: _ } => {
+            collect_state_identifiers(start, state_fields, out);
+            collect_state_identifiers(end, state_fields, out);
+        }
         _ => {}
     }
 }
@@ -1179,6 +1193,15 @@ pub(crate) fn collect_statement_identifiers(
         Statement::Term(val) | Statement::EndProgram(val) => {
             if let Some(v) = val {
                 collect_state_identifiers(v, state_fields, out);
+            }
+        }
+        // 2026-08-07 (Phase 7): a foreach's iterable and body are reads —
+        // a range bound (`0..=n`) or a collection iterated over keeps its
+        // fields alive (previously the whole statement was skipped).
+        Statement::Foreach { list, body, .. } => {
+            collect_state_identifiers(list, state_fields, out);
+            for s in body {
+                collect_statement_identifiers(s, state_fields, out);
             }
         }
         Statement::Block(stmts) => {

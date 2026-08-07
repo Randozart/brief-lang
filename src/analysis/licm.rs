@@ -116,6 +116,8 @@ fn is_invariant_expression(
         Expr::TaggedLiteral(_, _) | Expr::TaggedQuotedLiteral(_, _) => false,
         Expr::List(items) => items.iter().all(|i| is_invariant_expression(i, write_set, invariant_names, state_fields)),
         Expr::Slice { .. } => false,
+Expr::Slice { .. } => false,
+        Expr::Range { .. } => false,
         Expr::Tuple(items) => items.iter().all(|i| is_invariant_expression(i, write_set, invariant_names, state_fields)),
         Expr::Block(_) | Expr::If(_, _, _) | Expr::Match(_, _) | Expr::Lambda(_, _) => false,
         Expr::Deref(_) | Expr::AddrOf(_) | Expr::Consume(_) => false,

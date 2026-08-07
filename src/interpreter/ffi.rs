@@ -42,6 +42,7 @@ pub fn marshal_value(v: &Value) -> Marshalled {
         }
         Value::Ref(inner) => marshal_value(inner),
         Value::Closure { .. } => Marshalled::Void,
+        Value::Range { .. } => Marshalled::Void,
         Value::Void => Marshalled::Void,
     }
 }

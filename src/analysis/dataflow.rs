@@ -160,6 +160,10 @@ impl<'a> DataflowAnalyzer<'a> {
                 if let Some(e) = end.as_deref() { self.extract_ids_recursive(e, ids); }
                 if let Some(e) = stride.as_deref() { self.extract_ids_recursive(e, ids); }
             }
+            Expr::Range { start, end, inclusive: _ } => {
+                self.extract_ids_recursive(start, ids);
+                self.extract_ids_recursive(end, ids);
+            }
 
         }
     }

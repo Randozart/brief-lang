@@ -66,7 +66,26 @@ pub(super) fn emit_destroy_register(
     }
 }
 
-pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {    match stmt {
+/// 2026-08-07 (Phase 7): collect the names assigned inside a `foreach` body —
+/// loop-carried locals need memory slots (the body IR is emitted once).
+fn collect_foreach_assigned(stmts: &[Statement], out: &mut std::collections::HashSet<String>) {
+    for s in stmts {
+        match s {
+            Statement::Assign(Expr::Identifier(name), _) => { out.insert(name.clone()); }
+            Statement::Guarded(_, body) => collect_foreach_assigned(body, out),
+            Statement::If(_, then, els) => {
+                collect_foreach_assigned(then, out);
+                collect_foreach_assigned(els, out);
+            }
+            Statement::Block(body) | Statement::SyncBlock(body) => collect_foreach_assigned(body, out),
+            Statement::Foreach { body, .. } => collect_foreach_assigned(body, out),
+            _ => {}
+        }
+    }
+}
+
+pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
+    match stmt {
         Statement::Let { name, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
             let val = match expr {
@@ -756,6 +775,86 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Rollback(_) => {
             writeln!(out, "{}ret i64 0", indent).ok();
             backend.fun.terminated = true;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
+        // 2026-08-07 (Phase 7): `foreach(item in iterable)` — the sole
+        // iteration keyword (SPEC §11.4). This commit lowers ITERABLE
+        // RANGES (`0..n` / `0..=n`) as a counted loop; collections (List /
+        // Data / vector fields) are the interpreter reference today and a
+        // codegen follow-up (hard error here, no silent wrongness).
+        Statement::Foreach { item, list, body } => {
+            let Expr::Range { start, end, inclusive } = list.as_ref() else {
+                panic!(
+                    "foreach over a collection is not yet supported by codegen \
+                     (ranges `0..n`/`0..=n` are); the interpreter handles collections"
+                );
+            };
+            let start_reg = backend.emit_expr(out, start, indent);
+            let end_reg = backend.emit_expr(out, end, indent);
+            // 2026-08-07 (Phase 7): loop-carried locals — a register-bound let
+            // (e.g. `acc`) assigned in the body would read its STALE initial
+            // register every iteration (the body IR is emitted once; runtime
+            // re-execution never re-resolves). Pre-declare an alloca slot and
+            // seed it with the current value so the body reads/writes memory.
+            let mut body_assigned = std::collections::HashSet::new();
+            collect_foreach_assigned(body, &mut body_assigned);
+            for name in body_assigned {
+                if let Some(cur) = backend.fun.let_bindings.get(&name).cloned() {
+                    if !backend.fun.let_binding_allocas.contains(&cur) {
+                        let slot = backend.fun.gen_reg();
+                        let llvm_ty = backend.fun.let_binding_types.get(&name)
+                            .map(|t| backend.llvm_type(t))
+                            .unwrap_or_else(|| "i64".to_string());
+                        writeln!(out, "{}{} = alloca {}, align 8", indent, slot, llvm_ty).ok();
+                        writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, cur, slot).ok();
+                        backend.fun.let_bindings.insert(name.clone(), slot.clone());
+                        backend.fun.let_binding_allocas.insert(slot.clone());
+                    }
+                }
+            }
+            let label_n = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let header = format!("foreach.hdr{}", label_n);
+            let body_lbl = format!("foreach.body{}", label_n);
+            let end_lbl = format!("foreach.end{}", label_n);
+            let slot = backend.fun.gen_reg();
+            writeln!(out, "{}{} = alloca i64", indent, slot).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, start_reg.name, slot).ok();
+            writeln!(out, "{}br label %{}", indent, header).ok();
+            writeln!(out, "{}{}:", indent, header).ok();
+            let cur = backend.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, cur, slot).ok();
+            let cmp = backend.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = icmp {} i64 {}, {}",
+                indent,
+                cmp,
+                if *inclusive { "sle" } else { "slt" },
+                cur,
+                end_reg.name
+            )
+            .ok();
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, body_lbl, end_lbl).ok();
+            writeln!(out, "{}{}:", indent, body_lbl).ok();
+            // Bind the loop variable so the body resolves it like a `let`.
+            backend.fun.last_val_temps.insert(item.clone(), cur.clone());
+            backend.fun.last_val_types.insert(item.clone(), Type::int());
+            backend.fun.let_bindings.insert(item.clone(), cur.clone());
+            backend.fun.let_binding_types.insert(item.clone(), Type::int());
+            backend.fun.let_original_types.insert(item.clone(), Type::int());
+            backend.fun.terminated = false;
+            for stmt in body {
+                emit_statement(backend, out, stmt, indent);
+            }
+            if !backend.fun.terminated {
+                let next = backend.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 {}, 1", indent, next, cur).ok();
+                writeln!(out, "{}store i64 {}, ptr {}", indent, next, slot).ok();
+                writeln!(out, "{}br label %{}", indent, header).ok();
+            }
+            writeln!(out, "{}{}:", indent, end_lbl).ok();
+            backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::Gate(cond) => {

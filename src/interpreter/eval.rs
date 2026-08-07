@@ -201,6 +201,23 @@ pub fn eval_expr(
             bindings,
             functions,
         ),
+        // 2026-08-07 (Phase 7): an iterable range value — consumed by
+        // `foreach` (SPEC §11.4).
+        Expr::Range { start, end, inclusive } => {
+            let s = eval_expr(start, heap, bindings, functions)?
+                .as_i64()
+                .ok_or_else(|| RuntimeError::TypeError {
+                    expected: "an integer range bound".into(),
+                    found: "non-integer range bound".into(),
+                })?;
+            let e = eval_expr(end, heap, bindings, functions)?
+                .as_i64()
+                .ok_or_else(|| RuntimeError::TypeError {
+                    expected: "an integer range bound".into(),
+                    found: "non-integer range bound".into(),
+                })?;
+            Ok(Value::Range { start: s, end: e, inclusive: *inclusive })
+        }
 
     }
 }
@@ -391,6 +408,7 @@ fn describe_value(v: &Value) -> String {
         Value::Ref(_) => "reference".into(),
         Value::Closure { .. } => "closure".into(),
         Value::Sum { .. } => "sum".into(),
+        Value::Range { .. } => "range".into(),
     }
 }
 
@@ -645,6 +663,7 @@ fn reflect_type_code(v: &Value) -> i64 {
         Value::Sum { .. } => 6,
         Value::Ref(_) => 7,
         Value::Closure { .. } => 8,
+        Value::Range { .. } => 10,
         Value::Void => 9,
     }
 }
@@ -1263,7 +1282,49 @@ pub fn eval_statement(
             }
             Ok(result)
         }
-        Statement::Foreach { .. } => Ok(Value::Void),
+        // 2026-08-07 (Phase 7): `foreach(item in list)` — the sole iteration
+        // keyword (SPEC §11.4). The iterable is an integer range (`0..=n`) or
+        // a collection (a Product for lists/vectors, or Bits for Data).
+        Statement::Foreach { item, list, body } => {
+            let iterable = eval_expr(list, heap, bindings, functions)?;
+            let mut result = Value::Void;
+            match iterable {
+                Value::Range { start, end, inclusive } => {
+                    let last = if inclusive { end } else { end - 1 };
+                    if start <= last {
+                        for cur in start..=last {
+                            bindings.insert(item.clone(), Value::Atom(Atom::Int(cur)));
+                            for stmt in body {
+                                result = eval_statement(stmt, heap, bindings, functions)?;
+                            }
+                        }
+                    }
+                }
+                Value::Product { fields, .. } => {
+                    for f in &fields {
+                        bindings.insert(item.clone(), f.clone());
+                        for stmt in body {
+                            result = eval_statement(stmt, heap, bindings, functions)?;
+                        }
+                    }
+                }
+                Value::Bits(bytes) => {
+                    for b in &bytes {
+                        bindings.insert(item.clone(), Value::bits(vec![*b]));
+                        for stmt in body {
+                            result = eval_statement(stmt, heap, bindings, functions)?;
+                        }
+                    }
+                }
+                other => {
+                    return Err(RuntimeError::TypeError {
+                        expected: "an iterable (a range, list, or byte data)".into(),
+                        found: format!("{}", describe_value(&other)),
+                    });
+                }
+            }
+            Ok(result)
+        }
         Statement::TrgBinding { .. } => Ok(Value::Void),
         Statement::Match { .. } => unreachable!("match only in $defn"),
     }
@@ -1432,6 +1493,103 @@ mod tests {
         let s = Expr::Quoted(b"abc".to_vec());
         let idx = Expr::Index(Box::new(s), Box::new(Expr::Decimal(1)));
         assert_eq!(eval1(&idx), Value::bits(vec![b'b']));
+    }
+
+    #[test]
+    fn test_foreach_range_inclusive_accumulates() {
+        // 2026-08-07 (Phase 7): `foreach(i in 0..=5) acc = acc + i` (SPEC
+        // §11.4 counted iteration) accumulates 0+1+2+3+4+5 = 15.
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        let foreach = Statement::Foreach {
+            item: "i".to_string(),
+            list: Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(0)),
+                end: Box::new(Expr::Decimal(5)),
+                inclusive: true,
+            }),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("acc".to_string())),
+                    Box::new(Expr::Identifier("i".to_string())),
+                ),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(15));
+    }
+
+    #[test]
+    fn test_foreach_range_exclusive_stops_short() {
+        // `0..5` excludes the end — 0+1+2+3+4 = 10.
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        let foreach = Statement::Foreach {
+            item: "i".to_string(),
+            list: Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(0)),
+                end: Box::new(Expr::Decimal(5)),
+                inclusive: false,
+            }),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("acc".to_string())),
+                    Box::new(Expr::Identifier("i".to_string())),
+                ),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(10));
+    }
+
+    #[test]
+    fn test_foreach_over_empty_range_skips() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(7)));
+        let foreach = Statement::Foreach {
+            item: "i".to_string(),
+            list: Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(5)),
+                end: Box::new(Expr::Decimal(0)),
+                inclusive: false,
+            }),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::Decimal(0),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(7));
+    }
+
+    #[test]
+    fn test_foreach_over_product_iterates_elements() {
+        // A collection iterable (a list) binds each element in turn — the
+        // reference for `foreach(item in items)`.
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        let foreach = Statement::Foreach {
+            item: "x".to_string(),
+            list: Box::new(Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)])),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("acc".to_string())),
+                    Box::new(Expr::Identifier("x".to_string())),
+                ),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(6));
     }
 
     #[test]

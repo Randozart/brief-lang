@@ -351,6 +351,71 @@ fn test_mask_index_list_emits_element_gep() {
         "the heap-List mask index must call the typed gather helper");
 }
 
+/// A program with `foreach(i in 0..=5) { acc = acc + i; }` — exercises the
+/// counted-iteration loop lowering (2026-08-07, Phase 7).
+fn foreach_range_program() -> Vec<TopLevel> {
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "acc".to_string(),
+                names: vec![],
+                ty: Some(Type::int()),
+                expr: Some(Expr::Decimal(0)),
+                modifiers: vec![],
+            },
+            Statement::Foreach {
+                item: "i".to_string(),
+                list: Box::new(Expr::Range {
+                    start: Box::new(Expr::Decimal(0)),
+                    end: Box::new(Expr::Decimal(5)),
+                    inclusive: true,
+                }),
+                body: vec![Statement::Assign(
+                    Expr::Identifier("acc".to_string()),
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("acc".to_string())),
+                        Box::new(Expr::Identifier("i".to_string())),
+                    ),
+                )],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![node]
+}
+
+#[test]
+fn test_foreach_range_emits_counted_loop() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&foreach_range_program(), None);
+    assert!(output.contains("foreach.hdr"),
+        "foreach must emit a loop header");
+    assert!(output.contains("icmp sle"),
+        "an inclusive range must compare with sle");
+    assert!(output.contains("foreach.end"),
+        "foreach must emit a loop exit label");
+}
+
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
 /// (2026-08-06, Phase 7).

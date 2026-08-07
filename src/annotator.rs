@@ -122,6 +122,10 @@ impl Annotator {
                 if let Some(e) = end.as_deref() { self.collect_calls_from_expr(e, calls); }
                 if let Some(e) = stride.as_deref() { self.collect_calls_from_expr(e, calls); }
             }
+            Expr::Range { start, end, inclusive: _ } => {
+                self.collect_calls_from_expr(start, calls);
+                self.collect_calls_from_expr(end, calls);
+            }
             Expr::Call(name, args, _) => {
                 calls.push(name.clone());
                 for arg in args {
@@ -625,6 +629,12 @@ impl Annotator {
                 s.push_str("]");
                 s
             }
+            Expr::Range { start, end, inclusive } => format!(
+                "{}..{}{}",
+                self.format_expr(start),
+                if *inclusive { "=" } else { "" },
+                self.format_expr(end)
+            ),
 
         }
     }

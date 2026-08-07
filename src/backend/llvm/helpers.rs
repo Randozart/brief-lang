@@ -157,6 +157,11 @@ impl LlvmBackend {
                 let new_stride = stride.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name)));
                 Expr::Slice { array: Box::new(new_array), start: new_start, end: new_end, stride: new_stride }
             }
+            Expr::Range { start, end, inclusive } => {
+                let new_start = Box::new(Self::rewrite_cell_identifiers(start, cell_name));
+                let new_end = Box::new(Self::rewrite_cell_identifiers(end, cell_name));
+                Expr::Range { start: new_start, end: new_end, inclusive: *inclusive }
+            }
 
         }
     }

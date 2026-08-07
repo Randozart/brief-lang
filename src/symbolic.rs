@@ -281,6 +281,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::PluginIntercept { .. } => SymbolicValue::Unknown,
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
         Expr::Slice { .. } => { SymbolicValue::Unknown },
+        Expr::Range { .. } => { SymbolicValue::Unknown },
 
     }
 }

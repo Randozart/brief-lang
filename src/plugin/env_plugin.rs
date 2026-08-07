@@ -157,6 +157,8 @@ fn walk_expr(expr: &mut Expr) {
         Expr::StructLiteral { .. } => {}
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
         Expr::Slice { .. } => {},
+Expr::Slice { .. } => {},
+        Expr::Range { .. } => {},
 
     }
 }

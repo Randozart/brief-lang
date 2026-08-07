@@ -282,6 +282,11 @@ pub enum Value {
     /// Renamed from `Constructor` (the synthesis-tree name was misleading —
     /// the value is a tagged compound, not a constructor expression).
     Sum { name: String, payload: Vec<Value> },
+
+    /// 2026-08-07 (Phase 7): an iterable range — `start..end` (half-open) or
+    /// `start..=end` (inclusive). Produced by `Expr::Range`; consumed by
+    /// `foreach` (SPEC §11.4 counted iteration).
+    Range { start: i64, end: i64, inclusive: bool },
 }
 
 // 2026-08-06 (Slice I): the last ad-hoc variant (`List`) is dropped — no
