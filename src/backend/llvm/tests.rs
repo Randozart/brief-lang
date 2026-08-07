@@ -351,6 +351,63 @@ fn test_mask_index_list_emits_element_gep() {
         "the heap-List mask index must call the typed gather helper");
 }
 
+/// A program with `let m: List<Float> = v[[true, false]]` where `v: Float[2]`
+/// — exercises the f32 mask gather (2026-08-07, Phase 7).
+fn mask_index_f32_program() -> Vec<TopLevel> {
+    let v_state = TopLevel::Statement(Box::new(Statement::Let {
+        name: "v".to_string(),
+        names: vec![],
+        ty: Some(Type::Vector(Box::new(Type::float()), vec![crate::ast::Dimension::Anonymous(2)])),
+        expr: None,
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "m".to_string(),
+                names: vec![],
+                ty: Some(Type::Applied("List".to_string(), vec![Type::float()])),
+                expr: Some(Expr::Index(
+                    Box::new(Expr::Identifier("v".to_string())),
+                    Box::new(Expr::List(vec![Expr::Bool(true), Expr::Bool(false)])),
+                )),
+                modifiers: vec![],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![v_state, node]
+}
+
+#[test]
+fn test_mask_index_f32_emits_float_gather() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&mask_index_f32_program(), None);
+    assert!(output.contains("@briv_mask_select_f32"),
+        "a Float vector mask must call the f32 gather helper");
+    assert!(output.contains("ptrtoint ptr"),
+        "the List<Float> result must be boxed to an i64 handle");
+}
+
 /// A program with `foreach(i in 0..=5) { acc = acc + i; }` — exercises the
 /// counted-iteration loop lowering (2026-08-07, Phase 7).
 fn foreach_range_program() -> Vec<TopLevel> {

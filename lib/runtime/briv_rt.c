@@ -928,3 +928,29 @@ int64_t* briv_mask_select64(const int64_t* data, int64_t data_len,
     for (int64_t i = 0; i < mask_len; i++) if (mask[i]) out[w++] = data[i];
     return out;
 }
+
+/// Float (f32) Boolean mask select over a `Float[N]` vector state field
+/// (SPEC §16.5 `array[mask]`): the elements at the true mask positions, in
+/// ascending order. Returns a LIST buffer — slot 0 is the length, slots 1..
+/// hold the selected float VALUES as i64 bit patterns (matching how heap
+/// List<Float> slots store floats). A mask longer than the data is truncated.
+/// 2026-08-07 (Phase 7).
+int64_t* briv_mask_select_f32(const float* data, int64_t data_len,
+                              const int64_t* mask, int64_t mask_len) {
+    if (mask_len > data_len) mask_len = data_len;
+    int64_t new_len = 0;
+    for (int64_t i = 0; i < mask_len; i++) if (mask[i]) new_len++;
+    int64_t* out = (int64_t*)malloc((size_t)((1 + new_len) * 8));
+    if (!out) return NULL;
+    out[0] = new_len;
+    int64_t w = 1;
+    for (int64_t i = 0; i < mask_len; i++) {
+        if (mask[i]) {
+            float f = data[i];
+            int64_t bits = 0;
+            memcpy(&bits, &f, 4);
+            out[w++] = bits;
+        }
+    }
+    return out;
+}

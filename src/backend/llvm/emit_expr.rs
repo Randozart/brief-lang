@@ -833,6 +833,16 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = load {}{}, ptr {}", indent, raw,
                             if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, raw).ok();
+                    } else if self.is_protocol_member(&index_elem_ty, "#Float") {
+                        // 2026-08-07 (Phase 7): a Float (f32) element is
+                        // stored in the i64 list slot as
+                        // `zext(bitcast float to i32)` — invert it.
+                        let raw = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}{}, ptr {}", indent, raw,
+                            if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
+                        let tr = self.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, tr).ok();
                     } else {
                         writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
                             if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
@@ -1218,11 +1228,49 @@ impl LlvmBackend {
         let fidx = *self.ctx.field_index_map.get(name).unwrap();
         let data_ptr = self.emit_state_gep(out, indent, "f", "%state", fidx);
         let n = self.vector_element_count(&op.obj_reg.ty) as i64;
+        // 2026-08-07 (Phase 7): a Float (f32) vector field (`[N x float]`)
+        // uses the f32 gather — the selected floats land in the List as i64
+        // bit patterns, matching how heap List<Float> slots store floats.
+        // Float64 (double) vectors are a hard error (no f64 gather yet).
+        let is_f32 = matches!(&op.obj_reg.ty, Type::Vector(inner, _)
+            if self.is_protocol_member(inner, "#Float")
+                && self.ctx.type_universe.as_ref()
+                    .and_then(|u| inner.universe_key().and_then(|k| u.get(k)))
+                    .map(|rt| rt.max_bits <= 32)
+                    .unwrap_or(true));
+        if is_f32 {
+            let buf = self.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = call ptr @briv_mask_select_f32(ptr {}, i64 {}, ptr {}, i64 {})",
+                indent, buf, data_ptr, n, mask_ptr, mask_len
+            )
+            .ok();
+            let handle = self.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+            let elem_ty = match &op.obj_reg.ty {
+                Type::Vector(inner, _) => (**inner).clone(),
+                _ => Type::int(),
+            };
+            return TypedRegister {
+                name: handle,
+                ty: Type::Applied("List".into(), vec![elem_ty]),
+            };
+        }
+        // A Float64 (double) vector is NOT an i64-slot array — routing it to
+        // briv_mask_select64 would read `[N x double]` as i64s (garbage).
+        // No f64 gather exists yet: hard error, no silent wrongness.
+        if matches!(&op.obj_reg.ty, Type::Vector(inner, _)
+            if self.is_protocol_member(inner, "#Float"))
+        {
+            panic!("mask indexing on Float64 (double) vectors is not yet supported");
+        }
+        let helper = "@briv_mask_select64";
         let buf = self.fun.gen_reg();
         writeln!(
             out,
-            "{}{} = call ptr @briv_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
-            indent, buf, data_ptr, n, mask_ptr, mask_len
+            "{}{} = call ptr {}(ptr {}, i64 {}, ptr {}, i64 {})",
+            indent, buf, helper, data_ptr, n, mask_ptr, mask_len
         )
         .ok();
         let handle = self.fun.gen_reg();

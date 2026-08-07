@@ -788,11 +788,9 @@ pub fn infer_expression(
                         },
                     ));
                 }
-                // A typed vector field (Int/Bool — i64-slot %State arrays)
-                // or a heap List (Applied("List", [Int/Bool])) masks into a
-                // heap List of its element type. Float vectors scalarize in
-                // the backend (no contiguous array to gather from), so they
-                // stay an error.
+                // A typed vector field (Int/Bool — i64-slot %State arrays;
+                // Float — native `[N x float]`) or a heap List masks into a
+                // heap List of its element type.
                 let i64_slot_elem = match &obj_ty {
                     Type::Vector(inner, _) => Some(inner.as_ref()),
                     Type::Applied(n, args) if n == "List" => args.first(),
@@ -803,7 +801,10 @@ pub fn infer_expression(
                         ctx.universe,
                         elem,
                     );
-                    if cat.as_deref() == Some("Int") || cat.as_deref() == Some("Bool") {
+                    if cat.as_deref() == Some("Int")
+                        || cat.as_deref() == Some("Bool")
+                        || cat.as_deref() == Some("Float")
+                    {
                         return Ok((
                             Type::Applied("List".into(), vec![elem.clone()]),
                             Provenance::Index {
@@ -3220,9 +3221,9 @@ node t [true][false] {
     }
 
     #[test]
-    fn mask_index_on_float_vector_still_errors() {
-        // Float vectors scalarize in the backend (no contiguous array), so a
-        // Boolean mask over them remains a hard type error.
+    fn mask_index_on_float_vector_types_to_list() {
+        // 2026-08-07 (Phase 7): Float vector fields are contiguous `[N x
+        // float]` arrays — a Boolean mask over them types to List<Float>.
         let src = r#"
 let v: Float[4];
 node t [true][false] {
@@ -3230,12 +3231,7 @@ node t [true][false] {
     term;
 };
 "#;
-        let err = check(src).unwrap_err();
-        assert!(
-            err.iter().any(|e| format!("{}", e).contains("mask index")),
-            "expected a mask-index error for Float vectors, got {:?}",
-            err
-        );
+        check(src).expect("Float vector mask index should typecheck to List<Float>");
     }
 
     #[test]
@@ -3253,7 +3249,10 @@ node t [true][false] {
     }
 
     #[test]
-    fn mask_index_on_float_list_still_errors() {
+    fn mask_index_on_float_list_types_to_list() {
+        // A heap List<Float> stores its elements as i64 bit patterns in i64
+        // slots — the typed gather preserves them, so a Boolean mask over a
+        // List<Float> is List<Float> (2026-08-07, Phase 7).
         let src = r#"
 node t [true][false] {
     let l: List<Float> = [1.0, 2.0];
@@ -3261,12 +3260,7 @@ node t [true][false] {
     term;
 };
 "#;
-        let err = check(src).unwrap_err();
-        assert!(
-            err.iter().any(|e| format!("{}", e).contains("mask index")),
-            "expected a mask-index error for Float lists, got {:?}",
-            err
-        );
+        check(src).expect("heap List<Float> mask index should typecheck to List<Float>");
     }
 
 
