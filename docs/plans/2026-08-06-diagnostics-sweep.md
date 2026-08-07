@@ -17,7 +17,7 @@ programs. Each has a test.
 | # | Symptom | Fix | Site |
 |---|---|---|---|
 | 1 | A scheduler-planned `Free#` is silently skipped (reactive/term-ending last consumer) → heap leak, zero diagnostic | Warn when a `free_after` field's last-consumer txn does not fold (no LoopShape → the free has no sound emission point) | `backend/llvm/mod.rs` generate() after `global_free_after` set |
-| 2 | `op Add(Int): nonexistent(#L,#R)` typechecks, lowers to `call @nonexistent`, dies at link with an undefined-symbol clang error | Typecheck error: "op 'Add' target 'nonexistent' is not a defined function" | `elaborate_ops` (validate the Function binding target against the program's defined fns) |
+| 2 | `op Add(Int): nonexistent(#Lh,#Rh)` typechecks, lowers to `call @nonexistent`, dies at link with an undefined-symbol clang error | Typecheck error: "op 'Add' target 'nonexistent' is not a defined function" | `elaborate_ops` (validate the Function binding target against the program's defined fns) |
 | 3 | `let f = x -> body;` then `Print#(f)`/passing `f` silently yields the 0 placeholder register | Error: "closure 'f' can only be applied as a call" | `emit_expr` Identifier arm (closure_lets contains the name) |
 | 4 | Interpreter `Call(my_add)` (from op elaboration) → misleading "undefined variable 'my_add'" (my_add IS defined) | Truthful message covering both cases | `interpreter/eval.rs` eval_call fallback |
 | 5 | `GetEnvInt#("BOUND")` → "unknown intrinsic 'GetEnvInt#'" (the rename guidance for `GetEnvInt` exists but misses the `#` forms) | Route `GetEnvInt#`/`GetEnv#`/`GetEnvOrDefault#` through the rename guidance | typechecker intrinsic-lookup error path |

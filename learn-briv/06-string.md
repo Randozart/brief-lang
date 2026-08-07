@@ -2,6 +2,27 @@
 
 Briv provides comprehensive string operations, all implemented natively (no FFI).
 
+## 0. String and byte literals
+
+Three literal forms (SPEC §16.1/16.2):
+
+```briv
+let s: String = "escaped\n";     // escapes ARE interpreted: \n \t \\ \" \xHH
+let r: String = #r"raw \ text";  // raw string: escapes NOT interpreted
+let b: Data   = #b"\x89PNG\r\n"; // byte literal: raw bytes (exact \xHH content)
+```
+
+- `#r"..."` is a raw string — backslashes are kept literally (useful for regex
+  and Windows paths).
+- `#b"..."` is a Data byte literal — `\xHH` yields the exact byte, and the
+  result is typed `Data`, not `String`. `x.^Len` on a Data value is the byte
+  length (O(1), reads the `[len]` header).
+
+```briv
+let bytes: Data = #b"\x00\xff";
+let n: Int = bytes.^Len;  // 2
+```
+
 ## 1. Basic Operations
 
 ```briv

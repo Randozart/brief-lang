@@ -12,7 +12,7 @@ backend architecture rules.
 
 ### 1.0 Protocol variants
 
-`#L`, `#R`, `#T` are compiler-internal positional markers for op bindings —
+`#Lh`, `#Rh`, `#T` are compiler-internal positional markers for op bindings —
 lexed as distinct tokens and resolved at codegen time to concrete registers.
 `#Category` hashwords (`#Int`, `#Float`, `#String`, `#Bool`, `#Char`, `#Bits`)
 are backend directives in op signatures; parameterized variants
@@ -299,7 +299,7 @@ both — an unclassified eligible pair is a hard error.
 
 **Delimiter semantic load:** `<>` = compile-time type specialization
 (`Stack<T>`, `#String<UTF8>`, `asm<chip>`, `sync<group>`); `()` = application &
-binding (`f(a)`, `Person(...)`, `op Add: func(#L,#R)`, `op Add(Float)` —
+binding (`f(a)`, `Person(...)`, `op Add: func(#Lh,#Rh)`, `op Add(Float)` —
 declarations take params); `[]` = containment/bound; `{}` = grouping.
 
 ## 5. Coding Standards (details)

@@ -33,7 +33,7 @@ Status legend:
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | In progress | Phase 9: garbage scheduler wired across fold paths + only soundly-emittable frees planned (2026-08-06); ownership algebra + `.s` enforcement pending |
 | 15 | Expressions and operations | In progress | Phase 5: op elaboration — declared variant ops lower to their functions (`resolve_binary_op_binding` + `elaborate_ops`, 2026-08-06); remaining: effects/access-shape carrying, dyn Trait |
-| 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#r`/`#b` and Python slices Phase 7 |
+| 16 | Literals, ranges, slicing | In progress | width suffixes removed; `#b` Data byte literals + `#r` raw strings + Python slices shipped 2026-08-06; remaining: `..`/`..=` standalone ranges (`..=` token absent), boolean mask indexing, named selectors, const generics |
 | 17 | Reflection | In progress | Phase 7: `^^Type` descriptor (category code) + value-side eval shipped 2026-08-06; remaining: const generics |
 | 18 | Compile-time execution and macros | In progress | Phase 8: escaping closures (interpreter + codegen env blocks) + interpreter user-fn support shipped 2026-08-06; `$name`/`name!` macros + stage timing pending |
 | 19 | Foreign functions, export, GLUE | In progress | GLUE FFI merged (per-language glue folders, native extensions for hosts); frgn/export + `--shared` PIC `.so`; four provenance forms Phase 12 |

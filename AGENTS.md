@@ -18,7 +18,7 @@ Every decision passes three questions:
 
 1. **Does this make the compiler more general, or special-case one pattern?**
    A match arm for `"ring_push"` solves today's benchmark; tomorrow's
-   `MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` demands the same treatment.
+   `MyQueue<T>` with `InsertAt <~ my_push(#Lh, #Rh)` demands the same treatment.
 2. **Does this add knowledge the compiler must carry forever, or push it into
    configuration/stdlib where it can evolve?** The dividing line is
    `--no-stdlib`: if it must work without stdlib, it's an intrinsic; everything
@@ -107,7 +107,7 @@ Patches are unacceptable. There is no "go fast and break things."
     `<>` = compile-time type-level specialization (generics `Stack<T>`,
     protocol variants `#String<UTF8>`, targets `asm<chip>`, groups
     `sync<group>`); `()` = application & binding (calls `f(a)`, params
-    `defn f(x)`, construction `Person(...)`, op bindings `op Add: func(#L,#R)`
+    `defn f(x)`, construction `Person(...)`, op bindings `op Add: func(#Lh,#Rh)`
     — declarations take params, so `op Add(Float)` is `()`); `[]` =
     containment/bound (`Int[8]`, `[pre]`); `{}` = grouping/definition. Never
     use a delimiter for a different load.
