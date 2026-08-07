@@ -21,6 +21,15 @@ enum MaskSource {
     StateField(usize),
 }
 
+/// 2026-08-07 (Phase 7): the operands of a mask index — the object expression
+/// + register, and the mask source. Bundled so `emit_masked_index` stays under
+/// the parameter budget.
+struct MaskIndexOperands<'a> {
+    obj: &'a Expr,
+    obj_reg: &'a TypedRegister,
+    source: MaskSource,
+}
+
 /// Pack an SVO inline header: `len` and `cap` into disjoint bit ranges with
 /// bit 0 as the inline tag.
 ///
@@ -663,7 +672,15 @@ impl LlvmBackend {
                     }
                 };
                 if let Some(source) = mask_source {
-                    return self.emit_masked_index(out, &obj_reg, source, indent);
+                    return self.emit_masked_index(
+                        out,
+                        MaskIndexOperands {
+                            obj,
+                            obj_reg: &obj_reg,
+                            source,
+                        },
+                        indent,
+                    );
                 }
                 // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
                 // (`buckets[h]` on a Ptr<List<...>> → List<...>); a heap List
@@ -1064,33 +1081,25 @@ impl LlvmBackend {
 
     // ── Sub-helpers ──────────────────────────────────────────────────
 
-    /// 2026-08-07 (Phase 7): lower `data[mask]` — a masked select over a Data
-    /// buffer (SPEC §16.5). The mask is either a compile-time Boolean list
-    /// (interned as a `@bmask` constant) or a Bool[N] state field (an i64
-    /// slot array in %State). The result is a NEW [len][bytes] buffer returned
-    /// by the runtime helper — a ptr-typed Data value like a byte literal.
+    /// 2026-08-07 (Phase 7): lower `array[mask]` — a masked select (SPEC
+    /// §16.5). The mask is either a compile-time Boolean list (interned as a
+    /// `@bmask` constant) or a Bool[N] state field (an i64-slot array in
+    /// %State). Two object kinds:
+    ///   - a byte buffer (Data/String/Bits) → a new [len][bytes] Data buffer
+    ///     via `briv_mask_select` (ptr-typed, like a byte literal);
+    ///   - an Int/Bool vector state field (`[N x i64]`) → a new heap List of
+    ///     the selected elements via `briv_mask_select64`.
     /// Mask lengths longer than the data truncate (the mask governs), matching
-    /// the interpreter. The typechecker has already rejected non-byte
-    /// containers, so the object here is always a byte buffer.
+    /// the interpreter. The typechecker has already rejected unsupported
+    /// containers, so the object here is a byte buffer or an i64-slot vector.
     fn emit_masked_index(
         &mut self,
         out: &mut String,
-        obj_reg: &TypedRegister,
-        source: MaskSource,
+        op: MaskIndexOperands<'_>,
         indent: &str,
     ) -> TypedRegister {
-        // A Data/string operand register is already a [len][bytes] ptr (a
-        // literal's @bstr/@str global, or a state-field read inttoptr'd back);
-        // a boxed i64 handle is inttoptr'd.
-        let data_ptr = if self.is_string_operand(&obj_reg.ty) || self.is_data_operand(&obj_reg.ty) {
-            obj_reg.name.clone()
-        } else {
-            let p = self.fun.gen_reg();
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, obj_reg.name).ok();
-            p
-        };
-        // The mask pointer + mask length.
-        let (mask_ptr, mask_len) = match source {
+        // The mask pointer + mask length (shared by both gathers).
+        let (mask_ptr, mask_len) = match op.source {
             MaskSource::Constant(bits) => {
                 let bytes: Vec<u8> = bits.iter().map(|b| if *b { 1 } else { 0 }).collect();
                 let mi = self
@@ -1115,16 +1124,63 @@ impl LlvmBackend {
                 (gep, n as i64)
             }
         };
-        let r = self.fun.gen_reg();
+        // Byte-buffer object → the byte gather; result is a ptr-typed Data.
+        if self.is_string_operand(&op.obj_reg.ty) || self.is_data_operand(&op.obj_reg.ty) {
+            let data_ptr = op.obj_reg.name.clone();
+            let r = self.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
+                indent, r, data_ptr, mask_ptr, mask_len
+            )
+            .ok();
+            return TypedRegister {
+                name: r,
+                ty: Type::Custom("Data".into()),
+            };
+        }
+        if matches!(&op.obj_reg.ty, Type::Bits(_)) {
+            // Bits is a raw byte sequence without a [len] header — the byte
+            // gather needs the header; inttoptr the i64 handle's bits (the
+            // slot holds the buffer pointer for a Bytes-typed field).
+            let p = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, op.obj_reg.name).ok();
+            let r = self.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
+                indent, r, p, mask_ptr, mask_len
+            )
+            .ok();
+            return TypedRegister {
+                name: r,
+                ty: Type::Custom("Data".into()),
+            };
+        }
+        // Int/Bool vector state field → the typed gather; result is a heap
+        // List handle (ptrtoint'd, like emit_heap_seq).
+        let Expr::Identifier(name) = op.obj else {
+            unreachable!("vector mask routing only admits state-field objects");
+        };
+        let fidx = *self.ctx.field_index_map.get(name).unwrap();
+        let data_ptr = self.emit_state_gep(out, indent, "f", "%state", fidx);
+        let n = self.vector_element_count(&op.obj_reg.ty) as i64;
+        let buf = self.fun.gen_reg();
         writeln!(
             out,
-            "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
-            indent, r, data_ptr, mask_ptr, mask_len
+            "{}{} = call ptr @briv_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
+            indent, buf, data_ptr, n, mask_ptr, mask_len
         )
         .ok();
+        let handle = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+        let elem_ty = match &op.obj_reg.ty {
+            Type::Vector(inner, _) => (**inner).clone(),
+            _ => Type::int(),
+        };
         TypedRegister {
-            name: r,
-            ty: Type::Custom("Data".into()),
+            name: handle,
+            ty: Type::Applied("List".into(), vec![elem_ty]),
         }
     }
 

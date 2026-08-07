@@ -329,9 +329,11 @@ fn bool_mask_from_value(v: &Value) -> Option<Vec<bool>> {
     Some(bits)
 }
 
-/// 2026-08-07 (Phase 7): masked select over byte data — the bytes at the
-/// true mask positions, in ascending order. A mask longer than the data is
-/// truncated (the mask governs), matching the runtime helper.
+/// 2026-08-07 (Phase 7): masked select — the elements at the true mask
+/// positions, in ascending order. Over a `Product` (an Int/Bool vector) the
+/// selected FIELDS form a new product; over byte data the selected bytes form
+/// a new Bits value. A mask longer than the source truncates (the mask
+/// governs), matching the runtime helpers.
 fn eval_masked_index(obj_val: Value, mask: &[bool]) -> Result<Value, RuntimeError> {
     match obj_val {
         Value::Bits(bytes) => {
@@ -343,8 +345,26 @@ fn eval_masked_index(obj_val: Value, mask: &[bool]) -> Result<Value, RuntimeErro
                 .collect();
             Ok(Value::bits(selected))
         }
+        Value::Product { fields, names } => {
+            let selected: Vec<Value> = fields
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask.get(*i).copied().unwrap_or(false))
+                .map(|(_, f)| f.clone())
+                .collect();
+            let selected_names = names.map(|ns| {
+                Arc::new(
+                    ns.iter()
+                        .enumerate()
+                        .filter(|(i, _)| mask.get(*i).copied().unwrap_or(false))
+                        .map(|(_, n)| n.clone())
+                        .collect(),
+                )
+            });
+            Ok(Value::Product { fields: selected, names: selected_names })
+        }
         other => Err(RuntimeError::TypeError {
-            expected: "byte data (Data)".into(),
+            expected: "byte data (Data) or a vector (list of elements)".into(),
             found: format!("{}", describe_value(&other)),
         }),
     }
@@ -1469,6 +1489,23 @@ mod tests {
         let mask = Expr::List(vec![Expr::Bool(true), Expr::Decimal(7)]);
         let idx = Expr::Index(Box::new(data), Box::new(mask));
         assert!(eval1_err(&idx).contains("integer index"));
+    }
+
+    #[test]
+    fn test_mask_index_product_selects_fields() {
+        // 2026-08-07 (Phase 7): a Boolean mask over a product (a typed
+        // vector) yields a new product of the selected fields — the
+        // interpreter reference for `Int[N][mask]` → `List<Int>`.
+        let v = Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)]);
+        let mask = Expr::List(vec![Expr::Bool(true), Expr::Bool(false), Expr::Bool(true)]);
+        let idx = Expr::Index(Box::new(v), Box::new(mask));
+        match eval1(&idx) {
+            Value::Product { fields, .. } => {
+                let vals: Vec<i64> = fields.iter().map(|f| f.as_i64().unwrap()).collect();
+                assert_eq!(vals, vec![10, 30]);
+            }
+            other => panic!("expected a product, got {:?}", other),
+        }
     }
 
     #[test]

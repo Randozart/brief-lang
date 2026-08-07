@@ -788,9 +788,28 @@ pub fn infer_expression(
                         },
                     ));
                 }
-                // A Boolean mask selects bytes — only byte-buffer containers
-                // (Data/String/Bits) accept it. Anything else is a hard type
-                // error (not a silent element-type fallback).
+                // A typed vector field (Int/Bool — i64-slot %State arrays)
+                // masks into a heap List of its element type. Float vectors
+                // scalarize in the backend (no contiguous array to gather
+                // from), so they stay an error.
+                if let Type::Vector(inner, _) = &obj_ty {
+                    let cat = crate::type_universe::operators::protocol_category(
+                        ctx.universe,
+                        inner,
+                    );
+                    if cat.as_deref() == Some("Int") || cat.as_deref() == Some("Bool") {
+                        return Ok((
+                            Type::Applied("List".into(), vec![(**inner).clone()]),
+                            Provenance::Index {
+                                base: Box::new(obj_prov),
+                                index: Box::new(idx_prov),
+                            },
+                        ));
+                    }
+                }
+                // A Boolean mask selects elements — only byte-buffer or
+                // i64-slot vector containers accept it. Anything else is a
+                // hard type error (not a silent element-type fallback).
                 return Err(TypeError::InvalidOperation {
                     operation: "mask index with a Boolean vector".into(),
                     type_name: format!("{}", obj_ty),
@@ -3174,20 +3193,34 @@ node t [true][false] {
     }
 
     #[test]
-    fn mask_index_on_int_vector_errors() {
-        // A Boolean mask selects BYTES — a non-byte-buffer container is a hard
-        // type error (not a silent element-type fallback).
+    fn mask_index_on_int_vector_types_to_list() {
+        // 2026-08-07 (Phase 7): `Int[N][mask]` types to List<Int> — a heap
+        // container of the selected elements, not the scalar element type.
         let src = r#"
-let v: Int[3];
+let v: Int[4];
 node t [true][false] {
-    let masked: Data = v[[true, false, true]];
+    let m: List<Int> = v[[true, false, true, false]];
+    term;
+};
+"#;
+        check(src).expect("Int vector mask index should typecheck to List<Int>");
+    }
+
+    #[test]
+    fn mask_index_on_float_vector_still_errors() {
+        // Float vectors scalarize in the backend (no contiguous array), so a
+        // Boolean mask over them remains a hard type error.
+        let src = r#"
+let v: Float[4];
+node t [true][false] {
+    let m: List<Float> = v[[true, false, true, false]];
     term;
 };
 "#;
         let err = check(src).unwrap_err();
         assert!(
             err.iter().any(|e| format!("{}", e).contains("mask index")),
-            "expected a mask-index error, got {:?}",
+            "expected a mask-index error for Float vectors, got {:?}",
             err
         );
     }

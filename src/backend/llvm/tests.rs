@@ -237,6 +237,63 @@ fn test_mask_index_emits_gather_and_bmask_constant() {
         "the mask constant must use i64 slots matching Bool-vector state fields");
 }
 
+/// A program with `let m: List<Int> = v[[true, false]]` where `v: Int[2]` —
+/// exercises the TYPED mask gather (Int-vector field → heap List).
+fn mask_index_typed_program() -> Vec<TopLevel> {
+    let v_state = TopLevel::Statement(Box::new(Statement::Let {
+        name: "v".to_string(),
+        names: vec![],
+        ty: Some(Type::Vector(Box::new(Type::int()), vec![crate::ast::Dimension::Anonymous(2)])),
+        expr: None,
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "m".to_string(),
+                names: vec![],
+                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
+                expr: Some(Expr::Index(
+                    Box::new(Expr::Identifier("v".to_string())),
+                    Box::new(Expr::List(vec![Expr::Bool(true), Expr::Bool(false)])),
+                )),
+                modifiers: vec![],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![v_state, node]
+}
+
+#[test]
+fn test_mask_index_typed_emits_select64() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&mask_index_typed_program(), None);
+    assert!(output.contains("@briv_mask_select64"),
+        "an Int-vector mask index must call the typed gather helper");
+    assert!(output.contains("ptrtoint ptr"),
+        "the List result must be boxed to an i64 handle like emit_heap_seq");
+}
+
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering
 /// (2026-08-06, Phase 7).

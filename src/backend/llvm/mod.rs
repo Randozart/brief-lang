@@ -2583,6 +2583,9 @@ impl LlvmBackend {
         // 2026-08-07 (Phase 7): boolean mask select over a Data buffer —
         // `data[mask]` returns a new [len][bytes] buffer (SPEC §16.5).
         writeln!(out, "declare ptr @briv_mask_select(ptr, ptr, i64) #1").ok();
+        // 2026-08-07 (Phase 7): typed mask select — an Int/Bool vector state
+        // field (`[N x i64]`) masked into a new heap List buffer.
+        writeln!(out, "declare ptr @briv_mask_select64(ptr, i64, ptr, i64) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (briv_rt.c) read them as externs. The compiler OWNS the globals
