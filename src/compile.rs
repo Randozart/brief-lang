@@ -286,6 +286,49 @@ fn nav_value_to_expr(val: &briv_compiler::macros::eval::NavValue) -> Result<Expr
     }
 }
 
+struct PreprocessedSource {
+    briv_source: String,
+    style_css: Option<String>,
+    view_html: Option<String>,
+}
+
+/// Normalize source text by file kind before lexing.
+///
+/// `.rbv` files carry `<view>`/`<style>` markup that must not reach the lexer.
+/// The Briv parser consumes only extracted Briv source, while webstack output
+/// still receives the extracted HTML/CSS payload.
+fn preprocess_source_for_path(file_path: &str, source: &str) -> Result<PreprocessedSource, String> {
+    if get_extension(file_path) != ".rbv" {
+        return Ok(PreprocessedSource {
+            briv_source: source.to_string(),
+            style_css: None,
+            view_html: None,
+        });
+    }
+
+    // Support logic-only `.rbv` files: if no RBV markup/script tags are
+    // present, treat the file as plain Briv source.
+    let has_rbv_markup = source.contains("<view>")
+        || source.contains("<style>")
+        || source.contains("<script")
+        || source.contains("</script>");
+    if !has_rbv_markup {
+        return Ok(PreprocessedSource {
+            briv_source: source.to_string(),
+            style_css: None,
+            view_html: None,
+        });
+    }
+
+    let rbv = briv_compiler::rbv::RbvFile::parse(source)
+        .map_err(|e| format!("{}: rbv parse error: {}", file_path, e))?;
+    Ok(PreprocessedSource {
+        briv_source: rbv.briv_source,
+        style_css: rbv.style_css,
+        view_html: Some(rbv.view_html),
+    })
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -311,8 +354,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
-    // ── PreLex stage: source transformation ──────────────────────────
-    let mut source = source.to_string();
+    // ── Source normalization + PreLex transformation ─────────────────
+    let preprocessed = preprocess_source_for_path(file_path, source)?;
+    let mut source = preprocessed.briv_source;
     pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
@@ -743,7 +787,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             compile_wasm(&out_path, &wasm_path)?;
 
             // 2026-07-26: Phase 6b — Write app.css from <style> block content.
-            if let Some(ref css) = opts.style_css {
+            let style_css = opts.style_css.as_ref().or(preprocessed.style_css.as_ref());
+            if let Some(css) = style_css {
                 let css_path = format!("{}.css", binary_base);
                 std::fs::write(&css_path, css)
                     .map_err(|e| format!("cannot write '{}': {}", css_path, e))?;
@@ -753,7 +798,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             // 2026-07-26: Phase 6b — Write index.html from <view> block content.
             // Wraps the raw view HTML in a minimal HTML5 boilerplate that
             // links app.css and loads dom-shim.mjs via ES module import.
-            if let Some(ref html) = opts.view_html {
+            let view_html = opts.view_html.as_ref().or(preprocessed.view_html.as_ref());
+            if let Some(html) = view_html {
                 let index_path = format!("{}.html", binary_base);
                 let index_content = format!(
                     "<!DOCTYPE html>\n\
@@ -787,7 +833,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     let ssr_out = briv_compiler::ssr::render_ssr(
                         html,
                         &items,
-                        opts.style_css.as_deref(),
+                        style_css.map(|s| s.as_str()),
                         binary_base,
                         opts.dev,
                     );
@@ -1366,7 +1412,8 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
     } else if let Some(lock) = briv_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
         briv_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
     }
-    let mut source = source.to_string();
+    let preprocessed = preprocess_source_for_path(file_path, source)?;
+    let mut source = preprocessed.briv_source;
     pm.run_source(StageKind::PreLex, &mut source)?;
     let tokens = lex_for_path(file_path, &source)?;
     let mut items = parse(file_path, &tokens, &source)?;
@@ -1678,8 +1725,9 @@ fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
 
 /// Lex + parse + resolve imports + typecheck, returning items and universe.
 fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<briv_compiler::ast::TopLevel>, TypeUniverse), String> {
-    let tokens = lex_for_path(file_path, source)?;
-    let items = parse(file_path, &tokens, source)?;
+    let preprocessed = preprocess_source_for_path(file_path, source)?;
+    let tokens = lex_for_path(file_path, &preprocessed.briv_source)?;
+    let items = parse(file_path, &tokens, &preprocessed.briv_source)?;
 
     let mut resolver = briv_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
@@ -1821,6 +1869,39 @@ fn check_types(items: &mut [briv_compiler::ast::TopLevel], universe: &TypeUniver
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_preprocess_source_for_path_rbv_extracts_briv_and_view() {
+        let source = "let x: Int = 0;\n<view><div>ok</div></view>\n<style>.a{color:red;}</style>\n";
+        let parsed = preprocess_source_for_path("/tmp/sample.rbv", source)
+            .expect("rbv parse should succeed");
+
+        assert!(parsed.briv_source.contains("let x: Int = 0;"));
+        assert_eq!(parsed.view_html.as_deref(), Some("<div>ok</div>"));
+        assert_eq!(parsed.style_css.as_deref(), Some(".a{color:red;}"));
+    }
+
+    #[test]
+    fn test_preprocess_source_for_path_non_rbv_passthrough() {
+        let source = "let x: Int = 0;\n";
+        let parsed = preprocess_source_for_path("/tmp/sample.bv", source)
+            .expect("bv passthrough should succeed");
+
+        assert_eq!(parsed.briv_source, source);
+        assert!(parsed.view_html.is_none());
+        assert!(parsed.style_css.is_none());
+    }
+
+    #[test]
+    fn test_preprocess_source_for_path_rbv_no_markup_passthrough() {
+        let source = "let x: Int = 0;\n";
+        let parsed = preprocess_source_for_path("/tmp/sample.rbv", source)
+            .expect("logic-only rbv should pass through");
+
+        assert_eq!(parsed.briv_source, source);
+        assert!(parsed.view_html.is_none());
+        assert!(parsed.style_css.is_none());
+    }
 
     /// Helper: create a temporary file with given content, run a function on its path.
     fn with_temp_file<F>(content: &str, f: F)
