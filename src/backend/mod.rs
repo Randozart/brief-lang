@@ -73,6 +73,11 @@ pub struct AnalysisResults {
     // policy, eligibility proof, kernel shape, and decision. Computed once in
     // the frontend, consumed by the LLVM backend as a deterministic switch.
     pub accel: HashMap<String, crate::analysis::accel::AccelEntry>,
+    /// 2026-08-07 (object instance pools): the proven maximum live instances
+    /// per obj base — the member column sizes. Predictably inexhaustible:
+    /// no runtime exhaustion path exists (the analysis rejects unprovable
+    /// spawn counts).
+    pub spawn_pools: HashMap<String, usize>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -167,6 +172,7 @@ pub fn analyze_program(
         observable_names,
         module_metadata,
         accel,
+        spawn_pools: crate::analysis::spawn_pool::analyze(items).0,
     }
 }
 

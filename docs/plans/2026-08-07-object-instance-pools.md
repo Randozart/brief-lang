@@ -175,3 +175,29 @@ column) inside the countdown loop. The generated IR is correct (GEPs at the
 handle row); the miscompile is the loop vectorizer touching beyond the fixed
 column. Next: disable the unroll for the member-body emission OR re-check the
 loop-shape analysis's handling of the inlined member writes.
+
+## Predictably-inexhaustible pools 2026-08-07 (late)
+
+Adopted the principle: Briv has NO runtime errors — a spawn pool is PROVABLY
+inexhaustible. The `obj_instance_capacity` config default is removed; the
+capacity is DERIVED by a new frontend analysis:
+
+- `src/analysis/spawn_pool.rs`: computes the maximum concurrent live instances
+  per obj base (spawns minus frees, weighted by the enclosing foreach const
+  range length and a reactive node's countdown firing count — `[ticks < N]`
+  with a compile-time N fires N times).
+- The member columns are sized to `live + 1` (row 0 is the static instance).
+- An UNPROVABLE spawn (a runtime-bound loop or a never-converging node) is a
+  COMPILE ERROR ("cannot statically bound..."), surfaced in both `build` and
+  `check` like the termination analysis.
+- AnalysisResults.spawn_pools + ctx.spawn_pools thread the proven capacities.
+
+Verified: 1658 tests (2 spawn_pool tests: const countdown bounded, runtime
+bound rejected) + 75 MATCH + 1 PASS (no regression).
+
+OPEN (unchanged): the spawned instance's runtime member calls still crash
+under -O3 -flto — LLVM unrolls the inlined h.inc() bodies into 4 writes that
+advance past the column inside the countdown loop (independent of the
+capacity). NEXT: address the unroll interaction.
+FOLLOW-UP: the runtime-sized dependent capacity buffer for runtime-bound
+spawn loops (§16.6), and cells.

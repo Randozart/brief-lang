@@ -176,6 +176,9 @@ pub struct CompilerContext {
     /// (induction variable, bound, direction) and increments per transaction name.
     /// Used by emit_toplevel.rs for precise !prof branch weights on guard conditions.
     pub transition_graph: Option<crate::analysis::transition_graph::ReactorTransitionGraph>,
+    /// 2026-08-07 (object instance pools): the proven maximum live instances
+    /// per obj base — the member column sizes (predictably inexhaustible).
+    pub spawn_pools: std::collections::HashMap<String, usize>,
     /// 2026-07-31: Phase 2 measurement passes (plan §7) — set once in
     /// generate() from AnalysisResults so emission consumers read frontend
     /// analysis instead of re-walking bodies. See §7.5.
@@ -350,6 +353,7 @@ impl CompilerContext {
             has_cycles: false,
             state_size_bytes: 0,
             transition_graph: None,
+            spawn_pools: std::collections::HashMap::new(),
             // 2026-07-31: Phase 2 measurement passes (plan §7) — stored on the
             // context so every emission consumer reads frontend analysis instead
             // of re-walking bodies. Set once in generate() from AnalysisResults.

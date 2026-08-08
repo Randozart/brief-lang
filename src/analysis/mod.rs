@@ -44,8 +44,8 @@ pub mod density;
 pub mod modulo_partition;
 pub mod inline_cost;
 pub mod batch_shape;
+pub mod spawn_pool;
 pub mod termination;
-
 /// Determines how a state field behaves in the %State struct layout.
 /// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields
 /// and allocate cache slots for meld-backed deferred projections.

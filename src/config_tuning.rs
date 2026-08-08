@@ -56,10 +56,6 @@ pub struct IrLoweringSettings {
     pub accel_probe_tolerance: f64,
     /// Accel probe commit margin: GPU must beat CPU by 1 + margin.
     pub accel_probe_margin: f64,
-    /// 2026-08-07 (object instance pools): the fixed capacity of an unpacked
-    /// obj's member COLUMNS — each member becomes `[capacity x T]` in %State,
-    /// row 0 is the static instance, and `spawn` allocates the free rows.
-    pub obj_instance_capacity: usize,
 }
 
 /// x86_64 defaults — also the fallback for unknown target prefixes.
@@ -80,7 +76,6 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_k: 2,
     accel_probe_tolerance: 0.0001,
     accel_probe_margin: 0.05,
-    obj_instance_capacity: 2,
 };
 
 /// Per-target-prefix tuning tables, keyed by triple prefix (e.g. "x86_64").
@@ -195,10 +190,6 @@ fn load_ir_lowering() -> IrLoweringSettings {
         accel_probe_margin: db
             .field_float("accel_probe_margin", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_margin),
-        obj_instance_capacity: db
-            .field_int("obj_instance_capacity", 0)
-            .map(|v| v.max(1) as usize)
-            .unwrap_or(DEFAULT_IR_LOWERING.obj_instance_capacity),
     }
 }
 

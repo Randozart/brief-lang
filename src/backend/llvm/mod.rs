@@ -1944,6 +1944,7 @@ impl LlvmBackend {
         // 2026-07-28: Persist transition graph for !prof computation in emit_toplevel.
         // iter_bounds populated later (at txn processing loop) — txns not in scope yet.
         self.ctx.transition_graph = Some(analysis.transition_graph.clone());
+        self.ctx.spawn_pools = analysis.spawn_pools.clone();
         // 2026-07-31: Phase 2 measurement passes (plan §7.5) — persist so the
         // emission consumers (density downgrade, modulo dispatch, auto-inline)
         // read frontend analysis instead of re-walking bodies.
@@ -4348,7 +4349,15 @@ impl LlvmBackend {
                         // scalar, `[capacity x [N x T]]` for a member array.
                         // Row 0 is the static instance; spawn allocates the
                         // free rows.
-                        let capacity = crate::config_tuning::ir_lowering().obj_instance_capacity;
+                        // 2026-08-07 (object instance pools): the column
+                        // capacity is the PROVEN maximum live instance count
+                        // from the frontend spawn-count analysis — the pool is
+                        // predictably inexhaustible (no runtime exhaustion
+                        // path). Row 0 is the static instance, so the columns
+                        // hold live + 1.
+                        let capacity = self.ctx.spawn_pools.get(&base)
+                            .map(|n| n + 1)
+                            .unwrap_or(1);
                         for (mname, mty) in slots {
                             let slot_name = format!("{}.{}", base, mname);
                             let column = match mty {

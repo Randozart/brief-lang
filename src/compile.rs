@@ -445,6 +445,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             return Err(format!("termination errors:\n{}", term_errors.join("\n")));
         }
     }
+    // 2026-08-07 (object instance pools): spawn pools must be predictably
+    // inexhaustible — the spawn-count analysis rejects any spawn whose
+    // multiplicity cannot be statically bounded (Briv has no runtime errors).
+    {
+        let (_, spawn_errors) = briv_compiler::analysis::spawn_pool::analyze(&items);
+        if !spawn_errors.is_empty() {
+            return Err(format!(
+                "spawn pool errors:\n{}",
+                spawn_errors.join("\n")
+            ));
+        }
+    }
     // 2026-08-03: `+` is string concat for #String/#Data operands — rewrite
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).
@@ -1757,6 +1769,15 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     }
     if !term_errors.is_empty() {
         return Err(format!("termination errors:\n{}", term_errors.join("\n")));
+    }
+    // 2026-08-07 (object instance pools): `check` must reject unprovable
+    // spawn counts exactly like `build` (Briv has no runtime errors).
+    let (_, spawn_errors) = briv_compiler::analysis::spawn_pool::analyze(&items);
+    if !spawn_errors.is_empty() {
+        return Err(format!(
+            "spawn pool errors:\n{}",
+            spawn_errors.join("\n")
+        ));
     }
     Ok((items, universe))
 }
