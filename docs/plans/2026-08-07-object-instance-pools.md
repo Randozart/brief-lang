@@ -156,3 +156,22 @@ The unpacked single-instance representation works end-to-end:
 REMAINING: spawn/await/free/keep (id-pool allocator + linear handles, §12.2),
 the SoA pool dimension (capacity), member-body liveness wiring, retiring the
 boxed %Box/self-slot paths for instances.
+
+## spawn infrastructure checkpoint 2026-08-07
+
+`spawn Obj(args)` (SPEC §12.2) is wired end-to-end: lexer token, Expr::Spawn,
+parser prefix, walker arms, the typechecker (types to Custom(type_name)), the
+per-BASE pool columns (static + spawned share `{base}.{member}`), the
+__spawn_next_<base> allocator counter, and the handle-aware member access
+(Field/Identifier/Assign GEP the column at the handle's row; member calls
+resolve a spawned handle local via instance_prefix_for). Committed d8e62e5b.
+Verified: 1656 tests + 75 MATCH + 1 PASS (no regression; the Box end-to-end
+= 51 on the per-base columns).
+
+OPEN: a spawned instance's runtime member calls crash under -O3 -flto — the
+inlined `h.inc()` bodies get UNROLLED by LLVM into 4 writes that advance past
+the `[2 x i64]` column (addq $0x2, 0x1(%rdx)..0x3(%rdx) on a 2-element
+column) inside the countdown loop. The generated IR is correct (GEPs at the
+handle row); the miscompile is the loop vectorizer touching beyond the fixed
+column. Next: disable the unroll for the member-body emission OR re-check the
+loop-shape analysis's handling of the inlined member writes.
