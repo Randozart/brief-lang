@@ -62,7 +62,7 @@ pub fn hoist_swan_song(
     state_fields: &HashSet<String>,
 ) -> (Vec<Statement>, Vec<Vec<Statement>>) {
     let mut stmts: Vec<&Statement> = body.iter()
-        .filter(|s| !matches!(s, Statement::Term(..) | Statement::EndProgram(..)))
+        .filter(|s| !matches!(s, Statement::EndProgram(..) | Statement::Term(None)))
         .collect();
     // 2026-07-05: Build let-to-state-field mapping from body assignments.
     // When the hoisted swan song references a let binding (like nesc in

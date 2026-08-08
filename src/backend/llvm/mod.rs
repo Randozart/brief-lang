@@ -770,8 +770,9 @@ pub(super) fn emit_loop_metadata(
     backedge_label: &str,
     metadata_counter: &mut usize,
     pending_metadata: &mut String,
+    disable_fold: bool,
 ) {
-    let md_idx = emit_loop_metadata_nodes(metadata_counter, pending_metadata);
+    let md_idx = emit_loop_metadata_nodes(metadata_counter, pending_metadata, disable_fold);
     writeln!(out, "{0}br label %{1}, !llvm.loop !{2}", indent, backedge_label, md_idx).ok();
 }
 
@@ -781,6 +782,7 @@ pub(super) fn emit_loop_metadata(
 pub(super) fn emit_loop_metadata_nodes(
     metadata_counter: &mut usize,
     pending_metadata: &mut String,
+    disable_fold: bool,
 ) -> usize {
     let start = *metadata_counter;
     let mut md_count = 1;
@@ -797,6 +799,17 @@ pub(super) fn emit_loop_metadata_nodes(
     writeln!(pending_metadata, "!{0} = !{{!\"llvm.loop.align\", i32 32}}", align_md).ok();
     md_entries.push(format!("!{}", align_md));
     md_count += 1;
+
+    // 2026-08-07 (instance pools): a loop whose body contains an OBSERVABLE
+    // call (an observable intrinsic like Print#, an FFI, or an `out`-marked
+    // name) must not be folded/unrolled by LLVM — the observable is a liveness
+    // root. !llvm.loop.disable_nonforced forbids non-forced transformations.
+    if disable_fold {
+        let df_md = start + md_count;
+        writeln!(pending_metadata, "!{0} = !{{!\"llvm.loop.disable_nonforced\"}}", df_md).ok();
+        md_entries.push(format!("!{}", df_md));
+        md_count += 1;
+    }
 
     let entries = md_entries.join(", ");
     writeln!(pending_metadata, "!{0} = !{{!{0}, {1}}}", start, entries).ok();
@@ -3515,7 +3528,7 @@ impl LlvmBackend {
         // vector emission is disabled (counter.rs), so there's no conflict with
         // LLVM's auto-vectorizer. All functions use #0 or #3 without disable-slp.
         // The hazard analysis code in hazard.rs is retained for future re-evaluation.
-        writeln!(out, "attributes #6 = {{ nounwind memory(readwrite) }}").ok();
+        writeln!(out, "attributes #6 = {{ nounwind }}").ok();
         // 2026-07-04: #7 = readonly for @pre_* functions.
         // Precondition expressions never write to %State — they only read
         // state fields via GEP+load. readonly tells LLVM the function has
@@ -4063,8 +4076,10 @@ impl LlvmBackend {
         // non-counter state write). `counter_only_writes` encodes that structurally.
         if shape.counter_only_writes && !shape.has_swan_song {
             let total_fields = self.ctx.field_index_map.len();
-            self.fun.pending_post_hoist = post_hoist;
+            self.fun.pending_post_hoist = post_hoist.clone();
+
             self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({} fields)", node.name, total_fields));
+
             self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts), Some(&bp.var));
             return true;
         }

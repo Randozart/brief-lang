@@ -153,8 +153,12 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
         }
+        let disable_fold = body.map_or(false, |b| self.loop_has_observable(b));
+        if let Some(b) = body {
+
+        }
         emit_loop_metadata(out, "  ", &format!("{}.header", label_prefix),
-            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata, disable_fold);
         writeln!(out, "{}:", exit_label).ok();
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
     }
@@ -471,8 +475,9 @@ impl LlvmBackend {
             }
         }
 
+        let disable_fold = self.loop_has_observable(body);
         emit_loop_metadata(out, "  ", ".cm_header",
-            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+            &mut self.fun.metadata_counter, &mut self.fun.pending_metadata, disable_fold);
         writeln!(out, "{}:", exit_label).ok();
         // 2026-07-17: Emit hoisted post-loop prints (swan song) AFTER the loop
         // closes, so they read the final accumulator values from %State. The

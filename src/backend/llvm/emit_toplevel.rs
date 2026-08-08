@@ -967,6 +967,71 @@ impl LlvmBackend {
             .map(|(base, _)| (base.clone(), "0".to_string()))
     }
 
+    /// 2026-08-07 (instance pools): does a loop body contain an OBSERVABLE
+    /// call (an observable intrinsic like Print#, an FFI, or an `out`-marked
+    /// name)? Such loops must not be folded/unrolled by LLVM — the observable
+    /// is a liveness root, and the countdown loop emitter attaches
+    /// `!llvm.loop.disable_nonforced` for them.
+    pub(super) fn loop_has_observable(&self, body: &[Statement]) -> bool {
+        let observable = &self.ctx.observable_names;
+        body.iter().any(|s| Self::has_observable_stmt(s, observable))
+    }
+
+    fn has_observable_stmt(stmt: &Statement, observable: &std::collections::HashSet<String>) -> bool {
+        match stmt {
+            Statement::Let { expr: Some(e), .. }
+            | Statement::Expression(e)
+            | Statement::Term(Some(e))
+            | Statement::EndProgram(Some(e))
+            | Statement::Gate(e) => Self::has_observable_expr(e, observable),
+            Statement::Assign(_, e) => Self::has_observable_expr(e, observable),
+            Statement::Guarded(_, body) | Statement::Block(body) => {
+                body.iter().any(|s| Self::has_observable_stmt(s, observable))
+            }
+            Statement::Foreach { list, body, .. } => {
+                Self::has_observable_expr(list, observable)
+                    || body.iter().any(|s| Self::has_observable_stmt(s, observable))
+            }
+            _ => false,
+        }
+    }
+
+    fn has_observable_expr(expr: &Expr, observable: &std::collections::HashSet<String>) -> bool {
+        match expr {
+            Expr::Call(name, args, _) => {
+                !name.ends_with('#')
+                    || crate::intrinsic_signatures::get_intrinsic_signature(name)
+                        .map_or(false, |sig| sig.observable)
+                    || observable.contains(name)
+                    || args.iter().any(|a| Self::has_observable_expr(a, observable))
+            }
+            Expr::MethodCall(recv, _, args, _) => {
+                Self::has_observable_expr(recv, observable)
+                    || args.iter().any(|a| Self::has_observable_expr(a, observable))
+            }
+            Expr::BinaryOp(_, l, r) => {
+                Self::has_observable_expr(l, observable) || Self::has_observable_expr(r, observable)
+            }
+            Expr::Index(o, _) | Expr::Field(o, _) | Expr::Cast(o, _) | Expr::IsType(o, _)
+            | Expr::Consume(o) | Expr::Deref(o) | Expr::AddrOf(o) => {
+                Self::has_observable_expr(o, observable)
+            }
+            Expr::List(args) | Expr::Tuple(args) => {
+                args.iter().any(|a| Self::has_observable_expr(a, observable))
+            }
+            Expr::If(c, t, e) => {
+                Self::has_observable_expr(c, observable)
+                    || Self::has_observable_expr(t, observable)
+                    || e.as_ref().map_or(false, |e| Self::has_observable_expr(e, observable))
+            }
+            Expr::Match(s, arms) => {
+                Self::has_observable_expr(s, observable)
+                    || arms.iter().any(|a| Self::has_observable_expr(&a.body, observable))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn resolve_obj_key(&mut self, ty: &crate::ast::Type) -> Option<String> {
         match ty {
             crate::ast::Type::Custom(n) if self.ctx.struct_types.contains_key(n) => Some(n.clone()),

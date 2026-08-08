@@ -820,7 +820,11 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
                     Box::new(Expr::Decimal(1)),
                 ),
             ),
-            Statement::Term(None),
+            Statement::Term(Some(Expr::Call(
+                "Print#".to_string(),
+                vec![Expr::Decimal(1)],
+                None,
+            ))),
         ],
         metadata: HashMap::new(),
         derivation: None,
@@ -839,6 +843,8 @@ fn test_spawn_member_call_uses_column_row() {
         "the countdown loop body must GEP the count column at the handle's row");
     assert!(!output.contains("inttoptr"),
         "a spawned handle's member body must NOT fall back to the boxed self path");
+    assert!(output.contains("llvm.loop.disable_nonforced"),
+        "a loop with an observable call (the Print# term) must not be folded by LLVM");
 }
 
 
