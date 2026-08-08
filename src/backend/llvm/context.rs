@@ -179,6 +179,17 @@ pub struct CompilerContext {
     /// 2026-08-07 (object instance pools): the proven maximum live instances
     /// per obj base — the member column sizes (predictably inexhaustible).
     pub spawn_pools: std::collections::HashMap<String, usize>,
+    /// 2026-08-07 (object instance pools): the runtime-bound spawn terms per
+    /// obj base — the columns of a base here are RUNTIME-SIZED heap buffers
+    /// (malloc'd at init to the sum of the terms + 1, SPEC §16.6 dependent
+    /// bounds). Keys that also appear in `spawn_pools` still include the
+    /// static capacity as a minimum (rows = static_cap + sum(terms)).
+    pub dependent_pools: std::collections::HashMap<String, Vec<crate::analysis::spawn_pool::DependentTerm>>,
+    /// 2026-08-07 (object instance pools): state-field indices whose column is
+    /// a DEPENDENT heap buffer → the LLVM element type string of one row (the
+    /// static column's `load_ty`). Member access GEPs through the buffer
+    /// pointer stored in the slot.
+    pub heap_columns: std::collections::HashMap<usize, String>,
     /// 2026-07-31: Phase 2 measurement passes (plan §7) — set once in
     /// generate() from AnalysisResults so emission consumers read frontend
     /// analysis instead of re-walking bodies. See §7.5.
@@ -354,6 +365,8 @@ impl CompilerContext {
             state_size_bytes: 0,
             transition_graph: None,
             spawn_pools: std::collections::HashMap::new(),
+            dependent_pools: std::collections::HashMap::new(),
+            heap_columns: std::collections::HashMap::new(),
             // 2026-07-31: Phase 2 measurement passes (plan §7) — stored on the
             // context so every emission consumer reads frontend analysis instead
             // of re-walking bodies. Set once in generate() from AnalysisResults.

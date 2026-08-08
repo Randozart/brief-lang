@@ -1986,6 +1986,19 @@ impl LlvmBackend {
         let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
         let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
         let base = self.emit_state_gep(out, indent, "i", "%state", idx);
+        // 2026-08-07 (object instance pools): a DEPENDENT column is a heap
+        // buffer — the slot holds the malloc'd buffer address. Load it, then
+        // GEP the row inside the buffer (element = the member's llvm type).
+        if let Some(elem_ty) = self.ctx.heap_columns.get(&idx) {
+            let addr = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, addr, base).ok();
+            let buf = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf, addr).ok();
+            let row = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, row, elem_ty, buf, row_reg).ok();
+            let load_ty = elem_ty.clone();
+            return (row, slot_ty, load_ty);
+        }
         let row = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, row, col_ty, base, row_reg).ok();
         let row_ty = match &slot_ty {

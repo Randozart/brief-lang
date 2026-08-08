@@ -106,7 +106,18 @@ fn try_eval_cfloat(
 }
 
 /// Map an LLVM type string to its byte size. Used by compute_state_size_bytes.
+/// 2026-08-07 (object instance pools): `[N x T]` recurses — the byte size of
+/// an array column/heap buffer is N times the element size (a member-array
+/// row in a dependent pool's malloc), not the flat default.
 fn llvm_type_byte_size(t: &str) -> i64 {
+    if let Some(rest) = t.strip_prefix('[') {
+        if let Some((count, elem)) = rest.split_once("x ") {
+            if let Ok(n) = count.trim().parse::<i64>() {
+                return n * llvm_type_byte_size(elem.trim_end_matches(']').trim());
+            }
+        }
+        return 8;
+    }
     match t {
         "i8" | "i1" => 1,
         "i16" => 2,
@@ -1958,6 +1969,7 @@ impl LlvmBackend {
         // iter_bounds populated later (at txn processing loop) — txns not in scope yet.
         self.ctx.transition_graph = Some(analysis.transition_graph.clone());
         self.ctx.spawn_pools = analysis.spawn_pools.clone();
+        self.ctx.dependent_pools = analysis.dependent_pools.clone();
         // 2026-07-31: Phase 2 measurement passes (plan §7.5) — persist so the
         // emission consumers (density downgrade, modulo dispatch, auto-inline)
         // read frontend analysis instead of re-walking bodies.
@@ -4373,8 +4385,41 @@ impl LlvmBackend {
                         let capacity = self.ctx.spawn_pools.get(&base)
                             .map(|n| n + 1)
                             .unwrap_or(1);
+                        let is_dependent = self.ctx.dependent_pools.contains_key(&base);
                         for (mname, mty) in slots {
                             let slot_name = format!("{}.{}", base, mname);
+                            if is_dependent {
+                                // 2026-08-07 (object instance pools): a
+                                // DEPENDENT column is a heap buffer — the slot
+                                // stores the malloc'd buffer address (an i64),
+                                // sized at init to the runtime-bound capacity
+                                // (SPEC §16.6). Member access loads the
+                                // pointer and GEPs the row inside the buffer
+                                // (see emit_instance_column_row).
+                                let slot_idx = self.ctx.field_types.len();
+                                self.ctx.field_index_map
+                                    .insert(slot_name.clone(), slot_idx);
+                                self.push_field_type(&Type::int());
+                                // The slot's LLVM type is i64 (the buffer
+                                // address); its BRIV type is the MEMBER type
+                                // so emit_instance_column_row can derive the
+                                // row type (a member array stays Vector for
+                                // the pointer-returning caller).
+                                self.ctx.field_briv_types[slot_idx] = mty.clone();
+                                self.ctx.field_initializers.insert(slot_name.clone(), None);
+                                self.ctx.instance_slots.insert(slot_name);
+                                // The row load type = the member's LLVM type: a member array keeps its
+                                // full `[N x T]` shape (a row IS the member
+                                // array); a scalar member is its own llvm type.
+                                let elem_ty = if matches!(mty, Type::Vector(_, _)) {
+                                    self.vector_array_llvm_type(&mty)
+                                        .unwrap_or_else(|| "i64".to_string())
+                                } else {
+                                    self.llvm_type(&mty)
+                                };
+                                self.ctx.heap_columns.insert(slot_idx, elem_ty);
+                                continue;
+                            }
                             let column = match mty {
                                 Type::Vector(inner, dims) => Type::Vector(
                                     inner.clone(),

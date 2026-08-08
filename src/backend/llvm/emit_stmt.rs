@@ -285,13 +285,30 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
                         let slot = format!("{}.{}", prefix, name);
                         if let Some(&idx) = backend.ctx.field_index_map.get(&slot) {
-                            let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
-                            let gep = backend.fun.gen_reg();
-                            let col_ty = backend.ctx.field_types[idx].clone();
-                            writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, gep, col_ty, base, row_reg).ok();
+                            let field_ty = backend.ctx.field_types[idx].clone();
+                            // 2026-08-07 (object instance pools): a DEPENDENT
+                            // column is a heap buffer — load the buffer
+                            // address from the slot and GEP the row inside it
+                            // (mirrors emit_instance_column_row's heap path).
+                            let gep = if let Some(elem_ty) = backend.ctx.heap_columns.get(&idx).cloned() {
+                                let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                                let addr = backend.fun.gen_reg();
+                                writeln!(out, "{}{} = load i64, ptr {}", indent, addr, base).ok();
+                                let buf = backend.fun.gen_reg();
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf, addr).ok();
+                                let row = backend.fun.gen_reg();
+                                writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, row, elem_ty, buf, row_reg).ok();
+                                let field_ty = elem_ty.clone();
+                                row
+                            } else {
+                                let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                                let gep = backend.fun.gen_reg();
+                                let col_ty = backend.ctx.field_types[idx].clone();
+                                writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, gep, col_ty, base, row_reg).ok();
+                                gep
+                            };
                             // Mirror the standard top-level field store: use the
                             // slot's actual LLVM type and box Ptr/float values.
-                            let field_ty = backend.ctx.field_types[idx].clone();
                             let val_ty = backend.llvm_type(&val.ty);
                             if val_ty == field_ty {
                                 writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, val.name, gep).ok();

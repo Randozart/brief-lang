@@ -1,6 +1,6 @@
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
-use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, llvm_type_byte_size, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -887,9 +887,79 @@ impl LlvmBackend {
         self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.clone(), "0".to_string())) }, indent);
     }
 
-    /// 2026-08-07 (object instance pools): run a SPAWNED instance's Init
-    /// member at pool row `row_reg` — `spawn Counter()` initializes row 1's
-    /// columns with `self_prefix = (base, row_reg)`.
+    /// 2026-08-07 (object instance pools): allocate the DEPENDENT pools'
+    /// heap buffers at program init. Each dependent base's columns are
+    /// malloc'd to `(rows) * elem_size`, where `rows = static_rows +
+    /// Σ multiplier×bound_expr` (SPEC §16.6 dependent bounds), the sum of all
+    /// proven runtime bounds. Runs AFTER the field-init stores (so bound
+    /// fields like `N` are readable) and BEFORE the static instance inits
+    /// (row 0 lives at the buffer start). The pool is predictably
+    /// inexhaustible: the buffer holds the sum of all runtime bounds, and the
+    /// bound expressions are the countdown loop limits — the pool can never
+    /// be exhausted during the program.
+    fn emit_dependent_pool_buffers(&mut self, out: &mut String, indent: &str) {
+        // Deterministic IR: iterate the dependent bases in sorted order.
+        let mut bases: Vec<String> = self.ctx.dependent_pools.keys().cloned().collect();
+        bases.sort();
+        for base in &bases {
+            // Owned copies (self is mutably borrowed below).
+            let terms: Vec<crate::analysis::spawn_pool::DependentTerm> =
+                self.ctx.dependent_pools.get(base).cloned().unwrap_or_default();
+            let static_rows = self.ctx.spawn_pools.get(base).copied().unwrap_or(0) as i64;
+            // rows = static_rows + Σ (multiplier × bound_expr). The bound
+            // expressions read state fields that were initialized earlier in
+            // this same function.
+            let mut acc_reg: Option<String> = None;
+            for term in terms {
+                let vr = self.emit_expr(out, &term.bound, indent);
+                let scaled = if term.multiplier != 1 {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = mul i64 {}, {}", indent, r, vr.name, term.multiplier).ok();
+                    r
+                } else {
+                    vr.name
+                };
+                let lhs = match &acc_reg {
+                    Some(acc) => acc.clone(),
+                    None => format!("{}", static_rows),
+                };
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 {}, {}", indent, r, lhs, scaled).ok();
+                acc_reg = Some(r);
+            }
+            let rows_reg = acc_reg.unwrap_or_else(|| format!("{}", static_rows));
+            // Allocate a heap buffer per member column of this base.
+            let mut columns: Vec<(usize, String)> = self.ctx.heap_columns.iter()
+                .filter(|(idx, _)| {
+                    let slot_name = self.ctx.field_index_map.iter()
+                        .find(|(_, v)| **v == **idx)
+                        .map(|(k, _)| k.clone())
+                        .unwrap_or_default();
+                    slot_name.starts_with(&format!("{}.", base))
+                })
+                .map(|(&idx, elem)| (idx, elem.clone()))
+                .collect();
+            columns.sort_by_key(|&(idx, _)| idx);
+            for (idx, elem) in &columns {
+                // bytes = rows * elem_size; store the malloc'd address in the
+                // column slot (member access loads it and GEPs the row).
+                let byte_size = llvm_type_byte_size(elem);
+                let size_reg = if byte_size != 1 {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = mul i64 {}, {}", indent, r, rows_reg, byte_size).ok();
+                    r
+                } else {
+                    rows_reg.clone()
+                };
+                let raw = self.fun.gen_reg();
+                writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, raw, size_reg).ok();
+                let addr = self.fun.gen_reg();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, raw).ok();
+                let slot = self.emit_state_gep(out, indent, "dp", "%state", *idx);
+                writeln!(out, "{}store i64 {}, ptr {}", indent, addr, slot).ok();
+            }
+        }
+    }
     pub(crate) fn emit_spawn_init(
         &mut self,
         out: &mut String,
@@ -1269,6 +1339,11 @@ impl LlvmBackend {
             // deleted; bracket-list initializers go through emit_field_init_value.
             self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx);
         }
+        // 2026-08-07 (object instance pools): allocate the DEPENDENT pools'
+        // heap buffers here — AFTER the field-init stores (the runtime bound
+        // fields like `N` are readable) and BEFORE the static instance inits
+        // (row 0 lives at the buffer start, so it must exist first).
+        self.emit_dependent_pool_buffers(out, indent);
         // 2026-08-07 (object instance pools): the unpacked instances' Init
         // members run here too (the reactor uses the inline init stores, not
         // @init_state).

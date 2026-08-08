@@ -78,6 +78,10 @@ pub struct AnalysisResults {
     /// no runtime exhaustion path exists (the analysis rejects unprovable
     /// spawn counts).
     pub spawn_pools: HashMap<String, usize>,
+    /// 2026-08-07 (object instance pools): bases whose spawn count is bounded
+    /// by a RUNTIME value — their member columns are runtime-sized heap
+    /// buffers (dependent capacity, SPEC §16.6).
+    pub dependent_pools: std::collections::HashMap<String, Vec<crate::analysis::spawn_pool::DependentTerm>>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -150,6 +154,7 @@ pub fn analyze_program(
         .collect();
     let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order, &foldable);
     let observable_names = collect_observable_names(items);
+    let (spawn_pools, dependent_pools, _) = crate::analysis::spawn_pool::analyze(items);
     let module_metadata = collect_module_metadata(items);
     let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
     AnalysisResults {
@@ -172,7 +177,8 @@ pub fn analyze_program(
         observable_names,
         module_metadata,
         accel,
-        spawn_pools: crate::analysis::spawn_pool::analyze(items).0,
+        spawn_pools,
+        dependent_pools,
     }
 }
 
