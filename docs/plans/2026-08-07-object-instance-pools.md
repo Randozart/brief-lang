@@ -201,3 +201,36 @@ advance past the column inside the countdown loop (independent of the
 capacity). NEXT: address the unroll interaction.
 FOLLOW-UP: the runtime-sized dependent capacity buffer for runtime-bound
 spawn loops (§16.6), and cells.
+
+## Runtime-bound dependent pools 2026-08-07 (final)
+
+The runtime-bound spawn loop is no longer a compile error — it is a
+DEPENDENT pool sized at runtime:
+
+- `src/analysis/spawn_pool.rs`: `Firing` becomes `Static(i64)` (const
+  countdown) | `Dependent(Expr)` (countdown bound is a runtime field / named
+  const) | `Unprovable` (`[true]` node + spawn = error). Analyze returns
+  `(capacities, dependent_terms, errors)` — `DependentTerm { multiplier,
+  bound }` carries the countdown bound (nested Mul products for enclosing
+  runtime-bound foreachs). 4 analysis tests.
+- Backend `ctx.heap_columns: HashMap<usize, String>`: index → member-row
+  LLVM type, ONLY for dependent bases. A dependent column is registered as an
+  i64 SLOT holding the heap-buffer address, not a `[capacity x T]` array.
+- `emit_dependent_pool_buffers` (emit_toplevel.rs): at program init, AFTER
+  the bound field stores (e.g. `N = get_env_int!`) and BEFORE the static
+  instance's row-0 writes, malloc each dependent base's columns to
+  `(static_rows + Σ multiplier×bound) * elem_size`, and store the address in
+  the slot. Provably inexhaustible: the buffer holds the sum of all proven
+  runtime bounds; the allocator counter starts at row 1.
+- Member read + write (self-prefix / emit_instance_column_row / Assign): if
+  the column is dependent, load the slot address, inttoptr, GEP the row
+  inside the buffer (element type from heap_columns). Static columns keep the
+  `[capacity x T]` GEP unchanged.
+- Verified: 1662 lib tests (new: spawn_pool dependent cases +
+  `test_dependent_spawn_pool_heap_buffer` asserting malloc + slot round-trip +
+  no static column) + scratch/spr.bv with BOUND=5 prints `22222` (each
+  spawned row: Init→0, inc×2→2) under `-O3 -flto`. Benchmark samples
+  (enemy_swarm .79x, linked_list .72x) unchanged — no regression.
+- Committed 58f89b02.
+
+OPEN: cells (spawn/await/keep/free lifecycle beyond the row allocator).
