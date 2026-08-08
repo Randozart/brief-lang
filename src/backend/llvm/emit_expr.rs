@@ -1914,7 +1914,11 @@ impl LlvmBackend {
         // is a let-bound row id whose type names the obj — its register is
         // the pool row.
         let recv_prefix = match recv {
-            Expr::Identifier(n) => self.instance_prefix_for(n),
+            Expr::Identifier(n) => {
+                let p = self.instance_prefix_for(n);
+
+                p
+            }
             _ => None,
         };
         let (recv_reg, mut type_name) = if let Some((prefix, _row)) = &recv_prefix {

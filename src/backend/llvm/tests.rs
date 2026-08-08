@@ -704,6 +704,143 @@ fn test_unpacked_instance_emits_prefixed_slots() {
         "b.data[2] must GEP the unpacked slot's array");
 }
 
+/// A countdown node that spawns a Counter + calls its member — the spawned
+/// handle's member body must resolve the column at the handle's row (not the
+/// boxed inttoptr path). Exercises the loop-engine Let-binding fix.
+fn spawn_countdown_program() -> Vec<TopLevel> {
+    use crate::ast::top::TypeDefBody;
+    use crate::ast::top::TypeDefSlot;
+    let obj_decl = TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+        name: "Counter".to_string(),
+        type_params: vec![],
+        parent: None,
+        protocol: None,
+        traits: vec![],
+        bit_range: None,
+        body: TypeDefBody {
+            slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
+            metadata: HashMap::new(),
+            projections: vec![],
+            bindings: vec![],
+            operators: vec![],
+            op_bindings: vec![],
+            constraints: vec![],
+            members: vec![TopLevel::Transaction(Transaction {
+                name: "inc".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Identifier("count".to_string()),
+                        Expr::BinaryOp(
+                            crate::ast::BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("count".to_string())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                    Statement::Term(None),
+                ],
+                metadata: HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            })],
+            span: None,
+        },
+        span: None,
+    }));
+    let inst = TopLevel::Statement(Box::new(Statement::Let {
+        name: "c".to_string(),
+        names: vec![],
+        ty: Some(Type::Custom("Counter".to_string())),
+        expr: Some(Expr::Decimal(0)),
+        modifiers: vec![],
+    }));
+    let ticks = TopLevel::Statement(Box::new(Statement::Let {
+        name: "ticks".to_string(),
+        names: vec![],
+        ty: Some(Type::int()),
+        expr: Some(Expr::Decimal(0)),
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "work".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("ticks".to_string())),
+                Box::new(Expr::Decimal(2)),
+            ),
+            post_condition: Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("ticks".to_string())),
+                Box::new(Expr::Decimal(2)),
+            ),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "h".to_string(),
+                names: vec![],
+                ty: Some(Type::Custom("Counter".to_string())),
+                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![] }),
+                modifiers: vec![],
+            },
+            Statement::Expression(Expr::MethodCall(
+                Box::new(Expr::Identifier("h".to_string())),
+                "inc".to_string(),
+                vec![],
+                None,
+            )),
+            Statement::Assign(
+                Expr::Identifier("ticks".to_string()),
+                Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("ticks".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![obj_decl, inst, ticks, node]
+}
+
+#[test]
+fn test_spawn_member_call_uses_column_row() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&spawn_countdown_program(), None);
+    assert!(output.contains("getelementptr [3 x i64], ptr"),
+        "the countdown loop body must GEP the count column at the handle's row");
+    assert!(!output.contains("inttoptr"),
+        "a spawned handle's member body must NOT fall back to the boxed self path");
+}
+
 
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering

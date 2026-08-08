@@ -3515,7 +3515,7 @@ impl LlvmBackend {
         // vector emission is disabled (counter.rs), so there's no conflict with
         // LLVM's auto-vectorizer. All functions use #0 or #3 without disable-slp.
         // The hazard analysis code in hazard.rs is retained for future re-evaluation.
-        writeln!(out, "attributes #6 = {{ nounwind }}").ok();
+        writeln!(out, "attributes #6 = {{ nounwind memory(readwrite) }}").ok();
         // 2026-07-04: #7 = readonly for @pre_* functions.
         // Precondition expressions never write to %State — they only read
         // state fields via GEP+load. readonly tells LLVM the function has

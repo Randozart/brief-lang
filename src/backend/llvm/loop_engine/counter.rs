@@ -1549,7 +1549,16 @@ impl LlvmBackend {
                 Statement::Let { name, expr: Some(e), .. } => {
                     let reg = self.emit_expr(out, e, "  ");
                     self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
-                    self.fun.last_val_types.insert(name.clone(), reg.ty);
+                    self.fun.last_val_types.insert(name.clone(), reg.ty.clone());
+                    // 2026-08-07 (instance pools): a spawned handle local
+                    // (`let h: Counter = spawn ...`) must bind through
+                    // let_bindings/let_binding_types too — the member-call /
+                    // field resolution (instance_prefix_for) reads those, not
+                    // last_val_temps. Without them h.inc() fell back to the
+                    // boxed self (inttoptr the row) and dereferenced address 1.
+                    self.fun.let_bindings.insert(name.clone(), reg.name.clone());
+                    self.fun.let_binding_types.insert(name.clone(), reg.ty.clone());
+                    self.fun.let_original_types.insert(name.clone(), reg.ty.clone());
                 }
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
@@ -1783,7 +1792,10 @@ impl LlvmBackend {
             Statement::Let { name, expr: Some(e), .. } => {
                 let reg = self.emit_expr(out, e, indent);
                 self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
-                self.fun.last_val_types.insert(name.clone(), reg.ty);
+                self.fun.last_val_types.insert(name.clone(), reg.ty.clone());
+                self.fun.let_bindings.insert(name.clone(), reg.name.clone());
+                self.fun.let_binding_types.insert(name.clone(), reg.ty.clone());
+                self.fun.let_original_types.insert(name.clone(), reg.ty.clone());
             }
             Statement::Expression(e) => {
                 self.emit_expr(out, e, indent);
