@@ -1349,8 +1349,14 @@ impl LlvmBackend {
             "double".to_string()
         } else if **inner == crate::ast::Type::float() {
             "float".to_string()
-        } else {
+        } else if matches!(inner.as_ref(), crate::ast::Type::Ptr(_) | crate::ast::Type::PtrConst(_)) {
+            // Ptr state slots hold the i64 HANDLE (uniform %State), not a raw
+            // ptr — a Ptr member column is `[2 x i64]`.
             "i64".to_string()
+        } else {
+            // Struct/other inners use their real LLVM type — a member column
+            // of `{ ptr, i64 }` must be `[2 x { ptr, i64 }]`, not `[2 x i64]`.
+            self.llvm_type(inner).to_string()
         };
         let mut arr_ty = inner_llvm;
         for n in resolved.iter().rev() {

@@ -173,17 +173,17 @@ impl LlvmBackend {
                 if let Some(prefix) = self.fun.self_prefix.clone() {
                     let slot = format!("{}.{}", prefix, name);
                     if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
-                        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
-                        if matches!(&slot_ty, Type::Vector(_, _)) {
-                            let base = self.emit_state_gep(out, indent, "i", "%state", idx);
-                            return TypedRegister { name: base, ty: slot_ty };
+                        let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx);
+                        if matches!(&row_ty, Type::Vector(_, _)) {
+                            return TypedRegister { name: row, ty: row_ty };
                         }
-                        let (loaded, briv_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
-                        return TypedRegister { name: loaded, ty: briv_ty };
+                        let loaded = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
+                        return TypedRegister { name: loaded, ty: row_ty };
                     }
                 }
-                // 2026-08-07 (Phase 7): a let MUTATED via `x = ...` is
-                // redirected to an alloca slot by the assign — reads must load
+    /// 2026-08-07 (Phase 7): a let MUTATED via `x = ...` is
+                /// redirected to an alloca slot by the assign — reads must load
                 // from the slot (fresh across loop iterations), NOT resolve a
                 // stale `last_val_temps` register that is not dominated in a
                 // loop (accumulating `acc = acc + i` in a foreach summed to
@@ -651,13 +651,13 @@ impl LlvmBackend {
                 if let Expr::Identifier(recv_name) = obj.as_ref() {
                     let slot = format!("{}.{}", recv_name, field);
                     if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
-                        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
-                        if matches!(&slot_ty, Type::Vector(_, _)) {
-                            let base = self.emit_state_gep(out, indent, "i", "%state", idx);
-                            return TypedRegister { name: base, ty: slot_ty };
+                        let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx);
+                        if matches!(&row_ty, Type::Vector(_, _)) {
+                            return TypedRegister { name: row, ty: row_ty };
                         }
-                        let (loaded, briv_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
-                        return TypedRegister { name: loaded, ty: briv_ty };
+                        let loaded = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
+                        return TypedRegister { name: loaded, ty: row_ty };
                     }
                 }
                 let obj_reg = self.emit_expr(out, obj, indent);
@@ -1924,6 +1924,39 @@ impl LlvmBackend {
     /// receiver register and the given arg registers bound to the member's
     /// params. Shared by MethodCall codegen and the `<-` op dispatch
     /// (emit_strategy_member_call).
+    /// 2026-08-07 (object instance pools): GEP an unpacked instance's member
+    /// COLUMN at row 0 (the static instance) and return the row register, the
+    /// member's Briv type (the column's dims[1..]; an empty tail means a
+    /// scalar member), and the row's LLVM load type (the column's inner). A
+    /// spawned instance would pass its id instead of 0.
+    pub(crate) fn emit_instance_column_row(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        idx: usize,
+    ) -> (String, Type, String) {
+        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
+        let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+        let base = self.emit_state_gep(out, indent, "i", "%state", idx);
+        let row = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 0", indent, row, col_ty, base).ok();
+        let row_ty = match &slot_ty {
+            Type::Vector(inner, dims) if dims.len() > 1 => {
+                Type::Vector(inner.clone(), dims[1..].to_vec())
+            }
+            Type::Vector(inner, _) => (**inner).clone(),
+            other => other.clone(),
+        };
+        // The load type = the column's inner (`[2 x i64]` → i64,
+        // `[2 x { ptr, i64 }]` → `{ ptr, i64 }`, `[2 x float]` → float).
+        let load_ty = col_ty
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once('x'))
+            .map(|(_, t)| t.trim().trim_end_matches(']').trim().to_string())
+            .unwrap_or_else(|| "i64".to_string());
+        (row, row_ty, load_ty)
+    }
+
     pub(crate) fn emit_member_body(
         &mut self,
         out: &mut String,

@@ -2002,6 +2002,13 @@ impl LlvmBackend {
                         self.ctx.obj_type_params.entry(td.name.clone())
                             .or_insert_with(|| td.type_params.iter().map(|p| p.name.clone()).collect());
                     }
+                    // 2026-08-07 (object instance pools): only OBJS (types
+                    // with members) unpack into instance pools — a List<T> or
+                    // other Applied collection with a slot layout must NOT
+                    // unpack (it is a plain field).
+                    if !td.body.members.is_empty() {
+                        self.ctx.obj_members.entry(td.name.clone()).or_insert_with(|| td.body.members.clone());
+                    }
                 }
                 _ => {}
             }
@@ -4276,7 +4283,15 @@ impl LlvmBackend {
                     // Member types are substituted with the concrete const
                     // args (the mono_subst map ensure_mono uses).
                     let unpacked: Option<Vec<(String, Type)>> = match &field_ty {
-                        Type::Applied(base, args) if self.ctx.struct_types.contains_key(base) => {
+                        // Only OBJ bases unpack — List<T> and other Applied
+                        // collections with a slot layout stay plain fields.
+                        // A LIST-LITERAL initializer (`let q: List<Int> =
+                        // [0]`) constructs a heap collection VALUE, not an
+                        // instance pool.
+                        Type::Applied(base, args)
+                            if self.ctx.obj_members.contains_key(base)
+                                && !matches!(expr, Some(Expr::List(_)) | Some(Expr::Tuple(_))) =>
+                        {
                             let params = self.ctx.obj_type_params.get(base).cloned().unwrap_or_default();
                             let subst: std::collections::HashMap<String, Type> =
                                 params.into_iter().zip(args.iter().cloned()).collect();
@@ -4298,11 +4313,29 @@ impl LlvmBackend {
                             };
                             self.ctx.obj_instance_inits.insert(name.clone(), (base, init_expr.clone()));
                         }
+                        // 2026-08-07 (object instance pools): each member is a
+                        // COLUMN over the instance id — `[capacity x T]` for a
+                        // scalar, `[capacity x [N x T]]` for a member array.
+                        // Row 0 is the static instance; spawn allocates the
+                        // free rows.
+                        let capacity = crate::config_tuning::ir_lowering().obj_instance_capacity;
                         for (mname, mty) in slots {
                             let slot_name = format!("{}.{}", name, mname);
+                            let column = match mty {
+                                Type::Vector(inner, dims) => Type::Vector(
+                                    inner.clone(),
+                                    std::iter::once(crate::ast::Dimension::Anonymous(capacity))
+                                        .chain(dims.iter().cloned())
+                                        .collect(),
+                                ),
+                                _ => Type::Vector(
+                                    Box::new(mty.clone()),
+                                    vec![crate::ast::Dimension::Anonymous(capacity)],
+                                ),
+                            };
                             self.ctx.field_index_map
                                 .insert(slot_name.clone(), self.ctx.field_types.len());
-                            self.push_field_type(&mty);
+                            self.push_field_type(&column);
                             self.ctx.field_initializers.insert(slot_name.clone(), None);
                             self.ctx.instance_slots.insert(slot_name);
                         }
