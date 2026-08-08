@@ -233,4 +233,8 @@ DEPENDENT pool sized at runtime:
   (enemy_swarm .79x, linked_list .72x) unchanged — no regression.
 - Committed 58f89b02.
 
-OPEN: cells (spawn/await/keep/free lifecycle beyond the row allocator).
+OPEN: cells (spawn/await/keep/free lifecycle beyond the row allocator). →
+See `docs/plans/2026-08-08-pool-lifecycle-free-keep-await.md` for the
+lifecycle plan (three capacity-corruption bugs found: free keys by var name,
+cross-node capacity is max-but-allocator-is-monotonic, dependent buffer
+off-by-one; then await + free-list reclamation).
