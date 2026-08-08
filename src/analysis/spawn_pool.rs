@@ -1,13 +1,14 @@
 //! 2026-08-07 (object instance pools): predictably-inexhaustible pools.
 //!
 //! Briv has no runtime errors: a spawn pool must be PROVABLY inexhaustible.
-//! This analysis computes, per obj base, the maximum number of concurrent
-//! live instances (spawns minus frees, weighted by the enclosing bounded
-//! iteration / reactive firing count), OR marks the pool DEPENDENT when the
-//! bound is a runtime value.
+//! This analysis computes, per obj base, the TOTAL lifetime spawn count
+//! (each bounded firing context's spawns, summed across every node that
+//! spawns the base — the monotonic `__spawn_next_<base>` counter is shared,
+//! so its max is the sum), OR marks the pool DEPENDENT when the bound is a
+//! runtime value.
 //!
 //! - A STATIC countdown (`[ticks < N]` with a compile-time N) sizes the
-//!   member columns to the proven maximum — no runtime exhaustion path.
+//!   member columns to the total spawn count — no runtime exhaustion path.
 //! - A DEPENDENT countdown (`[ticks < N]` with N a runtime field/const name)
 //!   still bounds the pool: the capacity is N at runtime, so the backend
 //!   allocates the member columns as a runtime-sized heap buffer (proven ≥
@@ -15,6 +16,10 @@
 //!   EXPRESSION per base so the backend can size the malloc.
 //! - A spawn whose multiplicity is genuinely unbounded (a `[true]` node, a
 //!   non-countdown loop) is a COMPILE ERROR.
+//!
+//! 2026-08-08 (pool lifecycle): `free`/`keep` do NOT shrink the pool (the
+//! allocator is monotonic; no reclamation until the free-list phase), and the
+//! per-base capacity is a SUM across nodes (one shared counter), not a max.
 
 use crate::ast::{Expr, Statement, TopLevel};
 use std::collections::HashMap;
@@ -43,11 +48,19 @@ pub struct DependentTerm {
     pub bound: Expr,
 }
 
-/// The result: `base` → the proven maximum live instance count for STATIC
-/// pools (≥ 1 — row 0 is the static instance); `base` → the runtime-bound
-/// spawn terms for DEPENDENT pools (the backend sizes the heap buffer to
-/// the sum of the terms + 1, an over-approximation of the concurrent live
-/// maximum — provably inexhaustible); and the unprovable-spawn errors.
+/// The result: `base` → the proven TOTAL lifetime spawn count for STATIC
+/// pools (the monotonic `__spawn_next_<base>` counter is shared by every node
+/// that spawns the base, so the capacity is the SUM of all firing contexts —
+/// the counter never exceeds it; row 0 is the static instance); `base` → the
+/// runtime-bound spawn terms for DEPENDENT pools (the backend sizes the heap
+/// buffer to the sum of the terms + 1); and the unprovable-spawn errors.
+///
+/// 2026-08-08 (pool lifecycle, Bug 1+2): capacity is a TOTAL across nodes,
+/// not a max. `__spawn_next_<base>` only ever increments (no row reclamation
+/// until the free-list phase), so two nodes each spawning the same base write
+/// rows 1..(a+b) on ONE counter — `max(a,b)` columns would overflow. And
+/// `free`/`keep` do NOT shrink the pool: without reclamation a free never
+/// returns a row, so decrementing here would under-allocate.
 pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, Vec<DependentTerm>>, Vec<String>) {
     let mut capacities: HashMap<String, usize> = HashMap::new();
     let mut dependent: HashMap<String, Vec<DependentTerm>> = HashMap::new();
@@ -60,7 +73,7 @@ pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, V
                 let mut terms: HashMap<String, Vec<DependentTerm>> = HashMap::new();
                 let mut ctx = WalkCtx { firing: &firing, bound_terms: &[] };
                 walk_stmts(&t.body, 1, &mut ctx, &mut live, &mut terms, &mut errors);
-                merge_max(&mut capacities, &live);
+                merge_total(&mut capacities, &live);
                 for (base, ts) in terms {
                     dependent.entry(base).or_default().extend(ts);
                 }
@@ -70,7 +83,7 @@ pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, V
                 let mut terms: HashMap<String, Vec<DependentTerm>> = HashMap::new();
                 let mut ctx = WalkCtx { firing: &Firing::Static(1), bound_terms: &[] };
                 walk_stmts(&d.body, 1, &mut ctx, &mut live, &mut terms, &mut errors);
-                merge_max(&mut capacities, &live);
+                merge_total(&mut capacities, &live);
                 for (base, ts) in terms {
                     dependent.entry(base).or_default().extend(ts);
                 }
@@ -80,7 +93,7 @@ pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, V
                 let mut terms: HashMap<String, Vec<DependentTerm>> = HashMap::new();
                 let mut ctx = WalkCtx { firing: &Firing::Static(1), bound_terms: &[] };
                 walk_stmt(stmt, 1, &mut ctx, &mut live, &mut terms, &mut errors);
-                merge_max(&mut capacities, &live);
+                merge_total(&mut capacities, &live);
                 for (base, ts) in terms {
                     dependent.entry(base).or_default().extend(ts);
                 }
@@ -218,10 +231,14 @@ fn walk_stmt(
             walk_expr(e, multiplier, ctx, live, terms, errors);
         }
         Statement::Expression(e) | Statement::Gate(e) => walk_expr(e, multiplier, ctx, live, terms, errors),
-        Statement::FreeHint(name) | Statement::KeepHint(name) => {
-            let entry = live.entry(name.clone()).or_insert(0);
-            *entry = (*entry - multiplier).max(0);
-        }
+        // 2026-08-08 (pool lifecycle, Bug 1): `free h;` / `keep h;` do NOT
+        // shrink the pool. The `__spawn_next_<base>` allocator is monotonic —
+        // without row reclamation (the free-list phase) a free never returns a
+        // row to the pool, so a capacity decrement here would UNDER-allocate
+        // and corrupt rows 1..total. `free`/`keep` are consumption/ownership
+        // directives: the typechecker marks the handle dead; the pool keeps
+        // its full lifetime capacity.
+        Statement::FreeHint(_) | Statement::KeepHint(_) => {}
         Statement::Let { expr: Some(e), .. } => walk_expr(e, multiplier, ctx, live, terms, errors),
         _ => {}
     }
@@ -340,10 +357,15 @@ fn product(bounds: &[Expr]) -> Expr {
     acc
 }
 
-fn merge_max(out: &mut HashMap<String, usize>, live: &HashMap<String, i64>) {
+/// Sum a node's live counts into the per-base TOTAL. 2026-08-08 (Bug 2): the
+/// monotonic `__spawn_next_<base>` counter is shared across every node that
+/// spawns the base — its max value is the SUM of all firing contexts, so the
+/// pool must be sized to the total, never the max (max would overflow rows
+/// 1..(a+b) on one counter).
+fn merge_total(out: &mut HashMap<String, usize>, live: &HashMap<String, i64>) {
     for (base, n) in live {
         let entry = out.entry(base.clone()).or_insert(0);
-        *entry = (*entry).max(*n as usize).max(1);
+        *entry = *entry + (*n as usize).max(1);
     }
 }
 
@@ -472,4 +494,47 @@ mod tests {
         assert!(!errors.is_empty(), "an unbounded spawn must be rejected");
         assert!(errors[0].contains("not statically bounded"));
     }
+
+    // 2026-08-08 (pool lifecycle, Bug 1): `free h;` must NOT shrink the pool —
+    // the __spawn_next_<base> allocator is monotonic (no reclamation yet), so
+    // the capacity is the TOTAL spawn count, and free/keep are ownership
+    // directives that leave the pool size unchanged.
+    #[test]
+    fn free_does_not_shrink_pool() {
+        let mut body = vec![spawn("Counter")];
+        body.push(Statement::FreeHint("h".to_string()));
+        let program = vec![countdown_with_body(Expr::Decimal(4), body)];
+        let (caps, dependent, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert!(dependent.is_empty(), "a const countdown is not dependent");
+        assert_eq!(caps.get("Counter"), Some(&4),
+            "free must not reduce the pool: capacity = total spawn count (4 firings), not max concurrent (1)");
+    }
+
+    #[test]
+    fn keep_does_not_shrink_pool() {
+        let mut body = vec![spawn("Counter")];
+        body.push(Statement::KeepHint("h".to_string()));
+        let program = vec![countdown_with_body(Expr::Decimal(3), body)];
+        let (caps, _, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert_eq!(caps.get("Counter"), Some(&3),
+            "keep must not reduce the pool: capacity = total spawn count (3 firings)");
+    }
+
+    // 2026-08-08 (pool lifecycle, Bug 2): capacity is a SUM across nodes —
+    // __spawn_next_<base> is ONE monotonic counter shared by every node that
+    // spawns the base. Two nodes spawning the same base need rows 1..(a+b);
+    // a max (max(a,b)) column would overflow the shared counter.
+    #[test]
+    fn cross_node_spawns_sum_capacity() {
+        let node_a = countdown_with_body(Expr::Decimal(3), vec![spawn("Counter")]);
+        let node_b = countdown_with_body(Expr::Decimal(5), vec![spawn("Counter")]);
+        let program = vec![node_a, node_b];
+        let (caps, _, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert_eq!(caps.get("Counter"), Some(&8),
+            "two nodes spawning Counter need the SUM (3 + 5 = 8) on the shared counter");
+    }
 }
+

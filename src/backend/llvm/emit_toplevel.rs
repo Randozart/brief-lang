@@ -906,9 +906,13 @@ impl LlvmBackend {
             let terms: Vec<crate::analysis::spawn_pool::DependentTerm> =
                 self.ctx.dependent_pools.get(base).cloned().unwrap_or_default();
             let static_rows = self.ctx.spawn_pools.get(base).copied().unwrap_or(0) as i64;
-            // rows = static_rows + Σ (multiplier × bound_expr). The bound
+            // rows = static_rows + Σ (multiplier × bound_expr) + 1. The bound
             // expressions read state fields that were initialized earlier in
-            // this same function.
+            // this same function. The +1 is row 0 (the static instance): the
+            // __spawn_next_<base> counter starts at 1, so the last spawned row
+            // is index `total` — the buffer must hold total + 1 elements
+            // (2026-08-08 Bug 3; without it the final row wrote OOB, hidden
+            // only by malloc slop in spr.bv).
             let mut acc_reg: Option<String> = None;
             for term in terms {
                 let vr = self.emit_expr(out, &term.bound, indent);
@@ -927,7 +931,9 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, r, lhs, scaled).ok();
                 acc_reg = Some(r);
             }
-            let rows_reg = acc_reg.unwrap_or_else(|| format!("{}", static_rows));
+            let rows_base = acc_reg.unwrap_or_else(|| format!("{}", static_rows));
+            let rows_reg = self.fun.gen_reg();
+            writeln!(out, "{}{} = add i64 {}, 1", indent, rows_reg, rows_base).ok();
             // Allocate a heap buffer per member column of this base.
             let mut columns: Vec<(usize, String)> = self.ctx.heap_columns.iter()
                 .filter(|(idx, _)| {

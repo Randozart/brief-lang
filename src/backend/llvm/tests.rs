@@ -845,6 +845,11 @@ fn test_spawn_member_call_uses_column_row() {
         "a spawned handle's member body must NOT fall back to the boxed self path");
     assert!(output.contains("llvm.loop.disable_nonforced"),
         "a loop with an observable call (the Print# term) must not be folded by LLVM");
+    // 2026-08-08 (literal-bound countdown fix): the countdown `[ticks < 2]`
+    // must loop to the literal 2, not the `add i64 0, 1` fallback that ran
+    // every literal-bound loop once and silently dropped spawns.
+    assert!(output.contains("add i64 0, 2"),
+        "the literal countdown bound (2) must be emitted, not the fallback 1: {output}");
 }
 
 /// A countdown whose bound is a RUNTIME state field (`N`), spawning a
@@ -991,12 +996,23 @@ fn spawn_dependent_countdown_program() -> Vec<TopLevel> {
 fn test_dependent_spawn_pool_heap_buffer() {
     let mut backend = LlvmBackend::new();
     let output = backend.generate(&spawn_dependent_countdown_program(), None);
-    assert!(output.contains("call ptr @malloc"),
+    assert!(output.contains("= call ptr @malloc"),
         "a DEPENDENT pool must allocate a runtime-sized heap buffer at init: missing malloc");
     assert!(output.contains("inttoptr i64"),
         "the heap buffer address must be stored as an i64 slot and re-pointed on access");
     assert!(!output.contains("getelementptr [3 x i64], ptr"),
         "a DEPENDENT pool must NOT emit the static [capacity x T] column");
+    // 2026-08-08 (Bug 3): the buffer holds total + 1 rows — the allocator
+    // counter starts at row 1, so the last spawned row is index `total`; the
+    // malloc size must be (bound + 1) * elem_size, else the final spawn writes
+    // one-past-the-end (hidden only by malloc slop in spr.bv). The size
+    // computation sits immediately before the malloc call: the +1 add, the
+    // elem_size multiply, then malloc.
+    let malloc_pos = output.find("= call ptr @malloc")
+        .expect("malloc must follow the size computation: {output}");
+    let before = &output[malloc_pos.saturating_sub(200)..malloc_pos];
+    assert!(before.contains(", 1") && before.contains("add i64") && before.contains("mul i64"),
+        "size = (bound + 1) * elem must be computed right before malloc: {output}");
     assert!(output.contains("llvm.loop.disable_nonforced"),
         "observable spawn work loop must not be folded");
 }

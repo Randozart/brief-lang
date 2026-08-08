@@ -81,7 +81,7 @@ impl LlvmBackend {
     ) {
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("flb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
         let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
         // 2026-07-18: Preallocate push targets before the loop body.
         // Collects all Assign(Ident, _) targets from the body and allocates
@@ -173,6 +173,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         use_phi: bool,
         body: Option<&[Statement]>,
         counter_var: Option<&str>,
@@ -181,7 +182,7 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name,
-            ".fmain", use_phi, body, 1, false, None, counter_var);
+            ".fmain", use_phi, body, 1, false, bound_literal, counter_var);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -229,6 +230,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         body: &[Statement],
         write_set: &HashSet<String>,
         is_decreasing: bool,
@@ -240,7 +242,7 @@ impl LlvmBackend {
         self.emit_inline_init_stores(out, "%state");
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("cmb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
         let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
 
         // 2026-07-17: Pre-load all field initial values from state for per-field phis.
@@ -552,6 +554,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         write_set: &HashSet<String>,
         is_decreasing: bool,
         counter_var: &str,
@@ -564,7 +567,7 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         self.fun.txn_counter += 1;
         let bound_reg = self.fun.next_reg_with_prefix("obb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
 
         // Pre-load initial values from %State for the outer phis.
         let mut sorted_fields: Vec<&String> = write_set.iter().collect();
@@ -846,6 +849,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         write_set: &HashSet<String>,
         counter_var: &str,
         batch: &crate::analysis::batch_shape::BatchShape,
@@ -859,7 +863,7 @@ impl LlvmBackend {
         let c0 = self.fun.txn_counter;
         self.fun.txn_counter += 1;
         let bound_reg = self.fun.next_reg_with_prefix("cdb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
 
         // Pre-load initial values for the header phis.
         // 2026-07-31 (A4): aggregate (array) fields are excluded from phis —
@@ -1204,6 +1208,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         body: &[Statement],
         write_set: &HashSet<String>,
         is_decreasing: bool,
@@ -1266,7 +1271,7 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let bound_reg = self.fun.next_reg_with_prefix("vdb");
-        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
         let (init_name, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
 
         let mut sorted_fields: Vec<&String> = write_set.iter().collect();
@@ -1510,11 +1515,20 @@ impl LlvmBackend {
         bound_reg: &str,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         _c0: usize,
     ) {
         // 2026-07-20: Pre-allocated bound_reg — use hand-rolled GEP+load
         // because the centralized helper creates its own register name.
-        if let Some(ti) = total_idx {
+        if let Some(lit) = bound_literal {
+            // 2026-08-08 (countdown-loop bound fix): a `[ticks < N]` countdown
+            // with a compile-time LITERAL N emitted the loop bound as
+            // `add i64 0, 1` (the final else fallback), so the loop ran once
+            // regardless of N — every literal-bound countdown (spawn pools
+            // sized by the analysis included) silently under-ran. Emit the
+            // literal directly.
+            writeln!(out, "  {} = add i64 0, {}", bound_reg, lit).ok();
+        } else if let Some(ti) = total_idx {
             let gep = self.fun.next_reg_with_prefix("clb");
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                 gep, ti).ok();

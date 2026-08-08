@@ -87,9 +87,13 @@ pub struct LoopShape {
 /// Program-level convergence: whether the whole program is guaranteed to exit.
 #[derive(Debug, Clone)]
 pub struct ProgramConvergence {
-    /// (counter, bound_var) pairs for every foldable reactive txn, ANDed.
-    /// Empty when the program has an explicit exit condition or cannot exit.
-    pub counter_ge_bounds: Vec<(String, String)>,
+    /// (counter, bound) pairs for every foldable reactive txn, ANDed.
+    /// The bound is an Expr so a literal bound (`[ticksA < 3]`) carries its
+    /// VALUE (`Decimal(3)`) — a synthetic `__lit__ticksA` name would emit an
+    /// undefined `@__lit__ticksA` global in the exit check
+    /// (2026-08-08, two-node reactor fix). Empty when the program has an
+    /// explicit exit condition or cannot exit.
+    pub counter_ge_bounds: Vec<(String, Expr)>,
     /// True when a natural exit was derived (no explicit #!exit present).
     pub has_natural_exit: bool,
 }
@@ -157,7 +161,7 @@ pub fn program_convergence(
             has_natural_exit: false,
         };
     }
-    let mut counter_ge_bounds: Vec<(String, String)> = Vec::new();
+    let mut counter_ge_bounds: Vec<(String, Expr)> = Vec::new();
     for (name, t) in &txns {
         if !t.is_reactive {
             continue;
@@ -169,7 +173,16 @@ pub fn program_convergence(
             continue;
         };
         if bp.var == inc.var {
-            counter_ge_bounds.push((bp.var.clone(), bp.bound_var.clone()));
+            // 2026-08-08 (two-node reactor fix): a literal bound
+            // (`[ticksA < 3]`) is carried by bp.bound_literal; a field/const
+            // bound by bp.bound_var. Emit the VALUE, not a synthetic name —
+            // the synthetic `__lit__ticksA` has no backing global and the exit
+            // check would reference an undefined `@__lit__ticksA`.
+            let bound_expr = match bp.bound_literal {
+                Some(n) => Expr::Decimal(n),
+                None => Expr::Identifier(bp.bound_var.clone()),
+            };
+            counter_ge_bounds.push((bp.var.clone(), bound_expr));
         }
     }
     let has_natural_exit = !counter_ge_bounds.is_empty();
@@ -497,7 +510,30 @@ mod tests {
         );
         let conv = program_convergence(&graph, &items, false);
         assert!(conv.has_natural_exit);
-        assert_eq!(conv.counter_ge_bounds, vec![("count".to_string(), "bound".to_string())]);
+        assert_eq!(
+            conv.counter_ge_bounds,
+            vec![("count".to_string(), Expr::Identifier("bound".to_string()))]
+        );
+    }
+
+    #[test]
+    fn test_program_convergence_literal_bound_uses_value() {
+        // 2026-08-08 (two-node reactor fix): a literal countdown bound must
+        // converge via its VALUE (`count >= 3`), never a synthetic
+        // `__lit__count` name that would reference an undefined global.
+        let (graph, items) = graph_and_items(
+            "let count: Int = 0;\n\
+             node work [count < 3][count == 3] {\n\
+               count = count + 1;\n\
+               term;\n\
+             };\n",
+        );
+        let conv = program_convergence(&graph, &items, false);
+        assert!(conv.has_natural_exit);
+        assert_eq!(
+            conv.counter_ge_bounds,
+            vec![("count".to_string(), Expr::Decimal(3))]
+        );
     }
 
     #[test]

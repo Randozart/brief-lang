@@ -2034,12 +2034,37 @@ impl LlvmBackend {
         // body resolves bare member names against the instance's top-level
         // slots (`st` → `st.data`/`st.len`) via `self_prefix`. The boxed
         // address self is the fallback (self_prefix None).
+        // 2026-08-08 (pool lifecycle, Phase 1d): an obj INSTANCE must never
+        // reach the boxed fallback — instance_prefix_for / unpacked_instance_prefix
+        // resolve every instance (top-level + spawned handles) to a prefix.
+        // The boxed path is STRUCT-only (struct state-fields, struct
+        // construction, non-identifier receivers). If an obj receiver ever
+        // lands here, that is a retired-path regression (the member body would
+        // GEP a fake boxed self instead of the pool column) — fail loudly.
         let saved_prefix = self.fun.self_prefix.clone();
         let saved = self.fun.self_binding.clone();
         if let Some((prefix, row_reg)) = &self_prefix {
             self.fun.self_prefix = Some((prefix.clone(), row_reg.clone()));
             self.fun.self_binding = None;
         } else {
+            // 2026-08-08 (pool lifecycle, Phase 1d): the boxed self path is
+            // legitimate ONLY for non-pool objs — stdlib collection objs
+            // (List, RingBuffer, ...) are boxed struct addresses, not instance
+            // pools. A genuine POOL instance (one whose members are unpacked
+            // into `{base}.{member}` top-level columns) must never land here:
+            // its member body would GEP a fake boxed self instead of the pool
+            // column. Detect a pool base by its `{base}.`-prefixed instance
+            // slots (registered by build_field_index), and fail loudly if one
+            // ever reaches the boxed fallback.
+            let is_pool_instance = self.ctx.instance_slots.iter()
+                .any(|slot| slot.starts_with(&format!("{}.", type_name)));
+            if is_pool_instance {
+                panic!(
+                    "obj instance member call '.{}' on '{}' reached the retired boxed self path \
+                     (instance must resolve to a pool prefix; this is a codegen regression)",
+                    member_briv_name(member), type_name
+                );
+            }
             let self_ptr = self.fun.gen_reg();
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
             self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));

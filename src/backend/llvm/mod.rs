@@ -3013,11 +3013,13 @@ impl LlvmBackend {
         );
         self.ctx.has_natural_exit = program_conv.has_natural_exit;
         if explicit_exit.is_none() && !program_conv.counter_ge_bounds.is_empty() {
+            // 2026-08-08 (two-node reactor fix): the bound is already an Expr
+            // (Decimal for literal bounds, Identifier for field/const bounds).
             let combined = program_conv.counter_ge_bounds.into_iter()
                 .map(|(counter, bound)| Expr::BinaryOp(
                     crate::ast::BinaryOpKind::Ge,
                     Box::new(Expr::Identifier(counter)),
-                    Box::new(Expr::Identifier(bound)),
+                    Box::new(bound),
                 ))
                 .reduce(|a, b| Expr::BinaryOp(crate::ast::BinaryOpKind::And, Box::new(a), Box::new(b)))
                 .unwrap();
@@ -3176,15 +3178,46 @@ impl LlvmBackend {
                 // fold calls @txn_<name> which handles guard checks including
                 // observable effects. We only need deterministic convergence
                 // (bounded_pre + increments) so the loop bounds are known.
-                let multi_foldable = enumerable.is_none()
+                // 2026-08-08 (two-node countdown bug): the multi-txn fold emits
+                // ONE loop driven by a single counter slot and bound
+                // (emit_folded_multi_main hardcodes counter_idx/bound from the
+                // call site). It is only sound when every async txn counts the
+                // SAME counter field to the SAME bound — otherwise the loop
+                // either runs once (bound fell back to 1) or drives the wrong
+                // field, silently dropping iterations. Async txns with
+                // disjoint counters (e.g. two `[ticksA < N]`/`[ticksB < N]`
+                // nodes) must fall through to the per-txn SSA dispatch, which
+                // drives each counter independently.
+                let mut shared_counter: Option<String> = None;
+                let mut shared_bound: Option<String> = None;
+                let mut multi_foldable = enumerable.is_none()
                     && !has_wake_triggers
-                    && !self.async_txn_names.is_empty()
-                    && self.async_txn_names.iter().all(|name| {
-                        graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
-                            node.bounded_pre.is_some()
-                            && node.increments.is_some()
-                        })
-                    });
+                    && !self.async_txn_names.is_empty();
+                if multi_foldable {
+                    for name in &self.async_txn_names {
+                        let node = graph.nodes.iter().find(|n| n.name == *name);
+                        let Some(node) = node else { multi_foldable = false; break };
+                        let (Some(bp), Some(inc)) = (&node.bounded_pre, &node.increments) else {
+                            multi_foldable = false; break;
+                        };
+                        if inc.var != bp.var {
+                            // The fold drives a counter with `counter + 1`;
+                            // a txn that increments a different field than
+                            // it counts can't be folded.
+                            multi_foldable = false; break;
+                        }
+                        match &shared_counter {
+                            None => shared_counter = Some(bp.var.clone()),
+                            Some(c) if *c == bp.var => {}
+                            Some(_) => { multi_foldable = false; break; }
+                        }
+                        match &shared_bound {
+                            None => shared_bound = Some(bp.bound_var.clone()),
+                            Some(b) if *b == bp.bound_var => {}
+                            Some(_) => { multi_foldable = false; break; }
+                        }
+                    }
+                }
                 let mut multi_fold_params: HashMap<String, FoldParam> = HashMap::new();
                 if multi_foldable {
                     for txn_name in &self.async_txn_names {
@@ -3213,8 +3246,32 @@ impl LlvmBackend {
                     // EmitAdaptive: multi-txn pure fold
                     let txn_list: Vec<&str> = multi_fold_params.keys().map(|s| s.as_str()).collect();
                     self.warnings.push(format!("info: txns [{}] dispatched via multi-txn pure fold (all-internal, async)", txn_list.join(", ")));
+                    // 2026-08-08: the fold drives ONE shared counter to ONE
+                    // bound (the gate above guarantees every async txn shares
+                    // them). Derive the driver from the shared fields so the
+                    // loop actually runs to the bound instead of `counter < 1`.
+                    let mf_counter = shared_counter.as_ref()
+                        .and_then(|c| self.ctx.field_index_map.get(c.as_str()).copied())
+                        .unwrap_or(0);
+                    let (mf_bound_field, mf_bound_const, mf_bound_literal) = match shared_bound.as_ref() {
+                        Some(b) if self.ctx.field_index_map.contains_key(b.as_str()) => {
+                            (self.ctx.field_index_map.get(b.as_str()).copied(), None, None)
+                        }
+                        Some(b) => {
+                            // A shared literal bound is recorded as a synthetic
+                            // name in bound_var? No — bp.bound_var is the field/
+                            // const NAME for field/const bounds; a literal bound
+                            // is carried by bp.bound_literal on each node. Recover
+                            // it from the first FoldParam.
+                            (None, Some(b.as_str()), None)
+                        }
+                        None => (None, None, None),
+                    };
+                    let mf_bound_literal = mf_bound_literal.or_else(|| {
+                        multi_fold_params.values().find_map(|p| p.bound_literal)
+                    });
                     self.emit_folded_multi_main(&mut out, &txns, &[], &HashMap::new(), &multi_fold_params,
-                        &HashMap::new(), 0, None, None, None, None, None, false);
+                        &HashMap::new(), mf_counter, mf_bound_field, mf_bound_const, mf_bound_literal, None, None, None, false);
                     self.emit_thread_pool_metadata(&mut out);
                 } else if dispatch_mode == DispatchMode::Sequential && !txns.is_empty()
                     && enumerable.is_none() && !has_wake_triggers
@@ -3346,6 +3403,7 @@ impl LlvmBackend {
                     enum_ci,
                     enum_ti,
                     enum_tcn_ref,
+                    enum_fold_params.values().find_map(|p| p.bound_literal),
                     composed_fn,
                     composed_trig_ref,
                     all_int_ref,
@@ -4055,7 +4113,7 @@ impl LlvmBackend {
                         node.name, batch.batch_size, node.write_set.len()
                     ));
                     self.emit_countable_countdown_main(
-                        out, &node.name, counter_idx, total_idx, total_const_name,
+                        out, &node.name, counter_idx, total_idx, total_const_name, bp.bound_literal,
                         &node.write_set, &bp.var, batch,
                         watchdog,
                         analysis.global_lifetime.free_after.get(&node.name)
@@ -4071,7 +4129,7 @@ impl LlvmBackend {
         // See docs/plans/2026-07-30-flat-node-decomposition.md §11.
         self.fun.pending_post_hoist = post_hoist.clone();
         if self.emit_version_dag_main(
-            out, counter_idx, total_idx, total_const_name,
+            out, counter_idx, total_idx, total_const_name, bp.bound_literal,
             &body_stmts, &node.write_set, is_decreasing_vd, Some(&bp.var),
             analysis.global_lifetime.free_after.get(&node.name)
                 .map(|v| v.as_slice()).unwrap_or(&[]),
@@ -4092,7 +4150,7 @@ impl LlvmBackend {
 
             self.warnings.push(format!("info: txn '{}' dispatched via inline SSA ({} fields)", node.name, total_fields));
 
-            self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts), Some(&bp.var));
+            self.emit_folded_main(out, &node.name, counter_idx, total_idx, total_const_name, bp.bound_literal, false, Some(&body_stmts), Some(&bp.var));
             return true;
         }
 
@@ -4115,7 +4173,7 @@ impl LlvmBackend {
         self.fun.pending_post_hoist = post_hoist;
         let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
         self.emit_countable_main(
-            out, &node.name, counter_idx, total_idx, total_const_name,
+            out, &node.name, counter_idx, total_idx, total_const_name, bp.bound_literal,
             &inner_body, &node.write_set, is_decreasing, Some(&bp.var),
             watchdog,
         );

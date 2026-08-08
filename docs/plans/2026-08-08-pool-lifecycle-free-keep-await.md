@@ -186,6 +186,52 @@ Enforce with the existing consumed_locals machinery (extend to Await/Keep).
 - Update `docs/architecture/` + SPEC §12.2 notes + this plan's progress
   section; update the 2026-08-07 plan's OPEN (cells → done).
 
+## Phase 1 shipped 2026-08-08
+
+- **1a (Bug 1):** `free h;`/`keep h;` no longer decrement the pool count
+  (`spawn_pool.rs`) — the monotonic allocator never reclaims, so the decrement
+  (keyed by var name, not base) was both a no-op AND a trap: keying it by base
+  would under-allocate. `free`/`keep` are consumption directives only.
+- **1b (Bug 2):** `merge_max` → `merge_total` — capacity per base is the SUM
+  across all nodes (one shared monotonic counter), not the max. Two nodes
+  spawning the same base get `[a+b+1 x T]` columns, never `[max(a,b)+1]`.
+- **1c (Bug 3):** `emit_dependent_pool_buffers` adds the `+1` for row 0 — the
+  last spawned row was writing one-past-the-end (masked by malloc slop).
+- **1d:** boxed obj-instance fallback guarded — a genuine POOL instance (has
+  `{base}.`-prefixed instance slots) reaching `self_binding` panics loudly;
+  stdlib collection objs (List/RingBuffer, boxed struct addresses) keep the
+  boxed path.
+
+### Three additional pre-existing bugs found while verifying Bug 2
+
+Verification exposed pre-existing dispatch/codegen bugs (not pool-related,
+fixed under "bug in a touched file" rule):
+
+1. **Literal-bound countdown loops ran once.** `emit_countable_load_bound`
+   fell back to `add i64 0, 1` for `[ticks < N]` with a literal N — every
+   literal-bound countdown (spawn pools included) silently under-ran. Threaded
+   `bound_literal` through all four live emitters
+   (`emit_countable_main`/`emit_folded_main`/`emit_countable_countdown_main`/
+   `emit_version_dag_main`) + `emit_folded_multi_main`. spc3 (three firings,
+   spawn+inc each) went from `2` to `222`.
+2. **Multi-txn fold selected for disjoint counters.** `multi_foldable` folded
+   any set of async bounded txns into ONE loop driven by a single counter
+   (hardcoded slot 0) — two nodes with different counters ran once then
+   dropped. Now gated on all async txns sharing the SAME counter var + bound;
+   the fold call derives the shared driver instead of `0/None/None`.
+3. **Synthetic exit referenced an undefined global.** `program_convergence`
+   emitted `ticks >= __lit__ticksA` (a synthetic name with no backing global)
+   for literal bounds → `@__lit__ticksA` undefined in the reactor exit check.
+   `counter_ge_bounds` now carries the bound as an `Expr` (`Decimal` for
+   literals, `Identifier` for field/const bounds).
+
+Verified: 1666 lib tests (new: free/keep no-op ×2, cross-node sum,
+convergence literal-value, dependent +1 + literal-bound assertions in the
+spawn member test) + full `--runtime` benchmark suite all MATCH (ring_buffer
+1.07x vs 1.18x baseline — improved, not regressed). The two-node spawn RUNTIME
+path still needs the async/sync reactor dispatch fixes (empty reactor_tick,
+thread-pool convergence) — pre-existing, tracked for Phase 2's cells work.
+
 ## Verification
 
 - `cargo test --lib` green at every phase (existing 1662 + new tests).

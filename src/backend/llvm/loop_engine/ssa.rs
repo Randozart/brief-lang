@@ -422,6 +422,7 @@ impl LlvmBackend {
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
         _composed_fn: Option<&str>,
         _composed_trig_map: Option<&HashMap<String, Vec<(i64, String)>>>,
         _all_internal_map: Option<&HashMap<String, (usize, i64)>>,
@@ -430,7 +431,13 @@ impl LlvmBackend {
         self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
-        let bound_reg = if let Some(ti) = total_idx {
+        let bound_reg = if let Some(lit) = bound_literal {
+            // 2026-08-08: a shared compile-time literal bound — the fold loop
+            // must run to the literal, not the `counter < 1` fallback.
+            let r = self.fun.next_reg_with_prefix("fmb");
+            writeln!(out, "  {} = add i64 0, {}", r, lit).ok();
+            r
+        } else if let Some(ti) = total_idx {
             let (br, _) = self.emit_state_load_i64_by_idx(out, "  ", ti);
             br
         } else if let Some(tcn) = total_const_name {
