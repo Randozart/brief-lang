@@ -39,7 +39,8 @@ pub(crate) struct MemberInvocation<'a> {
     pub type_name: &'a str,
     pub member: &'a crate::ast::TopLevel,
     pub arg_regs: &'a [(String, Type)],
-    pub prefix: Option<String>,
+    /// (instance prefix, pool row register) — "0" for a static instance.
+    pub prefix: Option<(String, String)>,
 }
 
 /// Pack an SVO inline header: `len` and `cap` into disjoint bit ranges with
@@ -170,10 +171,11 @@ impl LlvmBackend {
                 // 2026-08-07 (object instance pools): a bare member name in an
                 // UNPACKED member body resolves to the instance's top-level
                 // slot — `data` inside `st`'s push → the `st.data` field.
-                if let Some(prefix) = self.fun.self_prefix.clone() {
+                if let Some((prefix, row_reg)) = self.fun.self_prefix.clone() {
                     let slot = format!("{}.{}", prefix, name);
+
                     if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
-                        let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx);
+                        let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx, &row_reg);
                         if matches!(&row_ty, Type::Vector(_, _)) {
                             return TypedRegister { name: row, ty: row_ty };
                         }
@@ -649,15 +651,17 @@ impl LlvmBackend {
                 // itself has no slot (it unpacked), so emitting it would
                 // produce an undefined `@b` global.
                 if let Expr::Identifier(recv_name) = obj.as_ref() {
-                    let slot = format!("{}.{}", recv_name, field);
-                    if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
-                        let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx);
-                        if matches!(&row_ty, Type::Vector(_, _)) {
-                            return TypedRegister { name: row, ty: row_ty };
+                    if let Some((base, row_reg)) = self.instance_prefix_for(recv_name) {
+                        let slot = format!("{}.{}", base, field);
+                        if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                            let (row, row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx, &row_reg);
+                            if matches!(&row_ty, Type::Vector(_, _)) {
+                                return TypedRegister { name: row, ty: row_ty };
+                            }
+                            let loaded = self.fun.gen_reg();
+                            writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
+                            return TypedRegister { name: loaded, ty: row_ty };
                         }
-                        let loaded = self.fun.gen_reg();
-                        writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
-                        return TypedRegister { name: loaded, ty: row_ty };
                     }
                 }
                 let obj_reg = self.emit_expr(out, obj, indent);
@@ -1239,6 +1243,27 @@ impl LlvmBackend {
             Expr::Range { .. } => panic!(
                 "a range expression is only valid as a `foreach` iterable, not as a value"
             ),
+            // 2026-08-07 (object instance pools): `spawn Obj(args)` — allocate
+            // the next pool row from the __spawn_next_<base> counter, run the
+            // Init member at that row, increment the counter, and return the
+            // row as the linear handle.
+            Expr::Spawn { type_name, args } => {
+                let counter_name = format!("__spawn_next_{}", type_name);
+                let Some(&counter_idx) = self.ctx.field_index_map.get(&counter_name) else {
+                    panic!("spawn of '{}' with no registered instance pool", type_name);
+                };
+                let counter = self.emit_state_gep(out, indent, "sp", "%state", counter_idx);
+                let cur = self.fun.gen_reg();
+                writeln!(out, "{}{} = load i64, ptr {}", indent, cur, counter).ok();
+                self.emit_spawn_init(out, indent, type_name.as_str(), args.as_slice(), &cur);
+                let next = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 {}, 1", indent, next, cur).ok();
+                writeln!(out, "{}store i64 {}, ptr {}", indent, next, counter).ok();
+                TypedRegister {
+                    name: cur,
+                    ty: Type::Custom(type_name.clone()),
+                }
+            }
         }
     }
 
@@ -1856,6 +1881,21 @@ impl LlvmBackend {
     /// clear error for dynamic receivers (Phase-1b boundary).
     /// 2026-07-31 (A5): `recv.name(args)` — inline the obj member body with
     /// `self` bound to the receiver instance's storage.
+    /// 2026-08-07 (object instance pools): resolve an instance receiver's
+    /// (base, pool row) — a static instance name (`b` → ("Box", "0")) or a
+    /// spawned handle local (`h` → ("Counter", <row reg>)).
+    pub(crate) fn instance_prefix_for(&self, name: &str) -> Option<(String, String)> {
+        if let Some(p) = self.unpacked_instance_prefix(name) {
+            return Some(p);
+        }
+        let reg = self.get_local(name)?;
+        let base = self.fun.let_binding_types.get(name).and_then(|t| match t {
+            Type::Custom(b) if self.ctx.obj_members.contains_key(b) => Some(b.clone()),
+            _ => None,
+        })?;
+        Some((base, reg))
+    }
+
     pub(crate) fn emit_method_call(
         &mut self,
         out: &mut String,
@@ -1870,15 +1910,17 @@ impl LlvmBackend {
         // (`b.set(...)`) — `b` has no slot (its members unpacked), so emitting
         // it would produce an undefined `@b`. The member body resolves bare
         // member names against the instance PREFIX; the base obj type comes
-        // from the recorded instance Init.
+        // from the recorded instance Init. A SPAWNED handle local (`h.inc()`)
+        // is a let-bound row id whose type names the obj — its register is
+        // the pool row.
         let recv_prefix = match recv {
-            Expr::Identifier(n) => self.unpacked_instance_prefix(n),
+            Expr::Identifier(n) => self.instance_prefix_for(n),
             _ => None,
         };
-        let (recv_reg, mut type_name) = if let Some(prefix) = &recv_prefix {
+        let (recv_reg, mut type_name) = if let Some((prefix, _row)) = &recv_prefix {
             let base = self.ctx.obj_instance_inits.get(prefix)
                 .map(|(b, _)| b.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| prefix.clone());
             let dummy = self.fun.gen_reg();
             writeln!(out, "{}{} = add i64 0, 0", indent, dummy).ok();
             (
@@ -1917,6 +1959,7 @@ impl LlvmBackend {
             let r = self.emit_expr_inner(out, &arg_tmp, a, indent);
             (r.name, r.ty)
         }).collect();
+
         self.emit_member_body(out, v, MemberInvocation { recv_reg: &recv_reg, type_name: &type_name, member: &member, arg_regs: &arg_regs, prefix: recv_prefix }, indent)
     }
 
@@ -1934,12 +1977,13 @@ impl LlvmBackend {
         out: &mut String,
         indent: &str,
         idx: usize,
+        row_reg: &str,
     ) -> (String, Type, String) {
         let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
         let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
         let base = self.emit_state_gep(out, indent, "i", "%state", idx);
         let row = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 0", indent, row, col_ty, base).ok();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, row, col_ty, base, row_reg).ok();
         let row_ty = match &slot_ty {
             Type::Vector(inner, dims) if dims.len() > 1 => {
                 Type::Vector(inner.clone(), dims[1..].to_vec())
@@ -1975,8 +2019,8 @@ impl LlvmBackend {
         // address self is the fallback (self_prefix None).
         let saved_prefix = self.fun.self_prefix.clone();
         let saved = self.fun.self_binding.clone();
-        if let Some(prefix) = &self_prefix {
-            self.fun.self_prefix = Some(prefix.clone());
+        if let Some((prefix, row_reg)) = &self_prefix {
+            self.fun.self_prefix = Some((prefix.clone(), row_reg.clone()));
             self.fun.self_binding = None;
         } else {
             let self_ptr = self.fun.gen_reg();

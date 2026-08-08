@@ -319,6 +319,7 @@ impl<'a> DagBuilder<'a> {
             Expr::Slice { .. } => {},
 Expr::Slice { .. } => {},
             Expr::Range { .. } => {},
+            Expr::Spawn { args, .. } => {},
         }
     }
 }

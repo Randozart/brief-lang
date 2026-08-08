@@ -598,8 +598,9 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// 2026-08-07 (object instance pools): the unpacked obj instance prefix
     /// (`st`) while emitting a member body. Bare member names (`data`, `len`)
     /// resolve to the `{prefix}.{member}` top-level field slots instead of a
-    /// boxed self address.
-    pub self_prefix: Option<String>,
+    /// boxed self address. The second element is the pool ROW register —
+    /// "0" for a static instance, the handle's register for a spawned one.
+    pub self_prefix: Option<(String, String)>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,

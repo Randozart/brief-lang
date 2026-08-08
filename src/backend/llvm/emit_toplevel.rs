@@ -884,7 +884,46 @@ impl LlvmBackend {
             name: "0".to_string(),
             ty: Type::Custom(base.clone()),
         };
-        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some(name.clone()) }, indent);
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.clone(), "0".to_string())) }, indent);
+    }
+
+    /// 2026-08-07 (object instance pools): run a SPAWNED instance's Init
+    /// member at pool row `row_reg` — `spawn Counter()` initializes row 1's
+    /// columns with `self_prefix = (base, row_reg)`.
+    pub(crate) fn emit_spawn_init(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        base: &str,
+        args: &[Expr],
+        row_reg: &str,
+    ) {
+        let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
+        let init_def = match defs.iter().find(|d| d.op == "Init") {
+            Some(d) => d.clone(),
+            None => return,
+        };
+        let fn_name = match init_def.impl_args.as_ref() {
+            Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
+            _ => return,
+        };
+        let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
+        let member = members.iter()
+            .find(|m| super::emit_expr::member_briv_name(m) == fn_name)
+            .cloned();
+        let Some(member) = member else { return; };
+        let mut arg_regs: Vec<(String, Type)> = Vec::new();
+        for a in args {
+            let tmp = self.fun.gen_reg();
+            let vr = self.emit_expr_inner(out, &tmp, a, indent);
+            arg_regs.push((vr.name, vr.ty));
+        }
+        let out_tmp = self.fun.gen_reg();
+        let recv_reg = crate::backend::llvm::TypedRegister {
+            name: "0".to_string(),
+            ty: Type::Custom(base.to_string()),
+        };
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.to_string(), row_reg.to_string())) }, indent);
     }
 
     /// 2026-07-31 (A8): monomorphize an applied obj type (`Stack<Int, 8>`):
@@ -923,8 +962,9 @@ impl LlvmBackend {
     /// 2026-08-07 (object instance pools): `Some(name)` when `name` is an
     /// unpacked obj instance (its Init was recorded) — its member bodies
     /// resolve bare member names against the prefixed top-level slots.
-    pub(crate) fn unpacked_instance_prefix(&self, name: &str) -> Option<String> {
-        self.ctx.obj_instance_inits.contains_key(name).then(|| name.to_string())
+    pub(crate) fn unpacked_instance_prefix(&self, name: &str) -> Option<(String, String)> {
+        self.ctx.obj_instance_inits.get(name)
+            .map(|(base, _)| (base.clone(), "0".to_string()))
     }
 
     pub(crate) fn resolve_obj_key(&mut self, ty: &crate::ast::Type) -> Option<String> {

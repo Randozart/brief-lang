@@ -37,6 +37,17 @@ impl fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
+            // 2026-08-07 (object instance pools): `spawn Obj(args)`.
+            Expr::Spawn { type_name, args } => {
+                write!(f, "spawn {}(", type_name)?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", a)?;
+                }
+                write!(f, ")")
+            }
             Expr::BinaryOp(kind, lhs, rhs) => {
                 write!(f, "({} {} {})", lhs, kind, rhs)
             }

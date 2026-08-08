@@ -421,7 +421,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         | Expr::Field(e, _) => {
             collect_expr_identifiers(e, ids);
         }
-        Expr::Call(_, args, _) => {
+        Expr::Call(_, args, _) | Expr::Spawn { args, .. } => {
             for arg in args {
                 collect_expr_identifiers(arg, ids);
             }

@@ -117,7 +117,7 @@ fn walk_expr(expr: &mut Expr) {
         Expr::Consume(inner) => walk_expr(inner),
         Expr::Char(_) => {}
         Expr::Decimal(_) | Expr::Bool(_) | Expr::BeginProgram | Expr::Float(_) => {}
-        Expr::Call(_, args, _) => {
+        Expr::Call(_, args, _) | Expr::Spawn { args, .. } => {
             for a in args { walk_expr(a); }
         }
         Expr::If(cond, then, else_) => {

@@ -132,6 +132,11 @@ impl Annotator {
                     self.collect_calls_from_expr(arg, calls);
                 }
             }
+            Expr::Spawn { args, .. } => {
+                for arg in args {
+                    self.collect_calls_from_expr(arg, calls);
+                }
+            }
             Expr::BinaryOp(_, l, r) => {
                 self.collect_calls_from_expr(l, calls);
                 self.collect_calls_from_expr(r, calls);
@@ -523,6 +528,14 @@ impl Annotator {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}({})", name, args_str)
+            }
+            Expr::Spawn { type_name, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("spawn {}({})", type_name, args_str)
             }
             Expr::BinaryOp(kind, l, r) => {
                 let op_str = match kind {

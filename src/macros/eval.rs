@@ -2056,7 +2056,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         Expr::Quoted(_) | Expr::TaggedQuotedLiteral(_, _) | Expr::Decimal(_) | Expr::Char(_) | Expr::Float(_) | Expr::Bool(_) | Expr::BeginProgram
         | Expr::TaggedLiteral(_, _)
         | Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } | Expr::Slice { .. } => Ok(()),
-| Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } | Expr::Slice { .. } | Expr::Range { .. } => Ok(()),
+| Expr::FormattingAnnotation(_) | Expr::StructLiteral { .. } | Expr::Slice { .. } | Expr::Range { .. } | Expr::Spawn { .. } => Ok(()),
         Expr::Field(recv, _) | Expr::Reflect(recv, _, _) => resolve_dollar_refs_in_expr(recv, scope),
         Expr::MethodCall(recv, _, args, _) => {
             resolve_dollar_refs_in_expr(recv, scope)?;

@@ -452,8 +452,24 @@ impl<'a> Parser<'a> {
             // explicit syntax in a later phase.
 
             // ── Identifiers (including # names like Sqrt#) ──────────
-            Some((Token::Identifier(name), span)) => {
-                // 2026-08-05 (Phase 3): adjacent prefix-discriminator literals
+            // 2026-08-07 (object instance pools): `spawn Obj(args)` — create
+            // an obj instance + return a linear handle (SPEC §12.2).
+            Some((Token::Spawn, _)) => {
+                let type_name = self.expect_identifier()?;
+                self.expect(Token::LParen)?;
+                let mut args = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RParen)?;
+                Ok(Expr::Spawn { type_name, args })
+            }
+            Some((Token::Identifier(name), span)) => {                // 2026-08-05 (Phase 3): adjacent prefix-discriminator literals
                 // (`sql"SELECT"`) are removed; domain literals use explicit
                 // macro calls such as `sql!("SELECT")` (SPEC §16.2).
                 // 2026-07-24: Struct literal: TypeName { field: expr; ... }

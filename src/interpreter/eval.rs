@@ -203,6 +203,15 @@ pub fn eval_expr(
         ),
         // 2026-08-07 (Phase 7): an iterable range value — consumed by
         // `foreach` (SPEC §11.4).
+        Expr::Spawn { args, .. } => {
+            // 2026-08-07 (instance pools): the interpreter reference evaluates
+            // the spawn args; the handle is a synthetic atom (the codegen
+            // allocates the real pool row).
+            for a in args {
+                eval_expr(a, heap, bindings, functions)?;
+            }
+            Ok(Value::Atom(Atom::Int(0)))
+        }
         Expr::Range { start, end, inclusive } => {
             let s = eval_expr(start, heap, bindings, functions)?
                 .as_i64()

@@ -546,6 +546,9 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Call(_, args, _) => {
             for a in args { collect_strings_expr(a, seen, out); }
         }
+        Expr::Spawn { args, .. } => {
+            for a in args { collect_strings_expr(a, seen, out); }
+        }
         Expr::Match(value, arms) => {
             collect_strings_expr(value, seen, out);
             for arm in arms { collect_strings_expr(&arm.body, seen, out); }
@@ -1837,6 +1840,11 @@ impl LlvmBackend {
             }
             Expr::Lambda(_, body) => {
                 self.check_expr_embedded(body, ctx_name, threading_intrinsics);
+            }
+            Expr::Spawn { args, .. } => {
+                for a in args {
+                    self.check_expr_embedded(a, ctx_name, threading_intrinsics);
+                }
             }
             Expr::Within(body, fallback) => {
                 self.check_expr_embedded(body, ctx_name, threading_intrinsics);
@@ -4303,15 +4311,37 @@ impl LlvmBackend {
                                     .collect(),
                             )
                         }
+                        // 2026-08-07: a non-generic obj (`let c: Counter = 0`)
+                        // — no const args to substitute.
+                        Type::Custom(base) if self.ctx.obj_members.contains_key(base) => {
+                            Some(
+                                self.ctx.struct_types.get(base).unwrap().iter()
+                                    .map(|(mname, mty)| (mname.clone(), mty.clone()))
+                                    .collect(),
+                            )
+                        }
                         _ => None,
                     };
                     if let Some(slots) = unpacked {
+                        let base = match &field_ty {
+                            Type::Applied(base, _) | Type::Custom(base) => base.clone(),
+                            _ => String::new(),
+                        };
+                        // 2026-08-07 (object instance pools): the allocator
+                        // counter for this obj base — spawn reads it to get the
+                        // next row, then increments (starting at row 1; row 0
+                        // is the static instance). Registered once per base and
+                        // kept ALWAYS-live (the spawn codegen reads it).
+                        let counter_name = format!("__spawn_next_{}", base);
+                        if !self.ctx.field_index_map.contains_key(&counter_name) {
+                            self.ctx.field_index_map
+                                .insert(counter_name.clone(), self.ctx.field_types.len());
+                            self.push_field_type(&Type::int());
+                            self.ctx.field_initializers.insert(counter_name.clone(), Some(Expr::Decimal(1)));
+                            self.ctx.instance_slots.insert(counter_name);
+                        }
                         if let Some(init_expr) = expr {
-                            let base = match &field_ty {
-                                Type::Applied(base, _) => base.clone(),
-                                _ => String::new(),
-                            };
-                            self.ctx.obj_instance_inits.insert(name.clone(), (base, init_expr.clone()));
+                            self.ctx.obj_instance_inits.insert(name.clone(), (base.clone(), init_expr.clone()));
                         }
                         // 2026-08-07 (object instance pools): each member is a
                         // COLUMN over the instance id — `[capacity x T]` for a
@@ -4320,7 +4350,7 @@ impl LlvmBackend {
                         // free rows.
                         let capacity = crate::config_tuning::ir_lowering().obj_instance_capacity;
                         for (mname, mty) in slots {
-                            let slot_name = format!("{}.{}", name, mname);
+                            let slot_name = format!("{}.{}", base, mname);
                             let column = match mty {
                                 Type::Vector(inner, dims) => Type::Vector(
                                     inner.clone(),

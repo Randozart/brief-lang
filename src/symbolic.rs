@@ -282,6 +282,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Exists(_) => { unreachable!("fn? only in stage eval") },
         Expr::Slice { .. } => { SymbolicValue::Unknown },
         Expr::Range { .. } => { SymbolicValue::Unknown },
+        Expr::Spawn { .. } => { SymbolicValue::Unknown },
 
     }
 }

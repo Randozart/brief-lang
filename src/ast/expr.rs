@@ -61,6 +61,13 @@ pub enum Expr {
         end: Box<Expr>,
         inclusive: bool,
     },
+    /// 2026-08-07 (object instance pools): `spawn Obj(args)` — create an obj
+    /// instance from its Init member + return a linear handle (the pool row
+    /// id). SPEC §12.2.
+    Spawn {
+        type_name: String,
+        args: Vec<Expr>,
+    },
 
     // ── Control flow ────────────────────────────────────────────
     Block(Vec<super::Statement>),

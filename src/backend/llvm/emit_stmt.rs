@@ -282,10 +282,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // target in an UNPACKED member body writes the instance's
                     // top-level slot — `total = 1` in `st`'s member → the
                     // `st.total` field.
-                    if let Some(prefix) = backend.fun.self_prefix.clone() {
+                    if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
                         let slot = format!("{}.{}", prefix, name);
                         if let Some(&idx) = backend.ctx.field_index_map.get(&slot) {
-                            let gep = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                            let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                            let gep = backend.fun.gen_reg();
+                            let col_ty = backend.ctx.field_types[idx].clone();
+                            writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, gep, col_ty, base, row_reg).ok();
                             // Mirror the standard top-level field store: use the
                             // slot's actual LLVM type and box Ptr/float values.
                             let field_ty = backend.ctx.field_types[idx].clone();

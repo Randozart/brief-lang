@@ -1071,6 +1071,15 @@ pub fn infer_expression(
                 infer_type_only(end, ctx)?;
                 Ok((Type::Applied("Range".into(), vec![Type::int()]), Provenance::Unknown))
             }
+            // 2026-08-07 (object instance pools): `spawn Obj(args)` creates an
+            // obj instance + returns a handle of the instance type. The type
+            // args come from a `let h: Obj<...> = spawn ...` annotation.
+            Expr::Spawn { type_name, args } => {
+                for a in args {
+                    infer_type_only(a, ctx)?;
+                }
+                Ok((Type::Custom(type_name.clone()), Provenance::Unknown))
+            }
 
     }
 }
