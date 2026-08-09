@@ -1,10 +1,10 @@
 // ── GLUE Configuration (Data Briv) ───────────────────────────────────
 // 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): the GLUE registry is
-// a per-language folder tree — lib/glue/<lang>/glue.dbvl. The compiler finds
+// a per-language folder tree — lib/glue/<lang>/glue.dbv. The compiler finds
 // the relevant folder BY NAME on invocation (`briv export|bindings|extension
 // <bridge> <lang>`) and loads that file; the full registry (all languages) is
 // the merged scan, used by extension routing (find_language_by_extension) and
-// ConfigGet$. Replaced the monolithic config/glue.dbvl (itself migrated from
+// ConfigGet$. Replaced the monolithic config/glue.dbv (itself migrated from
 // lib/glue.toml). The compiler carries zero language knowledge — the glue
 // folder is data.
 //
@@ -134,7 +134,7 @@ pub struct ProtocolEntry {
 }
 
 /// Load the GLUE registry (Data Briv). `None` scans the per-language glue
-/// folders (lib/glue/<lang>/glue.dbvl) and merges by folder name; `Some(path)`
+/// folders (lib/glue/<lang>/glue.dbv) and merges by folder name; `Some(path)`
 /// loads a single config file (the `--glue-config` override / tests).
 pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarget>, String> {
     match path {
@@ -147,17 +147,17 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
     }
 }
 
-/// Load one language's glue config BY NAME — `lib/glue/<lang>/glue.dbvl`.
+/// Load one language's glue config BY NAME — `lib/glue/<lang>/glue.dbv`.
 /// Used by `briv export|bindings|extension <bridge> <lang>` after the
 /// invocation resolves the language folder.
 pub fn load_glue_language(lang: &str) -> Result<GlueTarget, String> {
     let glue_root = resolve_glue_root().ok_or_else(|| {
         format!("lib/glue/ not found — cannot load glue config for '{}'", lang)
     })?;
-    let cfg = glue_root.join(lang).join("glue.dbvl");
+    let cfg = glue_root.join(lang).join("glue.dbv");
     if !cfg.exists() {
         return Err(format!(
-            "no glue config for language '{}' (wanted lib/glue/{}/glue.dbvl)",
+            "no glue config for language '{}' (wanted lib/glue/{}/glue.dbv)",
             lang, lang
         ));
     }
@@ -169,7 +169,7 @@ pub fn load_glue_language(lang: &str) -> Result<GlueTarget, String> {
     })
 }
 
-/// Scan lib/glue/*/glue.dbvl and merge every language into the registry,
+/// Scan lib/glue/*/glue.dbv and merge every language into the registry,
 /// keyed by folder name.
 fn load_glue_folders() -> Result<HashMap<String, GlueTarget>, String> {
     let glue_root = resolve_glue_root().ok_or_else(|| {
@@ -184,7 +184,7 @@ fn load_glue_folders() -> Result<HashMap<String, GlueTarget>, String> {
         if !dir.is_dir() {
             continue;
         }
-        let cfg = dir.join("glue.dbvl");
+        let cfg = dir.join("glue.dbv");
         if !cfg.exists() {
             continue;
         }
@@ -195,7 +195,7 @@ fn load_glue_folders() -> Result<HashMap<String, GlueTarget>, String> {
     }
     if !found {
         return Err(format!(
-            "no lib/glue/*/glue.dbvl found under '{}'",
+            "no lib/glue/*/glue.dbv found under '{}'",
             glue_root.display()
         ));
     }
@@ -532,24 +532,24 @@ rust: { types_module: "glue/rust/types.bv"; extension: "rs"; bridge_kind: "exter
     #[test]
     fn test_load_glue_config_not_found() {
         let dir = std::env::temp_dir();
-        let missing = dir.join("nonexistent_glue.dbvl");
+        let missing = dir.join("nonexistent_glue.dbv");
         let result = load_glue_config(Some(&missing));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_load_glue_config_default_path_exists() {
-        // The compiler-shipped default (config/glue.dbvl) should exist.
+        // The compiler-shipped default (config/glue.dbv) should exist.
         let result = load_glue_config(None);
-        assert!(result.is_ok(), "Default config/glue.dbvl not found: {:?}", result.err());
+        assert!(result.is_ok(), "Default config/glue.dbv not found: {:?}", result.err());
     }
 
-    /// Baked config golden: the compiler-shipped config/glue.dbvl loads with
+    /// Baked config golden: the compiler-shipped config/glue.dbv loads with
     /// all four languages and the expected protocol/template shape. Replaces
     /// the TOML parity gate after lib/glue.toml was deleted.
     #[test]
     fn baked_glue_dbvl_shape() {
-        let config = load_glue_config(None).expect("config/glue.dbvl should load");
+        let config = load_glue_config(None).expect("config/glue.dbv should load");
         for lang in ["python", "rust", "node", "web"] {
             assert!(config.contains_key(lang), "missing '{}' target", lang);
         }

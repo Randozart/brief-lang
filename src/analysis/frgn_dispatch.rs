@@ -220,7 +220,7 @@ pub fn resolve_single_frgn(
 
     Ok(ResolvedFrgn::Unsupported(format!(
         "frgn '{}' from '{}': extension '.{}' is not supported by the {} backend. \
-         Add a GLUE registry entry in config/glue.dbvl or use a supported extension (.c, .rs, .py, .js, .mjs)",
+         Add a GLUE registry entry in config/glue.dbv or use a supported extension (.c, .rs, .py, .js, .mjs)",
         fb.effective_briv_name(),
         ext,
         ext,

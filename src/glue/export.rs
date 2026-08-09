@@ -6,12 +6,12 @@
 //
 // Pipeline:
 //   1. Parse the bridge .bv to collect #export/frgn/meld declarations.
-//   2. Read glue.dbvl to find the language target entry (types_module,
+//   2. Read glue.dbv to find the language target entry (types_module,
 //      llvm_triple, c_type_map).
 //   3. Write bridge-exports.dbvl with tagged entries:
 //      - export lines: function signatures crossing the boundary
 //      - meld lines: type-layout compatibility proofs for the boundary
-//      - ctype lines: Briv type → C ABI type mappings (from glue.dbvl)
+//      - ctype lines: Briv type → C ABI type mappings (from glue.dbv)
 //   4. (Future) Compile bridge to .ll via `briv build --library`.
 //
 // 2026-07-10: GLUE v2. Replaced the $!macro adapter pipeline (which
@@ -74,7 +74,7 @@ pub struct MeldDecl {
     pub route: String,
 }
 
-/// Registry entry for a GLUE target language, parsed from glue.dbvl.
+/// Registry entry for a GLUE target language, parsed from glue.dbv.
 ///
 /// 2026-07-10: GLUE v2. Removed macro_path (adapter $!macro system is
 /// gone). Added types_module (path to .bv with foreign type declarations)
@@ -461,7 +461,7 @@ fn render_ffi_decls(
 /// for the exported functions, without the full wrapper crate.
 ///
 /// 2026-08-03: Config-driven — the bindings templates and per-export ABI
-/// (state param from needs_state) live in config/glue.dbvl. No compiler-side
+/// (state param from needs_state) live in lib/glue/<lang>/glue.dbv. No compiler-side
 /// language knowledge.
 pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(file_path)
@@ -489,7 +489,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
 
     let bindings_ffi = target.templates.get("bindings.ffi_template")
         .or_else(|| target.templates.get("ffi_template"))
-        .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in config/glue.dbvl", language))?;
+        .ok_or_else(|| format!("target '{}' has no bindings.ffi_template in lib/glue/<lang>/glue.dbv", language))?;
     let ffi_decls = render_ffi_decls(&info.exports, &target, &template_vars, bindings_ffi, &type_protocols);
     template_vars.insert("ffi_decls".to_string(), ffi_decls);
 
@@ -518,7 +518,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
         written += 1;
     }
     if written == 0 {
-        return Err(format!("target '{}' has no bindings.* templates in config/glue.dbvl", language));
+        return Err(format!("target '{}' has no bindings.* templates in lib/glue/<lang>/glue.dbv", language));
     }
     Ok(())
 }
@@ -529,7 +529,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
 /// CPython C-extension module (`PyInit_<bridge>` + per-export methods) that
 /// calls the Briv exports directly — the ~1.9µs ctypes overhead disappears.
 /// Config-driven: the language's `native.*` templates + per-category
-/// parse/build snippets live in config/glue.dbvl; the compiler only renders.
+/// parse/build snippets live in lib/glue/<lang>/glue.dbv; the compiler only renders.
 pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("Cannot read '{}': {}", file_path, e))?;
