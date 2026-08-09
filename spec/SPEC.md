@@ -207,6 +207,7 @@ item             ::= import_decl
                    | export_decl
                    | const_decl
                    | let_decl
+                   | init_decl
                    | type_decl
                    | trait_decl
                    | proto_decl
@@ -271,18 +272,113 @@ Diamond dependencies are valid. Genuine import cycles are compile-time errors. S
 
 ## 8. Declarations
 
-### 8.1 `let` and `const`
+### 8.1 `let`, `const`, and `init`
 
 ```briv
 let counter: Int = 0;
 const MaxRetries: Int = 3;
+init BufSize: Int = get_env_int!("BUFSIZE");
 ```
 
 Top-level `let` declares reactive program state. Local `let` declares a local binding. There is no `state` keyword.
 
 `const` declares an immutable top-level value. `$const` is a separate compile-time-only binding erased before runtime.
 
+`init` declares a **runtime-seeded invariant**: a top-level value set exactly
+once, before `beginprogram` or any other transition fires, and provably
+immutable for the remainder of the run. It is not compile-time-folded like
+`const` — the value is loaded from the environment or target at runtime — but
+after that single seeding the compiler treats it as a proof-stable constant:
+reassignment of an `init` name anywhere is a compile error.
+
+`init` may declare an expected value set (see "Bounded value sets" below). An
+`init` with a declared, provable value set is the preferred substrate for
+capacity, bounded loops, and lifetime proofs.
+
 Protocol-supplied defaults may initialize omitted logical fields. Unknown fields, duplicate fields, unresolved defaults, and mismatched constructor arity are errors. There is no generic zero-fill fallback.
+
+**Bounded value sets.** An `init` may declare that its value is *one of* a set
+of options, written between `:` and the type so it cannot be confused with an
+array dimension:
+
+```briv
+init BufferSize: [64 | lo..hi] Int = ...;   // exactly 64, or in [lo,hi]
+init BitLayout:  [16 | 32 | 64] Int = ...;  // one of three; target resolves
+```
+
+- `[lo..hi]` is a range of expected values; `[a | b | c]` is a discrete union
+  of options (values and ranges may mix).
+- The set declares the bound over all expected values, giving the compiler a
+  finite proof domain (for capacity: the max of the set; for layout: a choice
+  the target resolves, falling back to the minimum).
+- A bounded `init` at a generic site is a finite proof domain (e.g. a
+  size parameter is adapted per-target without unbounded instantiation).
+- An unbounded `init` is permitted where the surrounding contract proves
+  satisfactory resolution, but is weaker proof: the compiler must fall back to
+  a runtime check.
+
+**Proof-vs-decision hierarchy (core philosophy).** Briv compiles through
+proof and leaves decisions to the programmer where no single option is best:
+
+1. **Prove**: a provably-best strategy is the default; the compiler is silent.
+2. **Guardrail with request for disambiguation**: when selection is genuinely
+   ambiguous, the compiler emits a warning and requires the programmer to name
+   a strategy explicitly (`init` with a value set, or a storage-strategy
+   classification).
+3. **Error when provably reckless and/or underdetermined or overdetermined**:
+   a chosen strategy that provably conflicts with its use (use-after-free,
+   capacity below proven need, an underdetermined or overdefined bound) is a
+   compile error. The compiler never ships a provably wrong program.
+
+This underpins concurrency classification (`async`/`sync<group>`), lifetime
+management, capacity proofs, and layout selection alike.
+
+**Strategy keywords.** All compiler strategy is expressed in keywords.
+Collectively these are **strategy keywords** — what pragmas are in other
+languages, but transparent: ordinary words in the program, not hidden
+directives, so they carry little to no knowledge tax. They are the inverse of
+pragmas in one more sense: you never need one to get correct, efficient code —
+the compiler proves the default and *reminds you* when a decision genuinely
+needs your input (it warns and asks for a keyword). Rules:
+
+- Strategy is **keyword-shaped**, never an invisible flag.
+- Keywords are **transparent** — ordinary syntax, disclosed, well-documented.
+- **Zero knowledge tax**: omitting a strategy keyword is the common case;
+  derivation is proven, not annotated.
+- They **never make code faster**: the default is the efficient path, and a
+  keyword-beaten default is a compiler bug (`seq`, `vol`, `async`, `box`,
+  `spill`, `storage` all follow this).
+- One shape, `category<mechanism>`: the *category* keyword is
+  program-independent (`borrow`, `storage`, `delivery`); the *mechanism* rides
+  inside `<>` and is either a compiler-known intrinsic class or a config row
+  (`borrowed<source>`, `sync<group>`, `#Link<name>`, `#String<UTF8>`,
+  `asm<chip>`). Mechanisms resolve through shared config registries; categories
+  are keywords — "config learns, compiler teaches." See §14.1 for the ownership
+  category and `docs/plans/2026-08-09-init-kind-invariant.md` for the full axis
+  table.
+
+**Storage-strategy markers.** Where the compiler cannot select a single best
+storage strategy, the programmer classifies explicitly:
+
+```briv
+box    // heap-per-instance storage, not a pooled column; an explicit choice,
+       //   not a hidden special case
+spill  // a value may grow beyond its static pool column into a growable buffer
+```
+
+- These markers carry the same rule as `seq`/`vol`/`async`: they must never
+  make code faster than the default — the default is always the efficient
+  path, and a marker-beaten default is a compiler bug.
+- They exist only to *reveal* a choice the backend would otherwise hide or
+  guess, at the points where the compiler genuinely cannot decide a single
+  best-fitting, fastest, most-efficient strategy.
+- Their absence is the normal case: derived storage is proven, not annotated.
+
+**Memory-decision audit.** `brivc memcheck` reports every memory decision
+point — lifetime, capacity, storage class, dependent versus static columns —
+with the strategy chosen, its location, and the proof obligation that
+justified it. Silent decisions are auditable; a decision that fell back
+(ambiguous → warning tier) is reported as such.
 
 ### 8.2 `struct`
 
@@ -874,6 +970,15 @@ frgn view(borrow source: Buffer) -> borrowed<source> Slice from #System;
 ```
 
 Allocation and destruction policy is configured rather than hardcoded into the ownership keyword. Read/write permission belongs to effects.
+
+These five words are **strategy keywords** (§8.1): `borrow`/`consume`/`owned`/
+`shared` are the program-independent *category* — their meaning is intrinsic and
+must compile even with `--no-stdlib` and no configuration; `borrowed<source>` is
+the mechanism form, where `<>` carries the lifetime source input. What each
+category permits at a boundary (retain-after-call, who frees, exclusivity
+obligation) resolves through the shared mechanism registry
+(`config/alloc-strategies.dbvl` and per-category rows), the same way allocation
+policy does for owned results and consumed inputs.
 
 ### 14.2 Pointer safety
 
