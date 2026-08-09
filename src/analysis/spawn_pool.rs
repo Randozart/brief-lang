@@ -65,10 +65,25 @@ pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, V
     let mut capacities: HashMap<String, usize> = HashMap::new();
     let mut dependent: HashMap<String, Vec<DependentTerm>> = HashMap::new();
     let mut errors: Vec<String> = Vec::new();
+    // 2026-08-09 (init kind, Phase 4): an init with a declared bound set sizes
+    // its pool to the max of the set — the value is provably ≤ that max, so
+    // the pool is statically sized (provably inexhaustible) instead of going
+    // through the dependent-heap runtime-malloc path.
+    let init_maxes: HashMap<String, i64> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::Init(i) => i
+                .bound
+                .as_ref()
+                .and_then(bound_set_max)
+                .map(|m| (i.name.clone(), m)),
+            _ => None,
+        })
+        .collect();
     for item in items {
         match item {
             TopLevel::Transaction(t) => {
-                let firing = node_firing(t);
+                let firing = node_firing(t, &init_maxes);
                 let mut live: HashMap<String, i64> = HashMap::new();
                 let mut terms: HashMap<String, Vec<DependentTerm>> = HashMap::new();
                 let mut ctx = WalkCtx { firing: &firing, bound_terms: &[] };
@@ -114,9 +129,14 @@ struct WalkCtx<'a> {
 
 /// Classify a reactive node's firing: a countdown `[count < N][count == N]`
 /// with a compile-time N is Static; with a runtime N (a field or a named
-/// const) it is Dependent (the capacity is N at runtime); anything else is
-/// Unprovable.
-fn node_firing(t: &crate::ast::Transaction) -> Firing {
+/// const) it is Dependent (the capacity is N at runtime); a bounded `init`
+/// (declared value set) sizes the pool to the max of the set (Static, provably
+/// inexhaustible); anything else is Unprovable.
+///
+/// 2026-08-09 (init kind, Phase 4): `init_maxes` maps init names to the max of
+/// their declared bound set. A countdown bound that names a bounded init folds
+/// to that static max — the pool is provably sized, no runtime malloc.
+fn node_firing(t: &crate::ast::Transaction, init_maxes: &HashMap<String, i64>) -> Firing {
     if !t.is_reactive {
         return Firing::Static(1);
     }
@@ -128,11 +148,39 @@ fn node_firing(t: &crate::ast::Transaction) -> Firing {
                     let inclusive = matches!(t.contract.pre_condition, Expr::BinaryOp(crate::ast::BinaryOpKind::Le, _, _));
                     Firing::Static(if inclusive { n + 1 } else { *n })
                 }
-                Expr::Identifier(_) => Firing::Dependent((**r).clone()),
+                Expr::Identifier(name) => match init_maxes.get(name) {
+                    // A bounded init: the seeded value is one of the set, so
+                    // the max is a provable static capacity.
+                    Some(&max) => Firing::Static(max),
+                    None => Firing::Dependent((**r).clone()),
+                },
                 _ => Firing::Unprovable,
             }
         }
         _ => Firing::Unprovable,
+    }
+}
+
+/// The maximum of an init bound set, when it is statically resolvable:
+/// `[16 | 32 | 64]` → 64, `[64 | lo..hi]` → hi (when hi is a literal). A set
+/// containing a name reference (another runtime value) is not statically
+/// bounded → None (the pool falls back to the dependent path).
+/// 2026-08-09 (init kind, Phase 4).
+fn bound_set_max(bound: &crate::ast::top::BoundSpec) -> Option<i64> {
+    match bound {
+        crate::ast::top::BoundSpec::Single(term) => bound_term_value(term),
+        crate::ast::top::BoundSpec::Range(_, hi) => bound_term_value(hi),
+        crate::ast::top::BoundSpec::Choice(parts) => parts
+            .iter()
+            .map(bound_set_max)
+            .try_fold(i64::MIN, |acc, v| v.map(|v| acc.max(v))),
+    }
+}
+
+fn bound_term_value(term: &crate::ast::top::BoundTerm) -> Option<i64> {
+    match term {
+        crate::ast::top::BoundTerm::Lit(n) => Some(*n),
+        crate::ast::top::BoundTerm::Ref(_) => None,
     }
 }
 
@@ -535,6 +583,87 @@ mod tests {
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert_eq!(caps.get("Counter"), Some(&8),
             "two nodes spawning Counter need the SUM (3 + 5 = 8) on the shared counter");
+    }
+
+    // ── 2026-08-09 (init kind, Phase 4): bounded-init pool capacity ────
+
+    fn bounded_init(name: &str, set: crate::ast::top::BoundSpec) -> TopLevel {
+        TopLevel::Init(crate::ast::top::InitDecl {
+            name: name.to_string(),
+            bound: Some(set),
+            ty: crate::ast::Type::int(),
+            value: Some(Expr::Decimal(0)),
+            body: vec![],
+            span: None,
+            doc: None,
+        })
+    }
+
+    /// A countdown whose bound is a bounded init `[16 | 32 | 64]` — the pool
+    /// is sized to the max of the set (64), provably inexhaustible, instead of
+    /// the dependent-heap runtime-malloc path.
+    #[test]
+    fn bounded_init_countdown_sizes_pool_to_set_max() {
+        let init = bounded_init(
+            "N",
+            crate::ast::top::BoundSpec::Choice(vec![
+                crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(16)),
+                crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(32)),
+                crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(64)),
+            ]),
+        );
+        let program = vec![init, countdown(Expr::Identifier("N".into()))];
+        let (caps, dependent, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert!(dependent.is_empty(),
+            "a bounded init must not use the dependent-heap path, got {dependent:?}");
+        assert_eq!(caps.get("Counter"), Some(&64),
+            "pool must be sized to the max of the bound set (64)");
+    }
+
+    /// A bounded init with a literal range `[64 | lo..hi]` — the max is the
+    /// range's hi literal.
+    #[test]
+    fn bounded_init_range_uses_hi_as_max() {
+        let init = bounded_init(
+            "N",
+            crate::ast::top::BoundSpec::Choice(vec![
+                crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(64)),
+                crate::ast::top::BoundSpec::Range(
+                    crate::ast::top::BoundTerm::Lit(10),
+                    crate::ast::top::BoundTerm::Lit(54),
+                ),
+            ]),
+        );
+        let program = vec![init, countdown(Expr::Identifier("N".into()))];
+        let (caps, dependent, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert!(dependent.is_empty());
+        assert_eq!(caps.get("Counter"), Some(&64),
+            "range max (hi=54) and the single 64 both contribute — max is 64");
+    }
+
+    /// An init bound set containing a NAME reference is not statically
+    /// bounded — the pool falls back to the dependent path (runtime-sized).
+    #[test]
+    fn unbounded_init_set_with_ref_stays_dependent() {
+        let init = bounded_init(
+            "N",
+            crate::ast::top::BoundSpec::Choice(vec![
+                crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(16)),
+                crate::ast::top::BoundSpec::Range(
+                    crate::ast::top::BoundTerm::Lit(10),
+                    crate::ast::top::BoundTerm::Ref("M".into()),
+                ),
+            ]),
+        );
+        let program = vec![init, countdown(Expr::Identifier("N".into()))];
+        let (caps, dependent, errors) = analyze(&program);
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+        assert!(!caps.contains_key("Counter"),
+            "a ref-containing bound set is not statically bounded");
+        let terms = dependent.get("Counter").expect("must use the dependent path");
+        assert!(matches!(&terms[0].bound, Expr::Identifier(n) if n == "N"));
     }
 }
 

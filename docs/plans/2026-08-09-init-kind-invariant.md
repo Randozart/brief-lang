@@ -323,6 +323,11 @@ the program (unprovable)." Expanding:
    `add i64 0, 1` fallback). Loop-shape names bundled into `ItemNames` (build_shape
    param count). Tests: 1688 pass.
 4. Capacity: pool read via set-max.
+   **DONE 2026-08-09**: a countdown bound naming a bounded init (`[16|32|64]`)
+   sizes the pool statically to the max of the set (`bound_set_max`) — the
+   backend emits a static `[capacity x T]` column, no dependent-heap malloc.
+   A set containing a name ref (`lo..M`) is not statically bounded → the
+   dependent path stays. Tests: 1692 pass.
 5. `box`/`spill` classification around the pool.
 6. Mechanism registry generalization: `resolve_mechanism(category, name)`
    shared by storage + ownership policy; FFI delivery/source/fallback axes

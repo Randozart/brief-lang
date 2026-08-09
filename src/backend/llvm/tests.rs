@@ -979,6 +979,40 @@ fn test_spawn_member_call_uses_column_row() {
 /// instance's row-0 writes), slot the address, and GEP the member accesses
 /// inside the buffer instead of the static `[capacity x T]` column.
 fn spawn_dependent_countdown_program() -> Vec<TopLevel> {
+    // `let N: Int = get_env_int!("BOUND")` — a runtime-bound field value.
+    let n_item = TopLevel::Statement(Box::new(Statement::Let {
+        name: "N".to_string(),
+        names: vec![],
+        ty: Some(Type::int()),
+        expr: Some(Expr::Call("get_env_int!".to_string(), vec![Expr::Quoted(b"BOUND".to_vec())], None)),
+        modifiers: vec![],
+    }));
+    spawn_pool_countdown_program(n_item)
+}
+
+/// 2026-08-09 (init kind, Phase 4): a bounded-init countdown — the pool is
+/// sized statically to the max of the bound set, not a dependent heap buffer.
+fn spawn_bounded_init_countdown_program() -> Vec<TopLevel> {
+    let n_item = TopLevel::Init(crate::ast::top::InitDecl {
+        name: "N".to_string(),
+        bound: Some(crate::ast::top::BoundSpec::Choice(vec![
+            crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(16)),
+            crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(32)),
+            crate::ast::top::BoundSpec::Single(crate::ast::top::BoundTerm::Lit(64)),
+        ])),
+        ty: Type::int(),
+        value: Some(Expr::Decimal(0)),
+        body: vec![],
+        span: None,
+        doc: None,
+    });
+    spawn_pool_countdown_program(n_item)
+}
+
+/// The shared spawn-pool program: an obj `Counter` with a countdown node that
+/// spawns one instance per tick against the bound `N`. The bound item (a
+/// runtime field or a bounded init) is supplied by the caller.
+fn spawn_pool_countdown_program(n_item: TopLevel) -> Vec<TopLevel> {
     use crate::ast::top::{TypeDef, TypeDefBody, TypeDefSlot};
     let obj = TopLevel::TypeDef(Box::new(TypeDef {
         name: "Counter".to_string(),
@@ -1046,13 +1080,6 @@ fn spawn_dependent_countdown_program() -> Vec<TopLevel> {
         modifiers: vec![],
     }));
     // `let N: Int = get_env_int!("BOUND")` — a runtime-bound field value.
-    let n_field = TopLevel::Statement(Box::new(Statement::Let {
-        name: "N".to_string(),
-        names: vec![],
-        ty: Some(Type::int()),
-        expr: Some(Expr::Call("get_env_int!".to_string(), vec![Expr::Quoted(b"BOUND".to_vec())], None)),
-        modifiers: vec![],
-    }));
     let node = TopLevel::Transaction(Transaction {
         name: "work".to_string(),
         is_reactive: true,
@@ -1110,7 +1137,7 @@ fn spawn_dependent_countdown_program() -> Vec<TopLevel> {
         span: None,
         doc: None,
     });
-    vec![obj, inst, ticks, n_field, node]
+    vec![obj, inst, ticks, n_item, node]
 }
 
 #[test]
@@ -1136,6 +1163,24 @@ fn test_dependent_spawn_pool_heap_buffer() {
         "size = (bound + 1) * elem must be computed right before malloc: {output}");
     assert!(output.contains("llvm.loop.disable_nonforced"),
         "observable spawn work loop must not be folded");
+}
+
+/// 2026-08-09 (init kind, Phase 4): a bounded-init countdown sizes its pool
+/// statically to the max of the bound set — a `[65 x i64]` column (64 spawns +
+/// row 0), NO runtime malloc (the dependent-heap path stays for unbounded
+/// inits).
+#[test]
+fn test_bounded_init_spawn_pool_is_static_set_max() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&spawn_bounded_init_countdown_program(), None);
+    assert!(
+        output.contains("getelementptr [65 x i64], ptr"),
+        "a bounded-init pool must emit the static [65 x i64] column (max of set + row 0); got:\n{output}"
+    );
+    assert!(
+        !output.contains("= call ptr @malloc"),
+        "a bounded-init pool is statically sized — must NOT malloc a dependent heap buffer:\n{output}"
+    );
 }
 
 

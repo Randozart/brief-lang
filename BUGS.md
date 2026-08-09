@@ -1,5 +1,21 @@
 # Bugs
 
+## Spawned-obj Member Slot Read Emits Undefined `@slot` Global in Two-Node Shape — OPEN (pre-existing)
+
+**Date:** 2026-08-09
+**Status:** Open (pre-existing; found while validating the init-bound spawn pool)
+**Root cause:** a program that spawns an obj instance inside a countdown node
+and calls a member that reads its own slot emits `load i64, ptr @<slot>`
+(a nonexistent global) instead of resolving the instance column. Reproduced
+with both a runtime field bound and a bounded-init bound — independent of the
+phase-4 init-pool work.
+**Impact:** two-node spawn programs (countdown spawner + a second node) fail at
+clang with "use of undefined value '@slot'". The single-node spawn shapes used
+by the backend tests emit correctly.
+**Repro:** `obj Counter { count: Int; txn inc() [count==0][count==1] { count = count + 1; term; }; };` + `init N: [16|32|64] Int = 16;` + `[ticks < N]` node spawning `Counter()` + calling `h.inc()`.
+**Fix (planned):** resolve the member-body slot identifier to the instance
+column in the multi-node path (mirror the single-node row resolution).
+
 ## Sync Group Blocks When Members Have Unequal Firing Schedules — OPEN (pre-existing)
 
 **Date:** 2026-08-06
