@@ -24,7 +24,7 @@ Status legend:
 | 4 | Lexical conventions | In progress | Phase 3 removed dead tokens, `sig`, `++`, pragmas, `prop`, `Ptr!`, `@`/prefix literals, width suffixes |
 | 5 | Delimiters and arrows | In progress | Phase 3 removed `|>`; `<:`/`:>` and `++` removed |
 | 6 | Grammar overview | In progress | Phase 2 canonical formatter; Phase 3 `render Name`, `b-when` |
-| 7 | Modules and imports | In progress | Phase 11: selective rename `{ Local: Exported }`, glob rejection, import-collision errors, `export import` re-export (2026-08-06); remaining: `:` module alias, configured-root determinism records |
+| 7 | Modules and imports | In progress | Phase 11: selective rename `{ Local: Exported }`, glob rejection, import-collision errors, `export import` re-export (2026-08-06); `:` module alias (collision-resolving tag, no qualified access), deterministic resolved-path records, cross-module impl coherence (an impl no longer collides with its target type), and target-selected `.ebv`/`.bv` variants (SPEC §3.3) shipped 2026-08-09 |
 | 8 | Declarations | In progress | Phase 5: `trait`/`impl` declarations, relationship list `type X: Parent, Trait, #Proto`, impl coherence, structural conformance; `meld` deferred to Phase 12 |
 | 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done; `endprogram` real process exit + `beginprogram` entry-loop shipped 2026-08-06 |
 | 10 | Contracts, invariants, watchdogs | In progress | Phase 6: mandatory non-trivial contracts on node/txn/asm; explicit `[true][true]` rejected |

@@ -118,5 +118,27 @@ Commit `cf2a5659` (docs refresh). 37/37 runtime MATCH. Expectation unchanged.
 - Deferred: the `:` module alias (needs a module-qualified-access design
   decision — Briv inlines imports with no namespace operator).
 
+## 8. Delivered (2026-08-09) — Slice 2
+
+- **`:` module alias** (`import collections: <std/collections>`) — a
+  collision-resolving local TAG (no qualified access; Briv inlines imports).
+  `Import.alias` field; parser accepts `import <ident> : <path>`; the resolver
+  treats two imports of the same exported name as legal when they carry
+  DIFFERENT aliases (same alias still collides). Per SPEC §7.2.
+- **Configured-root determinism records** — `ImportResolver.resolved_paths`
+  (specifier → canonical resolved path), in source order (SPEC §7.1).
+- **Coherence provenance** — an `impl T` no longer collides with the `type T`
+  it extends across modules (`record_imported_names` skips impls): a valid
+  cross-module coherence pair (`type Point` in a.bv + `impl Point` in b.bv)
+  resolves cleanly (§17.2).
+- **Target-selected module variants** — `TargetSettings.prefer_ebv` declared in
+  `config/targets.dbvl` (4th tuning column); embedded targets
+  (aarch64/arm/wasm/spirv) prefer the `.ebv` stdlib sibling for extensionless
+  imports (SPEC §3.3). The extension remains the resolver-time proxy (no
+  triple in BuildOptions yet).
+- Tests: alias resolves collision, same-alias still collides, cross-module
+  impl coherence, resolved_paths recorded, embedded target prefers .ebv.
+  Full suite: 1716 pass.
+
 1619 lib tests (5 new). Praetor: no new diagnostics (10 identical at HEAD).
 36/36 runtime MATCH at the verification commit; unchanged expectation.

@@ -911,6 +911,7 @@ impl<'a> Parser<'a> {
             return Ok(Import {
                 kind,
                 symbols,
+                alias: None,
                 span: None,
             });
         }
@@ -927,6 +928,7 @@ impl<'a> Parser<'a> {
             return Ok(Import {
                 kind: ImportKind::Registry(name),
                 symbols: vec![],
+                alias: None,
                 span: None,
             });
         }
@@ -938,18 +940,33 @@ impl<'a> Parser<'a> {
             return Ok(Import {
                 kind: ImportKind::Literal(module),
                 symbols: vec![],
+                alias: None,
                 span: None,
             });
         }
 
         // Import with symbols: import sym from "module" or from <name>
         let first = self.expect_identifier()?;
+        // 2026-08-09 (Phase 11, Slice 2): `import alias: <path>` — a `:` module
+        // alias. Collision-resolving local TAG only (no qualified access — Briv
+        // inlines imports). The path follows the `:`.
+        if self.eat(&Token::Colon) {
+            let kind = parse_import_path(self)?;
+            self.expect(Token::Semicolon)?;
+            return Ok(Import {
+                kind,
+                symbols: vec![],
+                alias: Some(first),
+                span: None,
+            });
+        }
         if self.eat_identifier("from") {
             let kind = parse_import_path(self)?;
             self.expect(Token::Semicolon)?;
             Ok(Import {
                 kind,
                 symbols: vec![(first.clone(), first)],
+                alias: None,
                 span: None,
             })
         } else {
@@ -967,6 +984,7 @@ impl<'a> Parser<'a> {
             Ok(Import {
                 kind,
                 symbols,
+                alias: None,
                 span: None,
             })
         }
@@ -3647,5 +3665,39 @@ mod phase3_tests {
             .iter()
             .any(|t| matches!(t, crate::ast::TopLevel::Init(_)));
         assert!(!has_top_init, "no init declaration at top level here");
+    }
+
+    // ── 2026-08-09 (Phase 11, Slice 2): `:` module alias ─────────────
+
+    #[test]
+    fn import_module_alias_parses() {
+        // `import collections: <std/collections>;` — a collision-resolving
+        // local tag (SPEC §7.2). The path follows the `:`.
+        let src = "import collections: <std/collections>;";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        match &items[0] {
+            crate::ast::TopLevel::Import(imp) => {
+                assert_eq!(imp.alias.as_deref(), Some("collections"));
+                assert_eq!(imp.path(), "std/collections");
+            }
+            other => panic!("expected import, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn import_alias_with_literal_path_parses() {
+        let src = "import x: \"local/path.bv\";";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        match &items[0] {
+            crate::ast::TopLevel::Import(imp) => {
+                assert_eq!(imp.alias.as_deref(), Some("x"));
+                assert_eq!(imp.path(), "local/path.bv");
+            }
+            other => panic!("expected import, got {other:?}"),
+        }
     }
 }

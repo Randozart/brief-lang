@@ -21,6 +21,7 @@ pub fn document_to_program_flags(doc: &DbrivDocument, name: &str, use_lazy: bool
         items.push(ast::TopLevel::Import(ast::Import {
             kind: ast::ImportKind::Literal(import_path.clone()),
             symbols: Vec::new(),
+            alias: None,
             span: None,
         }));
     }

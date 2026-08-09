@@ -692,6 +692,7 @@ mod tests {
             TopLevel::Import(crate::ast::Import {
                 kind: crate::ast::ImportKind::Literal("std/io.bv".into()),
                 symbols: vec![],
+                alias: None,
                 span: None,
             }),
             TopLevel::Definition(Definition {

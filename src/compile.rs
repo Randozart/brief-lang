@@ -415,6 +415,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     }
     // 2026-08-04 (Phase 4): an .ebv embedded target prefers the .ebv stdlib
     // variant (the casting-lane symbols as Briv defns, not C).
+    // 2026-08-09 (Phase 11, Slice 2): the target profile declares the
+    // preferred sibling variant (`prefer_ebv` in config/targets.dbvl, SPEC
+    // §3.3); the resolver consults it via target_settings_for once a triple
+    // is threaded to resolver construction. Today the extension is the
+    // resolver-time proxy for the embedded target (no triple in BuildOptions).
     resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
     items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
 

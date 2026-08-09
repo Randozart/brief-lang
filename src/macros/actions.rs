@@ -410,6 +410,7 @@ mod tests {
             TopLevel::Import(Import {
                 kind: ImportKind::Literal("std/io.bv".into()),
                 symbols: vec![],
+                alias: None,
                 span: None,
             }),
             TopLevel::Definition(Definition {
@@ -438,6 +439,7 @@ mod tests {
         let new_item = TopLevel::Import(Import {
             kind: ImportKind::Literal("std/debug.bv".into()),
             symbols: vec![],
+            alias: None,
             span: None,
         });
         insert_items(&mut items, &pos, vec![new_item], StageKind::Parsed).unwrap();
@@ -453,6 +455,7 @@ mod tests {
         let new_item = TopLevel::Import(Import {
             kind: ImportKind::Literal("std/debug.bv".into()),
             symbols: vec![],
+            alias: None,
             span: None,
         });
         insert_items(&mut items, &pos, vec![new_item], StageKind::Parsed).unwrap();

@@ -233,6 +233,7 @@ mod tests {
             TopLevel::Import(Import {
                 kind: ImportKind::Literal("std/io.bv".into()),
                 symbols: vec![],
+                alias: None,
                 span: None,
             }),
             TopLevel::Definition(Definition {

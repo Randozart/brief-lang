@@ -480,6 +480,13 @@ pub enum ImportKind {
     /// rename `import { Local: Exported }` binds the module's `Exported` name
     /// as `Local`; unrenamed symbols push `(name, name)`.
     pub symbols: Vec<(String, String)>,
+    /// 2026-08-09 (Phase 11, Slice 2): a `:` module alias
+    /// (`import collections: <std/collections>;`). A collision-resolving local
+    /// TAG only — Briv inlines imports into one namespace with no
+    /// module-qualified access operator, so the alias records provenance and
+    /// lets two imports of the same exported name coexist (SPEC §7.2). Not a
+    /// new access form.
+    pub alias: Option<String>,
     pub span: Option<Span>,
 }
 
@@ -506,6 +513,7 @@ impl Import {
         Import {
             kind: ImportKind::Literal(path.into()),
             symbols,
+            alias: None,
             span: None,
         }
     }
@@ -515,6 +523,7 @@ impl Import {
         Import {
             kind: ImportKind::Registry(name.into()),
             symbols,
+            alias: None,
             span: None,
         }
     }

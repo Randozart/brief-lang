@@ -33,10 +33,15 @@
 //   vector_min_width      — minimum isomorphic-group width for vector-phi
 //                          promotion (below this the scalar-phi +
 //                          extract/insert overhead exceeds the gain).
+//   prefer_ebv            — 0/1 (2026-08-09, Phase 11): the preferred stdlib
+//                          sibling variant for EXTENSIONLESS imports
+//                          (SPEC §3.3). 1 → prefer `.ebv` (embedded /
+//                          freestanding targets); 0 → prefer `.bv`. Absent →
+//                          default 0.
 
-target.x86_64: 16; 4.0; 4;
-target.aarch64: 32; 4.0; 4;
-target.arm64: 32; 4.0; 4;
-target.wasm32: 4294967295; 4.0; 4;
-target.wasm64: 4294967295; 4.0; 4;
-target.spirv64: 32; 4.0; 4;
+target.x86_64: 16; 4.0; 4; 0;
+target.aarch64: 32; 4.0; 4; 1;
+target.arm64: 32; 4.0; 4; 1;
+target.wasm32: 4294967295; 4.0; 4; 1;
+target.wasm64: 4294967295; 4.0; 4; 1;
+target.spirv64: 32; 4.0; 4; 1;

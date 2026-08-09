@@ -61,6 +61,11 @@ pub struct ImportResolver {
     /// stdlib provides the casting-lane symbols (int_to_str, str_to_int, …)
     /// as Briv defns; the `.bv` stdlib + briv_rt.c provide them as C.
     prefer_ebv: bool,
+    /// 2026-08-09 (Phase 11, Slice 2): the deterministic resolution record —
+    /// (import specifier → canonical resolved path), in source order. SPEC
+    /// §7.1 requires resolution to be deterministic AND to record the resolved
+    /// path; this is the audit trail (reproducible builds, diagnostics).
+    pub resolved_paths: Vec<(String, String)>,
 }
 
 /// The name of a top-level item, if it carries one.
@@ -150,6 +155,7 @@ impl ImportResolver {
             in_progress: HashSet::new(),
             registry: load_module_registry(),
             prefer_ebv: false,
+            resolved_paths: Vec::new(),
         }
     }
 
@@ -252,7 +258,10 @@ impl ImportResolver {
         // 2026-08-06 (Phase 11): track which module path each imported name
         // came from. Two DIFFERENT modules providing the same unqualified name
         // is a hard error (SPEC 7.2); the same path (diamond) is fine.
+        // 2026-08-09 (Phase 11, Slice 2): a second map tracks the `:` module
+        // alias per imported name — differing aliases resolve a collision.
         let mut imported_names: HashMap<String, (String, String)> = HashMap::new();
+        let mut imported_aliases: HashMap<String, String> = HashMap::new();
 
         let mut index = 0;
 
@@ -273,7 +282,13 @@ impl ImportResolver {
                 continue;
             };
             let resolved = self.resolve_import(&import, file_path)?;
-            Self::record_imported_names(&mut imported_names, &resolved, import.path())?;
+            Self::record_imported_names(
+                &mut imported_names,
+                &mut imported_aliases,
+                &resolved,
+                import.path(),
+                import.alias.as_deref(),
+            )?;
             items.remove(index);
             items.splice(index..index, resolved);
         }
@@ -292,13 +307,36 @@ impl ImportResolver {
     /// same path (diamond) is fine.
     fn record_imported_names(
         imported: &mut HashMap<String, (String, String)>,
+        imported_aliases: &mut HashMap<String, String>,
         resolved: &[TopLevel],
         path: &str,
+        alias: Option<&str>,
     ) -> Result<(), String> {
         for item in resolved {
+            // 2026-08-09 (Phase 11, Slice 2): an `impl T` EXTENDS the type `T`
+            // — it does not DECLARE it, so it must not participate in name
+            // collision. The type declaration carries the name; an impl is a
+            // coherence relationship (§17.2). Skipping impls here also fixes a
+            // false collision: `type Point` in a.bv + `impl Point` in b.bv,
+            // both imported, are a valid cross-module coherence pair.
+            if matches!(item, TopLevel::Impl(_)) {
+                continue;
+            }
             if let Some(n) = Self::item_name(item) {
                 if let Some((src, prior)) = imported.get(n) {
-                    if src != path && *prior != format!("{:?}", item) {
+                    // 2026-08-09 (Phase 11, Slice 2): two imports providing the
+                    // same exported name are legal when they carry DIFFERENT
+                    // `:` module aliases — the alias is a collision-resolving
+                    // local TAG (SPEC §7.2; no qualified access — Briv inlines).
+                    // Same path (diamond) and identical definitions stay benign.
+                    let same_alias = match (imported_aliases.get(n), alias) {
+                        (Some(a), Some(b)) => a == b,
+                        (None, None) => true,
+                        // One side aliased, the other not: the aliased import
+                        // is a distinct tag, so they coexist.
+                        _ => false,
+                    };
+                    if src != path && *prior != format!("{:?}", item) && same_alias {
                         return Err(format!(
                             "import name '{}' conflicts: provided by both '{}' and '{}' — \
                              use a selective rename (`{{ Local: Exported }}`) or a module alias",
@@ -307,6 +345,9 @@ impl ImportResolver {
                     }
                 } else {
                     imported.insert(n.to_string(), (path.to_string(), format!("{:?}", item)));
+                    if let Some(a) = alias {
+                        imported_aliases.insert(n.to_string(), a.to_string());
+                    }
                 }
             }
         }
@@ -421,6 +462,10 @@ impl ImportResolver {
             // 2026-07-26: Check registry directory first (user-installed modules
             // take priority over baked config/module-registry.toml entries).
             if let Some(reg_path) = crate::registry::find_registry_entry(name) {
+                // 2026-08-09 (Phase 11, Slice 2): record the registry name →
+                // canonical path (SPEC §7.1 determinism record).
+                self.resolved_paths
+                    .push((import.path().to_string(), reg_path.to_string_lossy().to_string()));
                 let literal_import = Import::literal(reg_path.to_string_lossy().to_string(), import.symbols.clone());
                 return self.resolve_import(&literal_import, source_file);
             }
@@ -433,6 +478,8 @@ impl ImportResolver {
                     name.clone()
                 }
             };
+            self.resolved_paths
+                .push((import.path().to_string(), actual_path.clone()));
             let literal_import = Import::literal(actual_path, import.symbols.clone());
             return self.resolve_import(&literal_import, source_file);
         }
@@ -704,6 +751,14 @@ impl ImportResolver {
                 mp = module_path,
             )
         })?;
+
+        // 2026-08-09 (Phase 11, Slice 2): record the deterministic resolution
+        // (specifier → canonical path) for reproducibility/diagnostics (SPEC
+        // §7.1). The specifier is the ORIGINAL import path; a registry import
+        // lands here after its literal re-entry, so the record uses the
+        // import's current path (already rewritten to the resolved literal).
+        self.resolved_paths
+            .push((import.path().to_string(), resolved_path.to_string_lossy().to_string()));
 
 
         // 2026-07-01: Cycle detection
@@ -1408,6 +1463,109 @@ fn test_identical_duplicate_imports_do_not_conflict() {
     assert!(
         resolver.resolve_imports(items, &src).is_ok(),
         "identical duplicate definitions must not conflict"
+    );
+}
+
+/// 2026-08-09 (Phase 11, Slice 2): an `impl T` extends the type `T` — it does
+/// NOT declare it. `type Point` in a.bv + `impl Point` in b.bv, both imported,
+/// is a VALID cross-module coherence pair (§17.2); the impl must not collide
+/// with the type it targets.
+#[test]
+fn test_cross_module_impl_does_not_collide_with_target_type() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("ty.bv"), "type Point: Int;").unwrap();
+    fs::write(dir.path().join("impl.bv"), "impl Point { defn origin() -> Int { term 0; }; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![
+        TopLevel::Import(Import::literal("ty.bv".to_string(), vec![])),
+        TopLevel::Import(Import::literal("impl.bv".to_string(), vec![])),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let result = resolver.resolve_imports(items, &src).unwrap();
+    assert!(
+        result.iter().any(|i| matches!(i, TopLevel::Impl(imp) if imp.target == "Point")),
+        "the impl must survive import (coherence pair)"
+    );
+    assert!(
+        result.iter().any(|i| matches!(i, TopLevel::TypeDef(t) if t.name == "Point")),
+        "the type must survive import"
+    );
+}
+
+/// 2026-08-09 (Phase 11, Slice 2): a `:` module alias resolves a name collision
+/// between two DIFFERENT modules exporting the same symbol (SPEC §7.2).
+#[test]
+fn test_module_alias_resolves_collision() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("m1.bv"), "defn foo -> Int { term 1; };").unwrap();
+    fs::write(dir.path().join("m2.bv"), "defn foo -> Int { term 2; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    // `import a: "m1.bv"; import b: "m2.bv";` — both export `foo` but carry
+    // DIFFERENT aliases, so they coexist (no qualified access — inlined tags).
+    let mut a = Import::literal("m1.bv".to_string(), vec![]);
+    a.alias = Some("a".to_string());
+    let mut b = Import::literal("m2.bv".to_string(), vec![]);
+    b.alias = Some("b".to_string());
+    let items = vec![
+        TopLevel::Import(a),
+        TopLevel::Import(b),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    assert!(
+        resolver.resolve_imports(items, &src).is_ok(),
+        "differing module aliases must resolve the collision"
+    );
+}
+
+/// 2026-08-09 (Phase 11, Slice 2): same-alias imports of the same exported
+/// name from DIFFERENT modules STILL collide (the alias is per-import).
+#[test]
+fn test_same_alias_still_collides() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("m1.bv"), "defn foo -> Int { term 1; };").unwrap();
+    fs::write(dir.path().join("m2.bv"), "defn foo -> Int { term 2; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let mut a = Import::literal("m1.bv".to_string(), vec![]);
+    a.alias = Some("a".to_string());
+    let mut b = Import::literal("m2.bv".to_string(), vec![]);
+    b.alias = Some("a".to_string()); // same tag → still a collision
+    let items = vec![
+        TopLevel::Import(a),
+        TopLevel::Import(b),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    assert!(
+        resolver.resolve_imports(items, &src).is_err(),
+        "two imports with the SAME alias must still collide"
+    );
+}
+
+/// 2026-08-09 (Phase 11, Slice 2): resolution records the deterministic
+/// (specifier → resolved path) map (SPEC §7.1).
+#[test]
+fn test_resolved_paths_are_recorded() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("m.bv"), "defn foo -> Int { term 1; };").unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![
+        TopLevel::Import(Import::literal("m.bv".to_string(), vec![])),
+    ];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    resolver.resolve_imports(items, &src).unwrap();
+    assert_eq!(resolver.resolved_paths.len(), 1);
+    assert_eq!(resolver.resolved_paths[0].0, "m.bv");
+    assert!(
+        resolver.resolved_paths[0].1.ends_with("m.bv"),
+        "the record must map the specifier to its canonical path: {:?}",
+        resolver.resolved_paths
     );
 }
 }
