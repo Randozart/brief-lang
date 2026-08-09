@@ -29,6 +29,13 @@ pub struct TypecheckContext<'a> {
     /// txn parameters). Used by is_mutable_location to distinguish mutable
     /// state fields from immutable let-bindings for PtrConst inference.
     pub state_keys: std::collections::HashSet<String>,
+    /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariant names. Reads
+    /// resolve via `bindings` (registered in make_typecheck_context); any
+    /// write to one — `=` assign, `<-`/`~<-` arrow, `let` shadow, `~op`
+    /// consume — is a compile error (the value is set once before
+    /// `beginprogram`, immutable for the run). Distinct from `state_keys`
+    /// (mutable state) and `consumed_locals` (revivable locals).
+    pub init_names: std::collections::HashSet<String>,
     /// 2026-08-06 (diagnostics): every function/transaction name defined in the
     /// program (defns, txns, imported bodies). Used to validate a declared
     /// `op` binding's implementation target actually exists.
@@ -122,6 +129,7 @@ impl<'a> TypecheckContext<'a> {
         TypecheckContext {
             bindings: HashMap::new(),
             state_keys: std::collections::HashSet::new(),
+            init_names: std::collections::HashSet::new(),
             defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
             universe,
@@ -1673,6 +1681,18 @@ fn infer_match(
 pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(), TypeError> {
     match stmt {
         Statement::Let { name, names, ty, expr, .. } => {
+            // 2026-08-09 (init kind, Phase 2): a `let` declaring an `init`
+            // name would shadow the seeded invariant — reject the shadow.
+            if names.iter().any(|n| ctx.init_names.contains(n)) {
+                return Err(TypeError::InvalidOperation {
+                    operation: format!(
+                        "`let {}` shadows an `init` — the init is seeded once and \
+                         immutable for the run; choose another name",
+                        names.iter().find(|n| ctx.init_names.contains(*n)).unwrap()
+                    ),
+                    type_name: "init".into(),
+                });
+            }
             // 2026-07-25: Tuple destructuring or single let.
             if names.len() > 1 {
                 return check_let_destructure(names, expr, ctx);
@@ -1740,6 +1760,22 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             Ok(())
         }
         Statement::Assign(lhs, rhs) => {
+            // 2026-08-09 (init kind, Phase 2): an `init` is seeded exactly once
+            // (its declaration) and is immutable for the run — any later write
+            // to it is a compile error, not a runtime rebind.
+            if let Expr::Identifier(target_name) = lhs {
+                if ctx.init_names.contains(target_name) {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!(
+                            "assignment to `{}` — an `init` is seeded once before \
+                             beginprogram and is immutable for the run; declare a \
+                             `let` for mutable state",
+                            target_name
+                        ),
+                        type_name: "init".into(),
+                    });
+                }
+            }
             // 2026-08-01 (Phase 3): the rhs reads the OLD value (a
             // use-after-free/use-after-move is caught here), then the target
             // is REVIVED so the lhs (a reassignment) is legal — `b = 5` makes
@@ -1858,6 +1894,20 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                         }
                     } else {
                         // Plain assignment — no implicit coercion.
+                        // 2026-08-09 (init kind, Phase 2): `init <- v` would
+                        // rebind an immutable seeded value — reject it like `=`.
+                        if let Expr::Identifier(target_name) = t.as_ref() {
+                            if ctx.init_names.contains(target_name) {
+                                return Err(TypeError::InvalidOperation {
+                                    operation: format!(
+                                        "arrow write to `{}` — an `init` is seeded once \
+                                         before beginprogram and is immutable for the run",
+                                        target_name
+                                    ),
+                                    type_name: "init".into(),
+                                });
+                            }
+                        }
                         let lhs_ty = infer_type_only(t, ctx)?;
                         if lhs_ty != value_ty {
                             let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
@@ -2257,7 +2307,67 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         })
         .collect();
 
+    // 2026-08-09 (init kind, Phase 2): init names → type, collected SEPARATELY
+    // from state_bindings so init is read-only (not a mutable `state_key`) but
+    // still visible to every txn/defn body that reads it.
+    let init_bindings: std::collections::HashMap<String, Type> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::Init(i) => Some((i.name.clone(), i.ty.clone())),
+            _ => None,
+        })
+        .collect();
+
     let mut errors = Vec::new();
+
+    // 2026-08-09 (init kind, Phase 2): set-once — an `init` name may be
+    // declared exactly once (its seeding IS the one write). A duplicate
+    // declaration is a compile error, as is re-seeding via a later `init`.
+    {
+        let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for (i, item) in items.iter().enumerate() {
+            if let TopLevel::Init(init) = item {
+                match seen.entry(init.name.as_str()) {
+                    std::collections::hash_map::Entry::Occupied(_) => {
+                        errors.push(TypeError::InvalidOperation {
+                            operation: format!(
+                                "duplicate `init` declaration for '{}' — an init is seeded \
+                                 exactly once before beginprogram",
+                                init.name
+                            ),
+                            type_name: "init".into(),
+                        });
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(i);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2026-08-09 (init kind, Phase 2): ordering — seeding runs before
+    // beginprogram, so every `init` declaration must precede the program's
+    // entry loop. An init after a beginprogram marker would seed too late.
+    {
+        let mut begin_seen = false;
+        for item in items.iter() {
+            if contains_beginprogram_in_item(item) {
+                begin_seen = true;
+            } else if let TopLevel::Init(init) = item {
+                if begin_seen {
+                    errors.push(TypeError::InvalidOperation {
+                        operation: format!(
+                            "`init {}` appears after a beginprogram entry — seeding must \
+                             happen before beginprogram",
+                            init.name
+                        ),
+                        type_name: "init".into(),
+                    });
+                }
+            }
+        }
+    }
 
     // 2026-08-05 (Phase 6): contract obligations.
     // - `defn`: contract optional; an explicit [true][true] is rejected.
@@ -2448,6 +2558,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
 
     let env = CheckEnv {
         state_bindings: &state_bindings,
+        init_bindings: &init_bindings,
         fn_return_types: &fn_return_types,
         fn_param_types: &fn_param_types,
         all_parse_bindings: &all_parse_bindings,
@@ -2591,6 +2702,18 @@ fn contains_beginprogram(e: &Expr) -> bool {
         Expr::BinaryOp(BinaryOpKind::And, a, b) => {
             contains_beginprogram(a) || contains_beginprogram(b)
         }
+        _ => false,
+    }
+}
+
+/// 2026-08-09 (init kind, Phase 2): does a top-level item carry a
+/// `beginprogram` entry marker? A transaction whose precondition contains
+/// `beginprogram` is the program's entry loop — everything after it in source
+/// order seeds too late for an `init`.
+fn contains_beginprogram_in_item(item: &TopLevel) -> bool {
+    match item {
+        TopLevel::Transaction(t) => contains_beginprogram(&t.contract.pre_condition),
+        TopLevel::Export(e) => contains_beginprogram_in_item(&e.inner),
         _ => false,
     }
 }
@@ -2755,6 +2878,10 @@ fn cross_op_fn_name(impl_args: &Option<PropertyValue>) -> Option<String> {
 /// `check_top_level` and `elaborate_ops` share one signature (Praetor rule 4).
 struct CheckEnv<'a> {
     state_bindings: &'a HashMap<String, Type>,
+    /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariant names → type.
+    /// Reads resolve through ctx.bindings; writes are rejected by the
+    /// `init_names` reassign check (the seeding is the one write).
+    init_bindings: &'a HashMap<String, Type>,
     fn_return_types: &'a HashMap<String, Type>,
     fn_param_types: &'a HashMap<String, Vec<Type>>,
     all_parse_bindings: &'a HashMap<String, Vec<OperatorBinding>>,
@@ -2795,6 +2922,13 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     for (name, ty) in env.state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
         ctx.state_keys.insert(name.clone());
+    }
+    // 2026-08-09 (init kind, Phase 2): init names are readable everywhere but
+    // NOT mutable — bind them, mark them init_names (reassign → error), and
+    // keep them out of state_keys so &init yields Ptr<const T>.
+    for (name, ty) in env.init_bindings {
+        ctx.bindings.insert(name.clone(), ty.clone());
+        ctx.init_names.insert(name.clone());
     }
     // 2026-07-25: Inject function return types for call inference.
     for (name, ty) in env.fn_return_types {
@@ -3985,6 +4119,146 @@ node probe [st.len <= 8][true] { st.push(5); term; };
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    // ── init kind semantics (2026-08-09, Phase 2) ─────────────────────
+
+    #[test]
+    fn init_read_is_legal_but_assign_is_an_error() {
+        // An init seeds once and is immutable — reading it anywhere is fine,
+        // writing to it is a compile error.
+        let src = r#"
+init BufSize: Int = 64;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    let x: Int = BufSize;
+    fired = fired + 1;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "reads of an init must typecheck");
+        let src = r#"
+init BufSize: Int = 64;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    BufSize = 128;
+    fired = fired + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("immutable for the run")),
+            "expected init-reassign error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn init_arrow_write_is_an_error() {
+        let src = r#"
+init BufSize: Int = 64;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    BufSize <- 128;
+    fired = fired + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("immutable for the run")),
+            "expected init-arrow error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn init_shadowed_by_let_is_an_error() {
+        let src = r#"
+init BufSize: Int = 64;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    let BufSize: Int = 8;
+    fired = fired + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("shadows an `init`")),
+            "expected init-shadow error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn duplicate_init_declaration_is_an_error() {
+        let src = r#"
+init BufSize: Int = 64;
+init BufSize: Int = 128;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] { fired = fired + 1; term; };
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("duplicate `init`")),
+            "expected duplicate-init error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn init_after_beginprogram_is_an_error() {
+        let src = r#"
+node entry [beginprogram][i == 4] {
+    let i: Int = 0;
+    i = i + 1;
+    term;
+};
+init BufSize: Int = 64;
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("after a beginprogram")),
+            "expected late-init error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn init_and_beginprogram_coexist_when_ordered() {
+        let src = r#"
+init BufSize: Int = 64;
+node entry [beginprogram][i == 4] {
+    let i: Int = 0;
+    i = i + 1;
+    let x: Int = BufSize;
+    term;
+};
+"#;
+        assert!(check(src).is_ok(), "init before beginprogram must typecheck");
+    }
+
+    #[test]
+    fn init_consume_is_an_error() {
+        // An init is not a mutable location — `~` consume of it is rejected.
+        let src = r#"
+init BufSize: Int = 64;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    let x: Int = 0;
+    x ~= BufSize;
+    fired = fired + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("cannot consume a constant")),
+            "expected init-consume error, got {:?}",
+            err
+        );
     }
 }
 

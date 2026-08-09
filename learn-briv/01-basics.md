@@ -103,6 +103,8 @@ once via the same synthesized node (it is renamed to `briv_main`).
 - Statements execute in order, exactly once, then the program exits
 - `__script_main` / `__script_done` are compiler-reserved — a user binding
   with either name is a compile error
+- `init` seeds a runtime value exactly once (before any node fires) and is
+  immutable for the run — reassigning it anywhere is a compile error
 - `escape` inside a top-level statement atomically rolls back all changes
 - Reactive programs (with `node`/`txn`/`entry!`) are NOT wrapped
 

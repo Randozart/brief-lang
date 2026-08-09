@@ -467,6 +467,26 @@ impl LlvmBackend {
                             ty: Type::int(),
                         }
                     }
+                } else if let Some(init) = self.ctx.inits.get(name) {
+                    // 2026-08-09 (init kind, Phase 2): a runtime-seeded
+                    // invariant reads its seeded global. Load with the declared
+                    // type (like the constants path) — the global is a mutable
+                    // i64/float/double/ptr slot seeded once in the pre-reactor
+                    // phase and never written again.
+                    let ty = &init.ty;
+                    if *ty == Type::float() {
+                        writeln!(out, "{}{} = load float, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::float() }
+                    } else if *ty == Type::float64() {
+                        writeln!(out, "{}{} = load double, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::float64() }
+                    } else if self.is_string_operand(ty) || matches!(ty, Type::Ptr(_)) {
+                        writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: ty.clone() }
+                    } else {
+                        writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::int() }
+                    }
                 } else {
                     writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
                     TypedRegister {

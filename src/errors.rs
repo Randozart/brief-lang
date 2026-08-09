@@ -1113,6 +1113,10 @@ pub enum RuntimeError {
     /// 2026-08-06 (Slice C): match expression where no arm's pattern matched
     /// (or its `when` guard failed). Carries the scrutinee value description.
     NonExhaustiveMatch(String),
+    /// 2026-08-09 (init kind, Phase 2): an attempt to re-seed or reassign an
+    /// `init` — the value is set once before beginprogram and is immutable for
+    /// the run. The interpreter is the reference: codegen must match.
+    ImmutableInit(String),
 }
 
 impl fmt::Display for RuntimeError {
@@ -1140,6 +1144,9 @@ impl fmt::Display for RuntimeError {
             RuntimeError::ProgramExit(_) => write!(f, "endprogram (process exit)"),
             RuntimeError::NonExhaustiveMatch(desc) => {
                 write!(f, "non-exhaustive match: no arm matched {}", desc)
+            }
+            RuntimeError::ImmutableInit(name) => {
+                write!(f, "cannot modify '{}': an init is seeded once before beginprogram and is immutable for the run", name)
             }
         }
     }

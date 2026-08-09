@@ -305,9 +305,18 @@ the program (unprovable)." Expanding:
 ## Phasing
 
 1. Grammar/AST + lexer/parser — the `init` construct parses and displays.
+   **DONE 2026-08-09** (commit `12b9212a`): contextual keyword, AST
+   `TopLevel::Init(InitDecl)` + `BoundSpec`/`BoundTerm`, walkers, BEAST
+   round-trip, LSP/import/typechecker registrations.
 2. Semantics: set-once + before-begin ordering (interpreter reference) +
    reassign error; memcheck sealing.
-3. Proof-link: `Bound::Bind` folding.
+   **DONE 2026-08-09**: typechecker rejects reassign/arrow/shadow/consume of an
+   init, duplicate decls, and init-after-beginprogram; interpreter seeds inits
+   (value + body `term <expr>` form) as the reference; backend emits init as a
+   mutable global, seeds it in `emit_init_state` / `emit_inline_init_stores` /
+   `__briv_init_state`, and reads load it; memcheck reports init-bound pools as
+   sealed. Tests: 1686 pass.
+3. Proof-link: `Bound::Init` folding.
 4. Capacity: pool read via set-max.
 5. `box`/`spill` classification around the pool.
 6. Mechanism registry generalization: `resolve_mechanism(category, name)`

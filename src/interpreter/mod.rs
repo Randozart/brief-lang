@@ -65,6 +65,10 @@ pub struct Interpreter {
     /// 2026-07-28: Phase B.1 — Function definitions loaded from the program.
     /// Keyed by function name, used by call_function() for assertion verification.
     pub functions: HashMap<String, FunctionDef>,
+    /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariant names. Set by
+    /// `load_program` when it seeds each `TopLevel::Init`; reads resolve via
+    /// `state`, and a later write to one is a `RuntimeError::ImmutableInit`.
+    pub init_names: std::collections::HashSet<String>,
 }
 
 impl Interpreter {
@@ -74,6 +78,7 @@ impl Interpreter {
             prior_state: HashMap::new(),
             heap: VirtualHeap::new(),
             functions: HashMap::new(),
+            init_names: std::collections::HashSet::new(),
         }
     }
 
@@ -101,6 +106,56 @@ impl Interpreter {
                 _ => {}
             }
         }
+        // 2026-08-09 (init kind, Phase 2): seed each init exactly once, before
+        // any transaction runs. A seeding failure (or a duplicate init) is a
+        // runtime error — the interpreter is the reference codegen must match.
+        let _ = self.seed_inits(program);
+    }
+
+    /// 2026-08-09 (init kind, Phase 2): evaluate each `TopLevel::Init` seeding
+    /// (value expr, or body statements once) into `state` and mark the name in
+    /// `init_names`. Re-seeding an already-seeded init is
+    /// `RuntimeError::ImmutableInit`. Reads of the seeded value then resolve
+    /// through the normal identifier path.
+    pub fn seed_inits(&mut self, program: &[TopLevel]) -> Result<(), RuntimeError> {
+        for item in program {
+            if let TopLevel::Init(init) = item {
+                self.seed_init(init)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Seed one `TopLevel::Init` — value form evaluates its expr; body form
+    /// runs its statements once (a `term <expr>` yields the value; a bare
+    /// `term;` is a convergence checkpoint leaving Void). Re-seeding a seeded
+    /// init is `RuntimeError::ImmutableInit`.
+    fn seed_init(&mut self, init: &crate::ast::top::InitDecl) -> Result<(), RuntimeError> {
+        if self.init_names.contains(&init.name) || self.state.contains_key(&init.name) {
+            return Err(RuntimeError::ImmutableInit(init.name.clone()));
+        }
+        if let Some(value) = &init.value {
+            let v = self.eval_expr(value)?;
+            self.state.insert(init.name.clone(), v);
+        } else {
+            let seeded = self.seed_body(&init.body)?;
+            self.state.insert(init.name.clone(), seeded);
+        }
+        self.init_names.insert(init.name.clone());
+        Ok(())
+    }
+
+    /// Run a body-form init's statements once and return the seeded value.
+    fn seed_body(&mut self, body: &[Statement]) -> Result<Value, RuntimeError> {
+        let mut seeded = Value::Void;
+        for stmt in body {
+            match self.exec_stmt(stmt) {
+                Ok(v) => seeded = v,
+                Err(RuntimeError::TermReturn(v)) => return Ok(v),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(seeded)
     }
 
     /// 2026-07-28: Phase B.1 — Look up a function definition by name.
@@ -164,6 +219,15 @@ impl Interpreter {
     }
 
     pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<Value, RuntimeError> {
+        // 2026-08-09 (init kind, Phase 2): an `init` is seeded once and
+        // immutable — a write to one at runtime is a reference violation
+        // (the typechecker rejects it statically; this is the defensive
+        // runtime half, matching the backend's seeded-global store).
+        if let Some(name) = statement_write_target(stmt) {
+            if self.init_names.contains(name) {
+                return Err(RuntimeError::ImmutableInit(name.to_string()));
+            }
+        }
         eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions)
     }
 
@@ -200,6 +264,27 @@ impl Interpreter {
 impl Default for Interpreter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 2026-08-09 (init kind, Phase 2): the top-level name a statement writes, if
+/// it is a plain identifier assignment/arrow write. Used by exec_stmt to
+/// reject writes to seeded `init` names (the typechecker rejects them
+/// statically; this is the defensive runtime half).
+fn statement_write_target<'a>(stmt: &'a Statement) -> Option<&'a str> {
+    match stmt {
+        Statement::Assign(lhs, _) => match lhs {
+            Expr::Identifier(name) => Some(name.as_str()),
+            _ => None,
+        },
+        Statement::ArrowAssign { target, .. } => match target.as_ref() {
+            Some(t) => match t.as_ref() {
+                Expr::Identifier(name) => Some(name.as_str()),
+                _ => None,
+            },
+            None => None,
+        },
+        _ => None,
     }
 }
 
@@ -700,5 +785,67 @@ mod tests {
         let deref = Expr::Deref(Box::new(addrof));
         let result = eval_expr(&deref, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(result.as_i64(), Some(99));
+    }
+
+    // ── init seeding reference (2026-08-09, Phase 2) ──────────────────
+
+    fn parse_program(src: &str) -> Vec<crate::ast::TopLevel> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        p.parse_program().unwrap()
+    }
+
+    #[test]
+    fn init_value_form_seeds_and_reads() {
+        // Value form: the expr is evaluated once and the name resolves.
+        let program = parse_program("init BufSize: Int = 64;\n");
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        assert_eq!(interp.state.get("BufSize").and_then(|v| v.as_i64()), Some(64));
+        let expr = Expr::Identifier("BufSize".into());
+        let v = interp.eval_expr(&expr).unwrap();
+        assert_eq!(v.as_i64(), Some(64));
+    }
+
+    #[test]
+    fn init_body_form_term_yields_seed() {
+        // Body form: statements run once; `term <expr>` yields the seed.
+        let program = parse_program(
+            "init Layout: [16 | 32 | 64] Int { term 32; };\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        assert_eq!(interp.state.get("Layout").and_then(|v| v.as_i64()), Some(32));
+    }
+
+    #[test]
+    fn init_reassign_is_a_runtime_error() {
+        // The reference: a write to a seeded init is rejected at runtime too.
+        let program = parse_program("init BufSize: Int = 64;\n");
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let stmt = Statement::Assign(
+            Expr::Identifier("BufSize".into()),
+            Expr::Decimal(128),
+        );
+        let err = interp.exec_stmt(&stmt).unwrap_err();
+        assert!(
+            format!("{}", err).contains("immutable for the run"),
+            "expected ImmutableInit, got {err}"
+        );
+    }
+
+    #[test]
+    fn duplicate_init_seed_is_a_runtime_error() {
+        // Set-once: seeding the same init twice is an error.
+        let program = parse_program(
+            "init BufSize: Int = 64;\ninit BufSize: Int = 128;\n",
+        );
+        let mut interp = Interpreter::new();
+        let err = interp.seed_inits(&program).unwrap_err();
+        assert!(
+            format!("{}", err).contains("immutable for the run"),
+            "expected ImmutableInit, got {err}"
+        );
     }
 }

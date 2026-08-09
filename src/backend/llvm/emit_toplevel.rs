@@ -1,6 +1,6 @@
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
-use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, llvm_type_byte_size, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, llvm_type_byte_size, protocol_llvm_type, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -1300,6 +1300,9 @@ impl LlvmBackend {
             let val_reg = self.emit_expr(out, &expr, "  ");
             writeln!(out, "  store volatile i64 {}, ptr {}, align 1", val_reg, p).ok();
         }
+        // 2026-08-09 (init kind, Phase 2): seed runtime-seeded invariants here,
+        // after state-field init stores and before any node fires.
+        self.emit_init_seeding_stores(out, "  ");
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
@@ -1377,6 +1380,64 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
                 writeln!(out, "{}store i8 0, ptr {}, align {}", indent, vp, self.align_of("i8")).ok();
             }
+        }
+        // 2026-08-09 (init kind, Phase 2): seed runtime-seeded invariants here,
+        // after the field-init stores (a body may read state) and before any
+        // node fires — mirrors emit_init_state for the inline-SROA path.
+        self.emit_init_seeding_stores(out, indent);
+    }
+
+    /// 2026-08-09 (init kind, Phase 2): seed every runtime-seeded invariant by
+    /// evaluating its value expr (or running its body statements once) and
+    /// storing the result to its mutable global. Runs in the pre-reactor phase
+    /// — after state-field init stores (a body may read state fields) and
+    /// before any node fires. Reads of the seeded globals then load the value;
+    /// nothing writes them again (the typechecker + interpreter enforce that).
+    pub(super) fn emit_init_seeding_stores(&mut self, out: &mut String, indent: &str) {
+        let mut sorted_inits: Vec<String> = self.ctx.inits.keys().cloned().collect();
+        sorted_inits.sort();
+        for name in &sorted_inits {
+            let init = self.ctx.inits[name].clone();
+            let llvm_ty = protocol_llvm_type(&init.ty, self.ctx.type_universe.as_ref());
+            if let Some(value) = &init.value {
+                let reg = self.emit_expr(out, value, indent);
+                writeln!(out, "{}store {} {}, ptr @{}, align 8", indent, llvm_ty, reg.name, name).ok();
+            } else {
+                self.emit_init_seeding_body(out, indent, name, &init);
+            }
+        }
+    }
+
+    /// Emit a body-form init's seeding statements once, storing the yielded
+    /// value to the init's global. A `term <expr>` yields the value (emit_expr
+    /// directly — the txn-flavored Term arm emits ret/branch, which has no
+    /// meaning in the pre-reactor seeding phase); otherwise the last
+    /// statement's value is used.
+    fn emit_init_seeding_body(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+        init: &crate::ast::top::InitDecl,
+    ) {
+        let llvm_ty = protocol_llvm_type(&init.ty, self.ctx.type_universe.as_ref());
+        let mut last = "".to_string();
+        for stmt in &init.body {
+            match stmt {
+                crate::ast::Statement::Term(Some(expr)) => {
+                    let reg = self.emit_expr(out, expr, indent);
+                    last = reg.name;
+                    break;
+                }
+                crate::ast::Statement::Term(None) => break,
+                _ => {
+                    let reg = crate::backend::llvm::emit_stmt::emit_statement(self, out, stmt, indent);
+                    last = reg.name;
+                }
+            }
+        }
+        if !last.is_empty() {
+            writeln!(out, "{}store {} {}, ptr @{}, align 8", indent, llvm_ty, last, name).ok();
         }
     }
 
@@ -3389,6 +3450,9 @@ impl LlvmBackend {
             }
         }
         writeln!(out, "define dso_local void @__briv_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
+        // 2026-08-09 (init kind, Phase 2): library mode seeds runtime-seeded
+        // invariants before any exported function runs.
+        self.emit_init_seeding_stores(out, "  ");
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
         writeln!(out, "define void @__briv_init() #0 {{").ok();

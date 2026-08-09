@@ -174,6 +174,58 @@ fn test_llvm_generates_module() {
     assert!(output.contains("target triple"));
 }
 
+/// 2026-08-09 (init kind, Phase 2): a runtime-seeded invariant emits as a
+/// mutable global, seeds once in the pre-reactor phase, and reads load it.
+#[test]
+fn test_init_emits_global_seeding_and_read() {
+    let init = TopLevel::Init(crate::ast::top::InitDecl {
+        name: "BufSize".to_string(),
+        bound: None,
+        ty: Type::int(),
+        value: Some(Expr::Decimal(64)),
+        body: vec![],
+        span: None,
+        doc: None,
+    });
+    // A node that reads the init, so a load of the global is emitted.
+    let node = TopLevel::Transaction(Transaction {
+        name: "go".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "x".to_string(),
+                names: vec![],
+                ty: Some(Type::int()),
+                expr: Some(Expr::Identifier("BufSize".to_string())),
+                modifiers: vec![],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&[init, node], None);
+    assert!(output.contains("@BufSize = global i64 0"), "init must emit a mutable global");
+    assert!(output.contains("store i64"), "init seeding must store to the global");
+    assert!(output.contains("load i64, ptr @BufSize"), "init read must load the global");
+}
+
 /// A program with `let masked: Data = data[[true, false, true]]` — exercises
 /// the Boolean mask-index lowering (2026-08-07, Phase 7).
 fn mask_index_program() -> Vec<TopLevel> {

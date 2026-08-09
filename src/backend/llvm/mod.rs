@@ -2007,11 +2007,15 @@ impl LlvmBackend {
         // resolve their size from `const MAXB: Int = 4096;`. Without this the
         // derivation falls back to a scalar i64 / `[0 x T]`.
         self.ctx.constants.clear();
+        self.ctx.inits.clear();
         for item in items {
             if let TopLevel::Constant(c) = item {
                 self.ctx
                     .constants
                     .insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+            }
+            if let TopLevel::Init(i) = item {
+                self.ctx.inits.insert(i.name.clone(), i.clone());
             }
         }
         // 2026-08-07 (object instance pools): pre-register the struct/obj
@@ -2102,6 +2106,7 @@ impl LlvmBackend {
         self.ctx.defn_params.clear();
         self.ctx.defn_return_types.clear();
         self.ctx.constants.clear();
+        self.ctx.inits.clear();
         self.ctx.string_constants = collect_strings(items);
         self.ctx.byte_constants = collect_byte_literals(items);
         self.ctx.mask_constants = collect_mask_literals(items);
@@ -2111,6 +2116,9 @@ impl LlvmBackend {
             match item {
                 TopLevel::Constant(c) => {
                     self.ctx.constants.insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+                }
+                TopLevel::Init(i) => {
+                    self.ctx.inits.insert(i.name.clone(), i.clone());
                 }
                 TopLevel::Transaction(t) => {
                     txns.push((t.name.clone(), t));
@@ -2790,6 +2798,21 @@ impl LlvmBackend {
             writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
         }
         if !self.ctx.constants.is_empty() { writeln!(out).ok(); }
+
+        // 2026-08-09 (init kind, Phase 2): runtime-seeded invariants — mutable
+        // globals, seeded once in the pre-reactor phase (emit_init_state /
+        // emit_inline_init_stores / __briv_init_state), then read-only for the
+        // run. Declared `global <zero>` (NOT `constant`) because the seeding
+        // store happens at runtime; the global holds the seeded value.
+        let mut sorted_inits: Vec<String> = self.ctx.inits.keys().cloned().collect();
+        sorted_inits.sort();
+        for name in &sorted_inits {
+            let init = &self.ctx.inits[name];
+            let llvm_ty = protocol_llvm_type(&init.ty, self.ctx.type_universe.as_ref());
+            let zero = if llvm_ty == "float" { "0.0" } else if llvm_ty == "double" { "0.0" } else if llvm_ty == "ptr" { "null" } else { "0" };
+            writeln!(out, "@{} = global {} {}", name, llvm_ty, zero).ok();
+        }
+        if !self.ctx.inits.is_empty() { writeln!(out).ok(); }
 
         self.declare_state_type(&mut out);
         // %State no longer has a module-level global. Instead, main()

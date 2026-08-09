@@ -138,6 +138,12 @@ pub struct CompilerContext {
     /// init_state.
     pub obj_instance_inits: std::collections::HashMap<String, (String, Expr)>,
     pub constants: HashMap<String, (Type, Expr)>,
+    /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariants, name → type
+    /// + seeding form. Emitted as mutable globals (`@name = global ... 0`),
+    /// seeded once in the pre-reactor phase (emit_init_state /
+    /// emit_inline_init_stores / __briv_init_state), then read via load. Not
+    /// folded like `constants` — the value is only known at runtime.
+    pub inits: HashMap<String, crate::ast::top::InitDecl>,
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
@@ -342,6 +348,7 @@ impl CompilerContext {
             instance_slots: std::collections::HashSet::new(),
             obj_instance_inits: std::collections::HashMap::new(),
             constants: HashMap::new(),
+            inits: HashMap::new(),
             struct_types: HashMap::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
