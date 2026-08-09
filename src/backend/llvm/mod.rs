@@ -4039,11 +4039,16 @@ impl LlvmBackend {
         // neither) — mirroring the old total_idx / total_const_name lookup so
         // literal-bound txns reach emit_countable_main with both None exactly as
         // before (emit_countable_load_bound falls back to `add i64 0, 1`).
+        // 2026-08-09 (init kind, Phase 3): an `init` bound reuses the
+        // total_const_name slot — emit_countable_load_bound loads the seeded
+        // global the same way it loads a const global (the Init global is
+        // mutable-but-seeded-once, so the load reads the seeded value).
         let (total_idx, total_const_name) = match &shape.bound {
             crate::analysis::loop_shape::Bound::Field(name) => {
                 (self.ctx.field_index_map.get(name.as_str()).copied(), None)
             }
-            crate::analysis::loop_shape::Bound::Const(name) => (None, Some(name.as_str())),
+            crate::analysis::loop_shape::Bound::Const(name)
+            | crate::analysis::loop_shape::Bound::Init(name) => (None, Some(name.as_str())),
             crate::analysis::loop_shape::Bound::Literal(_) | crate::analysis::loop_shape::Bound::Unknown(_) => {
                 (None, None)
             }
@@ -4091,6 +4096,10 @@ impl LlvmBackend {
                     .get(name.as_str())
                     .and_then(|(_, e)| if let Expr::Decimal(n) = e { Some(*n) } else { None }),
                 crate::analysis::loop_shape::Bound::Literal(_) | crate::analysis::loop_shape::Bound::Unknown(_) => None,
+                // 2026-08-09 (init kind, Phase 3): an init's value is only
+                // known at runtime — the O(1) pure-counter fold (a compile-time
+                // store count) cannot fire; the seeded-bound loop path runs.
+                crate::analysis::loop_shape::Bound::Init(_) => None,
             };
             if let Some(tv) = total_val {
                 // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid.

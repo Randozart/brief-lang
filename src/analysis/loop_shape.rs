@@ -28,6 +28,11 @@ pub enum Bound {
     Field(String),
     /// bound_var is a global constant (`const N = ...`).
     Const(String),
+    /// bound_var is a runtime-seeded invariant (`init N: Int = ...`).
+    /// 2026-08-09 (init kind, Phase 3): provably invariant for the run (set
+    /// once before beginprogram), so folding a loop against it is sound — the
+    /// backend loads the seeded global as the bound (no Unknown fallback).
+    Init(String),
     /// bound is a compile-time literal.
     Literal(i64),
     /// bound_var is neither a state field nor a constant — backend must decide.
@@ -111,8 +116,7 @@ pub fn build_loop_shapes(
     items: &[TopLevel],
     min_width: usize,
 ) -> HashMap<String, LoopShape> {
-    let state_fields = collect_state_fields(items);
-    let consts = collect_const_names(items);
+    let names = ItemNames::collect(items);
     let txns = collect_txns(items);
 
     let mut shapes = HashMap::new();
@@ -129,7 +133,7 @@ pub fn build_loop_shapes(
         let Some(txn) = txns.get(&node.name) else {
             continue;
         };
-        shapes.insert(node.name.clone(), build_shape(node, txn, &state_fields, &consts, min_width));
+        shapes.insert(node.name.clone(), build_shape(node, txn, &names, min_width));
     }
     shapes
 }
@@ -196,15 +200,14 @@ pub fn program_convergence(
 fn build_shape(
     node: &crate::analysis::transition_graph::ReactorNode,
     txn: &Transaction,
-    state_fields: &HashSet<String>,
-    consts: &HashSet<String>,
+    names: &ItemNames,
     min_width: usize,
 ) -> LoopShape {
     let bp = node.bounded_pre.as_ref().unwrap();
-    let bound = resolve_bound(bp, state_fields, consts);
+    let bound = resolve_bound(bp, names);
     let counter_only_writes = node.write_set.len() == 1 && node.write_set.contains(&bp.var);
     let carried_fields = classify_carried(node.write_set.clone(), txn);
-    let vector_groups = detect_vector_groups_structural(txn, node.write_set.clone(), state_fields, min_width);
+    let vector_groups = detect_vector_groups_structural(txn, node.write_set.clone(), &names.state_fields, min_width);
     let has_swan = swan_song::has_swan_song(&txn.body);
     let is_pure = node.is_pure_body || node.is_effectively_pure;
     LoopShape {
@@ -229,19 +232,39 @@ fn build_shape(
 /// backend's `total_idx` / `total_const_name` resolution exactly.
 fn resolve_bound(
     bp: &BoundedPre,
-    state_fields: &HashSet<String>,
-    consts: &HashSet<String>,
+    names: &ItemNames,
 ) -> Bound {
     if let Some(lit) = bp.bound_literal {
         return Bound::Literal(lit);
     }
-    if state_fields.contains(&bp.bound_var) {
+    if names.state_fields.contains(&bp.bound_var) {
         return Bound::Field(bp.bound_var.clone());
     }
-    if consts.contains(&bp.bound_var) {
+    if names.consts.contains(&bp.bound_var) {
         return Bound::Const(bp.bound_var.clone());
     }
+    if names.inits.contains(&bp.bound_var) {
+        return Bound::Init(bp.bound_var.clone());
+    }
     Bound::Unknown(bp.bound_var.clone())
+}
+
+/// The item-level name sets a loop bound can resolve against: state fields,
+/// compile-time constants, and runtime-seeded invariants.
+struct ItemNames {
+    state_fields: HashSet<String>,
+    consts: HashSet<String>,
+    inits: HashSet<String>,
+}
+
+impl ItemNames {
+    fn collect(items: &[TopLevel]) -> ItemNames {
+        ItemNames {
+            state_fields: collect_state_fields(items),
+            consts: collect_const_names(items),
+            inits: collect_init_names(items),
+        }
+    }
 }
 
 /// Classify the loop-carried field set (minimal-state, deterministic order).
@@ -365,6 +388,19 @@ fn collect_const_names(items: &[TopLevel]) -> HashSet<String> {
         }
     }
     consts
+}
+
+/// Collect runtime-seeded invariant names from `init` declarations
+/// (TopLevel::Init). 2026-08-09 (init kind, Phase 3): an init is provably
+/// invariant for the run, so a loop folded against it is sound.
+fn collect_init_names(items: &[TopLevel]) -> HashSet<String> {
+    let mut inits = HashSet::new();
+    for item in items {
+        if let TopLevel::Init(i) = item {
+            inits.insert(i.name.clone());
+        }
+    }
+    inits
 }
 
 /// Collect all transactions by name.
@@ -578,6 +614,24 @@ mod tests {
         let shapes = build_loop_shapes(&graph, &items, 4);
         let shape = shapes.values().next().unwrap();
         assert_eq!(shape.bound, Bound::Unknown("local_bound".to_string()));
+    }
+
+    /// 2026-08-09 (init kind, Phase 3): a loop bound declared by an `init`
+    /// resolves to Bound::Init — provably invariant, so the backend folds the
+    /// loop against the seeded value (no Unknown fallback).
+    #[test]
+    fn test_init_bound_resolves_to_bound_init() {
+        let (graph, items) = graph_and_items(
+            "init N: Int = 64;\n\
+             let count: Int = 0;\n\
+             node work [count < N][count == N] {\n\
+               count = count + 1;\n\
+               term;\n\
+             };\n",
+        );
+        let shapes = build_loop_shapes(&graph, &items, 4);
+        let shape = shapes.values().next().unwrap();
+        assert_eq!(shape.bound, Bound::Init("N".to_string()));
     }
 
     #[test]

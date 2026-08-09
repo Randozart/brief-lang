@@ -226,6 +226,75 @@ fn test_init_emits_global_seeding_and_read() {
     assert!(output.contains("load i64, ptr @BufSize"), "init read must load the global");
 }
 
+/// 2026-08-09 (init kind, Phase 3): a bounded-counter loop whose bound is a
+/// runtime-seeded init folds against the seeded global — the IR must load the
+/// init as the loop bound (`flb` register prefix), NOT the Unknown `add i64 0,
+/// 1` fallback that ran the loop once.
+#[test]
+fn test_init_bound_loop_folds_against_seeded_global() {
+    let init = TopLevel::Init(crate::ast::top::InitDecl {
+        name: "N".to_string(),
+        bound: None,
+        ty: Type::int(),
+        value: Some(Expr::Decimal(64)),
+        body: vec![],
+        span: None,
+        doc: None,
+    });
+    let count_state = TopLevel::StateDecl(StateDecl {
+        name: "count".to_string(),
+        ty: Type::int(),
+        span: None,
+    });
+    let node = TopLevel::Transaction(Transaction {
+        name: "work".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(
+                BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("N".to_string())),
+            ),
+            post_condition: Expr::BinaryOp(
+                BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("N".to_string())),
+            ),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Assign(
+                Expr::Identifier("count".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&[init, count_state, node], None);
+    // The folded-loop bound loads the seeded init global.
+    assert!(
+        output.contains("load i64, ptr @N, align 8"),
+        "init-bound loop must load the seeded global as its bound; got:\n{output}"
+    );
+}
+
 /// A program with `let masked: Data = data[[true, false, true]]` — exercises
 /// the Boolean mask-index lowering (2026-08-07, Phase 7).
 fn mask_index_program() -> Vec<TopLevel> {

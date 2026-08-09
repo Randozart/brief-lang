@@ -317,6 +317,11 @@ the program (unprovable)." Expanding:
    `__briv_init_state`, and reads load it; memcheck reports init-bound pools as
    sealed. Tests: 1686 pass.
 3. Proof-link: `Bound::Init` folding.
+   **DONE 2026-08-09**: `Bound::Init(String)` added; `resolve_bound` maps an
+   init bound_var to it; the fold gate accepts it via the `total_const_name`
+   slot; `emit_countable_load_bound` loads the seeded global (no Unknown
+   `add i64 0, 1` fallback). Loop-shape names bundled into `ItemNames` (build_shape
+   param count). Tests: 1688 pass.
 4. Capacity: pool read via set-max.
 5. `box`/`spill` classification around the pool.
 6. Mechanism registry generalization: `resolve_mechanism(category, name)`
@@ -333,7 +338,7 @@ the program (unprovable)." Expanding:
 | walkers/display | `src/ast/display.rs`, `src/ast/canonical.rs`, `src/annotator.rs`, `src/symbolic.rs` |
 | typechecker set-once + ordering | `src/typechecker/mod.rs` |
 | interpreter reference | `src/interpreter/mod.rs`, `src/interpreter/eval.rs` |
-| `Bound::Bound` + fold | `src/analysis/loop_shape.rs`, `src/backend/llvm/mod.rs` (`try_to_fold`), `loop_engine/counter.rs` |
+| `Bound::Init` + fold | `src/analysis/loop_shape.rs`, `src/backend/llvm/mod.rs` (`try_to_fold`), `loop_engine/counter.rs` |
 | capacity from set | `src/analysis/spawn_pool.rs`, `src/backend/llvm/emit_toplevel.rs` |
 | memcheck expansion | `src/macros/memcheck.rs` |
 | mechanism registry | `config/alloc-strategies.dbvl` + per-axis siblings (inherited by phase 6) |

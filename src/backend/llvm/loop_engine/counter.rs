@@ -1542,6 +1542,11 @@ impl LlvmBackend {
                 writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                     gep, idx).ok();
                 writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
+            } else if self.ctx.inits.contains_key(tcn) {
+                // 2026-08-09 (init kind, Phase 3): the bound is a runtime-seeded
+                // invariant — load its seeded global. Provably invariant, so the
+                // fold is sound; no Unknown `add i64 0, 1` fallback.
+                writeln!(out, "  {} = load i64, ptr @{}, align 8", bound_reg, tcn).ok();
             } else {
                 writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
             }
