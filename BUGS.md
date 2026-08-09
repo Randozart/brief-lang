@@ -1,20 +1,24 @@
 # Bugs
 
-## Spawned-obj Member Slot Read Emits Undefined `@slot` Global in Two-Node Shape — OPEN (pre-existing)
+## Spawned-obj Member Slot Read Emits Undefined `@slot` Global in Two-Node Shape — FIXED
 
 **Date:** 2026-08-09
-**Status:** Open (pre-existing; found while validating the init-bound spawn pool)
-**Root cause:** a program that spawns an obj instance inside a countdown node
-and calls a member that reads its own slot emits `load i64, ptr @<slot>`
-(a nonexistent global) instead of resolving the instance column. Reproduced
-with both a runtime field bound and a bounded-init bound — independent of the
-phase-4 init-pool work.
-**Impact:** two-node spawn programs (countdown spawner + a second node) fail at
-clang with "use of undefined value '@slot'". The single-node spawn shapes used
-by the backend tests emit correctly.
-**Repro:** `obj Counter { count: Int; txn inc() [count==0][count==1] { count = count + 1; term; }; };` + `init N: [16|32|64] Int = 16;` + `[ticks < N]` node spawning `Counter()` + calling `h.inc()`.
-**Fix (planned):** resolve the member-body slot identifier to the instance
-column in the multi-node path (mirror the single-node row resolution).
+**Status:** Fixed 2026-08-09 (commit pending)
+**Root cause:** A base that is ONLY spawned (no top-level `let c: Obj = ...`
+unpacked instance) never ran the pool registration in `build_field_index` —
+the pool counter (`__spawn_next_<base>`) and member COLUMNS were only
+registered when a top-level instance unpacked them. A spawn-only base either
+panicked ("spawn of 'X' with no registered instance pool") or, for
+box/spill bases, had no `boxed_offsets` so the member body read a nonexistent
+`@member` global.
+**Fix (applied):** extracted `register_pool_columns` (counter + static/dependent
+columns); `build_field_index` ends with a fallback pass that registers every
+base in `spawn_pools`/`dependent_pools`/`spawn_storage` that lacks a counter
+(registering `boxed_offsets` for box/spill bases). The member-body Identifier
+arm also gained a boxed_offsets fallback so boxed members resolve without a
+field slot. Regression test: `test_spawn_only_base_registers_pool`.
+**Undo:** remove the fallback pass + boxed member-body branch; the top-level
+instance path is unchanged.
 
 ## Sync Group Blocks When Members Have Unequal Firing Schedules — OPEN (pre-existing)
 

@@ -1245,6 +1245,148 @@ fn test_spill_spawn_emits_per_instance_heap() {
     );
 }
 
+/// 2026-08-09 (Bug 1): a base that is ONLY spawned (no top-level `let c: Obj
+/// = ...` instance) must still register its pool counter + member columns —
+/// otherwise `spawn Obj()` panics on a missing pool and the member body reads
+/// a nonexistent `@member` global.
+#[test]
+fn test_spawn_only_base_registers_pool() {
+    use crate::ast::top::{TypeDef, TypeDefBody, TypeDefSlot};
+    let obj = TopLevel::TypeDef(Box::new(TypeDef {
+        name: "Counter".to_string(),
+        type_params: vec![],
+        parent: None,
+        protocol: None,
+        traits: vec![],
+        bit_range: None,
+        body: TypeDefBody {
+            slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
+            metadata: HashMap::new(),
+            projections: vec![],
+            bindings: vec![],
+            operators: vec![],
+            op_bindings: vec![],
+            constraints: vec![],
+            members: vec![TopLevel::Transaction(Transaction {
+                name: "inc".to_string(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Identifier("count".to_string()),
+                        Expr::BinaryOp(
+                            crate::ast::BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("count".to_string())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                    Statement::Term(None),
+                ],
+                metadata: HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            })],
+            span: None,
+        },
+        span: None,
+    }));
+    let ticks = TopLevel::Statement(Box::new(Statement::Let {
+        name: "ticks".to_string(),
+        names: vec![],
+        ty: Some(Type::int()),
+        expr: Some(Expr::Decimal(0)),
+        modifiers: vec![],
+    }));
+    let node = TopLevel::Transaction(Transaction {
+        name: "work".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("ticks".to_string())),
+                Box::new(Expr::Decimal(3)),
+            ),
+            post_condition: Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("ticks".to_string())),
+                Box::new(Expr::Decimal(3)),
+            ),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "h".to_string(),
+                names: vec![],
+                ty: Some(Type::Custom("Counter".to_string())),
+                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![], storage: crate::ast::SpawnStorage::Pooled }),
+                modifiers: vec![],
+            },
+            Statement::Expression(Expr::MethodCall(
+                Box::new(Expr::Identifier("h".to_string())),
+                "inc".to_string(),
+                vec![],
+                None,
+            )),
+            Statement::Assign(
+                Expr::Identifier("ticks".to_string()),
+                Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("ticks".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            ),
+            Statement::Term(Some(Expr::Call(
+                "Print#".to_string(),
+                vec![Expr::Identifier("ticks".to_string())],
+                None,
+            ))),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&[obj, ticks, node], None);
+    // No top-level instance — but the pool counter + member column must still
+    // be registered (as %State struct slots) so spawn + member access resolve
+    // to columns, never @count. Slot 2 = the spawn counter; slot 3 = the
+    // `Counter.count` column ([4 x i64] = capacity 3 + row 0).
+    assert!(
+        output.contains("[4 x i64]"),
+        "spawn-only base must register a member column sized capacity+1:\n{output}"
+    );
+    assert!(
+        output.contains("i32 0, i32 2"),
+        "spawn-only base must register the __spawn_next_Counter slot:\n{output}"
+    );
+    assert!(
+        !output.contains("load i64, ptr @count"),
+        "member body must resolve the column, not a nonexistent @count global:\n{output}"
+    );
+}
+
 
 /// A reactive node whose term is a match over the `n` state field:
 /// `1..=5 => 7`, `_ => 0`. Exercises the codegen match lowering

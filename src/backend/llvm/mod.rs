@@ -4465,88 +4465,16 @@ impl LlvmBackend {
                             }
                             self.ctx.boxed_offsets.insert(base.clone(), offsets);
                         }
-                        // 2026-08-07 (object instance pools): the allocator
-                        // counter for this obj base — spawn reads it to get the
-                        // next row, then increments (starting at row 1; row 0
-                        // is the static instance). Registered once per base and
-                        // kept ALWAYS-live (the spawn codegen reads it).
-                        let counter_name = format!("__spawn_next_{}", base);
-                        if !self.ctx.field_index_map.contains_key(&counter_name) {
-                            self.ctx.field_index_map
-                                .insert(counter_name.clone(), self.ctx.field_types.len());
-                            self.push_field_type(&Type::int());
-                            self.ctx.field_initializers.insert(counter_name.clone(), Some(Expr::Decimal(1)));
-                            self.ctx.instance_slots.insert(counter_name);
-                        }
+                        // 2026-08-07 (object instance pools): register the
+                        // allocator counter + per-member COLUMNS. Row 0 is the
+                        // static instance; spawn allocates the free rows.
+                        // 2026-08-09 (Bug 1): a base with NO top-level instance
+                        // (spawn-only) has no unpacked registration — the
+                        // fallback pass at the end of build_field_index calls
+                        // this for every base in spawn_pools/dependent_pools.
+                        self.register_pool_columns(&base, &slots);
                         if let Some(init_expr) = expr {
                             self.ctx.obj_instance_inits.insert(name.clone(), (base.clone(), init_expr.clone()));
-                        }
-                        // 2026-08-07 (object instance pools): each member is a
-                        // COLUMN over the instance id — `[capacity x T]` for a
-                        // scalar, `[capacity x [N x T]]` for a member array.
-                        // Row 0 is the static instance; spawn allocates the
-                        // free rows.
-                        // 2026-08-07 (object instance pools): the column
-                        // capacity is the PROVEN maximum live instance count
-                        // from the frontend spawn-count analysis — the pool is
-                        // predictably inexhaustible (no runtime exhaustion
-                        // path). Row 0 is the static instance, so the columns
-                        // hold live + 1.
-                        let capacity = self.ctx.spawn_pools.get(&base)
-                            .map(|n| n + 1)
-                            .unwrap_or(1);
-                        let is_dependent = self.ctx.dependent_pools.contains_key(&base);
-                        for (mname, mty) in slots {
-                            let slot_name = format!("{}.{}", base, mname);
-                            if is_dependent {
-                                // 2026-08-07 (object instance pools): a
-                                // DEPENDENT column is a heap buffer — the slot
-                                // stores the malloc'd buffer address (an i64),
-                                // sized at init to the runtime-bound capacity
-                                // (SPEC §16.6). Member access loads the
-                                // pointer and GEPs the row inside the buffer
-                                // (see emit_instance_column_row).
-                                let slot_idx = self.ctx.field_types.len();
-                                self.ctx.field_index_map
-                                    .insert(slot_name.clone(), slot_idx);
-                                self.push_field_type(&Type::int());
-                                // The slot's LLVM type is i64 (the buffer
-                                // address); its BRIV type is the MEMBER type
-                                // so emit_instance_column_row can derive the
-                                // row type (a member array stays Vector for
-                                // the pointer-returning caller).
-                                self.ctx.field_briv_types[slot_idx] = mty.clone();
-                                self.ctx.field_initializers.insert(slot_name.clone(), None);
-                                self.ctx.instance_slots.insert(slot_name);
-                                // The row load type = the member's LLVM type: a member array keeps its
-                                // full `[N x T]` shape (a row IS the member
-                                // array); a scalar member is its own llvm type.
-                                let elem_ty = if matches!(mty, Type::Vector(_, _)) {
-                                    self.vector_array_llvm_type(&mty)
-                                        .unwrap_or_else(|| "i64".to_string())
-                                } else {
-                                    self.llvm_type(&mty)
-                                };
-                                self.ctx.heap_columns.insert(slot_idx, elem_ty);
-                                continue;
-                            }
-                            let column = match mty {
-                                Type::Vector(inner, dims) => Type::Vector(
-                                    inner.clone(),
-                                    std::iter::once(crate::ast::Dimension::Anonymous(capacity))
-                                        .chain(dims.iter().cloned())
-                                        .collect(),
-                                ),
-                                _ => Type::Vector(
-                                    Box::new(mty.clone()),
-                                    vec![crate::ast::Dimension::Anonymous(capacity)],
-                                ),
-                            };
-                            self.ctx.field_index_map
-                                .insert(slot_name.clone(), self.ctx.field_types.len());
-                            self.push_field_type(&column);
-                            self.ctx.field_initializers.insert(slot_name.clone(), None);
-                            self.ctx.instance_slots.insert(slot_name);
                         }
                     } else {
                         self.ctx.field_index_map
@@ -4805,6 +4733,121 @@ impl LlvmBackend {
                 }
                 self.ctx.cache_slots.insert(name.clone(), target_map);
             }
+        }
+
+        // 2026-08-09 (Bug 1): a base that is ONLY spawned (no top-level
+        // `let c: Obj = ...` unpacked instance) never ran the pool registration
+        // above. Register the allocator counter + member columns for every
+        // base the frontend spawn analysis knows about, so `spawn Obj()`
+        // doesn't panic on a missing pool and the member bodies resolve their
+        // columns instead of a nonexistent `@member` global.
+        let pool_bases: Vec<String> = self.ctx.spawn_pools.keys()
+            .chain(self.ctx.dependent_pools.keys())
+            .chain(self.ctx.spawn_storage.keys())
+            .cloned()
+            .collect();
+        let mut pool_bases = pool_bases;
+        pool_bases.sort();
+        pool_bases.dedup();
+        for base in &pool_bases {
+            if !self.ctx.obj_members.contains_key(base) {
+                continue;
+            }
+            let slots: Vec<(String, Type)> = self.ctx.struct_types.get(base)
+                .cloned()
+                .unwrap_or_default();
+            if slots.is_empty() {
+                continue;
+            }
+            // Box/spill bases register the per-instance member layout (their
+            // spawns are heap blocks, not pool columns) and never get a
+            // counter/column.
+            if let Some(_storage) = self.ctx.spawn_storage.get(base) {
+                if !self.ctx.boxed_offsets.contains_key(base) {
+                    let mut offsets: std::collections::HashMap<String, (u64, Type)> =
+                        std::collections::HashMap::new();
+                    let mut off = 0u64;
+                    for (mname, mty) in &slots {
+                        offsets.insert(mname.clone(), (off, mty.clone()));
+                        off += crate::backend::llvm::types::type_size(
+                            mty, self.ctx.type_universe.as_ref(),
+                        );
+                    }
+                    self.ctx.boxed_offsets.insert(base.clone(), offsets);
+                }
+                continue;
+            }
+            let counter_name = format!("__spawn_next_{}", base);
+            if self.ctx.field_index_map.contains_key(&counter_name) {
+                continue;
+            }
+            self.register_pool_columns(base, &slots);
+        }
+    }
+
+    /// 2026-08-07 (object instance pools): register a base's allocator counter
+    /// (`__spawn_next_<base>`, starts at row 1) and per-member COLUMNS —
+    /// `[capacity x T]` for a scalar, `[capacity x [N x T]]` for a member
+    /// array, or a dependent heap buffer when the spawn count is runtime-bound
+    /// (SPEC §16.6). Row 0 is the static instance (or the first spawned row for
+    /// spawn-only bases); the pool is provably inexhaustible. Idempotent — the
+    /// counter check skips bases already registered via a top-level instance.
+    fn register_pool_columns(&mut self, base: &str, slots: &[(String, Type)]) {
+        let counter_name = format!("__spawn_next_{}", base);
+        if !self.ctx.field_index_map.contains_key(&counter_name) {
+            self.ctx.field_index_map
+                .insert(counter_name.clone(), self.ctx.field_types.len());
+            self.push_field_type(&Type::int());
+            self.ctx.field_initializers.insert(counter_name.clone(), Some(Expr::Decimal(1)));
+            self.ctx.instance_slots.insert(counter_name);
+        }
+        let capacity = self.ctx.spawn_pools.get(base)
+            .map(|n| n + 1)
+            .unwrap_or(1);
+        let is_dependent = self.ctx.dependent_pools.contains_key(base);
+        for (mname, mty) in slots {
+            let slot_name = format!("{}.{}", base, mname);
+            if self.ctx.field_index_map.contains_key(&slot_name) {
+                continue;
+            }
+            if is_dependent {
+                // 2026-08-07 (object instance pools): a DEPENDENT column is a
+                // heap buffer — the slot stores the malloc'd buffer address (an
+                // i64), sized at init to the runtime-bound capacity (SPEC
+                // §16.6). Member access loads the pointer and GEPs the row
+                // inside the buffer (see emit_instance_column_row).
+                let slot_idx = self.ctx.field_types.len();
+                self.ctx.field_index_map.insert(slot_name.clone(), slot_idx);
+                self.push_field_type(&Type::int());
+                self.ctx.field_briv_types[slot_idx] = mty.clone();
+                self.ctx.field_initializers.insert(slot_name.clone(), None);
+                self.ctx.instance_slots.insert(slot_name);
+                let elem_ty = if matches!(mty, Type::Vector(_, _)) {
+                    self.vector_array_llvm_type(mty)
+                        .unwrap_or_else(|| "i64".to_string())
+                } else {
+                    self.llvm_type(mty)
+                };
+                self.ctx.heap_columns.insert(slot_idx, elem_ty);
+                continue;
+            }
+            let column = match mty {
+                Type::Vector(inner, dims) => Type::Vector(
+                    inner.clone(),
+                    std::iter::once(crate::ast::Dimension::Anonymous(capacity))
+                        .chain(dims.iter().cloned())
+                        .collect(),
+                ),
+                _ => Type::Vector(
+                    Box::new(mty.clone()),
+                    vec![crate::ast::Dimension::Anonymous(capacity)],
+                ),
+            };
+            self.ctx.field_index_map
+                .insert(slot_name.clone(), self.ctx.field_types.len());
+            self.push_field_type(&column);
+            self.ctx.field_initializers.insert(slot_name.clone(), None);
+            self.ctx.instance_slots.insert(slot_name);
         }
     }
 

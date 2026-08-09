@@ -183,6 +183,27 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
                         return TypedRegister { name: loaded, ty: row_ty };
                     }
+                    // 2026-08-09 (Bug 1 / Phase 5): a BOXED/SPILLED member body
+                    // has no `{base}.{member}` field slot (the instance is a
+                    // per-heap block, not a pooled column) — resolve the member
+                    // through the boxed_offsets layout directly: inttoptr the
+                    // handle + GEP the byte offset.
+                    if let Some(offsets) = self.ctx.boxed_offsets.get(prefix.as_str()) {
+                        if let Some((off, mty)) = offsets.get(name) {
+                            let ptr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, row_reg).ok();
+                            let gep = self.fun.gen_reg();
+                            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, off).ok();
+                            let llvm_ty = if matches!(mty, Type::Ptr(_)) {
+                                "i64".to_string()
+                            } else {
+                                self.llvm_type(mty)
+                            };
+                            let loaded = self.fun.gen_reg();
+                            writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, llvm_ty, gep).ok();
+                            return TypedRegister { name: loaded, ty: mty.clone() };
+                        }
+                    }
                 }
     /// 2026-08-07 (Phase 7): a let MUTATED via `x = ...` is
                 /// redirected to an alloca slot by the assign — reads must load
