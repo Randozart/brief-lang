@@ -824,6 +824,10 @@ pub struct ForeignBinding {
     pub is_fire_forget: bool,
     /// 2026-07-25: frgn?! — fire-and-forget with Bool(delivered) return.
     pub is_delivery: bool,
+    /// 2026-08-09 (Phase 12, SPEC §19.4): a variadic foreign signature has an
+    /// explicit final named variadic parameter (`variadic args: ForeignArgs`).
+    /// GLUE supplies the ABI behavior; `...` is reserved for slicing.
+    pub is_variadic: bool,
 }
 
 impl ForeignBinding {
@@ -858,6 +862,7 @@ impl ForeignBinding {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
         }
     }
 

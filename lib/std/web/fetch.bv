@@ -2,4 +2,4 @@
 // Returns response body as String. For streaming or binary responses,
 // use the lower-level fetch with callbacks (future enhancement).
 
-frgn fetch_url(url: String) -> String as fetch from #Web;
+frgn fetch(url: String) -> String : fetch_url from #Web;

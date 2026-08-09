@@ -321,12 +321,30 @@ impl<'a> Parser<'a> {
     /// `from` is required (provenance for the foreign module).
     /// `as` is optional and comes before `from` (Briv name, different from the C symbol).
     fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
-        // 2026-07-22: First name after `frgn` is the C/foreign symbol name.
-        let foreign_name = self.expect_identifier()?;
+        // 2026-08-09 (Phase 12, SPEC §19.1): the declaration name is the LOCAL
+        // Briv name; a `:` binds a DIFFERENT external (link) symbol. `as` is
+        // not an alias operator (removed — the 2026-07-22 inversion).
+        let local_name = self.expect_identifier()?;
+
+        // 2026-08-09 (SPEC §19.7): `frgn name @ address` (MMIO) is invalid —
+        // memory-mapped I/O uses configured ports or explicit intrinsics.
+        // We can't see `@` until after the params; the post-param check
+        // rejects it. (Also rejected before `(` by the caller's dispatch.)
 
         self.expect(Token::LParen)?;
         let mut inputs = Vec::new();
+        let mut is_variadic = false;
         while !self.check(&Token::RParen) {
+            // 2026-08-09 (SPEC §19.4): `variadic args: ForeignArgs` — an
+            // explicit final named variadic parameter. `...` is reserved for
+            // slicing, so the marker is the `variadic` keyword.
+            if self.check_identifier("variadic") {
+                if is_variadic {
+                    return self.error_at_current("only one `variadic` parameter is allowed");
+                }
+                is_variadic = true;
+                self.pos += 1; // consume `variadic`
+            }
             let param_name = self.expect_identifier()?;
             self.expect(Token::Colon)?;
             let param_type = self.parse_type()?;
@@ -342,12 +360,23 @@ impl<'a> Parser<'a> {
             vec![]
         };
 
-        // 2026-07-22: Parse optional `as <briv_name>` — Briv-side name, before `from`.
-        let briv_name = if self.eat(&Token::As) {
-            Some(self.expect_identifier()?)
+        // 2026-08-09 (SPEC §19.1): `: external_symbol` binds the link symbol.
+        // Absent → the local name IS the external symbol. The old `as
+        // <briv_name>` form is removed (it inverted the names).
+        let (foreign_name, briv_name): (String, Option<String>) = if self.eat(&Token::Colon) {
+            (self.expect_identifier()?, Some(local_name))
         } else {
-            None
+            (local_name.clone(), None)
         };
+
+        // 2026-08-09 (SPEC §19.7): reject the MMIO address form `frgn name @
+        // address` after the signature (e.g. `frgn x(...) @ 0x...`).
+        if self.check(&Token::At) {
+            return self.error_at_current(
+                "frgn `@ address` (MMIO) is invalid — use configured device/cell \
+                 ports or explicit pointer/address intrinsics",
+            );
+        }
 
         // 2026-07-22: `from` is REQUIRED — every frgn must declare provenance.
         if !self.eat(&Token::From) {
@@ -428,6 +457,7 @@ impl<'a> Parser<'a> {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic,
         })
     }
 
@@ -2472,6 +2502,44 @@ mod tests {
         let fb = parse_frgn(r#"frgn print(s: String) from "libio.so";"#).unwrap();
         assert_eq!(fb.foreign_name, "print");
         assert!(fb.success_output.is_empty());
+    }
+
+    // ── 2026-08-09 (Phase 12, SPEC §19.1/19.4/19.7) ──────────────────
+
+    #[test]
+    fn test_frgn_colon_binds_external_symbol() {
+        // SPEC §19.1: the declaration name is the LOCAL Briv name; `:` binds a
+        // different external (link) symbol. `as` is not an alias operator.
+        let fb = parse_frgn(
+            r#"frgn local_add(a: Int, b: Int) -> Int: external_add from #System;"#,
+        )
+        .unwrap();
+        assert_eq!(fb.foreign_name, "external_add", "the `:` symbol is the link name");
+        assert_eq!(fb.briv_name.as_deref(), Some("local_add"), "the declaration name is the local Briv name");
+        assert_eq!(fb.effective_briv_name(), "local_add");
+    }
+
+    #[test]
+    fn test_frgn_variadic_named_param() {
+        // SPEC §19.4: `variadic args: ForeignArgs` — an explicit final named
+        // variadic parameter; `...` stays reserved for slicing.
+        let fb = parse_frgn(
+            r#"frgn log(format: String, variadic args: ForeignArgs) -> Void from #System;"#,
+        )
+        .unwrap();
+        assert!(fb.is_variadic, "the `variadic` marker must be recorded");
+        assert_eq!(fb.inputs.len(), 2);
+        assert_eq!(fb.inputs[1].0, "args");
+    }
+
+    #[test]
+    fn test_frgn_mmio_address_form_rejected() {
+        // SPEC §19.7: `frgn name @ address` is invalid — MMIO uses configured
+        // ports or explicit intrinsics. The `@` is rejected regardless of where
+        // it appears (before params via the dedicated check, or after `from`
+        // via the trailing-token expectation).
+        assert!(parse_frgn(r#"frgn reg(a: Int) -> Int from "c" @ 0x40000000;"#).is_err());
+        assert!(parse_frgn(r#"frgn reg @ 0x40000000;"#).is_err());
     }
 
     #[test]

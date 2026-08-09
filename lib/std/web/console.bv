@@ -3,6 +3,6 @@
 // The GLUE [web] target generates JS import stubs from the type signatures
 // — no compiler knowledge of these function names.
 
-frgn console_log(msg: String) as log from #Web;
-frgn console_warn(msg: String) as warn from #Web;
-frgn console_error(msg: String) as error from #Web;
+frgn log(msg: String) : console_log from #Web;
+frgn warn(msg: String) : console_warn from #Web;
+frgn error(msg: String) : console_error from #Web;

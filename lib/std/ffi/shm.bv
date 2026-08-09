@@ -13,9 +13,9 @@
 
 // Replaced: frgn __ftruncate_shm with FTruncate# intrinsic
 
-frgn __shm_list() -> Result<List<String>, ShmError> as frgn__shm_list from "lib/runtime/briv_rt.c" fallback [];
-frgn __shm_exists(name: String) -> Result<Bool, ShmError> as frgn__shm_exists from "lib/runtime/briv_rt.c" fallback false;
-frgn __shm_size(name: String) -> Result<Int, ShmError> as frgn__shm_size from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__shm_list() -> Result<List<String>, ShmError> : __shm_list from "lib/runtime/briv_rt.c" fallback [];
+frgn frgn__shm_exists(name: String) -> Result<Bool, ShmError> : __shm_exists from "lib/runtime/briv_rt.c" fallback false;
+frgn frgn__shm_size(name: String) -> Result<Int, ShmError> : __shm_size from "lib/runtime/briv_rt.c" fallback 0;
 
 // ===== NATIVE WRAPPERS =====
 
@@ -45,12 +45,12 @@ frgn __shm_size(name: String) -> Result<Int, ShmError> as frgn__shm_size from "l
 
 // Replaced: frgn __mmap_anonymous with Mmap# intrinsic
 
-frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> as frgn__msync from "lib/runtime/briv_rt.c" fallback;
+frgn frgn__msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> : __msync from "lib/runtime/briv_rt.c" fallback;
 
-frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> as frgn__mmap_write from "lib/runtime/briv_rt.c" fallback;
-frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> as frgn__mmap_read from "lib/runtime/briv_rt.c" fallback [];
-frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> as frgn__mmap_read_u32 from "lib/runtime/briv_rt.c" fallback 0;
-frgn __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> as frgn__mmap_write_u32 from "lib/runtime/briv_rt.c" fallback;
+frgn frgn__mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> : __mmap_write from "lib/runtime/briv_rt.c" fallback;
+frgn frgn__mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> : __mmap_read from "lib/runtime/briv_rt.c" fallback [];
+frgn frgn__mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> : __mmap_read_u32 from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> : __mmap_write_u32 from "lib/runtime/briv_rt.c" fallback;
 
 // PROT_READ | PROT_WRITE flags
 

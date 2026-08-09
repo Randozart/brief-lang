@@ -3933,6 +3933,7 @@ fn test_frgn_ptr_declare() {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
             doc: None,
         }),
     ];
@@ -3967,6 +3968,7 @@ fn test_frgn_ptr_return() {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
             doc: None,
         }),
     ];
@@ -4070,6 +4072,7 @@ fn test_addr_of_struct_literal() {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {
@@ -4157,6 +4160,7 @@ fn test_frgn_ptr_param_inttoptr() {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {
@@ -4410,6 +4414,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
             is_optional: false,
             is_fire_forget: false,
             is_delivery: false,
+            is_variadic: false,
             doc: None,
         }),
         TopLevel::Definition(Definition {

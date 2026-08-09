@@ -5,18 +5,18 @@
 //   5 = host_invoke_clang(ptr_to_argv) — fork+exec clang
 
 // Host function declarations — these become HCALL instructions
-frgn host_llvm_emit(text: Int) -> Int as emit_ir from "host";
-frgn host_llvm_flush(path: Int) -> Int as flush_ir from "host";
-frgn host_invoke_clang(argv: Int) -> Int as invoke_clang from "host";
+frgn emit_ir(text: Int) -> Int : host_llvm_emit from "host";
+frgn flush_ir(path: Int) -> Int : host_llvm_flush from "host";
+frgn invoke_clang(argv: Int) -> Int : host_invoke_clang from "host";
 
 export defn emit_ir_text(text: Ptr<Int>) -> Int {
-    term host_llvm_emit(text as Int);
+    term emit_ir(text as Int);
 };
 
 export defn flush_ir_to_file(path: Ptr<Int>) -> Int {
-    term host_llvm_flush(path as Int);
+    term flush_ir(path as Int);
 };
 
 export defn compile_with_clang(argv: Ptr<Int>) -> Int {
-    term host_invoke_clang(argv as Int);
+    term invoke_clang(argv as Int);
 };

@@ -10,8 +10,8 @@
 
 import "glue/c.bv";
 
-frgn briv_str_substr(handle: String, a: Int, b: Int) -> String as briv_str_substr from "lib/runtime/briv_rt.c" fallback "";
-frgn briv_str_char_at(handle: String, i: Int) -> Int as briv_str_char_at from "lib/runtime/briv_rt.c" fallback 0;
+frgn briv_str_substr(handle: String, a: Int, b: Int) -> String : briv_str_substr from "lib/runtime/briv_rt.c" fallback "";
+frgn briv_str_char_at(handle: String, i: Int) -> Int : briv_str_char_at from "lib/runtime/briv_rt.c" fallback 0;
 
 // char_at(s, i): the i-th byte as an Int (no allocation).
 defn char_at(s: String, i: Int) -> Int {
