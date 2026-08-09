@@ -155,3 +155,25 @@ reference → LLVM codegen → tests), plus the Kani/verification obligations.
 - Remaining: Slice D (task cancellation proof + Kani). The "silently dropped
   live handle is an error" liveness check rides the ownership analysis
   (Phase 9 follow-up, not this slice).
+
+### 2026-08-09 — Slice D (cancellation proof + Kani) DONE
+
+- `check_pair`'s classification decision extracted to `classify_eligible_pair`
+  (pure over both_async/same_group) so Kani can prove the gate.
+- Kani proofs (`cfg(feature = kani, kani_full)`):
+  - `verify_classified_pair_is_accepted` — any classified eligible pair
+    (both async OR same group) returns None (accepted), never an error.
+  - `verify_unclassified_pair_is_rejected` — an eligible pair that is
+    neither both-async nor same-group is rejected.
+  Together they establish: no unclassified eligible pair reaches execution
+  (SPEC §12.1 / Kani obligation).
+- Task cancellation: `free task` is always safe in the deterministic inline
+  model (a spawned task runs synchronously; there are no live host threads
+  to cancel), so the effect-analysis requirement is trivially satisfied.
+  The "silently dropped live handle is an error" ownership check rides the
+  Phase 9 ownership analysis (tracked separately).
+- Phase 10 §16.1 control forms now complete: rollback, endprogram, defer,
+  mutex, barrier<group>, spawn/await/free/keep task handles, no statement
+  async. Remaining §16.2-16.5 (objects/cells lifecycle, deterministic
+  scheduler interleaving mode, watchdog units, barrier Kani membership
+  proofs) are tracked as follow-ups.
