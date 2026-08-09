@@ -289,6 +289,10 @@ the program (unprovable)." Expanding:
   the current model: one, target, one pick).
 - `budget`/capacity-tier keyword grammar is noted but deferred until after
   `box`/`spill` shape.
+- Phase 6 (mechanism registry `resolve_mechanism(category, name)` + the FFI
+  delivery/source/fallback grammar) is **DEFERRED 2026-08-09** — grammar and
+  registry intent are settled here, implementation is a standalone follow-up.
+  See the Phasing §6 DEFERRED marker.
 
 ## Verification
 
@@ -341,6 +345,14 @@ the program (unprovable)." Expanding:
 6. Mechanism registry generalization: `resolve_mechanism(category, name)`
    shared by storage + ownership policy; FFI delivery/source/fallback axes
    flattened onto the same grammar+registry (deferred grammar, settled here).
+   **DEFERRED 2026-08-09 — NOT STARTED.** The grammar shape, axis table, and
+   registry intent are settled in the "Strategy keywords" section above; the
+   `config/alloc-strategies.dbvl` registry and `resolve_mechanism` API do not
+   exist yet. The init-kind ecosystem (phases 1–5) is complete and committed;
+   phase 6 is a standalone follow-up with no dependency on the committed work.
+   Undo if/when started: this entry is the sole record — there is no code to
+   revert. Reopen by removing this DEFERRED marker and implementing the
+   registry per the settled design.
 
 ## Reference map
 
