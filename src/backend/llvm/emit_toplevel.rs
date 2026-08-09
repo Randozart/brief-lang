@@ -77,8 +77,7 @@ impl LlvmBackend {
     /// Emit cleanup calls for all local variables whose type has an
     /// OnExit foreign destructor. Called at scope exit points.
     fn emit_on_exit_cleanup(&mut self, out: &mut String, indent: &str) {
-        let Some(ref universe) = self.ctx.type_universe else { return };
-        for (name, ty) in &self.fun.let_binding_types {
+        let Some(ref universe) = self.ctx.type_universe else { return };        for (name, ty) in &self.fun.let_binding_types {
             let type_name = match ty {
                 crate::ast::Type::Custom(n) => n,
                 crate::ast::Type::Applied(n, _) => n,
@@ -99,6 +98,19 @@ impl LlvmBackend {
                 reg
             ).ok();
             self.fun.txn_counter += 1;
+        }
+    }
+
+    /// 2026-08-09 (Phase 10): emit all registered `defer` bodies LIFO and
+    /// clear the stack. Called before every exit of a transaction/reactive
+    /// firing (term, rollback, fallthrough ret). A defer body may itself
+    /// register more defers — they are collected and flushed too (each runs
+    /// exactly once).
+    pub(super) fn flush_defer_cleanup(&mut self, out: &mut String, indent: &str) {
+        while let Some(body) = self.fun.defer_bodies.pop() {
+            for stmt in &body {
+                crate::backend::llvm::emit_stmt::emit_statement(self, out, stmt, indent);
+            }
         }
     }
 
@@ -1708,6 +1720,8 @@ impl LlvmBackend {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
         }
+        // 2026-08-09 (Phase 10): a fallthrough exit runs registered defers.
+        self.flush_defer_cleanup(out, "  ");
         // Foreign destructor cleanup: emit OnExit calls before returning
         self.emit_on_exit_cleanup(out, "  ");
         if !self.fun.terminated {
@@ -2166,6 +2180,8 @@ impl LlvmBackend {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
         }
+            // 2026-08-09 (Phase 10): a fallthrough exit runs registered defers.
+            self.flush_defer_cleanup(out, "  ");
             if !self.fun.terminated {
                 self.emit_beginprogram_goal_check(out, txn);
                 self.emit_arena_fini(out, "  ");

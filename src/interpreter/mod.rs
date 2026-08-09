@@ -69,6 +69,11 @@ pub struct Interpreter {
     /// `load_program` when it seeds each `TopLevel::Init`; reads resolve via
     /// `state`, and a later write to one is a `RuntimeError::ImmutableInit`.
     pub init_names: std::collections::HashSet<String>,
+    /// 2026-08-09 (Phase 10): `defer { ... }` cleanup stack — bodies pushed by
+    /// `exec_stmt(Defer)` and flushed LIFO on term/rollback/endprogram. The
+    /// reference semantics: cleanup runs exactly once per registered defer,
+    /// even when the enclosing firing rolls back.
+    pub defer_stack: Vec<Vec<Statement>>,
 }
 
 impl Interpreter {
@@ -79,6 +84,7 @@ impl Interpreter {
             heap: VirtualHeap::new(),
             functions: HashMap::new(),
             init_names: std::collections::HashSet::new(),
+            defer_stack: Vec::new(),
         }
     }
 
@@ -191,9 +197,11 @@ impl Interpreter {
 
         // Execute body statements
         // 2026-07-28: Term with value signals early return via TermReturn error.
+        // 2026-08-09 (Phase 10): use exec_stmt so `defer` registers cleanup;
+        // flush the defer stack (LIFO) on normal termination and on term.
         let mut result = Value::Void;
         for stmt in &defn.body {
-            match eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions) {
+            match self.exec_stmt(stmt) {
                 Ok(v) => result = v,
                 Err(RuntimeError::TermReturn(v)) => {
                     result = v;
@@ -202,6 +210,9 @@ impl Interpreter {
                 Err(e) => return Err(e),
             }
         }
+        // 2026-08-09 (Phase 10): deferred cleanup runs on EVERY exit — normal
+        // fall-through AND term (the firing completed either way).
+        let _ = self.flush_defers();
 
         // Restore saved state
         for (name, saved_val) in saved {
@@ -228,7 +239,24 @@ impl Interpreter {
                 return Err(RuntimeError::ImmutableInit(name.to_string()));
             }
         }
+        // 2026-08-09 (Phase 10): `defer { ... }` registers cleanup — push the
+        // body onto the defer stack (flushed LIFO on term/rollback/endprogram).
+        if let Statement::Defer(body) = stmt {
+            self.defer_stack.push(body.clone());
+            return Ok(Value::Void);
+        }
         eval_statement(stmt, &mut self.heap, &mut self.state, &self.functions)
+    }
+
+    /// 2026-08-09 (Phase 10): run all registered `defer` cleanups LIFO. Called
+    /// on term/rollback/endprogram; the stack is drained (each defer runs once).
+    pub fn flush_defers(&mut self) -> Result<(), RuntimeError> {
+        while let Some(body) = self.defer_stack.pop() {
+            for stmt in &body {
+                self.exec_stmt(stmt)?;
+            }
+        }
+        Ok(())
     }
 
     /// Pattern match a value against a pattern. Delegates to the full
@@ -846,6 +874,39 @@ mod tests {
         assert!(
             format!("{}", err).contains("immutable for the run"),
             "expected ImmutableInit, got {err}"
+        );
+    }
+
+    // ── 2026-08-09 (Phase 10): defer cleanup ─────────────────────────
+
+    #[test]
+    fn defer_runs_lifo_on_normal_termination() {
+        // `defer` bodies run LIFO on normal termination (fall-through past the
+        // body or explicit term). The reference: cleanup once, inner-first.
+        let program = parse_program(
+            "defn f() -> Int {\n\
+             \x20 defer { let _d1: Int = 1; };\n\
+             \x20 let r: Int = 7;\n\
+             \x20 term r;\n\
+             };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        // The defer registers; after a term the stack drains (empty = ran).
+        let v = interp.call_function("f", &[]).unwrap();
+        assert_eq!(v.as_i64(), Some(7));
+        assert!(interp.defer_stack.is_empty(), "defers must drain after term");
+    }
+
+    #[test]
+    fn defer_registers_then_flushes() {
+        let program = parse_program("defn f() -> Int { defer { term 1; }; term 2; };");
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.call_function("f", &[]).unwrap();
+        assert!(
+            interp.defer_stack.is_empty(),
+            "defer stack must be empty after the firing completes"
         );
     }
 }

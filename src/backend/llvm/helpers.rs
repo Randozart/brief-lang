@@ -287,6 +287,25 @@ impl LlvmBackend {
                     .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
                     .collect(),
             ),
+            Statement::Defer(stmts) => Statement::Defer(
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
+            ),
+            Statement::Mutex(stmts) => Statement::Mutex(
+                stmts
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
+            ),
+            Statement::Barrier { groups, body } => Statement::Barrier {
+                groups: groups.clone(),
+                body: body
+                    .iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
+                    .collect(),
+            },
             Statement::InlineAsm { .. } => stmt.clone(),
             Statement::TrgBinding { name, instance } => Statement::TrgBinding {
                 name: name.clone(),

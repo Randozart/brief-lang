@@ -1291,6 +1291,25 @@ pub fn eval_statement(
             }
             Ok(result)
         }
+        Statement::Mutex(body) => {
+            let mut result = Value::Void;
+            for stmt in body {
+                result = eval_statement(stmt, heap, bindings, functions)?;
+            }
+            Ok(result)
+        }
+        Statement::Barrier { body, .. } => {
+            let mut result = Value::Void;
+            for stmt in body {
+                result = eval_statement(stmt, heap, bindings, functions)?;
+            }
+            Ok(result)
+        }
+        // 2026-08-09 (Phase 10): `defer` is handled by the Interpreter wrapper
+        // (exec_stmt pushes the body onto the defer stack, flushed LIFO on
+        // term/rollback/endprogram). This standalone arm is a defensive
+        // no-op for direct eval_statement callers (tests).
+        Statement::Defer(_) => Ok(Value::Void),
         // 2026-08-07 (Phase 7): `foreach(item in list)` — the sole iteration
         // keyword (SPEC §11.4). The iterable is an integer range (`0..=n`) or
         // a collection (a Product for lists/vectors, or Bits for Data).

@@ -690,6 +690,10 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// Set by callable-txn body entry. Gate emits `br i1 %cond, continue, convergence_target`
     /// when the condition is false, branching back to the convergence loop for retry.
     pub convergence_target: Option<String>,
+    /// 2026-08-09 (Phase 10): `defer { ... }` bodies registered by the current
+    /// transaction/reactive firing, in registration order. Flushed LIFO before
+    /// every exit (term/rollback/fallthrough ret) via flush_defer_cleanup.
+    pub defer_bodies: Vec<Vec<crate::ast::Statement>>,
     /// 2026-08-04 (term-termination-diagnostics): label that a value-form
     /// `term <val>` / `term! <val>` in a VOID function branches to, unwinding
     /// the rest of the transaction body (interpreter TermReturn in
@@ -934,6 +938,7 @@ impl FunctionContext {
             callable_txn_result: None,
             callable_txn_post_label: None,
             convergence_target: None,
+            defer_bodies: Vec::new(),
             void_txn_abort_label: None,
             ssa_state_reg: None,
             param_slots: HashMap::new(),

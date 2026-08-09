@@ -54,6 +54,9 @@ impl<'a> Parser<'a> {
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
             Some(Token::Sync) => self.parse_sync_block(),
+            Some(Token::Defer) => self.parse_defer_statement(),
+            Some(Token::Mutex) => self.parse_mutex_statement(),
+            Some(Token::Barrier) => self.parse_barrier_statement(),
             Some(Token::Match) => self.parse_match_statement(),
             Some(Token::LBrace) => self.parse_block_statement(),
             Some(Token::LBracket) => self.parse_guard_statement_bracket(),
@@ -271,6 +274,44 @@ impl<'a> Parser<'a> {
         // 2026-08-05 (Phase 2 canonical formatter): consume optional `;`.
         self.eat(&Token::Semicolon);
         Ok(Statement::SyncBlock(body))
+    }
+
+    /// `defer { ... }` — cleanup registered for the current transaction;
+    /// runs LIFO on `term`, `rollback`, and `endprogram` (2026-08-09, Phase 10).
+    fn parse_defer_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1;
+        let body = self.parse_block()?;
+        self.eat(&Token::Semicolon);
+        Ok(Statement::Defer(body))
+    }
+
+    /// `mutex { ... }` — a serial section (2026-08-09, Phase 10).
+    fn parse_mutex_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1;
+        let body = self.parse_block()?;
+        self.eat(&Token::Semicolon);
+        Ok(Statement::Mutex(body))
+    }
+
+    /// `barrier<group> { ... }` — a group-barrier body (2026-08-09, Phase 10).
+    fn parse_barrier_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1;
+        let groups = if self.eat(&Token::Lt) {
+            let mut names = Vec::new();
+            loop {
+                names.push(self.expect_identifier()?);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            names
+        } else {
+            vec![]
+        };
+        let body = self.parse_block()?;
+        self.eat(&Token::Semicolon);
+        Ok(Statement::Barrier { groups, body })
     }
 
     /// { stmt; stmt; ... }
@@ -597,5 +638,48 @@ mod tests {
         }
         assert!(saw_value, "endprogram 5; must parse as EndProgram(Some)");
         assert!(saw_bare, "endprogram; must parse as EndProgram(None)");
+    }
+
+    // ── 2026-08-09 (Phase 10): defer/mutex/barrier statements ─────────
+
+    #[test]
+    fn defer_mutex_barrier_parse() {
+        let src = "defn f(x: Int) -> Int {
+            defer { term 1; };
+            mutex { let y: Int = x; };
+            barrier<g> { term x; };
+            term x;
+        };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let program = p.parse_program().unwrap();
+        let body = match &program[0] {
+            crate::ast::TopLevel::Definition(d) => &d.body,
+            _ => panic!("expected defn"),
+        };
+        let mut saw_defer = false;
+        let mut saw_mutex = false;
+        let mut saw_barrier = false;
+        for s in body {
+            match s {
+                Statement::Defer(b) => {
+                    saw_defer = true;
+                    assert_eq!(b.len(), 1);
+                }
+                Statement::Mutex(b) => {
+                    saw_mutex = true;
+                    assert_eq!(b.len(), 1);
+                }
+                Statement::Barrier { groups, body } => {
+                    saw_barrier = true;
+                    assert_eq!(groups, &vec!["g".to_string()]);
+                    assert_eq!(body.len(), 1);
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_defer, "defer block must parse");
+        assert!(saw_mutex, "mutex block must parse");
+        assert!(saw_barrier, "barrier block must parse");
     }
 }

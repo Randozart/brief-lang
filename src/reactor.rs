@@ -330,6 +330,10 @@ impl Reactor {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }
+            Statement::Defer(_) | Statement::Mutex(_) | Statement::Barrier { .. } => {
+                interp.exec_stmt(stmt)?;
+                Ok(StmtResult::Continue)
+            }
             Statement::Foreach { item, list, body, .. } => {
                 let list_val = interp.eval_expr(list)?;
                 // 2026-08-06 (Slice G/I): Expr::List evaluates to a Product.

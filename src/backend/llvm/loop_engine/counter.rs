@@ -160,6 +160,8 @@ impl LlvmBackend {
         emit_loop_metadata(out, "  ", &format!("{}.header", label_prefix),
             &mut self.fun.metadata_counter, &mut self.fun.pending_metadata, disable_fold);
         writeln!(out, "{}:", exit_label).ok();
+        // 2026-08-09 (Phase 10): a folded loop exit runs registered defers.
+        self.flush_defer_cleanup(out, "  ");
         self.emit_state_store_i64_by_idx(out, "  ", counter_idx, &counter_name);
     }
 
@@ -1712,6 +1714,18 @@ impl LlvmBackend {
                     let name = format!("%t{}", self.fun.txn_counter);
                     self.fun.txn_counter += 1;
                     writeln!(out, "  {} = add i64 0, {}", name, val.name).ok();
+                }
+                Statement::Defer(body) => {
+                    // 2026-08-09 (Phase 10): register cleanup on the fold's
+                    // defer stack; flush_defer_cleanup emits it at loop exit.
+                    self.fun.defer_bodies.push(body.clone());
+                    i += 1;
+                    continue;
+                }
+                Statement::Mutex(body) | Statement::Barrier { body, .. } => {
+                    self.emit_countable_body(out, body, write_set, hoisted);
+                    i += 1;
+                    continue;
                 }
                 Statement::If(cond, then_b, else_b) => {
                     let cond_reg = self.emit_expr(out, cond, "  ");

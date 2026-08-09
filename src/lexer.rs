@@ -108,6 +108,21 @@ pub enum Token {
     #[token("rollback")]
     Rollback,
 
+    /// 2026-08-09 (Phase 10): `defer { ... }` — cleanup registered for the
+    /// current transaction/reactive firing; runs on `term`, `rollback`, and
+    /// `endprogram`. Replaces the legacy `#on_exit`.
+    #[token("defer")]
+    Defer,
+
+    /// 2026-08-09 (Phase 10): `mutex { ... }` — a serial section (replaces
+    /// the legacy `sync {}`).
+    #[token("mutex")]
+    Mutex,
+
+    /// 2026-08-09 (Phase 10): `barrier<group> { ... }` — a group-barrier body.
+    #[token("barrier")]
+    Barrier,
+
     #[token("import")]
     Import,
 
@@ -506,6 +521,9 @@ impl std::fmt::Display for Token {
             Token::EndProgram => write!(f, "endprogram"),
             Token::BeginProgram => write!(f, "beginprogram"),
             Token::Rollback => write!(f, "rollback"),
+            Token::Defer => write!(f, "defer"),
+            Token::Mutex => write!(f, "mutex"),
+            Token::Barrier => write!(f, "barrier"),
             Token::Import => write!(f, "import"),
             Token::From => write!(f, "from"),
             Token::As => write!(f, "as"),

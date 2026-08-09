@@ -664,6 +664,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if backend.ctx.webstack_enabled {
                 writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
             }
+            // 2026-08-09 (Phase 10): run deferred cleanup before the firing
+            // exits (term is a successful completion).
+            backend.flush_defer_cleanup(out, indent);
             if let Some(val) = val {
                 let mut reg = backend.emit_expr(out, val, indent);
                 // 2026-08-01 (C3): a boxed Float param returned from a defn
@@ -893,8 +896,53 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             last
         }
+        Statement::Defer(body) => {
+            // 2026-08-09 (Phase 10): register the cleanup body on the current
+            // firing's defer stack; flush_defer_cleanup emits it LIFO before
+            // every exit (term/rollback/fallthrough ret). No code is emitted
+            // at the registration point — the cleanup runs later.
+            backend.fun.defer_bodies.push(body.clone());
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
+        Statement::Mutex(stmts) => {
+            // 2026-08-09 (Phase 10): `mutex` is a serial section — sequential
+            // execution IS the default (a modifier must never be a speedup),
+            // so the body emits inline with no added synchronization.
+            let mut last = TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+            for stmt in stmts {
+                last = emit_statement(backend, out, stmt, indent);
+            }
+            last
+        }
+        Statement::Barrier { body, .. } => {
+            // 2026-08-09 (Phase 10): `barrier<group>` holds members until all
+            // fire — the no-implicit-concurrency gate classifies the pair. In
+            // the single-threaded default the barrier body emits inline (the
+            // barrier is a scheduling contract, not a parallelization hint).
+            let mut last = TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+            for stmt in body {
+                last = emit_statement(backend, out, stmt, indent);
+            }
+            last
+        }
         Statement::Rollback(_) => {
-            writeln!(out, "{}ret i64 0", indent).ok();
+            // 2026-08-09 (Phase 10): deferred cleanup runs on rollback too —
+            // the firing aborts but registered cleanup still executes.
+            backend.flush_defer_cleanup(out, indent);
+            // 2026-08-09: the ret type must match the function's return type
+            // (a reactive txn is void; a value-returning defn returns its ty).
+            if backend.fun.fn_ret_ty == "void" {
+                writeln!(out, "{}ret void", indent).ok();
+            } else {
+                let zero = if backend.fun.fn_ret_ty == "float" || backend.fun.fn_ret_ty == "double" {
+                    "0.0".to_string()
+                } else if backend.fun.fn_ret_ty == "ptr" {
+                    "null".to_string()
+                } else {
+                    "0".to_string()
+                };
+                writeln!(out, "{}ret {} {}", indent, backend.fun.fn_ret_ty, zero).ok();
+            }
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

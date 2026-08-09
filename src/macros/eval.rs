@@ -2118,8 +2118,15 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
         Statement::Gate(cond) => {
             resolve_dollar_refs_in_expr(cond, scope)
         }
-        Statement::Block(stmts) | Statement::SyncBlock(stmts) => {
+        Statement::Block(stmts) | Statement::SyncBlock(stmts)
+        | Statement::Defer(stmts) | Statement::Mutex(stmts) => {
             for s in stmts.iter_mut() {
+                resolve_dollar_refs_in_stmt(s, scope)?;
+            }
+            Ok(())
+        }
+        Statement::Barrier { body, .. } => {
+            for s in body.iter_mut() {
                 resolve_dollar_refs_in_stmt(s, scope)?;
             }
             Ok(())

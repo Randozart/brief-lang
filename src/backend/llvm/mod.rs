@@ -507,7 +507,11 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             for s in then_body { collect_strings_stmt(s, seen, out); }
             for s in else_body { collect_strings_stmt(s, seen, out); }
         }
-        Statement::Block(body) | Statement::SyncBlock(body) => {
+        Statement::Block(body) | Statement::SyncBlock(body)
+        | Statement::Defer(body) | Statement::Mutex(body) => {
+            for s in body { collect_strings_stmt(s, seen, out); }
+        }
+        Statement::Barrier { body, .. } => {
             for s in body { collect_strings_stmt(s, seen, out); }
         }
         Statement::Rollback(Some(e)) => { collect_strings_expr(e, seen, out); }

@@ -309,6 +309,17 @@ pub enum Statement {
     },
     /// sync { ... }
     SyncBlock(Vec<Statement>),
+    /// 2026-08-09 (Phase 10): `defer { ... }` — cleanup registered for the
+    /// current transaction/reactive firing; runs LIFO on `term`, `rollback`,
+    /// and `endprogram`. Replaces the legacy `#on_exit` (SPEC §11).
+    Defer(Vec<Statement>),
+    /// 2026-08-09 (Phase 10): `mutex { ... }` — a serial section (replaces
+    /// the legacy `sync {}`). Members execute without interleaving.
+    Mutex(Vec<Statement>),
+    /// 2026-08-09 (Phase 10): `barrier<group> { ... }` — a group-barrier
+    /// body. Members of the same group hold off finishing until all fired
+    /// members have (SPEC §11).
+    Barrier { groups: Vec<String>, body: Vec<Statement> },
     /// $defn name(params) -> Type { body } — compile-time-only definition.
     /// 2026-07-23: Only valid inside $(Stage) blocks. Body can call $ intrinsics.
     InlineDefn(Definition),

@@ -214,6 +214,21 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
+            Statement::Defer(body) => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
+            Statement::Mutex(body) => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
+            Statement::Barrier { body, .. } => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
             Statement::If(cond, then, else_) => {
                 self.extract_ids_recursive(cond, ids);
                 for s in then {

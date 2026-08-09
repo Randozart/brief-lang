@@ -1422,7 +1422,9 @@ fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext, errors: &mut
             elaborate_stmts(then, ctx, errors);
             elaborate_stmts(else_, ctx, errors);
         }
-        Statement::Block(body) | Statement::SyncBlock(body) => elaborate_stmts(body, ctx, errors),
+        Statement::Block(body) | Statement::SyncBlock(body)
+        | Statement::Defer(body) | Statement::Mutex(body) => elaborate_stmts(body, ctx, errors),
+        Statement::Barrier { body, .. } => elaborate_stmts(body, ctx, errors),
         Statement::Foreach { list, body, .. } => {
             elaborate_expr(list, ctx, errors);
             elaborate_stmts(body, ctx, errors);
@@ -2024,6 +2026,18 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         }
         Statement::InlineAsm { .. } | Statement::InlineDefn(_) | Statement::InlineTxn(_) | Statement::Match { .. } => Ok(()),
         Statement::SyncBlock(body) => {
+            for stmt in body {
+                infer_statement(stmt, ctx)?;
+            }
+            Ok(())
+        }
+        Statement::Defer(body) | Statement::Mutex(body) => {
+            for stmt in body {
+                infer_statement(stmt, ctx)?;
+            }
+            Ok(())
+        }
+        Statement::Barrier { body, .. } => {
             for stmt in body {
                 infer_statement(stmt, ctx)?;
             }
