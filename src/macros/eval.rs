@@ -2188,7 +2188,7 @@ fn resolve_dollar_refs_in_type(ty: &mut Type, scope: &Scope) -> Result<(), Strin
 }
 
 /// Recursively resolve $ident references in a TopLevel AST node.
-/// Handles common TopLevel variants; less common ones (Meld, Trigger, etc.)
+/// Handles common TopLevel variants; less common ones (Trigger, etc.)
 /// are skipped conservatively.
 fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(), String> {
     match tl {
@@ -2250,7 +2250,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
             Ok(())
         }
         TopLevel::Import(_) | TopLevel::Export(_) | TopLevel::Cell(_)
-        | TopLevel::Meld(_) | TopLevel::Trigger(_) | TopLevel::Signature(_)
+        | TopLevel::Trigger(_) | TopLevel::Signature(_)
         | TopLevel::StateDecl(_) | TopLevel::TriggerBinding { .. }
         | TopLevel::LinkDependency(_) | TopLevel::ResourceDecl(_)
         | TopLevel::TypeDef(_) | TopLevel::Codec(_)

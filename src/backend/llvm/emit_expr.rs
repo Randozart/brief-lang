@@ -2694,18 +2694,10 @@ impl LlvmBackend {
                     // a String IS a ptr to [len][bytes] under the bits model,
                     // so the arg is already pointer-typed and needs no handle
                     // extraction.
-                    if self
-                        .ctx
-                        .type_universe
-                        .as_ref()
-                        .and_then(|u| u.find_meld_to_extension(ty_name, ext_str))
-                        .is_some()
-                    {
-                        // meld exists — convention compatible, identity conversion
-                        arg.clone()
-                    } else {
-                        arg.clone()
-                    }
+                    // 2026-08-09 (Phase 12, SPEC §19.6): the meld lookup was a
+                    // no-op (both branches returned the arg unchanged) — removed.
+                    let _ = ty_name;
+                    arg.clone()
                 })
                 .collect()
         };

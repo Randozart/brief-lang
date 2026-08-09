@@ -40,8 +40,6 @@ pub struct BridgeInfo {
     pub exports: Vec<ExportDecl>,
     /// Foreign functions called by the bridge (via frgn declarations)
     pub frgns: Vec<FrgnDecl>,
-    /// Meld route declarations (for type mapping)
-    pub melds: Vec<MeldDecl>,
 }
 
 /// A function exported to the foreign language via `#export` pragma.
@@ -64,14 +62,6 @@ pub struct FrgnDecl {
     pub return_type: String,
     /// If the frgn name matches an Intrinsic variant, list it here
     pub intrinsic_match: Option<String>,
-}
-
-/// A meld route declaration for type compatibility.
-#[derive(Debug, Clone)]
-pub struct MeldDecl {
-    pub from_type: String,
-    pub to_type: String,
-    pub route: String,
 }
 
 /// Registry entry for a GLUE target language, parsed from glue.dbv.
@@ -102,7 +92,6 @@ pub fn extract_bridge_info(items: &[TopLevel], name: &str) -> BridgeInfo {
         name: name.to_string(),
         exports: extract_exports(items),
         frgns: extract_frgns(items),
-        melds: extract_melds(items),
     }
 }
 
@@ -193,22 +182,6 @@ fn extract_frgns(items: &[TopLevel]) -> Vec<FrgnDecl> {
     frgns
 }
 
-fn extract_melds(items: &[TopLevel]) -> Vec<MeldDecl> {
-    let mut melds = Vec::new();
-    for item in items {
-        if let TopLevel::Meld(meld) = item {
-            for (key, _val) in &meld.bindings {
-                melds.push(MeldDecl {
-                    from_type: meld.target.clone(),
-                    to_type: meld.name.clone(),
-                    route: key.clone(),
-                });
-            }
-        }
-    }
-    melds
-}
-
 fn format_type(ty: &crate::ast::Type) -> String {
     match ty {
         crate::ast::Type::Custom(name) => name.clone(),
@@ -274,14 +247,6 @@ fn serialize_exports_tagged(exports: &[ExportDecl]) -> String {
         // emitted C ABI). Consumers use it to pass/omit the state handle.
         let ns = if e.needs_state { "state" } else { "pure" };
         lines.push(format!("export,{},{},{},{}", e.name, params.join("|"), e.return_type, ns));
-    }
-    lines.join("\n")
-}
-
-fn serialize_melds_tagged(melds: &[MeldDecl]) -> String {
-    let mut lines = Vec::new();
-    for m in melds {
-        lines.push(format!("meld,{},{},{}", m.from_type, m.to_type, m.route));
     }
     lines.join("\n")
 }
@@ -786,8 +751,8 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     let glue_targets = crate::glue::config::load_glue_config(None)?;
     let info = extract_bridge_info(&items, bridge_name);
     let type_protocols = build_type_protocols(&items);
-    println!("  Bridge '{}': {} exports, {} frgns, {} melds",
-        info.name, info.exports.len(), info.frgns.len(), info.melds.len());
+    println!("  Bridge '{}': {} exports, {} frgns",
+        info.name, info.exports.len(), info.frgns.len());
     println!("  Target: {} (types: {}, bridge: {})",
         target.language, target.types_module.display(), target.bridge_kind);
 
@@ -921,11 +886,6 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     let exports_str = serialize_exports_tagged(&info.exports);
     if !exports_str.is_empty() {
         dbvl_content.push_str(&exports_str);
-        dbvl_content.push('\n');
-    }
-    let melds_str = serialize_melds_tagged(&info.melds);
-    if !melds_str.is_empty() {
-        dbvl_content.push_str(&melds_str);
         dbvl_content.push('\n');
     }
     let ctypes_str = serialize_ctypes_dbvl(&adapter.c_type_map);
@@ -1094,17 +1054,6 @@ mod tests {
         }];
         let result = serialize_exports_tagged(&exports);
         assert_eq!(result, "export,write_file,String|Data,Int,state");
-    }
-
-    #[test]
-    fn test_serialize_melds_tagged() {
-        let melds = vec![MeldDecl {
-            from_type: "CBuffer".to_string(),
-            to_type: "RSBuffer".to_string(),
-            route: "identity".to_string(),
-        }];
-        let result = serialize_melds_tagged(&melds);
-        assert_eq!(result, "meld,CBuffer,RSBuffer,identity");
     }
 
     #[test]

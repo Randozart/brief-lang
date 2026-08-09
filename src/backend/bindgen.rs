@@ -325,7 +325,6 @@ mod tests {
         types.insert("Header".to_string(), make_test_type("Header", 16));
         TypeUniverse {
             types,
-            melds: HashMap::new(),
             warnings: Vec::new(),
         }
     }

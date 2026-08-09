@@ -155,7 +155,17 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
-            Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
+            // 2026-08-09 (Phase 12, SPEC §19.6): `meld` is removed — foreign
+            // shapes adapt through GLUE/Data Briv descriptors, explicit
+            // protocol cast edges, ownership contracts, and effects. Rejected
+            // as staged (SPEC §25), not silently accepted.
+            Some(Token::Meld) => Err(SyntaxError::StagedFeature {
+                feature: "meld declarations are removed — foreign shapes adapt through \
+                         GLUE descriptors, explicit protocol cast edges, ownership \
+                         contracts, and effects"
+                    .into(),
+                span: self.peek_with_span().map(|(_, s)| self.make_span(s.clone())).unwrap_or_else(crate::errors::Span::dummy),
+            }),
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
             // 2026-08-06 (accel plan): top-level `!> key: value;` module
             // metadata (SPEC §8.9). Multiple consecutive bindings merge into
@@ -1110,48 +1120,6 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse: meld name -> target;
-    fn parse_meld(&mut self) -> Result<Meld, SyntaxError> {
-        self.pos += 1;
-        let name = self.expect_identifier()?;
-        // 2026-07-16: -> separates the two meld types
-        self.expect(Token::Arrow)?;
-        let target = self.expect_identifier()?;
-        // 2026-07-14: Optional body with layout { field -> field; } mappings
-        let mut bindings = std::collections::HashMap::new();
-        if self.eat(&Token::LBrace) {
-            while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // Expect "layout" as the block keyword
-                let keyword = self.expect_identifier()?;
-                if keyword == "layout" {
-                    self.expect(Token::LBrace)?;
-                    while !self.check(&Token::RBrace) && !self.is_at_end() {
-                        let lhs = self.expect_identifier()?;
-                        // 2026-07-16: -> maps source field to target field
-                        self.expect(Token::Arrow)?;
-                        let rhs = self.expect_identifier()?;
-                        self.eat(&Token::Semicolon);
-                        bindings.insert(format!("layout.{}", lhs), rhs);
-                    }
-                    self.expect(Token::RBrace)?;
-                    // 2026-07-16: layout { ... }; — eat the statement terminator
-                    self.eat(&Token::Semicolon);
-                } else {
-                    return Err(SyntaxError::InvalidExpression {
-                        reason: format!("expected 'layout' in meld body, got '{}'", keyword),
-                        span: crate::errors::Span::new(0, 0, 0, 0),
-                    });
-                }
-            }
-            self.expect(Token::RBrace)?;
-        }
-        Ok(Meld {
-            name,
-            target,
-            bindings,
-            span: None,
-        })
-    }
-
     /// Parse top-level trg binding: trg name @ instance.#port;
     /// 2026-07-15: The # prefix is required for layout port access.
     fn parse_top_level_trg(&mut self) -> Result<Trigger, SyntaxError> {

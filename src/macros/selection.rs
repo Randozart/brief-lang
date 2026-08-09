@@ -354,7 +354,6 @@ pub fn top_level_tag(item: &TopLevel) -> Option<&str> {
         TopLevel::Cell(_) => Some("cell"),
         TopLevel::Import(_) => Some("import"),
         TopLevel::Export(_) => Some("export"),
-        TopLevel::Meld(_) => Some("meld"),
         TopLevel::Trigger(_) => Some("trigger"),
         TopLevel::Constant(_) => Some("constant"),
         TopLevel::Init(_) => Some("init"),

@@ -23,7 +23,6 @@ pub enum TopLevel {
     Cell(CellDef),
     Import(Import),
     Export(Export),
-    Meld(Meld),
     Trigger(Trigger),
     // ── Backend-compat variants (old AST) ─────────────────────────────
     Constant(Constant),
@@ -585,33 +584,6 @@ impl StageKind {
     pub fn is_ir_stage(&self) -> bool {
         matches!(self, StageKind::Generated | StageKind::Optimized)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct Meld {
-    pub name: String,
-    pub target: String,
-    pub bindings: HashMap<String, String>,
-    pub span: Option<Span>,
-}
-
-/// A meld route defines how one type's field is derived from another type.
-#[derive(Debug, Clone)]
-pub struct MeldRouteDef {
-    /// The projection target name (e.g. "Ptr", "Size")
-    pub accessor: String,
-    /// The expression that computes this field from the partner type
-    pub dest_expr: Expr,
-}
-
-/// A bidirectional type compatibility declaration.
-/// Allows viewing type A as type B and vice versa via named routes.
-#[derive(Debug, Clone)]
-pub struct MeldDeclaration {
-    pub name_a: String,
-    pub name_b: String,
-    pub routes: Vec<MeldRouteDef>,
-    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]

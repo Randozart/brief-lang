@@ -25,8 +25,6 @@ type PyInt: #Int {
     op CastFrom(#Int) = i64_to_pylong(#Lh);
 };
 
-// Zero-copy melds: if Briv CBuffer has same layout as PyBytes
-meld PyBytes -> CBuffer {
-    ptr -> ptr;
-    len -> len;
-};
+// 2026-08-09 (Phase 12): the `meld PyBytes -> CBuffer` zero-copy admission is
+// removed (SPEC 19.6) — the layout equivalence lives in the GLUE descriptor;
+// PyBytes <-> CBuffer adapts through an explicit protocol cast edge.

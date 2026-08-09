@@ -34,27 +34,10 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     // width metadata falls back to the TARGET default width, not a hardcoded 64.
     register_typedefs(items, universe, int_bits)?;
 
-    // 2026-07-16: P0+P6 — Process meld layout declarations in a single pass.
-    for item in items.iter() {
-        if let TopLevel::Meld(m) = &item {
-            synthesize_meld_shuffle(m, universe)?;
-            let decl = crate::analysis::meld_validation::build_meld_declaration(
-                &m.name, &m.target, &m.bindings, &m.span,
-            );
-            universe.melds.insert(
-                (decl.name_a.clone(), decl.name_b.clone()),
-                decl.clone(),
-            );
-            universe.melds.insert(
-                (decl.name_b.clone(), decl.name_a.clone()),
-                decl.clone(),
-            );
-            if let Err(errs) = crate::analysis::meld_validation::validate_meld_layout(&decl, universe, false) {
-                let msg: Vec<String> = errs.iter().map(|e| format!("{}", e)).collect();
-                return Err(format!("meld validation failed for '{}': {}", m.name, msg.join("; ")));
-            }
-        }
-    }
+    // 2026-08-09 (Phase 12, SPEC §19.6): the `meld` declaration pass is
+    // removed — foreign shapes adapt through GLUE/Data Briv descriptors,
+    // explicit protocol cast edges, ownership contracts, and effects.
+    // (2026-07-16: P0+P6 — Process meld layout declarations in a single pass.)
 
     // Validate intrinsics against supported set
     let errors = normalizer::validate_intrinsics(items, &build_supported_ops());
@@ -421,65 +404,6 @@ fn attach_layout_fields(rt: &mut crate::type_universe::ResolvedType, pat: &crate
     }
 }
 
-/// 2026-07-14: For a meld with layout mappings, compute bit positions and
-/// attach shuffle metadata to the source type's properties.
-fn synthesize_meld_shuffle(meld: &crate::ast::top::Meld, universe: &mut TypeUniverse) -> Result<(), String> {
-    let layout_mappings: Vec<(&str, &str)> = meld.bindings.iter()
-        .filter(|(k, _)| k.starts_with("layout."))
-        .map(|(k, v)| (k.strip_prefix("layout.").unwrap(), v.as_str()))
-        .collect();
-
-    if layout_mappings.is_empty() {
-        return Ok(());
-    }
-
-    let source_rt = match universe.get(&meld.name) {
-        Some(rt) => rt.clone(),
-        None => return Ok(()),
-    };
-    let target_rt = match universe.get(&meld.target) {
-        Some(rt) => rt.clone(),
-        None => return Ok(()),
-    };
-
-    for (src_field, dst_field) in &layout_mappings {
-        let src_offset = source_rt.properties.get(&format!("field.{}.offset", src_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
-        let src_width = source_rt.properties.get(&format!("field.{}.width", src_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-            .unwrap_or_else(|| {
-                // 2026-07-31: Phase 3 (§8.6) — meld shuffle width missing: assume
-                // 64 bits and record the fallback so it is not silent.
-                universe.warnings.push(format!(
-                    "normalizer: meld '{}' field '{}' has no width — assuming 64 bits",
-                    meld.name, src_field
-                ));
-                64
-            });
-        let dst_offset = target_rt.properties.get(&format!("field.{}.offset", dst_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
-        let dst_width = target_rt.properties.get(&format!("field.{}.width", dst_field))
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None })
-            .unwrap_or_else(|| {
-                universe.warnings.push(format!(
-                    "normalizer: meld '{}' field '{}' has no width — assuming 64 bits",
-                    meld.name, dst_field
-                ));
-                64
-            });
-
-        let rt = universe.types.get_mut(&meld.name).unwrap();
-        rt.properties.insert(format!("shuffle.{}.src_offset", dst_field), PropertyValue::Int(src_offset as i64));
-        rt.properties.insert(format!("shuffle.{}.src_width", dst_field), PropertyValue::Int(src_width as i64));
-        rt.properties.insert(format!("shuffle.{}.dst_offset", dst_field), PropertyValue::Int(dst_offset as i64));
-        rt.properties.insert(format!("shuffle.{}.dst_width", dst_field), PropertyValue::Int(dst_width as i64));
-    }
-
-    Ok(())
-}
-
-/// Build the set of supported intrinsic names from the op config.
-/// 2026-07-20: Simplified — no TOML config lookup. Standard ops only.
 fn build_supported_ops() -> HashSet<String> {
     let mut set = HashSet::new();
     for op_name in STANDARD_OPS {

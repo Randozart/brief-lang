@@ -5,30 +5,29 @@
 // the composite String across process boundaries via the runtime's file I/O
 // (persist/load) — the only transport both languages share is Briv itself.
 //
-// The CStr <-> String meld (lib/glue/c.bv) makes the boundary cast-free; the
-// marshalling inserts cstr_to_briv / str_to_c at the implicit meld sites
-// (let, term, assignment, call args).
+// The CStr <-> String adaptation uses EXPLICIT protocol casts
+// (cstr_to_briv / str_to_c from lib/glue/c.bv) — the meld implicit admission
+// was removed (SPEC 19.6): foreign shapes adapt through explicit cast edges.
 
 import "glue/c.bv";
 
 // Runtime file I/O — the cross-process transport. `__read_file__` returns a
 // bare nul-terminated buffer; `load` wraps it with cstr_to_briv (correctness
 // first — never the fragile str_to_c heuristic). Note the frgn convention:
-// `frgn <C_symbol>(...) as <briv_name>` — the first is the C/runtime symbol,
-// `as` is the Briv name used in Briv code.
-frgn __read_file__(path: String) -> Int as briv_read_file_raw from "lib/runtime/briv_rt.c" fallback 0;
-frgn __write_file__(path: String, data: String) -> Int as briv_write_file from "lib/runtime/briv_rt.c" fallback 0;
+// `frgn <briv_name>(...) : <C_symbol>` — the first is the Briv name, `:` binds the C/runtime symbol.
+frgn briv_read_file_raw(path: String) -> Int  : __read_file__ from "lib/runtime/briv_rt.c" fallback 0;
+frgn briv_write_file(path: String, data: String) -> Int  : __write_file__ from "lib/runtime/briv_rt.c" fallback 0;
 
 let saved: String = "";
 let count: Int = 0;
 
 export defn save(name: CStr) -> CStr {
-    saved = name;
-    term saved;
+    saved = cstr_to_briv(name as Int);
+    term str_to_c(saved) as CStr;
 };
 
 export defn read() -> CStr {
-    term saved;
+    term str_to_c(saved) as CStr;
 };
 
 export defn bump(delta: Int) -> Int {
@@ -37,13 +36,13 @@ export defn bump(delta: Int) -> Int {
 };
 
 export defn persist(path: CStr) -> CStr {
-    let w: Int = briv_write_file(path, saved);
-    term saved;
+    let w: Int = briv_write_file(cstr_to_briv(path as Int), saved);
+    term str_to_c(saved) as CStr;
 };
 
 export defn load(path: CStr) -> CStr {
-    let raw: Int = briv_read_file_raw(path);
+    let raw: Int = briv_read_file_raw(cstr_to_briv(path as Int));
     let s: String = cstr_to_briv(raw);
     saved = s;
-    term saved;
+    term str_to_c(saved) as CStr;
 };

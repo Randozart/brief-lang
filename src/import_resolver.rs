@@ -883,8 +883,6 @@ impl ImportResolver {
     /// apply selective renames (`{ Local: Exported }`). Preserves the D3
     /// transitive-referenced-type closure and the file-private (sed) filter.
     fn filter_items(&self, items: &[TopLevel], sed_names: &[String], symbols: &[(String, String)]) -> Result<Vec<TopLevel>, String> {
-        if items.iter().any(|i| matches!(i, TopLevel::Meld(_))) {
-        }
         let rename: HashMap<String, String> = symbols
             .iter()
             .filter(|(l, e)| l != e)
@@ -914,8 +912,6 @@ impl ImportResolver {
                 continue;
             }
             if let Some(n) = Self::item_name(item) {
-                if matches!(item, TopLevel::Meld(_)) {
-                }
                 if !sed_names.iter().any(|s| s == n) && wanted(n) {
                     keep.insert(n.to_string());
                 }
@@ -985,7 +981,6 @@ impl ImportResolver {
             TopLevel::Trait(t) => Some(t.name.as_str()),
             TopLevel::Impl(i) => Some(i.target.as_str()),
             TopLevel::ProtocolDef(p) => Some(p.name.as_str()),
-            TopLevel::Meld(m) => Some(m.name.as_str()),
             TopLevel::StaticStruct(s) => Some(s.name.as_str()),
             _ => None,
         }

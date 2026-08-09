@@ -112,14 +112,10 @@ pub fn optimize_layouts(
                 continue;
             }
 
-            // 2026-07-22: Check for an existing identity meld between the
-            // Briv type and the foreign type. If one exists, the boundary
-            // is already zero-cost and no change is needed.
-            if let Some(meld) = universe.find_meld(ty_key, &foreign_ty_name) {
-                if is_identity_meld(meld) {
-                    continue;
-                }
-            }
+            // 2026-08-09 (Phase 12, SPEC §18.2): the meld identity check is
+            // removed — foreign shapes adapt through explicit protocol cast
+            // edges, not an implicit meld. The safe-cast-path check below is
+            // the remaining gate.
 
             // 2026-07-22: Safety check — the foreign type must be able to
             // cast back to the original type or its protocol (#Bits).
@@ -243,15 +239,6 @@ fn type_display_name(ty: &Type) -> String {
         Type::Custom(name) => name.clone(),
         _ => format!("{:?}", ty),
     }
-}
-
-/// Check if a meld is an identity meld (all fields map 1:1).
-///
-/// 2026-07-22: An identity meld between two types means no transformation
-/// is needed at the boundary — types are structurally identical. For now,
-/// a meld with no routes is conservatively treated as identity.
-fn is_identity_meld(meld: &crate::ast::top::MeldDeclaration) -> bool {
-    meld.routes.is_empty()
 }
 
 /// Check if a foreign type has a safe CastTo/CastFrom path back to the

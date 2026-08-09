@@ -540,9 +540,6 @@ impl fmt::Display for TopLevel {    fn fmt(&self, f: &mut fmt::Formatter<'_>) ->
             TopLevel::Export(export) => {
                 write!(f, "export {}", export.inner)
             }
-            TopLevel::Meld(meld) => {
-                write!(f, "meld {} -> {};", meld.name, meld.target)
-            }
             TopLevel::Trigger(trg) => {
                 write!(f, "trg {} @ {};", trg.name, trg.instance)
             }

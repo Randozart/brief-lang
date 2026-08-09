@@ -12,7 +12,6 @@ pub use resolve::*;
 pub use validate::*;
 
 use crate::ast::Type;
-use crate::ast::top::MeldDeclaration;
 use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
@@ -52,12 +51,12 @@ pub struct ResolvedType {
 
 /// Central type definition registry.
 /// Built during the type-checking pass from all `TopLevel::TypeDef` items.
-/// Also holds meld declarations for cross-type field derivations.
+/// 2026-08-09 (Phase 12, SPEC §19.6): the `melds` registry is removed — foreign
+/// shapes adapt through GLUE/Data Briv descriptors, explicit protocol cast
+/// edges, ownership contracts, and effects. No meld declarations exist.
 #[derive(Debug, Clone)]
 pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
-    /// Melds keyed by (type_a, type_b). Both orderings are stored.
-    pub melds: HashMap<(String, String), MeldDeclaration>,
     /// 2026-07-31: Phase 3 (§8.5-E6) — non-fatal diagnostics surfaced by the
     /// normalizer when a type's size/width/alignment falls back to a default
     /// (e.g. a type with no primordial and no `!> bits` metadata). The LLVM
@@ -74,7 +73,6 @@ impl TypeUniverse {
     pub fn new() -> Self {
         let mut universe = TypeUniverse {
             types: HashMap::new(),
-            melds: HashMap::new(),
             warnings: Vec::new(),
         };
         universe.seed_primordial_types();
@@ -210,51 +208,9 @@ impl TypeUniverse {
         }
     }
 
-    /// Look up a meld between two types (checks both orderings).
-    pub fn find_meld(&self, a: &str, b: &str) -> Option<&MeldDeclaration> {
-        self.melds.get(&(a.to_string(), b.to_string()))
-            .or_else(|| self.melds.get(&(b.to_string(), a.to_string())))
-    }
-
     /// 2026-07-16: P2 — Look up "String.c" from base "String" and extension "c".
     pub fn get_extension(&self, base: &str, ext: &str) -> Option<&ResolvedType> {
         self.types.get(&format!("{}.{}", base, ext))
-    }
-
-    /// 2026-07-16: P2 — Find meld between base type and an extension type directly.
-    pub fn find_ext_meld(&self, base: &str, ext: &str) -> Option<&MeldDeclaration> {
-        let ext_name = format!("{}.{}", base, ext);
-        self.find_meld(base, &ext_name)
-    }
-
-    /// 2026-07-16: P2 — Find a meld from `ty` to any type ending in `.ext`.
-    /// Priority:
-    ///   1. Direct meld T -> T.ext  (exact match)
-    ///   2. Direct meld T -> Any.ext  (custom → standard extension)
-    ///   3. T.ext exists with auto-generated identity meld
-    ///   4. None — no meld possible
-    pub fn find_meld_to_extension(&self, ty: &str, ext: &str) -> Option<(String, MeldDeclaration)> {
-        let exact = format!("{}.{}", ty, ext);
-        if let Some(decl) = self.find_ext_meld(ty, ext) {
-            return Some((exact, decl.clone()));
-        }
-        for ((a, b), decl) in &self.melds {
-            if a == ty && b.ends_with(&format!(".{}", ext)) {
-                return Some((b.clone(), decl.clone()));
-            }
-            if b == ty && a.ends_with(&format!(".{}", ext)) {
-                return Some((a.clone(), decl.clone()));
-            }
-        }
-        if self.types.contains_key(&exact) {
-            return Some((exact.clone(), MeldDeclaration {
-                name_a: ty.to_string(),
-                name_b: exact,
-                routes: vec![],
-                span: None,
-            }));
-        }
-        None
     }
 
     pub fn get(&self, name: &str) -> Option<&ResolvedType> {
@@ -322,9 +278,8 @@ impl TypeUniverse {
 }
 
 #[cfg(test)]
-mod tests {
+ mod tests {
     use super::*;
-    use crate::ast::top::MeldRouteDef;
     use crate::ast::Expr;
 
     #[test]
@@ -342,72 +297,5 @@ mod tests {
     fn test_get_extension_not_found() {
         let u = TypeUniverse::new();
         assert!(u.get_extension("String", "c").is_none());
-    }
-
-    #[test]
-    fn test_find_ext_meld_direct() {
-        let mut u = TypeUniverse::new();
-        u.melds.insert(("String".into(), "String.c".into()), MeldDeclaration {
-            name_a: "String".into(), name_b: "String.c".into(),
-            routes: vec![], span: None,
-        });
-        u.melds.insert(("String.c".into(), "String".into()), MeldDeclaration {
-            name_a: "String.c".into(), name_b: "String".into(),
-            routes: vec![], span: None,
-        });
-        assert!(u.find_ext_meld("String", "c").is_some());
-    }
-
-    #[test]
-    fn test_find_meld_to_extension_priority1() {
-        let mut u = TypeUniverse::new();
-        u.melds.insert(("String".into(), "String.c".into()), MeldDeclaration {
-            name_a: "String".into(), name_b: "String.c".into(),
-            routes: vec![], span: None,
-        });
-        u.melds.insert(("String.c".into(), "String".into()), MeldDeclaration {
-            name_a: "String.c".into(), name_b: "String".into(),
-            routes: vec![], span: None,
-        });
-        let result = u.find_meld_to_extension("String", "c");
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().0, "String.c");
-    }
-
-    #[test]
-    fn test_find_meld_to_extension_priority2() {
-        let mut u = TypeUniverse::new();
-        u.melds.insert(("MyType".into(), "String.c".into()), MeldDeclaration {
-            name_a: "MyType".into(), name_b: "String.c".into(),
-            routes: vec![], span: None,
-        });
-        u.melds.insert(("String.c".into(), "MyType".into()), MeldDeclaration {
-            name_a: "String.c".into(), name_b: "MyType".into(),
-            routes: vec![], span: None,
-        });
-        let result = u.find_meld_to_extension("MyType", "c");
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn test_find_meld_to_extension_priority3_identity() {
-        let mut u = TypeUniverse::new();
-        u.types.insert("String.c".into(), ResolvedType {
-            name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
-            min_bits: 64, max_bits: 64,
-            properties: HashMap::new(), fields: vec![],
-        });
-        let result = u.find_meld_to_extension("String", "c");
-        assert!(result.is_some());
-        let (name, decl) = result.unwrap();
-        assert_eq!(name, "String.c");
-        assert_eq!(decl.name_a, "String");
-        assert_eq!(decl.name_b, "String.c");
-    }
-
-    #[test]
-    fn test_find_meld_to_extension_none() {
-        let u = TypeUniverse::new();
-        assert!(u.find_meld_to_extension("String", "c").is_none());
     }
 }

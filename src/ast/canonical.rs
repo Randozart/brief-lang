@@ -235,10 +235,6 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             format_item_into(item, out, level + 1);
             let _ = write!(out, "}};");
         }
-        TopLevel::Meld(m) => {
-            indent(out, level);
-            let _ = write!(out, "meld {} -> {};", m.name, m.target);
-        }
         TopLevel::Signature(s) => {
             indent(out, level);
             let _ = write!(out, "sig {}(", s.name);

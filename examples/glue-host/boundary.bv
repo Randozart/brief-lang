@@ -4,11 +4,12 @@ export defn echo(name: CStr) -> CStr {
     term name;
 };
 
-// The CStr <-> String meld (declared in c.bv) makes the pair interchangeable
-// — no explicit `as` casts; the marshalling inserts cstr_to_briv/str_to_c.
+// The CStr <-> String adaptation uses EXPLICIT protocol casts
+// (cstr_to_briv / str_to_c from glue/c.bv) — the meld implicit admission was
+// removed (SPEC 19.6).
 export defn greet(name: CStr) -> CStr {
-    let s: String = name;
-    term s;
+    let s: String = cstr_to_briv(name as Int);
+    term str_to_c(s) as CStr;
 };
 
 export defn identity(x: CDouble) -> CDouble {
@@ -17,5 +18,5 @@ export defn identity(x: CDouble) -> CDouble {
 
 // CStr + CStr → cstring_concat (the C_String variant's own concat).
 export defn join(a: CStr, b: CStr) -> CStr {
-    term a + b;
+    term cstring_concat(a as Int, b as Int) as CStr;
 };

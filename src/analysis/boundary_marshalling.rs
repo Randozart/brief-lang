@@ -29,9 +29,6 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
     // "#String<C_String>"). The universe is not populated until codegen, so
     // the pass resolves custom boundary types from their declarations.
     let mut type_protocols: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    // 2026-08-03 (P3): meld declarations — the composite interchangeability
-    // pairs (both orderings) that the typechecker admits without `as`.
-    let mut melds: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     // 2026-08-03 (P3, node bridge): the typechecker admits melded pairs at
     // assignment, call args, and constructor slots too — the marshalling must
     // insert the delta at those sites as well. Pre-collect the types needed to
@@ -65,10 +62,6 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
                 if !slots.is_empty() {
                     type_slots.insert(sd.name.clone(), slots);
                 }
-            }
-            TopLevel::Meld(m) => {
-                melds.insert((m.name.clone(), m.target.clone()));
-                melds.insert((m.target.clone(), m.name.clone()));
             }
             TopLevel::Statement(stmt) => {
                 if let crate::ast::Statement::Let { name, ty, .. } = stmt.as_ref() {
@@ -114,7 +107,6 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
             universe,
             graph: &graph,
             type_protocols: &type_protocols,
-            melds: &melds,
             fn_param_types: &fn_param_types,
             type_slots: &type_slots,
         };
@@ -168,7 +160,6 @@ struct MarshallingCtx<'a> {
     universe: &'a TypeUniverse,
     graph: &'a CastingGraph,
     type_protocols: &'a std::collections::HashMap<String, String>,
-    melds: &'a std::collections::HashSet<(String, String)>,
     fn_param_types: &'a std::collections::HashMap<String, Vec<Type>>,
     type_slots: &'a std::collections::HashMap<String, Vec<crate::ast::top::TypeDefSlot>>,
 }
@@ -240,21 +231,10 @@ fn wrap_if_marshalled(
     expr: &mut Expr,
     target: &Type,
 ) {
-    let src_ty = expr_type_of(expr, env, ctx.universe);
-    let melded = {
-        let (fa, tb) = match (&src_ty, target) {
-            (Type::Custom(a) | Type::Applied(a, _), Type::Custom(b) | Type::Applied(b, _)) => (a, b),
-            _ => return,
-        };
-        ctx.melds.contains(&(fa.clone(), tb.clone()))
-    };
-    if !melded {
-        return;
-    }
-    if let Some(fn_name) = marshalling_fn(ctx.graph, ctx.universe, ctx.type_protocols, &src_ty, target) {
-        let arg = expr.clone();
-        *expr = crate::ast::Expr::Call(fn_name, vec![arg], None);
-    }
+    // 2026-08-09 (Phase 12, SPEC §18.2): the implicit meld conversion is
+    // removed — foreign shapes adapt through EXPLICIT protocol cast edges
+    // (CastTo/CastFrom), not an implicit meld admission. This wrap is a no-op.
+    let _ = (ctx, env, expr, target);
 }
 
 fn rewrite_expr(
