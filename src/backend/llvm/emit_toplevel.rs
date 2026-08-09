@@ -1002,6 +1002,42 @@ impl LlvmBackend {
         self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.to_string(), row_reg.to_string())) }, indent);
     }
 
+    /// 2026-08-09 (Phase 5): emit a `box`/`spill` spawn — the instance is its
+    /// own heap allocation (NOT a pooled column row). A per-instance block
+    /// sized to the base's member columns is malloc'd, the Init member runs
+    /// against it (row 0 of the block), and the block address is the linear
+    /// handle. Member access inttoptrs the handle + GEPs the member offset
+    /// (emit_instance_column_row's boxed branch). Box and spill share this
+    /// emission — the classification difference (spill may grow) is recorded
+    /// in the analysis and drives future growable-buffer re-layout.
+    pub(crate) fn emit_spawn_storage(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        base: &str,
+        args: &[Expr],
+    ) -> crate::backend::llvm::TypedRegister {
+        let mut members: Vec<(String, crate::ast::Type)> = Vec::new();
+        if let Some(fields) = self.ctx.struct_types.get(base).cloned() {
+            members = fields;
+        }
+        let mut total: u64 = 0;
+        for (_mname, mty) in &members {
+            total += crate::backend::llvm::types::type_size(mty, self.ctx.type_universe.as_ref());
+        }
+        let total = total.max(8);
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, raw, total).ok();
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, raw).ok();
+        // Run the Init member at the block's row 0.
+        self.emit_spawn_init(out, indent, base, args, &addr);
+        crate::backend::llvm::TypedRegister {
+            name: addr,
+            ty: Type::Custom(base.to_string()),
+        }
+    }
+
     /// 2026-07-31 (A8): monomorphize an applied obj type (`Stack<Int, 8>`):
     /// register the substituted slots + member bodies under a mono key
     /// (`Stack<Int, 8>`), so layout, self-slot offsets, and member dispatch

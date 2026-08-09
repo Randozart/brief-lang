@@ -329,6 +329,15 @@ the program (unprovable)." Expanding:
    A set containing a name ref (`lo..M`) is not statically bounded → the
    dependent path stays. Tests: 1692 pass.
 5. `box`/`spill` classification around the pool.
+   **DONE 2026-08-09**: `box spawn Obj(...)` / `spill spawn Obj(...)` —
+   contextual storage-class keywords (only recognized immediately before
+   `spawn`; legal identifiers elsewhere — the compiler backend's own .bv uses
+   `spill` as a register word). AST `SpawnStorage` on `Expr::Spawn`;
+   `spawn_pool` classifies non-pooled bases (no capacity, no dependent term,
+   no unprovable error — the user opted out explicitly); the backend mallocs a
+   per-instance heap block, runs the Init member at row 0, and member access
+   inttoptrs the handle + GEPs the member offset (`boxed_offsets`). E2E: box
+   and spill spawns print the correct result. Tests: 1702 pass.
 6. Mechanism registry generalization: `resolve_mechanism(category, name)`
    shared by storage + ownership policy; FFI delivery/source/fallback axes
    flattened onto the same grammar+registry (deferred grammar, settled here).

@@ -191,6 +191,15 @@ pub struct CompilerContext {
     /// bounds). Keys that also appear in `spawn_pools` still include the
     /// static capacity as a minimum (rows = static_cap + sum(terms)).
     pub dependent_pools: std::collections::HashMap<String, Vec<crate::analysis::spawn_pool::DependentTerm>>,
+    /// 2026-08-09 (Phase 5): storage class of non-pooled spawn bases — `box`
+    /// (per-instance-heap) or `spill` (growable). Bases here never get a
+    /// static `[capacity x T]` column; their spawns allocate per instance.
+    pub spawn_storage: std::collections::HashMap<String, crate::ast::SpawnStorage>,
+    /// 2026-08-09 (Phase 5): per-instance-heap (box/spill) member layout — base
+    /// → member → (byte offset within the instance block, Briv type). The boxed
+    /// block is one instance's worth of member storage laid out like the static
+    /// instance columns; member access inttoptrs the handle + GEPs the offset.
+    pub boxed_offsets: std::collections::HashMap<String, std::collections::HashMap<String, (u64, crate::ast::Type)>>,
     /// 2026-08-07 (object instance pools): state-field indices whose column is
     /// a DEPENDENT heap buffer → the LLVM element type string of one row (the
     /// static column's `load_ty`). Member access GEPs through the buffer
@@ -373,6 +382,8 @@ impl CompilerContext {
             transition_graph: None,
             spawn_pools: std::collections::HashMap::new(),
             dependent_pools: std::collections::HashMap::new(),
+            spawn_storage: std::collections::HashMap::new(),
+            boxed_offsets: std::collections::HashMap::new(),
             heap_columns: std::collections::HashMap::new(),
             // 2026-07-31: Phase 2 measurement passes (plan §7) — stored on the
             // context so every emission consumer reads frontend analysis instead

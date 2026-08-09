@@ -161,6 +161,15 @@ impl LanguageVocab {
                 // Modifiers
                 kw("vol", VocabStatus::Canonical, KeywordContext::Modifier),
                 kw("out", VocabStatus::Canonical, KeywordContext::Modifier),
+                // Storage/layout strategy (2026-08-09, Phase 5): `box` marks a
+                // spawned value as per-instance-heap (not pooled) when the pool
+                // decoder is ambiguous; `spill` allows growth into a growable
+                // buffer when a static pool column can't hold the worst case.
+                // Contextual (spawn position only) — both stay legal
+                // identifiers elsewhere (the compiler backend's own .bv uses
+                // `spill` as a register word).
+                kw("box", VocabStatus::Canonical, KeywordContext::Modifier),
+                kw("spill", VocabStatus::Canonical, KeywordContext::Modifier),
                 // Ownership algebra (SPEC §14)
                 kw("borrow", VocabStatus::Canonical, KeywordContext::Ownership),
                 kw("consume", VocabStatus::Canonical, KeywordContext::Ownership),

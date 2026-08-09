@@ -1970,6 +1970,8 @@ impl LlvmBackend {
         self.ctx.transition_graph = Some(analysis.transition_graph.clone());
         self.ctx.spawn_pools = analysis.spawn_pools.clone();
         self.ctx.dependent_pools = analysis.dependent_pools.clone();
+        // 2026-08-09 (Phase 5): non-pooled spawn storage classes (box/spill).
+        self.ctx.spawn_storage = analysis.spawn_storage.clone();
         // 2026-07-31: Phase 2 measurement passes (plan §7.5) — persist so the
         // emission consumers (density downgrade, modulo dispatch, auto-inline)
         // read frontend analysis instead of re-walking bodies.
@@ -4445,6 +4447,24 @@ impl LlvmBackend {
                             Type::Applied(base, _) | Type::Custom(base) => base.clone(),
                             _ => String::new(),
                         };
+                        // 2026-08-09 (Phase 5): a box/spill base has NO shared
+                        // pool — every instance is its own heap block. Register
+                        // the per-instance member layout (member → byte offset
+                        // within the block) so member access can inttoptr the
+                        // handle + GEP the offset. The static top-level instance
+                        // keeps its unpacked slots; spawned handles allocate.
+                        if let Some(_storage) = self.ctx.spawn_storage.get(&base) {
+                            let mut offsets: std::collections::HashMap<String, (u64, crate::ast::Type)> =
+                                std::collections::HashMap::new();
+                            let mut off = 0u64;
+                            for (mname, mty) in &slots {
+                                offsets.insert(mname.clone(), (off, mty.clone()));
+                                off += crate::backend::llvm::types::type_size(
+                                    mty, self.ctx.type_universe.as_ref(),
+                                );
+                            }
+                            self.ctx.boxed_offsets.insert(base.clone(), offsets);
+                        }
                         // 2026-08-07 (object instance pools): the allocator
                         // counter for this obj base — spawn reads it to get the
                         // next row, then increments (starting at row 1; row 0

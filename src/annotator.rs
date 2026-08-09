@@ -529,13 +529,17 @@ impl Annotator {
                     .join(", ");
                 format!("{}({})", name, args_str)
             }
-            Expr::Spawn { type_name, args } => {
+            Expr::Spawn { type_name, args, storage } => {
                 let args_str = args
                     .iter()
                     .map(|a| self.format_expr(a))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("spawn {}({})", type_name, args_str)
+                if storage.keyword().is_empty() {
+                    format!("spawn {}({})", type_name, args_str)
+                } else {
+                    format!("{} spawn {}({})", storage.keyword(), type_name, args_str)
+                }
             }
             Expr::BinaryOp(kind, l, r) => {
                 let op_str = match kind {

@@ -924,7 +924,7 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
                 name: "h".to_string(),
                 names: vec![],
                 ty: Some(Type::Custom("Counter".to_string())),
-                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![] }),
+                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![], storage: crate::ast::SpawnStorage::Pooled }),
                 modifiers: vec![],
             },
             Statement::Expression(Expr::MethodCall(
@@ -1011,8 +1011,17 @@ fn spawn_bounded_init_countdown_program() -> Vec<TopLevel> {
 
 /// The shared spawn-pool program: an obj `Counter` with a countdown node that
 /// spawns one instance per tick against the bound `N`. The bound item (a
-/// runtime field or a bounded init) is supplied by the caller.
+/// runtime field or a bounded init) is supplied by the caller; the storage
+/// class of the spawn is settable for box/spill tests.
 fn spawn_pool_countdown_program(n_item: TopLevel) -> Vec<TopLevel> {
+    spawn_pool_countdown_program_storage(n_item, crate::ast::SpawnStorage::Pooled)
+}
+
+/// Variant with an explicit spawn storage class (2026-08-09, Phase 5).
+fn spawn_pool_countdown_program_storage(
+    n_item: TopLevel,
+    storage: crate::ast::SpawnStorage,
+) -> Vec<TopLevel> {
     use crate::ast::top::{TypeDef, TypeDefBody, TypeDefSlot};
     let obj = TopLevel::TypeDef(Box::new(TypeDef {
         name: "Counter".to_string(),
@@ -1108,7 +1117,7 @@ fn spawn_pool_countdown_program(n_item: TopLevel) -> Vec<TopLevel> {
                 name: "h".to_string(),
                 names: vec![],
                 ty: Some(Type::Custom("Counter".to_string())),
-                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![] }),
+                expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![], storage }),
                 modifiers: vec![],
             },
             Statement::Expression(Expr::MethodCall(
@@ -1180,6 +1189,59 @@ fn test_bounded_init_spawn_pool_is_static_set_max() {
     assert!(
         !output.contains("= call ptr @malloc"),
         "a bounded-init pool is statically sized — must NOT malloc a dependent heap buffer:\n{output}"
+    );
+}
+
+/// 2026-08-09 (Phase 5): a `box` spawn allocates a per-instance heap block
+/// (malloc), inttoptrs it as the handle, and member access GEPs the block —
+/// NOT a pooled `[capacity x T]` column row.
+#[test]
+fn test_box_spawn_emits_per_instance_heap() {
+    let n_item = TopLevel::Statement(Box::new(Statement::Let {
+        name: "N".to_string(),
+        names: vec![],
+        ty: Some(Type::int()),
+        expr: Some(Expr::Decimal(8)),
+        modifiers: vec![],
+    }));
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(
+        &spawn_pool_countdown_program_storage(n_item, crate::ast::SpawnStorage::Box),
+        None,
+    );
+    assert!(
+        output.contains("= call ptr @malloc"),
+        "a box spawn must malloc a per-instance heap block:\n{output}"
+    );
+    assert!(
+        output.contains("inttoptr i64"),
+        "the boxed handle must be an inttoptr'd block address:\n{output}"
+    );
+}
+
+/// 2026-08-09 (Phase 5): a `spill` spawn is also a per-instance heap block —
+/// never a static pool column.
+#[test]
+fn test_spill_spawn_emits_per_instance_heap() {
+    let n_item = TopLevel::Statement(Box::new(Statement::Let {
+        name: "N".to_string(),
+        names: vec![],
+        ty: Some(Type::int()),
+        expr: Some(Expr::Decimal(8)),
+        modifiers: vec![],
+    }));
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(
+        &spawn_pool_countdown_program_storage(n_item, crate::ast::SpawnStorage::Spill),
+        None,
+    );
+    assert!(
+        output.contains("= call ptr @malloc"),
+        "a spill spawn must allocate per instance:\n{output}"
+    );
+    assert!(
+        output.contains("inttoptr i64"),
+        "the spilled handle must be an inttoptr'd block address:\n{output}"
     );
 }
 

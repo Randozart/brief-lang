@@ -928,6 +928,21 @@ let result = await task;
 - `keep task` transfers the handle to the enclosing owner/boundary.
 - Silently dropping or discarding a live handle is an error.
 
+**Obj-instance spawn storage classes.** `spawn Obj(...)` allocates the
+instance from the obj's static pool column (the default, provably
+inexhaustible). The storage-strategy markers (§8.1) classify the spawn
+explicitly where the pool decoder cannot choose a single best strategy:
+
+```briv
+let h = box   spawn Counter();   // heap-per-instance, not a pooled column
+let h = spill spawn Counter();   // may grow beyond a static pool column
+```
+
+`box`/`spill` are contextual keywords — recognized only immediately before
+`spawn`, and legal identifiers elsewhere. A non-pooled spawn consumes no pool
+capacity and never triggers the unprovable-spawn error (the user opted out of
+the pooled column explicitly).
+
 `free task` is valid only when effect analysis proves cooperative cancellation points and cancellation-safe active FFI. Otherwise the handle must be awaited or kept.
 
 ### 12.3 Reference scheduling

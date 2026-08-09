@@ -61,7 +61,12 @@ pub struct DependentTerm {
 /// rows 1..(a+b) on ONE counter — `max(a,b)` columns would overflow. And
 /// `free`/`keep` do NOT shrink the pool: without reclamation a free never
 /// returns a row, so decrementing here would under-allocate.
-pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, Vec<DependentTerm>>, Vec<String>) {
+pub fn analyze(items: &[TopLevel]) -> (
+    HashMap<String, usize>,
+    HashMap<String, Vec<DependentTerm>>,
+    Vec<String>,
+    HashMap<String, crate::ast::SpawnStorage>,
+) {
     let mut capacities: HashMap<String, usize> = HashMap::new();
     let mut dependent: HashMap<String, Vec<DependentTerm>> = HashMap::new();
     let mut errors: Vec<String> = Vec::new();
@@ -116,7 +121,151 @@ pub fn analyze(items: &[TopLevel]) -> (HashMap<String, usize>, HashMap<String, V
             _ => {}
         }
     }
-    (capacities, dependent, errors)
+    // 2026-08-09 (Phase 5): collect the storage classes of non-pooled spawns —
+    // `box` (per-instance-heap) and `spill` (growable). The backend skips the
+    // static `[capacity x T]` column for these bases.
+    let storage_classes = collect_storage_classes(items);
+    (capacities, dependent, errors, storage_classes)
+}
+
+/// Scan every expression for `box`/`spill` spawns and record the base →
+/// storage-class mapping. A base with any non-pooled spawn is never given a
+/// static pool column.
+fn collect_storage_classes(items: &[TopLevel]) -> HashMap<String, crate::ast::SpawnStorage> {
+    let mut out = HashMap::new();
+    for stmt in items.iter().flat_map(top_level_bodies) {
+        walk_stmt_for_storage(stmt, &mut out);
+    }
+    out
+}
+
+/// The statement list a top-level item carries (transaction body, definition
+/// body, or a single top-level statement).
+fn top_level_bodies(item: &TopLevel) -> Vec<&crate::ast::Statement> {
+    match item {
+        TopLevel::Transaction(t) => t.body.iter().collect(),
+        TopLevel::Definition(d) => d.body.iter().collect(),
+        TopLevel::Statement(stmt) => vec![stmt],
+        _ => vec![],
+    }
+}
+
+/// Record any non-pooled `box`/`spill` spawn in a statement (recursively).
+fn walk_stmt_for_storage(
+    s: &crate::ast::Statement,
+    out: &mut HashMap<String, crate::ast::SpawnStorage>,
+) {
+    match s {
+        crate::ast::Statement::Let { expr, .. } => {
+            if let Some(e) = expr {
+                walk_expr_for_storage(e, out);
+            }
+        }
+        crate::ast::Statement::Assign(l, r) => {
+            walk_expr_for_storage(l, out);
+            walk_expr_for_storage(r, out);
+        }
+        crate::ast::Statement::ArrowAssign { target, value, .. } => {
+            if let Some(t) = target {
+                walk_expr_for_storage(t, out);
+            }
+            walk_expr_for_storage(value, out);
+        }
+        crate::ast::Statement::Term(Some(e)) | crate::ast::Statement::EndProgram(Some(e)) => {
+            walk_expr_for_storage(e, out);
+        }
+        crate::ast::Statement::Expression(e) | crate::ast::Statement::Gate(e) => {
+            walk_expr_for_storage(e, out);
+        }
+        crate::ast::Statement::Guarded(_, body) => {
+            for s in body {
+                walk_stmt_for_storage(s, out);
+            }
+        }
+        crate::ast::Statement::If(_, t, e) => {
+            for s in t {
+                walk_stmt_for_storage(s, out);
+            }
+            for s in e {
+                walk_stmt_for_storage(s, out);
+            }
+        }
+        crate::ast::Statement::Block(b) | crate::ast::Statement::SyncBlock(b) => {
+            for s in b {
+                walk_stmt_for_storage(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Record any non-pooled `box`/`spill` spawn in an expression (recursively).
+fn walk_expr_for_storage(e: &Expr, out: &mut HashMap<String, crate::ast::SpawnStorage>) {
+    match e {
+        Expr::Spawn { type_name, storage, .. } if *storage != crate::ast::SpawnStorage::Pooled => {
+            out.entry(type_name.clone()).or_insert(*storage);
+        }
+        Expr::Spawn { args, .. }
+        | Expr::Call(_, args, _)
+        | Expr::List(args)
+        | Expr::Tuple(args) => {
+            for a in args {
+                walk_expr_for_storage(a, out);
+            }
+        }
+        Expr::BinaryOp(_, l, r) => {
+            walk_expr_for_storage(l, out);
+            walk_expr_for_storage(r, out);
+        }
+        Expr::UnaryOp(_, i) | Expr::Deref(i) | Expr::AddrOf(i) | Expr::Cast(i, _)
+        | Expr::Consume(i) | Expr::IsType(i, _) => walk_expr_for_storage(i, out),
+        Expr::Field(o, _) | Expr::Index(o, _) | Expr::Reflect(o, _, _) => {
+            walk_expr_for_storage(o, out)
+        }
+        Expr::MethodCall(recv, _, args, _) => {
+            walk_expr_for_storage(recv, out);
+            for a in args {
+                walk_expr_for_storage(a, out);
+            }
+        }
+        Expr::If(c, t, e) => {
+            walk_expr_for_storage(c, out);
+            walk_expr_for_storage(t, out);
+            if let Some(e) = e {
+                walk_expr_for_storage(e, out);
+            }
+        }
+        Expr::Match(s, arms) => {
+            walk_expr_for_storage(s, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    walk_expr_for_storage(g, out);
+                }
+                walk_expr_for_storage(&arm.body, out);
+            }
+        }
+        Expr::Slice { array, start, end, stride, .. } => {
+            walk_expr_for_storage(array, out);
+            for b in [start, end, stride].into_iter().flatten() {
+                walk_expr_for_storage(b, out);
+            }
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for (_, f) in fields {
+                walk_expr_for_storage(f, out);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            walk_expr_for_storage(start, out);
+            walk_expr_for_storage(end, out);
+        }
+        Expr::Block(stmts) => {
+            for s in stmts {
+                walk_stmt_for_storage(s, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The walk context: the node's firing multiplicity, plus the runtime bound
@@ -301,7 +450,18 @@ fn walk_expr(
     errors: &mut Vec<String>,
 ) {
     match expr {
-        Expr::Spawn { type_name, args } => {
+        Expr::Spawn { type_name, args, storage } => {
+            // 2026-08-09 (Phase 5): `box`/`spill` spawns are NOT pool rows —
+            // box is per-instance-heap (each instance its own allocation),
+            // spill is a growable buffer. Neither consumes static/dependent
+            // pool capacity, and neither triggers the unprovable-spawn error
+            // (the user opted out of the pooled column explicitly).
+            if *storage != crate::ast::SpawnStorage::Pooled {
+                for a in args {
+                    walk_expr(a, multiplier, ctx, live, terms, errors);
+                }
+                return;
+            }
             match ctx.firing {
                 Firing::Static(n) if ctx.bound_terms.is_empty() => {
                     let entry = live.entry(type_name.clone()).or_insert(0);
@@ -452,7 +612,7 @@ mod tests {
             name: "h".to_string(),
             names: vec![],
             ty: None,
-            expr: Some(Expr::Spawn { type_name: base.to_string(), args: vec![] }),
+            expr: Some(Expr::Spawn { type_name: base.to_string(), args: vec![], storage: crate::ast::SpawnStorage::Pooled }),
             modifiers: vec![],
         }
     }
@@ -473,7 +633,7 @@ mod tests {
     #[test]
     fn const_countdown_spawn_is_bounded() {
         let program = vec![countdown(Expr::Decimal(2))];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(dependent.is_empty(), "a const countdown is not dependent");
         assert_eq!(caps.get("Counter"), Some(&2));
@@ -485,7 +645,7 @@ mod tests {
         // N at runtime, SPEC §16.6), NOT an error, and the bound expression
         // is threaded for the backend malloc.
         let program = vec![countdown(Expr::Identifier("N".into()))];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(!caps.contains_key("Counter"));
         let terms = dependent.get("Counter").expect("a runtime-bound spawn must be dependent");
@@ -508,7 +668,7 @@ mod tests {
             body: vec![spawn("Counter")],
         };
         let program = vec![countdown_with_body(Expr::Identifier("N".into()), vec![foreach])];
-        let (_, dependent, errors) = analyze(&program);
+        let (_, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         let terms = dependent.get("Counter").expect("dependent pool expected");
         assert_eq!(terms.len(), 1);
@@ -538,7 +698,7 @@ mod tests {
             Expr::Bool(false),
             vec![spawn("Counter")],
         )];
-        let (_, _, errors) = analyze(&program);
+        let (_, _, errors, _) = analyze(&program);
         assert!(!errors.is_empty(), "an unbounded spawn must be rejected");
         assert!(errors[0].contains("not statically bounded"));
     }
@@ -552,7 +712,7 @@ mod tests {
         let mut body = vec![spawn("Counter")];
         body.push(Statement::FreeHint("h".to_string()));
         let program = vec![countdown_with_body(Expr::Decimal(4), body)];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(dependent.is_empty(), "a const countdown is not dependent");
         assert_eq!(caps.get("Counter"), Some(&4),
@@ -564,7 +724,7 @@ mod tests {
         let mut body = vec![spawn("Counter")];
         body.push(Statement::KeepHint("h".to_string()));
         let program = vec![countdown_with_body(Expr::Decimal(3), body)];
-        let (caps, _, errors) = analyze(&program);
+        let (caps, _, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert_eq!(caps.get("Counter"), Some(&3),
             "keep must not reduce the pool: capacity = total spawn count (3 firings)");
@@ -579,7 +739,7 @@ mod tests {
         let node_a = countdown_with_body(Expr::Decimal(3), vec![spawn("Counter")]);
         let node_b = countdown_with_body(Expr::Decimal(5), vec![spawn("Counter")]);
         let program = vec![node_a, node_b];
-        let (caps, _, errors) = analyze(&program);
+        let (caps, _, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert_eq!(caps.get("Counter"), Some(&8),
             "two nodes spawning Counter need the SUM (3 + 5 = 8) on the shared counter");
@@ -613,7 +773,7 @@ mod tests {
             ]),
         );
         let program = vec![init, countdown(Expr::Identifier("N".into()))];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(dependent.is_empty(),
             "a bounded init must not use the dependent-heap path, got {dependent:?}");
@@ -636,7 +796,7 @@ mod tests {
             ]),
         );
         let program = vec![init, countdown(Expr::Identifier("N".into()))];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(dependent.is_empty());
         assert_eq!(caps.get("Counter"), Some(&64),
@@ -658,12 +818,74 @@ mod tests {
             ]),
         );
         let program = vec![init, countdown(Expr::Identifier("N".into()))];
-        let (caps, dependent, errors) = analyze(&program);
+        let (caps, dependent, errors, _) = analyze(&program);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
         assert!(!caps.contains_key("Counter"),
             "a ref-containing bound set is not statically bounded");
         let terms = dependent.get("Counter").expect("must use the dependent path");
         assert!(matches!(&terms[0].bound, Expr::Identifier(n) if n == "N"));
+    }
+
+    // ── 2026-08-09 (Phase 5): box/spill storage classification ────────
+
+    fn spawn_with_storage(storage: crate::ast::SpawnStorage) -> Statement {
+        Statement::Let {
+            name: "h".to_string(),
+            names: vec![],
+            ty: None,
+            expr: Some(Expr::Spawn { type_name: "Counter".to_string(), args: vec![], storage }),
+            modifiers: vec![],
+        }
+    }
+
+    /// A `box` spawn is NOT pooled — no capacity, no dependent term, no
+    /// unprovable error (the user opted out of the pool column explicitly),
+    /// and the analysis records the Box storage class.
+    #[test]
+    fn box_spawn_is_non_pooled_and_classified() {
+        let program = vec![txn(
+            "work",
+            Expr::Bool(true),
+            Expr::Bool(false),
+            vec![spawn_with_storage(crate::ast::SpawnStorage::Box)],
+        )];
+        let (caps, dependent, errors, storage) = analyze(&program);
+        // The firing is unprovable ([true]) but box legalizes it — no error.
+        assert!(errors.is_empty(), "box spawn must not error, got {errors:?}");
+        assert!(caps.is_empty(), "a box spawn consumes no pool capacity");
+        assert!(dependent.is_empty(), "a box spawn is not a dependent pool");
+        assert_eq!(storage.get("Counter"), Some(&crate::ast::SpawnStorage::Box));
+    }
+
+    /// A `spill` spawn is also non-pooled and classified Spill.
+    #[test]
+    fn spill_spawn_is_non_pooled_and_classified() {
+        let program = vec![txn(
+            "work",
+            Expr::Bool(true),
+            Expr::Bool(false),
+            vec![spawn_with_storage(crate::ast::SpawnStorage::Spill)],
+        )];
+        let (caps, dependent, errors, storage) = analyze(&program);
+        assert!(errors.is_empty(), "spill spawn must not error, got {errors:?}");
+        assert!(caps.is_empty(), "a spill spawn consumes no pool capacity");
+        assert_eq!(storage.get("Counter"), Some(&crate::ast::SpawnStorage::Spill));
+    }
+
+    /// A plain (pooled) spawn in an unprovable context is STILL an error —
+    /// box/spill are the explicit escape, not a silent relaxation.
+    #[test]
+    fn pooled_spawn_in_unprovable_context_is_still_rejected() {
+        let program = vec![txn(
+            "work",
+            Expr::Bool(true),
+            Expr::Bool(false),
+            vec![spawn_with_storage(crate::ast::SpawnStorage::Pooled)],
+        )];
+        let (_, _, errors, storage) = analyze(&program);
+        assert!(!errors.is_empty(), "a pooled spawn in an unprovable node must error");
+        assert!(errors[0].contains("not statically bounded"));
+        assert!(storage.is_empty(), "a rejected pooled spawn has no storage class");
     }
 }
 

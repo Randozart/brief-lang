@@ -458,7 +458,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // inexhaustible — the spawn-count analysis rejects any spawn whose
     // multiplicity cannot be statically bounded (Briv has no runtime errors).
     {
-        let (_, _, spawn_errors) = briv_compiler::analysis::spawn_pool::analyze(&items);
+        let (_, _, spawn_errors, _) = briv_compiler::analysis::spawn_pool::analyze(&items);
         if !spawn_errors.is_empty() {
             return Err(format!(
                 "spawn pool errors:\n{}",
@@ -1781,7 +1781,7 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     }
     // 2026-08-07 (object instance pools): `check` must reject unprovable
     // spawn counts exactly like `build` (Briv has no runtime errors).
-    let (_, _, spawn_errors) = briv_compiler::analysis::spawn_pool::analyze(&items);
+    let (_, _, spawn_errors, _) = briv_compiler::analysis::spawn_pool::analyze(&items);
     if !spawn_errors.is_empty() {
         return Err(format!(
             "spawn pool errors:\n{}",

@@ -6,6 +6,34 @@
 use crate::ast::Type;
 use crate::errors::Span;
 
+/// The storage class of a spawned obj instance (2026-08-09, Phase 5).
+/// Strategy-keyword surface: the default (Pooled) is the efficient path — a
+/// keyword may only *reveal* a choice the pool decoder cannot make alone,
+/// never beat a working default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnStorage {
+    /// The instance lives in the obj's static pool column (the default).
+    Pooled,
+    /// `box spawn Obj(...)` — per-instance-heap: the instance is its own
+    /// heap allocation, NOT a row in the pool. Explicit class when the pool
+    /// decoder is ambiguous.
+    Box,
+    /// `spill spawn Obj(...)` — allowed to grow into a growable buffer when a
+    /// static pool column can't hold the proven worst case.
+    Spill,
+}
+
+impl SpawnStorage {
+    /// The storage-class keyword for display, or "" for the default (pooled).
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            SpawnStorage::Pooled => "",
+            SpawnStorage::Box => "box",
+            SpawnStorage::Spill => "spill",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     // ── Literals ────────────────────────────────────────────────
@@ -64,9 +92,13 @@ pub enum Expr {
     /// 2026-08-07 (object instance pools): `spawn Obj(args)` — create an obj
     /// instance from its Init member + return a linear handle (the pool row
     /// id). SPEC §12.2.
+    /// 2026-08-09 (Phase 5): `box spawn Obj(args)` / `spill spawn Obj(args)`
+    /// set the storage class — per-instance-heap (not pooled) or growable
+    /// (a static pool column that can't hold the worst case). Default Pooled.
     Spawn {
         type_name: String,
         args: Vec<Expr>,
+        storage: SpawnStorage,
     },
 
     // ── Control flow ────────────────────────────────────────────

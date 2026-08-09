@@ -38,8 +38,14 @@ impl fmt::Display for Expr {
                 write!(f, ")")
             }
             // 2026-08-07 (object instance pools): `spawn Obj(args)`.
-            Expr::Spawn { type_name, args } => {
-                write!(f, "spawn {}(", type_name)?;
+            // 2026-08-09 (Phase 5): `box`/`spill` storage-class prefixes.
+            Expr::Spawn { type_name, args, storage } => {
+                let kw = storage.keyword();
+                if kw.is_empty() {
+                    write!(f, "spawn {}(", type_name)?;
+                } else {
+                    write!(f, "{} spawn {}(", kw, type_name)?;
+                }
                 for (i, a) in args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;

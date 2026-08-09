@@ -1267,7 +1267,15 @@ impl LlvmBackend {
             // the next pool row from the __spawn_next_<base> counter, run the
             // Init member at that row, increment the counter, and return the
             // row as the linear handle.
-            Expr::Spawn { type_name, args } => {
+            Expr::Spawn { type_name, args, storage } => {
+                if *storage != crate::ast::SpawnStorage::Pooled {
+                    // 2026-08-09 (Phase 5): `box`/`spill` spawns are NOT pooled
+                    // rows — box is a per-instance heap allocation, spill a
+                    // growable buffer. The spawn pool analysis rejects them
+                    // from the static/dependent column path; the emission for
+                    // each storage class is handled by the storage emitter.
+                    return self.emit_spawn_storage(out, indent, type_name, args);
+                }
                 let counter_name = format!("__spawn_next_{}", type_name);
                 let Some(&counter_idx) = self.ctx.field_index_map.get(&counter_name) else {
                     panic!("spawn of '{}' with no registered instance pool", type_name);
@@ -2005,6 +2013,31 @@ impl LlvmBackend {
     ) -> (String, Type, String) {
         let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
         let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+        // 2026-08-09 (Phase 5): a BOXED/SPILLED instance's handle is its heap
+        // block ADDRESS, not a pooled row id. When this slot's base is boxed,
+        // the "column" is the per-instance block: inttoptr the handle + GEP the
+        // member's byte offset, then load.
+        let slot_name = self.ctx.field_index_map.iter()
+            .find(|(_, v)| **v == idx)
+            .map(|(k, _)| k.clone());
+        if let Some(slot_name) = slot_name {
+            if let Some((base, member)) = slot_name.split_once('.') {
+                if let Some(offsets) = self.ctx.boxed_offsets.get(base) {
+                    if let Some((off, mty)) = offsets.get(member) {
+                        let ptr = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, row_reg).ok();
+                        let gep = self.fun.gen_reg();
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, off).ok();
+                        let llvm_ty = if matches!(mty, Type::Ptr(_)) {
+                            "i64".to_string()
+                        } else {
+                            self.llvm_type(mty)
+                        };
+                        return (gep, mty.clone(), llvm_ty);
+                    }
+                }
+            }
+        }
         let base = self.emit_state_gep(out, indent, "i", "%state", idx);
         // 2026-08-07 (object instance pools): a DEPENDENT column is a heap
         // buffer — the slot holds the malloc'd buffer address. Load it, then

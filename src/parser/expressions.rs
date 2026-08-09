@@ -5,7 +5,7 @@
 // @ prefix forces any token to Quoted(bytes).
 
 use super::helpers::Parser;
-use crate::ast::{BinaryOpKind, Expr, ReflectKind, UnaryOpKind};
+use crate::ast::{BinaryOpKind, Expr, ReflectKind, SpawnStorage, UnaryOpKind};
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
@@ -411,9 +411,27 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 2026-08-09 (Phase 5): parse `spawn Obj(args)` with a given storage
+    /// class. The caller has ALREADY consumed the `spawn` token (pos is at the
+    /// type name). `box`/`spill` keywords were consumed by the caller too.
+    fn parse_spawn_body(&mut self, storage: SpawnStorage) -> Result<Expr, SyntaxError> {
+        let type_name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        if !self.check(&Token::RParen) {
+            loop {
+                args.push(self.parse_expression()?);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+        Ok(Expr::Spawn { type_name, args, storage })
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
-        match self.advance() {
-            // ── Literals ────────────────────────────────────────────
+        match self.advance() {            // ── Literals ────────────────────────────────────────────
             Some((Token::Integer(n), span)) => {
                 // 2026-07-27: Check for adjacent suffix identifier (e.g., 42km, 0xFFh)
                 if let Some(suf) = self.peek_suffix(span.end) {
@@ -454,24 +472,28 @@ impl<'a> Parser<'a> {
             // ── Identifiers (including # names like Sqrt#) ──────────
             // 2026-08-07 (object instance pools): `spawn Obj(args)` — create
             // an obj instance + return a linear handle (SPEC §12.2).
-            Some((Token::Spawn, _)) => {
-                let type_name = self.expect_identifier()?;
-                self.expect(Token::LParen)?;
-                let mut args = Vec::new();
-                if !self.check(&Token::RParen) {
-                    loop {
-                        args.push(self.parse_expression()?);
-                        if !self.eat(&Token::Comma) {
-                            break;
-                        }
-                    }
-                }
-                self.expect(Token::RParen)?;
-                Ok(Expr::Spawn { type_name, args })
-            }
+            // 2026-08-09 (Phase 5): `box spawn Obj(args)` / `spill spawn
+            // Obj(args)` — contextual storage-class keywords, recognized ONLY
+            // immediately before `spawn` (elsewhere `box`/`spill` stay legal
+            // identifiers — the compiler backend's own .bv uses `spill` as a
+            // register word). `advance()` already consumed the `spawn` token,
+            // so parse_spawn_body starts at the type name.
+            Some((Token::Spawn, _)) => self.parse_spawn_body(SpawnStorage::Pooled),
             Some((Token::Identifier(name), span)) => {                // 2026-08-05 (Phase 3): adjacent prefix-discriminator literals
                 // (`sql"SELECT"`) are removed; domain literals use explicit
                 // macro calls such as `sql!("SELECT")` (SPEC §16.2).
+                // 2026-08-09 (Phase 5): contextual storage-class keywords
+                // `box`/`spill` — recognized ONLY when immediately followed by
+                // `spawn`. `advance()` already consumed the KEYWORD, so pos is
+                // AT `spawn` — consume it, then parse the spawn body.
+                if name == "box" && self.peek() == Some(&Token::Spawn) {
+                    self.advance();
+                    return self.parse_spawn_body(SpawnStorage::Box);
+                }
+                if name == "spill" && self.peek() == Some(&Token::Spawn) {
+                    self.advance();
+                    return self.parse_spawn_body(SpawnStorage::Spill);
+                }
                 // 2026-07-24: Struct literal: TypeName { field: expr; ... }
                 // Only parse as struct literal when the name starts with
                 // uppercase (PascalCase type names). This prevents `!first { ... }`
@@ -994,5 +1016,62 @@ mod tests {
             msg.contains("hint: match arms use '=>'; lambda parameters use '->'"),
             "expected the arrow hint, got: {msg}"
         );
+    }
+
+    // ── 2026-08-09 (Phase 5): box/spill storage-class spawns ──────────
+
+    #[test]
+    fn box_spawn_parses_with_box_storage() {
+        let expr = parse_expr("box spawn Counter(5)").unwrap();
+        match expr {
+            Expr::Spawn { type_name, args, storage } => {
+                assert_eq!(type_name, "Counter");
+                assert_eq!(args.len(), 1);
+                assert_eq!(storage, crate::ast::SpawnStorage::Box);
+            }
+            other => panic!("expected box spawn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spill_spawn_parses_with_spill_storage() {
+        let expr = parse_expr("spill spawn Counter()").unwrap();
+        match expr {
+            Expr::Spawn { type_name, args, storage } => {
+                assert_eq!(type_name, "Counter");
+                assert!(args.is_empty());
+                assert_eq!(storage, crate::ast::SpawnStorage::Spill);
+            }
+            other => panic!("expected spill spawn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_spawn_stays_pooled() {
+        let expr = parse_expr("spawn Counter()").unwrap();
+        match expr {
+            Expr::Spawn { storage, .. } => {
+                assert_eq!(storage, crate::ast::SpawnStorage::Pooled);
+            }
+            other => panic!("expected spawn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn box_without_spawn_is_a_plain_identifier() {
+        // Contextual keyword: `box` alone (no `spawn` after) stays an
+        // identifier — the compiler backend's own .bv uses `spill` as a
+        // register word.
+        let expr = parse_expr("box").unwrap();
+        assert!(matches!(expr, Expr::Identifier(n) if n == "box"));
+        let expr = parse_expr("spill").unwrap();
+        assert!(matches!(expr, Expr::Identifier(n) if n == "spill"));
+    }
+
+    #[test]
+    fn spill_identifier_in_call_position_stays_identifier() {
+        // `let box = 5; box` — `box` used as a variable name is untouched.
+        let expr = parse_expr("box + 1").unwrap();
+        assert!(matches!(expr, Expr::BinaryOp(_, l, _) if matches!(l.as_ref(), Expr::Identifier(n) if n == "box")));
     }
 }

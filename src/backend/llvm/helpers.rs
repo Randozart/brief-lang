@@ -65,11 +65,12 @@ impl LlvmBackend {
                     .collect(),
                 None,
             ),
-            Expr::Spawn { type_name, args } => Expr::Spawn {
+            Expr::Spawn { type_name, args, storage } => Expr::Spawn {
                 type_name: type_name.clone(),
                 args: args.iter()
                     .map(|a| Self::rewrite_cell_identifiers(a, cell_name))
                     .collect(),
+                storage: *storage,
             },
             Expr::Field(obj, field) => Expr::Field(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),

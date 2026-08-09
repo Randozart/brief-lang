@@ -343,6 +343,9 @@ Briv has many **full forms** and **abbreviated forms**. The abbreviated ones are
 | `init` | `init` | Runtime-seeded invariant |
 | `term` | `terminate` | Successful end |
 | `escape` | `escape` | Rollback |
+| `spawn` | `spawn` | Obj-instance/task creation |
+| `box` | `box` | Storage: heap-per-instance, not pooled (contextual — only before `spawn`) |
+| `spill` | `spill` | Storage: may grow past a static pool column (contextual — only before `spawn`) |
 
 ---
 
