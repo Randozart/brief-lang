@@ -28,8 +28,8 @@ Status legend:
 | 8 | Declarations | In progress | Phase 5: `trait`/`impl` declarations, relationship list `type X: Parent, Trait, #Proto`, impl coherence, structural conformance; `meld` deferred to Phase 12 |
 | 9 | Functions, transactions, nodes, objects, cells | In progress | `escape`→`rollback`, `term!`→`exit program` done; `endprogram` real process exit + `beginprogram` entry-loop shipped 2026-08-06 |
 | 10 | Contracts, invariants, watchdogs | In progress | Phase 6: mandatory non-trivial contracts on node/txn/asm; explicit `[true][true]` rejected |
-| 11 | Control flow | In progress | `rollback`, `exit program` done; `endprogram`/`beginprogram` entry-loop implemented 2026-08-06 (SPEC 11.5 no longer staged); `defer`/`mutex`/`barrier` Phase 11; no `main` — first-firing-node entry |
-| 12 | Concurrency and task lifecycle | Not started | Phase 10 (`spawn`/`await` handles) |
+| 11 | Control flow | In progress | `rollback`, `exit program` done; `endprogram`/`beginprogram` entry-loop implemented 2026-08-06 (SPEC 11.5 no longer staged); `defer`/`mutex`/`barrier<group>` statements shipped 2026-08-09 (Phase 10 — SPEC 11.6 no longer staged); no `main` — first-firing-node entry |
+| 12 | Concurrency and task lifecycle | In progress | `spawn Obj(...)` pools (2026-08-07) + `spawn defn(...)` task handles, `await`, `free`/`keep` (2026-08-09 Phase 10); no-implicit-concurrency gate with sync-group classification (Bug 2 fix); task cancellation proof + Kani gate proofs (2026-08-09); remaining: objects/cells lifecycle, deterministic scheduler interleaving mode |
 | 13 | Triggers and external events | In progress | `#assume_event` dead data removed; port contracts Phase 10 |
 | 14 | Ownership, lifetimes, effects | In progress | Phase 9: garbage scheduler wired across fold paths + only soundly-emittable frees planned (2026-08-06); ownership algebra + `.s` enforcement pending |
 | 15 | Expressions and operations | In progress | Phase 5: op elaboration — declared variant ops lower to their functions (`resolve_binary_op_binding` + `elaborate_ops`, 2026-08-06); remaining: effects/access-shape carrying, dyn Trait |
