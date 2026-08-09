@@ -136,3 +136,22 @@ reference → LLVM codegen → tests), plus the Kani/verification obligations.
   paths); rollback runs the defer too. Tests: 1708 pass.
 - Remaining: Slice C (`spawn defn`/`await`/`free`/`keep` task handles),
   Slice D (cancellation proof + Kani).
+
+### 2026-08-09 — Slice C (`spawn defn`/`await`/`free`/`keep` task handles) DONE
+
+- `Expr::Await(Box<Expr>)` — unary `await task`; parses in parse_unary.
+- `spawn defn(args)` — the typechecker classifies it as a TASK spawn when the
+  callee is a registered defn (fn_return_types), typing the handle as the
+  defn's return type; the backend `emit_task_spawn` emits the defn call inline
+  (the result register IS the handle — the deterministic reference scheduler);
+  the interpreter `eval_task_spawn` runs the defn inline and returns the result.
+- `await task` — evaluates the handle (already the result) in all engines.
+- `free task`/`keep task` — the existing FreeHint/KeepHint statements operate
+  on task handles (verified e2e).
+- Await threaded through every Expr walker (annotator, dataflow, allocation,
+  dependency_graph, licm, display, helpers, collect_strings, macro eval,
+  env_plugin, symbolic, typechecker, interpreter).
+- E2E: `spawn compute(21)` + `await t` prints 42. Tests: 1711 pass.
+- Remaining: Slice D (task cancellation proof + Kani). The "silently dropped
+  live handle is an error" liveness check rides the ownership analysis
+  (Phase 9 follow-up, not this slice).

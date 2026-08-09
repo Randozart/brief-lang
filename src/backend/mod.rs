@@ -425,6 +425,9 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         Expr::Consume(inner) => {
             collect_expr_identifiers(inner, ids);
         }
+        Expr::Await(inner) => {
+            collect_expr_identifiers(inner, ids);
+        }
         Expr::Identifier(n) => {
             ids.insert(n.clone());
         }

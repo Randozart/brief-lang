@@ -139,6 +139,11 @@ pub enum Expr {
     /// compile error (the move pass tracks it). Only a mutable lvalue can be
     /// consumed — `~op` on a constant is a compile error.
     Consume(Box<Expr>),
+    /// 2026-08-09 (Phase 10): `await task` — consume a task handle and yield
+    /// the callable's declared result (SPEC §12.2). The reference scheduler is
+    /// deterministic, so the handle already holds the result; `await` reads it
+    /// and marks the handle consumed (a later use is an error).
+    Await(Box<Expr>),
 
     // ── Plugin intercept ────────────────────────────────────────
     // 2026-07-19: name!(args). Resolved by Front or Mid stage plugins.
@@ -350,7 +355,7 @@ impl Expr {
                     }
                 }
             }
-            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => inner.collect_vars_into(acc),
+            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) | Expr::Await(inner) => inner.collect_vars_into(acc),
             _ => {}
         }
     }

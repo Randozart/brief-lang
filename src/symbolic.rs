@@ -274,6 +274,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
 
         // Pointer dereference
         Expr::Deref(inner) => eval_symbolic(inner, state),
+        Expr::Await(inner) => eval_symbolic(inner, state),
         // Address-of
         Expr::AddrOf(inner) => eval_symbolic(inner, state),
         Expr::Consume(inner) => eval_symbolic(inner, state),

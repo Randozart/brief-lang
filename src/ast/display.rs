@@ -140,6 +140,7 @@ impl fmt::Display for Expr {
             Expr::Deref(inner) => write!(f, "*{}", inner),
             Expr::AddrOf(inner) => write!(f, "&{}", inner),
             Expr::Consume(inner) => write!(f, "~{}", inner),
+            Expr::Await(inner) => write!(f, "await {}", inner),
             Expr::PluginIntercept { name, args, type_args: _ } => {
                 write!(f, "{}!(", name)?;
                 for (i, arg) in args.iter().enumerate() {

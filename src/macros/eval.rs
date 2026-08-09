@@ -2039,6 +2039,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
         | Expr::IsType(inner, _)
         | Expr::Deref(inner)
         | Expr::AddrOf(inner)
+        | Expr::Await(inner)
         | Expr::Consume(inner) => resolve_dollar_refs_in_expr(inner, scope),
         Expr::PluginIntercept { args: pargs, .. } => {
             for arg in pargs.iter_mut() {

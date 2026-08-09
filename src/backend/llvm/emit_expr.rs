@@ -99,6 +99,9 @@ impl LlvmBackend {
                 self.fun.pending_consumes.push(reg.name.clone());
                 reg
             }
+            // 2026-08-09 (Phase 10): `await task` — the task handle already
+            // holds the result (deterministic inline execution); await reads it.
+            Expr::Await(inner) => self.emit_expr(out, inner, indent),
             Expr::Decimal(n) => {
                 self.emit_int(out, v, *n, indent)
             }
@@ -1289,6 +1292,15 @@ impl LlvmBackend {
             // Init member at that row, increment the counter, and return the
             // row as the linear handle.
             Expr::Spawn { type_name, args, storage } => {
+                // 2026-08-09 (Phase 10): `spawn defn(args)` is a TASK spawn —
+                // the handle is the defn's result (SPEC §12.2). The reference
+                // semantic scheduler is deterministic: a spawned task runs to
+                // completion inline, and `await` reads the stored result. A
+                // defn name is distinguishable from an obj base by the
+                // defn_params/defn_return_types registration.
+                if self.ctx.defn_params.contains_key(type_name.as_str()) {
+                    return self.emit_task_spawn(out, indent, type_name, args);
+                }
                 if *storage != crate::ast::SpawnStorage::Pooled {
                     // 2026-08-09 (Phase 5): `box`/`spill` spawns are NOT pooled
                     // rows — box is a per-instance heap allocation, spill a
@@ -2857,6 +2869,22 @@ impl LlvmBackend {
             name: result_reg,
             ty: ret_type,
         }
+    }
+
+    /// 2026-08-09 (Phase 10): `spawn defn(args)` — a TASK spawn. The reference
+    /// semantic scheduler is deterministic: the task runs to completion, and
+    /// its result register IS the linear handle. `await`/`free`/`keep` then
+    /// operate on that handle (the handle's liveness is checked by the
+    /// typechecker/ownership analysis — a silently dropped live handle errors).
+    pub(super) fn emit_task_spawn(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+        args: &[Expr],
+    ) -> TypedRegister {
+        let v = self.fun.gen_reg();
+        self.emit_user_call(out, &v, name, args, indent)
     }
 
     /// Emit a user function call.

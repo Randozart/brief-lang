@@ -1015,6 +1015,14 @@ pub fn infer_expression(
                 }),
             }
         }
+        // 2026-08-09 (Phase 10): `await task` — the handle's type IS the
+        // task's result type (a task spawn's handle carries the defn's return
+        // type, SPEC §12.2); await reads it. The handle's consumption (a later
+        // use errors) is enforced by the ownership analysis.
+        Expr::Await(inner) => {
+            let (ty, prov) = infer_expression(inner, ctx)?;
+            Ok((ty, prov))
+        }
         // 2026-07-31: Reflection: x.^Len / x.^^Size (see resolve_reflect).
         Expr::Reflect(recv, target, kind) => {
             let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
@@ -1086,7 +1094,14 @@ pub fn infer_expression(
                 for a in args {
                     infer_type_only(a, ctx)?;
                 }
-                Ok((Type::Custom(type_name.clone()), Provenance::Unknown))
+                // 2026-08-09 (Phase 10): `spawn defn(args)` is a TASK spawn —
+                // its handle carries the defn's return type (SPEC §12.2); an
+                // obj spawn keeps the obj's Custom type.
+                if let Some(ty) = ctx.fn_return_types.get(type_name) {
+                    Ok((ty.clone(), Provenance::Unknown))
+                } else {
+                    Ok((Type::Custom(type_name.clone()), Provenance::Unknown))
+                }
             }
 
     }

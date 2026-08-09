@@ -170,6 +170,11 @@ pub fn eval_expr(
         // ── Address-of ───────────────────────────────────────────
         // 2026-07-18: Wrap the inner value in Value::Ref to represent a pointer.
         Expr::Consume(inner) => eval_expr(inner, heap, bindings, functions),
+        // 2026-08-09 (Phase 10): `await task` — the deterministic reference
+        // scheduler runs a spawned task inline, so its handle already holds
+        // the result; await reads it (the handle's consumption is enforced by
+        // the ownership analysis).
+        Expr::Await(inner) => eval_expr(inner, heap, bindings, functions),
         Expr::AddrOf(inner) => {
             let val = eval_expr(inner, heap, bindings, functions)?;
             Ok(Value::Ref(Box::new(val)))
@@ -203,10 +208,17 @@ pub fn eval_expr(
         ),
         // 2026-08-07 (Phase 7): an iterable range value — consumed by
         // `foreach` (SPEC §11.4).
-        Expr::Spawn { args, .. } => {
+        Expr::Spawn { type_name, args, .. } => {
             // 2026-08-07 (instance pools): the interpreter reference evaluates
             // the spawn args; the handle is a synthetic atom (the codegen
             // allocates the real pool row).
+            // 2026-08-09 (Phase 10): `spawn defn(args)` is a TASK spawn — the
+            // deterministic reference scheduler runs the task inline, so the
+            // handle IS the callable's result (SPEC §12.2). Distinguish a task
+            // (a registered function) from an obj base.
+            if functions.contains_key(type_name) {
+                return eval_task_spawn(type_name, args, heap, bindings, functions);
+            }
             for a in args {
                 eval_expr(a, heap, bindings, functions)?;
             }
@@ -229,6 +241,45 @@ pub fn eval_expr(
         }
 
     }
+}
+
+/// 2026-08-09 (Phase 10): `spawn defn(args)` — a TASK spawn evaluated inline.
+/// The deterministic reference scheduler runs the task to completion, so the
+/// returned handle IS the callable's result (SPEC §12.2).
+fn eval_task_spawn(
+    type_name: &str,
+    args: &[Expr],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
+) -> Result<Value, RuntimeError> {
+    let mut arg_vals = Vec::new();
+    for a in args {
+        arg_vals.push(eval_expr(a, heap, bindings, functions)?);
+    }
+    let defn = functions
+        .get(type_name)
+        .cloned()
+        .ok_or_else(|| RuntimeError::UndefinedFunction(type_name.to_string()))?;
+    let mut result = Value::Void;
+    let mut call_bindings: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
+    for (i, name) in defn.parameters.iter().enumerate() {
+        if let Some(v) = arg_vals.get(i) {
+            call_bindings.insert(name.clone(), v.clone());
+        }
+    }
+    for stmt in &defn.body {
+        match eval_statement(stmt, heap, &mut call_bindings, functions) {
+            Ok(v) => result = v,
+            Err(RuntimeError::TermReturn(v)) => {
+                result = v;
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(result)
 }
 
 /// Evaluate a function/intrinsic call.

@@ -159,7 +159,7 @@ impl Annotator {
                 self.collect_calls_from_expr(list, calls);
                 self.collect_calls_from_expr(index, calls);
             }
-            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => self.collect_calls_from_expr(inner, calls),
+            Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) | Expr::Await(inner) => self.collect_calls_from_expr(inner, calls),
             Expr::Field(obj, _) => self.collect_calls_from_expr(obj, calls),
             Expr::Tuple(elems) => {
                 for e in elems {
@@ -551,6 +551,7 @@ impl Annotator {
         match expr {
             Expr::Char(c) => format!("'{}'", c),
             Expr::Consume(inner) => format!("~{}", self.format_expr(inner)),
+            Expr::Await(inner) => format!("await {}", self.format_expr(inner)),
             Expr::BeginProgram => "beginprogram".to_string(),
             Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => n.to_string(),
             Expr::Float(f) => f.to_string(),

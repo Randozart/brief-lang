@@ -909,4 +909,26 @@ mod tests {
             "defer stack must be empty after the firing completes"
         );
     }
+
+    // ── 2026-08-09 (Phase 10): task spawn / await ────────────────────
+
+    #[test]
+    fn task_spawn_runs_inline_and_await_reads_result() {
+        // The reference semantic scheduler is deterministic: a spawned task
+        // runs to completion; `await` returns the stored result (SPEC §12.2).
+        let program = parse_program("defn compute(x: Int) -> Int { term x * 2; };");
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        // spawn = call the defn inline (the handle is the result).
+        let handle = interp.eval_expr(&Expr::Spawn {
+            type_name: "compute".to_string(),
+            args: vec![Expr::Decimal(21)],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        assert_eq!(handle.as_i64(), Some(42), "spawn must run the task inline");
+        // Bind the handle, then await reads it.
+        interp.state.insert("t".to_string(), handle);
+        let awaited = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t".to_string())))).unwrap();
+        assert_eq!(awaited.as_i64(), Some(42), "await must yield the task result");
+    }
 }

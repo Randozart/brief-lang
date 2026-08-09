@@ -148,6 +148,9 @@ impl LlvmBackend {
             Expr::Consume(inner) => {
                 Expr::Consume(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
             }
+            Expr::Await(inner) => {
+                Expr::Await(Box::new(Self::rewrite_cell_identifiers(inner, cell_name)))
+            }
             Expr::PluginIntercept { name, args, .. } => Expr::PluginIntercept {
                 name: name.clone(),
                 args: args

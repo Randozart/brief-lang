@@ -274,7 +274,7 @@ fn collect_bytes_expr(expr: &Expr, seen: &mut std::collections::HashSet<Vec<u8>>
                 collect_bytes_expr(a, seen, out);
             }
         }
-        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) => {
+        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) | Expr::Await(i) => {
             collect_bytes_expr(i, seen, out);
         }
         Expr::Field(o, _) | Expr::Index(o, _) => collect_bytes_expr(o, seen, out),
@@ -388,7 +388,7 @@ fn collect_masks_expr(expr: &Expr, seen: &mut std::collections::HashSet<Vec<u8>>
                 collect_masks_expr(a, seen, out);
             }
         }
-        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) => {
+        Expr::Cast(i, _) | Expr::IsType(i, _) | Expr::Consume(i) | Expr::Deref(i) | Expr::AddrOf(i) | Expr::Await(i) => {
             collect_masks_expr(i, seen, out);
         }
         Expr::Field(o, _) => collect_masks_expr(o, seen, out),
@@ -527,6 +527,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
         Expr::Consume(inner) => { collect_strings_expr(inner, seen, out); }
+        Expr::Await(inner) => { collect_strings_expr(inner, seen, out); }
         Expr::BeginProgram => {}
         Expr::Quoted(s) => {
             let s_str = String::from_utf8_lossy(s).into_owned();

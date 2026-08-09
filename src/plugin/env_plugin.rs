@@ -141,7 +141,7 @@ fn walk_expr(expr: &mut Expr) {
             for e in elems { walk_expr(e); }
         }
         Expr::Field(obj, _) | Expr::Index(obj, _) => walk_expr(obj),
-        Expr::Cast(inner, _) | Expr::IsType(inner, _) | Expr::Deref(inner)
+        Expr::Cast(inner, _) | Expr::IsType(inner, _) | Expr::Deref(inner) | Expr::Await(inner)
         | Expr::AddrOf(inner) => walk_expr(inner),
         Expr::Within(body, _) => walk_expr(body),
         Expr::Lambda(_, body) => walk_expr(body),

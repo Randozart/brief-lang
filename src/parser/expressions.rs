@@ -209,6 +209,11 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary()?;
             return Ok(Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(expr)));
         }
+        // 2026-08-09 (Phase 10): `await task` — consume a task handle.
+        if self.eat(&Token::Await) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::Await(Box::new(expr)));
+        }
         // 2026-07-15: Unary * for pointer dereference. Higher precedence than
         // binary * (multiplication) since it's in parse_unary.
         if self.eat(&Token::Star) {
@@ -1073,5 +1078,28 @@ mod tests {
         // `let box = 5; box` — `box` used as a variable name is untouched.
         let expr = parse_expr("box + 1").unwrap();
         assert!(matches!(expr, Expr::BinaryOp(_, l, _) if matches!(l.as_ref(), Expr::Identifier(n) if n == "box")));
+    }
+
+    // ── 2026-08-09 (Phase 10): await task ────────────────────────────
+
+    #[test]
+    fn await_parses_as_unary() {
+        let expr = parse_expr("await t").unwrap();
+        assert!(matches!(expr, Expr::Await(inner) if matches!(inner.as_ref(), Expr::Identifier(n) if n == "t")));
+    }
+
+    #[test]
+    fn spawn_defn_parses_as_task() {
+        // `spawn compute(21)` — the callee is a defn, not an obj base; the
+        // parser produces the same Spawn form (the typechecker classifies it).
+        let expr = parse_expr("spawn compute(21)").unwrap();
+        match expr {
+            Expr::Spawn { type_name, args, storage } => {
+                assert_eq!(type_name, "compute");
+                assert_eq!(args.len(), 1);
+                assert_eq!(storage, crate::ast::SpawnStorage::Pooled);
+            }
+            other => panic!("expected spawn, got {other:?}"),
+        }
     }
 }
