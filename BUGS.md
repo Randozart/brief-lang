@@ -45,19 +45,24 @@ the concurrency-gate classification (rule #21) is unchanged.
 **E2E:** two `sync<step>` nodes `[i < 4]` (4 fires) + `[count < 1]` (1 fire)
 now print 1,2,3,4.
 
-## Precompute Fold Evaluates Float-Array Indexed Observables as 0 — OPEN (pre-existing)
+## Precompute Fold Evaluates Float-Array Indexed Observables as 0 — FIXED
 
-**Date:** 2026-08-06
-**Status:** Open (pre-existing; found while validating Design A)
-**Root cause:** a foldable single bounded-counter node writing a `Float[]`
-array and printing `a[i]` from a `when` guard prints `0` — the
-`collect_final_values` i64-binding model does not model Float array writes, so
-the folded observable reads the unwritten value. Affects accel and plain
-programs identically (IR is byte-identical).
-**Impact:** Cosmetic for accel (the GPU path is runtime); would mislead a
-folded benchmark.
-**Fix (planned):** extend the fold's final-value model to array-indexed
-observables, or keep such observables out of the fold.
+**Date:** 2026-08-06 (fixed 2026-08-09, commit pending)
+**Status:** Fixed
+**Root cause:** the compile-time precompute fold (`region.rs` final-value model)
+tracks only plain-identifier bindings as `i64`. An array-element write
+(`a[i] = 1.5`) was silently ignored by `eval_stmt`, so a fully-precomputable
+chain left the array at its initializer — a folded observable read `a[k]`
+returned 0.
+**Fix (applied):** a composed chain containing an indexed assignment is no
+longer precomputable: `is_fully_precomputable` refuses chains with an indexed
+write (`Self::composed_body_has_indexed_write`), and `eval_stmt` returns false
+on `Assign(Expr::Index(..), _)` so the report path can't model it either. Such
+programs fall through to the runtime loop, which executes the writes correctly.
+**Undo:** remove the indexed-write guard in `is_fully_precomputable` +
+`eval_stmt`; the i64 model is otherwise unchanged.
+**E2E:** `a[i] = 1.5; sum += a[i]` over 4 iterations prints 6.0 (was 0).
+Regression test: `test_indexed_write_blocks_precompute`.
 
 ## Accel Node Folds the Reactor to Nothing — RESOLVED BY DESIGN (Design A)
 

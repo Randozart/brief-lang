@@ -888,6 +888,14 @@ impl RegionAnalyzer {
                 return false;
             }
             if cc.all_internal {
+                // 2026-08-09 (Bug 3): an all-internal chain that writes an
+                // ARRAY ELEMENT (`a[i] = ...`) cannot be precomputed — the
+                // final-value model only tracks plain-identifier bindings, so
+                // the array would keep its initializer (0) and a folded
+                // observable read `a[k]` would return 0. Refuse to precompute.
+                if Self::composed_body_has_indexed_write(&cc.composed_body) {
+                    return false;
+                }
                 total = total.saturating_add(1);
             } else {
                 return false;
@@ -950,6 +958,28 @@ impl RegionAnalyzer {
         bindings
     }
 
+    /// 2026-08-09 (Bug 3): does a composed-chain body contain an INDEXED
+    /// assignment (`a[i] = ...`)? The final-value model tracks only
+    /// plain-identifier bindings, so array-element writes are unrepresentable —
+    /// such chains must not be precomputed (a folded observable would read the
+    /// array's initializer, e.g. 0).
+    fn composed_body_has_indexed_write(body: &[Statement]) -> bool {
+        fn stmt_has_indexed_write(s: &Statement) -> bool {
+            match s {
+                Statement::Assign(Expr::Index(..), _) => true,
+                Statement::Guarded(_, inner) => inner.iter().any(stmt_has_indexed_write),
+                Statement::If(_, t, e) => {
+                    t.iter().any(stmt_has_indexed_write) || e.iter().any(stmt_has_indexed_write)
+                }
+                Statement::Block(inner) | Statement::SyncBlock(inner) => {
+                    inner.iter().any(stmt_has_indexed_write)
+                }
+                _ => false,
+            }
+        }
+        body.iter().any(stmt_has_indexed_write)
+    }
+
     fn eval_stmt(stmt: &Statement, bindings: &mut HashMap<String, i64>) -> bool {
         match stmt {
             Statement::Assign(Expr::Identifier(name), expr) => {
@@ -958,6 +988,13 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
+            // 2026-08-09 (Bug 3): an INDEXED assignment (`a[i] = ...`) writes
+            // into an array element the i64 binding model cannot represent —
+            // silently ignoring it leaves the array at its initializer value,
+            // so a folded observable read `a[k]` returns 0. Refuse to
+            // precompute such chains (they fall through to the runtime loop,
+            // which executes the write correctly).
+            Statement::Assign(Expr::Index(..), _) => false,
             // 2026-07-09: Pointer writes (AddrOf) not supported in compile-time eval.
             Statement::Assign(_, expr) => {
                 let _ = Self::eval_expr_simple(expr, bindings);
@@ -2309,5 +2346,36 @@ mod tests {
         ra.compose_chains();
         let result = ra.collect_final_values(&program);
         assert!(result.is_some());
+    }
+
+    /// 2026-08-09 (Bug 3): a chain that writes an ARRAY ELEMENT (`a[i] = ...`)
+    /// must NOT be precomputed — the i64 binding model can't represent array
+    /// elements, so a folded observable would read the initializer (0).
+    #[test]
+    fn test_indexed_write_blocks_precompute() {
+        let program = mk_program(vec![
+            make_const("total", 4),
+            make_state("count", int(0)),
+            make_state("a", int(0)),
+            make_txn("go",
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    // a[count] = 1.5 — an indexed write the model can't track.
+                    Statement::Assign(
+                        Expr::Index(Box::new(ident("a")), Box::new(ident("count"))),
+                        Expr::Float(1.5),
+                    ),
+                    assign("count", add(ident("count"), int(1))),
+                    Statement::Term(None),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        assert!(
+            !ra.is_fully_precomputable(100),
+            "an indexed write must block the compile-time precompute fold"
+        );
     }
 }
