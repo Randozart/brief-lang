@@ -405,11 +405,12 @@ fn collect_init_names(items: &[TopLevel]) -> HashSet<String> {
 
 /// Collect all transactions by name.
 fn collect_txns(items: &[TopLevel]) -> HashMap<String, &Transaction> {
+    // 2026-08-09 (Bug 2): use the effective transactions (direct +
+    // sync<group>/export-wrapped) so a sync-group node gets a loop shape and
+    // can fold — otherwise it had no shape and the fold machinery skipped it.
     let mut txns = HashMap::new();
-    for item in items {
-        if let TopLevel::Transaction(t) = item {
-            txns.insert(t.name.clone(), t);
-        }
+    for t in crate::analysis::effective_txns(items) {
+        txns.insert(t.name.clone(), t);
     }
     txns
 }

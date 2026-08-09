@@ -2141,6 +2141,18 @@ impl LlvmBackend {
                         self.ctx.defn_return_types.insert(t.name.clone(), ret_tys);
                     }
                 }
+                // 2026-08-09 (Bug 2): a `sync<group> node ...` is a reactive
+                // node wrapped in a group barrier — it MUST enter the reactor's
+                // txn list or the dispatch is empty and nothing fires. The
+                // group membership is a concurrency-gate classification (rule
+                // #21); the transaction itself dispatches like any reactive
+                // node.
+                TopLevel::SyncGroup { item: inner, .. } => {
+                    if let TopLevel::Transaction(t) = inner.as_ref() {
+                        txns.push((t.name.clone(), t));
+                        self.program_txns.push(t.name.clone());
+                    }
+                }
                 TopLevel::Trigger(trg) => {
                     // 2026-07-14: Convert new AST Trigger to TriggerDeclaration.
                     // The new Trigger struct has name/instance/port/span fields.

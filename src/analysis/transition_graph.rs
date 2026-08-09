@@ -55,10 +55,14 @@ impl ReactorTransitionGraph {
         let mut nodes = Vec::new();
         let mut has_triggers = false;
 
-        for item in items {
-            match item {
-                TopLevel::Transaction(txn) => {
-                    let body_no_term: Vec<Statement> = {
+        // 2026-08-09 (Bug 2): iterate the EFFECTIVE transactions (direct +
+        // sync<group>-wrapped + export-wrapped) — a sync-group node is a real
+        // reactive node whose fields must be live and whose bounded-pre must
+        // reach the fold analysis. Skipping them left live_fields empty for
+        // their state (dead-field elimination → undefined @field globals) and
+        // the reactor dispatch empty (nothing fired).
+        for txn in crate::analysis::effective_txns(items) {
+            let body_no_term: Vec<Statement> = {
                         let mut filtered: Vec<&Statement> = txn.body.iter()
                             .filter(|s| !matches!(s, Statement::Term(None) | Statement::EndProgram(None)))
                             .collect();
@@ -127,11 +131,12 @@ impl ReactorTransitionGraph {
                         is_effectively_pure: false,
                         lexicographic_vars,
                     });
-                }
-                TopLevel::Trigger(_) => {
-                    has_triggers = true;
-                }
-                _ => {}
+        }
+
+        // Trigger scan (kept separate — effective_txns yields only txns).
+        for item in items {
+            if let TopLevel::Trigger(_) = item {
+                has_triggers = true;
             }
         }
 
@@ -1992,5 +1997,73 @@ mod tests {
         let g = ReactorTransitionGraph::build(&items, &None, &[]);
         assert!(g.live_fields.contains("pinned"),
             "out-let field must stay live even though never read");
+    }
+
+    /// 2026-08-09 (Bug 2): a `sync<group> node` is a real reactive node — it
+    /// must produce a graph node with a bounded-pre and its fields live.
+    /// Previously sync-group nodes were skipped by the graph builder, so
+    /// dead-field elimination dropped their state → undefined `@field` globals
+    /// and an empty reactor dispatch.
+    #[test]
+    fn test_sync_group_node_enters_graph() {
+        fn make_sync_node(name: &str, var: &str) -> TopLevel {
+            TopLevel::SyncGroup {
+                domains: vec!["step".to_string()],
+                item: Box::new(TopLevel::Transaction(Transaction {
+                    name: name.to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    output_type: None,
+                    outputs: Vec::new(),
+                    contract: crate::ast::Contract::new(
+                        Expr::BinaryOp(
+                            BinaryOpKind::Lt,
+                            Box::new(Expr::Identifier(var.to_string())),
+                            Box::new(Expr::Decimal(4)),
+                        ),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Eq,
+                            Box::new(Expr::Identifier(var.to_string())),
+                            Box::new(Expr::Decimal(4)),
+                        ),
+                    ),
+                    body: vec![
+                        Statement::Assign(
+                            Expr::Identifier(var.to_string()),
+                            Expr::BinaryOp(
+                                BinaryOpKind::Add,
+                                Box::new(Expr::Identifier(var.to_string())),
+                                Box::new(Expr::Decimal(1)),
+                            ),
+                        ),
+                        Statement::Term(None),
+                    ],
+                    span: None,
+                    metadata: std::collections::HashMap::new(),
+                    modifiers: vec![],
+                    derivation: None,
+                    doc: None,
+                    is_reactive: true,
+                    is_async: false,
+                })),
+            }
+        }
+        let items = vec![
+            make_state("i", Type::int()),
+            make_state("count", Type::int()),
+            make_sync_node("force", "i"),
+            make_sync_node("step", "count"),
+        ];
+        let graph = ReactorTransitionGraph::build(&items, &None, &[]);
+        assert_eq!(graph.nodes.len(), 2, "sync-group nodes must enter the graph");
+        assert!(
+            graph.nodes.iter().all(|n| n.bounded_pre.is_some()),
+            "each sync-group node must get a bounded-pre"
+        );
+        assert!(
+            graph.live_fields.contains("i") && graph.live_fields.contains("count"),
+            "sync-group node fields must be live: {:?}",
+            graph.live_fields
+        );
     }
 }

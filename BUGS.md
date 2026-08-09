@@ -20,22 +20,30 @@ field slot. Regression test: `test_spawn_only_base_registers_pool`.
 **Undo:** remove the fallback pass + boxed member-body branch; the top-level
 instance path is unchanged.
 
-## Sync Group Blocks When Members Have Unequal Firing Schedules — OPEN (pre-existing)
+## Sync Group Blocks When Members Have Unequal Firing Schedules — FIXED
 
-**Date:** 2026-08-06
-**Status:** Open (pre-existing; found while validating Design A)
-**Root cause:** A `sync<group>` whose members have different firing counts
-(e.g. `force [i < n]` fires n times, `step [count < 1]` fires once) emits an
-empty `reactor_tick` — the group barrier holds members until "all fired
-members have finished," and the mismatched schedules never align. Reproduced
-with a NON-accel plain program, so it is independent of accel.
-**Impact:** Blocks the nbody `_accel` structure if force/integrate + step are
-grouped with mismatched firing counts. Phase 8 must structure the group so
-members fire in lockstep (or use `async` + a sequenced reset).
-**Repro:** two `sync<step>` nodes `[i < n]` (n fires) + `[count < 1]` (1 fire);
-run prints nothing, `reactor_tick` is `ret void`.
-**Fix (planned):** investigate the sync-group dispatch readiness/barrier for
-mismatched member schedules (Phase 8).
+**Date:** 2026-08-06 (fixed 2026-08-09, commit pending)
+**Status:** Fixed
+**Root cause:** `sync<group>`-wrapped transactions were skipped by every
+pipeline that iterated `TopLevel::Transaction` directly — the transition graph
+missed their nodes (so `live_fields` lacked their state → dead-field
+elimination dropped the fields → undefined `@field` globals), the loop-shape
+analysis skipped them (no fold shape), and the reactor's txn list was empty
+(`reactor_tick` = bare `ret void` → nothing fired). Separately, the strategy
+pass auto-classified conflict-free sync members as async (disjoint writes),
+routing them to the thread pool instead of the sequential reactor.
+**Fix (applied):**
+- `analysis::effective_txns(items)` — a centralized expander (direct +
+  sync<group>-wrapped + export-wrapped transactions); transition-graph builder,
+  loop-shape `collect_txns`, and the backend txn collection use it.
+- strategy: sync-group member names excluded from async auto-candidacy (a sync
+  group is a barrier, not async parallelism) so members stay on the sequential
+  reactor.
+- regression tests: `test_sync_group_node_enters_graph`.
+**Undo:** revert effective_txns usage + the strategy sync-member exclusion;
+the concurrency-gate classification (rule #21) is unchanged.
+**E2E:** two `sync<step>` nodes `[i < 4]` (4 fires) + `[count < 1]` (1 fire)
+now print 1,2,3,4.
 
 ## Precompute Fold Evaluates Float-Array Indexed Observables as 0 — OPEN (pre-existing)
 

@@ -62,3 +62,32 @@ pub enum FieldMode {
     /// Field is never accessed through any lens — eliminated from %State.
     Never,
 }
+
+/// Expand top-level items into their effective transactions: a direct
+/// `TopLevel::Transaction`, or the inner transaction of a `sync<group>` /
+/// `export` wrapper. 2026-08-09 (Bug 2): sync-group-wrapped nodes were being
+/// skipped by every pipeline that iterated `TopLevel::Transaction` directly —
+/// the transition graph missed their fields (dead-field elimination dropped
+/// them → undefined `@field` globals) and the reactor dispatch was empty
+/// (nothing fired). Analyses/backends MUST iterate the effective transactions,
+/// not the raw items.
+pub fn effective_txns<'a>(items: &'a [crate::ast::TopLevel]) -> Vec<&'a crate::ast::Transaction> {
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            crate::ast::TopLevel::Transaction(t) => out.push(t),
+            crate::ast::TopLevel::SyncGroup { item: inner, .. } => {
+                if let crate::ast::TopLevel::Transaction(t) = inner.as_ref() {
+                    out.push(t);
+                }
+            }
+            crate::ast::TopLevel::Export(e) => {
+                if let crate::ast::TopLevel::Transaction(t) = e.inner.as_ref() {
+                    out.push(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}

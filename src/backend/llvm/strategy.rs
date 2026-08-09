@@ -34,8 +34,22 @@ impl LlvmBackend {
         txns: &[(String, &Transaction)],
     ) -> OptimizationStrategy {
         let dispatch_mode = Self::select_dispatch_mode(program, txns);
+        // 2026-08-09 (Bug 2): a sync<group> node is a barrier, not async
+        // parallelism — exclude its members from async auto-candidacy so they
+        // stay on the sequential reactor (a group whose members went async
+        // produced an empty reactor_tick and never fired).
+        let sync_members: HashSet<String> = program
+            .iter()
+            .filter_map(|item| match item {
+                TopLevel::SyncGroup { item: inner, .. } => match inner.as_ref() {
+                    TopLevel::Transaction(t) => Some(t.name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
         let (has_wake_triggers, enumerable, enum_keys, enum_txn_names) =
-            Self::classify_txns(self, analysis, txns);
+            Self::classify_txns(self, analysis, txns, &sync_members);
         OptimizationStrategy {
             dispatch_mode,
             has_wake_triggers,
@@ -106,6 +120,7 @@ impl LlvmBackend {
         &mut self,
         analysis: &AnalysisResults,
         txns: &[(String, &Transaction)],
+        sync_members: &HashSet<String>,
     ) -> (
         bool,
         Option<Vec<(String, Option<u64>)>>,
@@ -207,7 +222,17 @@ impl LlvmBackend {
 
         let async_candidates: Vec<&Transaction> = txns
             .iter()
-            .filter(|(n, t)| t.is_reactive && !enum_txn_names.contains(n.as_str()))
+            .filter(|(n, t)| {
+                t.is_reactive
+                    && !enum_txn_names.contains(n.as_str())
+                    // 2026-08-09 (Bug 2): a sync<group> member is explicitly
+                    // grouped — the group is a barrier, NOT async parallelism.
+                    // Excluding members keeps them on the sequential reactor
+                    // (the group barrier holds their completion), so unequal
+                    // firing schedules can't silently drop them to the async
+                    // thread pool (which produced an empty reactor_tick).
+                    && !sync_members.contains(n.as_str())
+            })
             .map(|(_, t)| *t)
             .collect();
         let ac_writes: Vec<HashSet<String>> = async_candidates
