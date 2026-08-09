@@ -96,6 +96,50 @@ pub enum TopLevel {
     /// by backends and plugins via AnalysisResults.module_metadata.
     /// Multiple consecutive top-level `!>` bindings merge (last wins per key).
     ModuleMetadata(HashMap<String, PropertyValue>),
+    /// 2026-08-09: `init` — runtime-seeded invariant (SPEC §8.1). Set exactly
+    /// once before `beginprogram`/any transition fires; provably immutable
+    /// thereafter. Optionally declares an expected value set.
+    Init(InitDecl),
+}
+
+// ── InitDecl ──────────────────────────────────────────────────────────
+
+/// 2026-08-09: `init name: [bound_set] Type = expr` — a runtime-seeded
+/// invariant. The bound set declares the value is *one of* `[a | b | c]`
+/// (finite proof domain for capacity / bounded loops / lifetime proofs).
+#[derive(Debug, Clone)]
+pub struct InitDecl {
+    pub name: String,
+    /// Expected value set; `None` means unbounded.
+    pub bound: Option<BoundSpec>,
+    pub ty: Type,
+    /// `= expr` seeding form (expr/no body), or body form (no value).
+    pub value: Option<Expr>,
+    pub body: Vec<Statement>,
+    pub span: Option<Span>,
+    /// 2026-07-24: Doc comment text (/// or /** */).
+    pub doc: Option<String>,
+}
+
+/// Expected-value declaration for an `init`: a bounded set of single values,
+/// ranges, and discrete unions, e.g. `[64 | lo..hi]` or `[16 | 32 | 64]`.
+/// The set gives the compiler a finite proof domain over expected values.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoundSpec {
+    /// A single expected value.
+    Single(BoundTerm),
+    /// A range of expected values `lo..hi` (inclusive).
+    Range(BoundTerm, BoundTerm),
+    /// A discrete union of options `[a | b | c]` (values and ranges may mix).
+    Choice(Vec<BoundSpec>),
+}
+
+/// A bound term: a numeric literal or a reference to another symbol whose
+/// value the compiler resolves (e.g. another `init`'s seeded value).
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoundTerm {
+    Lit(i64),
+    Ref(String),
 }
 
 // ── Definition ─────────────────────────────────────────────────────────

@@ -97,7 +97,7 @@ A `defn main() -> Int { ... }` with no `entry!` is also wired to run exactly
 once via the same synthesized node (it is renamed to `briv_main`).
 
 **Rules:**
-- All declarations (`let`, `const`, `struct`, `enum`, `defn`, `txn`) must come
+- All declarations (`let`, `const`, `init`, `struct`, `enum`, `defn`, `txn`) must come
   **before** any executable statements
 - Once a top-level statement appears, no more declarations are allowed
 - Statements execute in order, exactly once, then the program exits

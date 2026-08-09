@@ -263,6 +263,24 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
                 let _ = write!(out, "!> {}: {};", key, meta[key]);
             }
         }
+        TopLevel::Init(init) => {
+            indent(out, level);
+            let _ = write!(out, "init {}", init.name);
+            let _ = write!(out, ":");
+            if let Some(bound) = &init.bound {
+                let _ = write!(out, " [{}]", crate::ast::display::display_bound_set(bound));
+            }
+            let _ = write!(out, " {}", init.ty);
+            if let Some(value) = &init.value {
+                let _ = write!(out, " = {};", value);
+            } else {
+                let _ = write!(out, " {{ ");
+                for stmt in &init.body {
+                    let _ = write!(out, "{} ", stmt);
+                }
+                out.push_str("};");
+            }
+        }
         TopLevel::ResourceDecl(_)
         | TopLevel::ForeignBinding(_)
         | TopLevel::Codec(_)
@@ -666,6 +684,11 @@ mod tests {
         "!> accel: try_all;\n",
         "!> accel: force;\n!> target: spirv;\n",
         "!> flags: [fast, contract];\n",
+        // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
+        "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
+        "init BufferSize: [64 | lo..hi] Int = 64;\n",
+        "init BitLayout: [16 | 32 | 64] Int = 16;\n",
+        "init Layout: [16 | 32 | 64] Int {\n  term pick(target);\n};\n",
     ];
 
     #[test]

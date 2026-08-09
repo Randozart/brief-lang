@@ -337,7 +337,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(let|const|type|trait|proto|struct|seq|enum|impl|obj|cell|defn|txn|node|asm|render|frgn|optional|export|import|from|as|op|term|endprogram|beginprogram|defer|rollback|mutex|barrier|match|when|foreach|spawn|await|free|keep|trg|within|async|sync|vol|out|borrow|consume|owned|shared|borrowed|quote)\\b",
+          "match": "\\b(let|const|init|type|trait|proto|struct|seq|enum|impl|obj|cell|defn|txn|node|asm|render|frgn|optional|export|import|from|as|op|term|endprogram|beginprogram|defer|rollback|mutex|barrier|match|when|foreach|spawn|await|free|keep|trg|within|async|sync|vol|out|borrow|consume|owned|shared|borrowed|quote)\\b",
           "name": "keyword.control.briv"
         },
         {

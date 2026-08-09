@@ -42,7 +42,50 @@ fn emit_toplevel(item: &TopLevel) -> SExpr {
         TopLevel::Trigger(t) => emit_trigger(t),
         TopLevel::Constant(c) => emit_constant(c),
         TopLevel::TypeDef(t) => emit_typedef(t),
+        TopLevel::Init(i) => emit_init(i),
         _ => list(&[atom("toplevel"), atom(&format!("{:?}", item))]),
+    }
+}
+
+/// Serialize an `init` declaration as:
+/// `(init NAME (:bound ...)? TYPE (=expr EXPR)? STMT*)`
+/// 2026-08-09: runtime-seeded invariant. The bound set is optional.
+fn emit_init(i: &crate::ast::InitDecl) -> SExpr {
+    let mut children: Vec<SExpr> = vec![atom("init"), atom(&i.name)];
+    if let Some(bound) = &i.bound {
+        let mut b = vec![atom(":bound")];
+        emit_bound_set_into(bound, &mut b);
+        children.push(SExpr::List(b));
+    }
+    children.push(emit_type(&i.ty));
+    if let Some(value) = &i.value {
+        children.push(SExpr::List(vec![atom("=expr"), emit_expr(value)]));
+    }
+    for s in &i.body {
+        children.push(emit_statement(s));
+    }
+    SExpr::List(children)
+}
+
+fn emit_bound_set_into(bound: &crate::ast::BoundSpec, out: &mut Vec<SExpr>) {
+    fn emit_term(t: &crate::ast::BoundTerm) -> SExpr {
+        match t {
+            crate::ast::BoundTerm::Lit(n) => list(&[atom(":lit"), atom(&n.to_string())]),
+            crate::ast::BoundTerm::Ref(n) => list(&[atom(":ref"), atom(n)]),
+        }
+    }
+    match bound {
+        crate::ast::BoundSpec::Single(t) => out.push(list(&[atom(":single"), emit_term(t)])),
+        crate::ast::BoundSpec::Range(lo, hi) => {
+            out.push(list(&[atom(":range"), emit_term(lo), emit_term(hi)]));
+        }
+        crate::ast::BoundSpec::Choice(parts) => {
+            let mut inner = vec![atom(":choice")];
+            for p in parts {
+                emit_bound_set_into(p, &mut inner);
+            }
+            out.push(SExpr::List(inner));
+        }
     }
 }
 
@@ -372,5 +415,49 @@ mod tests {
         let parsed = crate::beast::sexpr::parse(&tokens).unwrap();
         let restored = crate::beast::deserialize::parse_expr(&parsed).unwrap();
         assert_eq!(expr, restored);
+    }
+
+    #[test]
+    fn test_roundtrip_init() {
+        // 2026-08-09: init decl with a bounded value set round-trips through
+        // BEAST preserving name, bound, type, and seeding expr.
+        let items = vec![
+            TopLevel::Init(crate::ast::InitDecl {
+                name: "BufSize".into(),
+                bound: Some(crate::ast::BoundSpec::Choice(vec![
+                    crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(64)),
+                    crate::ast::BoundSpec::Range(
+                        crate::ast::BoundTerm::Lit(128),
+                        crate::ast::BoundTerm::Ref("LO".into()),
+                    ),
+                ])),
+                ty: Type::int(),
+                value: Some(Expr::Identifier("compute".into())),
+                body: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let universe = TypeUniverse::new();
+        let ir = to_beast(&items, &universe);
+        let (restored, _) = from_beast(&ir).unwrap();
+        match &restored[0] {
+            TopLevel::Init(i) => {
+                assert_eq!(i.name, "BufSize");
+                assert_eq!(i.ty, Type::int());
+                assert_eq!(i.value, Some(Expr::Identifier("compute".into())));
+                assert_eq!(
+                    i.bound,
+                    Some(crate::ast::BoundSpec::Choice(vec![
+                        crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(64)),
+                        crate::ast::BoundSpec::Range(
+                            crate::ast::BoundTerm::Lit(128),
+                            crate::ast::BoundTerm::Ref("LO".into()),
+                        ),
+                    ]))
+                );
+            }
+            _ => panic!("expected Init"),
+        }
     }
 }

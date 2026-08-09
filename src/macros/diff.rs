@@ -54,6 +54,7 @@ fn item_key(tl: &TopLevel) -> String {
         CompileTimeConst(name, _) => format!("$const:{}", name),
         ProtocolDef(p) => format!("protocol:{}", p.name),
         ModuleMetadata(_) => "module-metadata".into(),
+        Init(i) => format!("init:{}", i.name),
     }
 }
 
@@ -98,6 +99,7 @@ pub fn item_summary(tl: &TopLevel) -> String {
         AsmFn(a) => format!("asm:<{}> {}", a.target, a.name),
         ProtocolDef(p) => format!("proto {}: #{}", p.name, p.category),
         ModuleMetadata(meta) => format!("module metadata ({} keys)", meta.len()),
+        Init(i) => format!("init {}", i.name),
     }
 }
 

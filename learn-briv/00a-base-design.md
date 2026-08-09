@@ -340,6 +340,7 @@ Briv has many **full forms** and **abbreviated forms**. The abbreviated ones are
 | `syscall` | `syscall` | Kernel call |
 | `let` | `let` | Mutable state |
 | `const` | `const` | Constant |
+| `init` | `init` | Runtime-seeded invariant |
 | `term` | `terminate` | Successful end |
 | `escape` | `escape` | Rollback |
 

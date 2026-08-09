@@ -63,10 +63,10 @@ A fourth top-level declaration alongside `let` and `const`:
 init BufSize: Int = get_env_int!("BUFSIZE");
 
 // kind-attached bounded set (see below).
-init Parallel: Int [2 | 4 | 8] = get_env_int!("PAR");
+init Parallel: [2 | 4 | 8] Int = get_env_int!("PAR");
 
 // body form — seeding runs once before beginprogram / any node fires.
-init Layout: Int [16 | 32 | 64] { ... : Int = pick(target); }
+init Layout: [16 | 32 | 64] Int { ...; }
 ```
 
 Semantics (locked decisions):

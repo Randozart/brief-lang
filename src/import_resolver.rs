@@ -919,6 +919,7 @@ impl ImportResolver {
             TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
             TopLevel::Transaction(t) => Some(t.name.as_str()),
             TopLevel::Constant(c) => Some(c.name.as_str()),
+            TopLevel::Init(i) => Some(i.name.as_str()),
             TopLevel::Obj(s) => Some(s.name.as_str()),
             TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
             TopLevel::Trigger(trg) => Some(trg.name.as_str()),
@@ -941,6 +942,7 @@ impl ImportResolver {
             TopLevel::Definition(mut d) => { d.name = local.to_string(); TopLevel::Definition(d) }
             TopLevel::Signature(mut s) => { s.name = local.to_string(); TopLevel::Signature(s) }
             TopLevel::Constant(mut c) => { c.name = local.to_string(); TopLevel::Constant(c) }
+            TopLevel::Init(mut i) => { i.name = local.to_string(); TopLevel::Init(i) }
             TopLevel::Obj(mut s) => { s.name = local.to_string(); TopLevel::Obj(s) }
             TopLevel::Transaction(mut t) => { t.name = local.to_string(); TopLevel::Transaction(t) }
             TopLevel::Trigger(mut t) => { t.name = local.to_string(); TopLevel::Trigger(t) }

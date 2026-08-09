@@ -2253,6 +2253,15 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
         | TopLevel::AsmFn(_)
         | TopLevel::CompileTimeLet(_, _) | TopLevel::CompileTimeConst(_, _)
         | TopLevel::ModuleMetadata(_) => Ok(()),
+        TopLevel::Init(init) => {
+            if let Some(value) = &mut init.value {
+                resolve_dollar_refs_in_expr(value, scope)?;
+            }
+            for stmt in &mut init.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
         TopLevel::CompileTimeDefn(d) => {
             for stmt in &mut d.body {
                 resolve_dollar_refs_in_stmt(stmt, scope)?;

@@ -696,6 +696,7 @@ impl LspServer {
                 TopLevel::Definition(_) => 12,     // Function
                 TopLevel::Constant(_) => 14,       // Constant
                 TopLevel::Signature(_) => 12,      // Function
+                TopLevel::Init(_) => 14,            // Constant (runtime-seeded)
                 _ => return None,
             };
             let name_len = name.len();
@@ -781,6 +782,7 @@ fn item_span(item: &TopLevel) -> Option<Span> {
         TopLevel::Enum(e) => e.span,
         TopLevel::ForeignBinding(fb) => fb.span,
         TopLevel::Definition(d) => d.contract.span,
+        TopLevel::Init(i) => i.span,
         _ => None,
     }
 }
@@ -793,6 +795,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::StateDecl(s) => s.name.clone(),
         TopLevel::Trigger(t) => t.name.clone(),
         TopLevel::Constant(c) => c.name.clone(),
+        TopLevel::Init(i) => i.name.clone(),
         TopLevel::Obj(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
         TopLevel::ForeignBinding(fb) => fb.effective_briv_name().to_string(),

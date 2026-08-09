@@ -270,6 +270,15 @@ fn resolve_comptime_refs(
                     }
                 }
             }
+            // 2026-08-09: `init` seeding may reference $let/$const names —
+            // resolve them the same way const initializers do.
+            TopLevel::Init(init) => {
+                if let Some(Expr::Identifier(name)) = &init.value {
+                    if let Some((val, _)) = pm.comptime_vars.get(name) {
+                        init.value = Some(nav_value_to_expr(val)?);
+                    }
+                }
+            }
             _ => {}
         }
     }

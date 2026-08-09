@@ -30,6 +30,7 @@ pub fn from_beast(text: &str) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
                     "state" => { items.push(parse_statedecl(parts)?); }
                     "trigger" => { items.push(parse_trigger(parts)?); }
                     "constant" => { items.push(parse_constant(parts)?); }
+                    "init" => { items.push(parse_init(parts)?); }
                     _ => {}
                 }
             }
@@ -304,6 +305,141 @@ fn parse_constant(parts: &[SExpr]) -> Result<TopLevel, String> {
     let ty = parse_type(&parts[2])?;
     let expr = parse_expr(&parts[3])?;
     Ok(TopLevel::Constant(Constant { name, ty, expr }))
+}
+
+/// 2026-08-09: `(init NAME (:bound ...)? TYPE (=expr EXPR)? STMT*)`
+fn parse_init(parts: &[SExpr]) -> Result<TopLevel, String> {
+    let name = tag(parts, 1)?.to_string();
+    let mut bound = None;
+    let mut value = None;
+    let mut body = Vec::new();
+    let mut ty: Option<Type> = None;
+    for i in 2..parts.len() {
+        match classify_init_part(parts, i, ty.is_some())? {
+            InitPart::Bound(b) => bound = Some(b),
+            InitPart::Value(v) => value = Some(v),
+            InitPart::Type(t) => ty = Some(t),
+            InitPart::Body(s) => body.push(s),
+        }
+    }
+    Ok(TopLevel::Init(crate::ast::InitDecl {
+        name,
+        bound,
+        ty: ty.unwrap_or_else(Type::int),
+        value,
+        body,
+        span: None,
+        doc: None,
+    }))
+}
+
+enum InitPart {
+    Bound(crate::ast::BoundSpec),
+    Value(Expr),
+    Type(Type),
+    Body(Statement),
+}
+
+/// Classify one trailing init decl part by its leading tag. The first untagged
+/// part is the type (everything after is a body statement).
+fn classify_init_part(parts: &[SExpr], i: usize, has_type: bool) -> Result<InitPart, String> {
+    let t = child_tag(&parts[i])?;
+    if t == ":bound" {
+        let b = match parse_bound_field(parts, i)? {
+            Some(b) => b,
+            None => return Ok(InitPart::Body(parse_statement(&parts[i])?)),
+        };
+        return Ok(InitPart::Bound(b));
+    }
+    if t == "=expr" {
+        let v = match parse_init_value(parts, i)? {
+            Some(v) => v,
+            None => return Ok(InitPart::Body(parse_statement(&parts[i])?)),
+        };
+        return Ok(InitPart::Value(v));
+    }
+    if has_type {
+        return Ok(InitPart::Body(parse_statement(&parts[i])?));
+    }
+    Ok(InitPart::Type(parse_type(&parts[i])?))
+}
+
+/// Extract the `:bound` subtree of an init decl, if present at `parts[i]`.
+fn parse_bound_field(parts: &[SExpr], i: usize) -> Result<Option<crate::ast::BoundSpec>, String> {
+    let subtree = match &parts[i] {
+        SExpr::List(l) => l,
+        _ => return Ok(None),
+    };
+    parse_bound_nodes(subtree.get(1..).unwrap_or(&[]))
+}
+
+/// Extract the `(=expr EXPR)` value slot of an init decl, if present at `parts[i]`.
+fn parse_init_value(parts: &[SExpr], i: usize) -> Result<Option<Expr>, String> {
+    let p = match &parts[i] {
+        SExpr::List(p) => p,
+        _ => return Ok(None),
+    };
+    match p.get(1) {
+        Some(e) => Ok(Some(parse_expr(e)?)),
+        None => Ok(None),
+    }
+}
+
+fn parse_bound_nodes(nodes: &[SExpr]) -> Result<Option<crate::ast::BoundSpec>, String> {
+    let mut options = Vec::new();
+    for node in nodes {
+        if let Some(spec) = parse_bound_node(node)? {
+            options.push(spec);
+        }
+    }
+    Ok(match options.len() {
+        1 => Some(options.pop().unwrap()),
+        0 => None,
+        _ => Some(crate::ast::BoundSpec::Choice(options)),
+    })
+}
+
+fn parse_bound_node(node: &SExpr) -> Result<Option<crate::ast::BoundSpec>, String> {
+    let p = match node {
+        SExpr::List(p) => p,
+        _ => return Ok(None),
+    };
+    let tag_name = sexpr_str(p.first().ok_or("empty bound node")?)?;
+    match tag_name {
+        ":single" => {
+            let term = parse_bound_term(p.get(1))?;
+            Ok(Some(crate::ast::BoundSpec::Single(term)))
+        }
+        ":range" => {
+            let lo = parse_bound_term(p.get(1))?;
+            let hi = parse_bound_term(p.get(2))?;
+            Ok(Some(crate::ast::BoundSpec::Range(lo, hi)))
+        }
+        ":choice" => parse_bound_nodes(&p[1..]),
+        _ => Ok(None),
+    }
+}
+
+fn parse_bound_term(node: Option<&SExpr>) -> Result<crate::ast::BoundTerm, String> {
+    let p = match node {
+        Some(SExpr::List(p)) => p,
+        _ => return Err("expected bound term list".into()),
+    };
+    let tag = sexpr_str(p.first().ok_or("empty bound term")?)?;
+    match tag {
+        ":lit" => {
+            let raw = sexpr_str(p.get(1).ok_or("missing :lit value")?)?;
+            let n = raw
+                .parse::<i64>()
+                .map_err(|e| format!("bad :lit bound value: {e}"))?;
+            Ok(crate::ast::BoundTerm::Lit(n))
+        }
+        ":ref" => {
+            let n = sexpr_str(p.get(1).ok_or("missing :ref value")?)?.to_string();
+            Ok(crate::ast::BoundTerm::Ref(n))
+        }
+        other => Err(format!("unknown bound term tag '{other}'")),
+    }
 }
 
 fn parse_params(expr: &SExpr) -> Result<Vec<(String, Type)>, String> {

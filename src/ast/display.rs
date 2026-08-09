@@ -520,6 +520,23 @@ impl fmt::Display for TopLevel {    fn fmt(&self, f: &mut fmt::Formatter<'_>) ->
             TopLevel::CompileTimeConst(name, expr) => {
                 write!(f, "$const {} = {};", name, expr)
             }
+            TopLevel::Init(init) => {
+                write!(f, "init {}", init.name)?;
+                write!(f, ":")?;
+                if let Some(bound) = &init.bound {
+                    write!(f, " [{}]", display_bound_set(bound))?;
+                }
+                write!(f, " {}", init.ty)?;
+                if let Some(value) = &init.value {
+                    write!(f, " = {};", value)
+                } else {
+                    write!(f, " {{ ")?;
+                    for stmt in &init.body {
+                        write!(f, "{} ", stmt)?;
+                    }
+                    write!(f, "}};")
+                }
+            }
             _ => write!(f, "<definition>"),
         }
     }
@@ -694,4 +711,48 @@ mod tests {
         assert_eq!(format!("{}", UnaryOpKind::Not), "!");
         assert_eq!(format!("{}", UnaryOpKind::BitNot), "~");
     }
+
+    /// Snapshot test: verify BoundSpec rendering for `init` expected value sets.
+    #[test]
+    fn test_display_bound_set_snapshots() {
+        use crate::ast::{BoundSpec, BoundTerm};
+        assert_eq!(
+            display_bound_set(&BoundSpec::Single(BoundTerm::Lit(64))),
+            "64"
+        );
+        assert_eq!(
+            display_bound_set(&BoundSpec::Range(BoundTerm::Lit(10), BoundTerm::Lit(54))),
+            "10..54"
+        );
+        assert_eq!(
+            display_bound_set(&BoundSpec::Choice(vec![
+                BoundSpec::Single(BoundTerm::Lit(16)),
+                BoundSpec::Single(BoundTerm::Lit(32)),
+                BoundSpec::Single(BoundTerm::Lit(64)),
+            ])),
+            "16 | 32 | 64"
+        );
+    }
+}
+
+/// Render a bound set in canonical source form, e.g. `[64 | lo..hi]` bodies.
+/// The brackets are added by the callers; this helper renders the interior.
+pub fn display_bound_set(bound: &BoundSpec) -> String {
+    fn render_term(t: &BoundTerm) -> String {
+        match t {
+            BoundTerm::Lit(n) => n.to_string(),
+            BoundTerm::Ref(name) => name.clone(),
+        }
+    }
+    fn render(bound: &BoundSpec) -> String {
+        match bound {
+            BoundSpec::Single(t) => render_term(t),
+            BoundSpec::Range(lo, hi) => format!("{}..{}", render_term(lo), render_term(hi)),
+            BoundSpec::Choice(parts) => {
+                let rendered: Vec<String> = parts.iter().map(render).collect();
+                rendered.join(" | ")
+            }
+        }
+    }
+    render(bound)
 }

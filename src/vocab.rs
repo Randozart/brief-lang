@@ -115,6 +115,7 @@ impl LanguageVocab {
                 // Declarations
                 kw("let", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("const", VocabStatus::Canonical, KeywordContext::Declaration),
+                kw("init", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("type", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("trait", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("proto", VocabStatus::Canonical, KeywordContext::Declaration),

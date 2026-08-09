@@ -260,6 +260,14 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("asm") {
                     return self.parse_asm_fn().map(TopLevel::AsmFn);
                 }
+                // 2026-08-09: `init` is a contextual keyword — top-level
+                // declaration form only, matching the proto/asm pattern.
+                // It stays a legal identifier elsewhere (e.g. `txn init(...)`
+                // method + `op Init: init(#Lh,#Rh)` bindings in stdlib).
+                if self.check_identifier("init") {
+                    self.pos += 1; // consume `init` identifier
+                    return Ok(TopLevel::Init(self.parse_init_declaration()?));
+                }
                 // 2026-08-04 (remove-vestigial-return): Briv has no `return`
                 // statement — give the same helpful error at top level as in
                 // statement bodies (src/parser/statements.rs parse_statement).
@@ -577,6 +585,94 @@ impl<'a> Parser<'a> {
             ty,
             expr,
         })
+    }
+
+    /// Parse: `init name: [bound_set] Type (= expr | { body })`.
+    /// 2026-08-09: runtime-seeded invariant — the fourth top-level kind.
+    /// The bound set is kind-attached (between `:` and the type) so it is not
+    /// misread as an array dimension (`Int[16]` is containment, `:[..] Int`
+    /// is an expected-value set). Body form seeds once before beginprogram.
+    /// Caller has already consumed the `init` identifier token.
+    fn parse_init_declaration(&mut self) -> Result<InitDecl, SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+        let bound = if self.check(&Token::LBracket) {
+            Some(self.parse_bound_set()?)
+        } else {
+            None
+        };
+        let ty = self.parse_type()?;
+        let mut value = None;
+        let mut body = Vec::new();
+        if self.eat(&Token::Eq) {
+            value = Some(self.parse_expression()?);
+            self.expect(Token::Semicolon)?;
+        } else if self.check(&Token::LBrace) {
+            body = self.parse_block()?;
+            self.expect(Token::Semicolon)?;
+        } else {
+            return self.error_at_current(
+                "expected '=' with a seeding expression or '{ ... }' body after the \
+                 init declaration's type",
+            );
+        }
+        Ok(InitDecl {
+            name,
+            bound,
+            ty,
+            value,
+            body,
+            span: None,
+            doc: self.take_doc(),
+        })
+    }
+
+    /// Parse a bound set: `[ term | term | ... ]` where each term is a single
+    /// literal/ref or a `lo..hi` range. Terms may mix literals and names.
+    /// 2026-08-09: expected-value set for a bounded `init` (SPEC §8.1).
+    fn parse_bound_set(&mut self) -> Result<BoundSpec, SyntaxError> {
+        self.expect(Token::LBracket)?;
+        let mut parts = Vec::new();
+        loop {
+            parts.push(self.parse_bound_part()?);
+            if !self.eat(&Token::Pipe) {
+                break;
+            }
+        }
+        self.expect(Token::RBracket)?;
+        let spec = if parts.len() == 1 {
+            parts.pop().unwrap()
+        } else {
+            BoundSpec::Choice(parts)
+        };
+        Ok(spec)
+    }
+
+    fn parse_bound_part(&mut self) -> Result<BoundSpec, SyntaxError> {
+        let lo = self.parse_bound_term()?;
+        if self.eat(&Token::DotDot) {
+            let hi = self.parse_bound_term()?;
+            Ok(BoundSpec::Range(lo, hi))
+        } else {
+            Ok(BoundSpec::Single(lo))
+        }
+    }
+
+    fn parse_bound_term(&mut self) -> Result<BoundTerm, SyntaxError> {
+        match self.peek() {
+            Some(Token::Integer(n)) => {
+                let val = *n;
+                self.pos += 1;
+                Ok(BoundTerm::Lit(val))
+            }
+            Some(Token::Identifier(_)) => {
+                let name = self.expect_identifier()?;
+                Ok(BoundTerm::Ref(name))
+            }
+            _ => self.error_at_current(
+                "expected a number or an identifier in an init bound set",
+            ),
+        }
     }
 
     /// Parse: txn name [pre][post] { body }
@@ -3436,5 +3532,120 @@ mod phase3_tests {
         assert_eq!(i.target, "Point");
         assert_eq!(i.functions.len(), 1);
         assert_eq!(i.functions[0].name, "add_point");
+    }
+
+    // ── init kind (2026-08-09) ───────────────────────────────────────
+
+    #[test]
+    fn test_parse_init_expr_form() {
+        // Expr seeding form with an unbounded init.
+        let items = parse_prog("init BufSize: Int = get_env_int!(\"BUFSIZE\");\n");
+        let init = items.iter().find_map(|t| match t {
+            crate::ast::TopLevel::Init(i) => Some(i),
+            _ => None,
+        });
+        let init = init.expect("init must parse");
+        assert_eq!(init.name, "BufSize");
+        assert_eq!(init.ty, crate::ast::Type::int());
+        assert!(init.bound.is_none(), "no bound declared");
+        assert!(init.value.is_some(), "expr form has a value");
+        assert!(init.body.is_empty(), "expr form has no body");
+    }
+
+    #[test]
+    fn test_parse_init_bounded_set() {
+        // Bounded set: `[16 | 32 | 64]` discrete union and `[64 | lo..hi]`
+        // mixed union, both kind-attached between `:` and the type.
+        let items = parse_prog(
+            "init BitLayout: [16 | 32 | 64] Int = pick(target);\n\
+             init Shift: [64 | base..high] Int = 16;\n",
+        );
+        let inits: Vec<&crate::ast::top::InitDecl> = items
+            .iter()
+            .filter_map(|t| match t {
+                crate::ast::TopLevel::Init(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(inits.len(), 2);
+
+        let bit = &inits[0];
+        assert_eq!(bit.ty, crate::ast::Type::int());
+        match &bit.bound {
+            Some(crate::ast::BoundSpec::Choice(parts)) => {
+                assert_eq!(parts.len(), 3);
+                assert_eq!(parts[0], crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(16)));
+                assert_eq!(parts[2], crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(64)));
+            }
+            other => panic!("expected Choice(16|32|64), got {:?}", other),
+        }
+
+        let shift = &inits[1];
+        match &shift.bound {
+            Some(crate::ast::BoundSpec::Choice(parts)) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0], crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(64)));
+                assert_eq!(
+                    parts[1],
+                    crate::ast::BoundSpec::Range(
+                        crate::ast::BoundTerm::Ref("base".into()),
+                        crate::ast::BoundTerm::Ref("high".into()),
+                    )
+                );
+            }
+            other => panic!("expected Choice(64 | base..high), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_init_body_form() {
+        // Body form: seeds once before beginprogram; no `= expr`.
+        let items = parse_prog(
+            "init Layout: [16 | 32 | 64] Int {\n    term pick(target);\n};\n",
+        );
+        let init: &crate::ast::top::InitDecl = items
+            .iter()
+            .find_map(|t| match t {
+                crate::ast::TopLevel::Init(i) => Some(i),
+                _ => None,
+            })
+            .expect("init must parse");
+        assert!(init.value.is_none(), "body form has no = expr");
+        assert_eq!(init.body.len(), 1, "body form has statements");
+        assert_eq!(
+            init.bound,
+            Some(crate::ast::BoundSpec::Choice(vec![
+                crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(16)),
+                crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(32)),
+                crate::ast::BoundSpec::Single(crate::ast::BoundTerm::Lit(64)),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_parse_init_contextual_keyword_preserves_txn_init() {
+        // `init` stays a legal identifier in non-declaration positions, so
+        // stdlib `txn init(...)` / `op Init: init(#Lh,#Rh)` still parse.
+        let items = parse_prog(
+            "obj Stack<T, N> {\n\
+                     data: T[N];\n\
+                     len: Int;\n\
+                     op Init: init(#Lh, #Rh);\n\
+                     txn init(val: T) [true][len == 1] { data[0] = val; len = 1; };\n\
+                 };\n\
+                 let b: Stack<Int, 5> = 0;\n",
+        );
+        let txn_init = items.iter().any(|t| match t {
+            crate::ast::TopLevel::TypeDef(td) => td.body.members.iter().any(|member| match member {
+                crate::ast::TopLevel::Transaction(tr) => tr.name == "init",
+                _ => false,
+            }),
+            _ => false,
+        });
+        assert!(txn_init, "txn init must remain legal inside obj");
+        let has_top_init = items
+            .iter()
+            .any(|t| matches!(t, crate::ast::TopLevel::Init(_)));
+        assert!(!has_top_init, "no init declaration at top level here");
     }
 }

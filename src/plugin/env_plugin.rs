@@ -72,6 +72,14 @@ fn walk_item(item: &mut TopLevel) {
         TopLevel::Transaction(t) => walk_stmts(&mut t.body),
         TopLevel::Constant(c) => walk_expr(&mut c.expr),
         TopLevel::Statement(stmt) => walk_stmt(stmt),
+        // 2026-08-09: `init` seeding (`get_env_int!` etc.) is runtime input —
+        // walk the value expr and any body statements like a const/let.
+        TopLevel::Init(init) => {
+            if let Some(value) = &mut init.value {
+                walk_expr(value);
+            }
+            walk_stmts(&mut init.body);
+        }
         TopLevel::StateDecl(_) | TopLevel::Trigger(_) => {}
         TopLevel::ForeignBinding(_) => {}
         _ => {}

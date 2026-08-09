@@ -357,6 +357,7 @@ pub fn top_level_tag(item: &TopLevel) -> Option<&str> {
         TopLevel::Meld(_) => Some("meld"),
         TopLevel::Trigger(_) => Some("trigger"),
         TopLevel::Constant(_) => Some("constant"),
+        TopLevel::Init(_) => Some("init"),
         TopLevel::ForeignBinding(_) => Some("frgn"),
         TopLevel::Obj(_) => Some("struct"),
         TopLevel::Enum(_) => Some("enum"),

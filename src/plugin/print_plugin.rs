@@ -171,6 +171,12 @@ fn walk_item(
         TopLevel::Transaction(t) => walk_stmts(&mut t.body, known_types, universe),
         TopLevel::Constant(c) => walk_expr(&mut c.expr, known_types, universe),
         TopLevel::Statement(stmt) => walk_stmt(stmt, known_types, universe),
+        TopLevel::Init(init) => {
+            if let Some(value) = &mut init.value {
+                walk_expr(value, known_types, universe)?;
+            }
+            walk_stmts(&mut init.body, known_types, universe)
+        }
         _ => Ok(()),
     }
 }

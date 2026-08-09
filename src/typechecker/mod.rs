@@ -1358,6 +1358,15 @@ pub fn elaborate_ops(items: &mut [TopLevel], universe: &TypeUniverse, env: &Chec
             }
             TopLevel::Statement(stmt) => elaborate_stmt(stmt, &mut ctx, &mut errors),
             TopLevel::Constant(c) => elaborate_expr(&mut c.expr, &mut ctx, &mut errors),
+            TopLevel::Init(init) => {
+                // Register the name so later statements can reference it, then
+                // elaborate the seeding expr/body (like a const, but runtime).
+                ctx.bindings.insert(init.name.clone(), init.ty.clone());
+                if let Some(value) = &mut init.value {
+                    elaborate_expr(value, &mut ctx, &mut errors);
+                }
+                elaborate_stmts(&mut init.body, &mut ctx, &mut errors);
+            }
             _ => {}
         }
     }

@@ -86,7 +86,7 @@ fn has_main_defn(program: &[TopLevel]) -> bool {
 /// (vs a reactor program): statements/lets and constants.
 fn has_script_content(program: &[TopLevel]) -> bool {
     program.iter().any(|item| match item {
-        TopLevel::Statement(_) | TopLevel::Constant(_) => true,
+        TopLevel::Statement(_) | TopLevel::Constant(_) | TopLevel::Init(_) => true,
         _ => false,
     })
 }
@@ -108,6 +108,22 @@ fn collect_script_statements(program: &[TopLevel]) -> Vec<Statement> {
                     expr: Some(c.expr.clone()),
                     modifiers: vec![],
                 });
+            }
+            TopLevel::Init(init) => {
+                // 2026-08-09: `init` = runtime-seeded invariant — in script
+                // mode it is a runtime `let` (each line runs once; no reactor
+                // ordering to protect). Body form unsupported here — an init
+                // body seeds once before beginprogram; scripts have no reactor,
+                // so the value form is the valid script shape.
+                if let Some(value) = &init.value {
+                    out.push(Statement::Let {
+                        name: init.name.clone(),
+                        names: vec![],
+                        ty: Some(init.ty.clone()),
+                        expr: Some(value.clone()),
+                        modifiers: vec![],
+                    });
+                }
             }
             _ => {}
         }
@@ -191,6 +207,7 @@ fn reserved_collision(program: &[TopLevel]) -> Option<&'static str> {
             }
             TopLevel::Constant(c) => c.name.as_str(),
             TopLevel::Definition(d) => d.name.as_str(),
+            TopLevel::Init(i) => i.name.as_str(),
             _ => continue,
         };
         if name == "__script_main" {

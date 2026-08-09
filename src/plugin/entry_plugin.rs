@@ -78,6 +78,7 @@ fn collect_existing(program: &[TopLevel]) -> HashSet<String> {
             TopLevel::Definition(d) => { names.insert(d.name.clone()); }
             TopLevel::Transaction(t) => { names.insert(t.name.clone()); }
             TopLevel::Constant(c) => { names.insert(c.name.clone()); }
+            TopLevel::Init(i) => { names.insert(i.name.clone()); }
             TopLevel::Statement(stmt) => {
                 if let Statement::Let { name, .. } = stmt.as_ref() {
                     names.insert(name.clone());
