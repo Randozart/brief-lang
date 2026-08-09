@@ -83,62 +83,79 @@ firing. Verified: accel IR is byte-identical to the plain node's (no
 regression), 14 accel unit tests + wrapper fast-forward test green.
 **Undo:** none — the virtual-index model is superseded.
 
-## Runtime `lib/runtime/briv_rt.c` Is Untracked — OPEN (rename/gitignore artifact)
+## Runtime `lib/runtime/briv_rt.c` Is Untracked — FIXED
 
-**Date:** 2026-08-05
-**Status:** Open
+**Date:** 2026-08-05 (fixed 2026-08-06, commit `2bcec427`)
+**Status:** Fixed
 **Root cause:** The Brief→Briv rename (`d026c002`) renamed `lib/runtime/brief_rt.c`
-to `lib/runtime/briv_rt.c`, but `.gitignore:180` contains a bare `briv_rt.c`
+to `lib/runtime/briv_rt.c`, but `.gitignore:180` contained a bare `briv_rt.c`
 pattern (added for "root-level runtime artifacts (compiled outside benchmarks/)").
-Because the pattern has no path, it hides the renamed runtime too. `git ls-files`
-shows only `lib/runtime/briv_gpu_rt.c` tracked; `briv_rt.c` is untracked.
-**Impact:** A fresh clone cannot link any runtime benchmark or FFI bridge — the
-harness links `lib/runtime/briv_rt.c` directly
-(`benchmarks/build_and_bench.sh:231`). The baseline worktree at `46f4f741`
-lacked the file until it was copied in manually for the Phase 3 nbody A/B.
-**Fix (planned):** Narrow the `.gitignore` pattern (keep `briv_rt.o` and
-`benchmarks/briv_rt.c`, which is covered by the "Generated copy" entry at line
-107) and `git add lib/runtime/briv_rt.c` so the runtime is version-controlled.
+Because the pattern has no path, it hid the renamed runtime too.
+**Fix (applied):** anchored the pattern to `/briv_rt.c` (root-only) and
+`git add lib/runtime/briv_rt.c`. Verified 2026-08-09: the file is tracked in
+main (`2bcec427`) and present in the baseline worktree; `git check-ignore`
+returns not-ignored.
 **Undo:** none (tracking infrastructure the harness already requires).
 
 ---
 
-## Baseline Harness Defects Blocking Trustworthy A/B Comparison — OPEN
+## Baseline Harness Defects Blocking Trustworthy A/B Comparison — PARTIALLY FIXED
 
 **Date:** 2026-08-05
-**Status:** Open (baseline captured at `46f4f741`; see
-`docs/plans/2026-08-05-implement-normative-language-spec.md` §4.3)
-**Root cause:** The runtime benchmark harness has four pre-existing
-correctness/reporting defects that make the captured baseline partially
-untrustworthy. They are logged here before any implementation phase relies on
-the harness. Each must be fixed before the final migration benchmark gate.
-**Findings:**
-1. **`deep_recursion` prints divide-by-zero but reports `MATCH`.** The harness
-   printed `Runtime error (func=(main), adr=15): Divide by zero`, then two
-   `(standard_in) 1: syntax error` lines, yet recorded
-   `correctness: MATCH (output: "15")` with a C duration of `0s` and an
-   undefined ratio. The comparison is not valid.
-2. **`bridge_glue` produces `<null>` vs `42` and reports `SKIP`.** The GLUE
-   string round-trip printed `Briv:  '<null>'`, `❌ MISMATCH` (C and native
-   produce `'42'`), then the summary recorded `SKIP (briv binary missing)`.
-   A wrong result must never be classified as skip.
-3. **Protocol round-trip proofs are silently skipped.** ASCII, UTF16, and
-   Posit32 emit `warning: round-trip proof skipped for ... — bodies not found`.
-   The normative SPEC (`spec/SPEC.md` §8.7) requires proof or an explicitly
-   trusted axiom; silent skip is not acceptable.
-4. **Unresolved representation widths/alignments fall back silently.** The
-   normalizer prints `has no primordial entry and no `!> bits` metadata —
-   defaulting max width to target int width (64)` and
-   `assuming alignment 8` for `Slice`, `List`, `Stack`, `HashMap`,
-   `RingBuffer`, and others. SPEC §2.1 forbids silent representation fallback.
-5. **`#!exit` benchmarks warn their exit condition is never checked.** Many
-   benchmarks warn `#!exit declared but program has no tick loop`; their
-   migration to `exit program`/ports/entry macros must preserve observability.
-**Fix (planned):** Make the harness fail hard on runtime errors and wrong
-output instead of `MATCH`/`SKIP`; supply proof bodies or explicit trusted
-axioms for ASCII/UTF16/Posit32; require explicit representation resolution in
-the normalizer; migrate benchmark exits to canonical entry semantics.
+**Status:** Defects #1 + #2 fixed 2026-08-09 (commit pending); #3 + #4 are
+compiler gaps, tracked separately below.
+**Root cause:** The runtime benchmark harness had correctness/reporting defects
+that made the captured baseline partially untrustworthy.
+**Findings + resolution:**
+1. **`deep_recursion` prints divide-by-zero but reports `MATCH`.** FIXED — the
+   divide-by-zero itself was already fixed; the harness now separates stdout
+   from stderr and treats a non-empty stderr / non-zero exit as `FAIL`, never
+   `MATCH`. Verified `deep_recursion` runs cleanly and reports MATCH.
+2. **`bridge_glue` produces `<null>` vs `42` and reports `SKIP`.** FIXED — two
+   harness bugs: (a) the Python bridge harness exited 0 on mismatch and the
+   shell then SKIPped on a missing compiled binary, masking the wrong result;
+   (b) `bench_glue_cross.py` called `briv_test_cstr_roundtrip(state, s_ptr)`
+   with a 2-arg ABI, but the export needs NO state (its body only calls the
+   cstr_to_briv/str_to_c FFI), so `state`(0) was passed as `input_ptr` →
+   `<null>`. The Python now calls the correct 1-arg ABI, exits 1 on mismatch,
+   and the shell records `FAIL`. Verified `'42'` round-trips and MATCH.
+3. **Protocol round-trip proofs are silently skipped.** NOT FIXED — the
+   ASCII/UTF16/Posit32 conversion functions (`ascii_to_utf8`, ...) have no
+   bodies in stdlib; the proof machinery warns-and-skips. Needs proof bodies
+   or explicit trusted axioms (SPEC §8.7). Tracked as its own bug below.
+4. **Unresolved representation widths/alignments fall back silently.** NOT
+   FIXED — the normalizer defaults max width to 64 / alignment 8 for `Slice`,
+   `List`, etc. SPEC §2.1 forbids silent fallback. Tracked separately below.
+5. **`#!exit` benchmarks warn their exit condition is never checked.** The
+   benchmarks migrated to `endprogram`/entry semantics; remaining warnings are
+   informational.
 **Undo:** none (correctness fixes; do not restore silent fallbacks).
+
+---
+
+## Protocol Round-Trip Proofs Silently Skipped — OPEN (compiler gap)
+
+**Date:** 2026-08-09 (split from the harness-defects entry)
+**Status:** Open
+**Root cause:** `lib/std/protocols.bv` declares `proto ASCII/UTF16/Posit32`
+with `CastTo`/`CastFrom` referencing `ascii_to_utf8`/`utf8_to_ascii`/
+`utf16_to_utf8`/`utf8_to_utf16`/`Posit32_to_IEEE754`/`IEEE754_to_Posit32`, but
+none of those functions are defined in stdlib. The round-trip proof machinery
+(`protocol_graph.rs`) warns "bodies not found" and skips the proof.
+**Fix (planned):** implement the conversion functions in stdlib (`.bv`) or
+declare explicit trusted axioms per SPEC §8.7; the proof must not silently skip.
+
+---
+
+## Silent Representation Width/Alignment Fallbacks — OPEN (compiler gap)
+
+**Date:** 2026-08-09 (split from the harness-defects entry)
+**Status:** Open
+**Root cause:** the normalizer defaults unresolved max width to 64 and
+alignment to 8 for `Slice`, `List`, `Stack`, `HashMap`, `RingBuffer`, etc.
+SPEC §2.1 forbids silent representation fallback.
+**Fix (planned):** require explicit `!> bits`/alignment resolution for
+non-primordial types, or a declared default, instead of a silent assume.
 
 ---
 

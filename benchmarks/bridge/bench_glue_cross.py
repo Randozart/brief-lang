@@ -39,7 +39,10 @@ def load_briv_lib():
     """Load the Briv bridge .so."""
     path = os.path.join(BRIDGE_DIR, "libpp_types.so")
     lib = ctypes.CDLL(path)
-    lib.briv_test_cstr_roundtrip.argtypes = [ctypes.c_int64, ctypes.c_int64]
+    # 2026-08-09 (Bug 5): briv_test_cstr_roundtrip needs NO state — its export
+    # ABI is fn(i64) -> i64. A 2-arg declaration here silently passed state(0)
+    # as input_ptr and returned '<null>'.
+    lib.briv_test_cstr_roundtrip.argtypes = [ctypes.c_int64]
     lib.briv_test_cstr_roundtrip.restype = ctypes.c_int64
     return lib
 
@@ -72,9 +75,13 @@ def bench_c(lib, _state, s: str) -> str:
     return from_c_str(result_ptr)
 
 def bench_briv(lib, state, s: str) -> str:
-    """Call via Briv GLUE bridge — briv_test_cstr_roundtrip(state, s)."""
+    """Call via Briv GLUE bridge — briv_test_cstr_roundtrip(input_ptr)."""
     s_ptr = c_str(s)
-    result_ptr = lib.briv_test_cstr_roundtrip(state, s_ptr)
+    # 2026-08-09 (Bug 5): briv_test_cstr_roundtrip does NOT need the runtime
+    # state (its body only calls the cstr_to_briv/str_to_c FFI), so the export
+    # ABI is `fn(i64) -> i64` — a 2-arg call would pass state(0) as input_ptr
+    # and return `<null>`. Match the Rust pp_roundtrip test: single arg.
+    result_ptr = lib.briv_test_cstr_roundtrip(s_ptr)
     return from_c_str(result_ptr)
 
 def bench_native(s: str) -> str:
@@ -136,8 +143,16 @@ def main():
     print(f"  Native: {n_result!r}")
     if c_result == n_result == b_result:
         print("  ✅ All match")
-    else:
-        print("  ❌ MISMATCH")
+        return True
+    print("  ❌ MISMATCH")
+    # 2026-08-09 (Bug 5): a wrong bridge result must exit non-zero so the
+    # harness records FAIL (previously the shell re-ran check_correctness
+    # which SKIPped on a missing compiled binary, masking the mismatch).
+    return False
 
 if __name__ == "__main__":
-    main()
+    # 2026-08-09 (Bug 5): a wrong bridge result exits 1 so the shell harness
+    # records FAIL instead of masking the mismatch behind a SKIP.
+    ok = main()
+    import sys
+    sys.exit(0 if ok else 1)

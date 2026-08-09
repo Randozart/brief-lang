@@ -428,12 +428,39 @@ check_correctness() {
         return
     fi
 
-    local briv_out c_out
-    briv_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$briv_bin" 2>&1 || echo "__FAIL__")
+    local briv_out c_out briv_err c_err briv_rc c_rc
+    local tdir
+    tdir=$(mktemp -d) || tdir=/tmp
+    # 2026-08-09 (Bug 5): capture STDOUT and STDERR separately. A runtime
+    # error (divide-by-zero, undefined global, ...) prints diagnostics to
+    # stderr; merging it into the compared output let a crashing program
+    # "match" the C reference (deep_recursion printed a divide-by-zero and
+    # reported MATCH). A non-empty stderr / non-zero exit is now FAIL, never
+    # MATCH.
+    env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$briv_bin" >"$tdir/briv.out" 2>"$tdir/briv.err"
+    briv_rc=$?
+    briv_out=$(cat "$tdir/briv.out" 2>/dev/null)
+    briv_err=$(cat "$tdir/briv.err" 2>/dev/null)
     if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
-        c_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$ref_c_bin" 2>&1 || echo "__FAIL__")
+        env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$ref_c_bin" >"$tdir/c.out" 2>"$tdir/c.err"
     else
-        c_out=$(env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
+        env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$c_bin" >"$tdir/c.out" 2>"$tdir/c.err"
+    fi
+    c_rc=$?
+    c_out=$(cat "$tdir/c.out" 2>/dev/null)
+    c_err=$(cat "$tdir/c.err" 2>/dev/null)
+    rm -rf "$tdir"
+
+    # A runtime error on either side is a hard FAIL — never a silent MATCH.
+    if [ "$briv_rc" != "0" ] || [ -n "$briv_err" ]; then
+        echo "  correctness: FAIL (briv runtime error, rc=$briv_rc stderr: \"${briv_err:0:80}\")"
+        LAST_CORRECTNESS="FAIL"
+        return
+    fi
+    if [ "$c_rc" != "0" ] || [ -n "$c_err" ]; then
+        echo "  correctness: FAIL (C reference error, rc=$c_rc stderr: \"${c_err:0:80}\")"
+        LAST_CORRECTNESS="FAIL"
+        return
     fi
 
     if [ "$briv_out" = "$c_out" ]; then
@@ -508,8 +535,13 @@ bench_self_term() {
     if [ "$name" = "bridge_glue" ]; then
         local py_bench="benchmarks/bridge/bench_glue_cross.py"
         if [ -f "$py_bench" ] && [ -x "$(command -v python3)" ]; then
-            python3 "$py_bench"
-            check_correctness "$name"
+            # 2026-08-09 (Bug 5): honor the Python harness's verdict — a wrong
+            # bridge result exits 1 (FAIL), never SKIP.
+            if python3 "$py_bench"; then
+                LAST_CORRECTNESS="MATCH"
+            else
+                LAST_CORRECTNESS="FAIL"
+            fi
             record_result "$name" "done" "" "" "" "$LAST_CORRECTNESS"
         else
             echo "  SKIP — no Python harness"
