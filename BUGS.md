@@ -3685,3 +3685,11 @@ permutation). The failure was observed before the P3 string/codegen fixes
 (clear_locals, is_semantic_string, Len-on-boxed-String); one of those repaired
 the imported-frgn return-type resolution. The needs_state.bv comment about
 declaring the frgn locally is now stale — the shared reader is the single home.
+
+## Duplicate `BackendKind::Webstack` match arms in compile.rs — OPEN
+
+**Date:** 2026-08-10
+**Status:** Open
+**Root cause:** `compile.rs` (backend emit dispatch, arm `let ext: &str = match opts.backend`) contains THREE `BackendKind::Webstack` arms (~lines 1235, 1280, 1320). Rust proves the second and third unreachable (the first always matches), so only the arm at ~1235 runs. The dead arms carry differing backend configuration (one registers ProtocolDefs onto the casting graph + `with_optimize_report(true)`; another omits operator_defs) — the live arm registers neither. Unreachable-arm compiler warnings (`unreachable pattern`) pre-date this session.
+**Impact:** `compile()`'s Webstack path is deterministic (the reachable arm always wins), so no observable divergence today — but the de-facto webstack config differs from two presumably-intended configs that were never valid, and the dead arms conceal which configuration is canonical.
+**Fix direction:** consolidate the three arms into one canonical Webstack arm (preserving the reachable arm's behavior: operator_defs, cast_from_bit_overrides, resolved_frgns, target config, .ebv embedded mode), then decide whether ProtocolDef registering on the casting graph belongs in compile()'s webstack path (the LLVM/Gpu arms do this today). Verify with `cargo test --lib webstack` + a `.bv`→`.wasm` compile before/after.

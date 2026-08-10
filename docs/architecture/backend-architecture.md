@@ -39,6 +39,28 @@ The backend state is strictly stratified into three lifetimes to prevent state l
 | `loop_engine/` | Loop emission strategies (counter.rs, ssa.rs) |
 | `tests.rs` | Backend unit tests |
 
+### 1.2.5 Backend Folder Layout + Normalizer Responsibility
+
+2026-08-10: each live backend lives in its own folder (`llvm/`, `circt/`,
+`spirv/`, `webstack/`, `vm/`) as `mod.rs` (generator) + `normalizer.rs`.
+The legacy flat backend files (`c.rs`, `rust.rs`, `verilog.rs`, …) were
+deleted — they were unreferenced dead code.
+
+User `TypeDef` registration is shared: `backend/register_types.rs`
+`register_typedefs()` populates the `TypeUniverse` uniformly, and **every**
+backend normalizer calls it first (LLVM, CIRCT, SPIR-V, webstack, and the
+minimal VM pass — the VM is untyped but must not rot the uniform-universe
+invariant). After registration each normalizer derives only what its backend
+needs:
+- LLVM: (nothing more — the casting graph resolves IR types at codegen time)
+- CIRCT: `bit_width` from `bytes`, hardware-only intrinsic validation, keep-list
+- SPIR-V: kernel flagging + op validation + keep-list
+- webstack: `js_type` + `TypeTag` via `protocol_category` (Cast.# lane)
+- VM: registration only
+
+The normalizer's one job remains registering types; it does NOT resolve
+native types or compute layouts — those are the casting graph's.
+
 ### 1.3 Code Generation Flow
 
 ```
