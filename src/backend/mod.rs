@@ -1,5 +1,6 @@
 pub mod assembler;
 pub mod bindgen;
+pub mod register_types;
 pub mod circt;
 pub mod circt_normalizer;
 pub mod llvm;
