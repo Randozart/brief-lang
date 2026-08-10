@@ -1003,6 +1003,51 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 2026-08-09 (Phase 13, SPEC 22.6): `briv check file.dbv|file.dbvl` — parse a
+/// Data Briv document and validate it against its asserted schemas. A `.dbvl`
+/// file uses the line-oriented parser (offsets tracked); `.dbv` the structured
+/// parser. The document is not a Briv program — it never enters the .bv
+/// pipeline.
+pub fn check_data_source(file_path: &str, source: &str) -> Result<(), String> {
+    let is_dbvl = file_path.ends_with(".dbvl");
+    let mut doc = if is_dbvl {
+        briv_compiler::dbriv::v2::parse_document_track_offsets(source)
+    } else {
+        briv_compiler::dbriv::v2::parse_document(source)
+    }
+    .map_err(|e| format!("{}: {}", file_path, e))?;
+    // Resolve `schema X from "file.dbv"` imports: load the referenced schema
+    // files (relative to the checking file's directory) and merge their
+    // schemas so the data groups can be validated against them.
+    let base_dir = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let imports: Vec<String> = doc.imports.clone();
+    for imp in imports {
+        let candidate = base_dir.join(&imp);
+        let Ok(import_src) = std::fs::read_to_string(&candidate) else {
+            return Err(format!(
+                "{}: cannot resolve schema import '{}' (wanted {})",
+                file_path, imp, candidate.display()
+            ));
+        };
+        let imported = briv_compiler::dbriv::v2::parse_document(&import_src)
+            .map_err(|e| format!("{}: schema import '{}': {}", file_path, imp, e))?;
+        doc.schemas.extend(imported.schemas);
+    }
+    let errors = briv_compiler::dbriv::validate::validate_document(&doc);
+    if errors.is_empty() {
+        println!("OK ({} schema{}, {} data groups)",
+            doc.schemas.len(),
+            if doc.schemas.len() == 1 { "" } else { "s" },
+            doc.data_groups.len());
+        Ok(())
+    } else {
+        Err(format!("schema validation failed for '{}':\n  {}", file_path, errors.join("\n  ")))
+    }
+}
+
 /// Build the plugin manager for a given file and opts.
 /// 2026-07-15: Phase 2 — Discovers system plugins, applies per-extension
 /// filtering, and applies CLI overrides. The caller then runs stages at

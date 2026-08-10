@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod v2;
+pub mod validate;
+pub mod serialize;
 pub mod bridge;
 pub mod config_db;
 

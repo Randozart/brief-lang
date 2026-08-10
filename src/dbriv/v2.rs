@@ -410,7 +410,13 @@ impl Parser {
             fields.push(self.parse_field_def()?);
         }
 
-        doc.schemas.push(SchemaDef { name, key_field, fields });
+        doc.schemas.push(SchemaDef { name: name.clone(), key_field, fields });
+        // 2026-08-09 (Phase 13): an inline `schema Name { }` establishes the
+        // current schema for the data groups that follow (`> people` after it).
+        // Without this, a `> people` category after an inline schema had
+        // schema_name = None and was treated as raw data (SPEC 22.2 — the
+        // schema is asserted against the following entries).
+        self.current_schema = Some(name);
         // 2026-07-28: Consume optional trailing ; after schema } to prevent
         // the ; from falling through to the main loop's _ => arm, where it
         // gets misparsed as an empty positional value.
@@ -708,6 +714,18 @@ impl Parser {
         };
         self.skip_ws();
 
+        // 2026-08-09 (Phase 13, SPEC 22.3): a `.dbvl` bare record (`rust; a.bv;`)
+        // must not be misread as a keyed entry — the first token is only a KEY
+        // when followed by `:`/`as`/`{`. If it is followed by `;`, rewind and
+        // let the caller parse it as a positional record.
+        if self.peek_char() != Some(':')
+            && !(self.starts_with_ignore_case("as") && self.is_keyword_boundary("as"))
+            && self.peek_char() != Some('{')
+        {
+            self.pos = save;
+            return Ok(None);
+        }
+
         // `key as SchemaName { fields; }` — standalone with `as` keyword (no `:`)
         if self.starts_with_ignore_case("as") && self.is_keyword_boundary("as") {
             self.advance_n(2);
@@ -897,6 +915,12 @@ impl Parser {
     fn parse_positional_values(&mut self) -> Result<Vec<DataField>, String> {
         let mut fields = Vec::new();
         loop {
+            // 2026-08-09 (Phase 13, SPEC 22.3): a `\n` terminates the record
+            // (line-oriented `.dbvl`) — check BEFORE skipping whitespace, which
+            // would consume the newline and merge the next record.
+            if self.peek_char() == Some('\n') {
+                break;
+            }
             self.skip_ws_and_comments();
             if self.is_eof() || self.peek_char() == Some('\n') || self.peek_char() == Some('>') || self.peek_char() == Some('}') {
                 break;
@@ -904,7 +928,16 @@ impl Parser {
             if !fields.is_empty() {
                 if self.peek_char() == Some(';') {
                     self.advance();
-                    self.skip_ws_and_comments();
+                    // 2026-08-09 (Phase 13): the `;` branch must NOT skip the
+                    // newline (skip_ws_and_comments would merge the next
+                    // record). Only spaces are skipped here; a trailing
+                    // newline ends the record.
+                    while self.peek_char() == Some(' ') || self.peek_char() == Some('\t') {
+                        self.advance();
+                    }
+                    if self.peek_char() == Some('\n') {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -1706,8 +1739,11 @@ Bob; 25;
 "#;
         let doc = parse_document(input).unwrap();
         assert_eq!(doc.imports.len(), 1);
-        assert_eq!(doc.data_groups.len(), 1);
-        assert_eq!(doc.data_groups[0].entries.len(), 1);
+        // 2026-08-09 (Phase 13, SPEC 22.3): line-oriented `.dbvl` — each
+        // physical line is one record. Two lines = two entries (the previous
+        // behavior merged them into one, violating the spec).
+        let total_entries: usize = doc.data_groups.iter().map(|g| g.entries.len()).sum();
+        assert_eq!(total_entries, 2);
         // The schema is imported, not inline — SchemaDef is empty here
         // Key field annotation on imports is resolved at bridge layer
     }

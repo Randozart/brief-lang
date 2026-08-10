@@ -655,6 +655,13 @@ fn run_check(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("cannot read '{}': {}", file_path, e))?
         }
     };
+    // 2026-08-09 (Phase 13, SPEC 22.6): `briv check file.dbv|file.dbvl`
+    // dispatches to the Data Briv check (parse + validate asserted schemas),
+    // not the .bv source pipeline.
+    let ext = get_extension(file_path);
+    if ext == ".dbv" || ext == ".dbvl" {
+        return compile::check_data_source(file_path, &source);
+    }
     compile::check_source(file_path, &source)
 }
 
