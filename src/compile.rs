@@ -516,7 +516,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             briv_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Vm => {
-            // VM backend is target-agnostic — no normalization needed.
+            // 2026-08-10: VM is untyped but the universe must be populated
+            // uniformly — minimal shared registration, nothing backend-specific.
+            briv_compiler::backend::vm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
     }
 

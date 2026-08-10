@@ -6,6 +6,7 @@ pub mod assembler;
 pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
+pub mod normalizer;
 
 pub use assembler::Assembler;
 
