@@ -410,38 +410,16 @@ impl<'a> Parser<'a> {
             };
         }
 
-        // 2026-07-22: Parse optional `fallback <expr>` or `fallback <fn>(<args>)`.
-        let fallback = if self.eat_identifier("fallback") {
-            if self.check(&Token::Semicolon) {
-                // fallback; — implicit void, just skip the call
-                Fallback::Implicit
-            } else if self.peek().map_or(false, |t| matches!(t, Token::Identifier(_))) {
-                // Could be FnCall(name, args) or Static(ident)
-                // Peek ahead: if next after identifier is LParen, it's a function call
-                let saved = self.pos;
-                let ident = self.expect_identifier()?;
-                if self.eat(&Token::LParen) {
-                    let mut args = Vec::new();
-                    while !self.check(&Token::RParen) {
-                        args.push(self.parse_expression()?);
-                        if !self.eat(&Token::Comma) { break; }
-                    }
-                    self.expect(Token::RParen)?;
-                    Fallback::FnCall(ident, args)
-                } else {
-                    // Single identifier as a static expression
-                    // Reconstruct: we've consumed the identifier and need to reparse it as an expr
-                    self.pos = saved;
-                    let expr = self.parse_expression()?;
-                    Fallback::Static(expr)
-                }
-            } else {
-                let expr = self.parse_expression()?;
-                Fallback::Static(expr)
-            }
-        } else {
-            Fallback::None
-        };
+        // 2026-08-09 (SPEC §19.3): the declaration-level `fallback` clause is
+        // removed — fallback behavior uses ordinary typed control flow (the
+        // `optional frgn` + `.^^Available` check). Rejected as staged, not
+        // silently accepted.
+        if self.check_identifier("fallback") {
+            return self.error_at_current(
+                "`fallback` clause removed (SPEC 19.3) — use `optional frgn` + \
+                 `feature.^^Available` and ordinary typed control flow instead",
+            );
+        }
 
         self.expect(Token::Semicolon)?;
         Ok(ForeignBinding {
@@ -461,7 +439,6 @@ impl<'a> Parser<'a> {
             default_watchdog: None,
             wasm_impl: None,
             wasm_setup: None,
-            fallback,
             span: None,
             doc: self.take_doc(),
             is_optional: false,

@@ -2538,8 +2538,8 @@ impl LlvmBackend {
                 let sym = symbol.clone();
                 self.emit_direct_frgn_call(out, v, &sym, sig, args, indent)
             }
-            Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Bridge { language, param_paths, return_path, fallback }) => {
-                self.emit_bridge_frgn_call(out, v, sig, args, &language, &param_paths, &return_path, &fallback, indent)
+            Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Bridge { language, param_paths, return_path, .. }) => {
+                self.emit_bridge_frgn_call(out, v, sig, args, &language, &param_paths, &return_path, indent)
             }
             Some(crate::analysis::frgn_dispatch::ResolvedFrgn::Unsupported(msg)) => {
                 // 2026-07-22: Return a zero-value for the return type.
@@ -2781,7 +2781,6 @@ impl LlvmBackend {
         _language: &str,
         param_paths: &[crate::analysis::frgn_dispatch::ProtocolStep],
         return_path: &Option<crate::analysis::frgn_dispatch::ProtocolStep>,
-        fallback: &crate::ast::top::Fallback,
         indent: &str,
     ) -> TypedRegister {
         // 2026-07-22: Emit argument expressions and apply protocol transforms.
@@ -2850,15 +2849,11 @@ impl LlvmBackend {
             v.to_string()
         };
 
-        // 2026-07-22: Apply fallback dispatch with full phi-node structure.
-        // Uses self.fun.gen_reg() as the register generator for unique labels/registers.
-        let result_reg = crate::glue::bridge::emit_fallback_llvm(
-            out, &final_reg, &ret_type, &ret_llvm, fallback, indent,
-            &mut || self.fun.gen_reg(),
-        ).unwrap_or_else(|_| final_reg);
-
+        // 2026-08-09 (Phase 12, SPEC §19.3): the `fallback` dispatch phi is
+        // removed — fallback behavior uses ordinary typed control flow. The
+        // call result is used directly.
         TypedRegister {
-            name: result_reg,
+            name: final_reg,
             ty: ret_type,
         }
     }

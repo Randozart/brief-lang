@@ -335,7 +335,6 @@ mod tests {
             None,
             FromSpec::Literal(PathBuf::from(format!("lib.{}", ext))),
             ForeignTarget::Native,
-            Fallback::None,
         );
         fb.inputs = inputs;
         TopLevel::ForeignBinding(fb)
@@ -443,7 +442,6 @@ mod tests {
             language: "python".to_string(),
             param_paths: Vec::new(),
             return_path: None,
-            fallback: Fallback::None,
         });
 
         let targets = sample_glue_targets();
@@ -466,7 +464,6 @@ mod tests {
             language: "python".to_string(),
             param_paths: Vec::new(),
             return_path: None,
-            fallback: Fallback::None,
         });
         let targets = sample_glue_targets();
 
@@ -492,7 +489,6 @@ mod tests {
             language: "python".to_string(),
             param_paths: Vec::new(),
             return_path: None,
-            fallback: Fallback::None,
         });
         let targets = sample_glue_targets();
 

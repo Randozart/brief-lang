@@ -21,10 +21,9 @@ defn unwrap_or<T>(opt: Option<T>, default: T) -> T {
     uni opt(None) = { term default; };
     term default;
 };
-defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) -> T {
-    uni opt(Some(v)) = { term v; };
-    uni opt(None) = { term fallback(); };
-    term fallback();
+defn unwrap_or_else<T>(opt: Option<T>,; };
+    uni opt(None) = { term; };
+    term;
 };
 defn map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> {
     uni opt(Some(v)) = { term Some(f(v)); };
@@ -36,10 +35,9 @@ defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> {
     uni opt(None) = { term None; };
     term None;
 };
-defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) -> Option<T> {
-    uni opt(Some(v)) = { term Some(v); };
-    uni opt(None) = { term fallback(); };
-    term fallback();
+defn or_else<T>(opt: Option<T>,; };
+    uni opt(None) = { term; };
+    term;
 };
 defn filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> {
     uni opt(Some(v)) = {

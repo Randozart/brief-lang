@@ -10,8 +10,8 @@ $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
     code += "struct PyModuleDef { m_base: PyModuleDef_Base; m_name: Ptr; m_doc: Ptr; m_size: Int; m_methods: Ptr; m_slots: Ptr; m_traverse: Ptr; m_clear: Ptr; m_free: Ptr; };\n\n";
 
     // frgn declarations
-    code += "frgn PyLong_FromLongLong(n: Int) -> Ptr from \"c\" fallback 0;\n";
-    code += "frgn PyModule_Create2(defn: Ptr, api: Int) -> Ptr from \"c\" fallback 0;\n\n";
+    code += "frgn PyLong_FromLongLong(n: Int) -> Ptr from \"c\";\n";
+    code += "frgn PyModule_Create2(defn: Ptr, api: Int) -> Ptr from \"c\";\n\n";
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
@@ -19,7 +19,7 @@ $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
         code += "frgn " + name + "(";
         when pcount > 0 { code += "a: Int"; };
         when pcount > 1 { code += ", b: Int"; };
-        code += ") -> Int from \"c\" fallback 0;\n";
+        code += ") -> Int from \"c\";\n";
     };
 
     foreach(exp in exports) {

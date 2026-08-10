@@ -730,7 +730,6 @@ mod tests {
             None,
             crate::ast::FromSpec::Protocol("#Web".to_string()),
             crate::ast::ForeignTarget::Native,
-            crate::ast::Fallback::None,
         );
         fb.inputs = inputs;
         fb.success_output = outputs;

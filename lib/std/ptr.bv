@@ -54,5 +54,4 @@ defn copy(dest: Ptr<Int>, src: Ptr<Int>, count: Int)
   [true]
 {
   // Proven non-overlapping by caller — compiler emits @llvm.memcpy
-  // Element-by-element fallback if overlap unprovable
-};
+  // Element-by-element;

@@ -6,29 +6,29 @@
 // ===== PURE FOREIGN (requires system time) =====
 
 // Current time
-frgn frgn__now() -> Result<Int, TimeError> : __now from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__now_millis() -> Result<Int, TimeError> : __now_millis from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__now_micros() -> Result<Int, TimeError> : __now_micros from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__now() -> Result<Int, TimeError> : __now from "lib/runtime/briv_rt.c";
+frgn frgn__now_millis() -> Result<Int, TimeError> : __now_millis from "lib/runtime/briv_rt.c";
+frgn frgn__now_micros() -> Result<Int, TimeError> : __now_micros from "lib/runtime/briv_rt.c";
 // Time component extraction
-frgn frgn__year(timestamp: Int) -> Result<Int, TimeError> : __year from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__month(timestamp: Int) -> Result<Int, TimeError> : __month from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__day(timestamp: Int) -> Result<Int, TimeError> : __day from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__hour(timestamp: Int) -> Result<Int, TimeError> : __hour from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__minute(timestamp: Int) -> Result<Int, TimeError> : __minute from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__second(timestamp: Int) -> Result<Int, TimeError> : __second from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__weekday(timestamp: Int) -> Result<Int, TimeError> : __weekday from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__yearday(timestamp: Int) -> Result<Int, TimeError> : __yearday from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__year(timestamp: Int) -> Result<Int, TimeError> : __year from "lib/runtime/briv_rt.c";
+frgn frgn__month(timestamp: Int) -> Result<Int, TimeError> : __month from "lib/runtime/briv_rt.c";
+frgn frgn__day(timestamp: Int) -> Result<Int, TimeError> : __day from "lib/runtime/briv_rt.c";
+frgn frgn__hour(timestamp: Int) -> Result<Int, TimeError> : __hour from "lib/runtime/briv_rt.c";
+frgn frgn__minute(timestamp: Int) -> Result<Int, TimeError> : __minute from "lib/runtime/briv_rt.c";
+frgn frgn__second(timestamp: Int) -> Result<Int, TimeError> : __second from "lib/runtime/briv_rt.c";
+frgn frgn__weekday(timestamp: Int) -> Result<Int, TimeError> : __weekday from "lib/runtime/briv_rt.c";
+frgn frgn__yearday(timestamp: Int) -> Result<Int, TimeError> : __yearday from "lib/runtime/briv_rt.c";
 // Time creation
-frgn frgn__timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> : __timestamp from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> : __timestamp_full from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> : __timestamp from "lib/runtime/briv_rt.c";
+frgn frgn__timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> : __timestamp_full from "lib/runtime/briv_rt.c";
 // Formatting
-frgn frgn__format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> : __format_timestamp from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__format_date(timestamp: Int) -> Result<String, TimeError> : __format_date from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__format_time(timestamp: Int) -> Result<String, TimeError> : __format_time from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__format_datetime(timestamp: Int) -> Result<String, TimeError> : __format_datetime from "lib/runtime/briv_rt.c" fallback "";
+frgn frgn__format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> : __format_timestamp from "lib/runtime/briv_rt.c";
+frgn frgn__format_date(timestamp: Int) -> Result<String, TimeError> : __format_date from "lib/runtime/briv_rt.c";
+frgn frgn__format_time(timestamp: Int) -> Result<String, TimeError> : __format_time from "lib/runtime/briv_rt.c";
+frgn frgn__format_datetime(timestamp: Int) -> Result<String, TimeError> : __format_datetime from "lib/runtime/briv_rt.c";
 // Parsing
-frgn frgn__parse_timestamp(s: String) -> Result<Int, TimeError> : __parse_timestamp from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__parse_datetime(s: String) -> Result<Int, TimeError> : __parse_datetime from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__parse_timestamp(s: String) -> Result<Int, TimeError> : __parse_timestamp from "lib/runtime/briv_rt.c";
+frgn frgn__parse_datetime(s: String) -> Result<Int, TimeError> : __parse_datetime from "lib/runtime/briv_rt.c";
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
@@ -46,8 +46,8 @@ frgn frgn__parse_datetime(s: String) -> Result<Int, TimeError> : __parse_datetim
 
 
 // Constants - these could be frgn or defn
-frgn frgn__seconds_per_minute() -> Result<Int, TimeError> : __seconds_per_minute from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__seconds_per_hour() -> Result<Int, TimeError> : __seconds_per_hour from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__seconds_per_day() -> Result<Int, TimeError> : __seconds_per_day from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__millis_per_second() -> Result<Int, TimeError> : __millis_per_second from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__micros_per_second() -> Result<Int, TimeError> : __micros_per_second from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__seconds_per_minute() -> Result<Int, TimeError> : __seconds_per_minute from "lib/runtime/briv_rt.c";
+frgn frgn__seconds_per_hour() -> Result<Int, TimeError> : __seconds_per_hour from "lib/runtime/briv_rt.c";
+frgn frgn__seconds_per_day() -> Result<Int, TimeError> : __seconds_per_day from "lib/runtime/briv_rt.c";
+frgn frgn__millis_per_second() -> Result<Int, TimeError> : __millis_per_second from "lib/runtime/briv_rt.c";
+frgn frgn__micros_per_second() -> Result<Int, TimeError> : __micros_per_second from "lib/runtime/briv_rt.c";

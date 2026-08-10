@@ -1,12 +1,7 @@
 // gen_protocol.bv — Tier 2: Universal subprocess protocol bridge
 // 2026-07-24: Generates a C shim that communicates via stdin/stdout text protocol.
 // Overhead: ~1-5ms per call (dominated by process spawn).
-// Universal fallback: works with any language that can spawn a subprocess.
-//
-// Protocol: "add 3 4\n" → "7\n"
-
-$defn gen_protocol_shim(exports: Selection, bridge_name: String) -> String {
-    let code = "// " + bridge_name + " — Protocol bridge shim (auto-generated)\n";
+// Universal;
     code += "// Compile: gcc -O2 -o " + bridge_name + " " + bridge_name + ".c -ldl\n\n";
     code += "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <dlfcn.h>\n\n";
     code += "static void* lib_handle = NULL;\n\n";

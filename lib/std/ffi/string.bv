@@ -7,38 +7,38 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Case conversion
-frgn frgn__to_upper(s: String) -> Result<String, StringError> : __to_upper from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__to_title(s: String) -> Result<String, StringError> : __to_title from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__is_lower(s: String) -> Result<Bool, StringError> : __is_lower from "lib/runtime/briv_rt.c" fallback false;
-frgn frgn__is_upper(s: String) -> Result<Bool, StringError> : __is_upper from "lib/runtime/briv_rt.c" fallback false;
+frgn frgn__to_upper(s: String) -> Result<String, StringError> : __to_upper from "lib/runtime/briv_rt.c";
+frgn frgn__to_title(s: String) -> Result<String, StringError> : __to_title from "lib/runtime/briv_rt.c";
+frgn frgn__is_lower(s: String) -> Result<Bool, StringError> : __is_lower from "lib/runtime/briv_rt.c";
+frgn frgn__is_upper(s: String) -> Result<Bool, StringError> : __is_upper from "lib/runtime/briv_rt.c";
 // Whitespace checking
-frgn frgn__is_whitespace(s: String) -> Result<Bool, StringError> : __is_whitespace from "lib/runtime/briv_rt.c" fallback false;
-frgn frgn__is_alpha(s: String) -> Result<Bool, StringError> : __is_alpha from "lib/runtime/briv_rt.c" fallback false;
-frgn frgn__is_alphanumeric(s: String) -> Result<Bool, StringError> : __is_alphanumeric from "lib/runtime/briv_rt.c" fallback false;
-frgn frgn__is_numeric(s: String) -> Result<Bool, StringError> : __is_numeric from "lib/runtime/briv_rt.c" fallback false;
+frgn frgn__is_whitespace(s: String) -> Result<Bool, StringError> : __is_whitespace from "lib/runtime/briv_rt.c";
+frgn frgn__is_alpha(s: String) -> Result<Bool, StringError> : __is_alpha from "lib/runtime/briv_rt.c";
+frgn frgn__is_alphanumeric(s: String) -> Result<Bool, StringError> : __is_alphanumeric from "lib/runtime/briv_rt.c";
+frgn frgn__is_numeric(s: String) -> Result<Bool, StringError> : __is_numeric from "lib/runtime/briv_rt.c";
 // Complex search (requires iteration)
-frgn frgn__rfind(s: String, needle: String) -> Result<Int, StringError> : __rfind from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__rfind(s: String, needle: String) -> Result<Int, StringError> : __rfind from "lib/runtime/briv_rt.c";
 // Character operations
-frgn frgn__get_chars(s: String) -> Result<List<String>, StringError> : __get_chars from "lib/runtime/briv_rt.c" fallback [];
-frgn frgn__UTF8_len(s: String) -> Result<Int, StringError> : __UTF8_len from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__get_chars(s: String) -> Result<List<String>, StringError> : __get_chars from "lib/runtime/briv_rt.c";
+frgn frgn__UTF8_len(s: String) -> Result<Int, StringError> : __UTF8_len from "lib/runtime/briv_rt.c";
 // Escaping
-frgn frgn__escape(s: String) -> Result<String, StringError> : __escape from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__unescape(s: String) -> Result<String, StringError> : __unescape from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__quote(s: String) -> Result<String, StringError> : __quote from "lib/runtime/briv_rt.c" fallback "";
-frgn frgn__unquote(s: String) -> Result<String, StringError> : __unquote from "lib/runtime/briv_rt.c" fallback "";
+frgn frgn__escape(s: String) -> Result<String, StringError> : __escape from "lib/runtime/briv_rt.c";
+frgn frgn__unescape(s: String) -> Result<String, StringError> : __unescape from "lib/runtime/briv_rt.c";
+frgn frgn__quote(s: String) -> Result<String, StringError> : __quote from "lib/runtime/briv_rt.c";
+frgn frgn__unquote(s: String) -> Result<String, StringError> : __unquote from "lib/runtime/briv_rt.c";
 // Encoding
-frgn frgn__from_bytes(list: List<Int>) -> Result<String, StringError> : __from_bytes from "lib/runtime/briv_rt.c" fallback "";
+frgn frgn__from_bytes(list: List<Int>) -> Result<String, StringError> : __from_bytes from "lib/runtime/briv_rt.c";
 // Complex replacement
-frgn frgn__replace_all(s: String, old: String, new: String) -> Result<String, StringError> : __replace_all from "lib/runtime/briv_rt.c" fallback "";
+frgn frgn__replace_all(s: String, old: String, new: String) -> Result<String, StringError> : __replace_all from "lib/runtime/briv_rt.c";
 // Split variations
-frgn frgn__rsplit(s: String, delim: String) -> Result<List<String>, StringError> : __rsplit from "lib/runtime/briv_rt.c" fallback [];
-frgn frgn__words(s: String) -> Result<List<String>, StringError> : __words from "lib/runtime/briv_rt.c" fallback [];
+frgn frgn__rsplit(s: String, delim: String) -> Result<List<String>, StringError> : __rsplit from "lib/runtime/briv_rt.c";
+frgn frgn__words(s: String) -> Result<List<String>, StringError> : __words from "lib/runtime/briv_rt.c";
 // Comparison
-frgn frgn__eq_ignore_case(a: String, b: String) -> Result<Bool, StringError> : __eq_ignore_case from "lib/runtime/briv_rt.c" fallback false;
-frgn frgn__cmp(s1: String, s2: String) -> Result<Int, StringError> : __cmp from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__eq_ignore_case(a: String, b: String) -> Result<Bool, StringError> : __eq_ignore_case from "lib/runtime/briv_rt.c";
+frgn frgn__cmp(s1: String, s2: String) -> Result<Int, StringError> : __cmp from "lib/runtime/briv_rt.c";
 // Parsing
-frgn frgn__parse_float(s: String) -> Result<Float, StringError> : __parse_float from "lib/runtime/briv_rt.c" fallback 0.0;
-frgn frgn__to_bool(s: String) -> Result<Bool, StringError> : __to_bool from "lib/runtime/briv_rt.c" fallback false;
+frgn frgn__parse_float(s: String) -> Result<Float, StringError> : __parse_float from "lib/runtime/briv_rt.c";
+frgn frgn__to_bool(s: String) -> Result<Bool, StringError> : __to_bool from "lib/runtime/briv_rt.c";
 // ===== NATIVE DEFINITIONS =====
 
 // Length

@@ -57,32 +57,7 @@ enum Expr {
 obj Hashtag {
     name: String,
     value: Option<String>,
-    mandatory: Bool,
-    fallback: List<String>,
-    scoped: Option<String>
-}
-
-// ===== STATEMENTS =====
-
-obj AlkaBlock {
-    dangerous: Bool,
-    content: String
-}
-
-enum Statement {
-    // Assignment
-    StmtAssign(Expr, Expr, List<Hashtag>),  // lhs, rhs, modifiers
-    
-    // Let binding
-    StmtLet(String, Option<Type>, Option<Expr>, List<Hashtag>, Option<Expr>),  // name, type, init, modifiers, address_expr
-    
-    // Expression statement
-    StmtExpr(Expr),
-    
-    // Term statement
-    StmtTerm(List<Option<Expr>>, List<Hashtag>),  // return values, modifiers
-    
-    // Local trigger: trg! name: Type = expr;
+    mandatory: Bool,;
     StmtLocalTrigger(String, Type, Option<Expr>),  // name, type, expr
     
     // Escape statement

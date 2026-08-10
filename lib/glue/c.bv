@@ -15,9 +15,9 @@
 // nul-terminated C string into a [len][data] Briv String; `str_to_c` emits a
 // nul-terminated C string from a Briv String. The CastTo/CastFrom pair makes
 // the C_String variant 1-to-1 with the UTF8 base: the delta is one call.
-frgn cstr_to_briv(ptr: Int) -> String : briv_cstr_to_briv from "lib/runtime/briv_rt.c" fallback "";
-frgn str_to_c(handle: String) -> Int : briv_str_to_c from "lib/runtime/briv_rt.c" fallback 0;
-frgn cstring_concat(a: Int, b: Int) -> Int : briv_cstring_concat from "lib/runtime/briv_rt.c" fallback 0;
+frgn cstr_to_briv(ptr: Int) -> String : briv_cstr_to_briv from "lib/runtime/briv_rt.c";
+frgn str_to_c(handle: String) -> Int : briv_str_to_c from "lib/runtime/briv_rt.c";
+frgn cstring_concat(a: Int, b: Int) -> Int : briv_cstring_concat from "lib/runtime/briv_rt.c";
 
 // The C string sub-protocol of #String: nul-terminated bytes vs the base's
 // [len][data] encoding. `Concat` is the variant's own operation — a CStr

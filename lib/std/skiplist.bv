@@ -1,16 +1,7 @@
 // SkipList<T> — sorted list with O(log n) search/insert/delete.
 //
 // TypeDef links `<-` to sl_insert and sl_remove via the Custom strategy.
-// The defn bodies delegate to the List<- fallback for correctness, keeping
-// the public API identical. A future optimization pass can replace these
-// with Malloc#/Copy#/Free# based implementations.
-//
-// Type definition: SkipList derives from List, sharing its flat i64 buffer
-// layout. The Custom strategy in InsertAt/ExtractFrom redirects `<-` to
-// the defn declarations below.
-
-type SkipList<T> : List<T> {
-    !> InsertAt: sl_insert;
+// The defn bodies delegate to the List<-;
     !> ExtractFrom: sl_remove;
 };
 

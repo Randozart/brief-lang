@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::top::{Fallback, ForeignBinding, FromSpec};
+use crate::ast::top::{ForeignBinding, FromSpec};
 use crate::glue::config::{find_language_by_extension, GlueTarget};
 use crate::target::BackendKind;
 
@@ -48,8 +48,6 @@ pub enum ResolvedFrgn {
         param_paths: Vec<ProtocolStep>,
         /// Protocol transform chain for the return value
         return_path: Option<ProtocolStep>,
-        /// Fallback strategy
-        fallback: Fallback,
     },
     /// Not supported by this backend
     Unsupported(String),
@@ -126,7 +124,6 @@ pub fn resolve_single_frgn(
                     language: target.language.clone(),
                     param_paths,
                     return_path,
-                    fallback: fb.fallback.clone(),
                 });
             }
         }
@@ -203,7 +200,6 @@ pub fn resolve_single_frgn(
             language: target.language.clone(),
             param_paths,
             return_path,
-            fallback: fb.fallback.clone(),
         });
     }
 
@@ -365,7 +361,6 @@ mod tests {
             None,
             FromSpec::Literal(PathBuf::from(format!("lib.{}", ext))),
             ForeignTarget::Native,
-            Fallback::None,
         )
     }
 
@@ -375,7 +370,6 @@ mod tests {
             Some(as_name.to_string()),
             FromSpec::Literal(PathBuf::from(format!("lib.{}", ext))),
             ForeignTarget::Native,
-            Fallback::None,
         )
     }
 
@@ -517,7 +511,6 @@ mod tests {
             None,
             FromSpec::Protocol("#System".to_string()),
             ForeignTarget::Native,
-            Fallback::None,
         );
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None).unwrap();
@@ -540,7 +533,6 @@ mod tests {
             None,
             FromSpec::Protocol("#SomethingElse".to_string()),
             ForeignTarget::Native,
-            Fallback::None,
         );
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None);
@@ -557,7 +549,6 @@ mod tests {
             None,
             FromSpec::Linked("z".to_string()),
             ForeignTarget::Native,
-            Fallback::None,
         );
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "", &targets, BackendKind::Llvm, None).unwrap();

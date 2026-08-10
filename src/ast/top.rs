@@ -746,21 +746,6 @@ impl Default for ForeignSignature {
     }
 }
 
-/// 2026-07-22: Fallback strategy when a frgn call's return violates its
-/// contract or the foreign function cannot be reached.
-/// The program must always produce a valid result — this is the safety net.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Fallback {
-    /// Return a static expression (literal, constructor call, etc.)
-    Static(Expr),
-    /// Call a Briv function with the frgn's parameters
-    FnCall(String, Vec<Expr>),
-    /// Void-return frgn — just skip the call
-    Implicit,
-    /// No fallback declared (codegen uses zero-value of return type)
-    None,
-}
-
 /// Foreign function binding — a `frgn` declaration that wraps an external function.
 /// 2026-07-22: Treated as an import. `foreign_name` is the C/foreign symbol the
 /// linker looks for. `briv_name` (from `as` clause) is what Briv code calls it.
@@ -785,8 +770,6 @@ pub struct ForeignBinding {
     pub default_watchdog: Option<(u64, u64, u64, Box<Expr>)>,
     pub wasm_impl: Option<String>,
     pub wasm_setup: Option<String>,
-    /// 2026-07-22: Fallback strategy when the foreign call fails.
-    pub fallback: Fallback,
     pub span: Option<Span>,
     /// 2026-07-24: Doc comment text.
     pub doc: Option<String>,
@@ -809,7 +792,6 @@ impl ForeignBinding {
         briv_name: Option<String>,
         from: FromSpec,
         target: ForeignTarget,
-        fallback: Fallback,
     ) -> Self {
         ForeignBinding {
             foreign_name,
@@ -828,7 +810,6 @@ impl ForeignBinding {
             default_watchdog: None,
             wasm_impl: None,
             wasm_setup: None,
-            fallback,
             span: None,
             doc: None,
             is_optional: false,

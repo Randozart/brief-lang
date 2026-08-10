@@ -44,12 +44,9 @@ defn c_ptr_to_address(ptr: CPtr) -> Int [ptr.not_null()][term >= 0] {
   term ptr.address();
 };
 
-// Safe string conversion with fallback
-defn c_string_safe(c_str: CString, fallback: String) -> String [true][term.len() >= 0] {
-  [c_str.is_valid()] {
-    term c_str.to_str();
+// Safe string conversion with;
   };
-  term fallback;
+  term;
 };
 
 // Handle C array conversion

@@ -5,20 +5,20 @@
 // 2026-07-21: Return Int (not Void) to match C's int64_t return type.
 // LTO inlining requires the call site and definition signatures to match
 // (mismatched return types prevent LTO from inlining frgn functions).
-frgn frgn__print_int(n: Int) -> Int : __print_int from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__print_int(n: Int) -> Int : __print_int from "lib/runtime/briv_rt.c";
 // 2026-08-01 (B0): frgn __print_str(msg: String) -> Void REMOVED. It was dead
 // (no importers; print! literal segments go through the PrintStr# intrinsic,
 // not this frgn) AND doubly broken: `as frgn__print_str` points at a symbol
 // briv_rt.c does not define, and its String-typed param would declare
 // `{ i64, i64 }` before the B0 ptr change. The PrintStr# intrinsic owns this
 // call site. Undo: re-add the frgn only if stdlib ever needs a named wrapper.
-frgn frgn__print_float(f: Float) -> Int : __print_float from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__print_char(c: Int) -> Int : __print_char from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__print_float(f: Float) -> Int : __print_float from "lib/runtime/briv_rt.c";
+frgn frgn__print_char(c: Int) -> Int : __print_char from "lib/runtime/briv_rt.c";
 // 2026-08-01 (audit): the generic Print# convenience intrinsic routes
 // #Bool → __print_bool (true/false, not 1/0) and #Float64 → __print_float64.
 // Declared here (the stdlib declares the print runtime family; __print_str is
 // the backend-declared B0 exception).
-frgn frgn__print_bool(b: Int) -> Int : __print_bool from "lib/runtime/briv_rt.c" fallback 0;
-frgn frgn__print_float64(f: Float64) -> Int : __print_float64 from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__print_bool(b: Int) -> Int : __print_bool from "lib/runtime/briv_rt.c";
+frgn frgn__print_float64(f: Float64) -> Int : __print_float64 from "lib/runtime/briv_rt.c";
 // 2026-08-01 (Phase 4): the `#StdErr <- <String>` stream write.
-frgn frgn__eprint_str(msg: String) -> Int : __eprint_str from "lib/runtime/briv_rt.c" fallback 0;
+frgn frgn__eprint_str(msg: String) -> Int : __eprint_str from "lib/runtime/briv_rt.c";

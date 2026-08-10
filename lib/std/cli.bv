@@ -10,11 +10,11 @@
 // `entry_cmd() == "cmd" && !__entry_cmd_done` and `args!("--flag")` to a
 // snapshot state field bound from `__argv_has("--flag")`.
 
-frgn __argv_count() -> Int from "lib/runtime/briv_rt.c" fallback 0;
-frgn __argv_get(i: Int) -> String from "lib/runtime/briv_rt.c" fallback "";
-frgn __argv_has(flag: String) -> Bool from "lib/runtime/briv_rt.c" fallback false;
-frgn __argv_value(flag: String) -> String from "lib/runtime/briv_rt.c" fallback "";
-frgn __argv_command() -> String from "lib/runtime/briv_rt.c" fallback "";
+frgn __argv_count() -> Int from "lib/runtime/briv_rt.c";
+frgn __argv_get(i: Int) -> String from "lib/runtime/briv_rt.c";
+frgn __argv_has(flag: String) -> Bool from "lib/runtime/briv_rt.c";
+frgn __argv_value(flag: String) -> String from "lib/runtime/briv_rt.c";
+frgn __argv_command() -> String from "lib/runtime/briv_rt.c";
 
 defn entry_cmd() -> String {
     term __argv_command();

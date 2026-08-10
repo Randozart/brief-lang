@@ -15,8 +15,8 @@ import "glue/c.bv";
 // bare nul-terminated buffer; `load` wraps it with cstr_to_briv (correctness
 // first — never the fragile str_to_c heuristic). Note the frgn convention:
 // `frgn <briv_name>(...) : <C_symbol>` — the first is the Briv name, `:` binds the C/runtime symbol.
-frgn briv_read_file_raw(path: String) -> Int  : __read_file__ from "lib/runtime/briv_rt.c" fallback 0;
-frgn briv_write_file(path: String, data: String) -> Int  : __write_file__ from "lib/runtime/briv_rt.c" fallback 0;
+frgn briv_read_file_raw(path: String) -> Int  : __read_file__ from "lib/runtime/briv_rt.c";
+frgn briv_write_file(path: String, data: String) -> Int  : __write_file__ from "lib/runtime/briv_rt.c";
 
 let saved: String = "";
 let count: Int = 0;

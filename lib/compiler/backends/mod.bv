@@ -52,14 +52,12 @@ defn validate_hashtag(tag: Hashtag, backend: String) -> Result<String, String> {
         i = i + 1;
     };
     
-    // Check fallback chain (syntax: #!primary|fallback1|fallback2)
-    [len(tag.fallback) > 0] {
-        let j: Int = 0;
+    // Check;
         [j < len(tag.fallback)] {
             let k: Int = 0;
             [k < len(supported)] {
                 [supported[k] == tag.fallback[j]] {
-                    term Ok("supported (via fallback: " + tag.fallback[j] + ")");
+                    term Ok("supported (via;
                 };
                 k = k + 1;
             };

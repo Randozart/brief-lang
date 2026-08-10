@@ -221,10 +221,7 @@ defn parse_hashtag_modifiers(state: ParserState) -> Result<(List<Hashtag>, Parse
         let modifier = Hashtag {
             name: name,
             value: None,
-            mandatory: tag_type == HashBang,
-            fallback: [],
-            scoped: None
-        };
+            mandatory: tag_type == HashBang,;
         state = advance(state);
         modifiers = append(modifiers, modifier);
     };
@@ -2479,8 +2476,7 @@ defn parse_rstruct(state: ParserState) -> Result<(RStructDefinition, ParserState
                 };
                 [current_token(state) != OpColon] {
                     // Not a field - try as transaction with implicit name
-                    // This is a simplified fallback
-                    term Err("Expected field (name: Type) or transaction in rstruct body");
+                    // This is a simplified;
                 };
             };
             [!is_identifier(ftok)] { term Err("Expected field or transaction in rstruct body"); };

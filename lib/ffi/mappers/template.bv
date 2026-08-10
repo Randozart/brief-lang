@@ -123,12 +123,9 @@ defn map_error(err: Error) -> Error [true][term == err] {
 //     term <LangError>::new(err.message);
 // };
 
-// Safe conversion with fallback
-// defn <lang>_string_safe(<lang>_str: <LangString>, fallback: String) -> String [true][term == fallback || <lang>_str.is_valid()] {
-//     [<lang>_str.is_valid()] {
-//         term <lang>_str.to_string();
+// Safe conversion with;
 //     };
-//     term fallback;
+//     term;
 // };
 
 // ============================================================
