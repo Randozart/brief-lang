@@ -6357,3 +6357,122 @@ fn test_webstack_int_literal_emits_target_width() {
     assert!(!ir.contains("add i64 0, 1"),
         "Int literal must not hardcode i64; got:\n{ir}");
 }
+
+#[test]
+fn test_webstack_state_int_slots_are_target_width() {
+    // 2026-08-10: flexible Int %State slots are i{int_bits} (i32 on wasm32) —
+    // the --int-bits design intent. x86_64 (int_bits=64) is unchanged.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "label".into(), ty: Some(Type::string()), expr: None,
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Let { name: "tmp".into(), ty: None,
+                    expr: Some(Expr::Call("Len#".into(), vec![Expr::Identifier("label".into())], None)),
+                    modifiers: vec![], names: vec![] },
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    // Int slot → i32; String slot stays i64 (boxed ptr).
+    assert!(ir.contains("%State = type { i32, i64 }") || ir.contains("%StateChunk0 = type { i32, i64 }")
+        || ir.contains("%State = type { i32, i64, i64 }") || ir.contains("%StateChunk0 = type { i32, i64, i64 }"),
+        "Int slot must be i32 on wasm32, String i64; got:\n{ir}");
+}
+
+#[test]
+fn test_webstack_folded_loop_is_width_consistent() {
+    // 2026-08-10: the folded loop counter must be i{int_bits} (phi i32, add i32)
+    // with only the bound compare sext'd to i64. The old `phi i64` feeding
+    // `add nsw i32` was invalid IR that llc rejected.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(crate::ast::BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("count".into())), Box::new(Expr::Decimal(100))),
+                post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()),
+                    Expr::BinaryOp(crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("count".into())), Box::new(Expr::Decimal(1)))),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("phi i32"),
+        "folded loop counter phi must be i32 on wasm32; got:\n{ir}");
+    assert!(ir.contains("add nuw nsw i32"),
+        "folded loop backedge must be i32; got:\n{ir}");
+    assert!(ir.contains("sext i32") && ir.contains("icmp slt i64"),
+        "bound compare must sext i32 → i64; got:\n{ir}");
+}
+
+#[test]
+fn test_webstack_array_field_store_gep_widens_index() {
+    // 2026-08-10: `f[i] = v` on an Int[N] state field emits the GEP index at
+    // i64 (sext from the i32 index) — the old raw i32 index was invalid.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "idx".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "buf".into(),
+            ty: Some(Type::Vector(Box::new(Type::int()),
+                vec![crate::ast::Dimension::Anonymous(4)])),
+            expr: None,
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "fill".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(
+                    Expr::Index(Box::new(Expr::Identifier("buf".into())),
+                        Box::new(Expr::Identifier("idx".into()))),
+                    Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("sext i32") && ir.contains("getelementptr [4 x i32]"),
+        "array store GEP index must sext i32 → i64; got:\n{ir}");
+}

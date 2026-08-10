@@ -1183,7 +1183,11 @@ impl LlvmBackend {
                 // verifier errors if they cross adapt_to_i64 before DCE runs.
         match init_clone {
             Some(Expr::Decimal(n)) => {
-                writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
+                // 2026-08-10: store at the field's actual LLVM type. Flexible
+                // Int/UInt slots are i{int_bits} (i32 on wasm32); the old
+                // hardcoded `store i64` broke those slots. Exact ints and i64
+                // (x86_64) are unchanged.
+                writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, n, gep, self.align_of(ty)).ok();
             }
             Some(Expr::Float(f)) => {
                 // 2026-07-17: State fields are always i64. Box float via
@@ -3248,12 +3252,29 @@ fn probe_ok_checks(
                         let bound = if let Expr::Decimal(b) = rhs.as_ref() { *b } else { 0 };
                         let gep = format!("%prg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let ty = self.ctx.field_types[idx].clone();
+                        // 2026-08-10: range metadata must match the load width —
+                        // flexible Int slots are i{int_bits} (i32 wasm32). The
+                        // old hardcoded `i64` range on an i32 load fails llc's
+                        // verifier. A bound that doesn't fit the width (e.g.
+                        // 300 in i8) is clamped to the width's max (the load
+                        // physically can't exceed it).
+                        let bits: u32 = ty.strip_prefix('i')
+                            .and_then(|s| s.parse().ok()).unwrap_or(64);
+                        let max_signed = if bits >= 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
+                        let rhi = bound.min(max_signed);
                         let idx_val = idx;
                         let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-                        writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{{i64 {}, i64 {}}}",
-                            indent, rl, ty, gep, self.align_of(&ty), tn, 0i64, bound).ok();
+                        // LLVM range syntax: `!range !{i32 0, i32 100}` for
+                        // typed widths, `!range !{0, 100}` for i64.
+                        let range = if bits >= 64 {
+                            format!("{{ {}, {} }}", 0i64, rhi)
+                        } else {
+                            format!("{{ {} {}, {} {} }}", ty, 0i64, ty, rhi)
+                        };
+                        writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{}",
+                            indent, rl, ty, gep, self.align_of(&ty), tn, range).ok();
                     } else {
                         writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
                     }

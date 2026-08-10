@@ -1237,8 +1237,25 @@ impl LlvmBackend {
                         else if rt.max_bits <= 64 { 64 }
                         else { 128 };
                     format!("i{}", bits)
-                } else {
+                } else if rt.properties.contains_key("Cast.#Bool")
+                    || rt.properties.contains_key("Cast.#String")
+                    || rt.properties.contains_key("Cast.#Data")
+                    || rt.properties.contains_key("Cast.#Char")
+                {
+                    // 2026-08-10: boxed scalar/pointer types stay i64 —
+                    // Bool/Char store as boxed i64, String/Data store the
+                    // [len][bytes] address. Changing their slot width would
+                    // ripple through the boxed-param and ptr adaptation paths.
                     "i64".to_string()
+                } else {
+                    // 2026-08-10: flexible Int/UInt store at the TARGET int
+                    // width (i{int_bits}) — the `--int-bits` design intent.
+                    // i32 on wasm32 (avoids BigInt), i64 on x86_64 (identical
+                    // to the old hardcoded i64). Exact-width ints took the
+                    // branch above; flexible Int/UInt land here. This makes
+                    // %State slots match llvm_type(Int)/binop_int_type() and
+                    // activates the loop engines' narrow-counter machinery.
+                    format!("i{}", self.ctx.int_bits)
                 }
             } else {
                 "i64".to_string()

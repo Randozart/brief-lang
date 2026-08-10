@@ -33,7 +33,8 @@ pub fn emit_intrinsic_call(
             // 2026-08-01 (D2): `Now#` — monotonic clock in ns for the
             // watchdog `within N ms` deadline compare.
             writeln!(out, "{}{} = call i64 @__briv_now()", indent, v).ok();
-            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+            let narrowed = narrow_int_result(backend, out, v, indent);
+            return BTypedRegister { name: narrowed, ty: Type::int() };
         }
         "Load#" => return emit_load(backend, out, v, args, indent),
         "Store#" => return emit_store(backend, out, v, args, indent),
@@ -214,6 +215,22 @@ fn emit_args(backend: &mut LlvmBackend, out: &mut String, args: &[Expr], indent:
 
 fn emit_arg(backend: &mut LlvmBackend, out: &mut String, arg: &Expr, indent: &str) -> String {
     backend.emit_expr(out, arg, indent).name
+}
+
+/// 2026-08-10: Truncate an i64-valued Int intrinsic result to the target int
+/// width (i{int_bits}). C-runtime intrinsics (Now#, syscall, sysconf, atol)
+/// return i64, but an Int-typed register is i{int_bits} (i32 on wasm32) — an
+/// i64 value feeding `icmp slt i32` is invalid IR. x86_64 (int_bits=64) emits
+/// `trunc i64 to i64`, folded to a no-op by LLVM. NOT for pointer/address
+/// results (Malloc/Alloc/custom alloc) — those stay i64.
+fn narrow_int_result(backend: &mut LlvmBackend, out: &mut String, v: &str, indent: &str) -> String {
+    let width = format!("i{}", backend.ctx.int_bits);
+    if width == "i64" {
+        return v.to_string();
+    }
+    let r = backend.fun.gen_reg();
+    writeln!(out, "{}{} = trunc i64 {} to {}", indent, r, v, width).ok();
+    r
 }
 
 // ─── Memory intrinsics ────────────────────────────────────────────────
@@ -598,9 +615,12 @@ fn emit_get_env(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let name_reg = emit_arg(backend, out, &args[0], indent);
-    let ptr_reg = backend.fun.gen_reg();
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
+    let name_reg = backend.emit_expr(out, &args[0], indent);
+    // 2026-08-10: the string operand may be an unboxed ptr (literal's
+    // @str.N global) or a boxed i64 handle — string_ptr handles both. The old
+    // hardcoded `inttoptr i64` broke on a ptr operand (wasm32 llc: "'%t8'
+    // defined with type 'ptr' but expected 'i64'").
+    let ptr_reg = backend.string_ptr(out, indent, &name_reg);
     // Call getenv — may return null
     let env_ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, ptr_reg).ok();
@@ -635,9 +655,10 @@ fn emit_get_env_int(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let name_reg = emit_arg(backend, out, &args[0], indent);
-    let ptr_reg = backend.fun.gen_reg();
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
+    let name_reg = backend.emit_expr(out, &args[0], indent);
+    // 2026-08-10: string_ptr handles unboxed-ptr vs boxed-i64 operands (see
+    // emit_get_env). The old hardcoded `inttoptr i64` broke on ptr operands.
+    let ptr_reg = backend.string_ptr(out, indent, &name_reg);
     // 2026-07-28: Briv strings are stored as [i64 length][data\0] with the
     // handle pointing to the struct start. getenv expects just the data portion.
     // Without this GEP, getenv reads the length field as the string (e.g.,
@@ -647,8 +668,13 @@ fn emit_get_env_int(
     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, data_ptr, ptr_reg).ok();
     let env_ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, data_ptr).ok();
-    writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, v, env_ptr).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
+    let atol_reg = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, atol_reg, env_ptr).ok();
+    // 2026-08-10: atol returns i64 but the Int register width is i{int_bits}
+    // (i32 wasm32) — narrow so the result matches llvm_type(Int) and feeds
+    // i32 comparisons/arithmetic. x86_64 (int_bits=64) returns the value as-is.
+    let narrowed = narrow_int_result(backend, out, &atol_reg, indent);
+    BTypedRegister { name: narrowed, ty: Type::int() }
 }
 
 // ─── GetGlobalId# ─────────────────────────────────────────────────────
@@ -881,7 +907,11 @@ fn emit_syscall(
         // Non-Linux fallback: call briv_syscall via C runtime
         writeln!(out, "{}{} = call i64 @briv_syscall({})", indent, v, all_args.join(", ")).ok();
     }
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
+    // 2026-08-10: the syscall result is a semantic Int (i64 from the kernel /
+    // C runtime) — narrow to the target int width (i32 wasm32) so it matches
+    // llvm_type(Int) and feeds i32 comparisons.
+    let narrowed = narrow_int_result(backend, out, v, indent);
+    BTypedRegister { name: narrowed, ty: Type::int() }
 }
 
 // ─── SysConf# — runtime system configuration ──────────────────────────
@@ -916,7 +946,8 @@ fn emit_sysconf(
         None => "0".to_string(),
     };
     writeln!(out, "{}{} = call i64 @briv_sysconf(i64 {})", indent, v, name_reg).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
+    let narrowed = narrow_int_result(backend, out, v, indent);
+    BTypedRegister { name: narrowed, ty: Type::int() }
 }
 
 // ─── Atomic operations ───────────────────────────────────────────────
@@ -1043,7 +1074,8 @@ fn emit_backtrace(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     writeln!(out, "{}{} = call i64 @briv_backtrace()", indent, v).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
+    let narrowed = narrow_int_result(backend, out, v, indent);
+    BTypedRegister { name: narrowed, ty: Type::int() }
 }
 
 // 2026-07-18: Deref# — load through pointer. The pointee type is resolved

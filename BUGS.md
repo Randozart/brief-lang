@@ -3719,28 +3719,44 @@ object). Regression tests: `test_webstack_ssa_precondition_emits_valid_bool_bran
 when the repro also drops `with_type_universe` (a test-config artifact, not a
 codegen path).
 
-## wasm32 webstack: %State i64 storage vs i{int_bits} arithmetic — PARTIALLY FIXED (loop engines remain)
+## wasm32 webstack: %State i64 storage vs i{int_bits} arithmetic — RESOLVED
 
 **Date:** 2026-08-10
-**Status:** Partially fixed (the standalone-txn path; the loop engines remain).
-**Root cause:** `%State` slots are uniformly i64 (push_field_type), but
-arithmetic/comparisons use `binop_int_type()` = `i{int_bits}` (i32 on wasm32).
-The two models only agree at int_bits=64. Sites fixed this round:
-- `emit_int` (emit_expr.rs) — literals now `i{int_bits}`.
-- state-field load (emit_expr.rs Identifier arm) — `%State` i64 word truncs to
-  `i{int_bits}` for Int/UInt when `int_bits != 64`.
-- frgn String/Data param marshalling (emit_direct_frgn_call) — boxed String/Data
-  args now `inttoptr i64` for ptr params (the old `("i64","ptr")` coerce arm
-  never fired because `llvm_type(Int)`=i32 on wasm32 → bitcast fallback).
-- unsupported-frgn zero-value (emit_expr.rs Unsupported path) — emits `add
-  i{ret_width}` instead of hardcoded `add i64` (a Bool `ret i8` was fed i64).
-**Remaining:** the loop engines (counter.rs folded/countable/version-DAG, ssa.rs)
-hardcode `phi i64`/`icmp i64`/`add i64` for counters while body arithmetic uses
-`i{int_bits}` — a `%flc6 = phi i64` feeding `add nsw i32` is invalid. This is a
-pre-existing wasm32 gap (the webstack `.bv` path never assembled before this
-session — verified against the pre-change build). Fixing it means either
-width-aware loop phis (touches performance-critical loop machinery) or keeping
-i64 arithmetic on wasm32 (dropping the `--int-bits 32` avoid-BigInt goal).
-**Verification:** the standalone reactive-txn path assembles (`llc` exit 0);
-the folded-counter path (`emit_folded_loop`) still fails until the loop engines
-are reconciled.
+**Status:** Resolved 2026-08-10 (plan `2026-08-10-width-aware-loop-engines.md`).
+**Root cause:** `%State` slots for flexible Int/UInt were hardcoded i64
+(push_field_type) while arithmetic/comparisons use `binop_int_type()` =
+`i{int_bits}` (i32 wasm32). The two models only agree at int_bits=64, so every
+webstack `.bv`/`.rbv` failed llc assembly (verified pre-existing).
+**Fix (applied, width-aware loop engines):**
+- `push_field_type`: flexible Int/UInt `%State` slots are now `i{int_bits}`
+  (i32 wasm32; i64 x86_64 — byte-identical). Bool/String/Data/Char stay i64.
+- `emit_folded_loop`: counter phi/backedge use the field width; bound compare
+  sexts i{int_bits} → i64 (reusing the existing narrow-counter machinery).
+- per-field phi backedges: written fields store their native-width value
+  (i{int_bits}), not the i64 `adapt_to_i64` box — the phi type matches.
+- array field store/row-view GEPs: index widened i{int_bits} → i64
+  (`gep_index` helper; no-op on x86_64).
+- Int-returning intrinsics (Now#, GetEnvInt#, SysCall#, SysConf#,
+  Backtrace#): results narrowed i64 → i{int_bits} (`narrow_int_result`).
+- init-store + guarded-load `!range` metadata emit at the field's width.
+- removed the earlier load-trunc hack in the Identifier arm (slots now
+  already i{int_bits}).
+**Verification:** `--backend webstack` `.bv` → `.wasm` assembles end-to-end via
+llc for folded, per-field phi, countdown, direct-SSA, and runtime-bound loop
+shapes; Int/Float/String/array fields and the GetEnvInt#/Now# intrinsics all
+validate. 1738 lib tests (x86_64 unaffected — int_bits=64 → identical IR).
+**Undo:** revert push_field_type's flexible-Int branch to `"i64"`; the loop
+engines revert to the i64-only model (breaks wasm32 again).
+
+## ViewCompiler never wired into compile pipeline — OPEN (pre-existing)
+
+**Date:** 2026-08-10
+**Status:** Open. `opts.view_bindings` is never populated from `render`
+blocks — the `ViewCompiler` (src/view_compiler.rs) is only unit-tested, never
+invoked in `compile_source`. As a result `--backend webstack` on an `.rbv`
+produces the `.wasm` + `.html` but no `dom-shim.mjs` with binding wiring (the
+`GlueWebGenerator` early-returns on empty bindings). The width/flush/binding
+machinery is complete; the view compiler just isn't called.
+**Fix direction:** in compile_source, after parsing, collect `RenderBlock`
+view HTML + run `ViewCompiler::compile()` into `opts.view_bindings`, then the
+existing dom-shim generation (compile.rs ~893) produces the wired shim.

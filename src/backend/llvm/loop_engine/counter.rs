@@ -37,6 +37,27 @@ impl LlvmBackend {
     // Strategy 1: Pure Counter Fold
     // ═══════════════════════════════════════════════════════════════
 
+    /// 2026-08-10: Widen a narrow loop counter to i64 for the bound comparison.
+    /// The loop bound is always i64 (emit_countable_load_bound); a counter whose
+    /// %State slot is `i{int_bits}` (i32 on wasm32) must be sext'd to i64 before
+    /// `icmp slt/sgt i64`. Mirrors emit_countable_main's `counter_ty != "i64"`
+    /// arm. x86_64 (counter_ty == i64) returns the counter unchanged.
+    fn narrow_counter_for_bound(
+        &mut self,
+        out: &mut String,
+        prefix: &str,
+        counter_ty: &str,
+        counter_name: &str,
+    ) -> String {
+        if counter_ty != "i64" {
+            let w = self.fun.next_reg_with_prefix(prefix);
+            writeln!(out, "  {} = sext {} {} to i64", w, counter_ty, counter_name).ok();
+            w
+        } else {
+            counter_name.to_string()
+        }
+    }
+
     /// Emit a pure counter fold: single `store i64` with the final counter
     /// value. No runtime loop. The body was fully precomputed at compile
     /// time within `--optimize-budget`.
@@ -105,20 +126,28 @@ impl LlvmBackend {
         writeln!(out, "{}.header:", label_prefix).ok();
         let counter_name = self.fun.next_reg_with_prefix("flc");
         let done_reg = self.fun.next_reg_with_prefix("fld");
+        // 2026-08-10: the counter phi uses the field's actual LLVM type
+        // (i{int_bits} for flexible Int on wasm32). The bound is always i64;
+        // a narrow counter is sext'd to i64 for the comparison (mirrors
+        // emit_countable_main's counter_ty != "i64" arm).
+        let counter_ty = self.ctx.field_types.get(counter_idx)
+            .cloned().unwrap_or_else(|| "i64".to_string());
         if is_decreasing {
-            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
-                counter_name, init_name, next, label_prefix).ok();
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{}.latch ]",
+                counter_name, counter_ty, init_name, next, label_prefix).ok();
             // 2026-07-17: Fixed comparison direction. For decreasing counters we
             // want `counter > 0` (continue while still above the bound), not
             // `counter < bound` (which would exit immediately for decreasing).
-            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+            let cmp = self.narrow_counter_for_bound(out, "flc", &counter_ty, &counter_name);
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, cmp, bound_reg).ok();
         } else {
-            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
-                counter_name, init_name, next, label_prefix).ok();
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %{}.latch ]",
+                counter_name, counter_ty, init_name, next, label_prefix).ok();
             // 2026-07-17: Fixed comparison direction. For increasing counters we
             // want `counter < bound` (continue while below the bound), not
             // `counter > bound` (which would exit immediately).
-            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+            let cmp = self.narrow_counter_for_bound(out, "flc", &counter_ty, &counter_name);
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, cmp, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %{}.body, label %{}", done_reg, label_prefix, exit_label).ok();
         writeln!(out, "{}.body:", label_prefix).ok();
@@ -149,9 +178,9 @@ impl LlvmBackend {
         writeln!(out, "  br label %{}.latch", label_prefix).ok();
         writeln!(out, "{}.latch:", label_prefix).ok();
         if is_decreasing {
-            writeln!(out, "  {} = sub nuw nsw i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = sub nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         } else {
-            writeln!(out, "  {} = add nuw nsw i64 {}, 1", next, counter_name).ok();
+            writeln!(out, "  {} = add nuw nsw {} {}, 1", next, counter_ty, counter_name).ok();
         }
         let disable_fold = body.map_or(false, |b| self.loop_has_observable(b));
         if let Some(b) = body {
@@ -1626,9 +1655,22 @@ impl LlvmBackend {
                                       .cloned().unwrap_or_else(|| "i64".to_string());
                                   if field_ty == "float" || field_ty == "double" {
                                       self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
-                                  } else {
+                                  } else if field_ty == "i64" {
+                                      // 2026-08-10: Bool/String/Data/Ptr slots are
+                                      // i64 — box the value (adapt_to_i64 widens
+                                      // i32→i64, ptrtoints, etc.) so the backedge
+                                      // phi (typed field_ty=i64) matches.
                                       let boxed = self.adapt_to_i64(out, "  ", &val);
                                       self.fun.pending_phi_backedge.insert(n.clone(), boxed);
+                                  } else {
+                                      // 2026-08-10: flexible Int/UInt slots are
+                                      // i{int_bits} (i32 wasm32) — the body value
+                                      // is already that width (binop_int_type),
+                                      // so the backedge phi gets it directly.
+                                      // adapt_to_i64 here would emit
+                                      // `sext i32 <i32 val> to i64`, mismatching
+                                      // the `phi i32` backedge.
+                                      self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
                                   }
                               }
                           }

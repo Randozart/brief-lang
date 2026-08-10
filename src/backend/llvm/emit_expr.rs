@@ -448,23 +448,11 @@ impl LlvmBackend {
                             name: str_p,
                             ty: briv_ty,
                         }
-                    } else if (self.is_protocol_member(&briv_ty, "#Int")
-                               || self.is_protocol_member(&briv_ty, "#UInt"))
-                        && self.ctx.int_bits != 64
-                    {
-                        // 2026-08-10: narrow a %State i64 word to the target int
-                        // width (i32 on wasm32). %State slots are uniformly i64
-                        // (push_field_type), but arithmetic/comparisons use
-                        // i{int_bits} (binop_int_type) — on wasm32 an i64 load
-                        // feeding `icmp slt i32` is invalid IR. x86_64
-                        // (int_bits=64) is unchanged.
-                        let tr = self.fun.gen_reg();
-                        writeln!(out, "{}{} = trunc i64 {} to i{}", indent, tr, loaded, self.ctx.int_bits).ok();
-                        TypedRegister {
-                            name: tr,
-                            ty: briv_ty,
-                        }
                     } else {
+                        // 2026-08-10: flexible Int/UInt %State slots are now
+                        // i{int_bits} (push_field_type), so `loaded` is already
+                        // the arithmetic width — no trunc needed. Bool/String/
+                        // Data/Ptr slots stay i64 and are boxed/unboxed above.
                         TypedRegister {
                             name: loaded,
                             ty: briv_ty,
@@ -787,6 +775,9 @@ impl LlvmBackend {
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-10: clone so gep_index can take &mut self while the
+                // struct_types borrow for self-array slots is live below.
+                let idx_clone = idx_reg.clone();
                 // 2026-08-07 (Phase 7): a Boolean-vector index is a MASK —
                 // `data[mask]` selects the bytes at the true positions
                 // (SPEC §16.5). Supported sources: a compile-time Boolean
@@ -842,13 +833,20 @@ impl LlvmBackend {
                  // `data[i]` in a member body. GEP self + slot offset + elem.
                  if let Some((self_type, self_ptr)) = self.fun.self_binding.clone() {
                      if let Expr::Identifier(sname) = obj.as_ref() {
-                         if let Some((_, s_ty)) = self.ctx.struct_types.get(&self_type)
-                             .and_then(|f| f.iter().find(|(n, _)| n == sname))
-                         {
-                             if let Type::Vector(inner, dims) = s_ty {
-                                 if dims.len() >= 1 {
+                         // 2026-08-10: clone inner/dims so the struct_types
+                         // borrow is released before gep_index (which takes
+                         // &mut self) — the old code held s_ty across the call.
+                         let slot_ty: Option<(crate::ast::Type, Vec<crate::ast::Dimension>)> =
+                             self.ctx.struct_types.get(&self_type)
+                                 .and_then(|f| f.iter().find(|(n, _)| n == sname))
+                                 .and_then(|(_, ty)| match ty {
+                                     Type::Vector(inner, dims) => Some(((**inner).clone(), dims.clone())),
+                                     _ => None,
+                                 });
+                         if let Some((inner, dims)) = slot_ty {
+                             if dims.len() >= 1 {
                                      let offset = self.lookup_field_offset(&self_type, sname);
-                                     let elem_size = crate::backend::llvm::types::type_size(inner.as_ref(), self.ctx.type_universe.as_ref());
+                                     let elem_size = crate::backend::llvm::types::type_size(&inner, self.ctx.type_universe.as_ref());
                                      // 2026-08-07: multi-dim — the row stride
                                      // is the product of the REMAINING dims
                                      // (`data[row]` jumps a whole row of the
@@ -860,31 +858,31 @@ impl LlvmBackend {
                                              _ => 1,
                                          })
                                          .product::<usize>().max(1);
-                                     let scaled = self.fun.gen_reg();
-                                     writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, idx_reg.name, elem_size * row_elems as u64).ok();
+                                      let scaled = self.fun.gen_reg();
+                                      let gep_idx = self.gep_index(out, indent, &idx_clone);
+                                      writeln!(out, "{}{} = mul i64 {}, {}", indent, scaled, gep_idx, elem_size * row_elems as u64).ok();
                                      let total = self.fun.gen_reg();
                                      writeln!(out, "{}{} = add i64 {}, {}", indent, total, offset, scaled).ok();
                                      let gep = self.fun.gen_reg();
                                      writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, self_ptr, total).ok();
                                      if dims.len() == 1 {
-                                         let elem_llvm = self.llvm_type(inner);
+                                         let elem_llvm = self.llvm_type(&inner);
                                          let val = self.fun.gen_reg();
                                          writeln!(out, "{}{} = load {}, ptr {}", indent, val, elem_llvm, gep).ok();
                                          let _ = v;
-                                         return TypedRegister { name: val, ty: (**inner).clone() };
+                                         return TypedRegister { name: val, ty: inner.clone() };
                                      }
-                                     // A row view — the enclosing index GEPs
-                                     // into it (the row-view path below).
-                                     let _ = v;
-                                     return TypedRegister {
-                                         name: gep,
-                                         ty: Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec()),
-                                     };
-                                 }
-                             }
-                         }
-                     }
-                 }
+                                      // A row view — the enclosing index GEPs
+                                      // into it (the row-view path below).
+                                      let _ = v;
+                                       return TypedRegister {
+                                           name: gep,
+                                           ty: Type::Vector(Box::new(inner.clone()), dims[1..].to_vec()),
+                                       };
+                                   }
+                               }
+                           }
+                      }
                  // 2026-07-31 (A4): Array state-field indexing — GEP into
                  // %State + scalar load. A runtime index cannot extractvalue
                  // from a loaded aggregate; the whole-array load + extract
@@ -904,15 +902,16 @@ impl LlvmBackend {
                                  .get(fidx)
                                  .cloned()
                                  .unwrap_or_else(|| "i64".into());
-                             if dims.len() == 1 {
-                                 // 1-dim field → the element.
-                                 let elem = self.fun.gen_reg();
-                                 writeln!(
-                                     out,
-                                     "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
-                                     indent, elem, agg_ty, base, idx_reg.name
-                                 )
-                                 .ok();
+                              if dims.len() == 1 {
+                                  // 1-dim field → the element.
+                                  let elem = self.fun.gen_reg();
+                                  let gep_idx = self.gep_index(out, indent, &idx_clone);
+                                  writeln!(
+                                      out,
+                                      "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                                      indent, elem, agg_ty, base, gep_idx
+                                  )
+                                  .ok();
                                  let val = self.fun.gen_reg();
                                  writeln!(
                                      out,
@@ -928,14 +927,15 @@ impl LlvmBackend {
                              // ptr into the aggregate typed with the remaining
                              // dims. The enclosing index (or a whole-row use)
                              // GEPs into it.
-                             let row = self.fun.gen_reg();
-                             writeln!(
-                                 out,
-                                 "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
-                                 indent, row, agg_ty, base, idx_reg.name
-                             )
-                             .ok();
-                             let _ = v;
+                              let row = self.fun.gen_reg();
+                              let gep_idx = self.gep_index(out, indent, &idx_clone);
+                              writeln!(
+                                  out,
+                                  "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                                  indent, row, agg_ty, base, gep_idx
+                              )
+                              .ok();
+                              let _ = v;
                              return TypedRegister {
                                  name: row,
                                  ty: Type::Vector(Box::new((**inner).clone()), dims[1..].to_vec()),
@@ -954,10 +954,11 @@ impl LlvmBackend {
                         let agg_ty = self.vector_array_llvm_type(&obj_reg.ty)
                             .unwrap_or_else(|| "i64".to_string());
                         let elem = self.fun.gen_reg();
+                        let gep_idx = self.gep_index(out, indent, &idx_clone);
                         writeln!(
                             out,
                             "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
-                            indent, elem, agg_ty, obj_reg.name, idx_reg.name
+                            indent, elem, agg_ty, obj_reg.name, gep_idx
                         )
                         .ok();
                         if dims.len() == 1 {
@@ -997,10 +998,11 @@ impl LlvmBackend {
                     // 2026-07-21: Only List types have a length header at slot 0.
                     // Raw Ptr<T> from Malloc# has no header — offset is the index.
                     let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
+                    let gep_idx = self.gep_index(out, indent, &idx_clone);
                     if is_list_type {
-                        writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                        writeln!(out, "{}{} = add i64 {}, 1", indent, offset, gep_idx).ok();
                     } else {
-                        writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
+                        writeln!(out, "{}{} = add i64 {}, 0", indent, offset, gep_idx).ok();
                     }
                     let gep = self.fun.gen_reg();
                     writeln!(
@@ -1774,6 +1776,23 @@ impl LlvmBackend {
         let int_ty = format!("i{}", self.ctx.int_bits);
         writeln!(out, "{}{} = add {} 0, {}", indent, v, int_ty, imm).ok();
         TypedRegister { name: v.to_string(), ty: Type::int() }
+    }
+
+    /// 2026-08-10: Widen an array-index register to i64 for GEP. An index is an
+    /// Int value (i{int_bits}, i32 on wasm32) but LLVM GEP indices are i64 —
+    /// the old code passed the raw i{int_bits} register, producing
+    /// `getelementptr [N x i32], ptr %x, i64 0, i64 <i32 reg>` (invalid). The
+    /// extension is a no-op on x86_64 (index already i64). Takes &mut self to
+    /// emit; uses ctx.int_bits for the width (indices are always Int scalars),
+    /// so no llvm_type lookup that could conflict with a live borrow.
+    pub(crate) fn gep_index(&mut self, out: &mut String, indent: &str, idx: &TypedRegister) -> String {
+        let width = format!("i{}", self.ctx.int_bits);
+        if width == "i64" {
+            return idx.name.clone();
+        }
+        let r = self.fun.gen_reg();
+        writeln!(out, "{}{} = sext {} {} to i64", indent, r, width, idx.name).ok();
+        r
     }
 
     /// Emit a string literal as stack-allocated bytes + GEP.

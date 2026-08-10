@@ -529,10 +529,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             let agg_ty = backend.vector_array_llvm_type(&obj_reg.ty)
                                 .unwrap_or_else(|| "i64".to_string());
                             let elem = backend.fun.gen_reg();
+                            let gep_idx = backend.gep_index(out, indent, &idx_reg);
                             writeln!(
                                 out,
                                 "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
-                                indent, elem, agg_ty, obj_reg.name, idx_reg.name
+                                indent, elem, agg_ty, obj_reg.name, gep_idx
                             )
                             .ok();
                             let inner_llvm = backend.llvm_type(inner);
@@ -1274,11 +1275,14 @@ pub(super) fn emit_array_state_store(
     }
     let idx_reg = backend.emit_expr(out, idx, indent);
     let base = backend.emit_state_gep(out, indent, "f", "%state", fidx);
+    // 2026-08-10: the index is i{int_bits} (i32 wasm32) — widen to i64 for the
+    // GEP (LLVM GEP indices are i64). emit_expr::gep_index is a no-op on x86_64.
+    let gep_idx = backend.gep_index(out, indent, &idx_reg);
     let elem = backend.fun.gen_reg();
     writeln!(
         out,
         "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
-        indent, elem, field_ty, base, idx_reg.name
+        indent, elem, field_ty, base, gep_idx
     )
     .ok();
     let elem_llvm = field_ty
