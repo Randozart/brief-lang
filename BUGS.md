@@ -3694,10 +3694,53 @@ declaring the frgn locally is now stale — the shared reader is the single home
 **Impact:** `compile()`'s Webstack path is deterministic (the reachable arm always wins), so no observable divergence today — but the de-facto webstack config differs from two presumably-intended configs that were never valid, and the dead arms conceal which configuration is canonical.
 **Fix direction:** consolidate the three arms into one canonical Webstack arm (preserving the reachable arm's behavior: operator_defs, cast_from_bit_overrides, resolved_frgns, target config, .ebv embedded mode), then decide whether ProtocolDef registering on the casting graph belongs in compile()'s webstack path (the LLVM/Gpu arms do this today). Verify with `cargo test --lib webstack` + a `.bv`→`.wasm` compile before/after.
 
-## Webstack SSA-loop precondition emits `br i1 <i8 reg>` — OPEN (pre-existing)
+## Webstack SSA-loop precondition emits `br i1 <i8 reg>` — RESOLVED
 
 **Date:** 2026-08-10
-**Status:** Open (pre-existing — found while wiring the flush buffer)
-**Root cause:** For a txn with `[true]` (or any `Expr::Bool`) precondition, the SSA main loop (ssa.rs) emits `%t = add i8 0, 1` for the literal then `br i1 %t` directly — but `as_bool_reg` (helpers.rs:597) only truncs when the register's Briv type resolves to `#Bool`/`#Int`. The literal's `bool_()` type does not reach that path in the SSA-loop emission, so the i8 register feeds `br i1` → llc rejects the module: `'%t' defined with type 'i8' but expected 'i1'`.
-**Impact:** `--backend webstack` modules with `Bool(true)`-preconditioned reactive txns fail to assemble via llc. Reproduced at unit level (module dump + `llc -march=wasm32`), independent of the flush work. The standalone `@txn_<name>` path and non-`Bool` preconditions are unaffected.
-**Fix direction:** in the SSA-loop precondition emission, apply `as_bool_reg` to the `Expr::Bool` literal result (or emit `icmp ne i8 %t, 0` before `br`), matching the standalone-txn path.
+**Status:** Resolved 2026-08-10 (was OPEN — found while wiring the flush buffer).
+**Root cause:** Two distinct issues compounded:
+1. **Missing type universe in the diagnostic path** — `as_bool_reg` (helpers.rs:597)
+   only truncs `i8 → i1` when the register's Briv type resolves to `#Bool` via
+   `is_protocol_member`. That needs `ctx.type_universe` populated; the repro
+   tests omitted `with_type_universe`. With the universe set (as the CLI path
+   does), membership resolves and `trunc i8 %t to i1` is emitted correctly.
+2. **emit_int hardcoded `add i64` for Int literals** — `llvm_type(Int)` is
+   `i{int_bits}` (i32 on wasm32) and `binop_int_type()` emits i32, but the
+   literal emitter produced i64 registers. `adapt_to_i64` then saw
+   `llvm_type(Int)` = i32 and emitted `sext i32 <i64 reg>` → invalid IR that
+   llc rejects (`'%t0' defined with type 'i64' but expected 'i32'`).
+**Fix (applied):** `emit_int` now emits at `i{int_bits}` (matching the Char
+literal pattern and `llvm_type(Int)`/`binop_int_type()`). x86_64 unchanged
+(int_bits=64 → `add i64`). With both fixed, `--backend webstack` modules
+assemble via llc (verified: `llc -march=wasm32 -filetype=obj` produces the
+object). Regression tests: `test_webstack_ssa_precondition_emits_valid_bool_branch`,
+`test_webstack_int_literal_emits_target_width` (1735 tests).
+**Undo:** revert `emit_int` to `add i64`; the `br i1 <i8>` symptom returns only
+when the repro also drops `with_type_universe` (a test-config artifact, not a
+codegen path).
+
+## wasm32 webstack: %State i64 storage vs i{int_bits} arithmetic — PARTIALLY FIXED (loop engines remain)
+
+**Date:** 2026-08-10
+**Status:** Partially fixed (the standalone-txn path; the loop engines remain).
+**Root cause:** `%State` slots are uniformly i64 (push_field_type), but
+arithmetic/comparisons use `binop_int_type()` = `i{int_bits}` (i32 on wasm32).
+The two models only agree at int_bits=64. Sites fixed this round:
+- `emit_int` (emit_expr.rs) — literals now `i{int_bits}`.
+- state-field load (emit_expr.rs Identifier arm) — `%State` i64 word truncs to
+  `i{int_bits}` for Int/UInt when `int_bits != 64`.
+- frgn String/Data param marshalling (emit_direct_frgn_call) — boxed String/Data
+  args now `inttoptr i64` for ptr params (the old `("i64","ptr")` coerce arm
+  never fired because `llvm_type(Int)`=i32 on wasm32 → bitcast fallback).
+- unsupported-frgn zero-value (emit_expr.rs Unsupported path) — emits `add
+  i{ret_width}` instead of hardcoded `add i64` (a Bool `ret i8` was fed i64).
+**Remaining:** the loop engines (counter.rs folded/countable/version-DAG, ssa.rs)
+hardcode `phi i64`/`icmp i64`/`add i64` for counters while body arithmetic uses
+`i{int_bits}` — a `%flc6 = phi i64` feeding `add nsw i32` is invalid. This is a
+pre-existing wasm32 gap (the webstack `.bv` path never assembled before this
+session — verified against the pre-change build). Fixing it means either
+width-aware loop phis (touches performance-critical loop machinery) or keeping
+i64 arithmetic on wasm32 (dropping the `--int-bits 32` avoid-BigInt goal).
+**Verification:** the standalone reactive-txn path assembles (`llc` exit 0);
+the folded-counter path (`emit_folded_loop`) still fails until the loop engines
+are reconciled.

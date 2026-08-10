@@ -6289,3 +6289,71 @@ fn test_web_state_layout_carries_field_names() {
     assert_eq!(count.type_tag, crate::glue::web_generator::TypeTag::Int);
     assert_eq!(label.type_tag, crate::glue::web_generator::TypeTag::String);
 }
+
+#[test]
+fn test_webstack_ssa_precondition_emits_valid_bool_branch() {
+    // 2026-08-10: a [true] precondition in the SSA main loop must emit
+    // `trunc i8 <reg> to i1` before `br i1` (as_bool_reg), not `br i1 <i8>`
+    // directly. Without a type universe the membership check fails, so the
+    // test sets one (as the CLI path does).
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    // The SSA-loop guard must truncate the i8 Bool literal to i1 before br.
+    assert!(ir.contains("trunc i8 %t") && ir.contains("br i1 %tb"),
+        "precondition must trunc i8 → i1 before br; got:\n{ir}");
+    assert!(!ir.contains("br i1 %t5,"),
+        "no raw i8 reg may feed br i1; got:\n{ir}");
+}
+
+#[test]
+fn test_webstack_int_literal_emits_target_width() {
+    // 2026-08-10: emit_int must produce i{int_bits} (i32 on wasm32), matching
+    // llvm_type(Int)/binop_int_type. The old hardcoded `add i64` produced
+    // `sext i32 <i64 reg>` — invalid IR that llc rejects.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("add i32 0, 1"),
+        "Int literal must emit at i32 for wasm32; got:\n{ir}");
+    assert!(!ir.contains("add i64 0, 1"),
+        "Int literal must not hardcode i64; got:\n{ir}");
+}

@@ -448,6 +448,22 @@ impl LlvmBackend {
                             name: str_p,
                             ty: briv_ty,
                         }
+                    } else if (self.is_protocol_member(&briv_ty, "#Int")
+                               || self.is_protocol_member(&briv_ty, "#UInt"))
+                        && self.ctx.int_bits != 64
+                    {
+                        // 2026-08-10: narrow a %State i64 word to the target int
+                        // width (i32 on wasm32). %State slots are uniformly i64
+                        // (push_field_type), but arithmetic/comparisons use
+                        // i{int_bits} (binop_int_type) — on wasm32 an i64 load
+                        // feeding `icmp slt i32` is invalid IR. x86_64
+                        // (int_bits=64) is unchanged.
+                        let tr = self.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i{}", indent, tr, loaded, self.ctx.int_bits).ok();
+                        TypedRegister {
+                            name: tr,
+                            ty: briv_ty,
+                        }
                     } else {
                         TypedRegister {
                             name: loaded,
@@ -1749,7 +1765,14 @@ impl LlvmBackend {
     /// 2026-07-25: Emit an integer constant. All intermediate values use i64 —
     /// narrowing is applied at the `ret` instruction.
     fn emit_int(&mut self, out: &mut String, v: &str, imm: i64, indent: &str) -> TypedRegister {
-        writeln!(out, "{}{} = add i64 0, {}", indent, v, imm).ok();
+        // 2026-08-10: emit at the TARGET int width (i{int_bits}) — matching
+        // llvm_type(Int) and binop_int_type(). The old hardcoded `add i64`
+        // produced i64 literals that llvm_type(Int) (i32 on wasm32) and the
+        // binary-op emitters treat as i32, so adapt_to_i64 emitted
+        // `sext i32 <i64 reg>` — invalid IR. Char literals already used the
+        // native width (emit_expr.rs Expr::Char); Int follows the same rule.
+        let int_ty = format!("i{}", self.ctx.int_bits);
+        writeln!(out, "{}{} = add {} 0, {}", indent, v, int_ty, imm).ok();
         TypedRegister { name: v.to_string(), ty: Type::int() }
     }
 
@@ -2601,6 +2624,14 @@ impl LlvmBackend {
                         writeln!(out, "{}  {} = inttoptr i64 0 to ptr", indent, v).ok();
                     } else if ret_llvm == "float" {
                         writeln!(out, "{}  {} = fadd float 0.0, 0.0", indent, v).ok();
+                    } else if ret_llvm == "double" {
+                        writeln!(out, "{}  {} = fadd double 0.0, 0.0", indent, v).ok();
+                    } else if ret_llvm.starts_with('i') && ret_llvm.len() > 1 {
+                        // 2026-08-10: zero at the return type's actual width
+                        // (i8 for Bool, i32/i64 for ints) — the hardcoded i64
+                        // broke `ret i8 <i64 reg>` on any target where the
+                        // return width is narrower.
+                        writeln!(out, "{}  {} = add {} 0, 0", indent, v, ret_llvm).ok();
                     } else {
                         writeln!(out, "{}  {} = add i64 0, 0", indent, v).ok();
                     }
@@ -2753,11 +2784,19 @@ impl LlvmBackend {
         // 2026-07-24: Convert i64 args to ptr when the frgn param expects Ptr.
         // This handles PyModule_Create2(&moduledef, ...) where &moduledef returns
         // an i64 address but the C function expects a pointer parameter.
+        // 2026-08-10: also covers String/Data params — a boxed String/Data arg
+        // is an i64 [len][bytes] address in SSA (boxed to Type::int() at defn
+        // entry), so a ptr-typed frgn param needs `inttoptr i64`. On wasm32
+        // `llvm_type(Int)` is i32, so coerce_to_param_type's ("i64","ptr") arm
+        // never fires for boxed values — this explicit inttoptr is the fix.
         let final_args: Vec<TypedRegister> = meld_args
             .iter()
             .zip(sig.inputs.iter())
             .map(|(arg, (_, param_ty))| {
-                if matches!(param_ty, Type::Ptr(_)) && arg.ty == Type::int() {
+                let param_is_ptr = matches!(param_ty, Type::Ptr(_))
+                    || self.is_string_operand(param_ty)
+                    || self.is_data_operand(param_ty);
+                if param_is_ptr && arg.ty == Type::int() {
                     let ptr_reg = self.fun.gen_reg();
                     writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
                     TypedRegister {
