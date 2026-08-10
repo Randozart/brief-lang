@@ -506,11 +506,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             briv_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Circt => {
-            briv_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe, int_bits)?;
+            briv_compiler::backend::circt::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Webstack => {
             // Webstack is always wasm32 (32-bit pointers)
-            briv_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe, 32)?;
+            briv_compiler::backend::webstack::normalizer::normalize(&mut items, &mut universe, 32)?;
         }
         BackendKind::Spirv => {
             briv_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;

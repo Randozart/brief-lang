@@ -2,13 +2,11 @@ pub mod assembler;
 pub mod bindgen;
 pub mod register_types;
 pub mod circt;
-pub mod circt_normalizer;
 pub mod llvm;
 pub mod metadata;
 pub mod normalizer;
 pub mod vm;
 pub mod webstack;
-pub mod webstack_normalizer;
 pub mod spirv;
 
 use crate::analysis::call_graph::CallGraph;

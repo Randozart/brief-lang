@@ -27,6 +27,8 @@
 // BackendKind::Webstack which routes through LlvmBackend(wasm32).
 // See docs/architecture/features/rendered-briv-wasm.md.
 
+pub mod normalizer;
+
 use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Transaction, Type, UnaryOpKind};
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
@@ -53,7 +55,7 @@ pub enum TsType {
     Any,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 enum SignalType {
     Int,
     Float,
@@ -97,6 +99,54 @@ pub struct WebstackGenerator {
 struct PendingPromise {
     var: String,
     capture: Option<String>,
+}
+
+/// 2026-08-09 (Phase 14, SPEC 21.6 / AGENTS rule 18): derive a state field's
+/// web signal type from its PROTOCOL category via the universe — never by
+/// matching Briv type names. The universe resolves each type's `base` protocol
+/// (Int/Float/Bool/String/List/Vector/struct); a type absent from the universe
+/// falls back to Struct/Int (the target capability validator rejects
+/// unsupported values — SPEC 21.6).
+fn signal_type_for(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> SignalType {
+    // Recover the name for the universe lookup, then derive from the resolved
+    // protocol base.
+    let name = match ty {
+        Type::Custom(n) | Type::Applied(n, _) | Type::Generic(n, _) => Some(n.as_str()),
+        Type::Constrained(inner, _) => match inner.as_ref() {
+            Type::Custom(n) | Type::Applied(n, _) => Some(n.as_str()),
+            _ => None,
+        },
+        Type::Vector(_, dims) => {
+            let total: usize = dims
+                .iter()
+                .map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                })
+                .product();
+            return SignalType::Vector(total);
+        }
+        _ => None,
+    };
+    let Some(name) = name else {
+        return SignalType::Int;
+    };
+    // A collection type is recognized structurally (List/Map), not by name.
+    if name == "List" || name == "Map" || name == "Array" {
+        return SignalType::List;
+    }
+    let base = universe
+        .get(name)
+        .map(|r| r.base.as_str())
+        .unwrap_or(name);
+    match base {
+        "Int" | "UInt" | "Int8" | "Int16" | "Int32" | "UInt8" | "UInt16" | "UInt32"
+        | "Int64" | "UInt64" => SignalType::Int,
+        "Float" | "Float64" | "Float32" => SignalType::Float,
+        "Bool" => SignalType::Bool,
+        "String" | "Char" | "Data" => SignalType::String,
+        _ => SignalType::Struct,
+    }
 }
 
 /// Intent: WebstackGenerator implementation block.
@@ -151,8 +201,9 @@ impl WebstackGenerator {
         items: &[TopLevel],
         bindings: &[Binding],
         program_name: &str,
+        universe: &crate::type_universe::TypeUniverse,
     ) -> WebstackOutput {
-        self.collect_signals_and_transactions(items);
+        self.collect_signals_and_transactions(items, universe);
 
         match self.target {
             CodeTarget::Wasm => {
@@ -169,37 +220,11 @@ impl WebstackGenerator {
         }
     }
 
-    fn collect_signals_and_transactions(&mut self, items: &[TopLevel]) {
+    fn collect_signals_and_transactions(&mut self, items: &[TopLevel], universe: &crate::type_universe::TypeUniverse) {
         for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {
-                    let signal_type = match &decl.ty {
-                        Type::Custom(__t) if __t == "Int" => SignalType::Int,
-                        Type::Custom(__t) if __t == "Float" => SignalType::Float,
-                        Type::Custom(__t) if __t == "Int8" || __t == "Int16" || __t == "Int32" || __t == "UInt8" || __t == "UInt16" || __t == "UInt32" => SignalType::Int,
-                        Type::Custom(__t) if __t == "Float64" => SignalType::Float,
-                        Type::Custom(__t) if __t == "Bool" => SignalType::Bool,
-                        Type::Custom(__t) if __t == "String" => SignalType::String,
-                        Type::Applied(name, _) if name == "List" => SignalType::List,
-                        Type::Generic(name, _) if name == "List" => SignalType::List,
-                        Type::Vector(_, dims) => {
-                            let total: usize = dims.iter().map(|d| match d {
-                                crate::ast::Dimension::Anonymous(s) => *s,
-                                crate::ast::Dimension::Named(_, s) => *s,
-                            }).product();
-                            SignalType::Vector(total)
-                        }
-                        Type::Constrained(inner, _) => match **inner {
-                            Type::Custom(ref __t) if __t == "Int" => SignalType::Int,
-                            Type::Custom(ref __t) if __t == "UInt" => SignalType::Int,
-                            Type::Custom(ref __t) if __t == "Float" => SignalType::Float,
-                            Type::Custom(ref __t) if __t == "Bool" => SignalType::Bool,
-                            _ => SignalType::Int,
-                        },
-                        Type::Custom(_) => SignalType::Struct,
-                        Type::TypeVar(_) => SignalType::Int,
-                        _ => SignalType::Int,
-                    };
+                    let signal_type = signal_type_for(&decl.ty, universe);
                     self.signal_types
                         .insert(decl.name.clone(), signal_type.clone());
 
@@ -1024,7 +1049,7 @@ mod tests {
         let mut backend = WebstackGenerator::new();
         let items: Vec<TopLevel> = vec![];
         let bindings: Vec<Binding> = vec![];
-        let output = backend.generate(&items, &bindings, "test");
+        let output = backend.generate(&items, &bindings, "test", &crate::type_universe::TypeUniverse::new());
         assert!(output.ts_code.contains("App"), "Should generate App class");
     }
 
@@ -1036,7 +1061,7 @@ mod tests {
             element_id: "e1".into(),
             directive: Directive::Text { signal: "greeting".into() },
         }];
-        let output = backend.generate(&items, &bindings, "binding_test");
+        let output = backend.generate(&items, &bindings, "binding_test", &crate::type_universe::TypeUniverse::new());
         assert!(output.js_glue.contains("greeting"));
     }
 
@@ -1048,7 +1073,7 @@ mod tests {
             element_id: "e2".into(),
             directive: Directive::Show { expr: "visible".into() },
         }];
-        let output = backend.generate(&items, &bindings, "show_test");
+        let output = backend.generate(&items, &bindings, "show_test", &crate::type_universe::TypeUniverse::new());
         assert!(output.js_glue.contains("visible"));
     }
 
@@ -1057,7 +1082,7 @@ mod tests {
         let mut backend = WebstackGenerator::new();
         let items: Vec<TopLevel> = vec![];
         let bindings: Vec<Binding> = vec![];
-        let output = backend.generate(&items, &bindings, "ts_mod");
+        let output = backend.generate(&items, &bindings, "ts_mod", &crate::type_universe::TypeUniverse::new());
         assert!(!output.ts_code.is_empty(), "Should generate TS code");
         assert!(output.ts_code.contains("App"), "Should generate App class");
     }
@@ -1077,7 +1102,7 @@ mod tests {
                 span: None,
             }),
         ];
-        let output = backend.generate(&items, &[], "test");
+        let output = backend.generate(&items, &[], "test", &crate::type_universe::TypeUniverse::new());
         assert!(output.ts_code.contains("count: number = 0;"));
         assert!(output.ts_code.contains("name: string = \"\";"));
     }
@@ -1086,7 +1111,7 @@ mod tests {
     fn test_webstack_export_create_app() {
         let mut backend = WebstackGenerator::new();
         let items: Vec<TopLevel> = vec![];
-        let output = backend.generate(&items, &[], "test");
+        let output = backend.generate(&items, &[], "test", &crate::type_universe::TypeUniverse::new());
         assert!(output.ts_code.contains("export function createApp"));
     }
 
@@ -1140,7 +1165,7 @@ mod tests {
                 doc: None,
             }),
         ];
-        let output = backend.generate(&items, &[], "test");
+        let output = backend.generate(&items, &[], "test", &crate::type_universe::TypeUniverse::new());
         assert!(output.ts_code.contains("tick"), "Transaction method 'tick' should exist");
         assert!(output.ts_code.contains("count") || output.ts_code.contains("count = count + 1"),
             "Should reference count signal in tick body");
@@ -1235,4 +1260,45 @@ mod tests {
     }
 
     // test_arm_txn_body_not_placeholder removed 2026-07-26 — dead ARM backend.
+}
+
+#[cfg(test)]
+mod phase14_tests {
+    use super::*;
+
+    #[test]
+    fn signal_type_int_from_universe_base() {
+        let u = crate::type_universe::TypeUniverse::new();
+        let st = signal_type_for(&Type::int(), &u);
+        assert_eq!(st, SignalType::Int, "Int must map to Int");
+        let st = signal_type_for(&Type::string(), &u);
+        assert_eq!(st, SignalType::String, "String must map to String");
+    }
+}
+
+#[cfg(test)]
+mod phase14_debug {
+    use super::*;
+    #[test]
+    fn debug_type() {
+        let t = Type::int();
+        println!("Type::int() = {:?}", t);
+        let u = crate::type_universe::TypeUniverse::new();
+        println!("universe.get(Int) = {:?}", u.get("Int").is_some());
+    }
+}
+
+#[cfg(test)]
+mod phase14_debug2 {
+    use super::*;
+    #[test]
+    fn debug_base() {
+        let u = crate::type_universe::TypeUniverse::new();
+        if let Some(r) = u.get("Int") {
+            println!("Int base = {:?} name = {:?}", r.base, r.name);
+        }
+        if let Some(r) = u.get("String") {
+            println!("String base = {:?}", r.base);
+        }
+    }
 }

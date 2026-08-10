@@ -1,6 +1,8 @@
 // CIRCT Backend — emits MLIR text in HW + Comb + Seq dialects.
 // Invoked via: briv build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
+pub mod normalizer;
+
 use crate::analysis::dependency_graph::DependencyGraph;
 use crate::ast::{BinaryOpKind, Contract, Expr, OutputType, Statement, TopLevel, Type, UnaryOpKind};
 use std::collections::HashMap;
