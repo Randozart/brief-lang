@@ -4,15 +4,21 @@
 //
 // 2026-07-20: Simplified for hashword protocol. ALU metadata removed.
 // Op validation uses hardcoded standard ops instead of TOML config.
+// 2026-08-10: user TypeDefs registered via the shared
+// backend::register_types::register_typedefs before validation.
 
 use crate::ast::*;
 use crate::backend::normalizer;
+use crate::backend::register_types::register_typedefs;
 use crate::type_universe::TypeUniverse;
 use std::collections::HashSet;
 
 /// 2026-07-15: Normalize AST for SPIR-V backend emission.
 /// 2026-07-20: No TOML config — hashword protocol replaces op dispatch.
-pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bits: u64) -> Result<(), String> {
+pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bits: u64) -> Result<(), String> {
+    // 2026-08-10: shared type registration — uniform universe population.
+    register_typedefs(items, universe, int_bits)?;
+
     // 2026-07-15: Flag kernel transactions ([idx < N] pattern)
     for item in items.iter_mut() {
         if let TopLevel::Transaction(txn) = item {
@@ -54,4 +60,45 @@ fn build_supported_ops() -> HashSet<String> {
         set.insert(name.to_string());
     }
     set
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::top::{TypeDef, TypeDefBody, TypeDefSlot};
+    use std::collections::HashMap;
+
+    fn make_type_def(name: &str, slots: Vec<(&str, Type)>) -> TopLevel {
+        TopLevel::TypeDef(Box::new(TypeDef {
+            name: name.to_string(),
+            type_params: vec![],
+            parent: None,
+            protocol: Some("#Bit".to_string()),
+            traits: vec![],
+            bit_range: None,
+            body: TypeDefBody {
+                slots: slots.into_iter().map(|(n, ty)| TypeDefSlot {
+                    name: n.to_string(), ty, bit_range: None,
+                }).collect(),
+                metadata: HashMap::new(),
+                projections: vec![],
+                bindings: vec![],
+                operators: vec![],
+                op_bindings: vec![],
+                constraints: vec![],
+                members: vec![],
+                span: None,
+            },
+            span: None,
+        }))
+    }
+
+    #[test]
+    fn test_spirv_register_typedefs() {
+        let mut u = TypeUniverse::new();
+        let items = vec![make_type_def("Point", vec![("x", Type::int()), ("y", Type::int())])];
+        normalize(&mut items.clone(), &mut u, 32).unwrap();
+        let rt = u.get("Point").expect("typedef registered");
+        assert_eq!(rt.bytes, 16);
+    }
 }
