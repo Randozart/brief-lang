@@ -43,6 +43,20 @@ pub enum TypeTag {
 }
 
 impl TypeTag {
+    /// 2026-08-10: Derive the JS type tag from a Briv TYPE via its protocol
+    /// category (Cast.# lanes) — never by matching type names (rule 18).
+    /// Matches the webstack normalizer's js_type mapping: Int/UInt/Float →
+    /// number, Bool → boolean, String/Char/Data → string, everything else
+    /// (structs, collections, Ptr, ...) → Int (the shim's raw-word default).
+    pub fn from_protocol_category(cat: Option<&str>) -> TypeTag {
+        match cat {
+            Some("Int" | "UInt" | "Float") => TypeTag::Int,
+            Some("Bool") => TypeTag::Bool,
+            Some("String" | "Char" | "Data") => TypeTag::String,
+            _ => TypeTag::Int,
+        }
+    }
+
     fn js_type_name(&self) -> &'static str {
         match self {
             TypeTag::Int => "number",

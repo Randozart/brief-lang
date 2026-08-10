@@ -6073,3 +6073,72 @@ node start [true][false] {
         "Data ^Len must load the [len] header; got:\n{ir}"
     );
 }
+
+// ── First-class backend normalizers (2026-08-10): webstack layout helper ─
+
+#[test]
+fn test_web_llvm_byte_size_scalars() {
+    use crate::backend::llvm::web_llvm_byte_size;
+    assert_eq!(web_llvm_byte_size("i8"), 1);
+    assert_eq!(web_llvm_byte_size("i32"), 4);
+    assert_eq!(web_llvm_byte_size("i64"), 8);
+    assert_eq!(web_llvm_byte_size("float"), 4);
+    assert_eq!(web_llvm_byte_size("double"), 8);
+    assert_eq!(web_llvm_byte_size("ptr"), 8);
+}
+
+#[test]
+fn test_web_llvm_byte_size_arrays_and_unknown() {
+    use crate::backend::llvm::web_llvm_byte_size;
+    assert_eq!(web_llvm_byte_size("[1024 x i64]"), 8 * 1024);
+    assert_eq!(web_llvm_byte_size("[8 x float]"), 4 * 8);
+    assert_eq!(web_llvm_byte_size("i128"), 0, ">i64 words not stored in %State");
+    assert_eq!(web_llvm_byte_size("bogus"), 0);
+}
+
+#[test]
+fn test_web_generator_type_tag_from_protocol_category() {
+    use crate::glue::web_generator::TypeTag;
+    assert_eq!(TypeTag::from_protocol_category(Some("Int")), TypeTag::Int);
+    assert_eq!(TypeTag::from_protocol_category(Some("UInt")), TypeTag::Int);
+    assert_eq!(TypeTag::from_protocol_category(Some("Float")), TypeTag::Int);
+    assert_eq!(TypeTag::from_protocol_category(Some("Bool")), TypeTag::Bool);
+    assert_eq!(TypeTag::from_protocol_category(Some("String")), TypeTag::String);
+    assert_eq!(TypeTag::from_protocol_category(Some("Char")), TypeTag::String);
+    assert_eq!(TypeTag::from_protocol_category(None), TypeTag::Int);
+}
+
+#[test]
+fn test_state_layout_emits_real_field_rows() {
+    // With webstack enabled, @__web_layout carries one row per %State field:
+    // handle, structural offset, byte size, and protocol-derived type tag.
+    let src = r#"
+let count: Int = 0;
+let name: String = "";
+node start [true][name .^Len == 0] {
+    term Print#(count);
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let universe = crate::type_universe::TypeUniverse::new();
+    let mut backend = crate::backend::llvm::LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("@__web_layout") && ir.contains("define i32 @state_layout()"),
+        "webstack must emit the layout table; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("i32 3, i32 0, i32 64, i32 16"),
+        "header must count 3 fields; got:\n{ir}"
+    );
+    // String field → tag 3 (TypeTag::String), Int field → tag 0.
+    assert!(
+        ir.contains("i32 3") && ir.contains("i32 0"),
+        "rows must carry string(cat=3) and int(cat=0) tags; got:\n{ir}"
+    );
+}

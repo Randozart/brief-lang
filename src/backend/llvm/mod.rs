@@ -693,6 +693,39 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     }
     "i64".to_string()
 }
+
+/// 2026-08-10: Byte width of an emitted LLVM field type string for the
+/// webstack state_layout table. Covers the vocabulary the backend emits into
+/// %State (iN scalars, float/double, ptr, and `[N x iT]` arrays). Returns 0
+/// for anything unrecognized so the caller skips the row rather than lying.
+pub fn web_llvm_byte_size(llvm_ty: &str) -> u64 {
+    if let Some(bits) = llvm_ty.strip_prefix('i') {
+        if let Ok(n) = bits.parse::<u64>() {
+            let bytes = n.div_ceil(8);
+            return if bytes <= 8 { bytes } else { 0 }; // >i64 not stored in %State words
+        }
+    }
+    match llvm_ty {
+        "float" => 4,
+        "double" => 8,
+        "ptr" => 8,
+        _ => {
+            // `[N x T]` — N× the element width.
+            if llvm_ty.starts_with('[') && llvm_ty.contains(" x ") && llvm_ty.ends_with(']') {
+                let inner = &llvm_ty[1..llvm_ty.len() - 1];
+                let (n, elem) = inner.split_once(" x ").unwrap_or(("", ""));
+                if let (Ok(count), elem_ty) = (n.trim().parse::<u64>(), elem.trim()) {
+                    let elem_size = web_llvm_byte_size(elem_ty);
+                    if elem_size > 0 {
+                        return count * elem_size;
+                    }
+                }
+            }
+            0
+        }
+    }
+}
+
 /// 2026-07-26: Storage type for trigger fields. Calls protocol_llvm_type
 /// with the universe available during codegen.
 pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
@@ -3924,12 +3957,47 @@ impl LlvmBackend {
             writeln!(out, "@__web_generation = global i32 0").ok();
             // Export generation counter (WASM global export)
             writeln!(out, "@__web_generation_export = hidden global ptr @__web_generation").ok();
-            // State layout function — returns ptr to layout struct
-            // For Phase 4, emit a stub with 0 fields. Phase 6 will wire
-            // the actual field layout table.
-            writeln!(out, "@__web_layout = private constant {{ i32, i32, i32, i32 }} {{ i32 0, i32 0, i32 64, i32 16 }}").ok();
+            // State layout function — returns ptr to a constant layout table
+            // consumed by the JS shim (glue/web_generator.rs). Table layout:
+            //   +0 field_count u32, +4 generation_off u32, +8 flush_off u32,
+            //   +12 max_entries u32, then field_count × 16 bytes:
+            //   handle u32, offset u32, size u32, type_tag u32.
+            // 2026-08-10: real per-field rows. handle = field index, offset =
+            // structural byte offset within the emitted %State (fields laid
+            // out in LLVM struct order), size = LLVM byte width, type_tag from
+            // the field's Briv type via protocol category (rule 18 — never
+            // matched by type name).
+            let mut rows = String::new();
+            let mut types_ll = Vec::new();
+            let mut offset = 0u64;
+            let mut field_count = 0u32;
+            for (i, briv_ty) in self.ctx.field_briv_types.iter().enumerate() {
+                let ty = self.ctx.field_types[i].clone();
+                let size = web_llvm_byte_size(&ty);
+                if size == 0 { continue; } // skip non-word rows (unresolved)
+                let cat = match self.ctx.type_universe.as_ref() {
+                    Some(u) => crate::type_universe::protocol_category(u, briv_ty),
+                    None => None,
+                };
+                let tag: u32 = match crate::glue::web_generator::TypeTag::from_protocol_category(cat.as_deref()) {
+                    crate::glue::web_generator::TypeTag::Int => 0,
+                    crate::glue::web_generator::TypeTag::Float => 1,
+                    crate::glue::web_generator::TypeTag::Bool => 2,
+                    crate::glue::web_generator::TypeTag::String => 3,
+                };
+                rows.push_str(&format!("i32 {}, i32 {}, i32 {}, i32 {}, ", i as u32, offset, size, tag));
+                types_ll.push(format!("i32, i32, i32, i32"));
+                offset += size;
+                field_count += 1;
+            }
+            let header = format!("i32 {}, i32 0, i32 64, i32 16{}", field_count,
+                if types_ll.is_empty() { String::new() } else { format!(", {}", types_ll.join(", ")) });
+            let body = if rows.is_empty() { String::new() } else {
+                format!("{} ", rows.trim_end_matches(", "))
+            };
+            writeln!(out, "@__web_layout = private constant {{ {} }} {{ {} }}", header, body).ok();
             writeln!(out, "define i32 @state_layout() {{").ok();
-            writeln!(out, "  ret i32 ptrtoint ({{ i32, i32, i32, i32 }}* @__web_layout to i32)").ok();
+            writeln!(out, "  ret i32 ptrtoint ({{ {} }}* @__web_layout to i32)", header).ok();
             writeln!(out, "}}").ok();
         }
 
