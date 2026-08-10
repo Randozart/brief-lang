@@ -6133,12 +6133,111 @@ node start [true][name .^Len == 0] {
         "webstack must emit the layout table; got:\n{ir}"
     );
     assert!(
-        ir.contains("i32 3, i32 0, i32 64, i32 16"),
-        "header must count 3 fields; got:\n{ir}"
+        ir.contains("i32 3, i32 ptrtoint (ptr @__web_generation to i32), i32 ptrtoint (ptr @__web_flush_buf to i32)"),
+        "header must count 3 fields and reference the real buffer/counter; got:\n{ir}"
     );
     // String field → tag 3 (TypeTag::String), Int field → tag 0.
     assert!(
         ir.contains("i32 3") && ir.contains("i32 0"),
         "rows must carry string(cat=3) and int(cat=0) tags; got:\n{ir}"
     );
+}
+#[test]
+fn test_webstack_flush_batch_covers_written_fields() {
+    // 2026-08-10: term flushes a real update batch — one {handle, value_ptr,
+    // value_len} record per written field, not the historical (0, 0) stub.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    // Buffer must be declared and the call must pass its address (not 0).
+    assert!(ir.contains("@__web_flush_buf = private global"),
+        "flush buffer must be declared; got:\n{ir}");
+    assert!(ir.contains("call void @__web_flush_state(i32 ptrtoint (ptr @__web_flush_buf to i32), i32 1)"),
+        "flush call must pass the buffer with 1 record; got:\n{ir}");
+    assert!(!ir.contains("call void @__web_flush_state(i32 0, i32 0)"),
+        "stub call must be gone; got:\n{ir}");
+    // The written field's record: handle 0, value_len 8 (i64 word).
+    assert!(ir.contains("store i32 0, ptr %t") && ir.contains("store i32 8, ptr %t"),
+        "record must carry handle 0 and len 8; got:\n{ir}");
+    // Generation counter must bump after the flush.
+    assert!(ir.contains("add i32") && ir.contains("store i32 %t") && ir.contains("@__web_generation"),
+        "generation must be incremented; got:\n{ir}");
+}
+
+#[test]
+fn test_webstack_flush_empty_write_set_is_noop() {
+    // 2026-08-10: a txn that writes nothing flushes (0, 0) — valid no-op for
+    // the JS shim, and the buffer records stay untouched.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "tick".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![Statement::Term(None)],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("call void @__web_flush_state(i32 0, i32 0)"),
+        "empty write_set must flush the no-op path; got:\n{ir}");
+}
+
+#[test]
+fn test_webstack_layout_header_describes_real_buffer() {
+    // 2026-08-10: the state_layout header must point at the real flush buffer
+    // and generation counter (link-time-resolved ptrtoint), not the old
+    // hardcoded `flush_off=64, max_entries=16`.
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("i32 ptrtoint (ptr @__web_generation to i32)"),
+        "header must reference the real generation counter; got:\n{ir}");
+    assert!(ir.contains("i32 ptrtoint (ptr @__web_flush_buf to i32)"),
+        "header must reference the real flush buffer; got:\n{ir}");
+    assert!(!ir.contains("i32 0, i32 64, i32 16"),
+        "hardcoded stub header must be gone; got:\n{ir}");
 }

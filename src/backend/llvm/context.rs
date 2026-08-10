@@ -263,6 +263,12 @@ pub struct CompilerContext {
     // with BackendKind::Webstack.
     pub webstack_enabled: bool,
 
+    /// 2026-08-10: Size of the webstack flush buffer — the largest transaction
+    /// write_set. Computed once in generate() from the transition graph (never
+    /// re-walked), then read by both the term-site batch emitters and the
+    /// @__web_flush_buf declaration. 0 before generate() runs.
+    pub web_max_entries: u32,
+
     // 2026-07-28: Phase H.0 — !> metadata registry for optimization hints.
     // Maps (key, value) metadata pairs to backend-specific LLVM IR attributes.
     // Loaded once from config/meta-vocab.dbv at CompilerContext construction.
@@ -405,6 +411,7 @@ impl CompilerContext {
             operator_defs: HashMap::new(),
             casting_graph: Some(crate::casting::graph::CastingGraph::new()),
             webstack_enabled: false,
+            web_max_entries: 0,
             dep_graph: DependencyGraph {
                 topo_order: Vec::new(),
                 bit_index: HashMap::new(),

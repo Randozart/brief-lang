@@ -726,8 +726,15 @@ pub fn web_llvm_byte_size(llvm_ty: &str) -> u64 {
     }
 }
 
-/// 2026-07-26: Storage type for trigger fields. Calls protocol_llvm_type
-/// with the universe available during codegen.
+/// 2026-08-10: Size of the webstack flush buffer — the largest transaction
+/// write_set (each txn's update batch fits; unused tail entries are zero).
+/// Frontend-provided analysis (transition graph write_sets), never re-walked.
+pub(super) fn web_max_flush_entries(ctx: &crate::backend::llvm::context::CompilerContext) -> u32 {
+    let max = ctx.transition_graph.as_ref()
+        .map(|g| g.nodes.iter().map(|n| n.write_set.len()).max().unwrap_or(0))
+        .unwrap_or(0);
+    max.max(1) as u32
+}
 pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
     protocol_llvm_type(ty, universe)
 }
@@ -2006,6 +2013,10 @@ impl LlvmBackend {
         // 2026-07-28: Persist transition graph for !prof computation in emit_toplevel.
         // iter_bounds populated later (at txn processing loop) — txns not in scope yet.
         self.ctx.transition_graph = Some(analysis.transition_graph.clone());
+        // 2026-08-10: webstack flush buffer sized to the largest write_set —
+        // frontend analysis, computed once so the term-site batch emitters and
+        // the @__web_flush_buf declaration agree.
+        self.ctx.web_max_entries = web_max_flush_entries(&self.ctx);
         self.ctx.spawn_pools = analysis.spawn_pools.clone();
         self.ctx.dependent_pools = analysis.dependent_pools.clone();
         // 2026-08-09 (Phase 5): non-pooled spawn storage classes (box/spill).
@@ -3957,6 +3968,13 @@ impl LlvmBackend {
             writeln!(out, "@__web_generation = global i32 0").ok();
             // Export generation counter (WASM global export)
             writeln!(out, "@__web_generation_export = hidden global ptr @__web_generation").ok();
+            // 2026-08-10: real flush buffer — the JS shim's _applyFlush reads
+            // count × 12-byte records { field_handle, value_ptr, value_len }
+            // starting at the pointer __web_flush_state receives. Sized to the
+            // largest transaction write_set (each txn's update batch fits; the
+            // shim loops count records, so unused tail entries are harmless).
+            let max_entries = self.ctx.web_max_entries.max(1);
+            writeln!(out, "@__web_flush_buf = private global [{} x {{ i32, i32, i32 }}] zeroinitializer", max_entries).ok();
             // State layout function — returns ptr to a constant layout table
             // consumed by the JS shim (glue/web_generator.rs). Table layout:
             //   +0 field_count u32, +4 generation_off u32, +8 flush_off u32,
@@ -3966,7 +3984,8 @@ impl LlvmBackend {
             // structural byte offset within the emitted %State (fields laid
             // out in LLVM struct order), size = LLVM byte width, type_tag from
             // the field's Briv type via protocol category (rule 18 — never
-            // matched by type name).
+            // matched by type name). flush_off/max_entries now describe the
+            // real @__web_flush_buf (resolved via ptrtoint at link time).
             let mut rows = String::new();
             let mut types_ll = Vec::new();
             let mut offset = 0u64;
@@ -3990,14 +4009,21 @@ impl LlvmBackend {
                 offset += size;
                 field_count += 1;
             }
-            let header = format!("i32 {}, i32 0, i32 64, i32 16{}", field_count,
+            // The LLVM struct TYPE is plain i32 fields; the INITIALIZER body
+            // carries the values (including link-time-resolved ptrtoint of the
+            // generation counter and flush buffer). A ptrtoint in the type
+            // position is invalid LLVM.
+            let layout_ty = format!("i32, i32, i32, i32{}",
                 if types_ll.is_empty() { String::new() } else { format!(", {}", types_ll.join(", ")) });
-            let body = if rows.is_empty() { String::new() } else {
-                format!("{} ", rows.trim_end_matches(", "))
-            };
-            writeln!(out, "@__web_layout = private constant {{ {} }} {{ {} }}", header, body).ok();
+            // Body: field_count, generation_off, flush_off, max_entries, then rows.
+            let mut body = format!("i32 {}, i32 ptrtoint (ptr @__web_generation to i32), i32 ptrtoint (ptr @__web_flush_buf to i32), i32 {}", field_count, max_entries);
+            if !rows.is_empty() {
+                body.push_str(", ");
+                body.push_str(rows.trim_end_matches(", "));
+            }
+            writeln!(out, "@__web_layout = private constant {{ {} }} {{ {} }}", layout_ty, body).ok();
             writeln!(out, "define i32 @state_layout() {{").ok();
-            writeln!(out, "  ret i32 ptrtoint ({{ {} }}* @__web_layout to i32)", header).ok();
+            writeln!(out, "  ret i32 ptrtoint ({{ {} }}* @__web_layout to i32)", layout_ty).ok();
             writeln!(out, "}}").ok();
         }
 

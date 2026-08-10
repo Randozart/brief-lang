@@ -36,6 +36,81 @@ fn drain_pending_consumes(backend: &mut LlvmBackend, out: &mut String, indent: &
     }
 }
 
+/// 2026-08-10: Emit the webstack flush batch at a transaction commit point
+/// (`term`/`endprogram`). Replaces the historical `(i32 0, i32 0)` stub with a
+/// real update batch: for each field the current transaction writes (its
+/// transition-graph write_set, frontend-provided), store a 12-byte record
+/// { field_handle, value_ptr, value_len } into @__web_flush_buf, then call
+/// __web_flush_state(buf, count). The JS shim's _applyFlush reads exactly this
+/// record format (web_generator.rs _applyFlush). value_ptr points at the field
+/// slot inside %State — every emission shape commits writes to %State before
+/// term, so the slot holds the post-transaction value.
+///
+/// A transaction whose write_set is empty flushes `(0, 0)` — the JS no-op path
+/// stays valid (no DOM mutations to apply).
+pub(super) fn emit_web_flush_batch(backend: &mut LlvmBackend, out: &mut String, indent: &str) {
+    use std::fmt::Write;
+    if !backend.ctx.webstack_enabled {
+        return;
+    }
+    let txn_name = backend.fun.txn_name.clone();
+    // 2026-08-10: the write_set is frontend analysis — sorted by field index
+    // for deterministic IR (AGENTS.md HashMap iteration rule).
+    let mut written: Vec<usize> = backend.ctx.transition_graph.as_ref()
+        .and_then(|g| g.nodes.iter().find(|n| n.name == txn_name))
+        .map(|n| {
+            n.write_set.iter()
+                .filter_map(|name| backend.ctx.field_index_map.get(name).copied())
+                .collect()
+        })
+        .unwrap_or_default();
+    written.sort_unstable();
+    if written.is_empty() {
+        writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
+        return;
+    }
+    for (i, idx) in written.iter().enumerate() {
+        let field_llvm = backend.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+        let size = super::web_llvm_byte_size(&field_llvm);
+        // Skip rows that don't resolve to a word width (matches state_layout).
+        if size == 0 {
+            continue;
+        }
+        let gep = backend.emit_state_gep(out, indent, "wf", "%state", *idx);
+        // @__web_flush_buf is `[N x { i32, i32, i32 }]` — GEP to record i, field 0
+        // for the handle store; fields 1 (value_ptr) and 2 (value_len) GEP below.
+        let buf_gep = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x {{ i32, i32, i32 }}], ptr @__web_flush_buf, i32 0, i32 {}, i32 0",
+            indent, buf_gep, backend.ctx.web_max_entries, i).ok();
+        // field_handle
+        writeln!(out, "{}store i32 {}, ptr {}", indent, *idx as u32, buf_gep).ok();
+        // value_ptr — ptrtoint of the %State slot (resolves at link time in wasm32)
+        let val_ptr = backend.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i32", indent, val_ptr, gep).ok();
+        let val_ptr_gep = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x {{ i32, i32, i32 }}], ptr @__web_flush_buf, i32 0, i32 {}, i32 1",
+            indent, val_ptr_gep, backend.ctx.web_max_entries, i).ok();
+        writeln!(out, "{}store i32 {}, ptr {}", indent, val_ptr, val_ptr_gep).ok();
+        // value_len
+        let len_gep = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x {{ i32, i32, i32 }}], ptr @__web_flush_buf, i32 0, i32 {}, i32 2",
+            indent, len_gep, backend.ctx.web_max_entries, i).ok();
+        writeln!(out, "{}store i32 {}, ptr {}", indent, size as u32, len_gep).ok();
+    }
+    let count = written.iter().filter(|idx| {
+        let field_llvm = backend.ctx.field_types.get(**idx).cloned().unwrap_or_else(|| "i64".to_string());
+        super::web_llvm_byte_size(&field_llvm) > 0
+    }).count();
+    writeln!(out, "{}call void @__web_flush_state(i32 ptrtoint (ptr @__web_flush_buf to i32), i32 {})", indent, count).ok();
+    // 2026-08-10: bump the generation counter so the JS `generation` getter
+    // observes this commit (HMR/SSR contract in rendered-briv-wasm.md).
+    let g = backend.fun.gen_reg();
+    let g2 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = load i32, ptr @__web_generation", indent, g).ok();
+    writeln!(out, "{}{} = add i32 {}, 1", indent, g2, g).ok();
+    writeln!(out, "{}store i32 {}, ptr @__web_generation", indent, g2).ok();
+}
+
 /// Destroy a consumed register's backing storage — an allocation-strategy-aware
 /// free (mirrors the Free# intrinsic). The register is a handle (stored as an
 /// i64), widened via inttoptr for the @free call.
@@ -659,10 +734,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         }
         Statement::Term(val) => {
             // 2026-07-26: Phase 4 — webstack flush at term.
-            // Emit __web_flush_state call before the return/branch so the
-            // JS shim applies DOM updates before the transaction completes.            // Phase 6 will wire the actual flush buffer with modified fields.
+            // 2026-08-10: real update batch — each field the transaction wrote
+            // (transition-graph write_set) is stored into @__web_flush_buf as a
+            // {handle, value_ptr, value_len} record, then __web_flush_state is
+            // called with the buffer + count. The JS shim applies the DOM
+            // mutations synchronously before the transaction completes.
             if backend.ctx.webstack_enabled {
-                writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
+                emit_web_flush_batch(backend, out, indent);
             }
             // 2026-08-09 (Phase 10): run deferred cleanup before the firing
             // exits (term is a successful completion).
@@ -794,7 +872,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // value's i64 result as the exit code (adapt_to_i64); the bare
             // form exits 0.
             if backend.ctx.webstack_enabled {
-                writeln!(out, "{}call void @__web_flush_state(i32 0, i32 0)", indent).ok();
+                emit_web_flush_batch(backend, out, indent);
             }
             let code = if let Some(v) = val {
                 let reg = backend.emit_expr(out, v, indent);
