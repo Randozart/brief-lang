@@ -2231,6 +2231,55 @@ impl LlvmBackend {
         let recv_tmp = self.fun.gen_reg();
         let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
         match (target, kind) {
+            // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a
+            // compile-time descriptor reflect that folds to a runtime
+            // briv_symbol_available(symbol) check for an `optional frgn`. The
+            // receiver is the frgn's local name; its FOREIGN symbol is what
+            // gets checked (the codegen resolves it via the frgn declaration).
+            ("Available", ReflectKind::CompileTime) => {
+                let symbol = match recv {
+                    Expr::Identifier(n) => {
+                        let fb = self.ctx.frgn_map.get(n.as_str()).cloned();
+                        let sym = match fb {
+                            Some(sig) => sig.name.clone(),
+                            None => n.clone(),
+                        };
+                        sym
+                    }
+                    _ => String::new(),
+                };
+                let symbol = match recv {
+                    Expr::Identifier(n) => {
+                        let fb = self.ctx.frgn_map.get(n.as_str()).cloned();
+                        let sym = match fb {
+                            Some(sig) => sig.name.clone(),
+                            None => n.clone(),
+                        };
+                        sym
+                    }
+                    _ => String::new(),
+                };
+                // Emit the symbol as a stack NUL-terminated buffer (avoid the
+                // pre-collected string-global pass, which runs before bodies).
+                let buf = self.fun.gen_reg();
+                let sym_bytes = symbol.as_bytes();
+                writeln!(out, "{}{} = alloca i8, i64 {}", indent, buf, sym_bytes.len() + 1).ok();
+                for (bi, b) in sym_bytes.iter().enumerate() {
+                    let gep = self.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, buf, bi).ok();
+                    writeln!(out, "{}  store i8 {}, ptr {}, align 1", indent, *b as i8, gep).ok();
+                }
+                let nul = self.fun.gen_reg();
+                writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nul, buf, sym_bytes.len()).ok();
+                writeln!(out, "{}  store i8 0, ptr {}, align 1", indent, nul).ok();
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = call i64 @briv_symbol_available(ptr {})", indent, r, buf).ok();
+                let b = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i64 {} to i1", indent, b, r).ok();
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = zext i1 {} to i8", indent, c, b).ok();
+                TypedRegister { name: c, ty: Type::bool_() }
+            }
             ("Size", ReflectKind::CompileTime) => {
                 let count = self.vector_element_count(&recv_reg.ty);
                 let r = self.fun.gen_reg();

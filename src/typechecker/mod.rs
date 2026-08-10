@@ -60,6 +60,10 @@ pub struct TypecheckContext<'a> {
     /// 2026-07-25: Function return types for user-defined functions.
     /// Populated by check_program before type-checking bodies.
     fn_return_types: HashMap<String, Type>,
+    /// 2026-08-09 (Phase 12, SPEC §19.3): names of `optional frgn` bindings.
+    /// `feature.^^Available` (a compile-time descriptor reflect) is a Bool
+    /// only for these — non-optional frgns are always available.
+    optional_frgns: std::collections::HashSet<String>,
     /// 2026-07-31: Regular operator declarations from TypeDef bodies
     /// (`op Add(#Float): func(#Lh,#Rh);` / `op Add(Float): ...;`), keyed by type
     /// name. Used to ALLOW mixed-type arithmetic ONLY when a cross-type /
@@ -114,6 +118,7 @@ impl<'a> TypecheckContext<'a> {
             parse_ops: HashMap::new(),
             type_parents: HashMap::new(),
             fn_return_types: HashMap::new(),
+            optional_frgns: std::collections::HashSet::new(),
             regular_ops: HashMap::new(),
             regular_bindings: HashMap::new(),
             type_slots: HashMap::new(),
@@ -1001,6 +1006,25 @@ pub fn infer_expression(
         }
         // 2026-07-31: Reflection: x.^Len / x.^^Size (see resolve_reflect).
         Expr::Reflect(recv, target, kind) => {
+            // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a
+            // compile-time descriptor Bool for an `optional frgn`. Only an
+            // optional frgn name admits it (non-optional frgns are always
+            // available; the reflect on a non-frgn value is an error).
+            if target == "Available" && matches!(kind, ReflectKind::CompileTime) {
+                let is_optional_frgn = match recv.as_ref() {
+                    Expr::Identifier(n) => ctx.optional_frgns.contains(n),
+                    _ => false,
+                };
+                if !is_optional_frgn {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "reflection target 'Available'".into(),
+                        type_name: format!(
+                            "`^^Available` is valid only on an `optional frgn` name"
+                        ),
+                    });
+                }
+                return Ok((Type::bool_(), Provenance::Unknown));
+            }
             let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
             let result_ty = resolve_reflect(&recv_ty, target, *kind)?;
             Ok((result_ty, recv_prov))
@@ -2422,6 +2446,16 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         }
     }).collect();
 
+    let optional_frgns: std::collections::HashSet<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevel::ForeignBinding(fb) if fb.is_optional => {
+                Some(fb.briv_name.clone().unwrap_or_else(|| fb.foreign_name.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+
     // 2026-07-31: Pre-collect user function/txn parameter types for call-arg
     // validation (Phase 2 — re-establish type validation).
     let fn_param_types: HashMap<String, Vec<Type>> = items
@@ -2546,6 +2580,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         state_bindings: &state_bindings,
         init_bindings: &init_bindings,
         fn_return_types: &fn_return_types,
+        optional_frgns: &optional_frgns,
         fn_param_types: &fn_param_types,
         all_parse_bindings: &all_parse_bindings,
         all_type_parents: &all_type_parents,
@@ -2592,6 +2627,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 mctx.type_protocols = all_type_protocols.clone();
                 for (name, ty) in &fn_return_types {
                     mctx.fn_return_types.insert(name.clone(), ty.clone());
+                }
+                for name in &optional_frgns {
+                    mctx.optional_frgns.insert(name.clone());
                 }
                 for (name, ty) in &state_bindings {
                     mctx.bindings.insert(name.clone(), ty.clone());
@@ -2867,6 +2905,7 @@ struct CheckEnv<'a> {
     /// `init_names` reassign check (the seeding is the one write).
     init_bindings: &'a HashMap<String, Type>,
     fn_return_types: &'a HashMap<String, Type>,
+    optional_frgns: &'a std::collections::HashSet<String>,
     fn_param_types: &'a HashMap<String, Vec<Type>>,
     all_parse_bindings: &'a HashMap<String, Vec<OperatorBinding>>,
     all_type_parents: &'a HashMap<String, String>,
@@ -2915,6 +2954,9 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     // 2026-07-25: Inject function return types for call inference.
     for (name, ty) in env.fn_return_types {
         ctx.fn_return_types.insert(name.clone(), ty.clone());
+    }
+    for name in env.optional_frgns {
+        ctx.optional_frgns.insert(name.clone());
     }
     ctx.defined_fns = env.defined_fns.clone();
     ctx
@@ -4239,6 +4281,47 @@ node go [fired == 0][fired == 1] {
         assert!(
             err.iter().any(|e| format!("{}", e).contains("cannot consume a constant")),
             "expected init-consume error, got {:?}",
+            err
+        );
+    }
+
+    // ── 2026-08-09 (Phase 12, SPEC §19.3): optional-frgn .^^Available ──
+
+    #[test]
+    fn optional_frgn_available_is_bool() {
+        // `feature.^^Available` on an `optional frgn` is a Bool descriptor.
+        let src = r#"
+optional frgn feature(x: Int) -> Int from #System;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    let avail: Bool = feature.^^Available;
+    fired = fired + 1;
+    term;
+};
+"#;
+        assert!(
+            check(src).is_ok(),
+            "an optional-frgn `^^Available` reflect must typecheck as Bool"
+        );
+    }
+
+    #[test]
+    fn available_on_non_optional_frgn_is_an_error() {
+        // `^^Available` is valid only on an `optional frgn` (a non-optional
+        // frgn is always available).
+        let src = r#"
+frgn feature(x: Int) -> Int from #System;
+let fired: Int = 0;
+node go [fired == 0][fired == 1] {
+    let avail: Bool = feature.^^Available;
+    fired = fired + 1;
+    term;
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(
+            err.iter().any(|e| format!("{}", e).contains("only on an `optional frgn`")),
+            "non-optional ^^Available must error, got {:?}",
             err
         );
     }

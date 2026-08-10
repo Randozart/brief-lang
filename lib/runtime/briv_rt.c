@@ -18,6 +18,11 @@
 #include <stdlib.h>
 #include <math.h>
 #include <dirent.h>
+#ifdef __has_include
+#if __has_include(<dlfcn.h>)
+#include <dlfcn.h>
+#endif
+#endif
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -397,6 +402,27 @@ extern void* __briv_argv;
 
 int64_t __argv_count(void) {
     return (int64_t)__briv_argc;
+}
+
+// 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a compile-time
+// descriptor reflect that folds to a runtime symbol-availability check. An
+// `optional frgn` may be missing at link time; the check tells the program
+// whether the foreign symbol resolves (via dlsym on the caller's image).
+// 1 = available, 0 = not. Tolerates platforms without dlfcn (returns 1 —
+// the symbol is assumed present, matching a non-optional link).
+int64_t briv_symbol_available(const char* symbol) {
+#ifdef RTLD_DEFAULT
+    void* handle = dlopen(NULL, RTLD_LAZY);
+    if (!handle) {
+        return 0;
+    }
+    void* addr = dlsym(handle, symbol);
+    dlclose(handle);
+    return addr != NULL ? 1 : 0;
+#else
+    (void)symbol;
+    return 1;
+#endif
 }
 
 // argv[i] as a Briv string (empty for out-of-range i).
