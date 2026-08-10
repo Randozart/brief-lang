@@ -45,19 +45,22 @@ impl RbvFile {
     /// Briv code is the default content — everything outside `<view>` and
     /// `<style>` tags is treated as Briv source.
     ///
-    /// Backward compatible: if `<script>` or `<script type="briv">` tags are
-    /// present, their content is used instead (old format).
+    /// 2026-08-09 (Phase 14, SPEC 21.1): legacy `<script>` wrappers are
+    /// INVALID — the script-wrapper compatibility was removed. A `<script>`
+    /// tag anywhere in the document is a hard error, not a fallback.
     pub fn parse(source: &str) -> Result<Self, RbvError> {
+        if source.contains("<script") || source.contains("</script>") {
+            return Err(RbvError::Parse(
+                "<script> wrappers are invalid (SPEC 21.1) — write Briv source \
+                 directly; the `<view>`/`<style>` blocks carry the markup"
+                    .into(),
+            ));
+        }
         let view = extract_tag(source, "<view>", "</view>").ok_or(RbvError::MissingView)?;
 
         let style = extract_tag(source, "<style>", "</style>");
 
-        let briv_source = if let Some(script) = extract_script_tags(source) {
-            script.trim().to_string()
-        } else {
-            let stripped = strip_known_blocks(source);
-            stripped.trim().to_string()
-        };
+        let briv_source = strip_known_blocks(source).trim().to_string();
 
         Ok(RbvFile {
             briv_source,
@@ -73,17 +76,10 @@ fn extract_tag(source: &str, start_tag: &str, end_tag: &str) -> Option<String> {
     Some(source[start..end].to_string())
 }
 
-fn extract_script_tags(source: &str) -> Option<String> {
-    extract_tag(source, "<script type=\"briv\">", "</script>")
-        .or_else(|| extract_tag(source, "<script>", "</script>"))
-}
-
 fn strip_known_blocks(source: &str) -> String {
-    let known_blocks: [(&str, &str); 4] = [
+    let known_blocks: [(&str, &str); 2] = [
         ("<view>", "</view>"),
         ("<style>", "</style>"),
-        ("<script>", "</script>"),
-        ("<script type=\"briv\">", "</script>"),
     ];
     let mut result = source.to_string();
     for &(start_tag, end_tag) in &known_blocks {
@@ -98,27 +94,6 @@ fn strip_known_blocks(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_rbv_script_backward_compat() {
-        let source = r#"
-<script type="briv">
-let count: Int = 0;
-</script>
-
-<view>
-<p b-text="count">0</p>
-</view>
-
-<style>
-p { color: red; }
-</style>
-"#;
-        let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.briv_source.contains("count"));
-        assert!(rbv.view_html.contains("b-text"));
-        assert!(rbv.style_css.is_some());
-    }
 
     #[test]
     fn test_parse_rbv_briv_as_default() {
@@ -161,5 +136,30 @@ txn double [true][@x * 2 == x] {
         assert!(rbv.briv_source.contains("let x: Int = 42"));
         assert!(rbv.briv_source.contains("txn double"));
         assert!(rbv.view_html.contains("b-text"));
+    }
+
+    /// 2026-08-09 (Phase 14, SPEC 21.1): a `<script>` wrapper is a hard error.
+    #[test]
+    fn test_parse_rbv_script_wrapper_is_invalid() {
+        let source = r#"
+<script type="briv">
+let count: Int = 0;
+</script>
+
+<view>
+<p b-text="count">0</p>
+</view>
+"#;
+        let err = RbvFile::parse(source).unwrap_err();
+        assert!(
+            format!("{}", err).contains("<script> wrappers are invalid"),
+            "script wrapper must be rejected: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_rbv_missing_view_errors() {
+        let err = RbvFile::parse("let x: Int = 0;").unwrap_err();
+        assert!(format!("{}", err).contains("Missing <view>"));
     }
 }

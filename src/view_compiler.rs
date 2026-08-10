@@ -76,6 +76,10 @@ pub struct ViewCompiler {
     id_counter: usize,
     each_context: Vec<EachContext>,
     pub diagnostics: Vec<String>,
+    /// 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors — `b-if`
+    /// rejected, `b-each` without `b-key`, `b-bind:value` on a non-assignable
+    /// target. Surfaced by compile() (not silently ignored).
+    pub validation_errors: Vec<String>,
     /// Transactions that are triggered by user input (b-trigger:)
     /// These should have preconditions that account for non-deterministic user input
     user_triggered_txns: HashSet<String>,
@@ -96,6 +100,7 @@ impl ViewCompiler {
             id_counter: 0,
             each_context: Vec::new(),
             diagnostics: Vec::new(),
+            validation_errors: Vec::new(),
             user_triggered_txns: HashSet::new(),
         }
     }
@@ -185,9 +190,15 @@ impl ViewCompiler {
     pub fn compile(&mut self, view_html: &str) -> (Vec<Binding>, String, Vec<String>) {
         self.bindings.clear();
         self.diagnostics.clear();
+        self.validation_errors.clear();
         let modified_html = self.inject_ids(view_html);
         self.extract_bindings(&modified_html);
-        (self.bindings.clone(), modified_html, self.diagnostics.clone())
+        // 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors are
+        // surfaced alongside the existing diagnostics (a rejected directive is
+        // not silently ignored).
+        let mut all = self.validation_errors.clone();
+        all.extend(self.diagnostics.clone());
+        (self.bindings.clone(), modified_html, all)
     }
 
     fn inject_ids(&mut self, html: &str) -> String {
@@ -216,6 +227,16 @@ impl ViewCompiler {
                     }
 
                     let tag_process = tag_str;
+
+                    // 2026-08-09 (Phase 14, SPEC 21.4): directive validation —
+                    // `b-if` is invalid; `b-each` requires a stable `b-key`
+                    // (dynamic children may be inserted/removed/reordered);
+                    // `b-bind:value` targets an assignable field. Errors are
+                    // collected (the compile() caller reports them) — a
+                    // rejected directive is not silently ignored.
+                    if let Some(verr) = self.validate_directives(&tag_str) {
+                        self.validation_errors.push(verr);
+                    }
 
                     let has_class_expr = self.extract_class_expression(&tag_str);
                     let has_b_class = tag_lower.contains("b-class");
@@ -411,7 +432,6 @@ impl ViewCompiler {
 
     fn extract_directives(&mut self, tag: &str, elem_id: &str) {
         let tag_lower = tag.to_lowercase();
-
         // Check for bare class={expr} syntax
         if let Some(expr) = self.extract_class_expression(tag) {
             let pairs = self.parse_class_expr(&expr);
@@ -576,6 +596,97 @@ if attr.starts_with("b-text") {
         } else {
             Some((extracted, params))
         }
+    }
+
+    /// 2026-08-09 (Phase 14, SPEC 21.4): validate a tag's directives.
+    /// - `b-if` is INVALID (structural conditionals use `b-when`).
+    /// - `b-each:name` requires a stable `b-key` when children may be
+    ///   inserted/removed/reordered (SPEC 21.4: dynamic repetition requires a
+    ///   stable key).
+    /// - `b-bind:value="target"` must target an assignable field (a computed
+    ///   expression is invalid — separate value/trigger handlers are used).
+    /// Returns a human-readable error, or None if the directives are valid.
+    fn validate_directives(&self, tag: &str) -> Option<String> {
+        let tag_lower = tag.to_lowercase();
+        if tag_lower.contains("b-if") {
+            return Some(
+                "`b-if` is invalid (SPEC 21.4) — use `b-when` for structural \
+                 mount/unmount and `b-show` for presentation-only visibility"
+                    .into(),
+            );
+        }
+        let has_each = tag_lower.contains("b-each:");
+        if has_each && !tag_lower.contains("b-key") {
+            return Some(
+                "`b-each` requires a stable `b-key` (SPEC 21.4) — dynamic children \
+                 may be inserted, removed, or reordered and need a stable identity"
+                    .into(),
+            );
+        }
+        if tag_lower.contains("b-bind:value") {
+            // `b-bind:value="field"` must be an assignable field — an
+            // expression (with operators) is invalid per SPEC 21.4.
+            if let Some(target) = self.extract_attr_value(tag, "b-bind:value") {
+                let trimmed = target.trim();
+                let is_identifier = !trimmed.is_empty()
+                    && trimmed
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '.');
+                if !is_identifier {
+                    return Some(
+                        "`b-bind:value` accepts only an assignable field (SPEC 21.4) — \
+                         computed expressions use separate value and trigger handlers"
+                            .into(),
+                    );
+                }
+            }
+        }
+        // 2026-08-09 (Phase 14, SPEC 21.5): view expressions are pure and
+        // read-only — mutation, FFI, allocation, and spawning occur only in
+        // explicit event handlers. A view-binding directive expression
+        // containing a mutation/FFI construct is rejected.
+        for directive in ["b-text", "b-show", "b-when", "b-class", "b-style"] {
+            if let Some(expr) = self.extract_attr_value(tag, directive) {
+                if let Some(impure) = Self::impure_view_expr(&expr) {
+                    return Some(format!(
+                        "view expression is not pure (SPEC 21.5): `{}={}` contains {} — \
+                         mutation/FFI/allocation belongs in an explicit event handler",
+                        directive, expr, impure
+                    ));
+                }
+            }
+        }
+        None
+    }
+
+    /// Conservative purity check for a view-binding expression: rejects
+    /// obvious mutation (`=`/`<-`/`~`), FFI (`frgn`/`spawn`/`Malloc#`), and
+    /// the trigger-ish `@` write prefix. A plain identifier / arithmetic /
+    /// field access expression passes.
+    fn impure_view_expr(expr: &str) -> Option<&'static str> {
+        let e = expr.trim();
+        if e.contains("<-") || e.contains("~=") || e.contains("~<-") {
+            return Some("a mutation/assignment");
+        }
+        if e.contains("Malloc#") || e.contains("spawn ") || e.contains("frgn") {
+            return Some("an allocation or FFI call");
+        }
+        // Bare `=` (e.g. `x = y`) as an assignment — but `==`/`>=`/`<=`/`!=`
+        // comparisons are fine. A single `=` not part of a comparison is an
+        // assignment.
+        let mut chars = e.char_indices();
+        while let Some((i, c)) = chars.next() {
+            if c == '=' {
+                let prev = e[..i].chars().next_back();
+                let next = chars.clone().next().map(|(_, c)| c);
+                if !matches!(prev, Some('=') | Some('!') | Some('<') | Some('>'))
+                    && !matches!(next, Some('=') | Some('>') | Some('<'))
+                {
+                    return Some("an assignment");
+                }
+            }
+        }
+        None
     }
 
     fn extract_trigger_value_from_tag(
@@ -1011,5 +1122,114 @@ mod tests {
         let (bindings, html, _) = vc.compile("");
         assert!(bindings.is_empty());
         assert!(html.is_empty());
+    }
+
+    // ── 2026-08-09 (Phase 14, SPEC 21.4): directive validation ────────
+
+    #[test]
+    fn b_if_is_rejected() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<div b-if="x > 0">hi</div>"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("`b-if` is invalid")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn b_each_requires_b_key() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<li b-each:item="items">x</li>"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("requires a stable `b-key`")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn b_each_with_b_key_is_valid() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<li b-each:item="items" b-key="item.id">x</li>"#,
+        );
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("`b-key`")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn b_bind_value_must_be_assignable_field() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<input b-bind:value="count + 1">"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("`b-bind:value` accepts only an assignable field")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    // ── 2026-08-09 (Phase 14, SPEC 21.5): view-expression purity ──────
+
+    #[test]
+    fn pure_view_expression_passes() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<span b-text="count + 1">0</span>"#,
+        );
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("not pure")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn mutation_in_view_expression_rejected() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<span b-text="count = 5">0</span>"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("not pure") && d.contains("assignment")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn ffi_in_view_expression_rejected() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<span b-text="Malloc#(64)">0</span>"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("not pure") && d.contains("allocation")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn comparison_in_view_expression_is_pure() {
+        // `==`/`>=` are comparisons, not assignments — they must pass purity.
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<div b-show="count == 5">x</div>"#,
+        );
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("not pure")),
+            "{:?}",
+            diagnostics
+        );
     }
 }
