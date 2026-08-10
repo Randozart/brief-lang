@@ -101,51 +101,52 @@ struct PendingPromise {
     capture: Option<String>,
 }
 
-/// 2026-08-09 (Phase 14, SPEC 21.6 / AGENTS rule 18): derive a state field's
-/// web signal type from its PROTOCOL category via the universe — never by
-/// matching Briv type names. The universe resolves each type's `base` protocol
-/// (Int/Float/Bool/String/List/Vector/struct); a type absent from the universe
+/// 2026-08-09 (Phase 14, SPEC 21.6): derive a state field's web signal type
+/// from its PROTOCOL category via the universe — never by matching Briv type
+/// names (rule 18). `protocol_category` resolves Cast.# properties (and the
+/// base chain) exactly like the casting graph; a type with no protocol lane
 /// falls back to Struct/Int (the target capability validator rejects
 /// unsupported values — SPEC 21.6).
+/// 2026-08-10: `Type::Applied` is a compiler-construct discriminator for
+/// generic collections (List<T>, Map<K,V>, Array<T>) — handled directly per
+/// rule 18a, the same way `Type::Vector` is.
 fn signal_type_for(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> SignalType {
-    // Recover the name for the universe lookup, then derive from the resolved
-    // protocol base.
-    let name = match ty {
-        Type::Custom(n) | Type::Applied(n, _) | Type::Generic(n, _) => Some(n.as_str()),
-        Type::Constrained(inner, _) => match inner.as_ref() {
-            Type::Custom(n) | Type::Applied(n, _) => Some(n.as_str()),
-            _ => None,
-        },
-        Type::Vector(_, dims) => {
-            let total: usize = dims
-                .iter()
-                .map(|d| match d {
-                    crate::ast::Dimension::Anonymous(s) => *s,
-                    crate::ast::Dimension::Named(_, s) => *s,
-                })
-                .product();
-            return SignalType::Vector(total);
-        }
-        _ => None,
-    };
-    let Some(name) = name else {
-        return SignalType::Int;
-    };
-    // A collection type is recognized structurally (List/Map), not by name.
-    if name == "List" || name == "Map" || name == "Array" {
+    use crate::type_universe::protocol_category;
+
+    // Vector <~ explicit dimensions — structural, no universe lookup.
+    if let Type::Vector(_, dims) = ty {
+        let total: usize = dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(s) => *s,
+                crate::ast::Dimension::Named(_, s) => *s,
+            })
+            .product();
+        return SignalType::Vector(total);
+    }
+    // Generic collection (Applied("List", ..), Applied("Map", ..)) — the
+    // Applied wrapper is the compiler construct, not a type-name match.
+    if matches!(ty, Type::Applied(_, _)) {
         return SignalType::List;
     }
-    let base = universe
-        .get(name)
-        .map(|r| r.base.as_str())
-        .unwrap_or(name);
-    match base {
-        "Int" | "UInt" | "Int8" | "Int16" | "Int32" | "UInt8" | "UInt16" | "UInt32"
-        | "Int64" | "UInt64" => SignalType::Int,
-        "Float" | "Float64" | "Float32" => SignalType::Float,
-        "Bool" => SignalType::Bool,
-        "String" | "Char" | "Data" => SignalType::String,
-        _ => SignalType::Struct,
+    // Constrained wrappers peel to their inner type.
+    let inner = match ty {
+        Type::Constrained(inner, _) => inner.as_ref(),
+        other => other,
+    };
+    // Resolve protocol category. HashWord/HashWordVariant/Bits/Void resolve
+    // directly; Custom/Generic resolve through the universe's Cast.# lanes.
+    match protocol_category(universe, inner) {
+        Some(cat) => match cat.as_str() {
+            "Int" | "UInt" => SignalType::Int,
+            "Float" => SignalType::Float,
+            "Bool" => SignalType::Bool,
+            "String" | "Char" | "Data" => SignalType::String,
+            _ => SignalType::Struct,
+        },
+        // Unregistered type (fresh universe) — conservative Int; the target
+        // capability validator rejects unsupported values at SPEC 21.6.
+        None => SignalType::Int,
     }
 }
 
@@ -1259,7 +1260,7 @@ mod tests {
         assert!(out.contains("state.count + 1"));
     }
 
-    // test_arm_txn_body_not_placeholder removed 2026-07-26 — dead ARM backend.
+// test_arm_txn_body_not_placeholder removed 2026-07-26 — dead ARM backend.
 }
 
 #[cfg(test)]
@@ -1274,31 +1275,18 @@ mod phase14_tests {
         let st = signal_type_for(&Type::string(), &u);
         assert_eq!(st, SignalType::String, "String must map to String");
     }
-}
 
-#[cfg(test)]
-mod phase14_debug {
-    use super::*;
     #[test]
-    fn debug_type() {
-        let t = Type::int();
-        println!("Type::int() = {:?}", t);
+    fn signal_type_collection_is_applied() {
         let u = crate::type_universe::TypeUniverse::new();
-        println!("universe.get(Int) = {:?}", u.get("Int").is_some());
+        let st = signal_type_for(&Type::Applied("List".into(), vec![Type::int()]), &u);
+        assert_eq!(st, SignalType::List, "generic collection must map to List");
     }
-}
 
-#[cfg(test)]
-mod phase14_debug2 {
-    use super::*;
     #[test]
-    fn debug_base() {
+    fn signal_type_float_and_bool() {
         let u = crate::type_universe::TypeUniverse::new();
-        if let Some(r) = u.get("Int") {
-            println!("Int base = {:?} name = {:?}", r.base, r.name);
-        }
-        if let Some(r) = u.get("String") {
-            println!("String base = {:?}", r.base);
-        }
+        assert_eq!(signal_type_for(&Type::float(), &u), SignalType::Float);
+        assert_eq!(signal_type_for(&Type::bool_(), &u), SignalType::Bool);
     }
 }
