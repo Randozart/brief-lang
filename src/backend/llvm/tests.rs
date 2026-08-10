@@ -6241,3 +6241,51 @@ fn test_webstack_layout_header_describes_real_buffer() {
     assert!(!ir.contains("i32 0, i32 64, i32 16"),
         "hardcoded stub header must be gone; got:\n{ir}");
 }
+
+#[test]
+fn test_web_state_layout_carries_field_names() {
+    // 2026-08-10: web_state_layout() must expose the field name → handle map
+    // the JS shim needs to resolve view bindings (signal = field name).
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi")
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "count".into(), ty: Some(Type::int()), expr: Some(Expr::Decimal(0)),
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Statement(Box::new(Statement::Let {
+            name: "label".into(), ty: Some(Type::string()), expr: None,
+            modifiers: vec![], names: vec![],
+        })),
+        TopLevel::Transaction(Transaction {
+            name: "increment".into(), is_reactive: true, is_async: false,
+            type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            body: vec![
+                Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
+                // reference label so the String field stays live (not pruned)
+                Statement::Let {
+                    name: "tmp".into(), ty: None,
+                    expr: Some(Expr::Call("Len#".into(), vec![Expr::Identifier("label".into())], None)),
+                    modifiers: vec![], names: vec![],
+                },
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
+        }),
+    ];
+    backend.generate(&program, None);
+    let layout = backend.web_state_layout("test_app");
+    assert!(layout.fields.len() >= 3, "count + label (+ synthetic cycle_count); got: {:?}", layout.fields);
+    let count = layout.fields.iter().find(|f| f.name == "count")
+        .expect("count field present");
+    assert_eq!(count.field_handle, 0, "count is the first field");
+    let label = layout.fields.iter().find(|f| f.name == "label")
+        .expect("label field present");
+    assert_eq!(label.field_handle, 1, "label is the second field");
+    assert_eq!(count.type_tag, crate::glue::web_generator::TypeTag::Int);
+    assert_eq!(label.type_tag, crate::glue::web_generator::TypeTag::String);
+}

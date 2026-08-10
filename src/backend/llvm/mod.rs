@@ -1275,6 +1275,55 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-08-10: Build the Rust-side StateLayout consumed by the
+    /// GlueWebGenerator (JS shim). Mirrors exactly the rows the backend emits
+    /// into the WASM `state_layout` table (same handle/offset/size/tag), plus
+    /// the field NAME so view bindings can map signal → handle. Call after
+    /// generate() — requires field_index_map/field_types/field_briv_types and
+    /// the type universe to be populated.
+    pub fn web_state_layout(&self, app_name: &str) -> crate::glue::web_generator::StateLayout {
+        use crate::glue::web_generator::{FieldLayout, StateLayout, TypeTag};
+        // 2026-08-10: field names sorted by handle (field index) for a stable
+        // name→handle map — the binding table lookup is by name, so this order
+        // only affects iteration determinism, which we keep anyway.
+        let mut named: Vec<(usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(name, idx)| (*idx, name.clone()))
+            .collect();
+        named.sort_by_key(|(idx, _)| *idx);
+        let mut fields = Vec::new();
+        let mut offset = 0u64;
+        for (idx, name) in &named {
+            let llvm_ty = self.ctx.field_types.get(*idx).cloned().unwrap_or_else(|| "i64".to_string());
+            let size = web_llvm_byte_size(&llvm_ty);
+            if size == 0 {
+                continue; // matches the WASM table's skip rule
+            }
+            let cat = match self.ctx.type_universe.as_ref() {
+                Some(u) => {
+                    let briv_ty = self.ctx.field_briv_types.get(*idx).cloned().unwrap_or_else(Type::int);
+                    crate::type_universe::protocol_category(u, &briv_ty)
+                }
+                None => None,
+            };
+            let tag = TypeTag::from_protocol_category(cat.as_deref());
+            fields.push(FieldLayout {
+                field_handle: *idx as u32,
+                name: name.clone(),
+                offset: offset as u32,
+                size: size as u32,
+                type_tag: tag,
+            });
+            offset += size;
+        }
+        StateLayout {
+            app_name: app_name.to_string(),
+            generation_offset: 0,   // resolved at link time via ptrtoint; shim re-reads at runtime
+            flush_buffer_offset: 0, // ditto
+            max_flush_entries: self.ctx.web_max_entries.max(1),
+            fields,
+        }
+    }
+
     /// Pre-populate MMIO address map from a resolved DBV target binding.
     /// Each alias name maps to a physical u64 address for volatile MMIO access.
     pub fn with_mmio_addresses(mut self, addresses: HashMap<String, u64>) -> Self {

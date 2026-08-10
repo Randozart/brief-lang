@@ -24,6 +24,11 @@ use std::collections::HashMap;
 pub struct FieldLayout {
     /// Unique handle for this field. Matches bindings in the view compiler output.
     pub field_handle: u32,
+    /// 2026-08-10: The Briv field NAME (e.g. "count"). Compile-time only — the
+    /// WASM table carries handle/offset/size/tag, but the Rust-side layout adds
+    /// the name so view bindings (whose `signal` is a field name) can map to
+    /// handles. Absent in old hardcoded layouts (empty string).
+    pub name: String,
     /// Byte offset of this field in WASM linear memory.
     pub offset: u32,
     /// Byte size of this field's value.
@@ -228,8 +233,39 @@ export class WasmDomRuntime {{
 
   _makeBinding(handle, fieldOff, fieldSize, typeTag) {{
     const _this = this;
+    // 2026-08-10: type-aware value decoding. The flush record's value_ptr
+    // points at the field's %State slot: scalars decode from the slot bytes
+    // (Int/Float/Bool), String dereferences the pointer stored in the slot.
+    let decode;
+    if (typeTag === 1) {{
+      decode = (valPtr, valLen) => {{
+        const mem = new DataView(_this._memory.buffer);
+        return mem.getFloat64(valPtr, true);
+      }};
+    }} else if (typeTag === 2) {{
+      decode = (valPtr, valLen) => {{
+        const mem = new DataView(_this._memory.buffer);
+        return mem.getUint8(valPtr, true) !== 0;
+      }};
+    }} else if (typeTag === 3) {{
+      decode = (valPtr, valLen) => {{
+        // The slot holds the string ADDRESS (i64); read it, then the
+        // [len][bytes] payload at that address.
+        const mem = new DataView(_this._memory.buffer);
+        const strPtr = Number(mem.getBigUint64(valPtr, true));
+        return _this._readString(strPtr);
+      }};
+    }} else {{
+      decode = (valPtr, valLen) => {{
+        const mem = new DataView(_this._memory.buffer);
+        return mem.getInt32(valPtr, true);
+      }};
+    }}
     return {{
       handle,
+      fieldOff,
+      typeTag,
+      decode,
       applyFn: function(value) {{
         // Default binding: log state change.
         // The view compiler's bindings customize this per field.
@@ -325,9 +361,9 @@ export class WasmDomRuntime {{
       const valLen = mem.getUint32(off, true); off += 4;
       const binding = this._bindingTable[handle];
       if (binding) {{
-        const value = valLen > 0
-          ? new TextDecoder().decode(new Uint8Array(this._memory.buffer, valPtr, valLen))
-          : null;
+        // 2026-08-10: decode by the field's type tag (Int/Float/Bool raw
+        // values from the slot; String dereferences the stored pointer).
+        const value = binding.decode ? binding.decode(valPtr, valLen) : null;
         binding.applyFn(value);
       }}
     }}
@@ -362,62 +398,88 @@ export async function createApp(wasmBytes) {{
 
     /// Generate per-binding apply functions from view compiler bindings.
     /// 2026-07-26: Phase 3 — Each binding directive (Text, Show, Trigger, etc.)
-    /// produces a JS function that reads from WASM memory and applies DOM changes.
+    /// produces a JS apply function that wires the binding-table entry for the
+    /// bound state field to the DOM element.
+    /// 2026-08-10: real wiring — signal (a Briv field name) is mapped to the
+    /// state_layout handle, and the emitted JS overrides that handle's
+    /// binding-table applyFn with the DOM mutation. Previously a placeholder
+    /// (comments only). Trigger directives wire event listeners that call the
+    /// WASM transaction export. Emitted inside _loadStateLayout so the default
+    /// _makeBinding entries exist before the overrides.
     fn generate_binding_table(&self) -> String {
         if self.bindings.is_empty() {
             return String::new();
         }
 
-        let mut out = String::from("  _applyViewBindings() {\n");
+        let mut out = String::new();
         for binding in &self.bindings {
             let js = self.binding_to_js(binding);
             out.push_str(&format!("    // binding: {} {:?}\n", binding.element_id, binding.directive));
-            out.push_str(&format!("    {}\n", js));
+            if !js.is_empty() {
+                out.push_str(&format!("    {}\n", js));
+            }
         }
-        out.push_str("  }\n\n");
         out
+    }
+
+    /// Map a binding's signal (Briv field name) to its state_layout handle.
+    /// 2026-08-10: the state_layout fields carry `name`; a binding whose signal
+    /// names a field resolves to that field's handle. Unresolved signals (e.g.
+    /// compound expressions) fall back to `None` — the binding is left to the
+    /// default (log-only) applyFn rather than guessed.
+    fn field_handle_for_signal(&self, signal: &str) -> Option<u32> {
+        let signal = signal.trim();
+        self.state_layout.fields.iter()
+            .find(|f| f.name == signal)
+            .map(|f| f.field_handle)
     }
 
     /// Convert a single view binding to a JS apply function.
     fn binding_to_js(&self, binding: &crate::view_compiler::Binding) -> String {
         use crate::view_compiler::Directive;
-        let signal = match &binding.directive {
-            Directive::Text { signal } => signal,
-            Directive::Show { expr } => expr,
-            Directive::Hide { expr } => expr,
-            Directive::Trigger { txn, .. } => txn,
-            _ => return String::new(),
-        };
-
+        let element = binding.element_id.trim();
+        let el = format!("document.getElementById({:?})", element);
         match &binding.directive {
-            Directive::Text { .. } => {
-                // Find matching field by signal name heuristic
-                let handle = self.state_layout.fields.iter()
-                    .position(|f| f.field_handle as usize == self.state_layout.fields.iter()
-                        .position(|f2| f2.field_handle as usize == self.state_layout.fields.len())
-                        .unwrap_or(0));
-                // Emit a placeholder binding — Phase 6 will wire exact field handles
+            Directive::Text { signal } => {
+                let Some(handle) = self.field_handle_for_signal(signal) else {
+                    return String::new();
+                };
                 format!(
-                    "    // Text binding: signal='{}' element='{}'",
-                    signal, binding.element_id
+                    "this._bindingTable[{handle}].applyFn = (value) => {{\n\
+                     \x20         const el = {el};\n\
+                     \x20         if (el) el.textContent = value;\n\
+                     \x20       }};"
                 )
             }
-            Directive::Show { .. } => {
+            Directive::Show { expr } | Directive::Hide { expr } => {
+                let Some(handle) = self.field_handle_for_signal(expr) else {
+                    return String::new();
+                };
+                let hidden = matches!(binding.directive, Directive::Hide { .. });
                 format!(
-                    "    // Show binding: signal='{}' element='{}'",
-                    signal, binding.element_id
+                    "this._bindingTable[{handle}].applyFn = (value) => {{\n\
+                     \x20         const el = {el};\n\
+                     \x20         if (el) el.style.display = ({hidden} ? !value : value) ? 'none' : '';\n\
+                     \x20       }};",
+                    hidden = if hidden { "false" } else { "true" }
                 )
             }
             Directive::Trigger { event, txn, params } => {
-                let param_str = if params.is_empty() {
+                // 2026-08-10: wire a DOM event listener that calls the WASM
+                // transaction export (b._instance.exports[<txn>]) with the
+                // binding's static params. The listener is attached once, at
+                // shim init, outside the per-flush binding table.
+                let arg_str = if params.is_empty() {
                     String::new()
                 } else {
                     let args: Vec<String> = params.iter().map(|(_, v)| v.clone()).collect();
                     format!(", {}", args.join(", "))
                 };
                 format!(
-                    "    // Trigger: event='{}' element='{}' txn='{}({})'",
-                    event, binding.element_id, txn, param_str
+                    "(() => {{\n\
+                     \x20         const el = {el};\n\
+                     \x20         if (el) el.addEventListener({event:?}, () => this._instance.exports[{txn:?}]({arg_str}));\n\
+                     \x20       }})();"
                 )
             }
             _ => String::new(),
@@ -621,18 +683,21 @@ mod tests {
                 fields: vec![
                     FieldLayout {
                         field_handle: 1,
+                        name: "count".to_string(),
                         offset: 4,
                         size: 4,
                         type_tag: TypeTag::Int,
                     },
                     FieldLayout {
                         field_handle: 2,
+                        name: "speed".to_string(),
                         offset: 8,
                         size: 4,
                         type_tag: TypeTag::Float,
                     },
                     FieldLayout {
                         field_handle: 3,
+                        name: "ready".to_string(),
                         offset: 12,
                         size: 1,
                         type_tag: TypeTag::Bool,
@@ -693,6 +758,7 @@ mod tests {
                 fields: vec![
                     FieldLayout {
                         field_handle: 1,
+                        name: "count".to_string(),
                         offset: 4,
                         size: 4,
                         type_tag: TypeTag::Int,
@@ -709,6 +775,16 @@ mod tests {
             "dts should include transaction method declarations");
         assert!(output.dom_shim.contains("_applyFlush"),
             "dom-shim should include flush handler");
+        // 2026-08-10: bindings must wire real DOM ops, not placeholders.
+        assert!(output.dom_shim.contains("_bindingTable[1].applyFn"),
+            "text binding must override the count field's applyFn; got:\n{}", output.dom_shim);
+        assert!(output.dom_shim.contains("document.getElementById(\"counter\")"),
+            "text binding must target its element; got:\n{}", output.dom_shim);
+        assert!(output.dom_shim.contains("el.textContent = value"),
+            "text binding must set textContent; got:\n{}", output.dom_shim);
+        assert!(output.dom_shim.contains("addEventListener(\"click\"")
+            && output.dom_shim.contains("exports[\"increment\"]"),
+            "trigger binding must wire the event listener; got:\n{}", output.dom_shim);
     }
 
     #[test]
@@ -717,6 +793,28 @@ mod tests {
         let output = g.generate().unwrap();
         assert!(output.dom_shim.contains("createApp"),
             "should still produce createApp with empty bindings");
+    }
+
+    #[test]
+    fn test_type_aware_flush_decode() {
+        // 2026-08-10: _makeBinding must store a type-aware decode — Int reads
+        // the slot as i32, Float as f64, Bool as i8, String dereferences the
+        // stored pointer. The old _applyFlush TextDecoded every value.
+        let g = make_empty_generator();
+        let output = g.generate().unwrap();
+        let shim = &output.dom_shim;
+        assert!(shim.contains("typeTag === 1") && shim.contains("getFloat64(valPtr, true)"),
+            "Float decode must be emitted; got:\n{shim}");
+        assert!(shim.contains("typeTag === 2") && shim.contains("getUint8(valPtr, true)"),
+            "Bool decode must be emitted; got:\n{shim}");
+        assert!(shim.contains("typeTag === 3") && shim.contains("_readString(strPtr)"),
+            "String decode must dereference the slot pointer; got:\n{shim}");
+        assert!(shim.contains("getInt32(valPtr, true)"),
+            "Int decode must be emitted; got:\n{shim}");
+        assert!(shim.contains("binding.decode ? binding.decode(valPtr, valLen) : null"),
+            "_applyFlush must use the type-aware decoder; got:\n{shim}");
+        assert!(!shim.contains("valLen > 0\n          ? new TextDecoder()"),
+            "blind TextDecoder path must be gone; got:\n{shim}");
     }
 
     #[test]

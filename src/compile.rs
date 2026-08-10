@@ -738,7 +738,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init)?;
+    // 2026-08-10: real state layout captured from the webstack codegen path,
+    // consumed by the GlueWebGenerator below (falls back to the hardcoded
+    // stub when no webstack codegen ran, e.g. --emit-ir-only).
+    let mut web_layout: Option<briv_compiler::glue::web_generator::StateLayout> = None;
+
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -886,15 +891,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 })
                 .collect();
             if !frgn_decls.is_empty() || !opts.view_bindings.is_empty() {
-                // Build a StateLayout matching what the LLVM backend emits
-                // (generation at offset 0, flush buffer at 64, max 16 entries).
-                let state_layout = briv_compiler::glue::web_generator::StateLayout {
-                    app_name: binary_base.to_string(),
-                    generation_offset: 0,
-                    flush_buffer_offset: 64,
-                    max_flush_entries: 16,
-                    fields: vec![],
-                };
+                // 2026-08-10: use the real layout captured from the webstack
+                // codegen path when available; fall back to the historical
+                // hardcoded stub (empty fields) for paths that skipped codegen.
+                let state_layout = web_layout.clone().unwrap_or_else(|| {
+                    briv_compiler::glue::web_generator::StateLayout {
+                        app_name: binary_base.to_string(),
+                        generation_offset: 0,
+                        flush_buffer_offset: 64,
+                        max_flush_entries: 16,
+                        fields: vec![],
+                    }
+                });
                 let web_gen = briv_compiler::glue::web_generator::GlueWebGenerator::new(
                     Vec::new(), // wasm bytes not needed for stub generation
                     opts.view_bindings.clone(),
@@ -1112,6 +1120,7 @@ fn codegen(
     needs_arena: std::collections::HashSet<String>,
     resolved_frgns: std::collections::HashMap<String, briv_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
+    web_layout: &mut Option<briv_compiler::glue::web_generator::StateLayout>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -1275,6 +1284,12 @@ fn codegen(
             for w in b.warnings() {
                 eprintln!("{}", w);
             }
+            // 2026-08-10: capture the real state layout (field names + handles)
+            // so the JS shim can map view bindings to state fields.
+            let stem = std::path::Path::new(&opts.file_path)
+                .file_stem().map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "app".to_string());
+            *web_layout = Some(b.web_state_layout(&stem));
             ".ll"
         }
         BackendKind::Webstack => {

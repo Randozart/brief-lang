@@ -65,8 +65,7 @@ call void @__web_flush_state(i32 ptrtoint(@__web_flush_buf to i32), i32 <count>)
 
 The `value_ptr` points *at the `%State` slot*, which holds the committed value
 (the JS shim reads by type tag: Int → `getInt32`, Float → `getFloat64`,
-Bool → `getUint8`, String → `[len][bytes]` at that ptr). This matches the
-existing `decoder_expr` in web_generator.rs.
+Bool → `getUint8`, String → dereferences the stored pointer to `[len][bytes]`).
 
 ### Buffer + header
 
@@ -76,48 +75,43 @@ Emit a module-level buffer (only when webstack enabled):
 @__web_flush_buf = private global [<N> x { i32, i32, i32 }] zeroinitializer
 ```
 
-where `N` = max write_set size (or a safe cap — number of fields). The
-`state_layout` header's `flush_off` / `max_entries` are updated to describe this
-buffer (offset via `ptrtoint(@__web_flush_buf to i32)` so it resolves at link
-time; count = N).
+where `N` = max write_set size. The `state_layout` header's `flush_off` /
+`max_entries` are updated to describe this buffer (offset via
+`ptrtoint(@__web_flush_buf to i32)` so it resolves at link time; count = N).
+The struct TYPE stays plain `i32` fields — `ptrtoint` belongs only in the
+initializer body (a `ptrtoint` in the type position is invalid LLVM).
 
 ### Generation counter
 
 Increment `@__web_generation` after each flush call so the JS `generation`
 getter observes the commit (HMR/SSR precondition).
 
+### Binding table wiring (2026-08-10, second commit)
+
+`FieldLayout` gains a compile-time `name`; `LlvmBackend::web_state_layout()`
+builds the Rust-side layout with names/handles matching the WASM table. The
+webstack codegen arm captures it (`codegen` out-param), and compile_source
+passes it to `GlueWebGenerator` (falling back to the hardcoded stub when no
+webstack codegen ran). `binding_to_js` maps a binding's signal (a Briv field
+name) to the field handle and emits a real `applyFn` override (Text →
+`textContent`, Show/Hide → `display`, Trigger → `addEventListener` calling the
+txn export). `_makeBinding` stores a type-aware `decode`; `_applyFlush` uses it
+instead of blind `TextDecoder`.
+
 ## Work items
 
-1. Add a helper `emit_web_flush_batch(out, indent, txn_name)` in the LLVM
-   backend that: looks up the txn's `write_set` from the transition graph,
-   maps field names → indices, sorts, emits the buffer stores + the call.
-   Uses the existing `web_llvm_byte_size` for `value_len`.
-2. Wire it at both stub sites (`Statement::Term`, `Statement::EndProgram` in
-   emit_stmt.rs), replacing `call ... (i32 0, i32 0)`. Skip when webstack is
-   disabled. Guard: if the txn has an empty write_set, emit `(0, 0)` (no
-   changes) — the JS no-op path stays valid.
-3. Emit `@__web_flush_buf` global + correct header `flush_off`/`max_entries`
-   in the state_layout block (llvm/mod.rs ~3952). Increment `@__web_generation`
-   after the flush call.
-4. Tests:
-   - IR test: webstack txn that writes `count` emits a `__web_flush_state`
-     call whose first arg is `ptrtoint(@__web_flush_buf to i32)` and whose
-     records cover the written field's handle/offset/size.
-   - IR test: a txn with an empty body/empty write_set emits `(i32 0, i32 0)`.
-   - Keep `test_webstack_emits_flush_state`/`test_webstack_emits_flush_at_term`
-     green (they only assert `__web_flush_state` appears).
-   - Existing `test_state_layout_emits_real_field_rows` still passes (header
-     gains real flush_off/max_entries).
-5. `cargo test --lib` full suite; update `docs/architecture/features/rendered-briv-wasm.md`
-   if the contract details change (it already describes the record format).
+1. ✅ `emit_web_flush_batch` helper + wiring at Term/EndProgram (committed
+   `fda40ca6`).
+2. ✅ `@__web_flush_buf` global + real header + generation increment (same).
+3. ✅ FieldLayout `name` + `web_state_layout()` + codegen capture.
+4. ✅ Binding table wiring (`binding_to_js` real DOM ops, type-aware decode).
+5. ✅ Tests (flush records, empty no-op, header, names, binding wiring, decode).
+6. `cargo test --lib` full suite; docs updated.
 
 ## Notes
 
-- The JS shim's `_applyFlush` already reads `{handle, val_ptr, val_len}` at
-  12 bytes/record (web_generator.rs:202-227) — no JS change needed for the
-  batch format itself. Binding-table wiring (`binding_to_js`) remains a
-  separate placeholder concern.
-- Determinism: write_set iteration must be sorted by field index (AGENTS.md
-  HashMap rule).
+- The JS shim's record format (`{handle, val_ptr, val_len}` at 12 bytes) was
+  already correct in `_loadStateLayout`/`_applyFlush`; the decode was the gap.
+- Determinism: write_set iteration sorted by field index (AGENTS.md HashMap rule).
 - No new intrinsics, no new stdlib, no type-name matching — the write_set is
   frontend-provided analysis (frontend-driven dispatch).
