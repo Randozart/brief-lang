@@ -25,13 +25,9 @@ Stale syntax blocked the flagship example:
   `push_element_type`/`extract_element_type` unwrap), and empty-list
   assignment (`items = []`) coerces via `try_coerce_via_parse`.
 
-Status: **compiles + links for x86_64** (`brivc build examples/todo.rbv
---backend llvm`). The webstack build is blocked by a separate pre-existing
-bug — wasm32 obj-member bodies hardcode i64 slot widths (BUGS.md, OPEN) —
-because the List's `len`/handle slots are i32 on wasm32. A compile-time
-WARNING for non-vector `b-each` iterables was added (the generator skips them,
-never a wrong render); the todo example's List each warns + skips until the
-list-rendering slice lands.
+Status: **compiles for x86_64 AND webstack** (the wasm32 obj-member bug that
+blocked the webstack build was fixed — see BUGS.md FIXED). The List b-each
+warns + skips (list rendering is a separate slice).
 
 Honest limitation: `items` is `List<String>`; the 2a3 b-each renderer handles
 static `Int[N]`/`Bool[N]` vectors only, and `.^Size` on a heap List isn't

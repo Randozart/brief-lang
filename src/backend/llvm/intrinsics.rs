@@ -240,6 +240,11 @@ fn emit_malloc(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let size = emit_arg(backend, out, &args[0], indent);
+    // 2026-08-11 (wasm32 obj-member fix): the size is an Int value at
+    // i{int_bits} (i32 on wasm32) — widen to i64 for the C malloc ABI. The
+    // old bare `i64 {size}` broke wasm32 (i32 value in an i64 call arg). A
+    // no-op on x86_64 (int_bits=64).
+    let size64 = widen_to_i64(backend, out, &size, indent);
     // 2026-07-17: Return Ptr<Int> so Expr::Index correctly identifies this
     // as a pointer type and emits GEP+load/store (not extractelement). The
     // raw bits are still i64 (ptrtoint); the type annotation only affects
@@ -250,25 +255,37 @@ fn emit_malloc(
     // arena result is an i64 (the bump address); emit_arena_alloc returns the
     // ptrtoint'd i64 which we re-interpret as a pointer for the Ptr<Int> ABI.
     if backend.ctx.is_embedded {
-        let arena_result = backend.emit_arena_alloc(out, indent, &size);
+        let arena_result = backend.emit_arena_alloc(out, indent, &size64);
         writeln!(out, "{}%{}_p = inttoptr i64 {} to ptr", indent, name, arena_result).ok();
         writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
         backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Arena);
         let remaining_reg = backend.fun.gen_reg();
-        writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
+        writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size64).ok();
         backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
         return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
     }
-    writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
+    writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size64).ok();
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
     // 2026-07-18: Record Malloc strategy so Free# can dispatch correctly.
     backend.fun.alloc_strategies.insert(v.to_string(), AllocStrategy::Malloc);
     // 2026-07-18: Record fat pointer provenance — base points to alloc,
     // offset 0, remaining = size. This enables O(1) Length#(ptr).
     let remaining_reg = backend.fun.gen_reg();
-    writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size).ok();
+    writeln!(out, "{} {} = add i64 {}, 0", indent, remaining_reg, size64).ok();
     backend.fun.fat_ptrs.insert(v.to_string(), (v.to_string(), "0".to_string(), remaining_reg));
     BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+}
+
+/// 2026-08-11 (wasm32 obj-member fix): widen an `i{int_bits}` value to i64
+/// for a C-ABI intrinsic argument (malloc sizes, etc.). A no-op on x86_64.
+fn widen_to_i64(backend: &mut LlvmBackend, out: &mut String, reg: &str, indent: &str) -> String {
+    if backend.ctx.int_bits == 64 {
+        return reg.to_string();
+    }
+    let width = format!("i{}", backend.ctx.int_bits);
+    let r = backend.fun.gen_reg();
+    writeln!(out, "{}{} = zext {} {} to i64", indent, r, width, reg).ok();
+    r
 }
 
 // 2026-07-18: Alloc# — compiler-delegated allocation with triple dispatch.

@@ -411,10 +411,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .map(|(_, ty)| (ty.clone(), ()))
                                 .unwrap_or((Type::int(), ()));
                             // 2026-08-01 (D3): a Ptr-typed self-slot stores the
-                            // i64 HANDLE (the value is already ptrtoint'd) —
-                            // not `ptr`, matching the self-slot read.
+                            // HANDLE at i{int_bits} (the value is already
+                            // ptrtoint'd) — not `ptr`, matching the self-slot
+                            // read. 2026-08-11: width-aware — a wasm32 pointer
+                            // slot is i32, not hardcoded i64.
                             let llvm_ty = if matches!(slot_ty, Type::Ptr(_)) {
-                                "i64".to_string()
+                                format!("i{}", backend.ctx.int_bits)
                             } else {
                                 backend.llvm_type(&slot_ty)
                             };
@@ -556,10 +558,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                         let gep = backend.fun.gen_reg();
                         let offset = backend.fun.gen_reg();
+                        // 2026-08-11 (wasm32 obj-member fix): the index is an
+                        // `Int` value at i{int_bits} (i32 on wasm32) — widen it
+                        // to the i64 GEP index via gep_index (sext on narrow
+                        // targets, a no-op on x86_64) instead of using the raw
+                        // register. The old `add i64 {idx}, 0` broke wasm32
+                        // (`%t38 defined with type 'i32' but expected 'i64'`).
+                        let gep_idx = backend.gep_index(out, indent, &idx_reg);
                         if matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_)) {
-                            writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, offset, gep_idx).ok();
                         } else {
-                            writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
+                            writeln!(out, "{}{} = add i64 {}, 0", indent, offset, gep_idx).ok();
                         }
                         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
                         // 2026-08-01 (E): `vol let p` — stores through the

@@ -311,11 +311,12 @@ impl LlvmBackend {
                                 return TypedRegister { name: addr, ty: slot_ty };
                             }
                             // 2026-08-01 (D3): a Ptr-typed self-slot stores the
-                            // i64 HANDLE (ptrtoint at store) — load i64, not
-                            // `ptr`, so inttoptr consumers (`buckets[h]`)
-                            // work.
+                            // HANDLE at i{int_bits} (ptrtoint at store) — load
+                            // that width, not `ptr`, so inttoptr consumers
+                            // (`buckets[h]`) work. 2026-08-11: width-aware —
+                            // a wasm32 pointer slot is i32, not hardcoded i64.
                             let llvm_ty = if matches!(slot_ty, Type::Ptr(_)) {
-                                "i64".to_string()
+                                format!("i{}", self.ctx.int_bits)
                             } else {
                                 self.llvm_type(&slot_ty)
                             };
@@ -778,7 +779,9 @@ impl LlvmBackend {
                         };
                         let offset = self.lookup_field_offset(&obj_type, field);
                         let base = self.fun.gen_reg();
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, obj_reg.name).ok();
+                        // 2026-08-11 (wasm32): obj handles are i{int_bits}.
+                        let hw = format!("i{}", self.ctx.int_bits);
+                        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, base, hw, obj_reg.name).ok();
                         let gep = self.fun.gen_reg();
                         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, base, offset).ok();
                         let _ = (field_idx, inner);
@@ -1014,10 +1017,14 @@ impl LlvmBackend {
                     || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
                 {
                     let ptr = self.fun.gen_reg();
+                    // 2026-08-11 (wasm32 obj-member fix): the Ptr/List receiver
+                    // handle is i{int_bits} (i32 on wasm32) — inttoptr at that
+                    // width, not hardcoded i64.
+                    let hw = format!("i{}", self.ctx.int_bits);
                     writeln!(
                         out,
-                        "{}{} = inttoptr i64 {} to ptr",
-                        indent, ptr, obj_reg.name
+                        "{}{} = inttoptr {} {} to ptr",
+                        indent, ptr, hw, obj_reg.name
                     )
                     .ok();
                     let offset = self.fun.gen_reg();
@@ -1949,7 +1956,11 @@ impl LlvmBackend {
         }
 
         let result = self.fun.gen_reg();
-        writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, alloca_reg).ok();
+        // 2026-08-11 (wasm32 obj-member fix): obj/struct handles are
+        // i{int_bits} (i32 on wasm32), not a hardcoded i64 — the state slot
+        // they land in is the same width. x86_64 (int_bits=64) is unchanged.
+        let hw = format!("i{}", self.ctx.int_bits);
+        writeln!(out, "{}  {} = ptrtoint ptr {} to {}", indent, result, alloca_reg, hw).ok();
         // 2026-07-24: Record the alloca pointer so &let_var on a struct-typed
         // binding retrieves the stack address, not the ptrtoint value.
         self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
@@ -2613,7 +2624,8 @@ impl LlvmBackend {
         }
 
         let result = self.fun.gen_reg();
-        writeln!(out, "{}  {} = ptrtoint ptr {} to i64", indent, result, alloca_reg).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        writeln!(out, "{}  {} = ptrtoint ptr {} to {}", indent, result, alloca_reg, hw).ok();
         self.fun.struct_literal_allocas.insert(result.clone(), alloca_reg.clone());
         TypedRegister { name: result, ty: Type::Custom(elem_type_name.to_string()) }
     }

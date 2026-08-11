@@ -1517,6 +1517,35 @@ fn test_webstack_bv_logic_only() {
         "should export state_layout function");
 }
 
+/// 2026-08-11 (wasm32 obj-member fix): a Ptr-indexed store `data[i] = v` at
+/// int_bits=32 must widen the i32 index to i64 for the GEP — the old bare
+/// `add i64 {i32}, 0` produced invalid IR (`%t38 defined with type 'i32' but
+/// expected 'i64'`) that llc rejected for the webstack build of
+/// examples/todo.rbv (the List.push body's `inner.data[len] = val`).
+#[test]
+fn test_wasm32_ptr_index_store_widens_index() {
+    let src = r#"
+let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
+let i: Int = 0;
+txn store [i < 8][true] {
+    buf[i] = 42;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new()
+        .with_webstack(true)
+        .with_int_bits(32)
+        .with_target_triple("wasm32-unknown-wasi");
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("sext i32"),
+        "wasm32 Ptr-indexed store must widen the i32 index to i64 for the GEP; got:\n{ir}"
+    );
+}
+
 #[test]
 fn test_llvm_generates_state_type() {
     let mut backend = LlvmBackend::new();

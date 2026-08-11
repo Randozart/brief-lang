@@ -28,23 +28,33 @@ extract_and_validate`, `global_class_complex_expr_is_error`,
 `comment_mentioning_directive_is_not_validated`. `examples/view-directives.rbv`
 migrated to supported forms.
 
-## wasm32 obj-member bodies hardcode i64 slot widths — OPEN
+## wasm32 obj-member bodies hardcode i64 slot widths — FIXED
 
 **Date:** 2026-08-11
-**Status:** Open. Repro: `brivc build examples/todo.rbv --backend webstack` —
-llc rejects `%t38 defined with type 'i32' but expected 'i64'` in the
-`List.push` member body.
-**Root cause:** the obj-member `self`-slot read/write paths hardcode i64 for
-struct/ptr slots (emit_expr.rs ~310/317-322: `ptrtoint ptr to i64`,
-`load i64`) and the Ptr/List heap-index path (emit_expr.rs ~1019:
-`inttoptr i64`), plus `add i64` on i32 width-aware `len`/index values. On
-wasm32 (int_bits=32) the List handle and its `len` field are i32, so the
-mixed-width IR is invalid. x86_64 compiles fine — the migration's fixes are
-correct; only the wasm32 obj-member emission is broken.
-**Fix direction:** make the self-slot read/write + heap-index paths width-aware
-(`i{int_bits}`) like the boxed-self inttoptr and Size-Runtime reflection
-already fixed this session. Not attempted here — out of the housekeeping
-scope, logged for a focused pass.
+**Status:** Fixed.
+**Repro:** `brivc build examples/todo.rbv --backend webstack` — llc rejected
+`%t38 defined with type 'i32' but expected 'i64'` in the `List.push` member
+body; obj/List handles and member-body arithmetic were hardcoded to i64 while
+the width-aware layout stores flexible Int fields at `i{int_bits}` (i32 on
+wasm32) and obj/List/Ptr handles now follow the same width.
+**Fix (architecture-dependent widths, per the "i64 was an earlier convention"
+directive):**
+- Ptr-indexed stores (`data[i] = v`, the List.push `inner.data[len] = val`)
+  widen the i32 index via `gep_index` (`sext i32 to i64`) instead of a bare
+  `add i64 {i32}, 0` (emit_stmt.rs).
+- Obj/struct/List instance handles are `i{int_bits}` at creation
+  (emit_struct_literal/emit_struct_array, emit_toplevel obj-init) and their
+  consumers inttoptr at that width (boxed-self, field-access, heap-index).
+- Ptr self-slot loads/stores use `i{int_bits}` (emit_expr/emit_stmt).
+- The obj-init instance-addr state store uses the field's LLVM type, not a
+  hardcoded `store i64`.
+- `Malloc#` widens its i32 size to i64 for the C ABI (`widen_to_i64`).
+- x86_64 (int_bits=64) is byte-identical — full suite unchanged.
+
+Verified: `examples/todo.rbv` and a `List<Int>` push program build for
+`--backend webstack` (all 6 artifacts); the List b-each warns + skips (list
+rendering still a separate slice). Regression test:
+`test_wasm32_ptr_index_store_widens_index`. Suite 1763 lib + 14 bin green.
 
 ## Webstack WASM exports nothing + txn naming mismatch — FIXED
 

@@ -843,7 +843,10 @@ impl LlvmBackend {
         let inst = self.fun.gen_reg();
         writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
         let addr = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, inst).ok();
+        // 2026-08-11 (wasm32 obj-member fix): obj instance handles are
+        // i{int_bits} (i32 on wasm32), not hardcoded i64.
+        let hw = format!("i{}", self.ctx.int_bits);
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
         let recv_reg = crate::backend::llvm::TypedRegister {
             name: addr.clone(),
             ty: Type::Custom(type_key.clone()),
@@ -860,7 +863,11 @@ impl LlvmBackend {
         let gep = self.fun.gen_reg();
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
         writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, self.fun.gen_reg(), inst, 0).ok();
-        writeln!(out, "{}store i64 {}, ptr {}", indent, addr, gep).ok();
+        // 2026-08-11 (wasm32 obj-member fix): the handle is i{int_bits} and
+        // the state slot is the same width — store at the field's LLVM type,
+        // not a hardcoded i64 (`store i64` into an i32 List slot is invalid).
+        let field_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+        writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, addr, gep).ok();
         let _ = field_name;
         true
     }
