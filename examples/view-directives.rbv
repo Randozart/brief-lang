@@ -1,10 +1,10 @@
 // view-directives.rbv — Advanced RBV view directives
 // Demonstrates: b-style, b-class, b-when, b-show, b-each
 
-let items: List<String> = ["A", "B", "C"];
-let selected: String = "";
+let nums: Int[3];
 let dark_mode: Bool = false;
 let show_sidebar: Bool = true;
+let bg_color: String = "#fff";
 
 txn toggle_dark [dark_mode == false][dark_mode == true] {
     dark_mode = true;
@@ -16,15 +16,15 @@ txn toggle_sidebar [show_sidebar == true][show_sidebar == false] {
     term;
 };
 
-txn select_item [true][selected == item] {
-    selected = item;
+txn cycle_color [bg_color == "#fff"][bg_color == "#333"] {
+    bg_color = "#333";
     term;
 };
 
 <view>
 <div>
     <!-- b-when: conditionally mount element (structurally mounts/unmounts) -->
-    <div b-when="dark_mode" b-style="background: #333; color: white;">
+    <div b-when="dark_mode" b-style="color: white">
         Dark mode active
     </div>
 
@@ -33,22 +33,20 @@ txn select_item [true][selected == item] {
         Sidebar content
     </div>
 
-    <!-- b-style: dynamic inline styles -->
-    <div b-style="'background: ' + (dark_mode ? '#222' : '#fff') + ';'">
+    <!-- b-style: dynamic inline styles (bounded field reference) -->
+    <div b-style="background: bg_color">
         Dynamic background
     </div>
 
-    <!-- b-class: dynamic CSS classes -->
-    <div b-class="{ 'active': selected == 'A', 'highlight': dark_mode }">
+    <!-- b-class: dynamic CSS classes (bounded single-field expressions) -->
+    <div b-class="{ 'active': dark_mode == true, 'highlight': dark_mode }">
         Conditional classes
     </div>
 
-    <!-- b-each: iterate over list -->
+    <!-- b-each: iterate over a static vector -->
     <ul>
-        <li b-each:item="items"
-            b-class="{ 'selected': item == selected }"
-            b-trigger:click="select_item(item)">
-            <span b-text="item">Item</span>
+        <li b-each:item="nums" b-key="item" b-class="{ 'selected': item == 2 }">
+            <span b-text="item">0</span>
         </li>
     </ul>
 </div>

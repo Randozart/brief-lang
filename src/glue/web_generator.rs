@@ -18,6 +18,20 @@
 
 use std::collections::HashMap;
 
+/// 2026-08-11 (housekeeping, Part 2): convert a Briv literal token to a JS
+/// literal — `'str'`/`"str"` → a quoted JS string, `true`/`false` → booleans,
+/// numbers pass through.
+fn js_literal(s: &str) -> String {
+    let s = s.trim();
+    if (s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2)
+        || (s.starts_with('"') && s.ends_with('"') && s.len() >= 2)
+    {
+        format!("\"{}\"", &s[1..s.len() - 1])
+    } else {
+        s.to_string()
+    }
+}
+
 /// Descriptor for a single state field in WASM linear memory.
 /// 2026-07-26: Phase 3 — Emitted by the LLVM backend in state_layout export.
 #[derive(Debug, Clone)]
@@ -815,14 +829,199 @@ export async function createApp(wasmBytes) {{
                      \x20           }}\n\
                      \x20         }});\n\
                      \x20       }})();",
-                    count = count,
+                     count = count,
                     elem_size = elem_size,
                     slot_reader = slot_reader,
                     template_html = template_html,
                 )
             }
-            _ => String::new(),
+            Directive::Class { pairs } => {
+                // 2026-08-11 (housekeeping, Part 2): `b-class="{ 'cls': expr }"`.
+                // Each expr is a bounded single-field form (validated at view
+                // compile): dynamic pairs register on the root field's handle
+                // (evaluated on flush); literal-only pairs apply once at init.
+                 let mut js = String::from("(() => {\n        const el = {el};\n        if (!el) return;\n");
+                 for (cls_name, expr) in pairs {
+                     match self.bounded_root(expr) {
+                         Some((root, None)) if !root.is_empty() => {
+                             if let Some(handle) = self.field_handle_for_signal(&root) {
+                                 let cond = Self::simple_expr_js(expr, "value");
+                                 js.push_str(&format!(
+                                     "        this._registerViewEffect({handle}, (value) => {{\n\
+                                      \x20         el.classList.toggle({cls_name:?}, {cond});\n\
+                                      \x20       }});\n"
+                                 ));
+                             }
+                         }
+                         Some((_, Some(_))) => {
+                             // Literal-only pair — apply once at init.
+                             let cond = Self::simple_expr_js(expr, "");
+                             js.push_str(&format!(
+                                 "        el.classList.toggle({cls_name:?}, {cond});\n"
+                             ));
+                         }
+                         _ => {}
+                     }
+                 }
+                 js.push_str("      })();");
+                 js
+             }
+             Directive::Style { name, value } => {
+                 // 2026-08-11 (housekeeping, Part 2): `b-style="name: value"`.
+                 let mut js = format!(
+                     "(() => {{\n\
+                      \x20         const el = {el};\n\
+                      \x20         if (!el) return;\n"
+                 );
+                 match self.bounded_root(value) {
+                     Some((root, None)) if !root.is_empty() => {
+                         if let Some(handle) = self.field_handle_for_signal(&root) {
+                             js.push_str(&format!(
+                                 "        this._registerViewEffect({handle}, (value) => {{\n\
+                                  \x20         el.style[{name:?}] = value;\n\
+                                  \x20       }});\n"
+                             ));
+                         }
+                     }
+                     Some((_, Some(_))) => {
+                         let lit = js_literal(value);
+                         js.push_str(&format!("        el.style[{name:?}] = {lit};\n"));
+                     }
+                     _ => {}
+                 }
+                 js.push_str("      })();");
+                 js
+             }
+             Directive::Attr { name, value } => {
+                 // 2026-08-11 (housekeeping, Part 2): `b-attr="name: value"`.
+                 let mut js = format!(
+                     "(() => {{\n\
+                      \x20         const el = {el};\n\
+                      \x20         if (!el) return;\n"
+                 );
+                 match self.bounded_root(value) {
+                     Some((root, None)) if !root.is_empty() => {
+                         if let Some(handle) = self.field_handle_for_signal(&root) {
+                             js.push_str(&format!(
+                                 "        this._registerViewEffect({handle}, (value) => {{\n\
+                                  \x20         el.setAttribute({name:?}, value);\n\
+                                  \x20       }});\n"
+                             ));
+                         }
+                     }
+                     Some((_, Some(_))) => {
+                         let lit = js_literal(value);
+                         js.push_str(&format!("        el.setAttribute({name:?}, {lit});\n"));
+                     }
+                     _ => {}
+                 }
+                 js.push_str("      })();");
+                 js
+             }
+             _ => String::new(),
         }
+    }
+
+    /// 2026-08-11 (housekeeping, Part 2): the bounded single-field root of a
+    /// view expression (the same forms the view compiler validated). Returns
+    /// Some(root) for a field-referencing expr, None for a literal-only one.
+    fn bounded_root(&self, expr: &str) -> Option<(String, Option<String>)> {
+        let e = expr.trim();
+        let is_identifier = |s: &str| {
+            !s.is_empty()
+                && s.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_')
+                && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        };
+        let is_literal = |s: &str| {
+            let s = s.trim();
+            s.parse::<f64>().is_ok()
+                || s == "true"
+                || s == "false"
+                || (s.starts_with('\'') && s.len() >= 2
+                    && s[1..].find('\'').map_or(false, |i| i == s.len() - 2))
+                || (s.starts_with('"') && s.len() >= 2
+                    && s[1..].find('"').map_or(false, |i| i == s.len() - 2))
+        };
+        if is_identifier(e) && !e.contains('.') {
+            return Some((e.to_string(), None));
+        }
+        if let Some(i) = e.find(['=', '!', '<', '>']) {
+            let op = if e[i..].starts_with("==") {
+                "=="
+            } else if e[i..].starts_with("!=") {
+                "!="
+            } else if e[i..].starts_with("<=") {
+                "<="
+            } else if e[i..].starts_with(">=") {
+                ">="
+            } else if e[i..].starts_with('<') {
+                "<"
+            } else if e[i..].starts_with('>') {
+                ">"
+            } else {
+                return None;
+            };
+            let (l, r) = (e[..i].trim(), e[i + op.len()..].trim());
+            if is_identifier(l) && is_literal(r) {
+                return Some((l.to_string(), None));
+            }
+        }
+        if is_literal(e) {
+            return Some(("".to_string(), Some(e.to_string())));
+        }
+        None
+    }
+
+    /// 2026-08-11 (housekeeping, Part 2): translate a bounded view expression
+    /// to a JS boolean/string expression given the flushed `value` variable
+    /// (or an empty string for a literal-only eval). `field` → Boolean(value);
+    /// `field <op> literal` → the comparison; a bare literal → its JS value.
+    fn simple_expr_js(expr: &str, value_var: &str) -> String {
+        let e = expr.trim();
+        let is_identifier = |s: &str| {
+            !s.is_empty()
+                && s.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_')
+                && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        };
+        let is_literal = |s: &str| {
+            let s = s.trim();
+            s.parse::<f64>().is_ok()
+                || s == "true"
+                || s == "false"
+                || (s.starts_with('\'') && s.len() >= 2
+                    && s[1..].find('\'').map_or(false, |i| i == s.len() - 2))
+                || (s.starts_with('"') && s.len() >= 2
+                    && s[1..].find('"').map_or(false, |i| i == s.len() - 2))
+        };
+        if is_identifier(e) && !e.contains('.') {
+            return if value_var.is_empty() {
+                "true".to_string()
+            } else {
+                format!("Boolean({value_var})")
+            };
+        }
+        if let Some(i) = e.find(['=', '!', '<', '>']) {
+            let op = if e[i..].starts_with("==") {
+                "=="
+            } else if e[i..].starts_with("!=") {
+                "!="
+            } else if e[i..].starts_with("<=") {
+                "<="
+            } else if e[i..].starts_with(">=") {
+                ">="
+            } else if e[i..].starts_with('<') {
+                "<"
+            } else if e[i..].starts_with('>') {
+                ">"
+            } else {
+                return "false".to_string();
+            };
+            let (l, r) = (e[..i].trim(), e[i + op.len()..].trim());
+            if is_identifier(l) && is_literal(r) {
+                return format!("{value_var} {op} {}", js_literal(r));
+            }
+        }
+        js_literal(e)
     }
 
     /// Generate custom imports section for frgn from #Web handlers.
@@ -1286,6 +1485,65 @@ mod tests {
         let output = g.generate().unwrap();
         assert!(output.dom_shim.contains("createApp"),
             "should still produce createApp with empty bindings");
+    }
+
+    #[test]
+    fn test_class_style_attr_emission() {
+        // 2026-08-11 (housekeeping, Part 2): global (non-each) b-class/
+        // b-style/b-attr were DEAD (fell to `_ => ""`). Now they register on
+        // the root field's handle (dynamic) or apply once at init (literal).
+        use crate::view_compiler::{Binding, Directive};
+        let field = || FieldLayout {
+            field_handle: 1,
+            name: "dark_mode".to_string(),
+            offset: 4,
+            size: 1,
+            element_size: 1,
+            type_tag: TypeTag::Bool,
+        };
+        let bindings = vec![
+            Binding {
+                element_id: "d1".to_string(),
+                directive: Directive::Class {
+                    pairs: vec![("active".to_string(), "dark_mode == true".to_string())],
+                },
+            },
+            Binding {
+                element_id: "d2".to_string(),
+                directive: Directive::Style {
+                    name: "background".to_string(),
+                    value: "dark_mode".to_string(),
+                },
+            },
+            Binding {
+                element_id: "d3".to_string(),
+                directive: Directive::Attr {
+                    name: "data-mode".to_string(),
+                    value: "'dark'".to_string(),
+                },
+            },
+        ];
+        let g = GlueWebGenerator::new(
+            Vec::new(),
+            bindings,
+            StateLayout {
+                app_name: "csd".to_string(),
+                generation_offset: 0,
+                flush_buffer_offset: 64,
+                max_flush_entries: 8,
+                fields: vec![field()],
+            },
+            HashMap::new(),
+            Vec::new(),
+        );
+        let output = g.generate().expect("generate should succeed");
+        let shim = &output.dom_shim;
+        assert!(shim.contains("el.classList.toggle(\"active\", value == true)"),
+            "class comparison registers on the field:\n{shim}");
+        assert!(shim.contains("el.style[\"background\"] = value"),
+            "style field ref registers on the field:\n{shim}");
+        assert!(shim.contains("el.setAttribute(\"data-mode\", \"dark\")"),
+            "literal attr applies once at init:\n{shim}");
     }
 
     #[test]

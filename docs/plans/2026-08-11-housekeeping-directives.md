@@ -40,32 +40,23 @@ decoded. Add a WARNING when an Each iterable is not a vector layout row
 with a documented list-rendering gap (a future list-support slice). Never a
 silent wrong render — the warning names the gap.
 
-## Part 2 — Global `b-class`/`b-style`/`b-attr` emission
+## Part 2 — Global `b-class`/`b-style`/`b-attr` emission — DONE
 
-Currently DEAD: `binding_to_js` matches Text/Show/Hide/When/Trigger/Bind/Each
-and falls to `_ => ""` for Class/Attr/Style — top-level (non-each) instances
-never update the DOM. Completes SPEC 21.4's directive list.
-
-Design (bounded, consistent with the b-each item expressions):
-
-- **Class** `b-class="{ 'cls': <expr> }"` — emit on the expr's ROOT field
-  handle: `el.classList.toggle(cls, eval(value))`. Bounded expr: bare field
-  (truthy), `field <op> <literal>` (==, !=, <, <=, >, >= against number/bool/
-  string literal). Complex (ternary, call, multi-field) → compile-time error
-  (SPEC 21.4: never silent).
-- **Style** `b-style="name: value"` — `el.style[<name>] = value`; bounded
-  value: literal or single field (string). Complex → error.
-- **Attr** `b-attr="name: value"` — `el.setAttribute(name, value)`; bounded
-  same as Style.
-- The flush-driven applyFn evaluates the expr with the flushed root field's
-  value; `view_root_signals` already protects these fields (observability).
-- `_registerViewEffect` fans multi-binding fields out (already landed).
-
-Migrate `examples/view-directives.rbv`'s complex `b-style` (string-concat
-ternary) to supported forms so the example compiles.
-
-Tests: view_compiler (extraction + validation errors), web_generator
-(Class/Style/Attr emission + expr translation), E2E `.rbv`.
+- **Class** `b-class="{ 'cls': <expr> }"`: `el.classList.toggle(cls, eval)`,
+  registered on the expr's root field handle (flush-driven). Bounded expr:
+  bare field (truthy) or `field <op> <literal>`; literal-only pairs apply once
+  at init.
+- **Style** `b-style="name: value"`: `el.style[name] = value` (field ref,
+  flush-driven) or a literal (init).
+- **Attr** `b-attr="name: value"`: `el.setAttribute(name, value)` (same).
+- `parse_attr_raw` preserves value quotes (quoted = literal, unquoted = field);
+  the literal check requires the closing quote at the exact end. Complex
+  expressions are compile-time errors (SPEC 21.4: never silent dead DOM).
+- Fixed the HTML-comment validation bug (`<!-- b-each: ... -->` triggered the
+  b-key error — the comment skip now checks the raw `<!--`/`</`).
+- `examples/view-directives.rbv` migrated to supported forms (vector each,
+  bounded class/style/attr exprs) — compiles + builds clean.
+- Tests: 4 new. Suite 1762 lib + 14 bin green.
 
 ## Part 3 — 2b2 (after Parts 1–2)
 

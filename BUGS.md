@@ -1,5 +1,33 @@
 # Bugs
 
+## Global b-class/b-style/b-attr emitted no JS + comment-tag validation — FIXED
+
+**Date:** 2026-08-11
+**Status:** Fixed (commit pending, housekeeping Part 2)
+Top-level (non-each) `b-class`/`b-attr`/`b-style` bindings fell through
+`binding_to_js`'s `_ => ""` — the DOM never updated. Now wired with bounded
+single-field expressions (bare field, `field <op> <literal>`, or a literal);
+complex expressions (ternaries, calls, string concat) are compile-time errors,
+never silent dead DOM.
+
+Three bugs fixed along the way:
+1. **`parse_attr_expr` stripped value quotes** — `b-attr="data-mode: 'dark'"`
+   lost the quotes, so `dark` was misread as a state-field reference and the
+   static attr silently skipped. `parse_attr_raw` keeps the raw value (quoted
+   = literal, unquoted = field).
+2. **Weak quoted-literal check** — a garbled value like `'#fff') + ';'` (from a
+   ternary's unquoted `:`) started AND ended with `'` and passed as a literal.
+   The literal check now requires the closing quote at the exact string end.
+3. **HTML comments were validated as directives** — `tag_lower.starts_with('!')`
+   never matched `<!--` (the raw string carries the leading `<`), so a comment
+   mentioning `b-each:` triggered the b-key error. The skip now checks the raw
+   `<!--`/`</` prefixes.
+
+Regression tests: `test_class_style_attr_emission`, `global_class_style_attr_
+extract_and_validate`, `global_class_complex_expr_is_error`,
+`comment_mentioning_directive_is_not_validated`. `examples/view-directives.rbv`
+migrated to supported forms.
+
 ## wasm32 obj-member bodies hardcode i64 slot widths — OPEN
 
 **Date:** 2026-08-11
