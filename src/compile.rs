@@ -359,6 +359,7 @@ fn compile_view(
     items: &[briv_compiler::ast::TopLevel],
     opts: &BuildOptions,
     preprocessed: &PreprocessedSource,
+    render_blocks: &std::collections::HashMap<String, Vec<String>>,
 ) -> Result<CompiledView, String> {
     let raw_view = opts
         .view_html
@@ -392,18 +393,10 @@ fn compile_view(
     let mut vc = briv_compiler::view_compiler::ViewCompiler::new();
     // 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` blocks are
     // reusable view fragments — `<Name />` mounts them at compile time. The
-    // fragment's directives bind to the state they reference (the global
-    // single-%State model; per-instance state is the Phase 2b slice 2).
-    let render_blocks: std::collections::HashMap<String, String> = items
-        .iter()
-        .filter_map(|item| match item {
-            briv_compiler::ast::TopLevel::RenderBlock(rb) => {
-                Some((rb.struct_name.clone(), rb.view_html.clone()))
-            }
-            _ => None,
-        })
-        .collect();
-    vc.set_render_blocks(render_blocks);
+    // fragment's directives bind to the state they reference. 2026-08-11
+    // (2b2 slice 2a): the per-mount fragment list (from the component-instance
+    // expansion) gives each mount its own instance-qualified slots.
+    vc.set_render_blocks(render_blocks.clone());
     for item in items {
         match item {
             briv_compiler::ast::TopLevel::StateDecl(sd) => {
@@ -1017,8 +1010,27 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // program is type-checked (SRBV is meaningful) but BEFORE codegen, so the
     // view-referenced fields protect their %State slots from dead-field
     // elimination. Output block below reuses the cached result.
+    // 2026-08-11 (2b2 slice 2a): expand component instances first — each
+    // `<Name />` mount gains its own instance-qualified state slots and txn
+    // variants; the per-mount fragments drive the view compiler.
+    let mut component_fragments: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if opts.backend == BackendKind::Webstack {
+        let view_html = opts
+            .view_html
+            .clone()
+            .or_else(|| preprocessed.view_html.clone())
+            .unwrap_or_default();
+        match briv_compiler::analysis::component_instances::expand_component_instances(
+            &mut items,
+            &view_html,
+        ) {
+            Ok(plan) => component_fragments = plan.fragments,
+            Err(msg) => return Err(format!("{}: component instance error: {}", file_path, msg)),
+        }
+    }
     let compiled_view: CompiledView = if opts.backend == BackendKind::Webstack {
-        compile_view(file_path, &items, opts, &preprocessed)?
+        compile_view(file_path, &items, opts, &preprocessed, &component_fragments)?
     } else {
         CompiledView {
             bindings: Vec::new(),
@@ -2400,7 +2412,7 @@ mod tests {
         let pre = preprocessed_with_view(
             r#"<div><span b-text="count">0</span><button b-trigger:click="bump">+</button></div>"#,
         );
-        let cv = compile_view("/tmp/app.rbv", &items, &opts, &pre).expect("view compiles");
+        let cv = compile_view("/tmp/app.rbv", &items, &opts, &pre, &std::collections::HashMap::new()).expect("view compiles");
         assert!(!cv.bindings.is_empty(), "b-text/b-trigger bindings extracted");
         let html = cv.modified_html.expect("modified html present");
         assert!(
@@ -2420,7 +2432,7 @@ mod tests {
     fn test_compile_view_rejects_b_if() {
         let opts = webstack_opts("/tmp/app.rbv");
         let pre = preprocessed_with_view(r#"<div b-if="x">bad</div>"#);
-        let err = compile_view("/tmp/app.rbv", &[], &opts, &pre).unwrap_err();
+        let err = compile_view("/tmp/app.rbv", &[], &opts, &pre, &std::collections::HashMap::new()).unwrap_err();
         assert!(
             err.contains("`b-if` is invalid"),
             "b-if rejected per SPEC 21.4: {err}"
@@ -2431,7 +2443,7 @@ mod tests {
     fn test_compile_view_strict_rejects_undefined_signal() {
         let opts = webstack_opts("/tmp/ui.s.rbv");
         let pre = preprocessed_with_view(r#"<span b-text="nope">x</span>"#);
-        let err = compile_view("/tmp/ui.s.rbv", &[], &opts, &pre).unwrap_err();
+        let err = compile_view("/tmp/ui.s.rbv", &[], &opts, &pre, &std::collections::HashMap::new()).unwrap_err();
         assert!(
             err.contains("SRBV001") && err.contains("'nope'"),
             "strict profile rejects undefined signal: {err}"
@@ -2444,7 +2456,7 @@ mod tests {
         // warnings — SRBV reference errors are a `.s` strict-profile feature.
         let opts = webstack_opts("/tmp/app.rbv");
         let pre = preprocessed_with_view(r#"<span b-text="nope">x</span>"#);
-        let cv = compile_view("/tmp/app.rbv", &[], &opts, &pre).expect("non-strict view compiles");
+        let cv = compile_view("/tmp/app.rbv", &[], &opts, &pre, &std::collections::HashMap::new()).expect("non-strict view compiles");
         assert!(
             cv.bindings.iter().any(|b| {
                 matches!(
@@ -2473,7 +2485,7 @@ mod tests {
             style_css: None,
             view_html: None,
         };
-        let cv = compile_view("/tmp/app.bv", &items, &opts, &pre).expect("render block compiles");
+        let cv = compile_view("/tmp/app.bv", &items, &opts, &pre, &std::collections::HashMap::new()).expect("render block compiles");
         let html = cv.modified_html.expect("html from render block");
         assert!(html.contains("b-text") || html.contains("rbv-"));
         assert!(!cv.bindings.is_empty());

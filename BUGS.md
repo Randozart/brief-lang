@@ -3904,12 +3904,14 @@ fields are protected from dead-field elimination via
 `CompilerContext.view_bound_fields` → `FieldMode::Always` (observability-as-
 liveness). SRBV verification runs only under the `.s` strict profile
 (`conformance::is_strict`). Covered by 6 new compile.rs tests + 1 rbv.rs test.
-**Still open — Phase 2 (SPEC 21.3) component model:** mount/unmount lifecycle,
-per-instance state (the WASM runtime state is a single global `%State`).
-**Slice 1 (2026-08-11) resolved:** `b-when`/`b-each`+`b-key`/`b-bind:value`
-are wired; `<Name />` mounts its `render Name { ... }` fragment at compile time
-(unique IDs per mount, nested fragments, cycle detection, unknown tags warn).
-Per-instance state is slice 2 — a component's directives bind the referenced
-(global) state, matching the counter.rbv semantics.
-See `docs/plans/2026-08-11-view-compiler-wiring.md` and
-`docs/plans/2026-08-11-phase2b-component-mounting.md`.
+**Phase 2 component model:**
+- Slice 1 (2026-08-11) resolved: `b-when`/`b-each`+`b-key`/`b-bind:value`
+  wired; `<Name />` mounts its `render Name { ... }` fragment at compile time.
+- Slice 2a (2026-08-11) resolved: per-instance component state via fixed
+  instance pools — each mount owns its fragment-referenced fields
+  (`Counter.0.count`, `Counter.1.count`) + per-mount txn variants
+  (`increment_0`/`increment_1`); a mount's `b-trigger` fires its own variant.
+- Still open: mount/unmount LIFECYCLE (an active-slot flag + DOM mount/unmount
+  per instance — `b-when` inside a component already works at the state level),
+  dynamic component counts (`b-each` of components), props.
+See `docs/plans/2026-08-11-phase2b2-instance-state.md`.

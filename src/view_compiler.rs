@@ -137,9 +137,16 @@ pub struct ViewCompiler {
     /// extraction must not leak item-scoped bindings like `b-text="item"`).
     each_depth: usize,
     /// 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` view fragments,
-    /// keyed by struct name. A `<Name />` tag in the view mounts the fragment's
-    /// HTML at compile time (inlined + ID-injected like any markup).
-    pub render_blocks: HashMap<String, String>,
+    /// keyed by struct name. A `<Name />` tag in the view mounts a fragment at
+    /// compile time (inlined + ID-injected like any markup). 2026-08-11
+    /// (2b2 slice 2a): the value is a PER-MOUNT list — mount k splices
+    /// `fragments[k % len]` so each mount binds its own instance-qualified
+    /// state (per-instance component state). A single shared entry preserves
+    /// the 2b1 shared-state behavior.
+    pub render_blocks: HashMap<String, Vec<String>>,
+    /// 2026-08-11 (2b2 slice 2a): per-component mount counter, used to pick the
+    /// per-mount fragment variant for each `<Name />` tag.
+    pub component_mounts: HashMap<String, usize>,
     pub diagnostics: Vec<String>,
     /// 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors — `b-if`
     /// rejected, `b-each` without `b-key`, `b-bind:value` on a non-assignable
@@ -166,6 +173,7 @@ impl ViewCompiler {
             each_context: Vec::new(),
             each_depth: 0,
             render_blocks: HashMap::new(),
+            component_mounts: HashMap::new(),
             diagnostics: Vec::new(),
             validation_errors: Vec::new(),
             user_triggered_txns: HashSet::new(),
@@ -181,9 +189,11 @@ impl ViewCompiler {
     }
 
     /// 2026-08-11 (Phase 2b): register the `render Name { ... }` view
-    /// fragments so `<Name />` tags mount them.
-    pub fn set_render_blocks(&mut self, blocks: HashMap<String, String>) {
+    /// fragments so `<Name />` tags mount them. The value is a per-mount list
+    /// (2b2 slice 2a): mount k splices `fragments[k % len]`.
+    pub fn set_render_blocks(&mut self, blocks: HashMap<String, Vec<String>>) {
         self.render_blocks = blocks;
+        self.component_mounts.clear();
     }
 
     /// Returns transactions that are triggered by user input (b-trigger:)
@@ -357,11 +367,23 @@ impl ViewCompiler {
                                 continue;
                             }
                             in_progress.insert(tag_name_raw.clone());
-                            let fragment = self
+                            // 2026-08-11 (2b2 slice 2a): pick the per-mount
+                            // fragment variant — each `<Name />` tag mounts the
+                            // instance-qualified fragment for its index.
+                            let mount = self
+                                .component_mounts
+                                .entry(tag_name_raw.clone())
+                                .or_insert(0);
+                            let fragments = self
                                 .render_blocks
                                 .get(&tag_name_raw)
                                 .cloned()
                                 .unwrap_or_default();
+                            let fragment = fragments
+                                .get(*mount % fragments.len().max(1))
+                                .cloned()
+                                .unwrap_or_default();
+                            *mount += 1;
                             // Self-closing `<Name />` skips just the tag; the
                             // paired `<Name>...</Name>` form skips to the close.
                             let close = format!("</{}>", tag_name_raw);
@@ -1969,7 +1991,7 @@ mod tests {
         let mut blocks = HashMap::new();
         blocks.insert(
             "Counter".to_string(),
-            r#"<span b-text="count">0</span>"#.to_string(),
+            vec![r#"<span b-text="count">0</span>"#.to_string()],
         );
         vc.set_render_blocks(blocks);
         let (bindings, modified_html, diagnostics) =
@@ -1999,7 +2021,7 @@ mod tests {
         let mut blocks = HashMap::new();
         blocks.insert(
             "Counter".to_string(),
-            "<span>hi</span>".to_string(),
+            vec!["<span>hi</span>".to_string()],
         );
         vc.set_render_blocks(blocks);
         let (_, modified_html, _) = vc.compile(r#"<Counter></Counter>"#);
@@ -2013,7 +2035,7 @@ mod tests {
     fn component_multiple_mounts_unique_ids() {
         let mut vc = ViewCompiler::new();
         let mut blocks = HashMap::new();
-        blocks.insert("Counter".to_string(), r#"<span b-text="count">0</span>"#.to_string());
+        blocks.insert("Counter".to_string(), vec![r#"<span b-text="count">0</span>"#.to_string()]);
         vc.set_render_blocks(blocks);
         let (bindings, modified_html, _) =
             vc.compile(r#"<Counter /><Counter />"#);
@@ -2035,8 +2057,8 @@ mod tests {
     fn component_cycle_is_error() {
         let mut vc = ViewCompiler::new();
         let mut blocks = HashMap::new();
-        blocks.insert("A".to_string(), "<B />".to_string());
-        blocks.insert("B".to_string(), "<A />".to_string());
+        blocks.insert("A".to_string(), vec!["<B />".to_string()]);
+        blocks.insert("B".to_string(), vec!["<A />".to_string()]);
         vc.set_render_blocks(blocks);
         let (_, _, diagnostics) = vc.compile("<A />");
         assert!(

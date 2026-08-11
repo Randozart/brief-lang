@@ -1,26 +1,32 @@
 # Phase 2b2 — Per-instance component state (SPEC 21.3, slice 2)
 
 **Date:** 2026-08-11
-**Status:** plan — design for per-instance component state, the second slice
-of the SPEC 21.3 component model. 2b1 (fragment mounting) landed; this gives
-each mount its OWN state.
+**Status:** slice 2a (fixed instance pools) implemented. Dynamic component
+counts + props are follow-ups.
 
-## Problem
+## Slice 2a implementation summary (2026-08-11)
 
-2b1 mounts a `render Name { ... }` fragment whose directives bind the GLOBAL
-`%State` — two `<Counter />` mounts share one `count`. SPEC 21.3 says custom
-component tags create **first-class reactive instances**: "The rendered parent
-owns each mounted component handle. Mounting creates the handle; unmounting
-releases state and subscriptions."
-
-Per-instance state needs:
-- Each mount of `Name` to own its own copy of the fields its fragment
-  references (`count` for the counter fragment).
-- Component transactions to route to the RIGHT instance (`increment` bumps
-  THIS counter, not all of them).
-- Mount/unmount to allocate/release instance state (`b-when` inside the
-  fragment, or the component tag inside a `b-when` subtree).
-- The WASM runtime's single-global-`%State` model to carry N instances.
+- `analysis/component_instances::expand_component_instances` runs in
+  compile_source after typecheck: counts `<Name />` mounts per component,
+  and for each mount registers instance-qualified state slots
+  (`Counter.0.count`, `Counter.1.count` — dotted StateDecls, scalar %State
+  rows) and per-mount txn variants (`increment_0`, `increment_1` — the txn
+  body/contract identifiers rewritten to the instance slots). Consumed
+  globals are removed.
+- The ViewCompiler's `render_blocks` became `HashMap<String, Vec<String>>`
+  (per-mount fragments); mount k splices `fragments[k % len]`, binding each
+  mount's DOM to its pool handles. `b-trigger` fires the mount's variant.
+- Field types are preserved on instance slots (a `let show: Bool` keeps Bool);
+  txns consumed by write-set (not just trigger name) are variant-ized + the
+  originals removed.
+- Verified E2E: two `<Counter />` mounts get independent `count` state and
+  `increment_0`/`increment_1` variants; the wasm exports both variants; the
+  shim binds each mount to its own handle; a `b-when` inside a component
+  toggles one instance independently. `examples/counter.rbv` (single mount)
+  binds `Counter.0.count`. Strict `.s.rbv` SRBV passes with the
+  instance-qualified signals.
+- Tests: 2 new (component_instances). Suite 1765 lib + 14 bin green; no new
+  Praetor diagnostics in the new module.
 
 ## Design: fixed instance pools (slice 2a)
 

@@ -1368,6 +1368,8 @@ Custom component tags create first-class reactive instances. The rendered parent
 
 A `render Name { ... }` block is a reusable view fragment: `<Name />` mounts the fragment's HTML at that position (each mount gets its own element IDs; nested fragments mount recursively). The fragment's directives bind the state they reference — per-instance state (each mount owning its own field slots) is the full instance model. A `<Name />` for an unknown `Name` is a compile-time warning; a render cycle (`A` mounts `B` mounts `A`) is a compile error.
 
+Each `<Name />` mount owns its own copy of the fields its fragment references, plus per-mount variants of the transactions that write them — incrementing one counter does not move another. The per-instance slots are dotted state fields (`Counter.0.count`, `Counter.1.count`); a mount's `b-trigger` fires its own txn variant.
+
 ### 21.4 Directives
 
 Canonical directives include:
