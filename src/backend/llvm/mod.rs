@@ -4799,6 +4799,16 @@ impl LlvmBackend {
         if let Some(idx) = self.ctx.field_index_map.get("cycle_count") {
             self.ctx.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
         }
+        // 2026-08-11 (view wiring): fields referenced by web view bindings are
+        // consumed by the DOM — observable, hence live (observability-as-liveness).
+        // They can be read-only (a `b-text` on a setup `let` never written by any
+        // txn), so the body-driven liveness scan would prune them. Never do so:
+        // the shim's binding table maps these names to handles.
+        for name in &self.ctx.view_bound_fields {
+            if self.ctx.field_index_map.contains_key(name) {
+                self.ctx.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+            }
+        }
         // 2026-07-19: Arena system fields must never be eliminated — they're
         // accessed by emit_arena_alloc via %State field indices, not by identifiers.
         for arena_name in &["__arena_ptr", "__arena_end", "__arena_base"] {

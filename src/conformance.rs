@@ -76,6 +76,20 @@ pub fn is_formatted(path: &Path) -> bool {
         })
 }
 
+/// 2026-08-11: whether an active source carries the `.s` strict profile
+/// (SPEC §3.2). Strict changes ACCEPTANCE criteria — unresolved view
+/// references, representation fallbacks, and trivial contracts are rejected —
+/// not runtime semantics or grammar. Governs the SRBV view-state verification
+/// on `.s.rbv` sources. Mirrors `is_formatted`.
+pub fn is_strict(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map_or(false, |name| {
+            let segments: Vec<&str> = name.split('.').collect();
+            segments.len() >= 2 && segments[1..segments.len() - 1].contains(&"s")
+        })
+}
+
 #[cfg(test)]
 mod profile_tests {
     use super::*;
@@ -87,6 +101,16 @@ mod profile_tests {
         assert!(!is_formatted(Path::new("main.bv")));
         assert!(!is_formatted(Path::new("main.s.bv")));
         assert!(!is_formatted(Path::new("noext")));
+    }
+
+    #[test]
+    fn detects_strict_profile() {
+        assert!(is_strict(Path::new("ui.s.rbv")));
+        assert!(is_strict(Path::new("main.s.bv")));
+        assert!(is_strict(Path::new("ui.s.f.rbv")));
+        assert!(!is_strict(Path::new("main.bv")));
+        assert!(!is_strict(Path::new("main.f.rbv")));
+        assert!(!is_strict(Path::new("noext")));
     }
 }
 

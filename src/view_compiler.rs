@@ -193,12 +193,43 @@ impl ViewCompiler {
         self.validation_errors.clear();
         let modified_html = self.inject_ids(view_html);
         self.extract_bindings(&modified_html);
+        // 2026-08-11: custom component tags (e.g. `<Counter />`) are first-class
+        // reactive instances per SPEC 21.3 — mount/unmount wiring is not yet
+        // wired into the web runtime, so flag them rather than silently
+        // rendering an inert element.
+        self.warn_component_tags(&modified_html);
         // 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors are
         // surfaced alongside the existing diagnostics (a rejected directive is
         // not silently ignored).
         let mut all = self.validation_errors.clone();
         all.extend(self.diagnostics.clone());
         (self.bindings.clone(), modified_html, all)
+    }
+
+    /// 2026-08-11: warn about custom component tags (`<Name .../>`, PascalCase)
+    /// whose mount lifecycle is a Phase 2 component-model feature. Standard
+    /// (lowercase) HTML elements are unaffected.
+    fn warn_component_tags(&mut self, html: &str) {
+        let mut pos = 0;
+        while let Some(rel) = html[pos..].find('<') {
+            let start = pos + rel;
+            let rest = &html[start + 1..];
+            let next = rest.as_bytes().first().copied();
+            if let Some(c) = next {
+                if c.is_ascii_uppercase() {
+                    let tag_end = rest
+                        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                        .unwrap_or(rest.len());
+                    let name = &rest[..tag_end];
+                    self.diagnostics.push(format!(
+                        "component tag '<{name}>' mounts a first-class reactive \
+                         instance (SPEC 21.3); mount/unmount wiring lands with \
+                         the Phase 2 component plan — rendered inert for now"
+                    ));
+                }
+            }
+            pos = start + 1;
+        }
     }
 
     fn inject_ids(&mut self, html: &str) -> String {
@@ -724,10 +755,17 @@ if attr.starts_with("b-text") {
         let value = if value_raw.trim_start().starts_with('"') || value_raw.trim_start().starts_with('\'') {
             let rest = value_raw.trim_start();
             let quote_char = if rest.starts_with('"') { '"' } else { '\'' };
-            let first_quote = rest.find(quote_char)? + 1;
-            let rest_after = &rest[first_quote..];
-            let end_quote = find_closing_quote(rest_after, quote_char).unwrap_or(rest_after.len());
-            rest[..first_quote + end_quote + 1].to_string()
+            // 2026-08-11: find_closing_quote expects the string to BEGIN with
+            // the opening quote. The previous code passed the tail AFTER the
+            // opening quote, so the first (and only) quote it saw was the
+            // closing one — mistaken for an opening quote → None → the
+            // unwrap_or(len) slice ran out of bounds (panic). Pass `rest`
+            // (which includes the opening quote) and slice to the closing
+            // quote inclusive.
+            match find_closing_quote(rest, quote_char) {
+                Some(end_quote) => rest[..end_quote + 1].to_string(),
+                None => rest.to_string(),
+            }
         } else {
             let end = value_raw
                 .find(|c: char| c.is_whitespace() || c == '>')
@@ -912,9 +950,42 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
     None
 }
 
-/// Verify .srbv (Strict Rendered Briv) view-state isomorphism
-/// For every signal/transaction referenced in the view bindings,
-/// verify they have non-trivial contracts (not [true] on both sides).
+/// Split a view signal into its root field name and any `.^X` reflection
+/// projection suffixes. `count` → (`count`, []); `items.^Size` →
+/// (`items`, ["Size"]); `a.^Size.^Len` → (`a`, ["Size", "Len"]).
+///
+/// 2026-08-11: single definition — reused by the web generator's
+/// `field_handle_for_signal` (handle lookup binds the root field), by
+/// `verify_srbv` (SRBV checks the root signal exists), and by the brivc
+/// frontend (view-bound fields protect %State slots from dead-field
+/// elimination). The `.^X` suffix is a projection on top of the field's
+/// value, never a separate signal.
+pub fn root_signal<'a>(signal: &'a str) -> (&'a str, Vec<&'a str>) {
+    let signal = signal.trim();
+    let mut proj: Vec<&str> = Vec::new();
+    let mut head = signal;
+    loop {
+        if let Some(dot) = head.rfind(".^") {
+            let suffix = &head[dot + 2..];
+            if !suffix.is_empty()
+                && suffix.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+            {
+                proj.push(suffix);
+                head = &head[..dot];
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    proj.reverse();
+    (head, proj)
+}
+
+/// Verify the `.s` strict profile (SPEC §3.2, `ui.s.rbv`) view-state
+/// isomorphism: every signal/transaction referenced in the view bindings must
+/// exist and carry non-trivial contracts (not `[true]` on both sides).
 /// Returns list of verification errors.
 pub fn verify_srbv(
     bindings: &[Binding],
@@ -931,6 +1002,16 @@ pub fn verify_srbv(
             TopLevel::StateDecl(state) => {
                 state_vars.insert(state.name.clone());
             }
+            // 2026-08-11: a top-level `let name: Type = ...;` is the standard
+            // `.s.rbv` state shape (parsed as a Statement::Let, not a
+            // StateDecl) — without this, `b-text="count"` on a `let count`
+            // fails SRBV001.
+            TopLevel::Statement(stmt) => {
+                if let ast::Statement::Let { name, names, .. } = stmt.as_ref() {
+                    state_vars.insert(name.clone());
+                    state_vars.extend(names.iter().cloned());
+                }
+            }
             TopLevel::Transaction(txn) => {
                 txn_contracts.insert(txn.name.clone(), &txn.contract);
             }
@@ -944,13 +1025,16 @@ pub fn verify_srbv(
     for binding in bindings {
         match &binding.directive {
             Directive::Text { signal } => {
-                if !state_vars.contains(signal) && !txn_contracts.contains_key(signal) {
+                // 2026-08-11: `items.^Size` binds the root field `items` —
+                // the reflection suffix is a projection, not a separate signal.
+                let (root, _) = root_signal(signal);
+                if !state_vars.contains(root) && !txn_contracts.contains_key(root) {
                     errors.push(format!(
                         "error[SRBV001]: view references undefined signal '{}' in b-text",
                         signal
                     ));
                 }
-                if let Some(contract) = txn_contracts.get(signal) {
+                if let Some(contract) = txn_contracts.get(root) {
                     if matches!(&contract.pre_condition, Expr::Bool(true))
                         && matches!(&contract.post_condition, Expr::Bool(true))
                     {

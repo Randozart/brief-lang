@@ -338,6 +338,142 @@ fn preprocess_source_for_path(file_path: &str, source: &str) -> Result<Preproces
     })
 }
 
+/// Compiled view output, produced once before codegen (webstack backend).
+#[derive(Debug)]
+struct CompiledView {
+    bindings: Vec<briv_compiler::view_compiler::Binding>,
+    /// ID-injected HTML — the dom-shim's getElementById() calls resolve
+    /// against this, never the raw markup. None when the build has no view.
+    modified_html: Option<String>,
+    warnings: Vec<String>,
+}
+
+/// 2026-08-11 (Phase 1 view wiring): compile the view markup with the
+/// ViewCompiler — element IDs injected, b-* bindings extracted, directives
+/// validated per SPEC 21.4 — and, for the `.s` strict profile, run the SRBV
+/// view-state verification. Runs BEFORE codegen so the returned view-referenced
+/// fields can protect state slots from dead-field elimination (the DOM consumes
+/// them — observability-as-liveness).
+fn compile_view(
+    file_path: &str,
+    items: &[briv_compiler::ast::TopLevel],
+    opts: &BuildOptions,
+    preprocessed: &PreprocessedSource,
+) -> Result<CompiledView, String> {
+    let raw_view = opts
+        .view_html
+        .as_ref()
+        .or(preprocessed.view_html.as_ref())
+        .cloned()
+        .or_else(|| {
+            // .bv with no <view>/--html: the view is the concatenation of
+            // `render Name { ... }` attachments.
+            let parts: Vec<String> = items
+                .iter()
+                .filter_map(|item| match item {
+                    briv_compiler::ast::TopLevel::RenderBlock(rb) => Some(rb.view_html.clone()),
+                    _ => None,
+                })
+                .collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n"))
+            }
+        });
+    let Some(html) = raw_view else {
+        return Ok(CompiledView {
+            bindings: opts.view_bindings.clone(),
+            modified_html: opts.view_html.clone(),
+            warnings: Vec::new(),
+        });
+    };
+
+    let mut vc = briv_compiler::view_compiler::ViewCompiler::new();
+    for item in items {
+        match item {
+            briv_compiler::ast::TopLevel::StateDecl(sd) => {
+                vc.register_signal(&sd.name, 0);
+            }
+            briv_compiler::ast::TopLevel::Transaction(t) => {
+                vc.register_transaction(&t.name, 0);
+            }
+            briv_compiler::ast::TopLevel::Definition(d) => {
+                vc.register_transaction(&d.name, 0);
+            }
+            _ => {}
+        }
+    }
+    let (bindings, modified_html, diagnostics) = vc.compile(&html);
+    // 2026-08-11: compile() surfaces validation_errors first (SPEC 21.4: a
+    // rejected directive is never silently ignored) — split the merged list on
+    // that count.
+    let validation_count = vc.validation_errors.len();
+    let warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
+    let directive_errors: Vec<String> =
+        diagnostics.iter().take(validation_count).cloned().collect();
+    if !directive_errors.is_empty() {
+        return Err(format!(
+            "{}: view directive errors:\n{}",
+            file_path,
+            directive_errors.join("\n")
+        ));
+    }
+    // 2026-08-11: SRBV view-state verification applies only to the `.s` strict
+    // profile (SPEC §3.2: `ui.s.rbv`) — strict changes ACCEPTANCE criteria.
+    // Plain `.rbv`/`.bv` builds surface ViewCompiler diagnostics as warnings.
+    if briv_compiler::conformance::is_strict(std::path::Path::new(file_path)) {
+        let srbv = briv_compiler::view_compiler::verify_srbv(&bindings, items);
+        if !srbv.is_empty() {
+            return Err(format!(
+                "{}: view reference errors:\n{}",
+                file_path,
+                srbv.join("\n")
+            ));
+        }
+    }
+    Ok(CompiledView {
+        bindings,
+        modified_html: Some(modified_html),
+        warnings,
+    })
+}
+
+/// 2026-08-11: the state fields a view actually references (root names of
+/// directive signals). Cache-slots and dead-field elimination must keep them.
+fn view_root_signals(
+    bindings: &[briv_compiler::view_compiler::Binding],
+) -> std::collections::HashSet<String> {
+    use briv_compiler::view_compiler::Directive;
+    let mut set = std::collections::HashSet::new();
+    for b in bindings {
+        match &b.directive {
+            Directive::Text { signal } => {
+                set.insert(briv_compiler::view_compiler::root_signal(signal).0.to_string());
+            }
+            Directive::Show { expr } | Directive::Hide { expr } => {
+                set.insert(briv_compiler::view_compiler::root_signal(expr).0.to_string());
+            }
+            Directive::Class { pairs } => {
+                for (_, v) in pairs {
+                    set.insert(briv_compiler::view_compiler::root_signal(v).0.to_string());
+                }
+            }
+            Directive::Attr { value, .. } => {
+                set.insert(briv_compiler::view_compiler::root_signal(value).0.to_string());
+            }
+            Directive::Style { value, .. } => {
+                set.insert(briv_compiler::view_compiler::root_signal(value).0.to_string());
+            }
+            Directive::Each { iterable, .. } => {
+                set.insert(briv_compiler::view_compiler::root_signal(iterable).0.to_string());
+            }
+            Directive::Trigger { .. } => {}
+        }
+    }
+    set
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -365,7 +501,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // ── Source normalization + PreLex transformation ─────────────────
     let preprocessed = preprocess_source_for_path(file_path, source)?;
-    let mut source = preprocessed.briv_source;
+    // 2026-08-11: clone — preprocessed (view_html/style_css) is consumed again
+    // by the early view compilation; a partial move would forbid that borrow.
+    let mut source = preprocessed.briv_source.clone();
     pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
@@ -734,6 +872,25 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
+    // ── View compilation (webstack) ────────────────────────────────────
+    // 2026-08-11 (Phase 1 view wiring): compile the view late enough that the
+    // program is type-checked (SRBV is meaningful) but BEFORE codegen, so the
+    // view-referenced fields protect their %State slots from dead-field
+    // elimination. Output block below reuses the cached result.
+    let compiled_view: CompiledView = if opts.backend == BackendKind::Webstack {
+        compile_view(file_path, &items, opts, &preprocessed)?
+    } else {
+        CompiledView {
+            bindings: Vec::new(),
+            modified_html: None,
+            warnings: Vec::new(),
+        }
+    };
+    let view_warnings = compiled_view.warnings.clone();
+    let view_bindings = compiled_view.bindings.clone();
+    let modified_view_html = compiled_view.modified_html.clone();
+    let view_signals = view_root_signals(&view_bindings);
+
     // ── Code generation ───────────────────────────────────────────────
     // 2026-07-23: Check if any glue target requests native module init.
     let enable_module_init = glue_targets.values().any(|t| t.module_init);
@@ -743,7 +900,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // stub when no webstack codegen ran, e.g. --emit-ir-only).
     let mut web_layout: Option<briv_compiler::glue::web_generator::StateLayout> = None;
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -828,11 +985,17 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 println!("wrote {}", css_path);
             }
 
-            // 2026-07-26: Phase 6b — Write index.html from <view> block content.
-            // Wraps the raw view HTML in a minimal HTML5 boilerplate that
+            // 2026-08-11 (Phase 1 view wiring): the view was compiled BEFORE
+            // codegen — bindings + ID-injected HTML cached in view_bindings /
+            // modified_view_html / view_warnings (see the webstack arm above).
+            // The injected IDs are load-bearing: the dom-shim's
+            // getElementById(el) calls resolve against the MODIFIED html,
+            // never the raw markup.
+
+            // 2026-07-26: Phase 6b — Write index.html from the compiled view.
+            // Wraps the ID-injected HTML in a minimal HTML5 boilerplate that
             // links app.css and loads dom-shim.mjs via ES module import.
-            let view_html = opts.view_html.as_ref().or(preprocessed.view_html.as_ref());
-            if let Some(html) = view_html {
+            if let Some(html) = modified_view_html.as_ref() {
                 let index_path = format!("{}.html", binary_base);
                 let index_content = format!(
                     "<!DOCTYPE html>\n\
@@ -875,6 +1038,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     println!("ssr {}", index_path);
                 }
             }
+            for w in &view_warnings {
+                eprintln!("warning: {}", w);
+            }
 
             // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
             let frgn_decls: Vec<briv_compiler::ast::ForeignBinding> = items.iter()
@@ -890,7 +1056,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     }
                 })
                 .collect();
-            if !frgn_decls.is_empty() || !opts.view_bindings.is_empty() {
+            if !frgn_decls.is_empty() || !view_bindings.is_empty() {
                 // 2026-08-10: use the real layout captured from the webstack
                 // codegen path when available; fall back to the historical
                 // hardcoded stub (empty fields) for paths that skipped codegen.
@@ -905,7 +1071,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 });
                 let web_gen = briv_compiler::glue::web_generator::GlueWebGenerator::new(
                     Vec::new(), // wasm bytes not needed for stub generation
-                    opts.view_bindings.clone(),
+                    view_bindings.clone(),
                     state_layout,
                     HashMap::new(),
                     frgn_decls,
@@ -1121,6 +1287,7 @@ fn codegen(
     resolved_frgns: std::collections::HashMap<String, briv_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
     web_layout: &mut Option<briv_compiler::glue::web_generator::StateLayout>,
+    view_signals: &std::collections::HashSet<String>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -1233,12 +1400,18 @@ fn codegen(
                 // collapse in find_path can make them zero-cost.
                 graph.register_inverse_pairs_from(items);
             }
-            output = b.generate(items, None);
+output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
             // GPU-info, target-triple notes) — they were test-only.
             for w in b.warnings() {
                 eprintln!("{}", w);
             }
+            // 2026-08-10: capture the real state layout (field names + handles)
+            // so the JS shim can map view bindings to state fields.
+            let stem = std::path::Path::new(&opts.file_path)
+                .file_stem().map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "app".to_string());
+            *web_layout = Some(b.web_state_layout(&stem));
             ".ll"
         }
         BackendKind::Webstack => {
@@ -1255,12 +1428,14 @@ fn codegen(
                 .with_needs_arena(needs_arena)
                 .with_stack_threshold(opts.stack_threshold)
                 .with_optimize_budget(opts.optimize_budget)
-                .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
                 .with_cast_from_bit_overrides(cast_from_bit_overrides)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init);
+            // 2026-08-11 (view wiring): view-bound fields are observability —
+            // the DOM consumes them, so dead-field elimination must keep them.
+            b.ctx.view_bound_fields = view_signals.clone();
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the
@@ -1998,6 +2173,186 @@ mod tests {
         assert_eq!(parsed.briv_source, source);
         assert!(parsed.view_html.is_none());
         assert!(parsed.style_css.is_none());
+    }
+
+    /// 2026-08-11 (view wiring): a minimal webstack BuildOptions for the
+    /// compile_view unit tests.
+    fn webstack_opts(file_path: &str) -> BuildOptions {
+        BuildOptions {
+            config_dir: None,
+            file_path: file_path.to_string(),
+            emit_ir_only: false,
+            out_dir: None,
+            optimize_budget: 256,
+            emit_beast_stages: vec![],
+            backend: BackendKind::Webstack,
+            no_stdlib: false,
+            stdlib_path: None,
+            disable_plugins: vec![],
+            enable_plugins: vec![],
+            trg_unresolved_action: TrgUnresolvedAction::Warn,
+            extra_objects: vec![],
+            shared: false,
+            library_mode: false,
+            int_bits: 32,
+            feature_svo: false,
+            glue_config: None,
+            stack_threshold: 4096,
+            allow_read: false,
+            allow_write: false,
+            allow_run: false,
+            allow_sys_query: false,
+            allow_net: false,
+            macro_budget: 0,
+            dump_vfs: false,
+            update_lockfile: false,
+            dump_traces: false,
+            diff_mode: false,
+            sysquery_overrides: std::collections::HashMap::new(),
+            target: None,
+            sysquery_pairs: vec![],
+            sysquery_files: vec![],
+            style_css: None,
+            view_html: None,
+            view_bindings: vec![],
+            ssr: false,
+            dev: false,
+        }
+    }
+
+    fn preprocessed_with_view(view_html: &str) -> PreprocessedSource {
+        PreprocessedSource {
+            briv_source: "".to_string(),
+            style_css: None,
+            view_html: Some(view_html.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_compile_view_injects_ids_and_extracts_bindings() {
+        let opts = webstack_opts("/tmp/app.rbv");
+        let items = vec![
+            briv_compiler::ast::TopLevel::Statement(Box::new(
+                briv_compiler::ast::Statement::Let {
+                    name: "count".to_string(),
+                    names: vec![],
+                    ty: Some(briv_compiler::ast::Type::int()),
+                    expr: Some(briv_compiler::ast::Expr::Decimal(0)),
+                    modifiers: vec![],
+                },
+            )),
+        ];
+        let pre = preprocessed_with_view(
+            r#"<div><span b-text="count">0</span><button b-trigger:click="bump">+</button></div>"#,
+        );
+        let cv = compile_view("/tmp/app.rbv", &items, &opts, &pre).expect("view compiles");
+        assert!(!cv.bindings.is_empty(), "b-text/b-trigger bindings extracted");
+        let html = cv.modified_html.expect("modified html present");
+        assert!(
+            html.contains("id=\"rbv-"),
+            "element IDs injected for the dom-shim: {html}"
+        );
+        let has_text = cv.bindings.iter().any(|b| {
+            matches!(
+                &b.directive,
+                briv_compiler::view_compiler::Directive::Text { signal } if signal == "count"
+            )
+        });
+        assert!(has_text, "b-text binding for count present");
+    }
+
+    #[test]
+    fn test_compile_view_rejects_b_if() {
+        let opts = webstack_opts("/tmp/app.rbv");
+        let pre = preprocessed_with_view(r#"<div b-if="x">bad</div>"#);
+        let err = compile_view("/tmp/app.rbv", &[], &opts, &pre).unwrap_err();
+        assert!(
+            err.contains("`b-if` is invalid"),
+            "b-if rejected per SPEC 21.4: {err}"
+        );
+    }
+
+    #[test]
+    fn test_compile_view_strict_rejects_undefined_signal() {
+        let opts = webstack_opts("/tmp/ui.s.rbv");
+        let pre = preprocessed_with_view(r#"<span b-text="nope">x</span>"#);
+        let err = compile_view("/tmp/ui.s.rbv", &[], &opts, &pre).unwrap_err();
+        assert!(
+            err.contains("SRBV001") && err.contains("'nope'"),
+            "strict profile rejects undefined signal: {err}"
+        );
+    }
+
+    #[test]
+    fn test_compile_view_non_strict_undefined_signal_passes() {
+        // 2026-08-11: plain .rbv builds surface ViewCompiler diagnostics as
+        // warnings — SRBV reference errors are a `.s` strict-profile feature.
+        let opts = webstack_opts("/tmp/app.rbv");
+        let pre = preprocessed_with_view(r#"<span b-text="nope">x</span>"#);
+        let cv = compile_view("/tmp/app.rbv", &[], &opts, &pre).expect("non-strict view compiles");
+        assert!(
+            cv.bindings.iter().any(|b| {
+                matches!(
+                    &b.directive,
+                    briv_compiler::view_compiler::Directive::Text { signal } if signal == "nope"
+                )
+            }),
+            "binding still extracted (dead in the shim until the field exists)"
+        );
+    }
+
+    #[test]
+    fn test_compile_view_falls_back_to_render_block_html() {
+        // A .bv with `render Name { ... }` and no <view> block derives its
+        // view from the render attachment.
+        let opts = webstack_opts("/tmp/app.bv");
+        let items = vec![briv_compiler::ast::TopLevel::RenderBlock(
+            briv_compiler::ast::RenderBlock {
+                struct_name: "Root".to_string(),
+                view_html: r#"<span b-text="count">0</span>"#.to_string(),
+                span: None,
+            },
+        )];
+        let pre = PreprocessedSource {
+            briv_source: "".to_string(),
+            style_css: None,
+            view_html: None,
+        };
+        let cv = compile_view("/tmp/app.bv", &items, &opts, &pre).expect("render block compiles");
+        let html = cv.modified_html.expect("html from render block");
+        assert!(html.contains("b-text") || html.contains("rbv-"));
+        assert!(!cv.bindings.is_empty());
+    }
+
+    #[test]
+    fn test_view_root_signals_derefs_projection() {
+        use briv_compiler::view_compiler::{Binding, Directive};
+        let bindings = vec![
+            Binding {
+                element_id: "a".to_string(),
+                directive: Directive::Text {
+                    signal: "items.^Size".to_string(),
+                },
+            },
+            Binding {
+                element_id: "b".to_string(),
+                directive: Directive::Text {
+                    signal: "count".to_string(),
+                },
+            },
+            Binding {
+                element_id: "c".to_string(),
+                directive: Directive::Trigger {
+                    event: "click".to_string(),
+                    txn: "bump".to_string(),
+                    params: vec![],
+                },
+            },
+        ];
+        let signals = view_root_signals(&bindings);
+        assert!(signals.contains("items"), "projection derefs to root field");
+        assert!(signals.contains("count"));
+        assert!(!signals.contains("bump"), "triggers reference txns, not fields");
     }
 
     /// Helper: create a temporary file with given content, run a function on its path.

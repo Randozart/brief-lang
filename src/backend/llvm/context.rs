@@ -101,6 +101,12 @@ pub struct CompilerContext {
     pub state_alias_scope_md: usize,
     pub exit_condition: Option<Box<Expr>>,
     pub has_natural_exit: bool,
+    /// 2026-08-11 (view wiring): state fields referenced by the web view's
+    /// bindings (`b-text`, `b-show`, `b-each`, …). The DOM consumes them, so
+    /// they are live by the observability-as-liveness rule and must never be
+    /// pruned by dead-field elimination. Frontend-computed (ViewCompiler
+    /// root signals) and copied here before generate().
+    pub view_bound_fields: std::collections::HashSet<String>,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -348,6 +354,7 @@ impl CompilerContext {
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,
+            view_bound_fields: std::collections::HashSet::new(),
             mmio_fields: HashMap::new(),
             mmio_initializers: HashMap::new(),
             mmio_prepopulated: false,

@@ -427,10 +427,15 @@ export async function createApp(wasmBytes) {{
     /// names a field resolves to that field's handle. Unresolved signals (e.g.
     /// compound expressions) fall back to `None` — the binding is left to the
     /// default (log-only) applyFn rather than guessed.
+    /// 2026-08-11: resolve a directive signal to its state-layout handle.
+    /// A view expression like `items.^Size` binds to the root field `items` —
+    /// the `.^X` reflection suffix is a projection applied on top of the
+    /// field's value, so handle lookup uses the head only. Shared root_signal
+    /// lives in view_compiler.rs (also used by verify_srbv — DRY).
     fn field_handle_for_signal(&self, signal: &str) -> Option<u32> {
-        let signal = signal.trim();
+        let (root, _) = crate::view_compiler::root_signal(signal);
         self.state_layout.fields.iter()
-            .find(|f| f.name == signal)
+            .find(|f| f.name == root)
             .map(|f| f.field_handle)
     }
 
@@ -441,13 +446,27 @@ export async function createApp(wasmBytes) {{
         let el = format!("document.getElementById({:?})", element);
         match &binding.directive {
             Directive::Text { signal } => {
-                let Some(handle) = self.field_handle_for_signal(signal) else {
+                let (root, proj) = crate::view_compiler::root_signal(signal);
+                let Some(handle) = self.field_handle_for_signal(root) else {
                     return String::new();
                 };
+                // 2026-08-11: apply `.^X` reflection projections inline in JS.
+                // `.^Size`/`.^Len` on a string/collection → `.length`; other
+                // reflections pass through as a property access.
+                let mut apply_value = "value".to_string();
+                for p in &proj {
+                    match *p {
+                        "Size" | "Len" => apply_value.push_str(".length"),
+                        other => {
+                            apply_value.push('.');
+                            apply_value.push_str(other);
+                        }
+                    }
+                }
                 format!(
                     "this._bindingTable[{handle}].applyFn = (value) => {{\n\
                      \x20         const el = {el};\n\
-                     \x20         if (el) el.textContent = value;\n\
+                     \x20         if (el) el.textContent = {apply_value};\n\
                      \x20       }};"
                 )
             }

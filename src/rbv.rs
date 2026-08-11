@@ -49,7 +49,17 @@ impl RbvFile {
     /// INVALID — the script-wrapper compatibility was removed. A `<script>`
     /// tag anywhere in the document is a hard error, not a fallback.
     pub fn parse(source: &str) -> Result<Self, RbvError> {
-        if source.contains("<script") || source.contains("</script>") {
+        // 2026-08-11: only reject a `<script>` that starts a line (the legacy
+        // wrapper shape). A line comment or string containing the literal text
+        // `<script>` is not markup — `examples/todo.rbv` documents the removal
+        // in a `//` comment and must still compile.
+        let has_script_tag = source
+            .lines()
+            .any(|line| {
+                let l = line.trim_start();
+                l.starts_with("<script") || l.starts_with("</script")
+            });
+        if has_script_tag {
             return Err(RbvError::Parse(
                 "<script> wrappers are invalid (SPEC 21.1) — write Briv source \
                  directly; the `<view>`/`<style>` blocks carry the markup"
@@ -155,6 +165,26 @@ let count: Int = 0;
             format!("{}", err).contains("<script> wrappers are invalid"),
             "script wrapper must be rejected: {err}"
         );
+    }
+
+    /// 2026-08-11: a `//` comment containing the literal text `<script>` is
+    /// NOT markup — `examples/todo.rbv` documents the legacy wrapper removal
+    /// in a comment and must still compile.
+    #[test]
+    fn test_parse_rbv_script_in_comment_is_allowed() {
+        let source = r#"// removed old <script> wrapper — plain Briv now
+let count: Int = 0;
+txn inc [count < 10][true] {
+    count = count + 1;
+    term;
+};
+<view>
+<span b-text="count">0</span>
+</view>
+"#;
+        let rbv = RbvFile::parse(source).expect("comment mentioning <script> must not be rejected");
+        assert!(rbv.briv_source.contains("let count: Int = 0;"));
+        assert!(rbv.view_html.contains("b-text"));
     }
 
     #[test]

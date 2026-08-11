@@ -3748,15 +3748,21 @@ validate. 1738 lib tests (x86_64 unaffected — int_bits=64 → identical IR).
 **Undo:** revert push_field_type's flexible-Int branch to `"i64"`; the loop
 engines revert to the i64-only model (breaks wasm32 again).
 
-## ViewCompiler never wired into compile pipeline — OPEN (pre-existing)
+## ViewCompiler never wired into compile pipeline — Phase 1 RESOLVED, Phase 2 OPEN
 
 **Date:** 2026-08-10
-**Status:** Open. `opts.view_bindings` is never populated from `render`
-blocks — the `ViewCompiler` (src/view_compiler.rs) is only unit-tested, never
-invoked in `compile_source`. As a result `--backend webstack` on an `.rbv`
-produces the `.wasm` + `.html` but no `dom-shim.mjs` with binding wiring (the
-`GlueWebGenerator` early-returns on empty bindings). The width/flush/binding
-machinery is complete; the view compiler just isn't called.
-**Fix direction:** in compile_source, after parsing, collect `RenderBlock`
-view HTML + run `ViewCompiler::compile()` into `opts.view_bindings`, then the
-existing dom-shim generation (compile.rs ~893) produces the wired shim.
+**Status (2026-08-11):** Phase 1 resolved. `opts.view_bindings` is now populated:
+`compile_source` runs `compile_view()` (ViewCompiler over the preprocessed
+`.rbv` `<view>` block, falling back to concatenated `RenderBlock.view_html`)
+*before* codegen, threads the extracted root signals through `codegen`, and the
+dom-shim generation emits the wired `dom-shim.mjs` (IDs injected into the
+copied `.html`, `_bindingTable` with per-field `applyFn`). View-referenced
+fields are protected from dead-field elimination via
+`CompilerContext.view_bound_fields` → `FieldMode::Always` (observability-as-
+liveness). SRBV verification runs only under the `.s` strict profile
+(`conformance::is_strict`). Covered by 6 new compile.rs tests + 1 rbv.rs test.
+**Still open — Phase 2 (SPEC 21.3) component model:** mount/unmount lifecycle,
+per-instance state (the WASM runtime state is a single global `%State`), `b-when`
+structural mount/unmount, `b-each`+`b-key` reconciliation, `b-bind:value`.
+Component tags (`<Counter>`) currently compile with a warning and render inert.
+See `docs/plans/2026-08-11-view-compiler-wiring.md`.
