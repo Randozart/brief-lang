@@ -130,12 +130,54 @@ pub struct GlueWebGenerator {
     /// 2026-07-26: Phase 6 — Foreign function declarations using from #Web protocol.
     /// Each produces a JS import stub in the WASM instantiation's import object.
     frgn_decls: Vec<crate::ast::top::ForeignBinding>,
+    /// 2026-08-11 (Phase 2a2, SPEC 21.4): `b-bind:value` input routing. Maps a
+    /// bound field to the UNIQUE transaction that writes it (the write-contract
+    /// proof) plus the JS marshalling category for the transaction's sole
+    /// parameter. Resolved at build time from the transition-graph write sets
+    /// (the same source the flush batch covers) — never guessed at runtime.
+    bind_routes: HashMap<String, BindRoute>,
+}
+
+/// JS marshalling category for a `b-bind:value` transaction parameter,
+/// derived from the Briv parameter type (type-driven — no name matching).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamKind {
+    /// #String — write via `_writeString(value)` (pointer into WASM memory).
+    String,
+    /// #Int / #Float — `Number(value)`.
+    Number,
+    /// #Bool — checkbox `.checked`.
+    Bool,
+}
+
+impl ParamKind {
+    /// 2026-08-11 (Phase 2a2): derive the marshalling category from the
+    /// existing type-tag machinery (protocol category → TypeTag → ParamKind).
+    /// No Briv type-name matching.
+    pub fn from_type_tag(tag: TypeTag) -> ParamKind {
+        match tag {
+            TypeTag::String => ParamKind::String,
+            TypeTag::Bool => ParamKind::Bool,
+            TypeTag::Int | TypeTag::Float => ParamKind::Number,
+        }
+    }
+}
+
+/// Build-time routing for a `b-bind:value` binding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BindRoute {
+    /// The transaction the input event fires on each change.
+    pub txn: String,
+    /// How the input value is marshalled into the transaction's parameter.
+    pub param_kind: ParamKind,
 }
 
 impl GlueWebGenerator {
     /// Create a new GlueWebGenerator with compile-time data.
     /// 2026-07-26: Phase 3 — `wasm_module` may be empty during testing.
     /// 2026-07-26: Phase 6 — Add frgn_decls for from #Web import stub generation.
+    /// 2026-08-11 (Phase 2a2): b-bind routes are set via `with_bind_routes`
+    /// (keeps `new` at 5 params — Praetor Datalog Rule 4).
     pub fn new(
         wasm_module: Vec<u8>,
         bindings: Vec<crate::view_compiler::Binding>,
@@ -149,7 +191,17 @@ impl GlueWebGenerator {
             state_layout,
             protocol_mappings,
             frgn_decls,
+            bind_routes: HashMap::new(),
         }
+    }
+
+    /// 2026-08-11 (Phase 2a2): set the resolved `b-bind:value` routes.
+    pub fn with_bind_routes(
+        mut self,
+        routes: HashMap<String, BindRoute>,
+    ) -> Self {
+        self.bind_routes = routes;
+        self
     }
 
     /// Generate the JS runtime shim and TS declarations.
@@ -537,6 +589,55 @@ export async function createApp(wasmBytes) {{
                      \x20       }})();"
                 )
             }
+            Directive::Bind { target } => {
+                // 2026-08-11 (Phase 2a2, SPEC 21.4): `b-bind:value="field"` wires
+                // the `input` event to the UNIQUE transaction that writes the
+                // field (resolved at build time — the write-contract proof).
+                // The value is marshalled by the transaction's sole parameter
+                // type: String → `_writeString` (pointer), Int/Float → Number,
+                // Bool → checkbox `.checked`. No silent guesses — an unresolvable
+                // route is a build-time error, not an inert input.
+                let Some(route) = self.bind_routes.get(target) else {
+                    return String::new();
+                };
+                let route_txn = &route.txn;
+                match route.param_kind {
+                    ParamKind::String => {
+                        format!(
+                            "(() => {{\n\
+                             \x20         const el = {el};\n\
+                             \x20         if (!el) return;\n\
+                             \x20         el.addEventListener('input', () => {{\n\
+                             \x20           const ptr = this._writeString(el.value);\n\
+                             \x20           this._instance.exports[{route_txn:?}](ptr);\n\
+                             \x20         }});\n\
+                             \x20       }})();"
+                        )
+                    }
+                    ParamKind::Number => {
+                        format!(
+                            "(() => {{\n\
+                             \x20         const el = {el};\n\
+                             \x20         if (!el) return;\n\
+                             \x20         el.addEventListener('input', () => {{\n\
+                             \x20           this._instance.exports[{route_txn:?}](Number(el.value) || 0);\n\
+                             \x20         }});\n\
+                             \x20       }})();"
+                        )
+                    }
+                    ParamKind::Bool => {
+                        format!(
+                            "(() => {{\n\
+                             \x20         const el = {el};\n\
+                             \x20         if (!el) return;\n\
+                             \x20         el.addEventListener('change', () => {{\n\
+                             \x20           this._instance.exports[{route_txn:?}](el.checked ? 1 : 0);\n\
+                             \x20         }});\n\
+                             \x20       }})();"
+                        )
+                    }
+                }
+            }
             Directive::Trigger { event, txn, params } => {
                 // 2026-08-10: wire a DOM event listener that calls the WASM
                 // transaction export (b._instance.exports[<txn>]) with the
@@ -912,8 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn test_when_binding_emits_mount_unmount_effect() {
-        // 2026-08-11 (Phase 2a, SPEC 21.4): `b-when` structurally mounts/
+    fn test_when_binding_emits_mount_unmount_effect() {        // 2026-08-11 (Phase 2a, SPEC 21.4): `b-when` structurally mounts/
         // unmounts a subtree. The emitted effect must snapshot a template,
         // anchor the position with a comment, and insert/remove on truthiness.
         let bindings = vec![crate::view_compiler::Binding {
@@ -953,6 +1053,60 @@ mod tests {
             "unmount must anchor the position:\n{shim}");
         assert!(shim.contains("el.remove()"),
             "unmount must detach the element:\n{shim}");
+    }
+
+    #[test]
+    fn test_bind_binding_emits_type_driven_input_wiring() {
+        // 2026-08-11 (Phase 2a2, SPEC 21.4): b-bind:value routes the input
+        // event to the resolved writer transaction, marshalling the value by
+        // the transaction's parameter type (String → _writeString, Number →
+        // Number(...), Bool → checkbox).
+        let mk = |target: &str, kind: ParamKind| {
+            let bindings = vec![crate::view_compiler::Binding {
+                element_id: "fld".to_string(),
+                directive: crate::view_compiler::Directive::Bind {
+                    target: target.to_string(),
+                },
+            }];
+            let mut routes = std::collections::HashMap::new();
+            routes.insert(
+                target.to_string(),
+                BindRoute {
+                    txn: "set_field".to_string(),
+                    param_kind: kind,
+                },
+            );
+            let g = GlueWebGenerator::new(
+                Vec::new(),
+                bindings,
+                StateLayout {
+                    app_name: "bind_app".to_string(),
+                    generation_offset: 0,
+                    flush_buffer_offset: 64,
+                    max_flush_entries: 8,
+                    fields: vec![],
+                },
+                HashMap::new(),
+                Vec::new(),
+            )
+            .with_bind_routes(routes);
+            g.generate().expect("generate should succeed").dom_shim
+        };
+        let shim_str = mk("name", ParamKind::String);
+        assert!(
+            shim_str.contains("_writeString(el.value)") && shim_str.contains("set_field"),
+            "String bind must write via _writeString:\n{shim_str}"
+        );
+        let shim_num = mk("count", ParamKind::Number);
+        assert!(
+            shim_num.contains("Number(el.value)"),
+            "Int/Float bind must marshal Number(...):\n{shim_num}"
+        );
+        let shim_bool = mk("flag", ParamKind::Bool);
+        assert!(
+            shim_bool.contains("el.checked"),
+            "Bool bind must read checkbox:\n{shim_bool}"
+        );
     }
 
     #[test]

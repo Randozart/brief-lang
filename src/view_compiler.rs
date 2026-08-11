@@ -51,6 +51,13 @@ pub enum Directive {
     When {
         expr: String,
     },
+    /// 2026-08-11 (Phase 2a2, SPEC 21.4): `b-bind:value="field"` — two-way
+    /// binding. The input event routes to the UNIQUE transaction that writes
+    /// `target` (the write-contract proof), resolved at build time; the value
+    /// is marshalled by that transaction's parameter type.
+    Bind {
+        target: String,
+    },
     Trigger {
         event: String,
         txn: String,
@@ -284,6 +291,7 @@ impl ViewCompiler {
                         || tag_lower.contains("b-when")
                         || tag_lower.contains("b-trigger")
                         || tag_lower.contains("b-on")
+                        || tag_lower.contains("b-bind")
                         || has_b_class
                         || tag_lower.contains("b-attr")
                         || tag_lower.contains("b-style")
@@ -550,6 +558,13 @@ if attr.starts_with("b-text") {
                     self.bindings.push(Binding {
                         element_id: elem_id.to_string(),
                         directive: Directive::When { expr },
+                    });
+                }
+            } else if attr.starts_with("b-bind") {
+                if let Some(target) = self.extract_attr_value(tag, "b-bind:value") {
+                    self.bindings.push(Binding {
+                        element_id: elem_id.to_string(),
+                        directive: Directive::Bind { target },
                     });
                 }
             } else if attr.starts_with("b-trigger:") || attr.starts_with("b-on:") {
@@ -1155,6 +1170,18 @@ pub fn verify_srbv(
                     ));
                 }
             }
+            Directive::Bind { target } => {
+                // 2026-08-11 (Phase 2a2): `b-bind:value` writes `target` — it
+                // must be a declared state field (the unique-writer resolution
+                // happens at build time against the transition graph).
+                let (root, _) = root_signal(target);
+                if !state_vars.contains(root) {
+                    errors.push(format!(
+                        "error[SRBV011]: b-bind:value targets undefined field '{}'",
+                        target
+                    ));
+                }
+            }
             Directive::Each { iterable, .. } => {
                 if !state_vars.contains(iterable.as_str()) && !txn_contracts.contains_key(iterable.as_str()) {
                     errors.push(format!(
@@ -1375,6 +1402,43 @@ mod tests {
         assert!(
             modified_html.contains("id=\"") && modified_html.contains("/>"),
             "ID must be injected into the self-closing tag: {modified_html}"
+        );
+    }
+
+    // ── 2026-08-11 (Phase 2a2, SPEC 21.4): b-bind:value ────────────────
+
+    #[test]
+    fn b_bind_extracts_target() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, modified_html, diagnostics) =
+            vc.compile(r#"<input b-bind:value="name" />"#);
+        assert!(diagnostics.is_empty(), "{:?}", diagnostics);
+        assert!(
+            modified_html.contains("id=\"") && modified_html.contains("/>"),
+            "self-closing b-bind input gets an ID: {modified_html}"
+        );
+        let bind = bindings
+            .iter()
+            .find(|b| matches!(&b.directive, Directive::Bind { .. }))
+            .expect("b-bind binding extracted");
+        match &bind.directive {
+            Directive::Bind { target } => assert_eq!(target, "name"),
+            other => panic!("expected Directive::Bind, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn b_bind_compound_target_rejected() {
+        // validate_directives already rejects a non-assignable target
+        // (SPEC 21.4) — a computed expression is not a field.
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(r#"<input b-bind:value="count + 1">"#);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.contains("`b-bind:value` accepts only an assignable field")),
+            "{:?}",
+            diagnostics
         );
     }
 

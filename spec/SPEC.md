@@ -1390,6 +1390,8 @@ Reactive component nodes and view-event handlers obey the same no-implicit-concu
 
 `b-bind:value` accepts only an assignable logical field with a proven write contract. Computed expressions use separate value and trigger handlers.
 
+The compiler resolves `b-bind:value`'s writer at build time: the target must be written by exactly one transaction (from the transition-graph write sets), and that transaction must take exactly one parameter — the input value is marshalled by that parameter's type. No writer, multiple writers, or a wrong-arity writer is a compile error, never an inert input.
+
 ### 21.5 View expressions
 
 Every directive expression is canonical Briv, not a JavaScript-like mini-language. Ternaries and brace object literals are invalid.

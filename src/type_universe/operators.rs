@@ -118,7 +118,9 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
 /// Never matches type names (rules 14/18). Returns None for types with no
 /// registered universe entry (custom types in a fresh universe); the
 /// typechecker resolves those via its own type_protocols/type_parents.
-pub(crate) fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
+/// 2026-08-11 (Phase 2a2): `pub` — the brivc bin (separate crate) resolves
+/// b-bind marshalling categories from it.
+pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     match ty {
         // A hashword IS a protocol category reference — strip the `#`.
         Type::HashWord(name) => return name.strip_prefix('#').map(str::to_string),

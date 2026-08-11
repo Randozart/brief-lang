@@ -475,10 +475,95 @@ fn view_root_signals(
             Directive::Each { iterable, .. } => {
                 set.insert(briv_compiler::view_compiler::root_signal(iterable).0.to_string());
             }
+            Directive::Bind { target } => {
+                // 2026-08-11 (Phase 2a2): b-bind WRITES the target — the field
+                // must stay live so its slot exists for the transaction's
+                // write + flush.
+                set.insert(briv_compiler::view_compiler::root_signal(target).0.to_string());
+            }
             Directive::Trigger { .. } => {}
         }
     }
     set
+}
+
+/// 2026-08-11 (Phase 2a2, SPEC 21.4): resolve `b-bind:value` input routes.
+/// A field's route is the UNIQUE transaction whose write_set contains it (the
+/// write-contract proof), and the JS marshalling category of that transaction's
+/// SOLE parameter. Resolved from the transition graph — the same write sets
+/// the webstack flush batch covers, so a resolved route is guaranteed to flush
+/// back to the DOM. Returns field → Ok(route) or Err(reason):
+/// - no writer → "no transaction writes '<field>'";
+/// - multiple writers → "ambiguous — transactions ... write '<field>'";
+/// - the sole writer takes no/several params → "transaction '<txn>' takes N
+///   parameter(s); b-bind requires exactly one".
+fn resolve_bind_routes(
+    graph: &Option<briv_compiler::analysis::transition_graph::ReactorTransitionGraph>,
+    items: &[briv_compiler::ast::TopLevel],
+    universe: &TypeUniverse,
+) -> std::collections::HashMap<String, Result<briv_compiler::glue::web_generator::BindRoute, String>>
+{
+    use briv_compiler::glue::web_generator::{BindRoute, ParamKind, TypeTag};
+    use std::collections::HashMap;
+
+    let mut writers: HashMap<String, Vec<String>> = HashMap::new();
+    // Flat scan of every (field, txn) write pair — the total write entries,
+    // not nodes × fields (single logical pass; grouping below is linear).
+    let write_pairs: Vec<(String, String)> = graph
+        .iter()
+        .flat_map(|g| g.nodes.iter())
+        .flat_map(|n| n.write_set.iter().map(move |f| (f.clone(), n.name.clone())))
+        .collect();
+    for (field, txn) in write_pairs {
+        writers.entry(field).or_default().push(txn);
+    }
+
+    // Transaction → sole parameter Briv type (type-driven marshalling).
+    let mut param_ty: HashMap<String, briv_compiler::ast::Type> = HashMap::new();
+    for item in items {
+        let (name, params) = match item {
+            briv_compiler::ast::TopLevel::Transaction(t) => (&t.name, &t.parameters),
+            briv_compiler::ast::TopLevel::Definition(d) => (&d.name, &d.parameters),
+            _ => continue,
+        };
+        if let Some((_, ty)) = params.first() {
+            param_ty.insert(name.clone(), ty.clone());
+        }
+    }
+
+    let mut out: HashMap<String, Result<BindRoute, String>> = HashMap::new();
+    for (field, mut txns) in writers {
+        txns.sort_unstable();
+        if txns.len() > 1 {
+            out.insert(
+                field.clone(),
+                Err(format!(
+                    "ambiguous — transactions {} write '{}'; b-bind:value needs exactly one writer",
+                    txns.join(", "),
+                    field
+                )),
+            );
+            continue;
+        }
+        let txn = txns[0].clone();
+        match param_ty.get(&txn) {
+            Some(ty) => {
+                let cat = briv_compiler::type_universe::protocol_category(universe, ty);
+                let kind = ParamKind::from_type_tag(TypeTag::from_protocol_category(cat.as_deref()));
+                out.insert(field.clone(), Ok(BindRoute { txn, param_kind: kind }));
+            }
+            None => {
+                out.insert(
+                    field.clone(),
+                    Err(format!(
+                        "transaction '{}' takes no parameters; b-bind:value must pass the input value",
+                        txn
+                    )),
+                );
+            }
+        }
+    }
+    out
 }
 
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
@@ -906,8 +991,14 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // consumed by the GlueWebGenerator below (falls back to the hardcoded
     // stub when no webstack codegen ran, e.g. --emit-ir-only).
     let mut web_layout: Option<briv_compiler::glue::web_generator::StateLayout> = None;
+    // 2026-08-11 (Phase 2a2): b-bind routes resolved during codegen from the
+    // transition graph; surfaced here so unresolvable routes are hard errors.
+    let mut bind_routes: Option<std::collections::HashMap<
+        String,
+        Result<briv_compiler::glue::web_generator::BindRoute, String>,
+    >> = None;
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -1049,6 +1140,35 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 eprintln!("warning: {}", w);
             }
 
+            // 2026-08-11 (Phase 2a2, SPEC 21.4): every `b-bind:value` must
+            // resolve to exactly one writer transaction (the write-contract
+            // proof). Unresolvable routes are hard errors, never inert inputs.
+            {
+                let routes = bind_routes.as_ref();
+                for binding in &view_bindings {
+                    if let briv_compiler::view_compiler::Directive::Bind { target } =
+                        &binding.directive
+                    {
+                        let (root, _) = briv_compiler::view_compiler::root_signal(target);
+                        let resolution = routes
+                            .and_then(|r| r.get(root))
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                Err(format!(
+                                    "no transaction writes '{}' — b-bind:value needs a proven write contract (SPEC 21.4)",
+                                    root
+                                ))
+                            });
+                        if let Err(reason) = resolution {
+                            return Err(format!(
+                                "{}: b-bind:value=\"{}\": {}",
+                                file_path, target, reason
+                            ));
+                        }
+                    }
+                }
+            }
+
             // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
             let frgn_decls: Vec<briv_compiler::ast::ForeignBinding> = items.iter()
                 .filter_map(|item| {
@@ -1076,13 +1196,22 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                         fields: vec![],
                     }
                 });
+                // 2026-08-11 (Phase 2a2): unwrap the resolved b-bind routes for
+                // the generator — the Ok entries are the wired inputs; Err
+                // entries were already rejected above as hard errors.
+                let resolved_routes: std::collections::HashMap<_, _> = bind_routes
+                    .iter()
+                    .flat_map(|r| r.iter())
+                    .filter_map(|(field, res)| res.clone().ok().map(|route| (field.clone(), route)))
+                    .collect();
                 let web_gen = briv_compiler::glue::web_generator::GlueWebGenerator::new(
                     Vec::new(), // wasm bytes not needed for stub generation
                     view_bindings.clone(),
                     state_layout,
                     HashMap::new(),
                     frgn_decls,
-                );
+                )
+                .with_bind_routes(resolved_routes);
                 match web_gen.generate() {
                     Ok(output) => {
                         let mjs_path = format!("{}.mjs", binary_base);
@@ -1295,6 +1424,10 @@ fn codegen(
     enable_module_init: bool,
     web_layout: &mut Option<briv_compiler::glue::web_generator::StateLayout>,
     view_signals: &std::collections::HashSet<String>,
+    bind_routes: &mut Option<std::collections::HashMap<
+        String,
+        Result<briv_compiler::glue::web_generator::BindRoute, String>,
+    >>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -1472,6 +1605,12 @@ output = b.generate(items, None);
                 .file_stem().map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "app".to_string());
             *web_layout = Some(b.web_state_layout(&stem));
+            // 2026-08-11 (Phase 2a2): resolve `b-bind:value` input routes from
+            // the transition-graph write sets (the SAME source the flush batch
+            // covers) — a field's route is the UNIQUE transaction that writes
+            // it. Compile_source surfaces unresolvable routes (zero / ambiguous
+            // writers, wrong arity) as hard errors.
+            *bind_routes = Some(resolve_bind_routes(&b.ctx.transition_graph, items, universe));
             ".ll"
         }
         BackendKind::Webstack => {
@@ -2360,6 +2499,103 @@ mod tests {
         assert!(signals.contains("items"), "projection derefs to root field");
         assert!(signals.contains("count"));
         assert!(!signals.contains("bump"), "triggers reference txns, not fields");
+    }
+
+    #[test]
+    fn test_resolve_bind_routes_unique_writer() {
+        // 2026-08-11 (Phase 2a2): a field written by exactly one transaction
+        // resolves to that transaction with the param marshalling category.
+        use briv_compiler::analysis::transition_graph::ReactorNode;
+        use briv_compiler::glue::web_generator::{BindRoute, ParamKind};
+        use std::collections::HashSet;
+
+        let node = |name: &str, fields: &[&str]| ReactorNode {
+            name: name.to_string(),
+            is_reactive: false,
+            precondition: briv_compiler::ast::Expr::Bool(true),
+            body: vec![],
+            bounded_pre: None,
+            increments: None,
+            is_pure_body: true,
+            write_set: fields.iter().map(|s| s.to_string()).collect(),
+            is_effectively_pure: false,
+            lexicographic_vars: vec![],
+        };
+        let graph = briv_compiler::analysis::transition_graph::ReactorTransitionGraph {
+            nodes: vec![node("set_name", &["name"])],
+            has_triggers: false,
+            live_fields: HashSet::new(),
+            has_unguarded_ffi: HashSet::new(),
+        };
+        let items = vec![briv_compiler::ast::TopLevel::Transaction(
+            briv_compiler::ast::Transaction {
+                name: "set_name".to_string(),
+                is_reactive: false,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![(
+                    "n".to_string(),
+                    briv_compiler::ast::Type::Custom("String".to_string()),
+                )],
+                output_type: None,
+                outputs: Vec::new(),
+                contract: briv_compiler::ast::Contract::new(
+                    briv_compiler::ast::Expr::Bool(true),
+                    briv_compiler::ast::Expr::Bool(true),
+                ),
+                body: vec![],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            },
+        )];
+        let mut universe = TypeUniverse::new();
+        let routes = resolve_bind_routes(&Some(graph), &items, &mut universe);
+        let route = routes
+            .get("name")
+            .expect("name resolves")
+            .as_ref()
+            .expect("no error");
+        assert_eq!(route.txn, "set_name");
+        assert_eq!(route.param_kind, ParamKind::String);
+    }
+
+    #[test]
+    fn test_resolve_bind_routes_ambiguous_and_missing() {
+        // A field written by two transactions is ambiguous (SPEC 21.4 needs a
+        // single proven write contract); a field no transaction writes has no
+        // route at all.
+        use briv_compiler::analysis::transition_graph::ReactorNode;
+        use std::collections::HashSet;
+
+        let node = |name: &str| ReactorNode {
+            name: name.to_string(),
+            is_reactive: false,
+            precondition: briv_compiler::ast::Expr::Bool(true),
+            body: vec![],
+            bounded_pre: None,
+            increments: None,
+            is_pure_body: true,
+            write_set: HashSet::from(["count".to_string()]),
+            is_effectively_pure: false,
+            lexicographic_vars: vec![],
+        };
+        let graph = briv_compiler::analysis::transition_graph::ReactorTransitionGraph {
+            nodes: vec![node("w1"), node("w2")],
+            has_triggers: false,
+            live_fields: HashSet::new(),
+            has_unguarded_ffi: HashSet::new(),
+        };
+        let mut universe = TypeUniverse::new();
+        let routes = resolve_bind_routes(&Some(graph), &[], &mut universe);
+        let err = routes
+            .get("count")
+            .expect("count has a resolution")
+            .as_ref()
+            .expect_err("ambiguous writers must error");
+        assert!(err.contains("ambiguous"), "got: {err}");
     }
 
     /// Helper: create a temporary file with given content, run a function on its path.

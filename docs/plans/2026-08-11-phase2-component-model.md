@@ -2,8 +2,27 @@
 
 **Date:** 2026-08-11
 **Status:** active — plan for the SPEC 21.3 component model, decomposed into
-independently-complete sub-phases. **2a1 `b-when` implemented (committed).**
-2a2/2a3/2b pending.
+independently-complete sub-phases. **2a1 `b-when` and 2a2 `b-bind:value`
+implemented (committed).** 2a3/2b pending.
+
+## 2a2 implementation summary (2026-08-11)
+
+- `Directive::Bind { target }` extracted; SRBV011 checks the target is a state
+  field (strict profile).
+- Build-time writer resolution (`resolve_bind_routes`): a field's input route is
+  the UNIQUE transaction whose `write_set` (the SAME transition-graph source the
+  flush batch covers) contains it. Zero writers / ambiguous writers / wrong
+  arity are hard errors (SPEC 21.4: never an inert input). `codegen` resolves
+  from the graph; compile_source validates every `Directive::Bind`.
+- Shim emits type-driven input wiring: String → `_writeString(el.value)` then
+  `exports[txn](ptr)`; Int/Float → `Number(el.value)`; Bool → checkbox
+  `.checked`. Marshalling derived from the txn param type via
+  protocol_category → TypeTag → ParamKind (no name matching).
+- Three webstack parameterized-txn codegen bugs fixed (BUGS.md): void-return
+  `alloca void`; boxed params typed `int()` (wrong on wasm32 i32); narrow Int
+  params stored un-widened.
+- Tests: 5 new (view_compiler ×2, web_generator ×1, compile ×2). Suite 1749
+  lib + 14 bin green.
 
 ## 2a1 implementation summary (2026-08-11)
 

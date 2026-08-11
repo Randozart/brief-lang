@@ -3065,16 +3065,24 @@ fn probe_ok_checks(
 
         // 2026-07-18: Use the function's return type for %result, not always i64.
         // Bool-returning functions need i8 result type to match the define i8 signature.
-        writeln!(out, "  %result = alloca {}, align 8", ret_llvm).ok();
-        // 2026-08-03 (node bridge): a callable txn may return ptr (CStr), float,
-        // or double — the zero constant must match the LLVM type or opt rejects
-        // it ("integer constant must have integer type" / invalid float literal).
-        let init_val = match ret_llvm.as_str() {
-            "ptr" => "null".to_string(),
-            "float" | "double" => "0.0".to_string(),
-            _ => "0".to_string(),
-        };
-        writeln!(out, "  store {} {}, ptr %result, align 8", ret_llvm, init_val).ok();
+        // 2026-08-11 (Phase 2a2 fix): a parameterized VOID txn (e.g.
+        // `txn set_name(n: String)`) emitted `alloca void` + `store void 0` —
+        // invalid LLVM ("void type only allowed for function results") that
+        // made llc reject the wasm module. The result slot only exists when
+        // the txn actually returns a value.
+        if ret_llvm != "void" {
+            writeln!(out, "  %result = alloca {}, align 8", ret_llvm).ok();
+            // 2026-08-03 (node bridge): a callable txn may return ptr (CStr),
+            // float, or double — the zero constant must match the LLVM type or
+            // opt rejects it ("integer constant must have integer type" /
+            // invalid float literal).
+            let init_val = match ret_llvm.as_str() {
+                "ptr" => "null".to_string(),
+                "float" | "double" => "0.0".to_string(),
+                _ => "0".to_string(),
+            };
+            writeln!(out, "  store {} {}, ptr %result, align 8", ret_llvm, init_val).ok();
+        }
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
@@ -3097,6 +3105,20 @@ fn probe_ok_checks(
                 // detection + emit_box_value_to_i64 replacing the name match.
                 let ac = format!("%ac{}", i);
                 self.emit_box_value_to_i64(out, "  ", t, &raw, &ac, &format!("%ai{}", i));
+                conv = ac;
+            } else if param_llvm_ty.starts_with('i') {
+                // 2026-08-11 (Phase 2a2 fix): a narrow integer param — `Int`
+                // on wasm32 is i32 (width-aware slots, int_bits=32) but the
+                // param slot is always i64. The old `conv = raw` emitted
+                // `store i64 %arg0` where %arg0 was i32, which llc rejected
+                // ("defined with type 'i32' but expected 'i64'"). Widen to the
+                // slot width: signed Int sexts, unsigned UInt zexts.
+                let ac = format!("%ac{}", i);
+                if self.is_protocol_member(t, "#UInt") {
+                    writeln!(out, "  {} = zext {} {} to i64", ac, param_llvm_ty, raw).ok();
+                } else {
+                    writeln!(out, "  {} = sext {} {} to i64", ac, param_llvm_ty, raw).ok();
+                }
                 conv = ac;
             } else {
                 conv = raw;
@@ -3123,15 +3145,15 @@ fn probe_ok_checks(
             // through the alloca correctly. Reads still load from the slot, but
             // LLVM's optimizer merges redundant loads via SROA.
             self.fun.let_bindings.insert(n.clone(), slot.clone());
-            // loaded is i64 (boxed value from param slot). Store Type::int()
-            // for boxed types so downstream doesn't treat them as native.
-            // 2026-07-31: Phase 3 (§8.4-D1) — is_boxed_int_type (protocol
-            // membership) replaces the hardcoded name set.
-            if self.is_boxed_int_type(t) {
-                self.fun.let_binding_types.insert(n.clone(), Type::int());
-            } else {
-                self.fun.let_binding_types.insert(n.clone(), t.clone());
-            }
+            // 2026-08-11 (Phase 2a2 fix): boxed params keep their ORIGINAL
+            // Briv type — the old `Type::int()` downgrade made a boxed String
+            // param look like an Int, and on wasm32 (int_bits=32) `int()` maps
+            // to i32, so `name = n` emitted `sext i32` on a value that is
+            // genuinely i64 (the boxed address). The identifier load now unboxes
+            // the i64 slot into the native representation (inttoptr for
+            // String/Data, trunc for Char/Bool) — same as state-field reads.
+            self.fun.let_binding_types.insert(n.clone(), t.clone());
+            self.fun.let_original_types.insert(n.clone(), t.clone());
         }
 
         // 2026-07-20: Set fn_ret_ty so term codegen stores with the correct type

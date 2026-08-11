@@ -1,5 +1,35 @@
 # Bugs
 
+## Webstack parameterized-txn codegen bugs (wasm32) — FIXED
+
+**Date:** 2026-08-11
+**Status:** Fixed (commit pending, 2a2 b-bind:value)
+Found while wiring `b-bind:value` (input → parameterized writer transaction).
+Parameterized transactions were never exercised on webstack before — the
+counter examples used param-less txns.
+
+1. **Void-return txn emitted `alloca void`** — `txn set_name(n: String)` (no
+   `->`) emitted `%result = alloca void, align 8` + `store void 0`, invalid
+   LLVM ("void type only allowed for function results") → llc rejected the
+   wasm module. **Fix:** the `%result` slot is emitted only when the txn
+   actually returns a value (`ret_llvm != "void"`).
+2. **Boxed param typed `int()` broke on wasm32** — boxed params (String/
+   Char/Bool/Data) were downgraded to `Type::int()` because their i64 param
+   slot "is already i64". On x86_64 `int()` = i64 (accidentally consistent);
+   on wasm32 (int_bits=32) `int()` = i32, so `name = n` emitted
+   `sext i32 %t12 to i64` on a value that is genuinely i64 → llc type error.
+   **Fix:** boxed params keep their ORIGINAL Briv type and the identifier load
+   unboxes the i64 slot (inttoptr for String/Data, trunc for Char/Bool),
+   mirroring state-field reads.
+3. **Narrow Int params stored un-widened** — `txn set_n(n: Int)` on wasm32
+   passes `%arg0` as i32 but the param slot is `alloca i64`; the old `conv =
+   raw` emitted `store i64 %arg0` (i32) → llc error. **Fix:** non-boxed
+   integer params widen to i64 at entry (sext signed / zext unsigned) and the
+   identifier load truncs back to the native width.
+
+Regression tests: the lib suite's existing parameterized-txn tests on x86_64
+stay green; b-bind E2E on wasm32 exercised String/Int/Bool param txns.
+
 ## Phase 2a view fixes (2026-08-11) — FIXED
 
 **Date:** 2026-08-11

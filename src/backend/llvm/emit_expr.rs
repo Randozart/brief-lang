@@ -343,9 +343,40 @@ impl LlvmBackend {
                     {
                         let loaded = self.fun.gen_reg();
                         writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, loaded, reg).ok();
-                        TypedRegister {
-                            name: loaded,
-                            ty: self.get_local_type(name),
+                        let ty = self.get_local_type(name);
+                        // 2026-08-11 (Phase 2a2 fix): a BOXED param slot holds
+                        // the boxed i64 machine word (String/Data = address,
+                        // Char = native i32, Bool = i8). Unbox at the load —
+                        // the same conversion state-field reads apply — so the
+                        // value's SSA type matches its register. Previously the
+                        // param was typed `int()`, which on wasm32 is i32, so a
+                        // String param was re-widened (`sext i32`) on store.
+                        if self.is_string_operand(&ty) || self.is_data_operand(&ty) {
+                            let p = self.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, loaded).ok();
+                            TypedRegister { name: p, ty }
+                        } else if self.is_protocol_member(&ty, "#Char") {
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, loaded).ok();
+                            TypedRegister { name: t, ty }
+                        } else if self.is_protocol_member(&ty, "#Bool") {
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, t, loaded).ok();
+                            TypedRegister { name: t, ty }
+                        } else {
+                            // 2026-08-11 (Phase 2a2 fix): a narrow INTEGER
+                            // param (`Int` on wasm32 is i32) is widened to the
+                            // i64 slot at function entry; reading it back must
+                            // truncate to the native width so the register type
+                            // matches the value's Briv type (i32, not i64).
+                            let lt = self.llvm_type(&ty);
+                            if lt.starts_with('i') && lt != "i64" {
+                                let t = self.fun.gen_reg();
+                                writeln!(out, "{}{} = trunc i64 {} to {}", indent, t, loaded, lt).ok();
+                                TypedRegister { name: t, ty }
+                            } else {
+                                TypedRegister { name: loaded, ty }
+                            }
                         }
                     } else {
                         TypedRegister {
