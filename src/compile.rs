@@ -1653,80 +1653,10 @@ output = b.generate(items, None);
             *bind_routes = Some(resolve_bind_routes(&b.ctx.transition_graph, items, universe));
             ".ll"
         }
-        BackendKind::Webstack => {
-            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
-            // The old TS emitter path is deprecated. Phase 6 will also invoke
-            // GlueWebGenerator to produce the JS shim from view bindings.
-            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
-            let mut b = LlvmBackend::new()
-                .with_webstack(true)
-                .with_int_bits(32)
-                .with_target_triple("wasm32-unknown-wasi")
-                .with_type_universe(universe.clone())
-                .with_alloc_strategies(alloc_strategies)
-                .with_stack_threshold(opts.stack_threshold)
-                .with_optimize_budget(opts.optimize_budget)
-                .with_resolved_frgns(resolved_frgns)
-                .with_optimize_report(true);
-            // Register proto declarations on the casting graph
-            if let Some(ref mut graph) = b.ctx.casting_graph {
-                for item in items.iter() {
-                    if let briv_compiler::ast::TopLevel::ProtocolDef(pd) = item {
-                        graph.register_protocol_def(pd);
-                    }
-                }
-                // 2026-08-03 (P1.5): prove cross-type inverse pairs
-                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
-                // collapse in find_path can make them zero-cost.
-                graph.register_inverse_pairs_from(items);
-            }
-            output = b.generate(items, None);
-            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
-            // GPU-info, target-triple notes) — they were test-only.
-            for w in b.warnings() {
-                eprintln!("{}", w);
-            }
-            ".ll"
-        }
         BackendKind::Circt => {
             let mut b = briv_compiler::backend::circt::CirctBackend::new();
             output = b.generate(items);
             ".mlir"
-        }
-        BackendKind::Webstack => {
-            // 2026-07-26: Phase 4 — Webstack uses LlvmBackend(wasm32) + with_webstack().
-            // The old TS emitter path is deprecated. Phase 6 will also invoke
-            // GlueWebGenerator to produce the JS shim from view bindings.
-            // Phase 5: Extension is .ll — compile_wasm will produce .wasm from it.
-            let mut b = LlvmBackend::new()
-                .with_webstack(true)
-                .with_int_bits(32)
-                .with_target_triple("wasm32-unknown-wasi")
-                .with_type_universe(universe.clone())
-                .with_alloc_strategies(alloc_strategies)
-                .with_stack_threshold(opts.stack_threshold)
-                .with_optimize_budget(opts.optimize_budget)
-                .with_resolved_frgns(resolved_frgns)
-                .with_optimize_report(true);
-            // Register proto declarations on the casting graph
-            if let Some(ref mut graph) = b.ctx.casting_graph {
-                for item in items.iter() {
-                    if let briv_compiler::ast::TopLevel::ProtocolDef(pd) = item {
-                        graph.register_protocol_def(pd);
-                    }
-                }
-                // 2026-08-03 (P1.5): prove cross-type inverse pairs
-                // (b.CastFrom(base)(a.CastTo(base)(x)) == x) so the delta
-                // collapse in find_path can make them zero-cost.
-                graph.register_inverse_pairs_from(items);
-            }
-            output = b.generate(items, None);
-            // 2026-08-01: surface the backend's warnings (redundant-keep hints,
-            // GPU-info, target-triple notes) — they were test-only.
-            for w in b.warnings() {
-                eprintln!("{}", w);
-            }
-            ".ll"
         }
         BackendKind::Gpu => {
             let mut b = LlvmBackend::new()
