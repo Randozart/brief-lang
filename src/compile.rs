@@ -1072,7 +1072,33 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         // Skips C runtime linking — WASM modules are self-contained pure logic.
         if opts.backend == BackendKind::Webstack {
             let wasm_path = format!("{}.wasm", binary_base);
-            compile_wasm(&out_path, &wasm_path)?;
+            // 2026-08-11 (Phase 2a3 fix): wasm-ld exports NOTHING by default
+            // (`--no-entry` + no `--export`) — the generated module exported
+            // only `memory`. The shim calls `exports.state_layout()` and
+            // `exports["<txn>"]()` on flush/trigger/bind, all of which were
+            // undefined → the page never initialized. Export every
+            // transaction/definition (the reactive entry points) + the
+            // state_layout table the shim reads at init.
+            let mut exports: Vec<String> = items.iter()
+                .filter_map(|item| match item {
+                    // 2026-08-11 (Phase 2a3): a callable txn emits `@<name>`; a
+                    // reactive txn emits `@txn_<name>`. Export both forms —
+                    // wasm-ld ignores names without a matching symbol, and the
+                    // shim's `_txn()` resolver tries both.
+                    briv_compiler::ast::TopLevel::Transaction(t) => {
+                        Some(vec![t.name.clone(), format!("txn_{}", t.name)])
+                    }
+                    briv_compiler::ast::TopLevel::Definition(d) => {
+                        Some(vec![d.name.clone(), format!("txn_{}", d.name)])
+                    }
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            exports.push("state_layout".to_string());
+            exports.sort_unstable();
+            exports.dedup();
+            compile_wasm(&out_path, &wasm_path, &exports)?;
 
             // 2026-07-26: Phase 6b — Write app.css from <style> block content.
             let style_css = opts.style_css.as_ref().or(preprocessed.style_css.as_ref());
@@ -2101,7 +2127,7 @@ fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) 
 /// The .ll file must have been emitted with wasm32 target triple.
 /// Uses `llc -march=wasm32 -filetype=obj` to produce a .o, then
 /// `wasm-ld` to link into .wasm. This avoids needing a wasm32 clang.
-fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
+fn compile_wasm(ll_path: &str, wasm_path: &str, exports: &[String]) -> Result<(), String> {
     // Step 1: compile .ll to .wasm object file
     let obj_path = format!("{}.o", wasm_path);
     let mut assemble = Command::new("llc");
@@ -2114,9 +2140,14 @@ fn compile_wasm(ll_path: &str, wasm_path: &str) -> Result<(), String> {
     if !status.success() {
         return Err(format!("llc failed to compile '{}' to WASM object", ll_path));
     }
-    // Step 2: link .o to .wasm
+    // Step 2: link .o to .wasm — export the reactive entry points the JS shim
+    // calls (state_layout + every txn/definition). wasm-ld exports nothing by
+    // default; without these the generated module is a dead object.
     let mut link = Command::new("wasm-ld");
     link.args(["--no-entry", "--allow-undefined", "-o", wasm_path, &obj_path]);
+    for name in exports {
+        link.arg(format!("--export={}", name));
+    }
     let status = link.status()
         .map_err(|e| format!(
             "failed to invoke wasm-ld: {} (install wasm-ld or use --emit-ir-only)",

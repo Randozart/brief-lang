@@ -806,7 +806,7 @@ impl WebstackGenerator {
                     ));
                     out.push_str(&format!("show_{}();\n", sel));
                 }
-                Directive::Each { iterable, item_name, template_html, container_id } => {
+                Directive::Each { iterable, item_name, container_id, .. } => {
                     out.push_str(&format!(
                         "// b-each: iterate over {} as {} using template #{}\n",
                         iterable, item_name, container_id

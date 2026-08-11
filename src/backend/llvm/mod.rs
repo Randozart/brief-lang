@@ -726,6 +726,22 @@ pub fn web_llvm_byte_size(llvm_ty: &str) -> u64 {
     }
 }
 
+/// 2026-08-11 (Phase 2a3): the per-element byte width of a state field's LLVM
+/// type. A vector (`[N x T]`) reports T's width — the b-each renderer derives
+/// the item count as total_size / element_width. Non-vectors report the full
+/// type width (a scalar field's "element" is itself).
+pub(super) fn web_vector_element_size(llvm_ty: &str) -> u64 {
+    if llvm_ty.starts_with('[') && llvm_ty.contains(" x ") && llvm_ty.ends_with(']') {
+        let inner = &llvm_ty[1..llvm_ty.len() - 1];
+        let (_, elem) = inner.split_once(" x ").unwrap_or(("", ""));
+        let elem_size = web_llvm_byte_size(elem.trim());
+        if elem_size > 0 {
+            return elem_size;
+        }
+    }
+    web_llvm_byte_size(llvm_ty)
+}
+
 /// 2026-08-10: Size of the webstack flush buffer — the largest transaction
 /// write_set (each txn's update batch fits; unused tail entries are zero).
 /// Frontend-provided analysis (transition graph write_sets), never re-walked.
@@ -1323,12 +1339,19 @@ impl LlvmBackend {
                 None => None,
             };
             let tag = TypeTag::from_protocol_category(cat.as_deref());
+            // 2026-08-11 (Phase 2a3): for a vector field (`[N x i32]` on
+            // wasm32) the shim's b-each renderer needs the per-ELEMENT byte
+            // width to derive the item count from the field's total size —
+            // the flat size alone can't (Int slots are i32 here, i64 on
+            // x86_64). Non-vector fields report size as the element size.
+            let element_size = web_vector_element_size(&llvm_ty);
             fields.push(FieldLayout {
                 field_handle: *idx as u32,
                 name: name.clone(),
                 offset: offset as u32,
                 size: size as u32,
                 type_tag: tag,
+                element_size: element_size as u32,
             });
             offset += size;
         }

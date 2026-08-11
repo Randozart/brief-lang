@@ -2,8 +2,30 @@
 
 **Date:** 2026-08-11
 **Status:** active — plan for the SPEC 21.3 component model, decomposed into
-independently-complete sub-phases. **2a1 `b-when` and 2a2 `b-bind:value`
-implemented (committed).** 2a3/2b pending.
+independently-complete sub-phases. **2a1 `b-when`, 2a2 `b-bind:value`, 2a3
+`b-each`+`b-key` implemented (committed).** Phase 2b pending.
+
+## 2a3 implementation summary (2026-08-11)
+
+- `Directive::Each` carries `item_bindings` + `key_expr`; item-scoped directives
+  (b-text/b-class/b-show/b-when/b-trigger referencing `item`) are captured from
+  the each element AND its inner template (data-itm markers), NOT leaked as
+  global bindings. Unsupported item expressions (state-field comparisons, calls)
+  are compile-time errors — never silent dead DOM.
+- Shim renderer: on iterable flush, reads `count = size/element_size` i64-or-i32
+  slots from WASM (width-aware — vector slots are `i{int_bits}`), builds a fresh
+  tagName clone per item, applies item directives, reconciles by key
+  (insert/remove/reorder).
+- **Two critical runtime gaps fixed** (never exercised because the page never
+  ran): (1) wasm-ld exported NOTHING (`state_layout`/txn exports undefined) —
+  `compile_wasm` now exports every txn (both `@<name>` and `@txn_<name>` forms)
+  + `state_layout`; (2) the reactive txn exports as `txn_<name>` while callable
+  txns export as `<name>` — the shim's `_txn()` resolves either.
+- `web_vector_element_size` + `FieldLayout.element_size`: the b-each count is
+  layout-derived (type-driven, no name matching).
+- `find_each_inner_html` quote-aware `>` scan (same bug class as parse_tag).
+- Tests: 3 new (view_compiler ×2, web_generator ×1). Suite 1752 lib + 14 bin
+  green.
 
 ## 2a2 implementation summary (2026-08-11)
 

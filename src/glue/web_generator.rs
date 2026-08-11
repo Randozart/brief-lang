@@ -33,6 +33,10 @@ pub struct FieldLayout {
     pub offset: u32,
     /// Byte size of this field's value.
     pub size: u32,
+    /// 2026-08-11 (Phase 2a3): per-element byte width — a vector field
+    /// (`[N x i32]` on wasm32) reports the element width so b-each can derive
+    /// the item count from `size`. Non-vector fields report `size`.
+    pub element_size: u32,
     /// Type tag for interpreting the value bytes.
     pub type_tag: TypeTag,
 }
@@ -324,9 +328,13 @@ export class WasmDomRuntime {{
       fieldOff,
       typeTag,
       decode,
-      applyFn: function(value) {{
+      // 2026-08-11 (Phase 2a3): applyFn receives the flush's value_ptr/value_len
+      // too — the b-each renderer reads raw vector slots from WASM (the decoded
+      // scalar would lose the array base address). Existing effects ignore the
+      // extra args.
+      applyFn: function(value, valPtr, valLen) {{
         const fns = _this._viewEffects.get(handle);
-        if (fns) for (const fn of fns) fn(value);
+        if (fns) for (const fn of fns) fn(value, valPtr, valLen);
       }},
     }};
   }}
@@ -421,7 +429,9 @@ export class WasmDomRuntime {{
         // 2026-08-10: decode by the field's type tag (Int/Float/Bool raw
         // values from the slot; String dereferences the stored pointer).
         const value = binding.decode ? binding.decode(valPtr, valLen) : null;
-        binding.applyFn(value);
+        // 2026-08-11 (Phase 2a3): pass valPtr/valLen so b-each can read the
+        // raw vector slots.
+        binding.applyFn(value, valPtr, valLen);
       }}
     }}
   }}
@@ -429,6 +439,12 @@ export class WasmDomRuntime {{
   _registerViewEffect(handle, fn) {{
     if (!this._viewEffects.has(handle)) this._viewEffects.set(handle, []);
     this._viewEffects.get(handle).push(fn);
+  }}
+
+  _txn(name) {{
+    // 2026-08-11 (Phase 2a3): a callable txn exports as `@<name>`, a reactive
+    // txn as `@txn_<name>`. Resolve either so the DOM can fire both.
+    return this._instance.exports[name] || this._instance.exports["txn_" + name];
   }}
 
   get generation() {{
@@ -609,7 +625,7 @@ export async function createApp(wasmBytes) {{
                              \x20         if (!el) return;\n\
                              \x20         el.addEventListener('input', () => {{\n\
                              \x20           const ptr = this._writeString(el.value);\n\
-                             \x20           this._instance.exports[{route_txn:?}](ptr);\n\
+                             \x20           this._txn({route_txn:?})(ptr);\n\
                              \x20         }});\n\
                              \x20       }})();"
                         )
@@ -620,7 +636,7 @@ export async function createApp(wasmBytes) {{
                              \x20         const el = {el};\n\
                              \x20         if (!el) return;\n\
                              \x20         el.addEventListener('input', () => {{\n\
-                             \x20           this._instance.exports[{route_txn:?}](Number(el.value) || 0);\n\
+                             \x20           this._txn({route_txn:?})(Number(el.value) || 0);\n\
                              \x20         }});\n\
                              \x20       }})();"
                         )
@@ -631,7 +647,7 @@ export async function createApp(wasmBytes) {{
                              \x20         const el = {el};\n\
                              \x20         if (!el) return;\n\
                              \x20         el.addEventListener('change', () => {{\n\
-                             \x20           this._instance.exports[{route_txn:?}](el.checked ? 1 : 0);\n\
+                             \x20           this._txn({route_txn:?})(el.checked ? 1 : 0);\n\
                              \x20         }});\n\
                              \x20       }})();"
                         )
@@ -652,8 +668,149 @@ export async function createApp(wasmBytes) {{
                 format!(
                     "(() => {{\n\
                      \x20         const el = {el};\n\
-                     \x20         if (el) el.addEventListener({event:?}, () => this._instance.exports[{txn:?}]({arg_str}));\n\
+                     \x20         if (el) el.addEventListener({event:?}, () => this._txn({txn:?})({arg_str}));\n\
                      \x20       }})();"
+                )
+            }
+            Directive::Each {
+                iterable,
+                item_name,
+                template_html,
+                container_id,
+                item_bindings,
+                key_expr,
+            } => {
+                // 2026-08-11 (Phase 2a3): a vector-field iteration renderer.
+                // On each flush of the iterable field, read `count` i64 slots
+                // from valPtr (the array base), render one fresh template clone
+                // per item, and reconcile by key (b-key). Item-scoped
+                // directives apply to each clone (marker 0 = the clone root,
+                // marker N = [data-itm="N"]).
+                let Some(handle) = self.field_handle_for_signal(iterable) else {
+                    return String::new();
+                };
+                let field = self.state_layout.fields.iter().find(|f| f.field_handle == handle);
+                let Some(field) = field else { return String::new(); };
+                // 2026-08-11 (Phase 2a3): item count = field size / element
+                // width. Vector slots are width-aware (i32 on wasm32, i64 on
+                // x86_64), so the reader + stride follow element_size.
+                let elem_size = field.element_size.max(1);
+                let count = field.size / elem_size;
+                let slot_reader = if elem_size >= 8 {
+                    "Number(dv.getBigInt64(valPtr + i * 8, true))"
+                } else {
+                    "dv.getInt32(valPtr + i * 4, true)"
+                };
+                // Serialize the item-scoped directives.
+                let ibs: Vec<String> = item_bindings
+                    .iter()
+                    .map(|ib| {
+                        let (kind, expr) = match &ib.directive {
+                            crate::view_compiler::ItemDirective::Text { signal } => ("text", signal.as_str()),
+                            crate::view_compiler::ItemDirective::Class { .. } => ("class", ""),
+                            crate::view_compiler::ItemDirective::Show { expr } => ("show", expr.as_str()),
+                            crate::view_compiler::ItemDirective::When { expr } => ("when", expr.as_str()),
+                            crate::view_compiler::ItemDirective::Trigger { .. } => ("trigger", ""),
+                        };
+                        let extra = match &ib.directive {
+                            crate::view_compiler::ItemDirective::Trigger { event, txn } => {
+                                format!(", event: {event:?}, txn: {txn:?}")
+                            }
+                            crate::view_compiler::ItemDirective::Class { pairs } => {
+                                let cls: Vec<String> = pairs
+                                    .iter()
+                                    .map(|(cls_name, cls_expr)| format!("({cls_name:?}, {cls_expr:?})"))
+                                    .collect();
+                                format!(", cls: [{}]", cls.join(", "))
+                            }
+                            _ => String::new(),
+                        };
+                        format!(
+                            "{{ marker: {m}, kind: {kind:?}, expr: {expr:?}{extra} }}",
+                            m = ib.marker
+                        )
+                    })
+                    .collect();
+                let ibs_js = format!("[{}]", ibs.join(", "));
+                // Only the bare item key is supported for scalar vectors.
+                if key_expr.trim() != item_name {
+                    return String::new();
+                }
+                format!(
+                    "(() => {{\n\
+                     \x20         const anchor = {el};\n\
+                     \x20         if (!anchor) return;\n\
+                     \x20         const container = anchor.parentNode;\n\
+                     \x20         if (!container) return;\n\
+                     \x20         const tagName = anchor.tagName.toLowerCase();\n\
+                     \x20         const templateInner = {template_html:?};\n\
+                     \x20         anchor.remove();\n\
+                     \x20         const itemBindings = {ibs_js};\n\
+                     \x20         const evalItem = (expr, item) => {{\n\
+                     \x20           if (expr === {item_name:?}) return Boolean(item);\n\
+                     \x20           for (const op of [\"==\", \"!=\", \"<=\", \">=\", \"<\", \">\"]) {{\n\
+                     \x20             const i = expr.indexOf(op);\n\
+                     \x20             if (i < 0) continue;\n\
+                     \x20             const l = expr.slice(0, i).trim(), r = expr.slice(i + op.length).trim();\n\
+                     \x20             const lv = l === {item_name:?} ? item : Number(l);\n\
+                     \x20             const rv = r === {item_name:?} ? item : Number(r);\n\
+                     \x20             switch (op) {{\n\
+                     \x20               case \"==\": return lv === rv;\n\
+                     \x20               case \"!=\": return lv !== rv;\n\
+                     \x20               case \"<=\": return lv <= rv;\n\
+                     \x20               case \">=\": return lv >= rv;\n\
+                     \x20               case \"<\": return lv < rv;\n\
+                     \x20               case \">\": return lv > rv;\n\
+                     \x20             }}\n\
+                     \x20           }}\n\
+                     \x20           return Boolean(item);\n\
+                     \x20         }};\n\
+                     \x20         const applyItem = (el, item) => {{\n\
+                     \x20           for (const ib of itemBindings) {{\n\
+                     \x20             const target = ib.marker === 0 ? el : el.querySelector('[data-itm=\"' + ib.marker + '\"]');\n\
+                     \x20             if (!target) continue;\n\
+                     \x20             if (ib.kind === \"text\") {{\n\
+                     \x20               target.textContent = String(item);\n\
+                     \x20             }} else if (ib.kind === \"class\") {{\n\
+                     \x20               for (const [clsName, clsExpr] of (ib.cls || [])) {{\n\x20                 target.classList.toggle(clsName, evalItem(clsExpr, item));\n\x20               }}\n\
+                     \x20             }} else if (ib.kind === \"show\" || ib.kind === \"when\") {{\n\
+                     \x20               target.style.display = evalItem(ib.expr, item) ? \"\" : \"none\";\n\
+                     \x20             }} else if (ib.kind === \"trigger\") {{\n\
+                     \x20               target.addEventListener(ib.event, () => this._txn(ib.txn)(item));\n\
+                     \x20             }}\n\
+                     \x20           }}\n\
+                     \x20         }};\n\
+                     \x20         let rendered = new Map();\n\
+                     \x20         this._registerViewEffect({handle}, (value, valPtr, valLen) => {{\n\
+                     \x20           if (!valPtr) return;\n\
+                     \x20           const dv = new DataView(this._memory.buffer);\n\
+                     \x20           const n = Math.min({count}, Math.floor(valLen / {elem_size}));\n\
+                     \x20           const seen = new Set();\n\
+                     \x20           for (let i = 0; i < n; i++) {{\n\
+                     \x20             const item = {slot_reader};\n\
+                     \x20             const key = String(item);\n\
+                     \x20             seen.add(key);\n\
+                     \x20             let el = rendered.get(key);\n\
+                     \x20             if (!el) {{\n\
+                     \x20               el = document.createElement(tagName);\n\
+                     \x20               el.innerHTML = templateInner;\n\
+                     \x20               applyItem(el, item);\n\
+                     \x20               container.appendChild(el);\n\
+                     \x20               rendered.set(key, el);\n\
+                     \x20             }}\n\
+                     \x20           }}\n\
+                     \x20           for (const [key, el] of rendered) {{\n\
+                     \x20             if (!seen.has(key)) {{\n\
+                     \x20               el.remove();\n\
+                     \x20               rendered.delete(key);\n\
+                     \x20             }}\n\
+                     \x20           }}\n\
+                     \x20         }});\n\
+                     \x20       }})();",
+                    count = count,
+                    elem_size = elem_size,
+                    slot_reader = slot_reader,
+                    template_html = template_html,
                 )
             }
             _ => String::new(),
@@ -860,6 +1017,7 @@ mod tests {
                         name: "count".to_string(),
                         offset: 4,
                         size: 4,
+                        element_size: 4,
                         type_tag: TypeTag::Int,
                     },
                     FieldLayout {
@@ -867,6 +1025,7 @@ mod tests {
                         name: "speed".to_string(),
                         offset: 8,
                         size: 4,
+                        element_size: 4,
                         type_tag: TypeTag::Float,
                     },
                     FieldLayout {
@@ -874,6 +1033,7 @@ mod tests {
                         name: "ready".to_string(),
                         offset: 12,
                         size: 1,
+                        element_size: 1,
                         type_tag: TypeTag::Bool,
                     },
                 ],
@@ -935,6 +1095,7 @@ mod tests {
                         name: "count".to_string(),
                         offset: 4,
                         size: 4,
+                        element_size: 4,
                         type_tag: TypeTag::Int,
                     },
                 ],
@@ -961,7 +1122,7 @@ mod tests {
         assert!(output.dom_shim.contains("el.textContent = value"),
             "text binding must set textContent; got:\n{}", output.dom_shim);
         assert!(output.dom_shim.contains("addEventListener(\"click\"")
-            && output.dom_shim.contains("exports[\"increment\"]"),
+            && output.dom_shim.contains("this._txn(\"increment\")"),
             "trigger binding must wire the event listener; got:\n{}", output.dom_shim);
     }
 
@@ -997,6 +1158,7 @@ mod tests {
                     name: "count".to_string(),
                     offset: 4,
                     size: 4,
+                    element_size: 4,
                     type_tag: TypeTag::Int,
                 }],
             },
@@ -1035,6 +1197,7 @@ mod tests {
                     name: "count".to_string(),
                     offset: 4,
                     size: 4,
+                    element_size: 4,
                     type_tag: TypeTag::Int,
                 }],
             },
@@ -1115,6 +1278,74 @@ mod tests {
         let output = g.generate().unwrap();
         assert!(output.dom_shim.contains("createApp"),
             "should still produce createApp with empty bindings");
+    }
+
+    #[test]
+    fn test_each_binding_emits_vector_renderer() {
+        // 2026-08-11 (Phase 2a3): b-each over a vector state field renders one
+        // template clone per slot, reconciled by key. The iterable field is an
+        // [N x i64] vector — count derives from the layout size (16 bytes → 2
+        // items).
+        use crate::view_compiler::{Binding, Directive, ItemBinding, ItemDirective};
+        let bindings = vec![Binding {
+            element_id: "lst".to_string(),
+            directive: Directive::Each {
+                iterable: "items".to_string(),
+                item_name: "item".to_string(),
+                template_html: r#"<span data-itm="1">x</span>"#.to_string(),
+                container_id: "lst".to_string(),
+                item_bindings: vec![
+                    ItemBinding {
+                        marker: 0,
+                        directive: ItemDirective::Trigger {
+                            event: "click".to_string(),
+                            txn: "select_item".to_string(),
+                        },
+                    },
+                    ItemBinding {
+                        marker: 1,
+                        directive: ItemDirective::Text {
+                            signal: "item".to_string(),
+                        },
+                    },
+                ],
+                key_expr: "item".to_string(),
+            },
+        }];
+        let g = GlueWebGenerator::new(
+            Vec::new(),
+            bindings,
+            StateLayout {
+                app_name: "each_app".to_string(),
+                generation_offset: 0,
+                flush_buffer_offset: 64,
+                max_flush_entries: 8,
+                fields: vec![FieldLayout {
+                    field_handle: 1,
+                    name: "items".to_string(),
+                    offset: 4,
+                    size: 16,
+                    element_size: 8,
+                    type_tag: TypeTag::Int,
+                }],
+            },
+            HashMap::new(),
+            Vec::new(),
+        );
+        let output = g.generate().expect("generate should succeed");
+        let shim = &output.dom_shim;
+        assert!(shim.contains("_registerViewEffect(1,"),
+            "each must register on the items field:\n{shim}");
+        assert!(shim.contains("document.createElement(tagName)")
+            && shim.contains("el.innerHTML = templateInner"),
+            "each must build a fresh clone per item:\n{shim}");
+        assert!(shim.contains("getBigInt64(valPtr + i * 8"),
+            "each must read i64 slots from WASM:\n{shim}");
+        assert!(shim.contains("txn: \"select_item\"")
+            && shim.contains("this._txn(ib.txn)(item)"),
+            "item trigger must call the txn with the item:\n{shim}");
+        assert!(shim.contains("data-itm=\\\""),
+            "marker-1 inner elements resolved in the clone:\n{shim}");
     }
 
     #[test]

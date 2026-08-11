@@ -1,5 +1,23 @@
 # Bugs
 
+## Webstack WASM exports nothing + txn naming mismatch — FIXED
+
+**Date:** 2026-08-11
+**Status:** Fixed (commit pending, 2a3 b-each)
+The generated WASM module exported ONLY `memory`. `wasm-ld --no-entry` exports
+nothing by default, so the shim's `exports.state_layout()` (called at init) and
+`exports["<txn>"]` (flush/trigger/bind) were all undefined — the page never
+initialized. Compile-level "E2E" checks never ran the module.
+
+**Fix:**
+1. `compile_wasm` now passes `--export=<name>` for every txn/definition (both
+   the `@<name>` callable form and the `@txn_<name>` reactive form) +
+   `state_layout`. wasm-ld ignores names without symbols.
+2. The shim's `_txn(name)` resolves `exports[name] || exports["txn_" + name]` —
+   callable txns export under the Briv name, reactive txns under `txn_<name>`.
+
+Verified: `each.wasm` now contains `state_layout`, `set`, and `txn_set`.
+
 ## Webstack parameterized-txn codegen bugs (wasm32) — FIXED
 
 **Date:** 2026-08-11

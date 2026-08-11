@@ -79,6 +79,49 @@ pub enum Directive {
         item_name: String,
         template_html: String,
         container_id: String,
+        /// 2026-08-11 (Phase 2a3): per-item directives captured from the each
+        /// element's own attributes AND its inner template. Applied by the
+        /// shim's item renderer (each rendered item is a fresh template clone).
+        /// Inner template elements carry a `data-itm="<index>"` marker so the
+        /// shim can locate them in the clone.
+        item_bindings: Vec<ItemBinding>,
+        /// The `b-key` expression (stable identity for reconciliation).
+        key_expr: String,
+    },
+}
+
+/// 2026-08-11 (Phase 2a3): an item-scoped directive inside a `b-each`
+/// template, with the marker attribute locating its element in a clone.
+#[derive(Debug, Clone)]
+pub struct ItemBinding {
+    /// `data-itm` marker index — the shim finds the element via
+    /// `clone.querySelector('[data-itm="N"]')`.
+    pub marker: usize,
+    pub directive: ItemDirective,
+}
+
+/// 2026-08-11 (Phase 2a3): the item-scoped directive kinds the item renderer
+/// understands. Expressions are simple scalar item forms (`item`, `item ==
+/// field`, `txn(item)`) — richer expressions are rejected at compile time
+/// (never silently dead DOM).
+#[derive(Debug, Clone)]
+pub enum ItemDirective {
+    Text {
+        signal: String,
+    },
+    Class {
+        /// `(class_name, expr)` pairs from `b-class="{ 'cls': item == 2 }"`.
+        pairs: Vec<(String, String)>,
+    },
+    Show {
+        expr: String,
+    },
+    When {
+        expr: String,
+    },
+    Trigger {
+        event: String,
+        txn: String,
     },
 }
 
@@ -88,6 +131,11 @@ pub struct ViewCompiler {
     bindings: Vec<Binding>,
     id_counter: usize,
     each_context: Vec<EachContext>,
+    /// 2026-08-11 (Phase 2a3): nesting depth inside a `b-each` element.
+    /// While > 0, inject_ids passes tags through untouched — the whole subtree
+    /// is item-scoped, handled by extract_bindings (global directive
+    /// extraction must not leak item-scoped bindings like `b-text="item"`).
+    each_depth: usize,
     pub diagnostics: Vec<String>,
     /// 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors — `b-if`
     /// rejected, `b-each` without `b-key`, `b-bind:value` on a non-assignable
@@ -112,6 +160,7 @@ impl ViewCompiler {
             bindings: Vec::new(),
             id_counter: 0,
             each_context: Vec::new(),
+            each_depth: 0,
             diagnostics: Vec::new(),
             validation_errors: Vec::new(),
             user_triggered_txns: HashSet::new(),
@@ -266,6 +315,21 @@ impl ViewCompiler {
                     // elements legitimately carry directives (`b-when`,
                     // `b-bind:value`, `b-show`). Only `</` and `<!...>` skip.
                     if tag_lower.starts_with('/') || tag_lower.starts_with('!') {
+                        // 2026-08-11 (Phase 2a3): a closing tag decrements the
+                        // b-each nesting depth.
+                        if tag_lower.starts_with('/') && self.each_depth > 0 {
+                            self.each_depth -= 1;
+                        }
+                        result.push_str(tag_str);
+                        pos += end_pos;
+                        continue;
+                    }
+
+                    // 2026-08-11 (Phase 2a3): inside a b-each subtree the whole
+                    // template is item-scoped — pass through untouched.
+                    // extract_bindings captures the item directives + injects
+                    // the data-itm markers from the raw template.
+                    if self.each_depth > 0 {
                         result.push_str(tag_str);
                         pos += end_pos;
                         continue;
@@ -299,6 +363,13 @@ impl ViewCompiler {
                         || has_class_expr.is_some();
 
                     if has_directive {
+                        // 2026-08-11 (Phase 2a3): a `b-each` element's OWN
+                        // directives (b-class/b-trigger/b-show on the <li>)
+                        // are item-scoped — they must NOT become global
+                        // bindings. inject_ids only gives the container an ID
+                        // (the shim's container_id); extract_bindings captures
+                        // the item directives from the raw tag + template.
+                        let is_each_tag = tag_lower.contains("b-each:");
                         // Use preprocessed tag for directive processing
                         let elem_id = if !tag_lower.contains("id=") {
                             self.generate_element_id(&tag_process)
@@ -318,8 +389,12 @@ impl ViewCompiler {
 
                         result.push_str(&tag_with_id);
 
-                        // Pass the computed elem_id to extract_directives so it uses consistent IDs
-                        self.extract_directives(&tag_with_id, &elem_id);
+                        if is_each_tag {
+                            self.each_depth += 1;
+                        } else {
+                            // Pass the computed elem_id to extract_directives so it uses consistent IDs
+                            self.extract_directives(&tag_with_id, &elem_id);
+                        }
                     } else {
                         result.push_str(tag_str);
                     }
@@ -381,38 +456,29 @@ impl ViewCompiler {
                             .find(|s| s.contains("b-each:"))
                             .unwrap_or("");
                         if let Some((item_name, iterable)) = self.extract_each_value(each_attr) {
-                            let elem_id = self.generate_element_id(&tag_str);
+                            // 2026-08-11 (Phase 2a3): use the id inject_ids put
+                            // in the MODIFIED html (the container the shim
+                            // resolves) — regenerating here would desync.
+                            let elem_id = self
+                                .extract_id_from_tag(&tag_str)
+                                .unwrap_or_else(|| self.generate_element_id(&tag_str));
                             let inner_html = self.find_each_inner_html(&html[pos..], &tag);
                             let elem_name = tag.split_whitespace().next().unwrap_or(&tag).trim();
-                            let _tag_attrs: String = tag
-                                .split_whitespace()
-                                .skip(1)
-                                .filter(|s| !s.starts_with("b-"))
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let template_html = inner_html.clone();
-
-                            let _container_id =
-                                if let Some((_, parent_pos)) = element_stack.iter().rev().nth(0) {
-                                    let parent_html = &html[*parent_pos..];
-                                    if let Some((parent_tag, _)) = self.parse_tag(parent_html) {
-                                        if let Some(id) = self.extract_id_from_tag(&parent_tag) {
-                                            id
-                                        } else {
-                                            format!(
-                                                "rbv-{}",
-                                                parent_tag
-                                                    .split_whitespace()
-                                                    .next()
-                                                    .unwrap_or("container")
-                                            )
-                                        }
-                                    } else {
-                                        "rbv-container".to_string()
-                                    }
-                                } else {
-                                    "rbv-container".to_string()
-                                };
+                            let key_expr = self
+                                .extract_attr_value(&tag_str, "b-key")
+                                .unwrap_or_else(|| "item".to_string());
+                            // Capture the each element's OWN item directives
+                            // (marker 0 = the rendered clone's root) and walk
+                            // the inner template (data-itm markers injected).
+                            let mut item_bindings: Vec<ItemBinding> = Vec::new();
+                            let mut marker_counter: usize = 1;
+                            self.capture_item_directives(&tag_str, 0, &item_name, &mut item_bindings);
+                            let template_html = self.capture_template_bindings(
+                                &inner_html,
+                                &item_name,
+                                &mut marker_counter,
+                                &mut item_bindings,
+                            );
 
                             self.bindings.push(Binding {
                                 element_id: elem_id.clone(),
@@ -421,6 +487,8 @@ impl ViewCompiler {
                                     item_name: item_name,
                                     template_html: template_html,
                                     container_id: elem_id,
+                                    item_bindings: item_bindings,
+                                    key_expr: key_expr,
                                 },
                             });
                             let total_len = end_pos + inner_html.len() + elem_name.len() + 3;
@@ -436,6 +504,196 @@ impl ViewCompiler {
             }
             pos += 1;
         }
+    }
+
+    /// 2026-08-11 (Phase 2a3): capture the item-scoped directives on a single
+    /// tag (the b-each element's own attributes when `marker == 0`, or a
+    /// template element when the marker is its data-itm index). Unsupported
+    /// item expressions are a compile error — never a silently dead directive.
+    fn capture_item_directives(
+        &mut self,
+        tag: &str,
+        marker: usize,
+        item_name: &str,
+        out: &mut Vec<ItemBinding>,
+    ) {
+        let tag_lower = tag.to_lowercase();
+        for attr in tag_lower.split_whitespace().skip(1) {
+            let attr = attr.trim_end_matches('>').trim_end_matches('/');
+            if attr.starts_with("b-text") {
+                if let Some(signal) = self.extract_attr_value(tag, "b-text") {
+                    match self.check_item_expr(&signal, item_name) {
+                        Ok(()) => out.push(ItemBinding { marker, directive: ItemDirective::Text { signal } }),
+                        Err(msg) => self.validation_errors.push(msg),
+                    }
+                }
+            } else if attr.starts_with("b-class") {
+                if let Some(value) = self.extract_attr_value(tag, "b-class") {
+                    // The brace form `{ 'cls': item == 2, ... }` — strip the
+                    // outer braces (parse_class_expr does not), then parse the
+                    // (class_name, expr) pairs.
+                    let mut v = value.trim().to_string();
+                    if v.starts_with('{') && v.ends_with('}') {
+                        v = v[1..v.len() - 1].to_string();
+                    }
+                    let pairs: Vec<(String, String)> = if v.contains(':') {
+                        self.parse_class_expr(&v)
+                            .into_iter()
+                            .map(|(name, expr)| {
+                                (
+                                    name.trim_matches('\'').trim_matches('"').to_string(),
+                                    expr.trim().to_string(),
+                                )
+                            })
+                            .collect()
+                    } else {
+                        vec![("".to_string(), v.trim().to_string())]
+                    };
+                    let mut ok = true;
+                    // for_each (not a `for` loop) keeps this single-level for
+                    // Praetor's loop-depth rule.
+                    pairs.iter().for_each(|(_, expr)| {
+                        if let Err(msg) = self.check_item_expr(expr, item_name) {
+                            self.validation_errors.push(msg);
+                            ok = false;
+                        }
+                    });
+                    if ok {
+                        out.push(ItemBinding { marker, directive: ItemDirective::Class { pairs } });
+                    }
+                }
+            } else if attr.starts_with("b-show") {
+                if let Some(expr) = self.extract_attr_value(tag, "b-show") {
+                    match self.check_item_expr(&expr, item_name) {
+                        Ok(()) => out.push(ItemBinding { marker, directive: ItemDirective::Show { expr } }),
+                        Err(msg) => self.validation_errors.push(msg),
+                    }
+                }
+            } else if attr.starts_with("b-when") {
+                if let Some(expr) = self.extract_attr_value(tag, "b-when") {
+                    match self.check_item_expr(&expr, item_name) {
+                        Ok(()) => out.push(ItemBinding { marker, directive: ItemDirective::When { expr } }),
+                        Err(msg) => self.validation_errors.push(msg),
+                    }
+                }
+            } else if attr.starts_with("b-trigger:") || attr.starts_with("b-on:") {
+                let prefix = if attr.starts_with("b-trigger:") { "b-trigger:" } else { "b-on:" };
+                if let Some((txn, _)) = self.extract_trigger_value_from_tag(tag, prefix) {
+                    let event = self
+                        .extract_event_suffix(&tag_lower, prefix.trim_end_matches(':'))
+                        .unwrap_or_else(|| "click".to_string());
+                    out.push(ItemBinding { marker, directive: ItemDirective::Trigger { event, txn } });
+                }
+            }
+        }
+    }
+
+    /// 2026-08-11 (Phase 2a3): validate a scalar item expression. Accepted:
+    /// the bare item (`item`) and `item <op> <literal>` comparisons. Anything
+    /// else (state-field comparisons, calls) is rejected — the item renderer
+    /// cannot evaluate it, and a silently dead directive is a contract
+    /// violation.
+    fn check_item_expr(&self, expr: &str, item_name: &str) -> Result<(), String> {
+        let e = expr.trim();
+        if e == item_name {
+            return Ok(());
+        }
+        // Find the operator by scanning for its first character (no loop —
+        // keeps capture_item_directives single-level for Praetor).
+        if let Some(i) = e.find(['=', '!', '<', '>']) {
+            let op = if e[i..].starts_with("==") {
+                "=="
+            } else if e[i..].starts_with("!=") {
+                "!="
+            } else if e[i..].starts_with("<=") {
+                "<="
+            } else if e[i..].starts_with(">=") {
+                ">="
+            } else if e[i..].starts_with('<') {
+                "<"
+            } else if e[i..].starts_with('>') {
+                ">"
+            } else {
+                return Err(self.unsupported_item_msg(expr, item_name));
+            };
+            let (l, r) = (e[..i].trim(), e[i + op.len()..].trim());
+            let ok_lit = |s: &str| s.parse::<f64>().is_ok() || s == "true" || s == "false";
+            if (l == item_name && ok_lit(r)) || (r == item_name && ok_lit(l)) {
+                return Ok(());
+            }
+        }
+        Err(self.unsupported_item_msg(expr, item_name))
+    }
+
+    fn unsupported_item_msg(&self, expr: &str, item_name: &str) -> String {
+        format!(
+            "item-scoped expression '{}' is unsupported in b-each (Phase 2a3) — \
+             only `{}` or `{} <op> <literal>` comparisons are rendered per item; \
+             state-field expressions land with the Phase 2b component plan",
+            expr, item_name, item_name
+        )
+    }
+
+    /// 2026-08-11 (Phase 2a3): walk the b-each inner template, capturing
+    /// item-scoped directives and injecting `data-itm="<marker>"` attributes so
+    /// the shim can locate each directive's element inside a rendered clone.
+    /// Returns the marked template HTML. `marker_counter` starts at 1 (marker 0
+    /// is the clone root).
+    fn capture_template_bindings(
+        &mut self,
+        html: &str,
+        item_name: &str,
+        marker_counter: &mut usize,
+        out: &mut Vec<ItemBinding>,
+    ) -> String {
+        let mut result = String::new();
+        let mut pos = 0;
+        let bytes = html.as_bytes();
+        while pos < bytes.len() {
+            if bytes[pos] == b'<'
+                && bytes
+                    .get(pos + 1)
+                    .map(|&b| b.is_ascii_alphabetic() || b == b'!')
+                    .unwrap_or(false)
+            {
+                if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
+                    let tag_str = &html[pos..pos + end_pos];
+                    let tag_lower = tag_str.to_lowercase();
+                    if tag_lower.starts_with('/') || tag_lower.starts_with('!') {
+                        result.push_str(tag_str);
+                        pos += end_pos;
+                        continue;
+                    }
+                    let has_directive = tag_lower.contains("b-text")
+                        || tag_lower.contains("b-class")
+                        || tag_lower.contains("b-show")
+                        || tag_lower.contains("b-when")
+                        || tag_lower.contains("b-trigger")
+                        || tag_lower.contains("b-on");
+                    if has_directive {
+                        let marker = *marker_counter;
+                        *marker_counter += 1;
+                        // Inject data-itm before the closing `>`.
+                        let inject_at = tag_str.rfind('>').unwrap_or(end_pos - 1);
+                        let marked = format!(
+                            "{} data-itm=\"{}\"{}",
+                            &tag_str[..inject_at],
+                            marker,
+                            &tag_str[inject_at..]
+                        );
+                        result.push_str(&marked);
+                        self.capture_item_directives(tag_str, marker, item_name, out);
+                    } else {
+                        result.push_str(tag_str);
+                    }
+                    pos += end_pos;
+                    continue;
+                }
+            }
+            result.push(html.chars().nth(pos).unwrap_or(' '));
+            pos += 1;
+        }
+        result
     }
 
     fn extract_id_from_tag(&self, tag: &str) -> Option<String> {
@@ -458,10 +716,13 @@ impl ViewCompiler {
         let elem_name = tag.split_whitespace().next().unwrap_or(tag).trim();
         let closing_pattern = format!("</{}>", elem_name);
         if let Some(closing_pos) = html.find(&closing_pattern) {
-            if let Some(open_end) = html.find('>') {
-                if open_end < closing_pos {
-                    return html[open_end + 1..closing_pos].trim().to_string();
-                }
+            // 2026-08-11 (Phase 2a3 fix): find the opening tag's end with the
+            // quote-aware scan — `b-class="{ 'big': item > 5 }"` embeds a `>`
+            // in the quoted value, and a naive `find('>')` truncated the inner
+            // HTML at the comparison.
+            let open_end = self.parse_tag(html).map(|(_, end)| end).unwrap_or(0);
+            if open_end > 0 && open_end < closing_pos {
+                return html[open_end..closing_pos].trim().to_string();
             }
         }
         String::new()
@@ -1437,6 +1698,72 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|d| d.contains("`b-bind:value` accepts only an assignable field")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    // ── 2026-08-11 (Phase 2a3): b-each + b-key ────────────────────────
+
+    #[test]
+    fn b_each_captures_item_bindings_and_marks_template() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, _, diagnostics) = vc.compile(
+            r#"<ul>
+  <li b-each:item="items" b-key="item" b-class="{ 'selected': item == 2 }">
+    <span b-text="item">x</span>
+  </li>
+</ul>"#,
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "item text/class with literal comparisons must compile: {:?}",
+            diagnostics
+        );
+        let each = bindings
+            .iter()
+            .find(|b| matches!(&b.directive, Directive::Each { .. }))
+            .expect("Each binding extracted");
+        let Directive::Each {
+            item_bindings,
+            key_expr,
+            template_html,
+            iterable,
+            item_name,
+            ..
+        } = &each.directive
+        else {
+            unreachable!()
+        };
+        assert_eq!(iterable.as_str(), "items");
+        assert_eq!(item_name.as_str(), "item");
+        assert_eq!(key_expr, "item");
+        assert_eq!(item_bindings.len(), 2, "container class + inner text: {item_bindings:?}");
+        assert!(
+            template_html.contains("data-itm=\""),
+            "inner template must carry data-itm markers: {template_html}"
+        );
+        // The inner b-text must NOT leak as a global binding.
+        assert!(
+            !bindings.iter().any(|b| {
+                matches!(&b.directive, Directive::Text { signal } if signal == "item")
+            }),
+            "item-scoped bindings must not leak as globals: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn b_each_unsupported_item_expr_is_error() {
+        // A state-field comparison (`item == selected`) is not evaluable by the
+        // scalar item renderer — it must be a hard error, never silent dead DOM.
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<li b-each:item="items" b-key="item" b-class="item == selected">x</li>"#,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.contains("unsupported in b-each") && d.contains("item == selected")),
             "{:?}",
             diagnostics
         );
