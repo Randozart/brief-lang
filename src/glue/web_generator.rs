@@ -176,6 +176,12 @@ export class WasmDomRuntime {{
   constructor(wasmBytes) {{
     this._handles = [null];
     this._bindingTable = [];
+    // 2026-08-11 (Phase 2a): per-handle view-effect lists. A field can be
+    // bound by many elements/directives (`b-text` + `b-when` on different
+    // nodes, or two elements reading the same field) — a single override slot
+    // per handle would clobber earlier bindings. The default applyFn fans the
+    // value out to every registered effect.
+    this._viewEffects = new Map();
     this._instance = null;
     this._memory = null;
     this._generationOffset = {generation_offset};
@@ -267,9 +273,8 @@ export class WasmDomRuntime {{
       typeTag,
       decode,
       applyFn: function(value) {{
-        // Default binding: log state change.
-        // The view compiler's bindings customize this per field.
-        console.debug(`[web] state update: handle=${{handle}} value=${{value}}`);
+        const fns = _this._viewEffects.get(handle);
+        if (fns) for (const fn of fns) fn(value);
       }},
     }};
   }}
@@ -369,6 +374,11 @@ export class WasmDomRuntime {{
     }}
   }}
 
+  _registerViewEffect(handle, fn) {{
+    if (!this._viewEffects.has(handle)) this._viewEffects.set(handle, []);
+    this._viewEffects.get(handle).push(fn);
+  }}
+
   get generation() {{
     if (!this._memory) return 0;
     const mem = new DataView(this._memory.buffer);
@@ -440,6 +450,12 @@ export async function createApp(wasmBytes) {{
     }
 
     /// Convert a single view binding to a JS apply function.
+    /// 2026-08-11 (Phase 2a): every per-field binding registers a view effect
+    /// with `_registerViewEffect(handle, fn)` — the default applyFn fans each
+    /// flush value out to ALL registered effects, so two elements binding the
+    /// same field (or `b-text` + `b-when` on one field) both react. Previously
+    /// each binding replaced `this._bindingTable[H].applyFn`, and the last one
+    /// emitted silently won.
     fn binding_to_js(&self, binding: &crate::view_compiler::Binding) -> String {
         use crate::view_compiler::Directive;
         let element = binding.element_id.trim();
@@ -464,10 +480,10 @@ export async function createApp(wasmBytes) {{
                     }
                 }
                 format!(
-                    "this._bindingTable[{handle}].applyFn = (value) => {{\n\
+                    "this._registerViewEffect({handle}, (value) => {{\n\
                      \x20         const el = {el};\n\
                      \x20         if (el) el.textContent = {apply_value};\n\
-                     \x20       }};"
+                     \x20       }});"
                 )
             }
             Directive::Show { expr } | Directive::Hide { expr } => {
@@ -476,11 +492,49 @@ export async function createApp(wasmBytes) {{
                 };
                 let hidden = matches!(binding.directive, Directive::Hide { .. });
                 format!(
-                    "this._bindingTable[{handle}].applyFn = (value) => {{\n\
+                    "this._registerViewEffect({handle}, (value) => {{\n\
                      \x20         const el = {el};\n\
                      \x20         if (el) el.style.display = ({hidden} ? !value : value) ? 'none' : '';\n\
-                     \x20       }};",
+                     \x20       }});",
                     hidden = if hidden { "false" } else { "true" }
+                )
+            }
+            Directive::When { expr } => {
+                // 2026-08-11 (Phase 2a, SPEC 21.4): `b-when` structurally
+                // mounts/unmounts the subtree — the element is present iff the
+                // condition field is truthy. The element starts in the DOM as
+                // authored (consistent with every other binding: the DOM shows
+                // authored content until the first flush). On the first falsy
+                // flush the element is detached, its position marked with a
+                // comment anchor, and a template snapshot kept; truthy flushes
+                // re-insert a fresh clone (identity is NOT preserved — that is
+                // the `b-show` distinction). The IIFE closes over the per-node
+                // mount state so it survives across flushes.
+                let (root, _) = crate::view_compiler::condition_root_signal(expr);
+                let Some(handle) = self.field_handle_for_signal(root) else {
+                    return String::new();
+                };
+                format!(
+                    "(() => {{\n\
+                     \x20         const el = {el};\n\
+                     \x20         if (!el) return;\n\
+                     \x20         let anchor = null;\n\
+                     \x20         let template = null;\n\
+                     \x20         let mounted = true;\n\
+                     \x20         this._registerViewEffect({handle}, (value) => {{\n\
+                     \x20           const show = value ? true : false;\n\
+                     \x20           if (show && !mounted) {{\n\
+                     \x20             anchor.parentNode.insertBefore(template.cloneNode(true), anchor);\n\
+                     \x20             mounted = true;\n\
+                     \x20           }} else if (!show && mounted) {{\n\
+                     \x20             template = template || el.cloneNode(true);\n\
+                     \x20             anchor = document.createComment('b-when');\n\
+                     \x20             el.parentNode.insertBefore(anchor, el);\n\
+                     \x20             el.remove();\n\
+                     \x20             mounted = false;\n\
+                     \x20           }}\n\
+                     \x20         }});\n\
+                     \x20       }})();"
                 )
             }
             Directive::Trigger { event, txn, params } => {
@@ -795,8 +849,12 @@ mod tests {
         assert!(output.dom_shim.contains("_applyFlush"),
             "dom-shim should include flush handler");
         // 2026-08-10: bindings must wire real DOM ops, not placeholders.
-        assert!(output.dom_shim.contains("_bindingTable[1].applyFn"),
-            "text binding must override the count field's applyFn; got:\n{}", output.dom_shim);
+        // 2026-08-11 (Phase 2a): bindings register per-field view effects
+        // (fanned out by the handle's default applyFn) instead of replacing
+        // `_bindingTable[1].applyFn` — the old replacement clobbered earlier
+        // bindings when two elements bound the same field.
+        assert!(output.dom_shim.contains("_registerViewEffect(1,"),
+            "text binding must register a view effect on the count field; got:\n{}", output.dom_shim);
         assert!(output.dom_shim.contains("document.getElementById(\"counter\")"),
             "text binding must target its element; got:\n{}", output.dom_shim);
         assert!(output.dom_shim.contains("el.textContent = value"),
@@ -804,6 +862,97 @@ mod tests {
         assert!(output.dom_shim.contains("addEventListener(\"click\"")
             && output.dom_shim.contains("exports[\"increment\"]"),
             "trigger binding must wire the event listener; got:\n{}", output.dom_shim);
+    }
+
+    #[test]
+    fn test_multiple_bindings_same_field_do_not_clobber() {
+        // 2026-08-11 (Phase 2a): two elements reading the same field must BOTH
+        // react — the per-handle effect list fans the flush value out instead
+        // of the last-emitted override winning.
+        let bindings = vec![
+            crate::view_compiler::Binding {
+                element_id: "a".to_string(),
+                directive: crate::view_compiler::Directive::Text {
+                    signal: "count".to_string(),
+                },
+            },
+            crate::view_compiler::Binding {
+                element_id: "b".to_string(),
+                directive: crate::view_compiler::Directive::Text {
+                    signal: "count".to_string(),
+                },
+            },
+        ];
+        let g = GlueWebGenerator::new(
+            Vec::new(),
+            bindings,
+            StateLayout {
+                app_name: "multi".to_string(),
+                generation_offset: 0,
+                flush_buffer_offset: 64,
+                max_flush_entries: 8,
+                fields: vec![FieldLayout {
+                    field_handle: 1,
+                    name: "count".to_string(),
+                    offset: 4,
+                    size: 4,
+                    type_tag: TypeTag::Int,
+                }],
+            },
+            HashMap::new(),
+            Vec::new(),
+        );
+        let output = g.generate().expect("generate should succeed");
+        let shim = &output.dom_shim;
+        let a_regs = shim.matches("_registerViewEffect(1,").count();
+        assert_eq!(a_regs, 2, "both elements must register on handle 1:\n{shim}");
+        assert!(shim.contains("document.getElementById(\"a\")")
+            && shim.contains("document.getElementById(\"b\")"),
+            "both elements targeted:\n{shim}");
+    }
+
+    #[test]
+    fn test_when_binding_emits_mount_unmount_effect() {
+        // 2026-08-11 (Phase 2a, SPEC 21.4): `b-when` structurally mounts/
+        // unmounts a subtree. The emitted effect must snapshot a template,
+        // anchor the position with a comment, and insert/remove on truthiness.
+        let bindings = vec![crate::view_compiler::Binding {
+            element_id: "panel".to_string(),
+            directive: crate::view_compiler::Directive::When {
+                expr: "count > 0".to_string(),
+            },
+        }];
+        let g = GlueWebGenerator::new(
+            Vec::new(),
+            bindings,
+            StateLayout {
+                app_name: "when_app".to_string(),
+                generation_offset: 0,
+                flush_buffer_offset: 64,
+                max_flush_entries: 8,
+                fields: vec![FieldLayout {
+                    field_handle: 1,
+                    name: "count".to_string(),
+                    offset: 4,
+                    size: 4,
+                    type_tag: TypeTag::Int,
+                }],
+            },
+            HashMap::new(),
+            Vec::new(),
+        );
+        let output = g.generate().expect("generate should succeed");
+        let shim = &output.dom_shim;
+        assert!(shim.contains("_registerViewEffect(1,"),
+            "when binding must register on the count field:\n{shim}");
+        assert!(shim.contains("document.getElementById(\"panel\")"),
+            "when binding must target its element:\n{shim}");
+        assert!(shim.contains("template.cloneNode(true)"),
+            "remount must clone the template:\n{shim}");
+        assert!(shim.contains("createComment('b-when')"),
+            "unmount must anchor the position:\n{shim}");
+        assert!(shim.contains("el.remove()"),
+            "unmount must detach the element:\n{shim}");
     }
 
     #[test]

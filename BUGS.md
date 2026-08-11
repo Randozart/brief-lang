@@ -1,5 +1,44 @@
 # Bugs
 
+## Phase 2a view fixes (2026-08-11) — FIXED
+
+**Date:** 2026-08-11
+**Status:** Fixed (commit pending, 2a1 b-when)
+Four bugs in the webstack view path, found while wiring `b-when`:
+
+1. **applyFn clobbering** — `binding_to_js` emitted
+   `this._bindingTable[H].applyFn = (value) => …` per binding. A field bound by
+   two elements (or `b-text`+`b-when` on one field) silently kept only the last
+   binding's DOM mutation. **Fix:** per-handle effect lists
+   (`_registerViewEffect(H, fn)`, default applyFn fans out to all). Two
+   elements on one field now both react.
+2. **Conditional writes missed by write_set** — `extract_write_set` scanned
+   only top-level `Statement::Assign`; a write inside `if` (e.g.
+   `if count > 2 { show = true; }`) was absent from the txn's write_set, so the
+   webstack flush batch (sized/looped over the write_set) never told the DOM the
+   field changed — `b-when`/`b-show` on it stayed dead. **Fix:** recurse into
+   `If`/`Guarded`/`Block`/`Foreach` bodies. `web_max_entries` grows to cover
+   them.
+3. **`parse_tag` broke on quoted `>`** — `b-when="count > 0"` truncated the tag
+   at the comparison operator inside the quoted attribute, leaving the tail as
+   text. **Fix:** quote-aware `>` scan.
+4. **Self-closing tags skipped directives** — `<input b-show="show" />` got no
+   ID and no binding (inject_ids bailed on `/>`). Void elements legitimately
+   carry directives. **Fix:** only `</` and `<!...>` skip; self-closing tags
+   with directives get IDs + extraction.
+5. **Dead-field diagnostics lied about view-bound fields** — the A002/A003
+   "stores eliminated / dead fields" warnings filtered only on the transition
+   graph's body-driven `live_fields`, so a view-bound field (`b-when="show"`)
+   was reported dead even though `view_bound_fields` → `FieldMode::Always`
+   correctly kept its store. **Fix:** the diagnostic now filters out
+   `view_bound_fields` (observability-as-liveness).
+
+Regression tests: `test_multiple_bindings_same_field_do_not_clobber`,
+`test_when_binding_emits_mount_unmount_effect`,
+`test_extract_write_set_recurses_into_conditionals`,
+`b_when_extracts_structural_binding`, `b_when_purity_enforced`,
+`self_closing_tag_with_directive_gets_id_and_binding`.
+
 ## Spawned-obj Member Slot Read Emits Undefined `@slot` Global in Two-Node Shape — FIXED
 
 **Date:** 2026-08-09

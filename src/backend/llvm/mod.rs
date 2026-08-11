@@ -3638,8 +3638,14 @@ impl LlvmBackend {
         // ── DEAD-FIELD INFO DIAGNOSTICS (A002/A003) ─────────
         if !self.ctx.dead_info_disabled {
             for node in &graph.nodes {
+                // 2026-08-11 (view wiring): view-bound fields are consumed by
+                // the DOM — observability-as-liveness. The transition graph's
+                // live_fields is body/contract-driven and knows nothing about
+                // web bindings, so filter them out of the "dead" diagnostics
+                // (the store is NOT eliminated; the message would be a lie).
                 let dead_fields: Vec<&String> = node.write_set.iter()
                     .filter(|f| !graph.live_fields.contains(*f))
+                    .filter(|f| !self.ctx.view_bound_fields.contains(*f))
                     .collect();
 
                 if !dead_fields.is_empty() {

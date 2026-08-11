@@ -1416,15 +1416,37 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
 fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> HashSet<String> {
     let mut writes = HashSet::new();
     for stmt in body {
-        if let Statement::Assign(lhs, _) = stmt {
-            // 2026-07-18: Use provenance to extract the root variable name
-            // from Expr::Field and Expr::Index chains.
-            let root = extract_root_via_provenance(lhs);
-            if let Some(name) = root {
-                if state_fields.contains(&name) {
-                    writes.insert(name);
+        // 2026-08-11 (Phase 2a fix): recurse into nested statement containers.
+        // The webstack flush batch covers exactly the txn's write_set — a
+        // conditional write (`if count > 2 { show = true; }`) that was missed
+        // meant the DOM never received a flush for `show`, so b-when/b-show
+        // bindings on it stayed dead. Top-level Assign-only scanning was the
+        // bug.
+        match stmt {
+            Statement::Assign(lhs, _) => {
+                // 2026-07-18: Use provenance to extract the root variable name
+                // from Expr::Field and Expr::Index chains.
+                let root = extract_root_via_provenance(lhs);
+                if let Some(name) = root {
+                    if state_fields.contains(&name) {
+                        writes.insert(name);
+                    }
                 }
             }
+            Statement::If(_, then_b, else_b) => {
+                writes.extend(extract_write_set(then_b, state_fields));
+                writes.extend(extract_write_set(else_b, state_fields));
+            }
+            Statement::Guarded(_, body) => {
+                writes.extend(extract_write_set(body, state_fields));
+            }
+            Statement::Block(body) => {
+                writes.extend(extract_write_set(body, state_fields));
+            }
+            Statement::Foreach { body, .. } => {
+                writes.extend(extract_write_set(body, state_fields));
+            }
+            _ => {}
         }
     }
     writes
@@ -1849,6 +1871,40 @@ mod tests {
         let writes = extract_write_set(&body, &fields);
         assert!(writes.contains("obj"), "field assign to obj.Size should detect obj as written");
         assert_eq!(writes.len(), 1);
+    }
+
+    /// 2026-08-11 (Phase 2a fix): a write inside an `if` body is still a
+    /// write — the webstack flush batch (sized to the write_set) must cover
+    /// it, or the DOM never learns the field changed. Regression for the
+    /// top-level-Assign-only scan.
+    #[test]
+    fn test_extract_write_set_recurses_into_conditionals() {
+        let fields: HashSet<String> = ["count".to_string(), "show".to_string()].into();
+        let body = vec![
+            Statement::Assign(
+                Expr::Identifier("count".to_string()),
+                Expr::Decimal(1),
+            ),
+            Statement::If(
+                Expr::BinaryOp(
+                    BinaryOpKind::Gt,
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Decimal(2)),
+                ),
+                vec![Statement::Assign(
+                    Expr::Identifier("show".to_string()),
+                    Expr::Bool(true),
+                )],
+                vec![],
+            ),
+        ];
+        let writes = extract_write_set(&body, &fields);
+        assert!(writes.contains("count"));
+        assert!(
+            writes.contains("show"),
+            "conditional write must land in the write_set: {writes:?}"
+        );
+        assert_eq!(writes.len(), 2);
     }
 
     /// Phase 2 (§7.4): a top-level FFI call (not inside a guard) marks the

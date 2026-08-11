@@ -24,8 +24,8 @@ use crate::ast::{self, Contract, Expr, TopLevel};
 use std::collections::{HashMap, HashSet};
 
 const KNOWN_DIRECTIVES: &[&str] = &[
-    "b-text", "b-show", "b-hide", "b-on:", "b-trigger:",
-    "b-class", "b-attr", "b-style", "b-each",
+    "b-text", "b-show", "b-hide", "b-when", "b-on:", "b-trigger:",
+    "b-class", "b-attr", "b-style", "b-each", "b-key", "b-bind",
 ];
 
 #[derive(Debug, Clone)]
@@ -43,6 +43,12 @@ pub enum Directive {
         expr: String,
     },
     Hide {
+        expr: String,
+    },
+    /// 2026-08-11 (Phase 2a, SPEC 21.4): `b-when` structurally mounts/unmounts
+    /// a subtree — presence in the DOM is state-driven and identity is NOT
+    /// preserved across toggles (unlike `b-show`, which is presentation-only).
+    When {
         expr: String,
     },
     Trigger {
@@ -248,10 +254,11 @@ impl ViewCompiler {
                     let tag_str = &html[pos..pos + end_pos];
                     let tag_lower = tag_str.to_lowercase();
 
-                    if tag_lower.starts_with('/')
-                        || tag_lower.starts_with('!')
-                        || tag_lower.ends_with("/>")
-                    {
+                    // 2026-08-11 (Phase 2a fix): a self-closing tag (`<input
+                    // b-show="show" />`) is NOT skipped outright — void
+                    // elements legitimately carry directives (`b-when`,
+                    // `b-bind:value`, `b-show`). Only `</` and `<!...>` skip.
+                    if tag_lower.starts_with('/') || tag_lower.starts_with('!') {
                         result.push_str(tag_str);
                         pos += end_pos;
                         continue;
@@ -274,6 +281,7 @@ impl ViewCompiler {
                     let has_directive = tag_lower.contains("b-text")
                         || tag_lower.contains("b-show")
                         || tag_lower.contains("b-hide")
+                        || tag_lower.contains("b-when")
                         || tag_lower.contains("b-trigger")
                         || tag_lower.contains("b-on")
                         || has_b_class
@@ -455,10 +463,29 @@ impl ViewCompiler {
         if !s.starts_with('<') {
             return None;
         }
-
-        let end = s.find('>')?;
-        let tag = &s[1..end];
-        Some((tag.to_string(), end + 1))
+        // 2026-08-11 (Phase 2a fix): scan for the closing `>` while honoring
+        // quoted attribute values — `b-when="count > 0"` embeds a `>` inside a
+        // quote, and a naive `find('>')` truncated the tag at the comparison,
+        // leaving the rest as text.
+        let mut in_quote: Option<char> = None;
+        for (i, c) in s.char_indices().skip(1) {
+            match in_quote {
+                Some(q) => {
+                    if c == q {
+                        in_quote = None;
+                    }
+                }
+                None => {
+                    if c == '"' || c == '\'' {
+                        in_quote = Some(c);
+                    } else if c == '>' {
+                        let tag = &s[1..i];
+                        return Some((tag.to_string(), i + 1));
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn extract_directives(&mut self, tag: &str, elem_id: &str) {
@@ -516,6 +543,13 @@ if attr.starts_with("b-text") {
                     self.bindings.push(Binding {
                         element_id: elem_id.to_string(),
                         directive: Directive::Hide { expr },
+                    });
+                }
+            } else if attr.starts_with("b-when") {
+                if let Some(expr) = self.extract_attr_value(tag, "b-when") {
+                    self.bindings.push(Binding {
+                        element_id: elem_id.to_string(),
+                        directive: Directive::When { expr },
                     });
                 }
             } else if attr.starts_with("b-trigger:") || attr.starts_with("b-on:") {
@@ -950,6 +984,16 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
     None
 }
 
+/// Root field of a `b-when`/`b-show` CONDITION expression. A condition is
+/// typically a comparison (`count > 0`, `items.^Size > 0`) — the root is the
+/// leading identifier token with `.^X` projections stripped. Shared by the
+/// SRBV check, the web generator's handle lookup, and the frontend's
+/// view-bound-field protection (DRY).
+pub fn condition_root_signal<'a>(expr: &'a str) -> (&'a str, Vec<&'a str>) {
+    let head = expr.trim().split_whitespace().next().unwrap_or("");
+    root_signal(head)
+}
+
 /// Split a view signal into its root field name and any `.^X` reflection
 /// projection suffixes. `count` → (`count`, []); `items.^Size` →
 /// (`items`, ["Size"]); `a.^Size.^Len` → (`a`, ["Size", "Len"]).
@@ -960,8 +1004,7 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
 /// frontend (view-bound fields protect %State slots from dead-field
 /// elimination). The `.^X` suffix is a projection on top of the field's
 /// value, never a separate signal.
-pub fn root_signal<'a>(signal: &'a str) -> (&'a str, Vec<&'a str>) {
-    let signal = signal.trim();
+pub fn root_signal<'a>(signal: &'a str) -> (&'a str, Vec<&'a str>) {    let signal = signal.trim();
     let mut proj: Vec<&str> = Vec::new();
     let mut head = signal;
     loop {
@@ -1050,6 +1093,19 @@ pub fn verify_srbv(
                 let var_name = expr.trim();
                 if !state_vars.contains(var_name) && !txn_contracts.contains_key(var_name) {
                     // Could be a compound expression - just warn
+                    errors.push(format!(
+                        "error[SRBV003]: view expression '{}' references undefined variable",
+                        expr
+                    ));
+                }
+            }
+            Directive::When { expr } => {
+                // 2026-08-11 (Phase 2a): a `b-when` condition is typically a
+                // comparison (`b-when="count > 0"`) — the root signal is the
+                // leading identifier, not the whole expression. Compound
+                // conditions must not false-positive SRBV003.
+                let (root, _) = condition_root_signal(expr);
+                if !state_vars.contains(root) && !txn_contracts.contains_key(root) {
                     errors.push(format!(
                         "error[SRBV003]: view expression '{}' references undefined variable",
                         expr
@@ -1262,8 +1318,67 @@ mod tests {
         );
     }
 
-    // ── 2026-08-09 (Phase 14, SPEC 21.5): view-expression purity ──────
+    // ── 2026-08-11 (Phase 2a, SPEC 21.4): b-when structural mount ─────
 
+    #[test]
+    fn b_when_extracts_structural_binding() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, modified_html, diagnostics) =
+            vc.compile(r#"<div b-when="count > 0">panel</div>"#);
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("unknown directive")),
+            "b-when must be a known directive: {:?}",
+            diagnostics
+        );
+        let when = bindings
+            .iter()
+            .find(|b| matches!(&b.directive, Directive::When { .. }))
+            .expect("b-when binding extracted");
+        match &when.directive {
+            Directive::When { expr } => assert_eq!(expr, "count > 0"),
+            other => panic!("expected Directive::When, got {other:?}"),
+        }
+        assert!(
+            modified_html.contains("id=\""),
+            "element IDs injected so the shim can mount/unmount"
+        );
+    }
+
+    #[test]
+    fn b_when_purity_enforced() {
+        // SPEC 21.5: b-when is a view expression — mutation is rejected there
+        // just like b-text.
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile(
+            r#"<div b-when="count = 5">panel</div>"#,
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("not pure") && d.contains("assignment")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn self_closing_tag_with_directive_gets_id_and_binding() {
+        // 2026-08-11 (Phase 2a fix): `<input b-show="show" />` was skipped
+        // outright (no ID, no binding) because inject_ids bailed on `/>`.
+        // Void elements legitimately carry directives.
+        let mut vc = ViewCompiler::new();
+        let (bindings, modified_html, diagnostics) =
+            vc.compile(r#"<input b-show="show" />"#);
+        assert!(diagnostics.is_empty(), "{:?}", diagnostics);
+        assert!(
+            bindings.iter().any(|b| matches!(&b.directive, Directive::Show { .. })),
+            "self-closing tag's b-show must extract: {bindings:?}"
+        );
+        assert!(
+            modified_html.contains("id=\"") && modified_html.contains("/>"),
+            "ID must be injected into the self-closing tag: {modified_html}"
+        );
+    }
+
+    // ── 2026-08-09 (Phase 14, SPEC 21.5): view-expression purity ──────
     #[test]
     fn pure_view_expression_passes() {
         let mut vc = ViewCompiler::new();

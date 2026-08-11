@@ -454,6 +454,13 @@ fn view_root_signals(
             Directive::Show { expr } | Directive::Hide { expr } => {
                 set.insert(briv_compiler::view_compiler::root_signal(expr).0.to_string());
             }
+            Directive::When { expr } => {
+                set.insert(
+                    briv_compiler::view_compiler::condition_root_signal(expr)
+                        .0
+                        .to_string(),
+                );
+            }
             Directive::Class { pairs } => {
                 for (_, v) in pairs {
                     set.insert(briv_compiler::view_compiler::root_signal(v).0.to_string());
