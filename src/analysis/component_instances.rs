@@ -20,6 +20,9 @@ pub struct ComponentInstancePlan {
     /// splices `fragments[k]`. Components without per-instance expansion have
     /// one shared entry (2b1 behavior).
     pub fragments: std::collections::HashMap<String, Vec<String>>,
+    /// Instance slot → prop initializer (`Counter.0.count` → 5). The backend
+    /// seeds these into %State at init.
+    pub initializers: std::collections::HashMap<String, Expr>,
 }
 
 /// Expand every `render Name` component into per-mount instance state.
@@ -40,6 +43,7 @@ pub fn expand_component_instances(
 
     let mut plan = ComponentInstancePlan {
         fragments: std::collections::HashMap::new(),
+        initializers: std::collections::HashMap::new(),
     };
     for (component, fragment_html) in &render_blocks {
         let mount_count = count_component_mounts(view_html, component);
@@ -50,6 +54,10 @@ pub fn expand_component_instances(
             plan.fragments.insert(component.clone(), vec![fragment_html.clone()]);
             continue;
         }
+        // 2026-08-11 (2b2 slice 2b): the props each mount passes — attribute
+        // `attr="value"` on the `<Name />` tag seeds the instance slot for the
+        // fragment-referenced field `attr`.
+        let mount_props = collect_mount_props(view_html, component, mount_count);
         let mut per_mount: Vec<String> = Vec::with_capacity(mount_count);
         // for_each (not a `for`) keeps expand single-level for Praetor.
         (0..mount_count).for_each(|i| {
@@ -58,6 +66,16 @@ pub fn expand_component_instances(
             refs.fields.iter().for_each(|field| {
                 replace_or_add_state_decl(items, &format!("{}.{}", prefix, field), field);
             });
+            // Prop initializers for this mount's slots.
+            if let Some(props) = mount_props.get(&i) {
+                props.iter().for_each(|(field, value)| {
+                    if refs.fields.contains(field) {
+                        if let Some(init) = parse_prop_value(value) {
+                            plan.initializers.insert(format!("{}.{}", prefix, field), init);
+                        }
+                    }
+                });
+            }
             let variant_txns = build_txn_variants(items, component, i, &refs, &prefix);
             // Rewrite the fragment's directives for this mount.
             let rewritten = rewrite_fragment(fragment_html, &refs, &prefix, i, &variant_txns);
@@ -134,6 +152,113 @@ fn count_component_mounts(view_html: &str, component: &str) -> usize {
     let needle_l = format!("<{}", component.to_lowercase());
     let lower = view_html.to_lowercase();
     lower.matches(&needle_l).count().max(1)
+}
+
+/// 2026-08-11 (2b2 slice 2b): the props each `<Name ...>` mount tag passes —
+/// `attr="value"` attributes (directive `b-*` attrs excluded), in mount order.
+/// Returns mount index → (attr, value) pairs.
+fn collect_mount_props(
+    view_html: &str,
+    component: &str,
+    count: usize,
+) -> std::collections::HashMap<usize, Vec<(String, String)>> {
+    let mut props: std::collections::HashMap<usize, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    let needle = format!("<{}", component);
+    let lower = view_html.to_lowercase();
+    let needle_l = needle.to_lowercase();
+    let mut mount = 0usize;
+    let mut rest = view_html;
+    let mut lower_rest = lower.as_str();
+    while let Some(pos) = lower_rest.find(&needle_l) {
+        if mount >= count {
+            break;
+        }
+        // The tag extends to the `>` (quote-aware).
+        let tag_start = pos;
+        let tag = &rest[tag_start..];
+        if let Some(end) = tag.find('>') {
+            let tag_str = &tag[..end];
+            let attrs = parse_tag_attrs(tag_str, component);
+            if !attrs.is_empty() {
+                props.insert(mount, attrs);
+            }
+        }
+        mount += 1;
+        let skip = pos + needle_l.len();
+        rest = &rest[skip..];
+        lower_rest = &lower_rest[skip..];
+    }
+    props
+}
+
+/// Extract `attr="value"` pairs from a component mount tag (skip `b-*`
+/// directives and `id`).
+fn parse_tag_attrs(tag: &str, component: &str) -> Vec<(String, String)> {
+    let mut attrs = Vec::new();
+    let rest = &tag[component.len()..];
+    let mut scan = 0;
+    while let Some(eq_rel) = rest[scan..].find('=') {
+        let eq = scan + eq_rel;
+        let attr_start = rest[..eq].rfind([' ', '\n', '\t']).map(|i| i + 1).unwrap_or(0);
+        let name = rest[attr_start..eq].trim();
+        // Directive attrs / id are not props.
+        if name.is_empty() || name.starts_with("b-") || name == "id" {
+            let after = &rest[eq + 1..];
+            let Some(advance) = attr_value_len(after) else { break };
+            scan = eq + 1 + advance;
+            continue;
+        }
+        // Read the quoted value.
+        let after = &rest[eq + 1..];
+        let v = after.trim_start();
+        let Some((value, advance)) = quoted_value(v) else { break };
+        attrs.push((name.to_string(), value.to_string()));
+        scan = eq + 1 + (after.len() - v.len()) + advance;
+    }
+    attrs
+}
+
+/// Byte length of a quoted attribute value starting at `after` (or the
+/// whitespace-separated token when unquoted).
+fn attr_value_len(after: &str) -> Option<usize> {
+    let v = after.trim_start();
+    if v.starts_with('"') {
+        let inner = &v[1..];
+        inner.find('"').map(|i| (after.len() - v.len()) + i + 2)
+    } else {
+        Some(after.len())
+    }
+}
+
+/// Read a quoted attribute value: the content and the bytes consumed.
+fn quoted_value(v: &str) -> Option<(&str, usize)> {
+    if v.starts_with('"') {
+        let inner = &v[1..];
+        let end = inner.find('"')?;
+        Some((&inner[..end], end + 2))
+    } else {
+        None
+    }
+}
+
+/// Parse a prop value string into an Expr literal.
+fn parse_prop_value(value: &str) -> Option<Expr> {
+    let v = value.trim();
+    if let Ok(n) = v.parse::<i64>() {
+        return Some(Expr::Decimal(n));
+    }
+    if v == "true" {
+        return Some(Expr::Bool(true));
+    }
+    if v == "false" {
+        return Some(Expr::Bool(false));
+    }
+    if v.len() >= 2 && (v.starts_with('\'') || v.starts_with('"')) {
+        let inner = &v[1..v.len() - 1];
+        return Some(Expr::Quoted(inner.as_bytes().to_vec()));
+    }
+    None
 }
 
 /// Replace the global `field` state declaration with the instance-qualified
@@ -692,5 +817,42 @@ render Root {
             "write-consumed txn gets per-mount variants: {txns:?}");
         assert!(!txns.contains(&"toggle".to_string()),
             "original write-consumed txn removed: {txns:?}");
+    }
+
+    /// 2026-08-11 (2b2 slice 2b): `<Name attr="val" />` seeds the mount's
+    /// instance slot for the fragment-referenced field `attr`.
+    #[test]
+    fn mount_props_seed_instance_slots() {
+        let src = r#"
+let count: Int = 0;
+txn increment [count < 100][true] {
+    count = count + 1;
+    term;
+};
+render Counter {
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+};
+render Root {
+    <Counter count="5" />
+    <Counter count="7" />
+};
+"#;
+        let (items, plan) = check(src).unwrap();
+        assert_eq!(
+            plan.initializers.get("Counter.0.count"),
+            Some(&Expr::Decimal(5)),
+            "mount 0 seeds 5"
+        );
+        assert_eq!(
+            plan.initializers.get("Counter.1.count"),
+            Some(&Expr::Decimal(7)),
+            "mount 1 seeds 7"
+        );
+        assert!(
+            plan.fragments.get("Counter").map(|f| f.len()).unwrap_or(0) == 2,
+            "two per-mount fragments"
+        );
+        let _ = items;
     }
 }

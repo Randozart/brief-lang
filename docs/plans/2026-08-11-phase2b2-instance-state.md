@@ -1,8 +1,22 @@
 # Phase 2b2 — Per-instance component state (SPEC 21.3, slice 2)
 
 **Date:** 2026-08-11
-**Status:** slice 2a (fixed instance pools) implemented. Dynamic component
-counts + props are follow-ups.
+**Status:** slice 2a (fixed instance pools) and slice 2b props implemented.
+Dynamic component counts remain a follow-up.
+
+## Slice 2b — props (2026-08-11)
+
+`<Name attr="value" />` seeds the mount's instance slot for the
+fragment-referenced field `attr`. `collect_mount_props` parses the view's
+mount tags in order; `parse_prop_value` turns the raw value into a literal
+(Decimal / Bool / Quoted). The plan's `initializers` map
+(`Counter.0.count` → 5) flows through codegen via
+`LlvmBackend::with_component_initializers` and build_field_index merges them
+into `field_initializers`, so `init_state` seeds each mount's slot.
+
+Verified E2E: `<Counter count="5" />` + `<Counter count="7" />` → init_state
+stores 5 into field 0 and 7 into field 1; each mount binds its own slot and
+its trigger fires its own variant.
 
 ## Slice 2a implementation summary (2026-08-11)
 

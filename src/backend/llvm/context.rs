@@ -68,6 +68,10 @@ pub struct CompilerContext {
     pub field_types: Vec<String>,
     pub field_briv_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
+    /// 2026-08-11 (2b2 slice 2b): component-instance slot initializers from
+    /// mount props (`Counter.0.count` → 5). build_field_index merges them into
+    /// field_initializers after the StateDecl registration.
+    pub component_initializers: HashMap<String, Expr>,
     pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
     /// 2026-07-02: Tracks RingBuffer variables whose fields are stored inline
     /// in %State (data_ptr, head, tail, mask) instead of via an opaque handle.
@@ -341,6 +345,7 @@ impl CompilerContext {
             field_types: Vec::new(),
             field_briv_types: Vec::new(),
             field_initializers: HashMap::new(),
+            component_initializers: HashMap::new(),
             ringbuf_inline: HashMap::new(),
             field_modes: HashMap::new(),
             cache_slots: HashMap::new(),

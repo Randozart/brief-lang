@@ -1394,6 +1394,17 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-08-11 (2b2 slice 2b): component-instance slot initializers from
+    /// mount props (`Counter.0.count` → 5). Merged into field_initializers by
+    /// build_field_index so init_state seeds the instance slots.
+    pub fn with_component_initializers(
+        mut self,
+        inits: std::collections::HashMap<String, crate::ast::Expr>,
+    ) -> Self {
+        self.ctx.component_initializers = inits;
+        self
+    }
+
     pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
         self.trg_unresolved_action = action;
         self
@@ -4998,6 +5009,14 @@ impl LlvmBackend {
                 continue;
             }
             self.register_pool_columns(base, &slots);
+        }
+
+        // 2026-08-11 (2b2 slice 2b): seed the component-instance slots from
+        // mount props — overrides the None the StateDecl registration inserted.
+        for (slot, init) in &self.ctx.component_initializers {
+            if self.ctx.field_index_map.contains_key(slot) {
+                self.ctx.field_initializers.insert(slot.clone(), Some(init.clone()));
+            }
         }
     }
 
