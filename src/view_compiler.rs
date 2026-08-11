@@ -136,6 +136,10 @@ pub struct ViewCompiler {
     /// is item-scoped, handled by extract_bindings (global directive
     /// extraction must not leak item-scoped bindings like `b-text="item"`).
     each_depth: usize,
+    /// 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` view fragments,
+    /// keyed by struct name. A `<Name />` tag in the view mounts the fragment's
+    /// HTML at compile time (inlined + ID-injected like any markup).
+    pub render_blocks: HashMap<String, String>,
     pub diagnostics: Vec<String>,
     /// 2026-08-09 (Phase 14, SPEC 21.4): directive validation errors — `b-if`
     /// rejected, `b-each` without `b-key`, `b-bind:value` on a non-assignable
@@ -161,6 +165,7 @@ impl ViewCompiler {
             id_counter: 0,
             each_context: Vec::new(),
             each_depth: 0,
+            render_blocks: HashMap::new(),
             diagnostics: Vec::new(),
             validation_errors: Vec::new(),
             user_triggered_txns: HashSet::new(),
@@ -173,6 +178,12 @@ impl ViewCompiler {
 
     pub fn register_transaction(&mut self, name: &str, id: usize) {
         self.transactions.insert(name.to_string(), id);
+    }
+
+    /// 2026-08-11 (Phase 2b): register the `render Name { ... }` view
+    /// fragments so `<Name />` tags mount them.
+    pub fn set_render_blocks(&mut self, blocks: HashMap<String, String>) {
+        self.render_blocks = blocks;
     }
 
     /// Returns transactions that are triggered by user input (b-trigger:)
@@ -295,6 +306,15 @@ impl ViewCompiler {
     }
 
     fn inject_ids(&mut self, html: &str) -> String {
+        let mut in_progress = std::collections::HashSet::new();
+        self.inject_ids_inner(html, &mut in_progress)
+    }
+
+    /// 2026-08-11 (Phase 2b): the recursive core of inject_ids — when a
+    /// `<Name />` tag names a `render Name { ... }` fragment, the fragment's
+    /// HTML is spliced in and processed (shared id_counter → unique element
+    /// IDs). `in_progress` guards render cycles (A→B→A → compile error).
+    fn inject_ids_inner(&mut self, html: &str, in_progress: &mut std::collections::HashSet<String>) -> String {
         let mut result = String::new();
         let mut pos = 0;
         let bytes = html.as_bytes();
@@ -309,6 +329,56 @@ impl ViewCompiler {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
                     let tag_str = &html[pos..pos + end_pos];
                     let tag_lower = tag_str.to_lowercase();
+
+                    // 2026-08-11 (Phase 2b, SPEC 21.3): `<Name />` mounts the
+                    // `render Name { ... }` fragment. Splice the fragment's
+                    // HTML and process it recursively (shared id_counter →
+                    // unique element IDs). Inside a b-each template (each_depth
+                    // > 0) tags pass through — item-scoped components are a
+                    // later slice.
+                    if self.each_depth == 0 {
+                        // parse_tag strips the brackets, so self-closing and the
+                        // name are derived from the RAW tag string.
+                        let tag_name_raw = tag_str
+                            .trim_start_matches('<')
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_end_matches('>')
+                            .to_string();
+                        if self.render_blocks.contains_key(&tag_name_raw) {
+                            if in_progress.contains(&tag_name_raw) {
+                                self.validation_errors.push(format!(
+                                    "component cycle: render '{}' mounts itself (directly or transitively)",
+                                    tag_name_raw
+                                ));
+                                result.push_str(tag_str);
+                                pos += end_pos;
+                                continue;
+                            }
+                            in_progress.insert(tag_name_raw.clone());
+                            let fragment = self
+                                .render_blocks
+                                .get(&tag_name_raw)
+                                .cloned()
+                                .unwrap_or_default();
+                            // Self-closing `<Name />` skips just the tag; the
+                            // paired `<Name>...</Name>` form skips to the close.
+                            let close = format!("</{}>", tag_name_raw);
+                            let skip_to = if tag_str.trim_end().ends_with("/>") {
+                                end_pos
+                            } else if let Some(rel) = html[pos..].find(&close) {
+                                end_pos + rel + close.len()
+                            } else {
+                                end_pos
+                            };
+                            let spliced = self.inject_ids_inner(&fragment, in_progress);
+                            result.push_str(&spliced);
+                            in_progress.remove(&tag_name_raw);
+                            pos += skip_to;
+                            continue;
+                        }
+                    }
 
                     // 2026-08-11 (Phase 2a fix): a self-closing tag (`<input
                     // b-show="show" />`) is NOT skipped outright — void
@@ -1764,6 +1834,102 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|d| d.contains("unsupported in b-each") && d.contains("item == selected")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    // ── 2026-08-11 (Phase 2b, SPEC 21.3): component fragment mounting ──
+
+    #[test]
+    fn component_tag_mounts_render_block() {
+        let mut vc = ViewCompiler::new();
+        let mut blocks = HashMap::new();
+        blocks.insert(
+            "Counter".to_string(),
+            r#"<span b-text="count">0</span>"#.to_string(),
+        );
+        vc.set_render_blocks(blocks);
+        let (bindings, modified_html, diagnostics) =
+            vc.compile(r#"<div><Counter /></div>"#);
+        assert!(
+            diagnostics.is_empty(),
+            "known component must not warn: {:?}",
+            diagnostics
+        );
+        assert!(
+            modified_html.contains("<span") && modified_html.contains("b-text=\"count\""),
+            "fragment must be inlined: {modified_html}"
+        );
+        assert!(
+            !modified_html.contains("Counter"),
+            "mount tag must be replaced: {modified_html}"
+        );
+        assert!(
+            bindings.iter().any(|b| matches!(&b.directive, Directive::Text { signal } if signal == "count")),
+            "fragment bindings extracted: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn component_tag_paired_form_mounts() {
+        let mut vc = ViewCompiler::new();
+        let mut blocks = HashMap::new();
+        blocks.insert(
+            "Counter".to_string(),
+            "<span>hi</span>".to_string(),
+        );
+        vc.set_render_blocks(blocks);
+        let (_, modified_html, _) = vc.compile(r#"<Counter></Counter>"#);
+        assert!(
+            modified_html.contains("<span>hi</span>"),
+            "paired form must inline the fragment: {modified_html}"
+        );
+    }
+
+    #[test]
+    fn component_multiple_mounts_unique_ids() {
+        let mut vc = ViewCompiler::new();
+        let mut blocks = HashMap::new();
+        blocks.insert("Counter".to_string(), r#"<span b-text="count">0</span>"#.to_string());
+        vc.set_render_blocks(blocks);
+        let (bindings, modified_html, _) =
+            vc.compile(r#"<Counter /><Counter />"#);
+        let id_count = modified_html.matches("rbv-").count();
+        assert_eq!(id_count, 2, "each mount gets its own element: {modified_html}");
+        // Both mounts bind the same state handle → both must register (the
+        // per-handle effect list fans out).
+        assert_eq!(
+            bindings
+                .iter()
+                .filter(|b| matches!(&b.directive, Directive::Text { signal } if signal == "count"))
+                .count(),
+            2,
+            "both mounts bind count: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn component_cycle_is_error() {
+        let mut vc = ViewCompiler::new();
+        let mut blocks = HashMap::new();
+        blocks.insert("A".to_string(), "<B />".to_string());
+        blocks.insert("B".to_string(), "<A />".to_string());
+        vc.set_render_blocks(blocks);
+        let (_, _, diagnostics) = vc.compile("<A />");
+        assert!(
+            diagnostics.iter().any(|d| d.contains("component cycle")),
+            "{:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn unknown_component_tag_warns() {
+        let mut vc = ViewCompiler::new();
+        let (_, _, diagnostics) = vc.compile("<Mystery />");
+        assert!(
+            diagnostics.iter().any(|d| d.contains("component tag '<Mystery>'")),
             "{:?}",
             diagnostics
         );

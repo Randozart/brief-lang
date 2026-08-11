@@ -390,6 +390,20 @@ fn compile_view(
     };
 
     let mut vc = briv_compiler::view_compiler::ViewCompiler::new();
+    // 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` blocks are
+    // reusable view fragments — `<Name />` mounts them at compile time. The
+    // fragment's directives bind to the state they reference (the global
+    // single-%State model; per-instance state is the Phase 2b slice 2).
+    let render_blocks: std::collections::HashMap<String, String> = items
+        .iter()
+        .filter_map(|item| match item {
+            briv_compiler::ast::TopLevel::RenderBlock(rb) => {
+                Some((rb.struct_name.clone(), rb.view_html.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    vc.set_render_blocks(render_blocks);
     for item in items {
         match item {
             briv_compiler::ast::TopLevel::StateDecl(sd) => {

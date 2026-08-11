@@ -1366,6 +1366,8 @@ render Counter {
 
 Custom component tags create first-class reactive instances. The rendered parent owns each mounted component handle. Mounting creates the handle; unmounting releases state and subscriptions.
 
+A `render Name { ... }` block is a reusable view fragment: `<Name />` mounts the fragment's HTML at that position (each mount gets its own element IDs; nested fragments mount recursively). The fragment's directives bind the state they reference — per-instance state (each mount owning its own field slots) is the full instance model. A `<Name />` for an unknown `Name` is a compile-time warning; a render cycle (`A` mounts `B` mounts `A`) is a compile error.
+
 ### 21.4 Directives
 
 Canonical directives include:

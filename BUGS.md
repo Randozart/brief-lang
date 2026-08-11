@@ -3849,7 +3849,11 @@ fields are protected from dead-field elimination via
 liveness). SRBV verification runs only under the `.s` strict profile
 (`conformance::is_strict`). Covered by 6 new compile.rs tests + 1 rbv.rs test.
 **Still open — Phase 2 (SPEC 21.3) component model:** mount/unmount lifecycle,
-per-instance state (the WASM runtime state is a single global `%State`), `b-when`
-structural mount/unmount, `b-each`+`b-key` reconciliation, `b-bind:value`.
-Component tags (`<Counter>`) currently compile with a warning and render inert.
-See `docs/plans/2026-08-11-view-compiler-wiring.md`.
+per-instance state (the WASM runtime state is a single global `%State`).
+**Slice 1 (2026-08-11) resolved:** `b-when`/`b-each`+`b-key`/`b-bind:value`
+are wired; `<Name />` mounts its `render Name { ... }` fragment at compile time
+(unique IDs per mount, nested fragments, cycle detection, unknown tags warn).
+Per-instance state is slice 2 — a component's directives bind the referenced
+(global) state, matching the counter.rbv semantics.
+See `docs/plans/2026-08-11-view-compiler-wiring.md` and
+`docs/plans/2026-08-11-phase2b-component-mounting.md`.
