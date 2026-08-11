@@ -2225,7 +2225,11 @@ impl LlvmBackend {
                 );
             }
             let self_ptr = self.fun.gen_reg();
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, self_ptr, recv_reg.name).ok();
+            // 2026-08-11 (housekeeping 1b fix): the boxed self HANDLE is
+            // `i{int_bits}` (a wasm32 List handle is i32) — inttoptr with the
+            // target's integer width, not a hardcoded i64.
+            let iw = format!("i{}", self.ctx.int_bits);
+            writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, self_ptr, iw, recv_reg.name).ok();
             self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));
         }
         let saved_bindings = self.fun.let_bindings.clone();
@@ -2358,6 +2362,44 @@ impl LlvmBackend {
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                 TypedRegister { name: r, ty: Type::int() }
+            }
+            // 2026-08-11 (housekeeping 1b fix): `x.^Size` on a collection
+            // (`List<String>` state field) — the receiver is an i64 handle to
+            // the heap obj; the element count is its `len` field (collections.bv
+            // `obj List<T> { inner: ListBuffer<T>; len: Int }`). GEP-by-offset
+            // and load, mirroring the obj-member access path. Only fires when
+            // the struct genuinely has a `len` slot.
+            ("Size", ReflectKind::Runtime) => {
+                let obj_type = match &recv_reg.ty {
+                    Type::Custom(n) => Some(n.clone()),
+                    Type::Applied(n, _) => Some(n.clone()),
+                    _ => None,
+                };
+                let has_len = obj_type.as_ref().map_or(false, |n| {
+                    self.ctx.struct_types.get(n).map_or(false, |f| {
+                        f.iter().any(|(name, _)| name == "len")
+                    })
+                });
+                if has_len {
+                    let obj_type = obj_type.unwrap();
+                    let offset = self.lookup_field_offset(&obj_type, "len");
+                    // Width-aware: the List handle slot and its `len` field are
+                    // `i{int_bits}` (i32 on wasm32, i64 on x86_64) — never
+                    // hardcode i64.
+                    let iw = format!("i{}", self.ctx.int_bits);
+                    let base = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, base, iw, recv_reg.name).ok();
+                    let gep = self.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, base, offset).ok();
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load {}, ptr {}", indent, r, iw, gep).ok();
+                    TypedRegister { name: r, ty: Type::int() }
+                } else {
+                    panic!(
+                        "runtime reflection 'Size' on '{:?}' (no `len` slot in struct layout) has no codegen yet",
+                        recv_reg.ty
+                    );
+                }
             }
             ("Bytes", ReflectKind::CompileTime) => {
                 // 2026-08-01 (B3): `x.^^Bytes` on a #String → the `Bytes` prop

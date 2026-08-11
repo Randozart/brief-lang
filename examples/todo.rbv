@@ -1,14 +1,16 @@
 // todo.rbv — Todo list app
 // 2026-07-26: Removed old <script> wrapper — Briv code is now the default content
 
+import <std/collections>;
+
 let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
 
-txn add_item [items :> Size < 100][items :> Size == @items :> Size + 1] {
-  items = items + ["New task"];
+txn add_item [items.^Size < 100][true] {
+  items.push("New task");
   term;
 };
 
-txn clear_all [items :> Size > 0][items :> Size == 0] {
+txn clear_all [items.^Size > 0][items.^Size == 0] {
   items = [];
   term;
 };
@@ -22,13 +24,13 @@ txn clear_all [items :> Size > 0][items :> Size == 0] {
     </div>
     
     <div id="todo-container">
-      <div b-each:item="items" class="todo-item">
+      <div b-each:item="items" b-key="item" class="todo-item">
         <span b-text="item">Task</span>
       </div>
     </div>
     
     <div class="footer">
-      <span><span b-text="items :> Size"></span> tasks</span>
+      <span><span b-text="items.^Size"></span> tasks</span>
       <button id="clear-btn" b-trigger:click="clear_all">Clear All</button>
     </div>
   </div>

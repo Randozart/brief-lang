@@ -393,7 +393,15 @@ impl<'a> TypecheckContext<'a> {
     /// 2026-07-31 (A6): For `&collection <- value`, find the collection's
     /// InsertAt op binding's member first-parameter type (the element type).
     pub fn push_element_type(&self, collection: &Expr) -> Option<Type> {
-        let Expr::Identifier(name) = collection else { return None; };
+        // 2026-08-11 (housekeeping 1b fix): the documented push form is
+        // `&list <- value` — the target is `AddrOf(Identifier)`. Unwrap the
+        // address-of so the InsertAt op binding resolves (the old `<-` was a
+        // plain assignment, which silently never pushed).
+        let inner = match collection {
+            Expr::AddrOf(e) => e.as_ref(),
+            other => other,
+        };
+        let Expr::Identifier(name) = inner else { return None; };
         let (type_name, args) = match self.bindings.get(name)? {
             Type::Custom(n) => (n.clone(), Vec::new()),
             Type::Applied(n, a) => (n.clone(), a.clone()),
@@ -420,7 +428,13 @@ impl<'a> TypecheckContext<'a> {
     /// Returns the member's RETURN type (what reading/extracting from the
     /// collection produces), mirroring `push_element_type` (InsertAt → param).
     pub fn extract_element_type(&self, collection: &Expr) -> Option<Type> {
-        let Expr::Identifier(name) = collection else { return None; };
+        // 2026-08-11 (housekeeping 1b fix): unwrap AddrOf (`&queue <- dest`)
+        // like push_element_type.
+        let inner = match collection {
+            Expr::AddrOf(e) => e.as_ref(),
+            other => other,
+        };
+        let Expr::Identifier(name) = inner else { return None; };
         let (type_name, args) = match self.bindings.get(name)? {
             Type::Custom(n) => (n.clone(), Vec::new()),
             Type::Applied(n, a) => (n.clone(), a.clone()),
@@ -1118,6 +1132,19 @@ fn try_coerce_via_parse(
     target_ty: &Type,
     ctx: &TypecheckContext,
 ) -> bool {
+    // 2026-08-11 (housekeeping 1b fix): an EMPTY list literal `[]` carries no
+    // element to infer — the typechecker defaults it to List<Int>. On
+    // assignment to a `List<T>` target it must coerce: an empty list is valid
+    // for every element type. (The Parse-op machinery below has no form for a
+    // bare `[]`.)
+    if let Expr::List(elems) = expr {
+        if elems.is_empty() {
+            if let Type::Applied(n, _) = target_ty {
+                return n == "List";
+            }
+            return false;
+        }
+    }
     let (form, discriminator) = match expr {
         Expr::Decimal(_) => ("Decimal", None),
         Expr::Float(_) => ("Decimal", None),
@@ -3379,6 +3406,21 @@ node t [count < 5][count == 5] {
             "expected an implicit-coercion error, got {:?}",
             err
         );
+    }
+
+    /// 2026-08-11 (housekeeping 1b): `items = []` on a `List<String>` target
+    /// must coerce — an empty list literal carries no element to infer, so it
+    /// defaults to List<Int>; assigning it to a List<T> is valid for every T.
+    #[test]
+    fn empty_list_assignment_coerces_to_target_element_type() {
+        let src = r#"
+let items: List<String> = ["A"];
+txn t [items.^Size > 0][items.^Size == 0] {
+    items = [];
+    term;
+};
+"#;
+        check(src).expect("empty [] assigned to List<String> must typecheck");
     }
 
     #[test]

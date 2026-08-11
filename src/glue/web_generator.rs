@@ -691,6 +691,14 @@ export async function createApp(wasmBytes) {{
                 };
                 let field = self.state_layout.fields.iter().find(|f| f.field_handle == handle);
                 let Some(field) = field else { return String::new(); };
+                // 2026-08-11 (housekeeping 1b): only a VECTOR field is
+                // iterable — for a scalar field element_size == size (one
+                // "element" the whole value), and a heap List is a pointer
+                // row the slot reader cannot index. Emit no renderer (the
+                // compile-side warning explains; never a wrong render).
+                if field.element_size == 0 || field.element_size >= field.size {
+                    return String::new();
+                }
                 // 2026-08-11 (Phase 2a3): item count = field size / element
                 // width. Vector slots are width-aware (i32 on wasm32, i64 on
                 // x86_64), so the reader + stride follow element_size.

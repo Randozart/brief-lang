@@ -423,7 +423,41 @@ fn compile_view(
     // rejected directive is never silently ignored) — split the merged list on
     // that count.
     let validation_count = vc.validation_errors.len();
-    let warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
+    // 2026-08-11 (housekeeping 1b): a `b-each` iterable must be a STATIC
+    // vector field (`Int[N]`/`Bool[N]` — the layout's i{int_bits} slot
+    // array). A heap `List`/`String` iterable cannot be indexed by the slot
+    // renderer; warn (the generator skips it — never a wrong render) instead
+    // of silently rendering garbage.
+    let field_types: std::collections::HashMap<String, briv_compiler::ast::Type> = items
+        .iter()
+        .filter_map(|item| match item {
+            briv_compiler::ast::TopLevel::StateDecl(sd) => Some((sd.name.clone(), sd.ty.clone())),
+            briv_compiler::ast::TopLevel::Statement(stmt) => {
+                if let briv_compiler::ast::Statement::Let { name, ty, .. } = stmt.as_ref() {
+                    ty.clone().map(|t| (name.clone(), t))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    let mut warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
+    for binding in &bindings {
+        if let briv_compiler::view_compiler::Directive::Each { iterable, .. } = &binding.directive {
+            let is_vector = field_types
+                .get(iterable)
+                .map(|t| matches!(t, briv_compiler::ast::Type::Vector(..)))
+                .unwrap_or(false);
+            if !is_vector {
+                warnings.push(format!(
+                    "b-each iterable '{}' is not a static vector field (Int[N]/Bool[N]); \
+                     List/collection iteration rendering is pending — the each is skipped",
+                    iterable
+                ));
+            }
+        }
+    }
     let directive_errors: Vec<String> =
         diagnostics.iter().take(validation_count).cloned().collect();
     if !directive_errors.is_empty() {

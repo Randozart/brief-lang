@@ -1,5 +1,23 @@
 # Bugs
 
+## wasm32 obj-member bodies hardcode i64 slot widths — OPEN
+
+**Date:** 2026-08-11
+**Status:** Open. Repro: `brivc build examples/todo.rbv --backend webstack` —
+llc rejects `%t38 defined with type 'i32' but expected 'i64'` in the
+`List.push` member body.
+**Root cause:** the obj-member `self`-slot read/write paths hardcode i64 for
+struct/ptr slots (emit_expr.rs ~310/317-322: `ptrtoint ptr to i64`,
+`load i64`) and the Ptr/List heap-index path (emit_expr.rs ~1019:
+`inttoptr i64`), plus `add i64` on i32 width-aware `len`/index values. On
+wasm32 (int_bits=32) the List handle and its `len` field are i32, so the
+mixed-width IR is invalid. x86_64 compiles fine — the migration's fixes are
+correct; only the wasm32 obj-member emission is broken.
+**Fix direction:** make the self-slot read/write + heap-index paths width-aware
+(`i{int_bits}`) like the boxed-self inttoptr and Size-Runtime reflection
+already fixed this session. Not attempted here — out of the housekeeping
+scope, logged for a focused pass.
+
 ## Webstack WASM exports nothing + txn naming mismatch — FIXED
 
 **Date:** 2026-08-11

@@ -15,10 +15,23 @@ Verify: no new "unreachable pattern" warnings; suite green; counter E2E still
 builds.
 
 ### 1b. Migrate `examples/todo.rbv`
-Stale syntax blocks the flagship example:
-- `items :> Size` → `items.^Size` (and `@items :> Size` → `@items.^Size`; `@`
-  pre-state references are still valid — proof-oracle.bv).
-- The `b-each` lacks the now-mandatory `b-key` → add `b-key="item"`.
+Stale syntax blocked the flagship example:
+- `items :> Size` → `items.^Size` (and `@items :> Size` → dropped; `@`
+  prior-state references are staged/unimplemented per SPEC, so the
+  postconditions use the counter.rbv bounded-pre + `[true]`-post shape).
+- The `b-each` lacked the now-mandatory `b-key` → added `b-key="item"`.
+- `List<String>` push: `import <std/collections>` (List's `op InsertAt` lives
+  in the stdlib), `&items <- v` (AddrOf target now resolves via
+  `push_element_type`/`extract_element_type` unwrap), and empty-list
+  assignment (`items = []`) coerces via `try_coerce_via_parse`.
+
+Status: **compiles + links for x86_64** (`brivc build examples/todo.rbv
+--backend llvm`). The webstack build is blocked by a separate pre-existing
+bug — wasm32 obj-member bodies hardcode i64 slot widths (BUGS.md, OPEN) —
+because the List's `len`/handle slots are i32 on wasm32. A compile-time
+WARNING for non-vector `b-each` iterables was added (the generator skips them,
+never a wrong render); the todo example's List each warns + skips until the
+list-rendering slice lands.
 
 Honest limitation: `items` is `List<String>`; the 2a3 b-each renderer handles
 static `Int[N]`/`Bool[N]` vectors only, and `.^Size` on a heap List isn't
