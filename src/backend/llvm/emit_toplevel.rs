@@ -1367,6 +1367,55 @@ impl LlvmBackend {
         self.emit_init_seeding_stores(out, "  ");
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
+        self.emit_component_reset_exports(out);
+    }
+
+    /// 2026-08-11 (2b2 lifecycle): per-instance reset exports — a b-when
+    /// unmount calls `__instance_reset_<Name>_<i>()` to re-seed the instance's
+    /// slots (remount = fresh). The backend emits them; the shim calls them.
+    pub(super) fn emit_component_reset_exports(&mut self, out: &mut String) {
+        let instances = self.ctx.component_instances.clone();
+        for (component, idx) in instances {
+            let fn_name = format!("__instance_reset_{}_{}", component, idx);
+            writeln!(
+                out,
+                "define void @{}(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {{",
+                fn_name
+            )
+            .ok();
+            let prefix = format!("{}.{}.", component, idx);
+            let mut fields: Vec<(String, usize, String)> = self
+                .ctx
+                .field_index_map
+                .iter()
+                .filter(|(name, _)| name.starts_with(&prefix))
+                .map(|(name, fidx)| {
+                    (
+                        name.clone(),
+                        *fidx,
+                        self.ctx
+                            .field_types
+                            .get(*fidx)
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect();
+            fields.sort_by_key(|(_, fidx, _)| *fidx);
+            for (name, fidx, fty) in fields {
+                let p = format!("%ip_{}", fidx);
+                writeln!(
+                    out,
+                    "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                    p, fidx
+                )
+                .ok();
+                let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
+                self.emit_field_init_value(out, "  ", init_clone, &fty, &p, fidx);
+            }
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+        }
     }
 
     /// Emit field initialization stores inline in the current function (no function call).

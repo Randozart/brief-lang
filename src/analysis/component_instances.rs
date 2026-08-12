@@ -14,20 +14,42 @@
 
 use crate::ast::{Expr, Statement, TopLevel, Transaction, Type};
 
+/// A single component mount's per-instance view-rewrite decision — the VIEW
+/// layer applies these to the raw fragment (field signals → qualified slots,
+/// trigger txns → mount variants). The analysis decides WHAT; the view
+/// compiler decides HOW to format the HTML.
+#[derive(Debug, Clone)]
+pub struct MountSpec {
+    /// The component name (for the `data-instance` marker).
+    pub component: String,
+    /// This mount's index.
+    pub index: usize,
+    /// Fragment-referenced field → instance-qualified slot
+    /// (`count` → `Counter.0.count`).
+    pub fields: Vec<(String, String)>,
+    /// Original txn name → per-mount variant (`increment` → `increment_0`).
+    pub txn_variants: std::collections::HashMap<String, String>,
+}
+
 /// The result of expanding component instances in a program + view.
 pub struct ComponentInstancePlan {
-    /// Component name → per-mount rewritten fragment html. Mount k of `Name`
-    /// splices `fragments[k]`. Components without per-instance expansion have
-    /// one shared entry (2b1 behavior).
-    pub fragments: std::collections::HashMap<String, Vec<String>>,
+    /// Component name → per-mount view-rewrite specs (decisions only — the
+    /// view layer applies them to the raw fragment).
+    pub mounts: std::collections::HashMap<String, Vec<MountSpec>>,
     /// Instance slot → prop initializer (`Counter.0.count` → 5). The backend
     /// seeds these into %State at init.
     pub initializers: std::collections::HashMap<String, Expr>,
+    /// 2026-08-11 (2b2 lifecycle): every per-instance mount, as
+    /// `(component, index)`. The backend emits a per-instance reset export so
+    /// a b-when unmount can re-seed the instance's slots (remount = fresh).
+    pub instances: Vec<(String, usize)>,
 }
 
 /// Expand every `render Name` component into per-mount instance state.
-/// Returns the plan (per-mount fragments) and appends the instance state
-/// declarations + txn variants to `items` (removing the consumed originals).
+/// Returns a DECLARATIVE plan (mount specs, initializers, instance list) and
+/// appends the instance state declarations + txn variants to `items`
+/// (removing the consumed originals). No HTML formatting happens here — the
+/// view layer consumes the specs.
 pub fn expand_component_instances(
     items: &mut Vec<TopLevel>,
     view_html: &str,
@@ -42,23 +64,32 @@ pub fn expand_component_instances(
         .collect();
 
     let mut plan = ComponentInstancePlan {
-        fragments: std::collections::HashMap::new(),
+        mounts: std::collections::HashMap::new(),
         initializers: std::collections::HashMap::new(),
+        instances: Vec::new(),
     };
     for (component, fragment_html) in &render_blocks {
         let mount_count = count_component_mounts(view_html, component);
         let refs = collect_fragment_refs(fragment_html);
-        // A fragment with no state fields is a static view fragment — mount it
-        // shared (2b1 behavior).
+        // A fragment with no state fields is a static view fragment — a single
+        // empty spec (the view layer mounts it shared, 2b1 behavior).
         if refs.fields.is_empty() && refs.txns.is_empty() {
-            plan.fragments.insert(component.clone(), vec![fragment_html.clone()]);
+            plan.mounts.insert(
+                component.clone(),
+                vec![MountSpec {
+                    component: component.clone(),
+                    index: 0,
+                    fields: Vec::new(),
+                    txn_variants: std::collections::HashMap::new(),
+                }],
+            );
             continue;
         }
         // 2026-08-11 (2b2 slice 2b): the props each mount passes — attribute
         // `attr="value"` on the `<Name />` tag seeds the instance slot for the
         // fragment-referenced field `attr`.
         let mount_props = collect_mount_props(view_html, component, mount_count);
-        let mut per_mount: Vec<String> = Vec::with_capacity(mount_count);
+        let mut per_mount: Vec<MountSpec> = Vec::with_capacity(mount_count);
         // for_each (not a `for`) keeps expand single-level for Praetor.
         (0..mount_count).for_each(|i| {
             let prefix = format!("{}.{}", component, i);
@@ -77,13 +108,24 @@ pub fn expand_component_instances(
                 });
             }
             let variant_txns = build_txn_variants(items, component, i, &refs, &prefix);
-            // Rewrite the fragment's directives for this mount.
-            let rewritten = rewrite_fragment(fragment_html, &refs, &prefix, i, &variant_txns);
-            per_mount.push(rewritten);
+            // The declarative mount spec — the view layer applies it to the
+            // raw fragment (no HTML formatting here).
+            let fields = refs
+                .fields
+                .iter()
+                .map(|field| (field.clone(), format!("{}.{}", prefix, field)))
+                .collect();
+            per_mount.push(MountSpec {
+                component: component.clone(),
+                index: i,
+                fields,
+                txn_variants: variant_txns,
+            });
+            plan.instances.push((component.clone(), i));
         });
         // Remove the consumed originals.
         remove_consumed_originals(items, &refs);
-        plan.fragments.insert(component.clone(), per_mount);
+        plan.mounts.insert(component.clone(), per_mount);
     }
     Ok(plan)
 }
@@ -627,62 +669,6 @@ fn rewrite_expr(e: &Expr, qualifier: &dyn Fn(&str) -> Option<String>) -> Expr {
     cloned
 }
 
-/// Rewrite a fragment's directives for a mount: field signals become
-/// `prefix.<field>` and txn triggers become the mount's variant names.
-fn rewrite_fragment(
-    fragment: &str,
-    refs: &FragmentRefs,
-    prefix: &str,
-    mount: usize,
-    variant_txns: &std::collections::HashMap<String, String>,
-) -> String {
-    let _ = mount;
-    let mut out = fragment.to_string();
-    for field in &refs.fields {
-        let qualified = format!("{}.{}", prefix, field);
-        // Replace `b-text="field"`, `b-show="field"`, etc. — the bare field
-        // token as a directive VALUE (attribute boundaries).
-        out = replace_directive_value(&out, field, &qualified);
-    }
-    for (orig, variant) in variant_txns {
-        out = replace_directive_value(&out, orig, variant);
-    }
-    out
-}
-
-/// Replace `from` → `to` inside DIRECTIVE attribute values only (`b-text="..."`,
-/// `b-trigger:click="..."`). Non-directive attrs and markup text pass through.
-fn replace_directive_value(html: &str, from: &str, to: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut scan = 0;
-    while let Some(rel) = html[scan..].find("=\"") {
-        let pos = scan + rel;
-        // Check the attr name before this `=`: scan only the trailing token
-        // window (bounded) so the backward search is O(1), not O(prefix).
-        let window_start = pos.saturating_sub(32);
-        let window = &html[window_start..pos];
-        let attr_name = &window[window.rfind([' ', '<', '>', '\n', '\t']).map(|i| i + 1).unwrap_or(0)..];
-        if attr_name.starts_with("b-") {
-            out.push_str(&html[scan..pos + 2]);
-            let after = &html[pos + 2..];
-            if let Some(end) = after.find('"') {
-                let value = &after[..end];
-                out.push_str(&value.replace(from, to));
-                out.push('"');
-                scan = pos + 2 + end + 1;
-            } else {
-                out.push_str(after);
-                scan = html.len();
-            }
-        } else {
-            out.push_str(&html[scan..pos + 1]);
-            scan = pos + 1;
-        }
-    }
-    out.push_str(&html[scan..]);
-    out
-}
-
 /// Remove the global state decls + txns consumed by per-instance expansion.
 fn remove_consumed_originals(items: &mut Vec<TopLevel>, refs: &FragmentRefs) {
     let fields = &refs.fields;
@@ -748,24 +734,27 @@ render Root {
 };
 "#;
         let (items, plan) = check(src).unwrap();
-        let frags = plan.fragments.get("Counter").expect("Counter plan");
-        assert_eq!(frags.len(), 2, "one fragment per mount: {frags:?}");
-        assert!(
-            frags[0].contains("b-text=\"Counter.0.count\""),
-            "mount 0 binds its instance slot: {}",
-            frags[0]
+        let specs = plan.mounts.get("Counter").expect("Counter plan");
+        assert_eq!(specs.len(), 2, "one spec per mount: {specs:?}");
+        assert_eq!(
+            specs[0].fields,
+            vec![("count".to_string(), "Counter.0.count".to_string())],
+            "mount 0 field map"
         );
-        assert!(
-            frags[1].contains("b-text=\"Counter.1.count\""),
-            "mount 1 binds its instance slot: {}",
-            frags[1]
+        assert_eq!(
+            specs[1].fields,
+            vec![("count".to_string(), "Counter.1.count".to_string())],
+            "mount 1 field map"
         );
-        assert!(
-            frags[0].contains("b-trigger:click=\"increment_0\"")
-                && frags[1].contains("b-trigger:click=\"increment_1\""),
-            "mount triggers route to their variants: {} / {}",
-            frags[0],
-            frags[1]
+        assert_eq!(
+            specs[0].txn_variants.get("increment").map(|v| v.as_str()),
+            Some("increment_0"),
+            "mount 0 txn variant"
+        );
+        assert_eq!(
+            specs[1].txn_variants.get("increment").map(|v| v.as_str()),
+            Some("increment_1"),
+            "mount 1 txn variant"
         );
         let names: Vec<String> = items.iter().filter_map(|item| match item {
             TopLevel::StateDecl(sd) => Some(sd.name.clone()),
@@ -849,9 +838,10 @@ render Root {
             Some(&Expr::Decimal(7)),
             "mount 1 seeds 7"
         );
-        assert!(
-            plan.fragments.get("Counter").map(|f| f.len()).unwrap_or(0) == 2,
-            "two per-mount fragments"
+        assert_eq!(
+            plan.mounts.get("Counter").map(|s| s.len()).unwrap_or(0),
+            2,
+            "two per-mount specs"
         );
         let _ = items;
     }

@@ -137,13 +137,18 @@ pub struct ViewCompiler {
     /// extraction must not leak item-scoped bindings like `b-text="item"`).
     each_depth: usize,
     /// 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` view fragments,
-    /// keyed by struct name. A `<Name />` tag in the view mounts a fragment at
-    /// compile time (inlined + ID-injected like any markup). 2026-08-11
-    /// (2b2 slice 2a): the value is a PER-MOUNT list — mount k splices
-    /// `fragments[k % len]` so each mount binds its own instance-qualified
-    /// state (per-instance component state). A single shared entry preserves
-    /// the 2b1 shared-state behavior.
-    pub render_blocks: HashMap<String, Vec<String>>,
+    /// keyed by struct name — the RAW fragment html. A `<Name />` tag in the
+    /// view mounts a fragment at compile time (inlined + ID-injected like any
+    /// markup). The per-mount REWRITE specs (`component_specs`) decide what
+    /// each mount binds (instance-qualified slots + txn variants) — the view
+    /// layer formats the HTML; analysis only supplies the decisions.
+    pub render_blocks: HashMap<String, String>,
+    /// 2026-08-11 (2b2 slice 2a/2b): per-mount view-rewrite specs (decisions
+    /// from analysis/component_instances). Mount k applies `specs[k % len]` to
+    /// the raw fragment: field signals → instance-qualified slots, trigger
+    /// txns → mount variants, and the fragment root gets a `data-instance`
+    /// marker so the shim can reset the instance on b-when unmount.
+    pub component_specs: HashMap<String, Vec<crate::analysis::component_instances::MountSpec>>,
     /// 2026-08-11 (2b2 slice 2a): per-component mount counter, used to pick the
     /// per-mount fragment variant for each `<Name />` tag.
     pub component_mounts: HashMap<String, usize>,
@@ -173,6 +178,7 @@ impl ViewCompiler {
             each_context: Vec::new(),
             each_depth: 0,
             render_blocks: HashMap::new(),
+            component_specs: HashMap::new(),
             component_mounts: HashMap::new(),
             diagnostics: Vec::new(),
             validation_errors: Vec::new(),
@@ -188,12 +194,100 @@ impl ViewCompiler {
         self.transactions.insert(name.to_string(), id);
     }
 
-    /// 2026-08-11 (Phase 2b): register the `render Name { ... }` view
-    /// fragments so `<Name />` tags mount them. The value is a per-mount list
-    /// (2b2 slice 2a): mount k splices `fragments[k % len]`.
-    pub fn set_render_blocks(&mut self, blocks: HashMap<String, Vec<String>>) {
+    /// 2026-08-11 (Phase 2b): register the RAW `render Name { ... }` view
+    /// fragments (the view layer rewrites per mount via `component_specs`).
+    pub fn set_render_blocks(&mut self, blocks: HashMap<String, String>) {
         self.render_blocks = blocks;
         self.component_mounts.clear();
+    }
+
+    /// 2026-08-11 (2b2 slice 2a/2b): register the per-mount rewrite specs.
+    pub fn set_component_specs(
+        &mut self,
+        specs: HashMap<String, Vec<crate::analysis::component_instances::MountSpec>>,
+    ) {
+        self.component_specs = specs;
+        self.component_mounts.clear();
+    }
+
+    /// 2026-08-11 (2b2 slice 2a/2b): apply a mount's rewrite SPEC to the raw
+    /// fragment — the view layer's formatting (analysis supplies only the
+    /// decisions): field directive values become the instance-qualified slots,
+    /// trigger txns become the mount variants, and the fragment root gets a
+    /// `data-instance` marker so the shim can reset the instance on b-when
+    /// unmount.
+    fn apply_mount_spec(
+        &self,
+        raw: &str,
+        spec: &crate::analysis::component_instances::MountSpec,
+    ) -> String {
+        let mut html = raw.to_string();
+        for (field, qualified) in &spec.fields {
+            html = Self::replace_directive_value(&html, field, qualified);
+        }
+        for (orig, variant) in &spec.txn_variants {
+            html = Self::replace_directive_value(&html, orig, variant);
+        }
+        Self::mark_fragment_root(&html, &format!("{}.{}", spec.component, spec.index))
+    }
+
+    /// 2026-08-11 (2b2 slice 2a/2b): inject `data-instance="<id>"` into the
+    /// fragment's ROOT (first opening tag) so the shim's b-when unmount can
+    /// find and reset the instance (remount = fresh).
+    fn mark_fragment_root(fragment: &str, id: &str) -> String {
+        let bytes = fragment;
+        let mut pos = 0;
+        while let Some(rel) = bytes[pos..].find('<') {
+            let start = pos + rel;
+            let next = bytes[start + 1..].as_bytes().first().copied();
+            if matches!(next, Some(b'/') | Some(b'!')) {
+                if let Some(end) = bytes[start..].find('>') {
+                    pos = start + end + 1;
+                    continue;
+                }
+                break;
+            }
+            if let Some(end_rel) = bytes[start..].find('>') {
+                let end = start + end_rel;
+                let insert_at = if bytes.as_bytes()[end - 1] == b'/' { end - 1 } else { end };
+                let marker = format!(" data-instance=\"{}\"", id);
+                return format!("{}{}{}", &bytes[..insert_at], marker, &bytes[insert_at..]);
+            }
+            break;
+        }
+        fragment.to_string()
+    }
+
+    /// 2026-08-11 (2b2 slice 2a/2b): replace `from` → `to` inside DIRECTIVE
+    /// attribute values only (`b-text="..."`, `b-trigger:click="..."`).
+    /// Non-directive attrs and markup text pass through.
+    fn replace_directive_value(html: &str, from: &str, to: &str) -> String {
+        let mut out = String::with_capacity(html.len());
+        let mut scan = 0;
+        while let Some(rel) = html[scan..].find("=\"") {
+            let pos = scan + rel;
+            let window_start = pos.saturating_sub(32);
+            let window = &html[window_start..pos];
+            let attr_name = &window[window.rfind([' ', '<', '>', '\n', '\t']).map(|i| i + 1).unwrap_or(0)..];
+            if attr_name.starts_with("b-") {
+                out.push_str(&html[scan..pos + 2]);
+                let after = &html[pos + 2..];
+                if let Some(end) = after.find('"') {
+                    let value = &after[..end];
+                    out.push_str(&value.replace(from, to));
+                    out.push('"');
+                    scan = pos + 2 + end + 1;
+                } else {
+                    out.push_str(after);
+                    scan = html.len();
+                }
+            } else {
+                out.push_str(&html[scan..pos + 1]);
+                scan = pos + 1;
+            }
+        }
+        out.push_str(&html[scan..]);
+        out
     }
 
     /// Returns transactions that are triggered by user input (b-trigger:)
@@ -367,23 +461,35 @@ impl ViewCompiler {
                                 continue;
                             }
                             in_progress.insert(tag_name_raw.clone());
-                            // 2026-08-11 (2b2 slice 2a): pick the per-mount
-                            // fragment variant — each `<Name />` tag mounts the
-                            // instance-qualified fragment for its index.
+                            // 2026-08-11 (2b2 slice 2a/2b): pick the per-mount
+                            // REWRITE SPEC (decisions) and apply it to the raw
+                            // fragment — the view layer formats the HTML.
                             let mount = self
                                 .component_mounts
                                 .entry(tag_name_raw.clone())
                                 .or_insert(0);
-                            let fragments = self
+                            let specs = self
+                                .component_specs
+                                .get(&tag_name_raw)
+                                .cloned()
+                                .unwrap_or_default();
+                            let spec = specs
+                                .get(*mount % specs.len().max(1))
+                                .cloned()
+                                .unwrap_or(crate::analysis::component_instances::MountSpec {
+                                    component: tag_name_raw.clone(),
+                                    index: 0,
+                                    fields: Vec::new(),
+                                    txn_variants: std::collections::HashMap::new(),
+                                });
+                            let raw = self
                                 .render_blocks
                                 .get(&tag_name_raw)
                                 .cloned()
                                 .unwrap_or_default();
-                            let fragment = fragments
-                                .get(*mount % fragments.len().max(1))
-                                .cloned()
-                                .unwrap_or_default();
                             *mount += 1;
+                            // The raw fragment, rewritten for this mount.
+                            let fragment = self.apply_mount_spec(&raw, &spec);
                             // Self-closing `<Name />` skips just the tag; the
                             // paired `<Name>...</Name>` form skips to the close.
                             let close = format!("</{}>", tag_name_raw);
@@ -1991,7 +2097,7 @@ mod tests {
         let mut blocks = HashMap::new();
         blocks.insert(
             "Counter".to_string(),
-            vec![r#"<span b-text="count">0</span>"#.to_string()],
+            r#"<span b-text="count">0</span>"#.to_string(),
         );
         vc.set_render_blocks(blocks);
         let (bindings, modified_html, diagnostics) =
@@ -2006,8 +2112,12 @@ mod tests {
             "fragment must be inlined: {modified_html}"
         );
         assert!(
-            !modified_html.contains("Counter"),
+            !modified_html.contains("<Counter"),
             "mount tag must be replaced: {modified_html}"
+        );
+        assert!(
+            modified_html.contains("data-instance=\"Counter.0\""),
+            "fragment root carries its instance marker for the shim: {modified_html}"
         );
         assert!(
             bindings.iter().any(|b| matches!(&b.directive, Directive::Text { signal } if signal == "count")),
@@ -2021,12 +2131,12 @@ mod tests {
         let mut blocks = HashMap::new();
         blocks.insert(
             "Counter".to_string(),
-            vec!["<span>hi</span>".to_string()],
+            "<span>hi</span>".to_string(),
         );
         vc.set_render_blocks(blocks);
         let (_, modified_html, _) = vc.compile(r#"<Counter></Counter>"#);
         assert!(
-            modified_html.contains("<span>hi</span>"),
+            modified_html.contains("<span") && modified_html.contains("hi</span>"),
             "paired form must inline the fragment: {modified_html}"
         );
     }
@@ -2035,7 +2145,7 @@ mod tests {
     fn component_multiple_mounts_unique_ids() {
         let mut vc = ViewCompiler::new();
         let mut blocks = HashMap::new();
-        blocks.insert("Counter".to_string(), vec![r#"<span b-text="count">0</span>"#.to_string()]);
+        blocks.insert("Counter".to_string(), r#"<span b-text="count">0</span>"#.to_string());
         vc.set_render_blocks(blocks);
         let (bindings, modified_html, _) =
             vc.compile(r#"<Counter /><Counter />"#);
@@ -2057,8 +2167,8 @@ mod tests {
     fn component_cycle_is_error() {
         let mut vc = ViewCompiler::new();
         let mut blocks = HashMap::new();
-        blocks.insert("A".to_string(), vec!["<B />".to_string()]);
-        blocks.insert("B".to_string(), vec!["<A />".to_string()]);
+        blocks.insert("A".to_string(), "<B />".to_string());
+        blocks.insert("B".to_string(), "<A />".to_string());
         vc.set_render_blocks(blocks);
         let (_, _, diagnostics) = vc.compile("<A />");
         assert!(

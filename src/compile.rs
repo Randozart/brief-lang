@@ -359,7 +359,10 @@ fn compile_view(
     items: &[briv_compiler::ast::TopLevel],
     opts: &BuildOptions,
     preprocessed: &PreprocessedSource,
-    render_blocks: &std::collections::HashMap<String, Vec<String>>,
+    component_specs: &std::collections::HashMap<
+        String,
+        Vec<briv_compiler::analysis::component_instances::MountSpec>,
+    >,
 ) -> Result<CompiledView, String> {
     let raw_view = opts
         .view_html
@@ -393,10 +396,20 @@ fn compile_view(
     let mut vc = briv_compiler::view_compiler::ViewCompiler::new();
     // 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` blocks are
     // reusable view fragments — `<Name />` mounts them at compile time. The
-    // fragment's directives bind to the state they reference. 2026-08-11
-    // (2b2 slice 2a): the per-mount fragment list (from the component-instance
-    // expansion) gives each mount its own instance-qualified slots.
-    vc.set_render_blocks(render_blocks.clone());
+    // analysis supplies the per-mount rewrite SPECS (decisions); the view
+    // layer formats the raw fragment per mount (instance-qualified slots +
+    // txn variants + data-instance marker).
+    let raw_blocks: std::collections::HashMap<String, String> = items
+        .iter()
+        .filter_map(|item| match item {
+            briv_compiler::ast::TopLevel::RenderBlock(rb) => {
+                Some((rb.struct_name.clone(), rb.view_html.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    vc.set_render_blocks(raw_blocks);
+    vc.set_component_specs(component_specs.clone());
     for item in items {
         match item {
             briv_compiler::ast::TopLevel::StateDecl(sd) => {
@@ -1013,12 +1026,15 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-08-11 (2b2 slice 2a): expand component instances first — each
     // `<Name />` mount gains its own instance-qualified state slots and txn
     // variants; the per-mount fragments drive the view compiler.
-    let mut component_fragments: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    let mut component_specs: std::collections::HashMap<
+        String,
+        Vec<briv_compiler::analysis::component_instances::MountSpec>,
+    > = std::collections::HashMap::new();
     let mut component_initializers: std::collections::HashMap<
         String,
         briv_compiler::ast::Expr,
     > = std::collections::HashMap::new();
+    let mut component_instances: Vec<(String, usize)> = Vec::new();
     if opts.backend == BackendKind::Webstack {
         let view_html = opts
             .view_html
@@ -1030,14 +1046,15 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             &view_html,
         ) {
             Ok(plan) => {
-                component_fragments = plan.fragments;
+                component_specs = plan.mounts;
                 component_initializers = plan.initializers;
+                component_instances = plan.instances;
             }
             Err(msg) => return Err(format!("{}: component instance error: {}", file_path, msg)),
         }
     }
     let compiled_view: CompiledView = if opts.backend == BackendKind::Webstack {
-        compile_view(file_path, &items, opts, &preprocessed, &component_fragments)?
+        compile_view(file_path, &items, opts, &preprocessed, &component_specs)?
     } else {
         CompiledView {
             bindings: Vec::new(),
@@ -1065,7 +1082,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         Result<briv_compiler::glue::web_generator::BindRoute, String>,
     >> = None;
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers, &component_instances)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -1163,6 +1180,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 .flatten()
                 .collect();
             exports.push("state_layout".to_string());
+            // 2026-08-11 (2b2 lifecycle): per-instance reset exports the shim
+            // calls on b-when unmount.
+            exports.extend(component_instances.iter().map(|(component, idx)| {
+                format!("__instance_reset_{}_{}", component, idx)
+            }));
             exports.sort_unstable();
             exports.dedup();
             compile_wasm(&out_path, &wasm_path, &exports)?;
@@ -1522,6 +1544,7 @@ fn codegen(
         Result<briv_compiler::glue::web_generator::BindRoute, String>,
     >>,
     component_initializers: &std::collections::HashMap<String, briv_compiler::ast::Expr>,
+    component_instances: &[(String, usize)],
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -1667,7 +1690,8 @@ output = b.generate(items, None);
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init)
-                .with_component_initializers(component_initializers.clone());
+                .with_component_initializers(component_initializers.clone())
+                .with_component_instances(component_instances.to_vec());
             // 2026-08-11 (view wiring): view-bound fields are observability —
             // the DOM consumes them, so dead-field elimination must keep them.
             b.ctx.view_bound_fields = view_signals.clone();

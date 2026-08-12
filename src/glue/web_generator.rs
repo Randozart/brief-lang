@@ -605,20 +605,28 @@ export async function createApp(wasmBytes) {{
                      \x20         let mounted = true;\n\
                      \x20         this._registerViewEffect({handle}, (value) => {{\n\
                      \x20           const show = value ? true : false;\n\
-                     \x20           if (show && !mounted) {{\n\
-                     \x20             anchor.parentNode.insertBefore(template.cloneNode(true), anchor);\n\
-                     \x20             mounted = true;\n\
-                     \x20           }} else if (!show && mounted) {{\n\
-                     \x20             template = template || el.cloneNode(true);\n\
-                     \x20             anchor = document.createComment('b-when');\n\
-                     \x20             el.parentNode.insertBefore(anchor, el);\n\
-                     \x20             el.remove();\n\
-                     \x20             mounted = false;\n\
-                     \x20           }}\n\
-                     \x20         }});\n\
-                     \x20       }})();"
-                )
-            }
+                      \x20           if (show && !mounted) {{\n\
+                      \x20             anchor.parentNode.insertBefore(template.cloneNode(true), anchor);\n\
+                      \x20             mounted = true;\n\
+                      \x20           }} else if (!show && mounted) {{\n\
+                      \x20             template = template || el.cloneNode(true);\n\
+                      \x20             anchor = document.createComment('b-when');\n\
+                      \x20             el.parentNode.insertBefore(anchor, el);\n\
+                      \x20             // 2026-08-11 (2b2 lifecycle): unmounting a subtree\n\
+                      \x20             // releases any component instances inside it — reset their\n\
+                      \x20             // state so a remount starts fresh.\n\
+                      \x20             el.querySelectorAll('[data-instance]').forEach((m) => {{\n\
+                      \x20               const inst = m.getAttribute('data-instance');\n\
+                      \x20               const reset = this._txn('__instance_reset_' + inst.replace('.', '_'));\n\
+                      \x20               if (reset) reset();\n\
+                      \x20             }});\n\
+                      \x20             el.remove();\n\
+                      \x20             mounted = false;\n\
+                      \x20           }}\n\
+                      \x20         }});\n\
+                      \x20       }})();"
+                 )
+             }
             Directive::Bind { target } => {
                 // 2026-08-11 (Phase 2a2, SPEC 21.4): `b-bind:value="field"` wires
                 // the `input` event to the UNIQUE transaction that writes the
