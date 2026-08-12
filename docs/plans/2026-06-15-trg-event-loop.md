@@ -16,7 +16,7 @@
 
 The compiler emits epoll setup and event loop as **bare LLVM IR** — no intrinsics, no FFI, no runtime helpers beyond libc. The programmer declares the trigger and its source; the compiler generates the fd setup, epoll registration, data reading, and state field stores:
 
-```briv
+```briev
 trg keypress: Char @stdin#;     // stdin input
 trg tick: Int @timer#(60);      // 60 Hz timer
 trg resize: Int @signal#(SIG);  // terminal resize signal
@@ -127,7 +127,7 @@ This applies to all main-loop dispatch variants that have `has_wake_triggers == 
 
 **File:** `src/backend/llvm/mod.rs:build_field_index`
 
-The synthetic epfd needs a slot in `%State`. Add a synthetic state declaration for `__trg_epfd: Int` that's injected during `emit_trg_epoll_setup()` but not visible to the Briv program.
+The synthetic epfd needs a slot in `%State`. Add a synthetic state declaration for `__trg_epfd: Int` that's injected during `emit_trg_epoll_setup()` but not visible to the Briev program.
 
 ### Item 6 — Compile `officina.bv` end-to-end
 
@@ -135,9 +135,9 @@ The synthetic epfd needs a slot in `%State`. Add a synthetic state declaration f
 
 After all changes, compile officina-cli:
 ```
-./target/release/briv-compiler llvm officina.bv -o officina.ll
+./target/release/briev-compiler llvm officina.bv -o officina.ll
 llc -O3 officina.ll -o officina.s
-clang -O3 officina.s lib/runtime/briv_rt.c -o officina_bin
+clang -O3 officina.s lib/runtime/briev_rt.c -o officina_bin
 ```
 
 Verify: binary boots, reads stdin, renders TUI, exits on Ctrl+C.
@@ -149,7 +149,7 @@ Verify: binary boots, reads stdin, renders TUI, exits on Ctrl+C.
 | `src/backend/llvm/emit_toplevel.rs` | Rewrite `emit_trg_init()` → `emit_trg_epoll_setup()`; remove `emit_trg_load()` |
 | `src/backend/llvm/mod.rs` | Replace declares; add epfd to `build_field_index` |
 | `src/backend/llvm/loop_engine.rs` | Modify `emit_main()` etc. to use epoll_wait + per-trg read + dirty-bit-set |
-| `lib/runtime/briv_rt.c` | No changes needed (old `__trg_*` already removed in Phase 6) |
+| `lib/runtime/briev_rt.c` | No changes needed (old `__trg_*` already removed in Phase 6) |
 
 ## Test Impact
 

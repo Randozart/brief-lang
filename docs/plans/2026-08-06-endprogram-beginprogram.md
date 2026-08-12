@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-06
 **Status:** Implemented (2026-08-06) — merged into main as `b3aff893`; backend entry-loop + real process exit delivered, SPEC 11.5 no longer staged
-**Branch:** `feat/accel-gpu` (worktree `../briv-compiler-accel`)
+**Branch:** `feat/accel-gpu` (worktree `../briev-compiler-accel`)
 **Companion SPEC change:** `spec/SPEC.md` §11.5 + a new entry-loop subsection,
-`src/vocab.rs`, `syntax-highlighter/syntaxes/briv.tmLanguage.json`.
+`src/vocab.rs`, `syntax-highlighter/syntaxes/briev.tmLanguage.json`.
 
 ---
 
@@ -72,7 +72,7 @@ analysis already proves.
 | # | Decision |
 |---|---|
 | D1 | Keyword: `endprogram` replaces `exit program` (single token). `exit` is removed as a keyword |
-| D2 | `endprogram` genuinely exits the process: LLVM emits `call void @__exit(i64 code)` (briv_rt.c wrapper, runs atexit cleanup) |
+| D2 | `endprogram` genuinely exits the process: LLVM emits `call void @__exit(i64 code)` (briev_rt.c wrapper, runs atexit cleanup) |
 | D3 | Exit code = the statement's value via `adapt_to_i64`; bare `endprogram;` exits 0; `endprogram 5;` exits 5; `endprogram println!(x);` prints then exits 0 (Print# returns i64 0) |
 | D4 | `beginprogram` is a keyword usable as a conjunct in a node precondition: `[beginprogram && <state-condition>]` |
 | D5 | `beginprogram` is a PURE marker — true exactly once at program start. It takes no conditions itself; the node's other precondition terms are ordinary STATE expressions (top-level `let` bindings seeded from env at startup, e.g. `let startingnumber: Int = get_env_int!("env_var")`) |
@@ -99,7 +99,7 @@ analysis already proves.
 - `term!` is `VocabStatus::Removed` (`src/vocab.rs:194`); the parser errors
   direct the user to `term;` / `term!` closes the program (definitions.rs:271,
   statements.rs:89).
-- `briv_rt.c` provides `void __exit(int64_t code)` (lib/runtime/briv_rt.c:578)
+- `briev_rt.c` provides `void __exit(int64_t code)` (lib/runtime/briev_rt.c:578)
   — always linked via the archive step.
 - SPEC §11.5: `term expression;` (complete current callable/transition),
   `exit program;` (complete the process boundary), `exit program code;`
@@ -132,7 +132,7 @@ analysis already proves.
 - **vocab.rs**: `kw("endprogram", Canonical, Statement)`; drop `kw("exit", ...)`
   and the `"exit program"` list entry.
 - **highlighter**: add `endprogram` keyword to
-  `syntax-highlighter/syntaxes/briv.tmLanguage.json`.
+  `syntax-highlighter/syntaxes/briev.tmLanguage.json`.
 - **helpers.rs**: keyword map.
 
 ### 4.2 Real exit semantics
@@ -143,7 +143,7 @@ analysis already proves.
   - `EndProgram(val)`: emit the value's side effects (the print), then
     `call void @__exit(i64 <code>)`; `<code>` = the value via
     `adapt_to_i64`, or `0` for the bare form. Declare `declare void
-    @__exit(i64)` (briv_rt.c, already linked; runs atexit cleanup).
+    @__exit(i64)` (briev_rt.c, already linked; runs atexit cleanup).
 - **Interpreter** (`src/interpreter/eval.rs:851`): `EndProgram(val)` →
   a distinct `RuntimeError::ProgramExit(value)` (not `TermReturn`).
 - **Reactor** (`src/reactor.rs:284`): `EndProgram` → distinct
@@ -169,7 +169,7 @@ analysis already proves.
 
 ### 5.1 Language
 
-```briv
+```briev
 let startingnumber: Int = get_env_int!("env_var");
 
 node entry1 [beginprogram && startingnumber == 1][done] {
@@ -279,7 +279,7 @@ node entry1 [beginprogram && startingnumber == 1][done] {
   host statements — a pre-existing gap; the exit would run on the CPU path
   only).
 - **Done (2026-08-06):** the backend entry-loop is implemented — per-node
-  `@briv_begin_<name>` flag (true until the goal) gates the precondition, and
+  `@briev_begin_<name>` flag (true until the goal) gates the precondition, and
   the body's goal-check clears it when the postcondition is met, so
   `[beginprogram && i < N]` drives a one-shot entry loop with no phase gate.
   `nbody_newton_accel.bv` uses it (`init_bodies [beginprogram && i < nb]

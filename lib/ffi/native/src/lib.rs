@@ -1,6 +1,6 @@
-//! Briv FFI Native Implementations
+//! Briev FFI Native Implementations
 //!
-//! This crate contains the Rust implementations for all Briv foreign functions.
+//! This crate contains the Rust implementations for all Briev foreign functions.
 //! Each function follows the pattern: takes basic types, returns Result<Output, ErrorType>
 
 use wasm_bindgen::prelude::*;

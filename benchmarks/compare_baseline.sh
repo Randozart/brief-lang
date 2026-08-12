@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NAME="${1:-nbody_newton}"
-BASELINE_DIR="../briv-compiler-baseline"
+BASELINE_DIR="../briev-compiler-baseline"
 CURRENT_DIR="."
 RUNS=5
 
@@ -31,15 +31,15 @@ echo ""
 if [ ! -f "$BASELINE_DIR/benchmarks/$NAME" ]; then
     echo "Building baseline binary..."
     cd "$BASELINE_DIR"
-    # 2026-08-01: binary renamed briv-compiler -> brivc long ago; the stale
+    # 2026-08-01: binary renamed briev-compiler -> brievc long ago; the stale
     # name made baseline builds fail silently and the comparison compare only
-    # the current binary (or error). Must match the harness's brivc binary.
-    BOUND=50000000 ./target/release/brivc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
+    # the current binary (or error). Must match the harness's brievc binary.
+    BOUND=50000000 ./target/release/brievc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
     cd "$CURRENT_DIR"
 fi
 if [ ! -f "benchmarks/$NAME" ]; then
     echo "Building current binary..."
-    BOUND=50000000 ./target/release/brivc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
+    BOUND=50000000 ./target/release/brievc build "benchmarks/${NAME}.bv" --out benchmarks 2>&1 | tail -1
 fi
 
 time_binary() {

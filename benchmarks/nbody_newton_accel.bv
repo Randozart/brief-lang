@@ -33,7 +33,7 @@ let count: Int = 0;
 let phase: Int = 0;   // 0 = init, 1 = step, 2 = step-complete, 3 = done
 
 // init_bodies: the program entry (beginprogram) — one parallel pass seeding
-// positions/velocities. The entry flag @briv_begin_init_bodies is cleared when
+// positions/velocities. The entry flag @briev_begin_init_bodies is cleared when
 // the [i == nb] goal is met, so the [beginprogram && i < nb] precondition stops
 // gating after the init completes — no phase gate needed.
 async accel node init_bodies [beginprogram && i < nb][i == nb] {

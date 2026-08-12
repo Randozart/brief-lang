@@ -61,7 +61,7 @@ the cheapest LLVM annotation:
 ### Risk
 
 - `!range` that contradicts program behavior causes `poison`, not `UB`.
-  Briv's contract checker already proves the guard, so this is safe.
+  Briev's contract checker already proves the guard, so this is safe.
 - Removing `@llvm.assume` entirely before all patterns are covered could
   regress optimizations that depend on `assume`. Keep the fallback for
   unsupported patterns.
@@ -72,7 +72,7 @@ the cheapest LLVM annotation:
 
 ### Current State
 
-Briv stores all values in `%State` as `i64` (or `i8*` for strings).
+Briev stores all values in `%State` as `i64` (or `i8*` for strings).
 LLVM's Type-Based Alias Analysis sees every field access as a generic
 `i64` load/store. Without type distinctions, LLVM conservatively assumes
 every store may alias every load.
@@ -101,7 +101,7 @@ store i64 %v1, i64* %field_a, !tbaa !3   ; !3 = "Int"
 1. **Define TBAA metadata tree** in `mod.rs`, emitted once per module:
 
    ```llvm
-   !0 = !{!"Briv"}
+   !0 = !{!"Briev"}
    !1 = !{!"Int", !0}
    !2 = !{!"Bool", !0}
    !3 = !{!"Char", !0}

@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Algebraic expression rewriting on the Briv AST before LLVM codegen.
+Algebraic expression rewriting on the Briev AST before LLVM codegen.
 Eliminates identity operations (`x + 0`, `x * 1`, `x && true`, `!!x`, etc.)
 so LLVM gets cleaner IR. Redundant operations are handled by LLVM's own
 optimizers (`-O3` catches `add i64 0, %x` → `%x`), but simplifying at

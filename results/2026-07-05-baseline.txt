@@ -10,7 +10,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/ring_buffer.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/ring_buffer
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -24,7 +24,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/float_math.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/float_math
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -38,7 +38,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/float_math_nonzero.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/float_math_nonzero
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -47,7 +47,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
 Compiling to LLVM IR: benchmarks/sparse_dispatch.bv 
 info: modulo-switch dispatch for [ping, ack, err, debug, data, ctrl, sync_, stat] on count % 8
   Output: benchmarks/sparse_dispatch.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined value '%state_0'
   %ip_16 = getelementptr inbounds %StateChunk0, ptr %state_0, i32 0, i32 0
                                                     ^
@@ -57,7 +57,7 @@ llc: error: llc: benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/sparse_dispatch.ll -o sparse_dispatch.opt.ll
     llc sparse_dispatch.opt.ll -filetype=obj -o benchmarks/sparse_dispatch.o
-    ld sparse_dispatch.o benchmarks/briv_rt.o -o sparse_dispatch -lpthread
+    ld sparse_dispatch.o benchmarks/briev_rt.o -o sparse_dispatch -lpthread
 benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined value '%state_0'
  1093 |   %ip_16 = getelementptr inbounds %StateChunk0, ptr %state_0, i32 0, i32 0
       |                                                     ^
@@ -77,7 +77,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/print_loop.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/print_loop
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -93,7 +93,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/nbody_newton.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/nbody_newton
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -107,7 +107,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/nbody_sqrt.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/nbody_sqrt
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -119,7 +119,7 @@ warning: #!exit declared but program has no tick loop
 note: the exit condition will never be checked
 help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/nbody_sqrt_idio.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defined with type 'float' but expected 'i64'
   %be_vx3 = add i64 0, %phi_vx3
                        ^
@@ -129,7 +129,7 @@ llc: error: llc: benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defin
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/nbody_sqrt_idio.ll -o nbody_sqrt_idio.opt.ll
     llc nbody_sqrt_idio.opt.ll -filetype=obj -o benchmarks/nbody_sqrt_idio.o
-    ld nbody_sqrt_idio.o benchmarks/briv_rt.o -o nbody_sqrt_idio -lpthread
+    ld nbody_sqrt_idio.o benchmarks/briev_rt.o -o nbody_sqrt_idio -lpthread
 benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defined with type 'float' but expected 'i64'
  14485 |   %be_vx3 = add i64 0, %phi_vx3
        |                        ^
@@ -149,7 +149,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/fasta.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/fasta
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -160,7 +160,7 @@ info: txn 'fan' dispatched via per-field phi loop (A005c, 16 fields)
   Output: benchmarks/fannkuch_redux.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/fannkuch_redux
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -174,7 +174,7 @@ warning: #!exit declared but program has no tick loop
 note: the exit condition will never be checked
 help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/mandelbrot.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 Instruction does not dominate all uses!
   %t216 = add i64 %t207, %t215
   %t265 = add i64 0, %t216
@@ -186,7 +186,7 @@ llc: error: 'benchmarks/mandelbrot.ll': input module cannot be verified
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/mandelbrot.ll -o mandelbrot.opt.ll
     llc mandelbrot.opt.ll -filetype=obj -o benchmarks/mandelbrot.o
-    ld mandelbrot.o benchmarks/briv_rt.o -o mandelbrot -lpthread
+    ld mandelbrot.o benchmarks/briev_rt.o -o mandelbrot -lpthread
 /usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crt1.o: in function `_start':
 (.text+0x1b): undefined reference to `main'
 collect2: error: ld returned 1 exit status
@@ -205,7 +205,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/kalman_filter_runtime.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/kalman_filter_runtime
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -219,7 +219,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/knucleotide.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/knucleotide
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -233,7 +233,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/cancel_math.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/cancel_math
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -245,7 +245,7 @@ info: sequential bounded dispatch (non-modulo preconditions)
   Output: benchmarks/bit_clear.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/bit_clear
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -257,7 +257,7 @@ warning: #!exit declared but program has no tick loop
 note: the exit condition will never be checked
 help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/queue_drain.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/queue_drain.ll:745:25: error: use of undefined value '%ip_2'
   store i64 %rb2_h, ptr %ip_2, align 8
                         ^
@@ -267,7 +267,7 @@ llc: error: llc: benchmarks/queue_drain.ll:745:25: error: use of undefined value
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/queue_drain.ll -o queue_drain.opt.ll
     llc queue_drain.opt.ll -filetype=obj -o benchmarks/queue_drain.o
-    ld queue_drain.o benchmarks/briv_rt.o -o queue_drain -lpthread
+    ld queue_drain.o benchmarks/briev_rt.o -o queue_drain -lpthread
 benchmarks/queue_drain.ll:745:25: error: use of undefined value '%ip_2'
   745 |   store i64 %rb2_h, ptr %ip_2, align 8
       |                         ^
@@ -287,7 +287,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/queue_drain_sym.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/queue_drain_sym
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -301,7 +301,7 @@ help: add an @link trigger to make the program reactive, or remove #!exit
   Output: benchmarks/queue_drain_idio.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/queue_drain_idio
-  Briv binary ready.
+  Briev binary ready.
   (no C reference — skipping)
 
 ================================================
@@ -313,7 +313,7 @@ info: sequential bounded dispatch (non-modulo preconditions)
   Output: benchmarks/interval_step.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/interval_step
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -321,111 +321,111 @@ info: sequential bounded dispatch (non-modulo preconditions)
 ================================================
 
 === ring_buffer ===
-  Briv: .0619s  (min 0.059713s, max 0.063102s)
+  Briev: .0619s  (min 0.059713s, max 0.063102s)
   C:     .0615s
   Ratio: 1.00x  →  ~tie wins
   correctness: MATCH (output: "")
 
 === float_math ===
-  Briv: .0610s  (min 0.057462s, max 0.064431s)
+  Briev: .0610s  (min 0.057462s, max 0.064431s)
   C:     .0721s
-  Ratio: .84x  →  Briv wins
+  Ratio: .84x  →  Briev wins
   correctness: MISMATCH
-    briv: "0.300000012"
+    briev: "0.300000012"
     c:     ""
 
 === float_math_nonzero ===
-  Briv: .1724s  (min 0.170719s, max 0.173836s)
+  Briev: .1724s  (min 0.170719s, max 0.173836s)
   C:     .1704s
   Ratio: 1.01x  →  C wins
   correctness: MISMATCH
-    briv: "2.000000000"
+    briev: "2.000000000"
     c:     ""
 
 === sparse_dispatch ===
-  briv binary: (no binary — linking issue)
+  briev binary: (no binary — linking issue)
   c binary:     1777B
   correctness: SKIP (binary missing)
 
 === print_loop ===
-  Briv: .0600s  (min 0.057506s, max 0.061891s)
+  Briev: .0600s  (min 0.057506s, max 0.061891s)
   C:     .0606s
-  Ratio: .99x  →  Briv wins
+  Ratio: .99x  →  Briev wins
   correctness: MATCH (output: "")
 
 === nbody_newton ===
-  Briv: 7.6231s  (min 7.255276s, max 8.392667s)
+  Briev: 7.6231s  (min 7.255276s, max 8.392667s)
   C:     9.2509s
-  Ratio: .82x  →  Briv wins
+  Ratio: .82x  →  Briev wins
   correctness: MISMATCH (line count 2 vs 1)
 
 === nbody_sqrt ===
-  Briv: 3.9217s  (min 3.793951s, max 4.136226s)
+  Briev: 3.9217s  (min 3.793951s, max 4.136226s)
   C:     3.0539s
   Ratio: 1.28x  →  C wins
   correctness: MATCH (output: "-0.169288784")
 
 === nbody_sqrt_idio ===
-  briv binary: (no binary — linking issue)
+  briev binary: (no binary — linking issue)
   c binary:     5418B
   correctness: SKIP (binary missing)
 
 === fasta ===
-  Briv: .0006s  (min 0.000634s, max 0.000724s)
+  Briev: .0006s  (min 0.000634s, max 0.000724s)
   C:     .2271s
-  Ratio: 0x  →  Briv wins
+  Ratio: 0x  →  Briev wins
   correctness: MISMATCH
-    briv: ""
+    briev: ""
     c:     "xqjqf"
 
 === fannkuch_redux ===
-  Briv: .1029s  (min 0.101258s, max 0.105794s)
+  Briev: .1029s  (min 0.101258s, max 0.105794s)
   C:     .0638s
   Ratio: 1.61x  →  C wins
   correctness: MATCH (output: "10")
 
 === mandelbrot ===
-  briv binary: (no binary — linking issue)
+  briev binary: (no binary — linking issue)
   c binary:     2195B
   correctness: SKIP (binary missing)
 
 === kalman_filter_runtime ===
-  Briv: .1802s  (min 0.177557s, max 0.184047s)
+  Briev: .1802s  (min 0.177557s, max 0.184047s)
   C:     .1805s
-  Ratio: .99x  →  Briv wins
+  Ratio: .99x  →  Briev wins
   correctness: MISMATCH
-    briv: "0.307020009"
+    briev: "0.307020009"
     c:     ""
 
 === knucleotide ===
-  Briv: .0006s  (min 0.000595s, max 0.000682s)
+  Briev: .0006s  (min 0.000595s, max 0.000682s)
   C:     .1937s
-  Ratio: 0x  →  Briv wins
+  Ratio: 0x  →  Briev wins
   correctness: MISMATCH
-    briv: ""
+    briev: ""
     c:     "3"
 
 === cancel_math ===
-  Briv: .0006s  (min 0.000589s, max 0.000819s)
+  Briev: .0006s  (min 0.000589s, max 0.000819s)
   C:     .0666s
-  Ratio: 0x  →  Briv wins
+  Ratio: 0x  →  Briev wins
   correctness: MATCH (output: "")
 
 === bit_clear ===
-  Briv: .0006s  (min 0.000590s, max 0.000714s)
+  Briev: .0006s  (min 0.000590s, max 0.000714s)
   C:     .0006s
   Ratio: 1.00x  →  ~tie wins
   correctness: MISMATCH
-    briv: ""
+    briev: ""
     c:     "0"
 
 === queue_drain ===
-  briv binary: (no binary — linking issue)
+  briev binary: (no binary — linking issue)
   c binary:     1777B
   correctness: SKIP (binary missing)
 
 === queue_drain_sym ===
-  Briv: .0598s  (min 0.058819s, max 0.061211s)
+  Briev: .0598s  (min 0.058819s, max 0.061211s)
   C:     .0580s
   Ratio: 1.03x  →  C wins
   correctness: MATCH (output: "")
@@ -435,9 +435,9 @@ benchmarks/build_and_bench.sh: line 244: [: : integer expression expected
   SKIP — no C binary
 
 === interval_step ===
-  Briv: .0008s  (min 0.000574s, max 0.001414s)
+  Briev: .0008s  (min 0.000574s, max 0.001414s)
   C:     .0633s
-  Ratio: .01x  →  Briv wins
+  Ratio: .01x  →  Briev wins
   correctness: MATCH (output: "")
 
 ================================================
@@ -449,25 +449,25 @@ benchmarks/build_and_bench.sh: line 244: [: : integer expression expected
 ================================================
 
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0619s     ║ .0615s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ float_math                ║ .0610s     ║ .0721s     ║ .84x     ║ Briv  ║ MISMATCH  ║
+║ float_math                ║ .0610s     ║ .0721s     ║ .84x     ║ Briev  ║ MISMATCH  ║
 ║ float_math_nonzero        ║ .1724s     ║ .1704s     ║ 1.01x    ║ C      ║ MISMATCH  ║
 ║ sparse_dispatch           ║ precomputed ║            ║          ║        ║ SKIP      ║
-║ print_loop                ║ .0600s     ║ .0606s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ nbody_newton              ║ 7.6231s    ║ 9.2509s    ║ .82x     ║ Briv  ║ MISMATCH  ║
+║ print_loop                ║ .0600s     ║ .0606s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ nbody_newton              ║ 7.6231s    ║ 9.2509s    ║ .82x     ║ Briev  ║ MISMATCH  ║
 ║ nbody_sqrt                ║ 3.9217s    ║ 3.0539s    ║ 1.28x    ║ C      ║ MATCH     ║
 ║ nbody_sqrt_idio           ║ precomputed ║            ║          ║        ║ SKIP      ║
-║ fasta                     ║ .0006s     ║ .2271s     ║ 0x       ║ Briv  ║ MISMATCH  ║
+║ fasta                     ║ .0006s     ║ .2271s     ║ 0x       ║ Briev  ║ MISMATCH  ║
 ║ fannkuch_redux            ║ .1029s     ║ .0638s     ║ 1.61x    ║ C      ║ MATCH     ║
 ║ mandelbrot                ║ precomputed ║            ║          ║        ║ SKIP      ║
-║ kalman_filter_runtime     ║ .1802s     ║ .1805s     ║ .99x     ║ Briv  ║ MISMATCH  ║
-║ knucleotide               ║ .0006s     ║ .1937s     ║ 0x       ║ Briv  ║ MISMATCH  ║
-║ cancel_math               ║ .0006s     ║ .0666s     ║ 0x       ║ Briv  ║ MATCH     ║
+║ kalman_filter_runtime     ║ .1802s     ║ .1805s     ║ .99x     ║ Briev  ║ MISMATCH  ║
+║ knucleotide               ║ .0006s     ║ .1937s     ║ 0x       ║ Briev  ║ MISMATCH  ║
+║ cancel_math               ║ .0006s     ║ .0666s     ║ 0x       ║ Briev  ║ MATCH     ║
 ║ bit_clear                 ║ .0006s     ║ .0006s     ║ 1.00x    ║ ~tie   ║ MISMATCH  ║
 ║ queue_drain               ║ precomputed ║            ║          ║        ║ SKIP      ║
 ║ queue_drain_sym           ║ .0598s     ║ .0580s     ║ 1.03x    ║ C      ║ MATCH     ║
 ║ queue_drain_idio          ║ SKIP       ║            ║          ║        ║ SKIP      ║
-║ interval_step             ║ .0008s     ║ .0633s     ║ .01x     ║ Briv  ║ MATCH     ║
+║ interval_step             ║ .0008s     ║ .0633s     ║ .01x     ║ Briev  ║ MATCH     ║
 ╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝

@@ -1,4 +1,4 @@
-# Briv Compiler Build Plan
+# Briev Compiler Build Plan
 
 **Based on:** `ARCHITECTURE.md` v1.0  
 **Target:** Incremental compiler for `.bv` files with manifest-driven imports  
@@ -25,10 +25,10 @@
 
 ## Phase 1: Manifest System (1 day)
 
-**Goal:** Package management with `briv.toml`
+**Goal:** Package management with `briev.toml`
 
 ### Deliverables
-- `src/manifest.rs` - Parse and validate briv.toml
+- `src/manifest.rs` - Parse and validate briev.toml
 - CLI commands: `import`, `install`, `list`, `remove`
 
 ### Tasks
@@ -39,9 +39,9 @@
 
 ### CLI Commands
 ```bash
-briv import <name> --path <loc>   # Add dependency
-briv install                      # Install all deps
-briv list                         # List deps
+briev import <name> --path <loc>   # Add dependency
+briev install                      # Install all deps
+briev list                         # List deps
 ```
 
 ---
@@ -88,7 +88,7 @@ briv list                         # List deps
 **Goal:** Persistent, content-addressed caching
 
 ### Deliverables
-- `.briv-cache/` directory
+- `.briev-cache/` directory
 - Phase-level caching (AST, types, proofs)
 
 ### Tasks
@@ -99,7 +99,7 @@ briv list                         # List deps
 
 ### Cache Structure
 ```
-.briv-cache/
+.briev-cache/
 ├── manifest.json
 ├── modules/
 │   ├── {name}.ast
@@ -134,17 +134,17 @@ briv list                         # List deps
 **Goal:** Complete command-line interface
 
 ### Deliverables
-- `briv check` - Type check without execution
-- `briv build` - Full compilation
-- `briv watch` - Watch mode
-- `briv init` - Scaffold new project
+- `briev check` - Type check without execution
+- `briev build` - Full compilation
+- `briev watch` - Watch mode
+- `briev init` - Scaffold new project
 
 ### Commands
 ```bash
-briv check <file.bv>      # Skip interpreter, fast feedback
-briv build <file.bv>      # Full compilation
-briv watch <file.bv>      # Watch mode
-briv init --name <name>   # Create project scaffold
+briev check <file.bv>      # Skip interpreter, fast feedback
+briev build <file.bv>      # Full compilation
+briev watch <file.bv>      # Watch mode
+briev init --name <name>   # Create project scaffold
 ```
 
 ---
@@ -162,7 +162,7 @@ briv init --name <name>   # Create project scaffold
 
 ---
 
-## Phase 8: Rendered Briv Preparation (Ongoing)
+## Phase 8: Rendered Briev Preparation (Ongoing)
 
 **Goal:** Design for future .rbv compilation
 
@@ -197,7 +197,7 @@ Phase 0: Architecture Foundation
     │                                                           │
     │                                                           └──► Phase 7: Integration Tests
     │
-    └──► Phase 8: Rendered Briv Preparation (Parallel)
+    └──► Phase 8: Rendered Briev Preparation (Parallel)
 ```
 
 ---
@@ -226,5 +226,5 @@ Phase 0: Architecture Foundation
 ## Key References
 
 - **Architecture:** `ARCHITECTURE.md`
-- **Language Spec:** `briv-lang-spec.md`
-- **Rendered Briv:** `rendered-briv-rbv-spec-v3.md`
+- **Language Spec:** `briev-lang-spec.md`
+- **Rendered Briev:** `rendered-briev-rbv-spec-v3.md`

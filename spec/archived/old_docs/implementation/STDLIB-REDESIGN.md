@@ -1,10 +1,10 @@
-# Briv Standard Library Redesign
+# Briev Standard Library Redesign
 
 ## Goal
 
-Separate what Briv can do natively from what requires FFI to Rust. Build a stdlib that leverages Briv's strengths: reactive state management, transactions, contracts.
+Separate what Briev can do natively from what requires FFI to Rust. Build a stdlib that leverages Briev's strengths: reactive state management, transactions, contracts.
 
-## What Briv Can Handle Natively
+## What Briev Can Handle Natively
 
 ### State & Transactions ✓
 - Global state management (via `let`, `const`)
@@ -14,7 +14,7 @@ Separate what Briv can do natively from what requires FFI to Rust. Build a stdli
 - Multi-variable state coordination
 
 **Example**: A counter that automatically increments while conditions hold
-```briv
+```briev
 let count: Int = 0;
 node increment [count < 100] [count == @count + 1] {
   &count = count + 1;
@@ -29,7 +29,7 @@ node increment [count < 100] [count == @count + 1] {
 - Pattern matching via unification
 
 **Example**: Compute derived values
-```briv
+```briev
 defn absolute_value(x: Int) -> Int [true][result >= 0] {
   [x < 0] term -x;
   [x >= 0] term x;
@@ -51,7 +51,7 @@ defn absolute_value(x: Int) -> Int [true][result >= 0] {
 - STM rollback handles conflicts
 - Preconditions act as gates
 
-## What Briv Cannot Handle (Needs FFI)
+## What Briev Cannot Handle (Needs FFI)
 
 ### I/O Operations ✗
 - File reading/writing
@@ -60,7 +60,7 @@ defn absolute_value(x: Int) -> Int [true][result >= 0] {
 - Database queries
 - Anything that talks to the OS or network
 
-**Why**: Briv doesn't have I/O primitives. These are external capabilities.
+**Why**: Briev doesn't have I/O primitives. These are external capabilities.
 
 ### Math Functions (Complex) ✗
 - Trigonometry: sin, cos, tan
@@ -68,7 +68,7 @@ defn absolute_value(x: Int) -> Int [true][result >= 0] {
 - Square roots, powers
 - Floating point operations beyond basic arithmetic
 
-**Why**: These are CPU operations, not state operations. Briv's arithmetic is integers and comparison.
+**Why**: These are CPU operations, not state operations. Briev's arithmetic is integers and comparison.
 
 ### String Manipulation (Complex) ✗
 - String length, substring, replace
@@ -76,38 +76,38 @@ defn absolute_value(x: Int) -> Int [true][result >= 0] {
 - Parsing (string → number)
 - Concatenation (can be done but inefficient)
 
-**Why**: Briv has no string operations. These are utility functions.
+**Why**: Briev has no string operations. These are utility functions.
 
 ### Time ✗
 - Getting current time
 - Measuring elapsed time
 - Sleeping
 
-**Why**: External to Briv. Time comes from the runtime/OS.
+**Why**: External to Briev. Time comes from the runtime/OS.
 
 ### Random Numbers ✗
 - RNG seeding
 - Random integer/float generation
 
-**Why**: Non-deterministic. Can't be proven in Briv.
+**Why**: Non-deterministic. Can't be proven in Briev.
 
 ### Collections (Partially) ✗
-- Lists/arrays: Briv has `Data` type but no operations on it
+- Lists/arrays: Briev has `Data` type but no operations on it
 - Maps/dictionaries: Not supported
 
-**Why**: Briv treats collections as opaque `Data`. Operations would need native support.
+**Why**: Briev treats collections as opaque `Data`. Operations would need native support.
 
 ## Proposed Stdlib Architecture
 
-### Tier 1: Native Briv (No FFI Needed)
+### Tier 1: Native Briev (No FFI Needed)
 
-**Module: `briv::core`**
+**Module: `briev::core`**
 - State management patterns
 - Transaction templates
 - Common guards/contracts
 
 Example:
-```briv
+```briev
 # Built-in pattern: Initialize on demand
 defn get_or_init(initialized: Bool, init_fn: ... -> ...) -> ... [true][initialized] {
   [initialized] term ...;
@@ -118,36 +118,36 @@ defn get_or_init(initialized: Bool, init_fn: ... -> ...) -> ... [true][initializ
 };
 ```
 
-**Module: `briv::math`** (Integer math only)
+**Module: `briev::math`** (Integer math only)
 - `absolute(x: Int) -> Int`
 - `min(a: Int, b: Int) -> Int`
 - `max(a: Int, b: Int) -> Int`
 - `clamp(x: Int, min: Int, max: Int) -> Int`
 
-All implemented as pure Briv functions with proven contracts.
+All implemented as pure Briev functions with proven contracts.
 
 ### Tier 2: FFI to Rust (Current Stdlib)
 
-These genuinely need Rust because Briv can't do I/O or call CPU functions.
+These genuinely need Rust because Briev can't do I/O or call CPU functions.
 
-**Module: `briv::io`** (FFI)
+**Module: `briev::io`** (FFI)
 - `read_file(path: String) -> Result<String, IoError>`
 - `write_file(path: String, content: String) -> Result<Void, IoError>`
 - Other file operations
 
-**Module: `briv::math`** (FFI)
+**Module: `briev::math`** (FFI)
 - `sqrt(x: Float) -> Result<Float, MathError>`
 - `sin(x: Float) -> Result<Float, MathError>`
 - `pow(base: Float, exp: Float) -> Result<Float, MathError>`
 - etc.
 
-**Module: `briv::string`** (FFI)
+**Module: `briev::string`** (FFI)
 - `length(s: String) -> Result<Int, StringError>`
 - `substring(s: String, start: Int, len: Int) -> Result<String, StringError>`
 - `to_upper(s: String) -> Result<String, StringError>`
 - etc.
 
-**Module: `briv::time`** (FFI)
+**Module: `briev::time`** (FFI)
 - `current_time() -> Result<Int, TimeError>`
 - `sleep(ms: Int) -> Result<Void, TimeError>`
 
@@ -155,20 +155,20 @@ These genuinely need Rust because Briv can't do I/O or call CPU functions.
 
 What we could add later:
 
-**Module: `briv::collections`** (FFI or native?)
+**Module: `briev::collections`** (FFI or native?)
 - List operations: append, map, filter, fold
 - Dictionary operations: get, set, keys
-- Decision: Do we add native collection support to Briv, or FFI them?
+- Decision: Do we add native collection support to Briev, or FFI them?
 
-**Module: `briv::random`** (FFI)
+**Module: `briev::random`** (FFI)
 - `random_int(min: Int, max: Int) -> Result<Int, RandomError>`
-- Note: Can't be proven in Briv, but can be called
+- Note: Can't be proven in Briev, but can be called
 
-**Module: `briv::crypto`** (FFI)
+**Module: `briev::crypto`** (FFI)
 - Hash functions
 - Encryption (if needed)
 
-**Module: `briv::json`** (FFI)
+**Module: `briev::json`** (FFI)
 - Parse JSON
 - Stringify values
 
@@ -177,11 +177,11 @@ What we could add later:
 ### Phase 1: Audit Current Stdlib
 
 Review `std/bindings/*.toml`:
-1. Identify functions that could be native Briv
+1. Identify functions that could be native Briev
 2. Identify functions that genuinely need FFI
 3. Separate them properly
 
-### Phase 2: Create Native Briv Stdlib
+### Phase 2: Create Native Briev Stdlib
 
 Create `std/core.bv`:
 - Integer math functions (all with proven contracts)
@@ -200,23 +200,23 @@ Keep only what genuinely needs Rust:
 ### Phase 4: Document the Distinction
 
 Make it clear in docs:
-- When to use native Briv functions
+- When to use native Briev functions
 - When to use FFI functions
 - Why the distinction matters
 
 ## Benefits of This Approach
 
-1. **Correct by construction**: Native Briv functions have proven contracts
-2. **No runtime surprises**: Everything Briv does is verified at compile time
+1. **Correct by construction**: Native Briev functions have proven contracts
+2. **No runtime surprises**: Everything Briev does is verified at compile time
 3. **Performance**: Native functions don't cross FFI boundary
-4. **Teachable**: Shows what Briv excels at
+4. **Teachable**: Shows what Briev excels at
 5. **Maintainable**: Clear separation of concerns
 
 ## Example: State Machine Library
 
-We could write a native Briv library for common patterns:
+We could write a native Briev library for common patterns:
 
-```briv
+```briev
 # State machine template
 defn state_machine(state: Int, event: Int) 
   -> Int 
@@ -230,11 +230,11 @@ defn state_machine(state: Int, event: Int)
 };
 ```
 
-This is what Briv is actually good at. Not string manipulation or math - state and transactions.
+This is what Briev is actually good at. Not string manipulation or math - state and transactions.
 
 ## What This Means for Users
 
-- Import native Briv libraries with `import briv.core;` - fully proven
+- Import native Briev libraries with `import briev.core;` - fully proven
 - Use FFI for I/O, math, utilities - same as now
 - Clear error messages about what needs what
-- Better mental model of Briv's actual capabilities
+- Better mental model of Briev's actual capabilities

@@ -39,7 +39,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     register_typedefs(items, universe, int_bits)?;
 
     // 2026-08-09 (Phase 12, SPEC §19.6): the `meld` declaration pass is
-    // removed — foreign shapes adapt through GLUE/Data Briv descriptors,
+    // removed — foreign shapes adapt through GLUE/Data Briev descriptors,
     // explicit protocol cast edges, ownership contracts, and effects.
     // (2026-07-16: P0+P6 — Process meld layout declarations in a single pass.)
 

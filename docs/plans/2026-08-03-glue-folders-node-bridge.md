@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 **Status:** Active plan
-**Branch:** `glue-host-callable` (worktree `../briv-compiler-glue-host`)
+**Branch:** `glue-host-callable` (worktree `../briev-compiler-glue-host`)
 **Related:** `docs/plans/2026-08-03-native-python-meld-composite.md`,
 `docs/guides/ffi-and-export.md`
 
@@ -19,12 +19,12 @@ per-language knowledge in the compiler?
 
 Take the best of all three eras that exist in the tree:
 - **Era 1 (compile-time metaprogramming, legacy/unwired):** `lib/ffi/gen_*.bv`
-  — Briv `$defn` generators + `FileWrite$` + `ShellCmd$` (Turing-complete
+  — Briev `$defn` generators + `FileWrite$` + `ShellCmd$` (Turing-complete
   generation, plugins can run the toolchain).
 - **Era 2 (generic plugin folders):** `plugins/{front,mid,post,back}/` — for
   compiler phases, **not** language bindings.
 - **Era 3 (config + Rust renderer, current P1–P3):** monolithic
-  `config/glue.dbvl` + `render_native_shim` + `briv extension`. Proven, but the
+  `config/glue.dbvl` + `render_native_shim` + `briev extension`. Proven, but the
   toolchain recipe is Python-hardcoded in Rust (`run_extension_cli:537-555`) —
   the hole the Node probe exposes.
 
@@ -54,7 +54,7 @@ lib/glue/<lang>/
   gen.bv        OPTIONAL compile-time plugin (imperative generation escape hatch)
 ```
 
-- `briv export|bindings|extension <bridge> <lang>` resolves
+- `briev export|bindings|extension <bridge> <lang>` resolves
   `lib/glue/<lang>/glue.dbvl` **by name** (reusing lib/ resolution), loads it,
   and emits whatever files the project's further compilation needs (header,
   crate, wrapper, extension).
@@ -84,7 +84,7 @@ Zero language knowledge in Rust.
 
 If `lib/glue/<lang>/gen.bv` exists, the command invokes it instead of the
 renderer: the pipeline writes a `bridge.dbvl` contract next to the output (the
-`extract_bridge_info` data, Data Briv), the plugin reads it via
+`extract_bridge_info` data, Data Briev), the plugin reads it via
 `FileRead$`/`ConfigGet$`, generates files via `FileWrite$`, runs the toolchain
 via `ShellCmd$` (both already wired: macros/audit.rs severity, macros/eval.rs).
 Turing-complete generation for anything the templates can't express.
@@ -129,8 +129,8 @@ module/method/method_def templates, per-export extern protos).
 `examples/glue-host/node_bridge.bv`:
 ```
 import "glue/c.bv";
-frgn briv_read_file_raw(path: String) -> Int as __read_file__ from "lib/runtime/briv_rt.c" fallback 0;
-frgn briv_write_file(path: String, data: String) -> Int as __write_file__ from "lib/runtime/briv_rt.c" fallback 0;
+frgn briev_read_file_raw(path: String) -> Int as __read_file__ from "lib/runtime/briev_rt.c" fallback 0;
+frgn briev_write_file(path: String, data: String) -> Int as __write_file__ from "lib/runtime/briev_rt.c" fallback 0;
 state saved: String = "";
 state count: Int = 0;
 txn store_text(name: CStr) -> CStr { saved = name; term saved; };
@@ -138,21 +138,21 @@ export defn save(name: CStr) -> CStr { term store_text(name); };
 export defn read() -> CStr { term saved; };
 export defn bump(delta: Int) -> Int { count = count + delta; term count; };
 export defn persist(path: CStr) -> CStr { ... __write_file__ ... term saved; };
-export defn load(path: CStr) -> CStr { ... __read_file__ + cstr_to_briv ... term saved; };
+export defn load(path: CStr) -> CStr { ... __read_file__ + cstr_to_briev ... term saved; };
 ```
 - The CStr ↔ String meld (c.bv) carries the boundary cast-free.
-- `load` wraps the bare `__read_file__` buffer with `cstr_to_briv` (correctness,
+- `load` wraps the bare `__read_file__` buffer with `cstr_to_briev` (correctness,
   not the fragile str_to_c heuristic).
 - Cross-process constraint: Node and Python are separate processes (no
   shared live state, unlike Rust-embedding-Python). In-process round-trips are
-  live; the cross-language exchange uses Briv's own runtime file I/O — the
+  live; the cross-language exchange uses Briev's own runtime file I/O — the
   only interface both languages share.
 
 `tests/c_driver_node.rs` (toolchain-guarded on node/python3-config/cc):
-1. build bridge `.a` → `briv extension … node` → `.node`.
-2. Node: `save("node→briv")`, `read()` assert, `bump(5)`, `persist(x.dat)`.
-3. `briv extension … python` → `.so`.
-4. Python: `load(x.dat)` asserts a Node-originated composite, `save("python→briv")`,
+1. build bridge `.a` → `briev extension … node` → `.node`.
+2. Node: `save("node→briev")`, `read()` assert, `bump(5)`, `persist(x.dat)`.
+3. `briev extension … python` → `.so`.
+4. Python: `load(x.dat)` asserts a Node-originated composite, `save("python→briev")`,
    `persist(y.dat)`, `bump(3)`.
 5. Node: `load(y.dat)` asserts the reverse.
 

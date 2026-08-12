@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=Briv Compiler
-Comment=Rebuild Briv compiler and VSIX extension
-Exec=/home/randozart/Desktop/Projects/briv-compiler/rebuild-compiler
-Icon=/home/randozart/Desktop/Projects/briv-compiler/syntax-highlighter/images/briv-logo.svg
-Terminal=true
-Type=Application
-Categories=Development;

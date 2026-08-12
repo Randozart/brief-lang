@@ -9,24 +9,24 @@ Commit `066b86a7` (dispatch guardrail + RHS mapping fix + vector phi infrastruct
 | Benchmark | Ratio | Winner | Correct |
 |-----------|-------|--------|---------|
 | ring_buffer | 1.02x | C | MATCH |
-| float_math | 0.99x | Briv | MATCH |
-| float_math_nonzero | 0.96x | Briv | MATCH |
-| sparse_dispatch | 0.83x | Briv | MATCH |
-| print_loop | 0.97x | Briv | MATCH |
+| float_math | 0.99x | Briev | MATCH |
+| float_math_nonzero | 0.96x | Briev | MATCH |
+| sparse_dispatch | 0.83x | Briev | MATCH |
+| print_loop | 0.97x | Briev | MATCH |
 | nbody_newton | **1.22x** | C | MATCH |
-| nbody_sqrt | **0.77x** | Briv | MATCH |
-| nbody_sqrt_idio | **0.74x** | Briv | MATCH |
+| nbody_sqrt | **0.77x** | Briev | MATCH |
+| nbody_sqrt_idio | **0.74x** | Briev | MATCH |
 | fasta | 1.02x | C | MATCH |
-| fannkuch_redux | 0.99x | Briv | MATCH |
+| fannkuch_redux | 0.99x | Briev | MATCH |
 | mandelbrot | 1.00x | ~tie | MATCH |
 | kalman_filter_runtime | 1.00x | ~tie | MATCH |
-| knucleotide | 0.98x | Briv | MATCH |
-| cancel_math | 0.84x | Briv | MATCH |
+| knucleotide | 0.98x | Briev | MATCH |
+| cancel_math | 0.84x | Briev | MATCH |
 | bit_clear | ~0 | ~tie | MATCH |
-| queue_drain | 0.91x | Briv | MATCH |
-| queue_drain_sym | 0.88x | Briv | MATCH |
-| queue_drain_idio | 0.88x | Briv | MATCH |
-| interval_step | 0.97x | Briv | MATCH |
+| queue_drain | 0.91x | Briev | MATCH |
+| queue_drain_sym | 0.88x | Briev | MATCH |
+| queue_drain_idio | 0.88x | Briev | MATCH |
+| interval_step | 0.97x | Briev | MATCH |
 
 fasta and knucleotide went from MISMATCH to MATCH (dispatch guardrail fix).
 nbody_sqrt/nbody_sqrt_idio improved slightly (0.78→0.77, 0.72→0.74).

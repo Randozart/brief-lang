@@ -24,27 +24,27 @@ Current tip: `fd59d350` (Phase 3). Run: `cargo build --release` +
 `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000, clang 18.1.3.
 Raw log: `/tmp/opencode/p3_runtime.log`. Zero MISMATCH.
 
-| Benchmark | Briv | C | Ratio | Winner | Correct |
+| Benchmark | Briev | C | Ratio | Winner | Correct |
 |-----------|------:|---:|------:|:------:|:-------:|
 | ring_buffer | .0524s | .0460s | 1.13× | C | MATCH |
-| float_math | .0734s | .0739s | 0.99× | Briv | MATCH |
+| float_math | .0734s | .0739s | 0.99× | Briev | MATCH |
 | float_math_nonzero | .2003s | .1644s | 1.21× | C | MATCH |
-| sparse_dispatch | .0515s | .0609s | 0.84× | Briv | MATCH |
+| sparse_dispatch | .0515s | .0609s | 0.84× | Briev | MATCH |
 | print_loop | .0607s | .0587s | 1.03× | C | MATCH |
-| nbody_newton | 6.9053s | 8.4097s | 0.82× | Briv | MATCH |
-| nbody_sqrt | 2.1862s | 2.7948s | 0.78× | Briv | MATCH |
-| nbody_sqrt_idio | 2.7251s | 3.6174s | 0.75× | Briv | MATCH |
-| fasta | .2088s | .2109s | 0.99× | Briv | MATCH |
-| fannkuch_redux | .0607s | .0651s | 0.93× | Briv | MATCH |
+| nbody_newton | 6.9053s | 8.4097s | 0.82× | Briev | MATCH |
+| nbody_sqrt | 2.1862s | 2.7948s | 0.78× | Briev | MATCH |
+| nbody_sqrt_idio | 2.7251s | 3.6174s | 0.75× | Briev | MATCH |
+| fasta | .2088s | .2109s | 0.99× | Briev | MATCH |
+| fannkuch_redux | .0607s | .0651s | 0.93× | Briev | MATCH |
 | mandelbrot | .6778s | .6622s | 1.02× | C | MATCH |
 | kalman_filter_runtime | .2197s | .1808s | 1.21× | C | MATCH |
-| knucleotide | .1873s | .1887s | 0.99× | Briv | MATCH |
-| cancel_math | .0535s | .0631s | 0.84× | Briv | MATCH |
+| knucleotide | .1873s | .1887s | 0.99× | Briev | MATCH |
+| cancel_math | .0535s | .0631s | 0.84× | Briev | MATCH |
 | bit_clear | .0003s | .0001s | 3.00× | C | MATCH |
-| queue_drain | .0570s | .0611s | 0.93× | Briv | MATCH |
-| queue_drain_sym | .0565s | .0610s | 0.92× | Briv | MATCH |
-| queue_drain_idio | .0564s | .0618s | 0.91× | Briv | MATCH |
-| interval_step | .0629s | .0637s | 0.99× | Briv | MATCH |
+| queue_drain | .0570s | .0611s | 0.93× | Briev | MATCH |
+| queue_drain_sym | .0565s | .0610s | 0.92× | Briev | MATCH |
+| queue_drain_idio | .0564s | .0618s | 0.91× | Briev | MATCH |
+| interval_step | .0629s | .0637s | 0.99× | Briev | MATCH |
 
 bit_clear times a ~0.3ms benchmark (noise). Bridge benchmarks: pre-existing
 koffi failures, unrelated.
@@ -106,7 +106,7 @@ Expr folds to a literal. No behavior change: the value is identical.
 `kalman_filter_runtime.ll` in `/tmp` (replace each `%t = load float, ptr @X`
 with `%t = bitcast i32 <bits> to float` using the const's own init bits), then
 `clang -O3 -flto -march=native -ffast-math -Wl,--gc-sections <mod.ll>
-lib/runtime/briv_rt.c -o <mod>` and time vs the untouched binaries at
+lib/runtime/briev_rt.c -o <mod>` and time vs the untouched binaries at
 BOUND=50000000. If the ratio drops toward ≤ 1.0×, the fix is validated.
 
 ## 5. Fix 2 — batch-loop guard hoisting (principled)
@@ -186,7 +186,7 @@ Transformed the current `float_math_nonzero.ll` / `kalman_filter_runtime.ll` in
 `%t = bitcast i32 <bits> to float` (the const's own init bits, alias-resolved
 through `@A10 = alias @A01` etc.). Built both with the harness's exact link
 step (`clang -O3 -flto -march=native -ffast-math -Wl,--gc-sections … .ll
-lib/runtime/briv_rt.c`) and interleaved-timed 5× at BOUND=50000000.
+lib/runtime/briev_rt.c`) and interleaved-timed 5× at BOUND=50000000.
 
 | Variant | float_math_nonzero | kalman |
 |---------|-------------------:|-------:|

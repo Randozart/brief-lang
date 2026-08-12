@@ -1,4 +1,4 @@
-# Briv Compiler - Critical Parser Bugs Technical Analysis
+# Briev Compiler - Critical Parser Bugs Technical Analysis
 
 ## Bug 1: Nested Block Elements Bug in `scan_html_block()` (Line 636)
 
@@ -167,7 +167,7 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
 
 Add these test cases:
 
-```briv
+```briev
 # Should work:
 rstruct Test1 {
   <div>
@@ -401,7 +401,7 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
 
 Add these test cases:
 
-```briv
+```briev
 # Test 1: ASCII (should work)
 rstruct Test1 {
   <div>content</div>

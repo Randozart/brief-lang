@@ -24,4 +24,4 @@ All benchmarks call `export defn add(a: Int, b: Int) -> Int` (a+b). Results are 
 
 - CPU: x86_64
 - Python 3.12.3, Node.js v24.16.0
-- Briv compiler commit `732ecc12`
+- Briev compiler commit `732ecc12`

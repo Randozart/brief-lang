@@ -18,7 +18,7 @@ ensures all memory access is explicit and contract-verified.
 
 ### Four pointer forms (2026-07-03)
 
-Briv has four forms of pointer, each differing in how much information the
+Briev has four forms of pointer, each differing in how much information the
 type system has about the pointee:
 
 | Form | Example | Pointee info | Use case |
@@ -74,7 +74,7 @@ All arithmetic operations preserve the pointer type:
 This means `Ptr<Float> as Ptr<Int32>` is valid (both 4 bytes, align 4),
 but `Ptr<Int> as Ptr<Int32>` is NOT valid (different sizes).
 
-```briv
+```briev
 let f: Ptr<Float> = 0x4000 as Ptr<Float>;
 let i: Ptr<Int32> = f as Ptr<Int32>;      // ✅ Float.bytes == Int32.bytes
 let raw: Ptr32 = f as Ptr32;               // ✅ Layout-compatible
@@ -97,7 +97,7 @@ matching that layout:
 
 These are available via `lib/std/spatial.bv`:
 
-```briv
+```briev
 import { block_copy, block_compare, block_fill, block_hash } from "std/spatial.bv";
 
 let dst: Ptr64 = malloc(8);
@@ -111,7 +111,7 @@ let eq = block_compare(dst, src, 8);
 A library can return `Ptr<Bits @/N>` as an opaque handle. The caller cannot
 inspect internals because `Ptr<Bits @/N>` only supports spatial operations:
 
-```briv
+```briev
 // Library: returns opaque 24-byte handle
 defn open_db(path: String) -> Ptr128 { ... };
 
@@ -132,7 +132,7 @@ available for compiler plugins to opt into.
 
 Functions can be referenced via `.#Ptr` and called indirectly:
 
-```briv
+```briev
 defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
 
 let cmp_fn = my_cmp .#Ptr;        // function pointer via .#Ptr
@@ -148,7 +148,7 @@ marshalling (passes `%state`, handles Bool/Float/String types).
 When `meld T <:> Int` exists, `(val as Int) * factor as T` is recognized as
 an EOR pattern. The backend emits native arithmetic without redundant casts:
 
-```briv
+```briev
 meld Meters <:> Int;
 defn scale(val: Meters, factor: Int) -> Meters {
     term (val as Int) * factor as Meters;  // compiled as a single mul i64
@@ -165,7 +165,7 @@ The EOR detection (`try_emit_eor` in `helpers.rs`) checks:
 Safety is proven by the existing contract system, not by a borrow checker.
 A pointer is just an integer with a *provenance*:
 
-```briv
+```briev
 defn read_device(reg: Ptr<Int>) -> Int
     [reg as Int >= UART0_BASE]
     [reg as Int <  UART_END]

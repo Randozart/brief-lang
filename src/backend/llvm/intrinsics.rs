@@ -32,7 +32,7 @@ pub fn emit_intrinsic_call(
         "Now#" => {
             // 2026-08-01 (D2): `Now#` — monotonic clock in ns for the
             // watchdog `within N ms` deadline compare.
-            writeln!(out, "{}{} = call i64 @__briv_now()", indent, v).ok();
+            writeln!(out, "{}{} = call i64 @__briev_now()", indent, v).ok();
             let narrowed = narrow_int_result(backend, out, v, indent);
             return BTypedRegister { name: narrowed, ty: Type::int() };
         }
@@ -48,7 +48,7 @@ pub fn emit_intrinsic_call(
         // 2026-08-03: host cancellation flag (process-global atomic).
         "CancelRequested#" => return emit_cancel_requested(backend, out, v, indent),
         "ClearCancel#" => {
-            writeln!(out, "{}store atomic i32 0, ptr @__briv_cancel_flag seq_cst, align 4", indent).ok();
+            writeln!(out, "{}store atomic i32 0, ptr @__briev_cancel_flag seq_cst, align 4", indent).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::void() };
         }
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
@@ -295,7 +295,7 @@ fn widen_to_i64(backend: &mut LlvmBackend, out: &mut String, reg: &str, indent: 
 //   Alloc#(size, Malloc)                — PascalCase: intrinsic dispatch
 //   Alloc#(size, Alloca)                — PascalCase: intrinsic dispatch
 //   Alloc#(size, "pool_serial")         — quoted: config/alloc-strategies.dbvl
-//   Alloc#(size, my_custom_alloc_fn)    — identifier: user Briv function
+//   Alloc#(size, my_custom_alloc_fn)    — identifier: user Briev function
 fn emit_alloc(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str, analysis_id: Option<usize>,
@@ -676,7 +676,7 @@ fn emit_get_env_int(
     // 2026-08-10: string_ptr handles unboxed-ptr vs boxed-i64 operands (see
     // emit_get_env). The old hardcoded `inttoptr i64` broke on ptr operands.
     let ptr_reg = backend.string_ptr(out, indent, &name_reg);
-    // 2026-07-28: Briv strings are stored as [i64 length][data\0] with the
+    // 2026-07-28: Briev strings are stored as [i64 length][data\0] with the
     // handle pointing to the struct start. getenv expects just the data portion.
     // Without this GEP, getenv reads the length field as the string (e.g.,
     // length=5 → binary 0x05 → empty string) → returns NULL → atol(NULL)
@@ -740,13 +740,13 @@ fn emit_address_of(
 }
 
 /// `CancelRequested#()` — load the process-global cancel flag as a Bool.
-/// 2026-08-03: the host raises it via `__briv_set_cancel`; Briv loops
+/// 2026-08-03: the host raises it via `__briev_set_cancel`; Briev loops
 /// poll explicitly (no implicit injection).
 fn emit_cancel_requested(
     backend: &mut LlvmBackend, out: &mut String, v: &str, indent: &str,
 ) -> BTypedRegister {
     let flag = backend.fun.gen_reg();
-    writeln!(out, "{}{} = load atomic i32, ptr @__briv_cancel_flag seq_cst, align 4", indent, flag).ok();
+    writeln!(out, "{}{} = load atomic i32, ptr @__briev_cancel_flag seq_cst, align 4", indent, flag).ok();
     let cmp = backend.fun.gen_reg();
     writeln!(out, "{}{} = icmp ne i32 {}, 0", indent, cmp, flag).ok();
     let zext = backend.fun.gen_reg();
@@ -771,17 +771,17 @@ fn emit_call_ptr(
     let cb_reg = emit_arg(backend, out, cb_expr, indent);
 
     // Resolve the fn's return type from the callback's declared type.
-    let (ret_ll, ret_briv) = match cb_expr {
+    let (ret_ll, ret_briev) = match cb_expr {
         Expr::Identifier(name) => match backend.fun.let_binding_types.get(name) {
             Some(Type::Function(_, ret)) => {
                 let ll = backend.llvm_type(ret);
-                let briv = match ll.as_str() {
+                let briev = match ll.as_str() {
                     "float" | "double" => Type::float(),
                     "ptr" => Type::string(),
                     "void" => Type::void(),
                     _ => Type::int(),
                 };
-                (ll, briv)
+                (ll, briev)
             }
             _ => ("i64".to_string(), Type::int()),
         },
@@ -809,7 +809,7 @@ fn emit_call_ptr(
         out, "{}{} = call {} {}({})",
         indent, v, ret_ll, cb_ptr, call_args.join(", ")
     ).ok();
-    BTypedRegister { name: v.to_string(), ty: ret_briv }
+    BTypedRegister { name: v.to_string(), ty: ret_briev }
 }
 
 // ─── Len# / Length# — load list length from 2-slot header ──────────────
@@ -870,13 +870,13 @@ fn resolve_syscall_number(op: &str) -> Option<i64> {
 /// 2026-07-26: Emit SysCall# — first arg is op (Int raw number or PascalCase
 /// abstract name), followed by up to 6 Int arguments.
 /// On x86_64/aarch64 Linux: emits inline assembly (syscall/svc #0).
-/// On other targets: falls back to @briv_syscall from briv_rt.c.
+/// On other targets: falls back to @briev_syscall from briev_rt.c.
 fn emit_syscall(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     if args.is_empty() {
-        writeln!(out, "{}call void @briv_syscall()", indent).ok();
+        writeln!(out, "{}call void @briev_syscall()", indent).ok();
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
         return BTypedRegister { name: v.to_string(), ty: Type::int() };
     }
@@ -921,8 +921,8 @@ fn emit_syscall(
             indent, v, all_args.join(", ")).ok();
         writeln!(out, "{}  )", indent).ok();
     } else {
-        // Non-Linux fallback: call briv_syscall via C runtime
-        writeln!(out, "{}{} = call i64 @briv_syscall({})", indent, v, all_args.join(", ")).ok();
+        // Non-Linux fallback: call briev_syscall via C runtime
+        writeln!(out, "{}{} = call i64 @briev_syscall({})", indent, v, all_args.join(", ")).ok();
     }
     // 2026-08-10: the syscall result is a semantic Int (i64 from the kernel /
     // C runtime) — narrow to the target int width (i32 wasm32) so it matches
@@ -935,7 +935,7 @@ fn emit_syscall(
 
 /// 2026-07-15: Emit SysConf# — resolves POSIX sysconf() values at runtime.
 /// First arg is a PascalCase abstract name (e.g., PageSize, CpuCount) or
-/// a raw Int constant. Emits call to @briv_sysconf(i64 %name).
+/// a raw Int constant. Emits call to @briev_sysconf(i64 %name).
 fn emit_sysconf(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
@@ -962,7 +962,7 @@ fn emit_sysconf(
         Some(arg) => emit_arg(backend, out, arg, indent),
         None => "0".to_string(),
     };
-    writeln!(out, "{}{} = call i64 @briv_sysconf(i64 {})", indent, v, name_reg).ok();
+    writeln!(out, "{}{} = call i64 @briev_sysconf(i64 {})", indent, v, name_reg).ok();
     let narrowed = narrow_int_result(backend, out, v, indent);
     BTypedRegister { name: narrowed, ty: Type::int() }
 }
@@ -1084,13 +1084,13 @@ fn emit_dl_close(
 
 // ─── Backtrace intrinsic ─────────────────────────────────────────────
 // 2026-07-15: backtrace() walks the stack. Emits call to C runtime
-// function @briv_backtrace() which uses glibc's backtrace().
+// function @briev_backtrace() which uses glibc's backtrace().
 
 fn emit_backtrace(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    writeln!(out, "{}{} = call i64 @briv_backtrace()", indent, v).ok();
+    writeln!(out, "{}{} = call i64 @briev_backtrace()", indent, v).ok();
     let narrowed = narrow_int_result(backend, out, v, indent);
     BTypedRegister { name: narrowed, ty: Type::int() }
 }
@@ -1218,7 +1218,7 @@ fn emit_intrinsic_print(
     };
     match category.as_str() {
         "String" => {
-            // A Briv String value IS the ptr to a length-prefixed
+            // A Briev String value IS the ptr to a length-prefixed
             // [len][bytes] buffer; __print_str takes that pointer.
             writeln!(out, "{}{} = call i64 @__print_str(ptr {})", indent, v, a.name).ok();
         }

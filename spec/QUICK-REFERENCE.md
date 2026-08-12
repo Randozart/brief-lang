@@ -1,10 +1,10 @@
-# Briv Quick Reference
+# Briev Quick Reference
 
 ## Syntax at a Glance
 
 ### Basic Declarations
 
-```briv
+```briev
 // State declaration
 state <name>: <type> = <expr>?
 
@@ -31,7 +31,7 @@ sig #out <name>(<params>) -> T from <path>;
 sig #inline <name>(<params>) -> T;
 
 // Import source file to link
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 ```
 
 ### FFI Keywords
@@ -55,7 +55,7 @@ import "link/briv_rt.c";
 
 ### Output Types
 
-```briv
+```briev
 // Single output
 -> Bool
 
@@ -74,7 +74,7 @@ import "link/briv_rt.c";
 
 ### Multi-Output Term
 
-```briv
+```briev
 term a, b, c;          // returns tuple of a, b, c
 term item;             // returns single value
 term;                  // returns nothing
@@ -82,8 +82,8 @@ term;                  // returns nothing
 
 ### Import Linking
 
-```briv
-import "link/briv_rt.c";    // C source → LLVM IR → llvm-link
+```briev
+import "link/briev_rt.c";    // C source → LLVM IR → llvm-link
 import "link/rust_lib.rs";   // Rust library
 import "link/zig_lib.zig";   // Zig library
 ```
@@ -99,7 +99,7 @@ import "link/zig_lib.zig";   // Zig library
 
 ### Operator Taxonomy
 
-Briv's operators belong to three conceptual groups:
+Briev's operators belong to three conceptual groups:
 
 | Group | Operators | Purpose |
 |-------|-----------|---------|
@@ -111,7 +111,7 @@ The **Anchor** (`@`) is a universal modifier for spatial/temporal location acros
 
 ### Control Flow
 
-```briv
+```briev
 // Guards (branching)
 [guard_expr] {
     // executes when guard is true
@@ -123,7 +123,7 @@ unbinding <name>(<pattern>) = <expr>
 
 ### Result Type Methods
 
-```briv
+```briev
 result.is_ok()     // Bool
 result.is_err()    // Bool  
 result.value       // Unwrapped value
@@ -155,7 +155,7 @@ result.error.message  // Error message
 
 ### Error Handling
 
-```briv
+```briev
 let result = read_file(path);
 [result.is_ok()] {
     term result.value;
@@ -166,13 +166,13 @@ let result = read_file(path);
 
 ### Fire-and-Forget FFI
 
-```briv
+```briev
 frgn! send_message(msg: String);
 ```
 
 ### Importing
 
-```briv
+```briev
 import "std/io";
 import "std/math" as math;
 import {File, Dir} from "std/fs" from "fs.toml";
@@ -180,7 +180,7 @@ import {File, Dir} from "std/fs" from "fs.toml";
 
 ### Multi-Output
 
-```briv
+```briev
 defn get_pair() -> (Int, String) [true] {
     term (42, "answer");
 };

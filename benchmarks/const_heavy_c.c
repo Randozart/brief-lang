@@ -1,7 +1,7 @@
 // Const Heavy — C reference for constant inlining benchmark.
 // 20 compile-time constants summed per iteration, 50M iterations.
 //
-// Briv version: const_heavy.bv — same computation in reactive model
+// Briev version: const_heavy.bv — same computation in reactive model
 // with folded pure-counter loop (O(1) store).
 
 #include <stdlib.h>

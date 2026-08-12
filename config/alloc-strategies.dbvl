@@ -8,7 +8,7 @@
 // {v}   = result register name (without %)
 // {size} = size_i64 register name
 //
-// 2026-08-03 (Phase 3, data-briv-config plan): migrated from
+// 2026-08-03 (Phase 3, data-briev-config plan): migrated from
 // alloc-strategies.toml. Row shape is `<name>: "<template with \n escapes>";
 // [free];`. The template REQUIRES quoted mode — bare mode takes `{size}` as a
 // nested sub-record and errors (locked by

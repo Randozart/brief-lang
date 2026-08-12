@@ -1,6 +1,6 @@
-# Briv Language - VSCode Extension
+# Briev Language - VSCode Extension
 
-Syntax highlighting, folding, bracket colorization, and intelligent editing for Briv (`.bv`), Rendered Briv (`.rbv`), Embedded Briv (`.ebv`), and Data Briv (`.dbv`, `.dbvl`) files.
+Syntax highlighting, folding, bracket colorization, and intelligent editing for Briev (`.bv`), Rendered Briev (`.rbv`), Embedded Briev (`.ebv`), and Data Briev (`.dbv`, `.dbvl`) files.
 
 ## Features
 
@@ -8,7 +8,7 @@ Syntax highlighting, folding, bracket colorization, and intelligent editing for 
 - **Bracket Colorization**: Matching brackets highlighted in different colors
 - **Auto-closing**: Automatically closes `{}`, `[]`, `()`, and `""`
 - **Folding**: Fold the PATH ANALYSIS annotation block
-- **Auto-indentation**: Smart indentation for Briv code blocks
+- **Auto-indentation**: Smart indentation for Briev code blocks
 - **Themes**: Dark and Light themes included
 
 ## Installation
@@ -17,9 +17,9 @@ Syntax highlighting, folding, bracket colorization, and intelligent editing for 
 
 ```bash
 # Create symlink to extensions folder
-ln -s "$(pwd)" ~/.vscode/extensions/briv-language
+ln -s "$(pwd)" ~/.vscode/extensions/briev-language
 # Or for VScodium:
-ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/briv-language
+ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/briev-language
 ```
 
 ### Option 2: Package as .vsix
@@ -27,7 +27,7 @@ ln -s "$(pwd)" ~/.config/VSCodium/User/extensions/briv-language
 ```bash
 npm install -g @vscode/vsce
 vsce package
-code --install-extension briv-language-0.1.0.vsix
+code --install-extension briev-language-0.1.0.vsix
 ```
 
 ## Color Scheme
@@ -73,24 +73,24 @@ Files with `.bv` extension are automatically recognized.
 ## Development
 
 To modify the grammar:
-1. Edit `syntaxes/briv.tmLanguage.json`
+1. Edit `syntaxes/briev.tmLanguage.json`
 2. Reload VSCode window
 
 To modify themes:
-1. Edit `themes/briv-dark.json` or `themes/briv-light.json`
+1. Edit `themes/briev-dark.json` or `themes/briev-light.json`
 2. Reload window
 
 ## Extension Structure
 
 ```
-briv-language/
+briev-language/
 ├── package.json              # Extension manifest
 ├── language-configuration.json # Brackets, indentation rules
 ├── settings.json             # Default settings
 ├── syntaxes/
-│   └── briv.tmLanguage.json # TextMate grammar
+│   └── briev.tmLanguage.json # TextMate grammar
 ├── themes/
-│   ├── briv-dark.json       # Dark theme
-│   └── briv-light.json      # Light theme
+│   ├── briev-dark.json       # Dark theme
+│   └── briev-light.json      # Light theme
 └── README.md
 ```

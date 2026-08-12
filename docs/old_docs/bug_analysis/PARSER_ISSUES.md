@@ -1,4 +1,4 @@
-# Rendered Briv Parser Issues - Session Log
+# Rendered Briev Parser Issues - Session Log
 
 **Date:** April 5, 2026  
 **Compiler Version:** 0.1.0  
@@ -25,7 +25,7 @@ Multiple sibling elements cause: `Unexpected token in rstruct: Ok(LtSlash)`
 - ✗ Any block-level element nested inside block-level element
 
 **Workaround:** Use ONLY inline elements inside the root div:
-```briv
+```briev
 rstruct App {
   <div class="root">
     <div b-show="step == 1">Step 1</div>
@@ -40,25 +40,25 @@ rstruct App {
 
 ## Issues Encountered
 
-### Issue 1: Unicode Emoji in Briv Code Section
+### Issue 1: Unicode Emoji in Briev Code Section
 **Error:** `byte index 1369 is not a char boundary; it is inside '🛍' (bytes 1368..1372)`
 **Location:** `src/parser.rs:675:27`
 **Severity:** CRITICAL - Parser panics on valid UTF-8 emoji characters
 **Root Cause:** Parser's byte indexing doesn't properly handle multi-byte UTF-8 characters
-**Workaround:** Remove all emoji from Briv code section (they can still be used in HTML via CSS `::before`)
+**Workaround:** Remove all emoji from Briev code section (they can still be used in HTML via CSS `::before`)
 **Test Case:**
-```briv
+```briev
 # This causes panic:
-# Shopping Cart System - Rendered Briv Example 🛍️
+# Shopping Cart System - Rendered Briev Example 🛍️
 ```
 
 ---
 
-### Issue 2: HTML Comments in Rendered Briv
+### Issue 2: HTML Comments in Rendered Briev
 **Error:** `Unexpected token in rstruct: Ok(LtSlash)` after HTML comments
 **Location:** Parser recognizes `</` but doesn't handle it correctly in HTML context
 **Severity:** HIGH - Cannot use HTML comments in `.rbv` files
-**Root Cause:** Parser may be treating `<!--` as Briv code syntax instead of HTML
+**Root Cause:** Parser may be treating `<!--` as Briev code syntax instead of HTML
 **Workaround:** Remove all HTML comments (`<!-- comment -->`)
 **Test Case:**
 ```html
@@ -99,8 +99,8 @@ rstruct App {
 
 ### Issue 4: Square Bracket Syntax in HTML Attributes
 **Error:** `Unexpected token in rstruct: Ok(LtSlash)` 
-**Severity:** CRITICAL - Parser interprets `[...]` as Briv syntax, not HTML
-**Root Cause:** Square brackets are Briv syntax for guards/conditions. Parser doesn't distinguish between Briv code and HTML template
+**Severity:** CRITICAL - Parser interprets `[...]` as Briev syntax, not HTML
+**Root Cause:** Square brackets are Briev syntax for guards/conditions. Parser doesn't distinguish between Briev code and HTML template
 **INCORRECT (causes error):**
 ```html
 <div [b-show="step == 1"]>Content</div>
@@ -110,7 +110,7 @@ rstruct App {
 <div b-show="step == 1">Content</div>
 ```
 **Workaround:** Use standard HTML attributes without square brackets. The binding system uses plain attribute names like `b-show`, `b-text`, `b-trigger:event`
-**Note:** This is a SYNTAX ERROR in Rendered Briv specification, not a parser bug. Square brackets are for Briv code, not HTML templates.
+**Note:** This is a SYNTAX ERROR in Rendered Briev specification, not a parser bug. Square brackets are for Briev code, not HTML templates.
 
 ---
 
@@ -158,13 +158,13 @@ vs
 
 ---
 
-### Issue 8: Briv Code Comments Before HTML
-**Error:** `Unexpected token in rstruct: Ok(LtSlash)` when Briv comments appear right before closing `};`
+### Issue 8: Briev Code Comments Before HTML
+**Error:** `Unexpected token in rstruct: Ok(LtSlash)` when Briev comments appear right before closing `};`
 **Severity:** MEDIUM - Limits documentation
-**Root Cause:** Parser may be incorrectly handling transition from Briv code to HTML template
-**Workaround:** Remove all comments from Briv sections; add documentation only in HTML
+**Root Cause:** Parser may be incorrectly handling transition from Briev code to HTML template
+**Workaround:** Remove all comments from Briev sections; add documentation only in HTML
 **Test Case:**
-```briv
+```briev
   };
 
   # UI Template Below
@@ -202,14 +202,14 @@ vs
 
 | Situation | Behavior | Issue ID |
 |-----------|----------|----------|
-| Unicode emoji in Briv comments | Panic - byte boundary error | #1 |
+| Unicode emoji in Briev comments | Panic - byte boundary error | #1 |
 | HTML comments in template | Parse error (`LtSlash`) | #2 |
 | Complex nested HTML | Parse error (`LtSlash`) | #3 |
 | Multiple sibling conditionals | Parse error (`LtSlash`) | #4 |
 | Self-closing HTML tags (`<hr>`) | Parse error (`LtSlash`) | #5 |
 | Many form inputs | Parse error (`LtSlash`) | #6 |
 | Attribute syntax variations | Inconsistent (needs verification) | #7 |
-| Briv comments before HTML | Parse error (`LtSlash`) | #8 |
+| Briev comments before HTML | Parse error (`LtSlash`) | #8 |
 
 ---
 
@@ -219,7 +219,7 @@ vs
 2. **Investigation:** Run parser with `RUST_BACKTRACE=1` to get stack traces
 3. **Testing:** Create minimal reproducers for each issue
 4. **Documentation:** Update `.rbv` specification with known limitations
-5. **Parser Review:** Check HTML/Briv template parser for:
+5. **Parser Review:** Check HTML/Briev template parser for:
    - Proper UTF-8 handling
    - Correct handling of nested structures
    - Support for HTML5 void elements
@@ -231,9 +231,9 @@ vs
 
 **Issue #4 was the PRIMARY BLOCKER:** Using `[b-show="..."]` syntax in HTML attributes.
 
-The square brackets `[...]` are **Briv language syntax**, not HTML template syntax. The parser correctly rejects them because it's trying to parse them as Briv code.
+The square brackets `[...]` are **Briev language syntax**, not HTML template syntax. The parser correctly rejects them because it's trying to parse them as Briev code.
 
-**CORRECT Rendered Briv Attribute Syntax:**
+**CORRECT Rendered Briev Attribute Syntax:**
 ```html
 b-show="condition"                (NOT [b-show="condition"])
 b-text="variable"                 (NOT [b-text="variable"])
@@ -241,7 +241,7 @@ b-trigger:eventname="txn"         (NOT [b-trigger:...]
 b-each:varname="collection"       (NOT [b-each:...]
 ```
 
-These are HTML attributes on the template, not Briv language constructs.
+These are HTML attributes on the template, not Briev language constructs.
 
 ---
 
@@ -252,10 +252,10 @@ The ultra-minimal shopping cart compiles successfully using:
 - Flat HTML structure (no deep nesting)
 - Standard HTML attribute binding syntax (`b-text`, `b-trigger`)
 - No HTML comments
-- No unicode in Briv code
+- No unicode in Briev code
 - No square brackets in attributes
 
-File: `/home/randozart/Desktop/Projects/briv-compiler/examples/shopping_cart.rbv`
+File: `/home/randozart/Desktop/Projects/briev-compiler/examples/shopping_cart.rbv`
 Status: ✓ Compiles successfully, WASM generated, runs in browser
 
 ---
@@ -266,11 +266,11 @@ Status: ✓ Compiles successfully, WASM generated, runs in browser
 1. Use standard HTML attribute binding (no square brackets)
 2. Keep HTML structure relatively flat
 3. No HTML comments (causes parse error)
-4. No unicode in Briv code sections
+4. No unicode in Briev code sections
 5. Avoid void elements or use closing tag form
-6. No Briv code comments immediately before HTML template section
+6. No Briev code comments immediately before HTML template section
 7. Use counter.rbv or todo.rbv as template - they work reliably
-8. Reference: Bindings are HTML attributes, not Briv syntax
+8. Reference: Bindings are HTML attributes, not Briev syntax
 ```
 
 ---
@@ -286,7 +286,7 @@ Status: ✓ Compiles successfully, WASM generated, runs in browser
 
 ## Conclusion
 
-Most parser failures in shopping cart examples were due to **incorrect use of Rendered Briv syntax** (using Briv square bracket syntax in HTML attributes), not parser bugs. The parser is working correctly and rejecting invalid syntax.
+Most parser failures in shopping cart examples were due to **incorrect use of Rendered Briev syntax** (using Briev square bracket syntax in HTML attributes), not parser bugs. The parser is working correctly and rejecting invalid syntax.
 
 Legitimate parser issues remain:
 - Unicode handling (Issue #1)

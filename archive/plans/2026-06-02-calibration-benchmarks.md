@@ -22,8 +22,8 @@ We need calibration benchmarks that isolate and measure each optimization indepe
 
 **Design:** 12 float state fields, ~60 float operations per tick (matrix multiply), 50M iterations via runtime variable `BOUND`. Single `node step [x0 == x0]` to ensure SSA mode (non-pure body prevents pure-counter elimination).
 
-```briv
-import "link/briv_rt.o"
+```briev
+import "link/briev_rt.o"
 import env from "std/env.bv"
 
 let x0: Float = 0.0
@@ -92,8 +92,8 @@ node step [x0 == x0] {
 
 **Design:** 8 transaction cases, gated by an Int trigger with sparse values `{101, 204, 404, 808, 1616, 3232, 6464, 128}`. Each case increments its own counter. 50M dispatches reading from `__io_pending` (volatile trigger).
 
-```briv
-import "link/briv_rt.o"
+```briev
+import "link/briev_rt.o"
 
 let count: Int = 0
 
@@ -123,7 +123,7 @@ node case_stat  [io_pending == 128] { &count = count + 1; }
 
 **Design:** 20 constants referenced by name in a tight loop. Each iteration performs arithmetic with all 20. Runtime bound.
 
-```briv
+```briev
 import env from "std/env.bv"
 
 const C00: Int = 100;  const C01: Int = 200;
@@ -182,5 +182,5 @@ node step [count < total] {
 2. Float math: IR shows `extractvalue float → fadd → bitcast → zext` (no redundant boxing)
 3. Sparse dispatch: IR shows `mul i64 + lshr i64 + switch` with verification guards
 4. Const heavy: IR shows `add i64 0, 100` (no `load i64 @C00`)
-5. C refs produce same output as Briv for all three
+5. C refs produce same output as Briev for all three
 6. `cargo test --lib` passes (368+ tests)

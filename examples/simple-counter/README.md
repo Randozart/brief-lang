@@ -1,13 +1,13 @@
 # Simple Counter
 
-A Briv program that tracks a number you can increment, decrement, and reset. Demonstrates state variables and contracts.
+A Briev program that tracks a number you can increment, decrement, and reset. Demonstrates state variables and contracts.
 
 ## Run It
 
-From the `briv-compiler` directory:
+From the `briev-compiler` directory:
 
 ```bash
-briv run examples/simple-counter/src/main.bv
+briev run examples/simple-counter/src/main.bv
 ```
 
 ## What It Does
@@ -22,7 +22,7 @@ This program manages a single number (`count`). You can:
 
 ### State Variable
 
-```briv
+```briev
 let count: Int = 0;
 ```
 
@@ -30,7 +30,7 @@ This creates a variable called `count` that holds an integer, starting at 0. Unl
 
 ### Increment Transaction
 
-```briv
+```briev
 txn increment [count < 100][count == @count + 1] {
     &count = count + 1;
     term;
@@ -51,7 +51,7 @@ txn increment [count < 100][count == @count + 1] {
 
 ### Decrement Transaction
 
-```briv
+```briev
 txn decrement [count > 0][count == @count - 1] {
     &count = count - 1;
     term;
@@ -64,7 +64,7 @@ Same pattern as increment, but:
 
 ### Reset Transaction
 
-```briv
+```briev
 txn reset [count != 0][count == 0] {
     &count = 0;
     term;
@@ -80,7 +80,7 @@ txn reset [count != 0][count == 0] {
 
 Use `&` before a variable name to modify a state variable:
 
-```briv
+```briev
 &count = count + 1;  // Modifies count
 count + 1;           // Just a calculation, result is discarded
 ```
@@ -89,7 +89,7 @@ count + 1;           // Just a calculation, result is discarded
 
 Use `@` before a variable name to refer to its previous value:
 
-```briv
+```briev
 // In the postcondition:
 count == @count + 1  // "new count equals old count plus 1"
 ```
@@ -98,20 +98,20 @@ count == @count + 1  // "new count equals old count plus 1"
 
 Try removing the precondition from increment:
 
-```briv
+```briev
 txn increment [true][count == @count + 1] {  // BAD!
     &count = count + 1;
     term;
 };
 ```
 
-Briv will warn you:
+Briev will warn you:
 
 ```
 error[P009]: trivial precondition
 ```
 
-Briv noticed that `[true]` has no requirements, which is suspicious for an increment operation that could exceed 100.
+Briev noticed that `[true]` has no requirements, which is suspicious for an increment operation that could exceed 100.
 
 ## Next Steps
 

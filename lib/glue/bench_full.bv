@@ -1,5 +1,5 @@
-// bench_full.bv — GLUE-in-Briv demo
-// Build: briv build lib/glue/bench_full.bv --enable-plugin glue-generator
+// bench_full.bv — GLUE-in-Briev demo
+// Build: briev build lib/glue/bench_full.bv --enable-plugin glue-generator
 
 export defn add(a: Int, b: Int) -> Int {
     term a + b;

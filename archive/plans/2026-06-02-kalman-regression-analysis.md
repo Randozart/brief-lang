@@ -4,7 +4,7 @@
 
 ### The Regression
 
-The old conversation showed **0.716s Briv vs 0.781s C** (50M iterations, Briv 9%
+The old conversation showed **0.716s Briev vs 0.781s C** (50M iterations, Briev 9%
 faster). Our current implementation runs the same benchmark at **0.28s at 10M**.
 Scaling: 0.716s / 5 = **0.143s expected** vs **0.28s actual** = **exactly 2× slower**.
 
@@ -42,7 +42,7 @@ which LLVM's backend handles naturally without SROA.
 Run `opt -O2 -vectorize-slp=false` before `llc` in the compilation pipeline:
 
 ```
-briv-compiler → .ll → opt -O2 -vectorize-slp=false → .opt.ll → llc -O2 → .o
+briev-compiler → .ll → opt -O2 -vectorize-slp=false → .opt.ll → llc -O2 → .o
 ```
 
 This:

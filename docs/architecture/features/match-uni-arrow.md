@@ -7,12 +7,12 @@
 
 The `=` separator between pattern and body in `match` and `uni` was
 semantically ambiguous with assignment. The `->` arrow reads more
-naturally as "pattern maps to body" and is consistent with Briv's use
+naturally as "pattern maps to body" and is consistent with Briev's use
 of `->` for return types and swan songs.
 
 ## Syntax
 
-```briv
+```briev
 match x {
     Some(v) -> expr1,
     None    -> expr2,

@@ -51,6 +51,6 @@ Then emit `alwaysinline` on the function. This is better than manual `#inline` a
 
 **Problem:** All state fields are emitted as `i64` in `%State`. Float32 fields need 4× instructions per access (GEP→load→trunc→bitcast).
 
-**Fix:** The chunk allocator (`emit_inline_init_stores` / chunk type emission) should use the field's Briv type to determine the LLVM type. Float32 → `float`, Float64 → `double`, Int → `i64`. This restores the Phase 3 behavior where `%StateChunk0 = type { i64, i64, float, float, ... }`.
+**Fix:** The chunk allocator (`emit_inline_init_stores` / chunk type emission) should use the field's Briev type to determine the LLVM type. Float32 → `float`, Float64 → `double`, Int → `i64`. This restores the Phase 3 behavior where `%StateChunk0 = type { i64, i64, float, float, ... }`.
 
 **More complex — needs careful handling of:** struct field alignment, GEP index calculations, and the `adapt_to_i64` boxing/unboxing in phi backedge handling.

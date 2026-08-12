@@ -5,7 +5,7 @@
 
 ## Goal
 
-Make the LLVM backend compile officina-cli (a multi-module Briv application with structs,
+Make the LLVM backend compile officina-cli (a multi-module Briev application with structs,
 lists, FFI, match, collections, and imports). Three specific fixes needed.
 
 ## Background
@@ -54,14 +54,14 @@ if !found_offset {
 }
 ```
 
-### Fix 3 — read_file# intrinsic via briv_rt.c
-File: `lib/runtime/briv_rt.c` — add `briv_read_file` function
+### Fix 3 — read_file# intrinsic via briev_rt.c
+File: `lib/runtime/briev_rt.c` — add `briev_read_file` function
 File: `src/backend/llvm/emit_expr.rs` — emit declare + call instead of stub
 
 The read_file#(path: String) → String intrinsic:
-- Declare `declare i64 @briv_read_file(i64)` in LLVM IR header
+- Declare `declare i64 @briev_read_file(i64)` in LLVM IR header
 - Call it with the path argument
-- Return the result as a Briv String pointer
+- Return the result as a Briev String pointer
 
 ### Fix 4 — time# intrinsic via libc time(null)
 File: `src/backend/llvm/emit_expr.rs` — emit declare + call to libc time
@@ -69,6 +69,6 @@ File: `src/backend/llvm/emit_expr.rs` — emit declare + call to libc time
 ## Verification
 
 1. `cargo test --lib` — all existing tests pass
-2. `briv check officina.bv` — 0 errors
-3. `briv build officina.bv` — produces binary
+2. `briev check officina.bv` — 0 errors
+3. `briev build officina.bv` — produces binary
 4. Binary runs without crash

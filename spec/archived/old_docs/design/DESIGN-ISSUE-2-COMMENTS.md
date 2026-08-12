@@ -13,7 +13,7 @@
 
 Comments currently break when used inside transaction and definition bodies:
 
-```briv
+```briev
 txn transfer [pre][post] {
   &balance = balance - 10;  // Perform transfer
   term;
@@ -59,7 +59,7 @@ comment ::= "//" [^\n]*
 Comments can appear **anywhere** except inside string literals:
 
 **Allowed:**
-```briv
+```briev
 // Top-level comment
 let x: Int = 5;  // Inline comment
 
@@ -74,7 +74,7 @@ defn add(a: Int, b: Int) [true][true] -> Int {  // Function comment
 ```
 
 **Not allowed (inside strings):**
-```briv
+```briev
 let msg: String = "This is not // a comment";  // But this is
 ```
 
@@ -88,9 +88,9 @@ Result: Parser never sees comments; they're transparent.
 
 ### 2.4 Newline Handling
 
-Newlines are already ignored by the lexer (Briv doesn't use newlines for statement boundaries). Comments extend to the newline and are skipped with it:
+Newlines are already ignored by the lexer (Briev doesn't use newlines for statement boundaries). Comments extend to the newline and are skipped with it:
 
-```briv
+```briev
 let x = 5;        // Comment 1
 let y = 10;       // Comment 2
 // Standalone comment
@@ -269,7 +269,7 @@ fn test_comment_with_special_chars() {
 
 **File:** `examples/comments.bv`
 
-```briv
+```briev
 // Bank transfer system with comments
 let alice_balance: Int = 1000;  // Alice's starting balance
 let bob_balance: Int = 500;     // Bob's starting balance
@@ -311,7 +311,7 @@ All existing .bv files should continue to compile (most don't have comments, so 
 
 ### 5.1 Comments Before Statement End
 
-```briv
+```briev
 txn test [true][true] {
   &x = 1; // Comment
   term;   // Comment
@@ -322,7 +322,7 @@ txn test [true][true] {
 
 ### 5.2 Multiple Comments on Same Line
 
-```briv
+```briev
 let x = 5; // Comment 1 // Comment 2
 ```
 
@@ -330,7 +330,7 @@ let x = 5; // Comment 1 // Comment 2
 
 ### 5.3 Comment After Guard
 
-```briv
+```briev
 [x > 0] // Comment
 { &a = 1; };
 ```
@@ -339,7 +339,7 @@ let x = 5; // Comment 1 // Comment 2
 
 ### 5.4 Comment in Expression (unlikely but possible)
 
-```briv
+```briev
 let y = (
   x + 1  // Comment in expression
 );
@@ -349,7 +349,7 @@ let y = (
 
 ### 5.5 Comments in Contracts
 
-```briv
+```briev
 txn test
   [x > 0]  // Pre-condition comment
   [x == @x + 1]  // Post-condition comment
@@ -363,7 +363,7 @@ txn test
 
 ### 5.6 Comment with Escape Sequences
 
-```briv
+```briev
 &msg = "test"; // Comment with \n \t \r
 ```
 
@@ -377,7 +377,7 @@ txn test
 
 Comments should NOT apply inside strings:
 
-```briv
+```briev
 let msg: String = "This is // not a comment";
 ```
 
@@ -385,7 +385,7 @@ let msg: String = "This is // not a comment";
 
 ### 6.2 Multi-line Strings (if supported)
 
-If Briv ever supports multi-line strings, comments must not affect them.
+If Briev ever supports multi-line strings, comments must not affect them.
 
 **No change needed:** This design only affects single-line comments (`//`).
 
@@ -393,11 +393,11 @@ If Briv ever supports multi-line strings, comments must not affect them.
 
 Comments should be treated like whitespace:
 
-```briv
+```briev
 let x=5;/*no comment*/ let y=10;
 ```
 
-The regex `r"//.*"` only matches `//` syntax, so `/* */` would not be skipped. This is fine; Briv uses `//` only.
+The regex `r"//.*"` only matches `//` syntax, so `/* */` would not be skipped. This is fine; Briev uses `//` only.
 
 ---
 
@@ -410,7 +410,7 @@ The regex `r"//.*"` only matches `//` syntax, so `/* */` would not be skipped. T
 /* Multi-line comment */
 ```
 
-Briv uses `//` only (no multi-line).
+Briev uses `//` only (no multi-line).
 
 ### Go
 
@@ -419,7 +419,7 @@ Briv uses `//` only (no multi-line).
 /* Multi-line */
 ```
 
-Briv uses `//` only.
+Briev uses `//` only.
 
 ### Python
 
@@ -427,12 +427,12 @@ Briv uses `//` only.
 # Comment
 ```
 
-Briv uses `//` (more mainstream than `#`).
+Briev uses `//` (more mainstream than `#`).
 
 ### Why `//` over `#`?
 
 1. **Consistency:** C-family languages use `//`
-2. **Clarity:** No conflict with Briv syntax (no `#var` would be confusing)
+2. **Clarity:** No conflict with Briev syntax (no `#var` would be confusing)
 3. **LLM preference:** AI models trained on C/Rust/Go suggest `//`
 4. **Familiarity:** Most programmers recognize `//`
 

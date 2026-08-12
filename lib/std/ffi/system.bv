@@ -1,9 +1,9 @@
-// System Triggers — Standard OS-level event triggers for Regular Briv
+// System Triggers — Standard OS-level event triggers for Regular Briev
 // These triggers map to OS events (signals, stdin, filesystem, network)
 // and provide a reactive I/O model without blocking calls.
 //
-// All trigger declarations come from std/briv_rt.bv.
-// import "link/briv_rt.c" in that file tells the compiler driver
+// All trigger declarations come from std/briev_rt.bv.
+// import "link/briev_rt.c" in that file tells the compiler driver
 // to compile and link the runtime automatically — no CLI flags needed.
 //
 // Import this file:
@@ -16,7 +16,7 @@ import {
     sigint, sigterm, sighup,
     stdin_ready, stdin_line,
     clock_1hz, clock_100hz
-} from "std/briv_rt.bv";
+} from "std/briev_rt.bv";
 
 // ===== HELPER TRANSACTIONS =====
 

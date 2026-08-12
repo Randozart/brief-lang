@@ -1,4 +1,4 @@
-// ── Static Capability Audit (briv audit) ────────────────────────────
+// ── Static Capability Audit (briev audit) ────────────────────────────
 // 2026-07-23: Scans .bv files for $ intrinsic usage and categorizes
 // each call by severity. Reports capabilities required by each file.
 //

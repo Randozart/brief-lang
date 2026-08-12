@@ -1,12 +1,12 @@
-# Briv to COBOL Examples
+# Briev to COBOL Examples
 
-This folder contains Briv source files (`*.bv`) and their generated COBOL equivalents.
+This folder contains Briev source files (`*.bv`) and their generated COBOL equivalents.
 
 ## Running Examples
 
 ```bash
 # Compile to COBOL
-cargo run --bin briv-compiler -- cobol examples/cobol/withdraw.bv --out examples/cobol/output/
+cargo run --bin briev-compiler -- cobol examples/cobol/withdraw.bv --out examples/cobol/output/
 
 # View generated COBOL
 cat examples/cobol/output/withdraw.cbl

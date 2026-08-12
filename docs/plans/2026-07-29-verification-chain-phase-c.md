@@ -142,7 +142,7 @@ fn resolve_segment(segment: &ChainSegment, target_arch: &str) -> Option<Body> {
 
 ```rust
 /// 2026-07-29: Evaluate a body on a single set of inputs.
-/// 2026-07-29: Evaluate a Briv expression against test inputs.
+/// 2026-07-29: Evaluate a Briev expression against test inputs.
 /// Returns the result value. Handles TermReturn from defn bodies.
 fn evaluate_ref_expr(expr: &Expr, input: &[Value]) -> Result<Value> {
     let mut bindings: HashMap<String, Value> = HashMap::new();

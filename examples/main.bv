@@ -1,6 +1,6 @@
-// Briv Compiler - Main Entry Point (Ouroboros Proof)
-// Proof of self-hosting: Briv compiles a program that uses the Briv compiler library
-// This file uses the Briv-written lexer to tokenize Briv source code
+// Briev Compiler - Main Entry Point (Ouroboros Proof)
+// Proof of self-hosting: Briev compiles a program that uses the Briev compiler library
+// This file uses the Briev-written lexer to tokenize Briev source code
 
 import compiler.token;
 import compiler.ast;
@@ -9,7 +9,7 @@ import compiler.lexer;
 // ===== COMPILER FUNCTIONS =====
 
 defn count_tokens(source: String) -> Int [source != ""][term >= 0] {
-    // Step 1: Tokenize using the Briv-written lexer
+    // Step 1: Tokenize using the Briev-written lexer
     let lex = new_lexer(source);
     let result = tokenize(lex);
     uni result(Ok(pair)) = {

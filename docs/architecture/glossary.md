@@ -1,6 +1,6 @@
 <!-- 2026-06-18 -->
 
-# Briv Compiler Glossary
+# Briev Compiler Glossary
 
 | Term | Definition |
 |------|------------|

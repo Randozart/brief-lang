@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Briev Compiler
+Comment=Rebuild Briev compiler and VSIX extension
+Exec=/home/randozart/Desktop/Projects/briev-compiler/rebuild-compiler
+Icon=/home/randozart/Desktop/Projects/briev-compiler/syntax-highlighter/images/briev-logo.svg
+Terminal=true
+Type=Application
+Categories=Development;

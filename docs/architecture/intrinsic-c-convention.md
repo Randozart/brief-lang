@@ -4,27 +4,27 @@
 
 ## Convention
 
-C functions that serve as compiler-internal implementations of Briv
+C functions that serve as compiler-internal implementations of Briev
 intrinsics follow the `__name__` naming convention (double underscore
 both sides). This distinguishes them from:
 
 | Convention | Meaning | Example |
 |---|---|---|
-| `name` | Briv intrinsic call syntax | `print#(msg)` |
+| `name` | Briev intrinsic call syntax | `print#(msg)` |
 | `__name__` | C implementation of an intrinsic | `int64_t __print__(const char* msg)` |
 | `__name` | **DEPRECATED** — old frgn convention | `frgn __print(...)` |
-| `briv_name` | **DEPRECATED** — old intrinsic C convention | `briv_read_file(...)` |
+| `briev_name` | **DEPRECATED** — old intrinsic C convention | `briev_read_file(...)` |
 
 ## Rules
 
-1. Every `__name__` C function corresponds to a Briv intrinsic callable
+1. Every `__name__` C function corresponds to a Briev intrinsic callable
    via `name#(args)` syntax.
 2. String parameters use `const char*` — the LLVM intrinsic handler loads
-   `hdr[0]` (the data pointer) from the Briv string struct before calling.
+   `hdr[0]` (the data pointer) from the Briev string struct before calling.
    This is an `i8*` pointing to the tight-packed char data.
 3. Non-string parameters (`Int`, `Bool`, `Float`) keep their native C
    types (`int64_t`, `int64_t` boxed, `float`).
-4. Return values are `int64_t` (a Briv-packed value: pointer for strings,
+4. Return values are `int64_t` (a Briev-packed value: pointer for strings,
    raw integer for ints, packed enum for Result/Option).
 5. `__name__` functions are declared in `emit_toplevel.rs` declares
    section and called from `emit_expr.rs` intrinsic handlers.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Canonical Briv source formatting.
+//! Canonical Briev source formatting.
 //!
 //! 2026-08-05 (normative spec Phase 2): this is the canonical formatter. Its
 //! contract is **round-trip AST equivalence**: `parse(format(parse(source)))`
@@ -21,7 +21,7 @@
 //!
 //! The formatter is separate from the debug `Display` impls (`src/ast/display.rs`).
 //! Every syntax-family migration (Phases 3+) must be accompanied by formatter
-//! support so macros, `briv fmt`, and the repository sweep emit canonical text.
+//! support so macros, `briev fmt`, and the repository sweep emit canonical text.
 
 use crate::ast::*;
 use std::fmt::Write;
@@ -636,7 +636,7 @@ mod tests {
     use super::*;
     use crate::lexer::tokenize;
 
-    /// 2026-08-05 (Phase 2): parse a Briv source string into top-level items.
+    /// 2026-08-05 (Phase 2): parse a Briev source string into top-level items.
     fn parse(source: &str) -> Result<Vec<TopLevel>, String> {
         let tokens = tokenize(source).map_err(|e| format!("lex: {}", e))?;
         let mut parser = crate::parser::Parser::new(tokens, source);

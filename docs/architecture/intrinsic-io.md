@@ -4,24 +4,24 @@
 SUPERSEDED. The actual implementation (Phase 2 audit + Phase 4) consolidated the
 four special-cased print intrinsics into ONE generic `Print#` that dispatches by
 the argument's protocol category (String/Char/Bool/Float/else Int) and routes
-through the runtime `__print_*` family (`briv_rt.c`), and added the stream
+through the runtime `__print_*` family (`briev_rt.c`), and added the stream
 symbols `#StdOut <- value` / `#StdErr <- <String>` / `#StdIn`. The C-surface
 reduction is now the `.bv`/`.ebv` split (`docs/architecture/c-surface-inventory.md`),
 not inline IR. The sections below are the archived pre-2026-08-01 design.
 
 ## Motivation (archived)
 
-`PrintInt#` currently routes through `briv_rt.c`:
+`PrintInt#` currently routes through `briev_rt.c`:
 
 ```
-PrintInt#(42) → call @__print_int → briv_rt.c → printf → libc → syscall write
+PrintInt#(42) → call @__print_int → briev_rt.c → printf → libc → syscall write
 ```
 
 This has three problems:
-1. **C dependency**: Briv cannot self-host I/O without a C toolchain.
-2. **Portability coupling**: `briv_rt.c` must exist for every target, even though the actual
+1. **C dependency**: Briev cannot self-host I/O without a C toolchain.
+2. **Portability coupling**: `briev_rt.c` must exist for every target, even though the actual
    I/O mechanism is platform-specific and the arithmetic is universal.
-3. **Backend lock-in**: Webstack and CIRCT cannot share `briv_rt.c` — they must duplicate.
+3. **Backend lock-in**: Webstack and CIRCT cannot share `briev_rt.c` — they must duplicate.
 
 The new design inlines ALL behavior into the backend, emitting zero external calls for I/O.
 
@@ -96,7 +96,7 @@ call i32 @__wasi_fd_write(i32 1, ptr %iov, i32 1, ptr %nwritten)
 ```
 
 Webstack already compiles to WASM. WASI provides `fd_write` for stdout.
-No `briv_rt.c` needed — WASI is the platform.
+No `briev_rt.c` needed — WASI is the platform.
 
 #### CIRCT — Simulation Print
 
@@ -173,6 +173,6 @@ Every modified code site must carry:
 
 ```
 // 2026-07-28: C-independent I/O. PrintInt# inlines decimal conversion + syscall.
-// No briv_rt.c dependency. observable<~true> prevents DCE of side effects.
-// Replaces @__print_int from briv_rt.c.
+// No briev_rt.c dependency. observable<~true> prevents DCE of side effects.
+// Replaces @__print_int from briev_rt.c.
 ```

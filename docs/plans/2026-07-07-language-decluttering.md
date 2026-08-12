@@ -23,7 +23,7 @@
 
 ## 1. Executive Summary
 
-Briv has accumulated syntax bloat across six dimensions:
+Briev has accumulated syntax bloat across six dimensions:
 
 | Bloat Area | Current | Target | Effort |
 |------------|---------|--------|--------|
@@ -41,7 +41,7 @@ Briv has accumulated syntax bloat across six dimensions:
 - Rust compiler warnings (currently 29) must be eliminated.
 - Kani harnesses (`src/backend/llvm/kani.rs`) that only generate warnings without proving anything new must be removed or converted to unit tests.
 - Every step that could affect benchmarks must be verified with `bash benchmarks/build_and_bench.sh`.
-- Every syntax change must update `docs/learn/types.md`, `docs/learn/*.md`, `docs/reference/BRIV_LANGUAGE_REFERENCE.md`, and `spec/SPEC.md`.
+- Every syntax change must update `docs/learn/types.md`, `docs/learn/*.md`, `docs/reference/BRIEV_LANGUAGE_REFERENCE.md`, and `spec/SPEC.md`.
 
 ---
 
@@ -49,7 +49,7 @@ Briv has accumulated syntax bloat across six dimensions:
 
 Captured from commit `5467de8` on `main`. All benchmarks run via `bash benchmarks/build_and_bench.sh --runtime` after `cargo build --release`.
 
-| Benchmark | Briv vs C | Briv wins by |
+| Benchmark | Briev vs C | Briev wins by |
 |-----------|-----------|---------------|
 | nbody_newton | 0.70x | 30% |
 | nbody_sqrt | 0.72x | 28% |
@@ -70,7 +70,7 @@ Captured from commit `5467de8` on `main`. All benchmarks run via `bash benchmark
 **Benchmarking procedure**:
 1. `cargo build --release`
 2. `bash benchmarks/build_and_bench.sh --runtime`
-3. Collect the `Briv vs C` ratios from the output table
+3. Collect the `Briev vs C` ratios from the output table
 4. Compare each ratio against the baseline above
 5. Any ratio below 0.97x of baseline is a regression — block and revert
 
@@ -229,7 +229,7 @@ Remove every `#[token("UPPERCASE")]` variant from the `Token` enum. For each key
 
 **Pre-removal test**: Verify that lowercase keywords parse correctly (existing tests already exercise this).
 
-**Doc update**: `docs/reference/BRIV_LANGUAGE_REFERENCE.md` keywords table — remove the "Aliases" column for case.
+**Doc update**: `docs/reference/BRIEV_LANGUAGE_REFERENCE.md` keywords table — remove the "Aliases" column for case.
 
 **Commit**: `declutter(0a): drop UPPERCASE keyword variants`
 
@@ -884,7 +884,7 @@ These are genuinely compiler-known and cannot be expressed as inops:
 
 Each group becomes a `.bv` file with `inop` declarations. Example:
 
-```briv
+```briev
 // std/os/fs.bv — auto-imported via prelude
 // 2026-07-07: Phase 3 — relocated from compiler intrinsic
 
@@ -975,7 +975,7 @@ if !no_stdlib && !prelude_injected {
 }
 ```
 
-The `is_magic: true` flag means paths resolve relative to `BRIV_STDLIB_PATH`, same as existing `import#` behavior.
+The `is_magic: true` flag means paths resolve relative to `BRIEV_STDLIB_PATH`, same as existing `import#` behavior.
 
 **Duplicate import protection**: Before injecting a prelude import, check if the user has already explicitly imported the same module. If `items` already contains `TopLevel::Import { path: "std/os/fs.bv", ... }`, skip injecting it. This prevents "duplicate import" errors when a user explicitly writes `import# "std/os/fs.bv"` and the prelude also provides it.
 
@@ -1072,7 +1072,7 @@ The correctness check is critical — it verifies that the inop declarations pro
 | `docs/learn/types.md` | Document `Bits` as fundamental type, `Int<N>` syntax, short forms. Remove mention of old concrete variants. |
 | `docs/learn/ffi.md` | Document prelude auto-import and `std/os/` module availability. Remove mention of removed intrinsics. |
 | `docs/learn/macros.md` | No changes expected. |
-| `docs/reference/BRIV_LANGUAGE_REFERENCE.md` | Major revision: annotation system, type system, intrinsic list, keyword table, prelude docs. |
+| `docs/reference/BRIEV_LANGUAGE_REFERENCE.md` | Major revision: annotation system, type system, intrinsic list, keyword table, prelude docs. |
 | `spec/SPEC.md` | Update language spec to reflect all changes: type system, annotations, intrinsic relocation. |
 | `docs/architecture/intrinsics.md` | Remove ~60 relocated intrinsic entries. List only remaining ~40. |
 | `docs/architecture/bits-thesis.md` | Update to reflect completed migration from concrete variants to canonical Bits form. |

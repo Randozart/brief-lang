@@ -6,12 +6,12 @@
 ## Motivation
 
 The current C reference benchmarks are actively hobbled by `volatile` qualifiers
-that prevent clang from applying the same optimizations Briv proves safe. Briv
+that prevent clang from applying the same optimizations Briev proves safe. Briev
 gets O(1) `store i64 N` while C does O(N) `while (volatile ops < N) ops++`.
 
 Additionally, all benchmarks test only one hardcoded input. Real-world programs
 have variable inputs. Fuzzing across input ranges tests both languages under
-uncertain conditions and reveals Briv's performance cliff between compile-time
+uncertain conditions and reveals Briev's performance cliff between compile-time
 optimization and runtime dispatch.
 
 ## Phase 1: Fair C Benchmarks
@@ -54,7 +54,7 @@ iir_filter_c.c:
 
 ### Phase 2a: Compile-Time Mode (fuzz.sh --compile-time)
 
-Recompile both Briv and C per random input — both get full compile-time opt.
+Recompile both Briev and C per random input — both get full compile-time opt.
 
 ```
 Usage: bash benchmarks/fuzz.sh <benchmark> --compile-time --runs 50 [--seed 42]
@@ -78,7 +78,7 @@ Parameters per benchmark:
 
 Compile once, run once per random input — tests non-constant codegen paths.
 
-**Briv**: New `lib/std/env.bv` providing `get_env_int(name: String) -> Int` FFI.
+**Briev**: New `lib/std/env.bv` providing `get_env_int(name: String) -> Int` FFI.
 Runtime-variant `.bv` files read bounds from environment variables instead of `const`.
 
 **C**: Runtime-variant `.c` files read from `getenv("BOUND")`.
@@ -92,8 +92,8 @@ New files:
   benchmarks/precompute_sum_runtime.bv (+ precompute_sum_runtime_c.c)
 
 Behavioral difference:
-  Briv compile-time: [ops < 50000000] → folded while-loop → O(1) store
-  Briv runtime:      [ops < bound]   → reactor ticks or unfolded loop
+  Briev compile-time: [ops < 50000000] → folded while-loop → O(1) store
+  Briev runtime:      [ops < bound]   → reactor ticks or unfolded loop
   C compile-time:     clang sees const → eliminates loop
   C runtime:          clang sees var → actual while-loop
 ```
@@ -103,24 +103,24 @@ Behavioral difference:
 | Metric | How |
 |--------|-----|
 | Mean/median/min/max/stddev | `awk` inline (no external deps) |
-| Output correctness | Compare exit codes between Briv and C |
-| Outlier detection | Flag runs where Briv >2σ slower than C |
+| Output correctness | Compare exit codes between Briev and C |
+| Outlier detection | Flag runs where Briev >2σ slower than C |
 | Summary table | Per-benchmark × per-mode matrix |
 
 ### Expected Findings
 
 ```
-Compile-time mode: Briv and C should be nearly identical — both get O(1) stores
+Compile-time mode: Briev and C should be nearly identical — both get O(1) stores
 or eliminated loops. Confirms fairness.
 
-Runtime mode: Briv falls back to different codegen paths:
+Runtime mode: Briev falls back to different codegen paths:
   - Folded loops still used if trigger-gated (counter < bound via GEP+load)
   - Enum dispatch picks up bounded-count via switch
   - Pure reactor tick with full pre-fire-post cycle per increment
   - Thread pool dispatch for async multi-txn
 
 This reveals the performance cliff — when inputs unknown at compile time, how
-much does Briv lose vs C? Data drives future optimization priorities.
+much does Briev lose vs C? Data drives future optimization priorities.
 ```
 
 ## Files Summary

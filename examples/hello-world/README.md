@@ -1,13 +1,13 @@
 # Hello World
 
-This is the simplest possible Briv program. It demonstrates the basic structure of a Briv transaction.
+This is the simplest possible Briev program. It demonstrates the basic structure of a Briev transaction.
 
 ## Run It
 
-From the `briv-compiler` directory:
+From the `briev-compiler` directory:
 
 ```bash
-briv run examples/hello-world/src/main.bv
+briev run examples/hello-world/src/main.bv
 ```
 
 ## What It Does
@@ -20,7 +20,7 @@ The contract `[true][result == "Hello, World!"]` means:
 
 ## The Code Explained
 
-```briv
+```briev
 txn greet         // Define a transaction called "greet"
 [true]           // Precondition: always satisfied
 [result == "Hello, World!"]  // Postcondition: result must be this string

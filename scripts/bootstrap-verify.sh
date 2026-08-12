@@ -10,11 +10,11 @@
 
 set -e
 
-BOOTSTRAP="./target/release/briv-compiler"
+BOOTSTRAP="./target/release/briev-compiler"
 SOURCE="main.bv"
-BUILD_DIR="/tmp/briv-bootstrap-$$"
+BUILD_DIR="/tmp/briev-bootstrap-$$"
 
-echo "=== Briv Bootstrap Chain Verification ==="
+echo "=== Briev Bootstrap Chain Verification ==="
 echo "Build directory: $BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
@@ -64,9 +64,9 @@ fi
 # ===== STAGE 0b: Binary compilation =====
 echo ""
 echo "--- Stage 0b: Compile Stage 0 output to binary ---"
-rustc -o "$BUILD_DIR/briv-v1" "$BUILD_DIR/run1/main.rs" 2>/dev/null && {
-    V1_HASH=$(sha256sum "$BUILD_DIR/briv-v1" | awk '{print $1}')
-    pass "briv-v1 binary compiled (hash: ${V1_HASH:0:16}...)"
+rustc -o "$BUILD_DIR/briev-v1" "$BUILD_DIR/run1/main.rs" 2>/dev/null && {
+    V1_HASH=$(sha256sum "$BUILD_DIR/briev-v1" | awk '{print $1}')
+    pass "briev-v1 binary compiled (hash: ${V1_HASH:0:16}...)"
 } || {
     warn "rustc failed (expected for minimal compiler)"
 }
@@ -74,18 +74,18 @@ rustc -o "$BUILD_DIR/briv-v1" "$BUILD_DIR/run1/main.rs" 2>/dev/null && {
 # ===== STAGE 1: Self-hosted compilation attempt =====
 echo ""
 echo "--- Stage 1: Self-hosted compilation attempt ---"
-if [ -x "$BUILD_DIR/briv-v1" ]; then
-    OUTPUT=$($BUILD_DIR/briv-v1 2>&1 || true)
-    echo "  briv-v1 output: $OUTPUT"
+if [ -x "$BUILD_DIR/briev-v1" ]; then
+    OUTPUT=$($BUILD_DIR/briev-v1 2>&1 || true)
+    echo "  briev-v1 output: $OUTPUT"
     
-    if echo "$OUTPUT" | grep -q "Briv kernel"; then
+    if echo "$OUTPUT" | grep -q "Briev kernel"; then
         pass "Self-hosted binary runs successfully"
     else
         warn "Self-hosted binary output unexpected"
     fi
     
     # Try to compile with self-hosted compiler
-    $BUILD_DIR/briv-v1 rust "$SOURCE" --out "$BUILD_DIR/stage1" 2>/dev/null && {
+    $BUILD_DIR/briev-v1 rust "$SOURCE" --out "$BUILD_DIR/stage1" 2>/dev/null && {
         if [ -f "$BUILD_DIR/stage1/main.rs" ]; then
             if diff -q "$BUILD_DIR/run1/main.rs" "$BUILD_DIR/stage1/main.rs" > /dev/null 2>&1; then
                 pass "Self-hosted compiler produces identical .rs to bootstrap"

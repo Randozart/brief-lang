@@ -8,7 +8,7 @@ Reorder transaction body statements to maximize instruction-level parallelism (I
 ## Motivation
 A transaction body like:
 
-```briv
+```briev
 node compute [ready][done] {
     &x = a + b;      // independent
     &y = c + d;      // independent — can fire in parallel with x
@@ -16,7 +16,7 @@ node compute [ready][done] {
 };
 ```
 
-Modern CPUs extract ILP via out-of-order execution, but the window is narrow (~352 µops on Zen 4, ~512 on Golden Cove). Briv has more information than LLVM — contracts expose precise read/write sets — so reordering at the Briv IR level gives LLVM better material to schedule.
+Modern CPUs extract ILP via out-of-order execution, but the window is narrow (~352 µops on Zen 4, ~512 on Golden Cove). Briev has more information than LLVM — contracts expose precise read/write sets — so reordering at the Briev IR level gives LLVM better material to schedule.
 
 ## Dependency Analysis
 

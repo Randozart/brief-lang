@@ -70,6 +70,6 @@ mounts. Separate plan doc `docs/plans/2026-08-11-phase2b2-instance-state.md`.
 
 ## Verification per commit
 
-`cargo test --lib` + `cargo test --bin brivc`; Praetor on changed files (no
-new diagnostics); E2E `brivc build` on the touched examples + a directive
+`cargo test --lib` + `cargo test --bin brievc`; Praetor on changed files (no
+new diagnostics); E2E `brievc build` on the touched examples + a directive
 test file; x86_64 codegen untouched (webstack-only).

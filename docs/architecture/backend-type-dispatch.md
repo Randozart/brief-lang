@@ -13,9 +13,9 @@
 
 ## Design Philosophy
 
-The Briv compiler does NOT hardcode primitive type mappings in Rust match arms.
+The Briev compiler does NOT hardcode primitive type mappings in Rust match arms.
 Type metadata declared in **source** drives all backend emission decisions.
-The Rust binary is a *thin reader* of the type system defined in Briv's own bootstrap files.
+The Rust binary is a *thin reader* of the type system defined in Briev's own bootstrap files.
 
 If the prelude (`bootstrap.bv`) is not loaded, every type is raw `Bits(N)` — no assumptions,
 no guesswork. The programmer defines their own types, or loads the prelude.
@@ -24,7 +24,7 @@ no guesswork. The programmer defines their own types, or loads the prelude.
 
 Every type is `Bits(N)` at minimum:
 
-```briv
+```briev
 type Int : Bits { !> maxbits: 64; !> ctd: Int; !> alu: Int; op Add ~> "int.add"; }
 type Float : Bits { !> maxbits: 32; !> ctd: Float; !> alu: Float; op Add ~> "float.add"; }
 type String : #String { prop Size: chars(#Lh); prop Bytes: byte_len(#Lh); };
@@ -93,7 +93,7 @@ see `docs/plans/2026-07-31-frontend-driven-dispatch.md` §8).
 A metadata slot added to a type definition in source is automatically visible to every backend.
 No Rust changes needed. No recompilation. Example:
 
-```briv
+```briev
 type HalfFloat : Bits { !> maxbits: 16; op Add(#Float, #Float); }
 ```
 
@@ -192,7 +192,7 @@ The backend OWNS:   CompilerContext, TypedRegister, LLVM IR output string
 
 Adding a new metadata field to a type definition:
 
-```briv
+```briev
 type MyColor : Bits {
     !> maxbits: 32;
     !> ctd: UInt;

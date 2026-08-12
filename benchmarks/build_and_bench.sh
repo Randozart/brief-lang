@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Briv Optimization Benchmarks — Builds, times, and tags all benchmarks
+# Briev Optimization Benchmarks — Builds, times, and tags all benchmarks
 #
 # Every benchmark is tagged as either --runtime (FFI in hot loop, timing valid)
 # or --optimizer (pure computation, LLVM may eliminate loop, timing meaningless).
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── RESULT COLLECTION ───────────────────────────────────────────
-# Collected as "name|briv|c|ratio|winner|correctness"
+# Collected as "name|briev|c|ratio|winner|correctness"
 declare -a RESULTS=()
 record_result() {
     RESULTS+=("$1|$2|$3|$4|$5|$6")
@@ -45,12 +45,12 @@ record_result() {
 print_summary_table() {
     echo ""
     echo "╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗"
-    echo "║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║"
+    echo "║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║"
     echo "╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣"
     for entry in "${RESULTS[@]}"; do
-        IFS='|' read -r name briv c ratio winner correct <<< "$entry"
+        IFS='|' read -r name briev c ratio winner correct <<< "$entry"
         printf "║ %-25s ║ %-10s ║ %-10s ║ %-8s ║ %-6s ║ %-9s ║\n" \
-            "$name" "$briv" "$c" "$ratio" "$winner" "$correct"
+            "$name" "$briev" "$c" "$ratio" "$winner" "$correct"
     done
     echo "╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝"
 }
@@ -148,7 +148,7 @@ BENCHMARKS=(
     "bit_clear"
     "queue_drain"       # generic obj (RingBuffer<Int>) via std/collections.bv + countdown
     "queue_drain_sym"    # mirrors C step-for-step (enabled 2026-08-01: the missing import is fixed)
-    "queue_drain_idio"   # Briv-native drain (enabled 2026-08-01: import { List } added; matches queue_drain_sym)
+    "queue_drain_idio"   # Briev-native drain (enabled 2026-08-01: import { List } added; matches queue_drain_sym)
     "stack_push_pop"    # generic obj (Stack<Int, 256>) push/pop cycle via <- ops
     "interval_step"
     # 2026-07-31: Real-program periodic-guard benchmarks (countdown dispatch A/B).
@@ -177,7 +177,7 @@ BENCHMARKS=(
 
 # ── DERIVE BENCHMARKS ─────────────────────────────────────────────────
 # These benchmarks use derivation-only .bv files (:= { ... } without body).
-# The pipeline: briv derive --stochastic → .opt.bv → compile → time.
+# The pipeline: briev derive --stochastic → .opt.bv → compile → time.
 # Results appear in a separate "MCMC Optimized" column.
 
 DERIVE_BENCHMARKS=(
@@ -219,8 +219,8 @@ build_bench() {
     # are dead code (zero iterations → output "0" instead of correct checksum).
     # 2026-07-14: --llvm removed — compiler now produces binary by default.
     # 2026-07-26: Clear FFI cache + temp objects to avoid duplicate symbols.
-    # The one-step `clang .ll lib/runtime/briv_rt.c` avoids cached .o conflicts.
-    rm -f ~/.cache/briv-compiler/ffi/*.o /tmp/briv_rt*.o 2>/dev/null || true
+    # The one-step `clang .ll lib/runtime/briev_rt.c` avoids cached .o conflicts.
+    rm -f ~/.cache/briev-compiler/ffi/*.o /tmp/briev_rt*.o 2>/dev/null || true
     local bound="${BOUND:-50000000}"
     if [ -n "${BENCH_BOUND[$name]:-}" ]; then
         bound="${BENCH_BOUND[$name]}"
@@ -236,19 +236,19 @@ build_bench() {
     # ${BENCH_ENV[$name]} -> "BODYCOUNT=2048") is treated by bash as a command
     # name, not an env assignment, so the direct `BOUND=.. $EXP cmd` form
     # fails with "BODYCOUNT=2048: command not found". `env` handles it.
-    env BOUND="$bound" ${BENCH_ENV[$name]:-} ./target/release/brivc build "benchmarks/${name}.bv" \
+    env BOUND="$bound" ${BENCH_ENV[$name]:-} ./target/release/brievc build "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
-        # 2026-07-26: One-step link with briv_rt.c (no pre-compiled .o files).
+        # 2026-07-26: One-step link with briev_rt.c (no pre-compiled .o files).
         # This avoids duplicate symbol conflicts between FFI cache objects
-        # and the harness's separate briv_rt.o.
+        # and the harness's separate briev_rt.o.
         clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
-            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/briv_rt.c" \
+            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/briev_rt.c" \
             -o "$bin" -lm 2>&1
     fi
     if [ -f "$bin" ]; then
-        echo "  Briv binary ready."
+        echo "  Briev binary ready."
     else
         echo "  (no binary — linking deferred)"
     fi
@@ -256,7 +256,7 @@ build_bench() {
 
 # ── DERIVE BUILD ──────────────────────────────────────────────────────
 
-# Build a derivation benchmark: run briv derive --stochastic, then compile .opt.bv
+# Build a derivation benchmark: run briev derive --stochastic, then compile .opt.bv
 build_derive_bench() {
     local name="$1"
     local bv_file="benchmarks/${name}.bv"
@@ -270,7 +270,7 @@ build_derive_bench() {
     echo "  Deriving: $name"
 
     # Step 1: Run derivation + MCMC to produce .opt.bv
-    BOUND=50000000 ./target/release/brivc derive --stochastic --iterations 10000 "$bv_file" 2>&1 | sed 's/^/    /'
+    BOUND=50000000 ./target/release/brievc derive --stochastic --iterations 10000 "$bv_file" 2>&1 | sed 's/^/    /'
 
     if [ ! -f "$derive_opt" ]; then
         echo "  SKIP — no .opt.bv produced (derive step may have failed)"
@@ -279,13 +279,13 @@ build_derive_bench() {
 
     # Step 2: Build the .opt.bv into a binary
     echo "  Building MCMC-optimized binary..."
-    rm -f ~/.cache/briv-compiler/ffi/*.o /tmp/briv_rt*.o 2>/dev/null || true
-    BOUND=50000000 ./target/release/brivc build "$derive_opt" --out benchmarks 2>&1 | sed 's/^/    /'
+    rm -f ~/.cache/briev-compiler/ffi/*.o /tmp/briev_rt*.o 2>/dev/null || true
+    BOUND=50000000 ./target/release/brievc build "$derive_opt" --out benchmarks 2>&1 | sed 's/^/    /'
 
     local bin="benchmarks/${name}_mcmc"
     if [ -f "benchmarks/${name}.ll" ]; then
         clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
-            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/briv_rt.c" \
+            -Wl,--gc-sections "benchmarks/${name}.ll" "lib/runtime/briev_rt.c" \
             -o "$bin" -lm 2>&1 | sed 's/^/    /'
     fi
 
@@ -305,7 +305,7 @@ build_c() {
         src="benchmarks/${name}_c.c"
     else
         # 2026-07-27: No direct C source — check for cross-reference.
-        local ref_name="${BRIV_CROSS_REF[$name]:-}"
+        local ref_name="${BRIEV_CROSS_REF[$name]:-}"
         if [ -n "$ref_name" ]; then
             echo "  No C source — uses ${ref_name}_c for cross-reference timing"
         fi
@@ -321,8 +321,8 @@ build_c() {
 
 # ── TIMING HARNESS ────────────────────────────────────────────────────
 
-TIMER_BIN="/tmp/briv_bench_timer"
-TIMER_SRC="/tmp/briv_bench_timer.c"
+TIMER_BIN="/tmp/briev_bench_timer"
+TIMER_SRC="/tmp/briev_bench_timer.c"
 if [ ! -f "$TIMER_BIN" ]; then
     cat > "$TIMER_SRC" << 'CEOF'
 #define _GNU_SOURCE
@@ -358,11 +358,11 @@ fi
 # ── SIZE-GATED PRECOMPUTE DETECTION ──────────────────────────────────
 
 # Returns true (0) if the benchmark is precompute_ok.
-# Checks: briv binary .text size < 25% of C binary .text size,
-#         or briv binary is missing (linking failed).
+# Checks: briev binary .text size < 25% of C binary .text size,
+#         or briev binary is missing (linking failed).
 is_precompute_ok() {
     local name="$1"
-    local briv_bin="benchmarks/${name}"
+    local briev_bin="benchmarks/${name}"
     local c_bin="benchmarks/${name}_c"
 
     # Optimizer-tagged benchmarks are always precompute_ok
@@ -370,23 +370,23 @@ is_precompute_ok() {
         return 0
     fi
 
-    # Missing briv binary → no timing possible
-    if [ ! -f "$briv_bin" ]; then
+    # Missing briev binary → no timing possible
+    if [ ! -f "$briev_bin" ]; then
         return 0
     fi
 
     # Size comparison
-    local briv_text=0
+    local briev_text=0
     local c_text=0
     if command -v size &>/dev/null; then
-        briv_text=$(size "$briv_bin" 2>/dev/null | tail -1 | awk '{print $1}')
+        briev_text=$(size "$briev_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         if [ -f "$c_bin" ]; then
             c_text=$(size "$c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         fi
-        if [ "$briv_text" -eq 0 ]; then
+        if [ "$briev_text" -eq 0 ]; then
             return 0
         fi
-        if [ "$c_text" -gt 0 ] && [ "$briv_text" -lt $(( c_text / 4 )) ]; then
+        if [ "$c_text" -gt 0 ] && [ "$briev_text" -lt $(( c_text / 4 )) ]; then
             return 0
         fi
     fi
@@ -397,9 +397,9 @@ is_precompute_ok() {
 # ── Cross-benchmark correctness references ──────────────────────────
 # Some benchmarks (e.g. queue_drain_idio) have no C reference of their own —
 # they are compared against a different benchmark's C reference (e.g.
-# queue_drain_sym_c). The BRIV_CROSS_REF array maps (benchmark, c_ref).
-declare -A BRIV_CROSS_REF
-BRIV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"
+# queue_drain_sym_c). The BRIEV_CROSS_REF array maps (benchmark, c_ref).
+declare -A BRIEV_CROSS_REF
+BRIEV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"
 
 # ── CORRECTNESS CHECK ────────────────────────────────────────────────
 
@@ -407,14 +407,14 @@ LAST_CORRECTNESS=""
 
 check_correctness() {
     local name="$1"
-    local briv_bin="benchmarks/${name}"
+    local briev_bin="benchmarks/${name}"
 
     local c_bin="benchmarks/${name}_c"
-    local ref_name="${BRIV_CROSS_REF[$name]:-$name}"
+    local ref_name="${BRIEV_CROSS_REF[$name]:-$name}"
     local ref_c_bin="benchmarks/${ref_name}_c"
 
-    if [ ! -f "$briv_bin" ]; then
-        echo "  correctness: SKIP (briv binary missing)"
+    if [ ! -f "$briev_bin" ]; then
+        echo "  correctness: SKIP (briev binary missing)"
         LAST_CORRECTNESS="SKIP"
         return
     fi
@@ -428,7 +428,7 @@ check_correctness() {
         return
     fi
 
-    local briv_out c_out briv_err c_err briv_rc c_rc
+    local briev_out c_out briev_err c_err briev_rc c_rc
     local tdir
     tdir=$(mktemp -d) || tdir=/tmp
     # 2026-08-09 (Bug 5): capture STDOUT and STDERR separately. A runtime
@@ -437,10 +437,10 @@ check_correctness() {
     # "match" the C reference (deep_recursion printed a divide-by-zero and
     # reported MATCH). A non-empty stderr / non-zero exit is now FAIL, never
     # MATCH.
-    env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$briv_bin" >"$tdir/briv.out" 2>"$tdir/briv.err"
-    briv_rc=$?
-    briv_out=$(cat "$tdir/briv.out" 2>/dev/null)
-    briv_err=$(cat "$tdir/briv.err" 2>/dev/null)
+    env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$briev_bin" >"$tdir/briev.out" 2>"$tdir/briev.err"
+    briev_rc=$?
+    briev_out=$(cat "$tdir/briev.out" 2>/dev/null)
+    briev_err=$(cat "$tdir/briev.err" 2>/dev/null)
     if [ "$name" != "$ref_name" ] && [ -f "$ref_c_bin" ]; then
         env ${BENCH_ENV[$name]:-} BOUND=5 timeout 10 "$ref_c_bin" >"$tdir/c.out" 2>"$tdir/c.err"
     else
@@ -452,8 +452,8 @@ check_correctness() {
     rm -rf "$tdir"
 
     # A runtime error on either side is a hard FAIL — never a silent MATCH.
-    if [ "$briv_rc" != "0" ] || [ -n "$briv_err" ]; then
-        echo "  correctness: FAIL (briv runtime error, rc=$briv_rc stderr: \"${briv_err:0:80}\")"
+    if [ "$briev_rc" != "0" ] || [ -n "$briev_err" ]; then
+        echo "  correctness: FAIL (briev runtime error, rc=$briev_rc stderr: \"${briev_err:0:80}\")"
         LAST_CORRECTNESS="FAIL"
         return
     fi
@@ -463,8 +463,8 @@ check_correctness() {
         return
     fi
 
-    if [ "$briv_out" = "$c_out" ]; then
-        echo "  correctness: MATCH (output: \"${briv_out:0:40}\")"
+    if [ "$briev_out" = "$c_out" ]; then
+        echo "  correctness: MATCH (output: \"${briev_out:0:40}\")"
         LAST_CORRECTNESS="MATCH"
         return
     fi
@@ -473,47 +473,47 @@ check_correctness() {
     # changing f32 association order. Strict string compare produces
     # false MISMATCH for values differing by ~1e-7.
     # Compare each line numerically if all lines are floats.
-    local briv_lines c_lines
-    mapfile -t briv_lines <<< "$briv_out"
+    local briev_lines c_lines
+    mapfile -t briev_lines <<< "$briev_out"
     mapfile -t c_lines <<< "$c_out"
-    local n_briv=${#briv_lines[@]}
+    local n_briev=${#briev_lines[@]}
     local n_c=${#c_lines[@]}
-    if [ "$n_briv" -ne "$n_c" ]; then
-        echo "  correctness: MISMATCH (line count $n_briv vs $n_c)"
+    if [ "$n_briev" -ne "$n_c" ]; then
+        echo "  correctness: MISMATCH (line count $n_briev vs $n_c)"
         LAST_CORRECTNESS="MISMATCH"
         return
     fi
     local all_float=true
     local i
     local re='^-?[0-9]+\.[0-9]+$'
-    for ((i=0; i<n_briv; i++)); do
-        if ! [[ "${briv_lines[$i]}" =~ $re ]] || ! [[ "${c_lines[$i]}" =~ $re ]]; then
+    for ((i=0; i<n_briev; i++)); do
+        if ! [[ "${briev_lines[$i]}" =~ $re ]] || ! [[ "${c_lines[$i]}" =~ $re ]]; then
             all_float=false
             break
         fi
     done
     if [ "$all_float" = false ]; then
         echo "  correctness: MISMATCH"
-        echo "    briv: \"${briv_out:0:60}\""
+        echo "    briev: \"${briev_out:0:60}\""
         echo "    c:     \"${c_out:0:60}\""
         LAST_CORRECTNESS="MISMATCH"
         return
     fi
     # All lines are floats — compare with epsilon
     local eps=0.00001
-    for ((i=0; i<n_briv; i++)); do
+    for ((i=0; i<n_briev; i++)); do
         local diff
-        diff=$(LC_ALL=C python3 -c "b=${briv_lines[$i]}; c=${c_lines[$i]}; print('{:.15e}'.format(abs(b - c)))" 2>/dev/null)
+        diff=$(LC_ALL=C python3 -c "b=${briev_lines[$i]}; c=${c_lines[$i]}; print('{:.15e}'.format(abs(b - c)))" 2>/dev/null)
         in_range=$(LC_ALL=C python3 -c "d=${diff}; print('yes' if d < $eps else 'no')" 2>/dev/null)
         if [ -z "$diff" ] || [ "$in_range" != "yes" ]; then
             echo "  correctness: MISMATCH (float diff $diff > $eps)"
-            echo "    briv: \"${briv_out:0:60}\""
+            echo "    briev: \"${briev_out:0:60}\""
             echo "    c:     \"${c_out:0:60}\""
             LAST_CORRECTNESS="MISMATCH"
             return
         fi
     done
-    echo "  correctness: MATCH (output: \"${briv_out:0:40}\")"
+    echo "  correctness: MATCH (output: \"${briev_out:0:40}\")"
     LAST_CORRECTNESS="MATCH"
 }
 
@@ -521,11 +521,11 @@ check_correctness() {
 
 bench_self_term() {
     local name="$1"
-    local briv_bin="benchmarks/${name}"
+    local briev_bin="benchmarks/${name}"
     local c_bin="benchmarks/${name}_c"
     # 2026-07-27: Cross-reference C binary — for benchmarks like queue_drain_idio
     # that compare against a different benchmark's C reference (queue_drain_sym_c).
-    local ref_name="${BRIV_CROSS_REF[$name]:-$name}"
+    local ref_name="${BRIEV_CROSS_REF[$name]:-$name}"
     local ref_c_bin="benchmarks/${ref_name}_c"
 
     echo ""
@@ -576,20 +576,20 @@ bench_self_term() {
 
     # Check for precomputed
     if is_precompute_ok "$name"; then
-        local briv_text=0
+        local briev_text=0
         local c_text=1
     if command -v size &>/dev/null; then
-        if [ -f "$briv_bin" ]; then
-            briv_text=$(size "$briv_bin" 2>/dev/null | tail -1 | awk '{print $1}')
+        if [ -f "$briev_bin" ]; then
+            briev_text=$(size "$briev_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         fi
         if [ -f "$ref_c_bin" ]; then
             c_text=$(size "$ref_c_bin" 2>/dev/null | tail -1 | awk '{print $1}')
         fi
     fi
-    if [ -f "$briv_bin" ]; then
-        echo "  briv binary: ${briv_text:-0}B  (precompute_ok — skip runtime)"
+    if [ -f "$briev_bin" ]; then
+        echo "  briev binary: ${briev_text:-0}B  (precompute_ok — skip runtime)"
     else
-        echo "  briv binary: (no binary — linking issue)"
+        echo "  briev binary: (no binary — linking issue)"
     fi
     echo "  c binary:     ${c_text:-0}B"
         check_correctness "$name"
@@ -597,8 +597,8 @@ bench_self_term() {
         return
     fi
 
-    if [ ! -f "$briv_bin" ]; then
-        echo "  SKIP — no briv binary (linking issue)"
+    if [ ! -f "$briev_bin" ]; then
+        echo "  SKIP — no briev binary (linking issue)"
         record_result "$name" "SKIP" "" "" "" "SKIP"
         return
     fi
@@ -618,7 +618,7 @@ bench_self_term() {
         return
     fi
 
-    local briv_sum=0; local briv_min=999999; local briv_max=0
+    local briev_sum=0; local briev_min=999999; local briev_max=0
     local c_sum=0
 
     local bound="${BOUND:-50000000}"
@@ -634,39 +634,39 @@ bench_self_term() {
     fi
 
     for i in 1 2 3 4 5; do
-        local bt=$(env ${BENCH_ENV[$name]:-} BOUND="$bound" "$TIMER_BIN" "$briv_bin")
+        local bt=$(env ${BENCH_ENV[$name]:-} BOUND="$bound" "$TIMER_BIN" "$briev_bin")
         local ct=$(env ${BENCH_ENV[$name]:-} BOUND="$bound" "$TIMER_BIN" "$ref_c_bin")
-        briv_sum=$(echo "$briv_sum + $bt" | bc)
+        briev_sum=$(echo "$briev_sum + $bt" | bc)
         c_sum=$(echo "$c_sum + $ct" | bc)
-        if (( $(echo "$bt < $briv_min" | bc -l) )); then briv_min=$bt; fi
-        if (( $(echo "$bt > $briv_max" | bc -l) )); then briv_max=$bt; fi
+        if (( $(echo "$bt < $briev_min" | bc -l) )); then briev_min=$bt; fi
+        if (( $(echo "$bt > $briev_max" | bc -l) )); then briev_max=$bt; fi
     done
 
-    local briv_avg=$(echo "scale=4; $briv_sum / 5" | bc)
+    local briev_avg=$(echo "scale=4; $briev_sum / 5" | bc)
     local c_avg=$(echo "scale=4; $c_sum / 5" | bc)
 
     local winner="—"
     local ratio="N/A"
-    if [ "$c_avg" != "0.0000" ] && [ "$briv_avg" != "0.0000" ]; then
-        ratio=$(echo "scale=2; $briv_avg / $c_avg" | bc)
+    if [ "$c_avg" != "0.0000" ] && [ "$briev_avg" != "0.0000" ]; then
+        ratio=$(echo "scale=2; $briev_avg / $c_avg" | bc)
         if (( $(echo "$ratio < 1.0" | bc -l) )); then
-            winner="Briv"
+            winner="Briev"
         elif (( $(echo "$ratio > 1.0" | bc -l) )); then
             winner="C"
         else
             winner="~tie"
         fi
-    elif [ "$briv_avg" = "0.0000" ] && [ "$c_avg" != "0.0000" ]; then
-        ratio="Briv wins (O(1) fold)"
-        winner="Briv"
+    elif [ "$briev_avg" = "0.0000" ] && [ "$c_avg" != "0.0000" ]; then
+        ratio="Briev wins (O(1) fold)"
+        winner="Briev"
     fi
 
-    echo "  Briv: ${briv_avg}s  (min ${briv_min}s, max ${briv_max}s)"
+    echo "  Briev: ${briev_avg}s  (min ${briev_min}s, max ${briev_max}s)"
     echo "  C:     ${c_avg}s"
     echo "  Ratio: ${ratio}x  →  ${winner} wins"
 
     check_correctness "$name"
-    record_result "$name" "${briv_avg}s" "${c_avg}s" "${ratio}x" "$winner" "$LAST_CORRECTNESS"
+    record_result "$name" "${briev_avg}s" "${c_avg}s" "${ratio}x" "$winner" "$LAST_CORRECTNESS"
 }
 
 # ── DERIVE BENCHMARK TIMING ───────────────────────────────────────────
@@ -785,10 +785,10 @@ filter_derive_name() {
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
-# 2026-07-01: Pre-build disabled — run `cargo build --release --bin brivc`
+# 2026-07-01: Pre-build disabled — run `cargo build --release --bin brievc`
 # manually before executing this script to avoid the long build hiding benchmark output.
-#echo "=== Building Briv compiler (release) ==="
-#cargo build --release --bin brivc 2>&1
+#echo "=== Building Briev compiler (release) ==="
+#cargo build --release --bin brievc 2>&1
 #echo ""
 
 # ── MAIN LOOP ─────────────────────────────────────────────────────────
@@ -801,11 +801,11 @@ for name in "${BENCHMARKS[@]}"; do
     fi
     build_bench "$name"
     if [ "$name" = "bridge_glue" ]; then
-        echo "  bridge_glue: building C + Briv .so files..."
-        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" BRIVC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
+        echo "  bridge_glue: building C + Briev .so files..."
+        make -C benchmarks/bridge PROJECT_ROOT="$PWD" BRIDGE_DIR="$PWD/target/bridge_bench" BRIEVC="$PWD/target/release/brievc" all 2>&1 | sed 's/^/    /'
     elif [ "$name" = "bridge_multi" ]; then
-        echo "  bridge_multi: building Briv .so + protocol shim..."
-        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" BRIVC="$PWD/target/release/brivc" all 2>&1 | sed 's/^/    /'
+        echo "  bridge_multi: building Briev .so + protocol shim..."
+        make -C benchmarks/multi_lang PROJECT_ROOT="$PWD" BUILD_DIR="$PWD/target/multi_lang" BRIEVC="$PWD/target/release/brievc" all 2>&1 | sed 's/^/    /'
     else
         build_c "$name" || true
     fi

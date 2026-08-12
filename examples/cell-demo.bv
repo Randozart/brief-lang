@@ -1,5 +1,5 @@
 // cell-demo.bv — cell primitive demo
-// Compile: briv-compiler build examples/cell-demo.bv && ./cell-demo
+// Compile: briev-compiler build examples/cell-demo.bv && ./cell-demo
 
 let boot_done: Bool = false;
 

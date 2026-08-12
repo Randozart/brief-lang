@@ -8,7 +8,7 @@
 
 ## 1. The Problem: Observability & Liveness
 
-Briv's optimizer eliminates dead code. A value is "dead" if no FFI call consumes it. This is correct — a program that produces no observable effect IS dead code.
+Briev's optimizer eliminates dead code. A value is "dead" if no FFI call consumes it. This is correct — a program that produces no observable effect IS dead code.
 
 But the optimizer cannot see through libc functions. `putchar()` gets eliminated via LLVM TargetLibraryInfo even with `memory(write)` on the declaration after LTO inlines the wrapper. `fprintf(stderr, ...)` survives but is a fragile workaround.
 
@@ -320,7 +320,7 @@ The standard library provides pre-declared `sig #out` functions with the `OUT__`
 
 ```
 // lib/std/out.bv
-import "link/briv_rt.o";
+import "link/briev_rt.o";
 
 // Underlying FFI (neutral — no sig, no #out)
 frgn __print_int(n: Int) -> Bool from "libruntime";
@@ -397,7 +397,7 @@ Field  tmp — eliminated
 
 ---
 
-## 10. Learn Briv Documentation (`docs/learn/liveness.md`)
+## 10. Learn Briev Documentation (`docs/learn/liveness.md`)
 
 Sections:
 
@@ -405,7 +405,7 @@ Sections:
 
 "A value is live if an FFI call consumes it."
 
-Briv's optimizer eliminates code that produces no observable effect. This is correct — a program that doesn't print, write files, or make network calls is dead code.
+Briev's optimizer eliminates code that produces no observable effect. This is correct — a program that doesn't print, write files, or make network calls is dead code.
 
 ### 10.2 Ways Code Stays Live
 
@@ -493,11 +493,11 @@ Use `--explain` to see:
 - Print sig resolution, liveness decisions, fold decisions
 - Print dead-field elimination reasons
 
-### Phase 7: Learn Briv + SPEC Update
+### Phase 7: Learn Briev + SPEC Update
 
 - Write `docs/learn/liveness.md`
 - Update `spec/SPEC.md` with output type algebra (§ new section)
-- Update `spec/old_docs/language_specs/v4-briv-lang-spec.md` to v5
+- Update `spec/old_docs/language_specs/v4-briev-lang-spec.md` to v5
 
 ---
 
@@ -508,8 +508,8 @@ Use `--explain` to see:
 **Before** (current — uses `#out` pragma and `io_pending` hack):
 ```
 #!exit count == N;
-import "link/briv_rt.o";
-import { io_pending } from "std/briv_rt.bv";
+import "link/briev_rt.o";
+import { io_pending } from "std/briev_rt.bv";
 
 frgn #out __putchar(c: Int) -> Int from "libruntime";
 frgn __get_env_int(name: String) -> Int from "libruntime";
@@ -529,7 +529,7 @@ node fasta [io_pending && count < N][count == N] {
 **After** (uses `sig #out` and OUT library):
 ```
 #!exit count == N;
-import "link/briv_rt.o";
+import "link/briev_rt.o";
 import { OUT__putchar } from "std/out.bv";
 
 frgn __get_env_int(name: String) -> Int from "libruntime";

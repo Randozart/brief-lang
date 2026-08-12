@@ -21,7 +21,7 @@ The old `TypeDefBody.bindings` field is retained as a migration compat field (du
 
 ## Syntax
 
-```briv
+```briev
 type MyInt : Int {
     maxbits <~ 64;                    // known metadata → PropertyValue::Int(64)
     alignment <~ 8;                // known metadata → PropertyValue::Int(8)
@@ -104,7 +104,7 @@ The function name is looked up first as an `inop` declaration (uses fallback),
 then as a `defn` (executes body).
 
 Example:
-```briv
+```briev
 type SkipList<T> : List<T> {
     InsertAt <~ sl_insert;
     ExtractFrom <~ sl_remove;
@@ -122,7 +122,7 @@ correctly maps `sl` to `SkipList` for strategy resolution.
 
 ### InsertAt/ExtractFrom binding format
 
-```briv
+```briev
 type MyCollection : List {
     InsertAt <~ sl_insert;       // Custom(strategy) → calls sl_insert#(list, val)
     ExtractFrom <~ sl_remove;    // Custom(strategy) → calls sl_remove#(list)

@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-29
 **Status:** ✅ IMPLEMENTED (2026-04-30)
-**Related:** `BRIV_COMPILER_CHECKLIST.md`, `VITRIOL_ARCHITECTURE.md`
+**Related:** `BRIEV_COMPILER_CHECKLIST.md`, `VITRIOL_ARCHITECTURE.md`
 
 ---
 
@@ -18,12 +18,12 @@ The current FFI system uses complex TOML binding files with per-function definit
 
 ## FFI Memory Model (Confirmed)
 
-**Core Principle: Briv owns all memory.**
+**Core Principle: Briev owns all memory.**
 
 ### Memory Ownership
-- **Briv allocates** memory for FFI parameters
-- **Briv tracks** the memory address
-- **Briv deallocates** memory after call (success OR error)
+- **Briev allocates** memory for FFI parameters
+- **Briev tracks** the memory address
+- **Briev deallocates** memory after call (success OR error)
 - **Compiler handles** all memory operations automatically
 
 ### TOML's Role: Declarative Ruleset
@@ -69,30 +69,30 @@ The compiler handles all memory operations:
 ## Syntax Reference
 
 ### File-Level Attribute
-```briv
+```briev
 #![ffi.<lang>, bind("./<profile>.toml"), import("./<script>")]
 ```
 
 ### Global Type Mapping
-```briv
+```briev
 #![ffi.c, map("uint","uint32_t"), map("string","char*")]
 #![ffi.js, map("uint","Number"), map("string","String")]
 ```
 
 ### Per-Function Type Override
-```briv
+```briev
 #[ffi.c, type("Int32Array")]
 frgn get_buffer() -> Result<Data, Err>;
 ```
 
 ### Disambiguation
-```briv
+```briev
 #[ffi.c]    frgn printf(fmt: String) -> Result<Int, Err>;
 #[ffi.rust] frgn printf(...);
 ```
 
 ### Simple frgn! Fire-and-Forget
-```briv
+```briev
 frgn! sync()              // Compiler picks address
 frgn! write_reg @ 0x40001000 (val: UInt);
 ```
@@ -119,7 +119,7 @@ Boolean = { size = 1 }
 Int = { representation = "IEEE754", size = 8 }
 
 [mapping]
-# Default mappings (can be overridden in Briv)
+# Default mappings (can be overridden in Briev)
 String = "String"
 Int = "Number"
 UInt = "Number"
@@ -174,7 +174,7 @@ error.max = 0xFFFFFFFF
 
 **Location:** `src/parser.rs`
 
-```briv
+```briev
 #![ffi.c, bind("./c_profile.toml"), import("./libc.a")]
 ```
 
@@ -192,7 +192,7 @@ struct FfiDirective {
 #### 2.2 Parse Global Mapping
 
 **Syntax:**
-```briv
+```briev
 #![ffi.c, map("uint","uint32_t"), map("string","char*")]
 ```
 
@@ -201,7 +201,7 @@ struct FfiDirective {
 #### 2.3 Parse Function-Level Override
 
 **Syntax:**
-```briv
+```briev
 #[ffi.c, type("Int32Array")]
 ```
 
@@ -212,7 +212,7 @@ struct FfiDirective {
 **Remove:** `from "bindings.toml"` requirement
 **Keep:** `-> Result<T, E>` return type
 
-```briv
+```briev
 # Old syntax (still supported):
 frgn read_spi(addr: Int) -> Result<Int, Err> from "bindings.toml";
 
@@ -233,7 +233,7 @@ frgn read_reg @ 0x40001000 (addr: UInt) -> Result<UInt, Err>;
 
 **Generate function calls:**
 ```c
-// Briv:
+// Briev:
 frgn pci_iomap(dev: UInt, bar: UInt, len: UInt) -> Result<UInt, Err>;
 
 // Generated C:
@@ -254,7 +254,7 @@ if (addr == NULL) {
 #### 3.3 Address Assignment for `frgn!`
 
 **Compiler picks address if not specified:**
-```briv
+```briev
 frgn! sync()  // Compiler assigns address
 ```
 
@@ -338,7 +338,7 @@ if (result < 0 || result > 32) {
 #### 5.3 `Result<Void, Err>` Verification
 
 For `frgn!` calls expecting `Void`:
-```briv
+```briev
 frgn! sync() -> Result<Void, Err>;
 ```
 
@@ -411,6 +411,6 @@ Existing `bindings.toml` files continue to work:
 
 ## Open Questions
 
-1. **Script Execution:** How does Briv execute imported JS scripts at runtime?
+1. **Script Execution:** How does Briev execute imported JS scripts at runtime?
 2. **Cache Invalidation:** When to recompile foreign functions?
 3. **Err Enum Definition:** Final schema for built-in `Err` type variants?

@@ -113,7 +113,7 @@ The following files received a single `Expr::Literal(lit)` route arm:
 
 The LLVM backend's `emit_llvm` for `LiteralExpr` returns values in the
 **boxed i64 format** — matching the system-wide convention that all SSA
-values are `i64` regardless of Briv-level type:
+values are `i64` regardless of Briev-level type:
 
 | Literal Variant | LLVM Emission | Register Type | TypedRegister.ty |
 |----------------|---------------|---------------|------------------|

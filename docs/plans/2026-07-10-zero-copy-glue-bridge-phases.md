@@ -4,7 +4,7 @@
 
 The GLUE protocol already supports zero-copy for scalar types (`Int` → `i64` in register).
 This plan extends zero-copy to composite types (structs, String, heap objects) through
-four phases. Every phase is driven entirely by Briv declarations — the user never
+four phases. Every phase is driven entirely by Briev declarations — the user never
 touches C, Rust, or Python bridge code.
 
 ## Testing Mandate
@@ -64,7 +64,7 @@ function signature, passed by value in registers (or by pointer for large struct
 
 ### What the user writes
 
-```briv
+```briev
 struct CBuffer { ptr: Int, len: Int };
 struct RSBuffer { data: Int, size: Int };
 meld CBuffer <:> RSBuffer;  // proves compatibility — no codegen needed
@@ -90,7 +90,7 @@ define i64 @process(ptr %state, %CBuffer %buf)  ; ← NOT boxed to i64
 ### String falls out naturally
 
 `String` is already a struct conceptually `{ ptr: Ptr<Byte>, len: Int }`. Making it
-a proper struct type in Briv's type universe means `llvm_type("String")` returns
+a proper struct type in Briev's type universe means `llvm_type("String")` returns
 `%String = type { i8*, i64 }` automatically.
 
 ### Files to modify
@@ -155,7 +155,7 @@ per field read — no copies.
 
 ### What the user writes
 
-```briv
+```briev
 import { PyLongObject } from "glue/python/layouts.bv";
 
 meld Int <:> PyLongObject {
@@ -197,7 +197,7 @@ define i64 @extract_value(ptr %state, ptr %p) {
 
 | File | Change | Nesting check |
 |------|--------|---------------|
-| `glue/python/layouts.bv` | Already exists — verify meld routes have explicit offset annotations | N/A (Briv source) |
+| `glue/python/layouts.bv` | Already exists — verify meld routes have explicit offset annotations | N/A (Briev source) |
 | `src/backend/llvm/helpers.rs` | `fn try_meld_projection()` — when the source register is an export `ptr` param, compute GEP offset from route expression | Extract offset computation into `fn meld_route_offset()`; guard clause for no-meld |
 | `src/backend/llvm/helpers.rs` | `fn emit_route_expression()` — new path: if expr is a struct field, emit `gep base_ptr, 0, field_index` | Flatten: determine route type → dispatch to GEP or identity or intrinsic |
 | `src/backend/llvm/helpers.rs` | `fn emit_decay()` — when chimera backing type matches target layout, emit noop | Early return for matching types; only allocate on mismatch |
@@ -233,7 +233,7 @@ materialization).
 
 ### Edge cases
 
-- **Mutability**: If a chimera value is written to (e.g., `p.ob_digit_0 = 42`), emit a `store` at the meld offset. Briv's mutability rules already track this.
+- **Mutability**: If a chimera value is written to (e.g., `p.ob_digit_0 = 42`), emit a `store` at the meld offset. Briev's mutability rules already track this.
 - **GC safety**: Python GC can move objects. The `ptr` must be valid for the duration of the call. The `frgn` declaration attests to this — no copying is safer than pinning.
 - **Route with no GEP**: Some meld routes are identity projections (`Ptr -> Ptr`). These emit no instructions.
 - **Route with intrinsic**: `Size -> strlen#(Ptr)` evaluates the intrinsic at the projected value — not zero-copy per se, but the correct computation.
@@ -250,7 +250,7 @@ Every `frgn` call site must handle the failure case explicitly. Provide two mech
 
 ### Syntax
 
-```briv
+```briev
 // Path A — full safety: returns Result<T, FrgnError>
 frgn open_file(path: String) -> Int;
 // Desugars to: external fn open_file(path: String) -> Result<Int, FrgnError>;
@@ -277,7 +277,7 @@ if fd != -1 {                      // Path B: OK — sentinel checked
 
 Defined in `glue/bridge-prelude.bv` (or a new `glue/frgn.bv`):
 
-```briv
+```briev
 struct FrgnError {
     code: Int;           // platform errno or custom error code
     source: String;      // the frgn symbol that produced the error
@@ -349,7 +349,7 @@ mirroring `frgn` syntactically.
 `frgn` syntactically — `frgn` is an incoming external call, `export` is an
 outgoing one. Both are part of the function/txn signature, not annotations:
 
-```briv
+```briev
 // ── export defn (pure function) ─────────────────────────────────
 
 // Basic: same symbol name
@@ -399,7 +399,7 @@ frgn  open_file(path: String) -> Int [fail: -1];
 // Outgoing:
 export defn process(buf: CBuffer) -> Int;
 
-// Both cross the Briv↔foreign boundary. Both participate in the same
+// Both cross the Briev↔foreign boundary. Both participate in the same
 // meld-verified ABI dispatch. The compiler handles them identically for
 // codegen — the only difference is which side owns the implementation.
 ```
@@ -468,7 +468,7 @@ bash benchmarks/build_and_bench.sh --runtime
 
 # Manual verification:
 cd examples/glue-rust-bridge
-briv build --no-stdlib --library bridge.bv --out .
+briev build --no-stdlib --library bridge.bv --out .
 grep '%CBuffer' bridge.ll    # Phase 1: struct type declared
 grep 'extractvalue' bridge.ll  # Phase 1: field access via extractvalue
 ```
@@ -478,7 +478,7 @@ grep 'extractvalue' bridge.ll  # Phase 1: field access via extractvalue
 ```
 # Manual verification:
 cd examples/glue-python-bridge
-briv build --no-stdlib --library bridge.bv --out .
+briev build --no-stdlib --library bridge.bv --out .
 grep 'getelementptr' bridge.ll  # Phase 2: GEP with meld offset
 python3 gluerun.py               # End-to-end
 
@@ -507,7 +507,7 @@ cat > /tmp/test_export.bv << 'EOF'
 export defn add(a: Int, b: Int) -> Int { term a + b; };
 #export defn add2(a: Int, b: Int) -> Int { term a + b; };
 EOF
-briv build --no-stdlib --library /tmp/test_export.bv --out /tmp/test_export
+briev build --no-stdlib --library /tmp/test_export.bv --out /tmp/test_export
 grep 'define.*@add' /tmp/test_export/test_export.ll  # Phase 4
 grep 'define.*@add2' /tmp/test_export/test_export.ll # Phase 4
 

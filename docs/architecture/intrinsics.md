@@ -13,7 +13,7 @@ relationship explicit and visible to the programmer.
 
 ## Syntax
 
-```briv
+```briev
 // Prefix-style (primary)
 let dist: Float = sqrt#(dsq);
 let count: Int = size#(list);
@@ -50,7 +50,7 @@ user-defined function or a `frgn` import.
 - The backend emits `call i64 @__open(...)` (via the frgn body)
 
 **To use:** Simply call `open#("file.txt", 0, 0)` as before — same syntax.
-The difference is that the implementation now lives in Briv source code
+The difference is that the implementation now lives in Briev source code
 (`lib/std/os/fs.bv`) instead of Rust compiler code (`src/backend/llvm/expr/intrinsics.rs`).
 
 ### Remaining Compiler Intrinsics (~40)
@@ -200,7 +200,7 @@ The interpreter implements real system calls for:
 - `readln#` — `std::io::stdin().read_line`
 - `exit#` — `std::process::exit(code)`
 - `time#` — `SystemTime::now().duration_since(UNIX_EPOCH)`
-- `read_file#` — Interpreter: `std::fs::read_to_string(path)`. LLVM backend: calls `briv_read_file` via C string marshaling (`inttoptr`/`ptrtoint`). See `backend-strategy.md` FFI Marshaling section.
+- `read_file#` — Interpreter: `std::fs::read_to_string(path)`. LLVM backend: calls `briev_read_file` via C string marshaling (`inttoptr`/`ptrtoint`). See `backend-strategy.md` FFI Marshaling section.
 - `write_file#` — Interpreter: `std::fs::write(path, data)`. LLVM backend: stub (returns 1).
 - `sleep#` — `std::thread::sleep(Duration::from_millis(ms))`
 - `socket#`, `bind#`, `listen#`, `accept#` — return failure stubs in interpreter
@@ -245,7 +245,7 @@ if let Some(Ok(Token::Hash)) = self.peek() {
 
 These ~80 intrinsics were moved from compiler code to `lib/std/os/*.bv` files.
 They are auto-imported via the prelude. Same call syntax (`open#(...)`),
-but the implementation lives in Briv source now.
+but the implementation lives in Briev source now.
 
 | Group | File | Intrinsics |
 |-------|------|------------|

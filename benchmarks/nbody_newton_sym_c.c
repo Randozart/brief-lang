@@ -83,7 +83,7 @@ int main(void) {
 
         #undef PAIR
 
-        // Position update uses UPDATED velocities (matches Briv's
+        // Position update uses UPDATED velocities (matches Briev's
         // store-and-forward semantics within a txn body).
         for (int i = 0; i < 5; i++) {
             bx[i] += dt * vx[i];

@@ -516,11 +516,11 @@ impl LLVMBuilder {
 
 // ── TypeConverter ────────────────────────────────────────────────────
 //
-// Centralized box/unbox logic for Briv's uniform i64 state representation.
+// Centralized box/unbox logic for Briev's uniform i64 state representation.
 // Previously scattered across adapt_to_i64, native_float_or_box, and
 // countless inline casts in emit_expr.rs. Every type coercion goes here.
 
-use crate::ast::Type as BrivType;
+use crate::ast::Type as BrievType;
 use crate::type_universe::TypeUniverse;
 
 pub struct TypeConverter;
@@ -533,7 +533,7 @@ impl TypeConverter {
     pub fn box_to_i64(
         builder: &mut LLVMBuilder,
         val: &str,
-        ty: &BrivType,
+        ty: &BrievType,
         universe: Option<&TypeUniverse>,
     ) -> String {
         // 2026-08-01: resolve the #String/#Data protocol membership from the
@@ -560,25 +560,25 @@ impl TypeConverter {
     /// tests go through the full pipeline. 2026-07-31: Phase 3 (§8.4-D2) —
     /// arms matched against the canonical bootstrap Type constructors
     /// (bool_/string()/float()/...) instead of type-name strings.
-    fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BrivType) -> String {
-        if *ty == BrivType::bool_() {
+    fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BrievType) -> String {
+        if *ty == BrievType::bool_() {
             builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
-        } else if *ty == BrivType::string() || *ty == BrivType::data() {
+        } else if *ty == BrievType::string() || *ty == BrievType::data() {
             builder.emit_ptrtoint(val, LlvmType::I64)
-        } else if *ty == BrivType::float() {
+        } else if *ty == BrievType::float() {
             let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
             builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
-        } else if *ty == BrivType::float64() {
+        } else if *ty == BrievType::float64() {
             builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
-        } else if *ty == BrivType::bits(1) {
+        } else if *ty == BrievType::bits(1) {
             // Int8/UInt8 both lower to i8; zext preserves the bit pattern for
             // the boxed i64 representation (the old name-based arms disagreed
             // on sext vs zext — zext is correct for unsigned and bit-preserving
             // for signed, so it is used uniformly here).
             builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
-        } else if *ty == BrivType::bits(2) {
+        } else if *ty == BrievType::bits(2) {
             builder.emit_zext(LlvmType::I16, LlvmType::I64, val)
-        } else if *ty == BrivType::bits(4) {
+        } else if *ty == BrievType::bits(4) {
             builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
         } else {
             val.to_string()
@@ -591,7 +591,7 @@ impl TypeConverter {
     pub fn unbox_from_i64(
         builder: &mut LLVMBuilder,
         val: &str,
-        target_ty: &BrivType,
+        target_ty: &BrievType,
         _universe: Option<&TypeUniverse>,
     ) -> String {
         Self::unbox_from_i64_fallback(builder, val, target_ty)
@@ -603,22 +603,22 @@ impl TypeConverter {
     fn unbox_from_i64_fallback(
         builder: &mut LLVMBuilder,
         val: &str,
-        target_ty: &BrivType,
+        target_ty: &BrievType,
     ) -> String {
-        if *target_ty == BrivType::bool_() {
+        if *target_ty == BrievType::bool_() {
             builder.emit_trunc(LlvmType::I64, LlvmType::I1, val)
-        } else if *target_ty == BrivType::string() || *target_ty == BrivType::data() {
+        } else if *target_ty == BrievType::string() || *target_ty == BrievType::data() {
             builder.emit_inttoptr(val, LlvmType::I64)
-        } else if *target_ty == BrivType::float() {
+        } else if *target_ty == BrievType::float() {
             let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
             builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
-        } else if *target_ty == BrivType::float64() {
+        } else if *target_ty == BrievType::float64() {
             builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
-        } else if *target_ty == BrivType::bits(1) {
+        } else if *target_ty == BrievType::bits(1) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
-        } else if *target_ty == BrivType::bits(2) {
+        } else if *target_ty == BrievType::bits(2) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
-        } else if *target_ty == BrivType::bits(4) {
+        } else if *target_ty == BrievType::bits(4) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
         } else {
             val.to_string()
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn test_box_bool_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%b", &BrivType::bool_(), None);
+        let r = TypeConverter::box_to_i64(&mut b, "%b", &BrievType::bool_(), None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = zext i1 %b to i64", r)));
     }
@@ -722,7 +722,7 @@ mod tests {
     #[test]
     fn test_box_float_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%f", &BrivType::float(), None);
+        let r = TypeConverter::box_to_i64(&mut b, "%f", &BrievType::float(), None);
         let ir = b.finish(2);
         // Float boxing: bitcast float→i32, then zext i32→i64
         assert!(ir.contains("bitcast float %f to i32"));
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn test_unbox_bool_from_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BrivType::bool_(), None);
+        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BrievType::bool_(), None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = trunc i64 %v to i1", r)));
     }

@@ -112,7 +112,7 @@ to BEAST string, parse back, verify `is_entry` is `true`.
 Uses `MatchIR$` to rewrite `defn main` or `txn main`, inserting `(entry)`
 into the contract.
 
-```briv
+```briev
 $(Mid) {
     // 2026-07-15: Auto-wire [#] to defn main
     MatchIR$(
@@ -137,7 +137,7 @@ $(Mid) {
 
 Uses `Collect$` to count entry mechanisms, emits error if zero.
 
-```briv
+```briev
 $(Mid) {
     let has_entry: Int = Collect$("(contract (entry) ??rest)");
     let has_rct: Int = Collect$("(node ?name ?contract ?params [?pre] [?post] ?body)");
@@ -275,6 +275,6 @@ Before final commit:
 
 1. `cargo test --lib` — all tests pass (including existing 855+)
 2. `cargo build` — no warnings
-3. New example files pass `briv check`
+3. New example files pass `briev check`
 4. Run Praetor on new/changed files
 5. `docs/architecture/features/plugins.md` updated with all three plugins

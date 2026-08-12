@@ -133,7 +133,7 @@ pub fn execute_intrinsic(
         }
         // 2026-08-03: host cancellation. In-process there is no host to raise
         // the flag, so CancelRequested# is always false (the backend's
-        // __briv_set_cancel is the real path).
+        // __briev_set_cancel is the real path).
         "CancelRequested#" => Ok(Value::Atom(Atom::Bool(false))),
         "ClearCancel#" => Ok(Value::Void),
          "Load#" => {
@@ -760,7 +760,7 @@ mod tests {
     fn test_string_bitwise_ops() {
         // 2026-08-01 (B1): & | ^ ~ on String operands operate on content bytes
         // and produce a same-length result (interpreter parity with the
-        // backend's briv_str_band/bor/bxor/bnot calls).
+        // backend's briev_str_band/bor/bxor/bnot calls).
         use crate::ast::{BinaryOpKind, Expr, UnaryOpKind};
         use crate::interpreter::eval_expr;
         let mut heap = VirtualHeap::new();
@@ -872,7 +872,7 @@ mod tests {
     #[test]
     fn test_reflect_len_and_bytes() {
         // 2026-08-01 (B3): `x.^Len` = UTF8 char count, `x.^^Bytes` = byte
-        // length (interpreter parity with the backend's briv_char_len /
+        // length (interpreter parity with the backend's briev_char_len /
         // header read). 'héllo' is 5 chars / 6 bytes.
         use crate::ast::{Expr, ReflectKind};
         use crate::interpreter::eval_expr;

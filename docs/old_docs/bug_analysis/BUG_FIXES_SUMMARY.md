@@ -1,4 +1,4 @@
-# Briv Compiler Bug Fixes - Complete Summary
+# Briev Compiler Bug Fixes - Complete Summary
 
 All three critical bugs have been **fixed and tested**.
 
@@ -80,7 +80,7 @@ All three critical bugs have been **fixed and tested**.
 
 ### Simple Method (Recommended)
 ```bash
-cd /home/randozart/Desktop/Projects/briv-compiler
+cd /home/randozart/Desktop/Projects/briev-compiler
 ./shopping-cart
 ```
 
@@ -104,7 +104,7 @@ When you run `./shopping-cart`, you get:
 ```
 .shopping_cart_build/
 ├── shopping_cart.html      ← Open this in browser
-├── shopping_cart.css       ← Styled by Briv
+├── shopping_cart.css       ← Styled by Briev
 ├── shopping_cart_glue.js   ← JS event handlers (uses fixed method names)
 ├── Cargo.toml
 ├── src/
@@ -203,4 +203,4 @@ output.push_str(&format!(
 ✅ **SHOPPING CART COMPILES**  
 ✅ **READY FOR END-TO-END TESTING**
 
-The Briv compiler is now ready to compile and run the shopping cart application successfully!
+The Briev compiler is now ready to compile and run the shopping cart application successfully!

@@ -183,7 +183,7 @@ extern "C" {
  */
 #ifdef XXH_DOXYGEN
 /*!
- * @briv Gives access to internal state declaration, required for static allocation.
+ * @briev Gives access to internal state declaration, required for static allocation.
  *
  * Incompatible with dynamic linking, due to risks of ABI changes.
  *
@@ -197,7 +197,7 @@ extern "C" {
 /* Do not undef XXH_STATIC_LINKING_ONLY for Doxygen */
 
 /*!
- * @briv Gives access to internal definitions.
+ * @briev Gives access to internal definitions.
  *
  * Usage:
  * @code{.c}
@@ -210,7 +210,7 @@ extern "C" {
 /* Do not undef XXH_IMPLEMENTATION for Doxygen */
 
 /*!
- * @briv Exposes the implementation and marks all functions as `inline`.
+ * @briev Exposes the implementation and marks all functions as `inline`.
  *
  * Use these build macros to inline xxhash into the target unit.
  * Inlining improves performance on small inputs, especially when the length is
@@ -230,12 +230,12 @@ extern "C" {
 #  define XXH_INLINE_ALL
 #  undef XXH_INLINE_ALL
 /*!
- * @briv Exposes the implementation without marking functions as inline.
+ * @briev Exposes the implementation without marking functions as inline.
  */
 #  define XXH_PRIVATE_API
 #  undef XXH_PRIVATE_API
 /*!
- * @briv Emulate a namespace by transparently prefixing all symbols.
+ * @briev Emulate a namespace by transparently prefixing all symbols.
  *
  * If you want to include _and expose_ xxHash functions from within your own
  * library, but also want to avoid symbol collisions with other libraries which
@@ -371,7 +371,7 @@ extern "C" {
 #ifndef XXHASH_H_5627135585666179
 #define XXHASH_H_5627135585666179 1
 
-/*! @briv Marks a global symbol. */
+/*! @briev Marks a global symbol. */
 #if !defined(XXH_INLINE_ALL) && !defined(XXH_PRIVATE_API)
 #  if defined(WIN32) && defined(_MSC_VER) && (defined(XXH_IMPORT) || defined(XXH_EXPORT))
 #    ifdef XXH_EXPORT
@@ -476,11 +476,11 @@ extern "C" {
 #define XXH_VERSION_MAJOR    0
 #define XXH_VERSION_MINOR    8
 #define XXH_VERSION_RELEASE  2
-/*! @briv Version number, encoded as two digits each */
+/*! @briev Version number, encoded as two digits each */
 #define XXH_VERSION_NUMBER  (XXH_VERSION_MAJOR *100*100 + XXH_VERSION_MINOR *100 + XXH_VERSION_RELEASE)
 
 /*!
- * @briv Obtains the xxHash version.
+ * @briev Obtains the xxHash version.
  *
  * This is mostly useful when xxHash is compiled as a shared library,
  * since the returned value comes from the library, as opposed to header file.
@@ -495,7 +495,7 @@ XXH_PUBLIC_API XXH_CONSTF unsigned XXH_versionNumber (void);
 ******************************/
 #include <stddef.h>   /* size_t */
 /*!
- * @briv Exit code for the streaming API.
+ * @briev Exit code for the streaming API.
  */
 typedef enum {
     XXH_OK = 0, /*!< OK */
@@ -508,7 +508,7 @@ typedef enum {
 ************************************************************************/
 #if defined(XXH_DOXYGEN) /* Don't show <stdint.h> include */
 /*!
- * @briv An unsigned 32-bit integer.
+ * @briev An unsigned 32-bit integer.
  *
  * Not necessarily defined to `uint32_t` but functionally equivalent.
  */
@@ -549,7 +549,7 @@ typedef uint32_t XXH32_hash_t;
  */
 
 /*!
- * @briv Calculates the 32-bit hash of @p input using xxHash32.
+ * @briev Calculates the 32-bit hash of @p input using xxHash32.
  *
  * Speed on Core 2 Duo @ 3 GHz (single thread, SMHasher benchmark): 5.4 GB/s
  *
@@ -602,21 +602,21 @@ XXH_PUBLIC_API XXH_PUREF XXH32_hash_t XXH32 (const void* input, size_t length, X
 
 /*!
  * @typedef struct XXH32_state_s XXH32_state_t
- * @briv The opaque state struct for the XXH32 streaming API.
+ * @briev The opaque state struct for the XXH32 streaming API.
  *
  * @see XXH32_state_s for details.
  */
 typedef struct XXH32_state_s XXH32_state_t;
 
 /*!
- * @briv Allocates an @ref XXH32_state_t.
+ * @briev Allocates an @ref XXH32_state_t.
  *
  * Must be freed with XXH32_freeState().
  * @return An allocated XXH32_state_t on success, `NULL` on failure.
  */
 XXH_PUBLIC_API XXH_MALLOCF XXH32_state_t* XXH32_createState(void);
 /*!
- * @briv Frees an @ref XXH32_state_t.
+ * @briev Frees an @ref XXH32_state_t.
  *
  * Must be allocated with XXH32_createState().
  * @param statePtr A pointer to an @ref XXH32_state_t allocated with @ref XXH32_createState().
@@ -624,7 +624,7 @@ XXH_PUBLIC_API XXH_MALLOCF XXH32_state_t* XXH32_createState(void);
  */
 XXH_PUBLIC_API XXH_errorcode  XXH32_freeState(XXH32_state_t* statePtr);
 /*!
- * @briv Copies one @ref XXH32_state_t to another.
+ * @briev Copies one @ref XXH32_state_t to another.
  *
  * @param dst_state The state to copy to.
  * @param src_state The state to copy from.
@@ -634,7 +634,7 @@ XXH_PUBLIC_API XXH_errorcode  XXH32_freeState(XXH32_state_t* statePtr);
 XXH_PUBLIC_API void XXH32_copyState(XXH32_state_t* dst_state, const XXH32_state_t* src_state);
 
 /*!
- * @briv Resets an @ref XXH32_state_t to begin a new hash.
+ * @briev Resets an @ref XXH32_state_t to begin a new hash.
  *
  * This function resets and seeds a state. Call it before @ref XXH32_update().
  *
@@ -649,7 +649,7 @@ XXH_PUBLIC_API void XXH32_copyState(XXH32_state_t* dst_state, const XXH32_state_
 XXH_PUBLIC_API XXH_errorcode XXH32_reset  (XXH32_state_t* statePtr, XXH32_hash_t seed);
 
 /*!
- * @briv Consumes a block of @p input to an @ref XXH32_state_t.
+ * @briev Consumes a block of @p input to an @ref XXH32_state_t.
  *
  * Call this to incrementally consume blocks of data.
  *
@@ -669,7 +669,7 @@ XXH_PUBLIC_API XXH_errorcode XXH32_reset  (XXH32_state_t* statePtr, XXH32_hash_t
 XXH_PUBLIC_API XXH_errorcode XXH32_update (XXH32_state_t* statePtr, const void* input, size_t length);
 
 /*!
- * @briv Returns the calculated hash value from an @ref XXH32_state_t.
+ * @briev Returns the calculated hash value from an @ref XXH32_state_t.
  *
  * @note
  *   Calling XXH32_digest() will not affect @p statePtr, so you can update,
@@ -707,14 +707,14 @@ XXH_PUBLIC_API XXH_PUREF XXH32_hash_t XXH32_digest (const XXH32_state_t* statePt
  */
 
 /*!
- * @briv Canonical (big endian) representation of @ref XXH32_hash_t.
+ * @briev Canonical (big endian) representation of @ref XXH32_hash_t.
  */
 typedef struct {
     unsigned char digest[4]; /*!< Hash bytes, big endian */
 } XXH32_canonical_t;
 
 /*!
- * @briv Converts an @ref XXH32_hash_t to a big endian @ref XXH32_canonical_t.
+ * @briev Converts an @ref XXH32_hash_t to a big endian @ref XXH32_canonical_t.
  *
  * @param dst The @ref XXH32_canonical_t pointer to be stored to.
  * @param hash The @ref XXH32_hash_t to be converted.
@@ -725,7 +725,7 @@ typedef struct {
 XXH_PUBLIC_API void XXH32_canonicalFromHash(XXH32_canonical_t* dst, XXH32_hash_t hash);
 
 /*!
- * @briv Converts an @ref XXH32_canonical_t to a native @ref XXH32_hash_t.
+ * @briev Converts an @ref XXH32_canonical_t to a native @ref XXH32_hash_t.
  *
  * @param src The @ref XXH32_canonical_t to convert.
  *
@@ -813,7 +813,7 @@ XXH_PUBLIC_API XXH_PUREF XXH32_hash_t XXH32_hashFromCanonical(const XXH32_canoni
 ************************************************************************/
 #if defined(XXH_DOXYGEN) /* don't include <stdint.h> */
 /*!
- * @briv An unsigned 64-bit integer.
+ * @briev An unsigned 64-bit integer.
  *
  * Not necessarily defined to `uint64_t` but functionally equivalent.
  */
@@ -849,7 +849,7 @@ typedef uint64_t XXH64_hash_t;
  */
 
 /*!
- * @briv Calculates the 64-bit hash of @p input using xxHash64.
+ * @briev Calculates the 64-bit hash of @p input using xxHash64.
  *
  * This function usually runs faster on 64-bit systems, but slower on 32-bit
  * systems (see benchmark).
@@ -876,14 +876,14 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH64(XXH_NOESCAPE const void* input, size
 /*******   Streaming   *******/
 #ifndef XXH_NO_STREAM
 /*!
- * @briv The opaque state struct for the XXH64 streaming API.
+ * @briev The opaque state struct for the XXH64 streaming API.
  *
  * @see XXH64_state_s for details.
  */
 typedef struct XXH64_state_s XXH64_state_t;   /* incomplete type */
 
 /*!
- * @briv Allocates an @ref XXH64_state_t.
+ * @briev Allocates an @ref XXH64_state_t.
  *
  * Must be freed with XXH64_freeState().
  * @return An allocated XXH64_state_t on success, `NULL` on failure.
@@ -891,7 +891,7 @@ typedef struct XXH64_state_s XXH64_state_t;   /* incomplete type */
 XXH_PUBLIC_API XXH_MALLOCF XXH64_state_t* XXH64_createState(void);
 
 /*!
- * @briv Frees an @ref XXH64_state_t.
+ * @briev Frees an @ref XXH64_state_t.
  *
  * Must be allocated with XXH64_createState().
  * @param statePtr A pointer to an @ref XXH64_state_t allocated with @ref XXH64_createState().
@@ -900,7 +900,7 @@ XXH_PUBLIC_API XXH_MALLOCF XXH64_state_t* XXH64_createState(void);
 XXH_PUBLIC_API XXH_errorcode  XXH64_freeState(XXH64_state_t* statePtr);
 
 /*!
- * @briv Copies one @ref XXH64_state_t to another.
+ * @briev Copies one @ref XXH64_state_t to another.
  *
  * @param dst_state The state to copy to.
  * @param src_state The state to copy from.
@@ -910,7 +910,7 @@ XXH_PUBLIC_API XXH_errorcode  XXH64_freeState(XXH64_state_t* statePtr);
 XXH_PUBLIC_API void XXH64_copyState(XXH_NOESCAPE XXH64_state_t* dst_state, const XXH64_state_t* src_state);
 
 /*!
- * @briv Resets an @ref XXH64_state_t to begin a new hash.
+ * @briev Resets an @ref XXH64_state_t to begin a new hash.
  *
  * This function resets and seeds a state. Call it before @ref XXH64_update().
  *
@@ -925,7 +925,7 @@ XXH_PUBLIC_API void XXH64_copyState(XXH_NOESCAPE XXH64_state_t* dst_state, const
 XXH_PUBLIC_API XXH_errorcode XXH64_reset  (XXH_NOESCAPE XXH64_state_t* statePtr, XXH64_hash_t seed);
 
 /*!
- * @briv Consumes a block of @p input to an @ref XXH64_state_t.
+ * @briev Consumes a block of @p input to an @ref XXH64_state_t.
  *
  * Call this to incrementally consume blocks of data.
  *
@@ -945,7 +945,7 @@ XXH_PUBLIC_API XXH_errorcode XXH64_reset  (XXH_NOESCAPE XXH64_state_t* statePtr,
 XXH_PUBLIC_API XXH_errorcode XXH64_update (XXH_NOESCAPE XXH64_state_t* statePtr, XXH_NOESCAPE const void* input, size_t length);
 
 /*!
- * @briv Returns the calculated hash value from an @ref XXH64_state_t.
+ * @briev Returns the calculated hash value from an @ref XXH64_state_t.
  *
  * @note
  *   Calling XXH64_digest() will not affect @p statePtr, so you can update,
@@ -963,12 +963,12 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH64_digest (XXH_NOESCAPE const XXH64_sta
 /*******   Canonical representation   *******/
 
 /*!
- * @briv Canonical (big endian) representation of @ref XXH64_hash_t.
+ * @briev Canonical (big endian) representation of @ref XXH64_hash_t.
  */
 typedef struct { unsigned char digest[sizeof(XXH64_hash_t)]; } XXH64_canonical_t;
 
 /*!
- * @briv Converts an @ref XXH64_hash_t to a big endian @ref XXH64_canonical_t.
+ * @briev Converts an @ref XXH64_hash_t to a big endian @ref XXH64_canonical_t.
  *
  * @param dst The @ref XXH64_canonical_t pointer to be stored to.
  * @param hash The @ref XXH64_hash_t to be converted.
@@ -979,7 +979,7 @@ typedef struct { unsigned char digest[sizeof(XXH64_hash_t)]; } XXH64_canonical_t
 XXH_PUBLIC_API void XXH64_canonicalFromHash(XXH_NOESCAPE XXH64_canonical_t* dst, XXH64_hash_t hash);
 
 /*!
- * @briv Converts an @ref XXH64_canonical_t to a native @ref XXH64_hash_t.
+ * @briev Converts an @ref XXH64_canonical_t to a native @ref XXH64_hash_t.
  *
  * @param src The @ref XXH64_canonical_t to convert.
  *
@@ -1051,7 +1051,7 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const
 ************************************************************************/
 
 /*!
- * @briv 64-bit unseeded variant of XXH3.
+ * @briev 64-bit unseeded variant of XXH3.
  *
  * This is equivalent to @ref XXH3_64bits_withSeed() with a seed of 0, however
  * it may have slightly better performance due to constant propagation of the
@@ -1067,7 +1067,7 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const
 XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH3_64bits(XXH_NOESCAPE const void* input, size_t length);
 
 /*!
- * @briv 64-bit seeded variant of XXH3
+ * @briev 64-bit seeded variant of XXH3
  *
  * This variant generates a custom secret on the fly based on default secret
  * altered using the `seed` value.
@@ -1093,7 +1093,7 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH3_64bits_withSeed(XXH_NOESCAPE const vo
 #define XXH3_SECRET_SIZE_MIN 136
 
 /*!
- * @briv 64-bit variant of XXH3 with a custom "secret".
+ * @briev 64-bit variant of XXH3 with a custom "secret".
  *
  * It's possible to provide any blob of bytes as a "secret" to generate the hash.
  * This makes it more difficult for an external actor to prepare an intentional collision.
@@ -1123,7 +1123,7 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t XXH3_64bits_withSecret(XXH_NOESCAPE const 
  */
 
 /*!
- * @briv The state struct for the XXH3 streaming API.
+ * @briev The state struct for the XXH3 streaming API.
  *
  * @see XXH3_state_s for details.
  */
@@ -1132,7 +1132,7 @@ XXH_PUBLIC_API XXH_MALLOCF XXH3_state_t* XXH3_createState(void);
 XXH_PUBLIC_API XXH_errorcode XXH3_freeState(XXH3_state_t* statePtr);
 
 /*!
- * @briv Copies one @ref XXH3_state_t to another.
+ * @briev Copies one @ref XXH3_state_t to another.
  *
  * @param dst_state The state to copy to.
  * @param src_state The state to copy from.
@@ -1142,7 +1142,7 @@ XXH_PUBLIC_API XXH_errorcode XXH3_freeState(XXH3_state_t* statePtr);
 XXH_PUBLIC_API void XXH3_copyState(XXH_NOESCAPE XXH3_state_t* dst_state, XXH_NOESCAPE const XXH3_state_t* src_state);
 
 /*!
- * @briv Resets an @ref XXH3_state_t to begin a new hash.
+ * @briev Resets an @ref XXH3_state_t to begin a new hash.
  *
  * This function resets `statePtr` and generate a secret with default parameters. Call it before @ref XXH3_64bits_update().
  * Digest will be equivalent to `XXH3_64bits()`.
@@ -1158,7 +1158,7 @@ XXH_PUBLIC_API void XXH3_copyState(XXH_NOESCAPE XXH3_state_t* dst_state, XXH_NOE
 XXH_PUBLIC_API XXH_errorcode XXH3_64bits_reset(XXH_NOESCAPE XXH3_state_t* statePtr);
 
 /*!
- * @briv Resets an @ref XXH3_state_t with 64-bit seed to begin a new hash.
+ * @briev Resets an @ref XXH3_state_t with 64-bit seed to begin a new hash.
  *
  * This function resets `statePtr` and generate a secret from `seed`. Call it before @ref XXH3_64bits_update().
  * Digest will be equivalent to `XXH3_64bits_withSeed()`.
@@ -1186,7 +1186,7 @@ XXH_PUBLIC_API XXH_errorcode XXH3_64bits_reset_withSeed(XXH_NOESCAPE XXH3_state_
 XXH_PUBLIC_API XXH_errorcode XXH3_64bits_reset_withSecret(XXH_NOESCAPE XXH3_state_t* statePtr, XXH_NOESCAPE const void* secret, size_t secretSize);
 
 /*!
- * @briv Consumes a block of @p input to an @ref XXH3_state_t.
+ * @briev Consumes a block of @p input to an @ref XXH3_state_t.
  *
  * Call this to incrementally consume blocks of data.
  *
@@ -1206,7 +1206,7 @@ XXH_PUBLIC_API XXH_errorcode XXH3_64bits_reset_withSecret(XXH_NOESCAPE XXH3_stat
 XXH_PUBLIC_API XXH_errorcode XXH3_64bits_update (XXH_NOESCAPE XXH3_state_t* statePtr, XXH_NOESCAPE const void* input, size_t length);
 
 /*!
- * @briv Returns the calculated XXH3 64-bit hash value from an @ref XXH3_state_t.
+ * @briev Returns the calculated XXH3 64-bit hash value from an @ref XXH3_state_t.
  *
  * @note
  *   Calling XXH3_64bits_digest() will not affect @p statePtr, so you can update,
@@ -1231,7 +1231,7 @@ XXH_PUBLIC_API XXH_PUREF XXH64_hash_t  XXH3_64bits_digest (XXH_NOESCAPE const XX
 ************************************************************************/
 
 /*!
- * @briv The return value from 128-bit hashes.
+ * @briev The return value from 128-bit hashes.
  *
  * Stored in little endian order, although the fields themselves are in native
  * endianness.
@@ -1242,7 +1242,7 @@ typedef struct {
 } XXH128_hash_t;
 
 /*!
- * @briv Unseeded 128-bit variant of XXH3
+ * @briev Unseeded 128-bit variant of XXH3
  *
  * The 128-bit variant of XXH3 has more strength, but it has a bit of overhead
  * for shorter inputs.
@@ -1259,9 +1259,9 @@ typedef struct {
  *    XXH3_128bits_reset(), XXH3_128bits_update(), XXH3_128bits_digest(): Streaming version.
  */
 XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits(XXH_NOESCAPE const void* data, size_t len);
-/*! @briv Seeded 128-bit variant of XXH3. @see XXH3_64bits_withSeed(). */
+/*! @briev Seeded 128-bit variant of XXH3. @see XXH3_64bits_withSeed(). */
 XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits_withSeed(XXH_NOESCAPE const void* data, size_t len, XXH64_hash_t seed);
-/*! @briv Custom secret 128-bit variant of XXH3. @see XXH3_64bits_withSecret(). */
+/*! @briev Custom secret 128-bit variant of XXH3. @see XXH3_64bits_withSecret(). */
 XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits_withSecret(XXH_NOESCAPE const void* data, size_t len, XXH_NOESCAPE const void* secret, size_t secretSize);
 
 /*******   Streaming   *******/
@@ -1279,7 +1279,7 @@ XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits_withSecret(XXH_NOESCAPE cons
  */
 
 /*!
- * @briv Resets an @ref XXH3_state_t to begin a new hash.
+ * @briev Resets an @ref XXH3_state_t to begin a new hash.
  *
  * This function resets `statePtr` and generate a secret with default parameters. Call it before @ref XXH3_128bits_update().
  * Digest will be equivalent to `XXH3_128bits()`.
@@ -1295,7 +1295,7 @@ XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits_withSecret(XXH_NOESCAPE cons
 XXH_PUBLIC_API XXH_errorcode XXH3_128bits_reset(XXH_NOESCAPE XXH3_state_t* statePtr);
 
 /*!
- * @briv Resets an @ref XXH3_state_t with 64-bit seed to begin a new hash.
+ * @briev Resets an @ref XXH3_state_t with 64-bit seed to begin a new hash.
  *
  * This function resets `statePtr` and generate a secret from `seed`. Call it before @ref XXH3_128bits_update().
  * Digest will be equivalent to `XXH3_128bits_withSeed()`.
@@ -1310,11 +1310,11 @@ XXH_PUBLIC_API XXH_errorcode XXH3_128bits_reset(XXH_NOESCAPE XXH3_state_t* state
  *
  */
 XXH_PUBLIC_API XXH_errorcode XXH3_128bits_reset_withSeed(XXH_NOESCAPE XXH3_state_t* statePtr, XXH64_hash_t seed);
-/*! @briv Custom secret 128-bit variant of XXH3. @see XXH_64bits_reset_withSecret(). */
+/*! @briev Custom secret 128-bit variant of XXH3. @see XXH_64bits_reset_withSecret(). */
 XXH_PUBLIC_API XXH_errorcode XXH3_128bits_reset_withSecret(XXH_NOESCAPE XXH3_state_t* statePtr, XXH_NOESCAPE const void* secret, size_t secretSize);
 
 /*!
- * @briv Consumes a block of @p input to an @ref XXH3_state_t.
+ * @briev Consumes a block of @p input to an @ref XXH3_state_t.
  *
  * Call this to incrementally consume blocks of data.
  *
@@ -1334,7 +1334,7 @@ XXH_PUBLIC_API XXH_errorcode XXH3_128bits_reset_withSecret(XXH_NOESCAPE XXH3_sta
 XXH_PUBLIC_API XXH_errorcode XXH3_128bits_update (XXH_NOESCAPE XXH3_state_t* statePtr, XXH_NOESCAPE const void* input, size_t length);
 
 /*!
- * @briv Returns the calculated XXH3 128-bit hash value from an @ref XXH3_state_t.
+ * @briev Returns the calculated XXH3 128-bit hash value from an @ref XXH3_state_t.
  *
  * @note
  *   Calling XXH3_128bits_digest() will not affect @p statePtr, so you can update,
@@ -1361,7 +1361,7 @@ XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH3_128bits_digest (XXH_NOESCAPE const X
 XXH_PUBLIC_API XXH_PUREF int XXH128_isEqual(XXH128_hash_t h1, XXH128_hash_t h2);
 
 /*!
- * @briv Compares two @ref XXH128_hash_t
+ * @briev Compares two @ref XXH128_hash_t
  * This comparator is compatible with stdlib's `qsort()`/`bsearch()`.
  *
  * @return: >0 if *h128_1  > *h128_2
@@ -1376,7 +1376,7 @@ typedef struct { unsigned char digest[sizeof(XXH128_hash_t)]; } XXH128_canonical
 
 
 /*!
- * @briv Converts an @ref XXH128_hash_t to a big endian @ref XXH128_canonical_t.
+ * @briev Converts an @ref XXH128_hash_t to a big endian @ref XXH128_canonical_t.
  *
  * @param dst The @ref XXH128_canonical_t pointer to be stored to.
  * @param hash The @ref XXH128_hash_t to be converted.
@@ -1387,7 +1387,7 @@ typedef struct { unsigned char digest[sizeof(XXH128_hash_t)]; } XXH128_canonical
 XXH_PUBLIC_API void XXH128_canonicalFromHash(XXH_NOESCAPE XXH128_canonical_t* dst, XXH128_hash_t hash);
 
 /*!
- * @briv Converts an @ref XXH128_canonical_t to a native @ref XXH128_hash_t.
+ * @briev Converts an @ref XXH128_canonical_t to a native @ref XXH128_hash_t.
  *
  * @param src The @ref XXH128_canonical_t to convert.
  *
@@ -1427,7 +1427,7 @@ XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH128_hashFromCanonical(XXH_NOESCAPE con
 
 /*!
  * @internal
- * @briv Structure for XXH32 streaming API.
+ * @briev Structure for XXH32 streaming API.
  *
  * @note This is only defined when @ref XXH_STATIC_LINKING_ONLY,
  * @ref XXH_INLINE_ALL, or @ref XXH_IMPLEMENTATION is defined. Otherwise it is
@@ -1451,7 +1451,7 @@ struct XXH32_state_s {
 
 /*!
  * @internal
- * @briv Structure for XXH64 streaming API.
+ * @briev Structure for XXH64 streaming API.
  *
  * @note This is only defined when @ref XXH_STATIC_LINKING_ONLY,
  * @ref XXH_INLINE_ALL, or @ref XXH_IMPLEMENTATION is defined. Otherwise it is
@@ -1496,7 +1496,7 @@ struct XXH64_state_s {
 #endif
 
 /*!
- * @briv The size of the internal XXH3 buffer.
+ * @briev The size of the internal XXH3 buffer.
  *
  * This is the optimal update size for incremental hashing.
  *
@@ -1506,7 +1506,7 @@ struct XXH64_state_s {
 
 /*!
  * @internal
- * @briv Default size of the secret buffer (and @ref XXH3_kSecret).
+ * @briev Default size of the secret buffer (and @ref XXH3_kSecret).
  *
  * This is the size used in @ref XXH3_kSecret and the seeded functions.
  *
@@ -1516,7 +1516,7 @@ struct XXH64_state_s {
 
 /*!
  * @internal
- * @briv Structure for XXH3 streaming API.
+ * @briev Structure for XXH3 streaming API.
  *
  * @note This is only defined when @ref XXH_STATIC_LINKING_ONLY,
  * @ref XXH_INLINE_ALL, or @ref XXH_IMPLEMENTATION is defined.
@@ -1568,7 +1568,7 @@ struct XXH3_state_s {
 #undef XXH_ALIGN_MEMBER
 
 /*!
- * @briv Initializes a stack-allocated `XXH3_state_s`.
+ * @briev Initializes a stack-allocated `XXH3_state_s`.
  *
  * When the @ref XXH3_state_t structure is merely emplaced on stack,
  * it should be initialized with XXH3_INITSTATE() or a memset()
@@ -1649,7 +1649,7 @@ XXH_PUBLIC_API XXH_PUREF XXH128_hash_t XXH128(XXH_NOESCAPE const void* data, siz
 XXH_PUBLIC_API XXH_errorcode XXH3_generateSecret(XXH_NOESCAPE void* secretBuffer, size_t secretSize, XXH_NOESCAPE const void* customSeed, size_t customSeedSize);
 
 /*!
- * @briv Generate the same secret as the _withSeed() variants.
+ * @briev Generate the same secret as the _withSeed() variants.
  *
  * The generated secret can be used in combination with
  *`*_withSecret()` and `_withSecretandSeed()` variants.
@@ -1787,14 +1787,14 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
  */
 #ifdef XXH_DOXYGEN
 /*!
- * @briv Define this to disable 64-bit code.
+ * @briev Define this to disable 64-bit code.
  *
  * Useful if only using the @ref XXH32_family and you have a strict C90 compiler.
  */
 #  define XXH_NO_LONG_LONG
 #  undef XXH_NO_LONG_LONG /* don't actually */
 /*!
- * @briv Controls how unaligned memory is accessed.
+ * @briev Controls how unaligned memory is accessed.
  *
  * By default, access to unaligned memory is controlled by `memcpy()`, which is
  * safe and portable.
@@ -1847,7 +1847,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH_SIZE_OPT
- * @briv Controls how much xxHash optimizes for size.
+ * @briev Controls how much xxHash optimizes for size.
  *
  * xxHash, when compiled, tends to result in a rather large binary size. This
  * is mostly due to heavy usage to forced inlining and constant folding of the
@@ -1875,7 +1875,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH_FORCE_ALIGN_CHECK
- * @briv If defined to non-zero, adds a special path for aligned inputs (XXH32()
+ * @briev If defined to non-zero, adds a special path for aligned inputs (XXH32()
  * and XXH64() only).
  *
  * This is an important performance trick for architectures without decent
@@ -1905,7 +1905,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH_NO_INLINE_HINTS
- * @briv When non-zero, sets all functions to `static`.
+ * @briev When non-zero, sets all functions to `static`.
  *
  * By default, xxHash tries to force the compiler to inline almost all internal
  * functions.
@@ -1927,7 +1927,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH3_INLINE_SECRET
- * @briv Determines whether to inline the XXH3 withSecret code.
+ * @briev Determines whether to inline the XXH3 withSecret code.
  *
  * When the secret size is known, the compiler can improve the performance
  * of XXH3_64bits_withSecret() and XXH3_128bits_withSecret().
@@ -1944,7 +1944,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH32_ENDJMP
- * @briv Whether to use a jump for `XXH32_finalize`.
+ * @briev Whether to use a jump for `XXH32_finalize`.
  *
  * For performance, `XXH32_finalize` uses multiple branches in the finalizer.
  * This is generally preferable for performance,
@@ -1956,7 +1956,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @internal
- * @briv Redefines old internal names.
+ * @briev Redefines old internal names.
  *
  * For compatibility with code that uses xxHash's internals before the names
  * were changed to improve namespacing. There is no other reason to use this.
@@ -1966,7 +1966,7 @@ XXH3_128bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr,
 
 /*!
  * @def XXH_NO_STREAM
- * @briv Disables the streaming API.
+ * @briev Disables the streaming API.
  *
  * When xxHash is not inlined and the streaming functions are not used, disabling
  * the streaming functions can improve code size significantly, especially with
@@ -2065,13 +2065,13 @@ static void XXH_free(void* p) { (void)p; }
 
 /*!
  * @internal
- * @briv Modify this function to use a different routine than malloc().
+ * @briev Modify this function to use a different routine than malloc().
  */
 static XXH_MALLOCF void* XXH_malloc(size_t s) { return malloc(s); }
 
 /*!
  * @internal
- * @briv Modify this function to use a different routine than free().
+ * @briev Modify this function to use a different routine than free().
  */
 static void XXH_free(void* p) { free(p); }
 
@@ -2081,7 +2081,7 @@ static void XXH_free(void* p) { free(p); }
 
 /*!
  * @internal
- * @briv Modify this function to use a different routine than memcpy().
+ * @briev Modify this function to use a different routine than memcpy().
  */
 static void* XXH_memcpy(void* dest, const void* src, size_t size)
 {
@@ -2134,7 +2134,7 @@ static void* XXH_memcpy(void* dest, const void* src, size_t size)
 /*!
  * @ingroup tuning
  * @def XXH_DEBUGLEVEL
- * @briv Sets the debugging level.
+ * @briev Sets the debugging level.
  *
  * XXH_DEBUGLEVEL is expected to be defined externally, typically via the
  * compiler's command line options. The value must be a number.
@@ -2173,7 +2173,7 @@ static void* XXH_memcpy(void* dest, const void* src, size_t size)
 /*!
  * @internal
  * @def XXH_COMPILER_GUARD(var)
- * @briv Used to prevent unwanted optimizations for @p var.
+ * @briev Used to prevent unwanted optimizations for @p var.
  *
  * It uses an empty GCC inline assembly statement with a register constraint
  * which forces @p var into a general purpose register (eg eax, ebx, ecx
@@ -2225,7 +2225,7 @@ typedef XXH32_hash_t xxh_u32;
 /*!
  * @internal
  * @fn xxh_u32 XXH_read32(const void* ptr)
- * @briv Reads an unaligned 32-bit integer from @p ptr in native endianness.
+ * @briev Reads an unaligned 32-bit integer from @p ptr in native endianness.
  *
  * Affected by @ref XXH_FORCE_MEMORY_ACCESS.
  *
@@ -2236,7 +2236,7 @@ typedef XXH32_hash_t xxh_u32;
 /*!
  * @internal
  * @fn xxh_u32 XXH_readLE32(const void* ptr)
- * @briv Reads an unaligned 32-bit little endian integer from @p ptr.
+ * @briev Reads an unaligned 32-bit little endian integer from @p ptr.
  *
  * Affected by @ref XXH_FORCE_MEMORY_ACCESS.
  *
@@ -2247,7 +2247,7 @@ typedef XXH32_hash_t xxh_u32;
 /*!
  * @internal
  * @fn xxh_u32 XXH_readBE32(const void* ptr)
- * @briv Reads an unaligned 32-bit big endian integer from @p ptr.
+ * @briev Reads an unaligned 32-bit big endian integer from @p ptr.
  *
  * Affected by @ref XXH_FORCE_MEMORY_ACCESS.
  *
@@ -2258,7 +2258,7 @@ typedef XXH32_hash_t xxh_u32;
 /*!
  * @internal
  * @fn xxh_u32 XXH_readLE32_align(const void* ptr, XXH_alignment align)
- * @briv Like @ref XXH_readLE32(), but has an option for aligned reads.
+ * @briev Like @ref XXH_readLE32(), but has an option for aligned reads.
  *
  * Affected by @ref XXH_FORCE_MEMORY_ACCESS.
  * Note that when @ref XXH_FORCE_ALIGN_CHECK == 0, the @p align parameter is
@@ -2324,7 +2324,7 @@ static xxh_u32 XXH_read32(const void* memPtr)
 /*!
  * @ingroup tuning
  * @def XXH_CPU_LITTLE_ENDIAN
- * @briv Whether the target is little endian.
+ * @briev Whether the target is little endian.
  *
  * Defined to 1 if the target is little endian, or 0 if it is big endian.
  * It can be defined externally, for example on the compiler command line.
@@ -2352,7 +2352,7 @@ static xxh_u32 XXH_read32(const void* memPtr)
 #  else
 /*!
  * @internal
- * @briv Runtime check for @ref XXH_CPU_LITTLE_ENDIAN.
+ * @briev Runtime check for @ref XXH_CPU_LITTLE_ENDIAN.
  *
  * Most compilers will constant fold this.
  */
@@ -2431,7 +2431,7 @@ static int XXH_isLittleEndian(void)
 /*!
  * @internal
  * @def XXH_rotl32(x,r)
- * @briv 32-bit rotate left.
+ * @briev 32-bit rotate left.
  *
  * @param x The 32-bit integer to be rotated.
  * @param r The number of bits to rotate.
@@ -2457,7 +2457,7 @@ static int XXH_isLittleEndian(void)
 /*!
  * @internal
  * @fn xxh_u32 XXH_swap32(xxh_u32 x)
- * @briv A 32-bit byteswap.
+ * @briev A 32-bit byteswap.
  *
  * @param x The 32-bit integer to byteswap.
  * @return @p x, byteswapped.
@@ -2483,7 +2483,7 @@ static xxh_u32 XXH_swap32 (xxh_u32 x)
 
 /*!
  * @internal
- * @briv Enum to indicate whether a pointer is aligned.
+ * @briev Enum to indicate whether a pointer is aligned.
  */
 typedef enum {
     XXH_aligned,  /*!< Aligned */
@@ -2573,7 +2573,7 @@ XXH_PUBLIC_API unsigned XXH_versionNumber (void) { return XXH_VERSION_NUMBER; }
 
 /*!
  * @internal
- * @briv Normal stripe processing routine.
+ * @briev Normal stripe processing routine.
  *
  * This shuffles the bits so that any bit from @p input impacts several bits in
  * @p acc.
@@ -2631,7 +2631,7 @@ static xxh_u32 XXH32_round(xxh_u32 acc, xxh_u32 input)
 
 /*!
  * @internal
- * @briv Mixes all bits to finalize the hash.
+ * @briev Mixes all bits to finalize the hash.
  *
  * The final mix ensures that all input bits have a chance to impact any bit in
  * the output digest, resulting in an unbiased distribution.
@@ -2653,7 +2653,7 @@ static xxh_u32 XXH32_avalanche(xxh_u32 hash)
 
 /*!
  * @internal
- * @briv Processes the last 0-15 bytes of @p ptr.
+ * @briev Processes the last 0-15 bytes of @p ptr.
  *
  * There may be up to 15 bytes remaining to consume from the input.
  * This final stage will digest them to ensure that all input bytes are present
@@ -2749,7 +2749,7 @@ XXH32_finalize(xxh_u32 hash, const xxh_u8* ptr, size_t len, XXH_alignment align)
 
 /*!
  * @internal
- * @briv The implementation for @ref XXH32().
+ * @briev The implementation for @ref XXH32().
  *
  * @param input , len , seed Directly passed from @ref XXH32().
  * @param align Whether @p input is aligned.
@@ -3137,7 +3137,7 @@ static xxh_u64 XXH64_avalanche(xxh_u64 hash)
 
 /*!
  * @internal
- * @briv Processes the last 0-31 bytes of @p ptr.
+ * @briev Processes the last 0-31 bytes of @p ptr.
  *
  * There may be up to 31 bytes remaining to consume from the input.
  * This final stage will digest them to ensure that all input bytes are present
@@ -3188,7 +3188,7 @@ XXH64_finalize(xxh_u64 hash, const xxh_u8* ptr, size_t len, XXH_alignment align)
 
 /*!
  * @internal
- * @briv The implementation for @ref XXH64().
+ * @briev The implementation for @ref XXH64().
  *
  * @param input , len , seed Directly passed from @ref XXH64().
  * @param align Whether @p input is aligned.
@@ -3524,7 +3524,7 @@ XXH_PUBLIC_API XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const XXH64_can
 #ifdef XXH_DOXYGEN
 /*!
  * @ingroup tuning
- * @briv Overrides the vectorization implementation chosen for XXH3.
+ * @briev Overrides the vectorization implementation chosen for XXH3.
  *
  * Can be defined to 0 to disable SIMD or any of the values mentioned in
  * @ref XXH_VECTOR_TYPE.
@@ -3535,7 +3535,7 @@ XXH_PUBLIC_API XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const XXH64_can
 #  define XXH_VECTOR XXH_SCALAR
 /*!
  * @ingroup tuning
- * @briv Possible values for @ref XXH_VECTOR.
+ * @briev Possible values for @ref XXH_VECTOR.
  *
  * Note that these are actually implemented as macros.
  *
@@ -3562,7 +3562,7 @@ enum XXH_VECTOR_TYPE /* fake enum */ {
 };
 /*!
  * @ingroup tuning
- * @briv Selects the minimum alignment for XXH3's accumulators.
+ * @briev Selects the minimum alignment for XXH3's accumulators.
  *
  * When using SIMD, this should match the alignment required for said vector
  * type, so, for example, 32 for AVX2.
@@ -3701,7 +3701,7 @@ typedef uint64x2_t xxh_aliasing_uint64x2_t XXH_ALIASING;
 
 /*!
  * @internal
- * @briv `vld1q_u64` but faster and alignment-safe.
+ * @briev `vld1q_u64` but faster and alignment-safe.
  *
  * On AArch64, unaligned access is always safe, but on ARMv7-a, it is only
  * *conditionally* safe (`vld1` has an alignment bit like `movdq[ua]` in x86).
@@ -3726,7 +3726,7 @@ XXH_FORCE_INLINE uint64x2_t XXH_vld1q_u64(void const* ptr)
 
 /*!
  * @internal
- * @briv `vmlal_u32` on low and high halves of a vector.
+ * @briev `vmlal_u32` on low and high halves of a vector.
  *
  * This is a workaround for AArch64 GCC < 11 which implemented arm_neon.h with
  * inline assembly and were therefore incapable of merging the `vget_{low, high}_u32`
@@ -3764,7 +3764,7 @@ XXH_vmlal_high_u32(uint64x2_t acc, uint32x4_t lhs, uint32x4_t rhs)
 
 /*!
  * @ingroup tuning
- * @briv Controls the NEON to scalar ratio for XXH3
+ * @briev Controls the NEON to scalar ratio for XXH3
  *
  * This can be set to 2, 4, 6, or 8.
  *
@@ -3996,7 +3996,7 @@ static const xxh_u64 PRIME_MX2 = 0x9FB21C651E98DF25ULL;  /*!< 0b1001111110110010
 
 #ifdef XXH_DOXYGEN
 /*!
- * @briv Calculates a 32-bit to 64-bit long multiply.
+ * @briev Calculates a 32-bit to 64-bit long multiply.
  *
  * Implemented as a macro.
  *
@@ -4030,7 +4030,7 @@ XXH_mult32to64(xxh_u64 x, xxh_u64 y)
 #endif
 
 /*!
- * @briv Calculates a 64->128-bit long multiply.
+ * @briev Calculates a 64->128-bit long multiply.
  *
  * Uses `__uint128_t` and `_umul128` if available, otherwise uses a scalar
  * version.
@@ -4163,7 +4163,7 @@ XXH_mult64to128(xxh_u64 lhs, xxh_u64 rhs)
 }
 
 /*!
- * @briv Calculates a 64-bit to 128-bit multiply, then XOR folds it.
+ * @briev Calculates a 64-bit to 128-bit multiply, then XOR folds it.
  *
  * The reason for the separate function is to prevent passing too many structs
  * around by value. This will hopefully inline the multiply, but we don't force it.
@@ -4895,7 +4895,7 @@ XXH3_scalarScrambleRound(void* XXH_RESTRICT acc,
 
 /*!
  * @internal
- * @briv The bulk processing loop for NEON and WASM SIMD128.
+ * @briev The bulk processing loop for NEON and WASM SIMD128.
  *
  * The NEON code path is actually partially scalar when running on AArch64. This
  * is to optimize the pipelining and can have up to 15% speedup depending on the
@@ -5316,7 +5316,7 @@ XXH_mult32to64_add64(xxh_u64 lhs, xxh_u64 rhs, xxh_u64 acc)
 
 /*!
  * @internal
- * @briv Scalar round for @ref XXH3_accumulate_512_scalar().
+ * @briev Scalar round for @ref XXH3_accumulate_512_scalar().
  *
  * This is extracted to its own function because the NEON path uses a combination
  * of NEON and scalar.
@@ -5342,7 +5342,7 @@ XXH3_scalarRound(void* XXH_RESTRICT acc,
 
 /*!
  * @internal
- * @briv Processes a 64 byte block of data using the scalar path.
+ * @briev Processes a 64 byte block of data using the scalar path.
  */
 XXH_FORCE_INLINE void
 XXH3_accumulate_512_scalar(void* XXH_RESTRICT acc,
@@ -5365,7 +5365,7 @@ XXH_FORCE_INLINE XXH3_ACCUMULATE_TEMPLATE(scalar)
 
 /*!
  * @internal
- * @briv Scalar scramble step for @ref XXH3_scrambleAcc_scalar().
+ * @briev Scalar scramble step for @ref XXH3_scrambleAcc_scalar().
  *
  * This is extracted to its own function because the NEON path uses a combination
  * of NEON and scalar.
@@ -5391,7 +5391,7 @@ XXH3_scalarScrambleRound(void* XXH_RESTRICT acc,
 
 /*!
  * @internal
- * @briv Scrambles the accumulators after a large chunk has been read
+ * @briev Scrambles the accumulators after a large chunk has been read
  */
 XXH_FORCE_INLINE void
 XXH3_scrambleAcc_scalar(void* XXH_RESTRICT acc, const void* XXH_RESTRICT secret)
@@ -5813,7 +5813,7 @@ static void XXH_alignedFree(void* p)
 }
 /*! @ingroup XXH3_family */
 /*!
- * @briv Allocate an @ref XXH3_state_t.
+ * @briev Allocate an @ref XXH3_state_t.
  *
  * Must be freed with XXH3_freeState().
  * @return An allocated XXH3_state_t on success, `NULL` on failure.
@@ -5828,7 +5828,7 @@ XXH_PUBLIC_API XXH3_state_t* XXH3_createState(void)
 
 /*! @ingroup XXH3_family */
 /*!
- * @briv Frees an @ref XXH3_state_t.
+ * @briev Frees an @ref XXH3_state_t.
  *
  * Must be allocated with XXH3_createState().
  * @param statePtr A pointer to an @ref XXH3_state_t allocated with @ref XXH3_createState().
@@ -5920,7 +5920,7 @@ XXH3_64bits_reset_withSecretandSeed(XXH_NOESCAPE XXH3_state_t* statePtr, XXH_NOE
 
 /*!
  * @internal
- * @briv Processes a large input for XXH3_update() and XXH3_digest_long().
+ * @briev Processes a large input for XXH3_update() and XXH3_digest_long().
  *
  * Unlike XXH3_hashLong_internal_loop(), this can process data that overlaps a block.
  *

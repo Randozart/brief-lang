@@ -1,7 +1,7 @@
 // Python Mapper
 //
-// Briv FFI mapper for Python via CPython.
-// Transforms between Python types and Briv types.
+// Briev FFI mapper for Python via CPython.
+// Transforms between Python types and Briev types.
 //
 // STATUS: Placeholder - requires CPython integration
 //
@@ -38,17 +38,17 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // String Conversions
 // ============================================================
 
-// Convert Python str to Briv String
+// Convert Python str to Briev String
 // Precondition: py_str is a Python str object
-// Postcondition: Returns Briv String with same UTF-8 content
-// defn py_string_to_briv(py_str: PyString) -> String [py_str.is_valid()][true] {
+// Postcondition: Returns Briev String with same UTF-8 content
+// defn py_string_to_briev(py_str: PyString) -> String [py_str.is_valid()][true] {
 //     term py_str.to_string();
 // };
 
-// Convert Briv String to Python str
-// Precondition: Briv String is valid
+// Convert Briev String to Python str
+// Precondition: Briev String is valid
 // Postcondition: Returns Python str object
-// defn briv_string_to_py(s: String) -> PyString [true][py_str.is_valid()] {
+// defn briev_string_to_py(s: String) -> PyString [true][py_str.is_valid()] {
 //     term PyString::from_string(s);
 // };
 
@@ -56,23 +56,23 @@ defn map_error(err: Error) -> Error [true][term == err] {
 // Numeric Conversions
 // ============================================================
 
-// Convert Python int to Briv Int
-defn py_int_to_briv(py_int: PyInt) -> Int [true][term == py_int.value] {
+// Convert Python int to Briev Int
+defn py_int_to_briev(py_int: PyInt) -> Int [true][term == py_int.value] {
     term py_int.value;
 };
 
-// Convert Briv Int to Python int
-defn briv_int_to_py(n: Int) -> PyInt [true][term.value == n] {
+// Convert Briev Int to Python int
+defn briev_int_to_py(n: Int) -> PyInt [true][term.value == n] {
     term PyInt::from_int(n);
 };
 
-// Convert Python float to Briv Float
-defn py_float_to_briv(py_float: PyFloat) -> Float [true][term == py_float.value] {
+// Convert Python float to Briev Float
+defn py_float_to_briev(py_float: PyFloat) -> Float [true][term == py_float.value] {
     term py_float.value;
 };
 
-// Convert Briv Float to Python float
-defn briv_float_to_py(f: Float) -> PyFloat [true][term.value == f] {
+// Convert Briev Float to Python float
+defn briev_float_to_py(f: Float) -> PyFloat [true][term.value == f] {
     term PyFloat::from_float(f);
 };
 
@@ -80,25 +80,25 @@ defn briv_float_to_py(f: Float) -> PyFloat [true][term.value == f] {
 // Complex Type Conversions
 // ============================================================
 
-// Convert Python bytes to Briv Data
+// Convert Python bytes to Briev Data
 // Precondition: py_bytes is a Python bytes object
-// Postcondition: Returns Briv Data with same content
-// defn py_bytes_to_briv(py_bytes: PyBytes) -> Data [py_bytes.is_valid()][term.len() == py_bytes.len()] {
+// Postcondition: Returns Briev Data with same content
+// defn py_bytes_to_briev(py_bytes: PyBytes) -> Data [py_bytes.is_valid()][term.len() == py_bytes.len()] {
 //     term py_bytes.to_data();
 // };
 
-// Convert Briv Data to Python bytes
-// defn briv_data_to_py(data: Data) -> PyBytes [data.is_valid()][term.len() == data.len()] {
+// Convert Briev Data to Python bytes
+// defn briev_data_to_py(data: Data) -> PyBytes [data.is_valid()][term.len() == data.len()] {
 //     term PyBytes::from_data(data);
 // };
 
-// Convert Python list to Briv List
-// defn py_list_to_briv(py_list: PyList) -> List<Value> [py_list.is_valid()][term.len() == py_list.len()] {
+// Convert Python list to Briev List
+// defn py_list_to_briev(py_list: PyList) -> List<Value> [py_list.is_valid()][term.len() == py_list.len()] {
 //     term py_list.to_list();
 // };
 
-// Convert Briv List to Python list
-// defn briv_list_to_py(list: List<Value>) -> PyList [list.is_valid()][term.len() == list.len()] {
+// Convert Briev List to Python list
+// defn briev_list_to_py(list: List<Value>) -> PyList [list.is_valid()][term.len() == list.len()] {
 //     term PyList::from_list(list);
 // };
 
@@ -111,13 +111,13 @@ defn briv_float_to_py(f: Float) -> PyFloat [true][term.value == f] {
 //     term py_obj.is_none();
 // };
 
-// Convert Python None to Briv Void
+// Convert Python None to Briev Void
 // defn py_none_to_void() -> Void [true][true] {
 //     term;
 // };
 
-// Convert Briv Void to Python None
-// defn briv_void_to_py_none() -> PyNone [true][true] {
+// Convert Briev Void to Python None
+// defn briev_void_to_py_none() -> PyNone [true][true] {
 //     term PyNone;
 // };
 
@@ -125,10 +125,10 @@ defn briv_float_to_py(f: Float) -> PyFloat [true][term.value == f] {
 // Error Handling
 // ============================================================
 
-// Convert Python Exception to Briv Error
+// Convert Python Exception to Briev Error
 // Precondition: py_exc is a Python Exception object
-// Postcondition: Returns Briv Error with exception message
-// defn py_error_to_briv(py_exc: PyException) -> Error [true][true] {
+// Postcondition: Returns Briev Error with exception message
+// defn py_error_to_briev(py_exc: PyException) -> Error [true][true] {
 //     term Error { message: py_exc.message };
 // };
 

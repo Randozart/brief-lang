@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import re
 
-path = '/home/randozart/Desktop/Projects/briv-compiler/src/lsp.rs'
+path = '/home/randozart/Desktop/Projects/briev-compiler/src/lsp.rs'
 content = open(path, 'r').read()
 
 # Add import_resolver and PathBuf to imports

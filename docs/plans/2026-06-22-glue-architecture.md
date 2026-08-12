@@ -10,7 +10,7 @@
 
 1. [Vision](#1-vision)
 2. [Architecture](#2-architecture)
-3. [Data Briv Formats: `.dbv`, `.dbvs`, `.dbvl`](#3-data-briv-formats-dbv-dbvs-dbvl)
+3. [Data Briev Formats: `.dbv`, `.dbvs`, `.dbvl`](#3-data-briev-formats-dbv-dbvs-dbvl)
 4. [CLI Verbs](#4-cli-verbs)
 5. [Memory Model](#5-memory-model)
 6. [Adapter System](#6-adapter-system)
@@ -25,14 +25,14 @@
 
 ## 1. Vision
 
-GLUE is a universal FFI broker. Any two languages that consume or produce LLVM-compatible object code can be linked through GLUE. Neither language knows Briv exists. Both see their own native interface. Briv is the invisible translator using `meld` to prove type compatibility at compile time — zero serialization, zero allocation at the call boundary. No C compiler, no `extern "C"`, no `cc` crate — the bridge IS native object code.
+GLUE is a universal FFI broker. Any two languages that consume or produce LLVM-compatible object code can be linked through GLUE. Neither language knows Briev exists. Both see their own native interface. Briev is the invisible translator using `meld` to prove type compatibility at compile time — zero serialization, zero allocation at the call boundary. No C compiler, no `extern "C"`, no `cc` crate — the bridge IS native object code.
 
 ### One-Sentence Thesis
 
 A Rust developer writes `use bridge::process_data` — it's a Rust crate.  
 A Python developer writes `from bridge import process_data` — it's a native module.  
 A Node developer writes `const bridge = require('bridge')` — it's a JS addon.  
-All three call the **same** Briv bridge. All three think they're talking to their own language.
+All three call the **same** Briev bridge. All three think they're talking to their own language.
 
 ---
 
@@ -49,9 +49,9 @@ Language B sources ──→ [Language B compiler] ──→ .o / .so ──→ 
                                                 Define frgn, #export, meld
 ```
 
-The bridge is a Briv program that:
+The bridge is a Briev program that:
 
-| Component | Role | Briv syntax |
+| Component | Role | Briev syntax |
 |---|---|---|
 | **`#export`** | Exposes functions to Language A. Language A sees native functions. | `defn #export "name" fn(a: Int) -> Int { ... };` |
 | **`frgn`** | Declares calls into Language B. Language B provides these as native exports. | `frgn fn_from_B(x: Int, y: Int) -> Int;` |
@@ -61,7 +61,7 @@ The bridge is a Briv program that:
 
 The bridge compiles to a **shared library** (`.a`/`.so`/`.wasm`). Every `#export` function becomes a public symbol. Every `frgn` declaration remains an unresolved symbol — the foreign library provides them at link time.
 
-**No C code required.** The bridge object file IS the native object file. Language A links it directly. Language B links it directly. Briv is the middle layer.
+**No C code required.** The bridge object file IS the native object file. Language A links it directly. Language B links it directly. Briev is the middle layer.
 
 ### Language matrix
 
@@ -82,13 +82,13 @@ The bridge object file uses **whatever ABI the target linker expects**. For Rust
 
 ---
 
-## 3. Data Briv Formats: `.dbv`, `.dbvs`, `.dbvl`
+## 3. Data Briev Formats: `.dbv`, `.dbvs`, `.dbvl`
 
-### `.dbv` — Data Briv (universal data, container)
+### `.dbv` — Data Briev (universal data, container)
 
-The universal data extension. Less strict — a container for data organized under Data Briv rules. Used for configurations, struct definitions, and any structured data. The `V` stands for "Briv" (a silly abbreviation), not "Variant."
+The universal data extension. Less strict — a container for data organized under Data Briev rules. Used for configurations, struct definitions, and any structured data. The `V` stands for "Briev" (a silly abbreviation), not "Variant."
 
-### `.dbvs` — Data Briv Schema
+### `.dbvs` — Data Briev Schema
 
 Defines the grammar for validating `.dbv` and `.dbvl` files. Semicolon-terminated declarations inside `entry Name { ... };` blocks.
 
@@ -116,7 +116,7 @@ entry GlueAdapter {
 };
 ```
 
-### `.dbvl` — Data Briv Lines
+### `.dbvl` — Data Briev Lines
 
 Raw data, one entry per line. Each line is self-contained — appendable, streamable, no nesting.
 
@@ -153,22 +153,22 @@ cobol, cbl cpy, dynamic, {Int:PIC S9(18) COMP}, templates/cobol/
 
 ## 4. CLI Verbs
 
-### `briv link <path> <function>` — Import a foreign function into Briv
+### `briev link <path> <function>` — Import a foreign function into Briev
 
 ```
-briv link libfoo.so "process_data"
+briev link libfoo.so "process_data"
 ```
 
 1. Analyzes the foreign library (reads symbol table, finds `process_data`)
 2. Cross-references against `src/ast.rs:477+` Intrinsic enum — if `process_data` matches an intrinsic name, use `intrinsic_call#()` instead of `frgn`
 3. Generates a `.bv` file with appropriate `frgn` or `intrinsic_call#()` declaration
 4. Optionally generates a `bindings.toml` for the FFI registry
-5. The user can now call `process_data#()` or `process_data(args)` from Briv
+5. The user can now call `process_data#()` or `process_data(args)` from Briev
 
-### `briv export <bridge.bv> <language>` — Compile Briv as a native library
+### `briev export <bridge.bv> <language>` — Compile Briev as a native library
 
 ```
-briv export bridge.bv rust
+briev export bridge.bv rust
 ```
 
 1. Compiles `bridge.bv` with `--library` flag (no `main` function emitted)
@@ -183,8 +183,8 @@ briv export bridge.bv rust
 glue libfoo.so "process_data" rust
 ```
 
-1. Does `briv link` internally to generate the `.bv` wrapper
-2. Does `briv export` internally to compile and generate the native crate
+1. Does `briev link` internally to generate the `.bv` wrapper
+2. Does `briev export` internally to compile and generate the native crate
 3. Output: complete native package that calls `process_data` from `libfoo.so`
 4. The developer adds `use glue_bridge::process_data` — that's it.
 
@@ -279,7 +279,7 @@ templates/cobol/
   bridge.cpy.hbs
 ```
 
-### Adapters are Briv `$!` macros (not a separate template engine)
+### Adapters are Briev `$!` macros (not a separate template engine)
 
 Each language adapter is a `.bv` file containing `$!macro` definitions. The macro
 receives the bridge's `#export`/`frgn`/`meld` declarations at compile time and
@@ -333,7 +333,7 @@ no new parsers, no separate template language.
 |---|---|---|
 | `{{bridge_name}}` | `.bv` filename | Name of the bridge |
 | `{{exports}}` | `#export` declarations | Generated for each exported function |
-| `{{types}}` | `glue.dbvl` type map | Briv type → native type conversions |
+| `{{types}}` | `glue.dbvl` type map | Briev type → native type conversions |
 | `{{frgn_decls}}` | `frgn` declarations | Generated for each foreign function call |
 | `{{intrinsics}}` | AST Intrinsic enum + user `frgn` | Cross-referenced: if `frgn` matches intrinsic, emit `intrinsic_call#()` instead |
 
@@ -348,13 +348,13 @@ fn is_intrinsic(name: &str) -> bool {
 }
 ```
 
-If the `frgn` name matches an intrinsic, the template emits `intrinsic_call#(args)` instead of `call @name(args)`. This cleanup applies to both `briv link` (generates correct `.bv`) and the template engine (generates correct native wrappers).
+If the `frgn` name matches an intrinsic, the template emits `intrinsic_call#(args)` instead of `call @name(args)`. This cleanup applies to both `briev link` (generates correct `.bv`) and the template engine (generates correct native wrappers).
 
 ---
 
 ## 7. Error Propagation (The Airlock)
 
-Briv's `frgn` always returns a typed result — either the expected type or a `Result<T, E>`. When a `frgn` call inside the bridge fails:
+Briev's `frgn` always returns a typed result — either the expected type or a `Result<T, E>`. When a `frgn` call inside the bridge fails:
 
 ### The rule: "Always be prepared to handle null"
 
@@ -398,11 +398,11 @@ The codebase has `frgn` declarations that should be `intrinsic_call#()` calls. E
 | `lib/std/string.bv` | Various `frgn` string ops | Check each against `Intrinsic` enum |
 | `lib/std/io.bv` | `frgn __read_file` etc. | No intrinsic exists — keep as `frgn` |
 | `lib/std/env.bv` | `frgn __get_env_int` | Check if `get_env_int#` exists as intrinsic |
-| Any user `.bv` with `frgn` | Declared in code | GLUE `briv link` auto-detects and upgrades |
+| Any user `.bv` with `frgn` | Declared in code | GLUE `briev link` auto-detects and upgrades |
 
 ### GLUE's role
 
-Both `briv link` and the template engine cross-reference against the Intrinsic enum:
+Both `briev link` and the template engine cross-reference against the Intrinsic enum:
 
 ```
 IF frgn_name ∈ Intrinsic enum:
@@ -455,7 +455,7 @@ This is automatic. The user never thinks about it.
 | Modified | File | Purpose |
 |---|---|---|
 | MOD | `src/backend/llvm/mod.rs` | Add `library_mode: bool` to `LlvmBackend`. Skip `emit_main` when set. |
-| MOD | `src/backend/llvm/emit_toplevel.rs` | Add `emit_library_shim()` — `__briv_init_state` + `#export` wrappers as `dso_local`. |
+| MOD | `src/backend/llvm/emit_toplevel.rs` | Add `emit_library_shim()` — `__briev_init_state` + `#export` wrappers as `dso_local`. |
 | MOD | `src/main.rs` | Add `--library` / `--no-main` flags to `build`/`export` subcommands. |
 | MOD | `src/main.rs` | When `--library`, emit `.a` via `ar` instead of linking executable. |
 
@@ -463,7 +463,7 @@ This is automatic. The user never thinks about it.
 
 ```llvm
 ; Library entry point — called once to initialize state
-define dso_local void @__briv_init_state(ptr %state) {
+define dso_local void @__briev_init_state(ptr %state) {
   entry:
     %state = alloca %State
     call void @init_state(ptr %state)
@@ -486,7 +486,7 @@ define dso_local i64 @export_process(ptr %state, i64 %arg) {
 - `llvm::tests::test_library_mode_has_init_state`
 - `llvm::tests::test_library_mode_exports_dso_local`
 
-### Milestone 3: `briv export` subcommand (3-5 days)
+### Milestone 3: `briev export` subcommand (3-5 days)
 
 **Files:**
 
@@ -497,7 +497,7 @@ define dso_local i64 @export_process(ptr %state, i64 %arg) {
 
 **Flow:**
 
-1. `briv export bridge.bv rust`
+1. `briev export bridge.bv rust`
 2. Compile `bridge.bv` with `--library` → produces `bridge.a`
 3. Read `glue.dbvl` → find `rust` entry → validate against `glue.dbvs`
 4. Load `templates/rust/` → render with bridge information
@@ -516,13 +516,13 @@ define dso_local i64 @export_process(ptr %state, i64 %arg) {
 **Generated `lib.rs`:**
 
 ```rust
-// Generated by Briv GLUE. Do not edit.
+// Generated by Briev GLUE. Do not edit.
 
 mod ffi;
 
 /// Initialize the bridge state. Call once at program start.
 pub fn init() -> u64 {
-    unsafe { ffi::__briv_init_state() }
+    unsafe { ffi::__briev_init_state() }
 }
 
 /// Call the exported function.
@@ -535,10 +535,10 @@ pub fn process_data(x: i64, y: i64) -> i64 {
 **Generated `ffi.rs` (hidden from user):**
 
 ```rust
-// Generated by Briv GLUE — unsafe FFI bindings
+// Generated by Briev GLUE — unsafe FFI bindings
 #[link(name = "bridge", kind = "static")]
 extern "C" {
-    pub fn __briv_init_state() -> u64;
+    pub fn __briev_init_state() -> u64;
     pub fn export_process_data(i64, i64) -> i64;
 }
 ```
@@ -567,18 +567,18 @@ fn main() {
 
 | New/Modified | File | Purpose |
 |---|---|---|
-| NEW | `glue/glue-simplify.bv` | Briv bridge with `#export simplify(expr: Expr) -> Expr` + `frgn __simplify_impl` |
+| NEW | `glue/glue-simplify.bv` | Briev bridge with `#export simplify(expr: Expr) -> Expr` + `frgn __simplify_impl` |
 | NEW | `glue/glue-simplify/` | Generated Rust crate |
 | MOD | compiler `Cargo.toml` | Add `glue-simplify` as dependency |
 
 **The bridge `.bv`:**
 
-```briv
+```briev
 // glue-simplify.bv — Expression simplification via GLUE bridge
 // The bridge exports simplify() to the Rust compiler.
 // Internally it calls frgn __simplify_impl which links back to
 // the Rust implementation. When self-hosted, this frgn is
-// replaced with pure-Briv logic.
+// replaced with pure-Briev logic.
 
 frgn __simplify_impl(expr: Expr) -> Expr;
 
@@ -616,7 +616,7 @@ Both produce identical output. The bridge is transparent.
 | New/Modified | File | Purpose |
 |---|---|---|
 | NEW | `src/glue/cli.rs` | Parses `glue` subcommand args |
-| NEW | `src/glue/link.rs` | `briv link` logic — symbol extraction + `.bv` generation |
+| NEW | `src/glue/link.rs` | `briev link` logic — symbol extraction + `.bv` generation |
 | MOD | `src/main.rs` | Add `glue` subcommand entry point |
 
 **Flow:**
@@ -633,20 +633,20 @@ Both produce identical output. The bridge is transparent.
 
 ## 10. The GLUE Engine (`glue-ffi`)
 
-A standalone repository at `~/Desktop/Projects/glue-ffi/` that implements GLUE outside of the Briv compiler.
+A standalone repository at `~/Desktop/Projects/glue-ffi/` that implements GLUE outside of the Briev compiler.
 
 ### Relationship to the compiler
 
 ```
-briv-compiler/src/glue/         ← In-tree GLUE module (compiler built-in)
+briev-compiler/src/glue/         ← In-tree GLUE module (compiler built-in)
 ~/Desktop/Projects/glue-ffi/     ← Standalone GLUE engine (published separately)
 ```
 
 The standalone GLUE engine:
 - Works identically to the compiler's built-in GLUE
 - Is published as a separate binary + library
-- Requires the Briv compiler to be installed (documents this)
-- Is for users who want to link two non-Briv languages without using the Briv compiler directly
+- Requires the Briev compiler to be installed (documents this)
+- Is for users who want to link two non-Briev languages without using the Briev compiler directly
 
 ### Distribution
 
@@ -655,9 +655,9 @@ glue-ffi/
   Cargo.toml         ← Standalone Rust project
   src/
     main.rs          ← CLI entry point (same verbs)
-    glue.rs          ← Reuses src/glue/ from briv-compiler
-    dbvl_reader.rs    ← Reuses dbvl_reader from briv-compiler
-    dbvs_validator.rs ← Reuses dbvs_validator from briv-compiler
+    glue.rs          ← Reuses src/glue/ from briev-compiler
+    dbvl_reader.rs    ← Reuses dbvl_reader from briev-compiler
+    dbvs_validator.rs ← Reuses dbvs_validator from briev-compiler
     adapter.rs       ← Template engine
     link.rs          ← Library analysis + .bv generation
   templates/         ← Same template directory structure
@@ -670,11 +670,11 @@ glue-ffi/
     glue.dbvs        ← Same schema
 ```
 
-The standalone GLUE depends on `briv build` being available on `$PATH`. When the user runs `glue libfoo.so process_data rust`, it internally calls:
+The standalone GLUE depends on `briev build` being available on `$PATH`. When the user runs `glue libfoo.so process_data rust`, it internally calls:
 
 ```
-briv link libfoo.so "process_data"    # generates .bv
-briv export bridge.bv rust            # compiles to crate
+briev link libfoo.so "process_data"    # generates .bv
+briev export bridge.bv rust            # compiles to crate
 ```
 
 ### When to extract
@@ -683,29 +683,29 @@ After Milestone 4 (compiler dogfooding works). The GLUE module in the compiler i
 
 1. Copy `src/glue/` to `glue-ffi/src/`
 2. Add `glue-ffi/src/main.rs` CLI
-3. The `glue` command shell-executes `briv build --library` internally
+3. The `glue` command shell-executes `briev build --library` internally
 4. Publish to GitHub as `anomalyco/glue-ffi`
 
 ---
 
 ## 11. Self-Hosting Path
 
-GLUE is the bridge from Rust-compiler to Briv-compiler.
+GLUE is the bridge from Rust-compiler to Briev-compiler.
 
 ```
 Phase A (today):    Rust compiler → LLVM C API + extern "C" FFI
 Phase B (M5):       Rust compiler → GLUE bridge → frgn → Rust impl
-Phase C (M6):       Rust compiler → GLUE bridge → frgn → Briv impl
-Phase D (M7):       Briv compiler (via GLUE bridge) → frgn → Briv impl
-Phase E (final):    Briv compiler (native, no Rust shell)
+Phase C (M6):       Rust compiler → GLUE bridge → frgn → Briev impl
+Phase D (M7):       Briev compiler (via GLUE bridge) → frgn → Briev impl
+Phase E (final):    Briev compiler (native, no Rust shell)
 ```
 
 | Phase | What changes | Proof |
 |---|---|---|
 | **A** | Status quo | All tests pass |
 | **B** | One `fn simplify()` replaced with GLUE bridge calling back into Rust | All tests pass, identical output |
-| **C** | Replace `frgn __simplify_impl` with pure-Briv `simplify()` implementation in the bridge | All tests pass, identical output |
-| **D** | Replace compiler's typechecker pass with GLUE bridge → Briv typechecker | All tests pass |
+| **C** | Replace `frgn __simplify_impl` with pure-Briev `simplify()` implementation in the bridge | All tests pass, identical output |
+| **D** | Replace compiler's typechecker pass with GLUE bridge → Briev typechecker | All tests pass |
 | **E** | Compiler `main.rs` is just `bridge::run()` — everything else is a GLUE bridge | Self-hosting achieved |
 
 Each phase is independently testable. Phase B is the critical proof that GLUE works end-to-end with actual compiler code.
@@ -730,14 +730,14 @@ Each phase is independently testable. Phase B is the critical proof that GLUE wo
 | `template` | `substitution` | `{{name}}` replaced correctly |
 | `template` | `for_loop` | Multiple `{{exports}}` expanded |
 | `llvm::tests` | `library_mode` | No `main` in output, has `#export` wrappers |
-| `llvm::tests` | `init_state` | `__briv_init_state` present |
+| `llvm::tests` | `init_state` | `__briev_init_state` present |
 
 ### Integration tests
 
 | Test | What it validates |
 |---|---|
-| `briv link mock_lib.a "fn"` | Library analysis + `.bv` generation |
-| `briv export test.bv rust` | Full pipeline: compile → read dbvl → render template → write crate |
+| `briev link mock_lib.a "fn"` | Library analysis + `.bv` generation |
+| `briev export test.bv rust` | Full pipeline: compile → read dbvl → render template → write crate |
 | `glue mock_lib.a "fn" rust` | One-shot wrapper generation |
 | `simplify_bridge_eq` | Bridge simplify == native simplify for all Expr variants |
 | `simplify_bridge_perf` | Bridge simplify within 2x of native (no catastrophic slowdown) |
@@ -759,7 +759,7 @@ fn test_bridge_call() {
 
 The bridge is compiled from:
 
-```briv
+```briev
 // tests/e2e_bridge.bv
 frgn add(a: Int, b: Int) -> Int;
 
@@ -785,7 +785,7 @@ The C file is linked with the bridge `.a` into the test binary. The Rust test ca
 |---|---|---|---|
 | **P0** | 1. `.dbvl`/`.dbvs` parser | 3-5 days | None |
 | **P0** | 2. Library-mode compilation | 2-3 days | None |
-| **P1** | 3. `briv export` (Rust) | 3-5 days | P0 Milestones 1+2 |
+| **P1** | 3. `briev export` (Rust) | 3-5 days | P0 Milestones 1+2 |
 | **P1** | 4. Dogfooding: simplify bridge | 3-5 days | P1 Milestone 3 |
 | **P2** | 5. `glue` standalone CLI | 2-3 days | P1 Milestone 4 |
 | **P2** | 6. Language expansion (Python, Node) | 2-3 days each | P1 Milestone 3 |

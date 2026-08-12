@@ -3,7 +3,7 @@
 
 ### Overview
 
-Every `Int`-typed value in Briv is a *range*, not a fixed-width word.
+Every `Int`-typed value in Briev is a *range*, not a fixed-width word.
 The compiler proves the maximum bits each code path needs and emits the
 corresponding LLVM integer type — i8, i16, i32, or i64. On WASM, anything
 ≤32 bits maps to i32, eliminating BigInt entirely.

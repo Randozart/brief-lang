@@ -4,14 +4,14 @@
 
 ## Priority Order
 
-### P0 — Fix output asymmetry (verify Briv semantics are the reference)
+### P0 — Fix output asymmetry (verify Briev semantics are the reference)
 
 **Problem**: 2 benchmarks (cancel_math, queue_drain) guard on `count % 5M == 0`.
-Briv's `node` checks the guard against pre-tick state. C checks after
+Briev's `node` checks the guard against pre-tick state. C checks after
 increment. This produces different first-print timing.
 
-**Fix**: The C reference should mirror Briv's semantics. Move the guard
-BEFORE the increment in C. Briv's node semantics are the reference
+**Fix**: The C reference should mirror Briev's semantics. Move the guard
+BEFORE the increment in C. Briev's node semantics are the reference
 implementation — C benchmarks should match them.
 
 Files: `benchmarks/cancel_math_c.c`, `benchmarks/queue_drain_c.c`
@@ -23,7 +23,7 @@ bug was fixed earlier in this session. These benchmarks may have been linked
 from stale `.o` files before the fix.
 
 **Fix**: Force rebuild: `rm -f benchmarks/nbody_*.ll benchmarks/nbody_*; 
-./briv-compiler llvm benchmarks/nbody_newton.bv --out benchmarks --optimize-budget 2048`
+./briev-compiler llvm benchmarks/nbody_newton.bv --out benchmarks --optimize-budget 2048`
 
 ### P1 — Investigate mandelbrot hang
 
@@ -39,8 +39,8 @@ File: `benchmarks/mandelbrot.bv`
 
 ### P1 — Fix fannkuch_redux output mismatch
 
-**Problem**: Briv outputs result to stderr; C returns it as exit code.
-These are different mechanisms and produce different numbers (Briv "10",
+**Problem**: Briev outputs result to stderr; C returns it as exit code.
+These are different mechanisms and produce different numbers (Briev "10",
 C "10" as exit code coincidentally the same at BOUND=5, but will differ
 at scale — the result is 10 at BOUND=5 for both, just one on stderr and
 one as exit code).
@@ -60,20 +60,20 @@ pointer in the runtime init path.
 ### P2 — queue_drain symmetric split
 
 **Problem**: Hillel Wayne observed that queue_drain.bv and queue_drain_c.c
-use different algorithms. The Briv version does more work (multiple fields,
+use different algorithms. The Briev version does more work (multiple fields,
 modulo dispatch) than the C version (simple counter). They produce the same
 result through different paths, which invalidates the comparison.
 
 **Fix**: Create two benchmarks:
-- `queue_drain_sym.bv` — mirrors C step-for-step using Briv features
-- `queue_drain_idio.bv` — Briv-native pattern (contract-proven, reactive)
+- `queue_drain_sym.bv` — mirrors C step-for-step using Briev features
+- `queue_drain_idio.bv` — Briev-native pattern (contract-proven, reactive)
 Both verified to produce identical output for the same input.
 
 ## Verification
 
 After each fix:
 
-1. `BOUND=5` run — confirm Briv and C produce identical stderr output
+1. `BOUND=5` run — confirm Briev and C produce identical stderr output
 2. `BOUND=50000000` run — confirm outputs match at scale
 3. `cargo test --lib` — all tests must pass
 4. Record any new diagnostics (A000–A005) observed during compilation

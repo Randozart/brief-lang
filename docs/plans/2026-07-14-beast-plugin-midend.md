@@ -1,4 +1,4 @@
-# BEAST: Briv Virtual IR — Plugin Mid-End Architecture
+# BEAST: Briev Virtual IR — Plugin Mid-End Architecture
 
 ## Design Summary
 

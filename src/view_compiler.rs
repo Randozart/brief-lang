@@ -149,7 +149,7 @@ pub struct ViewCompiler {
     /// txns → mount variants, and the fragment root gets a `data-instance`
     /// marker so the shim can reset the instance on b-when unmount.
     pub component_specs: HashMap<String, Vec<crate::analysis::component_instances::MountSpec>>,
-    /// 2026-08-12 (2b3 slice 2): Briv-side instance specs, keyed by the
+    /// 2026-08-12 (2b3 slice 2): Briev-side instance specs, keyed by the
     /// instance var name (`c1`). A `<c1 />` tag mounts the component's
     /// fragment routed to the instance's slots — no mount counter (the
     /// instance is unique by name).
@@ -216,7 +216,7 @@ impl ViewCompiler {
         self.component_mounts.clear();
     }
 
-    /// 2026-08-12 (2b3 slice 2): register the Briv-side instance specs
+    /// 2026-08-12 (2b3 slice 2): register the Briev-side instance specs
     /// (keyed by instance var name).
     pub fn set_instance_specs(
         &mut self,
@@ -465,7 +465,7 @@ impl ViewCompiler {
                             .unwrap_or("")
                             .trim_end_matches('>')
                             .to_string();
-                        // 2026-08-12 (2b3): tag namespace resolution — a Briv-side
+                        // 2026-08-12 (2b3): tag namespace resolution — a Briev-side
                         // instance var (`<c1 />`) mounts the component's fragment
                         // routed to the instance's slots; a component type
                         // (`<Counter />`) spawns an anonymous pool instance.
@@ -473,7 +473,7 @@ impl ViewCompiler {
                         let is_instance = inst_spec.is_some();
                         if is_instance || self.render_blocks.contains_key(&tag_name_raw) {
                             // The spec decides the routing: instance name for
-                            // Briv-side, mount-index pool for HTML-side.
+                            // Briev-side, mount-index pool for HTML-side.
                             let spec = inst_spec.unwrap_or_else(|| {
                                 let mount = self
                                     .component_mounts
@@ -1662,7 +1662,7 @@ pub fn condition_root_signal<'a>(expr: &'a str) -> (&'a str, Vec<&'a str>) {
 ///
 /// 2026-08-11: single definition — reused by the web generator's
 /// `field_handle_for_signal` (handle lookup binds the root field), by
-/// `verify_srbv` (SRBV checks the root signal exists), and by the brivc
+/// `verify_srbv` (SRBV checks the root signal exists), and by the brievc
 /// frontend (view-bound fields protect %State slots from dead-field
 /// elimination). The `.^X` suffix is a projection on top of the field's
 /// value, never a separate signal.

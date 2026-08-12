@@ -1,4 +1,4 @@
-# Briv Standard Library
+# Briev Standard Library
 
 > Extracted from the README (2026-07-31).
 ### Core Types

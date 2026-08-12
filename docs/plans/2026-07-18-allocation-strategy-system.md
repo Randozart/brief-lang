@@ -5,7 +5,7 @@
 **Depends on:** None (fixes existing bugs + additive stdlib)
 **See also:**
   - `docs/plans/2026-06-23-arena-allocation.md` (arena Phase 1-3, implemented)
-  - `docs/plans/2026-07-12-alloc-metadata.md` (superseded — allocation strategies are pure-Briv types)
+  - `docs/plans/2026-07-12-alloc-metadata.md` (superseded — allocation strategies are pure-Briev types)
   - `docs/plans/2026-07-18-ptr-level3-borrow-checking.md` (followup — provenance tracking refines Alloc# escape analysis)
   - `docs/architecture/llvm-memory-management.md` (current memory architecture)
   - `docs/architecture/arrow-syntax-and-arena.md` (arrow + arena spec)
@@ -16,7 +16,7 @@
 
 Make allocation strategies expressible at two levels of abstraction:
 
-1. **Explicit strategies** as pure-Briv types (`Arena`, `CrosswordArena`) — user controls which allocator by picking the type. Written in `.bv` files using existing `Malloc#`/`Free#`/Ptr arithmetic. No new intrinsics needed for these.
+1. **Explicit strategies** as pure-Briev types (`Arena`, `CrosswordArena`) — user controls which allocator by picking the type. Written in `.bv` files using existing `Malloc#`/`Free#`/Ptr arithmetic. No new intrinsics needed for these.
 
 2. **`Alloc#(size)` intrinsic** — compiler-delegated allocation. The compiler analyzes the execution graph (contract bounds, lifetimes, txn scopes) and picks the optimal strategy automatically: arena bump inside txns, `@malloc` outside, `alloca` for bounded locals.
 
@@ -24,7 +24,7 @@ This is enabled by fixing three bugs in the `InsertAt`/`ExtractFrom` property pi
 
 ### Key Principles
 
-- **No new intrinsics for explicit allocators.** `Arena` and `CrosswordArena` are pure Briv using existing primitives, exactly like `ring_push`/`ring_pop`.
+- **No new intrinsics for explicit allocators.** `Arena` and `CrosswordArena` are pure Briev using existing primitives, exactly like `ring_push`/`ring_pop`.
 - **`Alloc#` is a single delegation point** — one intrinsic that says "compiler decides." Strategy hints and per-allocation metadata are not needed.
 - **`Malloc#` stays** for explicit heap semantics (FFI, `--no-stdlib`).
 - **Free# dispatch via static analysis** — at compile time, the compiler annotates each `Free#` call with the strategy (arena = no-op, malloc = `@free`). No runtime tag bits.
@@ -42,7 +42,7 @@ Phase 2: Alloc# intrinsic + Free# static analysis ───────┤
     (intrinsic_signatures, backend emit, interpreter,     │
      AllocStrategy enum, register annotation)             │
                                                          │
-Phase 3: Stdlib arena types (pure Briv) ────────────────┘
+Phase 3: Stdlib arena types (pure Briev) ────────────────┘
     (arena.bv, crossword.bv, property bindings)          │
                                                          ├──→ Phase 5: Verify no regressions
 Phase 4: Execution-graph → strategy selection ───────────┘
@@ -425,14 +425,14 @@ This ensures that `Free#(let_bound_ptr)` correctly traces back to the original a
 
 ---
 
-## Phase 3: Stdlib Arena Types (Pure Briv)
+## Phase 3: Stdlib Arena Types (Pure Briev)
 
 ### 3a. Basic Bump Arena
 
 **File:** `lib/std/memory/arena.bv`
 
-```briv
-// 2026-07-18: Arena — single-direction bump allocator in pure Briv.
+```briev
+// 2026-07-18: Arena — single-direction bump allocator in pure Briev.
 // Backed by Alloc# for the backing buffer. The arena is itself
 // arena-allocated when arena_init is called inside a txn context
 // (nested arena — the parent arena manages the child arena's backing
@@ -484,7 +484,7 @@ defn arena_free(a: Arena) {
 
 **File:** `lib/std/memory/crossword.bv`
 
-```briv
+```briev
 // 2026-07-18: CrosswordArena — dual-direction arena allocator.
 // Fixed-size slots grow from base upward (slot_offset).
 // Variable-length data (strings, byte buffers) grows from
@@ -577,7 +577,7 @@ defn crossword_free(ca: CrosswordArena) {
 
 **File:** `lib/std/types.bv` — add re-export
 
-```briv
+```briev
 // 2026-07-18: Arena allocator types
 import arena from "std/memory/arena.bv";
 import crossword from "std/memory/crossword.bv";
@@ -585,7 +585,7 @@ import crossword from "std/memory/crossword.bv";
 
 Or if types.bv doesn't use imports this way, add a `lib/std/memory/mod.bv`:
 
-```briv
+```briev
 // 2026-07-18: Memory allocator module
 import Arena from "std/memory/arena.bv";
 import CrosswordArena from "std/memory/crossword.bv";
@@ -746,7 +746,7 @@ cargo build --release && bash benchmarks/build_and_bench.sh --runtime
 
 Capture ALL output in a table:
 
-| Benchmark | Briv (s) | C (s) | Ratio (Briv/C) | Correctness |
+| Benchmark | Briev (s) | C (s) | Ratio (Briev/C) | Correctness |
 |-----------|-----------|-------|-----------------|-------------|
 | ... | ... | ... | ... | PASS/FAIL |
 
@@ -776,8 +776,8 @@ Compare against baseline. No benchmark should regress. RingBuffer benchmarks sho
 
 | File | Purpose |
 |------|---------|
-| `lib/std/memory/arena.bv` | Pure-Briv bump arena type |
-| `lib/std/memory/crossword.bv` | Pure-Briv crossword arena type |
+| `lib/std/memory/arena.bv` | Pure-Briev bump arena type |
+| `lib/std/memory/crossword.bv` | Pure-Briev crossword arena type |
 | `lib/std/memory/mod.bv` | Memory module re-export |
 | `src/analysis/allocation.rs` | Execution-graph → strategy analysis pass |
 | `docs/plans/2026-07-18-allocation-strategy-system.md` | This plan |
@@ -838,10 +838,10 @@ All tests are behavioral (per Directive §5) — they assert outcomes, not IR sn
 
 | Test | What it asserts | How |
 |------|-----------------|-----|
-| `test_arena_init_pure_briv` | Arena type allocates correctly | Compile `arena_init(1024)`, run, check non-null base |
+| `test_arena_init_pure_briev` | Arena type allocates correctly | Compile `arena_init(1024)`, run, check non-null base |
 | `test_arena_alloc_bump` | Arena returns increasing addresses | `arena_alloc(a, 16)` twice, assert addresses differ by 16 |
 | `test_arena_reset` | Reset reuses memory | Alloc, reset, alloc again — same address |
-| `test_crossword_init_pure_briv` | Crossword arena initializes | `crossword_init(1024)`, check slot_offset=0, string_offset=1024 |
+| `test_crossword_init_pure_briev` | Crossword arena initializes | `crossword_init(1024)`, check slot_offset=0, string_offset=1024 |
 | `test_crossword_slot_vs_string` | Slots grow up, strings grow down | Alloc slot → `slot_offset` increases. Alloc string → `string_offset` decreases |
 | `test_crossword_collision` | Overflow triggers contract violation | Allocate beyond capacity → contract error |
 | `test_arrow_push_on_crossword` | `<- push` on crossword arena field works | Full integration: txn with `&ca <- val` |
@@ -885,10 +885,10 @@ cargo test --lib  — all existing tests must pass
 
 | Document | What changes |
 |----------|-------------|
-| `docs/architecture/arrow-syntax-and-arena.md` | Add section: "Pure-Briv Arena Types" — document that Arena and CrosswordArena are stdlib types expressible in pure Briv, not compiler intrinsics. Cross-reference with ring_push pattern. |
-| `docs/architecture/llvm-memory-management.md` | Add §21: "Alloc# Intrinsic" — triple dispatch (arena/malloc/alloca), Free# static analysis, info-on-promote. Add §22: "Pure-Briv Allocator Types" — how Alloc# enables nested arena. |
+| `docs/architecture/arrow-syntax-and-arena.md` | Add section: "Pure-Briev Arena Types" — document that Arena and CrosswordArena are stdlib types expressible in pure Briev, not compiler intrinsics. Cross-reference with ring_push pattern. |
+| `docs/architecture/llvm-memory-management.md` | Add §21: "Alloc# Intrinsic" — triple dispatch (arena/malloc/alloca), Free# static analysis, info-on-promote. Add §22: "Pure-Briev Allocator Types" — how Alloc# enables nested arena. |
 | `docs/architecture/intrinsics-vs-stdlib.md` | Add Alloc# as compiler-delegation intrinsic (passes `--no-stdlib` test). Arena types as stdlib. |
-| `docs/plans/2026-07-12-alloc-metadata.md` | Update status: "Superseded — allocation strategies are pure-Briv types; alloc metadata is unneeded." |
+| `docs/plans/2026-07-12-alloc-metadata.md` | Update status: "Superseded — allocation strategies are pure-Briev types; alloc metadata is unneeded." |
 
 ### Rationale comments at every modified site
 

@@ -3,13 +3,13 @@
 **Last updated**: 2026-06-07
 **Tests**: 450 passing
 
-This document synthesizes the Briv compiler's optimization design — the decision tree the backend traverses and the rationale behind each path. See `llvm-backend-optimization-catalog.md` for the earlier 5-path formulation; this document reflects the full evolved pipeline.
+This document synthesizes the Briev compiler's optimization design — the decision tree the backend traverses and the rationale behind each path. See `llvm-backend-optimization-catalog.md` for the earlier 5-path formulation; this document reflects the full evolved pipeline.
 
 ---
 
 ## Core Principle: Contracts Enable Optimizations
 
-Every optimization is sound **because** the programmer declares contracts. Without preconditions (guards), postconditions, and state declarations, the compiler would have to guess — Briv never guesses, it proves.
+Every optimization is sound **because** the programmer declares contracts. Without preconditions (guards), postconditions, and state declarations, the compiler would have to guess — Briev never guesses, it proves.
 
 | Contract feature | Enables |
 |---|---|
@@ -205,7 +205,7 @@ These apply within any emission path above.
 **What**: `estimate_slp_hazard()` computes peak register demand from live float fields (N), coupling density (C), temps (T), and global constants (K) against target hardware (R, W). Passes `-vectorize-slp=false` to `opt` when peak ≥ R.
 **Formula**: `peak = ceil(N/W) + min(2·ceil(N/W), ceil(C/2)) + T + ceil(K/W) + 2`
 **Why needed**: At ≥12 float fields with cross-variable coupling, `shufflevector` instructions from packed `<2 x float>` phis overflow x86_64's 16 XMM registers → 65 stack spills.
-**Verified**: Kalman n=12, C=72, T=12, K=18, R=16, W=4 → peak=28 ≥ 16 → SLP disabled. Briv 0.71s vs C 0.75s.
+**Verified**: Kalman n=12, C=72, T=12, K=18, R=16, W=4 → peak=28 ≥ 16 → SLP disabled. Briev 0.71s vs C 0.75s.
 
 ### Equality Saturation
 **What**: Lightweight recursive simplification — 5-pass fixpoint with 9 rewrite rules applied to expression trees at compile time.
@@ -227,7 +227,7 @@ These apply within any emission path above.
 **What**: When the call graph has no cycles, transaction functions are tagged `alwaysinline`. LLVM inlines bodies into the dispatch loop, eliminating call overhead. No bloat observed — `opt -O2` + SCEV handles the phi/select cascade.
 
 ### LTO Pipeline
-**What**: `compile_to_bitcode()` compiles C sources to bitcode via clang. `link_and_optimize()` merges program bitcode with `briv_rt.c` and any `import "link/..."` dependencies via `llvm-link`, then runs `opt -O2` for cross-module optimization.
+**What**: `compile_to_bitcode()` compiles C sources to bitcode via clang. `link_and_optimize()` merges program bitcode with `briev_rt.c` and any `import "link/..."` dependencies via `llvm-link`, then runs `opt -O2` for cross-module optimization.
 
 ### `!range` Metadata on State Loads
 **What**: Preconditions of the form `var < constant` are extracted as (lo, hi) ranges and attached as `!range` metadata on state field loads. LLVM uses this for value-range analysis.

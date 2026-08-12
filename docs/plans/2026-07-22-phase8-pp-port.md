@@ -1,4 +1,4 @@
-# Phase 8: AST Pretty-Printer Port to Briv
+# Phase 8: AST Pretty-Printer Port to Briev
 
 **Date:** 2026-07-22
 **Status:** Complete — all milestones achieved
@@ -9,18 +9,18 @@
 ## Results
 
 The GLUE pipeline is fully verified end-to-end:
-- `briv build pp-types.bv --llvm` produces real function bodies
-- `briv export pp-types.bv rust --out /tmp/x` generates a compilable Rust crate
+- `briev build pp-types.bv --llvm` produces real function bodies
+- `briev export pp-types.bv rust --out /tmp/x` generates a compilable Rust crate
 - The bridge `.so` loaded via FFI returns correct results
-- Benchmark: Briv GLUE 6203ns vs C FFI 5988ns (3.5% slower, ✅ all match)
+- Benchmark: Briev GLUE 6203ns vs C FFI 5988ns (3.5% slower, ✅ all match)
 
 ## What Was Built
 
-- `lib/pp/types.bv` — Briv pretty-printer for 16 Type variants
-- `lib/pp/exprs.bv` — Briv pretty-printer for operators and expressions
+- `lib/pp/types.bv` — Briev pretty-printer for 16 Type variants
+- `lib/pp/exprs.bv` — Briev pretty-printer for operators and expressions
 - `pp-types.bv` — Bridge file with export wrappers + round-trip test helpers
 - Integration tests (8 passing) — full pipeline from `.bv` to FFI call
-- Bridge benchmark — Python ↔ C vs Briv via ctypes
+- Bridge benchmark — Python ↔ C vs Briev via ctypes
 
 ## Backend Fixes
 
@@ -29,7 +29,7 @@ The GLUE pipeline is fully verified end-to-end:
 - Arena allocator uses C-compatible `[length][data]` format
 - `emit_load_length` reads `handle[0]` (correct for both heap and globals)
 - `emit_copy_data` uses caller-computed destination offsets
-- `briv_str_to_c` strips tag bits (`& ~3`) before reading handle
+- `briev_str_to_c` strips tag bits (`& ~3`) before reading handle
 - `emit_protocol_chain` emits real IR (Bitcast, MeldShuffle, ProtocolTransform)
 
 ## GLUE Export Infrastructure

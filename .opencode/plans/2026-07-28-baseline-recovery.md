@@ -9,30 +9,30 @@
 b39461e2  2026-07-27: SLP stride gate — all 19 benchmarks at parity or better
 ```
 
-The baseline worktree is at `../briv-compiler-baseline` with a release build ready.
-To rebuild: `cd ../briv-compiler-baseline && cargo build --release`
+The baseline worktree is at `../briev-compiler-baseline` with a release build ready.
+To rebuild: `cd ../briev-compiler-baseline && cargo build --release`
 
 ### 1.2 Baseline Benchmark Table (Run 6 — SLP stride gate era)
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0550s     ║ .0480s     ║ 1.14x    ║ C      ║ MATCH     ║
 ║ float_math                ║ .0744s     ║ .0743s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ float_math_nonzero        ║ .1656s     ║ .1675s     ║ .98x     ║ Briv  ║ MATCH     ║
-║ sparse_dispatch           ║ .0500s     ║ .0610s     ║ .81x     ║ Briv  ║ MATCH     ║
+║ float_math_nonzero        ║ .1656s     ║ .1675s     ║ .98x     ║ Briev  ║ MATCH     ║
+║ sparse_dispatch           ║ .0500s     ║ .0610s     ║ .81x     ║ Briev  ║ MATCH     ║
 ║ print_loop                ║ .0604s     ║ .0587s     ║ 1.02x    ║ C      ║ MATCH     ║
 ║ nbody_newton              ║ 9.0467s    ║ 8.2689s    ║ 1.09x    ║ C      ║ MATCH     ║
-║ nbody_sqrt                ║ 2.7347s    ║ 2.7684s    ║ .98x     ║ Briv  ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.3417s    ║ 3.6030s    ║ .92x     ║ Briv  ║ MATCH     ║
-║ fasta                     ║ .2099s     ║ .2109s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ fannkuch_redux            ║ .0653s     ║ .0657s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt                ║ 2.7347s    ║ 2.7684s    ║ .98x     ║ Briev  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.3417s    ║ 3.6030s    ║ .92x     ║ Briev  ║ MATCH     ║
+║ fasta                     ║ .2099s     ║ .2109s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ fannkuch_redux            ║ .0653s     ║ .0657s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ mandelbrot                ║ .6569s     ║ .6528s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ kalman_filter_runtime     ║ .1813s     ║ .1790s     ║ 1.01x    ║ C      ║ MATCH     ║
-║ knucleotide               ║ .1883s     ║ .1909s     ║ .98x     ║ Briv  ║ MATCH     ║
+║ knucleotide               ║ .1883s     ║ .1909s     ║ .98x     ║ Briev  ║ MATCH     ║
 ║ cancel_math               ║ .0626s     ║ .0614s     ║ 1.01x    ║ C      ║ MATCH     ║
-║ bit_clear                 ║ .0001s     ║ .0002s     ║ .50x     ║ Briv  ║ MATCH     ║
+║ bit_clear                 ║ .0001s     ║ .0002s     ║ .50x     ║ Briev  ║ MATCH     ║
 ║ queue_drain               ║ .0623s     ║ .0612s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ queue_drain_sym           ║ .0618s     ║ .0611s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ queue_drain_idio          ║ .0624s     ║ .0618s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
@@ -154,7 +154,7 @@ proceeding.
    (omit `dereferenceable` if `state_size_bytes == 0` to avoid invalid LLVM IR).
 4. Update ALL function definition sites (~14 across emit_toplevel.rs, dispatch.rs, mod.rs)
    to use `self.ctx.state_ptr_param` instead of hardcoded `ptr noalias nocapture align 8 %state`.
-5. Update 3 functions that were missing `align 8` (reactor_tick seq/par, __briv_init_state).
+5. Update 3 functions that were missing `align 8` (reactor_tick seq/par, __briev_init_state).
 
 **Affected lines (exact):**
 ```
@@ -169,7 +169,7 @@ emit_toplevel.rs:2302   async_body_* functions
 emit_toplevel.rs:2369   fused txn
 emit_toplevel.rs:2383   shape-guarded fused txn
 emit_toplevel.rs:2421   fused composed
-emit_toplevel.rs:2491   __briv_init_state (add align 8 + noalias)
+emit_toplevel.rs:2491   __briev_init_state (add align 8 + noalias)
 emit_toplevel.rs:2549   cell_persistent_ticks
 dispatch.rs:76          reactor_tick sequential (add align 8)
 dispatch.rs:365         reactor_tick parallel (add align 8)
@@ -328,7 +328,7 @@ if local_txn_attr == "#11" {
         if let Statement::Let { name, .. } = s { float_idents.insert(name.clone()); }
     }
     // Also add state fields and constants that are Float32
-    for (name, ty) in &self.ctx.field_briv_types.zip(self.ctx.field_index_map.keys()) {
+    for (name, ty) in &self.ctx.field_briev_types.zip(self.ctx.field_index_map.keys()) {
         if matches!(ty, Type::Custom(n) if n == "Float" || n == "Float32") {
             float_idents.insert(name.clone());
         }
@@ -385,9 +385,9 @@ bash benchmarks/build_and_bench.sh --correctness    # ~2min, all MATCH
 
 # Single benchmark (fast iteration)
 rm -f benchmarks/ring_buffer.ll benchmarks/ring_buffer benchmarks/ring_buffer_c
-./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out benchmarks
+./target/release/brievc build benchmarks/ring_buffer.bv --llvm --out benchmarks
 clang -O3 -flto -march=native -ffast-math \
-    benchmarks/ring_buffer.ll lib/runtime/briv_rt.c \
+    benchmarks/ring_buffer.ll lib/runtime/briev_rt.c \
     -o benchmarks/ring_buffer 2>&1 | grep -c "error" | grep -v "^0$" || echo OK
 BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/ring_buffer 2>&1
 
@@ -430,27 +430,27 @@ with guards in `@main` previously failed to compile (ring_buffer, nbody* , bit_c
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0554s     ║ .0490s     ║ 1.13x    ║ C      ║ MATCH     ║
-║ float_math                ║ .0725s     ║ .0760s     ║ .95x     ║ Briv  ║ MATCH     ║
-║ float_math_nonzero        ║ .1663s     ║ .1682s     ║ .98x     ║ Briv  ║ MATCH     ║
-║ sparse_dispatch           ║ .0548s     ║ .0641s     ║ .85x     ║ Briv  ║ MATCH     ║
+║ float_math                ║ .0725s     ║ .0760s     ║ .95x     ║ Briev  ║ MATCH     ║
+║ float_math_nonzero        ║ .1663s     ║ .1682s     ║ .98x     ║ Briev  ║ MATCH     ║
+║ sparse_dispatch           ║ .0548s     ║ .0641s     ║ .85x     ║ Briev  ║ MATCH     ║
 ║ print_loop                ║ .0650s     ║ .0631s     ║ 1.03x    ║ C      ║ MATCH     ║
 ║ nbody_newton              ║ 9.4851s    ║ 8.5580s    ║ 1.10x    ║ C      ║ MATCH     ║
-║ nbody_sqrt                ║ 2.7581s    ║ 2.7962s    ║ .98x     ║ Briv  ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.3699s    ║ 3.6140s    ║ .93x     ║ Briv  ║ MATCH     ║
-║ fasta                     ║ .2108s     ║ .2112s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ fannkuch_redux            ║ .0629s     ║ .0646s     ║ .97x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt                ║ 2.7581s    ║ 2.7962s    ║ .98x     ║ Briev  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.3699s    ║ 3.6140s    ║ .93x     ║ Briev  ║ MATCH     ║
+║ fasta                     ║ .2108s     ║ .2112s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ fannkuch_redux            ║ .0629s     ║ .0646s     ║ .97x     ║ Briev  ║ MATCH     ║
 ║ mandelbrot                ║ .6593s     ║ .6572s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ kalman_filter_runtime     ║ .1808s     ║ .1797s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ knucleotide               ║ .1901s     ║ .1920s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ cancel_math               ║ .0618s     ║ .0642s     ║ .96x     ║ Briv  ║ MATCH     ║
-║ bit_clear                 ║ .0002s     ║ .0003s     ║ .66x     ║ Briv  ║ MATCH     ║
-║ queue_drain               ║ .0618s     ║ .0630s     ║ .98x     ║ Briv  ║ MATCH     ║
-║ queue_drain_sym           ║ .0612s     ║ .0618s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ queue_drain_idio          ║ .0595s     ║ .0635s     ║ .93x     ║ Briv  ║ MATCH     ║
-║ interval_step             ║ .0612s     ║ .0626s     ║ .97x     ║ Briv  ║ MATCH     ║
+║ knucleotide               ║ .1901s     ║ .1920s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ cancel_math               ║ .0618s     ║ .0642s     ║ .96x     ║ Briev  ║ MATCH     ║
+║ bit_clear                 ║ .0002s     ║ .0003s     ║ .66x     ║ Briev  ║ MATCH     ║
+║ queue_drain               ║ .0618s     ║ .0630s     ║ .98x     ║ Briev  ║ MATCH     ║
+║ queue_drain_sym           ║ .0612s     ║ .0618s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ queue_drain_idio          ║ .0595s     ║ .0635s     ║ .93x     ║ Briev  ║ MATCH     ║
+║ interval_step             ║ .0612s     ║ .0626s     ║ .97x     ║ Briev  ║ MATCH     ║
 ╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝
 ```
 
@@ -470,24 +470,24 @@ fallback too. 1045 tests pass.
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0558s     ║ .0471s     ║ 1.18x    ║ C      ║ MATCH     ║
 ║ float_math                ║ .0735s     ║ .0735s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ float_math_nonzero        ║ .1659s     ║ .1651s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ sparse_dispatch           ║ .0517s     ║ .0598s     ║ .86x     ║ Briv  ║ MATCH     ║
-║ print_loop                ║ .0598s     ║ .0599s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ sparse_dispatch           ║ .0517s     ║ .0598s     ║ .86x     ║ Briev  ║ MATCH     ║
+║ print_loop                ║ .0598s     ║ .0599s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ nbody_newton              ║ 9.1881s    ║ 8.5377s    ║ 1.07x    ║ C      ║ MATCH     ║
 ║ nbody_sqrt                ║ 3.1200s    ║ 3.0291s    ║ 1.03x    ║ C      ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.6215s    ║ 4.0243s    ║ .89x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.6215s    ║ 4.0243s    ║ .89x     ║ Briev  ║ MATCH     ║
 ║ fasta                     ║ .2211s     ║ .2209s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ fannkuch_redux            ║ .0646s     ║ .0633s     ║ 1.02x    ║ C      ║ MATCH     ║
 ║ mandelbrot                ║ .6969s     ║ .6959s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ kalman_filter_runtime     ║ .1856s     ║ .1845s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ knucleotide               ║ .1987s     ║ .1983s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ cancel_math               ║ .0631s     ║ .0635s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ cancel_math               ║ .0631s     ║ .0635s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ bit_clear                 ║ .0004s     ║ .0003s     ║ 1.33x    ║ C      ║ MATCH     ║
-║ queue_drain               ║ .0619s     ║ .0646s     ║ .95x     ║ Briv  ║ MATCH     ║
+║ queue_drain               ║ .0619s     ║ .0646s     ║ .95x     ║ Briev  ║ MATCH     ║
 ║ queue_drain_sym           ║ .0642s     ║ .0616s     ║ 1.04x    ║ C      ║ MATCH     ║
 ║ queue_drain_idio          ║ .0673s     ║ .0662s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ interval_step             ║ .0714s     ║ .0710s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
@@ -509,24 +509,24 @@ into every state field load as `!range` metadata. Added `idx_to_field_name` reve
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0553s     ║ .0509s     ║ 1.08x    ║ C      ║ MATCH     ║
 ║ float_math                ║ .0757s     ║ .0748s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ float_math_nonzero        ║ .1662s     ║ .1645s     ║ 1.01x    ║ C      ║ MATCH     ║
-║ sparse_dispatch           ║ .0500s     ║ .0609s     ║ .82x     ║ Briv  ║ MATCH     ║
+║ sparse_dispatch           ║ .0500s     ║ .0609s     ║ .82x     ║ Briev  ║ MATCH     ║
 ║ print_loop                ║ .0615s     ║ .0584s     ║ 1.05x    ║ C      ║ MATCH     ║
 ║ nbody_newton              ║ 9.7294s    ║ 8.8435s    ║ 1.10x    ║ C      ║ MATCH     ║
 ║ nbody_sqrt                ║ 3.1473s    ║ 3.1247s    ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.7276s    ║ 3.9211s    ║ .95x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.7276s    ║ 3.9211s    ║ .95x     ║ Briev  ║ MATCH     ║
 ║ fasta                     ║ .2374s     ║ .2296s     ║ 1.03x    ║ C      ║ MATCH     ║
 ║ fannkuch_redux            ║ .0712s     ║ .0701s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ mandelbrot                ║ .6983s     ║ .6967s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ kalman_filter_runtime     ║ .1820s     ║ .1821s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ kalman_filter_runtime     ║ .1820s     ║ .1821s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ knucleotide               ║ .1971s     ║ .1957s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ cancel_math               ║ .0642s     ║ .0652s     ║ .98x     ║ Briv  ║ MATCH     ║
+║ cancel_math               ║ .0642s     ║ .0652s     ║ .98x     ║ Briev  ║ MATCH     ║
 ║ queue_drain               ║ .0630s     ║ .0625s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ queue_drain_sym           ║ .0638s     ║ .0639s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ queue_drain_sym           ║ .0638s     ║ .0639s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ queue_drain_idio          ║ .0621s     ║ .0579s     ║ 1.07x    ║ C      ║ MATCH     ║
 ║ interval_step             ║ .0637s     ║ .0635s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝
@@ -534,9 +534,9 @@ into every state field load as `!range` metadata. Added `idx_to_field_name` reve
 
 Key change: ring_buffer 1.18→1.08x from `!range [0, 50000000)` on the `ops` field.
 Other benchmarks showed non-overlapping min/max regressions:
-- nbody_newton (Briv min 8.95s→9.62s, C avg 8.54s→8.84s)
-- fasta (Briv min 0.205s→0.228s, C avg 0.211s→0.230s)
-- nbody_sqrt (C avg 2.80s→3.12s — pure noise, Briv stable at ~3.0s)
+- nbody_newton (Briev min 8.95s→9.62s, C avg 8.54s→8.84s)
+- fasta (Briev min 0.205s→0.228s, C avg 0.211s→0.230s)
+- nbody_sqrt (C avg 2.80s→3.12s — pure noise, Briev stable at ~3.0s)
 
 ### Step 4 Regression Analysis — July 28 12:00
 
@@ -558,16 +558,16 @@ C benchmarks also regressed between runs (nbody C 8.54s→8.84s, fasta C 0.211s�
 
 **Results from confirmation run (cold-started, 60s between runs):**
 
-| Benchmark | Step 3 (reverted) | Step 4 (re-applied) | Briv Delta |
+| Benchmark | Step 3 (reverted) | Step 4 (re-applied) | Briev Delta |
 |-----------|-------------------|--------------------|-------------|
 | ring_buffer | 1.09x (.0567s) | **1.14x (.0512s)** | **−9.7%** ⚡ |
 | nbody_newton | 1.12x (9.85s) | **1.05x (9.25s)** | **−6.1%** ⚡ |
 | nbody_sqrt | .94x (3.09s) | **.96x (2.85s)** | **−7.8%** ⚡ |
 | nbody_sqrt_idio | .93x (3.68s) | **.94x (3.51s)** | **−4.6%** ⚡ |
-| fasta | .93x (.221s) | 1.05x (.229s) | C faster (.236→.218s); Briv stable |
+| fasta | .93x (.221s) | 1.05x (.229s) | C faster (.236→.218s); Briev stable |
 | All others | parity | parity | Within noise |
 
-**Verdict: Step 4 is clean.** The original "regression" was thermal throttling noise from back-to-back benchmark runs without cooldown. Both Step 3 and Step 4 produce identical IR for benchmarks with no applicable `!range` metadata. ring_buffer's Briv time improved from .0567s to .0512s (−9.7%) from the `!range` on `ops`.
+**Verdict: Step 4 is clean.** The original "regression" was thermal throttling noise from back-to-back benchmark runs without cooldown. Both Step 3 and Step 4 produce identical IR for benchmarks with no applicable `!range` metadata. ring_buffer's Briev time improved from .0567s to .0512s (−9.7%) from the `!range` on `ops`.
 
 ### Step 5 Results — !prof branch weights from postcondition
 
@@ -577,23 +577,23 @@ available. Scales weights to max 1000. `1045 tests pass`. All 19 at parity.
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0553s     ║ .0488s     ║ 1.13x    ║ C      ║ MATCH     ║
-║ float_math                ║ .0721s     ║ .0740s     ║ .97x     ║ Briv  ║ MATCH     ║
-║ float_math_nonzero        ║ .1663s     ║ .1667s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ sparse_dispatch           ║ .0528s     ║ .0608s     ║ .86x     ║ Briv  ║ MATCH     ║
-║ print_loop                ║ .0579s     ║ .0580s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ float_math                ║ .0721s     ║ .0740s     ║ .97x     ║ Briev  ║ MATCH     ║
+║ float_math_nonzero        ║ .1663s     ║ .1667s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ sparse_dispatch           ║ .0528s     ║ .0608s     ║ .86x     ║ Briev  ║ MATCH     ║
+║ print_loop                ║ .0579s     ║ .0580s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ nbody_newton              ║ 9.0454s    ║ 8.2543s    ║ 1.09x    ║ C      ║ MATCH     ║
 ║ nbody_sqrt                ║ 2.8100s    ║ 2.7976s    ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 3.3549s    ║ 3.6367s    ║ .92x     ║ Briv  ║ MATCH     ║
-║ fasta                     ║ .2094s     ║ .2204s     ║ .95x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 3.3549s    ║ 3.6367s    ║ .92x     ║ Briev  ║ MATCH     ║
+║ fasta                     ║ .2094s     ║ .2204s     ║ .95x     ║ Briev  ║ MATCH     ║
 ║ fannkuch_redux            ║ .0681s     ║ .0648s     ║ 1.05x    ║ C      ║ MATCH     ║
 ║ mandelbrot                ║ .6702s     ║ .6648s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ kalman_filter_runtime     ║ .1801s     ║ .1817s     ║ .99x     ║ Briv  ║ MATCH     ║
+║ kalman_filter_runtime     ║ .1801s     ║ .1817s     ║ .99x     ║ Briev  ║ MATCH     ║
 ║ knucleotide               ║ .1963s     ║ .1906s     ║ 1.02x    ║ C      ║ MATCH     ║
 ║ cancel_math               ║ .0645s     ║ .0635s     ║ 1.01x    ║ C      ║ MATCH     ║
-║ queue_drain               ║ .0600s     ║ .0616s     ║ .97x     ║ Briv  ║ MATCH     ║
+║ queue_drain               ║ .0600s     ║ .0616s     ║ .97x     ║ Briev  ║ MATCH     ║
 ║ queue_drain_sym           ║ .0650s     ║ .0621s     ║ 1.04x    ║ C      ║ MATCH     ║
 ║ queue_drain_idio          ║ .0641s     ║ .0639s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ interval_step             ║ .0639s     ║ .0619s     ║ 1.03x    ║ C      ║ MATCH     ║
@@ -609,27 +609,27 @@ and commit messages. Every benchmark's best-ever ratio with the commit where it 
 
 ```
 ╔═══════════════════════════╦══════════════╦════════════╦══════════╦═══════════════════╗
-║ Benchmark                 ║ Best Ratio   ║ Briv Time ║ Winner   ║ Commit / Era      ║
+║ Benchmark                 ║ Best Ratio   ║ Briev Time ║ Winner   ║ Commit / Era      ║
 ╠═══════════════════════════╬══════════════╬════════════╬══════════╬═══════════════════╣
-║ ring_buffer               ║    0.99x     ║ .0664s     ║ Briv    ║ f598584 (Jul 06)  ║
-║ float_math                ║    0.81x     ║ .0631s     ║ Briv    ║ 8a827db (Jul 11)  ║
-║ float_math_nonzero        ║    0.98x     ║ .1611s     ║ Briv    ║ 33d42397 (Jul 27) ║
-║ sparse_dispatch           ║    0.09x     ║ .0060s     ║ Briv    ║ 8a827db (Jul 11)  ║
-║ print_loop                ║    0.93x     ║ .0624s     ║ Briv    ║ post-mig (Jul 19) ║
-║ nbody_newton              ║    0.75x     ║ 7.4132s    ║ Briv    ║ 8a827db (Jul 11)  ║
-║ nbody_sqrt                ║    0.85x     ║ 2.2434s    ║ Briv    ║ 33d42397 (Jul 27) ║
-║ nbody_sqrt_idio           ║    0.67x     ║ 2.3270s    ║ Briv    ║ 33d42397 (Jul 27) ║
-║ fasta                     ║    0.95x     ║ .2094s     ║ Briv    ║ recovery Step 5   ║
-║ fannkuch_redux            ║    0.96x     ║ .0763s     ║ Briv    ║ 8a827db (Jul 11)  ║
-║ mandelbrot                ║    0.99x     ║ .7514s     ║ Briv    ║ 8a827db (Jul 11)  ║
-║ kalman_filter_runtime     ║    0.95x     ║ .1610s     ║ Briv    ║ early Jun (Era 1) ║
-║ knucleotide               ║    0.97x     ║ .1880s     ║ Briv    ║ early Jun (Era 1) ║
-║ cancel_math               ║    0.96x     ║ .0618s     ║ Briv    ║ recovery Step 1   ║
-║ bit_clear                 ║    0.50x     ║ .0001s     ║ Briv    ║ 33d42397 (Jul 27) ║
-║ queue_drain               ║    0.01x     ║ .0007s     ║ Briv    ║ 8a827db (Jul 11)  ║
-║ queue_drain_sym           ║    0.95x     ║ .0575s     ║ Briv    ║ 33d42397 (Jul 27) ║
-║ queue_drain_idio          ║    0.93x     ║ .0595s     ║ Briv    ║ recovery Step 1   ║
-║ interval_step             ║    0.01x     ║ .0009s     ║ Briv    ║ f598584 (Jul 06)  ║
+║ ring_buffer               ║    0.99x     ║ .0664s     ║ Briev    ║ f598584 (Jul 06)  ║
+║ float_math                ║    0.81x     ║ .0631s     ║ Briev    ║ 8a827db (Jul 11)  ║
+║ float_math_nonzero        ║    0.98x     ║ .1611s     ║ Briev    ║ 33d42397 (Jul 27) ║
+║ sparse_dispatch           ║    0.09x     ║ .0060s     ║ Briev    ║ 8a827db (Jul 11)  ║
+║ print_loop                ║    0.93x     ║ .0624s     ║ Briev    ║ post-mig (Jul 19) ║
+║ nbody_newton              ║    0.75x     ║ 7.4132s    ║ Briev    ║ 8a827db (Jul 11)  ║
+║ nbody_sqrt                ║    0.85x     ║ 2.2434s    ║ Briev    ║ 33d42397 (Jul 27) ║
+║ nbody_sqrt_idio           ║    0.67x     ║ 2.3270s    ║ Briev    ║ 33d42397 (Jul 27) ║
+║ fasta                     ║    0.95x     ║ .2094s     ║ Briev    ║ recovery Step 5   ║
+║ fannkuch_redux            ║    0.96x     ║ .0763s     ║ Briev    ║ 8a827db (Jul 11)  ║
+║ mandelbrot                ║    0.99x     ║ .7514s     ║ Briev    ║ 8a827db (Jul 11)  ║
+║ kalman_filter_runtime     ║    0.95x     ║ .1610s     ║ Briev    ║ early Jun (Era 1) ║
+║ knucleotide               ║    0.97x     ║ .1880s     ║ Briev    ║ early Jun (Era 1) ║
+║ cancel_math               ║    0.96x     ║ .0618s     ║ Briev    ║ recovery Step 1   ║
+║ bit_clear                 ║    0.50x     ║ .0001s     ║ Briev    ║ 33d42397 (Jul 27) ║
+║ queue_drain               ║    0.01x     ║ .0007s     ║ Briev    ║ 8a827db (Jul 11)  ║
+║ queue_drain_sym           ║    0.95x     ║ .0575s     ║ Briev    ║ 33d42397 (Jul 27) ║
+║ queue_drain_idio          ║    0.93x     ║ .0595s     ║ Briev    ║ recovery Step 1   ║
+║ interval_step             ║    0.01x     ║ .0009s     ║ Briev    ║ f598584 (Jul 06)  ║
 ╚═══════════════════════════╩══════════════╩════════════╩══════════╩═══════════════════╝
 ```
 
@@ -648,10 +648,10 @@ throttling is the question.
 ### Worktree Layout
 
 ```
-../briv-compiler/                     # Main repo (integration target)
-../briv-compiler-baseline/            # Read-only A/B comparison at b39461e2
-../briv-compiler-recovery/            # ACTIVE — recovery-branch @ b39461e2
-../briv-compiler-derive/              # Feature worktree (derivation + stochastic opt)
+../briev-compiler/                     # Main repo (integration target)
+../briev-compiler-baseline/            # Read-only A/B comparison at b39461e2
+../briev-compiler-recovery/            # ACTIVE — recovery-branch @ b39461e2
+../briev-compiler-derive/              # Feature worktree (derivation + stochastic opt)
 ```
 
 ### Where to Run What
@@ -659,15 +659,15 @@ throttling is the question.
 | Operation | Run in | Why |
 |-----------|--------|-----|
 | `cargo test --lib` | `<any>` | All worktrees share objects — same result |
-| `cargo build --release` | `../briv-compiler-recovery` | Build the recovery compiler |
-| `bash benchmarks/build_and_bench.sh --runtime` | `../briv-compiler` | Script uses relative path to baseline |
-| `bash benchmarks/compare_baseline.sh <name>` | `../briv-compiler` | Script looks for `../briv-compiler-baseline` |
-| Single bmark compile | `../briv-compiler-recovery` | Use our compiler binary |
-| `git commit` | `../briv-compiler-recovery` | Commits go on `recovery-branch` |
+| `cargo build --release` | `../briev-compiler-recovery` | Build the recovery compiler |
+| `bash benchmarks/build_and_bench.sh --runtime` | `../briev-compiler` | Script uses relative path to baseline |
+| `bash benchmarks/compare_baseline.sh <name>` | `../briev-compiler` | Script looks for `../briev-compiler-baseline` |
+| Single bmark compile | `../briev-compiler-recovery` | Use our compiler binary |
+| `git commit` | `../briev-compiler-recovery` | Commits go on `recovery-branch` |
 
 ### Integration with Derivation Feature Worktree
 
-The derive worktree (`../briv-compiler-derive`) holds 12 code commits for the
+The derive worktree (`../briev-compiler-derive`) holds 12 code commits for the
 `:=` derivation block + stochastic optimization feature, forked from `c3155e99`
 (which is 5 commits behind HEAD on the current `main`).
 
@@ -711,16 +711,16 @@ git checkout -b recovery-branch
 
 ```bash
 # From the recovery worktree:
-cd /home/randozart/Desktop/Projects/briv-compiler-recovery
+cd /home/randozart/Desktop/Projects/briev-compiler-recovery
 rm -f benchmarks/ring_buffer.ll benchmarks/ring_buffer
-./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out benchmarks
+./target/release/brievc build benchmarks/ring_buffer.bv --llvm --out benchmarks
 clang -O3 -flto -march=native -ffast-math \
-    benchmarks/ring_buffer.ll lib/runtime/briv_rt.c \
+    benchmarks/ring_buffer.ll lib/runtime/briev_rt.c \
     -o benchmarks/ring_buffer
 BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/ring_buffer 2>&1
 
 # Compare against baseline:
-cd /home/randozart/Desktop/Projects/briv-compiler
+cd /home/randozart/Desktop/Projects/briev-compiler
 bash benchmarks/compare_baseline.sh ring_buffer
 ```
 
@@ -728,12 +728,12 @@ bash benchmarks/compare_baseline.sh ring_buffer
 
 ```bash
 # Before every commit (from recovery worktree):
-cd /home/randozart/Desktop/Projects/briv-compiler-recovery
+cd /home/randozart/Desktop/Projects/briev-compiler-recovery
 cargo test --lib
 cargo build --release
 
 # Full benchmark suite (from main worktree):
-cd /home/randozart/Desktop/Projects/briv-compiler
+cd /home/randozart/Desktop/Projects/briev-compiler
 rm -f benchmarks/*.ll
 bash benchmarks/build_and_bench.sh --runtime
 bash benchmarks/build_and_bench.sh --correctness

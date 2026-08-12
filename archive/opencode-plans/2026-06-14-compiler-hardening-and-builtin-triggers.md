@@ -25,12 +25,12 @@ Six issues from officina-cli that should have been caught at compile time.
 
 **Fix**: In `typechecker.rs` or `emit_stmt.rs`, detect when the LHS of an assignment is a trigger name. If it's a `@ link` trigger, emit a check: either store the value to the linked global, or emit an error.
 
-**Option A (preferred)**: Reject at the typechecker level — `Cannot assign to trigger variable 'X'`. Triggers are read-only from the Briv side; their values come from the linked C global.
+**Option A (preferred)**: Reject at the typechecker level — `Cannot assign to trigger variable 'X'`. Triggers are read-only from the Briev side; their values come from the linked C global.
 
 **Option B**: Allow the assignment and have the backend emit `store volatile` to the linked global. This is more permissive but enables use cases like resetting a trigger after reading it. However, this is semantically dangerous — the C runtime may be writing to the same global concurrently via epoll handler.
 
 **Recommendation**: Option A — reject at typecheck time. If users need to track trigger state, use a separate `let` variable:
-```briv
+```briev
 let prev_keypress: Char = '\0';
 txn track_key [keypress != '\0'] {
     &prev_keypress = keypress;

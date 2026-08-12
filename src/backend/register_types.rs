@@ -68,7 +68,7 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
             .or_else(|| exact_bits.map(|b| b / 8))
             .or_else(|| {
                 if td.body.slots.is_empty() { return None; }
-                // 2026-08-04 (compiler-in-Briv): sum slot sizes via
+                // 2026-08-04 (compiler-in-Briev): sum slot sizes via
                 // type_size (NOT raw rt.bytes). Flexible primordials (Int,
                 // String, ...) register bytes=0 ("not yet resolved"); reading
                 // rt.bytes directly collapsed `ListBuffer<T> { data: Ptr<T>,
@@ -145,7 +145,7 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
                 bytes.min(8)
             }));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
-        // 2026-08-04 (compiler-in-Briv): when re-registering a primordial (e.g.
+        // 2026-08-04 (compiler-in-Briev): when re-registering a primordial (e.g.
         // `type Int: #Int { ... }` in bootstrap.bv), inherit the primordial's
         // protocol Cast.#* properties. The flexible-protocol fallbacks in
         // type_size (types.rs) key on Cast.#Int/#String/#Float/#Bool — without

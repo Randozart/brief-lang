@@ -1,4 +1,4 @@
-# Compiler Sync Plan: Rust Bootstrap ↔ Briv Self-Hosted
+# Compiler Sync Plan: Rust Bootstrap ↔ Briev Self-Hosted
 
 **Date:** 2026-05-25
 **Status:** GAP ANALYSIS COMPLETE — READY FOR PHASED IMPLEMENTATION
@@ -7,11 +7,11 @@
 
 ## Executive Summary
 
-The Briv compiler exists in two versions that have diverged:
+The Briev compiler exists in two versions that have diverged:
 
-| Aspect | Rust Bootstrap (`src/`) | Briv Self-Hosted (`lib/compiler/`) |
+| Aspect | Rust Bootstrap (`src/`) | Briev Self-Hosted (`lib/compiler/`) |
 |--------|------------------------|-------------------------------------|
-| Language | Rust | Briv (`.bv`) |
+| Language | Rust | Briev (`.bv`) |
 | Total size | ~46,293 lines (26 modules) | ~8,470 lines (14 modules) |
 | Parser | 5,480 lines | 1,770 lines |
 | AST types | ~50 type definitions | ~25 type definitions |
@@ -19,16 +19,16 @@ The Briv compiler exists in two versions that have diverged:
 | Proof engine | 2,701 lines (14 check fns) | 810 lines (14 fns, 6 fewer checks) |
 | CLI commands | 17+ commands | 1 command (stub) |
 
-**The gap runs both ways.** Rust is ahead on v0.14 language features and production backends; Briv is ahead on AArch64 codegen and has a different WASM architecture.
+**The gap runs both ways.** Rust is ahead on v0.14 language features and production backends; Briev is ahead on AArch64 codegen and has a different WASM architecture.
 
 ---
 
 ## Priority: Phase Ordering
 
 1. **WASM/Webstack split** — critical architecture decision
-2. **Sync v0.14 features** — parser/AST/typechecker/proof engine from Rust → Briv
-3. **Backport AArch64** — from Briv → Rust
-4. **Create missing backends** — COBOL, TCL in Briv
+2. **Sync v0.14 features** — parser/AST/typechecker/proof engine from Rust → Briev
+3. **Backport AArch64** — from Briev → Rust
+4. **Create missing backends** — COBOL, TCL in Briev
 5. **Sync remaining backends** — C, Rust, Verilog, VHDL, x86_64
 
 ---
@@ -37,13 +37,13 @@ The Briv compiler exists in two versions that have diverged:
 
 ### Problem
 
-The Rust compiler's `wasm.rs` (2,022 lines) generates Rust+JS glue → wasm-pack → wasm. The Briv compiler's `wasm.bv` (351 lines) describes direct `.wasm` binary generation. These are **two different targets** sharing one name.
+The Rust compiler's `wasm.rs` (2,022 lines) generates Rust+JS glue → wasm-pack → wasm. The Briev compiler's `wasm.bv` (351 lines) describes direct `.wasm` binary generation. These are **two different targets** sharing one name.
 
 ### Decision
 
 Split into two distinct backends:
 
-- **WASM** — Direct WebAssembly binary generation (`.wasm` file). Briv's `wasm.bv` is the authoritative spec.
+- **WASM** — Direct WebAssembly binary generation (`.wasm` file). Briev's `wasm.bv` is the authoritative spec.
 - **Webstack** — Rust+JS glue → wasm-pack pipeline (`.rs` + `.js` + HTML). Rust's `wasm.rs` is the authoritative source.
 
 ### Tasks
@@ -53,12 +53,12 @@ Split into two distinct backends:
 | Task | File | Description |
 |------|------|-------------|
 | 1.1 | `src/backend/webstack.rs` | Rename `wasm.rs` → `webstack.rs`. Update all internal references, module paths, imports |
-| 1.2 | `src/backend/wasm.rs` | Create new file: direct WASM binary generation. Use Briv's `wasm.bv` as the architectural spec |
+| 1.2 | `src/backend/wasm.rs` | Create new file: direct WASM binary generation. Use Briev's `wasm.bv` as the architectural spec |
 | 1.3 | `src/backend/mod.rs` | Register both `wasm::WasmBackend` and `webstack::WebstackBackend` in the backend registry |
 | 1.4 | `src/main.rs` | Add `webstack` CLI command alongside existing `wasm`. Update `run_wasm` → dispatch to correct backend based on command name. Update CLI help text. Wire both into `run_compile_unified` for target-spec dispatch. Test with `cargo build && cargo test --lib` |
 | 1.5 | `src/main.rs` | Update `run_wasm` signature or add `run_webstack`. Ensure `--emit-memory-spec` and other flags apply to both |
 
-#### Briv self-hosted (`lib/compiler/`)
+#### Briev self-hosted (`lib/compiler/`)
 
 | Task | File | Description |
 |------|------|-------------|
@@ -66,33 +66,33 @@ Split into two distinct backends:
 | 1.7 | `lib/compiler/backends/webstack.bv` | Create new file. Port from Rust's `webstack.rs`. Add: reactive transaction engine, signal dependency graph, dirty tracking, `poll_dispatch`, render directives (b-text, b-show, b-hide, b-each), HTML escaping, FFI JS interop, wasm-pack build orchestration |
 | 1.8 | `lib/compiler/main.bv` | Add CLI dispatch for `wasm` and `webstack` commands. Accept `--target` spec. Output correct file types per backend |
 
-### WASM Binary Architecture (from Briv wasm.bv)
+### WASM Binary Architecture (from Briev wasm.bv)
 
 The direct WASM backend should produce:
 
 - **Sections**: Type (function signatures), Function (type indices), Code (function bodies), Export (public symbols), Import (WASI/host functions), Memory (linear memory declaration), Data (initial memory contents)
 - **Instructions**: WASM opcode encoding, structured control flow (block/loop/if/else/end), local variable management, memory load/store with offset
-- **Runtime**: Briv reactor loop compiled to WASM loop, branchless guard execution via select, state encoded as linear memory
+- **Runtime**: Briev reactor loop compiled to WASM loop, branchless guard execution via select, state encoded as linear memory
 - **Types**: i32 for bool/int/ptr, i64 for u64, f64 for float. Arrays encoded as (pointer, length) pairs
 - **FFI**: WASI imports for I/O, host function imports via Import section
 
 ### Verification
 
-- `briv wasm program.bv` produces valid `.wasm` binary that `wasmtime` or `wasmer` can execute
-- `briv webstack program.rbv` produces working browser app (wasm + JS + HTML)
+- `briev wasm program.bv` produces valid `.wasm` binary that `wasmtime` or `wasmer` can execute
+- `briev webstack program.rbv` produces working browser app (wasm + JS + HTML)
 - `cargo build && cargo test --lib` passes
 
 ---
 
-## Phase 2: Sync v0.14 Features (Rust → Briv)
+## Phase 2: Sync v0.14 Features (Rust → Briev)
 
-Sync these features from the Rust compiler into the Briv self-hosted compiler's parser, AST, typechecker, and proof engine.
+Sync these features from the Rust compiler into the Briev self-hosted compiler's parser, AST, typechecker, and proof engine.
 
 ### 2.1 Hashtag Modifiers
 
 **Rust source**: `src/parser.rs:185` (`parse_hashtag_modifiers`), `src/ast.rs:822-828` (`Hashtag` struct), lexer token variants `HashBang`, `HashBracket`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/token.bv` — add `HashBang`, `HashBracket` token variants
 - `lib/compiler/lexer.bv` — lex `#!`, `#?...`, `#[scope]tag`, `#(...)` block syntax
 - `lib/compiler/ast.bv` — add `Hashtag` struct with fields: name, value, mandatory (bool), fallback (List<String>), scope (Option<String>). Add `modifiers: Vec<Hashtag>` to Statement::StmtLet, Assignment, Term, Definition, Transaction, StructDefinition
@@ -103,7 +103,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/parser.rs:1869` (`parse_block_pragma`), `src/ast.rs:534-537` (`Statement::OnExit`), `src/typechecker.rs:1179-1183`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `StmtOnExit(List<Statement>)` to Statement enum
 - `lib/compiler/parser.bv` — parse `#identifier { body }` syntax, produce `StmtOnExit`
 - `lib/compiler/typechecker.bv` — typecheck OnExit body statements
@@ -112,9 +112,9 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/parser.rs:1071-1155` (`parse_struct_variants`, `parse_struct_variant_fields`), `src/ast.rs:742-760` (`StructVariant { contract, fields, additions, removals }`, `StructDefinition { ... variants }`)
 
-**Note**: In the Rust compiler, this feature is **parsed into AST but never consumed by typechecker or backends** — only base struct fields are validated/emitted. The Briv self-hosted port matches this behavior.
+**Note**: In the Rust compiler, this feature is **parsed into AST but never consumed by typechecker or backends** — only base struct fields are validated/emitted. The Briev self-hosted port matches this behavior.
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `StructVariant { contract: Contract, fields: List<StructField>, additions: List<StructField>, removals: List<String> }`. Add `variants: List<StructVariant>` to StructDefinition
 - `lib/compiler/parser.bv` — parse `[discriminant] { +field: Type, -field, field: Type }` syntax in `parse_struct_variants` / `parse_struct_variant_fields`
 - `lib/compiler/typechecker.bv` — pass `variants` through (no validation, matching Rust's current behavior)
@@ -123,7 +123,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/parser.rs:1827` (`parse_alka_block`), `src/ast.rs:531-545` (`Statement::Alka(AlkaBlock)`, `AlkaBlock` struct), `src/typechecker.rs:1184`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `AlkaBlock { dangerous: Bool, content: String }` and `StmtAlka(AlkaBlock)` to Statement
 - `lib/compiler/parser.bv` — parse `alka { ... }` and `alka! { ... }` syntax
 - `lib/compiler/typechecker.bv` — passthrough (no validation of alka content)
@@ -132,7 +132,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/parser.rs:2958-2986` (address binding in Let/StateDecl), `src/ast.rs:507-508` (Let.address, Let.address_expr), `src/typechecker.rs:1205`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `address: Option<AddressBinding>` to StmtLet and StateDecl. Add `AddressBinding { base: Expr, bit_range: Option<BitRange> }` struct. Extend BitRange to full enum matching Rust's `BitRange::Any(usize)`
 - `lib/compiler/parser.bv` — parse `@expr`, `@/bitrange`, `@addr/bitrange`, `stack:`/`heap:` syntax
 - `lib/compiler/typechecker.bv` — infer types for `@var` (PriorState) and `@expr` (OwnedRef)
@@ -141,7 +141,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:369` (`Expr::TupleDestructure`), `src/parser.rs:2909-2946`, `src/typechecker.rs:1113-1125`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `ExprTupleDestructure(List<String>, Expr)` to Expr enum
 - `lib/compiler/parser.bv` — parse `let (a, b, c) = expr` syntax
 - `lib/compiler/typechecker.bv` — check destructure count matches tuple arity
@@ -150,7 +150,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:523-528` (`Statement::LocalTrigger`), `src/parser.rs:3364-3377`, `src/typechecker.rs:1162-1178`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `StmtLocalTrigger { name, ty: Type, expr: Expr }` to Statement
 - `lib/compiler/token.bv` — add `TrgBang` token for `trg!`/`trigger!`
 - `lib/compiler/parser.bv` — parse `trg! name: Type = expr;` syntax
@@ -160,7 +160,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:841-844` (`StrictMode` enum), `src/parser.rs:2864-2881` (contract enforcement), `src/proof_engine.rs:766-794` (warning escalation), `src/main.rs:558-561` (extension detection), `src/main.rs:1338-1365` (capability validation), `src/view_compiler.rs:918-937` (view-state isomorphism)
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `StrictMode` enum (Off/Strict). Add `strict_mode` field to Program struct
 - `lib/compiler/parser.bv` — detect `.sbv`/`.sebv`/`.srbv` extensions, enable strict mode. In `parse_contract`, require both pre and post conditions, forbid `[true]`
 - `lib/compiler/proof_engine.bv` — add `strict_mode` field; escalate P009/P010 trivial contract warnings to hard errors in strict mode
@@ -183,7 +183,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 3. **No bare exceptions**: Just as Praetor forbids `// praetor:ignore`, hyper-strict forbids `# optimize` (advisory) — only `#!optimize` (mandatory with justification) is accepted.
 
-4. **Extension**: `.sbo` (Strict Briv Optimized), `.sebo` (Strict Embedded Briv Optimized), `.srbo` (Strict Rendered Briv Optimized) — or equivalently, `--strict --optimize` CLI flags.
+4. **Extension**: `.sbo` (Strict Briev Optimized), `.sebo` (Strict Embedded Briev Optimized), `.srbo` (Strict Rendered Briev Optimized) — or equivalently, `--strict --optimize` CLI flags.
 
 5. **Praetor interop**: Praetor's existing `.praetor.toml` Big-O threshold (`O(n²)`) and complexity limits already validate this externally. The compiler's built-in analysis would be the same logic, moved into the compilation pipeline and gated behind strict mode.
 
@@ -193,7 +193,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:103-107` (`Dimension` enum), `src/parser.rs:3613-3644, 3683-3707`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — add `Dimension { name: Option<String>, size: Int }` struct. Change `TypeVector(Type, Int)` → `TypeVector(Type, List<Dimension>)`
 - `lib/compiler/parser.bv` — parse `Vector<T, dim1, dim2>` with optional named dimensions `Vector<T, rows: 32, cols: 16>`
 - `lib/compiler/typechecker.bv` — validate dimension counts match operations
@@ -202,7 +202,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:339-347` (`Expr::Slice` with stride/mask, `Expr::MultiSlice`), `src/parser.rs:3996-4068`
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — extend `ExprSlice` with stride and mask fields. Add `ExprMultiSlice { value, coordinates: List<SliceCoordinate>, mask }`. Add `SliceCoordinate` enum (Index/Range/Named)
 - `lib/compiler/parser.bv` — parse `start..end..stride`, `start..end; mask`, multidimensional `v[0..4, 2..8]`, named `v[rows: 0..16]`
 - `lib/compiler/typechecker.bv` — validate slice bounds against dimension sizes
@@ -211,15 +211,15 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/proof_engine.rs:1321-1448` (`check_list_simd_lengths`, `check_list_simd_lengths_in_body`)
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/proof_engine.bv` — add `check_list_simd_lengths` function. Walk program body, identify SIMD binary ops on lists, assert length equality between operands and result. Generate `VerificationCondition` for each.
 
 ### 2.12 Backend Hashtag Registry
 
 **Rust source**: `src/backend/mod.rs:49-80` (`supported_hashtags`, `validate_hashtags`, `validate_hashtags_in_program`)
 
-**Briv target files**:
-- `lib/compiler/backends/mod.bv` — create this file (module registry for Briv backends). Add `supported_hashtags(backend)`, `validate_hashtags(tags, backend)`, and `validate_hashtags_in_program(program, backend, strict)` functions
+**Briev target files**:
+- `lib/compiler/backends/mod.bv` — create this file (module registry for Briev backends). Add `supported_hashtags(backend)`, `validate_hashtags(tags, backend)`, and `validate_hashtags_in_program(program, backend, strict)` functions
 - Each backend `.bv` file — export `supported_hashtags()` list
 - `lib/compiler/main.bv` — call hashtag validation in compilation pipeline
 
@@ -227,7 +227,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/main.rs:3522-3696` (dependency checking from `.dbvs`/`.dbv` files)
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/main.bv` — implement `deps [check|install|list]` command. Parse `.dbvs`/`.dbv` files for dependencies, validate against local cache, report missing dependencies
 - Add `Transaction.dependencies` field to AST (as in Rust)
 
@@ -235,14 +235,14 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 
 **Rust source**: `src/ast.rs:158-219` (`ForeignTarget`, `FfiKind`, `ForeignSignature`), `src/ast.rs:865-870` (`FfiState`)
 
-**Briv target files**:
+**Briev target files**:
 - `lib/compiler/ast.bv` — replace simple `ForeignBinding` with full `ForeignSignature` (13 fields). Add `ForeignTarget` enum (Native, Wasm, C, Python, Js, Swift, Go). Add `FfiKind` enum (frgn/frgn!/syscall/syscall!). Add `FfiState` struct
 - `lib/compiler/parser.bv` — parse full FFI signature syntax
 - `lib/compiler/typechecker.bv` — validate FFI declarations
 
 ### 2.8c Acyclic-Graph Optimization (Insight, Documented 2026-05-25)
 
-**Key insight:** Briv's proof engine can *prove* a transaction is acyclic via symbolic execution (`execute_statement_symbolic`). If no path contains a loop (`StmtWhile`/`StmtLoop`) or unbounded recursion, the transaction is provably acyclic — a category most languages cannot statically guarantee.
+**Key insight:** Briev's proof engine can *prove* a transaction is acyclic via symbolic execution (`execute_statement_symbolic`). If no path contains a loop (`StmtWhile`/`StmtLoop`) or unbounded recursion, the transaction is provably acyclic — a category most languages cannot statically guarantee.
 
 **What acyclic proof unlocks for backends:**
 
@@ -259,7 +259,7 @@ Sync these features from the Rust compiler into the Briv self-hosted compiler's 
 **Where this applies:**
 - **Phase 3 (AArch64 backend):** When a transaction is provably acyclic, emit straight-line AArch64 with aggressive instruction reordering. The backend's optimization pass (task 3.4) should gate parallel scheduling on acyclic proof.
 - **Big-O enforcement (§2.8b):** Acyclic transactions get precise Big-O = O(1). Cyclic transactions get their loop bounds analyzed for asymptotic complexity.
-- **Future hardware backends:** Acyclic Briv → VHDL/Verilog without handshake states — pure combinational logic.
+- **Future hardware backends:** Acyclic Briev → VHDL/Verilog without handshake states — pure combinational logic.
 
 **Implementation sketch:**
 ```
@@ -279,9 +279,9 @@ defn is_acyclic(body: List<Statement>) -> Bool {
 
 ### 2.8d Termination Strategy (Documented 2026-05-25)
 
-Briv does not solve the halting problem — it structurally discourages it:
+Briev does not solve the halting problem — it structurally discourages it:
 
-1. **No unbounded loop primitives** — `while`, `loop`, `for` do not exist in Briv. The `txn` construct is the only unit of iteration.
+1. **No unbounded loop primitives** — `while`, `loop`, `for` do not exist in Briev. The `txn` construct is the only unit of iteration.
 2. **Structural recursion** — `defn` with recursive calls on substructural data (e.g., `items[1..]`). The proof engine verifies termination by checking that each recursive call operates on a smaller value. This is the *default and preferred* approach.
 3. **Watchdog clauses** (`?[N]`) — For cases where the dataset size is genuinely unknown at compile time (network IO, device polling), the contract watchdog bounds execution at runtime: `[true][result > 0] ?[50]`. If the watchdog fires, execution terminates with a contract violation.
 4. **Escape hatch** (`alka!`) — For genuinely unbounded operations (rare), `alka! { raw_instructions }` is the explicit opt-out. The `!` is a psychological speedbump making the programmer consciously acknowledge the unprovable operation.
@@ -292,24 +292,24 @@ Briv does not solve the halting problem — it structurally discourages it:
 | Unknown-size dataset | Watchdog `?[N]` | Runtime bound |
 | Genuinely unbounded | `alka!` escape hatch | None (explicit) |
 
-This is the termination analog of Briv's contract philosophy: make the provable case the default, make the uncertain case explicit and bounded, and eliminate the need for general halting-problem reasoning.
+This is the termination analog of Briev's contract philosophy: make the provable case the default, make the uncertain case explicit and bounded, and eliminate the need for general halting-problem reasoning.
 
 ---
 
-## Phase 3: Backport AArch64 (Briv → Rust)
+## Phase 3: Backport AArch64 (Briev → Rust)
 
 ### Current State
 
 | Compiler | File | Lines | Capability |
 |----------|------|-------|------------|
-| Briv | `backend_aarch64.bv` | 1,654 | Full binary encoding, register allocator, memory layout, 3 optimization passes |
+| Briev | `backend_aarch64.bv` | 1,654 | Full binary encoding, register allocator, memory layout, 3 optimization passes |
 | Rust | `aarch64.rs` | 561 | NASM-style assembly text output, minimal expressions |
 
 ### Tasks
 
 | Task | File | Description |
 |------|------|-------------|
-| 3.1 | `src/backend/aarch64.rs` | Port Briv's instruction enum with binary A64 encodings. All instruction categories: Data Processing (Immediate, Register, Floating-point), Loads/Stores (scalar, SIMD, exclusive), Branches (B/BL/B.cond/CBZ/CBNZ/TBZ/TBNZ), System (MSR/MRS/SVC/DC), Cryptographic |
+| 3.1 | `src/backend/aarch64.rs` | Port Briev's instruction enum with binary A64 encodings. All instruction categories: Data Processing (Immediate, Register, Floating-point), Loads/Stores (scalar, SIMD, exclusive), Branches (B/BL/B.cond/CBZ/CBNZ/TBZ/TBNZ), System (MSR/MRS/SVC/DC), Cryptographic |
 | 3.2 | `src/backend/aarch64.rs` | Port register allocator: physical register file (X0-X30, V0-V31), callee-saved register management, linear scan allocation, spill/reload with stack slots, predicate register for guards |
 | 3.3 | `src/backend/aarch64.rs` | Port memory layout pass: bit-packed layout computation, field offset calculation, MMIO-mapped state detection, stack frame layout (prologue/epilogue), alignment |
 | 3.4 | `src/backend/aarch64.rs` | Port optimization passes: transaction fusion (merge adjacent transactions), parallel scheduling (independent state access), guard caching (branchless guard hoisting), memory overlay (alias analysis for stack slots) |
@@ -321,23 +321,23 @@ This is the termination analog of Briv's contract philosophy: make the provable 
 
 - ARM64 binary executes on Linux aarch64 (or via `qemu-aarch64`)
 - `cargo test --lib` passes all ARM64 backend tests
-- Regression: existing Briv `backend_aarch64.bv` still compiles and passes its tests
+- Regression: existing Briev `backend_aarch64.bv` still compiles and passes its tests
 
 **Phase 3 status**: NOT STARTED. Documented 2026-05-25. Ready to resume.
 
 ---
 
-## Phase 4: Create Missing Backends (Rust → Briv)
+## Phase 4: Create Missing Backends (Rust → Briev)
 
 ### 4.1 COBOL Backend
 
 **Rust source**: `src/backend/cobol.rs` (709 lines)
 
-**Briv target**: `lib/compiler/backends/cobol.bv`
+**Briev target**: `lib/compiler/backends/cobol.bv`
 
 Capabilities to port:
 - Free-format COBOL source generation (no column restrictions)
-- `WORKING-STORAGE SECTION` with PIC clauses for all Briv types
+- `WORKING-STORAGE SECTION` with PIC clauses for all Briev types
 - `LINKAGE SECTION` for parameter passing
 - `IDENTIFICATION DIVISION` / `PROCEDURE DIVISION` structure
 - Contract enforcement via `CHECK`/`VERIFY` paragraphs (pre/post conditions)
@@ -354,7 +354,7 @@ Capabilities to port:
 
 **Rust source**: `src/backend/tcl_generator.rs` (369 lines)
 
-**Briv target**: `lib/compiler/backends/tcl_generator.bv`
+**Briev target**: `lib/compiler/backends/tcl_generator.bv`
 
 Capabilities to port:
 - Vivado project creation with part/board resolution
@@ -372,107 +372,107 @@ Capabilities to port:
 
 For each pair, merge features bidirectionally.
 
-### 5.1 C Backend: Briv → Rust → Briv
+### 5.1 C Backend: Briev → Rust → Briev
 
-| Feature | Rust (908 lines) | Briv (205 lines) | Action |
+| Feature | Rust (908 lines) | Briev (205 lines) | Action |
 |---------|-----------------|-------------------|--------|
-| FFI bindings/calls/stubs | ✅ | ❌ | Port Rust→Briv |
-| Kernel module entry | ✅ | ❌ | Port Rust→Briv |
-| MMIO `@link` linkage | ✅ | ❌ | Port Rust→Briv |
-| Target spec integration | ✅ | ❌ | Port Rust→Briv |
-| Inline asm with clobbers | ✅ | ❌ | Port Rust→Briv |
-| Local trigger support | ✅ | ❌ | Port Rust→Briv |
-| Alka blocks | ✅ | ❌ | Port Rust→Briv |
-| `#on_exit` cleanup | ✅ | ❌ | Port Rust→Briv |
-| Error handling (bounds/null) | ✅ | ❌ | Port Rust→Briv |
-| State allocation (static/dynamic) | ✅ | ❌ | Port Rust→Briv |
-| Test mode | ✅ | ❌ | Port Rust→Briv |
-| Hardware register tracking | ✅ | ❌ | Port Rust→Briv |
-| Makefile generation | ✅ | ❌ | Port Rust→Briv |
+| FFI bindings/calls/stubs | ✅ | ❌ | Port Rust→Briev |
+| Kernel module entry | ✅ | ❌ | Port Rust→Briev |
+| MMIO `@link` linkage | ✅ | ❌ | Port Rust→Briev |
+| Target spec integration | ✅ | ❌ | Port Rust→Briev |
+| Inline asm with clobbers | ✅ | ❌ | Port Rust→Briev |
+| Local trigger support | ✅ | ❌ | Port Rust→Briev |
+| Alka blocks | ✅ | ❌ | Port Rust→Briev |
+| `#on_exit` cleanup | ✅ | ❌ | Port Rust→Briev |
+| Error handling (bounds/null) | ✅ | ❌ | Port Rust→Briev |
+| State allocation (static/dynamic) | ✅ | ❌ | Port Rust→Briev |
+| Test mode | ✅ | ❌ | Port Rust→Briev |
+| Hardware register tracking | ✅ | ❌ | Port Rust→Briev |
+| Makefile generation | ✅ | ❌ | Port Rust→Briev |
 | Basic reactor loop | ✅ | ✅ | (already synced) |
 | Guard compilation | ✅ | ✅ | (already synced) |
 
-### 5.2 Rust Backend: Briv → Rust → Briv
+### 5.2 Rust Backend: Briev → Rust → Briev
 
-| Feature | Rust (783 lines) | Briv (219 lines) | Action |
+| Feature | Rust (783 lines) | Briev (219 lines) | Action |
 |---------|-----------------|-------------------|--------|
-| Struct/enum/constant definitions | ✅ | ❌ | Port Rust→Briv |
-| Standalone definitions (functions) | ✅ | ❌ | Port Rust→Briv |
-| Inline asm (core::arch::asm!) | ✅ | ❌ | Port Rust→Briv |
-| Local triggers | ✅ | ❌ | Port Rust→Briv |
-| Alka blocks | ✅ | ❌ | Port Rust→Briv |
-| `#on_exit` cleanup | ✅ | ❌ | Port Rust→Briv |
-| Escape/term statement handling | ✅ | ❌ | Port Rust→Briv |
-| Type mappings (HashMap, Result, Option, Queue, Stack, HashSet, tuples, generics) | ✅ | ❌ | Port Rust→Briv |
-| Vector element-wise ops | ✅ | ❌ | Port Rust→Briv |
-| Field access / struct instances | ✅ | ❌ | Port Rust→Briv |
-| Pattern match / block expressions | ✅ | ❌ | Port Rust→Briv |
-| Tuple destructure | ✅ | ❌ | Port Rust→Briv |
-| Slice/multislice | ✅ | ❌ | Port Rust→Briv |
-| ForAll/Exists | ✅ | ❌ | Port Rust→Briv |
-| Object literals | ✅ | ❌ | Port Rust→Briv |
-| Default impl generation | ✅ | ❌ | Port Rust→Briv |
-| `main()` entry point | ✅ | ❌ | Port Rust→Briv |
+| Struct/enum/constant definitions | ✅ | ❌ | Port Rust→Briev |
+| Standalone definitions (functions) | ✅ | ❌ | Port Rust→Briev |
+| Inline asm (core::arch::asm!) | ✅ | ❌ | Port Rust→Briev |
+| Local triggers | ✅ | ❌ | Port Rust→Briev |
+| Alka blocks | ✅ | ❌ | Port Rust→Briev |
+| `#on_exit` cleanup | ✅ | ❌ | Port Rust→Briev |
+| Escape/term statement handling | ✅ | ❌ | Port Rust→Briev |
+| Type mappings (HashMap, Result, Option, Queue, Stack, HashSet, tuples, generics) | ✅ | ❌ | Port Rust→Briev |
+| Vector element-wise ops | ✅ | ❌ | Port Rust→Briev |
+| Field access / struct instances | ✅ | ❌ | Port Rust→Briev |
+| Pattern match / block expressions | ✅ | ❌ | Port Rust→Briev |
+| Tuple destructure | ✅ | ❌ | Port Rust→Briev |
+| Slice/multislice | ✅ | ❌ | Port Rust→Briev |
+| ForAll/Exists | ✅ | ❌ | Port Rust→Briev |
+| Object literals | ✅ | ❌ | Port Rust→Briev |
+| Default impl generation | ✅ | ❌ | Port Rust→Briev |
+| `main()` entry point | ✅ | ❌ | Port Rust→Briev |
 | State struct generation | ✅ | ✅ | (already synced) |
 | Basic let/assignment | ✅ | ✅ | (already synced) |
 
-### 5.3 Verilog Backend: Briv → Rust → Briv
+### 5.3 Verilog Backend: Briev → Rust → Briev
 
-| Feature | Rust (1,805 lines) | Briv (488 lines) | Action |
+| Feature | Rust (1,805 lines) | Briev (488 lines) | Action |
 |---------|-------------------|-------------------|--------|
-| AXI4-Lite state machine (full handshake FSM) | ✅ | ❌ | Port Rust→Briv |
-| Clock divider per reactor speed | ✅ | ❌ | Port Rust→Briv |
-| IO/memory mapping with hex-address lookup | ✅ | ❌ | Port Rust→Briv |
-| Union type signals (data/err/tag) | ✅ | ❌ | Port Rust→Briv |
-| Tuple signals | ✅ | ❌ | Port Rust→Briv |
-| BRAM/UltraRAM inference with ram_style attributes | ✅ | ❌ | Port Rust→Briv |
-| Vector generate-for loops | ✅ | ❌ | Port Rust→Briv |
-| RAM priority encoder multiplexer | ✅ | ❌ | Port Rust→Briv |
-| Timeout/watchdog per variable | ✅ | ❌ | Port Rust→Briv |
-| Hardware validation (size/bits) | ✅ | ❌ | Port Rust→Briv |
-| Testbench generation with VCD | ✅ | ❌ | Port Rust→Briv |
-| `generate_with_axi` auto-detection | ✅ | ❌ | Port Rust→Briv |
-| Regex-based vector lifting | ✅ | ❌ | Port Rust→Briv |
+| AXI4-Lite state machine (full handshake FSM) | ✅ | ❌ | Port Rust→Briev |
+| Clock divider per reactor speed | ✅ | ❌ | Port Rust→Briev |
+| IO/memory mapping with hex-address lookup | ✅ | ❌ | Port Rust→Briev |
+| Union type signals (data/err/tag) | ✅ | ❌ | Port Rust→Briev |
+| Tuple signals | ✅ | ❌ | Port Rust→Briev |
+| BRAM/UltraRAM inference with ram_style attributes | ✅ | ❌ | Port Rust→Briev |
+| Vector generate-for loops | ✅ | ❌ | Port Rust→Briev |
+| RAM priority encoder multiplexer | ✅ | ❌ | Port Rust→Briev |
+| Timeout/watchdog per variable | ✅ | ❌ | Port Rust→Briev |
+| Hardware validation (size/bits) | ✅ | ❌ | Port Rust→Briev |
+| Testbench generation with VCD | ✅ | ❌ | Port Rust→Briev |
+| `generate_with_axi` auto-detection | ✅ | ❌ | Port Rust→Briev |
+| Regex-based vector lifting | ✅ | ❌ | Port Rust→Briev |
 | Module / always process / FSM structure | ✅ | ✅ | (already synced) |
 | Guard compilation | ✅ | ✅ | (already synced) |
 | Memory inference | ✅ | ✅ | (already synced) |
 | PSL/SVA assertions | ✅ | ✅ | (already synced) |
 | Module structure / instantiation | ✅ | ✅ | (already synced) |
-| Optimization (pipelining/retiming) | ❌ | ✅ | Port Briv→Rust |
+| Optimization (pipelining/retiming) | ❌ | ✅ | Port Briev→Rust |
 
-### 5.4 VHDL Backend: Briv → Rust → Briv
+### 5.4 VHDL Backend: Briev → Rust → Briev
 
-| Feature | Rust (1,042 lines) | Briv (443 lines) | Action |
+| Feature | Rust (1,042 lines) | Briev (443 lines) | Action |
 |---------|-------------------|-------------------|--------|
-| Multi-file output (package/top/AXI/clk_div/RAM/FSM/txn/testbench) | ✅ | ❌ | Port Rust→Briv |
-| AXI4-Lite slave bridge (full state machine) | ✅ | ❌ | Port Rust→Briv |
-| Clock divider component | ✅ | ❌ | Port Rust→Briv |
-| RAM inference with attributes | ✅ | ❌ | Port Rust→Briv |
-| FSM (type/register/next-state/output) | ✅ | ❌ | Port Rust→Briv |
-| PSL assertion comments | ✅ | ❌ | Port Rust→Briv |
-| Testbench with clock/reset stimulus | ✅ | ❌ | Port Rust→Briv |
-| Type width calculation | ✅ | ❌ | Port Rust→Briv |
-| `get_pragma` attribute system | ✅ | ❌ | Port Rust→Briv |
-| `is_ram_state` detection | ✅ | ❌ | Port Rust→Briv |
+| Multi-file output (package/top/AXI/clk_div/RAM/FSM/txn/testbench) | ✅ | ❌ | Port Rust→Briev |
+| AXI4-Lite slave bridge (full state machine) | ✅ | ❌ | Port Rust→Briev |
+| Clock divider component | ✅ | ❌ | Port Rust→Briev |
+| RAM inference with attributes | ✅ | ❌ | Port Rust→Briev |
+| FSM (type/register/next-state/output) | ✅ | ❌ | Port Rust→Briev |
+| PSL assertion comments | ✅ | ❌ | Port Rust→Briev |
+| Testbench with clock/reset stimulus | ✅ | ❌ | Port Rust→Briev |
+| Type width calculation | ✅ | ❌ | Port Rust→Briev |
+| `get_pragma` attribute system | ✅ | ❌ | Port Rust→Briev |
+| `is_ram_state` detection | ✅ | ❌ | Port Rust→Briev |
 | Entity/architecture / process conversion | ✅ | ✅ | (already synced) |
 | Component instantiation | ✅ | ✅ | (already synced) |
-| Timing constraints | ❌ | ✅ | Port Briv→Rust |
-| Optimization (resource sharing/pipelining/guard merging) | ❌ | ✅ | Port Briv→Rust |
+| Timing constraints | ❌ | ✅ | Port Briev→Rust |
+| Optimization (resource sharing/pipelining/guard merging) | ❌ | ✅ | Port Briev→Rust |
 
-### 5.5 x86_64 Backend: Briv ↔ Rust
+### 5.5 x86_64 Backend: Briev ↔ Rust
 
-| Feature | Rust (598 lines) | Briv (523 lines) | Action |
+| Feature | Rust (598 lines) | Briev (523 lines) | Action |
 |---------|-----------------|-------------------|--------|
-| Binary encoding (instruction tables, label resolution) | ❌ | ✅ | Port Briv→Rust |
-| Register allocator | ❌ | ✅ | Port Briv→Rust |
-| Memory layout pass | ❌ | ✅ | Port Briv→Rust |
-| Two-pass encoding | ❌ | ✅ | Port Briv→Rust |
-| Entry point / Linux syscall exit | ✅ | ❌ | Port Rust→Briv |
-| Sequential + parallel reactor | ✅ | ❌ | Port Rust→Briv |
-| Branchless guard (CMOV/SETcc) | ✅ | ❌ | Port Rust→Briv |
-| Predictive fetch (PREFETCHT0) | ✅ | ❌ | Port Rust→Briv |
-| Multi-expr generation | ✅ | ❌ | Port Rust→Briv |
-| `collect_data_addresses` for prefetch | ✅ | ❌ | Port Rust→Briv |
+| Binary encoding (instruction tables, label resolution) | ❌ | ✅ | Port Briev→Rust |
+| Register allocator | ❌ | ✅ | Port Briev→Rust |
+| Memory layout pass | ❌ | ✅ | Port Briev→Rust |
+| Two-pass encoding | ❌ | ✅ | Port Briev→Rust |
+| Entry point / Linux syscall exit | ✅ | ❌ | Port Rust→Briev |
+| Sequential + parallel reactor | ✅ | ❌ | Port Rust→Briev |
+| Branchless guard (CMOV/SETcc) | ✅ | ❌ | Port Rust→Briev |
+| Predictive fetch (PREFETCHT0) | ✅ | ❌ | Port Rust→Briev |
+| Multi-expr generation | ✅ | ❌ | Port Rust→Briev |
+| `collect_data_addresses` for prefetch | ✅ | ❌ | Port Rust→Briev |
 | Transaction push/pop frame | ✅ | ✅ | (already synced) |
 
 ---
@@ -486,10 +486,10 @@ Each phase must pass these gates before moving to the next:
 | Rust builds | `cargo build` | Exit 0 |
 | Rust tests pass | `cargo test --lib` | All tests pass (currently 215+) |
 | Backend registry tests | `cargo test --lib -- backend::tests` | Backend registry + hashtag validation tests pass |
-| Briv compiler builds | `briv build lib/compiler/main.bv` | Briv self-hosted compiler compiles successfully |
-| CLI help | `briv help` | Shows all commands including new ones |
-| WASM output | `briv wasm file.bv` | Produces valid `.wasm` binary |
-| Webstack output | `briv webstack file.rbv` | Produces `.rs` + `.js` + HTML output |
+| Briev compiler builds | `briev build lib/compiler/main.bv` | Briev self-hosted compiler compiles successfully |
+| CLI help | `briev help` | Shows all commands including new ones |
+| WASM output | `briev wasm file.bv` | Produces valid `.wasm` binary |
+| Webstack output | `briev webstack file.rbv` | Produces `.rs` + `.js` + HTML output |
 
 ---
 
@@ -498,10 +498,10 @@ Each phase must pass these gates before moving to the next:
 | Phase | Compiler | Files Created | Files Modified | Total |
 |-------|----------|---------------|----------------|-------|
 | 1 (WASM split) | Rust | 1 (`wasm.rs`) | 3 (`webstack.rs`, `mod.rs`, `main.rs`) | 4 |
-| 1 (WASM split) | Briv | 1 (`webstack.bv`) | 2 (`wasm.bv`, `main.bv`) | 3 |
-| 2 (v0.14 features) | Briv | 1 (`backends/mod.bv`) | 6 (`token.bv`, `lexer.bv`, `ast.bv`, `parser.bv`, `typechecker.bv`, `proof_engine.bv`) | 7 |
+| 1 (WASM split) | Briev | 1 (`webstack.bv`) | 2 (`wasm.bv`, `main.bv`) | 3 |
+| 2 (v0.14 features) | Briev | 1 (`backends/mod.bv`) | 6 (`token.bv`, `lexer.bv`, `ast.bv`, `parser.bv`, `typechecker.bv`, `proof_engine.bv`) | 7 |
 | 3 (AArch64) | Rust | 0 | 1 (`aarch64.rs`) | 1 |
-| 4 (missing) | Briv | 2 (`cobol.bv`, `tcl_generator.bv`) | 1 (`main.bv`) | 3 |
+| 4 (missing) | Briev | 2 (`cobol.bv`, `tcl_generator.bv`) | 1 (`main.bv`) | 3 |
 | 5 (sync) | Both | 0 | ~10 backend files + main.rs/main.bv | ~12 |
 | **Total** | | **4 new files** | **~23 files** | **~27** |
 
@@ -512,9 +512,9 @@ Each phase must pass these gates before moving to the next:
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
 | WASM binary backend scope underestimated | Medium | Start with minimal viable subset (i32 ops, basic control flow). Iteratively add features |
-| Briv self-hosted compiler can't parse its own expanded AST | Low | Rust compiler is the bootstrap — can always compile the Briv compiler with itself after each change |
-| Briv proof_engine.bv too small for SIMD checks | Low | SIMD length checking is a standalone function, minimal integration with existing symbolic engine |
-| COBOL backend in Briv is a novelty with little practical use | Medium | Port the Rust implementation directly. Keep minimal. Don't over-engineer |
+| Briev self-hosted compiler can't parse its own expanded AST | Low | Rust compiler is the bootstrap — can always compile the Briev compiler with itself after each change |
+| Briev proof_engine.bv too small for SIMD checks | Low | SIMD length checking is a standalone function, minimal integration with existing symbolic engine |
+| COBOL backend in Briev is a novelty with little practical use | Medium | Port the Rust implementation directly. Keep minimal. Don't over-engineer |
 | Breaking changes to existing CLI behavior | Medium | Never remove or change existing commands. Only add new ones. Keep `wasm` as direct binary; `webstack` is new |
 | Phase 2 touches 7+ files with ~14 features — merge conflicts | Medium | Implement one feature at a time, test after each, commit between phases |
 
@@ -541,11 +541,11 @@ src/
 │   ├── rust.rs              (783 lines)
 │   ├── cobol.rs             (709 lines)
 │   ├── x86_64.rs            (598 lines)
-│   ├── aarch64.rs           (561 lines — stub, Briv version is authoritative)
+│   ├── aarch64.rs           (561 lines — stub, Briev version is authoritative)
 │   ├── tcl_generator.rs     (369 lines)
 ```
 
-### Briv Self-Hosted (`lib/compiler/`)
+### Briev Self-Hosted (`lib/compiler/`)
 
 ```
 lib/compiler/
@@ -585,7 +585,7 @@ lib/compiler/
 - `src/main.rs` — `run_wasm`/`run_webstack` split, `webstack` CLI command added
 - `cargo build && cargo test --lib` — clean build, 215/215 pass
 
-**Briv self-hosted:**
+**Briev self-hosted:**
 - `lib/compiler/backends/webstack.bv` — new file (signal collection, reactive engine, JS glue)
 - `lib/compiler/main.bv` — updated with `--wasm`, `--webstack`, `--rust` backend dispatch
 
@@ -703,7 +703,7 @@ lib/compiler/
 
 ## Phase 2 Summary (2026-05-25)
 
-All 14 v0.14 feature sync phases completed in a single session. The Briv self-hosted compiler (`lib/compiler/`) now has:
+All 14 v0.14 feature sync phases completed in a single session. The Briev self-hosted compiler (`lib/compiler/`) now has:
 
 1. ✅ Hashtag modifiers (`#!`, `#[`, `#(`, `#?`)
 2. ✅ `#on_exit` block pragma

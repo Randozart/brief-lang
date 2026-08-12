@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 3 implements the complete lexer (tokenizer) for Briv in pure Briv. No FFI required - uses only Tier 1 and Tier 2 native functions.
+Tier 3 implements the complete lexer (tokenizer) for Briev in pure Briev. No FFI required - uses only Tier 1 and Tier 2 native functions.
 
 **Components:**
 1. **Token Type** (`token.bv`) - Token enum and utilities
@@ -69,7 +69,7 @@ Tier 3 implements the complete lexer (tokenizer) for Briv in pure Briv. No FFI r
 
 ### Token Utilities
 
-```briv
+```briev
 // Keyword detection
 defn is_keyword(tok: Token) -> Bool
 
@@ -96,7 +96,7 @@ defn literal_to_string(tok: Token) -> String
 
 ### Lexer State
 
-```briv
+```briev
 struct LexerState {
     source: String,       // Source code
     position: Int,        // Current position
@@ -110,13 +110,13 @@ struct LexerState {
 
 ### Lexer Construction
 
-```briv
+```briev
 defn new_lexer(source: String) -> LexerState
 ```
 
 ### Character Access
 
-```briv
+```briev
 defn current_char(state: LexerState) -> Option<Char>
 defn peek_char(state: LexerState, offset: Int) -> Option<Char>
 defn advance(state: LexerState) -> LexerState
@@ -125,7 +125,7 @@ defn skip_chars(state: LexerState, count: Int) -> LexerState
 
 ### Token Extraction
 
-```briv
+```briev
 defn current_token_text(state: LexerState) -> String
 defn start_token(state: LexerState) -> LexerState
 ```
@@ -133,13 +133,13 @@ defn start_token(state: LexerState) -> LexerState
 ### Lexing Functions
 
 **Whitespace/Comments:**
-```briv
+```briev
 defn skip_whitespace(state: LexerState) -> LexerState
 defn skip_comment(state: LexerState) -> LexerState
 ```
 
 **Token Readers:**
-```briv
+```briev
 defn read_identifier(state: LexerState) -> (Token, LexerState)
 defn read_number(state: LexerState) -> (Token, LexerState)
 defn read_hex_number(state: LexerState) -> (Token, LexerState)
@@ -150,7 +150,7 @@ defn read_char_literal(state: LexerState) -> (Token, LexerState)
 
 ### Main Lexer Function
 
-```briv
+```briev
 defn next_token(state: LexerState) -> Result<(Token, LexerState), String>
 ```
 
@@ -166,7 +166,7 @@ defn next_token(state: LexerState) -> Result<(Token, LexerState), String>
 
 ### Full Tokenization
 
-```briv
+```briev
 defn tokenize(source: String) -> Result<List<Token>, String>
 ```
 
@@ -176,7 +176,7 @@ defn tokenize(source: String) -> Result<List<Token>, String>
 
 ### Basic Tokenization
 
-```briv
+```briev
 import std.lexer;
 import std.token;
 
@@ -192,7 +192,7 @@ let result = tokenize(source);
 
 ### Manual Lexing
 
-```briv
+```briev
 let state = new_lexer("let x = 1;");
 
 let (tok1, state) = next_token(state).unwrap();  // KeywordLet
@@ -205,7 +205,7 @@ let (tok6, state) = next_token(state).unwrap();  // TokenEof
 
 ### Error Handling
 
-```briv
+```briev
 let result = tokenize("let x = @invalid;");
 
 [result.is_err()] {
@@ -222,7 +222,7 @@ let result = tokenize("let x = @invalid;");
 
 Keywords are recognized by reading an identifier, then checking against a list:
 
-```briv
+```briev
 defn read_identifier(state: LexerState) -> (Token, LexerState) {
     // Read alphanumeric + underscore
     [current_char(state).is_some()] {
@@ -247,7 +247,7 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
 
 Supports decimal, hex, and float:
 
-```briv
+```briev
 defn read_number(state: LexerState) -> (Token, LexerState) {
     // Check for hex (0x...)
     [current_char(state).unwrap() == '0'] {
@@ -285,7 +285,7 @@ defn read_number(state: LexerState) -> (Token, LexerState) {
 
 Handles \n, \t, \r, \\, \":
 
-```briv
+```briev
 defn read_string(state: LexerState) -> (Token, LexerState) {
     &state = advance(state);  // Skip opening "
     
@@ -348,7 +348,7 @@ All lexer features tested:
 
 The lexer produces a `List<Token>` that the parser consumes:
 
-```briv
+```briev
 defn parse_program(source: String) -> Result<Program, ParseError> {
     let tokens = tokenize(source)?;
     let parser = new_parser(tokens);
@@ -362,7 +362,7 @@ defn parse_program(source: String) -> Result<Program, ParseError> {
 
 With Tier 3 complete, the lexer is ready. Next is **Tier 4: Parser Components**:
 
-1. Define AST types in Briv (structs and enums)
+1. Define AST types in Briev (structs and enums)
 2. Implement recursive descent parser
 3. Use Stack for expression parsing
 4. Error reporting with spans

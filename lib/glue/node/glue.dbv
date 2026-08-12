@@ -1,6 +1,6 @@
-// node/glue.dbvl — GLUE adapter for the node target (Data Briv).
+// node/glue.dbvl — GLUE adapter for the node target (Data Briev).
 // 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): per-language glue
-// config, referenced as config by `briv export|bindings|extension <bridge>
+// config, referenced as config by `briev export|bindings|extension <bridge>
 // node` — the compiler finds lib/glue/node/ BY NAME and loads this file.
 // Format (quoted mode):
 //   node: { types_module; extension; bridge_kind; calling_convention;
@@ -15,7 +15,7 @@ node: { types_module: "glue/node/types.bv"; extension: "mjs"; bridge_kind: "esm_
 node.templates.0: "ffi_template" "{{name}}: [{{c_return}}, [{{s_ffi_type}}{{c_types}}]],";
 node.templates.1: "fn_template" "export function {{name}}({{params}}) {\n    return lib.{{name}}({{s_param}}{{args_abi}});\n}\n";
 node.templates.2: "index.mjs" "// GLUE bridge for {{bridge_name}} — auto-generated.\nimport { createRequire } from 'module';\nconst require = createRequire(import.meta.url);\nconst ffi = require('ffi-napi');\n\nconst lib = ffi.Library('./bridge.so', {\n    init_state: ['void', ['pointer']],\n    {{ffi_decls}}\n});\n\nlet _state = null;\n\nfunction init_state() {\n    const buf = Buffer.alloc(32);\n    _state = buf;\n    lib.init_state(buf);\n}\n\ninit_state();\n\n{{exports}}\n";
-node.templates.3: "native.module" "#include <node_api.h>\n\ntypedef struct BrivState BrivState;\nextern BrivState* __briv_init_state(void);\nextern void __glue_release(BrivState* state);\n\n{{export_protos}}\n\nstatic BrivState* g_state = NULL;\n\n{{methods}}\n\nNAPI_MODULE_INIT() {\n    g_state = __briv_init_state();\n    napi_property_descriptor desc[] = {\n{{method_defs}}\n    };\n    napi_define_properties(env, exports, {{nmethods}}, desc);\n    return exports;\n}\n";
+node.templates.3: "native.module" "#include <node_api.h>\n\ntypedef struct BrievState BrievState;\nextern BrievState* __briev_init_state(void);\nextern void __glue_release(BrievState* state);\n\n{{export_protos}}\n\nstatic BrievState* g_state = NULL;\n\n{{methods}}\n\nNAPI_MODULE_INIT() {\n    g_state = __briev_init_state();\n    napi_property_descriptor desc[] = {\n{{method_defs}}\n    };\n    napi_define_properties(env, exports, {{nmethods}}, desc);\n    return exports;\n}\n";
 node.templates.4: "native.method" "static napi_value method_{{name}}(napi_env env, napi_callback_info info) {\n    size_t argc = {{nargs}};\n    napi_value argv[{{nargs_arr}}];\n    napi_get_cb_info(env, info, &argc, argv, NULL, NULL);\n    size_t _i = 0;\n    char _sbufs[{{nargs_arr}}][4096];\n{{parse_code}}\n    {{ret_c}} r = {{call}};\n{{build_code}}\n}\n";
 node.templates.5: "native.method_def" "        { \"{{name}}\", NULL, method_{{name}}, NULL, NULL, NULL, napi_default, NULL },\n";
 node.templates.6: "native.parse.#Int" "    int64_t {{name}};\n    if (napi_get_value_int64(env, argv[_i], &{{name}}) != napi_ok) return NULL;\n    _i++;";

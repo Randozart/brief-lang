@@ -9,7 +9,7 @@
 
 ## Overview
 
-Three pieces addressing correctness gaps and missing ergonomics in Briv's type system:
+Three pieces addressing correctness gaps and missing ergonomics in Briev's type system:
 
 1. **Bug Fix: Call argument type checking** — the typechecker currently does not validate
    that argument types match parameter types at call sites. A `String` where `TargetOS`
@@ -42,7 +42,7 @@ never validates the argument types against the function signature.
 at a call site) compiles silently and fails at runtime with a panic, match error, or
 silent data corruption.
 
-**Briv's philosophy demands this is caught at compile time.** Silent runtime bugs
+**Briev's philosophy demands this is caught at compile time.** Silent runtime bugs
 from preventable type errors are unacceptable.
 
 ### The Fix
@@ -143,7 +143,7 @@ This uses the existing `TypeError::TypeMismatch` infrastructure and the type's
 
 ### Syntax
 
-```briv
+```briev
 // Top-level items — file-as-module boundary
 sed defn helper() -> Int { ... }         // not importable
 sed let BOUND: Int = 100;                // not importable
@@ -281,7 +281,7 @@ Every `StructField { name, ty, default }` in the codebase needs
 | `src/parser.rs` | 1582, 1620, 1706, 1733, 1794, 1838 | 6 |
 | `src/backend/llvm/tests.rs` | 2018-2019 | 2 |
 | `src/fuzzing/ast_generator.rs` | 219 | 1 |
-| `src/dbriv/bridge.rs` | 106 | 1 |
+| `src/dbriev/bridge.rs` | 106 | 1 |
 
 ### Tests
 
@@ -304,7 +304,7 @@ Every `StructField { name, ty, default }` in the codebase needs
 
 ### Syntax
 
-```briv
+```briev
 struct Point3D <: Pair2D { z: Int; };             // single inheritance
 struct BoundedList <: Container<Int> { limit: Int; }; // generic parent
 struct DeepDerived <: Point3D { w: Int; };         // chain inheritance
@@ -409,7 +409,7 @@ before codegen, so every backend sees a flat struct.
 
 ## Interaction Between Features
 
-```briv
+```briev
 struct Pair2D {
     sed internal_tag: Int;
     x: Int;
@@ -484,7 +484,7 @@ semantics. Only steps 1-2 (Phase 1) must be done first — correctness fix.
 
 The `=` separator between pattern and body in `match` and `uni` was semantically
 ambiguous with assignment. The `->` arrow reads more naturally as "pattern maps to
-body" and is consistent with Briv's use of `->` for return types and swan songs.
+body" and is consistent with Briev's use of `->` for return types and swan songs.
 
 ### Changes
 
@@ -499,7 +499,7 @@ body" and is consistent with Briv's use of `->` for return types and swan songs.
 
 ### Syntax After
 
-```briv
+```briev
 match x {
     Some(v) -> expr1,
     None    -> expr2,

@@ -12,9 +12,9 @@ as C-callable entry points with a stable ABI.
 ## Build Flow
 
 ```
-brivc build --shared component.bv --out build/
+brievc build --shared component.bv --out build/
   → component.ll (LLVM IR)
-  → clang -O3 -shared -fPIC component.ll lib/runtime/briv_rt.c -o component.so -lm
+  → clang -O3 -shared -fPIC component.ll lib/runtime/briev_rt.c -o component.so -lm
   → component.so
 ```
 
@@ -22,12 +22,12 @@ The compiler:
 1. Parses `export` keyword → `TopLevel::Export` wrapper
 2. Emits each definition with `dso_local` visibility (public symbol)
 3. Skips `main()` / reactor loop / barrier sync (no runtime entry needed)
-4. Emits `__briv_init` / `__briv_fini` via `llvm.global_ctors`
-5. Links `briv_rt.c` for runtime functions (malloc, syscall wrappers, etc.)
+4. Emits `__briev_init` / `__briev_fini` via `llvm.global_ctors`
+5. Links `briev_rt.c` for runtime functions (malloc, syscall wrappers, etc.)
 
 ## Export Annotation
 
-```briv
+```briev
 export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
@@ -44,7 +44,7 @@ export node process [x < TOTAL][x == TOTAL] {
 
 ## C ABI
 
-| Briv signature | C signature |
+| Briev signature | C signature |
 |----------------|-------------|
 | `defn f(a: Int, b: Int) -> Int` | `int64_t f(void* state, int64_t a, int64_t b)` |
 | `defn f(a: Float) -> Float` | `double f(void* state, double a)` |
@@ -52,7 +52,7 @@ export node process [x < TOTAL][x == TOTAL] {
 | `defn f(a: Ptr<Byte>) -> Int` | `int64_t f(void* state, void* a)` |
 
 The `state` pointer is an opaque `%State` struct. The host must allocate
-it (minimum 8 bytes, zero-initialized) or use `__briv_init_state` to
+it (minimum 8 bytes, zero-initialized) or use `__briev_init_state` to
 initialize it properly.
 
 ## Example

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Briv Compiler — benchmark demo
+# Briev Compiler — benchmark demo
 # Runs the existing harness, presents a clean summary table.
 # Run: bash demo.sh
 
@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║              Briv Compiler — benchmark suite               ║"
+echo "║              Briev Compiler — benchmark suite               ║"
 echo "║  Ahead-of-time compiled, contract-driven safe language      ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
@@ -40,16 +40,16 @@ RUNTIME_OUT=$(bash benchmarks/build_and_bench.sh --runtime 2>&1) || true
 
 # Parse runtime results
 TIMING=$(mktemp)
-echo "$RUNTIME_OUT" | grep -E "=== |Briv:|C:|Ratio:" | while read -r line; do
+echo "$RUNTIME_OUT" | grep -E "=== |Briev:|C:|Ratio:" | while read -r line; do
     if echo "$line" | grep -q "^==="; then
         bm=$(echo "$line" | sed 's/=== //;s/ ===//')
-    elif echo "$line" | grep -q "^  Briv:"; then
-        briv=$(echo "$line" | sed 's/.*Briv: //;s/s.*//' | xargs)
+    elif echo "$line" | grep -q "^  Briev:"; then
+        briev=$(echo "$line" | sed 's/.*Briev: //;s/s.*//' | xargs)
     elif echo "$line" | grep -q "^  C:"; then
         c=$(echo "$line" | sed 's/.*C:[[:space:]]*//' | xargs)
     elif echo "$line" | grep -q "Ratio:"; then
         ratio=$(echo "$line" | sed 's/.*Ratio: //' | xargs)
-        echo "${bm}|${briv}|${c:-}|${ratio}" >> "$TIMING"
+        echo "${bm}|${briev}|${c:-}|${ratio}" >> "$TIMING"
     fi
 done
 
@@ -58,7 +58,7 @@ echo ""
 
 # ── 3. Summary table ─────────────────────────────────────────────
 echo "╔═══════════════════════╦══════════════╦══════════════╦══════════════╦══════════╗"
-echo "║ Benchmark             ║ Correctness  ║ Briv        ║ C            ║ Ratio    ║"
+echo "║ Benchmark             ║ Correctness  ║ Briev        ║ C            ║ Ratio    ║"
 echo "╠═══════════════════════╬══════════════╬══════════════╬══════════════╬══════════╣"
 
 print_row() {
@@ -73,13 +73,13 @@ for priority_group in "nbody_newton|nbody_sqrt|nbody_sqrt_idio|nbody_newton_sym"
         else
             if echo "$bm" | grep -qE "^(nbody_newton|nbody_sqrt|nbody_sqrt_idio|nbody_newton_sym)$"; then continue; fi
         fi
-        briv=$(grep "^${bm}|" "$TIMING" 2>/dev/null | cut -d'|' -f2 || echo "-")
+        briev=$(grep "^${bm}|" "$TIMING" 2>/dev/null | cut -d'|' -f2 || echo "-")
         c=$(grep "^${bm}|" "$TIMING" 2>/dev/null | cut -d'|' -f3 || echo "-")
         ratio=$(grep "^${bm}|" "$TIMING" 2>/dev/null | cut -d'|' -f4 || echo "-")
-        [ -z "$briv" ] && briv="-"
+        [ -z "$briev" ] && briev="-"
         [ -z "$c" ] && c="-"
         [ -z "$ratio" ] && ratio="-"
-        print_row "$bm" "$result" "$briv" "$c" "$ratio"
+        print_row "$bm" "$result" "$briev" "$c" "$ratio"
     done < "$RESULTS"
 done
 

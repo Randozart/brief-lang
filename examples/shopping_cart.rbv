@@ -48,7 +48,7 @@ obj ShoppingCart {
 render ShoppingCart {
     <div class="app">
         <span class="header">
-            <h1>Briv Store</h1>
+            <h1>Briev Store</h1>
             <span class="badge"><span b-text="items">0</span> items | $<span b-text="total">0</span></span>
         </span>
         <span class="shop" b-show="step == 0">

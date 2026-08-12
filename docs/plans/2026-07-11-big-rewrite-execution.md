@@ -355,7 +355,7 @@ literal: `let x: Color = @FF00FF` is unambiguously a literal.
 
 A codec declares which token forms it accepts:
 
-```briv
+```briev
 codec HexCodec {
     formatting <~ Bare;
     parse      <~ parse_hex;
@@ -382,7 +382,7 @@ to Bits at compile time.
 
 ### Bootstrap Codec Structure
 
-```briv
+```briev
 codec DefaultQuoted { formatting <~ Quoted; parse <~ identity; };
 codec DefaultDecimal { formatting <~ Decimal; parse <~ parse_decimal; };
 codec DefaultBare { formatting <~ Bare; parse <~ parse_bare; };

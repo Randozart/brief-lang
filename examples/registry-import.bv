@@ -4,7 +4,7 @@
 // The compiler resolves <name> against config/module-registry.toml
 // instead of searching the filesystem.
 //
-// Check: briv-compiler check examples/registry-import.bv
+// Check: briev-compiler check examples/registry-import.bv
 
 // Import all symbols from the collections module via registry
 import <collections>;
@@ -12,7 +12,7 @@ import <collections>;
 // Selective import from registry — only bring in one symbol
 import { map } from <collections>;
 
-// 2026-08-05 (Phase 6): no `main` in Briv — the entry is the first-firing node.
+// 2026-08-05 (Phase 6): no `main` in Briev — the entry is the first-firing node.
 let done: Bool = false;
 
 node start [done == false][done == true] {

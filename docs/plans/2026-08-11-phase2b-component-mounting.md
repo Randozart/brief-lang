@@ -73,7 +73,7 @@ uses a `render Counter {}` fragment whose directives reference the GLOBAL state
    only for unknown tags.
 3. Tests: fragment inlining (single mount), multiple mounts (unique IDs, both
    bind), nesting, cycle error, unknown-tag warning preserved.
-4. Verify: `cargo test --lib`, `cargo test --bin brivc`, Praetor, E2E
+4. Verify: `cargo test --lib`, `cargo test --bin brievc`, Praetor, E2E
    `examples/counter.rbv` (mounts `<Counter />` → fragment HTML live, buttons
    call the txns, span binds `count`).
 

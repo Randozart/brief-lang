@@ -1,6 +1,6 @@
 // glue-macro.bv — Full GLUE bridge pattern
 // 2026-07-22: Demonstrates export defn, frgn.
-// Three-language bridge: Briv exports, Rust/Python/Node imports
+// Three-language bridge: Briev exports, Rust/Python/Node imports
 // 2026-08-09 (Phase 12): the `meld Int -> Float` layout proof is removed
 // (SPEC 19.6) — layouts adapt through GLUE descriptors + explicit casts.
 

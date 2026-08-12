@@ -1,4 +1,4 @@
-# Briv Mapper Guide
+# Briev Mapper Guide
 
 **Version:** 1.0  
 **Purpose:** How to create language-specific FFI mappers  
@@ -12,7 +12,7 @@
 3. [Mapper Types](#mapper-types)
 4. [Required Functions](#required-functions)
 5. [Type Conversions](#type-conversions)
-6. [Briv Mapper Examples](#briv-mapper-examples)
+6. [Briev Mapper Examples](#briev-mapper-examples)
 7. [Creating a New Mapper](#creating-a-new-mapper)
 8. [Testing Your Mapper](#testing-your-mapper)
 9. [Template](#template)
@@ -21,10 +21,10 @@
 
 ## Overview
 
-A **mapper** translates between foreign language types and Briv types. When you call a foreign function, the mapper ensures data flows correctly across the language boundary.
+A **mapper** translates between foreign language types and Briev types. When you call a foreign function, the mapper ensures data flows correctly across the language boundary.
 
 ```
-Briv Code
+Briev Code
     |
     v
 frgn declaration  -->  TOML binding
@@ -36,7 +36,7 @@ Mapper (map_input)    Foreign input types
 Foreign Function
     |
     v
-Mapper (map_output)    Briv output types
+Mapper (map_output)    Briev output types
 ```
 
 ---
@@ -65,7 +65,7 @@ Mapper (map_output)    Briv output types
 │                      Mapper                             │
 │  map_input: CString -> String                          │
 │  map_output: CString -> String                         │
-│  map_error: CError -> BrivError                       │
+│  map_error: CError -> BrievError                       │
 └─────────────────────────────────────────────────────────┘
                             │
                             v
@@ -79,14 +79,14 @@ Mapper (map_output)    Briv output types
 
 ## Mapper Types
 
-### Briv Mappers (.bv)
+### Briev Mappers (.bv)
 
-Written in Briv itself. Best for simple type conversions.
+Written in Briev itself. Best for simple type conversions.
 
 **Location:** `lib/ffi/mappers/<lang>_mapper.bv`
 
-```briv
-// Example: Briv mapper for simple types
+```briev
+// Example: Briev mapper for simple types
 defn map_input(value: Int) -> Int [true][result == value] {
     term value;
 };
@@ -117,9 +117,9 @@ Every mapper must implement these three functions:
 
 ### map_input(value) -> Value
 
-Transforms Briv input into foreign input type.
+Transforms Briev input into foreign input type.
 
-```briv
+```briev
 defn map_input(value: Value) -> Value [true][true] {
     term value;  // Default: pass through unchanged
 };
@@ -127,9 +127,9 @@ defn map_input(value: Value) -> Value [true][true] {
 
 ### map_output(value) -> Value
 
-Transforms foreign output into Briv output type.
+Transforms foreign output into Briev output type.
 
-```briv
+```briev
 defn map_output(value: Value) -> Value [true][true] {
     term value;  // Default: pass through unchanged
 };
@@ -137,9 +137,9 @@ defn map_output(value: Value) -> Value [true][true] {
 
 ### map_error(err: Error) -> Error
 
-Transforms foreign error into Briv error.
+Transforms foreign error into Briev error.
 
-```briv
+```briev
 defn map_error(err: Error) -> Error [true][true] {
     term err;  // Default: pass through unchanged
 };
@@ -151,16 +151,16 @@ defn map_error(err: Error) -> Error [true][true] {
 
 ### String Types
 
-| Foreign Type | Briv Type | Conversion |
+| Foreign Type | Briev Type | Conversion |
 |--------------|------------|------------|
 | `char*` (C) | `String` | Null-terminated UTF-8 |
 | `String` (Rust) | `String` | 1:1 copy |
-| `str` (Python) | `String` | Python str to Briv String |
-| `String` (JS) | `String` | JS String to Briv String |
+| `str` (Python) | `String` | Python str to Briev String |
+| `String` (JS) | `String` | JS String to Briev String |
 
 ### Numeric Types
 
-| Foreign Type | Briv Type |
+| Foreign Type | Briev Type |
 |--------------|------------|
 | `int` (C) | `Int` |
 | `i32/i64` (Rust) | `Int` |
@@ -169,7 +169,7 @@ defn map_error(err: Error) -> Error [true][true] {
 
 ### Complex Types
 
-| Foreign Type | Briv Type | Notes |
+| Foreign Type | Briev Type | Notes |
 |--------------|------------|-------|
 | `struct` (C) | `Data` | Raw bytes |
 | `Vec<u8>` (Rust) | `Data` | Raw bytes |
@@ -178,25 +178,25 @@ defn map_error(err: Error) -> Error [true][true] {
 
 ---
 
-## Briv Mapper Examples
+## Briev Mapper Examples
 
 ### C Mapper (lib/ffi/mappers/c_mapper.bv)
 
-```briv
+```briev
 // C Mapper - Handles C string null-termination, UTF-8, etc.
 
-// Convert C string to Briv String
-defn c_string_to_briv(c_str: CString) -> String [c_str.is_valid() && c_str.not_null()][true] {
+// Convert C string to Briev String
+defn c_string_to_briev(c_str: CString) -> String [c_str.is_valid() && c_str.not_null()][true] {
     term c_str.to_str();
 };
 
-// Convert Briv String to C string
-defn briv_string_to_c(s: String) -> CString [true][true] {
+// Convert Briev String to C string
+defn briev_string_to_c(s: String) -> CString [true][true] {
     term CString::new(s);
 };
 
-// Convert C int to Briv Int
-defn c_int_to_briv(c_int: CInt) -> Int [true][true] {
+// Convert C int to Briev Int
+defn c_int_to_briev(c_int: CInt) -> Int [true][true] {
     term c_int.value;
 };
 
@@ -214,35 +214,35 @@ defn c_array_to_list(ptr: CPtr, len: Int) -> List<Int> [ptr.not_null() && len >=
 
 ### WASM Mapper (lib/ffi/mappers/wasm_mapper.bv)
 
-```briv
+```briev
 // WASM Mapper - Handles WebAssembly linear memory, JS value conversion
 
-// Convert WASM pointer to Briv String
+// Convert WASM pointer to Briev String
 defn wasm_ptr_to_string(ptr: Int, memory: Memory) -> String [ptr > 0 && memory.valid()][true] {
     term memory.read_string(ptr);
 };
 
-// Convert Briv String to WASM pointer
-defn briv_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][result > 0] {
+// Convert Briev String to WASM pointer
+defn briev_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][result > 0] {
     term memory.write_string(s);
 };
 
-// Convert WASM pointer to Briv Data
+// Convert WASM pointer to Briev Data
 defn wasm_ptr_to_data(ptr: Int, len: Int, memory: Memory) -> Data [ptr > 0 && len >= 0][result.len() == len] {
     term memory.read_bytes(ptr, len);
 };
 
-// Write Briv Data to WASM memory
-defn briv_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][result > 0] {
+// Write Briev Data to WASM memory
+defn briev_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][result > 0] {
     term memory.write_bytes(data);
 };
 
-// Convert JS value to Briv Data
+// Convert JS value to Briev Data
 defn js_value_to_data(js_val: JsValue) -> Data [true][true] {
     term js_val.to_bytes();
 };
 
-// Convert Briv Data to JS value
+// Convert Briev Data to JS value
 defn data_to_js_value(data: Data) -> JsValue [true][true] {
     term JsValue::from_bytes(data);
 };
@@ -250,9 +250,9 @@ defn data_to_js_value(data: Data) -> JsValue [true][true] {
 
 ### Rust Mapper (lib/ffi/mappers/rust_mapper.bv)
 
-```briv
+```briev
 // Rust Mapper - 1:1 mapping
-// No transformation between Rust and Briv types
+// No transformation between Rust and Briev types
 
 // Map input: 1:1 identity
 defn map_input(value: Value) -> Value [true][true] {
@@ -295,7 +295,7 @@ Understand:
 
 ### Step 3: Implement Required Functions
 
-```briv
+```briev
 // Required: identity mapper
 defn map_input(value: Value) -> Value [true][true] { term value; };
 defn map_output(value: Value) -> Value [true][true] { term value; };
@@ -305,22 +305,22 @@ defn map_error(err: Error) -> Error [true][true] { term err; };
 ### Step 4: Add Type-Specific Functions
 
 For C:
-```briv
-defn c_string_to_briv(c_str: CString) -> String [c_str.is_valid()][true] {
+```briev
+defn c_string_to_briev(c_str: CString) -> String [c_str.is_valid()][true] {
     term c_str.to_str();
 };
 ```
 
 For Python:
-```briv
-defn py_string_to_briv(py_str: PyString) -> String [py_str.is_valid()][true] {
+```briev
+defn py_string_to_briev(py_str: PyString) -> String [py_str.is_valid()][true] {
     term py_str.to_string();
 };
 ```
 
 For JavaScript:
-```briv
-defn js_to_briv_string(js_val: JsValue) -> String [js_val.is_string()][true] {
+```briev
+defn js_to_briev_string(js_val: JsValue) -> String [js_val.is_string()][true] {
     term js_val.to_string();
 };
 ```
@@ -335,7 +335,7 @@ Add to `lib/ffi/mappers.rs` or use the auto-discovery path:
 
 ### Step 6: Test the Mapper
 
-```briv
+```briev
 // Test file: test_<lang>_mapper.bv
 frgn sig test_function(param: String) -> String from "test_lib";
 
@@ -351,17 +351,17 @@ defn test [true][result == "hello"] {
 
 ### Unit Tests
 
-```briv
+```briev
 defn test_c_string_conversion [true][result == "test"] {
     let c_str = CString::new("test");
-    let briv_str = c_string_to_briv(c_str);
-    term briv_str;
+    let briev_str = c_string_to_briev(c_str);
+    term briev_str;
 };
 ```
 
 ### Integration Tests
 
-```briv
+```briev
 frgn sig strlen(s: String) -> Int from "libc";
 
 defn test_strlen [true][result == 5] {
@@ -372,7 +372,7 @@ defn test_strlen [true][result == 5] {
 
 ### Error Handling Tests
 
-```briv
+```briev
 frgn sig may_fail() -> Result<Int, MyError> from "test_lib";
 
 defn test_error_mapping [true][result == true] {
@@ -389,13 +389,13 @@ defn test_error_mapping [true][result == true] {
 
 ## Template
 
-Use this template to create a new Briv mapper:
+Use this template to create a new Briev mapper:
 
-```briv
+```briev
 // <Language> Mapper
 // 
-// Briv FFI mapper for <language>.
-// Transforms between <language> types and Briv types.
+// Briev FFI mapper for <language>.
+// Transforms between <language> types and Briev types.
 //
 // For documentation, see: spec/MAPPER-GUIDE.md
 
@@ -421,11 +421,11 @@ defn map_error(err: Error) -> Error [true][true] {
 
 // TODO: Add string conversion functions
 
-// defn <lang>_string_to_briv(<lang>_str: <LangString>) -> String [<conditions>][true] {
+// defn <lang>_string_to_briev(<lang>_str: <LangString>) -> String [<conditions>][true] {
 //     term <lang>_str.to_string();
 // };
 
-// defn briv_string_to_<lang>(s: String) -> <LangString> [true][true] {
+// defn briev_string_to_<lang>(s: String) -> <LangString> [true][true] {
 //     term <LangString>::new(s);
 // };
 
@@ -435,7 +435,7 @@ defn map_error(err: Error) -> Error [true][true] {
 
 // TODO: Add numeric conversion functions
 
-// defn <lang>_int_to_briv(<lang>_int: <LangInt>) -> Int [true][true] {
+// defn <lang>_int_to_briev(<lang>_int: <LangInt>) -> Int [true][true] {
 //     term <lang>_int.value;
 // };
 
@@ -457,7 +457,7 @@ defn map_error(err: Error) -> Error [true][true] {
 
 // TODO: Add error type conversions
 
-// defn <lang>_error_to_briv(<lang>_err: <LangError>) -> Error [true][true] {
+// defn <lang>_error_to_briev(<lang>_err: <LangError>) -> Error [true][true] {
 //     term Error { message: <lang>_err.message };
 // };
 ```

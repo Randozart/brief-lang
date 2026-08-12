@@ -1,11 +1,11 @@
 // ── LLVM Type Lowering ─────────────────────────────────────────────────
-// 2026-07-12: Phase 2.6/4 — Lower Briv types to LLVM IR type strings.
+// 2026-07-12: Phase 2.6/4 — Lower Briev types to LLVM IR type strings.
 // Consults the llvm metadata property, falls back to iN based on byte width.
 
 use crate::ast::Type;
 use crate::type_universe::resolve_type;
 
-/// 2026-07-26: Lower a Briv Type to an LLVM IR type string.
+/// 2026-07-26: Lower a Briev Type to an LLVM IR type string.
 /// Delegates to protocol_llvm_type for named types when a universe is
 /// available. Falls back to "i64" for unknown types.
 pub fn lower_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
@@ -41,7 +41,7 @@ fn lower_custom_type(name: &str, universe: Option<&crate::type_universe::TypeUni
 /// Uses the ResolvedType.bytes from the universe when available.
 /// Falls back to computing from the LLVM type string.
 pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> u64 {
-    // 2026-08-04 (compiler-in-Briv): a Ptr is ALWAYS one machine word. The
+    // 2026-08-04 (compiler-in-Briev): a Ptr is ALWAYS one machine word. The
     // universe path below would return 0 for an unsubstituted generic
     // `Ptr<T>` (bytes=0, no Cast.# property) and silently collapse struct
     // layouts containing such fields (List<String>.len collided with

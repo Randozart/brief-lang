@@ -1,4 +1,4 @@
-# Briv v7.0 Implementation Summary
+# Briev v7.0 Implementation Summary
 
 **Date:** 2026-04-07
 **Status:** Implementation Complete - Tests Passing
@@ -15,7 +15,7 @@
 | FFI error enforcement | typechecker.rs | 7.7 | ✅ Tested |
 | Dynamic FFI registry | ffi/registry.rs | 7 | ✅ Fixed |
 | Term functionCall verification | typechecker.rs | 5.3.2 | ✅ Tested |
-| R-Briv syntax fix | SPEC.md, refs | 9.2 | 📝 Docs only |
+| R-Briev syntax fix | SPEC.md, refs | 9.2 | 📝 Docs only |
 | Reactor throttling | SPEC.md | 8.4 | ✅ Tested |
 | Mutual exclusion fix | SPEC.md | 8.3 | ✅ Tested |
 | **Modular FFI Mapper System** | FFI/mapper | 7.x | 🔲 Not started |
@@ -109,7 +109,7 @@ All documentation updated to v7.0:
 - `spec/LANGUAGE-REFERENCE.md`
 - `spec/LANGUAGE-TUTORIAL.md`
 - `spec/FFI-GUIDE.md`
-- `spec/RENDERED-BRIV-GUIDE.md`
+- `spec/RENDERED-BRIEV-GUIDE.md`
 - `spec/QUICK-REFERENCE.md`
 
 **Commits:** `7d0d513`, `a6929ad`
@@ -120,7 +120,7 @@ All documentation updated to v7.0:
 
 # FFI Mapper System Implementation Plan
 
-**Part of:** Briv v7.0
+**Part of:** Briev v7.0
 **Status:** Planned
 **Priority:** High
 
@@ -128,21 +128,21 @@ All documentation updated to v7.0:
 
 ## Overview
 
-Briv's FFI system enables integration with any language via a modular mapper architecture. Mappers bridge Briv and foreign packages, handling type conversions and compilation.
+Briev's FFI system enables integration with any language via a modular mapper architecture. Mappers bridge Briev and foreign packages, handling type conversions and compilation.
 
 ### Core Principles
 
 | Principle | Description |
 |-----------|-------------|
-| **TOML is contract** | Defines what Briv expects; source of truth |
+| **TOML is contract** | Defines what Briev expects; source of truth |
 | **Runtime violations = errors** | Foreign code can break promises (404, unavailable resources) → Result types |
 | **Treat foreign code as unpredictable** | Cannot validate at compile time; always assume error margin |
-| **Errors must be handleable** | `frgn sig` requires Result type; Briv code must handle errors |
-| **Briv never breaks** | All errors are handled, not crashes |
+| **Errors must be handleable** | `frgn sig` requires Result type; Briev code must handle errors |
+| **Briev never breaks** | All errors are handled, not crashes |
 
 ### FFI Error Examples
 
-```briv
+```briev
 // Console unavailable
 frgn print(msg: String) -> Result<Void, IoError>;
 
@@ -161,7 +161,7 @@ frgn read_file(path: String) -> Result<String, IoError>;
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Briv Compiler                         │
+│                      Briev Compiler                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │
 │  │   Parser    │  │ TypeChecker │  │ FFI Resolver    │   │
 │  └─────────────┘  └─────────────┘  └─────────────────┘   │
@@ -185,7 +185,7 @@ frgn read_file(path: String) -> Result<String, IoError>;
 ### Mapper Invocation Flow
 
 ```
-briv run app.bv
+briev run app.bv
     │
     ├── Parse app.bv + frgn declarations
     │
@@ -210,10 +210,10 @@ briv run app.bv
 
 ### Mapper Protocol
 
-Each mapper is an executable (any language) invoked by Briv:
+Each mapper is an executable (any language) invoked by Briev:
 
 ```bash
-briv-mapper <lang> build <toml> <package> --output <bridge_path>
+briev-mapper <lang> build <toml> <package> --output <bridge_path>
 ```
 
 **Arguments:**
@@ -231,8 +231,8 @@ briv-mapper <lang> build <toml> <package> --output <bridge_path>
 |------|---------|
 | `0` | Success |
 | `1` | Error (compilation error) |
-| `2` | Missing dependency (Briv prompts user) |
-| `3` | Mapper not found (Briv tries next) |
+| `2` | Missing dependency (Briev prompts user) |
+| `3` | Mapper not found (Briev tries next) |
 
 ### Mapper Metadata (JSON)
 
@@ -244,7 +244,7 @@ Each mapper includes `mapper.json` for discovery:
   "version": "1.0.0",
   "language": "javascript",
   "runtime": "node",
-  "description": "Maps JavaScript/TypeScript packages to Briv FFI",
+  "description": "Maps JavaScript/TypeScript packages to Briev FFI",
   "targets": ["wasm", "native"],
   "requires": ["node", "wasm-pack"],
   "files": {
@@ -262,17 +262,17 @@ Each mapper includes `mapper.json` for discovery:
 
 Search order (first found wins):
 1. `./mappers/<lang>/` (project-local)
-2. `~/.briv/mappers/<lang>/` (user-wide)
-3. `$BRIV_MAPPERS_PATH/` (custom directory)
-4. `$BRIV_REGISTRY/<lang>/` (registry URL)
+2. `~/.briev/mappers/<lang>/` (user-wide)
+3. `$BRIEV_MAPPERS_PATH/` (custom directory)
+4. `$BRIEV_REGISTRY/<lang>/` (registry URL)
 5. Built-in (bundled with compiler)
 
 ### Mapper Installation
 
 ```bash
-briv install js-mapper           # From registry
-briv install js-mapper --from ./my_mapper.js  # Local path
-briv install js-mapper --from github:user/js-mapper  # GitHub
+briev install js-mapper           # From registry
+briev install js-mapper --from ./my_mapper.js  # Local path
+briev install js-mapper --from github:user/js-mapper  # GitHub
 ```
 
 ---
@@ -331,8 +331,8 @@ message = "String"
 TOML defines type conversions:
 
 ```toml
-# Briv type → Target type
-# Target type → Briv type (return)
+# Briev type → Target type
+# Target type → Briev type (return)
 
 [functions.types]
 # Input mapping
@@ -350,7 +350,7 @@ String = { js = "string", rust = "String" }
 ### Cache Location
 
 ```
-~/.briv/cache/
+~/.briev/cache/
 └── bridges/
     └── <hash_of_toml>/
         ├── bridge.wasm (or .so, .a, etc.)
@@ -487,9 +487,9 @@ main().catch(err => {
 **Files:** `src/cli/install.rs`
 
 ```bash
-briv install js-mapper
-briv install rust-mapper
-briv install python-mapper
+briev install js-mapper
+briev install rust-mapper
+briev install python-mapper
 ```
 
 **Registry format (JSON):**
@@ -500,7 +500,7 @@ briv install python-mapper
       "name": "js-mapper",
       "version": "1.0.0",
       "description": "JavaScript/TypeScript package bridge",
-      "url": "https://github.com/briv-lang/mapper-js/releases/v1.0.0.zip",
+      "url": "https://github.com/briev-lang/mapper-js/releases/v1.0.0.zip",
       "sha256": "abc123..."
     }
   ]
@@ -522,16 +522,16 @@ briv install python-mapper
 
 ### Runtime Errors
 
-| Error | Source | Briv Handling |
+| Error | Source | Briev Handling |
 |-------|--------|----------------|
 | NetworkError | HTTP requests | Result types |
 | IoError | File system | Result types |
 | TypeError | Bridge mismatch | Panic + diagnostic |
 | Timeout | Long operations | Result types |
 
-### Briv Never Breaks
+### Briev Never Breaks
 
-```briv
+```briev
 // All FFI errors are handleable
 txn safe_read [true][true] {
     let result = read_file("config.json");
@@ -549,7 +549,7 @@ txn safe_read [true][true] {
 ## File Structure
 
 ```
-briv-lang/
+briev-lang/
 ├── src/
 │   ├── ffi/
 │   │   ├── mod.rs
@@ -602,13 +602,13 @@ briv-lang/
 ### E2E Tests
 ```bash
 # Test JS package bridge
-briv run tests/fetch_time.bv
+briev run tests/fetch_time.bv
 
 # Test native Rust crate bridge
-briv run tests/crypto_hash.bv
+briev run tests/crypto_hash.bv
 
 # Test C library bridge
-briv run tests/zlib_compress.bv
+briev run tests/zlib_compress.bv
 ```
 
 ---
@@ -627,9 +627,9 @@ briv run tests/zlib_compress.bv
    - Add examples for each language
 
 3. **Tutorial** (update)
-   - "Using NPM packages in Briv"
-   - "Using Rust crates in Briv"
-   - "Using Python libraries in Briv"
+   - "Using NPM packages in Briev"
+   - "Using Rust crates in Briev"
+   - "Using Python libraries in Briev"
 
 ---
 

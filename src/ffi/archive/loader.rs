@@ -221,7 +221,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
         let binding = ForeignBinding {
             foreign_name: name,
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::Literal(std::path::PathBuf::from(&location)),
             target,
             wasm_impl,

@@ -370,13 +370,13 @@ fn test_tagged_literal_suffix() {
 
 **File:** `benchmarks/build_and_bench.sh`
 
-The harness at line 163 compiles `briv_rt.c` to `/tmp/briv_rt.o` with `-flto`, then tries to link it with the benchmark's `.ll` file. But the compiler's internal linking has already created FFI cached `.o` files that conflict.
+The harness at line 163 compiles `briev_rt.c` to `/tmp/briev_rt.o` with `-flto`, then tries to link it with the benchmark's `.ll` file. But the compiler's internal linking has already created FFI cached `.o` files that conflict.
 
 **Fix (verified working):** Replace lines 160-170 with one-step clang:
 
 ```bash
 if [ ! -f "$bin" ]; then
-    clang -O3 "benchmarks/${name}.ll" "lib/runtime/briv_rt.c" \
+    clang -O3 "benchmarks/${name}.ll" "lib/runtime/briev_rt.c" \
         -lm -o "$bin" 2>&1
 fi
 ```

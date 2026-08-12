@@ -24,7 +24,7 @@ $defn gen_shm_shim(exports: Selection, bridge_name: String, so_name: String) -> 
     code += "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n";
     code += "#include <dlfcn.h>\n#include <fcntl.h>\n#include <sys/mman.h>\n#include <sys/shm.h>\n#include <unistd.h>\n\n";
     code += "#define SHM_SIZE 64\n";
-    code += "#define SHM_NAME \"/briv_bridge\"\n\n";
+    code += "#define SHM_NAME \"/briev_bridge\"\n\n";
     code += "static void* lib_handle = NULL;\n";
     code += "static volatile uint8_t* shm = NULL;\n\n";
 

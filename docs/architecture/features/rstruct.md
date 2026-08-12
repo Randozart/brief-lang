@@ -5,18 +5,18 @@
 
 > **⚠️ DEPRECATED 2026-07-26:** The `rstruct` keyword is deprecated. Use
 > `render struct <name> { <html> }` or `render obj <name> { <html> }` instead.
-> See `docs/architecture/features/rendered-briv-wasm.md` for the current spec.
+> See `docs/architecture/features/rendered-briev-wasm.md` for the current spec.
 > The old examples are archived in `archive/examples/`.
 
 ## Overview
 
 The `render struct` / `render obj` keywords attach view HTML to existing
 data types. Together with top-level `let` state declarations and `txn` blocks,
-they form Briv's component system for `.rbv` files.
+they form Briev's component system for `.rbv` files.
 
 ## Syntax
 
-```briv
+```briev
 // Define state
 let count: Int = 0;
 

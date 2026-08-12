@@ -28,7 +28,7 @@ LLVM backend faithful to the interpreter's `term` semantics:
 ## 2. The core divergence (why a codegen fix was required)
 
 The analysis error alone was NOT sufficient. `corrected_term_guard.bv`
-(`when a == 1 { term! -> Print#(1); }; Print#(2);`) passes `brivc check` (the
+(`when a == 1 { term! -> Print#(1); }; Print#(2);`) passes `brievc check` (the
 statement after the guard IS reachable when the guard is false) yet the pre-fix
 binary printed `"12"` while the interpreter prints `"1"`. Root cause: the
 value-form term void path set `terminated = true` WITHOUT emitting a real LLVM
@@ -41,7 +41,7 @@ guard.
 
 | Commit | What |
 |--------|------|
-| `b0487364` | plan (main) + worktree `../briv-compiler-term-diagnostics` |
+| `b0487364` | plan (main) + worktree `../briev-compiler-term-diagnostics` |
 | `5ab100b1` | `src/analysis/termination.rs` — pass + 9 unit tests, wired into `parse_and_check` + `compile_source` |
 | `be934d61` | codegen real-terminator fix (see §3.1) |
 | `26f3e93f` | BUGS.md + plan baseline table |
@@ -81,10 +81,10 @@ terminator, leaving `terminated` unchanged.
 ### 3.3 Vestigial `return` removal (`57434d6b`)
 
 `return expr;` / `return;` was a parser leftover from the Phase 1 rewrite
-(`77836c35`). Briv never specced it; zero `.bv` used it; the interpreter
+(`77836c35`). Briev never specced it; zero `.bv` used it; the interpreter
 (evaluate + continue) and LLVM (real `ret`) and VM (≡ `term`) backends all
 disagreed. Now the parser rejects it (statement and top level) with:
-`invalid statement: Briv has no \`return\` statement. To return a value from a
+`invalid statement: Briev has no \`return\` statement. To return a value from a
 defn use \`term <value>\`; to mark a convergence checkpoint use bare \`term;\`;
 \`term!\` closes the program.` The `Statement::Return` AST variant and ~50 match
 arms across 37 files were removed.
@@ -98,7 +98,7 @@ with the PRE-change binary (main @ `b0487364`). Post: feature worktree @
 **Verdict: all 37 benchmarks MATCH; winner per benchmark unchanged; the
 previously-broken `queue_drain` family restored (.59x/.56x/.61x vs baseline
 .57x/.60x/.57x).** Only sub-millisecond noise moved (`series_converge`,
-`deep_recursion`, `bit_clear`); several improved (`ring_buffer` now Briv-wins
+`deep_recursion`, `bit_clear`); several improved (`ring_buffer` now Briev-wins
 .95x, `nbody_sqrt` −8%, `enemy_swarm` −8%, `linked_list` −5%). The
 real-terminator codegen change is performance-neutral.
 
@@ -111,8 +111,8 @@ real-terminator codegen change is performance-neutral.
    — fixed.
 4. **Vestigial `return` statement removed** (was the dangling "return
    divergence" claim — resolved by removal, not alignment).
-5. **POST-MERGE, main-only:** stale `free()` of zero-copy `briv_str_to_c`
-   results in `__getenv_briv`/`__getenv_int`/`__print`/`__print_str`/
+5. **POST-MERGE, main-only:** stale `free()` of zero-copy `briev_str_to_c`
+   results in `__getenv_briev`/`__getenv_int`/`__print`/`__print_str`/
    `__eprint_str` crashed any `get_env_int!(BOUND)`-driven program on main —
    surfaced by the merged clang-guarded integration test. Fixed at `9a7e1c10`.
 

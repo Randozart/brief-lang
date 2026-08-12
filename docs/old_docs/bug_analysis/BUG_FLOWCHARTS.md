@@ -1,4 +1,4 @@
-# Briv Compiler Parser Bugs - Visual Flowcharts
+# Briev Compiler Parser Bugs - Visual Flowcharts
 
 ## Bug 1: Nested Block Elements - Algorithm Comparison
 
@@ -154,7 +154,7 @@ is_char_boundary() function:
 ### BROKEN Current Implementation
 
 ```
-Briv Source:
+Briev Source:
   rstruct Counter {
     txn Counter.increment [true][@count + 1 == count] { ... };
     <button b-trigger:click="increment">+</button>
@@ -195,7 +195,7 @@ JavaScript Generation (Line 779):
 ### FIXED Implementation with Consistent Naming
 
 ```
-Briv Source:
+Briev Source:
   rstruct Counter {
     txn Counter.increment [true][@count + 1 == count] { ... };
     <button b-trigger:click="increment">+</button>
@@ -237,7 +237,7 @@ Step 3: Event listener uses full method name:
   ✓ SUCCESS! Method exists and is called correctly!
 
 Data Flow:
-  Briv Source
+  Briev Source
       ↓
   Parser extracts: txn="increment" (from b-trigger:click)
       ↓

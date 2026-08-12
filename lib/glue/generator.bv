@@ -1,5 +1,5 @@
-// glue-generator.bv — Briv-written GLUE bridge generator
-// 2026-07-24: Pure-Briv GLUE pipeline. Uses += for string building.
+// glue-generator.bv — Briev-written GLUE bridge generator
+// 2026-07-24: Pure-Briev GLUE pipeline. Uses += for string building.
 
 $defn generate_bridge(exports: Selection, bridge_name: String) -> String {
     let code = "// Bridge module for " + bridge_name + " — auto-generated\n\n";
@@ -68,7 +68,7 @@ $(Normalized @ highest) {
 
     let bridge_code = generate_bridge(exports, "bridge");
     FileWrite$("glue-out/bridge_pure.bv", bridge_code, true);
-    EmitInfo$("pure-Briv bridge: glue-out/bridge_pure.bv");
+    EmitInfo$("pure-Briev bridge: glue-out/bridge_pure.bv");
 
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");

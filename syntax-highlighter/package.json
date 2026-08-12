@@ -1,17 +1,17 @@
 {
-  "name": "briv-language",
-  "displayName": "Briv Language",
-  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Briv (.bv), Rendered Briv (.rbv), and Embedded Briv (.ebv) files",
+  "name": "briev-language",
+  "displayName": "Briev Language",
+  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Briev (.bv), Rendered Briev (.rbv), and Embedded Briev (.ebv) files",
   "version": "0.1.0",
   "icon": "images/extension-logo.png",
   "publisher": "randozart",
   "main": "./client/extension.js",
   "activationEvents": [
-    "onLanguage:briv",
+    "onLanguage:briev",
     "onLanguage:rbv",
     "onLanguage:ebv",
-    "onLanguage:dbriv",
-    "onLanguage:sbriv",
+    "onLanguage:dbriev",
+    "onLanguage:sbriev",
     "onLanguage:srbv",
     "onLanguage:sebv",
     "onLanguage:abv",
@@ -27,92 +27,92 @@
   "contributes": {
     "languages": [
       {
-        "id": "briv",
-        "aliases": ["Briv", "briv"],
+        "id": "briev",
+        "aliases": ["Briev", "briev"],
         "extensions": [".bv"],
         "icon": {
-          "light": "./images/briv-logo.svg",
-          "dark": "./images/briv-logo.svg"
+          "light": "./images/briev-logo.svg",
+          "dark": "./images/briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "rbv",
-        "aliases": ["Rendered Briv", "rendered-briv", "Briv Render", "briv-render"],
+        "aliases": ["Rendered Briev", "rendered-briev", "Briev Render", "briev-render"],
         "extensions": [".rbv"],
         "icon": {
-          "light": "./images/r-briv-logo.svg",
-          "dark": "./images/r-briv-logo.svg"
+          "light": "./images/r-briev-logo.svg",
+          "dark": "./images/r-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "ebv",
-        "aliases": ["Embedded Briv", "embedded-briv", "Briv Embed", "briv-embed"],
+        "aliases": ["Embedded Briev", "embedded-briev", "Briev Embed", "briev-embed"],
         "extensions": [".ebv"],
         "icon": {
-          "light": "./images/e-briv-logo.svg",
-          "dark": "./images/e-briv-logo.svg"
+          "light": "./images/e-briev-logo.svg",
+          "dark": "./images/e-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
-        "id": "dbriv",
-        "aliases": ["Data Briv", "dbriv", "Briv Data", "briv-data"],
+        "id": "dbriev",
+        "aliases": ["Data Briev", "dbriev", "Briev Data", "briev-data"],
         "extensions": [".dbv", ".dbvl"],
         "icon": {
-          "light": "./images/d-briv-logo.svg",
-          "dark": "./images/d-briv-logo.svg"
+          "light": "./images/d-briev-logo.svg",
+          "dark": "./images/d-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
-        "id": "sbriv",
-        "aliases": ["Strict Briv", "strict-briv"],
+        "id": "sbriev",
+        "aliases": ["Strict Briev", "strict-briev"],
         "extensions": [".sbv"],
         "icon": {
-          "light": "./images/briv-logo.svg",
-          "dark": "./images/briv-logo.svg"
+          "light": "./images/briev-logo.svg",
+          "dark": "./images/briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "srbv",
-        "aliases": ["Strict Rendered Briv", "strict-rendered-briv", "Strict Render", "strict-render"],
+        "aliases": ["Strict Rendered Briev", "strict-rendered-briev", "Strict Render", "strict-render"],
         "extensions": [".srbv"],
         "icon": {
-          "light": "./images/r-briv-logo.svg",
-          "dark": "./images/r-briv-logo.svg"
+          "light": "./images/r-briev-logo.svg",
+          "dark": "./images/r-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "sebv",
-        "aliases": ["Strict Embedded Briv", "strict-embedded-briv", "Strict Embed", "strict-embed"],
+        "aliases": ["Strict Embedded Briev", "strict-embedded-briev", "Strict Embed", "strict-embed"],
         "extensions": [".sebv"],
         "icon": {
-          "light": "./images/e-briv-logo.svg",
-          "dark": "./images/e-briv-logo.svg"
+          "light": "./images/e-briev-logo.svg",
+          "dark": "./images/e-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "abv",
-        "aliases": ["Accelerated Briv", "accelerated-briv", "Briv Accel", "briv-accel"],
+        "aliases": ["Accelerated Briev", "accelerated-briev", "Briev Accel", "briev-accel"],
         "extensions": [".abv"],
         "icon": {
-          "light": "./images/a-briv-logo.svg",
-          "dark": "./images/a-briv-logo.svg"
+          "light": "./images/a-briev-logo.svg",
+          "dark": "./images/a-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "cbv",
-        "aliases": ["Circuit Briv", "circuit-briv", "Briv Circuit", "briv-circuit"],
+        "aliases": ["Circuit Briev", "circuit-briev", "Briev Circuit", "briev-circuit"],
         "extensions": [".cbv"],
         "icon": {
-          "light": "./images/c-briv-logo.svg",
-          "dark": "./images/c-briv-logo.svg"
+          "light": "./images/c-briev-logo.svg",
+          "dark": "./images/c-briev-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
@@ -129,9 +129,9 @@
     ],
     "grammars": [
       {
-        "language": "briv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "language": "briev",
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
         "language": "rbv",
@@ -140,18 +140,18 @@
       },
       {
         "language": "ebv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
-        "language": "dbriv",
-        "scopeName": "source.dbriv",
-        "path": "./syntaxes/dbriv.tmLanguage.json"
+        "language": "dbriev",
+        "scopeName": "source.dbriev",
+        "path": "./syntaxes/dbriev.tmLanguage.json"
       },
       {
-        "language": "sbriv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "language": "sbriev",
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
         "language": "srbv",
@@ -160,18 +160,18 @@
       },
       {
         "language": "sebv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
         "language": "abv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
         "language": "cbv",
-        "scopeName": "source.briv",
-        "path": "./syntaxes/briv.tmLanguage.json"
+        "scopeName": "source.briev",
+        "path": "./syntaxes/briev.tmLanguage.json"
       },
       {
         "language": "beast",
@@ -181,19 +181,19 @@
     ],
     "themes": [
       {
-        "label": "Briv Dark",
+        "label": "Briev Dark",
         "uiTheme": "vs-dark",
-        "path": "./themes/briv-dark.json"
+        "path": "./themes/briev-dark.json"
       },
       {
-        "label": "Briv Light",
+        "label": "Briev Light",
         "uiTheme": "vs",
-        "path": "./themes/briv-light.json"
+        "path": "./themes/briev-light.json"
       }
     ],
     "folding": [
       {
-        "language": "briv",
+        "language": "briev",
         "boundaries": [
           "// === PATH ANALYSIS ===",
           "// === END PATH ANALYSIS ==="
@@ -202,17 +202,17 @@
     ],
     "brackets": [
       {
-        "language": "briv",
+        "language": "briev",
         "open": "{",
         "close": "}"
       },
       {
-        "language": "briv",
+        "language": "briev",
         "open": "[",
         "close": "]"
       },
       {
-        "language": "briv",
+        "language": "briev",
         "open": "(",
         "close": ")"
       }

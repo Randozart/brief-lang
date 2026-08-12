@@ -57,7 +57,7 @@ let val_for_store = if is_native_float {
 } else {
     self.adapt_to_i64(out, indent, val)
 };
-let tv = self.ensure_typed_value(out, indent, &ty, &val_for_store, briv_ty, Some(&val.ty));
+let tv = self.ensure_typed_value(out, indent, &ty, &val_for_store, briev_ty, Some(&val.ty));
 ```
 
 This produces IR structurally identical to `emit_memory_field_store`,

@@ -1,6 +1,6 @@
-// Precompute Sum — C reference for Briv LLVM backend Path 3 benchmark
+// Precompute Sum — C reference for Briev LLVM backend Path 3 benchmark
 //
-// Computes 0..500 sum (twin accumulators). Both C and Briv produce the
+// Computes 0..500 sum (twin accumulators). Both C and Briev produce the
 // same output: 249500.
 //
 // Build:

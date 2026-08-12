@@ -1,4 +1,4 @@
-// Module Registry (Data Briv form).
+// Module Registry (Data Briev form).
 //
 // 2026-08-03 (Phase 3): migration of config/module-registry.toml. Maps
 // registry names (used in `import <name>`) to stdlib paths. Paths are
@@ -40,7 +40,7 @@ spatial: std/spatial.bv;
 xxhash: std/xxhash.bv;
 skiplist: std/skiplist.bv;
 shm: std/shm.bv;
-briv_rt: std/briv_rt.bv;
+briev_rt: std/briev_rt.bv;
 types: std/types.bv;
 core: std/core;
 c: std/c;

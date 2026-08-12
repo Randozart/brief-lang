@@ -23,7 +23,7 @@
 //! FFI Mapper Module
 //!
 //! Handles mapper discovery and loading for the FFI system.
-//! Mappers translate between foreign language types and Briv types.
+//! Mappers translate between foreign language types and Briev types.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ pub struct MapperInfo {
 /// Type of mapper
 #[derive(Debug, Clone, PartialEq)]
 pub enum MapperType {
-    Briv,
+    Briev,
     Rust,
 }
 
@@ -101,7 +101,7 @@ impl MapperRegistry {
                 return Some(MapperInfo {
                     name: name.to_string(),
                     path: dir_path,
-                    mapper_type: MapperType::Briv,
+                    mapper_type: MapperType::Briev,
                 });
             }
 
@@ -111,7 +111,7 @@ impl MapperRegistry {
                 return Some(MapperInfo {
                     name: name.to_string(),
                     path: file_path,
-                    mapper_type: MapperType::Briv,
+                    mapper_type: MapperType::Briev,
                 });
             }
 
@@ -121,7 +121,7 @@ impl MapperRegistry {
                 return Some(MapperInfo {
                     name: name.to_string(),
                     path: direct_path,
-                    mapper_type: MapperType::Briv,
+                    mapper_type: MapperType::Briev,
                 });
             }
         }
@@ -132,7 +132,7 @@ impl MapperRegistry {
     /// Detect mapper type from path
     fn detect_mapper_type(&self, path: &PathBuf) -> MapperType {
         if path.extension().map(|e| e == "bv").unwrap_or(false) {
-            return MapperType::Briv;
+            return MapperType::Briev;
         }
         if path.join("Cargo.toml").exists() {
             return MapperType::Rust;
@@ -142,12 +142,12 @@ impl MapperRegistry {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.flatten() {
                     if entry.path().extension().map(|e| e == "bv").unwrap_or(false) {
-                        return MapperType::Briv;
+                        return MapperType::Briev;
                     }
                 }
             }
         }
-        MapperType::Briv
+        MapperType::Briev
     }
 
     /// Register a mapper manually
@@ -219,9 +219,9 @@ mod tests {
 
     #[test]
     fn test_mapper_type_equality() {
-        assert_eq!(MapperType::Briv, MapperType::Briv);
+        assert_eq!(MapperType::Briev, MapperType::Briev);
         assert_eq!(MapperType::Rust, MapperType::Rust);
-        assert_ne!(MapperType::Briv, MapperType::Rust);
+        assert_ne!(MapperType::Briev, MapperType::Rust);
     }
 }
 

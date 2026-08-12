@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-Replace 98 `inop` declarations across 18 files in `lib/std/os/` with pure-Briv
+Replace 98 `inop` declarations across 18 files in `lib/std/os/` with pure-Briev
 `defn` wrappers calling the `Syscall#` intrinsic. Eliminate the C runtime
 dependency for these operations. Then fix all example `.bv` files that used
 the old lowercase `#` patterns or `inop` declarations.
@@ -26,7 +26,7 @@ the old lowercase `#` patterns or `inop` declarations.
 | Layer | Files | Changes |
 |-------|-------|---------|
 | `lib/std/os/*.bv` | 18 files, 98 `inop` | Each `inop` → `defn` calling `Syscall#(AbstractOp, args...)` |
-| `lib/runtime/briv_rt.c` | 1 file | Keep `briv_syscall`, remove ~70 `briv_*` functions after migration |
+| `lib/runtime/briev_rt.c` | 1 file | Keep `briev_syscall`, remove ~70 `briev_*` functions after migration |
 | `examples/*.bv` | ~14 files | Replace lowercase `#` calls and `inop`-based imports with `import` from `std/os` |
 | `docs/architecture/` | 1 file | Update `docs/architecture/features/plugins.md` |
 
@@ -75,7 +75,7 @@ These are preserved in the replacement `defn` wrappers, with an additional
 Each `inop` with `Int`-only parameters (no `Ptr<Byte>` strings) is replaced
 with a `defn` that calls `Syscall#` with the matching abstract op name:
 
-```briv
+```briev
 // 2026-07-15: Replaced inop with defn + Syscall#(Close, ...)
 defn file_close(fd: Int) -> Int {
     Syscall#(Close, fd, 0, 0, 0, 0, 0)
@@ -225,9 +225,9 @@ Note: `prlimit64` syscall is used (x86_64 number 302).
 
 ## 5. Phase 2: String-Arg Wrappers (~17 inops, needs string conversion)
 
-### 5.1 The Briv string format
+### 5.1 The Briev string format
 
-Briv strings are stored as: `[8-byte length prefix][UTF-8 data]`. The
+Briev strings are stored as: `[8-byte length prefix][UTF-8 data]`. The
 incoming `Ptr<Byte>` points to the length prefix. To create a C string
 (null-terminated) for a syscall, we need:
 
@@ -241,10 +241,10 @@ Memset#(cstr + length, 0, 1)
 
 ### 5.2 Helper function: `lib/std/string_c.bv`
 
-```briv
-// 2026-07-15: Convert Briv string to C-style null-terminated string.
+```briev
+// 2026-07-15: Convert Briev string to C-style null-terminated string.
 // Allocates memory via Malloc# — caller must free.
-// Input: ptr to Briv string (length prefix + UTF-8 data)
+// Input: ptr to Briev string (length prefix + UTF-8 data)
 // Returns: ptr to C string (null-terminated)
 
 defn to_c_string(s: Ptr<Byte>) -> Ptr<Byte> {
@@ -322,14 +322,14 @@ After Phase 1, these can import from `std/os`:
 ## 8. Phase 5: C Runtime Cleanup
 
 After all 98 `inop` declarations are migrated, remove the corresponding
-`briv_*` functions from `lib/runtime/briv_rt.c`. Keep:
+`briev_*` functions from `lib/runtime/briev_rt.c`. Keep:
 
-- `briv_syscall` (the new core)
+- `briev_syscall` (the new core)
 - `__rt_init`, `__rt_wait` (runtime initialization — needed by main)
-- `briv_str_to_c` (until Phase 2 is complete)
-- `briv_pagesize`, `briv_cpu_count` (until `Sysconf#` is added)
+- `briev_str_to_c` (until Phase 2 is complete)
+- `briev_pagesize`, `briev_cpu_count` (until `Sysconf#` is added)
 
-Delete all other `briv_*` functions (~50 functions).
+Delete all other `briev_*` functions (~50 functions).
 
 ---
 
@@ -349,16 +349,16 @@ assert!(close_call.contains("Syscall#(Close, 3"));
 ### 9.2 Test files to create/modify
 
 - `src/backend/llvm/intrinsics.rs` — add `test_syscall_emits_call`:
-  Verify `Syscall#(Open, 1,2,3,4,5,6)` emits `call i64 @briv_syscall`
+  Verify `Syscall#(Open, 1,2,3,4,5,6)` emits `call i64 @briev_syscall`
 - `src/interpreter/intrinsics.rs` — add `test_syscall_abstract_op`:
   Verify `Syscall#(GetPid, ...)` resolves abstract op to number 39
 
 ### 9.3 Integration test
 
-After Phase 1, verify that `briv check` passes for a program using
+After Phase 1, verify that `briev check` passes for a program using
 `Syscall#` for file operations:
 
-```briv
+```briev
 import { file_close } from "std/os";
 defn main() -> Int { Syscall#(GetPid, 0,0,0,0,0,0); term 0; };
 ```
@@ -371,7 +371,7 @@ defn main() -> Int { Syscall#(GetPid, 0,0,0,0,0,0); term 0; };
 |-------|-----|
 | `cargo test --lib` | All 860+ tests pass |
 | `cargo build --release` | No warnings |
-| `briv check` on rewritten .bv files | Each `lib/std/os/*.bv` parses and passes type check |
+| `briev check` on rewritten .bv files | Each `lib/std/os/*.bv` parses and passes type check |
 | No remaining `inop` in `lib/std/os/` | `grep -r '^inop' lib/std/os/` returns empty |
 | No remaining lowercase `#` calls in examples | `grep -rn '[a-z][a-z0-9_]*#(' examples/` returns only `AddressOf#`, `PutChar#`, `Print#` |
 | Praetor on new/changed Rust code | Complexity ≤ 15, lines ≤ 100, params ≤ 6 |

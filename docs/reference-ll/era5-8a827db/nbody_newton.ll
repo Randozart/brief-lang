@@ -112,80 +112,80 @@ declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
 declare i64 @__str_to_int(i8*) #1
-declare i64 @briv_open(i64, i64, i64) #1
-declare i64 @briv_close(i64) #1
-declare i64 @briv_read(i64, i64, i64) #1
-declare i64 @briv_write(i64, i64, i64) #1
-declare i64 @briv_lseek(i64, i64, i64) #1
-declare i64 @briv_pread(i64, i64, i64, i64) #1
-declare i64 @briv_pwrite(i64, i64, i64, i64) #1
-declare i64 @briv_stat(i64, i64) #1
-declare i64 @briv_fstat(i64) #1
-declare i64 @briv_truncate(i64, i64) #1
-declare i64 @briv_ftruncate(i64, i64) #1
-declare i64 @briv_fsync(i64) #1
-declare i64 @briv_dup(i64) #1
-declare i64 @briv_dup2(i64, i64) #1
-declare i64 @briv_fcntl(i64, i64, i64) #1
-declare i64 @briv_socket(i64, i64, i64) #1
-declare i64 @briv_bind(i64, i64, i64) #1
-declare i64 @briv_listen(i64, i64) #1
-declare i64 @briv_accept(i64, i64, i64) #1
-declare i64 @briv_connect(i64, i64, i64) #1
-declare i64 @briv_send(i64, i64, i64, i64) #1
-declare i64 @briv_recv(i64, i64, i64, i64) #1
-declare i64 @briv_sendto(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_recvfrom(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_setsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @briv_getsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @briv_shutdown(i64, i64) #1
-declare i64 @briv_mkdir(i64, i64) #1
-declare i64 @briv_rmdir(i64) #1
-declare i64 @briv_unlink(i64) #1
-declare i64 @briv_rename(i64, i64) #1
-declare i64 @briv_symlink(i64, i64) #1
-declare i64 @briv_link(i64, i64) #1
-declare i64 @briv_chdir(i64) #1
-declare i64 @briv_chmod(i64, i64) #1
-declare i64 @briv_chown(i64, i64, i64) #1
-declare i64 @briv_umask(i64) #1
-declare i64 @briv_access(i64, i64) #1
-declare i64 @briv_mmap(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_munmap(i64, i64) #1
-declare i64 @briv_mprotect(i64, i64, i64) #1
-declare i64 @briv_brk(i64) #1
-declare i64 @briv_mlock(i64, i64) #1
-declare i64 @briv_pipe(i64) #1
-declare i64 @briv_shm_open(i64, i64, i64) #1
-declare i64 @briv_shm_unlink(i64) #1
-declare i64 @briv_sem_open(i64, i64, i64, i64) #1
-declare i64 @briv_sem_wait(i64) #1
-declare i64 @briv_sem_post(i64) #1
-declare i64 @briv_getpid() #1
-declare i64 @briv_getppid() #1
-declare i64 @briv_clock_gettime(i64, i64) #1
-declare i64 @briv_nanosleep(i64, i64) #1
-declare i64 @briv_getenv(i64, i64, i64) #1
-declare i64 @briv_setenv(i64, i64, i64) #1
-declare i64 @briv_unsetenv(i64) #1
-declare i64 @briv_futex(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_open(i64, i64, i64) #1
+declare i64 @briev_close(i64) #1
+declare i64 @briev_read(i64, i64, i64) #1
+declare i64 @briev_write(i64, i64, i64) #1
+declare i64 @briev_lseek(i64, i64, i64) #1
+declare i64 @briev_pread(i64, i64, i64, i64) #1
+declare i64 @briev_pwrite(i64, i64, i64, i64) #1
+declare i64 @briev_stat(i64, i64) #1
+declare i64 @briev_fstat(i64) #1
+declare i64 @briev_truncate(i64, i64) #1
+declare i64 @briev_ftruncate(i64, i64) #1
+declare i64 @briev_fsync(i64) #1
+declare i64 @briev_dup(i64) #1
+declare i64 @briev_dup2(i64, i64) #1
+declare i64 @briev_fcntl(i64, i64, i64) #1
+declare i64 @briev_socket(i64, i64, i64) #1
+declare i64 @briev_bind(i64, i64, i64) #1
+declare i64 @briev_listen(i64, i64) #1
+declare i64 @briev_accept(i64, i64, i64) #1
+declare i64 @briev_connect(i64, i64, i64) #1
+declare i64 @briev_send(i64, i64, i64, i64) #1
+declare i64 @briev_recv(i64, i64, i64, i64) #1
+declare i64 @briev_sendto(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_recvfrom(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_setsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briev_getsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briev_shutdown(i64, i64) #1
+declare i64 @briev_mkdir(i64, i64) #1
+declare i64 @briev_rmdir(i64) #1
+declare i64 @briev_unlink(i64) #1
+declare i64 @briev_rename(i64, i64) #1
+declare i64 @briev_symlink(i64, i64) #1
+declare i64 @briev_link(i64, i64) #1
+declare i64 @briev_chdir(i64) #1
+declare i64 @briev_chmod(i64, i64) #1
+declare i64 @briev_chown(i64, i64, i64) #1
+declare i64 @briev_umask(i64) #1
+declare i64 @briev_access(i64, i64) #1
+declare i64 @briev_mmap(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_munmap(i64, i64) #1
+declare i64 @briev_mprotect(i64, i64, i64) #1
+declare i64 @briev_brk(i64) #1
+declare i64 @briev_mlock(i64, i64) #1
+declare i64 @briev_pipe(i64) #1
+declare i64 @briev_shm_open(i64, i64, i64) #1
+declare i64 @briev_shm_unlink(i64) #1
+declare i64 @briev_sem_open(i64, i64, i64, i64) #1
+declare i64 @briev_sem_wait(i64) #1
+declare i64 @briev_sem_post(i64) #1
+declare i64 @briev_getpid() #1
+declare i64 @briev_getppid() #1
+declare i64 @briev_clock_gettime(i64, i64) #1
+declare i64 @briev_nanosleep(i64, i64) #1
+declare i64 @briev_getenv(i64, i64, i64) #1
+declare i64 @briev_setenv(i64, i64, i64) #1
+declare i64 @briev_unsetenv(i64) #1
+declare i64 @briev_futex(i64, i64, i64, i64, i64, i64) #1
 declare i64 @__ioctl__(i64, i64, i64) #1
 declare i64 @__isatty__(i64) #1
 declare i64 @__print(i64) #1
-declare i64 @briv_getuid() #1
-declare i64 @briv_geteuid() #1
-declare i64 @briv_getgid() #1
-declare i64 @briv_getegid() #1
-declare i64 @briv_sched_yield() #1
-declare i64 @briv_getpriority(i64, i64) #1
-declare i64 @briv_setpriority(i64, i64, i64) #1
-declare i64 @briv_getrlimit(i64) #1
-declare i64 @briv_setrlimit(i64, i64) #1
-declare i64 @briv_pagesize() #1
-declare i64 @briv_cpu_count() #1
-declare i64 @briv_ttyname(i64) #1
-declare i64 @briv_ring_push(i64, i64) #1
-declare i64 @briv_ring_pop(i64) #1
+declare i64 @briev_getuid() #1
+declare i64 @briev_geteuid() #1
+declare i64 @briev_getgid() #1
+declare i64 @briev_getegid() #1
+declare i64 @briev_sched_yield() #1
+declare i64 @briev_getpriority(i64, i64) #1
+declare i64 @briev_setpriority(i64, i64, i64) #1
+declare i64 @briev_getrlimit(i64) #1
+declare i64 @briev_setrlimit(i64, i64) #1
+declare i64 @briev_pagesize() #1
+declare i64 @briev_cpu_count() #1
+declare i64 @briev_ttyname(i64) #1
+declare i64 @briev_ring_push(i64, i64) #1
+declare i64 @briev_ring_pop(i64) #1
 declare i64 @__tty_read_key__(i64) #1
 declare i64 @__tty_size__() #1
 declare i64 @cpu_count() #1
@@ -652,182 +652,182 @@ define void @copy(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1, i6
 
 define internal i64 @file_open(i64 %path, i64 %flags, i64 %mode) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_open (i64 %path, i64 %flags, i64 %mode);
+  %r = call i64@briev_open (i64 %path, i64 %flags, i64 %mode);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_close(i64 %fd) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_close (i64 %fd);
+  %r = call i64@briev_close (i64 %fd);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_read(i64 %fd, i64 %buf, i64 %count) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_read (i64 %fd, i64 %buf, i64 %count);
+  %r = call i64@briev_read (i64 %fd, i64 %buf, i64 %count);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_write(i64 %fd, i64 %buf, i64 %count) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_write (i64 %fd, i64 %buf, i64 %count);
+  %r = call i64@briev_write (i64 %fd, i64 %buf, i64 %count);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_lseek(i64 %fd, i64 %offset, i64 %whence) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_lseek (i64 %fd, i64 %offset, i64 %whence);
+  %r = call i64@briev_lseek (i64 %fd, i64 %offset, i64 %whence);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_pread(i64 %fd, i64 %buf, i64 %count, i64 %offset) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_pread (i64 %fd, i64 %buf, i64 %count, i64 %offset);
+  %r = call i64@briev_pread (i64 %fd, i64 %buf, i64 %count, i64 %offset);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_pwrite(i64 %fd, i64 %buf, i64 %count, i64 %offset) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_pwrite (i64 %fd, i64 %buf, i64 %count, i64 %offset);
+  %r = call i64@briev_pwrite (i64 %fd, i64 %buf, i64 %count, i64 %offset);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_stat(i64 %path, i64 %buf) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_stat (i64 %path, i64 %buf);
+  %r = call i64@briev_stat (i64 %path, i64 %buf);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_fstat(i64 %fd, i64 %buf) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_fstat (i64 %fd, i64 %buf);
+  %r = call i64@briev_fstat (i64 %fd, i64 %buf);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_ftruncate(i64 %fd, i64 %length) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_ftruncate (i64 %fd, i64 %length);
+  %r = call i64@briev_ftruncate (i64 %fd, i64 %length);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_fsync(i64 %fd) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_fsync (i64 %fd);
+  %r = call i64@briev_fsync (i64 %fd);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_dup(i64 %fd) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_dup (i64 %fd);
+  %r = call i64@briev_dup (i64 %fd);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_dup2(i64 %oldfd, i64 %newfd) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_dup2 (i64 %oldfd, i64 %newfd);
+  %r = call i64@briev_dup2 (i64 %oldfd, i64 %newfd);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @file_fcntl(i64 %fd, i64 %cmd, i64 %arg) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_fcntl (i64 %fd, i64 %cmd, i64 %arg);
+  %r = call i64@briev_fcntl (i64 %fd, i64 %cmd, i64 %arg);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_socket(i64 %domain, i64 %type_, i64 %protocol) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_socket (i64 %domain, i64 %type_, i64 %protocol);
+  %r = call i64@briev_socket (i64 %domain, i64 %type_, i64 %protocol);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_bind(i64 %fd, i64 %addr, i64 %addrlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_bind (i64 %fd, i64 %addr, i64 %addrlen);
+  %r = call i64@briev_bind (i64 %fd, i64 %addr, i64 %addrlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_listen(i64 %fd, i64 %backlog) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_listen (i64 %fd, i64 %backlog);
+  %r = call i64@briev_listen (i64 %fd, i64 %backlog);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_accept(i64 %fd, i64 %addr, i64 %addrlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_accept (i64 %fd, i64 %addr, i64 %addrlen);
+  %r = call i64@briev_accept (i64 %fd, i64 %addr, i64 %addrlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_connect(i64 %fd, i64 %addr, i64 %addrlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_connect (i64 %fd, i64 %addr, i64 %addrlen);
+  %r = call i64@briev_connect (i64 %fd, i64 %addr, i64 %addrlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_send(i64 %fd, i64 %buf, i64 %len, i64 %flags) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_send (i64 %fd, i64 %buf, i64 %len, i64 %flags);
+  %r = call i64@briev_send (i64 %fd, i64 %buf, i64 %len, i64 %flags);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_recv(i64 %fd, i64 %buf, i64 %len, i64 %flags) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_recv (i64 %fd, i64 %buf, i64 %len, i64 %flags);
+  %r = call i64@briev_recv (i64 %fd, i64 %buf, i64 %len, i64 %flags);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_sendto(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_sendto (i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen);
+  %r = call i64@briev_sendto (i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_recvfrom(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_recvfrom (i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen);
+  %r = call i64@briev_recvfrom (i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_setsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_setsockopt (i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
+  %r = call i64@briev_setsockopt (i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_getsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getsockopt (i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
+  %r = call i64@briev_getsockopt (i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_shutdown(i64 %fd, i64 %how) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_shutdown (i64 %fd, i64 %how);
+  %r = call i64@briev_shutdown (i64 %fd, i64 %how);
   ret i64 %r;
   ret i64 0
 }
@@ -848,42 +848,42 @@ define internal i64 @__sys_sigprocmask(i64 %how, i64 %set, i64 %old_set) local_u
 
 define internal i64 @pipe(i64 %pipefd) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_pipe (i64 %pipefd);
+  %r = call i64@briev_pipe (i64 %pipefd);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @shm_open(i64 %name, i64 %oflag, i64 %mode) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_shm_open (i64 %name, i64 %oflag, i64 %mode);
+  %r = call i64@briev_shm_open (i64 %name, i64 %oflag, i64 %mode);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @shm_unlink(i64 %name) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_shm_unlink (i64 %name);
+  %r = call i64@briev_shm_unlink (i64 %name);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @sem_open(i64 %name, i64 %oflag, i64 %mode, i64 %value) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_sem_open (i64 %name, i64 %oflag, i64 %mode, i64 %value);
+  %r = call i64@briev_sem_open (i64 %name, i64 %oflag, i64 %mode, i64 %value);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @sem_wait(i64 %sem) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_sem_wait (i64 %sem);
+  %r = call i64@briev_sem_wait (i64 %sem);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @sem_post(i64 %sem) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_sem_post (i64 %sem);
+  %r = call i64@briev_sem_post (i64 %sem);
   ret i64 %r;
   ret i64 0
 }
@@ -946,35 +946,35 @@ define internal i64 @__sys_condvar_broadcast(i64 %cptr) local_unnamed_addr #0 {
 
 define internal i64 @mkdir(i64 %path, i64 %mode) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_mkdir (i64 %path, i64 %mode);
+  %r = call i64@briev_mkdir (i64 %path, i64 %mode);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @rmdir(i64 %path) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_rmdir (i64 %path);
+  %r = call i64@briev_rmdir (i64 %path);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @unlink(i64 %path) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_unlink (i64 %path);
+  %r = call i64@briev_unlink (i64 %path);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @rename(i64 %oldpath, i64 %newpath) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_rename (i64 %oldpath, i64 %newpath);
+  %r = call i64@briev_rename (i64 %oldpath, i64 %newpath);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @symlink(i64 %target, i64 %linkpath) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_symlink (i64 %target, i64 %linkpath);
+  %r = call i64@briev_symlink (i64 %target, i64 %linkpath);
   ret i64 %r;
   ret i64 0
 }
@@ -988,7 +988,7 @@ define internal i64 @read_link(i64 %path, i64 %buf, i64 %bufsiz) local_unnamed_a
 
 define internal i64 @link_path(i64 %oldpath, i64 %newpath) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_link (i64 %oldpath, i64 %newpath);
+  %r = call i64@briev_link (i64 %oldpath, i64 %newpath);
   ret i64 %r;
   ret i64 0
 }
@@ -1002,7 +1002,7 @@ define internal i64 @getcwd(i64 %buf, i64 %size) local_unnamed_addr #0 {
 
 define internal i64 @chdir(i64 %path) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_chdir (i64 %path);
+  %r = call i64@briev_chdir (i64 %path);
   ret i64 %r;
   ret i64 0
 }
@@ -1016,42 +1016,42 @@ define internal i64 @readdir(i64 %dirp, i64 %buf) local_unnamed_addr #0 {
 
 define internal i64 @chmod(i64 %path, i64 %mode) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_chmod (i64 %path, i64 %mode);
+  %r = call i64@briev_chmod (i64 %path, i64 %mode);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @chown(i64 %path, i64 %owner, i64 %group) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_chown (i64 %path, i64 %owner, i64 %group);
+  %r = call i64@briev_chown (i64 %path, i64 %owner, i64 %group);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @umask(i64 %mask) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_umask (i64 %mask);
+  %r = call i64@briev_umask (i64 %mask);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @access(i64 %path, i64 %mode) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_access (i64 %path, i64 %mode);
+  %r = call i64@briev_access (i64 %path, i64 %mode);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_getpid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getpid ();
+  %r = call i64@briev_getpid ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_getppid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getppid ();
+  %r = call i64@briev_getppid ();
   ret i64 %r;
   ret i64 0
 }
@@ -1093,77 +1093,77 @@ define internal i64 @__sys_isatty(i64 %fd) local_unnamed_addr #0 {
 
 define internal i64 @__sys_getuid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getuid ();
+  %r = call i64@briev_getuid ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_geteuid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_geteuid ();
+  %r = call i64@briev_geteuid ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_getgid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getgid ();
+  %r = call i64@briev_getgid ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_getegid() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_getegid ();
+  %r = call i64@briev_getegid ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_clock_gettime(i64 %clock_id, i64 %tp) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_clock_gettime (i64 %clock_id, i64 %tp);
+  %r = call i64@briev_clock_gettime (i64 %clock_id, i64 %tp);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_nanosleep(i64 %req, i64 %rem) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_nanosleep (i64 %req, i64 %rem);
+  %r = call i64@briev_nanosleep (i64 %req, i64 %rem);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @mmap(i64 %addr, i64 %length, i64 %prot, i64 %flags, i64 %fd, i64 %offset) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_mmap (i64 %addr, i64 %length, i64 %prot, i64 %flags, i64 %fd, i64 %offset);
+  %r = call i64@briev_mmap (i64 %addr, i64 %length, i64 %prot, i64 %flags, i64 %fd, i64 %offset);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @munmap(i64 %addr, i64 %length) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_munmap (i64 %addr, i64 %length);
+  %r = call i64@briev_munmap (i64 %addr, i64 %length);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @mprotect(i64 %addr, i64 %length, i64 %prot) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_mprotect (i64 %addr, i64 %length, i64 %prot);
+  %r = call i64@briev_mprotect (i64 %addr, i64 %length, i64 %prot);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @brk(i64 %addr) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_brk (i64 %addr);
+  %r = call i64@briev_brk (i64 %addr);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @mlock(i64 %addr, i64 %length) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_mlock (i64 %addr, i64 %length);
+  %r = call i64@briev_mlock (i64 %addr, i64 %length);
   ret i64 %r;
   ret i64 0
 }
@@ -1177,7 +1177,7 @@ define internal i64 @__sys_getrandom(i64 %buf, i64 %len, i64 %flags) local_unnam
 
 define internal i64 @__sys_sched_yield() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_sched_yield ();
+  %r = call i64@briev_sched_yield ();
   ret i64 %r;
   ret i64 0
 }
@@ -1212,14 +1212,14 @@ define internal i64 @__sys_hostname() local_unnamed_addr #0 {
 
 define internal i64 @__sys_pagesize() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_pagesize ();
+  %r = call i64@briev_pagesize ();
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_cpu_count() local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_cpu_count ();
+  %r = call i64@briev_cpu_count ();
   ret i64 %r;
   ret i64 0
 }
@@ -1268,14 +1268,14 @@ define internal i64 @__sys_backtrace() local_unnamed_addr #0 {
 
 define internal i64 @__sys_ring_push(i64 %handle, i64 %val) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_ring_push (i64 %handle, i64 %val);
+  %r = call i64@briev_ring_push (i64 %handle, i64 %val);
   ret i64 %r;
   ret i64 0
 }
 
 define internal i64 @__sys_ring_pop(i64 %handle) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_ring_pop (i64 %handle);
+  %r = call i64@briev_ring_pop (i64 %handle);
   ret i64 %r;
   ret i64 0
 }
@@ -1339,7 +1339,7 @@ define internal i64 @fence() local_unnamed_addr #0 {
 
 define internal i64 @futex(i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3) local_unnamed_addr #0 {
   entry:
-  %r = call i64@briv_futex (i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3);
+  %r = call i64@briev_futex (i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3);
   ret i64 %r;
   ret i64 0
 }
@@ -5074,7 +5074,7 @@ attributes #10 = {
     mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: read)
 }
 
-!0 = !{!"Briv"}
+!0 = !{!"Briev"}
 !1 = !{!"Int", !0}
 !2 = !{!"Char", !0}
 !3 = !{!"Float", !0}

@@ -355,7 +355,7 @@ impl LlvmBackend {
             if txn.is_reactive {
                 let pre = &txn.contract.pre_condition;
                 // 2026-08-06 (beginprogram plan): the precondition may read the
-                // node's `@briv_begin_<name>` entry flag — bind the txn name.
+                // node's `@briev_begin_<name>` entry flag — bind the txn name.
                 self.fun.txn_name = name.clone();
                 let cond_val = self.emit_expr(out, pre, "  ");
                 let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
@@ -507,9 +507,9 @@ impl LlvmBackend {
         sorted_keys.sort();
         for name in &sorted_keys {
             if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                let (val, briv_ty) = self.emit_state_load_i64_by_idx(out, "  ", idx);
+                let (val, briev_ty) = self.emit_state_load_i64_by_idx(out, "  ", idx);
                 self.fun.last_val_temps.insert(name.clone(), val.clone());
-                self.fun.last_val_types.insert(name.clone(), briv_ty);
+                self.fun.last_val_types.insert(name.clone(), briev_ty);
             }
         }
     }

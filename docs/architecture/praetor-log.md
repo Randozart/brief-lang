@@ -26,7 +26,7 @@ is stale (June schema `{total_diagnostics}` vs current `{failures,passed,
 total_diagnostics}`) and should be treated as informational until rewritten.
 
 **Pre-commit hook removed (2026-08-01):** the shared `pre-commit` hook
-(`../briv-compiler/.git/hooks/pre-commit`, June 2026, runs on this worktree)
+(`../briev-compiler/.git/hooks/pre-commit`, June 2026, runs on this worktree)
 was **broken the same way** — it built a comma-separated list of changed files
 and passed it to `--target`, which is directory-only, so it silently passed
 without analyzing anything. Per the no-hook decision, the hook was **deleted**,
@@ -211,8 +211,8 @@ All new functions expected to pass Praetor strict limits (complexity ≤ 15, lin
 ## 2026-06-12 — Highlighter/LSP Syntax Audit
 
 **Files audited:**
-- `syntax-highlighter/syntaxes/briv.tmLanguage.json` (412 lines)
-- `syntax-highlighter/syntaxes/dbriv.tmLanguage.json` (330 lines)
+- `syntax-highlighter/syntaxes/briev.tmLanguage.json` (412 lines)
+- `syntax-highlighter/syntaxes/dbriev.tmLanguage.json` (330 lines)
 - `src/lsp.rs` (completion list at line 558-566)
 
 **Gaps identified:**

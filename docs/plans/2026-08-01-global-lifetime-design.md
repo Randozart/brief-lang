@@ -4,13 +4,13 @@
 **Status:** Design → implementation (Phase D2 of
 `2026-07-31-collections-watchdogs-memory.md`). The `global_lifetime` stress
 benchmark pins this end-state.
-**Worktree:** `briv-compiler-cwm` (`feat/collections-watchdogs-memory`)
+**Worktree:** `briev-compiler-cwm` (`feat/collections-watchdogs-memory`)
 
 **Plan map:** the garbage-scheduler design. It is extended by the free-check
 (Phase 5 of the master plan —
 [2026-08-01-consumptive-operators-lifetime-and-c-surface.md](2026-08-01-consumptive-operators-lifetime-and-c-surface.md)),
 which adds the runtime refcount, the `free`/`keep` body annotations, and
-`brivc memcheck` on top of the compile-time proof recorded here. Related:
+`brievc memcheck` on top of the compile-time proof recorded here. Related:
 [2026-08-01-lifetime-hints-and-intrinsic-audit.md](2026-08-01-lifetime-hints-and-intrinsic-audit.md)
 (Phases 1–4) and
 [2026-07-31-collections-watchdogs-memory.md](2026-07-31-collections-watchdogs-memory.md).
@@ -119,15 +119,15 @@ The benchmark makes the leak/free observable and calibrates correctness:
 - A state `Ptr<Int>` heap buffer, written by an init txn, read by a consumer
   txn, then provably dead.
 - The consumer prints a value derived from the buffer; a `Free#` counter in the
-  runtime (`__briv_free_count`) is printed at the end.
+  runtime (`__briev_free_count`) is printed at the end.
 - **Correctness contract**: (a) the freed buffer is never dereferenced after the
   free (a read-after-free is a compile error, not a runtime crash); (b) the free
   count matches the allocation count exactly (no leak, no double-free).
 
 The C reference mirrors the same allocate/read/free lifecycle and prints the
-same values; the Briv version additionally prints the free count (the
+same values; the Briev version additionally prints the free count (the
 `_sym`/`_idio` split: `_sym` mirrors C step-for-step, `_idio` uses the
-Briv-native free-after-last-consumer form).
+Briev-native free-after-last-consumer form).
 
 ## 5. Edge cases
 

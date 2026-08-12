@@ -1,4 +1,4 @@
-# Briv v6.1 Implementation Progress Report
+# Briev v6.1 Implementation Progress Report
 **Date:** 2026-04-05  
 **Status:** Major Milestones Achieved - 4/4 Critical Issues + Symbolic Executor Complete
 
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The Briv v6.1 implementation phase has achieved **critical foundational work**:
+The Briev v6.1 implementation phase has achieved **critical foundational work**:
 
 ✅ **All 4 Critical Bug Fixes Completed:**
 1. Issue #1: Guard block syntax `[condition] { statements }` ✅
@@ -78,7 +78,7 @@ The Briv v6.1 implementation phase has achieved **critical foundational work**:
 - Peek-based parsing (no backtracking needed)
 
 **Example:**
-```briv
+```briev
 defn divide(a: Int, b: Int) [b != 0][result == a / b] -> result: Int {
   term a / b;
 };
@@ -102,7 +102,7 @@ defn divide(a: Int, b: Int) [b != 0][result == a / b] -> result: Int {
 8. **Annotator** (src/annotator.rs): Formatting for both syntaxes
 
 **Syntax Examples:**
-```briv
+```briev
 // Flat syntax (original) - still works
 [x > 100] &transfers = transfers + 1;
 [x > 100] &total = total + x;
@@ -136,7 +136,7 @@ defn divide(a: Int, b: Int) [b != 0][result == a / b] -> result: Int {
 - `#` comments still work for backward compat
 
 **Example:**
-```briv
+```briev
 txn transfer [pre][post] {
   &balance = balance - 10;  // Perform transfer
   // This comment is ignored
@@ -221,7 +221,7 @@ The implementation revealed several important design patterns:
    - Prior-state comparisons (@variable syntax)
    - Path enumeration through guards
 
-2. **Parser Patterns**: Briv's parser handles optional names effectively using peek-ahead without full backtracking, maintaining efficiency.
+2. **Parser Patterns**: Briev's parser handles optional names effectively using peek-ahead without full backtracking, maintaining efficiency.
 
 3. **Guard Block Uniformity**: Changing `Statement::Guarded` from single statement to Vec<Statement> propagated cleanly through 8 files, demonstrating good separation of concerns.
 
@@ -232,7 +232,7 @@ The implementation revealed several important design patterns:
 ## Build Status
 
 ```
-Compiling briv-compiler v0.1.0
+Compiling briev-compiler v0.1.0
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.67s
 
 Library tests: 23/23 ✓

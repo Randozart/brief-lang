@@ -10,7 +10,7 @@
 // is meaningful.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/bit_clear.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/bit_clear.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: bit_clear_c.c

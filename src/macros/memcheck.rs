@@ -1,4 +1,4 @@
-//! `brivc memcheck <file.bv>` — the garbage-scheduler diagnostics subcommand.
+//! `brievc memcheck <file.bv>` — the garbage-scheduler diagnostics subcommand.
 //!
 //! 2026-08-01 (Phase 5): reports, per heap-backed state field, whether the
 //! garbage scheduler proved a last use and scheduled a free (and after which

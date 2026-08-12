@@ -26,7 +26,7 @@ The parser rejects `[true]` postconditions even when the precondition is meaning
 
 **Pattern**: `uni stmt(StmtLet(name, _, Some(init), _, _)) = {`
 
-The Briv parser does not support `Some(init)` as a sub-pattern inside a `uni` match. The `Some()` constructor syntax is interpreted as a function call.
+The Briev parser does not support `Some(init)` as a sub-pattern inside a `uni` match. The `Some()` constructor syntax is interpreted as a function call.
 
 **Fix**: Restructure to match without `Some`:
 ```
@@ -56,7 +56,7 @@ Same pattern: function returns `Bool`, postcondition is trivial `[true]`.
 
 **Errors**:
 - `"expected identifier, found 'Some(Ok(Registry))'"` at line 113 — `.unwrap()` in `let reg = hint.unwrap();`
-- `let mut spill_instrs = ...` at lines 151, 154, 256-257, 418-419, 1385+ — `mut` is not valid Briv
+- `let mut spill_instrs = ...` at lines 151, 154, 256-257, 418-419, 1385+ — `mut` is not valid Briev
 
 **Fix for `.unwrap()`**: Replace `let reg = hint.unwrap()` with the two-step pattern:
 ```
@@ -66,10 +66,10 @@ Same pattern: function returns `Bool`, postcondition is trivial `[true]`.
 };
 ```
 
-**Fix for `let mut`**: In Briv, mutation uses `&var = value` on the second assignment, not `let mut`. Replace:
+**Fix for `let mut`**: In Briev, mutation uses `&var = value` on the second assignment, not `let mut`. Replace:
 - `let mut spill_instrs = []` → `let spill_instrs = []`
 - `&spill_instrs = ...` (second/third assignments stay as `&` mutation)
-This works because `let` declarations are immutable rebindings in Briv — the first `let` creates the binding, subsequent `&` rebindings mutate.
+This works because `let` declarations are immutable rebindings in Briev — the first `let` creates the binding, subsequent `&` rebindings mutate.
 
 **Spread across ~5 locations in this file**.
 
@@ -101,7 +101,7 @@ uni ty(TypeList(inner)) = {
     ...
 ```
 
-The `<` inside the string literal `"Vec<"` is being parsed as a comparison operator. The Briv parser (or lexer) treats `<` as `OpLess` regardless of string context.
+The `<` inside the string literal `"Vec<"` is being parsed as a comparison operator. The Briev parser (or lexer) treats `<` as `OpLess` regardless of string context.
 
 **Fix**: Escape the `<` or use string concatenation to avoid literal `<`:
 `s = s + "Vec" + "<";` or `s = s + "Vec<";` → but that has the same problem.
@@ -123,7 +123,7 @@ If the lexer truly doesn't handle `<` inside strings, this will require a lexer 
 
 **Code**: `Int(Int)` where `Int` is used both as variant name and parameter type.
 
-The Briv lexer reserves `Int` as a keyword, so it cannot be used as an enum variant identifier.
+The Briev lexer reserves `Int` as a keyword, so it cannot be used as an enum variant identifier.
 
 **Fix**: Rename the variant — `IntegerLiteral` or `IntLiteral` instead of `Int`.
 
@@ -133,7 +133,7 @@ The Briv lexer reserves `Int` as a keyword, so it cannot be used as an enum vari
 
 **Error**: `"expected ')', found 'txn'"` at line 204
 
-**Code**: `defn transaction_to_vhdl(txn: Transaction, ...)` — `Transaction` is a reserved keyword in Briv, so the parser chokes when it appears as a type name in a parameter.
+**Code**: `defn transaction_to_vhdl(txn: Transaction, ...)` — `Transaction` is a reserved keyword in Briev, so the parser chokes when it appears as a type name in a parameter.
 
 **Fix**: Replace `Transaction` with the qualified path `compiler.ast.Transaction` or rename the parameter type to avoid the keyword. Easiest: use `Txn` or `TransactionType` as the type name if it's a local struct, or reference the full path.
 
@@ -145,14 +145,14 @@ The Briv lexer reserves `Int` as a keyword, so it cannot be used as an enum vari
 
 **Key fixes needed**:
 
-**a) `comptype`** (line 41): Replace Rust comptime enum definition with a regular Briv enum.
+**a) `comptype`** (line 41): Replace Rust comptime enum definition with a regular Briev enum.
 
 **b) Integer shorthand types** (~30+ occurrences): Replace:
 - `u8` → `UInt[8]`
 - `u32` → `UInt[32]`
 - `i32` → `Int[32]`
 - `List<u8>` → `List<UInt[8]>`
-- `Vec<u8>` → `List<UInt[8]>` (Briv uses List, not Vec)
+- `Vec<u8>` → `List<UInt[8]>` (Briev uses List, not Vec)
 
 **c) Type annotations in let bindings** (if any): `let x: u32 = ...` → `let x: UInt[32] = ...`
 
@@ -164,9 +164,9 @@ The Briv lexer reserves `Int` as a keyword, so it cannot be used as an enum vari
 
 **a) `use std::string_builder;`**: Replace with `import std.string_builder;`.
 
-**b) `output: &mut String`** (line 228): Briv does not have `&mut` reference types. Since `String` is passed by value in Briv, the function can return the modified string or use a different pattern.
+**b) `output: &mut String`** (line 228): Briev does not have `&mut` reference types. Since `String` is passed by value in Briev, the function can return the modified string or use a different pattern.
 
-**Fix**: Change signature from `(..., output: &mut String)` to `(..., output: String) -> String` and return the modified string. Or if mutation is needed, use `&output` in the body with Briv's mutation syntax.
+**Fix**: Change signature from `(..., output: &mut String)` to `(..., output: String) -> String` and return the modified string. Or if mutation is needed, use `&output` in the body with Briev's mutation syntax.
 
 ---
 
@@ -199,6 +199,6 @@ done
 
 ## Risk
 
-- The `rust.bv` string literal issue (`"Vec<"`) may require a lexer fix if `<` cannot appear inside Briv string literals. This would be a more invasive change.
+- The `rust.bv` string literal issue (`"Vec<"`) may require a lexer fix if `<` cannot appear inside Briev string literals. This would be a more invasive change.
 - The `wasm.bv` file has the most changes (~30+ individual replacements).
 - No `.bv` file changes should break Rust tests (Rust tests don't depend on `.bv` file content).

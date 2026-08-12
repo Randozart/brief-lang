@@ -1,6 +1,6 @@
-// string.ebv — freestanding string conversions (no C, no briv_rt.c).
+// string.ebv — freestanding string conversions (no C, no briev_rt.c).
 // 2026-08-04 (Phase 4, out-observability plan): provides the casting-graph
-// lane symbols as Briv defns. The .ebv target's with_prefer_ebv + declare-
+// lane symbols as Briev defns. The .ebv target's with_prefer_ebv + declare-
 // guard (c7f25a95) ensures this file is loaded instead of string.bv, and
 // the backend's lane declares are skipped when the .ebv stdlib defines the
 // symbol. Uses String + String concat (C-free, arena-backed) via the
@@ -24,10 +24,10 @@ defn digit_to_str(d: Int) [d >= 0 && d <= 9][term .^Len == 1] -> String {
 
 // int_to_str — converts an integer to its decimal string representation.
 // Uses only String + String concat (no String + Int/Char/Float).
-// The casting graph emits `call ptr @int_to_str(i64)` — this Briv defn
+// The casting graph emits `call ptr @int_to_str(i64)` — this Briev defn
 // provides that symbol for the .ebv freestanding path. Marked `out` so the
 // frontend does not dead-code-eliminate it (the call comes from the backend's
-// casting graph, not from Briv code).
+// casting graph, not from Briev code).
 out defn int_to_str(n: Int) [true][term .^Len >= 0] -> String {
     when n < 0 {
         let abs: Int = n .^Absolute;
@@ -46,8 +46,8 @@ out defn uint_to_str(n: Int) [true][term .^Len >= 0] -> String {
 };
 
 out defn float_to_str(f: Float) [true][term .^Len >= 0] -> String {
-    // 2026-08-04: placeholder — the .bv path uses briv_rt.c's float_to_str
-    // via the casting graph. A pure-Briv float-to-string converter is a
+    // 2026-08-04: placeholder — the .bv path uses briev_rt.c's float_to_str
+    // via the casting graph. A pure-Briev float-to-string converter is a
     // separate effort (needs frexp or similar). For now, return "0.0" so
     // the symbol is defined and linking succeeds.
     term "0.0";
@@ -61,8 +61,8 @@ out defn bool_to_str(b: Int) [true][term .^Len >= 0] -> String {
 };
 
 out defn char_to_str(c: Int) [true][term .^Len >= 0] -> String {
-    // 2026-08-04: placeholder — the .bv path uses briv_rt.c's char_to_str
-    // via the casting graph. A pure-Briv char-to-string converter is a
+    // 2026-08-04: placeholder — the .bv path uses briev_rt.c's char_to_str
+    // via the casting graph. A pure-Briev char-to-string converter is a
     // separate effort. For now, return "." so the symbol is defined.
     term ".";
 };

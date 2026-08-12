@@ -1120,7 +1120,7 @@ fn eval_binary_op(
         BinaryOpKind::BitAnd | BinaryOpKind::BitOr | BinaryOpKind::BitXor => {
             // 2026-08-01 (B1): #String bitwise defaults — operate on content
             // bytes and return a NEW string of the same length (interpreter
-            // half of B1; the backend mirrors it with briv_str_band/bor/bxor).
+            // half of B1; the backend mirrors it with briev_str_band/bor/bxor).
             // When both operands deref as strings, apply the byte-wise op.
             match (lv.string_bytes(heap), rv.string_bytes(heap)) {
                 (Some(a), Some(b)) => {
@@ -1178,7 +1178,7 @@ fn eval_unary_op(
         UnaryOpKind::BitNot => {
             // 2026-08-01 (B1): #String unary bitwise default — complement each
             // content byte, same length (interpreter half; the backend emits
-            // briv_str_bnot).
+            // briev_str_bnot).
             if let Some(bytes) = val.string_bytes(heap) {
                 return Ok(Value::bits(bytes.iter().map(|b| !b).collect()));
             }

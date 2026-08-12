@@ -77,11 +77,11 @@ In `push_field_type` or a new `add_system_fields` function, reserve 3 extra i64 
 // After processing all user fields:
 let aptr_idx = self.ctx.field_types.len();
 self.ctx.field_types.push("i64".to_string()); // arena pointer
-self.ctx.field_briv_types.push(Type::int());
+self.ctx.field_briev_types.push(Type::int());
 self.ctx.field_types.push("i64".to_string()); // arena end
-self.ctx.field_briv_types.push(Type::int());
+self.ctx.field_briev_types.push(Type::int());
 self.ctx.field_types.push("i64".to_string()); // arena base
-self.ctx.field_briv_types.push(Type::int());
+self.ctx.field_briev_types.push(Type::int());
 ```
 
 ### Step 2: Store arena ptrs in %State during init

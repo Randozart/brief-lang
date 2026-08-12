@@ -7,7 +7,7 @@
 
 ## The gap
 
-Briv has `let` (reactive state), `const` (compile-time folded), `$const`
+Briev has `let` (reactive state), `const` (compile-time folded), `$const`
 (erased), `beginprogram` (entry-loop marker, implemented). No construct says
 **"set once at runtime start, then invariant for the whole run."** Today
 `let N = get_env_int!(...)` stays `Bound::Unknown` (loop_shape.rs:33) → cannot
@@ -19,7 +19,7 @@ memory-strategy classification surface that make it proof-bearing.
 
 ## Principles
 
-Briv's operating philosophy is **compile through proof, leave decisions to the
+Briev's operating philosophy is **compile through proof, leave decisions to the
 programmer where no single option is best**:
 
 1. **Prove.** The compiler proves what it can — bounds, capacity, scheduling,
@@ -58,7 +58,7 @@ txn vs. lives-for-program — plus redundant `keep` hints. That is the seed.)
 
 A fourth top-level declaration alongside `let` and `const`:
 
-```briv
+```briev
 // expr form — value seeded once at runtime start.
 init BufSize: Int = get_env_int!("BUFSIZE");
 
@@ -107,7 +107,7 @@ A bound is declared **between `:` and the type** (kind-attached), so it is not
 misread as an array dimension (`Int[16]` is fixed containment; `init N: [set]
 Int` is a *set of possible values*):
 
-```briv
+```briev
 init BufferSize: [64 | lo..hi] Int = ...;   // either exactly 64, or in [lo,hi]
 init BitLayout:  [16 | 32 | 64] Int = ...;  // one of three; target picks
 ```
@@ -193,7 +193,7 @@ a bug.
 ## Strategy keywords — the universal compiler surface
 
 **All compiler strategy is expressed in keywords.** Collectively these are
-**strategy keywords** — the Briv analog of pragmas in other languages, but
+**strategy keywords** — the Briev analog of pragmas in other languages, but
 **transparent**: they are ordinary words in the source program, not hidden
 directives, and they carry less "knowledge tax" than pragmas because you never
 need one to write a correct program. The compiler **reminds you when you need
@@ -269,7 +269,7 @@ land, so the mechanism registry exists first.
 
 ## memcheck expansion (keeps name)
 
-Current `brivc memcheck <file.bv>` (src/macros/memcheck.rs) reports, per
+Current `brievc memcheck <file.bv>` (src/macros/memcheck.rs) reports, per
 heap-backed state field: "freed after txn X / keep p. redundant" or "lives for
 the program (unprovable)." Expanding:
 
@@ -318,7 +318,7 @@ the program (unprovable)." Expanding:
    init, duplicate decls, and init-after-beginprogram; interpreter seeds inits
    (value + body `term <expr>` form) as the reference; backend emits init as a
    mutable global, seeds it in `emit_init_state` / `emit_inline_init_stores` /
-   `__briv_init_state`, and reads load it; memcheck reports init-bound pools as
+   `__briev_init_state`, and reads load it; memcheck reports init-bound pools as
    sealed. Tests: 1686 pass.
 3. Proof-link: `Bound::Init` folding.
    **DONE 2026-08-09**: `Bound::Init(String)` added; `resolve_bound` maps an
@@ -368,7 +368,7 @@ the program (unprovable)." Expanding:
 | capacity from set | `src/analysis/spawn_pool.rs`, `src/backend/llvm/emit_toplevel.rs` |
 | memcheck expansion | `src/macros/memcheck.rs` |
 | mechanism registry | `config/alloc-strategies.dbvl` + per-axis siblings (inherited by phase 6) |
-| docs / SPEC / highlighter | `spec/SPEC.md`, `learn-briv/`, syntax highlighter |
+| docs / SPEC / highlighter | `spec/SPEC.md`, `learn-briev/`, syntax highlighter |
 
 ## Open decision (deferred)
 

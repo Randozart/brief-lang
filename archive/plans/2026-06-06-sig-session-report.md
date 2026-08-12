@@ -62,7 +62,7 @@ Consolidated 544 lines of duplicated HashMap/HashSet/StringBuilder/Stack/Queue m
 - **17 .bv files updated**: All `from "libruntime"` removed
 
 ### No Hardcoded Runtime Declares
-- Removed `__rt_init`, `__rt_poll`, `__rt_wait`, `__exit`, `briv_thread_pool_init`, `briv_barrier_release`, `briv_barrier_wait` from `emit_declares()`
+- Removed `__rt_init`, `__rt_poll`, `__rt_wait`, `__exit`, `briev_thread_pool_init`, `briev_barrier_release`, `briev_barrier_wait` from `emit_declares()`
 - Re-added `__rt_init`, `__rt_poll`, `__rt_wait` with TODO marker (codegen callsites need migration)
 
 ### No `"None"`/`"Err"` Discriminant Magic

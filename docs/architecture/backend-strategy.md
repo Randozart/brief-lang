@@ -56,7 +56,7 @@ File extension determines which backend (and `CompilationTarget`) is used:
 |-----------|---------|-------------------|-------|
 | `.bv`/`.sbv` | LLVM | `Interpreter` | Standard native binary |
 | `.abv` | LLVM | `Interpreter` | GPU offload enabled via SPIR-V |
-| `.rbv`/`.srbv` | Webstack | `Wasm` | Rendered Briv → WASM+JS |
+| `.rbv`/`.srbv` | Webstack | `Wasm` | Rendered Briev → WASM+JS |
 | `.ebv`/`.sebv` | LLVM | `Embedded` | Bare-metal LLVM, `halt#` emits `wfi` |
 | `.cbv` | CIRCT | `Circuit` | Pure logic graph → MLIR |
 
@@ -206,8 +206,8 @@ enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
 > **⚠️ SUPERSEDED 2026-07-26** — This section describes the old TypeScript emitter
 > (`src/backend/webstack.rs`). The webstack v2 architecture compiles to **WASM + JS shim**
 > via the existing `LlvmBackend(wasm32)` and a new `GlueWebGenerator`. See
-> `docs/architecture/features/rendered-briv-wasm.md` and
-> `docs/plans/2026-07-26-rendered-briv-webstack-v2.md` for the current design.
+> `docs/architecture/features/rendered-briev-wasm.md` and
+> `docs/plans/2026-07-26-rendered-briev-webstack-v2.md` for the current design.
 >
 > The content below is preserved for historical reference during the migration.
 
@@ -267,7 +267,7 @@ export function createApp(): App {
 
 ### Signal Type Mapping
 
-| Briv type | TS type | Initializer |
+| Briev type | TS type | Initializer |
 |------------|---------|-------------|
 | `Int` | `number` | `0` |
 | `Float` | `number` | `0` |
@@ -319,14 +319,14 @@ The `generate_js_glue()` method emits DOM watchers that reference the `App` inst
 
 ## FFI Marshaling Convention (Critical)
 
-The LLVM backend and C runtime must agree on how Briv types cross the FFI
-boundary. The convention is documented at `briv_rt.c:376`:
+The LLVM backend and C runtime must agree on how Briev types cross the FFI
+boundary. The convention is documented at `briev_rt.c:376`:
 
 > The LLVM backend marshals String as i8*, Int as i64, Bool as i64.
 
 ### Convention
 
-| Briv type | C type | LLVM IR type | Notes |
+| Briev type | C type | LLVM IR type | Notes |
 |------------|--------|-------------|-------|
 | `Int` | `int64_t` | `i64` | Passed directly |
 | `Bool` | `int64_t` | `i64` | Truncated to `i32`/`i8` at frgn call sites only |
@@ -351,25 +351,25 @@ uses the same `inttoptr` → `call ptr` → `ptrtoint` marshaling:
 
 ```llvm
 %fp   = inttoptr i64 %path_val to ptr
-%raw  = call ptr @briv_read_file(ptr %fp)
+%raw  = call ptr @briev_read_file(ptr %fp)
 %data = ptrtoint ptr %raw to i64
 ```
 
-This was the root cause of the `briv_read_file` bug (2026-06-14) — the intrinsic
+This was the root cause of the `briev_read_file` bug (2026-06-14) — the intrinsic
 was passing `i64` directly, and the C function interpreted raw characters as a
-Briv header pointer. See `docs/architecture/fixes/briv-read-file-ffi-marshal.md`.
+Briev header pointer. See `docs/architecture/fixes/briev-read-file-ffi-marshal.md`.
 
 ## i64 Boxing Convention (Phase 0, 2026-06-16)
 
 The LLVM backend boxes native types to `i64` for a uniform internal ABI.
 This avoids SSA type proliferation — every value slot is `i64` regardless
-of the Briv-level type. The `TypedRegister.ty` field tracks the Briv type,
+of the Briev-level type. The `TypedRegister.ty` field tracks the Briev type,
 and `adapt_to_i64()` is the canonical function that produces a boxed `i64`
 from any `TypedRegister`, regardless of its current native/boxed state.
 
 ### The Convention
 
-| Briv type | Internal LLVM type | TypedRegister.ty | adapt_to_i64 |
+| Briev type | Internal LLVM type | TypedRegister.ty | adapt_to_i64 |
 |------------|-------------------|------------------|-------------|
 | `Bool` | `i1` (native) or `i64` (boxed) | `Type::Bool` or `Type::Int` | `zext i1 to i64` / pass-through |
 | `Char` | `i32` (native) or `i64` (boxed) | `Type::Char` or `Type::Int` | `zext i32 to i64` / pass-through |
@@ -430,7 +430,7 @@ This function must be called before:
 
 The FFI boundary uses a different convention — C types, not internal types:
 
-| Briv type | C type | LLVM IR type | MarshaL |
+| Briev type | C type | LLVM IR type | MarshaL |
 |------------|--------|-------------|---------|
 | `Int` | `int64_t` | `i64` | Direct |
 | `Bool` | `int64_t` | `i32` | `trunc i64 %boxed to i32` at FFI call site |
@@ -441,7 +441,7 @@ The FFI boundary uses a different convention — C types, not internal types:
 
 FFI calls at `emit_expr.rs:311-335` use the marshal table above.
 Intrinsics that call C functions (ReadFile, Spawn) must apply the same
-marshaling — this was the root cause of the `briv_read_file` bug (2026-06-14).
+marshaling — this was the root cause of the `briev_read_file` bug (2026-06-14).
 
 ## Known Backend Bugs (Fixed 2026-06-16)
 
@@ -515,7 +515,7 @@ via epoll/kqueue events.
 - `src/backend/llvm/emit_toplevel.rs:99-103` — load+zext
 - `src/backend/llvm/emit_expr.rs` — `emit_fcmp` special case
 - `src/backend/llvm/loop_engine.rs:622` — loop exit fix
-- `lib/runtime/briv_rt.c` — `__tty_read_key` global + epoll reads, `__print` flush
+- `lib/runtime/briev_rt.c` — `__tty_read_key` global + epoll reads, `__print` flush
 
 ---
 
@@ -575,7 +575,7 @@ The SSA extract-all-at-entry pattern (`pre_extract_int_fields`) caused a
 correctness bug when a field is both written and read within the same
 transaction body. Example from `fannkuch_redux_sym.bv`:
 
-```briv
+```briev
 &seed = p0;                    // writes seed field
 &checksum = checksum + seed % 13;  // reads seed — should see p0, not seed_old
 ```
@@ -586,9 +586,9 @@ extracted at body entry, not the `p0` that was just written. **Fix**
 re-extract the field from the new state and update `ssa_old_int_regs` so
 subsequent reads use the latest value.
 
-### Auto-Linking briv_rt.c (2026-06-17)
+### Auto-Linking briev_rt.c (2026-06-17)
 
-`briv_rt.c` is now auto-linked for **all** native builds (not just programs
+`briev_rt.c` is now auto-linked for **all** native builds (not just programs
 with `@ link` triggers). The linker drops unused symbols, so this is safe
 even for programs that use no C shims. This unblocks officina-cli, which
 uses `#`-intrinsics via the stdlib but has no `import "link/..."` statements.

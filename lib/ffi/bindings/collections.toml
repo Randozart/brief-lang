@@ -6,7 +6,7 @@
 # ==================================================
 [[functions]]
 name = "__filter"
-location = "briv_ffi_native::__filter"
+location = "briev_ffi_native::__filter"
 target = "native"
 mapper = "rust"
 description = "Filter list elements by predicate"
@@ -52,7 +52,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__map"
-location = "briv_ffi_native::__map"
+location = "briev_ffi_native::__map"
 target = "native"
 mapper = "rust"
 description = "Transform list elements"
@@ -98,7 +98,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__reduce"
-location = "briv_ffi_native::__reduce"
+location = "briev_ffi_native::__reduce"
 target = "native"
 mapper = "rust"
 description = "Reduce list to single value"
@@ -146,7 +146,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__unique"
-location = "briv_ffi_native::__unique"
+location = "briev_ffi_native::__unique"
 target = "native"
 mapper = "rust"
 description = "Remove duplicates from list"
@@ -190,7 +190,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__sort"
-location = "briv_ffi_native::__sort"
+location = "briev_ffi_native::__sort"
 target = "native"
 mapper = "rust"
 description = "Sort list elements"
@@ -234,7 +234,7 @@ message = "String"
 # ==================================================
 [[functions]]
 name = "__reverse"
-location = "briv_ffi_native::__reverse"
+location = "briev_ffi_native::__reverse"
 target = "native"
 mapper = "rust"
 description = "Reverse list order"

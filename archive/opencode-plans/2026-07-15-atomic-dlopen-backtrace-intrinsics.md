@@ -17,7 +17,7 @@ operations the compiler must know about to emit correct LLVM IR.
 
 | Category | Why `#` intrinsic, not `defn` | Why not `Syscall#` |
 |----------|-------------------------------|-------------------|
-| **Atomic** (6) | LLVM `atomicrmw` / `load atomic` / `fence` instructions have no Briv operator. The compiler must emit the `seq_cst` ordering flag. | Not syscalls — these are CPU instructions emitted inline. |
+| **Atomic** (6) | LLVM `atomicrmw` / `load atomic` / `fence` instructions have no Briev operator. The compiler must emit the `seq_cst` ordering flag. | Not syscalls — these are CPU instructions emitted inline. |
 | **dlopen/dlsym/dlclose** (3) | Platform dynamic linker ABI. The compiler must emit the correct calling convention for `@dlopen`. | Not syscalls — these are C library functions resolved by the system linker. |
 | **backtrace** (1) | Stack walking requires LLVM `@llvm.frameaddress` or DWARF unwind. The compiler controls frame layout. | Not a syscall — it's a debugging primitive like `Print#`. |
 
@@ -65,7 +65,7 @@ Interpreter: actual `libc::dlopen`/`dlsym`/`dlclose` calls on the host.
 
 | # | Intrinsic | Args | Returns | LLVM IR |
 |---|----------|------|---------|---------|
-| 10 | `Backtrace#` | `()` | `Int` | `%r = call i64 @briv_backtrace()` |
+| 10 | `Backtrace#` | `()` | `Int` | `%r = call i64 @briev_backtrace()` |
 
 Interpreter: stub returning 0.
 
@@ -100,5 +100,5 @@ Add 10 interpreter entries:
 ## 6. Verification
 
 - `cargo test --lib` — all 860+ tests pass
-- All 21 std/os files pass `briv check`
+- All 21 std/os files pass `briev check`
 - `cargo build --release` — no warnings

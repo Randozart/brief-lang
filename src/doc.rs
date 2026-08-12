@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::ast::*;
 use crate::parser::Parser;
 
-/// 2026-07-24: Generate documentation for a Briv source file.
+/// 2026-07-24: Generate documentation for a Briev source file.
 /// Reads the file, parses it, extracts doc comments, produces HTML.
 pub fn generate_doc(input_path: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(input_path)
@@ -50,7 +50,7 @@ fn render_html(program: &[TopLevel], source_path: &str) -> String {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title} — Briv Documentation</title>
+<title>{title} — Briev Documentation</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #fafafa; color: #333; }}
   h1 {{ border-bottom: 2px solid #4a90d9; padding-bottom: 8px; }}
@@ -66,7 +66,7 @@ fn render_html(program: &[TopLevel], source_path: &str) -> String {
 </style>
 </head>
 <body>
-<h1>{title} <span class="meta">— Briv Module</span></h1>
+<h1>{title} <span class="meta">— Briev Module</span></h1>
 <p class="meta">Source: {source}</p>
 {items}
 </body>

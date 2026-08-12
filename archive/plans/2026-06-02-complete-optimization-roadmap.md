@@ -6,16 +6,16 @@ After ASR profitability gate, benchmark infrastructure overhaul, and fixing exit
 
 ### Current Benchmark State (5-iteration avg, CLOCK_MONOTONIC nanosecond timing)
 
-| Benchmark | Briv | C | Ratio | Winner |
+| Benchmark | Briev | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
-| iir_filter | 0.0333s | 0.1526s | 0.21× | **Briv** (O(1) fold) |
+| iir_filter | 0.0333s | 0.1526s | 0.21× | **Briev** (O(1) fold) |
 | precompute_sum | 0.0009s | 0.0005s | 1.80× | startup noise |
 | ring_buffer | 0.0006s | 0.0006s | 1.00× | ~tie (O(1) fold) |
 | async_counters | 0.0005s | 0.0006s | 0.83× | ~tie (O(1) fold) |
 | **float_math** | 0.0161s | 0.0066s | **2.43×** | C |
 | **float_math_nonzero** | 0.5737s | 0.2431s | **2.35×** | C |
 | sparse_dispatch | 0.0018s | 0.0011s | 1.63× | startup noise |
-| const_heavy | 0.0007s | 0.0548s | 0.01× | **Briv** (7× faster) |
+| const_heavy | 0.0007s | 0.0548s | 0.01× | **Briev** (7× faster) |
 
 Root cause of 2.4× gap: struct `alloca` + `extractvalue`/`insertvalue` inside the loop body creates wider register lifetimes than C's local-variable register allocation. Zero SLP packing ops survive in `.opt.ll`.
 
@@ -37,7 +37,7 @@ Root cause of 2.4× gap: struct `alloca` + `extractvalue`/`insertvalue` inside t
 | Typed SSA | TypedRegister { name, ty }, removed is_float_expr heuristic | A4 |
 | Commutativity pattern fix | Removed duplicate match arm in extract_trigger_keys | A6 |
 | P0 bug fixes (B1-B4) | UTF-8 boundaries, entry-point values, assertion false-path, overlap detection | Phase 2 |
-| Round 2 code-review fixes | __find_from, dbriv pipeline, dataflow extracts, protocol verifier, parser dedup | Round 2 |
+| Round 2 code-review fixes | __find_from, dbriev pipeline, dataflow extracts, protocol verifier, parser dedup | Round 2 |
 | Benchmark infrastructure | Nanosecond fork+exec CLOCK_MONOTONIC timer, 5-iter avg, winner column | 2026-06-02 |
 | Exit condition fixes | Added `&& x0 >= 0.0` to float benchmarks to prevent dead-field elim | 2026-06-02 |
 
@@ -126,7 +126,7 @@ LLVM uses `@llvm.assume` to eliminate dead branches, simplify arithmetic, and un
 4. **Cost-function extraction**: extract the mathematically cheapest representation
 5. **Replace the composed body** with the extracted minimal form
 
-**Why Briv is uniquely suited**: Composed chains have no side effects, no pointer aliasing, no FFI calls — they are pure mathematical expressions. Equality saturation is designed exactly for this scenario.
+**Why Briev is uniquely suited**: Composed chains have no side effects, no pointer aliasing, no FFI calls — they are pure mathematical expressions. Equality saturation is designed exactly for this scenario.
 
 **Implementation notes**:
 - New dependency: `egg` crate in `Cargo.toml`
@@ -144,9 +144,9 @@ LLVM uses `@llvm.assume` to eliminate dead branches, simplify arithmetic, and un
 
 **Problem**: LLVM's code generator makes branch-layout decisions blindly. Without profile data, it assumes equal branch probability.
 
-**Solution**: Briv has a built-in `Interpreter` (`src/interpreter/mod.rs`). Use it for zero-overhead compile-time profiling:
+**Solution**: Briev has a built-in `Interpreter` (`src/interpreter/mod.rs`). Use it for zero-overhead compile-time profiling:
 
-1. **Interpret with profiling mode**: Execute the Briv program in the interpreter with sample inputs (or generate reasonable defaults from state initial values)
+1. **Interpret with profiling mode**: Execute the Briev program in the interpreter with sample inputs (or generate reasonable defaults from state initial values)
 2. **Record branch probabilities**: How often each guarded condition (`[sensor > 100]`) evaluates true/false
 3. **Emit `!prof` metadata**:
    ```llvm
@@ -194,7 +194,7 @@ Tier 2 (Partial, Turing-complete):
 
 **Files**: `src/analysis/region.rs`, `src/backend/llvm.rs`, `src/proof_engine.rs`
 
-**Expected impact**: Makes Briv's optimization decisions explicit and auditable. Enables future passes to target specific tiers.
+**Expected impact**: Makes Briev's optimization decisions explicit and auditable. Enables future passes to target specific tiers.
 
 ---
 
@@ -234,7 +234,7 @@ Extend chain composition to collapse everything with compile-time-decidable guar
 
 #### H. Extend `noalias`/`nocapture`
 
-Audit all function boundaries and add `noalias`/`nocapture` where Briv's semantics guarantee it. Incremental.
+Audit all function boundaries and add `noalias`/`nocapture` where Briev's semantics guarantee it. Incremental.
 
 **Files**: `src/backend/llvm.rs`
 

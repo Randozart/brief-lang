@@ -2,7 +2,7 @@
 
 **Date added:** 2026-06-18 · **Rewritten:** 2026-08-06 (accel plan,
 Design A)
-**Status:** Active — the `accel` keyword + `briv_accel_rt` runtime replace the
+**Status:** Active — the `accel` keyword + `briev_accel_rt` runtime replace the
 removed `#gpu` pragma family.
 
 ---
@@ -26,7 +26,7 @@ keywords), and SPEC §9.7.
 ## Compilation Flow
 
 ```
-Briv source
+Briev source
     │
     ├──→ Frontend analysis (src/analysis/accel.rs) →
     │       For each accel candidate:
@@ -37,7 +37,7 @@ Briv source
     ├──→ Native CPU binary (LLVM backend) — always emitted:
     │       • the counted loop runs natively (each firing = one work-item)
     │       • Gpu/Probe bodies get a dispatch wrapper @txn_<name> that calls
-    │         briv_accel_launch (with device/verdict gate) or @txn_<name>_cpu
+    │         briev_accel_launch (with device/verdict gate) or @txn_<name>_cpu
     │       • per-node entry flags for beginprogram entry loops
     │
     └──→ SPIR-V kernel emission (src/backend/llvm/kernel.rs) →
@@ -50,7 +50,7 @@ Briv source
 
 ## `accel` Keyword (Design A — no virtual variables)
 
-```briv
+```briev
 let i: Int = 0;
 accel node force [i < nb][i == nb] {
     dv[i] = force_on(i);       // per-work-item compute (disjoint affine write)
@@ -77,7 +77,7 @@ accel node force [i < nb][i == nb] {
 ## Process Boundary Keywords
 
 - `endprogram [code];` — genuinely exits the process (SPEC §11.5). LLVM emits
-  `call @__exit(i64 code)` (briv_rt.c, runs atexit cleanup). Unlike `term`
+  `call @__exit(i64 code)` (briev_rt.c, runs atexit cleanup). Unlike `term`
   (transaction end), a node with an always-true precondition cannot re-fire
   after `endprogram`.
 - `beginprogram` — an optional precondition conjunct marking the program
@@ -85,27 +85,27 @@ accel node force [i < nb][i == nb] {
   **entry loop**: entered once when its state conditions hold, the body loops
   until the goal. The goal must be provably reachable (compile error
   otherwise); at most one beginprogram node may be eligible at start
-  (compile-time conflict proof). A per-node `@briv_begin_<name>` flag gates
+  (compile-time conflict proof). A per-node `@briev_begin_<name>` flag gates
   the precondition and is cleared when the goal is met.
 
 ---
 
-## Runtime — `briv_accel_rt` (device-agnostic)
+## Runtime — `briev_accel_rt` (device-agnostic)
 
-`lib/runtime/briv_accel_rt.c` is a **dispatcher over a pluggable
+`lib/runtime/briev_accel_rt.c` is a **dispatcher over a pluggable
 device-driver table**. The compiler never names a device: it emits SPIR-V
-blobs + per-kernel layout descriptors + calls a stable `briv_accel_*` ABI.
+blobs + per-kernel layout descriptors + calls a stable `briev_accel_*` ABI.
 
 ```c
-int  briv_accel_init(const BrivKernelDesc* descs, uint32_t n);
-int  briv_accel_launch(uint32_t idx, const void* state, uint64_t work_n);
-int  briv_accel_available(void);
-int  briv_accel_probe(...);   // auto-tuning probe
+int  briev_accel_init(const BrievKernelDesc* descs, uint32_t n);
+int  briev_accel_launch(uint32_t idx, const void* state, uint64_t work_n);
+int  briev_accel_available(void);
+int  briev_accel_probe(...);   // auto-tuning probe
 ```
 
-- `BrivDeviceDriver` function-pointer table; drivers consume SPIR-V:
-  `briv_dev_vulkan` (Vulkan compute) + `briv_dev_opencl` (OpenCL 3.0 IL),
-  loaded via `dlopen`, selected by `BRIV_ACCEL_DEVICE` env + fallback chain
+- `BrievDeviceDriver` function-pointer table; drivers consume SPIR-V:
+  `briev_dev_vulkan` (Vulkan compute) + `briev_dev_opencl` (OpenCL 3.0 IL),
+  loaded via `dlopen`, selected by `BRIEV_ACCEL_DEVICE` env + fallback chain
   (Vulkan → OpenCL → CPU).
 - Generic pack/unpack: the runtime packs the kernel `%State` projection
   (arrays + scalars, kernel field order) into one flat device buffer per

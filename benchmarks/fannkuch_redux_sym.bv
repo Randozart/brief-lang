@@ -1,9 +1,9 @@
-// fannkuch_redux_sym — Permutation operations (Briv-idiomatic flat fields)
+// fannkuch_redux_sym — Permutation operations (Briev-idiomatic flat fields)
 // Symmetric variant: adds periodic checksum print every 5M iterations.
 // Prevents LLVM precomputation by adding hot-loop FFI.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/fannkuch_redux_sym.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/fannkuch_redux_sym.bv \
 //       --out benchmarks --optimize-budget 256
 
 

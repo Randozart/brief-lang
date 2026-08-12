@@ -16,7 +16,7 @@
 
 All values in LLVM registers are i64, but their native representations differ:
 
-| Briv Type | Native LLVM Type | i64 Encoding |
+| Briev Type | Native LLVM Type | i64 Encoding |
 |---|---|---|
 | Int / UInt | i64 | native |
 | Float | float | bitcast float→i32, zext to i64 |

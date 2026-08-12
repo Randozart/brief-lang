@@ -8,7 +8,7 @@
 
 ```toml
 # TOML
-name = "briv-compiler"
+name = "briev-compiler"
 version = "1.0.0"
 debug = false
 ```
@@ -22,13 +22,13 @@ schema Config {
 };
 
 as Config {
-    > briv-compiler; 1.0.0; false;
+    > briev-compiler; 1.0.0; false;
 };
 ```
 
 ```dbvl
 // .dbvl — flat line, no schema
-briv-compiler; 1.0.0; false;
+briev-compiler; 1.0.0; false;
 ```
 
 ---

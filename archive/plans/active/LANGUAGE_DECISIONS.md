@@ -10,20 +10,20 @@
 
 ### Logical OR: `||`
 - **Decision**: `||` operator in expressions, mapping to `Expr::Or`
-- **Rationale**: Briv already has `Expr::And` with `&&`. Symmetric operator for OR is idiomatic.
+- **Rationale**: Briev already has `Expr::And` with `&&`. Symmetric operator for OR is idiomatic.
 - **Status**: Lexer has `OpOr` token, parser has `Expr::Or` — just needs `||` wired through `parse_or_expr`
 
 ### List Concatenation: `++`
 - **Decision**: `++` operator for list concatenation
-- **Rationale**: Common functional language idiom. Distinct from arithmetic `+`. Briv lists are immutable, so `++` produces a new list.
+- **Rationale**: Common functional language idiom. Distinct from arithmetic `+`. Briev lists are immutable, so `++` produces a new list.
 - **Status**: New parser construct needed.
 
 ### Rejected: `::` path separator, `*` dereference
-- **Not Briv features**. `Box::new(x)` and `*expr` in proof_engine.bv are Rust-isms that leaked in during porting. Fix: `Box(x)` and `expr`.
+- **Not Briev features**. `Box::new(x)` and `*expr` in proof_engine.bv are Rust-isms that leaked in during porting. Fix: `Box(x)` and `expr`.
 
 ## Implementation Order
 
 1. Add `||` to parser (smallest change, already partially supported)
 2. Add `.N` tuple field access to parser
 3. Add `++` list concat to lexer + parser
-4. Fix Briv source files (Rust-ism removal): proof_engine.bv, main.bv, typechecker.bv, call_graph.bv, range.bv, parser.bv
+4. Fix Briev source files (Rust-ism removal): proof_engine.bv, main.bv, typechecker.bv, call_graph.bv, range.bv, parser.bv

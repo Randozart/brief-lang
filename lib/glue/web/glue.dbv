@@ -1,6 +1,6 @@
-// web/glue.dbvl — GLUE adapter for the web target (Data Briv).
+// web/glue.dbvl — GLUE adapter for the web target (Data Briev).
 // 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): per-language glue
-// config, referenced as config by `briv export|bindings|extension <bridge>
+// config, referenced as config by `briev export|bindings|extension <bridge>
 // web` — the compiler finds lib/glue/web/ BY NAME and loads this file.
 // Format (quoted mode):
 //   web: { types_module; extension; bridge_kind; calling_convention;

@@ -5,7 +5,7 @@
 
 ## Context
 
-This plan emerged from a discussion about Phase 5 (runtime-sized allocation) of the [LLVM Backend Completion Plan](./2026-06-03-llvm-backend-completion.md). During that discussion, we identified a deeper problem: Briv's interpreter uses string-matched function names (`"list_append"`, `"get"`, `"insert"`, etc.) to handle collection operations. This is magic. The LLVM backend cannot inherit this pattern without violating the **No Magic** principle.
+This plan emerged from a discussion about Phase 5 (runtime-sized allocation) of the [LLVM Backend Completion Plan](./2026-06-03-llvm-backend-completion.md). During that discussion, we identified a deeper problem: Briev's interpreter uses string-matched function names (`"list_append"`, `"get"`, `"insert"`, etc.) to handle collection operations. This is magic. The LLVM backend cannot inherit this pattern without violating the **No Magic** principle.
 
 What started as a discussion about `push`/`pop`/`insert`/`remove` syntax expanded into a complete rethinking of collection mutation, multi-dimensional targeting, and LINQ-style declarative data manipulation — all without a single method name or magic string match.
 
@@ -29,7 +29,7 @@ What started as a discussion about `push`/`pop`/`insert`/`remove` syntax expande
 2. The arrow operator (`<-`) must be bidirectional: push AND pop
 3. Multi-dimensional tensors need concise dimension targeting
 4. Filter-mask-stride syntax already exists (`[;>5]`, `[::2]`, `[0..10]`) — this just needs to compose with mutation
-5. All of this must feel Briv-idiomatic: contract-driven, compiler-optimizable, zero magic
+5. All of this must feel Briev-idiomatic: contract-driven, compiler-optimizable, zero magic
 
 ## Design: Three New Primitives
 
@@ -52,7 +52,7 @@ What started as a discussion about `push`/`pop`/`insert`/`remove` syntax expande
 
 `=` for element replacement, `<-` for structural mutation. `&` already means mutable reference. They compose naturally.
 
-**Discard form** (`<- &list`): The target is a statement-level expression with no binding. The ArrowDiscard variant handles this. Briv already has expression statements in the parser (`parse_statement` checks for `&` prefix to distinguish from assignment). ArrowDiscard extends this pattern.
+**Discard form** (`<- &list`): The target is a statement-level expression with no binding. The ArrowDiscard variant handles this. Briev already has expression statements in the parser (`parse_statement` checks for `&` prefix to distinguish from assignment). ArrowDiscard extends this pattern.
 
 **Type checking**: `<-` is valid only when the resolved collection type is `List<T>`. Fixed-size `Vector<T, ...>` rejects `<-` at compile time — structural mutation on a fixed-size type is a type error. Same mechanism that rejects assigning a `String` to an `Int`.
 
@@ -68,7 +68,7 @@ What started as a discussion about `push`/`pop`/`insert`/`remove` syntax expande
 
 **Semantics:** Inside bracket context, `...` expands to the right number of `:` wildcards (`SliceCoordinate::All`) to fill unspecified dimensions. The compiler computes the expansion at parse time from the type's dimensionality.
 
-```briv
+```briev
 # 4D tensor: Float[batch:64, channel:3, row:32, col:32]
 tensor[..., 0]              → tensor[:, :, :, 0]     — last dim = 0
 tensor[0, ...]              → tensor[0, :, :, :]     — first dim = 0
@@ -99,7 +99,7 @@ operation → integer                        index
 
 **Examples:**
 
-```briv
+```briev
 # Declaration
 let x: Vector<Float, @1:64, @2:3, @3:32, @4:32>;
 let x: Vector<Float, @1..3:32, @4:64>;      # dims 1-3 size 32, dim 4 size 64
@@ -129,7 +129,7 @@ rows[@1: ;>5]                               # inner dimension, filter >5
 
 ### Composition: Unified Example
 
-```briv
+```briev
 # Struct type for demonstration
 struct Person {
     name: String,
@@ -183,10 +183,10 @@ These were considered and deliberately rejected:
 **Rejected because:** this keeps the magic string-matching alive, just relocated from interpreter to parser. The function names are still magic. The parser matching `if fn_name == "push"` is the same violation as the interpreter `if fn_name == "list_append"`. Collection operations deserve first-class syntax, not disguised function calls.
 
 ### `&list <+ x` — Augmented Assignment
-**Rejected because:** `<+` works in one direction (push) but not the other (pop). `x <+ &list` doesn't read as extraction. Briv needs bidirectional mutation — `<-` handles both naturally through direction.
+**Rejected because:** `<+` works in one direction (push) but not the other (pop). `x <+ &list` doesn't read as extraction. Briev needs bidirectional mutation — `<-` handles both naturally through direction.
 
 ### `list << x` — Stream Operator
-**Rejected because:** `<<` is already ShiftLeft. Overloading would break all bitwise shift operations. C++ can do this because it separates stream `<<` (library overload) from bitwise `<<` (built-in). Briv has a fixed token set — no operator overloading.
+**Rejected because:** `<<` is already ShiftLeft. Overloading would break all bitwise shift operations. C++ can do this because it separates stream `<<` (library overload) from bitwise `<<` (built-in). Briev has a fixed token set — no operator overloading.
 
 ### `list[1..5] = src` as InsertRange
 **Rejected because:** `=` means replacement, not structural change. `&list[1..5] = src` replaces elements 1-5 with src (if lengths match). `&list[1..5] <- src` inserts src at position 1, shifting elements right. `=` and `<-` have different meanings, and the operator should communicate them.
@@ -195,7 +195,7 @@ These were considered and deliberately rejected:
 **Rejected because:** `(` inside `[...]` is currently an expression group. Changing it to sometimes be a dimension group would require the parser to look ahead and distinguish contexts. `@` signals dimension context unambiguously without lookahead.
 
 ### `@N` as 1-indexed
-**Rejected because:** Briv uses zero-indexing everywhere: `list[0]` is the first element, `mat[0, 0]` is the first cell, `SliceCoordinate::Index(0)` is position 0. Having `@1` mean "first dimension" while `[0]` means "first element" creates silent off-by-one errors. Zero-indexed everywhere, end of discussion. Named dimensions (`@batch: 0`) solve the readability concern without breaking indexing consistency.
+**Rejected because:** Briev uses zero-indexing everywhere: `list[0]` is the first element, `mat[0, 0]` is the first cell, `SliceCoordinate::Index(0)` is position 0. Having `@1` mean "first dimension" while `[0]` means "first element" creates silent off-by-one errors. Zero-indexed everywhere, end of discussion. Named dimensions (`@batch: 0`) solve the readability concern without breaking indexing consistency.
 
 ### `forall` / `exists` Quantifier Syntax
 **Dropped.** These were in the original LLVM Backend Completion Plan as Phase 6. Neither the interpreter (`Expr::ForAll` stub at line 1838) nor the LLVM backend (`Expr::ForAll` stub at line 2746) have real implementations. No benchmark uses them. They are theorem-proving features, not performance or expressiveness features. Quietly removed from the plan.
@@ -436,7 +436,7 @@ These are handled in the parser. The LLVM backend never sees them directly — t
 After implementation, these stdlib files can use native syntax:
 
 ### `lib/std/collections.bv` — Rewrite
-```briv
+```briev
 # Before (stub):
 defn append(list: List<Int>, item: Int) -> List<Int> {
     term list;
@@ -454,7 +454,7 @@ defn len(list: List<Int>) [true][term >= 0] -> Int {
 ```
 
 ### `lib/std/stack.bv` — Rewrite
-```briv
+```briev
 # Before: O(n) copy-based push/pop
 defn push<T>(stack: Stack<T>, item: T) -> Stack<T> {
     term Stack { items: stack.items + [item] };
@@ -500,7 +500,7 @@ Search `lib/compiler/` for any method-call patterns and replace with arrow synta
 
 ## Impact on Existing Plans
 
-This plan **replaces Phase 5** of the [LLVM Backend Completion Plan](./2026-06-03-llvm-backend-completion.md). The original Phase 5 (runtime-sized allocation) was blocked by a language design question: how does Briv express variable-sized collections? Arrow mutation + contract-proven bounds answers this. The compiler proves the max bound from the contract, allocates once, and the arrow operations mutate in-place within that bound.
+This plan **replaces Phase 5** of the [LLVM Backend Completion Plan](./2026-06-03-llvm-backend-completion.md). The original Phase 5 (runtime-sized allocation) was blocked by a language design question: how does Briev express variable-sized collections? Arrow mutation + contract-proven bounds answers this. The compiler proves the max bound from the contract, allocates once, and the arrow operations mutate in-place within that bound.
 
 **Phase 6** (ForAll/Exists) is **dropped**. Both interpreter and LLVM backend are stubs. No benchmark uses them. No plan to revive.
 
@@ -520,7 +520,7 @@ This plan **replaces Phase 5** of the [LLVM Backend Completion Plan](./2026-06-0
 
 ## Equivalence Reference
 
-| Briv (new) | Python | Rust | LINQ (C#) |
+| Briev (new) | Python | Rust | LINQ (C#) |
 |------------|--------|------|-----------|
 | `&list <- x` | `list.append(x)` | `list.push(x)` | `list.Add(x)` |
 | `x <- &list` | `x = list.pop()` | `x = list.pop()` | `list.RemoveAt(list.Count - 1)` |

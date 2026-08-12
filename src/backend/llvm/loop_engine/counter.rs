@@ -317,7 +317,7 @@ impl LlvmBackend {
         let cm_start = if let Some(wd) = watchdog {
             if wd.deadline_ns.is_some() {
                 let s = self.fun.gen_reg();
-                writeln!(out, "  {} = call i64 @__briv_now()", s).ok();
+                writeln!(out, "  {} = call i64 @__briev_now()", s).ok();
                 Some(s)
             } else {
                 None
@@ -413,7 +413,7 @@ impl LlvmBackend {
             if let Some(secs) = wd.deadline_ns {
                 if let Some(start) = &cm_start {
                     let now = self.fun.gen_reg();
-                    writeln!(out, "  {} = call i64 @__briv_now()", now).ok();
+                    writeln!(out, "  {} = call i64 @__briev_now()", now).ok();
                     let el = self.fun.gen_reg();
                     writeln!(out, "  {} = sub i64 {}, {}", el, now, start).ok();
                     let db = self.fun.gen_reg();
@@ -547,7 +547,7 @@ impl LlvmBackend {
 
     // ── Garbage-scheduler free emission ───────────────────────────────
 
-    /// 2026-08-06 (Phase 9): emit `__briv_free` for each scheduled state
+    /// 2026-08-06 (Phase 9): emit `__briev_free` for each scheduled state
     /// field whose reactor-ordered last consumer is the enclosing fold. The
     /// handle is the field's STORED value (the ptrtoint of the allocation),
     /// loaded from %State — re-evaluating the initializer would re-malloc.
@@ -557,7 +557,7 @@ impl LlvmBackend {
             let (handle, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
             let ptr = self.fun.gen_reg();
             writeln!(out, "  {} = inttoptr i64 {} to ptr", ptr, handle).ok();
-            writeln!(out, "  call void @__briv_free(ptr {})", ptr).ok();
+            writeln!(out, "  call void @__briev_free(ptr {})", ptr).ok();
         }
     }
 
@@ -922,7 +922,7 @@ impl LlvmBackend {
         let wd_start = if let Some(wd) = watchdog {
             if wd.deadline_ns.is_some() {
                 let s = self.fun.gen_reg();
-                writeln!(out, "  {} = call i64 @__briv_now()", s).ok();
+                writeln!(out, "  {} = call i64 @__briev_now()", s).ok();
                 Some(s)
             } else {
                 None
@@ -1003,7 +1003,7 @@ impl LlvmBackend {
             if let Some(secs) = wd.deadline_ns {
                 if let Some(start) = &wd_start {
                     let now = self.fun.gen_reg();
-                    writeln!(out, "  {} = call i64 @__briv_now()", now).ok();
+                    writeln!(out, "  {} = call i64 @__briev_now()", now).ok();
                     let el = self.fun.gen_reg();
                     writeln!(out, "  {} = sub i64 {}, {}", el, now, start).ok();
                     let db = self.fun.gen_reg();
@@ -1206,7 +1206,7 @@ impl LlvmBackend {
         // loop completes (a per-iteration free would be a use-after-free). The
         // handle is the field's STORED value (the ptrtoint of the allocation),
         // loaded from %State — re-evaluating the initializer would re-malloc.
-        // Routed through __briv_free so the benchmark can assert frees ==
+        // Routed through __briev_free so the benchmark can assert frees ==
         // allocs (no leak).
         self.emit_scheduled_frees(out, free_after);
         writeln!(out, "  ret i32 0").ok();

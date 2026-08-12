@@ -1,8 +1,8 @@
-# Phase 2b3 — obj-backed components: instantiate in Briv, mount in HTML
+# Phase 2b3 — obj-backed components: instantiate in Briev, mount in HTML
 
 **2026-08-12.** Supersedes the globals-based component model (2b2, SPEC 21.3) and
 the direct-store reset export (2b2 slice 2c). Replaces the frontend-seeded
-instance model with Briv-driven instantiation.
+instance model with Briev-driven instantiation.
 
 ## Problem
 
@@ -12,7 +12,7 @@ The 2b2 component model seeds instance state from the FRONTEND:
   (`collect_mount_props` / `parse_prop_value`, `component_instances.rs:104,288`),
   invents an `Expr::Decimal(7)` in Rust, and injects a direct `store i32 7`
   into `init_state` via `field_initializers`. The VALUE originates in Rust, not
-  Briv source — no contract, no reactive machinery.
+  Briev source — no contract, no reactive machinery.
 - The lifecycle reset (`__instance_reset_<Name>_<i>`, `emit_toplevel.rs:1376`)
   is a Rust-emitted DIRECT store called by the shim on b-when unmount — no
   contract proof, no flush. The missing flush leaves the DOM stale after a
@@ -23,13 +23,13 @@ The 2b2 component model seeds instance state from the FRONTEND:
 Rule (user, 2026-08-12): **if something in the frontend can change backend
 state, it must be bound to a trg.** The frontend (Rust) invents no state
 values; all state changes flow through the transaction machinery (contract
-proof + flush). Initial state is declared in Briv source.
+proof + flush). Initial state is declared in Briev source.
 
 ## Target model
 
 Components ARE objects.
 
-```briv
+```briev
 obj Counter {
     count: Int;
     txn increment [count < 100][true] {
@@ -43,7 +43,7 @@ render Counter {
     <button b-trigger:click="increment">+</button>
 };
 
-// Briv-side instance — the PROGRAM owns it (named, seedable, contractable):
+// Briev-side instance — the PROGRAM owns it (named, seedable, contractable):
 let c1: Counter = Counter { count: 5 };
 let c2: Counter = Counter { count: 7 };
 
@@ -57,14 +57,14 @@ render Root {
 
 Ownership split (user decision, 2026-08-12):
 
-- **Briv-side** (`let c1: Counter = ...` + `<c1 />`): the program owns the
-  instance. Named, code-controllable, seeded in Briv. Seed values are parsed
-  by the BRIV parser, never Rust.
+- **Briev-side** (`let c1: Counter = ...` + `<c1 />`): the program owns the
+  instance. Named, code-controllable, seeded in Briev. Seed values are parsed
+  by the BRIEV parser, never Rust.
 - **HTML-side** (`<Counter />`): the reactor owns it. Anonymous, per-mount
   pool (`Counter.<i>.*`), zero-init defaults, only its txn variants touch it.
   Not referenceable by code.
 - **No HTML props.** `<Counter count="5" />` is dropped entirely. All seeding
-  is Briv.
+  is Briev.
 
 ### Tag namespace resolution (deterministic)
 
@@ -95,7 +95,7 @@ demos/tests migrate to obj form.
 (`tests/instances_test.bv` is stale/aspirational — verified 2026-08-12). The
 working member form is bare:
 
-```briv
+```briev
 obj Counter {
     count: Int;
     txn increment [count < 100][true] { count = count + 1; term; };
@@ -111,7 +111,7 @@ keys (fragment refs ⊆ obj slots guarantees the overlap).
 
 | Write | Mechanism | Compliance |
 |---|---|---|
-| Seed (`count: 5`) | Briv StructLiteral `Counter { count: 5 }` → `c1.count` init → `init_state` store | ✅ value is Briv source |
+| Seed (`count: 5`) | Briev StructLiteral `Counter { count: 5 }` → `c1.count` init → `init_state` store | ✅ value is Briev source |
 | Per-mount write (`increment`) | callable txn variant, contract proven | ✅ |
 | Reset on unmount | callable reset TXN `txn __reset_c1 [true][c1.count == 5] { c1.count = 5; term; }`, contract + flush | ✅ fixes stale-DOM |
 | HTML-side default | zero-init (type-defined) | ✅ no Rust-invented value |
@@ -133,12 +133,12 @@ ticked nodes, so a `[true]`-pre reset txn cannot livelock.
 - Migrate `component_instances.rs` tests + `examples/*.s.rbv` counter demos to
   obj form.
 
-### Slice 2 — Briv-side instances
+### Slice 2 — Briev-side instances
 
 - Collect top-level `let <name>: <Obj> = <StructLiteral>` where the type has a
   `render` block → instance registry.
 - Decompose the StructLiteral fields → dotted `name.<field>` StateDecls (typed
-  by the obj) + `field_initializers` seeds (Briv values) → `init_state`.
+  by the obj) + `field_initializers` seeds (Briev values) → `init_state`.
 - Suppress the obj-unpack path (`build_field_index` unpack) for
   component-backed lets — avoid a double `Counter.count` column conflict.
 - `<c1 />` tag resolution (var → type → render block → mount spec routing to
@@ -147,12 +147,12 @@ ticked nodes, so a `[true]`-pre reset txn cannot livelock.
 
 ### Slice 3 — trg-based reset (replaces 2c direct-store reset)
 
-- Emit callable reset txns per instance: `__reset_c1` (re-applies the Briv
+- Emit callable reset txns per instance: `__reset_c1` (re-applies the Briev
   seed) / `__reset_Counter_<i>` (zero). Contract proven, flush runs.
 - Delete `emit_component_reset_exports` + `ctx.component_instances` + the
   `instances` field on the plan; shim reset hook calls
   `_txn('__reset_' + inst.replace('.', '_'))`.
-- The reset txn body is the Briv seed expression; for the HTML-side spawn it is
+- The reset txn body is the Briev seed expression; for the HTML-side spawn it is
   the type default (zero).
 
 ### Slice 4 — docs, spec, migration

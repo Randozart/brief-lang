@@ -1,15 +1,15 @@
-# Implement the 2026-08-05 Normative Briv Language Specification
+# Implement the 2026-08-05 Normative Briev Language Specification
 
 **Date:** 2026-08-05  
 **Status:** Planned — implementation not started  
 **Normative source:** `spec/SPEC.md`  
 **Decision record:** `docs/plans/2026-08-05-language-audit-decisions-draft.md`  
 **Code baseline:** `46f4f741` (`docs: record language audit decisions`)  
-**Baseline worktree:** REQUIRED at `../briv-compiler-baseline`; absent at plan creation
+**Baseline worktree:** REQUIRED at `../briev-compiler-baseline`; absent at plan creation
 
 ## 1. Goal
 
-Bring every active Briv implementation path and shipped source file into conformance with the normative 2026-08-05 specification.
+Bring every active Briev implementation path and shipped source file into conformance with the normative 2026-08-05 specification.
 
 Conformance means:
 
@@ -18,13 +18,13 @@ Conformance means:
 3. Every normative feature is implemented interpreter-first and then by every applicable active backend, or rejected by a frontend target-capability diagnostic.
 4. No compiler path selects user semantics from a concrete source type name.
 5. No unresolved representation falls back silently to `i64`, zero, `Void`, the first match arm, or the first output.
-6. All active shipped Briv/Data Briv files parse and typecheck in CI.
+6. All active shipped Briev/Data Briev files parse and typecheck in CI.
 7. Runtime correctness and performance do not regress against the baseline table in §4.
 
 ## 2. Non-goals
 
 - No compatibility parser.
-- No `briv migrate` command.
+- No `briev migrate` command.
 - No restoration of retired backends.
 - No implicit standard-library concepts in Rust compiler match arms.
 - No performance optimization justified without the measurement protocol in §5.
@@ -93,7 +93,7 @@ Results:
 
 The table is the mandatory comparison baseline for all implementation phases touching analysis, runtime, codegen, ABI, or shipped benchmark sources.
 
-| Benchmark | Briv | C | Ratio | Harness correctness |
+| Benchmark | Briev | C | Ratio | Harness correctness |
 |---|---:|---:|---:|---|
 | ring_buffer | .0591s | .0500s | 1.18x | MATCH |
 | float_math | .0469s | .0751s | .62x | MATCH |
@@ -139,7 +139,7 @@ The table is the mandatory comparison baseline for all implementation phases tou
 These are pre-existing correctness/reporting defects. Log their root causes in `BUGS.md` before implementation phases depend on the harness.
 
 1. **`deep_recursion`** prints a divide-by-zero runtime error, but the harness reports `MATCH` with output `15` and a zero C duration. The comparison is not trustworthy.
-2. **`bridge_glue`** produces Briv result `<null>` versus expected `42`, reports `❌ MISMATCH`, then records `SKIP` because the standard Briv binary is absent. This must not be counted as a passing baseline.
+2. **`bridge_glue`** produces Briev result `<null>` versus expected `42`, reports `❌ MISMATCH`, then records `SKIP` because the standard Briev binary is absent. This must not be counted as a passing baseline.
 3. Protocol round-trip proofs for ASCII, UTF16, and Posit32 are skipped because implementation bodies are unavailable. The normative SPEC requires proof or explicit trusted axioms.
 4. The normalizer emits unresolved-width/alignment fallbacks for `Slice`, `List`, `Stack`, `HashMap`, `RingBuffer`, and other types. The normative SPEC forbids silent representation fallback.
 5. Numerous benchmarks still use `#!exit` and trigger warnings that no tick loop will check the condition. Migration to `exit program`, ports, or explicit entry macros must preserve observability and output.
@@ -149,7 +149,7 @@ These are pre-existing correctness/reporting defects. Log their root causes in `
 Before Phase 1 code changes:
 
 ```bash
-git worktree add ../briv-compiler-baseline 46f4f741
+git worktree add ../briev-compiler-baseline 46f4f741
 ```
 
 If the path already exists in a future session, verify it points to `46f4f741`; do not overwrite uncommitted work.
@@ -232,7 +232,7 @@ Create one machine-readable source for:
 - `src/lexer.rs`
 - `src/parser/helpers.rs`
 - `src/lsp.rs`
-- `syntax-highlighter/syntaxes/briv.tmLanguage.json`
+- `syntax-highlighter/syntaxes/briev.tmLanguage.json`
 - formatter/display generation code
 
 ### 7.4 Tests
@@ -255,7 +255,7 @@ Make canonical formatting available before repository-wide syntax migration.
 - Add parse → format → parse AST-equivalence property tests.
 - Preserve source spans and rationale metadata through formatting.
 - Ensure macro-generated AST formats canonically.
-- Add formatter coverage for Briv, `.f`, RBV embedded expressions, `.dbv`, and `.dbvl` where applicable.
+- Add formatter coverage for Briev, `.f`, RBV embedded expressions, `.dbv`, and `.dbvl` where applicable.
 
 ### 8.3 Files
 
@@ -677,7 +677,7 @@ Trace and replace all uses in:
 
 Foreign adaptation comes from:
 
-- GLUE/Data Briv layout descriptors;
+- GLUE/Data Briev layout descriptors;
 - explicit protocol cast edges;
 - ownership/effect contracts;
 - configured error mapping.
@@ -695,7 +695,7 @@ Update loaders, tests, docs, and generated-path diagnostics. Keep generated `bri
 ### 18.4 FFI proof gates
 
 - Ownership required for pointer/aggregate boundaries.
-- Actual ABI signature and Briv-visible signature mapping validated.
+- Actual ABI signature and Briev-visible signature mapping validated.
 - Optional symbol availability is compile-time descriptor reflection.
 - Raw kernel transition only through explicit `SysCall#`.
 - No platform type-name matching in generator code.
@@ -704,7 +704,7 @@ Update loaders, tests, docs, and generated-path diagnostics. Keep generated `bri
 
 Repair `bridge_glue` mismatch before declaring Phase 12 complete. Add a hard harness correctness failure instead of `SKIP` on produced wrong output.
 
-## 19. Phase 13 — Data Briv
+## 19. Phase 13 — Data Briev
 
 ### 19.1 Parser modes
 
@@ -732,7 +732,7 @@ When asserted, enforce:
 
 ### 19.4 CLI
 
-`briv check` dispatches by extension and validates schemas.
+`briev check` dispatches by extension and validates schemas.
 
 ### 19.5 Migration
 
@@ -741,14 +741,14 @@ When asserted, enforce:
 - migrate human-authored GLUE configs;
 - preserve generated DBVL protocol.
 
-## 20. Phase 14 — Rendered Briv
+## 20. Phase 14 — Rendered Briev
 
 ### 20.1 Document parser
 
 - remove script-wrapper compatibility;
 - canonical source outside `<view>`/`<style>`;
 - `render Name` only;
-- canonical Briv expression parser for directives.
+- canonical Briev expression parser for directives.
 
 ### 20.2 Lifecycle
 
@@ -851,7 +851,7 @@ Add reference behavior for:
 - ownership/cancellation;
 - FFI error mapping.
 
-## 24. Phase 18 — Standard library and compiler-in-Briv migration
+## 24. Phase 18 — Standard library and compiler-in-Briev migration
 
 ### 24.1 Stdlib
 
@@ -859,7 +859,7 @@ Migrate all active modules to canonical declarations, imports, ops, protocols, q
 
 Collection behavior remains in stdlib. No Rust match arm may be added for `List`, `HashMap`, stack, queue, string utility functions, or host handles.
 
-### 24.2 Compiler-in-Briv
+### 24.2 Compiler-in-Briev
 
 Migrate `lib/compiler/` syntax and ensure every pass parses/typechecks in CI. Remove stale comments/examples that present old grammar as active.
 
@@ -899,13 +899,13 @@ Update in the same structural commits:
 - reflection/projection docs
 - ownership/lifetime docs
 - GLUE/FFI docs
-- Data Briv docs
-- Rendered Briv docs
+- Data Briev docs
+- Rendered Briev docs
 - target/backend strategy docs
 
 ### 26.2 Tutorials
 
-Rewrite `learn-briv/` around the normative grammar. Do not preserve obsolete syntax as alternatives. Migration notes may name removed forms but must not teach them as accepted.
+Rewrite `learn-briev/` around the normative grammar. Do not preserve obsolete syntax as alternatives. Migration notes may name removed forms but must not teach them as accepted.
 
 ### 26.3 CLAUDE.md and contributor instructions
 

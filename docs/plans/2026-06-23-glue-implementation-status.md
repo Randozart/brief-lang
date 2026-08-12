@@ -1,8 +1,8 @@
 # GLUE Implementation Status & Remaining Work
 
 **Date:** 2026-06-23 (final)  
-**Status:** Full GLUE pipeline end-to-end verified: `briv link` (nm analysis → intrinsic cross-ref → bridge .bv),  
-`briv export` (AST → DBVL → `$!macro` → `emit_file#()` → native crate).  
+**Status:** Full GLUE pipeline end-to-end verified: `briev link` (nm analysis → intrinsic cross-ref → bridge .bv),  
+`briev export` (AST → DBVL → `$!macro` → `emit_file#()` → native crate).  
 Rust and Python adapters generate valid wrappers. `String+` string concatenation fixed.  
 `argv#()` and `emit_file#()` intrinsics added.  
 LLVM backend broken by other agents — blocks native binary compilation and `--library` mode.
@@ -11,37 +11,37 @@ LLVM backend broken by other agents — blocks native binary compilation and `--
 
 ## 1. What GLUE Is
 
-GLUE (General Language Unification Engine) is a universal FFI broker built on Briv's
+GLUE (General Language Unification Engine) is a universal FFI broker built on Briev's
 `meld` system. Any two languages that consume LLVM-compatible object code can be linked
-through GLUE. Neither language knows Briv exists. Both see their own native interface.
-Briv compiles to native `.o`/`.a`/`.wasm` — no C compiler, no `extern "C"`, no `cc`
+through GLUE. Neither language knows Briev exists. Both see their own native interface.
+Briev compiles to native `.o`/`.a`/`.wasm` — no C compiler, no `extern "C"`, no `cc`
 crate needed.
 
 ### CLI Verbs
 
 | Command | Purpose | Status |
 |---|---|---|
-| `briv link <path>` | Analyze a foreign library via `nm`, generate `.bv` with `frgn` declarations cross-referenced against intrinsics | ✅ Implemented (`src/glue/link.rs`) |
-| `briv export <bridge.bv> <language>` | Parse bridge, serialize info as DBVL, invoke `$!` adapter macro via `emit_file#()` | ✅ Implemented (`src/glue/export.rs`) |
-| `glue <target> <function> <language>` | One-shot: `briv link` + `briv export` | ❌ Not started |
+| `briev link <path>` | Analyze a foreign library via `nm`, generate `.bv` with `frgn` declarations cross-referenced against intrinsics | ✅ Implemented (`src/glue/link.rs`) |
+| `briev export <bridge.bv> <language>` | Parse bridge, serialize info as DBVL, invoke `$!` adapter macro via `emit_file#()` | ✅ Implemented (`src/glue/export.rs`) |
+| `glue <target> <function> <language>` | One-shot: `briev link` + `briev export` | ❌ Not started |
 
 ### Protocol Files
 
 | File | Purpose |
 |---|---|
-| `lib/glue.dbvl` | D-Briv Lines — adapter registry, one language per line, bare comma-separated fields |
-| `lib/glue.dbvs` | D-Briv Schema — validates `glue.dbvl` entries |
+| `lib/glue.dbvl` | D-Briev Lines — adapter registry, one language per line, bare comma-separated fields |
+| `lib/glue.dbvs` | D-Briev Schema — validates `glue.dbvl` entries |
 | `glue/adapters/<language>.bv` | `$!macro` that generates native wrappers for a language using `emit_file#()` |
 
 ---
 
 ## 2. Architecture Decisions
 
-### 2.1 Adapters are Briv `$!` Macros (Not Rust Template Engine)
+### 2.1 Adapters are Briev `$!` Macros (Not Rust Template Engine)
 
 Language adapters are `.bv` files containing `$!macro` definitions. The macro takes
 bridge info (serialized as DBVL strings) and calls `emit_file#()` to write native
-source files. This keeps all language-specific logic in Briv code that survives
+source files. This keeps all language-specific logic in Briev code that survives
 self-hosting. Adding a language = writing one `.bv` file.
 
 ### 2.2 Memory Model (Three Tiers)
@@ -57,7 +57,7 @@ self-hosting. Adding a language = writing one `.bv` file.
 Bridge never panics. When a `frgn` inside the bridge fails:
 - Returns zero value for return type (0 for Int, null for String/pointer, false for Bool)
 - Caller is always responsible for null-checking
-- Briv's `Result` type makes this explicit — no silent failures
+- Briev's `Result` type makes this explicit — no silent failures
 
 ### 2.4 DBVL Format Rules
 
@@ -84,22 +84,22 @@ melds dbvl:    from_type, to_type, route
 ### 2.6 `emit_file#()` Intrinsic
 
 New compile-time-only intrinsic: `emit_file#(filename: String, content: String)`.
-Writes `content` to `BRIV_OUTPUT_DIR/filename` during `$!macro` expansion. Uses
-the `BRIV_OUTPUT_DIR` environment variable (set by `export.rs`) to determine the
+Writes `content` to `BRIEV_OUTPUT_DIR/filename` during `$!macro` expansion. Uses
+the `BRIEV_OUTPUT_DIR` environment variable (set by `export.rs`) to determine the
 output directory. This avoids passing Rust-side state into the macro sandbox.
 
 ### 2.7 File Extensions
 
 | Extension | Meaning |
 |---|---|
-| `.dbvl` | Data Briv Lines — raw data, one entry per line, comma-separated fields |
-| `.dbvs` | Data Briv Schema — validates `.dbvl` and `.dbv` files |
+| `.dbvl` | Data Briev Lines — raw data, one entry per line, comma-separated fields |
+| `.dbvs` | Data Briev Schema — validates `.dbvl` and `.dbv` files |
 
 ---
 
 ## 3. Implemented So Far
 
-### 3.1 Data Briv Parser (`src/glue/`)
+### 3.1 Data Briev Parser (`src/glue/`)
 
 - **`src/glue/mod.rs`** — Module declaration, submodule visibility
 - **`src/glue/dbvl_reader.rs`** — `.dbvl` parser (238 lines)
@@ -124,7 +124,7 @@ Added to the `Intrinsic` enum:
 - `Intrinsic::EmitFile => "emit_file"` in `name()`
 - Included in `is_compile_time_only()` — removed by `validate_no_compile_time_intrinsics()`
 - **Interpreter**: reads `(filename, content)` String args, creates parent dirs,
-  writes to `BRIV_OUTPUT_DIR` (or `.`), returns `Value::Void`
+  writes to `BRIEV_OUTPUT_DIR` (or `.`), returns `Value::Void`
 - **LLVM backend**: `panic!("emit_file#() called at runtime — this is a compiler bug")`
 
 ### 3.3 Export Pipeline (`src/glue/export.rs`, 457 lines)
@@ -155,7 +155,7 @@ Uses the `DbvlEntry` parser result directly (no manual quote stripping).
 
 - **`analyze_library()`** — runs `nm --defined-only -g` on a `.so`/`.a` file,
   extracts T (text) symbols, cross-references each against `Intrinsic::from_name()`
-  (also tries `__`-stripped and `briv_`-prefixed variants)
+  (also tries `__`-stripped and `briev_`-prefixed variants)
 - **`generate_bridge_bv()`** — emits `.bv` file: `intrinsic_call#()` wrappers for
   known intrinsics, `frgn` skeletons for unknown symbols
 - **`print_link_summary()`** — human-readable output for the CLI
@@ -163,8 +163,8 @@ Uses the `DbvlEntry` parser result directly (no manual quote stripping).
 
 ### 3.5 CLI Subcommands (`src/main.rs`)
 
-- **`briv export <bridge.bv> <language> [--out <dir>]`** — parses, invokes `run_export_main()`
-- **`briv link <library_path> [--out <dir>]`** — analyzes via nm, emits `.bv`
+- **`briev export <bridge.bv> <language> [--out <dir>]`** — parses, invokes `run_export_main()`
+- **`briev link <library_path> [--out <dir>]`** — analyzes via nm, emits `.bv`
 - Usage message updated with both commands
 
 ### 3.6 Registry Files
@@ -203,8 +203,8 @@ Other agents broke `loop_engine.rs` (3 PreallocBoundSource errors) and `emit_exp
 
 Once LLVM compiles:
 ```
-cargo run -- briv link /usr/lib/libm.so
-cargo run -- briv export examples/meld-simple.bv rust
+cargo run -- briev link /usr/lib/libm.so
+cargo run -- briev export examples/meld-simple.bv rust
 ls -la meld-simple-bridge/  # should have Cargo.toml, build.rs, src/
 ```
 
@@ -227,25 +227,25 @@ Standalone repository at `~/Desktop/Projects/glue-ffi/`:
 ```
 glue-ffi/
   Cargo.toml
-  src/main.rs          # CLI entry — delegates to briv build --library
+  src/main.rs          # CLI entry — delegates to briev build --library
   templates/           # symlinks to glue/adapters/
   lib/glue.dbvl
   lib/glue.dbvs
 ```
 
-The standalone GLUE requires `briv` compiler on `$PATH`.
+The standalone GLUE requires `briev` compiler on `$PATH`.
 
-### P3 — Wire `briv build --library` into `briv export`
+### P3 — Wire `briev build --library` into `briev export`
 
-Currently `briv export` only generates wrapper source files (Cargo.toml, lib.rs).
-It should also compile the bridge to `.a` via `briv build bridge.bv --library`
+Currently `briev export` only generates wrapper source files (Cargo.toml, lib.rs).
+It should also compile the bridge to `.a` via `briev build bridge.bv --library`
 and copy the `.a` into the output directory. This requires the LLVM backend's
 library mode to be functional.
 
 ### P3 — `__glue_release` Memory Management
 
 The arena-based memory model (tier 2) is not implemented. `__glue_release` is a
-no-op. This needs a per-call arena allocator in `briv_rt.c` and codegen in the
+no-op. This needs a per-call arena allocator in `briev_rt.c` and codegen in the
 LLVM backend (requires touching LLVM files).
 
 ---
@@ -272,9 +272,9 @@ LLVM backend (requires touching LLVM files).
 | File | Changes |
 |---|---|
 | `src/ast.rs` | Added `Intrinsic::EmitFile` variant, `from_name`, `name`, `is_compile_time_only` |
-| `src/interpreter.rs` | Added `EmitFile` handler: reads `(filename, content)`, writes to `BRIV_OUTPUT_DIR` |
+| `src/interpreter.rs` | Added `EmitFile` handler: reads `(filename, content)`, writes to `BRIEV_OUTPUT_DIR` |
 | `src/backend/llvm/emit_expr.rs` | Added `EmitFile` panic guard |
-| `src/main.rs` | Added `briv export` and `briv link` subcommands + `run_export_main()`/`run_link_main()` |
+| `src/main.rs` | Added `briev export` and `briev link` subcommands + `run_export_main()`/`run_link_main()` |
 | `src/lib.rs` | (unchanged — already had `pub mod glue`) |
 | `AGENTS.md` | GLUE architecture, Correctness Over Speed, Executive Requests mandates |
 
@@ -295,8 +295,8 @@ All in `src/glue/`:
 | Test | What it validates | Priority |
 |---|---|---|
 | `cargo test --lib` | All tests pass | P0 (blocked by LLVM) |
-| `briv link /usr/lib/libm.so` | nm analysis + intrinsic cross-ref | P1 |
-| `briv export examples/meld-simple.bv rust` | Full export pipeline | P1 |
+| `briev link /usr/lib/libm.so` | nm analysis + intrinsic cross-ref | P1 |
+| `briev export examples/meld-simple.bv rust` | Full export pipeline | P1 |
 | Rust crate from export builds | `cargo build` in output dir | P2 |
 
 ---
@@ -313,5 +313,5 @@ All in `src/glue/`:
    with correct linking, but `src/lib.rs` wrappers use placeholder FFI calls
    (not real `#export` wrappers). The `$!macro` can't call individual exports
    without knowing their signatures.
-5. **Library-mode `.a` compilation not wired into export** — `briv export`
+5. **Library-mode `.a` compilation not wired into export** — `briev export`
    only generates wrapper sources; doesn't compile the bridge to `.a`.

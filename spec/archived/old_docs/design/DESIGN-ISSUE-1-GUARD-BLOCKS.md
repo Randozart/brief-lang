@@ -11,13 +11,13 @@
 
 ### 1.1 Problem Statement
 
-Briv currently supports only flat guard syntax:
-```briv
+Briev currently supports only flat guard syntax:
+```briev
 [condition] statement;
 ```
 
 This works for single statements but becomes verbose for multiple related operations:
-```briv
+```briev
 [amount > 100] &large_transfers = large_transfers + 1;
 [amount > 100] &large_total = large_total + amount;
 [amount > 100] &large_count = large_count + 1;
@@ -26,7 +26,7 @@ This works for single statements but becomes verbose for multiple related operat
 ### 1.2 Proposed Solution
 
 Add block guard syntax that allows multiple statements in braces:
-```briv
+```briev
 [amount > 100] {
   &large_transfers = large_transfers + 1;
   &large_total = large_total + amount;
@@ -65,13 +65,13 @@ guarded_block ::= "[" expression "]" "{" statement* "}"
 Both syntaxes are semantically identical:
 
 **Flat syntax:**
-```briv
+```briev
 [condition] stmt1;
 [condition] stmt2;
 ```
 
 **Block syntax:**
-```briv
+```briev
 [condition] {
   stmt1;
   stmt2;
@@ -84,7 +84,7 @@ Both syntaxes are semantically identical:
 
 Blocks can contain any statements, including more guards:
 
-```briv
+```briev
 [x > 0] {
   &counter = counter + 1;
   [counter > 10] {
@@ -94,7 +94,7 @@ Blocks can contain any statements, including more guards:
 ```
 
 Multiple guards in sequence:
-```briv
+```briev
 [x > 0] { &a = a + 1; };
 [x < 0] { &b = b + 1; };
 [x == 0] { &c = c + 1; };
@@ -103,19 +103,19 @@ Multiple guards in sequence:
 ### 2.4 Edge Cases
 
 **Empty block:** Not allowed (compiler error)
-```briv
+```briev
 [x > 0] { };  // ERROR: Empty guarded block
 ```
 
 **Nested identical guards:** Allowed but redundant
-```briv
+```briev
 [x > 0] {
   [x > 0] &a = 1;  // Redundant inner guard, allowed
 };
 ```
 
 **Guard with term statement:** Allowed
-```briv
+```briev
 [success] {
   &done = true;
   term;
@@ -285,7 +285,7 @@ Statement::Guarded { condition, stmts } => {
 The compiler can desugar block guards to flat guards:
 
 **Input:**
-```briv
+```briev
 [condition] {
   stmt1;
   stmt2;
@@ -294,7 +294,7 @@ The compiler can desugar block guards to flat guards:
 ```
 
 **Desugared:**
-```briv
+```briev
 [condition] stmt1;
 [condition] stmt2;
 [condition] stmt3;
@@ -360,7 +360,7 @@ cargo test --release
 
 Create `examples/guard_blocks.bv`:
 
-```briv
+```briev
 let amount: Int = 0;
 let large_count: Int = 0;
 let large_total: Int = 0;
@@ -389,7 +389,7 @@ txn categorize_transfer [true][large_count + small_count > 0] {
 
 ### 6.1 Empty Blocks
 
-```briv
+```briev
 [x > 0] { }  // ERROR: Expected at least one statement
 ```
 
@@ -397,7 +397,7 @@ txn categorize_transfer [true][large_count + small_count > 0] {
 
 ### 6.2 Unclosed Blocks
 
-```briv
+```briev
 [x > 0] {
   &a = 1;
   // Missing }
@@ -407,7 +407,7 @@ txn categorize_transfer [true][large_count + small_count > 0] {
 
 ### 6.3 Guard at Block End
 
-```briv
+```briev
 txn test [true][true] {
   &x = 1;
   [success] { &done = true; }
@@ -417,7 +417,7 @@ txn test [true][true] {
 ```
 
 **Current behavior:** Semicolon is part of some statements. Guard blocks need semicolon:
-```briv
+```briev
 [success] { &done = true; };
 ```
 
@@ -425,7 +425,7 @@ This is consistent with existing syntax.
 
 ### 6.4 Multiple Consecutive Guards
 
-```briv
+```briev
 [x > 0] { &a = 1; };
 [x < 0] { &b = 1; };
 [x == 0] { &c = 1; };
@@ -466,15 +466,15 @@ if (condition) {
 }
 ```
 
-**Briv:**
-```briv
+**Briev:**
+```briev
 [condition] {
   stmt1;
   stmt2;
 };
 ```
 
-Briv follows the familiar pattern but with guard syntax instead of `if`.
+Briev follows the familiar pattern but with guard syntax instead of `if`.
 
 ---
 

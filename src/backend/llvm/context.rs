@@ -66,10 +66,10 @@ pub struct CompilerContext {
     // State layout (built during generate(), then read-only)
     pub field_index_map: HashMap<String, usize>,
     pub field_types: Vec<String>,
-    pub field_briv_types: Vec<Type>,
+    pub field_briev_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
     /// 2026-08-11 (2b2 slice 2b): component-instance slot initializers from
-    /// Briv-side seeds (`c1.count` → 5). build_field_index merges them into
+    /// Briev-side seeds (`c1.count` → 5). build_field_index merges them into
     /// field_initializers after the StateDecl registration.
     pub component_initializers: HashMap<String, Expr>,
     pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
@@ -94,7 +94,7 @@ pub struct CompilerContext {
     pub observable_names: std::collections::HashSet<String>,
     /// 2026-08-03: Per-export `needs_state` from the export ABI analysis
     /// (src/analysis/export_abi.rs). Pure exports keep a clean C ABI;
-    /// exports calling any Briv defn carry `ptr %state` first.
+    /// exports calling any Briev defn carry `ptr %state` first.
     pub export_needs_state: HashMap<String, bool>,
     /// 2026-07-27: Reverse index from state field position to field name.
     /// Used by load_field_type() to look up !range metadata by field index.
@@ -116,7 +116,7 @@ pub struct CompilerContext {
     pub mmio_fields: HashMap<String, u64>,
     pub mmio_initializers: HashMap<String, Option<Expr>>,
     pub mmio_prepopulated: bool,
-    /// 2026-07-26: Replaced DbrivType with HashSet. The type annotation
+    /// 2026-07-26: Replaced DbrievType with HashSet. The type annotation
     /// was never read in production — only names matter for cross-validation.
     pub schema_alias_names: HashSet<String>,
 
@@ -151,7 +151,7 @@ pub struct CompilerContext {
     /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariants, name → type
     /// + seeding form. Emitted as mutable globals (`@name = global ... 0`),
     /// seeded once in the pre-reactor phase (emit_init_state /
-    /// emit_inline_init_stores / __briv_init_state), then read via load. Not
+    /// emit_inline_init_stores / __briev_init_state), then read via load. Not
     /// folded like `constants` — the value is only known at runtime.
     pub inits: HashMap<String, crate::ast::top::InitDecl>,
 
@@ -206,7 +206,7 @@ pub struct CompilerContext {
     /// static `[capacity x T]` column; their spawns allocate per instance.
     pub spawn_storage: std::collections::HashMap<String, crate::ast::SpawnStorage>,
     /// 2026-08-09 (Phase 5): per-instance-heap (box/spill) member layout — base
-    /// → member → (byte offset within the instance block, Briv type). The boxed
+    /// → member → (byte offset within the instance block, Briev type). The boxed
     /// block is one instance's worth of member storage laid out like the static
     /// instance columns; member access inttoptrs the handle + GEPs the offset.
     pub boxed_offsets: std::collections::HashMap<String, std::collections::HashMap<String, (u64, crate::ast::Type)>>,
@@ -343,7 +343,7 @@ impl CompilerContext {
             module_init: false,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
-            field_briv_types: Vec::new(),
+            field_briev_types: Vec::new(),
             field_initializers: HashMap::new(),
             component_initializers: HashMap::new(),
             ringbuf_inline: HashMap::new(),
@@ -618,7 +618,7 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     pub let_original_types: HashMap<String, Type>,
     /// 2026-07-18: Tracks which let-bindings point to allocas (vs SSA registers).
     pub let_binding_allocas: HashSet<String>,
-    /// 2026-08-04 (compiler-in-Briv): top-level `let name` bindings that are
+    /// 2026-08-04 (compiler-in-Briev): top-level `let name` bindings that are
     /// reassigned somewhere in the body (incl. inside when/if/foreach blocks).
     /// Pre-declared as allocas at the function ENTRY so a reassignment inside a
     /// guard/loop body stores into an entry-block alloca — emitting the demotion
@@ -787,7 +787,7 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     // extractvalue from the state phi always gives old values, so all
     // computations are naturally independent.  The per-field phi loop
     // (EmitPerFieldPhi) broke this by updating ssa_old caches after each &
-    // (correct per Briv semantics but creates artificial dependency
+    // (correct per Briev semantics but creates artificial dependency
     // chains).  Parallel-safe mode restores the EmitInlineSsa independence.
     //
     // Exception: the counter field (tracked by counter_field_name) always

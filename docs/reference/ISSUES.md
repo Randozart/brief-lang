@@ -1,6 +1,6 @@
 # Issues Log
 
-**Project:** briv-compiler
+**Project:** briev-compiler
 **Purpose:** Approaches that failed and required different solutions
 
 ---

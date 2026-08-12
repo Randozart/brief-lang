@@ -1,17 +1,17 @@
-# Callbacks — host → Briv → host
+# Callbacks — host → Briev → host
 
 **Date:** 2026-08-03
 **Status:** Implemented (C path verified; Python/Node wrappers pending)
 **Request origin:** RamKumar Revanur (MAKER.AI) — "a means to update a first
 level primitive — progress bar updates in client code based on async updates
-of status from Briv code." C#-events/delegates-style.
+of status from Briev code." C#-events/delegates-style.
 
 ## What was built
 
-A host passes a function pointer into an exported Briv function; Briv calls
+A host passes a function pointer into an exported Briev function; Briev calls
 it back for first-level-primitive updates (e.g. per-file progress).
 
-```briv
+```briev
 export defn apply(cb: fn(Int) -> Int, x: Int) -> Int {
     term CallPtr#(cb, x);
 };
@@ -41,11 +41,11 @@ int64_t r = apply(doubler, 21);   // → 42
    the name where required (C: `int64_t (*cb)(int64_t)`).
 4. **Demo:** `examples/glue-host/callback.bv`.
 5. **Test:** `tests/c_driver_callback.rs` (toolchain-guarded) — C passes
-   `doubler`/`plus_one`, Briv calls them, returns 42/42.
+   `doubler`/`plus_one`, Briev calls them, returns 42/42.
 
 ## Status / follow-ups
 
-- C path verified end-to-end (`brivc build --library` + C driver).
+- C path verified end-to-end (`brievc build --library` + C driver).
 - Python (`ctypes.CFUNCTYPE`) and Node (`ffi-napi`) wrapper templates do not
   yet render fn-typed params — the callback type must be added to their
   config templates. The metadata (`bridge-exports.dbvl`) already carries the

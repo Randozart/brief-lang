@@ -13,7 +13,7 @@
 
 Postconditions currently fail verification when they reference output variable names:
 
-```briv
+```briev
 defn sufficient_funds(amount: Int) [amount > 0][result == true] -> Bool {
   term true;
 };
@@ -93,7 +93,7 @@ When verifying postcondition, the proof engine:
 **Example:**
 
 Defn declaration:
-```briv
+```briev
 defn divide(a: Int, b: Int) [b != 0][result == a / b] -> Int
 ```
 
@@ -108,7 +108,7 @@ Verification: Use symbolic executor to check this expression is satisfiable
 ### 2.4 Edge Cases
 
 **Multiple outputs with names:**
-```briv
+```briev
 defn pair() [true][first > 0 && second > 0] -> first: Int, second: Int {
   term 10;
   term 20;
@@ -119,7 +119,7 @@ Mapping: `{first: 0, second: 1}`
 Substitution: `(value_from_term_0) > 0 && (value_from_term_1) > 0`
 
 **Mixed named and unnamed:**
-```briv
+```briev
 defn complex() -> result: Bool, Int, success: Bool {
   term true;
   term 42;
@@ -131,7 +131,7 @@ Mapping: `{result: 0, success: 2}`
 Postcondition can use `result` and `success`, but not refer to slot 1
 
 **No names (backward compat):**
-```briv
+```briev
 defn old_style() -> Bool, Int {
   term true;
   term 42;
@@ -483,7 +483,7 @@ fn test_output_name_in_complex_postcondition() {
 
 Create `examples/output_names.bv`:
 
-```briv
+```briev
 defn divide(a: Int, b: Int) [b != 0][result == a / b] -> result: Int {
   let result: Int = a / b;
   term result;
@@ -520,7 +520,7 @@ cargo test --release
 
 ### 5.1 No Output Names (Backward Compat)
 
-```briv
+```briev
 defn old_style() -> Bool, Int {
   term true;
   term 42;
@@ -531,7 +531,7 @@ defn old_style() -> Bool, Int {
 
 ### 5.2 Output Name Not Used in Postcondition
 
-```briv
+```briev
 defn unused_name() [true][true] -> result: Bool {
   term true;
 };
@@ -541,7 +541,7 @@ defn unused_name() [true][true] -> result: Bool {
 
 ### 5.3 Reference to Non-Output Name
 
-```briv
+```briev
 defn test() [true][foo == 5] -> result: Bool {  // foo is not an output
   term true;
 };
@@ -551,7 +551,7 @@ defn test() [true][foo == 5] -> result: Bool {  // foo is not an output
 
 ### 5.4 Output Name in Nested Expression
 
-```briv
+```briev
 defn nested() [true][(result + 1) > 5] -> result: Int {
   term 10;
 };
@@ -565,7 +565,7 @@ defn nested() [true][(result + 1) > 5] -> result: Int {
 
 This feature is a **prerequisite** for multi-output functions (Feature A). When Feature A is implemented, output names enable:
 
-```briv
+```briev
 defn safe_fetch(url: String) -> json: JSON | Bool {
   // Can now reference json in postcondition
 };

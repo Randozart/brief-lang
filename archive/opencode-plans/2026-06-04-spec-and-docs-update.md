@@ -14,7 +14,7 @@ Phase 2: lib/std/ .bv files   (parseable once parser is done)
     ↓
 Phase 3: lib/compiler/ .bv files   (depend on stdlib)
     ↓
-Phase 4: Spec + learn-briv docs   (can be done in parallel with Phases 2-3)
+Phase 4: Spec + learn-briev docs   (can be done in parallel with Phases 2-3)
     ↓
 Phase 5: Internal docs (AGENTS.md, plans, BUGS.md)
 ```
@@ -97,7 +97,7 @@ syntax with `x :> Size`. This is the self-hosted compiler code.
 
 ---
 
-## Phase 4: Spec + Learn-Briv Documentation
+## Phase 4: Spec + Learn-Briev Documentation
 
 ### `spec/SPEC.md` (7 sites)
 Replace all `x.len()` and `len(x)` with `x :> Size`. Key locations:
@@ -113,7 +113,7 @@ Replace all `x.len()` and `len(x)` with `x :> Size`. Key locations:
 - Line 1228: `list.len()` → `list :> Size`
 - Line 1319: `observers.len()` → `observers :> Size`
 
-### `learn-briv/` (8 files, ~50 sites)
+### `learn-briev/` (8 files, ~50 sites)
 
 Systematic search-and-replace:
 - `items.len()` → `items :> Size`
@@ -139,8 +139,8 @@ in spec docs.
 
 ### `docs/` files
 - `docs/design/determinism-and-optimization-frontier.md`: `len(s) <= 140` → `s :> Size <= 140`
-- `docs/reference/BRIV_ADVENTURES_RESEARCH.md`: `inventory.len() > 0` → `inventory :> Size > 0`
-- `docs/reference/DBRIV_SPEC.md`: `name.len() > 0` → `name :> Size > 0`
+- `docs/reference/BRIEV_ADVENTURES_RESEARCH.md`: `inventory.len() > 0` → `inventory :> Size > 0`
+- `docs/reference/DBRIEV_SPEC.md`: `name.len() > 0` → `name :> Size > 0`
 - `docs/milestones/` (TIER1-6, SELF_HOSTING_PLAN): same pattern
 - `docs/old_docs/guides/GUIDE.md`: ~15 sites
 
@@ -167,7 +167,7 @@ Already up to date (written as the plan for this change).
 
 ### Other plan files in `plans/` and `llvm-spec/`
 - `plans/2026-06-02-typed-ssa-and-commutativity.md`: `Expr::ListLen(a)` → removed
-- `plans/active/BRIV_OPTIMIZATION_PLAN.md`: `Expr::ListLen(Expr)` → removed
+- `plans/active/BRIEV_OPTIMIZATION_PLAN.md`: `Expr::ListLen(Expr)` → removed
 - `plans/2026-06-03-llvm-backend-completion.md`: Phase 3a ListLen → now Projection
 - `llvm-spec/08e-AOT-SIZE-INFERENCE.md`: `list_len_ptr` → update
 
@@ -180,7 +180,7 @@ Already up to date (written as the plan for this change).
 | 1. Parser | 1 | ~25 lines | 🟢 Low |
 | 2. lib/std/ .bv | ~8 | ~100 replacements | 🟡 Medium (must not break logic) |
 | 3. lib/compiler/ .bv | ~10 | ~120 replacements | 🟡 Medium (self-hosted, harder to test) |
-| 4. Spec + learn-briv | ~20 | ~200 replacements | 🟢 Low (docs only) |
+| 4. Spec + learn-briev | ~20 | ~200 replacements | 🟢 Low (docs only) |
 | 5. Internal docs | ~15 | ~100 replacements | 🟢 Low (docs only) |
 
 **Total:** ~54 files, ~545 replacements

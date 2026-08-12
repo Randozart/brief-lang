@@ -1,4 +1,4 @@
-# Briv Stress Testing Log
+# Briev Stress Testing Log
 **Date Started:** 2026-04-05
 **Purpose:** Document language limitations and compiler errors discovered during real-world .bv program testing
 
@@ -15,7 +15,7 @@
 Inline comments inside transaction bodies cause parse errors.
 
 **Example that fails:**
-```briv
+```briev
 txn transfer [pre][post] {
   &balance = balance - 10;  // Perform transfer
   term;
@@ -44,7 +44,7 @@ Parse error: Unexpected token in expression: Ok(Comment("# Perform the transfer"
 Phase 4 ownership verification correctly detects conflicting write access in async transactions.
 
 **Example that correctly fails:**
-```briv
+```briev
 async node reserve_inventory [payment_processed == true && inventory_reserved == false]
   [inventory_reserved == true]
 {
@@ -79,7 +79,7 @@ error[P001]: ownership conflict in async transactions
 **Description:**
 The proof engine verifies that defn postconditions are satisfiable. In the test case:
 
-```briv
+```briev
 defn sufficient_funds(amount: Int) [amount > 0][result == true] -> Bool {
   term true;
 };
@@ -200,7 +200,7 @@ error[P008]: contract verification failed
 
 ## Conclusion
 
-**Briv's proof system is PRODUCTION-READY for its core use cases:**
+**Briev's proof system is PRODUCTION-READY for its core use cases:**
 - ✅ Compiler catches concurrency bugs at compile time
 - ✅ Contract verification prevents runtime state violations  
 - ✅ Ownership tracking prevents data races

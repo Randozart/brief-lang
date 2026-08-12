@@ -4,7 +4,7 @@
 **Status:** Implemented (`5ab100b1`, `be934d61`, `ac6aca40`) — all 37 runtime
 benchmarks MATCH post-change (A/B table below), queue_drain regression fixed and
 documented; docs updated.
-**Branch:** `feat/term-termination-diagnostics` (worktree `../briv-compiler-term-diagnostics`)
+**Branch:** `feat/term-termination-diagnostics` (worktree `../briev-compiler-term-diagnostics`)
 **Related:**
 - `docs/plans/2026-07-31-frontend-driven-dispatch.md` (frontend-driven dispatch — the pass model this follows)
 - `AGENTS.md` Rule 4 (interpreter is reference) and Rule 8 (tests or it doesn't exist)
@@ -121,7 +121,7 @@ missing compiler error / missing guidance.
   async body contains the `__print_int` after the bare `term;`.
 - **Value-form-in-guard fall-through REQUIRES a codegen fix (this plan's §1/§2
   error alone was NOT sufficient).** `corrected_term_guard.bv`
-  (`when a == 1 { term! -> Print#(1); }; Print#(2);`) passes `brivc check`
+  (`when a == 1 { term! -> Print#(1); }; Print#(2);`) passes `brievc check`
   (the statement after the guard IS reachable when the guard is false) yet the
   pre-fix binary printed `"12"` while the interpreter prints `"1"`. The
   correctness proof: the interpreter's `TermReturn` unwinds the WHOLE body, so
@@ -142,7 +142,7 @@ missing compiler error / missing guidance.
 
 - Termination-pass unit tests (§1).
 - Integration: a `.bv` with `when c { term! -> Print#(x); }; more;` must fail
-  `brivc check` with the unreachable-code message; same for a guard whose body
+  `brievc check` with the unreachable-code message; same for a guard whose body
   is only `term <val>` followed by a trailing statement.
 - Valid shapes still pass: `examples/swan-song.bv`, `examples/ptr-demo.bv`,
   `examples/error-handling.bv`, and all four `test-project-otto` CLI files
@@ -170,93 +170,93 @@ missing compiler error / missing guidance.
 
 Baseline at the current commit (clean `cargo build --release` +
 `bash benchmarks/build_and_bench.sh --runtime`), run with the PRE-change binary
-(main-worktree `target/release/brivc`, Aug 4 10:12) on 2026-08-04; the
+(main-worktree `target/release/brievc`, Aug 4 10:12) on 2026-08-04; the
 POST-change run (feature worktree) follows and is compared.
 Table format follows `benchmarks/results/2026-08-01-plugin-rework-baseline.md`.
 
 ### Baseline (pre-change, main worktree @ `b0487364`)
 
-| Benchmark | Briv | C | Ratio | Winner | Correct |
+| Benchmark | Briev | C | Ratio | Winner | Correct |
 |-----------|:-----:|:--:|:-----:|:------:|:-------:|
 | ring_buffer | .0694s | .0648s | 1.07x | C | MATCH |
-| float_math | .0455s | .0740s | .61x | Briv | MATCH |
-| float_math_nonzero | .1619s | .1700s | .95x | Briv | MATCH |
-| sparse_dispatch | .0618s | .0693s | .89x | Briv | MATCH |
-| print_loop | .0417s | .0757s | .55x | Briv | MATCH |
-| nbody_newton | 9.1892s | 10.8440s | .84x | Briv | MATCH |
-| nbody_sqrt | 3.0792s | 3.9270s | .78x | Briv | MATCH |
-| nbody_sqrt_idio | 3.9526s | 4.6586s | .84x | Briv | MATCH |
-| fasta | .3034s | .3222s | .94x | Briv | MATCH |
+| float_math | .0455s | .0740s | .61x | Briev | MATCH |
+| float_math_nonzero | .1619s | .1700s | .95x | Briev | MATCH |
+| sparse_dispatch | .0618s | .0693s | .89x | Briev | MATCH |
+| print_loop | .0417s | .0757s | .55x | Briev | MATCH |
+| nbody_newton | 9.1892s | 10.8440s | .84x | Briev | MATCH |
+| nbody_sqrt | 3.0792s | 3.9270s | .78x | Briev | MATCH |
+| nbody_sqrt_idio | 3.9526s | 4.6586s | .84x | Briev | MATCH |
+| fasta | .3034s | .3222s | .94x | Briev | MATCH |
 | fannkuch_redux | .0817s | .0780s | 1.04x | C | MATCH |
-| mandelbrot | .8040s | .8289s | .96x | Briv | MATCH |
-| kalman_filter_runtime | .1453s | .1872s | .77x | Briv | MATCH |
+| mandelbrot | .8040s | .8289s | .96x | Briev | MATCH |
+| kalman_filter_runtime | .1453s | .1872s | .77x | Briev | MATCH |
 | knucleotide | .2086s | .2059s | 1.01x | C | MATCH |
-| cancel_math | .0643s | .0710s | .90x | Briv | MATCH |
-| bit_clear | .0001s | .0002s | .50x | Briv | MATCH |
-| queue_drain | .0400s | .0696s | .57x | Briv | MATCH |
-| queue_drain_sym | .0417s | .0694s | .60x | Briv | MATCH |
-| queue_drain_idio | .0416s | .0720s | .57x | Briv | MATCH |
-| stack_push_pop | .0422s | .0694s | .60x | Briv | MATCH |
+| cancel_math | .0643s | .0710s | .90x | Briev | MATCH |
+| bit_clear | .0001s | .0002s | .50x | Briev | MATCH |
+| queue_drain | .0400s | .0696s | .57x | Briev | MATCH |
+| queue_drain_sym | .0417s | .0694s | .60x | Briev | MATCH |
+| queue_drain_idio | .0416s | .0720s | .57x | Briev | MATCH |
+| stack_push_pop | .0422s | .0694s | .60x | Briev | MATCH |
 | interval_step | .0714s | .0705s | 1.01x | C | MATCH |
-| telemetry_stream | .1973s | .2297s | .85x | Briv | MATCH |
-| pid_control | .3485s | .3541s | .98x | Briv | MATCH |
-| matrix_pipeline | .4705s | 1.0420s | .45x | Briv | MATCH |
-| accumulator_flush | .1491s | .2144s | .69x | Briv | MATCH |
+| telemetry_stream | .1973s | .2297s | .85x | Briev | MATCH |
+| pid_control | .3485s | .3541s | .98x | Briev | MATCH |
+| matrix_pipeline | .4705s | 1.0420s | .45x | Briev | MATCH |
+| accumulator_flush | .1491s | .2144s | .69x | Briev | MATCH |
 | sweep_sparse | .2238s | .1635s | 1.36x | C | MATCH |
 | sweep_mid | .2712s | .2447s | 1.10x | C | MATCH |
 | sweep_dense | .4119s | .2765s | 1.48x | C | MATCH |
 | sweep_arr | .4143s | .3643s | 1.13x | C | MATCH |
 | series_converge | .0003s | 0s | x | ~tie | MATCH |
-| global_lifetime | .0337s | .0870s | .38x | Briv | MATCH |
+| global_lifetime | .0337s | .0870s | .38x | Briev | MATCH |
 | deep_recursion | .0004s | .0002s | 2.00x | C | MATCH |
-| arena_churn | .0909s | .1217s | .74x | Briv | MATCH |
-| linked_list | 1.5420s | 2.2608s | .68x | Briv | MATCH |
-| hash_ops | 1.3678s | 1.5223s | .89x | Briv | MATCH |
-| hash_ops_idio | .0322s | .0637s | .50x | Briv | MATCH |
-| enemy_swarm | .1581s | .1788s | .88x | Briv | MATCH |
+| arena_churn | .0909s | .1217s | .74x | Briev | MATCH |
+| linked_list | 1.5420s | 2.2608s | .68x | Briev | MATCH |
+| hash_ops | 1.3678s | 1.5223s | .89x | Briev | MATCH |
+| hash_ops_idio | .0322s | .0637s | .50x | Briev | MATCH |
+| enemy_swarm | .1581s | .1788s | .88x | Briev | MATCH |
 | bridge_glue | done | | | | SKIP |
 | bridge_multi | done | | | | PASS |
 
 ### Post-change (feature worktree @ `ac6aca40`)
 
-| Benchmark | Briv | C | Ratio | Winner | Correct |
+| Benchmark | Briev | C | Ratio | Winner | Correct |
 |-----------|:-----:|:--:|:-----:|:------:|:-------:|
-| ring_buffer | .0652s | .0684s | .95x | Briv | MATCH |
-| float_math | .0470s | .0779s | .60x | Briv | MATCH |
-| float_math_nonzero | .1624s | .1787s | .90x | Briv | MATCH |
-| sparse_dispatch | .0634s | .0714s | .88x | Briv | MATCH |
-| print_loop | .0421s | .0683s | .61x | Briv | MATCH |
-| nbody_newton | 8.8868s | 10.6070s | .83x | Briv | MATCH |
-| nbody_sqrt | 2.8409s | 3.8678s | .73x | Briv | MATCH |
-| nbody_sqrt_idio | 4.0222s | 4.7522s | .84x | Briv | MATCH |
-| fasta | .3176s | .3309s | .95x | Briv | MATCH |
-| fannkuch_redux | .0934s | .0958s | .97x | Briv | MATCH |
+| ring_buffer | .0652s | .0684s | .95x | Briev | MATCH |
+| float_math | .0470s | .0779s | .60x | Briev | MATCH |
+| float_math_nonzero | .1624s | .1787s | .90x | Briev | MATCH |
+| sparse_dispatch | .0634s | .0714s | .88x | Briev | MATCH |
+| print_loop | .0421s | .0683s | .61x | Briev | MATCH |
+| nbody_newton | 8.8868s | 10.6070s | .83x | Briev | MATCH |
+| nbody_sqrt | 2.8409s | 3.8678s | .73x | Briev | MATCH |
+| nbody_sqrt_idio | 4.0222s | 4.7522s | .84x | Briev | MATCH |
+| fasta | .3176s | .3309s | .95x | Briev | MATCH |
+| fannkuch_redux | .0934s | .0958s | .97x | Briev | MATCH |
 | mandelbrot | .8272s | .8189s | 1.01x | C | MATCH |
-| kalman_filter_runtime | .1587s | .1866s | .85x | Briv | MATCH |
-| knucleotide | .2129s | .2197s | .96x | Briv | MATCH |
-| cancel_math | .0688s | .0761s | .90x | Briv | MATCH |
-| bit_clear | .0001s | .0003s | .33x | Briv | MATCH |
-| queue_drain | .0428s | .0723s | .59x | Briv | MATCH |
-| queue_drain_sym | .0414s | .0737s | .56x | Briv | MATCH |
-| queue_drain_idio | .0457s | .0749s | .61x | Briv | MATCH |
-| stack_push_pop | .0455s | .0742s | .61x | Briv | MATCH |
+| kalman_filter_runtime | .1587s | .1866s | .85x | Briev | MATCH |
+| knucleotide | .2129s | .2197s | .96x | Briev | MATCH |
+| cancel_math | .0688s | .0761s | .90x | Briev | MATCH |
+| bit_clear | .0001s | .0003s | .33x | Briev | MATCH |
+| queue_drain | .0428s | .0723s | .59x | Briev | MATCH |
+| queue_drain_sym | .0414s | .0737s | .56x | Briev | MATCH |
+| queue_drain_idio | .0457s | .0749s | .61x | Briev | MATCH |
+| stack_push_pop | .0455s | .0742s | .61x | Briev | MATCH |
 | interval_step | .0777s | .0768s | 1.01x | C | MATCH |
-| telemetry_stream | .2007s | .2415s | .83x | Briv | MATCH |
-| pid_control | .3493s | .3556s | .98x | Briv | MATCH |
-| matrix_pipeline | .4739s | 1.1448s | .41x | Briv | MATCH |
-| accumulator_flush | .1771s | .2421s | .73x | Briv | MATCH |
+| telemetry_stream | .2007s | .2415s | .83x | Briev | MATCH |
+| pid_control | .3493s | .3556s | .98x | Briev | MATCH |
+| matrix_pipeline | .4739s | 1.1448s | .41x | Briev | MATCH |
+| accumulator_flush | .1771s | .2421s | .73x | Briev | MATCH |
 | sweep_sparse | .2231s | .1672s | 1.33x | C | MATCH |
 | sweep_mid | .2798s | .2501s | 1.11x | C | MATCH |
 | sweep_dense | .4136s | .2789s | 1.48x | C | MATCH |
 | sweep_arr | .4113s | .3658s | 1.12x | C | MATCH |
 | series_converge | .0004s | .0003s | 1.33x | C | MATCH |
-| global_lifetime | .0426s | .0920s | .46x | Briv | MATCH |
+| global_lifetime | .0426s | .0920s | .46x | Briev | MATCH |
 | deep_recursion | .0008s | .0005s | 1.60x | C | MATCH |
-| arena_churn | .0910s | .1279s | .71x | Briv | MATCH |
-| linked_list | 1.4680s | 2.1151s | .69x | Briv | MATCH |
-| hash_ops | 1.4328s | 1.5354s | .93x | Briv | MATCH |
-| hash_ops_idio | .0324s | .0651s | .49x | Briv | MATCH |
-| enemy_swarm | .1458s | .1801s | .80x | Briv | MATCH |
+| arena_churn | .0910s | .1279s | .71x | Briev | MATCH |
+| linked_list | 1.4680s | 2.1151s | .69x | Briev | MATCH |
+| hash_ops | 1.4328s | 1.5354s | .93x | Briev | MATCH |
+| hash_ops_idio | .0324s | .0651s | .49x | Briev | MATCH |
+| enemy_swarm | .1458s | .1801s | .80x | Briev | MATCH |
 | bridge_glue | done | | | | SKIP |
 | bridge_multi | done | | | | PASS |
 
@@ -265,7 +265,7 @@ family is restored (.59x/.56x/.61x vs baseline .57x/.60x/.57x — unchanged).
 Winner per benchmark is unchanged across the whole suite. The only movements
 are sub-millisecond noise (`series_converge`, `deep_recursion`, `bit_clear`) and
 within-variance swings (`fannkuch_redux` +12ms, `accumulator_flush` +28ms,
-`kalman_filter_runtime` +13ms); several improved (`ring_buffer` now Briv-wins
+`kalman_filter_runtime` +13ms); several improved (`ring_buffer` now Briev-wins
 at .95x vs baseline 1.07x C, `nbody_sqrt` -8%, `enemy_swarm` -8%,
 `linked_list` -5%). No regression; the real-terminator codegen change is
 performance-neutral as measured.
@@ -277,7 +277,7 @@ performance-neutral as measured.
 1. `cargo test --lib` green.
 2. `cargo build` no new warnings.
 3. Praetor on changed directories (no NEW diagnostics in changed files).
-4. `brivc check` + `brivc build --llvm` on the four `test-project-otto` CLI
+4. `brievc check` + `brievc build --llvm` on the four `test-project-otto` CLI
    files: all pass (bare `term;` guards are valid); the `term! ->` corrected
    variant behaves as intended.
 5. Benchmark baseline A/B per above; any regression must be explained, not
@@ -288,7 +288,7 @@ performance-neutral as measured.
 
 ## Implementation Log
 
-- `b0487364` (main): plan committed; worktree `../briv-compiler-term-diagnostics`
+- `b0487364` (main): plan committed; worktree `../briev-compiler-term-diagnostics`
   created (`git worktree add -b feat/term-termination-diagnostics`).
 - `5ab100b1`: `src/analysis/termination.rs` (analysis pass + 9 unit tests) +
   wiring into `parse_and_check` (`src/compile.rs:1674`) and `compile_source`

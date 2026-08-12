@@ -1,4 +1,4 @@
-// Briv FFI Library
+// Briev FFI Library
 // 
 // This is the main entry point for the FFI system.
 // Import this module to access all foreign functions.

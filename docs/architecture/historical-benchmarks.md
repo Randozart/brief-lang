@@ -27,29 +27,29 @@ benchmarks/results/*.md, and commit messages.
 C references used `volatile`, hobbling clang. BOUND=50000000. 5-iteration average.
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
-║ print_loop            ║ .030s    ║ .049s    ║ 1.63x    ║ Briv  ║
-║ nbody_newton          ║ 3.62s    ║ 9.73s    ║ 2.70x    ║ Briv  ║
+║ print_loop            ║ .030s    ║ .049s    ║ 1.63x    ║ Briev  ║
+║ nbody_newton          ║ 3.62s    ║ 9.73s    ║ 2.70x    ║ Briev  ║
 ║ nbody_sqrt            ║ 6.96s    ║ 3.23s    ║ 2.15x    ║ C      ║
 ║ mandelbrot            ║ .74s     ║ .65s     ║ 1.14x    ║ C      ║
-║ knucleotide           ║ .188s    ║ .194s    ║ 0.97x    ║ Briv  ║
+║ knucleotide           ║ .188s    ║ .194s    ║ 0.97x    ║ Briev  ║
 ║ kalman_filter_runtime ║ .161s    ║ .153s    ║ 1.05x    ║ C      ║
 ╚═══════════════════════╩══════════╩══════════╩══════════╩════════╝
 ```
 
 ## Era 2 — Fair C Benchmarks (Jun 03 – Jun 04)
 
-C references de-volatilized. Same `-O3 -ffast-math` as Briv.
+C references de-volatilized. Same `-O3 -ffast-math` as Briev.
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
 ║ iir_filter            ║ .1524s   ║ .1028s   ║ 1.48x    ║ C      ║
 ║ precompute_sum        ║ .0020s   ║ .0018s   ║ ~tie     ║ ~tie   ║
 ║ ring_buffer           ║ .0019s   ║ .0017s   ║ ~tie     ║ ~tie   ║
 ║ async_counters        ║ .0018s   ║ .0018s   ║ ~tie     ║ ~tie   ║
-║ kalman_filter         ║ .71s     ║ .75s     ║ 0.95x    ║ Briv  ║
+║ kalman_filter         ║ .71s     ║ .75s     ║ 0.95x    ║ Briev  ║
 ╚═══════════════════════╩══════════╩══════════╩══════════╩════════╝
 ```
 Methodology: `build_and_bench.sh` now uses `date +%s.%N` + `bc` + `LC_NUMERIC=C`.
@@ -69,20 +69,20 @@ precompute_sum, iir_filter, sparse_dispatch.
 
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
-║ interval_step         ║ .0006s   ║ .0622s   ║ 0.01x    ║ Briv  ║
+║ interval_step         ║ .0006s   ║ .0622s   ║ 0.01x    ║ Briev  ║
 ║ bit_clear             ║ .0006s   ║ .0006s   ║ 1.00x    ║ ~tie   ║
 ║ mandelbrot            ║ .7236s   ║ .7232s   ║ 1.00x    ║ ~tie   ║
 ║ knucleotide           ║ .2006s   ║ .2004s   ║ 1.00x    ║ ~tie   ║
 ║ kalman_filter_runtime ║ .1844s   ║ .1836s   ║ 1.00x    ║ ~tie   ║
 ║ queue_drain           ║ .0627s   ║ .0621s   ║ 1.00x    ║ ~tie   ║
 ║ queue_drain_sym       ║ .0621s   ║ .0614s   ║ 1.01x    ║ C      ║
-║ ring_buffer           ║ .0664s   ║ .0666s   ║ 0.99x    ║ Briv  ║ ★ best
-║ float_math            ║ .0626s   ║ .0739s   ║ 0.84x    ║ Briv  ║
-║ nbody_sqrt            ║ 2.9267s  ║ 3.2106s  ║ 0.91x    ║ Briv  ║
-║ nbody_newton          ║ 7.2391s  ║ 9.4519s  ║ 0.76x    ║ Briv  ║
-║ nbody_sqrt_idio       ║ 3.0738s  ║ 4.0939s  ║ 0.75x    ║ Briv  ║
+║ ring_buffer           ║ .0664s   ║ .0666s   ║ 0.99x    ║ Briev  ║ ★ best
+║ float_math            ║ .0626s   ║ .0739s   ║ 0.84x    ║ Briev  ║
+║ nbody_sqrt            ║ 2.9267s  ║ 3.2106s  ║ 0.91x    ║ Briev  ║
+║ nbody_newton          ║ 7.2391s  ║ 9.4519s  ║ 0.76x    ║ Briev  ║
+║ nbody_sqrt_idio       ║ 3.0738s  ║ 4.0939s  ║ 0.75x    ║ Briev  ║
 ║ float_math_nonzero    ║ .1877s   ║ .1809s   ║ 1.03x    ║ C      ║
 ║ cancel_math           ║ .0667s   ║ .0630s   ║ 1.05x    ║ C      ║
 ║ print_loop            ║ .0710s   ║ .0653s   ║ 1.08x    ║ C      ║
@@ -100,26 +100,26 @@ fannkuch_redux (0.96x), mandelbrot (0.99x), float_math (0.81x).
 
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
 ║ ring_buffer           ║ .0686s   ║ .0676s   ║ 1.01x    ║ C      ║
-║ float_math            ║ .0631s   ║ .0771s   ║ 0.81x    ║ Briv  ║ ★ best
+║ float_math            ║ .0631s   ║ .0771s   ║ 0.81x    ║ Briev  ║ ★ best
 ║ float_math_nonzero    ║ .1920s   ║ .1727s   ║ 1.11x    ║ C      ║
-║ sparse_dispatch       ║ .0060s   ║ .0657s   ║ 0.09x    ║ Briv  ║ ★ best
-║ print_loop            ║ .0639s   ║ .0670s   ║ 0.95x    ║ Briv  ║
-║ nbody_newton          ║ 7.4132s  ║ 9.8522s  ║ 0.75x    ║ Briv  ║ ★ best
-║ nbody_sqrt            ║ 3.0046s  ║ 3.5218s  ║ 0.85x    ║ Briv  ║ ★ best
-║ nbody_sqrt_idio       ║ 2.9578s  ║ 4.3184s  ║ 0.68x    ║ Briv  ║
+║ sparse_dispatch       ║ .0060s   ║ .0657s   ║ 0.09x    ║ Briev  ║ ★ best
+║ print_loop            ║ .0639s   ║ .0670s   ║ 0.95x    ║ Briev  ║
+║ nbody_newton          ║ 7.4132s  ║ 9.8522s  ║ 0.75x    ║ Briev  ║ ★ best
+║ nbody_sqrt            ║ 3.0046s  ║ 3.5218s  ║ 0.85x    ║ Briev  ║ ★ best
+║ nbody_sqrt_idio       ║ 2.9578s  ║ 4.3184s  ║ 0.68x    ║ Briev  ║
 ║ fasta                 ║ .2695s   ║ .2636s   ║ 1.02x    ║ C      ║
-║ fannkuch_redux        ║ .0763s   ║ .0789s   ║ 0.96x    ║ Briv  ║ ★ best
-║ mandelbrot            ║ .7514s   ║ .7538s   ║ 0.99x    ║ Briv  ║ ★ best
-║ kalman_filter_runtime ║ .1876s   ║ .1887s   ║ 0.99x    ║ Briv  ║
+║ fannkuch_redux        ║ .0763s   ║ .0789s   ║ 0.96x    ║ Briev  ║ ★ best
+║ mandelbrot            ║ .7514s   ║ .7538s   ║ 0.99x    ║ Briev  ║ ★ best
+║ kalman_filter_runtime ║ .1876s   ║ .1887s   ║ 0.99x    ║ Briev  ║
 ║ knucleotide           ║ .2093s   ║ .2060s   ║ 1.01x    ║ C      ║
 ║ cancel_math           ║ .0682s   ║ .0672s   ║ 1.01x    ║ C      ║
 ║ bit_clear             ║ .0010s   ║ .0009s   ║ 1.11x    ║ C      ║
-║ queue_drain           ║ .0007s   ║ .0632s   ║ 0.01x    ║ Briv  ║ ★ best
-║ queue_drain_sym       ║ .0639s   ║ .0672s   ║ 0.95x    ║ Briv  ║
-║ interval_step         ║ .0009s   ║ .0669s   ║ 0.01x    ║ Briv  ║
+║ queue_drain           ║ .0007s   ║ .0632s   ║ 0.01x    ║ Briev  ║ ★ best
+║ queue_drain_sym       ║ .0639s   ║ .0672s   ║ 0.95x    ║ Briev  ║
+║ interval_step         ║ .0009s   ║ .0669s   ║ 0.01x    ║ Briev  ║
 ╚═══════════════════════╩══════════╩══════════╩══════════╩════════╝
 ```
 Source: `benchmarks/results/2026-07-11-phase3-complete.md`.
@@ -175,26 +175,26 @@ SLP vector emission removed, `memory(argmem: readwrite)` on main.
 
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
 ║ ring_buffer           ║ .0603s   ║ .0458s   ║ 1.31x    ║ C      ║
 ║ float_math            ║ .0748s   ║ .0697s   ║ 1.07x    ║ C      ║
-║ float_math_nonzero    ║ .1611s   ║ .1620s   ║ 0.99x    ║ Briv  ║ ★ best
-║ sparse_dispatch       ║ .0551s   ║ .0604s   ║ 0.91x    ║ Briv  ║
+║ float_math_nonzero    ║ .1611s   ║ .1620s   ║ 0.99x    ║ Briev  ║ ★ best
+║ sparse_dispatch       ║ .0551s   ║ .0604s   ║ 0.91x    ║ Briev  ║
 ║ print_loop            ║ .0568s   ║ .0559s   ║ 1.01x    ║ C      ║
 ║ nbody_newton          ║ 10.6217s ║ 7.8560s  ║ 1.35x    ║ C      ║
-║ nbody_sqrt            ║ 2.2434s  ║ 2.6339s  ║ 0.85x    ║ Briv  ║ ★ best
-║ nbody_sqrt_idio       ║ 2.3270s  ║ 3.4561s  ║ 0.67x    ║ Briv  ║ ★ best
+║ nbody_sqrt            ║ 2.2434s  ║ 2.6339s  ║ 0.85x    ║ Briev  ║ ★ best
+║ nbody_sqrt_idio       ║ 2.3270s  ║ 3.4561s  ║ 0.67x    ║ Briev  ║ ★ best
 ║ fasta                 ║ .1987s   ║ .1980s   ║ 1.00x    ║ ~tie   ║
-║ fannkuch_redux        ║ .0599s   ║ .0612s   ║ 0.97x    ║ Briv  ║
+║ fannkuch_redux        ║ .0599s   ║ .0612s   ║ 0.97x    ║ Briev  ║
 ║ mandelbrot            ║ .6317s   ║ .6277s   ║ 1.00x    ║ ~tie   ║
 ║ kalman_filter_runtime ║ .1741s   ║ .1725s   ║ 1.00x    ║ ~tie   ║
 ║ knucleotide           ║ .1843s   ║ .1823s   ║ 1.01x    ║ C      ║
 ║ cancel_math           ║ .0599s   ║ .0582s   ║ 1.02x    ║ C      ║
-║ bit_clear             ║ .0002s   ║ .0004s   ║ 0.50x    ║ Briv  ║ ★ best
-║ queue_drain           ║ .0601s   ║ .0612s   ║ 0.98x    ║ Briv  ║
-║ queue_drain_sym       ║ .0575s   ║ .0588s   ║ 0.97x    ║ Briv  ║
-║ queue_drain_idio      ║ .0603s   ║ .0002s*  ║ 301.50x* ║ Briv  ║
+║ bit_clear             ║ .0002s   ║ .0004s   ║ 0.50x    ║ Briev  ║ ★ best
+║ queue_drain           ║ .0601s   ║ .0612s   ║ 0.98x    ║ Briev  ║
+║ queue_drain_sym       ║ .0575s   ║ .0588s   ║ 0.97x    ║ Briev  ║
+║ queue_drain_idio      ║ .0603s   ║ .0002s*  ║ 301.50x* ║ Briev  ║
 ║ interval_step         ║ .0599s   ║ .0592s   ║ 1.01x    ║ C      ║
 ╚═══════════════════════╩══════════╩══════════╩══════════╩════════╝
 ```
@@ -212,27 +212,27 @@ Source: `docs/plans/2026-07-27-cold-path-refinement.md` (6 runs documented).
 
 SLP stride gate active. Three-category cold-path outlining active.
 Print plugin emits `__print_int` FFI (NOT `PrintInt#`). No `!range`/`!prof`.
-No `noundef`/`dereferenceable`. Baseline worktree at `../briv-compiler-baseline`.
+No `noundef`/`dereferenceable`. Baseline worktree at `../briev-compiler-baseline`.
 
 ```
 ╔═══════════════════════╦══════════╦══════════╦══════════╦════════╗
-║ Benchmark             ║ Briv    ║ C        ║ Ratio    ║ Winner ║
+║ Benchmark             ║ Briev    ║ C        ║ Ratio    ║ Winner ║
 ╠═══════════════════════╬══════════╬══════════╬══════════╬════════╣
 ║ ring_buffer           ║ .0550s   ║ .0480s   ║ 1.14x    ║ C      ║
 ║ float_math            ║ .0744s   ║ .0743s   ║ 1.00x    ║ ~tie   ║
-║ float_math_nonzero    ║ .1656s   ║ .1675s   ║ 0.98x    ║ Briv  ║
-║ sparse_dispatch       ║ .0500s   ║ .0610s   ║ 0.81x    ║ Briv  ║
+║ float_math_nonzero    ║ .1656s   ║ .1675s   ║ 0.98x    ║ Briev  ║
+║ sparse_dispatch       ║ .0500s   ║ .0610s   ║ 0.81x    ║ Briev  ║
 ║ print_loop            ║ .0604s   ║ .0587s   ║ 1.02x    ║ C      ║
 ║ nbody_newton          ║ 9.0467s  ║ 8.2689s  ║ 1.09x    ║ C      ║
-║ nbody_sqrt            ║ 2.7347s  ║ 2.7684s  ║ 0.98x    ║ Briv  ║
-║ nbody_sqrt_idio       ║ 3.3417s  ║ 3.6030s  ║ 0.92x    ║ Briv  ║
-║ fasta                 ║ .2099s   ║ .2109s   ║ 0.99x    ║ Briv  ║
-║ fannkuch_redux        ║ .0653s   ║ .0657s   ║ 0.99x    ║ Briv  ║
+║ nbody_sqrt            ║ 2.7347s  ║ 2.7684s  ║ 0.98x    ║ Briev  ║
+║ nbody_sqrt_idio       ║ 3.3417s  ║ 3.6030s  ║ 0.92x    ║ Briev  ║
+║ fasta                 ║ .2099s   ║ .2109s   ║ 0.99x    ║ Briev  ║
+║ fannkuch_redux        ║ .0653s   ║ .0657s   ║ 0.99x    ║ Briev  ║
 ║ mandelbrot            ║ .6569s   ║ .6528s   ║ 1.00x    ║ ~tie   ║
 ║ kalman_filter_runtime ║ .1813s   ║ .1790s   ║ 1.01x    ║ C      ║
-║ knucleotide           ║ .1883s   ║ .1909s   ║ 0.98x    ║ Briv  ║
+║ knucleotide           ║ .1883s   ║ .1909s   ║ 0.98x    ║ Briev  ║
 ║ cancel_math           ║ .0626s   ║ .0614s   ║ 1.01x    ║ C      ║
-║ bit_clear             ║ .0001s   ║ .0002s   ║ 0.50x    ║ Briv  ║
+║ bit_clear             ║ .0001s   ║ .0002s   ║ 0.50x    ║ Briev  ║
 ║ queue_drain           ║ .0623s   ║ .0612s   ║ 1.01x    ║ C      ║
 ║ queue_drain_sym       ║ .0618s   ║ .0611s   ║ 1.01x    ║ C      ║
 ║ queue_drain_idio      ║ .0624s   ║ .0618s   ║ 1.00x    ║ ~tie   ║
@@ -258,7 +258,7 @@ branch weights. Step 6: !> metadata syntax.
 
 | Benchmark | Best | Commit | Era | Notes |
 |-----------|------|--------|-----|-------|
-| ring_buffer | **0.99x** | `f598584` | 4 | Briv beat C once |
+| ring_buffer | **0.99x** | `f598584` | 4 | Briev beat C once |
 | float_math | **0.81x** | `8a827db` | 5 | Phase 3 era |
 | float_math_nonzero | **0.98x** | `33d42397` | 10 | Post-fixes, no SLP |
 | sparse_dispatch | **0.09x** | `8a827db` | 5 | Folded |

@@ -4,12 +4,12 @@
 // The loop remains a tight while-loop without __rt_wait() calls.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/ring_buffer_runtime.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/ring_buffer_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
 
 import { get_env_int } from "std/env.bv";
-// briv_rt.c linked automatically
+// briev_rt.c linked automatically
 
 let bound: Int = get_env_int("BOUND");
 let ops: Int = 0;

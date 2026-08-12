@@ -69,7 +69,7 @@ And add to the catch-all at line 57:
 ```
 
 ### NOT touched (correct as-is):
-- `src/dbriv/parser.rs:829` — `"result"` is the Dbriv `Result<S,E>` type keyword, unrelated
+- `src/dbriev/parser.rs:829` — `"result"` is the Dbriev `Result<S,E>` type keyword, unrelated
 - `src/assertion_verify.rs:278,283` — `"result"` is a regular variable name in test helper, unrelated
 - `src/analysis/dataflow.rs:195` — `"result"` is a heuristic string search, unrelated
 - `src/ffi/error.rs:197` — `"result"` is a generated FFI variable name, unrelated
@@ -147,14 +147,14 @@ Any postconditions referencing `result`.
 ## Phase D — Verify
 
 1. `cargo build`
-2. `./target/debug/briv-compiler check lib/compiler/*.bv`
-3. `./target/debug/briv-compiler check lib/std/*.bv`
-4. `./target/debug/briv-compiler check lib/ffi/mappers/*.bv`
-5. `./target/debug/briv-compiler check lib/ffi/mappers/**/*.bv`
+2. `./target/debug/briev-compiler check lib/compiler/*.bv`
+3. `./target/debug/briev-compiler check lib/std/*.bv`
+4. `./target/debug/briev-compiler check lib/ffi/mappers/*.bv`
+5. `./target/debug/briev-compiler check lib/ffi/mappers/**/*.bv`
 6. `cargo test --lib`
 
 ## Files NOT to touch
-- `src/dbriv/parser.rs` — `"result"` is the Dbriv Result<S,E> type keyword
+- `src/dbriev/parser.rs` — `"result"` is the Dbriev Result<S,E> type keyword
 - `src/assertion_verify.rs` — `"result"` is a regular variable in test helper
 - `src/analysis/dataflow.rs` — string heuristic
 - `src/ffi/error.rs` — FFI variable name generation

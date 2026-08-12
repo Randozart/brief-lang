@@ -8,7 +8,7 @@
 
 ## Abstract
 
-This plan refactors the Briv compiler's string model from a struct-based fat-pointer
+This plan refactors the Briev compiler's string model from a struct-based fat-pointer
 (`{data: Int, len: Int}` subscribing to `#String`) to a Bit-derivation model where
 `String` IS raw bytes (Bit) with UTF-8 interpretation rules layered via the `#String`
 protocol. It introduces `Slice<T>` as the canonical variable-length byte-view type,
@@ -19,7 +19,7 @@ a first-class protocol operation.
 
 ## Background: The Bits Thesis
 
-Every Briv type is ultimately a lens over raw bit layout. `Int` is 64 bits with
+Every Briev type is ultimately a lens over raw bit layout. `Int` is 64 bits with
 two's-complement semantics. `Float` is 32 bits with IEEE 754 semantics. `String`
 should be N bytes with UTF-8 semantics — not a struct containing a pointer and
 length, but the bytes themselves, where the pointer+length is an implementation
@@ -27,7 +27,7 @@ detail of the *container* that holds the bits.
 
 ### Before (current architecture)
 
-```briv
+```briev
 type String: #String {
     data: Int;      // pointer to UTF-8 bytes
     len: Int;       // byte length
@@ -47,7 +47,7 @@ Problems:
 
 ### After (target architecture)
 
-```briv
+```briev
 type String: #String Bit {
     op CastTo(#Bit) = string_get_content_bytes(#L);   // deref fat ptr → Slice<Bit>
     op CastTo(#Int) = string_parse_to_int(#L);         // semantic: "123" → 123
@@ -114,7 +114,7 @@ SSO disabled:
 
 ### Slice<T> as Primordial Bootstrap Type
 
-```briv
+```briev
 type Slice<T> {
     data: Ptr<T>;
     len: Int;
@@ -133,7 +133,7 @@ type Slice<T> {
 Since LLVM 15+ uses opaque `ptr` everywhere, `Ptr<Bit>` and `Ptr<Int32>` are
 the same LLVM type. Casting between them emits no instructions:
 
-```briv
+```briev
 let content: Slice<Bit> = s.CastTo(#Bit);   // → %v = extractvalue {ptr,i64} %s, 0
 let p32: Ptr<Int32> = content.data as Ptr<Int32>;  // → no LLVM instruction
 let val: Int32 = load<Int32>(p32);  // → load i32, ptr %v
@@ -211,7 +211,7 @@ its fields, not from `llvm_type` metadata or primordial entries.
 #### Step 1.1: Bootstrap Declaration
 
 `lib/std/types/bootstrap.bv`:
-```briv
+```briev
 // 2026-07-30: Slice<T> — fat-pointer view over contiguous elements.
 // LLVM type derived from field shapes: { ptr, i64 }.
 // No llvm_type metadata, no primordial entry.
@@ -264,7 +264,7 @@ but verify with a test.
 `src/analysis/layout_optimizer.rs` — `find_cast_path` uses `universe.get(&current)`
 which already works with `"Slice"`. No change needed.
 
-**Test**: A Briv program using `Slice<Bit>` compiles to correct LLVM IR:
+**Test**: A Briev program using `Slice<Bit>` compiles to correct LLVM IR:
 ```
 %Slice = type { ptr, i64 }
 ```
@@ -411,7 +411,7 @@ model using explicit CastTo/CastFrom operators.
 
 `lib/std/types/bootstrap.bv`:
 
-```briv
+```briev
 // 2026-07-30: Bit-derivation model. String IS raw bytes, not {data, len} struct.
 // The fat pointer {ptr, len} is the container; CastTo(#Bit) dereferences to content.
 // CastTo(#Int) and CastFrom(#Int) are semantic conversions (parse/format).
@@ -432,7 +432,7 @@ job (`#String<UTF8>` by default).
 
 `lib/std/string.bv` — add defn bodies:
 
-```briv
+```briev
 // 2026-07-30: Extract content bytes from String fat pointer.
 // SSO: inline bytes from handle[0] bits[3..63]
 // Heap: bytes at ptr (handle[0] with tag bits masked)
@@ -612,7 +612,7 @@ The consumers of `is_string_like()`:
 #### Step 5.2: Remove UTF8View
 
 `lib/std/types/bootstrap.bv` — remove UTF8View declaration:
-```briv
+```briev
 // REMOVED 2026-07-30: Replaced by Slice<Bit>. CastTo(#Bit) on String
 // returns Slice<Bit> which serves the same view role.
 ```
@@ -708,7 +708,7 @@ pub fn verify_protocol_roundtrip(
 
 `lib/std/protocols.bv`:
 
-```briv
+```briev
 proto ASCII: #String {
     !> roundtrip: true;  // ASCII ↔ UTF8 IS symmetric
     CastTo(#String<UTF8>) = ascii_to_utf8(#L);
@@ -739,7 +739,7 @@ proto UTF16: #String {
 
 `lib/std/string.bv`:
 
-```briv
+```briev
 // 2026-07-30: Read first 4 bytes as Int32 (fast parser trick).
 // SSO short: 2 LLVM instructions (lshr + trunc)
 // SSO heap:  3 LLVM instructions (and + inttoptr + load)
@@ -762,7 +762,7 @@ defn as_int64(s: String) -> Int64 {
 
 `benchmarks/string_swift_parse.bv`:
 
-```briv
+```briev
 import "std/string.bv";
 
 // HTTP method routing via single Int32 comparison.
@@ -791,7 +791,7 @@ node bench [i < N][i == N] {
 
 ```bash
 # Compile the benchmark
-./target/release/brivc compile benchmarks/string_swift_parse.bv --llvm
+./target/release/brievc compile benchmarks/string_swift_parse.bv --llvm
 # Check that the hot loop emits load i32, not a function call
 grep 'load i32' string_swift_parse.ll
 # Expected: %val = load i32, ptr %ptr  (single instruction)

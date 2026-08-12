@@ -84,14 +84,14 @@ These functions are replaced entirely. Remove them.
 In `benchmarks/build_and_bench.sh` line 150-151, change:
 
 ```bash
-BOUND=50000000 ./target/release/briv-compiler build --llvm "benchmarks/${name}.bv" \
+BOUND=50000000 ./target/release/briev-compiler build --llvm "benchmarks/${name}.bv" \
     --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 ```
 
 To:
 
 ```bash
-BOUND=50000000 ./target/release/briv-compiler build "benchmarks/${name}.bv" \
+BOUND=50000000 ./target/release/briev-compiler build "benchmarks/${name}.bv" \
     --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 ```
 
@@ -123,7 +123,7 @@ Every change must follow AGENTS.md:
 1. `cargo build` — no warnings
 2. `cargo test --lib` — all tests pass
 3. Manual smoke test: `echo 'defn main() -> Int { term 42; };' > /tmp/test.bv &&
-   ./target/release/briv-compiler build /tmp/test.bv` should produce `test`
+   ./target/release/briev-compiler build /tmp/test.bv` should produce `test`
    binary in `/tmp` that exits with 42 (or whatever the backend generates for
    a trivial program)
 

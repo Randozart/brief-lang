@@ -60,7 +60,7 @@ pub fn load_default_mappers(registry: &mut MapperRegistry) {
 /// Get mapper type description
 pub fn describe_mapper_type(info: &MapperInfo) -> &'static str {
     match info.mapper_type {
-        MapperType::Briv => "Briv mapper (.bv file)",
+        MapperType::Briev => "Briev mapper (.bv file)",
         MapperType::Rust => "Rust mapper (Cargo crate)",
     }
 }
@@ -120,17 +120,17 @@ mod tests {
 
     #[test]
     fn test_describe_mapper_type() {
-        let briv_info = MapperInfo {
-            name: "briv".into(),
-            path: PathBuf::from("briv.bv"),
-            mapper_type: MapperType::Briv,
+        let briev_info = MapperInfo {
+            name: "briev".into(),
+            path: PathBuf::from("briev.bv"),
+            mapper_type: MapperType::Briev,
         };
         let rust_info = MapperInfo {
             name: "rust".into(),
             path: PathBuf::from("rust_mapper"),
             mapper_type: MapperType::Rust,
         };
-        assert_eq!(describe_mapper_type(&briv_info), "Briv mapper (.bv file)");
+        assert_eq!(describe_mapper_type(&briev_info), "Briev mapper (.bv file)");
         assert_eq!(describe_mapper_type(&rust_info), "Rust mapper (Cargo crate)");
     }
 }

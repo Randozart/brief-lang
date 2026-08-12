@@ -1,4 +1,4 @@
-# Compile-Time `$defn` and `$txn` — Briv Functions in Stage Blocks
+# Compile-Time `$defn` and `$txn` — Briev Functions in Stage Blocks
 
 **Date:** 2026-07-23
 **Status:** Plan
@@ -17,11 +17,11 @@ function, per template — a pure string algorithm expressed awkwardly.
 
 **`$defn`** and **`$txn`** are compile-time-only function definitions.
 They live inside `$(Stage)` blocks, are extracted before codegen, and
-can call `$` intrinsics freely. They push logic from Rust into Briv.
+can call `$` intrinsics freely. They push logic from Rust into Briev.
 
 ### Syntax
 
-```briv
+```briev
 $(Normalized @ highest) {
     $defn replace_all(s: String, pairs: List) -> String {
         // Can call $ intrinsics: StrReplace$, StrLen$, etc.

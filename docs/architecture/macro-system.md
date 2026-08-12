@@ -270,11 +270,11 @@ Modification is detected via Debug output comparison.
 
 `$defn` and `$txn` are compile-time-only function definitions. They live
 at the top level alongside `$(Stage)` blocks, are extracted before codegen,
-and can call `$` intrinsics. They push logic from Rust into Briv.
+and can call `$` intrinsics. They push logic from Rust into Briev.
 
 ### Syntax
 
-```briv
+```briev
 $defn render(tmpl: String, name: String) -> String {
     let body = StrReplace$(tmpl, "{{name}}", name);
     let body = StrReplace$(body, "{{other}}", "...");
@@ -315,7 +315,7 @@ $txn converge(x: Int) [x < 100][x >= 100] {
 The pre/post conditions are `Expr` values evaluated in the function scope.
 They can reference parameters and local variables:
 
-```briv
+```briev
 $txn accum(list: List, n: Int) [list.Count$() < 100][list.Count$() >= 100] {
     list <- n;
 };
@@ -337,7 +337,7 @@ for exit:
 
 ### Calling from Stage Blocks
 
-```briv
+```briev
 $defn greet(name: String) -> String {
     let msg = "hello " + name;
     term msg;
@@ -381,7 +381,7 @@ accessible in `$(Stage)` blocks by bare name.
 
 ### Syntax
 
-```briv
+```briev
 $let name = expr;     // mutable compile-time variable
 $const name = expr;   // immutable compile-time constant
 ```
@@ -403,7 +403,7 @@ declarations by looking up `comptime_vars`.
 
 ### Example
 
-```briv
+```briev
 $(Parsed @ highest) {
     $let target_name = "linux";
     $const debug_mode = true;
@@ -468,7 +468,7 @@ Three override sources, cascading precedence (low → high):
 
 | Source | Format | Priority |
 |--------|--------|----------|
-| `--target <name>` | briv.toml `[target.*]` profile | Lowest |
+| `--target <name>` | briev.toml `[target.*]` profile | Lowest |
 | `--sysquery-file <path>` | Plain text key=value file | Medium |
 | `--sysquery <key=value>` | CLI pairs (repeatable) | Highest |
 
@@ -497,9 +497,9 @@ compatible).
 ## The Bridge Generator as a `.bv` Plugin
 
 The GLUE bridge generator (`lib/glue/generator.bv`) is implemented entirely
-in Briv using `$defn` helpers and `$` intrinsics — a stress test:
+in Briev using `$defn` helpers and `$` intrinsics — a stress test:
 
-```briv
+```briev
 $defn render_fn(tmpl: String, name: String, params: String, ...) -> String {
     // single-pass template substitution using $defn + StrReplace$
     term body;
@@ -569,7 +569,7 @@ Every proposed intrinsic must have at least 3 distinct non-GLUE use cases:
 
 ## `!`-suffix front-end plugins (2026-08-01, Phase 1-4)
 
-Separate from the `$` compile-time macros above, Briv has `!`-suffix
+Separate from the `$` compile-time macros above, Briev has `!`-suffix
 **front-end plugins** that rewrite `name!(args)` intercepts at the Parsed
 stage. These are ordinary Rust plugins (see `src/plugin/`), registered for
 the `.bv` target in `config/targets.toml`. They are NOT `$` macros and do

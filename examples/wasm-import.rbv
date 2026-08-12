@@ -6,12 +6,12 @@
 // linked by the GlueWebGenerator at runtime.
 //
 // Compilation:
-//   briv build wasm-import.rbv --backend webstack
+//   briev build wasm-import.rbv --backend webstack
 //     → app.wasm (main logic) + dom-shim.mjs (runtime bridge)
 //   The imported physics.bv compiles to a separate .wasm sidecar, linked
 //   via the wasm_runtime bridge in lib/glue.toml.
 //
-// See docs/architecture/features/rendered-briv-wasm.md for the current
+// See docs/architecture/features/rendered-briev-wasm.md for the current
 // webstack architecture.
 
 (wasm) import physics from "physics.bv" as wasmPhysics;

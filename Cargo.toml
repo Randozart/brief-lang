@@ -1,10 +1,10 @@
 [package]
-name = "briv-compiler"
+name = "briev-compiler"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "briv_compiler"
+name = "briev_compiler"
 path = "src/lib.rs"
 
 [features]
@@ -13,7 +13,7 @@ kani = []
 kani_full = []
 
 [[bin]]
-name = "brivc"
+name = "brievc"
 path = "src/main.rs"
 
 [dependencies]

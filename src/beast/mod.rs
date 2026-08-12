@@ -1,4 +1,4 @@
-// ── BEAST: Briv Virtual IR ──────────────────────────────────────────────
+// ── BEAST: Briev Virtual IR ──────────────────────────────────────────────
 // 2026-07-14: S-expression format for the plugin mid-end.
 // Serialize/deserialize between Rust AST and .beast text.
 

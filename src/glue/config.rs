@@ -1,7 +1,7 @@
-// ── GLUE Configuration (Data Briv) ───────────────────────────────────
+// ── GLUE Configuration (Data Briev) ───────────────────────────────────
 // 2026-08-03 (plan 2026-08-03-glue-folders-node-bridge): the GLUE registry is
 // a per-language folder tree — lib/glue/<lang>/glue.dbv. The compiler finds
-// the relevant folder BY NAME on invocation (`briv export|bindings|extension
+// the relevant folder BY NAME on invocation (`briev export|bindings|extension
 // <bridge> <lang>`) and loads that file; the full registry (all languages) is
 // the merged scan, used by extension routing (find_language_by_extension) and
 // ConfigGet$. Replaced the monolithic config/glue.dbv (itself migrated from
@@ -14,8 +14,8 @@
 //             protocols: { "#String": { native: "…"; c_abi: "…"; }; };
 //             templates: { "file": "…\n…"; "fn_template": "…"; }; };
 
-use crate::dbriv::config_db::ConfigDb;
-use crate::dbriv::v2::DataValue;
+use crate::dbriev::config_db::ConfigDb;
+use crate::dbriev::v2::DataValue;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 /// 2026-07-22: Each target describes how to bridge with one foreign language.
 /// Protocol mapping replaces old type_map/c_type_map/conversions —
 /// the config only knows about protocol categories (#String, #Int, #Float),
-/// not about Briv-internal type names.
+/// not about Briev-internal type names.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlueTarget {
     /// Language identifier (e.g., "python", "rust", "node")
@@ -43,7 +43,7 @@ pub struct GlueTarget {
     pub module_init: bool,
     /// Protocol category → native/C ABI type mapping.
     /// Keys like "#String", "#Int", "#Float" — protocol categories only,
-    /// never Briv-internal type names.
+    /// never Briev-internal type names.
     pub protocols: HashMap<String, ProtocolEntry>,
     /// Output path → template content. Special keys:
     ///   "fn_template" — per-function safe wrapper (rendered into {{exports}})
@@ -91,7 +91,7 @@ pub struct GlueTarget {
 /// How the state handle crosses the boundary for one language.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StateAbi {
-    /// C-ABI parameter declaration (e.g. `BrivState* state`), used in
+    /// C-ABI parameter declaration (e.g. `BrievState* state`), used in
     /// prototypes / extern blocks when an export needs state.
     pub decl: String,
     /// The state value expression at the call site (e.g. `STATE`, `_STATE`).
@@ -133,7 +133,7 @@ pub struct ProtocolEntry {
     pub wasm_abi: Option<String>,
 }
 
-/// Load the GLUE registry (Data Briv). `None` scans the per-language glue
+/// Load the GLUE registry (Data Briev). `None` scans the per-language glue
 /// folders (lib/glue/<lang>/glue.dbv) and merges by folder name; `Some(path)`
 /// loads a single config file (the `--glue-config` override / tests).
 pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarget>, String> {
@@ -148,7 +148,7 @@ pub fn load_glue_config(path: Option<&Path>) -> Result<HashMap<String, GlueTarge
 }
 
 /// Load one language's glue config BY NAME — `lib/glue/<lang>/glue.dbv`.
-/// Used by `briv export|bindings|extension <bridge> <lang>` after the
+/// Used by `briev export|bindings|extension <bridge> <lang>` after the
 /// invocation resolves the language folder.
 pub fn load_glue_language(lang: &str) -> Result<GlueTarget, String> {
     let glue_root = resolve_glue_root().ok_or_else(|| {
@@ -226,7 +226,7 @@ fn resolve_glue_root() -> Option<PathBuf> {
     None
 }
 
-/// Parse Data Briv glue config into GlueTargets.
+/// Parse Data Briev glue config into GlueTargets.
 ///
 /// Layout: one `<lang>: { … }` entry per language (scalars + protocols map),
 /// plus positional template lines `<lang>.templates.<n>: "<output path>"
@@ -251,7 +251,7 @@ fn parse_glue_dbvl(source: &str) -> Result<HashMap<String, GlueTarget>, String> 
 
 /// Collect `<lang>.templates.<n>` (output path, content) and
 /// `<lang>.bindings.<file>` (filename in key, content in field 0) into a
-/// per-language templates map. `bindings.*` keys are prefixed so `briv
+/// per-language templates map. `bindings.*` keys are prefixed so `briev
 /// bindings` can find them.
 fn collect_templates(db: &ConfigDb) -> HashMap<String, HashMap<String, String>> {
     let mut templates_by_lang: HashMap<String, HashMap<String, String>> = HashMap::new();

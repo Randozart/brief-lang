@@ -134,7 +134,7 @@ expects a 2-element list `(popped, new_collection)`.
 
 After the compiler changes, the skip list is defined using:
 
-```briv
+```briev
 import option from "std/option.bv";
 
 // ---- Type definition --------------------------------
@@ -147,14 +147,14 @@ type SkipList<T> : List<T> {
 inop _sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
 { term %res; }
 fallback {
-    // Pure-Briv skip list insert using index-based node pool
+    // Pure-Briev skip list insert using index-based node pool
     // stored as a flat List in the flat buffer.
 };
 
 inop _sl_remove<T>(list: SkipList<T>, val: T) -> (Option<T>, SkipList<T>)
 { term %res; }
 fallback {
-    // Pure-Briv skip list remove
+    // Pure-Briev skip list remove
 };
 
 // ---- Public API -------------------------------------
@@ -164,7 +164,7 @@ defn sl_to_list<T>(list: SkipList<T>) -> List<T> { ... };
 ```
 
 The **BILD bodies** are left as stubs initially (`term %res;`) — the
-interpreter uses the pure-Briv fallback, and the LLVM backend emits the
+interpreter uses the pure-Briev fallback, and the LLVM backend emits the
 fallback since no BILD is provided.
 
 ---

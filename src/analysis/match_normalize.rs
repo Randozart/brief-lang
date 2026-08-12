@@ -9,7 +9,7 @@
 //
 //   match x { 0 => { A } 1 => { B } _ => { C } }
 //
-// normalizes to (Briv's `when` has first-match-wins semantics):
+// normalizes to (Briev's `when` has first-match-wins semantics):
 //
 //   when x == 0 { A };
 //   when x == 1 { B };

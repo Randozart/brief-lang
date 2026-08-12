@@ -2,7 +2,7 @@
 // ── Compile-Time Evaluation (Level C) ───────────────────────────────────
 // 2026-07-21: Extends the interpreter with compile-time types for the
 // AST navigation DSL. CTSelection, CTPosition, CTTextSelection are first-
-// class values inside $(Stage) blocks, enabling full Briv evaluation
+// class values inside $(Stage) blocks, enabling full Briev evaluation
 // (let, defn, when, foreach, match) at compile time.
 //
 // Navigation intrinsics (Tag$, Named$, First$, Before$, Insert$, etc.)

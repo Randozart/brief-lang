@@ -59,7 +59,7 @@ The cost model is designed to serve three concrete domains:
 **Shaders / rendering:**
 - `Fragment(uv) → Color` → O(1) per pixel, pure → GPU kernel candidate
 - `Vertex(position) → Position` → O(1) per vertex, pure → GPU kernel candidate
-- The `rbv` (Rendered Briv) path already targets browser rendering — a WebGPU shader backend is the natural extension
+- The `rbv` (Rendered Briev) path already targets browser rendering — a WebGPU shader backend is the natural extension
 
 ---
 
@@ -541,7 +541,7 @@ For each composed chain with trigger variants:
 - `@txn_fused_trg_0(...)`  — body concretized for trigger=0
 - `@txn_fused_trg_1(...)`  — body concretized for trigger=1
 
-Emission uses the existing `emit_statement` infrastructure — the fused body is valid Briv statements that the LLVM backend already handles. No new IR emitters needed.
+Emission uses the existing `emit_statement` infrastructure — the fused body is valid Briev statements that the LLVM backend already handles. No new IR emitters needed.
 
 #### 4.6b — Enum Dispatch with Fused Targets
 
@@ -608,7 +608,7 @@ This is true O(1) — zero runtime iterations.
 
 ### 5.1 Full Report Example
 
-Invoked via `briv-compiler llvm file.bv --optimize-report [--optimize-budget 256] [--optimize-size 10240]`:
+Invoked via `briev-compiler llvm file.bv --optimize-report [--optimize-budget 256] [--optimize-size 10240]`:
 
 ```
 === Optimization Report ===

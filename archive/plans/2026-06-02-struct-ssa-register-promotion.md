@@ -5,7 +5,7 @@
 
 ## Motivation
 
-Briv's folded-loop codegen currently accesses every state field through
+Briev's folded-loop codegen currently accesses every state field through
 individual `gep @global_state → load` or `gep @global_state → store`
 instructions. This creates 20+ memory instructions per loop iteration
 for the IIR biquad (5 fields × 2 GEP/load + 5 fields × 2 GEP/store).
@@ -13,7 +13,7 @@ for the IIR biquad (5 fields × 2 GEP/load + 5 fields × 2 GEP/store).
 C keeps the same state in CPU registers via local variables. clang's SROA
 promotes local variables to SSA registers — zero memory traffic.
 
-Briv can match this by loading the entire `%State` struct once per loop
+Briev can match this by loading the entire `%State` struct once per loop
 iteration and operating on it via `extractvalue`/`insertvalue` chains.
 LLVM's SROA pass promotes these to pure registers, identical to C.
 
@@ -127,7 +127,7 @@ node step_b [bound > 0 && count < bound && acc_b >= 0][count == bound]
 
 ## Expected Outcome (BOUND=50000000)
 
-| Benchmark | Before (Briv) | After (Briv) | C | Notes |
+| Benchmark | Before (Briev) | After (Briev) | C | Notes |
 |-----------|---------------|--------------|---|-------|
 | ring_buffer | 0.01s (O(1)) | 0.01s (O(1)) | 0.00s | Tie |
 | async_counters | 0.01s (O(1)) | 0.01s (O(1)) | 0.00s | Tie |

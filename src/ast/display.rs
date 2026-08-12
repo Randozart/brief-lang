@@ -1,6 +1,6 @@
 // ── Display Impls for AST Types ────────────────────────────────────────
-// 2026-07-12: Phase 0.2 — Format AST types as valid Briv source text.
-// 2026-07-22: Phase 8 — Round-trip tests verify Rust<->Briv pp parity.
+// 2026-07-12: Phase 0.2 — Format AST types as valid Briev source text.
+// 2026-07-22: Phase 8 — Round-trip tests verify Rust<->Briev pp parity.
 
 use crate::ast::*;
 use std::fmt;
@@ -671,7 +671,7 @@ impl fmt::Display for DerivationExample {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Round-trip tests (Rust Display vs Briv pretty-printer via GLUE bridge)
+// Round-trip tests (Rust Display vs Briev pretty-printer via GLUE bridge)
 // ═══════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]

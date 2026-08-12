@@ -13,8 +13,8 @@
 `analysis/global_lifetime.rs` — the compile-time garbage scheduler that PROVES
 each heap-backed state field's last consumer in reactor order and plans a
 `Free#` exactly after it — is complete and unit-tested but **never wired into
-the compile pipeline**. Briv programs with heap state (ring_buffer, hash_ops,
-linked_list, global_lifetime) leak: the C references call `free`, Briv does
+the compile pipeline**. Briev programs with heap state (ring_buffer, hash_ops,
+linked_list, global_lifetime) leak: the C references call `free`, Briev does
 not. This slice wires the scheduler: surface `redundant_keep` warnings and
 inject the scheduled `Free#` statements before each last-consumer transaction's
 trailing term. Output-identical (frees are not observable), so the benchmark
@@ -31,7 +31,7 @@ suite must stay 36/36 MATCH; the `global_lifetime` benchmark pins the behavior.
 - `ReactorTransitionGraph.nodes: Vec<ReactorNode>` is the reactor's
   deterministic firing order (`node_order`).
 - `Free#` is a first-class intrinsic (interpreter intrinsics.rs:128, backend
-  intrinsics.rs:31 → `__briv_free`). A statement
+  intrinsics.rs:31 → `__briev_free`). A statement
   `Statement::Expression(Call("Free#", [Identifier(field)], None))` lowers
   correctly.
 - `benchmarks/global_lifetime.bv` ends with `term;` — a naive append would
@@ -52,14 +52,14 @@ Investigation corrected the plan: the scheduler is ALREADY wired end-to-end —
 `AnalysisResults.global_lifetime`, the LLVM backend copies it to
 `ctx.global_free_after` (mod.rs:1729), and the **countdown** fold path
 (emit_countable_countdown_main, counter.rs) and the **non-loop** txn path
-(emit_toplevel.rs:1824) already emit the `__briv_free` after the loop/body.
+(emit_toplevel.rs:1824) already emit the `__briev_free` after the loop/body.
 The `global_lifetime` benchmark runs the countdown path and was already
 freeing (free_count == 1).
 
 What this slice adds:
 
 1. **`emit_scheduled_frees` helper** (counter.rs) — the shared
-   load-handle → inttoptr → `__briv_free` emission, replacing the duplicated
+   load-handle → inttoptr → `__briev_free` emission, replacing the duplicated
    inline blocks (DRY, 4 sites).
 2. **PerFieldPhi path** (`emit_countable_main`) — previously did NOT free;
    now emits the scheduler's frees at the loop exit (`.cm_end` block), so a
@@ -69,7 +69,7 @@ What this slice adds:
    frees. (Both fold paths were silent leaks for heap-backed last-consumer
    fields.)
 4. **Automated test** — the countdown shape (benchmark's shape, with a
-   non-plugin `when` guard) asserts the `__briv_free` call is present and
+   non-plugin `when` guard) asserts the `__briev_free` call is present and
    precedes a `ret` (post-loop, not inside the body).
 
 Known limitation (pre-existing, sound): the non-loop reactive path skips the
@@ -84,7 +84,7 @@ or a post-reactor hook — separate work.
 - `global_lifetime` unit tests: `inject_frees` inserts before a trailing
   term; appends when no term; multiple fields ordered; term-not-last handled.
 - End-to-end: `global_lifetime.bv` still builds and its printed output
-  matches (the suite A/B below); `__briv_free_count` becomes 1 (matches the
+  matches (the suite A/B below); `__briev_free_count` becomes 1 (matches the
   C reference's `free`).
 - Full `cargo test --lib` green.
 
@@ -123,14 +123,14 @@ the full A/B run, never excuse as noise.
 ## 8. Delivered (2026-08-06)
 
 - `emit_scheduled_frees(out, fields)` helper in counter.rs — shared
-  load-handle → inttoptr → `__briv_free`; used by countdown, PerFieldPhi,
+  load-handle → inttoptr → `__briev_free`; used by countdown, PerFieldPhi,
   version-DAG (DRY, replaces duplicated inline blocks).
 - PerFieldPhi + version-DAG fold paths now free scheduler-proven fields at
   the loop exit (were silent leaks for heap-backed last consumers).
 - countdown path refactored onto the helper (behavior unchanged).
 - New backend test locks the countdown free emission (post-loop, pre-ret).
-- Verified E2E: `global_lifetime.bv` emits `__briv_free` once after the loop
-  (`.cde_` exit block), `__briv_free_count == 1`, output identical to the C
+- Verified E2E: `global_lifetime.bv` emits `__briev_free` once after the loop
+  (`.cde_` exit block), `__briev_free_count == 1`, output identical to the C
   reference.
 - Discovery: the scheduler was already wired for the countdown + non-loop
   paths (analyze_program → AnalysisResults.global_lifetime →

@@ -23,7 +23,7 @@
 - `TokenChar(Char)` - Char: `'a'`, `'\n'`
 
 **Keywords (30+):**
-```briv
+```briev
 // State
 KeywordLet, KeywordConst, KeywordState
 
@@ -56,7 +56,7 @@ KeywordTrue, KeywordFalse, KeywordOk, KeywordErr
 ```
 
 **Operators - Single Char (15):**
-```briv
+```briev
 OpPlus, OpMinus, OpStar, OpSlash, OpPercent
 OpEq, OpBang, OpAmp, OpPipe, OpCaret
 OpTilde, OpQuestion, OpAt, OpDot
@@ -64,7 +64,7 @@ OpColon, OpSemicolon, OpComma
 ```
 
 **Operators - Multi Char (20+):**
-```briv
+```briev
 OpEqEq, OpNeq, OpLt, OpGt, OpLtEq, OpGtEq
 OpAnd, OpOr, OpLtLt, OpGtGt
 OpArrow, OpFatArrow
@@ -73,14 +73,14 @@ OpDotDot, OpDotDotEq
 ```
 
 **Delimiters (6):**
-```briv
+```briev
 DelimLParen, DelimRParen
 DelimLBrace, DelimRBrace
 DelimLBracket, DelimRBracket
 ```
 
 **Special (6):**
-```briv
+```briev
 TokenIdentifier(String)
 TokenComment(String)
 TokenWhitespace(String)
@@ -91,7 +91,7 @@ TokenError(String)
 
 ### Token Utilities
 
-```briv
+```briev
 // Classification
 defn is_keyword(tok: Token) -> Bool
 defn is_operator(tok: Token) -> Bool
@@ -110,7 +110,7 @@ defn is_right_associative(tok: Token) -> Bool
 ### Lexer Implementation (lexer.bv)
 
 **LexerState:**
-```briv
+```briev
 struct LexerState {
     source: String,
     position: Int,
@@ -123,7 +123,7 @@ struct LexerState {
 ```
 
 **Core Functions:**
-```briv
+```briev
 defn new_lexer(source: String) -> LexerState
 defn current_char(state: LexerState) -> Option<Char>
 defn peek_char(state: LexerState, offset: Int) -> Option<Char>
@@ -133,7 +133,7 @@ defn current_token_text(state: LexerState) -> String
 ```
 
 **Lexing Functions:**
-```briv
+```briev
 defn skip_whitespace(state: LexerState) -> LexerState
 defn skip_comment(state: LexerState) -> LexerState
 defn read_identifier(state: LexerState) -> (Token, LexerState)
@@ -145,13 +145,13 @@ defn read_char_literal(state: LexerState) -> (Token, LexerState)
 ```
 
 **Main Entry Points:**
-```briv
+```briev
 defn next_token(state: LexerState) -> Result<(Token, LexerState), String>
 defn tokenize(source: String) -> Result<List<Token>, String>
 ```
 
 ### Features
-- ✅ Pure Briv (no FFI)
+- ✅ Pure Briev (no FFI)
 - ✅ Uses Tier 1 (Char, StringBuilder) and Tier 2 (char classification)
 - ✅ Line/column tracking for errors
 - ✅ Escape sequences: `\n`, `\t`, `\r`, `\\`, `\"`, `\'`
@@ -172,7 +172,7 @@ defn tokenize(source: String) -> Result<List<Token>, String>
 ### AST Definition (ast.bv)
 
 **Expression Types (15 variants):**
-```briv
+```briev
 enum Expr {
     // Literals
     ExprInt(Int),
@@ -206,7 +206,7 @@ enum Expr {
 ```
 
 **Statement Types (8 variants):**
-```briv
+```briev
 enum Statement {
     StmtAssign(Box<Expr>, Box<Expr>),
     StmtLet(String, Option<Type>, Option<Box<Expr>>),
@@ -220,7 +220,7 @@ enum Statement {
 ```
 
 **Contract Structure:**
-```briv
+```briev
 struct Contract {
     precondition: Expr,
     postcondition: Expr,
@@ -234,7 +234,7 @@ struct Watchdog {
 ```
 
 **Definition & Transaction:**
-```briv
+```briev
 struct Definition {
     name: String,
     type_params: List<String>,
@@ -256,7 +256,7 @@ struct Transaction {
 ```
 
 **Complete Type System:**
-```briv
+```briev
 enum Type {
     // Primitives
     TypeInt, TypeUInt, TypeFloat, TypeString,
@@ -283,7 +283,7 @@ enum Type {
 ```
 
 **Program Structure:**
-```briv
+```briev
 enum TopLevel {
     TopDefn(Definition),
     TopTxn(Transaction),
@@ -303,7 +303,7 @@ struct Program {
 ```
 
 **AST Utilities:**
-```briv
+```briev
 defn expr_precedence(expr: Expr) -> Int
 defn is_literal_expr(expr: Expr) -> Bool
 defn infer_expr_type(expr: Expr) -> Option<Type>
@@ -322,7 +322,7 @@ defn make_char(c: Char) -> Expr
 ### Parser Implementation (parser.bv)
 
 **Parser State:**
-```briv
+```briev
 struct ParserState {
     tokens: List<Token>,
     position: Int,
@@ -331,7 +331,7 @@ struct ParserState {
 ```
 
 **Token Access:**
-```briv
+```briev
 defn new_parser(tokens: List<Token>) -> ParserState
 defn current_token(state: ParserState) -> Token
 defn peek_token(state: ParserState, offset: Int) -> Token
@@ -341,20 +341,20 @@ defn match_token(state: ParserState, token: Token) -> (Bool, ParserState)
 ```
 
 **Program Parsing:**
-```briv
+```briev
 defn parse_program(state: ParserState) -> Result<Program, String>
 defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), String>
 ```
 
 **Declaration Parsing:**
-```briv
+```briev
 defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState), String>
 defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), String>
 defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), String>
 ```
 
 **Expression Parsing (Precedence Climbing):**
-```briv
+```briev
 // Level 4: Or
 defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String>
 
@@ -381,14 +381,14 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
 ```
 
 **Statement Parsing:**
-```briv
+```briev
 defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), String>
 defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String>
 defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), String>
 ```
 
 **Type Parsing:**
-```briv
+```briev
 defn parse_type(state: ParserState) -> Result<(Type, ParserState), String>
 defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState), String>
 defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), String>
@@ -407,7 +407,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
 | 11 | `*`, `/`, `%` | Left |
 
 ### Features
-- ✅ Pure Briv (no FFI)
+- ✅ Pure Briev (no FFI)
 - ✅ Recursive descent parsing
 - ✅ Operator precedence handling
 - ✅ Contract parsing (pre, post, watchdog)
@@ -420,7 +420,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
 
 ## Integration: Lexer → Parser
 
-```briv
+```briev
 import std.lexer;
 import std.parser;
 

@@ -4,15 +4,15 @@
 //! member transactions; `render Name { ... }` is the view fragment bound to
 //! that obj. The tag namespace resolves deterministically:
 //!
-//! 1. `<c1 />` — a declared Briv instance var (`let c1: Counter`) mounts the
-//!    fragment with bindings routed to `c1.*` slots (Briv-side instance; the
+//! 1. `<c1 />` — a declared Briev instance var (`let c1: Counter`) mounts the
+//!    fragment with bindings routed to `c1.*` slots (Briev-side instance; the
 //!    PROGRAM owns it).
 //! 2. `<Counter />` — a component type (`obj Counter` + `render Counter`)
 //!    spawns an anonymous, reactor-owned instance in a per-mount pool
 //!    (`Counter.<i>.*` slots); zero-init defaults, not referenceable by code.
 //! 3. else a lowercase HTML element; else an unknown-tag warning.
 //!
-//! Seeding is BRIV source, never Rust: `let c1: Counter = Counter { count: 5 }`
+//! Seeding is BRIEV source, never Rust: `let c1: Counter = Counter { count: 5 }`
 //! seeds `c1.count` from the StructLiteral. There are NO HTML props — the
 //! frontend invents no state values. Every state change the frontend requests
 //! (per-mount txn variants, lifecycle resets) is bound to a trg — a callable
@@ -35,7 +35,7 @@ pub struct MountSpec {
     /// This mount's index.
     pub index: usize,
     /// The `data-instance` marker value — the slot prefix: `Counter.0` for an
-    /// HTML-side pool spawn, `c1` for a Briv-side instance. The shim's b-when
+    /// HTML-side pool spawn, `c1` for a Briev-side instance. The shim's b-when
     /// unmount resets the instance via this key.
     pub marker: String,
     /// Fragment-referenced field → instance-qualified slot
@@ -52,11 +52,11 @@ pub struct ComponentInstancePlan {
     /// view layer applies them to the raw fragment). HTML-side anonymous
     /// spawns (`<Counter />`) route here.
     pub mounts: std::collections::HashMap<String, Vec<MountSpec>>,
-    /// Briv-side instances (`let c1: Counter = Counter { count: 5 }` +
+    /// Briev-side instances (`let c1: Counter = Counter { count: 5 }` +
     /// `<c1 />`), keyed by the instance var name. The PROGRAM owns these.
     pub instance_specs: std::collections::HashMap<String, MountSpec>,
-    /// Instance slot → Briv seed (`c1.count` → 5, from a StructLiteral). The
-    /// backend seeds these into %State at init; the VALUES are Briv source.
+    /// Instance slot → Briev seed (`c1.count` → 5, from a StructLiteral). The
+    /// backend seeds these into %State at init; the VALUES are Briev source.
     pub initializers: std::collections::HashMap<String, Expr>,
     /// Every per-instance mount, as `(component, index)`. The backend emits a
     /// per-instance reset so a b-when unmount re-applies the instance's seeds
@@ -96,9 +96,9 @@ pub fn expand_component_instances(
         initializers: HashMap::new(),
         instances: Vec::new(),
     };
-    // 2026-08-12 (2b3 slice 2): Briv-side instances — `let <name>: <Obj> =
+    // 2026-08-12 (2b3 slice 2): Briev-side instances — `let <name>: <Obj> =
     // <StructLiteral>` where the type has a render block. The PROGRAM owns
-    // these: seeds are the literal's field values (Briv source), and the
+    // these: seeds are the literal's field values (Briev source), and the
     // `<name />` tag mounts the fragment routed to the instance's slots.
     let instance_infos = collect_instance_lets(items, &render_blocks, &obj_defs)?;
     let mut pending_resets: Vec<(String, HashMap<String, Type>)> = Vec::new();
@@ -142,7 +142,7 @@ pub fn expand_component_instances(
     for (prefix, slot_types) in pending_resets {
         emit_reset_txn(items, &prefix, &slot_types, &plan.initializers)?;
     }
-    // Briv-side instances: their specs (slots + variants, routed to the
+    // Briev-side instances: their specs (slots + variants, routed to the
     // instance-name prefix) are added to the plan after the pool pass.
     for (var_name, component, literal) in &instance_infos {
         let Some(obj) = obj_defs.get(component) else { continue };
@@ -265,7 +265,7 @@ fn build_pool_mount(
     (spec, slot_types)
 }
 
-/// Build a Briv-side instance's spec: slots + variants routed to the
+/// Build a Briev-side instance's spec: slots + variants routed to the
 /// instance-name prefix, the literal's seeds, and its reset txn.
 fn build_instance_spec(
     items: &mut Vec<TopLevel>,
@@ -286,7 +286,7 @@ fn build_instance_spec(
         }
     };
     let variant_txns = build_txn_variants(items, obj, var_name, refs, &qualifier);
-    // The literal's field values seed the instance slots (Briv source — the
+    // The literal's field values seed the instance slots (Briev source — the
     // frontend invents nothing).
     if let Some(literal) = literal {
         for (field, value) in literal {
@@ -309,9 +309,9 @@ fn build_instance_spec(
             txn_variants: variant_txns,
         },
     );
-    // 2026-08-12 (2b3 slice 3): the Briv-side reset — a callable txn that
+    // 2026-08-12 (2b3 slice 3): the Briev-side reset — a callable txn that
     // re-applies the instance's SEEDS (the StructLiteral values), so a
-    // b-when unmount restarts the instance at its Briv-declared state.
+    // b-when unmount restarts the instance at its Briev-declared state.
     let slot_types = slot_set
         .iter()
         .map(|f| {
@@ -345,7 +345,7 @@ fn validate_literal_fields(
     Ok(Some(map))
 }
 
-/// The Briv zero-default for a bootstrap-primitive slot type — used when a
+/// The Briev zero-default for a bootstrap-primitive slot type — used when a
 /// reset must re-seed an unseeded slot. Custom/compound slot types have no
 /// synthesizable default (a seeded value is the only way they reset).
 fn default_expr_for_type(ty: &Type) -> Option<Expr> {
@@ -421,7 +421,7 @@ fn emit_reset_txn(
     Ok(())
 }
 
-/// The value a reset txn writes for one slot: the Briv seed when seeded, else
+/// The value a reset txn writes for one slot: the Briev seed when seeded, else
 /// the type default (bootstrap primitives only). A slot with neither is a
 /// compile error — never silently left stale on a reset.
 fn reset_value_for_slot(
@@ -448,7 +448,7 @@ fn prefix_for_error(slot: &str) -> String {
     slot.rfind('.').map(|i| slot[..i].to_string()).unwrap_or_else(|| slot.to_string())
 }
 
-/// The HTML element names reserved against Briv instance vars — an instance
+/// The HTML element names reserved against Briev instance vars — an instance
 /// named `div` mounted as `<div />` would silently shadow the HTML element,
 /// so such a name is a compile error (the namespaces stay separated).
 const RESERVED_TAG_NAMES: &[&str] = &[
@@ -457,7 +457,7 @@ const RESERVED_TAG_NAMES: &[&str] = &[
     "td", "textarea", "th", "thead", "tr", "ul",
 ];
 
-/// Collect Briv-side component instances: top-level `let <name>: <Obj> =
+/// Collect Briev-side component instances: top-level `let <name>: <Obj> =
 /// <StructLiteral>` where `<Obj>` has a render block. Returns `(var name,
 /// component, literal field values)`. The consumed lets are removed (their
 /// state becomes the `name.<field>` slots).
@@ -714,7 +714,7 @@ fn collect_txn_slots(txn: &Transaction, slots: &HashMap<String, Type>, out: &mut
 /// fragment's fields (or are triggered by it). Returns the variant names
 /// keyed by the original member name. `suffix` is the mount identity — the
 /// mount index (`0`) for an HTML-side spawn, the instance var name (`c1`)
-/// for a Briv-side instance.
+/// for a Briev-side instance.
 fn build_txn_variants(
     items: &mut Vec<TopLevel>,
     obj: &ObjInfo,
@@ -1220,11 +1220,11 @@ render Root {
         );
     }
 
-    /// 2026-08-12 (2b3 slice 2): a Briv-side instance — `let c1: Counter =
+    /// 2026-08-12 (2b3 slice 2): a Briev-side instance — `let c1: Counter =
     /// Counter { count: 5 }` + `<c1 />` — routes to the `c1.*` slots, seeds
-    /// from the StructLiteral (Briv source), and the let is consumed.
+    /// from the StructLiteral (Briev source), and the let is consumed.
     #[test]
-    fn briv_side_instance_seeds_and_routes() {
+    fn briev_side_instance_seeds_and_routes() {
         let src = r#"
 obj Counter {
     count: Int;
@@ -1258,7 +1258,7 @@ render Root {
         assert_eq!(
             plan.initializers.get("c1.count"),
             Some(&Expr::Decimal(5)),
-            "seed is the Briv literal"
+            "seed is the Briev literal"
         );
         let states: Vec<String> = items.iter().filter_map(|item| match item {
             TopLevel::StateDecl(sd) => Some(sd.name.clone()),
@@ -1281,10 +1281,10 @@ render Root {
         );
     }
 
-    /// Two Briv-side instances of the same obj are fully independent — each
+    /// Two Briev-side instances of the same obj are fully independent — each
     /// seeds its own slot and fires its own variant.
     #[test]
-    fn two_briv_side_instances_are_independent() {
+    fn two_briev_side_instances_are_independent() {
         let src = r#"
 obj Counter {
     count: Int;
@@ -1376,11 +1376,11 @@ render Root {
         assert!(err.contains("HTML element"), "{err}");
     }
 
-    /// 2026-08-12 (2b3 slice 3): a Briv-side instance gets a callable reset
+    /// 2026-08-12 (2b3 slice 3): a Briev-side instance gets a callable reset
     /// txn that re-applies its SEED — the write flows through the reactive
     /// machinery (contract + flush), never a direct store.
     #[test]
-    fn briv_side_instance_reset_reapplies_seed() {
+    fn briev_side_instance_reset_reapplies_seed() {
         let src = r#"
 obj Counter {
     count: Int;
@@ -1475,9 +1475,9 @@ render Root {
     }
 
     /// 2026-08-12 (2b3 slice 2): a component can mount BOTH ways — anonymous
-    /// `<Counter />` pool spawns AND a Briv-side `<c1 />` instance.
+    /// `<Counter />` pool spawns AND a Briev-side `<c1 />` instance.
     #[test]
-    fn mixed_html_and_briv_mounts() {
+    fn mixed_html_and_briev_mounts() {
         let src = r#"
 obj Counter {
     count: Int;
@@ -1505,7 +1505,7 @@ render Root {
         assert_eq!(
             plan.initializers.get("c1.count"),
             Some(&Expr::Decimal(5)),
-            "c1 seeds from Briv"
+            "c1 seeds from Briev"
         );
         assert!(
             !plan.initializers.contains_key("Counter.0.count"),

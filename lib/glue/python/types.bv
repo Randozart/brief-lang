@@ -1,4 +1,4 @@
-// 2026-07-22: Python type declarations for Briv's type universe.
+// 2026-07-22: Python type declarations for Briev's type universe.
 // Types are defined against protocol hashwords (#String<UTF8>, #Int, etc.)
 // so GLUE can find CastTo/CastFrom paths.
 

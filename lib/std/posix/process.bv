@@ -1,5 +1,5 @@
 // 2026-07-26: Process spawning — clone + execve.
-// Replaces ShellCmd from briv_rt.c (which used popen).
+// Replaces ShellCmd from briev_rt.c (which used popen).
 
 import "syscall.bv";
 

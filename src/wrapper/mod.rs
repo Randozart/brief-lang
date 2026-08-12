@@ -149,8 +149,8 @@ pub fn analyze_library(
     }
 }
 
-/// Convert C type to Briv type
-pub fn c_type_to_briv(c_type: &str) -> String {
+/// Convert C type to Briev type
+pub fn c_type_to_briev(c_type: &str) -> String {
     let t = c_type.trim().to_lowercase();
 
     match t.as_str() {

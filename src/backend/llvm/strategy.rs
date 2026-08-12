@@ -83,7 +83,7 @@ impl LlvmBackend {
                 let a_reads = crate::backend::collect_read_identifiers(&a.body);
                 let b_reads = crate::backend::collect_read_identifiers(&b.body);
                 // 2026-07-30: Write-write AND read-write conflicts are checked
-                // UNCONDITIONALLY. Briv's reactor design (per AGENTS.md) states:
+                // UNCONDITIONALLY. Briev's reactor design (per AGENTS.md) states:
                 //   "If two nodes firing together would lead to a race condition
                 //    due to one reading or one writing or both writing, deny
                 //    compilation. Writing is a XOR condition."

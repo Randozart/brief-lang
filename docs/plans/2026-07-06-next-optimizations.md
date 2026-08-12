@@ -5,9 +5,9 @@ Status: Plan
 
 ## 1. Current Benchmark Results (commit f598584)
 
-All 22 benchmarks MATCH (0 MISMATCH, 1 SKIP). Ratios are Briv/C — lower is better.
+All 22 benchmarks MATCH (0 MISMATCH, 1 SKIP). Ratios are Briev/C — lower is better.
 
-| Benchmark | Ratio | Briv Time | C Time | Dispatch | State Size | Notes |
+| Benchmark | Ratio | Briev Time | C Time | Dispatch | State Size | Notes |
 |-----------|-------|-----------|--------|----------|-----------|-------|
 | interval_step | **0.01x** | .0006s | .0622s | A000 (fold) | 2 fields | Precomputed — trivial |
 | bit_clear | **1.00x** | .0006s | .0006s | A005c (SSA) | 2 fields | Precomputed — 63 iters |
@@ -29,16 +29,16 @@ All 22 benchmarks MATCH (0 MISMATCH, 1 SKIP). Ratios are Briv/C — lower is bet
 | fannkuch_redux | **1.44x** | .1036s | .0717s | A005c+rotation | 16 fields | **LOSES to C (-44%)** |
 | queue_drain_idio | SKIP | — | — | — | — | No C binary |
 
-### Winners (Briv beats C)
+### Winners (Briev beats C)
 - **nbody_newton**: .76x (24% faster) — vector phis + force computation
 - **nbody_sqrt_idio**: .75x (25% faster) — vector phis + idiomatic txn
 - **nbody_sqrt**: .91x (9% faster) — sqrt in hot loop offsets vector phi benefit
 - **float_math**: .84x (16% faster) — tight float loop, well-vectorized
 - **ring_buffer**: .99x — within noise of C
 
-### Losers (C beats Briv)
-- **sparse_dispatch**: 1.52x — Briv does 8 bodies' work; C eliminates empty switch
-- **fannkuch_redux**: 1.44x — Briv uses GEP-store-reload for rotation; C uses pure SSA
+### Losers (C beats Briev)
+- **sparse_dispatch**: 1.52x — Briev does 8 bodies' work; C eliminates empty switch
+- **fannkuch_redux**: 1.44x — Briev uses GEP-store-reload for rotation; C uses pure SSA
 - **print_loop**: 1.08x — 2-field A005c overhead > 2-field C loop
 - **cancel_math**: 1.05x — same issue as print_loop
 - **float_math_nonzero**: 1.03x — within noise (likely variance)

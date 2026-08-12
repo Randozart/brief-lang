@@ -156,7 +156,7 @@ fn parse_py_function(line: &str, _is_stub: bool) -> Option<AnalyzedFunction> {
             .next()
             .unwrap_or(ret_str)
             .trim();
-        py_type_to_briv(ret_str)
+        py_type_to_briev(ret_str)
     } else {
         "Void".to_string()
     };
@@ -229,7 +229,7 @@ fn parse_py_function_internal(line: &str, _is_stub: bool) -> Option<AnalyzedFunc
             .next()
             .unwrap_or(ret_str)
             .trim();
-        py_type_to_briv(ret_str)
+        py_type_to_briev(ret_str)
     } else {
         "Void".to_string()
     };
@@ -351,11 +351,11 @@ fn parse_py_single_param(
         }
     };
 
-    Some((_name, py_type_to_briv(&type_str)))
+    Some((_name, py_type_to_briev(&type_str)))
 }
 
-/// Convert Python type annotation to Briv type
-pub fn py_type_to_briv(py_type: &str) -> String {
+/// Convert Python type annotation to Briev type
+pub fn py_type_to_briev(py_type: &str) -> String {
     let t = py_type.trim();
 
     // Handle None
@@ -416,7 +416,7 @@ pub fn py_type_to_briv(py_type: &str) -> String {
                     .or_else(|| t.strip_prefix("optional["))
                     .and_then(|s| s.strip_suffix(']'))
                     .unwrap_or(t);
-                py_type_to_briv(inner)
+                py_type_to_briev(inner)
             } else if t.starts_with("Union[") || t.starts_with("union[") {
                 // Union - take first type
                 let inner = t
@@ -427,7 +427,7 @@ pub fn py_type_to_briv(py_type: &str) -> String {
                 inner
                     .split(',')
                     .next()
-                    .map(|s| py_type_to_briv(s.trim()))
+                    .map(|s| py_type_to_briev(s.trim()))
                     .unwrap_or_else(|| "Value".to_string())
             } else if t.starts_with("Dict[")
                 || t.starts_with("dict[")
@@ -476,13 +476,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_py_type_to_briv() {
-        assert_eq!(py_type_to_briv("int"), "Int");
-        assert_eq!(py_type_to_briv("str"), "String");
-        assert_eq!(py_type_to_briv("list"), "List<Value>");
-        assert_eq!(py_type_to_briv("None"), "Void");
-        assert_eq!(py_type_to_briv("Optional[str]"), "String");
-        assert_eq!(py_type_to_briv("Union[int, str]"), "Int");
+    fn test_py_type_to_briev() {
+        assert_eq!(py_type_to_briev("int"), "Int");
+        assert_eq!(py_type_to_briev("str"), "String");
+        assert_eq!(py_type_to_briev("list"), "List<Value>");
+        assert_eq!(py_type_to_briev("None"), "Void");
+        assert_eq!(py_type_to_briev("Optional[str]"), "String");
+        assert_eq!(py_type_to_briev("Union[int, str]"), "Int");
     }
 
     #[test]

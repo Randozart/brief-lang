@@ -76,7 +76,7 @@ folded → entire matrix eliminated.
 |-----------|--------|-------|---|-------|
 | float_math (original) | 0.4297s | **~0.04s** | 0.0579s | ~tie |
 | float_math_nonzero | 0.4411s | ~0.17s? | 0.1676s | ~2.6× (remainder: NaN overhead) |
-| const_heavy | 0.0029s | 0.0029s | 0.0436s | Briv wins |
+| const_heavy | 0.0029s | 0.0029s | 0.0436s | Briev wins |
 
 ## Implementation
 

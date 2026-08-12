@@ -420,7 +420,7 @@ else imports.
 
 ### 7.2 `src/lexer.rs` — REWRITE, ~800 lines
 
-**Purpose:** Tokenize Briv source text into a token stream.
+**Purpose:** Tokenize Briev source text into a token stream.
 
 **What it must contain:**
 - `Token` enum with ALL token variants:
@@ -532,7 +532,7 @@ pub use display::*;
 
 ### 7.4 `src/ast/types.rs` — NEW, ~1500 lines
 
-**Purpose:** Type definitions for the Briv type system.
+**Purpose:** Type definitions for the Briev type system.
 
 **What it must contain:**
 - `Type` enum:
@@ -560,7 +560,7 @@ pub use display::*;
     `Identifier(String)`, `List(Vec<PropertyValue>)`
 - `OpBinding` enum:
   - `Intrinsic(String)` — `#`-named compiler intrinsic
-  - `Function(String)` — user-defined Briv function
+  - `Function(String)` — user-defined Briev function
 - `Constraint` — type constraint expression (for `[pre][post]`):
   - `Eq(Expr, Expr)`, `Neq`, `Lt`, `Gt`, `Le`, `Ge`, `And`, `Or`, `Not`,
     `Implies`, `Forall`, `Exists`
@@ -718,10 +718,10 @@ pub use display::*;
 **Purpose:** Display implementations for all AST types.
 
 **What it must contain:**
-- `Display` for `Expr` — produces valid Briv source text
-- `Display` for `Type` — produces valid Briv type syntax
-- `Display` for `Statement` — produces valid Briv statement syntax
-- `Display` for `TopLevel` — produces valid Briv top-level syntax
+- `Display` for `Expr` — produces valid Briev source text
+- `Display` for `Type` — produces valid Briev type syntax
+- `Display` for `Statement` — produces valid Briev statement syntax
+- `Display` for `TopLevel` — produces valid Briev top-level syntax
 - `Display` for `Contract` — produces `[pre][post]`, `[#]`, `[[post]`, etc.
 - `Display` for `Pattern`, `MatchArm`, `BinaryOpKind`, `UnaryOpKind`
 - `Display` for `DerivationBlock` — produces `:= { ... }` syntax
@@ -1209,7 +1209,7 @@ entry-point plans).
 
 ### 9.7 `src/backend/llvm/types.rs` — NEW, ~1000 lines
 
-**Purpose:** Lower Briv types to LLVM types.
+**Purpose:** Lower Briev types to LLVM types.
 
 **Functions:**
 - `fn lower_type(ty: &Type, universe: &TypeUniverse) -> String`
@@ -1230,13 +1230,13 @@ entry-point plans).
 
 ### 9.8 `src/backend/llvm/abi.rs` — NEW, ~1000 lines
 
-**Purpose:** ABI marshaling between C calling convention and Briv internal types.
+**Purpose:** ABI marshaling between C calling convention and Briev internal types.
 
 **Functions:**
-- `fn marshal_param_to_briv(param_ty: &Type, param_reg: &str) -> String`
+- `fn marshal_param_to_briev(param_ty: &Type, param_reg: &str) -> String`
   - Bool: `trunc i8 %param to i1`
   - Others: identity (pass through)
-- `fn marshal_briv_to_return(ret_ty: &Type, ret_reg: &str) -> String`
+- `fn marshal_briev_to_return(ret_ty: &Type, ret_reg: &str) -> String`
   - Bool: `zext i1 %ret to i8`
   - String: `getelementptr %String, ptr %ret, i32 0, i32 0` → `load i64` → `inttoptr`
   - Others: identity
@@ -1534,7 +1534,7 @@ Key points:
 
 - `webstack.rs`: WASM `#` intrinsic codegen, alloc metadata
 - `circt.rs`: CIRCT `#` intrinsic codegen, alloc metadata
-- `bindgen.rs`: `__briv_init_state`/`__glue_release` in C/Rust/Python headers
+- `bindgen.rs`: `__briev_init_state`/`__glue_release` in C/Rust/Python headers
 
 ---
 

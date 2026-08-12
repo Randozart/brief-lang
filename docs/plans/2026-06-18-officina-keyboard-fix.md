@@ -66,5 +66,5 @@ emit_trg_event_epoll_wait(self, out);
 
 1. `cargo test --lib` — all existing tests pass
 2. `cargo build` — no warnings
-3. Recompile officina: `./target/release/briv-compiler rbv officina.bv`
+3. Recompile officina: `./target/release/briev-compiler rbv officina.bv`
 4. Run officina and verify keyboard input is processed

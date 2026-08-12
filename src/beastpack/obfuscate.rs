@@ -76,7 +76,7 @@ fn collect_toplevel_names(item: &TopLevel, names: &mut HashSet<String>) {
             collect_toplevel_names(&e.inner, names);
         }
         TopLevel::ForeignBinding(fb) => {
-            if let Some(ref name) = fb.briv_name {
+            if let Some(ref name) = fb.briev_name {
                 names.insert(name.clone());
             }
         }

@@ -27,7 +27,7 @@ This works because `!range` on a load tells LLVM's `ScalarEvolution` pass the lo
 
 When a precondition involves multiple variables or relationships that can't be expressed as simple range metadata:
 
-```briv
+```briev
 // Complex precondition
 txn transfer [from > 0 && to < 100 && from + amount == to] { ... }
 ```
@@ -80,7 +80,7 @@ call void @llvm.assume(i1 %cond2)
 
 When a guard is `[x == 5]`, the backend can constant-propagate:
 
-```briv
+```briev
 [x == 5] {
     let y = x + 10;  // y is always 15
     &result = y * 2;  // result is always 30
@@ -108,7 +108,7 @@ This is a no-op for LLVM's optimizer, BUT it signals that no runtime postconditi
 
 Instead of branching on guards, the backend emits `select i1`:
 
-```briv
+```briev
 let x: Int = 0;
 [cond] {
     &x = 42;

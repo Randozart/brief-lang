@@ -1,8 +1,8 @@
-# Briv Compiler - Memory Architecture Extension Plan
+# Briev Compiler - Memory Architecture Extension Plan
 
 **Date:** 2026-04-27
 **Revised:** 2026-04-27 (minimal scope)
-**Purpose:** Native Briv syntax for IMP v1.4 split-DDR memory architecture
+**Purpose:** Native Briev syntax for IMP v1.4 split-DDR memory architecture
 **Target:** Both Rust and C transpilation
 
 ---
@@ -24,9 +24,9 @@ All other requirements from `FEATURE_REQUIREMENTS.md` are already addressable wi
 
 | File Type | Purpose | Transpilation Target | Memory Model |
 |-----------|---------|----------------------|--------------|
-| `.bv` | Briv specification | Rust, C | Virtual memory - compiler uses OS allocator optimally |
-| `.rbv` | Rendered Briv + View | WASM + JS (frontend) | N/A (view layer only) |
-| `.ebv` | Embedded Briv + Hardware | Rust/C + SystemVerilog | Physical addresses via `hardware.toml` |
+| `.bv` | Briev specification | Rust, C | Virtual memory - compiler uses OS allocator optimally |
+| `.rbv` | Rendered Briev + View | WASM + JS (frontend) | N/A (view layer only) |
+| `.ebv` | Embedded Briev + Hardware | Rust/C + SystemVerilog | Physical addresses via `hardware.toml` |
 
 **Transpilation Rules:**
 - `.bv` → **Rust/C only** (never SystemVerilog)
@@ -36,7 +36,7 @@ All other requirements from `FEATURE_REQUIREMENTS.md` are already addressable wi
 
 ## Part I: IMP Requirements Coverage
 
-This section maps each requirement from `FEATURE_REQUIREMENTS.md` to existing Briv syntax, showing that **most gaps are already addressed**.
+This section maps each requirement from `FEATURE_REQUIREMENTS.md` to existing Briev syntax, showing that **most gaps are already addressed**.
 
 ### Requirement 1: Memory Region Definitions
 
@@ -71,7 +71,7 @@ uint64_t get_weight_addr(uint64_t virtual_index) {
 ```
 
 **Existing Solution:** Standard ternary expressions already work:
-```briv
+```briev
 let phys_addr = (virtual_idx < MODEL_PART_A_SIZE)
     ? 0x0 + virtual_idx
     : 0x800000000 + (virtual_idx - MODEL_PART_A_SIZE);
@@ -89,7 +89,7 @@ cache.low_size = GAP_START - MODEL_A_END;
 ```
 
 **Existing Solution:** Vector types + hardware.toml sizing:
-```briv
+```briev
 let kv_cache: Int[?remaining] @ hardware.toml;  // Compiler fills from available
 ```
 
@@ -106,7 +106,7 @@ DMA->CTRL |= START;
 ```
 
 **Existing Solution:** Transactions with triggers already handle register writes:
-```briv
+```briev
 trg dma_src: UInt @ 0x80040000 /0..31;
 trg dma_dst: UInt @ 0x80040004 /0..31;
 trg dma_len: UInt @ 0x80040008 /0..15;
@@ -130,7 +130,7 @@ Inference: Read weights from either bank
 ```
 
 **Existing Solution:** Transaction preconditions + address arithmetic:
-```briv
+```briev
 node read_weight [idx < PART_A_SIZE] {
     &phys_addr = 0x0 + idx;
     term;
@@ -158,7 +158,7 @@ for (offset = 0; offset < model_size; offset += CHUNK_SIZE) {
 ```
 
 **Existing Solution:** Transactions ARE the iteration mechanism (proof-friendly loops):
-```briv
+```briev
 node stream_next [pending > 0] [stream_state == streaming] {
     &offset = (stream_state == idle) ? 0 : offset + CHUNK_SIZE;
     &fpga_addr = offset;
@@ -185,13 +185,13 @@ DSB SY             // Data synchronization barrier
 ### Requirement 8: Peripheral Register Definitions
 
 **What IMP Has:**
-```briv
+```briev
 trg hw_control: UInt @ 0x40000000 /0..7;
 trg hw_status: UInt @ 0x40000004 /0..7;
 ```
 
 **What IMP Needs:**
-```briv
+```briev
 trg dma_src: UInt @ 0x80040000 /0..31;
 trg fpga_weight_addr: UInt @ 0x8000A040 /0..17;
 ```
@@ -211,7 +211,7 @@ void layer_complete_isr(void) {
 ```
 
 **Existing Solution:** `trg` for interrupt variables, backend generates ISR:
-```briv
+```briev
 trg layer_complete_irq: Bool @ 0x40000010;
 
 node handle_irq [layer_complete_irq] [layer_complete_irq == false] {
@@ -252,13 +252,13 @@ Only two features require new syntax that doesn't exist in the current codebase.
 ## Feature 1: IO Linkage (`link`)
 
 **Applies to:** `.ebv` exclusively
-**Purpose:** Share IO pins/addresses between SV and Rust/C without hardcoding concrete addresses in Briv source
+**Purpose:** Share IO pins/addresses between SV and Rust/C without hardcoding concrete addresses in Briev source
 
 ### Rationale
-When `.ebv` transpiles to both SV and Rust/C, concrete addresses/wires must be agreed upon by both sides. Anonymous `link` references enable this without polluting Briv source with target-specific details.
+When `.ebv` transpiles to both SV and Rust/C, concrete addresses/wires must be agreed upon by both sides. Anonymous `link` references enable this without polluting Briev source with target-specific details.
 
 ### Proposed Syntax
-```briv
+```briev
 // linkage.toml (shared config)
 [fpga_io]
 weight_valid = { sv: "fpga_weight_valid_wire", rust: "0x8000A040", c: "0x8000A040" }
@@ -308,7 +308,7 @@ trg result_data: UInt @ 0x8000A050;
 Cache coherency operations (DC CIVAC, DSB SY), DSP intrinsics, or other architecture-specific instructions. Only makes sense for targets with Von Neumann architecture.
 
 ### Architecture Gating
-```briv
+```briev
 // .bv targeting x86/ARM/RISC-V can use asm
 asm "DC CIVAC X0, X1" { "x0", "x1" };
 
@@ -317,7 +317,7 @@ asm "DC CIVAC X0, X1" { "x0", "x1" };
 ```
 
 ### Proposed Syntax
-```briv
+```briev
 txn flush_cache_for_dma [true] {
     asm "DC CIVAC X0, X1" { "x0", "x1" };
     asm "DSB SY" {};
@@ -347,9 +347,9 @@ txn flush_cache_for_dma [true] {
 
 ## Part III: Requirements to Implementation Mapping
 
-### IMP Requirements vs Briv Features
+### IMP Requirements vs Briev Features
 
-| IMP Requirement | Briv Solution | Status |
+| IMP Requirement | Briev Solution | Status |
 |----------------|----------------|--------|
 | 1. Memory Regions | `hardware.toml` `[memory]` section | ✅ Already supported |
 | 2. Gap-Jumping Translation | Ternary `? :` expressions | ✅ Already supported |
@@ -425,16 +425,16 @@ cargo test --lib
 cargo build
 
 # 3. Test new link syntax parsing
-./target/release/briv-compiler ebv examples/linkage_test.ebv
+./target/release/briev-compiler ebv examples/linkage_test.ebv
 
 # 4. Verify SV output with linkage
-./target/release/briv-compiler ebv examples/linkage_test.ebv --output sv
+./target/release/briev-compiler ebv examples/linkage_test.ebv --output sv
 
 # 5. Verify Rust output with linkage
-./target/release/briv-compiler ebv examples/linkage_test.ebv --output rust
+./target/release/briev-compiler ebv examples/linkage_test.ebv --output rust
 
 # 6. Test asm syntax (if target supports it)
-./target/release/briv-compiler bv examples/asm_test.bv --output rust
+./target/release/briev-compiler bv examples/asm_test.bv --output rust
 ```
 
 ---
@@ -462,20 +462,20 @@ Reference files from `FEATURE_REQUIREMENTS.md`:
 ### Current IMP Syntax Usage
 
 **Peripheral registers (already working):**
-```briv
+```briev
 trg hw_control: UInt @ 0x40000000 /0..7;
 trg hw_status: UInt @ 0x40000004 /0..7;
 trg hw_opcode: UInt @ 0x40000008 /0..3;
 ```
 
 **Vector buffers (already working):**
-```briv
+```briev
 let weight_buffer: Int[262144] @ 0x40A80000 / x16;
 let scratch: Int[262144] @ 0x40B00000 / x16;
 ```
 
 **Address arithmetic (already working):**
-```briv
+```briev
 let phys_addr = (virtual_idx < MODEL_PART_A_SIZE)
     ? 0x0 + virtual_idx
     : 0x800000000 + (virtual_idx - MODEL_PART_A_SIZE);
@@ -484,20 +484,20 @@ let phys_addr = (virtual_idx < MODEL_PART_A_SIZE)
 ### IMP Requirements Not Yet Met
 
 1. **`link`**: `neuralcore.ebv` and `kernel.ebv` share signals but no linkage mechanism
-2. **`asm`**: Cache flush before DMA not expressible in current Briv
+2. **`asm`**: Cache flush before DMA not expressible in current Briev
 
 ---
 
 ## Appendix B: Quick Reference - Existing Syntax
 
 ### Hardware Registers
-```briv
+```briev
 trg name: Type @ address [/bit-range];
 let name: Type @ address [/bit-range] = init;
 ```
 
 ### Address Modes
-```briv
+```briev
 @address         // Target-dependent address
 @raw:0xADDRESS   // Raw physical (embedded)
 @stack:OFFSET     // Stack-relative
@@ -505,14 +505,14 @@ let name: Type @ address [/bit-range] = init;
 ```
 
 ### Bit Ranges
-```briv
+```briev
 @/N              // Bit at position N
 @/M..N           // Bit range M to N
 @/xN             // Any N-bit slot
 ```
 
 ### Transactions (Implicit Loops)
-```briv
+```briev
 node name [pre][post][?watchdog] {
     // body - executes when precondition is true
 }

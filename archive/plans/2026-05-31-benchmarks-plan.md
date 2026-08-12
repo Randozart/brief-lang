@@ -45,7 +45,7 @@ Add 3 new benchmarks to validate every optimization path against C equivalents, 
 **Expected LLVM output:**
 - `@async_body_inc_a` and `@async_body_inc_b` worker functions
 - `@llvm.thread_pool` metadata
-- `@main`: `briv_thread_pool_init → loop(tick: barrier_release → reactor_tick → barrier_wait → __rt_wait → br tick)`
+- `@main`: `briev_thread_pool_init → loop(tick: barrier_release → reactor_tick → barrier_wait → __rt_wait → br tick)`
 - Zero annotation needed — compiler auto-categorizes both as async
 
 **C comparison:** Two `pthread_create` threads each running `for (i=0; i<N; i++) a++` / `for (i=0; i<N; i++) b++`
@@ -106,8 +106,8 @@ void __run_benchmark(void (*body)(void), uint64_t iters) {
 }
 ```
 
-Briv side:
-```briv
+Briev side:
+```briev
 frgn __monotonic_ns() -> Result<Int, TimeError>;
 ```
 
@@ -115,18 +115,18 @@ frgn __monotonic_ns() -> Result<Int, TimeError>;
 
 ```bash
 # New flags:
-#   --link-rt     Compile with briv_rt.c runtime (for @link triggers + thread pool)
+#   --link-rt     Compile with briev_rt.c runtime (for @link triggers + thread pool)
 #   BENCH_DIR      Directory containing .bv and .c files
 #   BENCH_NAME     Base name (e.g., "ring_buffer")
 
 # For --link-rt benchmarks:
-cargo run --bin briv-compiler -- llvm $BENCH_DIR/${BENCH_NAME}.bv --out $BENCH_DIR --link-rt
-clang -O3 -march=native -o $BENCH_DIR/${BENCH_NAME} $BENCH_DIR/${BENCH_NAME}.o $BENCH_DIR/briv_rt.o -lpthread
+cargo run --bin briev-compiler -- llvm $BENCH_DIR/${BENCH_NAME}.bv --out $BENCH_DIR --link-rt
+clang -O3 -march=native -o $BENCH_DIR/${BENCH_NAME} $BENCH_DIR/${BENCH_NAME}.o $BENCH_DIR/briev_rt.o -lpthread
 ```
 
 ### Timing Pattern (in-benchmark)
 
-```briv
+```briev
 import io from "std/io.bv";
 
 frgn __monotonic_ns() -> Result<Int, TimeError>;
@@ -165,7 +165,7 @@ txn _report [_started == true && /* convergence condition */][true] {
 
 ## Expected Results (Target)
 
-| Benchmark | Path | Briv expected | C expected | Ratio target |
+| Benchmark | Path | Briev expected | C expected | Ratio target |
 |-----------|------|---------------|-----------|-------------|
 | IIR filter | 2 | 0.15s | 0.23s | 1.53× faster |
 | Ring buffer | 4 | TBD | TBD | ≥1.0× (parity or better) |

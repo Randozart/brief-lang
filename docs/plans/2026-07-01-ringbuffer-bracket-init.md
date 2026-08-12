@@ -46,8 +46,8 @@ The helper:
 Detection: At both callsites, before `Some(expr) => { self.emit_expr(...) }`, add:
 ```rust
 Some(Expr::ListLiteral(items)) => {
-    let briv_ty = &self.ctx.field_briv_types[field_idx];
-    if let Type::Applied(type_name, _) = briv_ty {
+    let briev_ty = &self.ctx.field_briev_types[field_idx];
+    if let Type::Applied(type_name, _) = briev_ty {
         if let Some(rt) = self.ctx.type_universe.get(type_name) {
             if rt.insert_at.as_deref() == Some("ring_push") {
                 emit_ringbuf_init(self, out, &items, field_idx, indent);

@@ -193,15 +193,15 @@ No change needed to `fallback_llvm_type()` — it's only reached for non-Int typ
 
 Add `--int-bits 32` to the LLVM IR generation target:
 ```makefile
-$(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
+$(OUT_DIR)/bench_add.ll: $(BV_SRC) $(BRIEVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIEVC) build $(BV_SRC) --llvm --out $(OUT_DIR) --int-bits 32 2>&1
 ```
 
 Also update the `.so` build for consistency (though the .so is native x86_64
 so it stays at i64 — the flag only matters for WASM targets):
 ```makefile
-$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
-	cd $(PROJECT_ROOT) && $(BRIVC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
+$(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIEVC) | $(OUT_DIR)
+	cd $(PROJECT_ROOT) && $(BRIEVC) build $(BV_SRC) --shared --out $(OUT_DIR) 2>&1
 	ln -sf bench_add.so $(OUT_DIR)/libbench_add.so
 ```
 (No change needed for .so — it naturally stays i64.)
@@ -213,7 +213,7 @@ $(OUT_DIR)/bench_add.so: $(BV_SRC) $(BRIVC) | $(OUT_DIR)
 **File:** `benchmarks/metropolitan/bench_add.bv`
 
 Add contract precondition so the narrowing pass can prove i32 safety:
-```briv
+```briev
 export defn add(a: Int, b: Int [a < 1000 && b < 1000]) -> Int {
     term a + b;
 };
@@ -257,7 +257,7 @@ bridge generation unchanged for now — the benchmark calls WASM directly via
 `instance.exports.add`, not through the generated bridge.
 
 **Rationale comment added to gen_wasm.bv:**
-```briv
+```briev
 // 2026-07-25: When --int-bits 32 is used, WASM exports i32 functions
 // that return plain JS numbers (no BigInt). The generated bridge
 // currently wraps in BigInt() — a future update can detect the int

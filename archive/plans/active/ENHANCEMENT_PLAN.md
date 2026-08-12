@@ -1,11 +1,11 @@
-# Briv Compiler Enhancement Plan: Catch Hardware Violations at Compile Time
+# Briev Compiler Enhancement Plan: Catch Hardware Violations at Compile Time
 
 **Date:** 2026-04-22
 **Status:** Planning
 
 ## Problem Statement
 
-During IMP development, multiple critical hardware-level bugs were found by manual code review that the Briv compiler *should* have caught:
+During IMP development, multiple critical hardware-level bugs were found by manual code review that the Briev compiler *should* have caught:
 
 1. **Address Space Violation** - ARM code accessed FPGA internal BRAM directly (would cause Data Abort)
 2. **MMIO Struct Mismatch** - Rust `State` struct didn't match `hardware.toml` memory map
@@ -89,7 +89,7 @@ pub struct State {
 ### 3. Transaction Protocol Verification
 
 **Problem:** Transaction in `.ebv`:
-```briv
+```briev
 node load_weights [cpu_write_en && control == 1][...] {
 ```
 has precondition `control == 1`, but code set `write_en` without setting `control` first.
@@ -183,7 +183,7 @@ After implementation, the compiler must catch:
 
 ### 5. Unary Negation Support (CRITICAL - Compiler Bug)
 
-**Problem:** The Briv compiler's AST cannot handle unary negation. Expression `current_weight == -1` produced:
+**Problem:** The Briev compiler's AST cannot handle unary negation. Expression `current_weight == -1` produced:
 ```verilog
 if ((current_weight == /* Unsupported Expr: Neg(Integer(1)) */)) begin
 ```
@@ -224,7 +224,7 @@ if ((current_weight == /* Unsupported Expr: Neg(Integer(1)) */)) begin
 
 ## Additional Requirements from Research
 
-### DBriv: Recursive Datalog Engine
+### DBriev: Recursive Datalog Engine
 
 **Gap:** Full Prolog-style recursive rules require a complete Datalog engine.
 
@@ -234,7 +234,7 @@ if ((current_weight == /* Unsupported Expr: Neg(Integer(1)) */)) begin
 3. Handle recursive queries (e.g., path finding)
 4. Negation support (stratified)
 
-### DBriv: Address Allocation (@auto)
+### DBriev: Address Allocation (@auto)
 
 **Gap:** The `@auto` keyword needs a linker-style address allocator.
 

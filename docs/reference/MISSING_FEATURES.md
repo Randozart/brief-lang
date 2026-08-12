@@ -1,8 +1,8 @@
-# Briv Language Extensions for Bare-Metal Development
+# Briev Language Extensions for Bare-Metal Development
 
 **Document Status:** Planning/Draft - Syntax NOT Final
 **Created:** 2026-04-22
-**Language Target:** .bv (Core Briv)
+**Language Target:** .bv (Core Briev)
 
 ---
 
@@ -10,7 +10,7 @@
 
 **This document is a DRAFT/PLAN. The syntax proposed here is NOT final and should NOT be implemented as-is.**
 
-If you are an AI working on the Briv compiler:
+If you are an AI working on the Briev compiler:
 - DO NOT implement any syntax from this document without explicit approval
 - The purpose of this document is to RECORD ideas, not ASSIGN work
 - Wait for explicit instruction before implementing any feature from here
@@ -20,9 +20,9 @@ If you are an AI working on the Briv compiler:
 
 ## Purpose
 
-This document describes extensions needed to make Briv (.bv) suitable for bare-metal software development, specifically targeting systems like the ARM Cortex-A53 on KV260 that run without an OS.
+This document describes extensions needed to make Briev (.bv) suitable for bare-metal software development, specifically targeting systems like the ARM Cortex-A53 on KV260 that run without an OS.
 
-Current Briv can describe hardware state machines (.ebv) and has FFI support for OS-level operations (.bv), but lacks features needed for bare-metal/system-level programming.
+Current Briev can describe hardware state machines (.ebv) and has FFI support for OS-level operations (.bv), but lacks features needed for bare-metal/system-level programming.
 
 ---
 
@@ -67,12 +67,12 @@ Current Briv can describe hardware state machines (.ebv) and has FFI support for
 **Problem:** Bare-metal code cannot link the standard library.
 
 **Current (OS-level .bv):**
-```briv
+```briev
 import std/io;
 ```
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 #![no_std]
 ```
 
@@ -87,7 +87,7 @@ import std/io;
 **Problem:** Need custom panic behavior for embedded systems.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 #![panic(my_panic_handler)]
 
 fn my_panic_handler(info: PanicInfo) -> ! {
@@ -107,10 +107,10 @@ fn my_panic_handler(info: PanicInfo) -> ! {
 
 **Problem:** Need to access memory-mapped hardware registers.
 
-**Current:** Not possible in Briv
+**Current:** Not possible in Briev
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Typed pointer to MMIO register block
 let mmio: *mut State = 0x4000A000 as *mut State;
 
@@ -132,7 +132,7 @@ let val = *mmio;  // or (*mmio).field
 **Current:** Not possible, optimizer could reorder or cache accesses.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Option A: Built-in functions
 let val = volatile_read(addr);
 volatile_write(addr, val);
@@ -156,7 +156,7 @@ let val = mmio.volatile_read();
 **Problem:** Bare-metal needs custom start address, not `main`.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 #![entry(_start)]
 
 #[no_mangle]
@@ -167,7 +167,7 @@ fn _start() -> ! {
 ```
 
 **Alternative Syntax:**
-```briv
+```briev
 fn #![start] main() -> ! {
     // This is the entry point
 }
@@ -182,7 +182,7 @@ fn #![start] main() -> ! {
 **Problem:** Need to place code/data in specific memory regions.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Place code in specific section
 #[link_section(".text.boot")]
 fn boot_code() { }
@@ -203,10 +203,10 @@ static BOOT_FLAG: u32 = 0;
 
 **Problem:** Need mutable global state without runtime borrow checking.
 
-**Current:** Not possible in safe Briv.
+**Current:** Not possible in safe Briev.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Option A: Static with unsafe access
 static mut COUNTER: u32 = 0;
 
@@ -229,7 +229,7 @@ fn increment() {
 **Problem:** Need to include binary data (vocab, weights) directly in binary.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Option A: Hex string
 static VOCAB: [u8; 100] = #embed_hex("4142434445");  // "ABCDE"
 
@@ -251,7 +251,7 @@ static VOCAB: [u8; 100] = #embed_base64("QUJDREVGRw==");
 **Problem:** Need to write architecture-specific instructions.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 fn enable_interrupts() {
     asm("cpsie i");
 }
@@ -262,7 +262,7 @@ fn memory_barrier() {
 ```
 
 **Alternative (more structured):**
-```briv
+```briev
 let result = asm!("mrs $0, PRIMASK" : "=r"(result));
 ```
 
@@ -273,7 +273,7 @@ let result = asm!("mrs $0, PRIMASK" : "=r"(result));
 **Problem:** Need atomic operations for multi-core or ISR communication.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Option A: Built-in atomics
 let flag = AtomicBool::new(false);
 flag.store(true);
@@ -298,7 +298,7 @@ frgn atomic_load(addr: *mut u32) -> u32 from "atomics.toml";
 **Problem:** Memory-mapped structs should auto-calculate offsets.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Compiler calculates field offsets
 mmio struct State {
     control: u32,    // offset 0
@@ -319,7 +319,7 @@ mmio struct State {
 **Problem:** Need symbols to match what linker expects.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 #[no_mangle]
 fn _start() { }  // Symbol will be "_start", not mangled
 ```
@@ -331,7 +331,7 @@ fn _start() { }  // Symbol will be "_start", not mangled
 **Problem:** Need access to hardware intrinsics (popcount, clz, etc.).
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 let count = __builtin_popcount(val);
 let leading = __builtin_clz(val);
 let ctz = __builtin_ctz(val);
@@ -346,7 +346,7 @@ let ctz = __builtin_ctz(val);
 **Problem:** Bare-metal needs to define interrupt handlers.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 #[interrupt(UART0)]
 fn uart_handler() {
     // Handle UART interrupt
@@ -361,7 +361,7 @@ fn uart_handler() {
 **Problem:** Need finer control over linker script input.
 
 **Proposed Syntax (DRAFT - NOT FINAL):**
-```briv
+```briev
 // Provide hints to linker
 #[section(".bss.NOINIT")]
 static LARGE_BUFFER: [u8; 65536] = undefined;
@@ -402,7 +402,7 @@ If implementing these extensions, suggested order:
 
 ### No GC / Heap Allocation
 
-Briv should NOT add heap allocation for bare-metal. Use static buffers or stack.
+Briev should NOT add heap allocation for bare-metal. Use static buffers or stack.
 
 ### No Virtual Memory Tables
 
@@ -410,7 +410,7 @@ For KV260 bare-metal, no MMU/MPU table generation. Programmer manages flat addre
 
 ### No Exception Handling
 
-Briv transactions replace exception-based flow. No `try/catch/throw`.
+Briev transactions replace exception-based flow. No `try/catch/throw`.
 
 ### No Dynamic Dispatch
 

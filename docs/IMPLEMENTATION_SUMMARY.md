@@ -1,12 +1,12 @@
-# Embedded Briv Implementation Summary
+# Embedded Briev Implementation Summary
 
 ## Overview
 
-This document describes the implementation of **Embedded Briv** - a bare-metal variant of the Briv programming language for microcontrollers and high-velocity hardware (GPUs, FPGAs). This implementation extends the existing Briv compiler with new features for embedded systems programming.
+This document describes the implementation of **Embedded Briev** - a bare-metal variant of the Briev programming language for microcontrollers and high-velocity hardware (GPUs, FPGAs). This implementation extends the existing Briev compiler with new features for embedded systems programming.
 
 ## Project Goal
 
-The goal is to implement Embedded Briv (`.ebv` files) while also adding features that benefit Core (`.bv`) and Rendered Briv (`.rbv`) variants. The approach uses a unified approach where all three file types can share logic via imports.
+The goal is to implement Embedded Briev (`.ebv` files) while also adding features that benefit Core (`.bv`) and Rendered Briev (`.rbv`) variants. The approach uses a unified approach where all three file types can share logic via imports.
 
 ## Discoveries from Research
 
@@ -19,7 +19,7 @@ The goal is to implement Embedded Briv (`.ebv` files) while also adding features
 
 ### 1. Lexer Updates (`src/lexer.rs`)
 
-Added new tokens for Embedded Briv features:
+Added new tokens for Embedded Briev features:
 
 ```rust
 // Type tokens
@@ -142,17 +142,17 @@ fn parse_bit_range(&mut self) -> Result<BitRange, String> {
 ```
 
 **State Declaration with Address:**
-```briv
+```briev
 let led_pin @ 0x40001000 [0:3]: Int = 0;
 ```
 
 **Assignment with Timeout:**
-```briv
+```briev
 sensor_read = read_sensor() within 100 ms;
 ```
 
 **Trigger Declaration:**
-```briv
+```briev
 trg button_press on stage init [0] {
     term true;
 };
@@ -240,7 +240,7 @@ Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.46s
 
 ## Relevant Documentation
 
-- `docs/EMBEDDED_BRIV_2.2_SPEC.md` - Final spec
-- `docs/EMBEDDED_BRIV_IMPLEMENTATION_PLAN.md` - Implementation plan
-- `spec/EMBEDDED-BRIV-SPEC.md` - Original Embedded Briv 1.0 spec
+- `docs/EMBEDDED_BRIEV_2.2_SPEC.md` - Final spec
+- `docs/EMBEDDED_BRIEV_IMPLEMENTATION_PLAN.md` - Implementation plan
+- `spec/EMBEDDED-BRIEV-SPEC.md` - Original Embedded Briev 1.0 spec
 - `CLAUDE.md` - Compiler documentation

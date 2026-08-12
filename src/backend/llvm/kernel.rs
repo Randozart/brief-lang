@@ -15,7 +15,7 @@
 //! Each kernel is emitted as a self-contained module (`target triple =
 //! "spirv64-unknown-unknown"` with its own `%State`), compiled via
 //! `llc --mtriple=spirv64-unknown-unknown`, and the resulting blob is embedded
-//! in the host module. The host runtime (briv_accel_rt) marshals buffers into
+//! in the host module. The host runtime (briev_accel_rt) marshals buffers into
 //! the kernel `%State` layout, launches, and unpacks.
 
 use crate::analysis::accel::{AccelDecision, AccelEntry, KernelShape};
@@ -92,16 +92,16 @@ impl super::LlvmBackend {
         // Build the compact kernel field maps from the program-wide ones.
         let mut kernel_index: HashMap<String, usize> = HashMap::new();
         let mut kernel_types: Vec<String> = Vec::new();
-        let mut kernel_briv: Vec<Type> = Vec::new();
+        let mut kernel_briev: Vec<Type> = Vec::new();
         let mut struct_fields: Vec<String> = Vec::new();
         let mut const_globals: Vec<(String, Type, Expr)> = Vec::new();
         for name in arrays.iter().chain(scalars.iter()) {
             if let Some(&fidx) = self.ctx.field_index_map.get(name) {
                 let agg = self.ctx.field_types[fidx].clone();
-                let briv = self.ctx.field_briv_types[fidx].clone();
+                let briev = self.ctx.field_briev_types[fidx].clone();
                 kernel_index.insert(name.clone(), kernel_types.len());
                 kernel_types.push(agg.clone());
-                kernel_briv.push(briv);
+                kernel_briev.push(briev);
                 struct_fields.push(agg);
             } else if let Some((ty, val)) = self.ctx.constants.get(name).cloned() {
                 // Read-only global constant referenced by the kernel — it gets
@@ -124,7 +124,7 @@ impl super::LlvmBackend {
         // Save/restore the program-wide field maps around kernel emission.
         let saved_index = std::mem::replace(&mut self.ctx.field_index_map, kernel_index);
         let saved_types = std::mem::replace(&mut self.ctx.field_types, kernel_types);
-        let saved_briv = std::mem::replace(&mut self.ctx.field_briv_types, kernel_briv);
+        let saved_briev = std::mem::replace(&mut self.ctx.field_briev_types, kernel_briev);
 
         // Isolated function state — kernels emit after all host emission, so
         // resetting the accumulator/label caches cannot disturb the host module.
@@ -194,7 +194,7 @@ impl super::LlvmBackend {
 
         self.ctx.field_index_map = saved_index;
         self.ctx.field_types = saved_types;
-        self.ctx.field_briv_types = saved_briv;
+        self.ctx.field_briev_types = saved_briev;
         Ok(out)
     }
 }
@@ -255,7 +255,7 @@ fn field_entry_ir(
         (2u32, llvm_agg_size(ty), 1u64, 0u32)
     };
     format!(
-        "%briv.field {{ ptr @str.briv.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
+        "%briev.field {{ ptr @str.briev.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
         txn, name, kind, host_off, elem_bytes, count, w
     )
 }
@@ -295,7 +295,7 @@ fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTab
 }
 
 /// Emit one kernel's descriptor: name/field string constants, the fields
-/// table, and the descriptor entry. Returns the `%briv.kernel` entry text.
+/// table, and the descriptor entry. Returns the `%briev.kernel` entry text.
 fn emit_one_kernel_desc(
     backend: &super::LlvmBackend,
     out: &mut String,
@@ -306,7 +306,7 @@ fn emit_one_kernel_desc(
     for name in &table.names {
         let bytes = format!("{}\0", name);
         out.push_str(&format!(
-            "@str.briv.{}.{} = private constant [{} x i8] c\"{}\\00\"\n",
+            "@str.briev.{}.{} = private constant [{} x i8] c\"{}\\00\"\n",
             txn,
             name,
             bytes.len(),
@@ -314,13 +314,13 @@ fn emit_one_kernel_desc(
         ));
     }
     out.push_str(&format!(
-        "@briv_kernel_{}_fields = private constant [{} x %briv.field] [{}]\n",
+        "@briev_kernel_{}_fields = private constant [{} x %briev.field] [{}]\n",
         txn,
         table.fields.len(),
         table.fields.join(", ")
     ));
     out.push_str(&format!(
-        "@str.briv.{} = private constant [{} x i8] c\"{}\\00\"\n",
+        "@str.briev.{} = private constant [{} x i8] c\"{}\\00\"\n",
         txn,
         txn.len() + 1,
         txn
@@ -329,11 +329,11 @@ fn emit_one_kernel_desc(
     // The emitted run_probe sets it once at startup; the dispatch wrapper gates
     // on it. Per-txn so independent accel bodies can commit independently.
     out.push_str(&format!(
-        "@briv_accel_verdict_{} = private global i32 0\n",
+        "@briev_accel_verdict_{} = private global i32 0\n",
         txn
     ));
     format!(
-        "%briv.kernel {{ ptr @str.briv.{}, i32 ptrtoint (ptr @briv_kernel_{} to i32), i32 {}, i32 {}, ptr @briv_kernel_{}_fields }}",
+        "%briev.kernel {{ ptr @str.briev.{}, i32 ptrtoint (ptr @briev_kernel_{} to i32), i32 {}, i32 {}, ptr @briev_kernel_{}_fields }}",
         txn,
         txn,
         k.bytes.len(),
@@ -343,7 +343,7 @@ fn emit_one_kernel_desc(
 }
 
 /// Emit the accel descriptor tables + ABI declares the host program links
-/// against (`briv_accel_rt.c`). Each kernel's fields are listed in KERNEL
+/// against (`briev_accel_rt.c`). Each kernel's fields are listed in KERNEL
 /// `%State` order (arrays sorted, then scalars sorted) with their HOST
 /// offsets, so the runtime's generic pack/unpack matches the kernel's GEPs.
 /// Returns the IR text and the txn-name → descriptor-index map the host
@@ -358,9 +358,9 @@ pub(crate) fn emit_accel_descriptors(
         return (out, idx_of);
     }
     out.push_str("\n; === Accel kernel descriptors ===\n");
-    out.push_str("%briv.field = type { ptr, i32, i64, i64, i64, i32 }\n");
-    out.push_str("%briv.kernel = type { ptr, i32, i32, i32, ptr }\n");
-    out.push_str("@briv_accel_ready = private global i32 0\n");
+    out.push_str("%briev.field = type { ptr, i32, i64, i64, i64, i32 }\n");
+    out.push_str("%briev.kernel = type { ptr, i32, i32, i32, ptr }\n");
+    out.push_str("@briev_accel_ready = private global i32 0\n");
 
     let mut desc_entries: Vec<String> = Vec::new();
     for (i, k) in kernels.iter().enumerate() {
@@ -368,14 +368,14 @@ pub(crate) fn emit_accel_descriptors(
         desc_entries.push(emit_one_kernel_desc(backend, &mut out, k));
     }
     out.push_str(&format!(
-        "@briv_accel_descs = private constant [{} x %briv.kernel] [{}]\n",
+        "@briev_accel_descs = private constant [{} x %briev.kernel] [{}]\n",
         desc_entries.len(),
         desc_entries.join(", ")
     ));
-    out.push_str("declare i32 @briv_accel_init(ptr, i32)\n");
-    out.push_str("declare i32 @briv_accel_launch(i32, ptr, i64)\n");
-    out.push_str("declare i32 @briv_accel_available()\n");
-    out.push_str("declare i32 @briv_accel_probe(ptr, ptr, ptr, i64, i64, double, double, ptr)\n");
+    out.push_str("declare i32 @briev_accel_init(ptr, i32)\n");
+    out.push_str("declare i32 @briev_accel_launch(i32, ptr, i64)\n");
+    out.push_str("declare i32 @briev_accel_available()\n");
+    out.push_str("declare i32 @briev_accel_probe(ptr, ptr, ptr, i64, i64, double, double, ptr)\n");
     (out, idx_of)
 }
 ///
@@ -394,7 +394,7 @@ pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {    use std
     let tmp_dir = std::env::temp_dir();
     static KERNEL_COUNTER: AtomicU64 = AtomicU64::new(0);
     let seq = KERNEL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let unique = format!("briv_kernel_{}_{}", std::process::id(), seq);
+    let unique = format!("briev_kernel_{}_{}", std::process::id(), seq);
     let ir_path = tmp_dir.join(format!("{}.ll", unique));
     let spv_path = tmp_dir.join(format!("{}.spv", unique));
 
@@ -429,7 +429,7 @@ pub(crate) fn embed_spirv_blob(spirv_binary: &[u8], kernel_name: &str) -> String
     let mut out = String::new();
     out.push_str(&format!("\n; Embedded SPIR-V kernel: {}\n", kernel_name));
     out.push_str(&format!(
-        "@briv_kernel_{} = private constant [{} x i8] c\"",
+        "@briev_kernel_{} = private constant [{} x i8] c\"",
         kernel_name,
         spirv_binary.len()
     ));
@@ -451,7 +451,7 @@ mod tests {
     fn embed_blob_wraps_bytes() {
         let blob = vec![0x03u8, 0x02, 0x23, 0x07];
         let out = embed_spirv_blob(&blob, "force");
-        assert!(out.contains("@briv_kernel_force = private constant [4 x i8] c\""));
+        assert!(out.contains("@briev_kernel_force = private constant [4 x i8] c\""));
         assert!(out.contains("\\03\\02\\23\\07"));
     }
 

@@ -7,7 +7,7 @@
 
 ## Philosophy
 
-Briv's FFI is *convention-driven*, not target-enum-driven. A type like `String.c` is not "the C type for String" — it is "String under the `.c` file's convention." When a function body makes FFI calls to multiple conventions, the meld system finds the zero-copy intersection layout automatically.
+Briev's FFI is *convention-driven*, not target-enum-driven. A type like `String.c` is not "the C type for String" — it is "String under the `.c` file's convention." When a function body makes FFI calls to multiple conventions, the meld system finds the zero-copy intersection layout automatically.
 
 The compiler is an abstract machine that adapts to any foreign ABI through three primitives:
 1. **Extension-typed params** (`T.<ext>`) — tell the compiler which convention this boundary uses
@@ -195,7 +195,7 @@ The `from` clause becomes a first-class AST construct. `ForeignSignature.locatio
 
 ### Concept
 
-```briv
+```briev
 frgn strlen(s: String) -> Int from "libc.so.6";
 frng hash(data: Data) -> Int from <xxhash.c>;
 ```
@@ -430,13 +430,13 @@ impl ImportResolver {
         if let Some(ref path) = self.stdlib_path {
             roots.push(path.clone());
         }
-        if let Ok(env_path) = std::env::var("BRIV_STDLIB_PATH") {
+        if let Ok(env_path) = std::env::var("BRIEV_STDLIB_PATH") {
             roots.push(PathBuf::from(env_path));
         }
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 roots.push(dir.join("../../lib"));
-                roots.push(dir.join("../share/briv"));
+                roots.push(dir.join("../share/briev"));
             }
         }
         roots
@@ -553,7 +553,7 @@ When a `from` path ends in `.c`, `.cpp`, `.cc`, `.cxx`, or `.m`, the compiler co
 
 ```rust
 /// 2026-07-16: P4 — Compile a C/C++ source to a .o object file.
-/// Content-hash cached at ~/.cache/briv-compiler/ffi/<hash>.o.
+/// Content-hash cached at ~/.cache/briev-compiler/ffi/<hash>.o.
 fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<PathBuf, String> {
     let content = std::fs::read(source_path)
         .map_err(|e| format!("cannot read '{}': {}", source_path.display(), e))?;
@@ -592,7 +592,7 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 fn get_ffi_cache_dir() -> PathBuf {
     let base = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("briv-compiler")
+        .join("briev-compiler")
         .join("ffi");
     std::fs::create_dir_all(&base).ok();
     base
@@ -645,7 +645,7 @@ fn compile_ll_to_binary(
     extra_objects: &[PathBuf],
 ) -> Result<(), String> {
     let rt_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("lib/runtime/briv_rt.c");
+        .join("lib/runtime/briev_rt.c");
     let rt_str = rt_path.to_string_lossy().to_string();
     let mut cmd = Command::new("clang");
     cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
@@ -708,7 +708,7 @@ fn test_ffi_extension_dispatch() {
 
 ### What
 
-When calling a foreign function, the compiler automatically applies meld conversion between Briv types and the foreign convention's types.
+When calling a foreign function, the compiler automatically applies meld conversion between Briev types and the foreign convention's types.
 
 ### The auto-meld algorithm
 
@@ -1291,7 +1291,7 @@ Add the public `prove_smt_formula()`:
 pub fn prove_smt_formula(formula: &str, timeout: Duration) -> SmtResult {
     // Write formula to temp file
     let mut tmp = std::env::temp_dir();
-    tmp.push(format!("briv_smt_{}.smt2", std::process::id()));
+    tmp.push(format!("briev_smt_{}.smt2", std::process::id()));
     std::fs::write(&tmp, formula).ok();
 
     let output = std::process::Command::new("z3")

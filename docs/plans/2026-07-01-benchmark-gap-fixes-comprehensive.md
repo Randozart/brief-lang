@@ -102,7 +102,7 @@ the txn only fires when count < total, and each push preceeds the next pop).
 
 #### Layer 2: Standard library type (`lib/std/ring_buffer.bv`)
 
-```briv
+```briev
 type RingBuffer<T> : List<T> {
     InsertAt = "ring_push";
     ExtractFrom = "ring_pop";
@@ -264,7 +264,7 @@ phi register value via identity `add i64 0, %phi_reg`.
 
 ### Root cause
 
-Briv compiles `count < bound; count++` as `icmp slt` + `add`. C compilers
+Briev compiles `count < bound; count++` as `icmp slt` + `add`. C compilers
 optimize `for (i = N; i-- > 0; )` to `sub` + `jne` (1 instruction vs 2
 for the loop exit check). The difference is ~1 instruction per iteration
 out of 15-18 in the hot loop body.
@@ -328,7 +328,7 @@ Track which functions are actually referenced (called from `@main` or
 recursively from other called functions). Omit unreferenced functions
 from the `.ll` output.
 
-This is a reachability analysis on the LLVM IR, not on the Briv AST.
+This is a reachability analysis on the LLVM IR, not on the Briev AST.
 The simplest approach: collect all function calls referenced during
 `@main` emission, then only emit declarations/functions that are
 reachable.
@@ -439,26 +439,26 @@ Option 1 is preferred — fail fast rather than silently measure old code.
 
 | Benchmark | Original ratio | After P0-P1 | After all | Notes |
 |-----------|:------------:|:----------:|:---------|-------|
-| ring_buffer | **0.67×** | 0.67× | 0.67× | Briv already wins |
-| float_math | **0.73×** | 0.73× | 0.73× | Briv already wins |
-| float_math_nonzero | **0.96×** | 0.96× | 0.96× | Briv already wins |
+| ring_buffer | **0.67×** | 0.67× | 0.67× | Briev already wins |
+| float_math | **0.73×** | 0.73× | 0.73× | Briev already wins |
+| float_math_nonzero | **0.96×** | 0.96× | 0.96× | Briev already wins |
 | sparse_dispatch | **1.06×** | **1.00×** | 1.00× | Switch ≈ C level |
-| print_loop | **0.64×** | 0.64× | 0.64× | Briv already wins |
+| print_loop | **0.64×** | 0.64× | 0.64× | Briev already wins |
 | nbody_newton | **1.50×** | **1.45×** | **~1.30×** | IR valid now; struct SROA helps |
 | nbody_sqrt | **1.22×** | **1.20×** | **~1.10×** | IR valid now; struct SROA helps |
 | nbody_sqrt_idio | **1.08×** | **1.06×** | **~1.03×** | Tacit (empty vs -0.169) |
-| fasta | **0.97×** | 0.97× | 0.97× | Briv already wins |
+| fasta | **0.97×** | 0.97× | 0.97× | Briev already wins |
 | fannkuch_redux | **1.05×** | **~1.03×** | **1.00×** | gc-sections + count-down = parity |
 | mandelbrot | **1.08×** | **~1.05×** | **1.02×** | gc-sections + count-down ≈ parity |
 | kalman_filter | **1.00×** | 1.00× | 1.00× | Already tied |
-| knucleotide | **0.95×** | 0.95× | 0.95× | Briv wins |
-| cancel_math | **0.68×** | 0.68× | 0.68× | Briv wins |
-| bit_clear | **0.47×** | 0.47× | 0.47× | Briv wins |
+| knucleotide | **0.95×** | 0.95× | 0.95× | Briev wins |
+| cancel_math | **0.68×** | 0.68× | 0.68× | Briev wins |
+| bit_clear | **0.47×** | 0.47× | 0.47× | Briev wins |
 | queue_drain | **3.23×** | 3.23× | **~0.7×** | Ring buffer eliminates allocs |
-| queue_drain_sym | **0.66×** | 0.66× | 0.66× | Briv already wins |
+| queue_drain_sym | **0.66×** | 0.66× | 0.66× | Briev already wins |
 | interval_step | **1.01×** | 1.01× | 1.01× | Already parity |
 
-**Briv wins 12/18** | **C wins 3/18** (nbody_newton, nbody_sqrt, nbody_sqrt_idio) |
+**Briev wins 12/18** | **C wins 3/18** (nbody_newton, nbody_sqrt, nbody_sqrt_idio) |
 **Ties 3/18** (sparse_dispatch, fannkuch, interval_step)
 
 ## Architecture Principles

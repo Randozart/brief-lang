@@ -42,7 +42,7 @@
 | OpConfig TOML nested-table parsing | `src/config.rs` | Unlocks ALL bitwise ops (Shl, Shr, BitAnd, BitOr, BitXor) that were silently emitting `add i64`. Also fixes comparison ops (Lt, Gt, Le, Ge, Eq, Neq) via config. |
 | Comparison zext in config path | `src/backend/llvm/emit_expr.rs` | Config templates for comparisons produce `i1`; codegen adds `zext i1 to i8` to match `Type::bool_()` convention |
 | Clear last_val_temps before hoisted prints | `src/backend/llvm/loop_engine/counter.rs` | SSA dominance violation — loop body SSA registers used in exit block. Fix forces phi/%-State resolution. |
-| briv_str_to_c handles SSO + C strings | `lib/runtime/briv_rt.c` | All frgn string parameters work under SSO mode |
+| briev_str_to_c handles SSO + C strings | `lib/runtime/briev_rt.c` | All frgn string parameters work under SSO mode |
 | Print plugin Float32/Float64 dispatch | `src/plugin/print_plugin.rs` | Float-typed variables (nbody energy) print correctly |
 | Loop engine detects __print_* calls | `src/backend/llvm/loop_engine/analysis.rs` | Precomputation no longer eliminates output calls |
 
@@ -65,4 +65,4 @@ nbody_newton is the only remaining performance gap — the memory loop (Phase 3 
 | Benchmarks | Status | Root Cause |
 |------------|--------|------------|
 | async_counters_idio | **MATCH** | Fixed by removing is_pure_body requirement from multi-txn fold; precomputation now applies. |
-| UTF8_ops | MISMATCH | Performance issue: pure-Briv memcmp uses txn convergence loops for each byte, very slow. C reference completes 50M iterations faster than Briv completes 5. Known limitation. |
+| UTF8_ops | MISMATCH | Performance issue: pure-Briev memcmp uses txn convergence loops for each byte, very slow. C reference completes 50M iterations faster than Briev completes 5. Known limitation. |

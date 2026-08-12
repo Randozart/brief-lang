@@ -6,7 +6,7 @@
 
 ## Syntax
 
-```briv
+```briev
 frgn name(args) -> T | fallback_expr ;
 frgn name(args) -> T | fallback_expr from "lib.so" ;
 ```

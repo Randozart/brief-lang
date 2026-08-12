@@ -1,7 +1,7 @@
 #!exit count == total && x0 >= 0.0;
 
 import { get_env_int } from "std/env.bv";
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 
 frgn __print_float(d: Float) -> Bool ;
 

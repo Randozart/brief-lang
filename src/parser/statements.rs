@@ -75,7 +75,7 @@ impl<'a> Parser<'a> {
                     return self.parse_statement();
                 }
                 // Keywords that lex as identifiers: if, $defn, $txn
-                // 2026-08-04 (remove-vestigial-return): Briv has NO `return`
+                // 2026-08-04 (remove-vestigial-return): Briev has NO `return`
                 // statement (never specced, never used). Previously it parsed to
                 // Statement::Return whose semantics disagreed across the
                 // interpreter (continues) and the LLVM/VM backends (exits) —
@@ -87,7 +87,7 @@ impl<'a> Parser<'a> {
                         .unwrap_or_else(crate::errors::Span::dummy);
                     self.pos += 1; // consume `return`
                     return Err(SyntaxError::InvalidStatement {
-                        reason: "Briv has no `return` statement. To return a value \
+                        reason: "Briev has no `return` statement. To return a value \
                                  from a defn use `term <value>`; to mark a convergence \
                                  checkpoint use bare `term;`; `term!` closes the program."
                             .to_string(),
@@ -583,7 +583,7 @@ mod tests {
     use super::*;
     use crate::lexer::tokenize;
 
-    // 2026-08-04 (remove-vestigial-return): Briv has no `return` statement —
+    // 2026-08-04 (remove-vestigial-return): Briev has no `return` statement —
     // using it must fail with a helpful error pointing at `term`, not parse to
     // a Statement::Return whose semantics disagreed across engines.
     #[test]

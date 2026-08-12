@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-04
 **Status:** Implemented — see Implementation Log.
-**Branch:** `feat/term-termination-diagnostics` (worktree `../briv-compiler-term-diagnostics`)
+**Branch:** `feat/term-termination-diagnostics` (worktree `../briev-compiler-term-diagnostics`)
 **Related:**
 - `docs/plans/2026-08-04-term-termination-diagnostics.md` (this plan's §5 and
   Out-of-Scope claimed the `return` divergence was "logged in BUGS.md" — it was
@@ -16,7 +16,7 @@
 
 ## The Problem
 
-`return expr;` / `return;` is a **vestigial parser path**, not a Briv feature:
+`return expr;` / `return;` is a **vestigial parser path**, not a Briev feature:
 
 - **Parser** (`src/parser/statements.rs:54-55, 142-151`): dispatches on the
   identifier `return`, producing `Statement::Return(Option<Expr>)`. Introduced in
@@ -40,9 +40,9 @@
 ## Decision (maintainer)
 
 **Remove the statement** AND raise a **helpful parse error** when `return` is
-used, pointing the author at the Briv-native construct:
+used, pointing the author at the Briev-native construct:
 
-> Briv has no `return` statement. Use `term <value>` to return a value from a
+> Briev has no `return` statement. Use `term <value>` to return a value from a
 > defn, bare `term;` as a convergence checkpoint, or `term!` to close the
 > program.
 

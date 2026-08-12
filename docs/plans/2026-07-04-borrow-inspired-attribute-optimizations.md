@@ -37,7 +37,7 @@ Every code change must include a comment explaining:
 ```
 // 2026-07-04: <what this attribute signals to LLVM>
 // <which optimization pass it unlocks>
-// <why we can prove the attribute holds in Briv (which analysis provides it)>
+// <why we can prove the attribute holds in Briev (which analysis provides it)>
 // <which other paths exist for the same feature (other attribute groups,
 //  other function types) and why each path is chosen>
 ```
@@ -113,7 +113,7 @@ define internal i1 @pre_{name}(ptr noalias nocapture align 8 %state) #7 {
 
 ### Safety (Proof)
 
-The `@pre_*` function body is compiled from a Briv precondition expression
+The `@pre_*` function body is compiled from a Briev precondition expression
 (`txn.contract.pre_condition`). Precondition expressions:
 - Cannot contain `Statement::Assignment` (no `&x = ...`)
 - Cannot contain arrow mutations (`<- push`, `<- pop`)
@@ -147,7 +147,7 @@ this eliminates redundant precondition evaluation at compile time.
 
 ### Problem
 
-Briv functions only access memory through pointer arguments (`%state` and,
+Briev functions only access memory through pointer arguments (`%state` and,
 for GPU kernels, `%in_buf`/`%out_buf`). They never read or write global
 memory, memory returned from `malloc`, or memory reachable through non-pointer
 global values. However, the current attribute groups use `memory(readwrite)`,
@@ -188,7 +188,7 @@ Assignment:
 
 ### Safety (Proof)
 
-Briv's execution model:
+Briev's execution model:
 - No global variables (except `@link` triggers, which are `load volatile`)
 - Arena allocator (bump pointer returned from `malloc`, not global state)
 - All state is in `%State` struct, passed as function parameter
@@ -241,11 +241,11 @@ LLVM gains:
 
 Function parameters beyond `%state` get zero LLVM attributes:
 ```llvm
-define i64 @briv_main(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1)
+define i64 @briev_main(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1)
 ```
 
 These parameters:
-- Are never written to (Briv has no mutable parameters — `&x = ...` only mutates
+- Are never written to (Briev has no mutable parameters — `&x = ...` only mutates
   state fields, not parameters)
 - Never escape (no pointer parameters at all for defns — all scalars)
 - Are used at most once (no aliasing concerns)
@@ -259,7 +259,7 @@ Emit `readonly` on every non-`%state` parameter for definitions and callable
 transactions:
 
 ```llvm
-define i64 @briv_main(ptr noalias nocapture align 8 %state,
+define i64 @briev_main(ptr noalias nocapture align 8 %state,
     i64 nofree nosync readonly %arg0,
     i64 nofree nosync readonly %arg1)
 ```
@@ -272,7 +272,7 @@ define i64 @briv_main(ptr noalias nocapture align 8 %state,
 - Parameters are scalar `i64` values: no pointer indirection, no aliasing.
 
 Exception: `Ptr<T>` parameters (opaque pointer addresses carried as `i64`) are
-also immutable at the Briv level — the function cannot modify the pointed-to
+also immutable at the Briev level — the function cannot modify the pointed-to
 memory except through explicit `volatile_store#(ptr, val)` intrinsics, which
 are side-effect calls, not parameter mutation.
 
@@ -378,7 +378,7 @@ Only emitted when:
 
 ### Problem
 
-`Ptr<T>` values are opaque integers (`i64`) in Briv's type system. When used
+`Ptr<T>` values are opaque integers (`i64`) in Briev's type system. When used
 with `volatile_load#(ptr)` or `volatile_store#(ptr, val)`, the backend emits
 an `inttoptr i64 %addr to ptr` to get an LLVM pointer, then loads/stores
 through it (`expr/intrinsics.rs:1884,1930`).
@@ -468,7 +468,7 @@ information about the validity or size of the pointed-to memory. Without
 `dereferenceable(N)`:
 - LLVM cannot speculate a load through the pointer before the bounds check
 - LLVM cannot hoist loads through the pointer out of loops
-- LLVM inserts unnecessary null checks (even though Briv pointers are never
+- LLVM inserts unnecessary null checks (even though Briev pointers are never
   null)
 
 ### Fix
@@ -488,7 +488,7 @@ The type universe provides `pointer_pointee_layout()` (type_universe.rs:771)
 which returns `(bytes, alignment)` for `Ptr<T>` types. This gives a minimum
 dereferenceable size from the type alone.
 
-Briv guarantees:
+Briev guarantees:
 1. Ptr<T> values come from contract-proven sources (hardware addresses,
    arena allocations, FFI returns)
 2. The arena allocator is scoped to the tick (reset each loop iteration)

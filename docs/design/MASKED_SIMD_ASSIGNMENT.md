@@ -3,14 +3,14 @@
 **Status**: Proposed (Not Implemented)  
 **Created**: 2026-05-05  
 **Updated**: 2026-05-06  
-**Purpose**: Extend Briv's SIMD capabilities with conditional masked assignments
+**Purpose**: Extend Briev's SIMD capabilities with conditional masked assignments
 
 ---
 
 ## Motivation
 
-Briv natively supports vector arrays with implicit SIMD lifting:
-```briv
+Briev natively supports vector arrays with implicit SIMD lifting:
+```briev
 &pixels = pixels * 2;  // 100 parallel multiplications
 ```
 
@@ -52,7 +52,7 @@ condition → expr
 
 ### Simple Mask (All Elements)
 
-```briv
+```briev
 // 1D masked assignment
 &vec[;> 5] = 0;              // Elements > 5 become 0, others unchanged
 &vec[;== 0] = 1;             // Elements == 0 become 1
@@ -64,7 +64,7 @@ condition → expr
 
 ### Range Syntax
 
-```briv
+```briev
 &vec[10..;> 5] = 0;          // From index 10 to end, where value > 5
 &vec[..20;> 5] = 0;          // From 0 to index 20 (inclusive), where value > 5
 &vec[10..20;> 5] = 0;        // From 10 to 20 (inclusive), where value > 5
@@ -74,7 +74,7 @@ condition → expr
 
 **Order matters** - stride then mask vs mask then stride produce different results:
 
-```briv
+```briev
 &vec[::2;> 5] = 0;           // Every 2nd element, if > 5 → set to 0
 &vec[;> 5:2] = 0;           // Elements > 5, then every 2nd of those
 
@@ -84,7 +84,7 @@ condition → expr
 
 **Example showing the difference:**
 
-```briv
+```briev
 let vec: Int[10] = [1, 6, 3, 8, 2, 9, 4, 7, 0, 2];
 
 // Stride first, then mask
@@ -104,7 +104,7 @@ let vec: Int[10] = [1, 6, 3, 8, 2, 9, 4, 7, 0, 2];
 
 When you need per-dimension control, use explicit dimension separators:
 
-```briv
+```briev
 let mat: Int[10][20];
 
 // Per-row mask: for each row, mask columns
@@ -122,7 +122,7 @@ For simple value-based masks, comma syntax is unnecessary - `&mat[;> 5]` applies
 
 When assigning between equal-sized vectors, conditions can filter which positions are assigned:
 
-```briv
+```briev
 // Assign source to dest, but only where condition matches
 let dest: Int[5] = [1, 6, 3, 8, 2];
 let source: Int[5] = [10, 20, 30, 40, 50];
@@ -149,7 +149,7 @@ let source: Int[5] = [10, 20, 30, 40, 50];
 
 **Behavior**: Only elements matching the condition are updated. Others remain unchanged.
 
-```briv
+```briev
 let vec: Int[5] = [1, 6, 3, 8, 2];
 &vec[;> 5] = 0;
 // Result: [1, 0, 3, 0, 2]  (only elements > 5 become 0)
@@ -161,7 +161,7 @@ let vec: Int[5] = [1, 6, 3, 8, 2];
 
 The mask operates on **values**, not positions. For any position `[i]`, the condition checks `vec[i]`:
 
-```briv
+```briev
 let vec: Int[5] = [1, 6, 3, 8, 2];
 &vec[;> 5] = 0;
 // At index 0: value=1 → 1>5 is false → unchanged
@@ -276,7 +276,7 @@ end
 ## Examples
 
 ### Example 1: Simple 1D Mask
-```briv
+```briev
 let sensor_readings: Int[100] = ...;
 
 // Zero out all readings above 100 (error readings)
@@ -284,7 +284,7 @@ let sensor_readings: Int[100] = ...;
 ```
 
 ### Example 2: 2D Value-Based Mask
-```briv
+```briev
 let frame: UInt[3][1920][1080];  // 1080p RGB
 
 // Set all R and B pixels > 200 to max (over-exposure protection)
@@ -293,7 +293,7 @@ let frame: UInt[3][1920][1080];  // 1080p RGB
 ```
 
 ### Example 3: Stride + Mask
-```briv
+```briev
 let samples: Float[1000];
 
 // Every 10th sample, if > threshold, reset to 0
@@ -301,7 +301,7 @@ let samples: Float[1000];
 ```
 
 ### Example 4: Range + Stride + Mask
-```briv
+```briev
 let buffer: Int[100];
 
 // Process middle section: indices 20-60, every 4th, where value > 10
@@ -309,7 +309,7 @@ let buffer: Int[100];
 ```
 
 ### Example 5: Conditional Vector Assignment
-```briv
+```briev
 let dest: Int[8] = [1, 5, 3, 8, 2, 7, 4, 9];
 let source: Int[8] = [10, 20, 30, 40, 50, 60, 70, 80];
 
@@ -327,7 +327,7 @@ let source: Int[8] = [10, 20, 30, 40, 50, 60, 70, 80];
    - **Answer**: Yes, parse as `Expr::BinaryOp(>, <)` with short-circuit
 
 2. **Source-side mask with different sizes**:
-   ```briv
+   ```briev
    let dest: Int[64];
    let source: Int[32];
    &dest[..31] = source[;> 2];
@@ -344,10 +344,10 @@ let source: Int[8] = [10, 20, 30, 40, 50, 60, 70, 80];
 
 ## References
 
-- **Current slice syntax**: `docs/EMBEDDED_BRIV_2.2_SPEC.md:62-68`
+- **Current slice syntax**: `docs/EMBEDDED_BRIEV_2.2_SPEC.md:62-68`
 - **Vector type definition**: `src/ast.rs:119`
 - **Slice parsing**: `src/parser.rs:2726-2770`
-- **SIMD lifting**: `docs/EMBEDDED_BRIV_2.2_SPEC.md:54-57`
+- **SIMD lifting**: `docs/EMBEDDED_BRIEV_2.2_SPEC.md:54-57`
 - **Verilog vector codegen**: `src/backend/verilog.rs:977-1292`
 
 ---

@@ -1,6 +1,6 @@
-// Ring Buffer — C reference for Briv LLVM backend Path 4 benchmark
+// Ring Buffer — C reference for Briev LLVM backend Path 4 benchmark
 //
-// Counts iterations and prints every 5M. Symmetric with Briv.
+// Counts iterations and prints every 5M. Symmetric with Briev.
 //
 // Build:
 //   clang -O3 -march=native -o benchmarks/ring_buffer_c benchmarks/ring_buffer_c.c

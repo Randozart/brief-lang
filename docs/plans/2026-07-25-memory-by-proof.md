@@ -3,13 +3,13 @@
 
 ## Overview
 
-Briv gains fixed-size array syntax `Int[1024]` as a first-class type construct.
+Briev gains fixed-size array syntax `Int[1024]` as a first-class type construct.
 Arrays are embedded in `struct` types, proven safe by contract bounds, and
 auto-vectorized by LLVM. No `Alloc#` or manual memory management needed.
 
 The tamer's VM buffer structs become:
 
-```briv
+```briev
 struct VMStack { data: Int[1024]; len: Int; };
 struct VMLocals { data: Int[4096]; len: Int; };
 struct VMFrame { locals_base: Int; local_count: Int; return_pc: Int; return_frame: Int; };
@@ -68,7 +68,7 @@ if let Type::Vector(inner, dims) = ty {
         if let Dimension::Anonymous(n) = dims[0] {
             let inner_llvm = self.llvm_type(inner);
             self.ctx.field_types.push(format!("[{} x {}]", n, inner_llvm));
-            self.ctx.field_briv_types.push(ty.clone());
+            self.ctx.field_briev_types.push(ty.clone());
             return;
         }
     }
@@ -87,11 +87,11 @@ For `Type::Vector` arrays, emit a GEP into the `[N x T]` field:
 %val = load i64, ptr %gep
 ```
 
-### 5. Tamer: VM in pure Briv
+### 5. Tamer: VM in pure Briev
 
 **New files: `lib/tamer/*.bv`**
 
-The VM interpreter, .bounty parser, and LLVM IR generator, all in pure Briv
+The VM interpreter, .bounty parser, and LLVM IR generator, all in pure Briev
 using `struct` with `Int[N]` arrays. No `Alloc#`, no custom C, no manual memory.
 
 ## Implementation Order
@@ -104,7 +104,7 @@ using `struct` with `Int[N]` arrays. No `Alloc#`, no custom C, no manual memory.
 6. Tuple destructuring: `let (a, b) = expr`
 7. Type checker: tuple destructuring binding
 8. Write tamer structs and VM
-9. Build `brivc build --backend llvm lib/tamer/main.bv -o tamer`
+9. Build `brievc build --backend llvm lib/tamer/main.bv -o tamer`
 10. Test: produce .bounty and process with tamer
 
 ## Future Work: `struct` Migration
@@ -122,7 +122,7 @@ The `type` keyword becomes purely for protocol/operator definitions:
 
 `Int[N]` arrays gain bracket operations:
 
-```briv
+```briev
 struct Matrix { data: Float[16]; };
 defn add(m: Matrix, n: Matrix) -> Matrix {
     term m + n;  // auto-vectorized: 4× vec4 fadd

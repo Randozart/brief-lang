@@ -1,26 +1,26 @@
-# Data Briv — Data Files, Schema, and Line Data
+# Data Briev — Data Files, Schema, and Line Data
 
 **Date:** 2026-06-24
 **Status:** Fully implemented
 
 ## Overview
 
-Data Briv (`.dbv`, `.dbvs`, `.dbvl`) is Briv's universal data format. It serves the same role as JSON, XML, or TOML in other ecosystems but is parsed by the Briv compiler itself.
+Data Briev (`.dbv`, `.dbvs`, `.dbvl`) is Briev's universal data format. It serves the same role as JSON, XML, or TOML in other ecosystems but is parsed by the Briev compiler itself.
 
 ## File Types
 
 | Extension | Name | Purpose |
 |-----------|------|---------|
-| `.dbv` | Data Briv | Structured data (think JSON/YAML) |
-| `.dbvs` | Data Briv Schema | Validation schema for `.dbv` and `.dbvl` files |
-| `.dbvl` | Data Briv Lines | Line-oriented data (one record per line, think JSONL/NDJSON) |
+| `.dbv` | Data Briev | Structured data (think JSON/YAML) |
+| `.dbvs` | Data Briev Schema | Validation schema for `.dbv` and `.dbvl` files |
+| `.dbvl` | Data Briev Lines | Line-oriented data (one record per line, think JSONL/NDJSON) |
 
 ## DBV — Structured Data
 
-```briv
+```briev
 // config.dbv — Application configuration
 {
-    "app": "briv-compiler",
+    "app": "briev-compiler",
     "version": "0.11.0",
     "debug": false,
     "optimization": {
@@ -34,7 +34,7 @@ Supports: strings, integers, floats, booleans, null, arrays, objects (key-value 
 
 ## DBVS — Schema Validation
 
-```briv
+```briev
 // schema.dbvs — Validates config.dbv
 schema Config {
     app: String required,
@@ -51,7 +51,7 @@ A `.dbvs` schema file declares expected structure, types, optionality, defaults,
 
 ## DBVL — Line Data
 
-```briv
+```briev
 // adapters.dbvl — One adapter per line
 rust glue/adapters/rust.bv .rs src/
 python glue/adapters/python.bv .py lib/
@@ -64,7 +64,7 @@ Each line is a record. Fields are separated by whitespace. Quoted strings allow 
 
 Dbvl tables support O(1) key lookup when accessed with a `FILTER(_field_0 == "key")` projection:
 
-```briv
+```briev
 // In .bv:
 let table = import "adapters.dbvl";
 let entry : table { FILTER(_field_0 == "rust"); };
@@ -72,9 +72,9 @@ let entry : table { FILTER(_field_0 == "rust"); };
 
 ## Import
 
-Data Briv files are imported into Briv programs:
+Data Briev files are imported into Briev programs:
 
-```briv
+```briev
 // Import entire data file
 let config = import "config.dbv";
 
@@ -90,4 +90,4 @@ let entry : adapters { FILTER(_field_0 == "python"); };
 - **Configuration**: Application config stored as `.dbv`, validated by `.dbvs`
 - **Hardware maps**: MMIO register maps (`hardware.dbv`)
 - **Adapter registries**: GLUE language adapter indexing (`adapters.dbvl`)
-- **Data exchange**: Briv-to-Briv data serialization
+- **Data exchange**: Briev-to-Briev data serialization

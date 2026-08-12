@@ -6,7 +6,7 @@
 
 ## Migration to Direct Libc (2026-06-16 — 2026-06-17)
 
-The initial intrinsic implementation used **Shim** (C functions in `briv_rt.c`).
+The initial intrinsic implementation used **Shim** (C functions in `briev_rt.c`).
 Over two sessions, ~60 of the 74 intrinsics were migrated to **Direct** (inline
 libc calls in LLVM IR), eliminating the C dependency for the common case.
 
@@ -16,7 +16,7 @@ libc calls in LLVM IR), eliminating the C dependency for the common case.
 |----------|-------|----------|-----------|-----------------|
 | D1 Memory | 5 | 5 | 0 | — |
 | D2 File I/O | 15 | 15 | 0 | — |
-| D3 Filesystem | 14 | 11 | 3 | `readlink`, `getcwd`, `readdir` — Briv string/list boxing |
+| D3 Filesystem | 14 | 11 | 3 | `readlink`, `getcwd`, `readdir` — Briev string/list boxing |
 | D4 Terminal | 5 | 4 | 1 | `tty_raw_mode` — `cfmakeraw` macro, 3-termios struct (~15 fields) |
 | D5 Process | 2 | 1 | 1 | `spawn` ✅ — `system()`+`WEXITSTATUS` | `spawn_with_output` — popen+fread+pclose+string boxing |
 | D6 Environment | 5 | 5 | 0 | — |
@@ -33,7 +33,7 @@ libc calls in LLVM IR), eliminating the C dependency for the common case.
 ## Purpose
 
 Define the complete set of ~80 compiler-owned `#`-intrinsics that bridge between
-safe Briv space and the host OS. These replace the current `frgn`+FFI-registry
+safe Briev space and the host OS. These replace the current `frgn`+FFI-registry
 pattern for all OS-level operations, making the compiler the sole owner of the
 system-call boundary.
 
@@ -41,7 +41,7 @@ system-call boundary.
 
 ```
 ┌──────────────────────────────┐     ┌──────────┐     ┌─────────────────────────┐
-│      Safe Briv Space        │ ──> │ Airlock  │ ──> │      Host OS Void       │
+│      Safe Briev Space        │ ──> │ Airlock  │ ──> │      Host OS Void       │
 │                              │     │  (std #) │     │                         │
 │ - Contracts everywhere       │     │          │     │ - raw pointers, errno   │
 │ - Borrow-checked references  │     │ compiler │     │ - raw file descriptors  │
@@ -51,7 +51,7 @@ system-call boundary.
 └──────────────────────────────┘     └──────────┘     └─────────────────────────┘
 ```
 
-Briv code never crosses into Host OS Void directly. It always passes through
+Briev code never crosses into Host OS Void directly. It always passes through
 the Airlock: `name#(args)`. The Airlock is:
 
 - **Compiler-owned**: dispatch via `Intrinsic::from_name()` hash, not FFI string match
@@ -75,7 +75,7 @@ User-defined intrinsics (`inop`/`inop!`) use the same calling convention:
 the parser falls back to `Intrinsic::UserDefined(name)` when `from_name()` fails.
 See `docs/architecture/features/inop.md` for details.
 
-```briv
+```briev
 // Before (frgn):
 frgn tty_raw_mode(enable: Bool) -> Result<void, IoError>;
 tty_raw_mode(true);
@@ -90,13 +90,13 @@ let encoded = tty_size#();
 
 | Category | What | How | Examples | Autarky effort |
 |---|---|---|---|---|---|
-| **Shim** | Complex multi-step ops | C function in `briv_rt.c`, compiler emits `declare`+`call` | `tty_raw_mode#`, `spawn_with_output#`, `readdir#` | Rewrite `briv_rt.c` function |
+| **Shim** | Complex multi-step ops | C function in `briev_rt.c`, compiler emits `declare`+`call` | `tty_raw_mode#`, `spawn_with_output#`, `readdir#` | Rewrite `briev_rt.c` function |
 | **Direct** | Thin syscall wrappers | Compiler emits inline libc calls in LLVM IR | `open#`, `read#`, `mmap#`, `socket#` | Change codegen match arm |
 | **Native** | LLVM-native instructions | Atomic LLVM IR directly | `atomic_load#`, `fence#` | Already native |
 
 **Status (2026-06-17):** ~60/74 intrinsics migrated from Shim → Direct.
 The remaining 14 Shim intrinsics require multi-call sequences, heap string boxing,
-or C macros (`cfmakeraw`, `WEXITSTATUS`).` briv_rt.c` is auto-linked for all native builds.
+or C macros (`cfmakeraw`, `WEXITSTATUS`).` briev_rt.c` is auto-linked for all native builds.
 
 ## Complete Intrinsic Catalog (18 Domains, ~80 Intrinsics)
 
@@ -104,7 +104,7 @@ Each intrinsic must specify three things:
 
 - **Description**: what it does, parameters, return value
 - **Safety**: what can go wrong (errno, null, overflow, blocking)
-- **Airlock precondition**: what the Briv code must ensure before calling
+- **Airlock precondition**: what the Briev code must ensure before calling
 
 ### D1 — Memory
 
@@ -210,7 +210,7 @@ The fine-grained primitives allow custom process management (redirection, env, c
 
 These two replace the entire `lib/std/ffi/time.bv` FFI surface (~20 frgn declarations).
 Everything in that module (year/month/day extraction, formatting, parsing) is
-implementable in pure Briv from `clock_gettime#()` — no intrinsic needed.
+implementable in pure Briev from `clock_gettime#()` — no intrinsic needed.
 
 ### D8 — Signals
 
@@ -223,7 +223,7 @@ implementable in pure Briv from `clock_gettime#()` — no intrinsic needed.
 | `timerfd_create#` | `(hz: Int) -> Int` | returns -1 on error | `hz > 0` |
 
 `signalfd#` and `timerfd_create#` replace the entire C-level signal handler
-infrastructure in `briv_rt.c` (the `__trg_*` functions and `signal()` calls).
+infrastructure in `briev_rt.c` (the `__trg_*` functions and `signal()` calls).
 
 ### D9 — Synchronization
 
@@ -332,7 +332,7 @@ and DNS resolution.
 | `getpwuid#` | `(uid: Int) -> String` | returns empty on error | uid ≥ 0 | Shim (`__getpwuid__`) |
 | `getgrgid#` | `(gid: Int) -> String` | returns empty on error | gid ≥ 0 | Shim (`__getgrgid__`) |
 
-`getpwuid#` returns `"name:dir:shell"` colon-separated. Use pure-Briv parsing to extract fields.
+`getpwuid#` returns `"name:dir:shell"` colon-separated. Use pure-Briev parsing to extract fields.
 
 ### D17 — Threading ✅ (2026-06-19)
 
@@ -400,8 +400,8 @@ is explicitly queried; character access via `At(i)` never calls strlen.
 - D4: `TtyRawMode`, `TtySize`, `TtyReadKey`, `IoCtl`, `IsTty`
 - D5: `SpawnWithOutput`, `Spawn`
 
-**LLVM backend:** Category **Shim** — emit `declare i64 @briv_*(i64, ...)`
-and `call`, implemented in `briv_rt.c` via libc.
+**LLVM backend:** Category **Shim** — emit `declare i64 @briev_*(i64, ...)`
+and `call`, implemented in `briev_rt.c` via libc.
 
 **Interpreter:** Rust `std::process::Command`, `libc` crate, direct impl.
 
@@ -411,7 +411,7 @@ and `call`, implemented in `briv_rt.c` via libc.
 - `src/backend/llvm/emit_expr.rs` — add LLVM codegen match arms
 - `src/backend/llvm/emit_toplevel.rs` — add `declare` stubs in `emit_declares`
 - `src/typechecker.rs` — add return type dispatch match arms
-- `lib/runtime/briv_rt.c` — add C function implementations (`briv_tty_raw_mode`, `briv_tty_size`, `briv_tty_read_key`, `briv_ioctl`, `briv_isatty`, `briv_spawn_with_output`, `briv_spawn`)
+- `lib/runtime/briev_rt.c` — add C function implementations (`briev_tty_raw_mode`, `briev_tty_size`, `briev_tty_read_key`, `briev_ioctl`, `briev_isatty`, `briev_spawn_with_output`, `briev_spawn`)
 
 **Files deleted:** `lib/std/ffi/tty.bv` (replaced by intrinsics)
 
@@ -428,8 +428,8 @@ and `call`, implemented in `briv_rt.c` via libc.
 `PRead`, `PWrite`, `Stat`, `FStat`, `Truncate`, `FTruncate`, `FSync`,
 `FDup`, `FDup2`, `FCntl`
 
-**LLVM backend:** Category **Shim** — emit `declare i64 @briv_*(i64, ...)`
-and `call`, implemented in `briv_rt.c` via POSIX.
+**LLVM backend:** Category **Shim** — emit `declare i64 @briev_*(i64, ...)`
+and `call`, implemented in `briev_rt.c` via POSIX.
 
 **Interpreter:** Rust `libc` crate for raw fd operations. `read#`/`pread#`
 allocate temporary buffers (caller's pointer is opaque in interpreter).
@@ -441,7 +441,7 @@ allocate temporary buffers (caller's pointer is opaque in interpreter).
 - `src/backend/llvm/emit_expr.rs` — add LLVM codegen match arms
 - `src/backend/llvm/emit_toplevel.rs` — add 15 `declare` stubs
 - `src/typechecker.rs` — add return type (all `Type::Int`)
-- `lib/runtime/briv_rt.c` — add C function implementations
+- `lib/runtime/briev_rt.c` — add C function implementations
 
 **Tests added:**
 - `src/ast.rs` — 15 roundtrip tests (from_name + name)
@@ -456,8 +456,8 @@ allocate temporary buffers (caller's pointer is opaque in interpreter).
 `SymLink`, `ReadLink`, `Link`, `GetCwd`, `ChDir`, `ReadDir`, `ChMod`,
 `ChOwn`, `UMask`, `Access`
 
-**LLVM backend:** Category **Shim** — emit `declare i64 @briv_*(i64, ...)`
-and `call`, implemented in `briv_rt.c` via POSIX.
+**LLVM backend:** Category **Shim** — emit `declare i64 @briev_*(i64, ...)`
+and `call`, implemented in `briev_rt.c` via POSIX.
 
 **Interpreter:** Rust `libc` crate for filesystem ops.
 `readdir#` uses `std::fs::read_dir`, `readlink#`/`getcwd#` use libc.
@@ -476,9 +476,9 @@ all others → Int.
 + D9: `AtomicLoad`, `AtomicStore`, `AtomicCas`, `AtomicXchg`, `AtomicAdd`,
 `Fence`, `Futex`
 
-**LLVM backend:** D1 → **Shim** (call i64 @briv_*). D9 atomic ops →
+**LLVM backend:** D1 → **Shim** (call i64 @briev_*). D9 atomic ops →
 **Native** (LLVM atomic IR: load atomic, store atomic, cmpxchg, atomicrmw,
-fence). Futex → **Shim** (call i64 @briv_futex).
+fence). Futex → **Shim** (call i64 @briev_futex).
 
 **Interpreter:** D1 uses libc::mmap/munmap/mprotect/sbrk/mlock. D9 atomic
 ops are stubs (opaque pointers can't be dereferenced). Brk returns current
@@ -494,8 +494,8 @@ break via sbrk(0). Futex returns -1.
 **New Intrinsic variants:** D11: `Pipe`, `ShmOpen`, `ShmUnlink`,
 `SemOpen`, `SemWait`, `SemPost`
 
-**LLVM backend:** Category **Shim** — emit `call i64 @briv_*`, implemented
-in `briv_rt.c` via POSIX (pipe, shm_open, shm_unlink, sem_open, sem_wait,
+**LLVM backend:** Category **Shim** — emit `call i64 @briev_*`, implemented
+in `briev_rt.c` via POSIX (pipe, shm_open, shm_unlink, sem_open, sem_wait,
 sem_post).
 
 **Interpreter:** Uses `libc::pipe` (writes fds through opaque pointer),
@@ -517,7 +517,7 @@ sem_post).
 
 **Interpreter:** Rust `std::fs` and `std::os::unix` for raw fd operations.
 
-**Files deleted:** `lib/std/ffi/io.bv` frgn declarations (path ops stay in stdlib as pure Briv)
+**Files deleted:** `lib/std/ffi/io.bv` frgn declarations (path ops stay in stdlib as pure Briev)
 
 ### Phase C — Filesystem (14 intrinsics)
 
@@ -551,8 +551,8 @@ Interpreter: Rust `std::fs`.
 **New Intrinsic variants:** D8: `SigAction`, `SigProcMask`, `Kill`,
 `SignalFd`, `TimerFdCreate`
 
-**LLVM backend:** Category **Shim** — emit `call i64 @briv_*`, implemented
-in `briv_rt.c` via POSIX (sigaction, sigprocmask, kill, signalfd, timerfd_create).
+**LLVM backend:** Category **Shim** — emit `call i64 @briev_*`, implemented
+in `briev_rt.c` via POSIX (sigaction, sigprocmask, kill, signalfd, timerfd_create).
 
 **Interpreter:** Uses `libc::sigaction`, `libc::sigprocmask`, `libc::kill`,
 `libc::signalfd`, `libc::timerfd_create`. All return Int.
@@ -568,8 +568,8 @@ in `briv_rt.c` via POSIX (sigaction, sigprocmask, kill, signalfd, timerfd_create
 `Connect`, `Send`, `Recv`, `SendTo`, `RecvFrom`, `SetSockOpt`,
 `GetSockOpt`, `Shutdown`, `GetAddrInfo`
 
-**LLVM backend:** Category **Shim** — emit `call i64 @briv_*`, implemented
-in `briv_rt.c` via POSIX socket API.
+**LLVM backend:** Category **Shim** — emit `call i64 @briev_*`, implemented
+in `briev_rt.c` via POSIX socket API.
 
 **Interpreter:** Uses `libc::socket`, `libc::bind`, `libc::listen`,
 `libc::accept`, `libc::connect`, `libc::send`, `libc::recv`, `libc::sendto`,
@@ -586,8 +586,8 @@ in `briv_rt.c` via POSIX socket API.
 **New Intrinsic variants:** D6: `GetEnv`, `SetEnv`, `UnsetEnv`, `GetPid`, `GetPPid`
 + D7: `ClockGetTime`, `NanoSleep`
 
-**LLVM backend:** Category **Shim** — emit `call i64 @briv_*`, implemented
-in `briv_rt.c` via POSIX (getenv, setenv, unsetenv, getpid, getppid,
+**LLVM backend:** Category **Shim** — emit `call i64 @briev_*`, implemented
+in `briev_rt.c` via POSIX (getenv, setenv, unsetenv, getpid, getppid,
 clock_gettime, nanosleep).
 
 **Interpreter:** Uses `std::env` for env vars, `libc::getpid`, `libc::getppid`,
@@ -607,7 +607,7 @@ which is native `float` in SSA). This creates ~130 marshaling instructions
 
 **Phase A policy:** Keep `i64` everywhere. The marshaling overhead is
 real but LLVM's InstCombine+SROA passes eliminate most of it. The
-intrinsic calls themselves are `call i64 @briv_*(i64, ...)` — they
+intrinsic calls themselves are `call i64 @briev_*(i64, ...)` — they
 fit the i64 pattern naturally.
 
 **Post-intrinsics cleanup:** After all intrinsic phases are stable,
@@ -617,7 +617,7 @@ SSA registers:
 - Bool → `i1` for comparisons, `i8` for storage (no zext)
 - String → `i8*` directly (no ptrtoint boxing)
 
-This is purely an LLVM backend change. It doesn't affect Briv semantics,
+This is purely an LLVM backend change. It doesn't affect Briev semantics,
 the interpreter, stdlib, or intrinsics. Do it as a standalone cleanup when
 ready. See `docs/architecture/features/expr-eqsat.md` for the expression
 simplification pass that already handles some of this.
@@ -631,9 +631,9 @@ simplification pass that already handles some of this.
 | `lib/std/ffi/process.bv` (frgn lines) | A+H | `__spawn`, `__env_var` etc. → intrinsics |
 | `lib/std/ffi/shm.bv` | D+E | `__mmap*`, `__atomic*`, `__shm*` → intrinsics |
 | `lib/std/ffi/system.bv` (frgn lines) | F | `__sig*`, `__timer*` → intrinsics |
-| `lib/std/ffi/time.bv` (frgn lines) | H | `__now*`, `__year*`, `__format*` → `clock_gettime#` + pure Briv |
+| `lib/std/ffi/time.bv` (frgn lines) | H | `__now*`, `__year*`, `__format*` → `clock_gettime#` + pure Briev |
 | `lib/std/ffi/env.bv` | H | `__get_env_int` → `getenv#` |
-| `lib/std/ffi/http.bv` | G | `__http_get`, `__http_post` → socket intrinsics + pure Briv |
+| `lib/std/ffi/http.bv` | G | `__http_get`, `__http_post` → socket intrinsics + pure Briev |
 
 After all phases, the remaining `frgn` declarations should be for **pure
 computation** only (encoding, XXHASH, JSON) — operations that don't
@@ -647,7 +647,7 @@ replaced by the new system:
 | Current stub | Replaced by |
 |---|---|
 | `Socket`, `Bind`, `Listen`, `Accept` | D10 full networking set |
-| `Sort`, `Reverse`, `Range` | Pure Briv stdlib (not intrinsics) |
+| `Sort`, `Reverse`, `Range` | Pure Briev stdlib (not intrinsics) |
 | `ReadFile`, `WriteFile` | Keep as convenience, add `open#`+`read#`+`write#`+`close#` |
 | `Println` | Keep as convenience for `write#(1, msg, len)` |
 | `Readln` | `read#(0, buf, 1)` in a txn loop |
@@ -660,7 +660,7 @@ replaced by the new system:
 **New Intrinsic variants:** D19: `PrintInt`, `PutChar`, `PrintFloat`, `GetEnvInt`
 
 Same syntax as existing `#` intrinsics, but with a fundamentally different codegen
-category: **Direct Libc** — no `briv_rt.c` shim, no LTO linking. The compiler
+category: **Direct Libc** — no `briev_rt.c` shim, no LTO linking. The compiler
 emits inline calls to libc functions (`fprintf`, `fputc`, `getenv`, `atol`).
 
 | Intrinsic | Signature | LLVM IR emitted |
@@ -689,7 +689,7 @@ pipes/files, line-buffered for TTYs).
 @FMT_STR = private unnamed_addr constant [4 x i8] c"%s\0A\00"
 ```
 
-**String marshaling:** Briv's string struct has layout `{ ptr_to_data: i64, length: i64, data: [N x i8] }`.
+**String marshaling:** Briev's string struct has layout `{ ptr_to_data: i64, length: i64, data: [N x i8] }`.
 The first field contains the address of the actual data bytes. The LLVM codegen
 loads this field and passes it to libc:
 ```llvm
@@ -703,15 +703,15 @@ loads this field and passes it to libc:
 **Why Direct Libc?** These intrinsics are the toolchain's canonical output path.
 No C runtime dependency means the resulting `.ll` files are `clang`-compilable
 without any additional link step (besides `-lm`). The benchmarks that use these
-intrinsics no longer need `import "link/briv_rt.c"` or `frgn` declarations.
+intrinsics no longer need `import "link/briev_rt.c"` or `frgn` declarations.
 
 **Side-effect annotation:** `has_side_effects()` returns `true` for all four,
 preventing the optimizer from folding them away even when their return values
 are unused. This is critical for benchmarks — `print_int#(n)` must remain
 observable regardless of optimization level.
 
-**Status:** 26 benchmark files migrated. `benchmarks/briv_rt.c` and
-`runtime/briv_rt.c` deleted (no longer referenced).
+**Status:** 26 benchmark files migrated. `benchmarks/briev_rt.c` and
+`runtime/briev_rt.c` deleted (no longer referenced).
 
 ## Side-Effect Metadata
 

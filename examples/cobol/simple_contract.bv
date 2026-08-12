@@ -1,4 +1,4 @@
-// Simple Contract - Minimal Briv example
+// Simple Contract - Minimal Briev example
 // Demonstrates: counter with pre/post conditions
 
 let counter: Int = 0;

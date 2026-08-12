@@ -4,7 +4,7 @@
 
 `async_counters` benchmark produces misleading timing because its C reference
 was changed (ad67b83) from a real 2-thread program to a fold-trivial version
-(`long g_a = 25000000L; (void)g_a;`), while the Briv body gained `print_int#()`
+(`long g_a = 25000000L; (void)g_a;`), while the Briev body gained `print_int#()`
 guards for observability, making it non-pure. The compiler correctly chooses the
 thread pool path (barriers) for impure bodies, resulting in ~500s runtime vs C's
 ~0.001s — a meaningless comparison.
@@ -14,15 +14,15 @@ thread pool path (barriers) for impure bodies, resulting in ~500s runtime vs C's
 Split into two benchmarks per the `_sym`/`_idio` convention:
 
 ### `async_counters_sym` (runtime tag)
-- **Briv**: `print_int#(a)` guards in body (observable, non-pure)
+- **Briev**: `print_int#(a)` guards in body (observable, non-pure)
 - **C reference**: Real 2-thread pthread_barrier program with matching prints
-- **What it tests**: "Does Briv's thread pool throughput match C's pthread?"
+- **What it tests**: "Does Briev's thread pool throughput match C's pthread?"
 - **Expected**: Both ~500s at BOUND=50e6 — fair comparison
 
 ### `async_counters_idio` (optimizer tag)
-- **Briv**: Pure bodies (no prints), multi-txn pure fold → O(1) register pipeline
+- **Briev**: Pure bodies (no prints), multi-txn pure fold → O(1) register pipeline
 - **C reference**: Current trivial version (clang folds to `long x = N`)
-- **What it tests**: "Does Briv fold pure async loops as aggressively as C?"
+- **What it tests**: "Does Briev fold pure async loops as aggressively as C?"
 - **Expected**: Both O(1) — fair comparison
 
 ### Old `async_counters` removed

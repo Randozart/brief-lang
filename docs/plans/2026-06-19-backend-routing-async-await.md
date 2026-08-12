@@ -8,19 +8,19 @@
 
 ## Motivation
 
-Briv has evolved from universal transpilation to a **backend-per-variant** architecture. Each file extension now targets a specific backend:
+Briev has evolved from universal transpilation to a **backend-per-variant** architecture. Each file extension now targets a specific backend:
 
 | Extension | Name | Backend | Role |
 |-----------|------|---------|------|
-| `.bv` | Briv | LLVM | General-purpose native |
-| `.sbv` | Strict Briv | LLVM | Full contract verification |
-| `.abv` | Accelerated Briv | SPIR-V via LLVM | GPU acceleration |
-| `.rbv` | Rendered Briv | Webstack (WASM+JS) | Web frontend |
-| `.srbv` | Strict Rendered Briv | Webstack | Verified view-state isomorphism |
-| `.ebv` | Embedded Briv | LLVM (restricted mode) | Bare-metal embedded |
-| `.sebv` | Strict Embedded Briv | LLVM (restricted mode) | Verified embedded |
-| `.cbv` | Circuit Briv | CIRCT | Hardware (synthesizable) |
-| `.dbv` / `.dbvs` / `.dbvl` | Data Briv | Config schema | Configuration/data |
+| `.bv` | Briev | LLVM | General-purpose native |
+| `.sbv` | Strict Briev | LLVM | Full contract verification |
+| `.abv` | Accelerated Briev | SPIR-V via LLVM | GPU acceleration |
+| `.rbv` | Rendered Briev | Webstack (WASM+JS) | Web frontend |
+| `.srbv` | Strict Rendered Briev | Webstack | Verified view-state isomorphism |
+| `.ebv` | Embedded Briev | LLVM (restricted mode) | Bare-metal embedded |
+| `.sebv` | Strict Embedded Briev | LLVM (restricted mode) | Verified embedded |
+| `.cbv` | Circuit Briev | CIRCT | Hardware (synthesizable) |
+| `.dbv` / `.dbvs` / `.dbvl` | Data Briev | Config schema | Configuration/data |
 
 The compiler currently has routing gaps:
 - **`.ebv` errors out** in `run_build` requiring explicit `--target` — should default to restricted LLVM
@@ -94,7 +94,7 @@ New: Match `.ebv`/`.sebv` → call `run_llvm_compile(...)` with same args as `.b
 - `src/main.rs` — in `run_llvm_compile`, detect embedded mode and propagate to backend
 - `src/backend/llvm/mod.rs` — add `is_embedded: bool` field and builder method
 
-**Validation**: `briv build foo.ebv` should compile through LLVM (not error). The `is_embedded` flag causes restricted-mode checks in Phase 3. For now, it's a silent flag.
+**Validation**: `briev build foo.ebv` should compile through LLVM (not error). The `is_embedded` flag causes restricted-mode checks in Phase 3. For now, it's a silent flag.
 
 ### 1.3 — Route `.cbv` → CIRCT via new `run_cbv()`
 
@@ -120,7 +120,7 @@ New: Add `.cbv` match arm → call new `run_cbv(file_path, ...)` function.
 12. Optionally run circt-opt | circt-translate --export-verilog pipeline
 ```
 
-**Validation**: `briv build foo.cbv` should parse and emit `.mlir` via CIRCT backend. If CIRCT tools are not installed, print warning and emit raw `.mlir`.
+**Validation**: `briev build foo.cbv` should parse and emit `.mlir` via CIRCT backend. If CIRCT tools are not installed, print warning and emit raw `.mlir`.
 
 ### 1.4 — Move 9 dead backends to `archive/`
 
@@ -166,7 +166,7 @@ Also update capability validation (lines 1706-1729):
 - `.ebv` requires `hardware_triggers` (MMIO/interrupts) — already checked
 - `.cbv` does NOT require `hardware_triggers` — it's pure CIRCT. Instead, `.cbv` requires `circt_synthesis` capability (or no check — CIRCT is the only option)
 
-**Validation**: `briv compile foo.ebv` infers `llvm.toml`. `briv compile foo.cbv` infers `circt.toml`.
+**Validation**: `briev compile foo.ebv` infers `llvm.toml`. `briev compile foo.cbv` infers `circt.toml`.
 
 ### 1.6 — Update `hardware_validator` to accept `CompilationTarget`
 
@@ -206,7 +206,7 @@ Update all call sites in `main.rs`:
 - `src/main.rs:2893` (run_vhdl_compile)
 - `src/main.rs:3170` (hardware validation in compile path)
 
-**Validation**: `briv build foo.ebv` does NOT run `B500x` checks. `briv build foo.cbv` DOES run `B500x` checks. All tests pass.
+**Validation**: `briev build foo.ebv` does NOT run `B500x` checks. `briev build foo.cbv` DOES run `B500x` checks. All tests pass.
 
 ### 1.7 — Add `halt#` intrinsic
 
@@ -537,7 +537,7 @@ This can reuse the existing `CallGraph` from `src/analysis/call_graph.rs`.
 **File**: `src/parser.rs` + `src/backend/llvm/emit_toplevel.rs`
 
 Parser: Support `#[interrupt(VECTOR_NAME)]` attribute on `trg`:
-```briv
+```briev
 #[interrupt(TIM2)]
 trg timer: Bool @ linked("__timer_isr");
 ```
@@ -563,7 +563,7 @@ attributes #0 = { interrupt }
 **File**: `src/backend/llvm/emit_stmt.rs`
 
 When `is_embedded` and `halt_on_term` is true:
-- `Statement::TermBang` emits `call void @llvm_briv_halt()` instead of `br label %done`
+- `Statement::TermBang` emits `call void @llvm_briev_halt()` instead of `br label %done`
 - `term` (non-bang) emits normally (commit action, no halt — the txn continues)
 
 The `halt#()` intrinsic emits:
@@ -639,7 +639,7 @@ hw.module @top(in %clock : i1, in %reset : i1, ...) {
 
 Map `Expr` variants to CIRCT `comb` dialect ops:
 
-| Briv Expr | CIRCT Op |
+| Briev Expr | CIRCT Op |
 |------------|----------|
 | `a + b` | `comb.add %a, %b` |
 | `a - b` | `comb.sub %a, %b` |
@@ -1054,7 +1054,7 @@ if is_embedded {
 ### 6.3 — Register map → `@ REG_NAME` resolution
 
 Import resolver loads `.dbv`, pre-populates `mmio_fields`. Source code can write:
-```briv
+```briev
 let usart1_sr: UInt @ USART1_SR;
 ```
 

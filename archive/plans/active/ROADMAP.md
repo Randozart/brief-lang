@@ -1,4 +1,4 @@
-# Briv Compiler Roadmap
+# Briev Compiler Roadmap
 
 **Date:** 2026-05-26 (revised)
 **Status:** SYNTHESIZED — supersedes `COMPILER_SYNC_PLAN.md` (2026-05-25) and `lsp-enhanced-plan.md`
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-The Briv compiler is two implementations (Rust bootstrap `src/`, ~46K lines; Briv self-hosted `lib/compiler/`, ~8.5K lines) with a common FFI runtime (`src/ffi/`, 3.8K lines) and an LSP server (`src/lsp.rs`, 767 lines). Phases 1–2 of the original sync plan are complete (WASM/Webstack split + all 14 v0.14 language features ported to Briv).
+The Briev compiler is two implementations (Rust bootstrap `src/`, ~46K lines; Briev self-hosted `lib/compiler/`, ~8.5K lines) with a common FFI runtime (`src/ffi/`, 3.8K lines) and an LSP server (`src/lsp.rs`, 767 lines). Phases 1–2 of the original sync plan are complete (WASM/Webstack split + all 14 v0.14 language features ported to Briev).
 
 **Key architectural insight added 2026-05-26:** Acyclic analysis is a *shared cross-cutting pass*, not a per-backend optimization. `trg!` is the formal demarcation between closed systems (provably acyclic) and open systems (external input). This enables aggressive optimizations in every backend and powers the LSP's ghost text (inlay hints) showing call graphs, trigger dependencies, parameter ranges, and acyclicity status.
 
@@ -108,22 +108,22 @@ src/
 ### Current Architecture
 
 ```
-Briv code → frgn declaration → DBVS/TOML binding → registry.resolve_location_to_impl()
+Briev code → frgn declaration → DBVS/TOML binding → registry.resolve_location_to_impl()
   → direct Rust ForeignFn(Vec<Value>) call  [NO shared memory]
 
-Briv code → metropolitan_ffi.bv → placeholder defn (returns 0x10000000 hardcoded)
+Briev code → metropolitan_ffi.bv → placeholder defn (returns 0x10000000 hardcoded)
   ✗ Never reaches Rust MetropolitanHub
 ```
 
 ### Target Architecture
 
 ```
-Briv code → frgn declaration → DBVS binding { target: metropolitan }
+Briev code → frgn declaration → DBVS binding { target: metropolitan }
   → MetropolitanHub.create_channel() → mmap request/response/sync regions
-  → Briv writes input to request_region at known offset
+  → Briev writes input to request_region at known offset
   → Foreign side reads from pre-negotiated address (auto-gen C header)
   → Foreign writes output to response_region
-  → Briv reads response, checks status word
+  → Briev reads response, checks status word
   → No linker scripts. No linking. Just shared memory.
 ```
 
@@ -131,7 +131,7 @@ Briv code → frgn declaration → DBVS binding { target: metropolitan }
 
 | ID | Task | Files | Effort | Depends On |
 |----|------|-------|--------|------------|
-| **A1** | **Bridge Briv API → Rust runtime** | `lib/std/metropolitan_ffi.bv`, `src/ffi/registry.rs`, `lib/std/shm.bv` | 1 week | None |
+| **A1** | **Bridge Briev API → Rust runtime** | `lib/std/metropolitan_ffi.bv`, `src/ffi/registry.rs`, `lib/std/shm.bv` | 1 week | None |
 | A1a | Create `frgn` declarations in `metropolitan_ffi.bv` that call into the Rust `MetropolitanHub` instead of returning placeholder values | `lib/std/metropolitan_ffi.bv` | 2 days | — |
 | A1b | Add `resolve_location_to_impl()` entries for `__shm_open`, `__mmap_anonymous`, `__atomic_cas_u32` (currently declared in `lib/std/shm.bv` but unresolvable) | `src/ffi/registry.rs` | 1 day | — |
 | A1c | Implement the Rust-side functions that wrap `MetropolitanHub`/`SharedRegion` methods | `src/ffi/registry.rs` (new impl fns) | 2 days | — |
@@ -160,13 +160,13 @@ Briv code → frgn declaration → DBVS binding { target: metropolitan }
 | | | | | |
 | **A6** | **Add ~50 unresolved registry entries + Rust impls** | `src/ffi/registry.rs`, `lib/ffi/native/` | 3–4 days | A5 |
 | A6a | Add location→impl entries for collections, encoding, json, http (currently fall through to `UNRESOLVED`) | `src/ffi/registry.rs` | 1 day | — |
-| A6b | Implement actual Rust functions in `briv-ffi-native` crate (many are stubbed: time month/day return 1, JSON returns defaults, encoding returns "not_implemented") | `lib/ffi/native/src/lib.rs` | 2–3 days | — |
+| A6b | Implement actual Rust functions in `briev-ffi-native` crate (many are stubbed: time month/day return 1, JSON returns defaults, encoding returns "not_implemented") | `lib/ffi/native/src/lib.rs` | 2–3 days | — |
 
 **Phase A total: ~4 weeks (A3 backend codegen is the bottleneck)**
 
 ---
 
-## Phase B: Strict Briv Maturation
+## Phase B: Strict Briev Maturation
 
 **Goal:** Make strict mode (`.sbv`/`.sebv`/`.srbv`) actually work across both compilers — fix the bugs, fill the gaps, add tests.
 
@@ -201,7 +201,7 @@ Briv code → frgn declaration → DBVS binding { target: metropolitan }
 
 ## Phase C: LSP Expansion
 
-**Goal:** Make the built-in `briv lsp` support strict mode, provide IDE-quality navigation, cover v0.14 language features, and render ghost text with call graph info, trigger dependencies, parameter ranges, and acyclicity status.
+**Goal:** Make the built-in `briev lsp` support strict mode, provide IDE-quality navigation, cover v0.14 language features, and render ghost text with call graph info, trigger dependencies, parameter ranges, and acyclicity status.
 
 ### Current LSP Status
 
@@ -214,7 +214,7 @@ Briv code → frgn declaration → DBVS binding { target: metropolitan }
 | `textDocument/definition` | ✅ | Go-to-definition within same file |
 | `textDocument/completion` | ✅ | Keywords + codicil-specific |
 | RBV extraction | ✅ | Strips HTML from `.rbv`, preserves positions |
-| DBriv support | ✅ | `.dbv`/`.dbvs`/`.dbvl` parsing |
+| DBriev support | ✅ | `.dbv`/`.dbvs`/`.dbvl` parsing |
 | Strict mode | ❌ | Always non-strict |
 | `documentSymbol` | ❌ | No outline view |
 | `workspace/symbol` | ❌ | No global symbol search |
@@ -253,10 +253,10 @@ Implementation uses LSP `textDocument/inlayHint` (LSP 3.17+) or `textDocument/de
 | **C1** | **Strict mode in LSP**: detect `.sbv`/`.sebv`/`.srbv` extensions in `didOpen`, wire `Parser::with_strict_mode(true)` and `ProofEngine::with_strict_mode(true)` | `src/lsp.rs` | 2 days | None |
 | **C2** | **Symbol table + document outline**: build `SymbolIndex` struct caching all definitions/txns/signatures/structs/enums per document. Implement `documentSymbol` and `workspace/symbol`. Replace O(n) scans with index lookups | `src/lsp.rs` | 1 week | None |
 | **C3** | **v0.14 completions**: hashtag modifiers (`#!`, `#[`, `#(`, `#?`), alka block snippets (`alka { }`, `alka! { }`), `trg! ` inside transactions, `frgn ... from "...";` snippet. **`trg` auto-complete**: suggest all declared `trg!` signals when writing a reactive transaction | `src/lsp.rs` | 2–3 days | None |
-| **C4** | **Auto-launch config**: add `"languageServer"` entry to VS Code extension manifest so `briv lsp` starts automatically | `syntax-highlighter/package.json` | 1 day | None |
+| **C4** | **Auto-launch config**: add `"languageServer"` entry to VS Code extension manifest so `briev lsp` starts automatically | `syntax-highlighter/package.json` | 1 day | None |
 | **C5** | **FFI diagnostics in LSP**: when hovering over a `frgn` declaration, show the pre/post conditions from the binding file. Validate that `frgn` calls match binding signatures. **`frgn` acyclicity**: mark `frgn` calls with `target: external` as boundary — anything calling them is not acyclic | `src/lsp.rs`, `src/ffi/sentinel.rs` | 2–3 days | None |
 | **C6** | **Ghost text (inlay hints)**: render call graph info, trigger dependencies, parameter ranges, and acyclicity status at the top of every `txn`/`defn`. Use LSP `textDocument/inlayHint`. Update on every `didChange` | `src/lsp.rs`, `src/analysis/` | 2–3 days | Phase 0 (call graph, range analysis, acyclic analysis) |
-| **C7** | **Semantic highlighting**: register `semanticTokens` provider for v0.14 constructs (hashtags, alka blocks, local triggers, `trg!` signals, `frgn` declarations, acyclic vs. cyclic coloring) | `src/lsp.rs`, `syntaxes/briv.tmLanguage.json` | 2 days | None |
+| **C7** | **Semantic highlighting**: register `semanticTokens` provider for v0.14 constructs (hashtags, alka blocks, local triggers, `trg!` signals, `frgn` declarations, acyclic vs. cyclic coloring) | `src/lsp.rs`, `syntaxes/briev.tmLanguage.json` | 2 days | None |
 
 **Phase C total: ~3.5 weeks** (C6 depends on Phase 0, others are independent)
 
@@ -264,7 +264,7 @@ Implementation uses LSP `textDocument/inlayHint` (LSP 3.17+) or `textDocument/de
 
 ## Phase D: AArch64 Backport
 
-**Goal:** Backport Briv's authoritative 1,654-line `backend_aarch64.bv` into Rust's 577-line `aarch64.rs` stub. All optimization passes query the shared acyclic analysis (Phase 0) to decide codegen strategy.
+**Goal:** Backport Briev's authoritative 1,654-line `backend_aarch64.bv` into Rust's 577-line `aarch64.rs` stub. All optimization passes query the shared acyclic analysis (Phase 0) to decide codegen strategy.
 
 | ID | Task | File | Effort | Depends On |
 |----|------|------|--------|------------|
@@ -282,12 +282,12 @@ Implementation uses LSP `textDocument/inlayHint` (LSP 3.17+) or `textDocument/de
 
 ## Phase E: Missing Backends & Syncs
 
-**Goal:** Create COBOL/TCL backends in Briv from Rust reference, then bidirectionally sync all backend pairs. All backends consume the shared acyclic analysis (Phase 0) to decide codegen strategy.
+**Goal:** Create COBOL/TCL backends in Briev from Rust reference, then bidirectionally sync all backend pairs. All backends consume the shared acyclic analysis (Phase 0) to decide codegen strategy.
 
 | ID | Task | Files | Effort | Depends On |
 |----|------|-------|--------|------------|
-| **E1** | COBOL backend in Briv (709 lines Rust → new `cobol.bv`). **Acyclic path**: linear `PARAGRAPH` flow, inline `IF` guards. **Cyclic path**: `PERFORM UNTIL` loop with state flags | `lib/compiler/backends/cobol.bv` | 1–2 weeks | Phase 0.5 |
-| **E2** | TCL generator in Briv (369 lines Rust → new `tcl_generator.bv`). TCL always targets FPGA synthesis — only acyclic transactions can be pipelined; cyclic ones need state machines | `lib/compiler/backends/tcl_generator.bv` | 1 week | Phase 0.5 |
+| **E1** | COBOL backend in Briev (709 lines Rust → new `cobol.bv`). **Acyclic path**: linear `PARAGRAPH` flow, inline `IF` guards. **Cyclic path**: `PERFORM UNTIL` loop with state flags | `lib/compiler/backends/cobol.bv` | 1–2 weeks | Phase 0.5 |
+| **E2** | TCL generator in Briev (369 lines Rust → new `tcl_generator.bv`). TCL always targets FPGA synthesis — only acyclic transactions can be pipelined; cyclic ones need state machines | `lib/compiler/backends/tcl_generator.bv` | 1 week | Phase 0.5 |
 | **E3** | Backend syncs: align C, Rust, Verilog, VHDL, x86_64 pairs for v0.14 features (FFI, Alka, LocalTrigger, Hashtags, etc.) + acyclic/cyclic dispatch | All backend `.rs` + `.bv` files | 3–4 weeks | Phase 0.5 |
 
 **Phase E total: ~6 weeks**
@@ -298,9 +298,9 @@ Implementation uses LSP `textDocument/inlayHint` (LSP 3.17+) or `textDocument/de
 
 ```
 Week   1–2.5: Phase 0         (Shared analysis: acyclic, call graph, range)
-Week   3–4:   Phase A1 + A5   (Bridge Briv→Rust runtime + DBVS backfill = FFI MVP)
+Week   3–4:   Phase A1 + A5   (Bridge Briev→Rust runtime + DBVS backfill = FFI MVP)
 Week   5–6:   Phase A2 + A4   (Orchestrator wired + Sentinel = Metropolitan dispatch working)
-Week   7–8:   Phase B1–B6     (Strict Briv fixed in both compilers)
+Week   7–8:   Phase B1–B6     (Strict Briev fixed in both compilers)
 Week   9–10:  Phase C1–C4     (LSP strict mode + symbol table + completions + auto-launch)
 Week  11–12:  Phase C6–C7     (LSP ghost text + semantic highlighting — needs Phase 0)
 Week  13–16:  Phase D1–D7     (AArch64 backport — simplified by acyclic analysis)
@@ -321,7 +321,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 
 ## Key Architectural Decisions
 
-1. **WASM and Webstack are separate targets.** WASM = direct binary generation (Briv `wasm.bv` authoritative). Webstack = Rust+JS+wasm-pack pipeline (Rust `webstack.rs` authoritative). ✅ Done in Phase 1.
+1. **WASM and Webstack are separate targets.** WASM = direct binary generation (Briev `wasm.bv` authoritative). Webstack = Rust+JS+wasm-pack pipeline (Rust `webstack.rs` authoritative). ✅ Done in Phase 1.
 
 2. **Acyclic analysis is a shared pass, not per-backend.** Every backend queries `analysis::acyclic::is_acyclic()` to decide codegen strategy. The proof engine uses it for strict mode escalation. The LSP uses it for ghost text. Architecture: `src/analysis/` module consumed by `proof_engine`, `lsp`, all backends.
 
@@ -329,7 +329,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 
 4. **Metropolitan is the FFI transport, DBVS is the interface.** The DBVS schema defines *what* functions exist and their types. The Metropolitan target defines *how* data moves (via shared memory, not static linking). Together they replace TOML bindings entirely.
 
-5. **Sentinel evaluates contracts using the existing expression parser.** The `precondition`/`postcondition` strings in DBVS bindings are parsed by the same parser that handles Briv contracts — no new expression engine needed.
+5. **Sentinel evaluates contracts using the existing expression parser.** The `precondition`/`postcondition` strings in DBVS bindings are parsed by the same parser that handles Briev contracts — no new expression engine needed.
 
 6. **LSP ghost text reuses the shared analysis module.** Call graph, range analysis, and acyclicity are computed once per `didChange` and served to both the proof engine and the LSP inlay hint provider.
 
@@ -344,11 +344,11 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 | Backend registry | `cargo test --lib -- backend::tests` | Backend + hashtag tests pass |
 | Acyclic analysis | `cargo test -- analysis::acyclic` | `is_acyclic()` correctly rejects `trg!`-dependent bodies |
 | Call graph | `cargo test -- analysis::call_graph` | Trigger tracking works, unreachable code detected |
-| Briv self-hosted builds | `briv build lib/compiler/main.bv` | Compiler compiles itself |
-| LSP starts | `briv lsp` | Listens on stdio, responds to initialize |
+| Briev self-hosted builds | `briev build lib/compiler/main.bv` | Compiler compiles itself |
+| LSP starts | `briev lsp` | Listens on stdio, responds to initialize |
 | LSP ghost text | Open `.bv` file in VS Code | Inlay hints shown for every `txn`/`defn` |
-| FFI call works | `briv run examples/test_ffi.bv` | Prints "ALL FFI TESTS PASSED!" |
-| Strict mode enforced | `briv check file.sbv --strict` | Rejects `[true]` contracts |
+| FFI call works | `briev run examples/test_ffi.bv` | Prints "ALL FFI TESTS PASSED!" |
+| Strict mode enforced | `briev check file.sbv --strict` | Rejects `[true]` contracts |
 | Praetor | `praetor validate --warn` in `./src` | Exit 0 |
 
 ---
@@ -359,7 +359,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 
 **Phases 1–2 completed** (documented in `COMPILER_SYNC_PLAN.md`):
 - WASM/Webstack split
-- All 14 v0.14 language features ported from Rust → Briv self-hosted
+- All 14 v0.14 language features ported from Rust → Briev self-hosted
 - 215/215 tests passing
 - Praetor compliance improved (143 intent comments, Intent Required downgraded to warning)
 
@@ -371,10 +371,10 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 - **B5**: `run_compile_unified` now detects `--strict` flag and propagates it to `run_rust`, `run_c`, `run_cobol_compile` via new `strict: bool` parameter
 - **B6**: `import_resolver.rs` — added `strict_mode: StrictMode` field + `with_strict_mode()` setter; all 8 internal `Program` constructors now use `self.strict_mode`
 - **C1**: LSP strict mode — `run_type_check()` detects `.sbv`/`.sebv`/`.srbv` from URI, passes to `Parser`, `ProofEngine`, and `ImportResolver`
-- **F1**: Added `briv bind` CLI subcommand + `run_bind()` + `generate_bindings_dbvs()` (replaces TOML with DBVS) + `generate_bridge_bv()` (pre-initialized wrapper with `alka!` polling via `metropolitan_rpc`) + `generate_foreign_stub()` (C/Python/JS via `MetropolitanHub`) + `write_bind_files()`
-- **F2**: `src/ffi/metro_cli.rs` (661 lines, NEW) — `run_metro_cli()` wired to `briv metrod connect` with REPL, one-shot, and stub generation modes
+- **F1**: Added `briev bind` CLI subcommand + `run_bind()` + `generate_bindings_dbvs()` (replaces TOML with DBVS) + `generate_bridge_bv()` (pre-initialized wrapper with `alka!` polling via `metropolitan_rpc`) + `generate_foreign_stub()` (C/Python/JS via `MetropolitanHub`) + `write_bind_files()`
+- **F2**: `src/ffi/metro_cli.rs` (661 lines, NEW) — `run_metro_cli()` wired to `briev metrod connect` with REPL, one-shot, and stub generation modes
 - **F3**: `lib/std/metro_bridge.bv` — added `metropolitan_rpc(channel_id, request, timeout_ms) → Result<List<Int>, String>` with `alka!` polling
-- **DBVS parser fix**: `src/dbriv/ast.rs` — added `Fn(Vec<DbrivType>, Box<DbrivType>)` and `Trigger(Box<DbrivType>)` variants. `src/dbriv/parser.rs` — handles `Fn(params...) -> Ret`, `Trigger(T)`, `Result[T,E]` syntax. All 5 pre-existing `.dbvs` files (io, math, string, time, system_triggers) now parse correctly.
+- **DBVS parser fix**: `src/dbriev/ast.rs` — added `Fn(Vec<DbrievType>, Box<DbrievType>)` and `Trigger(Box<DbrievType>)` variants. `src/dbriev/parser.rs` — handles `Fn(params...) -> Ret`, `Trigger(T)`, `Result[T,E]` syntax. All 5 pre-existing `.dbvs` files (io, math, string, time, system_triggers) now parse correctly.
 
 ### 2026-05-27 (evening batch)
 
@@ -383,7 +383,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 - **B2**: `proof_engine.bv` — `verify_precondition()` and `verify_postcondition()` now accept `strict_mode: Bool`. In strict mode, unknown/unprovable constraints fail verification instead of being assumed satisfiable.
 - **B3**: `typechecker.bv` — `check_program()`, `check_definition()`, `check_transaction()` now accept `strict_mode: Bool` and propagate it. In strict mode, `[true]` contracts are rejected with clear error messages.
 - **B4**: `main.bv` — BV compiler CLI now supports `--strict` flag. Added to `parse_args()` return tuple, combined with extension-based detection (`strict_flag || is_strict_extension(file_path)`).
-- **B7**: `tests/test_strict.sbv` — integration test for strict mode. Verified with `briv check test_strict.sbv` and `briv check --strict test_simple.bv`.
+- **B7**: `tests/test_strict.sbv` — integration test for strict mode. Verified with `briev check test_strict.sbv` and `briev check --strict test_simple.bv`.
 - **C2**: `lsp.rs` — added `build_symbol_table()` that indexes `program.items` by name, kind, span. Used by both document and workspace symbol handlers.
 - **C4**: `lsp.rs` — added `documentSymbolProvider` and `workspaceSymbolProvider` capabilities. Implemented `handle_document_symbol()` (returns symbols for current file) and `handle_workspace_symbol()` (searches all open documents with case-insensitive query matching).
 - **C5**: `lsp.rs` — added `AutoLaunchConfig` struct with `verbose` mode. Added `new_with_config()` factory method. Server startup now prints feature list in verbose mode.
@@ -393,7 +393,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 
 ### 2026-05-26 (morning)
 
-- Comprehensive gap analysis across FFI, LSP, and Strict Briv
+- Comprehensive gap analysis across FFI, LSP, and Strict Briev
 - Phase 0 architecture: acyclic analysis elevated from per-backend optimization to shared cross-cutting pass
 - `trg!` established as formal closed-system boundary
 - Ghost text (inlay hints) added to LSP plan, powered by shared analysis module
@@ -412,7 +412,7 @@ Week  25:     Phase B7 + C5   (Integration tests + FFI diagnostics — can float
 | `Orchestrator` — FFI call pipeline | `src/ffi/orchestrator.rs` | 192 | ⚠️ Creates hub, never uses channels. Calls `ForeignFn(Vec<Value>)` — no shared memory IPC. |
 | `Sentinel` — pre/post validation | `src/ffi/sentinel.rs` | 65 | ❌ Stubbed. Both methods return `Ok(())`. `TODO: Real expression evaluation`. |
 | `ScriptResolver` — JS/C/WASM extraction | `src/ffi/script.rs` | 281 | ⚠️ JS/C work. WASM returns `Ok(vec![])`. |
-| `metropolitan_ffi.bv` — Briv-level API | `lib/std/metropolitan_ffi.bv` | 268 | ❌ Placeholder. Returns hardcoded `0x10000000`. No `frgn` bridge to Rust runtime. |
+| `metropolitan_ffi.bv` — Briev-level API | `lib/std/metropolitan_ffi.bv` | 268 | ❌ Placeholder. Returns hardcoded `0x10000000`. No `frgn` bridge to Rust runtime. |
 | `shm.bv` — low-level frgn declarations | `lib/std/shm.bv` | exists | ❌ Unresolvable. `frgn` locations not in `resolve_location_to_impl()`. |
 | Backend support (any) | All backends | — | ❌ Zero backends know about Metropolitan protocol. |
 | DBVS binding files | `std/bindings/*.dbvs` | 4 files | ⚠️ Has io/math/string/time. Missing collections/encoding/json/http. |
@@ -478,13 +478,13 @@ fn generate_function(body, result: &AnalysisResult) -> Vec<Instruction> {
 - Documented architecture: shared `src/analysis/` module
 
 ### 2026-05-26 (morning) — Comprehensive Gap Analysis
-- Phase A1: Bridge Briv API → Rust runtime for Metropolitan FFI
+- Phase A1: Bridge Briev API → Rust runtime for Metropolitan FFI
 - Created `plans/active/ROADMAP.md`
 
 ### 2026-05-26 (evening) — Parallel Phase B, C, F
 - B1/B5/B6: Strict mode in parser, compile pipeline, import_resolver
 - C1: LSP strict mode detection
-- F1/F2/F3: `briv bind`, `briv metrod connect`, `metropolitan_rpc()`
+- F1/F2/F3: `briev bind`, `briev metrod connect`, `metropolitan_rpc()`
 - DBVS parser: `Fn()`, `Trigger()`, `Result[]` type support
 - **226 tests** (+11)
 
@@ -494,11 +494,11 @@ fn generate_function(body, result: &AnalysisResult) -> Vec<Instruction> {
 - C3: v0.14 LSP completions
 - **245 tests**
 
-### 2026-05-28 — Phase 0 + Phase A + Briv mirror
+### 2026-05-28 — Phase 0 + Phase A + Briev mirror
 - Phase 0: CallGraph + range analysis + backend wiring (C/Rust/AArch64)
 - A2a/b/c/d: Metropolitan target + orchestrator dispatch + channel IPC
 - A4/A5/A6: Sentinel validator, 4 DBVS files, 33 registry impls
-- Briv mirror: `call_graph.bv`, `range.bv` in `lib/compiler/`
+- Briev mirror: `call_graph.bv`, `range.bv` in `lib/compiler/`
 - Phase D: AArch64 statement/expression expansion (3→13 handlers, 8→22 exprs, struct gen, tests)
 - Phase E: x86_64 backend expansion (matching aarch64)
 - **255 tests** (+10 from 245)
@@ -519,7 +519,7 @@ fn generate_function(body, result: &AnalysisResult) -> Vec<Instruction> {
 All roadmap phases are now complete:
 - ✅ Phase 0: Shared analysis (CallGraph + Range + backend wiring)
 - ✅ Phase A: Metropolitan FFI (dispatch + sentinel + registry + DBVS)
-- ✅ Phase B: Strict Briv (all 7 bugs fixed)
+- ✅ Phase B: Strict Briev (all 7 bugs fixed)
 - ✅ Phase C: LSP (C1-C5: strict, symbols, completions, auto-launch)
 - ✅ Phase D/E: All 10 backends expanded with full statement/expression coverage
 
@@ -527,17 +527,17 @@ All roadmap phases are now complete:
 
 ## Remaining Work
 
-| Phase | Task | Effort | Briv Mirror? |
+| Phase | Task | Effort | Briev Mirror? |
 |-------|------|--------|--------------|
 | D | AArch64 FFI, linkage, post-conditions | 2 weeks | Partial |
 | E | wasm, webstack, cobol, verilog, vhdl syncs | 4 weeks | Partial |
 | — | LLVM backend via `inkwell` | 2-3 weeks | No (codegen) |
-| — | `is_acyclic` codegen in Briv backends | 1 week | Yes |
+| — | `is_acyclic` codegen in Briev backends | 1 week | Yes |
 
-### Briv Self-Hosted Mirroring Checklist
+### Briev Self-Hosted Mirroring Checklist
 - [x] `parser.bv` — strict mode propagation
 - [x] `proof_engine.bv` — strict escalation
 - [x] `typechecker.bv` — capability validation, `[true]` rejection
-- [x] `call_graph.bv` — CallGraph analysis in Briv
-- [x] `range.bv` — ParameterRanges analysis in Briv
-- [ ] `is_acyclic` codegen paths in Briv backends
+- [x] `call_graph.bv` — CallGraph analysis in Briev
+- [x] `range.bv` — ParameterRanges analysis in Briev
+- [ ] `is_acyclic` codegen paths in Briev backends

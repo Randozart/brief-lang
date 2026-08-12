@@ -44,7 +44,7 @@ All 5 halting pattern compiler passes are committed. What's missing are the benc
 3. **Build compiler** and run `cargo test --lib` for regression check
 4. **Run `build_and_bench.sh`** for Tier 1 benchmarks
 5. **Fix any compilation/runtime failures** and document in BUGS.md
-6. **Document results** (trophy folder update if Briv beats C)
+6. **Document results** (trophy folder update if Briev beats C)
 7. **Defer** Tier 2 (CLBG) and Tier 3 (harness runs) to next sprint
 
 ## Designs
@@ -103,6 +103,6 @@ C reference: counter loop with symmetric print.
 
 ## Verification
 - `cargo test --lib` — 434+ pass (no regressions)
-- Each .bv compiles via `briv-compiler llvm benchmarks/<name>.bv --out benchmarks --optimize-budget 256`
+- Each .bv compiles via `briev-compiler llvm benchmarks/<name>.bv --out benchmarks --optimize-budget 256`
 - Each binary runs to completion with `env BOUND=50000000`
 - Symmetric C reference exits with same return code

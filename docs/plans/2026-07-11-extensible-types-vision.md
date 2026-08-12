@@ -7,11 +7,11 @@ HOW in per-step detail.
 
 ## The Thesis
 
-`type` is Briv's metaprogramming keyword. It defines how bits are
+`type` is Briev's metaprogramming keyword. It defines how bits are
 interpreted, stored, manipulated, serialized, and codegen'd. Everything
 about a type should be user-definable from first principles — no magic, no
 hardcoded compiler internals. A user should be able to define a type so
-completely that `let fourteen: RomanNumeral = XIV` is a valid Briv
+completely that `let fourteen: RomanNumeral = XIV` is a valid Briev
 statement, driven entirely by the type universe.
 
 ## Current State
@@ -53,7 +53,7 @@ acted on — users can annotate types with arbitrary metadata.
 
 A property can reference an external codec definition:
 
-```briv
+```briev
 type RomanNumeral {
     value: UInt16;
     codec <~ import "encodings/roman.bv" : RomanCodec;
@@ -66,9 +66,9 @@ The compiler ingests the codec file at compile time and uses it to:
 - Register serialization/deserialization intrinsics
 - Generate validation guards
 
-The codec file is itself Briv:
+The codec file is itself Briev:
 
-```briv
+```briev
 // encodings/roman.bv
 codec RomanCodec for UInt16 {
     // Custom literal parser: maps "IV" → 4, "XIV" → 14, etc.
@@ -103,7 +103,7 @@ resolves to a type name, it checks whether that type has a registered
 literal syntax handler. If so, the next token is parsed as that type's
 literal:
 
-```briv
+```briev
 let x: Int = 42;              // standard integer literal
 let r: RomanNumeral = XIV;    // custom literal — parsed by RomanCodec.parse
 let s: String = "hello";      // standard string literal
@@ -131,7 +131,7 @@ Currently, operators are resolved through `OpRune` → intrinsic mappings in
 the TypeUniverse. With the generic property system, operators become just
 another property:
 
-```briv
+```briev
 type RomanNumeral {
     value: UInt16;
     op Add(RomanNumeral) -> RomanNumeral = roman_add#;
@@ -161,7 +161,7 @@ match ty {
 With the property system, `llvm_type` is just another property — already
 true in the TypeUniverse. A type declares its LLVM representation:
 
-```briv
+```briev
 type RomanNumeral {
     value: UInt16;
     llvm <~ "i16";
@@ -174,12 +174,12 @@ And the codegen queries `properties.get("llvm_type")` instead of matching
 on hardcoded type names. This is already partially implemented (Phase 7A).
 The vision completes it — NO hardcoded type-name matches in codegen.
 
-### Step 6: Briv as universal bridge
+### Step 6: Briev as universal bridge
 
 With extensible types, the GLUE bridge is no longer a separate protocol.
 It IS the type system:
 
-- **Foreign type** = a Briv `type` declaration with a codec
+- **Foreign type** = a Briev `type` declaration with a codec
 - **Zero-copy projection** = the type's slot layout matches the foreign
   struct layout (same byte offsets)
 - **Meld** = declaring that two types share the same bit interpretation
@@ -188,7 +188,7 @@ It IS the type system:
 
 A Python `PyLongObject` is just a type:
 
-```briv
+```briev
 type PyLongObject {
     ob_refcnt: UInt64;
     ob_type: Ptr<Byte>;
@@ -200,7 +200,7 @@ type PyLongObject {
 
 A C `struct timespec` is just a type:
 
-```briv
+```briev
 type Timespec {
     tv_sec: Int64;
     tv_nsec: Int64;
@@ -248,6 +248,6 @@ interpretation.
 
 A type answers one question: "what do these bits mean?" The answer should
 be fully user-definable through property bindings, slot declarations, and
-codec files — no compiler magic. Briv becomes the universal bridge not
+codec files — no compiler magic. Briev becomes the universal bridge not
 because it has hardcoded FFI support for N formats, but because its type
 system can express ANY format from first principles.

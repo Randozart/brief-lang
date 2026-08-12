@@ -228,47 +228,47 @@ fixes all stubs it touches.
 
 Baseline measured at commit `6ff24d59` (Phase 15 .f frontend, immediately
 before Phase 17 begins), `cargo build --release` + `bash
-benchmarks/build_and_bench.sh --runtime`. All 36 benchmarks **MATCH** (C vs Briv
+benchmarks/build_and_bench.sh --runtime`. All 36 benchmarks **MATCH** (C vs Briev
 times, ratio, winner):
 
-| Benchmark | C (s) | Briv (s) | Ratio | Winner |
+| Benchmark | C (s) | Briev (s) | Ratio | Winner |
 |---|---:|---:|---:|---|
 | ring_buffer | .0552 | .0462 | 1.19x | C |
-| float_math | .0433 | .0691 | .62x | Briv |
-| float_math_nonzero | .1594 | .1663 | .95x | Briv |
-| sparse_dispatch | .0572 | .0679 | .84x | Briv |
-| print_loop | .0328 | .0588 | .55x | Briv |
-| nbody_newton | 7.4690 | 8.7524 | .85x | Briv |
-| nbody_sqrt | 2.2951 | 2.9866 | .76x | Briv |
-| nbody_sqrt_idio | 3.2748 | 4.0351 | .81x | Briv |
-| fasta | .2183 | .2362 | .92x | Briv |
-| fannkuch_redux | .0604 | .0672 | .89x | Briv |
+| float_math | .0433 | .0691 | .62x | Briev |
+| float_math_nonzero | .1594 | .1663 | .95x | Briev |
+| sparse_dispatch | .0572 | .0679 | .84x | Briev |
+| print_loop | .0328 | .0588 | .55x | Briev |
+| nbody_newton | 7.4690 | 8.7524 | .85x | Briev |
+| nbody_sqrt | 2.2951 | 2.9866 | .76x | Briev |
+| nbody_sqrt_idio | 3.2748 | 4.0351 | .81x | Briev |
+| fasta | .2183 | .2362 | .92x | Briev |
+| fannkuch_redux | .0604 | .0672 | .89x | Briev |
 | mandelbrot | .7245 | .6838 | 1.05x | C |
-| kalman_filter_runtime | .1558 | .1805 | .86x | Briv |
-| knucleotide | .1930 | .1935 | .99x | Briv |
-| cancel_math | .0562 | .0645 | .87x | Briv |
+| kalman_filter_runtime | .1558 | .1805 | .86x | Briev |
+| knucleotide | .1930 | .1935 | .99x | Briev |
+| cancel_math | .0562 | .0645 | .87x | Briev |
 | bit_clear | .0003 | .0002 | 1.50x | C |
-| queue_drain | .0362 | .0631 | .57x | Briv |
-| queue_drain_sym | .0362 | .0653 | .55x | Briv |
-| queue_drain_idio | .0363 | .0654 | .55x | Briv |
-| stack_push_pop | .0327 | .0602 | .54x | Briv |
-| interval_step | .0633 | .0639 | .99x | Briv |
-| telemetry_stream | .1952 | .2047 | .95x | Briv |
-| pid_control | .3458 | .3489 | .99x | Briv |
-| matrix_pipeline | .4623 | .7168 | .64x | Briv |
-| accumulator_flush | .1133 | .1514 | .74x | Briv |
+| queue_drain | .0362 | .0631 | .57x | Briev |
+| queue_drain_sym | .0362 | .0653 | .55x | Briev |
+| queue_drain_idio | .0363 | .0654 | .55x | Briev |
+| stack_push_pop | .0327 | .0602 | .54x | Briev |
+| interval_step | .0633 | .0639 | .99x | Briev |
+| telemetry_stream | .1952 | .2047 | .95x | Briev |
+| pid_control | .3458 | .3489 | .99x | Briev |
+| matrix_pipeline | .4623 | .7168 | .64x | Briev |
+| accumulator_flush | .1133 | .1514 | .74x | Briev |
 | sweep_sparse | .2198 | .1577 | 1.39x | C |
 | sweep_mid | .2640 | .2360 | 1.11x | C |
 | sweep_dense | .3948 | .2666 | 1.48x | C |
 | sweep_arr | .4021 | .3443 | 1.16x | C |
 | series_converge | .0003 | .0003 | 1.00x | ~tie |
-| global_lifetime | .0305 | .0732 | .41x | Briv |
-| deep_recursion | .0001 | .0004 | .25x | Briv |
-| arena_churn | .0891 | .1028 | .86x | Briv |
-| linked_list | 1.1528 | 1.6884 | .68x | Briv |
-| hash_ops | 1.0211 | 1.1226 | .90x | Briv |
-| hash_ops_idio | .0305 | .0543 | .56x | Briv |
-| enemy_swarm | .0919 | .1347 | .68x | Briv |
+| global_lifetime | .0305 | .0732 | .41x | Briev |
+| deep_recursion | .0001 | .0004 | .25x | Briev |
+| arena_churn | .0891 | .1028 | .86x | Briev |
+| linked_list | 1.1528 | 1.6884 | .68x | Briev |
+| hash_ops | 1.0211 | 1.1226 | .90x | Briev |
+| hash_ops_idio | .0305 | .0543 | .56x | Briev |
+| enemy_swarm | .0919 | .1347 | .68x | Briev |
 
 `bridge_glue` SKIP, `bridge_multi` PASS. 36/36 runtime benchmarks MATCH.
 

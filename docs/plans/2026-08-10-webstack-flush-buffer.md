@@ -2,11 +2,11 @@
 
 **Date:** 2026-08-10
 **Status:** active
-**Related:** `docs/plans/2026-07-26-rendered-briv-webstack-v2.md` (Phase 4), `docs/architecture/features/rendered-briv-wasm.md` (the state_layout/flush contract), `src/glue/web_generator.rs` (JS shim).
+**Related:** `docs/plans/2026-07-26-rendered-briev-webstack-v2.md` (Phase 4), `docs/architecture/features/rendered-briev-wasm.md` (the state_layout/flush contract), `src/glue/web_generator.rs` (JS shim).
 
 ## Problem
 
-The webstack contract (rendered-briv-wasm.md) requires that at each transaction
+The webstack contract (rendered-briev-wasm.md) requires that at each transaction
 commit (`term;`) the WASM module call
 
 ```
@@ -92,7 +92,7 @@ getter observes the commit (HMR/SSR precondition).
 builds the Rust-side layout with names/handles matching the WASM table. The
 webstack codegen arm captures it (`codegen` out-param), and compile_source
 passes it to `GlueWebGenerator` (falling back to the hardcoded stub when no
-webstack codegen ran). `binding_to_js` maps a binding's signal (a Briv field
+webstack codegen ran). `binding_to_js` maps a binding's signal (a Briev field
 name) to the field handle and emits a real `applyFn` override (Text →
 `textContent`, Show/Hide → `display`, Trigger → `addEventListener` calling the
 txn export). `_makeBinding` stores a type-aware `decode`; `_applyFlush` uses it

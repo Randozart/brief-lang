@@ -10,7 +10,7 @@ investigation path.
 
 | Step | Commit | Description |
 |------|--------|-------------|
-| Baseline | `be6583bc` | Pre-SLP anchor (pinned worktree at `../briv-compiler-baseline`) |
+| Baseline | `be6583bc` | Pre-SLP anchor (pinned worktree at `../briev-compiler-baseline`) |
 | Fix 1 | `88532127` | Arena-By-Proof: transitive call-graph + gate emission |
 | Fix 2 | `129ee491` | ABI type coercion in `emit_direct_frgn_call` |
 | Fix 3 | `e3f2d309` | Print plugin float type inference |
@@ -20,25 +20,25 @@ investigation path.
 
 ```
 ╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
-║ Benchmark                 ║ Briv      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+║ Benchmark                 ║ Briev      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
 ╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
 ║ ring_buffer               ║ .0603s     ║ .0458s     ║ 1.31x    ║ C      ║ MATCH     ║
 ║ float_math                ║ .0748s     ║ .0697s     ║ 1.07x    ║ C      ║ MATCH     ║
-║ float_math_nonzero        ║ .1611s     ║ .1620s     ║ .99x     ║ Briv  ║ MATCH     ║
-║ sparse_dispatch           ║ .0551s     ║ .0604s     ║ .91x     ║ Briv  ║ MATCH     ║
+║ float_math_nonzero        ║ .1611s     ║ .1620s     ║ .99x     ║ Briev  ║ MATCH     ║
+║ sparse_dispatch           ║ .0551s     ║ .0604s     ║ .91x     ║ Briev  ║ MATCH     ║
 ║ print_loop                ║ .0568s     ║ .0559s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ nbody_newton              ║ 10.6217s   ║ 7.8560s    ║ 1.35x    ║ C      ║ MATCH     ║
-║ nbody_sqrt                ║ 2.2434s    ║ 2.6339s    ║ .85x     ║ Briv  ║ MATCH     ║
-║ nbody_sqrt_idio           ║ 2.3270s    ║ 3.4561s    ║ .67x     ║ Briv  ║ MATCH     ║
+║ nbody_sqrt                ║ 2.2434s    ║ 2.6339s    ║ .85x     ║ Briev  ║ MATCH     ║
+║ nbody_sqrt_idio           ║ 2.3270s    ║ 3.4561s    ║ .67x     ║ Briev  ║ MATCH     ║
 ║ fasta                     ║ .1987s     ║ .1980s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
-║ fannkuch_redux            ║ .0599s     ║ .0612s     ║ .97x     ║ Briv  ║ MATCH     ║
+║ fannkuch_redux            ║ .0599s     ║ .0612s     ║ .97x     ║ Briev  ║ MATCH     ║
 ║ mandelbrot                ║ .6317s     ║ .6277s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ kalman_filter_runtime     ║ .1741s     ║ .1725s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
 ║ knucleotide               ║ .1843s     ║ .1823s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ cancel_math               ║ .0599s     ║ .0582s     ║ 1.02x    ║ C      ║ MATCH     ║
-║ bit_clear                 ║ .0002s     ║ .0004s     ║ .50x     ║ Briv  ║ MATCH     ║
-║ queue_drain               ║ .0601s     ║ .0612s     ║ .98x     ║ Briv  ║ MATCH     ║
-║ queue_drain_sym           ║ .0575s     ║ .0588s     ║ .97x     ║ Briv  ║ MATCH     ║
+║ bit_clear                 ║ .0002s     ║ .0004s     ║ .50x     ║ Briev  ║ MATCH     ║
+║ queue_drain               ║ .0601s     ║ .0612s     ║ .98x     ║ Briev  ║ MATCH     ║
+║ queue_drain_sym           ║ .0575s     ║ .0588s     ║ .97x     ║ Briev  ║ MATCH     ║
 ║ queue_drain_idio          ║ .0603s     ║ .0002s     ║ 301.50x  ║ C      ║ MATCH     ║
 ║ interval_step             ║ .0599s     ║ .0592s     ║ 1.01x    ║ C      ║ MATCH     ║
 ║ bridge_glue               ║ done       ║            ║          ║        ║ SKIP      ║
@@ -62,7 +62,7 @@ With only 2 fields and `memory(argmem: readwrite)` on main, SROA fully promotes
 %State to SSA registers. The loop runs entirely in registers with no memory
 traffic. No `@malloc`/`@free` calls in the loop path.
 
-**Note:** The absolute times (0.0002s Briv, 0.0004s C) are at noise-floor level
+**Note:** The absolute times (0.0002s Briev, 0.0004s C) are at noise-floor level
 for 63 iterations. The ratio is partially measurement noise, but the structural
 improvement (no arena fields → SROA succeeds) is real. Keeping Fix 1 is correct.
 
@@ -103,10 +103,10 @@ operations are COMPLETELY ELIMINATED as dead code. The hot loop body is identica
 to queue_drain_sym (just counter increment + print check). The list pointer
 address computation (`%t29`) is dead and will be eliminated by LLVM DCE.
 
-The Briv time (0.0603s) matches queue_drain_sym (0.0575s) — no codegen regression.
+The Briev time (0.0603s) matches queue_drain_sym (0.0575s) — no codegen regression.
 
 **The 301.50x is a benchmark harness artifact:**
-- `BRIV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"` (build_and_bench.sh:285)
+- `BRIEV_CROSS_REF["queue_drain_idio"]="queue_drain_sym"` (build_and_bench.sh:285)
 - The C binary for queue_drain_sym timed at 0.0002s — physically impossible for
   50M iterations (would need ~0.012 cycles/iter at 3GHz)
 - The C binary was likely stale, miscompiled, or ran without `BOUND` env var

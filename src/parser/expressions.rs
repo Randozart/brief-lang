@@ -691,7 +691,7 @@ impl<'a> Parser<'a> {
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             let pattern = self.parse_pattern()?;
-            // 2026-08-06: Guards use `when` (Briv has no `if`; SPEC §10.2/§11).
+            // 2026-08-06: Guards use `when` (Briev has no `if`; SPEC §10.2/§11).
             // Previously parsed a bare identifier "if" — silently accepting a
             // non-keyword and rejecting the normative `when` guard.
             let guard = if self.eat(&Token::When) {
@@ -1001,7 +1001,7 @@ mod tests {
 
     #[test]
     fn match_expr_rejects_if_guard() {
-        // 2026-08-06: `if` is not a Briv keyword; guards are `when`. A guard
+        // 2026-08-06: `if` is not a Briev keyword; guards are `when`. A guard
         // written with `if` must fail to parse, not be silently accepted as an
         // identifier.
         assert!(parse_expr("match n { _ if n < 0 => -1 }").is_err());

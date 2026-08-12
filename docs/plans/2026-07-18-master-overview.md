@@ -272,11 +272,11 @@ pub(super) fn push_field_type(&mut self, ty: &Type) {
             .unwrap_or(1);
         for _ in 0..n_fields {
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_briv_types.push(ty.clone());
+            self.ctx.field_briev_types.push(ty.clone());
         }
     } else {
         self.ctx.field_types.push("i64".to_string());
-        self.ctx.field_briv_types.push(ty.clone());
+        self.ctx.field_briev_types.push(ty.clone());
     }
 }
 ```
@@ -344,14 +344,14 @@ cargo test --lib -- --feature sso-strings  → 919 pass (flag ON, new SSO tests)
 
 **Depends on:** Phase 1-2 (committed), Phase 4 (analysis pass, committed)
 
-**Goal:** Write the pure-Briv arena types to disk so they're available for import.
+**Goal:** Write the pure-Briev arena types to disk so they're available for import.
 
 ### Arena type
 
 **File:** `lib/std/memory/arena.bv`
 
-```briv
-// 2026-07-18: Arena — single-direction bump allocator in pure Briv.
+```briev
+// 2026-07-18: Arena — single-direction bump allocator in pure Briev.
 // Backed by Alloc# for the backing buffer.
 type Arena {
     base: Ptr<Byte>;
@@ -380,7 +380,7 @@ defn arena_free(a: Arena) { Free#(a.base as Int); };
 
 **File:** `lib/std/memory/crossword.bv`
 
-```briv
+```briev
 // 2026-07-18: CrosswordArena — dual-direction arena allocator.
 // Slots grow from base upward, variable-length data grows from
 // (base + capacity) downward. The two regions meet in the middle.
@@ -397,8 +397,8 @@ type CrosswordArena<T> : List<T> {
 
 Add import re-export for the memory types following existing conventions.
 
-**Test:** `test_arena_init_pure_briv` — Compile `arena_init(1024)`, run, check non-null base.
-**Test:** `test_crossword_init_pure_briv` — same pattern.
+**Test:** `test_arena_init_pure_briev` — Compile `arena_init(1024)`, run, check non-null base.
+**Test:** `test_crossword_init_pure_briev` — same pattern.
 
 ---
 
@@ -416,7 +416,7 @@ cargo build --release && bash benchmarks/build_and_bench.sh --runtime
 
 Capture ALL output into a table:
 
-| Benchmark | Briv (s) | C (s) | Ratio | Correctness |
+| Benchmark | Briev (s) | C (s) | Ratio | Correctness |
 |-----------|-----------|-------|-------|-------------|
 | ... | ... | ... | ... | PASS/FAIL |
 
@@ -733,12 +733,12 @@ Record full output. Compare against pre-implementation baseline. Any regression 
 | `src/analysis/provenance.rs` | ✅ Done | Fix is_local_provenance stub + collect_local_names |
 | `src/analysis/transition_graph.rs` | ✅ Done | Provenance-aware write set extraction |
 | `src/typechecker/mod.rs` | ✅ Done | Provenance threading, PtrConst, write-through guard |
-| `lib/std/memory/arena.bv` | ✅ Done | Pure-Briv arena type |
-| `lib/std/memory/crossword.bv` | ✅ Done | Pure-Briv crossword arena |
+| `lib/std/memory/arena.bv` | ✅ Done | Pure-Briev arena type |
+| `lib/std/memory/crossword.bv` | ✅ Done | Pure-Briev crossword arena |
 | `lib/std/types/bootstrap.bv` | ✅ Done | UTF8View, StaticString, SmallString64 type decls |
-| `lib/std/types/UTF8view.bv` | ✅ Done | Pure-Briv memcmp, UTF8_find, UTF8_validate |
+| `lib/std/types/UTF8view.bv` | ✅ Done | Pure-Briev memcmp, UTF8_find, UTF8_validate |
 | `lib/std/types/small_string.bv` | ✅ Done | SmallString64 inline buffer operations |
-| `lib/runtime/briv_rt.c` | ✅ Done | __UTF8_validate, __UTF8_find (kept for ref, pure-Briv supersedes) |
+| `lib/runtime/briev_rt.c` | ✅ Done | __UTF8_validate, __UTF8_find (kept for ref, pure-Briev supersedes) |
 | `BUGS.md` | ✅ Done | All findings documented |
 
 ## Benchmark Baseline (July 18, 2026)
@@ -747,7 +747,7 @@ Pre-SSO, pre-allocation-strategy baseline. Run from commit with SSO Phase B + ar
 
 ### Runtime Benchmarks (all `--runtime` tag)
 
-| Benchmark | Briv (s) | C (s) | Ratio | Correctness |
+| Benchmark | Briev (s) | C (s) | Ratio | Correctness |
 |-----------|-----------|-------|-------|-------------|
 | ring_buffer | 0.0328 | 0.0346 | 0.95x | ✅ PASS |
 | float_math | 0.0629 | 0.0718 | 0.88x | ✅ PASS |
@@ -759,7 +759,7 @@ Pre-SSO, pre-allocation-strategy baseline. Run from commit with SSO Phase B + ar
 
 ### Optimizer Benchmarks (all `--optimizer` tag, full compile-time folding)
 
-| Benchmark | Briv | C | Correctness |
+| Benchmark | Briev | C | Correctness |
 |-----------|-------|---|-------------|
 | iir_filter | precomputed | — | ✅ MATCH |
 | precompute_sum | precomputed | — | ✅ MATCH |
@@ -864,12 +864,12 @@ cargo test --lib -- --feature svo  → all pass (flag ON, new SVO tests)
 
 ## Block 14: UTF8View & Embedded String Types (Design Plan)
 
-**Goal:** Add two new string-like types to Briv: `UTF8View` (borrowed, zero-allocation UTF-8 view) and `SmallString<N>` (stack-allocated inline buffer, no heap), plus `StaticString` (compile-time-known ROM data). These complete the string type family for systems, embedded, and bare-metal targets.
+**Goal:** Add two new string-like types to Briev: `UTF8View` (borrowed, zero-allocation UTF-8 view) and `SmallString<N>` (stack-allocated inline buffer, no heap), plus `StaticString` (compile-time-known ROM data). These complete the string type family for systems, embedded, and bare-metal targets.
 
 ### Architecture
 
 ```
-String types in Briv:
+String types in Briev:
 
   ┌──────────────────────────────────────────────────────────┐
   │                    String (owned)                         │
@@ -903,7 +903,7 @@ String types in Briv:
 ### U1: UTF8View Type
 
 **Definition** (`lib/std/types/UTF8view.bv`):
-```briv
+```briev
 // 2026-07-18: UTF8View — borrowed, trusted-UTF-8 view of byte data.
 // Zero-allocation. Does NOT own the underlying buffer.
 // encoding <~ "UTF-8" is guaranteed by construction (validated at boundary).
@@ -925,14 +925,14 @@ type UTF8View {
 - **Passes `is_string_like()`** — matches Phase B (2 Int fields + encoding property)
 
 **Construction:**
-```briv
+```briev
 // From a String (borrow, no validation needed — String is already valid)
 defn UTF8View::from_string(s: &String) -> UTF8View {
     term UTF8View { data: s.data, len: s.len };
 };
 // From raw bytes + len (validates UTF-8 at runtime)
 defn UTF8View::from_bytes(ptr: Ptr<Byte>, len: Int) -> UTF8View [len >= 0] {
-    // Runtime call to UTF-8 validator in briv_rt.c
+    // Runtime call to UTF-8 validator in briev_rt.c
     let valid: Bool = __UTF8_validate(ptr, len);
     [valid == true];  // contract: validation MUST pass
     term UTF8View { data: ptr as Int, len: len };
@@ -946,7 +946,7 @@ defn UTF8View::from_literal(s: String) -> UTF8View {
 ```
 
 **Operations:**
-```briv
+```briev
 // O(1) — byte length
 defn UTF8View::len(v: UTF8View) -> Int { term v.len; };
 
@@ -995,7 +995,7 @@ defn String::from_UTF8_view(v: UTF8View) -> String {
 | `src/backend/llvm/emit_toplevel.rs` `llvm_type` | UTF8View always gets `{i64, i64}` LLVM type (regardless of `feature_sso_strings`), since it's always a fat pointer. The SSO override should check for UTF8View explicitly or the `is_string_like` check should differentiate String vs UTF8View. |
 | `src/backend/llvm/helpers.rs` `adapt_to_i64` | UTF8View → i64: extract handle[0] (same as SSO String) |
 | `src/backend/llvm/emit_stmt.rs` | UTF8View values cannot be stored to state fields — emit compile error |
-| `lib/runtime/briv_rt.c` | Add `__UTF8_validate(ptr, len)` validation function |
+| `lib/runtime/briev_rt.c` | Add `__UTF8_validate(ptr, len)` validation function |
 | `config/encodings.toml` | UTF-8 ops already defined — no change needed |
 | Tests | Construction, slice, find, char_len, eq, conversion from String |
 
@@ -1004,7 +1004,7 @@ defn String::from_UTF8_view(v: UTF8View) -> String {
 **Purpose:** Stack-allocated inline buffer with compile-time-fixed capacity. Zero heap allocation. For embedded targets (microcontroller, bare-metal) and hot paths where allocation is unacceptable.
 
 **Definition** (`lib/std/types/small_string.bv`):
-```briv
+```briev
 // 2026-07-18: SmallString<N> — stack-allocated inline string.
 // N = maximum byte capacity (compile-time constant).
 // No heap allocation, no SSO, no Free#.
@@ -1025,7 +1025,7 @@ type SmallString<@bufsize: Int> {
 
 **Alternative design (recommended):** Avoid the self-referential pointer. Instead, store the inline buffer directly as a sequence of `Int` fields, similar to SSO but with variable capacity:
 
-```briv
+```briev
 type SmallString<@bufsize: Int> {
     buf: Int;           // packed inline data (like SSO handle[0])
     len: Int;           // current byte length
@@ -1040,7 +1040,7 @@ But this ties SmallString's capacity to the number of i64 slots, which is archit
 
 **Third alternative (recommended for MVP):** SmallString<N> is a wrapper around a fixed-size byte array in the struct, with its own LLVM type:
 
-```briv
+```briev
 // 2026-07-18: SmallString<N> — inline buffer string.
 // LLVM type: { [N x i8], i64, i64 } — buf, len, capacity.
 // buf is NOT a pointer — it IS the inline bytes.
@@ -1053,7 +1053,7 @@ type SmallString<@bufsize: Int> {
 The struct has NO explicit fields — the LLVM type is derived from the `@bufsize` parameter and `bytes <~` metadata via `declare_struct_types`. Operations access the inline buffer via GEP into the struct.
 
 **Operations:**
-```briv
+```briev
 defn SmallString::init<@N: Int>() -> SmallString<@N> {
     term SmallString { };  // zero-initialized: buf = zeros, len = 0, cap = N
 };
@@ -1085,7 +1085,7 @@ defn SmallString::as_UTF8_view(s: SmallString<@N>) -> UTF8View {
 **Purpose:** Compile-time-known string data in ROM (.rodata). Zero runtime cost.
 
 **Definition:**
-```briv
+```briev
 type StaticString {
     data: Int;    // ptr to .rodata (known at link time)
     len: Int;     // byte length (known at compile time)
@@ -1138,7 +1138,7 @@ if self.feature_sso_strings
 | U1b | Wire UTF8View into bootstrap | `lib/std/types.bv` or mod | ~5 min |
 | U1c | Update `llvm_type` for UTF8View (always `{i64,i64}`) | `emit_toplevel.rs` | ~5 min |
 | U1d | Exclude UTF8View from `type_is_heap_allocated` | `mod.rs` | ~5 min |
-| U1e | Add `__UTF8_validate` to C runtime | `lib/runtime/briv_rt.c` | ~30 min |
+| U1e | Add `__UTF8_validate` to C runtime | `lib/runtime/briev_rt.c` | ~30 min |
 | U1f | UTF8View operations (slice, find, eq, char_len) | `.bv` files + encoding dispatch wiring | ~2 hr |
 | U2a | Parser: accept `Type::Width` in generic type args | `src/parser/types.rs` | ~1 hr |
 | U2b | Normalizer: derive SmallString LLVM struct | `src/backend/llvm/normalizer.rs` | ~2 hr |
@@ -1166,9 +1166,9 @@ if self.feature_sso_strings
 
 ---
 
-## Fix Block: Pure-Briv Functions + txn Return Type + .#field Access
+## Fix Block: Pure-Briev Functions + txn Return Type + .#field Access
 
-**Motivation:** The pure-Briv `__memcmp`, `__UTF8_find`, `__UTF8_validate` functions in `UTF8view.bv` compile but can't be tested because:
+**Motivation:** The pure-Briev `__memcmp`, `__UTF8_find`, `__UTF8_validate` functions in `UTF8view.bv` compile but can't be tested because:
 1. The parser doesn't accept `-> RetType` on `txn` declarations
 2. Non-SSO String field access via `.data`/`.len` uses `extractvalue` on `ptr` type, which fails
 
@@ -1193,12 +1193,12 @@ Replace `output_type: None` with `output_type`.
 The `.#field` syntax (`s1.#data`, `s1.#len`) triggers `emit_layout_field_read` which reads by byte offset via `Load#(addr + offset, width)` — works for both SSO and non-SSO String because it doesn't rely on LLVM struct decomposition.
 
 Use in tests instead of `.data`/`.len`:
-```briv
+```briev
 let data_ptr: Int = s1.#data;
 let byte_len: Int = s1.#len;
 ```
 
-### F3: Correct Briv syntax in tests
+### F3: Correct Briev syntax in tests
 
 - `else if` chains → `when` guard chains
 - `txn -> RetType` → valid after F1
@@ -1270,7 +1270,7 @@ pub enum AllocStrategy {
     Inline,                    // inline in parent struct (SSO/SVO)
     RingBuffer,               // circular buffer, overwrite-oldest
     Config(String),           // named template from alloc-strategies.toml
-    Custom(String),           // user-provided Briv function name
+    Custom(String),           // user-provided Briev function name
 }
 ```
 

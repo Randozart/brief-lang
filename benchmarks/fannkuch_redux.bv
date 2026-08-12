@@ -1,4 +1,4 @@
-// Fannkuch-Redux — Permutation operations (Briv-idiomatic flat fields)
+// Fannkuch-Redux — Permutation operations (Briev-idiomatic flat fields)
 // Exercises: 16 flat Int fields, LCG, convergence loop.
 // Symmetric with C reference: saves p0 before rotation for checksum.
 

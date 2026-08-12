@@ -3,7 +3,7 @@
 **Status: removed.** The `~?` operator (and its `~/` term-until sibling) were
 dead tokens — lexed but never parsed, with no AST or codegen support. Phase 3
 removed them from the lexer. "Until this holds" contracts use the `[!/X]` /
-`[!/!X]` invert-contract form instead (see `learn-briv/02-contracts.md`); time
+`[!/!X]` invert-contract form instead (see `learn-briev/02-contracts.md`); time
 bounds use `within <bound> <unit>` on a watchdog. This page is preserved for
 historical context.
 

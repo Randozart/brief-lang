@@ -5,7 +5,7 @@
 
 ## Overview
 
-The LLVM backend at `src/backend/llvm.rs` (6024 lines) lags behind the interpreter (`src/interpreter.rs`, 2327 lines). The interpreter already supports the full Briv expression language: structs, enums, tuples, lists, hash maps, pattern matching, and block expressions. The LLVM backend either silently returns `0` or skips these AST nodes entirely.
+The LLVM backend at `src/backend/llvm.rs` (6024 lines) lags behind the interpreter (`src/interpreter.rs`, 2327 lines). The interpreter already supports the full Briev expression language: structs, enums, tuples, lists, hash maps, pattern matching, and block expressions. The LLVM backend either silently returns `0` or skips these AST nodes entirely.
 
 The interpreter IS the reference implementation. If the interpreter runs it, the LLVM backend should compile it. This document lays out the exact gaps and a plan to close them — without regressing any existing optimization paths.
 
@@ -56,7 +56,7 @@ SROA/mem2reg handles scalarization — the `alloca i64` + `GEP` + `store` + `loa
 **Status: Added.** CLBG n-body gravity simulation, 5 bodies, 50M timesteps.
 
 - 32 state fields (15 positions, 15 velocities, count, bound)
-- 5 Newton iterations per sqrt (pure Briv Float math — no FFI)
+- 5 Newton iterations per sqrt (pure Briev Float math — no FFI)
 - 10 unrolled pair interactions per tick
 - C reference uses `sqrt()` from libm
 
@@ -90,7 +90,7 @@ TopLevel::Struct(s) => {
 }
 ```
 
-Field order follows `StructField` declaration order. Each field occupies one `i64` slot (Briv's universal register width). Float fields use `i64` representation with `bitcast` for operations — same convention as the existing `%State` struct.
+Field order follows `StructField` declaration order. Each field occupies one `i64` slot (Briev's universal register width). Float fields use `i64` representation with `bitcast` for operations — same convention as the existing `%State` struct.
 
 #### Phase 1b: StructInstance Emission
 Replace the stub at line 2674:
@@ -288,13 +288,13 @@ The interpreter allocates `Vec<Value>` on the Rust heap for lists. The size is d
 ### Current LLVM Codegen
 - `Expr::ListLiteral` uses `alloca i64, i64 <n>` with a compile-time-constant `n` (line 2641)
 - No mechanism for runtime-sized allocation
-- Briv's philosophy: the compiler proves bounds from contracts at compile time
+- Briev's philosophy: the compiler proves bounds from contracts at compile time
 
 ### What's Needed
 For benchmarks like spectral-norm (which needs `float[N]` where N is a runtime parameter), there are two approaches:
 
 #### Approach A: Fixed-Max from Contract Range
-If the contract provides `0 <= N <= 8000`, the compiler can emit `alloca i64, i64 8002` — allocating the maximum. The actual used portion is N elements. This is Briv's idiomatic approach: contracts prove the bound, the compiler allocates accordingly.
+If the contract provides `0 <= N <= 8000`, the compiler can emit `alloca i64, i64 8002` — allocating the maximum. The actual used portion is N elements. This is Briev's idiomatic approach: contracts prove the bound, the compiler allocates accordingly.
 
 This requires the range analyzer (`src/analysis/range.rs`) to propagate bounds to collection allocations. When a `ListLiteral` or other collection constructor uses an expression whose range is known from contracts, the size is the upper bound.
 
@@ -302,7 +302,7 @@ This requires the range analyzer (`src/analysis/range.rs`) to propagate bounds t
 LLVM supports `alloca i64, i64 %runtime_size`. This is valid when the contract doesn't provide a compile-time-known bound but the runtime size is available.
 
 #### Recommendation
-Implement Approach A first. It's Briv-idiomatic and doesn't require any runtime machinery. If a contract can't bound a collection size, that's a type-system issue — the programmer adds a contract. For spectral-norm specifically, N is read from stdin or an env var (`__get_env_int`), so the contract is `N > 0`.
+Implement Approach A first. It's Briev-idiomatic and doesn't require any runtime machinery. If a contract can't bound a collection size, that's a type-system issue — the programmer adds a contract. For spectral-norm specifically, N is read from stdin or an env var (`__get_env_int`), so the contract is `N > 0`.
 
 The implementation: in `emit_expr`, when emitting a collection constructor that uses a runtime value for size, check `self.field_ranges` (or equivalent) for a bound on that value. Emit `alloca` with the upper bound from the range.
 
@@ -431,8 +431,8 @@ The implementation builds on itself — each layer depends on the previous:
 Each phase includes:
 - **Interpreter regression**: Run the interpreter on the new language features — it already handles them
 - **LLVM IR verification**: `llc -verify-machineinstrs` catches malformed IR
-- **Output equivalence**: Briv output = C reference output for the same inputs
-- **Performance parity**: Briv ≥ C (never weaker)
+- **Output equivalence**: Briev output = C reference output for the same inputs
+- **Performance parity**: Briev ≥ C (never weaker)
 
 ### Existing Tests
 - 400 tests pass in `cargo test --lib`

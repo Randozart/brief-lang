@@ -1,8 +1,8 @@
-# Research: VHDL Target for Embedded Briv
+# Research: VHDL Target for Embedded Briev
 
 ## Concept: SystemVerilog + VHDL Dual Output from .ebv
 
-This document explores adding VHDL as a second transpile target for Embedded Briv, alongside SystemVerilog. VHDL offers advantages in formal verification and certain hardware design workflows.
+This document explores adding VHDL as a second transpile target for Embedded Briev, alongside SystemVerilog. VHDL offers advantages in formal verification and certain hardware design workflows.
 
 ---
 
@@ -16,7 +16,7 @@ This document explores adding VHDL as a second transpile target for Embedded Bri
 | **Safety Critical** | Good | Excellent (DO-254) |
 | **Learning Curve** | Lower | Higher |
 
-### VHDL Advantages for Briv
+### VHDL Advantages for Briev
 
 1. **PSL (Property Specification Language)** - Native temporal logic assertions
 2. **Formal verification** - Tools like Cadence JasperGold support VHDL better
@@ -27,10 +27,10 @@ This document explores adding VHDL as a second transpile target for Embedded Bri
 
 ## 2. Target Architecture
 
-### 2.1 Briv → VHDL Flow
+### 2.1 Briev → VHDL Flow
 
-```briv
-// config.ebv - Briv embedded code
+```briev
+// config.ebv - Briev embedded code
 led_on: Bool = false
 
 node init [true][led_on] {
@@ -80,9 +80,9 @@ end architecture rtl;
 
 ## 3. Translation Mapping
 
-### 3.1 Briv → VHDL Types
+### 3.1 Briev → VHDL Types
 
-| Briv Type | VHDL Type | Notes |
+| Briev Type | VHDL Type | Notes |
 |------------|-----------|-------|
 | `Bool` | `std_logic` | Single bit |
 | `UInt[N]` | `std_logic_vector(N-1 downto 0)` | Unsigned |
@@ -92,8 +92,8 @@ end architecture rtl;
 
 ### 3.2 Transaction → Process
 
-```briv
-// Briv
+```briev
+// Briev
 node set_led(value) [true][led == value] {
     led = value
 }
@@ -109,8 +109,8 @@ end process;
 
 ### 3.3 Guard → Clocked Process
 
-```briv
-// Briv - reactive
+```briev
+// Briev - reactive
 node toggle [led_on][!led_on] {
     led_on = !led_on
 }
@@ -132,10 +132,10 @@ end process;
 
 ## 4. Contracts → PSL Assertions
 
-### 4.1 Briv Contract → VHDL/PSL
+### 4.1 Briev Contract → VHDL/PSL
 
-```briv
-// Briv with contract
+```briev
+// Briev with contract
 node increment [counter < 1000][counter == @counter + 1] {
     counter = @counter + 1
 }
@@ -174,7 +174,7 @@ end architecture rtl;
 
 ### 5.1 .ebv Source
 
-```briv
+```briev
 // kv260.ebv
 ALIAS led: Bool
 ALIAS button: Bool
@@ -235,7 +235,7 @@ end architecture rtl;
 
 ### 6.1 Target Selection
 
-```briv
+```briev
 // In .ebv or compile command
 TARGET sv "./output.sv"
 TARGET vhdl "./output.vhdl"
@@ -288,4 +288,4 @@ VHDL provides an additional path for teams requiring:
 - Advanced formal verification
 - ESL/various design methodologies
 
-*Both targets share the same Briv contract verification, ensuring correctness before transpilation.*
+*Both targets share the same Briev contract verification, ensuring correctness before transpilation.*

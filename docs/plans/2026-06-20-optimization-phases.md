@@ -8,10 +8,10 @@ Author: randozart
 
 ## Baseline (from `results-2026-06-16.txt`, commit `8914ac5`)
 
-| Benchmark | Briv (s) | C (s) | Ratio | Winner | Status |
+| Benchmark | Briev (s) | C (s) | Ratio | Winner | Status |
 |-----------|-----------|-------|-------|--------|--------|
 | knucleotide | 0.2272 | 0.1924 | 1.181x | C | **Regressed 1.5x** vs 0.149s baseline |
-| nbody_newton | 7.6564 | 8.7000 | 0.880x | Briv | **Regressed 2.2x** vs 3.48s baseline |
+| nbody_newton | 7.6564 | 8.7000 | 0.880x | Briev | **Regressed 2.2x** vs 3.48s baseline |
 | mandelbrot | 0.8973 | 0.6704 | 1.338x | C | **Regressed 1.78x** vs 0.505s baseline |
 | fannkuch_redux | 0.0882 | 0.0674 | 1.310x | C | Improved from 2.25x gap to 1.7x |
 | fasta | 26.8059 | 0.2720 | 98.539x | C | **Bug**: putchar# flushes every char |

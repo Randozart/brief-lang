@@ -1,8 +1,8 @@
-# The zero-friction FFI gate — Briv at every host's native call
+# The zero-friction FFI gate — Briev at every host's native call
 
 **Date:** 2026-08-04
 **Status:** Active plan
-**Branch:** `glue-host-callable` (worktree `../briv-compiler-glue-host`)
+**Branch:** `glue-host-callable` (worktree `../briev-compiler-glue-host`)
 **Related:** `docs/plans/2026-08-04-ship-common-language-environments.md`,
 `docs/guides/ffi-and-export.md`
 
@@ -10,7 +10,7 @@
 
 ## Goal
 
-Briv sits natively next to each host language: a host calls a Briv export as
+Briev sits natively next to each host language: a host calls a Briev export as
 if calling a super-efficient version of itself. The boundary is **frictionless**
 — dispatch at the host's FFI floor, compute at native width with zero boxing
 and zero-copy composites. **FFI, not a backend**: no per-language code-emission
@@ -27,11 +27,11 @@ gate proves we sit *on* the floor, never above it.
 
 ## The gate (committed, toolchain-guarded)
 
-- **Gate A (real work):** `Briv.feature_hash` from each host vs that host's
+- **Gate A (real work):** `Briev.feature_hash` from each host vs that host's
   `native_feature_hash` (same FNV-1a, 64-bit wrap — Python masks to 64 bits).
-  Target ratio **≤ 1.0** always; **< 0.1** for Python/Lua (Briv compute is
+  Target ratio **≤ 1.0** always; **< 0.1** for Python/Lua (Briev compute is
   native machine code).
-- **Gate B (pure dispatch):** `Briv.add` vs the host's FFI floor (minimal
+- **Gate B (pure dispatch):** `Briev.add` vs the host's FFI floor (minimal
   C-extension / NAPI / cgo / JNI / Lua-C / direct C++) vs the host's
   pure-internal `add`. Reports which tier each host is on and any shim sitting
   above its floor.
@@ -60,8 +60,8 @@ zero-overhead regression gate. Record both tables in this plan + the roster doc.
 
 ## Results (2026-08-04)
 
-**Gate A — real work (Briv feature_hash vs native feature_hash, median ns/call):**
-| host | Briv | native | ratio |
+**Gate A — real work (Briev feature_hash vs native feature_hash, median ns/call):**
+| host | Briev | native | ratio |
 |------|-------|--------|-------|
 | C | 1220 | 1185 | 1.03 |
 | C++ | 1243 | 1227 | 1.01 |
@@ -71,10 +71,10 @@ zero-overhead regression gate. Record both tables in this plan + the roster doc.
 | Python | 1466 | 348588 | 0.004 |
 | Node | 1394 | 267169 | 0.005 |
 
-Parity for compiled hosts; **14–238× faster** for interpreted hosts (Briv's
+Parity for compiled hosts; **14–238× faster** for interpreted hosts (Briev's
 compute is native machine code).
 
-**Gate B — pure dispatch (Briv add vs native internal add):**
+**Gate B — pure dispatch (Briev add vs native internal add):**
 C 1.23, C++ 1.44, Lua 1.19, **Python 0.63**, Node 2.15, Java 5.99, Go 143×.
 Python's METH_FASTCALL shim now dispatches faster than Python's own function
 call (76 vs 121 ns). Node/Java/Go sit at their structural FFI bounds
@@ -93,4 +93,4 @@ binary (a cgo-linked binary distorted it).
 
 ## Out of scope
 
-Per-language code-emission backends (Go/Java transpilation) — Briv is an FFI.
+Per-language code-emission backends (Go/Java transpilation) — Briev is an FFI.

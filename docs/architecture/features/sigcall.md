@@ -6,7 +6,7 @@
 
 ## Overview
 
-`sig` (signature) declarations are Briv's mechanism for declaring an interface contract. They serve two roles:
+`sig` (signature) declarations are Briev's mechanism for declaring an interface contract. They serve two roles:
 
 1. **Top-level declaration**: `sig name: params -> output_type;` declares a callable signature
 2. **Higher-order function types**: `sig_name` used as a type constrains which functions can be passed
@@ -15,7 +15,7 @@
 
 ### Top-Level Declaration
 
-```briv
+```briev
 // Simple signature
 sig print: String -> Bool;
 
@@ -47,7 +47,7 @@ sig my_sig: Int -> Bool = some_defn;
 
 Signatures can be used as first-class function types:
 
-```briv
+```briev
 sig print_func: String -> Bool;
 
 defn my_printer(msg: String) [msg != ""][term == true] -> Bool {
@@ -68,7 +68,7 @@ Here `sig_print_func` (the sig name prefixed by `sig_`) acts as a function type 
 
 ### Union Return Types
 
-```briv
+```briev
 sig fetch: Int -> Int | Error;
 
 txn load [status == false][status == true] {

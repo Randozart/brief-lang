@@ -221,8 +221,8 @@ fallthrough paths with explicit `return`, then extract into a submodule.
 Once the type-checker and codegen changes are applied, test all three examples:
 
 ```
-cargo run --bin briv-compiler -- examples/inop-float4.bv
-cargo run --bin briv-compiler -- examples/inop-custom-types.bv
+cargo run --bin briev-compiler -- examples/inop-float4.bv
+cargo run --bin briev-compiler -- examples/inop-custom-types.bv
 ```
 
 Expected: generates LLVM IR with proper type-aware operations.

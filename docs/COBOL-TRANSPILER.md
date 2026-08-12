@@ -1,10 +1,10 @@
-# Briv-to-COBOL Transpiler
+# Briev-to-COBOL Transpiler
 
-A production-ready COBOL code generator that transpiles Briv's declarative, state-based smart contracts into IBM Enterprise COBOL for z/OS.
+A production-ready COBOL code generator that transpiles Briev's declarative, state-based smart contracts into IBM Enterprise COBOL for z/OS.
 
 ## Overview
 
-Briv is a contract-first programming language designed for financial systems. This transpiler generates **bank-ready COBOL** with:
+Briev is a contract-first programming language designed for financial systems. This transpiler generates **bank-ready COBOL** with:
 
 - **Contract verification** - Pre/post conditions become runtime guards
 - **Zero-cost abstraction** - No runtime library required
@@ -14,18 +14,18 @@ Briv is a contract-first programming language designed for financial systems. Th
 ## Quick Start
 
 ```bash
-# Compile a Briv file to COBOL
-cargo run --bin briv-compiler -- cobol mycontract.bv --out output/
+# Compile a Briev file to COBOL
+cargo run --bin briev-compiler -- cobol mycontract.bv --out output/
 
 # Or after installing
-briv cobol contract.brv --out ./cobol_output
+briev cobol contract.brv --out ./cobol_output
 ```
 
 ## Example Transpilation
 
-### Briv Source (`transfer.br`)
+### Briev Source (`transfer.br`)
 
-```briv
+```briev
 let balance: Int = 1000;
 let transfer_in_progress: Bool = false;
 
@@ -60,7 +60,7 @@ PROCEDURE DIVISION.
 MAIN-LOGIC SECTION.
     * PRE-CONDITION: ((transfer_in_progress == false) and (balance >= 100))
     IF NOT (((WS-TRANSFER_IN_PROGRESS = 'N') AND (WS-BALANCE >= 100)))
-        DISPLAY "BRIV CONTRACT FAILED: PRECONDITION: ..."
+        DISPLAY "BRIEV CONTRACT FAILED: PRECONDITION: ..."
         MOVE 4000 TO RETURN-CODE
         GOBACK
     END-IF.
@@ -73,7 +73,7 @@ MAIN-LOGIC SECTION.
 
     * POST-CONDITION: (balance == (... - 100))
     IF NOT ((WS-BALANCE = (WS-OLD-BALANCE - 100)))
-        DISPLAY "BRIV CONTRACT FAILED: POSTCONDITION: ..."
+        DISPLAY "BRIEV CONTRACT FAILED: POSTCONDITION: ..."
         MOVE 4000 TO RETURN-CODE
         GOBACK
     END-IF.
@@ -88,9 +88,9 @@ END PROGRAM TRANSFER.
 
 ### Contract Enforcement
 
-Every Briv transaction has optional pre and post conditions:
+Every Briev transaction has optional pre and post conditions:
 
-```briv
+```briev
 txn withdraw [balance >= amount]
   [balance == @balance - amount]
 { ... }
@@ -103,7 +103,7 @@ These compile to **hard runtime guards** in COBOL:
 
 ### Type Mapping
 
-| Briv Type | COBOL PIC Clause | Notes |
+| Briev Type | COBOL PIC Clause | Notes |
 |------------|-----------------|-------|
 | `Int` | `PIC S9(18) COMP-5` | Native binary |
 | `Bool` | `PIC X` + 88-level | Condition names |
@@ -113,9 +113,9 @@ These compile to **hard runtime guards** in COBOL:
 
 ### State Management
 
-Briv state maps directly to COBOL's `WORKING-STORAGE SECTION`:
+Briev state maps directly to COBOL's `WORKING-STORAGE SECTION`:
 
-```briv
+```briev
 let counter: Int = 0;
 let enabled: Bool = false;
 ```
@@ -132,7 +132,7 @@ WORKING-STORAGE SECTION.
 
 Fine-tune COBOL generation with attributes:
 
-```briv
+```briev
 # Custom PIC clause
 state balance: Int #[cobol, type("PIC S9(15) COMP-3")]
 
@@ -153,10 +153,10 @@ txn critical_op() #[cobol, abend]
 
 ## File Extensions
 
-- **`.br`** - Pure Briv (specification only)
-- **`.bv`** - Briv with view/rendering
-- **`.ebv`** - Embedded Briv (hardware)
-- **`.rbv`** - Rendered Briv (compiled to JS)
+- **`.br`** - Pure Briev (specification only)
+- **`.bv`** - Briev with view/rendering
+- **`.ebv`** - Embedded Briev (hardware)
+- **`.rbv`** - Rendered Briev (compiled to JS)
 
 ## Error Codes
 
@@ -170,19 +170,19 @@ txn critical_op() #[cobol, abend]
 
 ```bash
 # Basic compilation
-briv-compiler cobol <file> [--out <directory>]
+briev-compiler cobol <file> [--out <directory>]
 
 # With custom output directory
-briv-compiler cobol contracts/transfer.br --out ./cobol_gen
+briev-compiler cobol contracts/transfer.br --out ./cobol_gen
 
 # With verbose output
-briv-compiler cobol -v mycontract.bv
+briev-compiler cobol -v mycontract.bv
 ```
 
 ## Architecture
 
 ```
-Briv Source (.bv)
+Briev Source (.bv)
        │
        ▼
 ┌──────────────────┐
@@ -224,7 +224,7 @@ Briv Source (.bv)
 
 ## Integration with Existing COBOL
 
-For calling Briv-generated COBOL from existing mainframe programs:
+For calling Briev-generated COBOL from existing mainframe programs:
 
 ```cobol
        CALL 'TRANSFER' USING LS-BALANCE, LS-AMOUNT
@@ -235,7 +235,7 @@ For calling Briv-generated COBOL from existing mainframe programs:
 
 ## Requirements
 
-- Briv compiler (this repository)
+- Briev compiler (this repository)
 - IBM Enterprise COBOL 5.1+ or GnuCOBOL
 - z/OS, VSE, or Linux (GnuCOBOL)
 

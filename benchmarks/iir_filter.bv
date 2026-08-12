@@ -12,7 +12,7 @@
 // Equivalent C reference: iir_filter_c.c
 //
 // Build:
-//   cargo run --bin briv-compiler -- build --llvm benchmarks/iir_filter.bv -o benchmarks/iir_filter.ll
+//   cargo run --bin briev-compiler -- build --llvm benchmarks/iir_filter.bv -o benchmarks/iir_filter.ll
 //   clang -O3 -march=native -o benchmarks/iir_filter benchmarks/iir_filter.ll
 //
 // Benchmarks:

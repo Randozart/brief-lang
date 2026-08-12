@@ -9,7 +9,7 @@ for the wrong reasons (precomputation, fold elimination, or silently
 incorrect code). Every benchmark in the suite has a C reference that
 produces the same output for BOUND=5 across all 20+ runtime benchmarks.
 
-**How**: The benchmark harness runs each Briv binary and C binary with
+**How**: The benchmark harness runs each Briev binary and C binary with
 identical environment variables (`BOUND=5`), captures stdout, and compares
 byte-for-byte. The `build_and_bench.sh` script reports "MATCH" or
 "MISMATCH" for each benchmark. The suite includes symmetric and idiomatic

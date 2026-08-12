@@ -32,7 +32,7 @@ Author: Design discussion between randozart and OpenCode
 
 ## 1. Executive Summary
 
-Briv's type system has one true primitive: **`Bits`**. A contiguous block of N bytes of
+Briev's type system has one true primitive: **`Bits`**. A contiguous block of N bytes of
 storage. Everything else — `Int`, `Float`, `String`, `List<T>`, `HashMap<K,V>`, user-defined
 types — is `Bits` with properties attached. There are zero "built-in types" in the semantic
 sense. The compiler provides convenience fast-paths for well-known types, but the *semantics*
@@ -62,7 +62,7 @@ Computer science truth: a type is a constraint on bit pattern interpretation. `F
 not a fundamentally different thing from `Int` — it's 64 bits of storage whose projections
 call `fadd#` instead of `sadd#`. A type is bits with a *lens*.
 
-```briv
+```briev
 // These are the same bits:
 let a: Int   = 42;
 let b: Float = reinterpret<Float>(a);  // same 64 bits, different projections
@@ -80,7 +80,7 @@ All type-specific operations enter through `name#()` intrinsics. The `#` suffix 
 visible marker that the compiler owns these:
 
 ```
-Safe Briv Space            Airlock (name#)             Host / LLVM
+Safe Briev Space            Airlock (name#)             Host / LLVM
 ─────────────────    ──────────────────────────    ─────────────────
 Contracts everywhere   compiler's intrinsic table    raw instructions
 Reactive transactions                                  fadd, store, load
@@ -94,7 +94,7 @@ operations like `sqrt#(9.0)` while preserving observable I/O.
 
 The `@/N`, `@/M..N`, `@/xN` syntax declares bit-precise type layouts:
 
-```briv
+```briev
 type Header : Bits @/0..31 {
     Version = _ @/0..3;            // bits 0-3
     Type    = _ @/4..7;            // bits 4-7
@@ -145,7 +145,7 @@ for human comprehension:
 The nominal layer is **always peelable**. For any value `v`, the
 developer can reach its `Bits` representation through:
 
-```briv
+```briev
 let raw: Bits = v as Bits;           // Strip the nominal lens
 let field = raw @/64..127;           // Access raw bit field
 let restored: String = raw as String; // Reapply the nominal lens
@@ -251,7 +251,7 @@ the bit representation itself.
 
 Types override these defaults by defining a binding with the same name:
 
-```briv
+```briev
 type String : Bits @/0..127 {
     Bytes = 16;
     Size = _ @/64..127;        // bits 64-127 = length (byte offset 8-15)
@@ -282,7 +282,7 @@ These are silent because they operate on the raw bit pattern. No interpretation 
 The default is "same bit pattern." A type like `Float` overrides `Eq` to implement
 IEEE 754 NaN semantics:
 
-```briv
+```briev
 type Float : Bits @/0..63 {
     Bytes = 8;
     Eq(rhs) = _ :> fcmp_oeq#(rhs);   // ordered equality — NaN != NaN
@@ -416,7 +416,7 @@ When `T` is a generic type parameter (`T : Bits`), operator projections
 cannot be resolved at declaration time. The binding `Add` on `T` is
 unknown until `T` is concretely instantiated:
 
-```briv
+```briev
 defn double<T: Bits>(x: T) -> T {
     term x + x;  // What is `+` on T? Unknown until T is known.
 };
@@ -468,10 +468,10 @@ guarantees that the projection will have a concrete binding.
 
 #### Syntax for Constrained Generics
 
-To support Pass 1 checking, Briv introduces `where` clauses on
+To support Pass 1 checking, Briev introduces `where` clauses on
 generic type parameters:
 
-```briv
+```briev
 defn double<T: Bits where Add(T)>(x: T) -> T {
     term x + x;
 };
@@ -482,7 +482,7 @@ defn sum<T: Bits where Add(T)>(list: List<T>) -> T { ... };
 The `where` clause lists the projection names that the generic type
 must provide. The compiler verifies the constraint at each call site:
 
-```briv
+```briev
 let i: Int = double(5);       // ✓ Int defines Add
 let f: Float = double(3.14);  // ✓ Float defines Add
 let s: String = double("x");  // ✗ String does not define Add
@@ -490,12 +490,12 @@ let s: String = double("x");  // ✗ String does not define Add
 
 #### Comparison with Other Languages
 
-| Language | Generics mechanism | How `+` resolves | Briv advantage |
+| Language | Generics mechanism | How `+` resolves | Briev advantage |
 |----------|-------------------|------------------|----------------|
-| Rust | Trait bounds (`T: Add`) | Trait resolution, associated types | Same model — Briv's `where` is explicit |
+| Rust | Trait bounds (`T: Add`) | Trait resolution, associated types | Same model — Briev's `where` is explicit |
 | C++ | Templates (SFINAE) | Late binding, substitution failure | Earlier errors, no template bloat |
 | Java | Type erasure | Boxing + virtual dispatch | No boxing, zero-cost |
-| **Briv** | **`where` clauses + two-pass** | **Pass 1: structural. Pass 2: intrinsic.** | **TypeUniverse freeze = fast resolution** |
+| **Briev** | **`where` clauses + two-pass** | **Pass 1: structural. Pass 2: intrinsic.** | **TypeUniverse freeze = fast resolution** |
 
 #### Implementation
 
@@ -588,7 +588,7 @@ pub struct ResolvedType {
 
 ### 6.4 Parsing Example
 
-```briv
+```briev
 type Int : Bits @/0..63 {
     Bytes = 8;                  // No `_` → static property
     Alignment = 8;              // No `_` → static property
@@ -648,7 +648,7 @@ not by type name:
 ```
 
 This is actually *more* precise than the current system. Two loads at different
-state-struct field indices never alias regardless of what Briv types the fields
+state-struct field indices never alias regardless of what Briev types the fields
 hold. The TBAA tree describes the struct layout, not the type ontology — which is
 what LLVM actually uses it for.
 
@@ -703,7 +703,7 @@ just the "it's an i64" structural fact:
 
 ```llvm
 ; TBAA tree:
-!0 = !{!"Briv"}
+!0 = !{!"Briev"}
 !1 = !{!"state_field_0#", !0}       ; field index for list_a
 !2 = !{!"state_field_1#", !0}       ; field index for list_b
 !3 = !{!"heap_List_Int_element", !1}   ; List<Int> elements loaded via list_a
@@ -798,7 +798,7 @@ language evolves.
 
 ## 8. Tiered Property Recognition
 
-Different Briv file suffixes recognize different subsets of type properties.
+Different Briev file suffixes recognize different subsets of type properties.
 This is not a new restriction — it formalizes what the tier system already does.
 
 ### 8.1 Property Recognition Table
@@ -829,8 +829,8 @@ This is not a new restriction — it formalizes what the tier system already doe
 A property that a tier doesn't recognize is *ignored*, not *errored*. The type
 definition is still valid — the tier simply doesn't use that information:
 
-```briv
-// In .cbv (Circuit Briv), this type is valid but `Codec` is ignored.
+```briev
+// In .cbv (Circuit Briev), this type is valid but `Codec` is ignored.
 // The 16 bytes remain opaque Bits. No codec operations are emitted.
 type String : Bits {
     Bytes = 16;
@@ -864,7 +864,7 @@ The `&` sigil marks the mutation target. This is unchanged from the current desi
 
 All arrow operations are ❌ on bare `Bits`. A type must define them:
 
-```briv
+```briev
 type List<T> : Bits @/0..191 {
     Bytes = 24;  // ptr + len + cap
     ArrowPush(v) = ...;    // grow buffer, append v
@@ -907,7 +907,7 @@ of the same concept.
 
 ### 10.2 Tuple Bracket Indexing (NEW)
 
-```briv
+```briev
 let pair: (Int, String) = (42, "hello");
 let first = pair[0];   // → 42  (previously pair :> 0)
 let second = pair[1];  // → "hello"
@@ -921,7 +921,7 @@ index `n`. This replaces `ProjectionTarget::Index(n)`.
 
 Within a TypeDef body, `@/` declares bit-precise sub-fields:
 
-```briv
+```briev
 type RISC_V_Instruction : Bits @/0..31 {
     Opcode = _ @/0..6;
     Rd     = _ @/7..11;
@@ -935,7 +935,7 @@ type RISC_V_Instruction : Bits @/0..31 {
 Each `Field = _ @/start..end` desugars to a projection named `Field` that
 extracts the bit range. This is sugar for:
 
-```briv
+```briev
 Field = _[start..end];   // via bracket slicing
 ```
 
@@ -946,14 +946,14 @@ Field = _[start..end];   // via bracket slicing
 ### 11.1 Proving Mastery of Our Own System
 
 The Bits thesis is most powerfully demonstrated when we define a helper
-template *in Briv itself* using nothing but the primitives available to
+template *in Briev itself* using nothing but the primitives available to
 every user. The `slot` template is that demonstration.
 
 `slot(n)` expresses "extract byte-aligned field N" as a bit-range projection.
 It is defined in the `$` macro system, and its expansion uses only `@/`,
 which is a silent projection available on all `Bits`:
 
-```briv
+```briev
 // ============================================================
 // slot(n) — Bit-field accessor template
 // ============================================================
@@ -962,7 +962,7 @@ which is a silent projection available on all `Bits`:
 // The compiler recognizes byte-aligned `@/` ranges and emits
 // GEP + i64 load instead of shift+mask for misaligned ranges.
 //
-// Defined entirely in user-space Briv. No compiler magic.
+// Defined entirely in user-space Briev. No compiler magic.
 //
 $ slot(n) {
     quote { _ @/(n * 8)..(n * 8 + 7) }
@@ -971,7 +971,7 @@ $ slot(n) {
 
 ### 11.2 Usage
 
-```briv
+```briev
 // A 24-byte List: ptr at slot 0, len at slot 1, cap at slot 2
 type List<T> : Bits @/0..191 {
     Size = slot(1);       // → _ @/8..15      → GEP + load i64 at offset 8
@@ -991,7 +991,7 @@ type String : Bits @/0..127 {
 
 Users can define their own templates for common bit-field patterns:
 
-```briv
+```briev
 // Word accessor: extract N-byte word at byte offset
 $ word(n, bytes) {
     quote { _ @/(n * 8)..(n * 8 + bytes * 8 - 1) }
@@ -1044,7 +1044,7 @@ flexibility of the system.
 
 ### 12.2 Option A: Directly from `Bits`
 
-```briv
+```briev
 type HashMap<K, V> : Bits {
     // Layout: ptr to slot array + length + capacity
     // Each slot: key | value | occupancy flag (1 bit)
@@ -1062,7 +1062,7 @@ The `_lookup#` intrinsic does hash-and-probe. The projection expressions
 compose: `Get` is `Contains` with a `:> Value` lens tacked on. A slot
 is conceptually:
 
-```briv
+```briev
 // Each slot in the array:
 type Slot<K, V> : Bits @/0..(KBitWidth + VBitWidth) {
     Occupied = _ @/(KBitWidth + VBitWidth)..(KBitWidth + VBitWidth);  // 1-bit flag
@@ -1073,7 +1073,7 @@ type Slot<K, V> : Bits @/0..(KBitWidth + VBitWidth) {
 
 ### 12.3 Option B: Inherited from `List<(K, V)>`
 
-```briv
+```briev
 type HashMap<K, V> : List<(K, V)> {
     AllowIndex = false;            // raw bracket access would bypass hash
     Contains(key) = ...;           // hash-based lookup
@@ -1107,7 +1107,7 @@ results for the same inputs.
 ### 13.1 The Problem
 
 Cross-language FFI is one of the most error-prone areas in systems
-programming. Passing a `String` from Briv to Rust or C typically
+programming. Passing a `String` from Briev to Rust or C typically
 requires serialization wrappers, memory copies, and manual layout
 verification. Under the Bits Thesis, this becomes a zero-cost
 "re-lensing" operation.
@@ -1127,7 +1127,7 @@ without touching payload data.
 
 ### 13.3 Scalar Example: Float as CFloat
 
-```briv
+```briev
 let bf: Float = 1.23;
 let cf: CFloat = reinterpret<CFloat>(bf);
 ```
@@ -1138,7 +1138,7 @@ only difference is TBAA metadata node — LLVM sees the same register.
 The `reinterpret` tells the backend: "Swap the TBAA metadata node for
 alias analysis; emit no move, no conversion, no copy."
 
-### 13.4 Complex Structure Example: Briv String → Rust String
+### 13.4 Complex Structure Example: Briev String → Rust String
 
 Rust's standard `String` is 24 bytes:
 
@@ -1146,15 +1146,15 @@ Rust's standard `String` is 24 bytes:
 RustString = { ptr: i8*, capacity: u64, length: u64 }
 ```
 
-Briv's standard `String` is 16 bytes:
+Briev's standard `String` is 16 bytes:
 
 ```
-BrivString = { ptr: i8*, length: u64 }
+BrievString = { ptr: i8*, length: u64 }
 ```
 
 Under the Bits Thesis, define `RustString` to match Rust's ABI:
 
-```briv
+```briev
 type RustString : Bits @/0..191 {
     Bytes = 24;
     Ptr  = _ @/0..63;
@@ -1165,9 +1165,9 @@ type RustString : Bits @/0..191 {
 
 Convert without copying character data:
 
-```briv
-let briv: String = read_file("data.txt")?;
-let rust: RustString = (briv.Ptr, briv.Len, briv.Len) as RustString;
+```briev
+let briev: String = read_file("data.txt")?;
+let rust: RustString = (briev.Ptr, briev.Len, briev.Len) as RustString;
 ```
 
 Rust's `String::from_raw_parts` can take ownership of the pointer
@@ -1189,16 +1189,16 @@ Before permitting the cast, the type checker proves:
 
 ### 13.6 FFI Without Serialization Boilerplate
 
-Standard Briv FFI (`frgn from "c"` or `frgn from "rust"`) uses
+Standard Briev FFI (`frgn from "c"` or `frgn from "rust"`) uses
 these layout proofs to pass complex types across the boundary:
 
-```briv
+```briev
 frgn process_string(s: RustString) -> Int from "rust";
 
-let briv_str: String = read_file("input.txt")?;
-let rust_str: RustString = (briv_str.Ptr, briv_str.Len, briv_str.Len) as RustString;
+let briev_str: String = read_file("input.txt")?;
+let rust_str: RustString = (briev_str.Ptr, briev_str.Len, briev_str.Len) as RustString;
 let result: Int = process_string(rust_str);
-// After the call, briv_str's pointer is owned by Rust.
+// After the call, briev_str's pointer is owned by Rust.
 // The Borrow Checker / linearity analysis tracks this.
 ```
 
@@ -1213,7 +1213,7 @@ proven at compile time.
 | Rust FFI | `CString::new()` heap alloc + copy | Unsafe block required |
 | Go (cgo) | `C.CString()` alloc + copy, must free | Manual |
 | Java (JNI) | `NewStringUTF` copies, env ptr overhead | GC-managed |
-| **Briv** | **Zero-copy re-lensing** | **Proof-checked layout compatibility** |
+| **Briev** | **Zero-copy re-lensing** | **Proof-checked layout compatibility** |
 
 ### 13.8 Foreign Types as First-Class Natives
 
@@ -1221,17 +1221,17 @@ proven at compile time.
 
 The Bits Thesis does not distinguish "native" types from "foreign"
 types. A type is a lens over memory — nothing more. If you know the
-memory layout of a foreign structure, you can define it as a Briv type
+memory layout of a foreign structure, you can define it as a Briev type
 and use it with the same syntax, optimization, and safety guarantees as
 any built-in type.
 
 Foreign types are **not** second-class citizens wrapped in opaque
-pointers. They are first-class native Briv types whose bit layout
+pointers. They are first-class native Briev types whose bit layout
 happens to match another language's ABI.
 
-#### Example: C++ `std::string` as a Native Briv Type
+#### Example: C++ `std::string` as a Native Briev Type
 
-```briv
+```briev
 // C++ std::string on x86_64 libstdc++:
 // { pointer: i8*, length: u64, capacity: u64 }
 type CppString : Bits @/0..191 {
@@ -1242,16 +1242,16 @@ type CppString : Bits @/0..191 {
     Len = _ @/64..127;
     Cap = _ @/128..191;
 
-    // Native projections — same interface as Briv String
+    // Native projections — same interface as Briev String
     Size  = _ :> Len;
     At(i) = _ .#Ptr :> load_u8#(i);
 };
 ```
 
 After defining this type, any `std::string` returned by a C++ library
-can be used as a native Briv value:
+can be used as a native Briev value:
 
-```briv
+```briev
 frgn get_message() -> CppString from "rust" with "cpp_bridge";
 
 let msg: CppString = get_message();
@@ -1272,7 +1272,7 @@ The backend compiles `msg[0]` to:
 %char = load i8, i8* %elem_ptr, align 1
 ```
 
-This is identical to what Briv's native `String` emits for character
+This is identical to what Briev's native `String` emits for character
 access. LLVM does not know — and does not need to know — that the
 underlying allocation was created by a C++ allocator.
 
@@ -1305,7 +1305,7 @@ actual work.
 
 A `CString` is defined as a single 8-byte pointer with lazy projections:
 
-```briv
+```briev
 type CString : Bits @/0..63 {
     Bytes = 8;
     // The raw char* pointer — zero-cost to capture
@@ -1317,7 +1317,7 @@ type CString : Bits @/0..63 {
     // Deferred length calculation — only if explicitly requested
     Size = _ .#Ptr :> strlen#;
 
-    // Conversion to native Briv String — materializes on demand
+    // Conversion to native Briev String — materializes on demand
     ToString() = _ :> rebuild#(Size, Ptr);
 };
 ```
@@ -1334,11 +1334,11 @@ type CString : Bits @/0..63 {
 
 #### Why the Lazy Pattern Matters
 
-If Briv code only reads characters from a C-string, `strlen` is
+If Briev code only reads characters from a C-string, `strlen` is
 **never called**. This eliminates the single largest cost of C
 string interop (the mandatory O(N) scan) when it is not needed.
 
-```briv
+```briev
 frgn getenv(name: CString) -> CString from "c";
 
 let path: CString = getenv("PATH");
@@ -1347,23 +1347,23 @@ let first_char: Char = path[0];    // 1 load — strlen never runs
 let len: Int = path .#Size;       // O(N) — first and only scan
 ```
 
-#### The Reverse Direction: Briv String → C `char*`
+#### The Reverse Direction: Briev String → C `char*`
 
-Passing a Briv string to a C function that expects `const char*` is
+Passing a Briev string to a C function that expects `const char*` is
 **zero-cost in both common cases**:
 
 **Static string literals:**
-```briv
+```briev
 frgn puts(s: CString) -> Int from "c";
 puts("hello");  // Zero-cost — already null-terminated in .rodata
 ```
 
 The compiler ensures all string constants in `.rodata` have a trailing
-`\0`. The pointer at offset 0 of the Briv String struct is already a
+`\0`. The pointer at offset 0 of the Briev String struct is already a
 valid C string.
 
 **Dynamic strings:**
-```briv
+```briev
 let s: String = read_file("input.txt")?;
 let result = puts(s .#Ptr as CString);  // Zero-cost
 ```
@@ -1409,7 +1409,7 @@ Foreign pointer ──→ Minimal Bits lens ──→ Lazy projections
 
 The proof engine (`?#`) can verify properties about lazy projections:
 
-```briv
+```briev
 defn safe_read(c: CString) -> Char {
     // Mistake: accessing index without checking Size
     // The proof engine can warn: "strlen may not have been called"
@@ -1439,7 +1439,7 @@ out-of-bounds access when Size is unknown.
 #### Implementation Cost
 
 Adding a lazy foreign projection type requires:
-- A type definition in user-space Briv (no compiler changes)
+- A type definition in user-space Briev (no compiler changes)
 - An intrinsic for the O(N) operation (`strlen#`, `parse_headers#`, etc.)
   that the compiler already provides or can be added as a `name#` entry
 
@@ -1457,7 +1457,7 @@ alongside the `.o` library:
 |--------|--------|----------|
 | C `.h` header | `typedef struct { ... }` | Bit-exact struct layouts, function declarations for exported txns |
 | Rust crate | `#[repr(C)]` struct + `extern "C"` fn | Same layouts, safe wrappers around exported symbols |
-| Python extension | `ctypes` / `pyo3` stub | Memory maps to Briv's exported struct layouts |
+| Python extension | `ctypes` / `pyo3` stub | Memory maps to Briev's exported struct layouts |
 | Zig bindings | `extern struct` | Native Zig layout declarations |
 
 **How it works:** The compiler iterates `ResolvedType::projections` and
@@ -1466,8 +1466,8 @@ the parameter types from the transaction's type signature, looks up each
 parameter's layout in the TypeUniverse, and emits the corresponding struct
 definition in the target language. No manual wrapper code.
 
-```briv
-// In Briv:
+```briev
+// In Briev:
 sig #export fn process(packet: Packet) -> Result<Int, Error>;
 
 // Generated C header:
@@ -1481,15 +1481,15 @@ Estimated effort: 3-5 days for C + Rust generation.
 
 ### 13.12 Foreign Destructor Binding
 
-When Briv imports a foreign type (e.g., Rust `Vec<T>` or C++
+When Briev imports a foreign type (e.g., Rust `Vec<T>` or C++
 `std::vector`), the type's physical layout is native, but the
-allocation lifecycle must be respected. If Briv drops or mutates
+allocation lifecycle must be respected. If Briev drops or mutates
 the foreign value without calling its destructor, memory corruption
 or double-frees result.
 
 **The pattern:**
 
-```briv
+```briev
 type RustVec : Bits @/0..191 {
     Ptr  = _ @/0..63;  // data pointer
     Len  = _ @/64..127; // length
@@ -1501,7 +1501,7 @@ type RustVec : Bits @/0..191 {
 The compiler associates a foreign destructor with the type via an
 `OnExit` binding:
 
-```briv
+```briev
 type RustVec : Bits {
     Bytes = 24;
     OnExit = __rust_vec_drop#;   // called when value goes out of scope
@@ -1521,13 +1521,13 @@ ownership semantics (safe for C/POD types).
 
 ### 13.13 Export Symbol Mangling and the `#export` Directive
 
-To make Briv transactions callable from other languages, the compiler
+To make Briev transactions callable from other languages, the compiler
 needs to export symbols with the target language's calling convention
 and name mangling scheme.
 
 **The `#export` directive:**
 
-```briv
+```briev
 sig #export("process_data") fn process(p: Packet) -> Result<Int, Error>;
 ```
 
@@ -1541,12 +1541,12 @@ This tells the backend to emit a globally-visible symbol with:
 | Python | `process_data` | PyObject* calling convention |
 
 The `#export` sigil marks the transaction for export. The optional
-string argument specifies the exported name (defaults to the Briv
+string argument specifies the exported name (defaults to the Briev
 identifier name).
 
 **Calling convention for exported txns:** Exported transactions receive
 a pointer to the program state struct as their first argument, followed
-by the transaction parameters. The state pointer is the Briv runtime's
+by the transaction parameters. The state pointer is the Briev runtime's
 equivalent of a `self` parameter:
 
 ```c
@@ -1555,7 +1555,7 @@ int64_t process(State* state, Packet packet);
 ```
 
 The caller is responsible for allocating and initializing the state
-(which the Briv compiler can also generate as a `state_init()` helper).
+(which the Briev compiler can also generate as a `state_init()` helper).
 
 **Implementation cost:**
 - `sig #export` parser support — already partially modeled by `SigModifier`
@@ -1659,7 +1659,7 @@ Estimated: 1 day
 | 2. Cover: Bits thesis, tier tables, silent rules, desugaring, TBAA, optimization | — | None | — |
 | 3. Include FAQ: "But what about Float?" / "CBV doesn't recognize String?" / "Performance?" | — | None | — |
 | 4. Update `docs/architecture/glossary.md` with new terms | `glossary.md` | None | — |
-| 5. Update `docs/BRIV_3.0_SPEC.md` section 2 with refined `:>` specs | `BRIV_3.0_SPEC.md` | None | — |
+| 5. Update `docs/BRIEV_3.0_SPEC.md` section 2 with refined `:>` specs | `BRIEV_3.0_SPEC.md` | None | — |
 
 ---
 
@@ -1910,12 +1910,12 @@ operators transparently. No migration needed.
 | **Silent projection** | A projection that works on bare `Bits` without a type definition. Metadata, bitwise ops, and indexing are silent. |
 | **Operator sigil** | A surface syntax symbol (`+`, `-`, `==`, `<-`) that desugars to a named projection. |
 | **Desugaring** | The compile-time AST transform that converts operator sigils to projection expressions. |
-| **Intrinsic airlock** | The `name#()` mechanism — the boundary between safe Briv space and host LLVM/hardware. |
+| **Intrinsic airlock** | The `name#()` mechanism — the boundary between safe Briev space and host LLVM/hardware. |
 | **Shape matching** | The backend's recognition of projection expressions by structural pattern, not type name. |
 | **Fast-path registry** | The static table in each backend mapping well-known projection name+shape pairs to dedicated codegen. |
 | **`@/` anchor** | The bit-precision decorator — `@/N`, `@/M..N`, `@/xN` declares exact bit positions. |
 | **Lazy view** | A `Value::LazyView` that wraps a projection without materializing it. Materialization happens on consumption. |
-| **Tier** | A Briv file suffix (`.bv`, `.ebv`, `.abv`, `.cbv`) that defines which properties and capabilities are recognized. |
+| **Tier** | A Briev file suffix (`.bv`, `.ebv`, `.abv`, `.cbv`) that defines which properties and capabilities are recognized. |
 
 ---
 
@@ -1923,7 +1923,7 @@ operators transparently. No migration needed.
 
 ### Int
 
-```briv
+```briev
 type Int : Bits @/0..63 {
     Bytes = 8;
     Alignment = 8;
@@ -1947,7 +1947,7 @@ type Int : Bits @/0..63 {
 
 ### Float
 
-```briv
+```briev
 type Float : Bits @/0..63 {
     Bytes = 8;
     Alignment = 8;
@@ -1966,7 +1966,7 @@ type Float : Bits @/0..63 {
 
 ### String
 
-```briv
+```briev
 type String : Bits @/0..127 {
     Bytes = 16;
     Alignment = 8;
@@ -1980,7 +1980,7 @@ type String : Bits @/0..127 {
 
 ### List<T>
 
-```briv
+```briev
 type List<T> : Bits @/0..191 {
     Bytes = 24;
     Alignment = 8;
@@ -1998,7 +1998,7 @@ type List<T> : Bits @/0..191 {
 
 ### User-defined: Matrix4x4
 
-```briv
+```briev
 type Float : Bits @/0..63 {
     Bytes = 8;
     // Float projections as above...
@@ -2022,7 +2022,7 @@ Demonstrates bit-precise `@/` field access for hardware co-design,
 directly decodable to GEP + mask in software or wire slicing in
 Verilog/CIRCT:
 
-```briv
+```briev
 type RISC_V_Instruction : Bits @/0..31 {
     Bytes = 4;
     Opcode = _ @/0..6;
@@ -2036,7 +2036,7 @@ type RISC_V_Instruction : Bits @/0..31 {
 
 Usage in a disassembler:
 
-```briv
+```briev
 defn decode(instr: RISC_V_Instruction) -> String {
     [instr.Opcode == 0x33] {   // OP-type (RISC-V spec)
         let s = "";
@@ -2062,9 +2062,9 @@ Key properties:
 
 ## Appendix B: Tier Ignorance Examples
 
-```briv
+```briev
 // ============================================================
-// CBV (Circuit Briv) — Ignored properties
+// CBV (Circuit Briev) — Ignored properties
 // ============================================================
 // CBV requires total contracts and synthesizable types only.
 // The following properties are IGNORED in CBV:
@@ -2081,7 +2081,7 @@ Key properties:
 // non-synthesizable intrinsics are errors.
 
 // ============================================================
-// ABV (Accelerated Briv) — String exception
+// ABV (Accelerated Briev) — String exception
 // ============================================================
 // ABV compiles to SPIR-V (GPU). String constants are recognized
 // at compile time for error messages and shader embedding.

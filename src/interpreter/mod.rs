@@ -332,7 +332,7 @@ pub enum Atom {
     Char(char),
 }
 
-/// The representational value in the Briv interpreter.
+/// The representational value in the Briev interpreter.
 ///
 /// 2026-08-06 (Phase 17, Slice A): `Enum`, `Instance`, `HashMap`, and `Defn`
 /// were dropped — they had no live producers/consumers (only orphaned
@@ -500,9 +500,9 @@ impl Value {
         self.as_bool().unwrap_or(false)
     }
 
-    /// Dereference this value as a Briv String's content bytes.
+    /// Dereference this value as a Briev String's content bytes.
     ///
-    /// 2026-08-01 (B1): A Briv String is either raw bytes (`Value::Bits`,
+    /// 2026-08-01 (B1): A Briev String is either raw bytes (`Value::Bits`,
     /// produced by literals and the get_env! macro) or a heap handle
     /// (`Value::Atom(Atom::Int(addr))` pointing at `[len: i64][payload]`,
     /// produced by FFI marshalling like EnvGet#). This is the single deref

@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 4 implements the complete AST definition and recursive descent parser for Briv in pure Briv.
+Tier 4 implements the complete AST definition and recursive descent parser for Briev in pure Briev.
 
 **Components:**
 1. **AST Definition** (`ast.bv`) - Complete AST type hierarchy
@@ -64,7 +64,7 @@ Tier 4 implements the complete AST definition and recursive descent parser for B
 
 ### Contract Structure
 
-```briv
+```briev
 struct Contract {
     precondition: Expr,
     postcondition: Expr,
@@ -79,7 +79,7 @@ struct Watchdog {
 
 ### Definition and Transaction
 
-```briv
+```briev
 struct Definition {
     name: String,
     type_params: List<String>,
@@ -109,7 +109,7 @@ Complete type enum with all Tier 1 types:
 
 ### Program Structure
 
-```briv
+```briev
 enum TopLevel {
     TopDefn(Definition),
     TopTxn(Transaction),
@@ -130,7 +130,7 @@ struct Program {
 
 ### AST Utilities
 
-```briv
+```briev
 defn expr_precedence(expr: Expr) -> Int
 defn is_literal_expr(expr: Expr) -> Bool
 defn infer_expr_type(expr: Expr) -> Option<Type>
@@ -154,7 +154,7 @@ defn make_char(c: Char) -> Expr
 
 ### Parser State
 
-```briv
+```briev
 struct ParserState {
     tokens: List<Token>,
     position: Int,
@@ -164,13 +164,13 @@ struct ParserState {
 
 ### Parser Construction
 
-```briv
+```briev
 defn new_parser(tokens: List<Token>) -> ParserState
 ```
 
 ### Token Access
 
-```briv
+```briev
 defn current_token(state: ParserState) -> Token
 defn peek_token(state: ParserState, offset: Int) -> Token
 defn advance(state: ParserState) -> ParserState
@@ -180,7 +180,7 @@ defn match_token(state: ParserState, token: Token) -> (Bool, ParserState)
 
 ### Program Parsing
 
-```briv
+```briev
 defn parse_program(state: ParserState) -> Result<Program, String>
 defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), String>
 ```
@@ -198,7 +198,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
 
 ### Transaction Parsing
 
-```briv
+```briev
 defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState), String>
 ```
 
@@ -214,7 +214,7 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
 
 ### Definition Parsing
 
-```briv
+```briev
 defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), String>
 ```
 
@@ -228,7 +228,7 @@ defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), S
 
 ### Contract Parsing
 
-```briv
+```briev
 defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), String>
 ```
 
@@ -248,7 +248,7 @@ defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), Strin
 6. `*`, `/`, `%` (Multiplicative) - precedence 11
 
 **Implementation:**
-```briv
+```briev
 defn parse_expression(state: ParserState) -> Result<(Expr, ParserState), String>
 defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String>
 defn parse_and_expr(state: ParserState) -> Result<(Expr, ParserState), String>
@@ -270,7 +270,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
 
 ### Statement Parsing
 
-```briv
+```briev
 defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), String>
 ```
 
@@ -285,7 +285,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
 
 ### Type Parsing
 
-```briv
+```briev
 defn parse_type(state: ParserState) -> Result<(Type, ParserState), String>
 defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState), String>
 defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), String>
@@ -297,7 +297,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
 
 ### Parse Complete Program
 
-```briv
+```briev
 import std.lexer;
 import std.parser;
 
@@ -319,7 +319,7 @@ let program = parse_program(parser)?;
 
 ### Parse Single Expression
 
-```briv
+```briev
 let parser = new_parser(tokenize("x + y * 2")?);
 let (expr, _) = parse_expression(parser)?;
 
@@ -330,7 +330,7 @@ let (expr, _) = parse_expression(parser)?;
 
 ### Error Handling
 
-```briv
+```briev
 let result = parse_program(new_parser(tokenize("invalid syntax")?));
 
 [result.is_err()] {
@@ -347,7 +347,7 @@ let result = parse_program(new_parser(tokenize("invalid syntax")?));
 
 The parser uses recursive descent with one function per precedence level:
 
-```briv
+```briev
 defn parse_expression(state: ParserState) -> Result<(Expr, ParserState), String> {
     parse_or_expr(state)
 }
@@ -371,7 +371,7 @@ defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
 
 Currently uses immediate error reporting. Future enhancement: panic mode recovery.
 
-```briv
+```briev
 defn expect_token(state: ParserState, expected: Token) -> Result<ParserState, String> {
     [current_token(state) == expected] {
         term Ok(advance(state));
@@ -412,7 +412,7 @@ All parser features tested:
 
 ### With Lexer
 
-```briv
+```briev
 defn compile(source: String) -> Result<Program, String> {
     let tokens = tokenize(source)?;
     let parser = new_parser(tokens);
@@ -422,7 +422,7 @@ defn compile(source: String) -> Result<Program, String> {
 
 ### With Type Checker (Tier 5)
 
-```briv
+```briev
 defn typecheck(program: Program) -> Result<TypedProgram, TypeError> {
     let ctx = new_type_context();
     

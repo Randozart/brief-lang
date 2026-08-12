@@ -30,7 +30,7 @@ but removed from the plugin data path.
    operation families (Select → Traverse → Position → Act), with target-appropriate semantics.
 5. **Complete macro capability.**  A `PrintLn!()` call should be expandable entirely within
    a `$(Stage)` block using the DSL — no Rust plugin needed.
-6. **Full Briv evaluation at compile time.**  Inside `$(Stage)` blocks, any valid Briv
+6. **Full Briev evaluation at compile time.**  Inside `$(Stage)` blocks, any valid Briev
    `defn`/`let`/`when`/`for`/`match` code is evaluated at compile time, with the navigation
    DSL and the four targets (`Source$`, AST, `Ir$`, `Bin$`) available as built-in bindings.
    The existing interpreter is extended to handle these as compile-time value types.
@@ -322,7 +322,7 @@ Applied to an existing selection:
 | `.Not$(sel)` | Selection | Complement within current selection |
 
 Example:
-```briv
+```briev
 // Find all defn nodes NOT named "main"
 Tag$("defn").Not$(Named$("main"));
 ```
@@ -357,7 +357,7 @@ Applied to a selection.  Returns a new selection.
 | `.Prev$(sel?)` | Selection | Preceding siblings of each selected (filtered) |
 
 Examples:
-```briv
+```briev
 // First parameter of defn main
 Tag$("defn").Named$("main").Children$("param").First$();
 
@@ -376,7 +376,7 @@ These turn a selection into a value:
 | `.Names$()` | List[String] | Name fields of selected nodes |
 
 Examples:
-```briv
+```briev
 let count = Tag$("import").Count$();
 when count == 0 { EmitWarning$("no imports!"); };
 ```
@@ -429,7 +429,7 @@ selection state.
 
 ### 4.8 Complete Chain Examples
 
-```briv
+```briev
 // Find the first import, insert prelude imports before it
 Tag$("import").First$().Before$().Insert$(
     Import$("std/types/bootstrap.bv"),
@@ -515,11 +515,11 @@ into the text buffer.
 
 ### 5.7 Text Examples
 
-```briv
+```briev
 $(PreLex) {
     // Source$ is the default target at PreLex
     Find$("#define DEBUG").ReplaceWith$("// #define DEBUG");
-    Prepend$("// Auto-generated from Briv\n");
+    Prepend$("// Auto-generated from Briev\n");
 };
 
 $(Generated) {
@@ -537,7 +537,7 @@ $(Generated) {
 
 The binary target supports only `Run$`:
 
-```briv
+```briev
 $(Linked) {
     Bin$.Run$("strip --strip-unnecessary {{path}}");
     Bin$.Run$("objcopy --only-keep-debug {{path}} {{path}}.debug");
@@ -578,7 +578,7 @@ System plugins (plugins/{stage}/.bv) ─── always available, always first
 
 Takes a `$(StageName)` block literal as its argument:
 
-```briv
+```briev
 $(Parsed) {
     // Only register the validator if the file contains unsafe code
     let has_unsafe = Tag$("call").Named$("Unsafe#").Count$();
@@ -596,7 +596,7 @@ $(Parsed) {
 
 Loads a `.bv` file, extracts its `$(Stage)` blocks, and registers them:
 
-```briv
+```briev
 $(Parsed) {
     // Load a target-specific validation plugin
     when Source$.Find$("// TARGET: riscv").Count$() > 0 {
@@ -612,7 +612,7 @@ exist or fails to parse, a warning is emitted and registration is skipped.
 
 Disables a plugin by name:
 
-```briv
+```briev
 $(Typed) {
     // Remove the entry-check plugin if we have our own entry logic
     Stage$.Remove$("entry-check");
@@ -625,7 +625,7 @@ Removing a plugin that doesn't exist is a no-op (with info-level diagnostic).
 
 Inspect the current plugin roster:
 
-```briv
+```briev
 $(Parsed) {
     foreach(name in Stage$.List$()) {
         EmitInfo$("active plugin: " + name);
@@ -640,7 +640,7 @@ $(Parsed) {
 The DSL is not a separate engine — it *is* the interpreter, extended with
 compile-time types (`CTSelection`, `CTPosition`, `CTTextSelection`, `CTTarget`)
 and registration of all navigation intrinsics as callable built-in functions.
-Inside `$(Stage)` blocks, standard Briv syntax (`let`, `when`, `foreach`,
+Inside `$(Stage)` blocks, standard Briev syntax (`let`, `when`, `foreach`,
 `match`, `for`) is evaluated at compile time by the interpreter.
 
 Navigation selections are first-class values of type `CTSelection`.  All
@@ -651,7 +651,7 @@ etc.) are methods on `CTSelection` that the interpreter dispatches.
 
 Use standard `let`:
 
-```briv
+```briev
 let imports = Tag$("import");
 let first_import = imports.First$();
 
@@ -664,9 +664,9 @@ Scope is the enclosing `$(Stage)` block.  No shadowing within a block.
 ### 8.2 Iteration (`foreach`)
 
 Iterates over a selection with an explicit element binding.
-Uses standard Briv `foreach` syntax:
+Uses standard Briev `foreach` syntax:
 
-```briv
+```briev
 foreach(imp in Tag$("import")) {
     imp.After$().Insert$(Import$("std/debug.bv"));
 };
@@ -674,7 +674,7 @@ foreach(imp in Tag$("import")) {
 
 For nested iteration:
 
-```briv
+```briev
 foreach(defn in Tag$("defn")) {
     foreach(call in defn.Descendants$(Tag$("call"))) {
         EmitWarning$("call inside " + defn.Names$().First$() +
@@ -697,9 +697,9 @@ navigation chain evaluations, and `match`/`when` branching all count.
 
 ### 8.3 Conditional (`when`)
 
-Standard Briv `when`:
+Standard Briev `when`:
 
-```briv
+```briev
 when Tag$("defn").Named$("main").Count$() == 0 {
     EmitWarning$("no main entry point — program may not start");
 };
@@ -726,7 +726,7 @@ Statements are executed in order.  A navigation chain without a terminal
 action is treated as a read query and its result is discarded (unless bound
 with `let`).
 
-```briv
+```briev
 $(Parsed) {
     // Statement 1: bind
     let target = Tag$("import").First$();
@@ -744,12 +744,12 @@ $(Parsed) {
 
 ---
 
-## 9. Level C — Full Briv Evaluation at Compile Time
+## 9. Level C — Full Briev Evaluation at Compile Time
 
 The flow control in §8 covers the DSL's built-in branching and iteration.
 For complex logic — string processing, arithmetic, binary analysis, conditional
 codegen — the compiler reuses its existing **interpreter** (`src/interpreter/`)
-to evaluate arbitrary Briv `defn` and `let` code at compile time.  This means
+to evaluate arbitrary Briev `defn` and `let` code at compile time.  This means
 the full language is available inside `$(Stage)` blocks.
 
 ### 9.1 How It Works
@@ -774,11 +774,11 @@ identifiers in the interpreter's scope.
 
 ### 9.2 Inside a `$(Stage)` Block
 
-Any valid Briv syntax is evaluated at compile time:
+Any valid Briev syntax is evaluated at compile time:
 
-```briv
+```briev
 $(Parsed) {
-    // Full Briv: defn, let, when, for, match
+    // Full Briev: defn, let, when, for, match
     defn count_unsafe_calls(items: Selection) -> Int {
         let total = 0;
         foreach(item in items) {
@@ -807,7 +807,7 @@ $(Parsed) {
 DSL bindings (`let`, `foreach`) are available in compile-time code.
 Function arguments typed as `Selection` accept DSL values:
 
-```briv
+```briev
 $(Typed) {
     defn has_debug_metadata(sel: Selection) -> Bool {
         term sel.WithKey$("debug").Count$() > 0;
@@ -832,7 +832,7 @@ $(Typed) {
 | `EmitWarning$(msg)` | Warning | Prints to stderr, compilation continues |
 | `EmitError$(msg)` | Error | Aborts compilation |
 
-```briv
+```briev
 $(Parsed) {
 let count = Tag$("import").Count$();
     EmitInfo$("file has " + count + " imports");
@@ -850,7 +850,7 @@ let count = Tag$("import").Count$();
 When iterating over `Pattern$` matches, `.Bind$(name)` on a selection
 retrieves the value bound to `?name` in the pattern:
 
-```briv
+```briev
 foreach(match in Pattern$("(call ?fn ?arg1)")) {
     let fn = match.Bind$("fn");         // The ?fn binding — always CTSelection
     let arg = match.Bind$("arg1");      // The ?arg1 binding — always CTSelection
@@ -866,7 +866,7 @@ compile-time error to reference an undefined binding name.
 
 ### 9.6 Compile-Time defn Restrictions
 
-Not all Briv constructs are available at compile time:
+Not all Briev constructs are available at compile time:
 
 | Construct | Available at compile time? | Notes |
 |-----------|---------------------------|-------|
@@ -956,7 +956,7 @@ They are the building blocks passed to `.Insert$()` and `.ReplaceWith$()`.
 
 Used for querying the AST with `.beast`-style variables:
 
-```briv
+```briev
 foreach(match in Pattern$("(call ?fn ?arg)")) {
     EmitWarning$("found call to " + match.Bound$("fn"));
 };
@@ -971,7 +971,7 @@ value bound to `?name` in the pattern.
 
 ### 9.1 prelude.bv (was `plugins/front/prelude.bv`)
 
-```briv
+```briev
 // 2026-07-21: Insert stdlib imports before the first user import.
 // Runs at Parsed stage — imports are not yet resolved, so we insert
 // before the first import statement found in the source AST.
@@ -998,7 +998,7 @@ $(Parsed) @ highest {
 
 ### 9.2 prelude-hw.bv (was `plugins/front/prelude-hw.bv`)
 
-```briv
+```briev
 $(Parsed) @ highest {
     let anchor = Tag$("import").First$();
     anchor.Before$().Insert$(
@@ -1010,7 +1010,7 @@ $(Parsed) @ highest {
 
 ### 9.3 auto-main.bv (was `plugins/mid/auto-main.bv`)
 
-```briv
+```briev
 // 2026-07-21: Set [#] entry marker on defn main / txn main.
 // Uses direct AST navigation instead of MatchIR$ serialize/deserialize.
 
@@ -1026,7 +1026,7 @@ $(Typed) @ highest {
 
 ### 9.4 entry-check.bv (was `plugins/mid/entry-check.bv`)
 
-```briv
+```briev
 // 2026-07-21: Verify program has at least one entry mechanism.
 // Was previously using Collect$ + CheckReactive$ at Mid stage.
 
@@ -1041,7 +1041,7 @@ $(Typed) {
 
 ### 9.5 validate-trg.bv (was `plugins/post/validate-trg.bv`)
 
-```briv
+```briev
 // 2026-07-21: Validate dynamic trigger targets after protocol verification.
 
 $(Verified) {
@@ -1056,7 +1056,7 @@ $(Verified) {
 
 ### 9.6 PrintLn! Expansion (new — demonstrates completeness)
 
-```briv
+```briev
 // 2026-07-21: Expand !PrintLn(x) into
 //   { call PrintString$("\n"); call PrintInt#(x); }
 
@@ -1119,14 +1119,14 @@ users iterate on plugin logic without killing the build.
 
 ```bash
 # Old (removed):
-briv build program.bv --emit-beast ast
-briv build program.bv --emit-beast mid
-briv build program.bv --emit-beast post
+briev build program.bv --emit-beast ast
+briev build program.bv --emit-beast mid
+briev build program.bv --emit-beast post
 
 # New:
-briv build program.bv --emit-beast parse
-briv build program.bv --emit-beast type-check
-briv build program.bv --emit-beast all           # all stages
+briev build program.bv --emit-beast parse
+briev build program.bv --emit-beast type-check
+briev build program.bv --emit-beast all           # all stages
 ```
 
 The `BeastStage` enum maps to the granular stages:
@@ -1168,7 +1168,7 @@ consumption (`--emit-beast`) and for debugging plugin behavior.
 
 ## 13. Highlighter Changes
 
-### 12.1 briv.tmLanguage.json
+### 12.1 briev.tmLanguage.json
 
 **Remove** old stage tokens:
 - `$(Front)`, `$(Mid)`, `$(Post)`, `$(Back)`
@@ -1178,29 +1178,29 @@ consumption (`--emit-beast`) and for debugging plugin behavior.
 ```jsonc
 // Stage blocks
 { "match": "\\$\\((PreLex|Parsed|Resolved|Typed|Normalized|Verified|Allocated|Provenanced|Generated|Optimized|Linked)\\)",
-  "name": "entity.name.function.stage-block.briv" }
+  "name": "entity.name.function.stage-block.briev" }
 
 // AST navigation intrinsics (PascalCase + $)
 { "match": "\\b(Import|Defn|Txn|Contract|Block|Let|Assign|Term|Guarded|Call|Ident|Expr|BinOp|Field|BlockExpr|Bits|Ptr|Tuple|Metadata|Pattern)\\$",
-  "name": "support.function.constructor.briv" }
+  "name": "support.function.constructor.briev" }
 
 // Navigation intrinsics (mixedCase + $)
 { "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove)\\$",
-  "name": "support.function.navigation.briv" }
+  "name": "support.function.navigation.briev" }
 
-// Flow control (standard Briv — handled by existing keyword patterns)
+// Flow control (standard Briev — handled by existing keyword patterns)
 
 // Source$, Ir$, Bin$, Stage$ targets
 { "match": "\\b(Source|Ir|Bin|Stage)\\$",
-  "name": "variable.language.target.briv" }
+  "name": "variable.language.target.briev" }
 
 // Diagnostics
 { "match": "\\b(EmitInfo|EmitWarning|EmitError)\\$",
-  "name": "keyword.other.diagnostic.briv" }
+  "name": "keyword.other.diagnostic.briev" }
 
 // Bind$ pattern variable access
 { "match": "\\.Bind\\$",
-  "name": "support.function.navigation.briv" }
+  "name": "support.function.navigation.briev" }
 ```
 
 ### 12.2 New .beast Grammar
@@ -1436,7 +1436,7 @@ File: `src/parser/definitions.rs`
 2. Reject old names with clear diagnostic (see §2.3).
 3. Standard `let`/`when`/`foreach`/`match` inside `$(Stage)` blocks is already
    handled by the existing parser — no special parsing needed.
-4. `foreach(item in list) { body }` is already standard Briv syntax.
+4. `foreach(item in list) { body }` is already standard Briev syntax.
    The interpreter handles it as a special form with lazy body evaluation.
 5. Parse `when cond { ... }`.
 6. Parse navigation chains as expression statements.
@@ -1541,7 +1541,7 @@ match name {
 ### Phase K: Highlighter (1 day)
 
 1. Create `syntaxes/beast.tmLanguage.json`
-2. Update `briv.tmLanguage.json` — new tokens, remove old tokens
+2. Update `briev.tmLanguage.json` — new tokens, remove old tokens
 3. Update `package.json` — language entry, grammar entry, icon
 4. Copy `assets/beast-icon.svg` → `syntax-highlighter/images/beast-icon.svg`
 5. Update theme files if needed for new scopes
@@ -1550,7 +1550,7 @@ match name {
 
 1. Rewrite `docs/architecture/features/plugins.md`
 2. Update `docs/architecture/overview.md` pipeline diagram
-3. Update `learn-briv/16-plugins.md`
+3. Update `learn-briev/16-plugins.md`
 4. Create example files in `examples/stage/` for each new stage type
 5. Update old example files (`collect-match.bv`, `emit-error.bv`, `back-final.bv`,
    `post-validate.bv`, `mid-check.bv`, `front-import.bv`)
@@ -1727,8 +1727,8 @@ fn test_prelude_inserts_imports() {
 | `examples/stage/*.bv` | Rewrite all stage examples |
 | `docs/architecture/overview.md` | Pipeline diagram, module list |
 | `docs/architecture/features/plugins.md` | Full rewrite |
-| `learn-briv/16-plugins.md` | Update to new API |
-| `syntax-highlighter/syntaxes/briv.tmLanguage.json` | New tokens, remove old |
+| `learn-briev/16-plugins.md` | Update to new API |
+| `syntax-highlighter/syntaxes/briev.tmLanguage.json` | New tokens, remove old |
 | `syntax-highlighter/package.json` | .beast language + grammar + icon |
 
 ### Removed files

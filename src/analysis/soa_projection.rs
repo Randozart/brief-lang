@@ -1,10 +1,10 @@
-// ── SoA Reorder Projection — the second compiler-in-Briv handoff ──────
-// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi, P5): serializes
+// ── SoA Reorder Projection — the second compiler-in-Briev handoff ──────
+// 2026-08-04 (plan 2026-08-04-compiler-in-briev-dogfood-ffi, P5): serializes
 // the input to `soa_reorder::reorder_fields` into the permutation-only form
-// the Briv pass (lib/compiler/soa_reorder.bv) reads. Rust walks the AST and
+// the Briev pass (lib/compiler/soa_reorder.bv) reads. Rust walks the AST and
 // emits, per reorderable float field, its SIBLING-REFERENCE count (how many
 // same-prefix fields its update expr / the txn body's assigns reference);
-// Briv decides which prefix groups are SAFE (≥2 members, no sibling refs)
+// Briev decides which prefix groups are SAFE (≥2 members, no sibling refs)
 // and builds the item-index permutation. This is a DIFFERENT handoff shape
 // than needs_state (field descriptors + a permutation buffer vs a bitmask) —
 // proving the pattern generalizes.
@@ -18,8 +18,8 @@
 //   ...                                    # declaration order
 //   nonfloat <m> <itemidx> ...
 //
-// Undo: if the Briv pass is ever removed, delete this module and the
-// reorder_fields_briv dispatch in soa_reorder.rs.
+// Undo: if the Briev pass is ever removed, delete this module and the
+// reorder_fields_briev dispatch in soa_reorder.rs.
 
 use crate::ast::{Expr, Statement, TopLevel};
 use std::collections::HashMap;

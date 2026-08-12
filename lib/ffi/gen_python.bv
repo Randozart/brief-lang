@@ -101,14 +101,14 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
     code = code + "\nstatic PyMethodDef methods[] = {\n";
     foreach(exp in exports) {
         let name = TypeInfo$(exp, "name");
-        code = code + "    {\"" + name + "\", pybridge_" + name + ", METH_VARARGS, \"Briv export " + name + "\"},\n";
+        code = code + "    {\"" + name + "\", pybridge_" + name + ", METH_VARARGS, \"Briev export " + name + "\"},\n";
     };
     code = code + "    {NULL, NULL, 0, NULL}\n};\n\n";
 
     code = code + "static struct PyModuleDef module_def = {\n";
     code = code + "    PyModuleDef_HEAD_INIT,\n";
     code = code + "    \"" + bridge_name + "\",\n";
-    code = code + "    \"Briv bridge (Metropolitan FFI)\",\n";
+    code = code + "    \"Briev bridge (Metropolitan FFI)\",\n";
     code = code + "    0,\n";
     code = code + "    methods\n";
     code = code + "};\n\n";
@@ -131,7 +131,7 @@ $defn gen_python_bridge(exports: Selection, bridge_name: String) -> String {
 $(Normalized @ highest) {
     let exports = Tag$("export");
     when exports.Count$() > 0 {
-        let code = gen_python_bridge(exports, "briv_bridge");
+        let code = gen_python_bridge(exports, "briev_bridge");
         FileWrite$("ffi-out/python/bridge.c", code, true);
         EmitInfo$("gen_python: ffi-out/python/bridge.c");
     };

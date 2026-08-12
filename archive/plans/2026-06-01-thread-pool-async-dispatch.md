@@ -36,7 +36,7 @@ main loop:
 | WASM/Emscripten | `pthread_barrier_t` with `-s USE_PTHREADS=1` | Yes |
 | Bare metal ARM/x86 | N/A | No — no OS scheduler |
 
-Gated behind `#if defined(BRIV_THREAD_POOL)` in `briv_rt.c`, activated by `@llvm.thread_pool` metadata in generated IR.
+Gated behind `#if defined(BRIEV_THREAD_POOL)` in `briev_rt.c`, activated by `@llvm.thread_pool` metadata in generated IR.
 
 ## Compiler Auto-Inference
 
@@ -81,13 +81,13 @@ case_1:  ;; folded loop / pure counter for sync txn at value 1
 
 async_phase:
   ; Phase 3: Release workers (async bodies run in parallel)
-  call void @briv_barrier_release()
+  call void @briev_barrier_release()
 
   ; Phase 3b (concurrent): main does sequential non-enum txns
   call void @reactor_tick_seq()
 
   ; Phase 4: Wait for all workers
-  call void @briv_barrier_wait()
+  call void @briev_barrier_wait()
 
   ; Phase 5: Wait for next event
   call void @__rt_wait()
@@ -112,12 +112,12 @@ done:
 
 | File | Lines | Change |
 |------|-------|--------|
-| `runtime/briv_rt.c` | ~80 | `briv_thread_pool_init(N, fn_ptrs)`, `briv_barrier_release()`, `briv_barrier_wait()`, `briv_thread_pool_shutdown()`. Platform-specific barrier under `#if`. |
+| `runtime/briev_rt.c` | ~80 | `briev_thread_pool_init(N, fn_ptrs)`, `briev_barrier_release()`, `briev_barrier_wait()`, `briev_thread_pool_shutdown()`. Platform-specific barrier under `#if`. |
 | `src/backend/llvm.rs` | ~50 | `emit_async_body` — per-txn worker function |
 | `src/backend/llvm.rs` | ~100 | Auto-split txns into enum/async/seq groups in `generate()`; emit hybrid `@main` |
 | `src/backend/llvm.rs` | ~30 | `emit_enum_main` extended for async phase after switch arms |
-| `src/backend/mod.rs` | ~10 | Builtins: `briv_thread_pool_init`, `briv_barrier_release`, `briv_barrier_wait` |
-| `src/main.rs` | ~10 | Detect `@llvm.thread_pool` metadata, add `-DBRIV_THREAD_POOL -lpthread` to link step |
+| `src/backend/mod.rs` | ~10 | Builtins: `briev_thread_pool_init`, `briev_barrier_release`, `briev_barrier_wait` |
+| `src/main.rs` | ~10 | Detect `@llvm.thread_pool` metadata, add `-DBRIEV_THREAD_POOL -lpthread` to link step |
 | `src/proof_engine.rs` | 0 | Already done — `suggest_async_promotion` from Step 4 |
 
 ## Key Design Decisions
@@ -126,7 +126,7 @@ done:
 Enum dispatch produces O(1) folded while-loops with no precondition checking in the hot path. Async dispatch still evaluates preconditions each tick. For a trigger-gated txn with a known value set, enum is strictly better.
 
 ### Why two opposing barriers?
-The thread pool initial barrier pattern is: `worker: wait → fire → release → main: release → work → wait`. This is essentially a tick-level rendezvous. Workers block on `barrier_enter` until the main thread calls `briv_barrier_release()`. After firing, workers block on `barrier_exit` until the main thread calls `briv_barrier_wait()`. Two barriers prevent the main thread from advancing to the next tick before all workers complete.
+The thread pool initial barrier pattern is: `worker: wait → fire → release → main: release → work → wait`. This is essentially a tick-level rendezvous. Workers block on `barrier_enter` until the main thread calls `briev_barrier_release()`. After firing, workers block on `barrier_exit` until the main thread calls `briev_barrier_wait()`. Two barriers prevent the main thread from advancing to the next tick before all workers complete.
 
 ### No atomics on state fields
 The proof engine guarantees:
@@ -149,7 +149,7 @@ The proof engine's compile-time guarantees eliminate the need for runtime synchr
 
 ## Test Plan
 
-1. Two `rct async` txns, disjoint writes → verify `@async_body_*` functions emitted, `briv_barrier_*` calls in main
+1. Two `rct async` txns, disjoint writes → verify `@async_body_*` functions emitted, `briev_barrier_*` calls in main
 2. Two `rct async` + one `rct` sync (non-enum) → verify sequential phase after async
 3. Two `rct async` + trigger-gated sync (enum candidate) → verify enum dispatch before async
 4. End-to-end: compile `.bv` → verify `pthread_create`/barrier in native binary via `nm`

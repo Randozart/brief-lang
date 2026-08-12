@@ -219,8 +219,8 @@ The `<:` compiler detects indexed collections and generates the optimized code p
 | 5 | `src/desugarer.rs` | Add pass-through match arm |
 | 6 | `src/interpreter.rs` | Implement fused projection evaluation |
 | 7 | `src/backend/*` (all 10) | Remove `:> Match` stubs |
-| 8 | `src/dbriv/eval.rs` | **Delete** — superseded |
-| 9 | `src/dbriv/mod.rs` | Remove `pub use eval::*` |
+| 8 | `src/dbriev/eval.rs` | **Delete** — superseded |
+| 9 | `src/dbriev/mod.rs` | Remove `pub use eval::*` |
 | 10 | `tests/` | Parser + interpreter tests |
 
 ---
@@ -229,7 +229,7 @@ The `<:` compiler detects indexed collections and generates the optimized code p
 
 | File | Lines | Reason |
 |------|-------|--------|
-| `src/dbriv/eval.rs` | 612 | Query engine operated on old `DbrivLiteral` — superseded by `<:` on native Value |
+| `src/dbriev/eval.rs` | 612 | Query engine operated on old `DbrievLiteral` — superseded by `<:` on native Value |
 | `ProjectionTarget::Match` in `ast.rs` | ~5 | Superseded by `SubtypeOp::Match` for string `<:[...]` |
 | `interpreter.rs` `:> Match` match arm | ~15 | Removed |
 | All backends `:> Match` match arms | ~10 each (10 backends = ~100) | Removed (were stubs) |
@@ -254,4 +254,4 @@ The `<:` compiler detects indexed collections and generates the optimized code p
 | `test_projection_match_error` | MATCH on List source errors |
 | `test_projection_aggregate_must_be_last` | Op after COUNT errors |
 | `test_no_more_projectin_target_match` | `:> Match` no longer exists |
-| `test_eval_deleted` | `dbriv::eval` module removed |
+| `test_eval_deleted` | `dbriev::eval` module removed |

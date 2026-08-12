@@ -1,8 +1,8 @@
-# Macros and Templates in Briv — Learning Guide
+# Macros and Templates in Briev — Learning Guide
 
 **Last updated:** 2026-07-23
 
-Briv's metaprogramming system has three tiers:
+Briev's metaprogramming system has three tiers:
 
 | Tier | Mechanism | Use case |
 |------|-----------|----------|
@@ -22,7 +22,7 @@ Run at compile time at a specified pipeline stage.
 
 ### Stage Block Syntax
 
-```briv
+```briev
 $(Parsed) {
     let imports = Tag$("import");
     when imports.IsEmpty$() {
@@ -58,7 +58,7 @@ $(Parsed) {
 
 ### Diagnostics
 
-```briv
+```briev
 EmitInfo$("found " + count + " exports");
 EmitWarning$("deprecated pattern detected");
 EmitError$("fatal: " + reason);   // halts compilation
@@ -72,7 +72,7 @@ See `docs/architecture/macro-system.md` for the full reference.
 
 ### Declaration
 
-```briv
+```briev
 template unless(cond: Expr, body: Block) -> Stmt {
     return quote { [@cond] { @body } };
 };
@@ -82,7 +82,7 @@ Parameters are typed using `Expr`, `Stmt`, `Block`, `Type`, `Int`, `String`, or 
 
 ### Call site
 
-```briv
+```briev
 $unless(sensor_tripped) { activate_alarm(); };
 ```
 
@@ -92,7 +92,7 @@ The `$` sigil tells the reader: "this is a safe syntactic transformation."
 
 Inside `quote { }`, `@ident` is replaced with the corresponding argument's AST:
 
-```briv
+```briev
 template wrap_counter(name: String) -> Stmt {
     return quote {
         state @name: Int = 0;
@@ -109,7 +109,7 @@ template wrap_counter(name: String) -> Stmt {
 
 For computed interpolations, use `@{expr}`:
 
-```briv
+```briev
 template declare(n: Int) -> Stmt {
     let size: Int = @{n * 2};
     return quote { let arr: List<Int> = List<Int>::new(@{size}); };
@@ -120,7 +120,7 @@ template declare(n: Int) -> Stmt {
 
 Templates are **hygienic by default**. Local `let` bindings are automatically renamed to `__gensym_N` to prevent variable capture. `state`, `fn`, and `txn` names are preserved.
 
-```briv
+```briev
 template wrap() -> Block {
     return quote {
         let temp: Int = 0;     // → __gensym_0
@@ -136,7 +136,7 @@ template wrap() -> Block {
 
 ### Declaration
 
-```briv
+```briev
 macro assert_nonzero(val: Expr) -> Stmt {
     return quote { [@val == 0] { error#("assertion failed: nonzero"); }; };
 };
@@ -146,7 +146,7 @@ Macros accept the same parameter types as templates.
 
 ### Call site
 
-```briv
+```briev
 $!assert_nonzero(x);
 ```
 
@@ -154,9 +154,9 @@ The `$!` sigil means "warning: this macro may do unexpected things."
 
 ### String mixins with `compile#()`
 
-The `compile#()` intrinsic parses a Briv source string at compile time:
+The `compile#()` intrinsic parses a Briev source string at compile time:
 
-```briv
+```briev
 macro circular_buffer(name: String, size: Int) -> Block {
     [size <= 0] { error#("size must be > 0"); };
     return compile#("
@@ -177,14 +177,14 @@ These intrinsics are only valid during macro/template expansion. If they survive
 
 | Intrinsic | Signature | Purpose |
 |-----------|-----------|---------|
-| `compile#(code)` | `compile#(String) -> Block` | Parse string as Briv code at compile time |
+| `compile#(code)` | `compile#(String) -> Block` | Parse string as Briev code at compile time |
 | `error#(msg)` | `error#(String)` | Halt compilation with error message |
 | `warn#(msg)` | `warn#(String)` | Print warning, continue compilation |
 | `gensym#()` | `gensym#() -> String` | Generate unique identifier |
 
 Example:
 
-```briv
+```briev
 macro check_positive(name: String, val: Expr) -> Stmt {
     [@val <= 0] { error#("expected positive value for " ++ @name); };
     return quote { let @name: Int = @val; };
@@ -227,7 +227,7 @@ Macros can emit template calls (they're re-expanded in a second Phase 1a pass). 
 
 ### Lookup table generation
 
-```briv
+```briev
 macro sine_lut(n: Int) -> Block {
     let code: String = "state sine_table: Array<Float> = [";
     let i: Int = 0;
@@ -243,7 +243,7 @@ macro sine_lut(n: Int) -> Block {
 
 ### Error-checking wrappers
 
-```briv
+```briev
 template must_succeed(call: Expr) -> Stmt {
     return quote {
         let result = @call;

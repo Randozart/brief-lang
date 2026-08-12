@@ -102,7 +102,7 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
         ("String", "Eq") => Some(OpBinding::Intrinsic("StringEq#".into())),
         // 2026-08-01 (B1): #String bitwise defaults — & | ^ ~ operate on the
         // content bytes and return a new String of the same length (see
-        // briv_str_band/bor/bxor/bnot). Binding here lets the typechecker
+        // briev_str_band/bor/bxor/bnot). Binding here lets the typechecker
         // accept `a & b` on Strings; the backend/interpreter dispatch to the
         // content ops via #String protocol membership.
         ("String", "BitAnd") => Some(OpBinding::Intrinsic("StringBitAnd#".into())),
@@ -118,7 +118,7 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
 /// Never matches type names (rules 14/18). Returns None for types with no
 /// registered universe entry (custom types in a fresh universe); the
 /// typechecker resolves those via its own type_protocols/type_parents.
-/// 2026-08-11 (Phase 2a2): `pub` — the brivc bin (separate crate) resolves
+/// 2026-08-11 (Phase 2a2): `pub` — the brievc bin (separate crate) resolves
 /// b-bind marshalling categories from it.
 pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     match ty {

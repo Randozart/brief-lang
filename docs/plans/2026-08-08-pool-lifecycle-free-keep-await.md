@@ -41,7 +41,7 @@ live counts. But `__spawn_next_<base>` (`emit_expr.rs:1256`) is a single
 monotonic counter shared by ALL nodes that spawn that base — it never
 decrements. Two nodes each spawning `Counter`:
 
-```briv
+```briev
 node a [ticksA < 3][ticksA == 3] { let h = spawn Counter(); ticksA = ticksA + 1; };
 node b [ticksB < 5][ticksB == 5] { let h = spawn Counter(); ticksB = ticksB + 1; };
 ```

@@ -1,41 +1,41 @@
 // WASM Mapper - Handles WebAssembly linear memory, JS value conversion
 
-// Convert WASM pointer to Briv String
+// Convert WASM pointer to Briev String
 // Precondition: pointer is valid offset into WASM memory
 // Postcondition: Returns UTF-8 string
 defn wasm_ptr_to_string(ptr: Int, memory: Memory) -> String [ptr > 0 && memory.valid()][true] {
   term memory.read_string(ptr);
 };
 
-// Convert Briv String to WASM pointer (writes to memory)
+// Convert Briev String to WASM pointer (writes to memory)
 // Precondition: string is valid UTF-8
 // Postcondition: Returns pointer to string in WASM memory
-defn briv_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][term > 0] {
+defn briev_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][term > 0] {
   term memory.write_string(s);
 };
 
-// Convert WASM pointer to Briv Data (bytes)
+// Convert WASM pointer to Briev Data (bytes)
 // Precondition: pointer and length are valid
 // Postcondition: Returns byte list
 defn wasm_ptr_to_data(ptr: Int, len: Int, memory: Memory) -> Data [ptr > 0 && len >= 0 && memory.valid()][term.len() == len] {
   term memory.read_bytes(ptr, len);
 };
 
-// Write Briv Data to WASM memory
+// Write Briev Data to WASM memory
 // Precondition: data is valid
 // Postcondition: Returns pointer to data in memory
-defn briv_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][term > 0] {
+defn briev_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][term > 0] {
   term memory.write_bytes(data);
 };
 
-// Convert JS value to Briv Data
+// Convert JS value to Briev Data
 // Precondition: JS value exists
 // Postcondition: Returns serialized data
 defn js_value_to_data(js_val: JsValue) -> Data [js_val.is_valid()][term.len() >= 0] {
   term js_val.to_bytes();
 };
 
-// Convert Briv Data to JS value
+// Convert Briev Data to JS value
 // Precondition: data is valid
 // Postcondition: Returns JS value
 defn data_to_js_value(data: Data) -> JsValue [true][term.is_valid()] {

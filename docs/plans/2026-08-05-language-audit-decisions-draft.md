@@ -1,8 +1,8 @@
-# Briv Language Audit — Draft Decisions
+# Briev Language Audit — Draft Decisions
 
 **Date:** 2026-08-05  
 **Status:** DRAFT — audit in progress; no implementation authorized by this record  
-**Scope:** Language model, syntax, compiler architecture, interpreter/backend contracts, Data Briv, tooling, documentation, and rename verification  
+**Scope:** Language model, syntax, compiler architecture, interpreter/backend contracts, Data Briev, tooling, documentation, and rename verification  
 **Performance baseline:** Not applicable. This document records design decisions only; any later performance implementation requires its own baseline and A/B plan.
 
 This document preserves every decision reached during the ongoing post-rename language audit. It is a living audit record until the review is complete. A decision recorded here is not evidence that the compiler currently implements it.
@@ -92,17 +92,17 @@ This document preserves every decision reached during the ongoing post-rename la
 - Configured-root resolution is deterministic and records the resolved path for reproducible builds.
 - The standalone `syscall` keyword is removed.
 - Named system APIs use `frgn ... from #System`; raw target-specific kernel transitions use an explicit intrinsic such as `SysCall#(...)`.
-- A foreign declaration names the local Briv binding first; `:` binds it to a differently named external symbol, for example `frgn local_name(...): external_name from #System;`.
+- A foreign declaration names the local Briev binding first; `:` binds it to a differently named external symbol, for example `frgn local_name(...): external_name from #System;`.
 - `as` is reserved for semantic conversion and is not used for foreign-symbol renaming.
 - Declaration-level foreign `fallback` clauses are removed; optional-symbol fallback behavior uses ordinary `when`/`match` control flow with `.^^Available`.
 - Legacy `frgn name @ address` declarations are removed; MMIO uses configured device/cell ports or explicit pointer/address intrinsics.
 - `meld` is removed entirely.
 - Foreign shapes are imported/configured as explicit layout descriptors and adapted through declared protocol cast edges plus ownership/effect contracts.
 - GLUE synthesizes boundary bridges from those descriptors and cast paths; ordinary semantic conversion and FFI adaptation use the same protocol-casting architecture.
-- Exact foreign field order, widths, alignment, calling convention, and release policy live in GLUE/Data Briv configuration, not logical Briv source.
+- Exact foreign field order, widths, alignment, calling convention, and release policy live in GLUE/Data Briev configuration, not logical Briev source.
 - Variadic foreign signatures use an explicit final named parameter such as `variadic args: ForeignArgs`; `...` is reserved for multidimensional slice ellipsis.
 - GLUE configuration supplies the foreign variadic ABI behavior.
-- A `frgn` signature declares its actual Briv-visible return type; foreign calls are never implicitly wrapped in `Result`.
+- A `frgn` signature declares its actual Briev-visible return type; foreign calls are never implicitly wrapped in `Result`.
 - GLUE configuration explicitly maps errno, status codes, exceptions, or delivery failures into `Result` when required.
 
 ### 3.2 Module binding
@@ -260,7 +260,7 @@ This document preserves every decision reached during the ongoing post-rename la
 - Active backends must implement normative behavior or hard-error; there are no placeholders, zero substitutions, first-arm-only matches, or silent `Void` results.
 - Unknown LLVM representation is a hard error; there is no `i64` fallback.
 - Backend and FFI generators may not match user-visible type names.
-- Platform mappings such as DOM handles live entirely in GLUE/Data Briv configuration.
+- Platform mappings such as DOM handles live entirely in GLUE/Data Briev configuration.
 - One inferred effect system unifies read/write, allocation, free, spawn, FFI, I/O, blocking, and purity facts.
 - Effects are usable in traits/contracts and visible through `.^^Effects`.
 
@@ -336,7 +336,7 @@ This document preserves every decision reached during the ongoing post-rename la
 - `.s` remains a stronger verification profile, not a separate syntax grammar.
 - Deprecated compact extensions such as `.sbv` are removed; dotted forms such as `.s.bv` are canonical.
 
-### 12.1 Rendered Briv
+### 12.1 Rendered Briev
 
 - Conditional view inclusion uses `b-when="condition"`; legacy `b-if` is removed.
 - View-bound values are not restricted by compiler-known primitive names.
@@ -345,16 +345,16 @@ This document preserves every decision reached during the ongoing post-rename la
 - The rendered parent owns each mounted component handle; mounting creates it and unmounting releases its state and subscriptions.
 - View attachment uses one form, `render Name { ... }`; `render struct`, `render obj`, `render cell`, and `rstruct` are not separate syntax.
 - The compiler resolves the declaration kind and enforces the corresponding static-data, reactive-identity, or sealed-port visibility/lifecycle rules.
-- Legacy `<script>` and `<script type="briv">` wrappers are removed; Briv source outside `<view>`/`<style>` is the sole `.rbv` source form.
+- Legacy `<script>` and `<script type="briev">` wrappers are removed; Briev source outside `<view>`/`<style>` is the sole `.rbv` source form.
 - `b-when` structurally mounts/unmounts its subtree and therefore creates/releases owned component handles.
 - `b-show` changes presentation visibility only and preserves DOM/component identity and state.
-- Every `b-*` attribute uses the canonical Briv expression parser and type/effect analysis; JS-like ternaries and brace object-literal mini-syntax are removed.
+- Every `b-*` attribute uses the canonical Briev expression parser and type/effect analysis; JS-like ternaries and brace object-literal mini-syntax are removed.
 - View expressions use ordinary `match`, associative `[key => value]` literals, calls, and bindings.
 - Dynamic `b-each:item="items"` repetitions require an explicit stable `b-key="..."`; positional identity is not used for insertable, removable, or reorderable children.
 - `b-bind:value="field"` remains only for assignable logical fields with proven write contracts; computed expressions require separate value and trigger handlers.
 - Render expressions are pure/read-only; mutation, FFI, allocation, and spawning are allowed only in explicit event handlers or compiler-managed component lifecycle.
 
-## 13. Data Briv
+## 13. Data Briev
 
 - `.dbvs` is removed and unified into `.dbv`.
 - `.dbv` and `.dbvl` become distinct parser modes sharing a value/schema core.
@@ -385,8 +385,8 @@ This document preserves every decision reached during the ongoing post-rename la
   - `field?: T`.
 - Lazy/streaming `.dbvl` is required.
 - `.dbvl` supports append-only canonical writes.
-- `briv check` directly validates `.dbv` and `.dbvl`.
-- Data Briv gets deterministic canonical serialization.
+- `briev check` directly validates `.dbv` and `.dbvl`.
+- Data Briev gets deterministic canonical serialization.
 - Remaining `.dbvs` and legacy data files must be migrated or archived.
 - Human-authored per-language GLUE configuration migrates from `lib/glue/<lang>/glue.dbvl` to structured, multiline `lib/glue/<lang>/glue.dbv`.
 - Generated `bridge-exports.dbvl` remains line-oriented machine metadata suitable for streaming and downstream tooling.
@@ -396,7 +396,7 @@ This document preserves every decision reached during the ongoing post-rename la
 - Documentation authority:
   1. `spec/SPEC.md`.
   2. `docs/architecture/`.
-  3. `learn-briv/`.
+  3. `learn-briev/`.
 - The SPEC is normative with explicitly staged/unimplemented sections.
 - Normative SPEC examples become executable conformance fixtures.
 - Lexer/parser/tooling vocabularies come from a shared machine-readable manifest.
@@ -406,13 +406,13 @@ This document preserves every decision reached during the ongoing post-rename la
 - Any excluded source must live under an explicit archive boundary.
 - Legacy active-looking docs/examples move under `archive/`; timestamped plans remain immutable.
 - `export` is the sole export syntax; `#export` is removed.
-- No compatibility parser or `briv migrate` tool is added while the language remains pre-adoption; active source is rewritten directly to canonical syntax.
+- No compatibility parser or `briev migrate` tool is added while the language remains pre-adoption; active source is rewritten directly to canonical syntax.
 
 ## 15. Rename status
 
-- Full active rename to Briv was selected.
+- Full active rename to Briev was selected.
 - Static inspection currently finds no active `Brief`, `brief`, or `dbrief` module/build residue.
-- Runtime, crate, binary, syntax-highlighter, and Data Briv paths appear consistently renamed.
+- Runtime, crate, binary, syntax-highlighter, and Data Briev paths appear consistently renamed.
 - A fresh build/test verification is still pending.
 - No compiler or language implementation changes were made as part of the audit before this draft was created.
 
@@ -433,8 +433,8 @@ The audit is substantially complete. Remaining work includes:
 Any implementation plan derived from this draft must update, as applicable:
 
 - `spec/SPEC.md` as the normative language contract.
-- `docs/architecture/` for declaration semantics, reflection, casting, effects, ownership, concurrency, targets, Data Briv, and backend contracts.
-- `learn-briv/` for canonical examples only.
+- `docs/architecture/` for declaration semantics, reflection, casting, effects, ownership, concurrency, targets, Data Briev, and backend contracts.
+- `learn-briev/` for canonical examples only.
 - The shared language manifest and generated highlighter/LSP vocabularies.
 - Formatter/round-trip fixtures.
 - Parser, interpreter, active-backend, and target-profile conformance tests.

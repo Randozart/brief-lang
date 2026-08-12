@@ -1,4 +1,4 @@
-// GLUE: Python foreign type declarations for Briv's type universe.
+// GLUE: Python foreign type declarations for Briev's type universe.
 //
 // Python doesn't compile to LLVM IR, so interop goes through C ABI +
 // meld projections onto CPython's GC heap. These types are the C

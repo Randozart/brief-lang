@@ -19,7 +19,7 @@ class bench {
         FeatureHash(1000, r);
         long t0 = System.nanoTime();
         for (int i = 0; i < N; i++) sink += FeatureHash(1000, r);
-        System.out.printf("BRIV_FH %.1f%n", (double)(System.nanoTime() - t0) / N);
+        System.out.printf("BRIEV_FH %.1f%n", (double)(System.nanoTime() - t0) / N);
         nativeFh(1000, r);
         t0 = System.nanoTime();
         for (int i = 0; i < N; i++) sink += nativeFh(1000, r + i);
@@ -27,7 +27,7 @@ class bench {
         Add(r, 4);
         t0 = System.nanoTime();
         for (int i = 0; i < N2; i++) sink += Add(r, 4);
-        System.out.printf("BRIV_ADD %.2f%n", (double)(System.nanoTime() - t0) / N2);
+        System.out.printf("BRIEV_ADD %.2f%n", (double)(System.nanoTime() - t0) / N2);
         nativeAdd(r, 4);
         t0 = System.nanoTime();
         for (int i = 0; i < N2; i++) sink += nativeAdd(r, i & 7);

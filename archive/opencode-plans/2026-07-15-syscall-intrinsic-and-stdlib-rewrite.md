@@ -6,7 +6,7 @@
 ## Summary
 
 Replace 98 `inop` declarations in `lib/std/os/` and 37 lowercase `#` calls in
-examples with a single `Syscall#` intrinsic + pure-Briv stdlib wrappers.
+examples with a single `Syscall#` intrinsic + pure-Briev stdlib wrappers.
 
 ## 1. Syscall# Intrinsic
 
@@ -85,5 +85,5 @@ Files to rewrite: fs.bv, net.bv, mem.bv, thread.bv, time.bv, dir.bv, etc.
 ## 4. Verification
 
 - `cargo test --lib` — all pass
-- All changed examples pass `briv check`
+- All changed examples pass `briev check`
 - `grep '[a-z]+#(' examples/` — zero lowercase # calls remain

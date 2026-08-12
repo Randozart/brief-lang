@@ -13,7 +13,7 @@
 
 Currently, defn can only return a single output type:
 
-```briv
+```briev
 defn get_status(id: Int) -> Bool {
   [id > 0] term true;
   [id <= 0] term false;
@@ -29,7 +29,7 @@ This forces callers to handle single outcomes. Real functions often have multipl
 
 Enable defn to declare **multiple output types** that callers **must handle exhaustively**:
 
-```briv
+```briev
 // Union: can produce any ONE of these
 defn fetch(url: String) -> JSON | Error {
   [valid_url(url)] term fetch_json(url);
@@ -84,7 +84,7 @@ output_union ::= type ("|" type)*
 - Caller must handle ALL possible types
 - Caller doesn't know which until runtime
 
-```briv
+```briev
 defn choose(x: Int) -> Bool | String {
   [x > 0] term true;
   [x <= 0] term "negative";
@@ -103,7 +103,7 @@ let result: Bool = choose(5);  // Compiler error
 - Multiple `term` statements fill slots
 - Caller must bind variables for all slots
 
-```briv
+```briev
 defn pair() -> Bool, String {
   term true;      // Fills slot 0 (Bool)
   term "message"; // Fills slot 1 (String)
@@ -120,7 +120,7 @@ let b: Bool = pair();  // Compiler error
 
 When a defn returns a union type, the **caller must handle all outcomes**:
 
-```briv
+```briev
 defn api_call() -> JSON | Error | Timeout {
   [success] term parse_json(...);
   [error] term Error(...);
@@ -158,7 +158,7 @@ To fix:
 
 Multi-output functions support optional names (from Issue #3):
 
-```briv
+```briev
 defn safe_divide(a: Int, b: Int)
   [b != 0]
   [success == true && result == a / b]
@@ -470,7 +470,7 @@ fn test_union_handled_correctly() {
 
 Create `examples/multi_output.bv`:
 
-```briv
+```briev
 let json: JSON;
 let error: String;
 

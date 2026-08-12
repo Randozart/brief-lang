@@ -6,7 +6,7 @@
 Replace the old polling-based trigger system (`__trg_stdin_read`, `__trg_timerfd_read`, `__trg_signalfd_read`) with a compile-time dependency graph + bitmask dirty-flag architecture. Each `trg` declaration becomes an externally-driven input; dependent state variables are recomputed in topological order when any trigger fires.
 
 ## Syntax
-```briv
+```briev
 trg sensor: Int @ 0x1000;       // MMIO-mapped sensor input
 trg keypress: Char @stdin;      // stdin event (epoll-driven)
 trg tick: Int @timer(60);       // 60 Hz periodic timer
@@ -18,7 +18,7 @@ All triggers are now **wake by default** — the reactor blocks on epoll (for bu
 
 Use `#nowake` for passive triggers that should be read-only (e.g., an MMIO input that doesn't need to drive the tick loop):
 
-```briv
+```briev
 trg io_pending: Bool @ link __io_pending;    // wake (default) — blocks until __io_pending changes
 trg button: Bool @ 0x5000 #nowake;            // passive — polled but doesn't wake the reactor
 ```
@@ -149,7 +149,7 @@ pub fn step_triggers(&mut self) {
 
 ## Cleanup (Phase 6)
 
-Removed `__trg_stdin_read()` polling function from `briv_rt.c` and
+Removed `__trg_stdin_read()` polling function from `briev_rt.c` and
 its `declare` in the LLVM backend. The remaining timerfd/signalfd
 polling functions (`__trg_timerfd_open/read`, `__trg_signalfd_open/read`)
 are deprecated and will be removed once the epoll event loop is fully

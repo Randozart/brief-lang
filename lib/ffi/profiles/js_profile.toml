@@ -1,4 +1,4 @@
-# JavaScript Language Profile for Briv FFI
+# JavaScript Language Profile for Briev FFI
 # Defines type mappings and conventions for speaking to JavaScript/WASM
 
 [language]
@@ -32,7 +32,7 @@ Void = { size = 0 }
 Object = { representation = "JSObject", size = "variable" }
 
 [mapping]
-# Default mappings for Briv types
+# Default mappings for Briev types
 String = "String"
 Int = "Number"
 UInt = "Number"

@@ -1,14 +1,14 @@
-# Briv Compiler - rstruct Implementation Fixes
+# Briev Compiler - rstruct Implementation Fixes
 
 ## Overview
 
-This document details the fixes required to make rstruct components work correctly in Briv. The issues were discovered during testing of the landing page demo.
+This document details the fixes required to make rstruct components work correctly in Briev. The issues were discovered during testing of the landing page demo.
 
 ## Issues Identified
 
 ### 1. b-each Container Selector Bug
 
-**Location**: `briv-compiler/src/view_compiler.rs` line 191
+**Location**: `briev-compiler/src/view_compiler.rs` line 191
 
 **Problem**: The code uses `.nth(1)` to find the container element, which gets the grandparent element instead of the direct parent.
 
@@ -28,7 +28,7 @@ let container_id = if let Some((_, parent_pos)) = element_stack.iter().rev().nth
 
 ### 2. rstruct Trigger Mapping Bug
 
-**Location**: `briv-compiler/src/wasm_gen.rs` lines 801-806
+**Location**: `briev-compiler/src/wasm_gen.rs` lines 801-806
 
 **Problem**: When user writes `b-trigger:click="tick"` inside an rstruct, the JS trigger map maps to `invoke_tick` but only `invoke_Counter_tick` exists (the alias isn't being used correctly).
 
@@ -57,7 +57,7 @@ let invoke_method = format!("invoke_{}", short_name);
 
 #### 3a. AST Changes
 
-**File**: `briv-compiler/src/ast.rs`
+**File**: `briev-compiler/src/ast.rs`
 
 Add `default` field to `StructField`:
 
@@ -71,7 +71,7 @@ pub struct StructField {
 
 #### 3b. Parser Changes
 
-**File**: `briv-compiler/src/parser.rs`
+**File**: `briev-compiler/src/parser.rs`
 
 - Accept `let count: Int = 5;` syntax in rstruct
 - Error if field has no initializer: "rstruct field '{name}' must have initial value"
@@ -79,7 +79,7 @@ pub struct StructField {
 
 #### 3c. WASM Generation
 
-**File**: `briv-compiler/src/wasm_gen.rs`
+**File**: `briev-compiler/src/wasm_gen.rs`
 
 - Generate signals from rstruct field defaults
 - Include rstruct fields in the signal map
@@ -88,7 +88,7 @@ pub struct StructField {
 
 ### 4. Transaction Naming Shortcut
 
-**Location**: `briv-compiler/src/parser.rs` (rstruct parsing)
+**Location**: `briev-compiler/src/parser.rs` (rstruct parsing)
 
 **Problem**: Users must write `txn Counter.tick [...]` but should be able to write just `txn tick [...]`
 
@@ -99,7 +99,7 @@ pub struct StructField {
 ## Updated Syntax Examples
 
 ### Old (broken):
-```briv
+```briev
 rstruct Counter {
     count: Int;  // ERROR - no initializer
     
@@ -116,7 +116,7 @@ rstruct Counter {
 ```
 
 ### New (correct):
-```briv
+```briev
 rstruct Counter {
     let count: Int = 0;  // REQUIRED - must have default
     
@@ -141,7 +141,7 @@ After implementation, test with:
 ```bash
 cd /home/randozart/Desktop/Projects/codicil/landing-page
 rm -rf landing-build
-/home/randozart/Desktop/Projects/briv-compiler/target/release/briv-compiler rbv landing.rbv
+/home/randozart/Desktop/Projects/briev-compiler/target/release/briev-compiler rbv landing.rbv
 ```
 
 Expected results:
@@ -153,7 +153,7 @@ Expected results:
 
 ## 5. Reactive Transactions in WASM
 
-**Location**: `briv-compiler/src/wasm_gen.rs`
+**Location**: `briev-compiler/src/wasm_gen.rs`
 
 ### 5.1 Reactive Transaction Tracking
 
@@ -181,7 +181,7 @@ if !self.reactive_txns.is_empty() {
 ```
 
 ### Usage
-```briv
+```briev
 rstruct Counter {
     let count: Int = 5;
     node tick [count > 0][count == @count - 1] {
@@ -195,14 +195,14 @@ rstruct Counter {
 
 ## 6. --no-cache CLI Flag
 
-**Location**: `briv-compiler/src/main.rs`
+**Location**: `briev-compiler/src/main.rs`
 
 Added `--no-cache` flag to both `run` and `rbv` commands to clear build cache before compiling.
 
 **Usage**:
 ```bash
-briv run landing.rbv --no-cache
-briv rbv landing.rbv --no-cache
+briev run landing.rbv --no-cache
+briev rbv landing.rbv --no-cache
 ```
 
 ---
@@ -220,7 +220,7 @@ Note: wasm-pack still outputs emoji (🎯🌀⚡✨📦) - that's external to th
 
 ## 8. Property Access in Directives
 
-**Location**: `briv-compiler/src/wasm_gen.rs` - `render_each` function
+**Location**: `briev-compiler/src/wasm_gen.rs` - `render_each` function
 
 ### Implementation
 
@@ -233,7 +233,7 @@ Extended b-each rendering to support property access like `item.name`:
 
 ### Usage
 
-```briv
+```briev
 struct Item {
     let name: String = "";
     let color: String = "#fff";

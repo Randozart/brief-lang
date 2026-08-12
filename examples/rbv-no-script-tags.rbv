@@ -1,6 +1,6 @@
-// rbv-no-script-tags.rbv — Briv-as-default .rbv format
+// rbv-no-script-tags.rbv — Briev-as-default .rbv format
 //
-// Briv code is the default content — no <script> wrapper needed.
+// Briev code is the default content — no <script> wrapper needed.
 // The <view> section contains the HTML template with b-* directives.
 // The <style> section is optional; CSS can also be imported via:
 //   import "styles.css";

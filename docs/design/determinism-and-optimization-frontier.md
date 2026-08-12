@@ -43,7 +43,7 @@ Taintedness follows assignment: if `&x = trg_a + 1`, then `x` inherits `trg_a`'s
 
 ## Boundedness Flows Through the Dependency Graph
 
-Because Briv programs form an assignment dependency graph (a value implies other values through transactions), boundedness is *also* graph-structured. The bounds on a `trg` or FFI value are not isolated — they propagate through every expression and transaction that reads them.
+Because Briev programs form an assignment dependency graph (a value implies other values through transactions), boundedness is *also* graph-structured. The bounds on a `trg` or FFI value are not isolated — they propagate through every expression and transaction that reads them.
 
 Given:
 ```
@@ -64,7 +64,7 @@ The practical consequence: `[count < total][count == total]` works identically w
 ### Edge Cases in Bound Propagation
 
 - **Division**: `a / b` where `0 <= b <= 10` — `b` can be zero, so the bound interval may collapse to "any Int" (undefined behavior). The compiler rejects or conservatively widens.
-- **Overflow**: `a + 1` where `a = MAX_INT` — the arithmetic is well-defined by Briv's semantics (saturating or wrapping, per contract), but bound propagation must account for it.
+- **Overflow**: `a + 1` where `a = MAX_INT` — the arithmetic is well-defined by Briev's semantics (saturating or wrapping, per contract), but bound propagation must account for it.
 
 These don't break the model — they define where the compiler must conservatively degrade a classification (Bounded → Opaque) when arithmetic loses monotonicity.
 
@@ -72,7 +72,7 @@ These don't break the model — they define where the compiler must conservative
 
 ## Timing Predictability at the Frontier
 
-A `trg` declaration says "this value may change at any tick." But "any tick" is not always an unknowable interval. In embedded Briv, `trg` variables are wired to direct MMIO addresses:
+A `trg` declaration says "this value may change at any tick." But "any tick" is not always an unknowable interval. In embedded Briev, `trg` variables are wired to direct MMIO addresses:
 
 ```
 // firmware.ebv — runs on a microcontroller
@@ -133,7 +133,7 @@ When `button` fires, only **Region A** re-evaluates. `sensor` is undisturbed. `l
 
 5. **Region merging on shared consumers**: Two `trg`s remain independent UNLESS a transaction reads both. If `txn A` depends on both `trg_1` and `trg_2`, those two regions merge into one. The partition is connected-components over the dependency graph.
 
-This is a fundamentally different model from a global reactive framework (like FRP with a global push/pull phase). Briv's `trg` is a **local equilibrium break** — the rest of the system doesn't even notice.
+This is a fundamentally different model from a global reactive framework (like FRP with a global push/pull phase). Briev's `trg` is a **local equilibrium break** — the rest of the system doesn't even notice.
 
 ---
 

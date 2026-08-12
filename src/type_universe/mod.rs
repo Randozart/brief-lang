@@ -52,7 +52,7 @@ pub struct ResolvedType {
 /// Central type definition registry.
 /// Built during the type-checking pass from all `TopLevel::TypeDef` items.
 /// 2026-08-09 (Phase 12, SPEC §19.6): the `melds` registry is removed — foreign
-/// shapes adapt through GLUE/Data Briv descriptors, explicit protocol cast
+/// shapes adapt through GLUE/Data Briev descriptors, explicit protocol cast
 /// edges, ownership contracts, and effects. No meld declarations exist.
 #[derive(Debug, Clone)]
 pub struct TypeUniverse {

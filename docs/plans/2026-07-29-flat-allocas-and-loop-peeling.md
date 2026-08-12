@@ -92,7 +92,7 @@ The [Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian
 | C gcc #1 (reference) | 5.23s | Plain struct `planet { double x,y,z,... }` + sqrt |
 | Rust #9 (SIMD) | 2.19s | `core::simd` portable SIMD |
 
-The C reference (5.23s) uses an **array-of-structs** layout (`struct planet { double x, y, z, vx, vy, vz, mass; }`) — the same AoS pattern as our nbody_newton. Clang generates per-field phi nodes and LLVM's SROA handles promotion. The C reference doesn't vectorize (no SIMD intrinsics), yet it runs in 5.23s vs our Briv at ~10.6s (50M bound). The 2× gap is from the Briv compiler emitting a monolithic `%State` struct instead of individual field allocas.
+The C reference (5.23s) uses an **array-of-structs** layout (`struct planet { double x, y, z, vx, vy, vz, mass; }`) — the same AoS pattern as our nbody_newton. Clang generates per-field phi nodes and LLVM's SROA handles promotion. The C reference doesn't vectorize (no SIMD intrinsics), yet it runs in 5.23s vs our Briev at ~10.6s (50M bound). The 2× gap is from the Briev compiler emitting a monolithic `%State` struct instead of individual field allocas.
 
 ## Diagnostic Experiment: Loop Peeling
 
@@ -278,4 +278,4 @@ This plan supersedes the prior "Improvement #2: Separate `@init_state`" which wa
 | `<2 x float>` vector phis | 1.52× C | Appendix E.2 |
 | `<8 x float>` vector phis (SoA) | 1.48× C | Appendix E.4 |
 | `@init_state` separation | 1.28× C | Appendix F (reverted) |
-| Briv-level LICM | 1.24× C | Committed at `0c042745` |
+| Briev-level LICM | 1.24× C | Committed at `0c042745` |

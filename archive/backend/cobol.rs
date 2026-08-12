@@ -373,7 +373,7 @@ impl CobolBackend {
 
         if cond_str != "1 = 1" {
             output.push_str(&format!(
-                "    * PRE-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIV CONTRACT FAILED: PRECONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
+                "    * PRE-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIEV CONTRACT FAILED: PRECONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
                 Self::expr_to_display(pre_contract),
                 cond_str,
                 Self::expr_to_display(pre_contract)
@@ -391,7 +391,7 @@ impl CobolBackend {
         let post_contract = &txn.contract.post_condition;
         let cond_str = self.translate_condition(post_contract);
         output.push_str(&format!(
-            "    * POST-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIV CONTRACT FAILED: POSTCONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
+            "    * POST-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIEV CONTRACT FAILED: POSTCONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
             Self::expr_to_display(post_contract),
             cond_str,
             Self::expr_to_display(post_contract)
@@ -403,7 +403,7 @@ impl CobolBackend {
 
         if let Some(watchdog) = &txn.contract.watchdog {
             output.push_str(&format!(
-                "    * WATCHDOG: {}\n    ADD 1 TO WS-RECURSION-DEPTH.\n    IF WS-RECURSION-DEPTH > {}\n        DISPLAY \"BRIV WATCHDOG: Recursion depth exceeded\"\n        MOVE 4001 TO RETURN-CODE\n        GOBACK\n    END-IF.\n\n",
+                "    * WATCHDOG: {}\n    ADD 1 TO WS-RECURSION-DEPTH.\n    IF WS-RECURSION-DEPTH > {}\n        DISPLAY \"BRIEV WATCHDOG: Recursion depth exceeded\"\n        MOVE 4001 TO RETURN-CODE\n        GOBACK\n    END-IF.\n\n",
                 Self::expr_to_display(&watchdog.condition),
                 self.recursion_limit
             ));

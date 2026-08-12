@@ -4,13 +4,13 @@ This document explains how `hardware.toml` affects the generated SystemVerilog o
 
 ## Overview
 
-The `hardware.toml` file provides target-specific configuration that changes how Briv code compiles to hardware. This allows the same `.ebv` source to target different FPGAs or memory architectures.
+The `hardware.toml` file provides target-specific configuration that changes how Briev code compiles to hardware. This allows the same `.ebv` source to target different FPGAs or memory architectures.
 
 ## Memory Type Abstraction
 
 ### The Problem
 
-Briv's `let buf: Int[1024]` declares a vector of 1024 integers. When compiling to SystemVerilog, this could become:
+Briev's `let buf: Int[1024]` declares a vector of 1024 integers. When compiling to SystemVerilog, this could become:
 
 1. **Flip-flop array**: `logic [15:0] buf [0:1023]` with per-element always_ff logic
 2. **Block RAM (BRAM)**: Single `always_ff` with address muxing
@@ -133,6 +133,6 @@ The compiler now avoids this by skipping reset initialization for RAM types.
 | `address_width = 18` | 18-bit address signals generated |
 
 The abstraction allows:
-- Portable Briv code across different FPGA targets
+- Portable Briev code across different FPGA targets
 - Memory architecture decisions external to business logic
 - Correct synthesis to actual FPGA resources (BRAM vs FFs)

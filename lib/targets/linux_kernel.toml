@@ -9,7 +9,7 @@ state_allocation = "static"
 
 [codegen.entry_point]
 style = "module_init"
-module_name = "briv_module"
+module_name = "briev_module"
 
 [codegen.templates]
 header = """
@@ -19,6 +19,6 @@ header = """
 #include <linux/delay.h>
 """
 footer = """
-MODULE_AUTHOR("Briv Compiler");
+MODULE_AUTHOR("Briev Compiler");
 MODULE_LICENSE("GPL");
 """

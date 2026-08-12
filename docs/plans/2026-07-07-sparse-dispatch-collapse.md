@@ -4,7 +4,7 @@
 
 All 22 benchmarks MATCH. Run at BOUND=50000000, 5 iterations.
 
-| Benchmark | Ratio | Briv | C | Correct | Notes |
+| Benchmark | Ratio | Briev | C | Correct | Notes |
 |-----------|-------|-------|---|---------|-------|
 | ring_buffer | .96x | .0597s | .0620s | MATCH |
 | float_math | .82x | .0589s | .0713s | MATCH | BEATS C |
@@ -38,7 +38,7 @@ term;
 The compiler's `emit_modulo_rotated` emits all 8 bodies sequentially in a
 rotated loop, producing 8× the LLVM IR of a single-body equivalent. C's clang
 at `-O3` eliminates the empty switch entirely, producing just `count++` with a
-5M-interval print guard. Clang's output has 1 body to optimize; Briv's has 8
+5M-interval print guard. Clang's output has 1 body to optimize; Briev's has 8
 separate basic blocks.
 
 ## Root Cause

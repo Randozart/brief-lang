@@ -134,7 +134,7 @@ Current (broken): `socket#(AF_INET, SOCK_STREAM, 0)` — calls non-existent intr
 
 New approach — typed `AddressOf#` handle + `frgn` syscalls:
 
-```briv
+```briev
 // 2026-07-15: AddressOf# resolves a typed pointer to the networking interface
 let net: Ptr<NetIf> = AddressOf#("sys:net");
 
@@ -152,7 +152,7 @@ subsystem; `frgn` declarations provide the raw syscall surface.
 
 Replace `mmap#(...)` with:
 
-```briv
+```briev
 // 2026-07-15: AddressOf# resolves the memory subsystem handle
 let mem: Ptr<MemRegion> = AddressOf#("sys:mmap");
 
@@ -180,6 +180,6 @@ blocks and `$` intrinsics in Phases 5-6. The file is obsolete.
 ## 8. Verification Gates
 
 1. `cargo test --lib` — all tests pass (currently 860)
-2. All changed example files pass `briv check`
+2. All changed example files pass `briev check`
 3. No remaining lowercase `#` calls in `examples/` (grep for `[a-z]+#\(`)
 4. `cargo build --release` — no warnings

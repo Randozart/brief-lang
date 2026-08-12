@@ -291,7 +291,7 @@ pub fn generate_dbv(
 
 /// Extract alias → address mappings from a .dbvl target binding file.
 ///
-/// Parses the DBriv Lines file and extracts every positional entry with
+/// Parses the DBriev Lines file and extracts every positional entry with
 /// `name; @0x...` pattern, returning a map of alias name to its physical
 /// u64 address.
 ///
@@ -302,9 +302,9 @@ pub fn generate_dbv(
 /// Or standalone entries without schema:
 ///   gpio0; @0x8000A000;
 pub fn extract_target_addresses(dbv_content: &str) -> Result<HashMap<String, u64>, String> {
-    use crate::dbriv::{DataField, DataValue};
+    use crate::dbriev::{DataField, DataValue};
 
-    let doc = crate::dbriv::v2::parse_document(dbv_content)
+    let doc = crate::dbriev::v2::parse_document(dbv_content)
         .map_err(|e| format!("Failed to parse .dbvl file: {}", e))?;
 
     let mut addresses = HashMap::new();

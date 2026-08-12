@@ -4,7 +4,7 @@
 // addresses. Used by both the interpreter (AddressOf# evaluation) and the
 // LLVM backend (AddressOf# codegen).
 //
-// 2026-08-03 (Phase 2, plan docs/plans/2026-08-03-data-briv-config-and-
+// 2026-08-03 (Phase 2, plan docs/plans/2026-08-03-data-briev-config-and-
 // board-hardware-map.md §5.2): the board's `addresses.dbvl` is now the
 // primary source. Resolution order:
 //   1. active board's `lib/boards/<board>/addresses.dbvl` (ConfigDb-backed)
@@ -17,7 +17,7 @@
 // in a thread-local so both backends and the interpreter agree by
 // construction — they all call this one function.
 
-use crate::dbriv::config_db::ConfigDb;
+use crate::dbriev::config_db::ConfigDb;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

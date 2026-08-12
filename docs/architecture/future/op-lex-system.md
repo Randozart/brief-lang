@@ -33,7 +33,7 @@ discriminator fields that duplicate what a single regex could express.
 Replace `op Parse` with `op Lex` — three entry point variants that let types
 self-declare how they interpret source text:
 
-```briv
+```briev
 op Lex(Literal, regex):  fn(#L);   // matches raw text tokens
 op Lex(Quoted):          fn(#L);   // matches paired-delimiter strings
 op Lex(Keyword, word):   fn(#L);   // subscribes a specific identifier word
@@ -66,17 +66,17 @@ When the parser encounters a `Literal("42")` in an expression, it:
 4. Calls the matching handler to produce a typed value
 
 For `Literal("0xFF")`:
-```briv
+```briev
 type Int { op Lex(Literal, r"^0x[0-9a-fA-F]+$"): parse_hex(#L); };
 ```
 
 For `Literal("42km")`:
-```briv
+```briev
 type KiloMetre { op Lex(Literal, r"^[0-9]+km$"): parse_km(#L); };
 ```
 
 For `Literal("true")`:
-```briv
+```briev
 type Bool { op Lex(Keyword, "true"): parse_true(#L); };
 ```
 
@@ -93,7 +93,7 @@ declaring one:
 | `#Bool` | `op Lex(Keyword, "true"): parse_true(#L);` + `op Lex(Keyword, "false"): parse_false(#L);` | Two keyword entries |
 
 Users can override or extend:
-```briv
+```briev
 type HexInt: #Int {
     op Lex(Literal, r"^0x[0-9a-fA-F]+$"): parse_hex(#L);
     // #Int's default r"^[0-9]+$" still inherited for plain decimals
@@ -128,7 +128,7 @@ cleaner but may degrade error messages.
 ### 3.2 pre/suf — only on Quoted or everywhere?
 
 Raw regex can express prefix and suffix patterns:
-```briv
+```briev
 op Lex(Literal, r"^0x[0-9a-fA-F]+$"): parse_hex(#L); // prefix 0x
 op Lex(Literal, r"^[0-9]+km$"):       parse_km(#L);  // suffix km
 ```
@@ -138,7 +138,7 @@ But for `Quoted`, the paired-delimiter model makes regex awkward:
 would need to match the opening quote, prefix, content, closing quote.
 `pre:` and `suf:` on `Quoted` avoid this:
 
-```briv
+```briev
 type Sql { op Lex(Quoted, pre:"sql"): parse_sql(#L); };
 ```
 
@@ -148,7 +148,7 @@ is impractical). `Keyword` has no regex — exact match only.
 
 ### 3.3 Single keyword vs combined
 
-```briv
+```briev
 // Option A: one per keyword
 op Lex(Keyword, "true"):  parse_true(#L);
 op Lex(Keyword, "false"): parse_false(#L);

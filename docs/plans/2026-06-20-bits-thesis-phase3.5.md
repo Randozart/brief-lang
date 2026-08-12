@@ -34,7 +34,7 @@ and emits native LLVM IR directly instead of the `add i64 0, 0` stub.
 | `Int` | Add, Sub, Mul, Div, Mod | `add/sub/mul/sdiv/srem i64` |
 | `Int` | Eq, Ne, Lt, Le, Gt, Ge | `icmp` + `zext i1 to i64` |
 | `Int` | BitAnd, BitOr, BitXor, Shl, Shr | `and/or/xor/shl/lshr i64` |
-| `Int` | And, Or | `and/or i64` (bitwise, treated as logical in Briv) |
+| `Int` | And, Or | `and/or i64` (bitwise, treated as logical in Briev) |
 | `Float` | Add, Sub, Mul, Div | `fadd/fsub/fmul/fdiv float` |
 | `Float` | Eq, Ne, Lt, Le, Gt, Ge | `fcmp oeq/one/olt/ole/ogt/oge` + `zext` + `sitofp` |
 | `Bool` | And, Or | `and/or i1` |

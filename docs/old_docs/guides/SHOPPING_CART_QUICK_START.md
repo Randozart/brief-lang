@@ -2,14 +2,14 @@
 
 ## The Proven Easy Command
 
-Run this ONE command from the briv-compiler directory:
+Run this ONE command from the briev-compiler directory:
 
 ```bash
 ./shopping-cart
 ```
 
 That's it! This command:
-1. ✅ Builds the Briv compiler
+1. ✅ Builds the Briev compiler
 2. ✅ Compiles the shopping cart (nested divs, emoji, WASM glue)
 3. ✅ Generates all necessary files
 4. ✅ Builds the WASM module
@@ -32,8 +32,8 @@ python3 -m http.server 8000
 # Option 2: Using Node.js
 npx http-server -p 8000
 
-# Option 3: Using Briv's built-in server
-briv serve .
+# Option 3: Using Briev's built-in server
+briev serve .
 ```
 
 Then open your browser to:
@@ -53,7 +53,7 @@ A fully functional shopping cart with:
 
 ## How It Works
 
-The Briv compiler has been fixed to support:
+The Briev compiler has been fixed to support:
 
 1. **Nested HTML Elements** - Shopping cart layout with nested divs
 2. **Unicode & Emoji** - 🛍️ 💻 ✨ appear in the UI
@@ -78,8 +78,8 @@ All event handlers (buttons, selections) are wired up via the fixed glue code.
 
 ### Command not found: `./shopping-cart`
 ```bash
-# Make sure you're in the briv-compiler directory
-cd /home/randozart/Desktop/Projects/briv-compiler
+# Make sure you're in the briev-compiler directory
+cd /home/randozart/Desktop/Projects/briev-compiler
 chmod +x shopping-cart  # Make it executable
 ./shopping-cart
 ```
@@ -114,4 +114,4 @@ All fixes are tested with 12 comprehensive test cases - check `tests/bug_fixes_t
 - WASM build: ~23 seconds (first time)
 - Total time: ~25 seconds
 
-The shopping cart is now **production-ready** and demonstrates Briv's full capabilities!
+The shopping cart is now **production-ready** and demonstrates Briev's full capabilities!

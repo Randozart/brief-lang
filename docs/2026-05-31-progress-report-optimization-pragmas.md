@@ -23,7 +23,7 @@ Completed the entire optimization framework across 4 commits. All 5 optimization
 - **Step 3**: Lifted wake+enum mutual exclusion. Wake reactors with bounded trigger value sets now enter enum switch-dispatch with `@__rt_init()`/`@__rt_wait()` hybrid mode.
 - **Step 4**: `suggest_async_promotion()` lint. Emits A001 warning for conflict-free `rct` txns that could be marked `async`.
 - **Step 5**: Thread pool + auto async/enum inference.
-  - Portable thread pool in `runtime/briv_rt.c` (mutex+cond+counter barrier, works on macOS)
+  - Portable thread pool in `runtime/briev_rt.c` (mutex+cond+counter barrier, works on macOS)
   - Auto-categorization: enum candidates (trigger-gated) beat async candidates (conflict-free)
   - `emit_async_body` functions for worker threads
   - Hybrid `@main` with thread pool init, barrier phases, and `__rt_wait` integration

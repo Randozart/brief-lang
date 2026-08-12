@@ -1,0 +1,566 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "fileTypes": [
+    "bv",
+    "br",
+    "abv",
+    "sbv",
+    "rbv",
+    "srbv",
+    "ebv",
+    "sebv",
+    "cbv",
+    "dbv",
+    "dbvl"
+  ],
+  "firstLineMatch": "^//",
+  "name": "Briev",
+  "patterns": [
+    {
+      "include": "#block-comments"
+    },
+    {
+      "include": "#line-comments"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#render-block"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#intrinsics"
+    },
+    {
+      "include": "#hash-words"
+    },
+    {
+      "include": "#compiletime-keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#contracts"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#stage-blocks"
+    },
+    {
+      "include": "#navigation-intrinsics"
+    },
+    {
+      "include": "#ast-constructors"
+    },
+    {
+      "include": "#diagnostics"
+    },
+    {
+      "include": "#targets"
+    },
+    {
+      "include": "#identifiers"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#metadata-properties"
+    }
+  ],
+  "repository": {
+    "annotations": {
+      "patterns": [
+        {
+          "match": "^// === PATH ANALYSIS ===",
+          "name": "meta.annotation.briev"
+        },
+        {
+          "match": "^// === END PATH ANALYSIS ===",
+          "name": "meta.annotation.briev"
+        },
+        {
+          "match": "^// \\[(ENTRY_POINT|RECURSIVE)\\]",
+          "name": "comment.annotation.briev"
+        },
+        {
+          "match": "^// (PATHS_TO|CALLERS|RESOLVES_TO):",
+          "name": "comment.annotation.briev"
+        }
+      ]
+    },
+    "ast-constructors": {
+      "patterns": [
+        {
+          "match": "\\b(Import|Defn|Txn|Contract|Block|Let|Assign|Term|Guarded|Call|Ident|Expr|BinOp|Field|BlockExpr|Bits|Ptr|Tuple|Metadata|Pattern)\\$",
+          "name": "support.constant.property-value.constructor.briev"
+        }
+      ]
+    },
+    "block-comments": {
+      "patterns": [
+        {
+          "begin": "#\\[",
+          "end": "\\]#",
+          "name": "comment.block.briev"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "match": "\\b(true)\\b",
+          "name": "constant.language.true.briev"
+        },
+        {
+          "match": "\\b(false)\\b",
+          "name": "constant.language.false.briev"
+        }
+      ]
+    },
+    "briev-bindings": {
+      "patterns": [
+        {
+          "captures": {
+            "1": {
+              "name": "entity.other.attribute-name.briev"
+            },
+            "3": {
+              "name": "variable.parameter.briev"
+            },
+            "4": {
+              "name": "punctuation.separator.key-value.briev"
+            },
+            "5": {
+              "name": "string.quoted.double.briev"
+            }
+          },
+          "match": "\\b(b-[a-z0-9\\-]+)(:([a-z0-9\\-]+))?(=)(\"[^\"]*\")"
+        }
+      ]
+    },
+    "compiletime-keywords": {
+      "patterns": [
+        {
+          "match": "\\$(let|const|defn|txn)\\b",
+          "name": "support.constant.property-value.compiletime.briev"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "match": "\\b[A-Z][A-Z0-9_]*\\b",
+          "name": "variable.other.constant.briev"
+        }
+      ]
+    },
+    "contracts": {
+      "patterns": [
+        {
+          "begin": "\\[\\[?",
+          "end": "\\]\\]?",
+          "name": "meta.contract.briev",
+          "patterns": [
+            {
+              "include": "#line-comments"
+            },
+            {
+              "include": "#block-comments"
+            },
+            {
+              "include": "#expressions"
+            }
+          ]
+        }
+      ]
+    },
+    "diagnostics": {
+      "patterns": [
+        {
+          "match": "\\b(EmitInfo|EmitWarning|EmitError)\\$",
+          "name": "support.constant.property-value.diagnostic.briev"
+        }
+      ]
+    },
+    "expressions": {
+      "patterns": [
+        {
+          "include": "#line-comments"
+        },
+        {
+          "include": "#block-comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#booleans"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
+    "hash-words": {
+      "patterns": [
+        {
+          "comment": "Positional markers (#L, #R, #T, #Self) and protocol category hashwords (#Int, #Float, #String, #Bool, #Char, #Bits, #Ptr, #Void, #Bit, #Link, #System, #r, #b). Optional <variant> suffix for parameterized protocols like #String<UTF8>.",
+          "match": "#(L|R|T|Self|Int|Float|String|Bool|Char|Bits|Ptr|Void|Bit|Link|System|r|b)(<[a-zA-Z0-9_]+>)?",
+          "name": "support.constant.property-value.hashword.briev"
+        }
+      ]
+    },
+    "html-components": {
+      "patterns": [
+        {
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.tag.briev"
+            },
+            "2": {
+              "name": "entity.name.tag.briev"
+            },
+            "3": {
+              "patterns": [
+                {
+                  "include": "text.html.basic"
+                }
+              ]
+            },
+            "4": {
+              "name": "punctuation.definition.tag.briev"
+            }
+          },
+          "match": "(<)([A-Z][a-zA-Z0-9_]*)(\\s+[^>]*)?(/?>)"
+        },
+        {
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.tag.briev"
+            },
+            "2": {
+              "name": "entity.name.tag.briev"
+            },
+            "3": {
+              "name": "punctuation.definition.tag.briev"
+            }
+          },
+          "match": "(</)([A-Z][a-zA-Z0-9_]*)(>)"
+        },
+        {
+          "begin": "(<)([a-z][a-z0-9]*)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.briev"
+            },
+            "2": {
+              "name": "entity.name.tag.briev"
+            }
+          },
+          "end": "(</)(\\2)(>)|(/>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.briev"
+            },
+            "2": {
+              "name": "entity.name.tag.briev"
+            },
+            "3": {
+              "name": "punctuation.definition.tag.briev"
+            },
+            "4": {
+              "name": "punctuation.definition.tag.briev"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#briev-bindings"
+            },
+            {
+              "include": "text.html.basic"
+            },
+            {
+              "include": "#html-components"
+            }
+          ]
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()",
+          "name": "entity.name.function.briev"
+        },
+        {
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
+          "name": "variable.other.read.briev"
+        }
+      ]
+    },
+    "intrinsics": {
+      "patterns": [
+        {
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*#",
+          "name": "support.constant.property-value.intrinsic.briev"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(let|const|init|type|trait|proto|struct|seq|enum|impl|obj|cell|defn|txn|node|asm|render|frgn|optional|export|import|from|as|op|term|endprogram|beginprogram|defer|rollback|mutex|barrier|match|when|foreach|spawn|await|free|keep|trg|within|async|sync|vol|out|borrow|consume|owned|shared|borrowed|box|spill|quote)\\b",
+          "name": "keyword.control.briev"
+        },
+        {
+          "match": "\\b(true|false)\\b",
+          "name": "constant.language.briev"
+        },
+        {
+          "match": "\\b(cyc|ns|ms|s|min)\\b",
+          "name": "keyword.other.time-unit.briev"
+        },
+        {
+          "match": "\\b(Abs\\#|BitReverse\\#|Popcount\\#|LeadingZeros\\#|TrailingZeros\\#|SysCall\\#|Malloc\\#|Free\\#|Print\\#|Sqrt\\#)\\b",
+          "name": "support.function.intrinsic.briev"
+        },
+        {
+          "match": "\\b(Int|Float|Bool|String|Char|Void|Ptr|Bits)\\b",
+          "name": "support.type.primitive.briev"
+        }
+      ]
+    },
+    "line-comments": {
+      "patterns": [
+        {
+          "match": "//.*$",
+          "name": "comment.line.briev"
+        }
+      ]
+    },
+    "metadata-properties": {
+      "patterns": [
+        {
+          "match": "\\b(maxbits|observable|alignment|primitive|ctd|alu|llvm_type|layout)\\b",
+          "name": "keyword.other.property.briev"
+        }
+      ]
+    },
+    "navigation-intrinsics": {
+      "patterns": [
+        {
+          "match": "\\b(All|Tag|Named|WithKey|WithAttr|And|Or|Not|First|Last|Nth|Children|Descendants|Parent|Ancestors|Closest|Next|Prev|Before|After|Replace|Inside|AppendTo|Insert|Delete|ReplaceWith|Set|Wrap|Rename|Count|IsEmpty|Names|Find|Prepend|Append|Lines|Run|ForEach|Bound|Text|Path|Size|ReadBytes|List|Remove|StrSplit|StrReplace|StrJoin|EnvGet|SysQuery|TimeNow|HttpFetch|ShellCmd|FileRead|FileWrite|ConfigGet|TypeInfo|CastPath|InjectTypeLayout|DocRead|EmitInfo|EmitWarning|EmitError|Quote)\\$",
+          "name": "support.constant.property-value.navigation.briev"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b",
+          "name": "constant.numeric.float.briev"
+        },
+        {
+          "match": "\\b0x[0-9a-fA-F]+\\b|\\b[0-9]+\\b",
+          "name": "constant.numeric.integer.briev"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "&",
+          "name": "storage.modifier.ownership.briev"
+        },
+        {
+          "match": "@",
+          "name": "storage.modifier.ownership.briev"
+        },
+        {
+          "match": "\\?",
+          "name": "storage.modifier.ownership.briev"
+        },
+        {
+          "match": "!",
+          "name": "storage.modifier.ownership.briev"
+        },
+        {
+          "match": "==|!=",
+          "name": "keyword.operator.comparison.briev"
+        },
+        {
+          "match": "<-",
+          "name": "keyword.operator.push.briev"
+        },
+        {
+          "match": "<=|>=|<|>",
+          "name": "keyword.operator.relational.briev"
+        },
+        {
+          "match": "&&|\\|\\|",
+          "name": "keyword.operator.logical.briev"
+        },
+        {
+          "match": "\\+|\\-|\\*|/",
+          "name": "keyword.operator.arithmetic.briev"
+        },
+        {
+          "match": "~<-|~=|~\\+|~\\-|~\\*|~/",
+          "name": "keyword.operator.consumptive.briev"
+        },
+        {
+          "match": "~|&(?!&)|\\|(?!\\|)",
+          "name": "keyword.operator.bitwise.briev"
+        },
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.briev"
+        },
+        {
+          "match": "<-",
+          "name": "keyword.operator.arrow.briev"
+        },
+        {
+          "match": "<~",
+          "name": "keyword.operator.property.briev"
+        },
+        {
+          "match": "=",
+          "name": "keyword.operator.assignment.briev"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "match": ";",
+          "name": "punctuation.terminator.briev"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.briev"
+        },
+        {
+          "match": "[{}]",
+          "name": "punctuation.bracket.curly.briev"
+        },
+        {
+          "match": "[\\[\\]]",
+          "name": "punctuation.bracket.square.briev"
+        },
+        {
+          "match": "[()]",
+          "name": "punctuation.bracket.round.briev"
+        }
+      ]
+    },
+    "render-block": {
+      "begin": "\\b(render|RENDER)\\b\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.render.briev"
+        },
+        "2": {
+          "name": "punctuation.bracket.curly.briev"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.bracket.curly.briev"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#html-components"
+        },
+        {
+          "include": "text.html.basic"
+        },
+        {
+          "include": "#briev-bindings"
+        }
+      ]
+    },
+    "stage-blocks": {
+      "patterns": [
+        {
+          "match": "\\$\\((PreLex|Parsed|Resolved|Typed|Normalized|Verified|Allocated|Provenanced|Generated|Optimized|Linked)\\)",
+          "name": "entity.name.function.stage-block.briev"
+        },
+        {
+          "match": "\\$\\((Front|Mid|Post|Back)\\)",
+          "name": "entity.name.function.stage-block.deprecated.briev"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "match": "'(\\\\.|[^'\\\\])'",
+          "name": "string.quoted.single.briev"
+        },
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.briev",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.briev"
+            }
+          ]
+        }
+      ]
+    },
+    "targets": {
+      "patterns": [
+        {
+          "match": "\\b(Source|Ir|Bin|Stage)\\$",
+          "name": "support.constant.property-value.target.briev"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "match": "\\b(Int|Float|Bool|String|Char|Void|Ptr|Bits)\\b",
+          "name": "support.type.primitive.briev"
+        },
+        {
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b",
+          "name": "entity.name.type.custom.briev"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.briev"
+}

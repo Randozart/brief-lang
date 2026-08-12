@@ -3,7 +3,7 @@
 // Matches kalman_filter_runtime_c.c exactly.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/kalman_filter_runtime.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/kalman_filter_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
 

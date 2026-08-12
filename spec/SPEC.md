@@ -1,4 +1,4 @@
-# Briv Language Specification
+# Briev Language Specification
 
 **Version:** Draft 2026-08-05
 **Status:** Normative target specification; implementation conformance is staged
@@ -6,7 +6,7 @@
 
 ## 1. Scope and conformance
 
-Briv is a contract-first language for layout-independent values, reactive state machines, target-specialized execution, and adaptable foreign boundaries.
+Briev is a contract-first language for layout-independent values, reactive state machines, target-specialized execution, and adaptable foreign boundaries.
 
 A conforming implementation must:
 
@@ -22,7 +22,7 @@ A section marked **Staged** is normative design that may not yet be implemented.
 
 ### 2.1 Types have no canonical layout
 
-A Briv type denotes semantic behavior, logical fields, invariants, metadata, and operation bindings. It does not own one physical representation.
+A Briev type denotes semantic behavior, logical fields, invariants, metadata, and operation bindings. It does not own one physical representation.
 
 Physical representation is selected from:
 
@@ -69,13 +69,13 @@ Examples:
 
 | Extension | Role | Canonical target path |
 |---|---|---|
-| `.bv` | General Briv | LLVM/native; optional configured offload |
-| `.ebv` | Embedded Briv | LLVM embedded target profile |
-| `.abv` | Accelerator Briv | Direct SPIR-V through `rspirv` |
-| `.cbv` | Circuit Briv | CIRCT |
-| `.rbv` | Rendered Briv | Webstack |
-| `.dbv` | Structured Data Briv | Data parser |
-| `.dbvl` | Line-oriented Data Briv | Streaming data parser |
+| `.bv` | General Briev | LLVM/native; optional configured offload |
+| `.ebv` | Embedded Briev | LLVM embedded target profile |
+| `.abv` | Accelerator Briev | Direct SPIR-V through `rspirv` |
+| `.cbv` | Circuit Briev | CIRCT |
+| `.rbv` | Rendered Briev | Webstack |
+| `.dbv` | Structured Data Briev | Data parser |
+| `.dbvl` | Line-oriented Data Briev | Streaming data parser |
 
 `.dbvs`, `.sbv`, `.srbv`, `.sebv`, `.c.bv`, and other compact or legacy variants are not part of the language.
 
@@ -138,7 +138,7 @@ The names `sed`, `pvt`, and `reg` remain reserved for future language contracts.
 
 ### 4.2 Comments
 
-```briv
+```briev
 // line comment
 /* block comment */
 /// declaration documentation
@@ -163,7 +163,7 @@ Prefix `!value` is Boolean negation. Postfix callable `!` is compile-time expans
 
 ### 4.4 Removed lexical forms
 
-The following are not Briv syntax:
+The following are not Briev syntax:
 
 - `rstruct`, `uni`, `like`, `is`, `prop`, `sig`, `state`, `meld`, `syscall`;
 - `term!`, `trg!`, `cell!`, `sync!`, `frgn!`, `frgn?`, `frgn?!`, `syscall!`;
@@ -233,7 +233,7 @@ path             ::= string_literal | "<" path_component ("/" path_component)* "
 
 ### 7.1 Path model
 
-```briv
+```briev
 import "./local/path.bv";
 import <std/collections>;
 ```
@@ -247,7 +247,7 @@ import <std/collections>;
 
 `as` is reserved for semantic conversion. Import aliases use local-to-source `:` binding.
 
-```briv
+```briev
 import collections: <std/collections>;
 import { LocalName: ExportedName, OtherName } from "./module.bv";
 ```
@@ -260,7 +260,7 @@ Glob imports are invalid.
 
 Ordinary imports are private to the importing module.
 
-```briv
+```briev
 export import { PublicName } from "./internal.bv";
 ```
 
@@ -274,7 +274,7 @@ Diamond dependencies are valid. Genuine import cycles are compile-time errors. S
 
 ### 8.1 `let`, `const`, and `init`
 
-```briv
+```briev
 let counter: Int = 0;
 const MaxRetries: Int = 3;
 init BufSize: Int = get_env_int!("BUFSIZE");
@@ -301,7 +301,7 @@ Protocol-supplied defaults may initialize omitted logical fields. Unknown fields
 of options, written between `:` and the type so it cannot be confused with an
 array dimension:
 
-```briv
+```briev
 init BufferSize: [64 | lo..hi] Int = ...;   // exactly 64, or in [lo,hi]
 init BitLayout:  [16 | 32 | 64] Int = ...;  // one of three; target resolves
 ```
@@ -317,7 +317,7 @@ init BitLayout:  [16 | 32 | 64] Int = ...;  // one of three; target resolves
   satisfactory resolution, but is weaker proof: the compiler must fall back to
   a runtime check.
 
-**Proof-vs-decision hierarchy (core philosophy).** Briv compiles through
+**Proof-vs-decision hierarchy (core philosophy).** Briev compiles through
 proof and leaves decisions to the programmer where no single option is best:
 
 1. **Prove**: a provably-best strategy is the default; the compiler is silent.
@@ -360,7 +360,7 @@ needs your input (it warns and asks for a keyword). Rules:
 **Storage-strategy markers.** Where the compiler cannot select a single best
 storage strategy, the programmer classifies explicitly:
 
-```briv
+```briev
 box    // heap-per-instance storage, not a pooled column; an explicit choice,
        //   not a hidden special case
 spill  // a value may grow beyond its static pool column into a growable buffer
@@ -374,7 +374,7 @@ spill  // a value may grow beyond its static pool column into a growable buffer
   best-fitting, fastest, most-efficient strategy.
 - Their absence is the normal case: derived storage is proven, not annotated.
 
-**Memory-decision audit.** `brivc memcheck` reports every memory decision
+**Memory-decision audit.** `brievc memcheck` reports every memory decision
 point — lifetime, capacity, storage class, dependent versus static columns —
 with the strategy chosen, its location, and the proof obligation that
 justified it. Silent decisions are auditable; a decision that fell back
@@ -384,7 +384,7 @@ justified it. Silent decisions are auditable; a decision that fell back
 
 A `struct` declares a named data relationship. It does not own methods, operations, identity, or lifecycle.
 
-```briv
+```briev
 struct Point<T> {
     x: T;
     y: T;
@@ -393,7 +393,7 @@ struct Point<T> {
 
 A plain struct is layout-adaptive: a backend may reorder, split, scalarize, or eliminate fields when semantics permit.
 
-```briv
+```briev
 type Length32: #Int {
     !> bits: 32;
 };
@@ -412,7 +412,7 @@ Behavior for a struct is attached through an inherent `impl` in the defining mod
 
 An enum is a closed nominal sum. Its physical tag and payload layout are derived.
 
-```briv
+```briev
 enum Result<T, E> {
     Ok(T),
     Err(E),
@@ -423,13 +423,13 @@ Enum behavior is attached through `impl`. Variant names are ordinary identifiers
 
 ### 8.4 Structural sums
 
-```briv
+```briev
 Int | String
 ```
 
 `A | B` is an anonymous structural sum type. It is matched with typed bindings:
 
-```briv
+```briev
 match value {
     number: Int => use_int(number),
     text: String => use_string(text),
@@ -440,7 +440,7 @@ match value {
 
 A type declares semantic identity, logical fields, invariants, metadata/layout hints, functions, and operation bindings.
 
-```briv
+```briev
 type UserId: Int, Comparable<UserId>, #Int {
     value: Int;
     [value >= 0]
@@ -472,7 +472,7 @@ The relationship list after `:` may contain:
 
 A trait declares reusable behavioral requirements and defaults. It has no target-specific storage meaning.
 
-```briv
+```briev
 trait Sized {
     Size: Int;
 };
@@ -500,7 +500,7 @@ Conflicting defaults require an explicit local resolution.
 
 Runtime trait dispatch is explicit:
 
-```briv
+```briev
 let value: dyn Printable = source;
 ```
 
@@ -512,7 +512,7 @@ Trait node templates never activate through inferred conformance. A type or obje
 
 A protocol is a compiler-visible semantic category and cast-coherence domain. Protocols do not prescribe one layout.
 
-```briv
+```briev
 proto #String<UTF8> {
     !> encoding: UTF8;
 };
@@ -530,7 +530,7 @@ Each written `as` may traverse:
 
 Crossing multiple semantic protocol categories requires multiple written casts.
 
-```briv
+```briev
 let bits = text as #Bit;
 let number = text as #String as #Int;
 ```
@@ -541,7 +541,7 @@ Missing proof evidence is an error unless the edge is visibly declared as a trus
 
 `impl` attaches inherent behavior to data-only nominal declarations and imported foreign shapes.
 
-```briv
+```briev
 impl Point<Float> {
     op Add(Point<Float>): add_points(#Lh, #Rh);
 };
@@ -555,7 +555,7 @@ Inherent implementations may appear only in the target declaration's module. Exp
 
 `!>` is the canonical metadata-binding operator.
 
-```briv
+```briev
 type Int32: #Int {
     !> bits: 32;
 };
@@ -567,7 +567,7 @@ type Int32: #Int {
 Top-level `!>` is a shortcut for attaching metadata to the script; it never
 attaches to the following declaration.
 
-```briv
+```briev
 !> accel: try_all;
 ```
 
@@ -581,13 +581,13 @@ the metadata vocabulary.
 
 ### 9.1 Functions
 
-```briv
+```briev
 defn add(left: Int, right: Int) -> Int [true][#R == left + right] {
     term left + right;
 };
 ```
 
-`term expression;` completes the current callable or convergence step. Briv has no `return` keyword.
+`term expression;` completes the current callable or convergence step. Briev has no `return` keyword.
 
 A body-less internal signature uses `defn` with its contracts/effects and is staged until an implementation is supplied. There is no `sig` declaration.
 
@@ -595,7 +595,7 @@ A body-less internal signature uses `defn` with its contracts/effects and is sta
 
 Callable types use signature shape directly:
 
-```briv
+```briev
 let transform: (Int) -> Int = value => value + 1;
 ```
 
@@ -605,7 +605,7 @@ Closures capture lexical bindings. Captures participate in ownership, lifetime, 
 
 ### 9.3 Transactions
 
-```briv
+```briev
 txn increment()[counter < Max][counter >= 0] {
     counter = counter + 1;
     term;
@@ -619,7 +619,7 @@ transactions must express their postconditions without prior-state reads.
 
 A transaction is atomic with respect to its declared state transition. `rollback;` or `rollback reason;` aborts and reverts the current transaction/reactive firing.
 
-```briv
+```briev
 when invalid_input {
     rollback InvalidInput;
 };
@@ -631,7 +631,7 @@ when invalid_input {
 
 A node is a reactive transition that may fire when its precondition is satisfied.
 
-```briv
+```briev
 node update [pending][!pending] {
     pending = false;
     term;
@@ -644,7 +644,7 @@ The keyword is `node`; `rct` is not source syntax.
 
 An object owns identity, lifecycle, logical state, ports, and reactive behavior in its parent reactor.
 
-```briv
+```briev
 obj Enemy(damage: Event<Damage>) -> died: Event<EnemyId> {
     health: Int;
 
@@ -661,7 +661,7 @@ Objects use traits and composition rather than parent inheritance.
 
 A cell is a sealed state machine with an independent convergence membrane.
 
-```briv
+```briev
 cell Timer(period: Duration) -> tick: Event {
     // owned state and internal nodes
 };
@@ -684,7 +684,7 @@ declares and initializes the work-item counter explicitly (`let i: Int = 0;`),
 bounds it with a counted-loop contract, and advances it in the body. No
 compiler-synthesized variables: everything the loop does is visible in source.
 
-```briv
+```briev
 let i: Int = 0;                       // work-item counter, explicit init
 accel node force [i < nbodies][i == nbodies] {
     dv[i] = force_on(i);              // per-work-item compute
@@ -747,7 +747,7 @@ verification pipeline.
 
 Callable and transition contracts use precondition/postcondition brackets:
 
-```briv
+```briev
 defn divide(a: Int, b: Int) -> Int [b != 0][#R * b == a] {
     term a / b;
 };
@@ -763,7 +763,7 @@ Type invariants must be proven across construction and every mutating transforma
 
 ### 10.2 Inline guards and gates
 
-```briv
+```briev
 [ready] process();
 [converged];
 ```
@@ -776,7 +776,7 @@ Type invariants must be proven across construction and every mutating transforma
 
 Watchdogs occupy a dedicated grammar slot after a contract.
 
-```briv
+```briev
 txn poll()[ready][done] ?[progress] within 10ms -> on_timeout() {
     // body
 };
@@ -796,11 +796,11 @@ The watchdog `?`/`!` forms are contextual and do not conflict with expression pr
 
 ### 11.1 No `if`/`else`
 
-Briv has no `if` or `else`. Conditional branching uses exhaustive `match`. One-sided guarded execution uses `when` or inline guards.
+Briev has no `if` or `else`. Conditional branching uses exhaustive `match`. One-sided guarded execution uses `when` or inline guards.
 
 ### 11.2 `when`
 
-```briv
+```briev
 when ready {
     process();
 };
@@ -810,7 +810,7 @@ A `when` block has no implicit complementary branch.
 
 ### 11.3 `match`
 
-```briv
+```briev
 match value {
     Result::Ok(result) => use(result),
     Result::Err(error) when error.retryable => retry(error),
@@ -828,7 +828,7 @@ match value {
 
 `foreach` is the sole iteration keyword.
 
-```briv
+```briev
 foreach(item in items) {
     consume(item);
 };
@@ -849,7 +849,7 @@ which only ends the current transaction, `endprogram` exits the process even
 when a node's precondition remains satisfiable. Abrupt termination is not
 currently a source-language feature.
 
-There is no `main` declaration in Briv. The program entry is either an
+There is no `main` declaration in Briev. The program entry is either an
 explicit `beginprogram` node (§11.5.1) or, absent one, whichever reactive
 node fires first: the reactor evaluates node preconditions and the first
 satisfiable one fires. A program converges (and exits) when no node can fire.
@@ -862,7 +862,7 @@ at program start — and takes no conditions itself. The node's other
 precondition terms are ordinary state expressions over top-level bindings
 seeded from the environment or compile time at startup:
 
-```briv
+```briev
 let startingnumber: Int = get_env_int!("env_var");
 
 node entry1 [beginprogram && startingnumber == 1][done] {
@@ -889,7 +889,7 @@ A `beginprogram` node is an **entry loop**:
 
 ### 11.6 Critical sections and barriers
 
-```briv
+```briev
 mutex {
     update_shared_state();
 };
@@ -914,7 +914,7 @@ An unclassified eligible pair is a compile-time error.
 
 ### 12.2 `spawn` and `await`
 
-```briv
+```briev
 let task = spawn compute(input);
 let result = await task;
 ```
@@ -933,7 +933,7 @@ instance from the obj's static pool column (the default, provably
 inexhaustible). The storage-strategy markers (§8.1) classify the spawn
 explicitly where the pool decoder cannot choose a single best strategy:
 
-```briv
+```briev
 let h = box   spawn Counter();   // heap-per-instance, not a pooled column
 let h = spill spawn Counter();   // may grow beyond a static pool column
 ```
@@ -953,7 +953,7 @@ The reference interpreter uses a deterministic semantic scheduler for normal exe
 
 The reactive input keyword is `trg`.
 
-```briv
+```briev
 trg input_ready @ device;
 ```
 
@@ -975,7 +975,7 @@ Boundary and callable ownership uses:
 - `borrowed<source>`: returned lifetime is bounded by a named input;
 - `shared`: ownership uses a declared retain/release policy.
 
-```briv
+```briev
 frgn parse(
     borrow input: Ptr<Byte>,
     consume arena: Arena
@@ -1008,7 +1008,7 @@ There is no `Ptr!` alias and no `.^Address` acquisition form.
 
 ### 14.3 `free` and `keep`
 
-```briv
+```briev
 free value;
 keep value;
 ```
@@ -1039,7 +1039,7 @@ Traits and contracts may constrain effects. Compile-time reflection exposes `.^^
 
 Syntax maps to operation identities, which types bind to functions.
 
-```briv
+```briev
 type Number: #Int {
     op Add(Number): add(#Lh, #Rh);
 };
@@ -1071,7 +1071,7 @@ Concatenation has no dedicated `++`; it resolves through an ordinary operation b
 
 ### 15.3 Transfer arrows
 
-```briv
+```briev
 list <- value;
 value <- list[index];
 value ~<- list[index];
@@ -1114,7 +1114,7 @@ Custom parse-prefix/suffix bindings are not currently exposed. Unknown prefixes 
 
 ### 16.2 Strings and bytes
 
-```briv
+```briev
 "escaped string"
 #r"raw \ text"
 #b"\x89PNG\r\n"
@@ -1127,7 +1127,7 @@ Custom parse-prefix/suffix bindings are not currently exposed. Unknown prefixes 
 
 ### 16.3 Ordered and associative literals
 
-```briv
+```briev
 [1, 2, 3]
 ["one" => 1, "two" => 2]
 ```
@@ -1144,7 +1144,7 @@ There is no universal `null` or `nil`. Absence uses an ordinary sum variant such
 
 ### 16.5 Python-style slicing
 
-```briv
+```briev
 tensor[start:stop:step, ..., time => 5, width => 0:10]
 array[mask]
 array[start:stop][mask]
@@ -1157,7 +1157,7 @@ array[start:stop][mask]
 
 ### 16.6 Fixed containment and const dimensions
 
-```briv
+```briev
 Int[8]
 Matrix<T, Rows, Cols>
 ```
@@ -1168,7 +1168,7 @@ Matrix<T, Rows, Cols>
 
 ### 17.1 Runtime reflection
 
-```briv
+```briev
 value.^Field
 ```
 
@@ -1176,7 +1176,7 @@ Runtime reflection reads a declared/materialized logical field. Missing fields a
 
 ### 17.2 Compile-time descriptor reflection
 
-```briv
+```briev
 value.^^Type
 value.^^Ops
 value.^^Bytes
@@ -1206,7 +1206,7 @@ Declaration/source metadata is compile-time-only unless explicitly materialized.
 
 ### 18.1 Compile-time-only bindings
 
-```briv
+```briev
 $const Limit = 32;
 $let current = 0;
 $defn build(...) { ... };
@@ -1216,7 +1216,7 @@ $defn build(...) { ... };
 
 ### 18.2 Expansion
 
-```briv
+```briev
 format!("value: {}", value)
 regex!(#r"[a-z]+")
 ```
@@ -1227,7 +1227,7 @@ Privileged macros declare capabilities at definition. Calls still use `name!(...
 
 ### 18.3 Stages
 
-```briv
+```briev
 $(Parsed) { ... }
 $(Allocated) { ... }
 ```
@@ -1242,7 +1242,7 @@ Quotation and interpolation operate on AST values during compile time. They must
 
 `:=` introduces compile-time derivation/synthesis examples or a reference implementation.
 
-```briv
+```briev
 defn parity(x: Int) -> Bool
     := { 0 => false; 1 => true; }
     := parity_reference;
@@ -1254,16 +1254,16 @@ Generated behavior must satisfy the declared contracts and reference obligations
 
 ### 19.1 Foreign declaration
 
-```briv
+```briev
 frgn local_name(
     borrow input: Ptr<Byte>,
     consume arena: Arena
 ) -> owned Node: external_symbol from #System;
 ```
 
-The declaration name is the local Briv name. `:` binds a different external symbol. `as` is not an alias operator.
+The declaration name is the local Briev name. `:` binds a different external symbol. `as` is not an alias operator.
 
-A `frgn` signature declares the actual Briv-visible return type. Foreign calls are never implicitly wrapped in `Result`.
+A `frgn` signature declares the actual Briev-visible return type. Foreign calls are never implicitly wrapped in `Result`.
 
 GLUE configuration explicitly maps errno, status codes, exceptions, or delivery failures into `Result` when required.
 
@@ -1271,7 +1271,7 @@ GLUE configuration explicitly maps errno, status codes, exceptions, or delivery 
 
 Exactly four provenance forms exist:
 
-```briv
+```briev
 from "path"
 from <configured/path>
 from #Link<name>
@@ -1287,7 +1287,7 @@ Platform families such as POSIX are target configuration, not source hashwords.
 
 ### 19.3 Optional symbols
 
-```briv
+```briev
 optional frgn feature(...) -> T from #System;
 
 when feature.^^Available {
@@ -1299,7 +1299,7 @@ There is no `frgn?` or declaration-level `fallback` clause. Fallback behavior us
 
 ### 19.4 Variadics
 
-```briv
+```briev
 frgn log(format: String, variadic args: ForeignArgs) -> Void from #System;
 ```
 
@@ -1311,7 +1311,7 @@ Named system APIs use `frgn ... from #System`. Raw target-specific kernel transi
 
 ### 19.6 Foreign layouts
 
-Exact foreign field order, width, alignment, calling convention, and release policy live in GLUE/Data Briv configuration.
+Exact foreign field order, width, alignment, calling convention, and release policy live in GLUE/Data Briev configuration.
 
 There is no `meld` declaration. Foreign shapes adapt through configured descriptors, declared protocol cast edges, ownership contracts, and effects.
 
@@ -1321,7 +1321,7 @@ There is no `meld` declaration. Foreign shapes adapt through configured descript
 
 ### 19.8 Export
 
-```briv
+```briev
 export defn add(left: Int, right: Int) -> Int {
     term left + right;
 };
@@ -1331,7 +1331,7 @@ export defn add(left: Int, right: Int) -> Int {
 
 ## 20. Assembly declarations
 
-```briv
+```briev
 asm<x86_64> add_words(left: Int, right: Int) -> Int
     [true][#R == left + right]
     !> effects: [read, pure]
@@ -1344,15 +1344,15 @@ asm<x86_64> add_words(left: Int, right: Int) -> Int
 
 The target capability profile validates instruction syntax. Every assembly declaration supplies contracts and an effect profile including read/write sets, clobbers, blocking, FFI, and purity facts as applicable.
 
-## 21. Rendered Briv
+## 21. Rendered Briev
 
 ### 21.1 Document structure
 
-An `.rbv` document contains Briv source plus `<view>` and optional `<style>` blocks. Legacy `<script>` wrappers are invalid.
+An `.rbv` document contains Briev source plus `<view>` and optional `<style>` blocks. Legacy `<script>` wrappers are invalid.
 
 ### 21.2 View attachment
 
-```briv
+```briev
 render Counter {
     <button b-trigger:click="increment">
         <span b-text="count"></span>
@@ -1372,18 +1372,18 @@ compile error, never silently dead DOM.
 
 There are two mount forms, split by ownership:
 
-- **Briv-side instance — the program owns it.** `let c1: Counter = Counter { count: 5 };`
-  creates an instance seeded in Briv (the literal's field values are the
+- **Briev-side instance — the program owns it.** `let c1: Counter = Counter { count: 5 };`
+  creates an instance seeded in Briev (the literal's field values are the
   initial state; the frontend invents nothing). `<c1 />` mounts the fragment
   routed to that instance's slots (`count` → `c1.count`); its `b-trigger`
   fires the per-instance txn variant (`increment_c1`).
 - **HTML-side spawn — the reactor owns it.** `<Counter />` spawns an anonymous,
   pool-indexed instance (`Counter.0.count`, `Counter.1.count`, …) with
-  zero-init defaults. It is not referenceable by Briv code; only its txn
+  zero-init defaults. It is not referenceable by Briev code; only its txn
   variants touch it.
 
 There are NO HTML props (`<Counter count="5" />` is invalid). All seeding is
-Briv source.
+Briev source.
 
 The tag namespace resolves deterministically: a declared instance var
 (`<c1 />`) mounts the instance; else a component type (`<Counter />`) spawns
@@ -1403,8 +1403,8 @@ incrementing one counter does not move another.
 
 `b-when` unmounting a subtree releases the component instances inside it: the
 shim fires each instance's **reset txn** (`__reset_c1`, `__reset_Counter_0`),
-a callable transaction that re-applies the instance's initial state (the Briv
-seeds for a Briv-side instance, the type defaults for an HTML-side spawn).
+a callable transaction that re-applies the instance's initial state (the Briev
+seeds for a Briev-side instance, the type defaults for an HTML-side spawn).
 The reset flows through the reactive machinery — its contract is carried and
 its write set drives the flush, so the DOM updates immediately; a slot with
 neither a seed nor a type default is a compile error, never silently left
@@ -1438,7 +1438,7 @@ The compiler resolves `b-bind:value`'s writer at build time: the target must be 
 
 ### 21.5 View expressions
 
-Every directive expression is canonical Briv, not a JavaScript-like mini-language. Ternaries and brace object literals are invalid.
+Every directive expression is canonical Briev, not a JavaScript-like mini-language. Ternaries and brace object literals are invalid.
 
 View expressions are pure/read-only. Mutation, FFI, allocation, and spawning occur only in explicit event handlers or compiler-managed component lifecycle.
 
@@ -1446,7 +1446,7 @@ View expressions are pure/read-only. Mutation, FFI, allocation, and spawning occ
 
 View-bound values are not restricted to compiler-known primitive names. Web GLUE configuration supplies protocol casts and layout descriptors. Unsupported values are rejected by the target capability validator.
 
-## 22. Data Briv
+## 22. Data Briev
 
 ### 22.1 Shared principles
 
@@ -1518,9 +1518,9 @@ When a schema is asserted, validation covers:
 
 ### 22.6 Canonical serialization
 
-Data Briv defines deterministic field/key ordering, quoting, numeric spelling, and instruction placement for reproducible builds and hashing.
+Data Briev defines deterministic field/key ordering, quoting, numeric spelling, and instruction placement for reproducible builds and hashing.
 
-`briv check file.dbv` and `briv check file.dbvl` select the correct parser mode and perform schema validation when asserted.
+`briev check file.dbv` and `briev check file.dbvl` select the correct parser mode and perform schema validation when asserted.
 
 ### 22.7 GLUE files
 
@@ -1540,7 +1540,7 @@ Lexer vocabulary, LSP vocabulary, highlighter grammar, extensions, profiles, and
 
 ### 23.2 LSP
 
-The LSP uses the compiler's real Briv/Data Briv parsers and semantic analyses. It does not maintain an independent language grammar.
+The LSP uses the compiler's real Briev/Data Briev parsers and semantic analyses. It does not maintain an independent language grammar.
 
 ### 23.3 Formatter
 
@@ -1556,7 +1556,7 @@ Excluded legacy material belongs under `archive/`.
 
 1. `spec/SPEC.md` is normative.
 2. `docs/architecture/` explains implementation and rationale.
-3. `learn-briv/` teaches normative syntax.
+3. `learn-briev/` teaches normative syntax.
 4. Timestamped plans are historical records and are not retroactively rewritten.
 
 ## 24. Standard-library boundary
@@ -1579,8 +1579,8 @@ Until a normative feature is implemented, the compiler must:
 - reject it with a precise staged-feature diagnostic; or
 - continue accepting only already-conforming subsets.
 
-It must not retain removed aliases in the normal parser merely for compatibility. Briv is pre-adoption; active repository source is rewritten directly to canonical syntax.
+It must not retain removed aliases in the normal parser merely for compatibility. Briev is pre-adoption; active repository source is rewritten directly to canonical syntax.
 
-No compatibility parser or `briv migrate` tool is part of this migration. The canonical parser accepts only this specification.
+No compatibility parser or `briev migrate` tool is part of this migration. The canonical parser accepts only this specification.
 
 The implementation plan following this specification defines parser, AST, analysis, interpreter, backend, stdlib, tooling, documentation, and verification order.

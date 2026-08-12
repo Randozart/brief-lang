@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-06
 **Status:** Implemented (2026-08-06) — merged into main as `b3aff893`; nbody_newton_accel MATCH (7.47x C wins), auto-tuning probe shipped
-**Branch:** `feat/accel-gpu` (worktree `../briv-compiler-accel`)
+**Branch:** `feat/accel-gpu` (worktree `../briev-compiler-accel`)
 **Baseline commit:** `0461a559`
-**Baseline worktree:** `../briv-compiler-baseline` (detached HEAD)
+**Baseline worktree:** `../briev-compiler-baseline` (detached HEAD)
 **Comparable with:** `bash benchmarks/compare_baseline.sh`
 **Companion SPEC change:** `spec/SPEC.md` §8.9 (top-level metadata), §9.7 (`accel`)
 
@@ -12,8 +12,8 @@
 
 ## 0. Executive Summary
 
-Briv's nbody benchmarks measure CPU-vs-C parity on sequential, scalar
-time-stepped code. A real Briv program with many bodies would want a targeted
+Briev's nbody benchmarks measure CPU-vs-C parity on sequential, scalar
+time-stepped code. A real Briev program with many bodies would want a targeted
 GPU speedup that the benchmarks are not written to expose. The historical
 `#GPU` pragma was opaque and has been removed along with the rest of the
 pragma system. This plan replaces it with a first-class **`accel` keyword** on
@@ -21,7 +21,7 @@ top-level bodies, plus a **top-level `!>` metadata** mechanism as a module-wide
 shortcut — and, critically, GPU deferral happens **only when the compiler can
 verify the speedup**.
 
-The design is grounded in Briv's operating rules:
+The design is grounded in Briev's operating rules:
 
 - **Rule 19 (MEASURE BEFORE YOU BUILD):** performance cannot be proven
   statically when the workload (`BOUND`, body count) is runtime-determined and
@@ -39,13 +39,13 @@ The design is grounded in Briv's operating rules:
   The backend only consumes the decision; it never re-derives it.
 - **Rule 18 (no type-name matching):** all type checks derive from the
   `TypeUniverse` (`universe_key()`, casting-graph properties), never from
-  matching Briv type names.
+  matching Briev type names.
 - **Rule 1 (contract-first):** GPU eligibility is a *proof obligation*, not a
   heuristic. Ineligible or unverifiable bodies fall back to CPU silently with
   an optimization remark; contracts are never weakened.
 
 The existing GPU pipeline is a vestigial stub: SPIR-V kernels are extracted and
-embedded but **never dispatched** (`briv_gpu_launch` is never emitted), the
+embedded but **never dispatched** (`briev_gpu_launch` is never emitted), the
 `#?gpu` speculative path is dead code, and the cost model runs inside the
 backend, violating frontend-driven dispatch. This plan **rewrites** the pipeline
 on the current architecture. SPIR-V is retained because it is vendor-portable
@@ -67,7 +67,7 @@ tolerance against its own C reference.
 `benchmarks/nbody_newton.bv` is a 5-body scalar, sequential time-step
 simulation:
 
-```briv
+```briev
 node simulate [count < bound][count == bound] {
     let dx01: Float32 = bx0 - bx1;
     // ... ~600 lines of scalar pair computations ...
@@ -98,7 +98,7 @@ This exposes the two design requirements:
 duplicated `#`-marker syntax whose real meaning (intrinsic suffix, hashword
 prefix) is unrelated to codegen directives. The pragma family (`#gpu`,
 `#?gpu`, `#!gpu`, `--gpu-offload`) is being pruned. The replacement uses the
-two mechanisms Briv already considers non-pragma:
+two mechanisms Briev already considers non-pragma:
 
 - **Ordinary keywords** for user-facing directives (`seq`, `vol`, `async`,
   `sync<g>`), per SPEC §8.9/§12.1 — this is what `accel` is.
@@ -116,16 +116,16 @@ two mechanisms Briv already considers non-pragma:
 | D2 | Module shortcut | Top-level `!>` metadata attaches `accel` policy to the **module**. Values are lowercase policy atoms (see §4.3): `try_all`, `force`, `try_all_force`. Absent key = keyword-marked bodies only |
 | D3 | Metadata scope | Top-level `!>` is **module-level only** (a shortcut to attach metadata to the script), not declaration-attached |
 | D4 | Candidate resolution | Two axes — *target* (all bodies vs `accel`-keyword bodies) and *mode* (try vs force). See §4.4 for the resolution matrix. Per-body `accel` keyword marks the body in every mode |
-| D5 | GPU target | SPIR-V kernel emission (one blob serves every SPIR-V consumer) + device-agnostic `briv_accel_rt` glue with a pluggable driver table (Vulkan + OpenCL static; see §7) |
+| D5 | GPU target | SPIR-V kernel emission (one blob serves every SPIR-V consumer) + device-agnostic `briev_accel_rt` glue with a pluggable driver table (Vulkan + OpenCL static; see §7) |
 | D6 | Kernel model | Design A: the work-item counter is a REAL state field (`let i: Int = 0;` + `i = i + 1`). `accel` marks a native counted loop `[i < N][i == N]` as a parallel map; the compiler proves the map and coalesces the loop into one GPU dispatch (fast-forwarding the counter to N). No virtual variables |
 | D7 | Speedup verification | Runtime auto-tuning probe at program start, minimal overhead, when the decision is `Probe` (runtime N). `try` modes only — `force` skips the speedup gate |
 | D8 | Static decision | When N is compile-time-known and N ≥ crossover, decision is `Gpu` with no probe |
 | D9 | Failure behavior | `try` modes: silent CPU fallback + optimization remark, never a compile error. `force` mode (keyword-marked bodies): ineligible = compile error, unverified speedup still offloads (developer asserts), no device available at runtime = runtime error |
 | D10 | `_accel` correctness | Tolerance-based comparison vs C reference (harness epsilon override) |
-| D11 | Worktree | `../briv-compiler-accel`, branch `feat/accel-gpu`, isolated from `feat/out-observability` agent |
+| D11 | Worktree | `../briev-compiler-accel`, branch `feat/accel-gpu`, isolated from `feat/out-observability` agent |
 | D12 | Removals | `#gpu`/`#?gpu`/`#!gpu` directives, `--gpu-offload` flag, `.abv: spirv; --gpu-offload` default, old `gpu.rs` emitter, backend-side `gpu_cost` invocation |
 | D13 | Per-body opt-out | Deferred. v1 has no per-body opt-out (an unmarked body is never a candidate unless the mode targets all bodies). In-body `!> accel: off;` on transactions is a follow-up |
-| D14 | Baseline discipline | `cargo test --lib` green per commit; baseline A/B via `../briv-compiler-baseline` + `compare_baseline.sh` before/after performance work |
+| D14 | Baseline discipline | `cargo test --lib` green per commit; baseline A/B via `../briev-compiler-baseline` + `compare_baseline.sh` before/after performance work |
 | D15 | Casing | Metadata keys and values are lowercase (matching the existing `!>` vocabulary: `bits`, `overflow`, `fp_math`, ...). ALL_CAPS rejected — breaking churn for zero benefit |
 | D16 | Observability axis | `!> accel_report: verbose;` is a separate key (composes with any `accel` policy value). Emits a remark for every analyzed body — offloaded, CPU-fallback, and ineligibility reasons |
 
@@ -181,7 +181,7 @@ attach step*: parse, accumulate into one module map, recurse.
   `emit_spirv_module` → `compile_to_spirv` (shells to
   `llc --mtriple=spirv64-unknown-unknown`) → embeds blob into `.rodata`
   (`emit_spirv_embeds`, mod.rs:1487).
-- **Critical defect:** the CPU program never dispatches. No `briv_gpu_launch`
+- **Critical defect:** the CPU program never dispatches. No `briev_gpu_launch`
   call is ever emitted; the transaction body is still emitted as normal CPU
   code. The blobs are dead data.
 - **Dead speculative path:** `is_speculative` checks
@@ -192,10 +192,10 @@ attach step*: parse, accumulate into one module map, recurse.
   `parse_body_metadata` (`metadata.rs:17,24-27`).
 - `--gpu-offload` flag: `src/main.rs:248`, default for the `.abv` extension in
   `config/targets.dbvl:20` (`.abv: spirv; --gpu-offload; prelude;`).
-- `briv_gpu_rt.c` exists (`lib/runtime/briv_gpu_rt.c`): dlopens BOTH
+- `briev_gpu_rt.c` exists (`lib/runtime/briev_gpu_rt.c`): dlopens BOTH
   `libvulkan.so.1` and `libOpenCL.so` (Vulkan first, OpenCL fallback — both
   consume SPIR-V via `clCreateProgramWithIL`), storage buffers, CPU fallback
-  via `briv_gpu_is_available()`. This dual-API is the seed of the §7 driver
+  via `briev_gpu_is_available()`. This dual-API is the seed of the §7 driver
   table.
 
 ### 3.5 Frontend-driven dispatch is the integration point
@@ -232,7 +232,7 @@ callers (`backend/wasm.rs:31`, `verilog.rs:74`, `vhdl.rs:72`, `c.rs:83`,
 - TAG map (`benchmarks/build_and_bench.sh:80`), `BENCHMARKS` list
   (`build_and_bench.sh:110`), `gpu_flag` for `gpu/*` (`:200-205`).
 - Correctness: string match, then per-line float epsilon
-  (`eps=0.00001`, `build_and_bench.sh:459-469`). `BRIV_CROSS_REF` maps
+  (`eps=0.00001`, `build_and_bench.sh:459-469`). `BRIEV_CROSS_REF` maps
   benchmarks to foreign C references (`:384`).
 - Size-gated precompute detection (`is_precompute_ok`, `:342`): an `accel`
   benchmark whose binary is GPU-dispatched must still produce an observable
@@ -244,18 +244,18 @@ callers (`backend/wasm.rs:31`, `verilog.rs:74`, `vhdl.rs:72`, `c.rs:83`,
 `git worktree list`:
 
 ```
-/home/randozart/Desktop/Projects/briv-lang                [main]
+/home/randozart/Desktop/Projects/briev-lang                [main]
 /home/randozart/Desktop/Projects/brief-compiler-baseline  (detached, prunable)
 /home/randozart/Desktop/Projects/brief-compiler-dogfood   [compiler-in-brief]
 /home/randozart/Desktop/Projects/brief-compiler-out       [feat/out-observability]
-/home/randozart/Desktop/Projects/briv-compiler-baseline   (detached)   ← A/B baseline
+/home/randozart/Desktop/Projects/briev-compiler-baseline   (detached)   ← A/B baseline
 ```
 
 Another agent works in `brief-compiler-out` (`feat/out-observability`).
 `main` also carries **uncommitted interpreter changes**
 (`src/interpreter/{casts,eval,mod}.rs`) that must never be touched or
 discarded (Golden Rule 7). The accel work therefore runs in a fresh worktree
-`../briv-compiler-accel` on branch `feat/accel-gpu` with its own `target/`
+`../briev-compiler-accel` on branch `feat/accel-gpu` with its own `target/`
 directory (no build lock).
 
 ---
@@ -266,7 +266,7 @@ directory (no build lock).
 
 **Syntax (Design A — real counter, no virtual variables):**
 
-```briv
+```briev
 let i: Int = 0;                      // work-item counter, explicit init
 accel node force [i < nbodies][i == nbodies] {
     dv[i] = ...;                     // per-work-item compute
@@ -296,7 +296,7 @@ accel node force [i < nbodies][i == nbodies] {
 
 **Syntax:**
 
-```briv
+```briev
 //! script-level metadata; accumulates into one module map
 !> accel: try_all;
 !> target: spirv;
@@ -335,7 +335,7 @@ forcing on the marked ones*. Absent is the conservative default.
 `!> accel_report: verbose;` (D16) is a **separate** observability key and
 composes with any policy value:
 
-```briv
+```briev
 !> accel: try_all;
 !> accel_report: verbose;
 ```
@@ -411,7 +411,7 @@ Proves, in order, for each candidate body:
    in `src/address_resolver.rs`, `dependency_graph.rs`, `loop_carried.rs`).
 3. **Flat types:** every touched state field and temporary resolves through the
    `TypeUniverse` (`universe_key()`, casting-graph `resolve_llvm_type`) to a
-   flat scalar (`#Int`, `#Float`, `Bool`, `Char`). **Never** Briv-name matching
+   flat scalar (`#Int`, `#Float`, `Bool`, `Char`). **Never** Briev-name matching
    (Rule 18). String/struct/ptr/collection fields reject the kernel.
 4. **Purity:** no user FFI, no `term!`/`ExitProgram`/`Rollback`, no
    print/observable side effects inside the kernel statements.
@@ -518,7 +518,7 @@ For every non-`Cpu` txn, emit a host-side stub that:
 1. Marshals `KernelShape.read_buffers`/`write_buffers` into device buffers via
    the runtime's generic pack (SoA-coalesced, only touched fields — the cost
    model's byte count is derived from exactly these buffers).
-2. Calls the device-agnostic `briv_accel_*` runtime dispatch (see §7).
+2. Calls the device-agnostic `briev_accel_*` runtime dispatch (see §7).
 3. Unpacks written buffers back into state.
 4. Runs `host_stmts` (counters, observables, swan song).
 
@@ -529,29 +529,29 @@ the probe's CPU lane).
 
 - `Cpu`: normal emission (current path), plus remark.
 - `Gpu`: emit kernel + dispatch stub; CPU body behind
-  `briv_gpu_is_available()` gate.
+  `briev_gpu_is_available()` gate.
 - `Probe`: emit kernel + dispatch stub + CPU body + the probe prologue (§7.3).
 
 ---
 
-## 7. Runtime — device-agnostic `briv_accel_rt` (glue rewrite)
+## 7. Runtime — device-agnostic `briev_accel_rt` (glue rewrite)
 
 The runtime is **device-agnostic glue**: the compiler never names a device. It
 emits SPIR-V blobs + per-kernel layout descriptors + calls a stable accel ABI;
 the runtime dispatches to a pluggable device-driver table. This is a
-formalization of the existing `lib/runtime/briv_gpu_rt.c`, which already
+formalization of the existing `lib/runtime/briev_gpu_rt.c`, which already
 dlopens BOTH Vulkan and OpenCL (Vulkan first, OpenCL fallback — both consume
 SPIR-V via `clCreateProgramWithIL`). The old per-work-item buffer model
-(`briv_gpu_malloc`/`memcpy`/`launch`) is replaced by the descriptor-driven
+(`briev_gpu_malloc`/`memcpy`/`launch`) is replaced by the descriptor-driven
 model.
 
 ### 7.1 Layering (D5, refined)
 
 | Layer | Emits / holds | Device knowledge |
 |---|---|---|
-| Compiler (kernel.rs) | SPIR-V blob + layout descriptor + `briv_accel_*` ABI calls | none — one blob serves every SPIR-V consumer (Vulkan, OpenCL, LevelZero) |
-| `briv_accel_rt.c` | dispatcher over the driver table; generic pack/unpack | none — layout-driven, device-independent |
-| driver (`briv_dev_vulkan.c`, `briv_dev_opencl.c`) | raw device buffers, upload/launch/download | per-device transfer mechanism only |
+| Compiler (kernel.rs) | SPIR-V blob + layout descriptor + `briev_accel_*` ABI calls | none — one blob serves every SPIR-V consumer (Vulkan, OpenCL, LevelZero) |
+| `briev_accel_rt.c` | dispatcher over the driver table; generic pack/unpack | none — layout-driven, device-independent |
+| driver (`briev_dev_vulkan.c`, `briev_dev_opencl.c`) | raw device buffers, upload/launch/download | per-device transfer mechanism only |
 
 Kernel *emission* is per device-**family**: CUDA needs a different emitter
 (PTX), which is a compiler **backend** (`cuda` target), never a glue change.
@@ -570,23 +570,23 @@ pattern in CUDA/ROCm/oneDNN.
 ```c
 typedef struct {
     const char* name;               // "vulkan" | "opencl" | "levelzero" | ...
-    uint32_t    capabilities;       // bit 0: BRIV_DEV_CAN_ZERO_COPY (SVM / unified memory)
+    uint32_t    capabilities;       // bit 0: BRIEV_DEV_CAN_ZERO_COPY (SVM / unified memory)
     int  (*available)(void);        // dlopen + device present
     int  (*init)(void);
     int  (*create_kernel)(const uint8_t* spirv, size_t size, void** kernel_out);
     int  (*launch)(void* kernel, size_t global_n,
-                   const BrivLayout* layout,
+                   const BrievLayout* layout,
                    const void* state, size_t state_bytes, void* state_out);
     void (*destroy_kernel)(void* kernel);
     void (*shutdown)(void);
-} BrivDeviceDriver;
+} BrievDeviceDriver;
 
-extern BrivDeviceDriver briv_dev_vulkan;   // formalizes existing Vulkan path
-extern BrivDeviceDriver briv_dev_opencl;   // formalizes existing OpenCL fallback
-// future: briv_dev_levelzero, briv_dev_cuda (cuda needs a PTX emitter — compiler backend)
+extern BrievDeviceDriver briev_dev_vulkan;   // formalizes existing Vulkan path
+extern BrievDeviceDriver briev_dev_opencl;   // formalizes existing OpenCL fallback
+// future: briev_dev_levelzero, briev_dev_cuda (cuda needs a PTX emitter — compiler backend)
 ```
 
-Drivers are **statically linked** into `briv_accel_rt.c` and selected at
+Drivers are **statically linked** into `briev_accel_rt.c` and selected at
 runtime; a dlopen'd hot-plug driver set is a future option.
 
 ### 7.3 Stable compiler-facing ABI
@@ -594,28 +594,28 @@ runtime; a dlopen'd hot-plug driver set is a future option.
 The only surface emitted code touches — never names a device:
 
 ```c
-int  briv_accel_init(const BrivKernelDesc* descs, uint32_t n);
-int  briv_accel_launch(uint32_t idx, const void* state, uint64_t work_n, void* state_out);
-int  briv_accel_available(void);
-int  briv_accel_probe(...);   // §7.5
+int  briev_accel_init(const BrievKernelDesc* descs, uint32_t n);
+int  briev_accel_launch(uint32_t idx, const void* state, uint64_t work_n, void* state_out);
+int  briev_accel_available(void);
+int  briev_accel_probe(...);   // §7.5
 ```
 
-`BrivKernelDesc` = blob pointer/size + layout (array fields [element type,
+`BrievKernelDesc` = blob pointer/size + layout (array fields [element type,
 dim], scalar fields [type], index var) — the compiler's `KernelShape` projected
 into a C struct.
 
 ### 7.4 Device selection
 
-`config/targets.dbvl` default (`vulkan`) + runtime `BRIV_ACCEL_DEVICE` env
+`config/targets.dbvl` default (`vulkan`) + runtime `BRIEV_ACCEL_DEVICE` env
 override + fallback chain Vulkan → OpenCL → CPU. No compiler rebuild to
-switch. `briv_accel_available()` reflects the winning driver.
+switch. `briev_accel_available()` reflects the winning driver.
 
 ### 7.5 Generic pack/unpack + probe
 
-- **Pack:** `briv_accel_rt.c` packs host `%State` → flat device buffers from
-  `BrivLayout` (device-independent). A driver with `BRIV_DEV_CAN_ZERO_COPY`
+- **Pack:** `briev_accel_rt.c` packs host `%State` → flat device buffers from
+  `BrievLayout` (device-independent). A driver with `BRIEV_DEV_CAN_ZERO_COPY`
   may skip the copy inside its own `launch`.
-- **Probe API:** `briv_accel_probe(...)` runs both lanes on a slice and
+- **Probe API:** `briev_accel_probe(...)` runs both lanes on a slice and
   compares wall time + output equality.
 
 ### 7.6 Probe protocol (D7, minimal overhead)
@@ -666,7 +666,7 @@ or before the first dispatch, guarded by a static flag so it runs once.
 
 ### 9.1 Structure
 
-```briv
+```briev
 !> accel: try_all;
 
 const MAXB: Int = 4096;
@@ -724,8 +724,8 @@ hobbled** — plain `clang -O3 -march=native -ffast-math`.
   benchmark still correct, just measures CPU).
 - Add `nbody_newton_accel` to `BENCHMARKS`.
 
-The speedup story is the intended output: at large `BODYCOUNT`, the Briv GPU
-path legitimately beats the C CPU reference — C is unhobbled, Briv simply
+The speedup story is the intended output: at large `BODYCOUNT`, the Briev GPU
+path legitimately beats the C CPU reference — C is unhobbled, Briev simply
 targets the better device when verified.
 
 ---
@@ -777,8 +777,8 @@ reported. Baseline A/B via `compare_baseline.sh`.
 ## 11. Development Process & Worktree
 
 1. Commit the plan + SPEC changes on `main`.
-2. `git worktree add ../briv-compiler-accel -b feat/accel-gpu`
-3. All implementation commits happen in `../briv-compiler-accel` on
+2. `git worktree add ../briev-compiler-accel -b feat/accel-gpu`
+3. All implementation commits happen in `../briev-compiler-accel` on
    `feat/accel-gpu`. Uncommitted interpreter changes in the `main` worktree
    are never touched (Rule 7).
 4. Continuous commits after each logical step; `cargo test --lib` green before
@@ -786,7 +786,7 @@ reported. Baseline A/B via `compare_baseline.sh`.
    (`praetor validate --warn --target <dir>`); Kani for new safety-critical
    code; architecture docs updated in the same commit as structural changes.
 5. Baseline tables before/after performance work (Rule 11) using
-   `../briv-compiler-baseline` + `compare_baseline.sh`.
+   `../briev-compiler-baseline` + `compare_baseline.sh`.
 
 ---
 
@@ -801,10 +801,10 @@ Each phase ends in a commit with green tests.
 | 3 | meta-vocab.dbv: `accel` + `accel_report` MetaFields (typed vocab; no BackendMapping rows — the backend consumes accel via analysis, not IR attributes); registry tests | registry tests green |
 | 4 | `src/analysis/accel.rs`: eligibility proof, cost model (absorb gpu_cost), `AccelDecision`, `AnalysisResults.accel` | accel.rs unit tests green |
 | 5 | Kernel emission via LLVM emitter reuse → SPIR-V blob; host dispatch stub; delete legacy GPU paths (`gpu.rs`, `#gpu`, `--gpu-offload`, `collect_gpu_kernel`, backend gpu_cost) | integration tests green, no legacy refs |
-| 6 | `briv_accel_rt.c` rewrite: driver table (Vulkan + OpenCL, statically linked), `briv_accel_*` ABI, generic pack/unpack from layout descriptor, `BRIV_ACCEL_DEVICE` env + config default + fallback chain, probe API | runtime smoke test, Kani |
+| 6 | `briev_accel_rt.c` rewrite: driver table (Vulkan + OpenCL, statically linked), `briev_accel_*` ABI, generic pack/unpack from layout descriptor, `BRIEV_ACCEL_DEVICE` env + config default + fallback chain, probe API | runtime smoke test, Kani |
 | 7 | Probe machinery: prologue wiring, adaptive slice, correctness gate, commit cache; config tunables (`probe_budget`, `probe_min/max`, `probe_margin`, device constants) | probe unit tests, Kani |
 | 8 | `nbody_newton_accel.bv` + `_accel_c.c` + harness (TAG, EPS map, BODYCOUNT) | benchmark runs, GPU lane engaged, A/B vs baseline |
-| 9 | Docs: `spec/SPEC.md` (§8.9, §9.7, §4.1), `learn-briv/`, rewrite `docs/architecture/gpu-offloading.md`, reconcile `docs/architecture/gpu-model.md`, `AGENTS.md` index, syntax highlighter; plan doc finalized | doc review |
+| 9 | Docs: `spec/SPEC.md` (§8.9, §9.7, §4.1), `learn-briev/`, rewrite `docs/architecture/gpu-offloading.md`, reconcile `docs/architecture/gpu-model.md`, `AGENTS.md` index, syntax highlighter; plan doc finalized | doc review |
 
 ---
 
@@ -820,9 +820,9 @@ Each phase ends in a commit with green tests.
 - `docs/architecture/hash-words.md`: remove `#gpu` references.
 - `docs/architecture/backend-type-dispatch.md` / `backend-architecture.md`:
   note the kernel-emission reuse path.
-- `learn-briv/`: `accel` tutorial page.
+- `learn-briev/`: `accel` tutorial page.
 - `AGENTS.md`: command/index updates, benchmark table entry.
-- Historical docs (`docs/plans/2026-06-18-graphic-briv.md`, GPU-era plans) are
+- Historical docs (`docs/plans/2026-06-18-graphic-briev.md`, GPU-era plans) are
   records — reference, never retroactively edit.
 
 ---
@@ -858,5 +858,5 @@ Each phase ends in a commit with green tests.
 - Per-body in-body opt-out `!> accel: off;` (D13) — deferred.
 - Device-constant calibration procedure for `config` (measured once per
   machine, documented in the config audit trail).
-- Library (`--library`) builds do not yet package `briv_accel_rt.c` (Phase 6b
+- Library (`--library`) builds do not yet package `briev_accel_rt.c` (Phase 6b
   wires the executable link only).

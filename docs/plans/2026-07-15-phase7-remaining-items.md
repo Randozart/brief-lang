@@ -150,7 +150,7 @@ trigger's target is null at init time.
   — no null check. With these flags, wrap the load in a null-check + branch:
   - `icmp eq ptr %ptr, null`
   - `br i1 %cmp, label %trg_null_<n>, label %trg_ok_<n>`
-  - `trg_null_<n>`: call `__briv_warn("unresolved trigger")` or abort
+  - `trg_null_<n>`: call `__briev_warn("unresolved trigger")` or abort
   - `trg_ok_<n>`: normal `load volatile`
 
 **Simplification for this pass:** Add the flags to `BuildOptions`, thread
@@ -203,7 +203,7 @@ config-driven approach.
 **Goal:** A `$(Post)` stage plugin that warns on unresolved dynamic triggers.
 
 **Design:**
-```briv
+```briev
 $(Post @ 0) {
     // 2026-07-15: Post-stage guard for dynamic triggers.
     // Scans the generated IR for unresolved @ *ptr references
@@ -222,7 +222,7 @@ and is a future enhancement.
 
 ## 10. Item 8: plugins/{mid,post,back}/README.md
 
-**Goal:** Briv documentation for each plugin stage directory explaining
+**Goal:** Briev documentation for each plugin stage directory explaining
 what kind of plugins belong there.
 
 Content pattern:
@@ -247,7 +247,7 @@ Similar for `post/` and `back/`.
 
 ## 11. Item 9: register subcommand
 
-**Goal:** Add `briv-compiler register <name>` CLI subcommand for
+**Goal:** Add `briev-compiler register <name>` CLI subcommand for
 registering project/target schemas.
 
 **Design:**

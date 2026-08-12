@@ -93,5 +93,5 @@ node run [tick < 1][tick == 1] {
     };
 };
 
-// Compile:   ./target/release/briv-compiler build examples/ptr-arithmetic.bv
+// Compile:   ./target/release/briev-compiler build examples/ptr-arithmetic.bv
 // Expected:  prints "2"

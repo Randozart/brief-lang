@@ -13,12 +13,12 @@ Status: Plan
 | bit_clear.bv | **Compile-time** | `const initial_reg = 0x7FFFFFFFFFFFFFFF` | Yes — 63 iterations by design |
 
 All runtime-bound benchmarks are already "the same between runs and between C
-and Briv" and "not so deterministic that the compiler can predict at compile
+and Briev" and "not so deterministic that the compiler can predict at compile
 time." No changes needed for the benchmark sources.
 
 ### What's left: IR non-determinism
 
-The same Briv source compiled twice produces different LLVM IR because Rust's
+The same Briev source compiled twice produces different LLVM IR because Rust's
 `HashMap` iterates in non-deterministic order (SipHash random seed per process).
 This causes ~5-10% benchmark-to-benchmark performance variation on the same
 machine — not from CPU throttling but from different machine code each compile.

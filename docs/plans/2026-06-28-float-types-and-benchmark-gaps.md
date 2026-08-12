@@ -153,8 +153,8 @@
 
 Using `Float64` in nbody benchmarks means:
 - Constant folding in pure f64 (no f32 truncation) → matches C's `float * float` behavior
-- All arithmetic in f64 (vs C's f32) → Briv is now *more precise* than C
-- To match C's f32 precision, use `Float` instead. With `Float64`, Briv outperforms C by computing in f64.
+- All arithmetic in f64 (vs C's f32) → Briev is now *more precise* than C
+- To match C's f32 precision, use `Float` instead. With `Float64`, Briev outperforms C by computing in f64.
 
 #### Step 9: Standard Library
 
@@ -176,7 +176,7 @@ Using `Float64` in nbody benchmarks means:
 
 ### DONE — print_loop C Reference (`benchmarks/print_loop_c.c`)
 
-**Fix:** Added `getenv("BOUND")` like the Briv version. C now runs the same iteration count as Briv for any given BOUND.
+**Fix:** Added `getenv("BOUND")` like the Briev version. C now runs the same iteration count as Briev for any given BOUND.
 
 **Verified:** `BOUND=5` both produce empty output. `BOUND=50000000` both produce matching progress output.
 

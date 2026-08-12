@@ -158,7 +158,7 @@ entry:
 
 The state field index assignment (`build_field_index` at `mod.rs:3614`) assigns indices in **source declaration order**. If the source declares fields in per-body (AoS) order:
 
-```briv
+```briev
 let bx0: Float32; let by0: Float32; let bz0: Float32;
 let vx0: Float32; let vy0: Float32; let vz0: Float32;
 let bx1: Float32; let by1: Float32; ...
@@ -172,7 +172,7 @@ bx0@2, by0@3, bz0@4, vx0@5, vy0@6, vz0@7, bx1@8, ...
 Same-component fields (all bx) have non-consecutive indices (gap of 6). This prevents the index-run grouping from forming `<4 x float>` vector phis.
 
 If the source declared in SoA order:
-```briv
+```briev
 let bx0; let bx1; let bx2; let bx3; let bx4;
 let by0; let by1; ...
 ```
@@ -210,7 +210,7 @@ by0→7, by1→8, ...
 Step 6: **Update dependent data structures** — Remap:
 - `field_index_map`
 - `field_types` (reorder to match new indices)
-- `field_briv_types` (same reorder)
+- `field_briev_types` (same reorder)
 - `idx_to_field_name` (regenerate from new `field_index_map`)
 - Analysis results that used field indices (dependence graph, channel map)
 
@@ -229,7 +229,7 @@ Step 6: **Update dependent data structures** — Remap:
 
 ---
 
-## Improvement 4: Briv-Level LICM (Loop-Invariant Code Motion)
+## Improvement 4: Briev-Level LICM (Loop-Invariant Code Motion)
 
 **Files:**
 - `src/analysis/licm.rs` (new module)
@@ -240,7 +240,7 @@ Step 6: **Update dependent data structures** — Remap:
 
 In the nbody hot loop, many expressions are recomputed every iteration but never change:
 
-```briv
+```briev
 let dist01a: Float32 = dsq01 * 0.5f32;        // 0.5f32 is constant
 let mag01: Float32 = dt / (dsq01 * dist01);   // dt is constant (const, never changes)
 ```
@@ -248,7 +248,7 @@ let mag01: Float32 = dt / (dsq01 * dist01);   // dt is constant (const, never ch
 `0.5f32` and `dt` are loop-invariant. Yet the compiler emits fresh `bitcast i32 1056964608 to float` for every `0.5f32` in every iteration. LLVM's LICM may hoist these, but:
 1. The `0.5f32` constant emission was fixed in Improvement 1
 2. For `dt * m1` patterns, LLVM LICM may not hoist through `memory(readwrite)` function boundaries
-3. Briv-level LICM runs BEFORE codegen, so the backend never sees the redundant computation
+3. Briev-level LICM runs BEFORE codegen, so the backend never sees the redundant computation
 
 ### Algorithm
 
@@ -278,7 +278,7 @@ Step 4: **Hoist** — move all invariant let-bindings to a `pre_body` vector tha
 **Example:**
 
 Before LICM:
-```briv
+```briev
 txn advance [count < N][count == N] {
     let dt: Float32 = 0.01f32;       // loop-invariant
     let step: Float32 = dt * 0.5f32; // loop-invariant (dt constant)
@@ -288,7 +288,7 @@ txn advance [count < N][count == N] {
 ```
 
 After LICM:
-```briv
+```briev
 txn advance [count < N][count == N] {
     term {
         let dt: Float32 = 0.01f32;       // hoisted before loop entry
@@ -318,7 +318,7 @@ txn advance [count < N][count == N] {
 | Priority | Improvement | Effort | Risk | Expected Impact |
 |----------|-------------|--------|------|-----------------|
 | **1** | Float constant emission | 5 min | Near-zero | Removes ~2100 IR instructions from nbody |
-| **2** | Briv-level LICM | 2-3 hours | Low | Removes redundant loop-body computation |
+| **2** | Briev-level LICM | 2-3 hours | Low | Removes redundant loop-body computation |
 | **3** | Separate `@init_state` | 2-4 hours | Moderate | Shrinks hot loop register pressure |
 | **4** | AoS→SoA reorder pass | 4-6 hours | Moderate-high | Enables `<4 x float>` vector groups automatically |
 
@@ -347,9 +347,9 @@ Total expected improvement: 1.23× → ~0.80× C (recovering Era-5 performance).
 | 1 | Float constant emission | ✅ Done | `3371f985` | Cleaner IR, no runtime impact |
 | 3 | AoS→SoA field reorder | ✅ Done | `4fa1641e` | New pinned baseline |
 | 2 | Separate `@init_state` | 🔲 Planned | — | — |
-| 4 | Briv-level LICM | 🔲 Planned | — | — |
+| 4 | Briev-level LICM | 🔲 Planned | — | — |
 
-**New baseline:** `4fa1641e`. Permanent worktree at `../briv-compiler-baseline`.
+**New baseline:** `4fa1641e`. Permanent worktree at `../briev-compiler-baseline`.
 Benchmark results: `benchmarks/results/2026-07-29-baseline-4fa1641e.md`.
 
 ---
@@ -459,7 +459,7 @@ Expected output: `MATCH` (same output as `nbody_newton`).
 | 1 | Float constant emission | Nothing |
 | 2 | Separate `@init_state` | Nothing |
 | 3 | AoS→SoA field reorder | Nothing |
-| 4 | Briv-level LICM | Nothing |
+| 4 | Briev-level LICM | Nothing |
 
 **All four improvements are orthogonal and independently verifiable.** None depends on another. They address different sources of IR bloat:
 
@@ -709,10 +709,10 @@ This is purely index-based, no naming conventions. It detects AoS patterns regar
 
 ```bash
 # Set new pinned baseline:
-rm -rf ../briv-compiler-baseline
+rm -rf ../briev-compiler-baseline
 git worktree prune
-git worktree add ../briv-compiler-baseline <commit-hash>
-cd ../briv-compiler-baseline && cargo build --release
+git worktree add ../briev-compiler-baseline <commit-hash>
+cd ../briev-compiler-baseline && cargo build --release
 
 # Compare against baseline:
 bash benchmarks/compare_baseline.sh <benchmark_name>
@@ -727,4 +727,4 @@ bash benchmarks/compare_baseline.sh <benchmark_name>
 | `32e5a24a` | 2026-07-29 | Pre-investigation (current before work) | 1.23× |
 | `4fa1641e` | 2026-07-29 | + float const emission + SoA reorder | **1.22×** |
 
-Rule from AGENTS.md §11b: *"A permanent git worktree at `../briv-compiler-baseline` holds the current baseline commit for regression detection."* Update only when ALL current benchmarks equal or exceed the baseline.
+Rule from AGENTS.md §11b: *"A permanent git worktree at `../briev-compiler-baseline` holds the current baseline commit for regression detection."* Update only when ALL current benchmarks equal or exceed the baseline.

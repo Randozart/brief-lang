@@ -41,8 +41,8 @@ files for uncovered syntax features.
 | Category | Count | Files |
 |----------|-------|-------|
 | Parenthetical import → braces | 4 | `benchmarks/ring_buffer_runtime.bv`, `nbody_newton_sym.bv`, `precompute_sum_runtime.bv`, `print_loop.bv` |
-| Benchmark CLI comment updates | 24 | All `benchmarks/*.bv` files with `briv-compiler llvm` or `cargo run -- llvm` |
-| README/docs/learn-briv fixes | 7 | `README.md`, `examples/README.md`, `learn-briv/11-triggers.md`, `14-bild.md`, `16-plugins.md`, `docs/architecture/overview.md`, `prelude-and-import-magic.md` |
+| Benchmark CLI comment updates | 24 | All `benchmarks/*.bv` files with `briev-compiler llvm` or `cargo run -- llvm` |
+| README/docs/learn-briev fixes | 7 | `README.md`, `examples/README.md`, `learn-briev/11-triggers.md`, `14-bild.md`, `16-plugins.md`, `docs/architecture/overview.md`, `prelude-and-import-magic.md` |
 | Example CLI flag fixes | 2 | `pipe-skip.bv`, `pipe-chain.bv` |
 | New example files | 4 | `registry-import.bv`, `dynamic-trigger-trg.bv`, `stage/collect-match.bv`, `emit-error.bv` |
 | Benchmark regression check | 1 run | `bash benchmarks/build_and_bench.sh --runtime --optimizer` |
@@ -51,7 +51,7 @@ files for uncovered syntax features.
 - Normalizer auto-annotation removal (wrong-headed per previous review)
 
 **Late-breaking change:** `inop` and `syscall` keywords removed from language.
-All `inop-*.bv` example files and `learn-briv/14-bild.md` deleted.
+All `inop-*.bv` example files and `learn-briev/14-bild.md` deleted.
 
 ---
 
@@ -101,8 +101,8 @@ instead of the standard brace syntax `import { x } from`.
 **Goal:** Update 24 benchmark files that reference the removed `llvm`
 subcommand in their header comments. Two patterns:
 
-1. `briv-compiler llvm ...` → `briv-compiler build --llvm ...`
-2. `cargo run --bin briv-compiler -- llvm ...` → `cargo run --bin briv-compiler -- build --llvm ...`
+1. `briev-compiler llvm ...` → `briev-compiler build --llvm ...`
+2. `cargo run --bin briev-compiler -- llvm ...` → `cargo run --bin briev-compiler -- build --llvm ...`
 
 Uses `replaceAll` since the pattern is uniform across all files.
 
@@ -123,21 +123,21 @@ Three broken references:
 
 ### 6.2 `examples/README.md` (lines ~50, ~115)
 
-- `briv import <name> --path <location>` — `import` subcommand does not exist
-  → Replace with `briv register <name> --path <location>`
-- `briv rbv component.rbv --out dist/` — `rbv` subcommand does not exist
-  → Replace with `briv build --backend webstack component.rbv --out dist/`
+- `briev import <name> --path <location>` — `import` subcommand does not exist
+  → Replace with `briev register <name> --path <location>`
+- `briev rbv component.rbv --out dist/` — `rbv` subcommand does not exist
+  → Replace with `briev build --backend webstack component.rbv --out dist/`
 
-### 6.3 `learn-briv/11-triggers.md`
+### 6.3 `learn-briev/11-triggers.md`
 
-- `briv llvm program.bv --link-rt` → `briv build --llvm program.bv`
+- `briev llvm program.bv --link-rt` → `briev build --llvm program.bv`
 - Remove `--link-rt` flag (never existed)
 
-### 6.4 `learn-briv/14-bild.md`
+### 6.4 `learn-briev/14-bild.md`
 
 **Deleted** — entire document described `inop`/BILD syntax which was removed.
 
-### 6.5 `learn-briv/16-plugins.md`
+### 6.5 `learn-briev/16-plugins.md`
 
 Rewrite the opening CLI examples from `--plugin <path>` to
 `--disable-plugin <name>` / `--enable-plugin <name>`. The core concepts
@@ -158,11 +158,11 @@ Three references to `--no-stdlib` → `--disable-plugin prelude`.
 
 ### 7.1 `examples/pipe-skip.bv` line 16
 
-`briv-compiler rbv` → `briv-compiler build --backend webstack`
+`briev-compiler rbv` → `briev-compiler build --backend webstack`
 
 ### 7.2 `examples/pipe-chain.bv` line 8
 
-`briv-compiler rbv` → `briv-compiler build --backend webstack`
+`briev-compiler rbv` → `briev-compiler build --backend webstack`
 
 ### 7.3 `examples/inop-skiplist-dispatch.bv` line 11
 
@@ -181,7 +181,7 @@ Three references to `--no-stdlib` → `--disable-plugin prelude`.
 Demonstrates `import <name>` (angle-bracket registry syntax) and
 `import { sym } from <name>`.
 
-```briv
+```briev
 // 2026-07-15: Demos import <name> registry syntax and import { sym } from <name>
 // Uses collections module from config/module-registry.toml
 
@@ -199,12 +199,12 @@ registry imports.
 ### 8.2 `examples/dynamic-trigger-trg.bv`
 
 Demonstrates `@ *ptr` dynamic trigger binding with `AddressOf#(gpio)`.
-Requires LLVM backend; passes `briv check` for type safety.
+Requires LLVM backend; passes `briev check` for type safety.
 
-```briv
+```briev
 // 2026-07-15: Demos @ *ptr dynamic trigger with AddressOf#(gpio) from
 // config/address-map.toml
-// Compile: briv-compiler build --llvm dynamic-trigger-trg.bv
+// Compile: briev-compiler build --llvm dynamic-trigger-trg.bv
 
 import gpio from "target"
 
@@ -222,9 +222,9 @@ node blink [true][true] {
 Demonstrates `Collect$` + `MatchIR$` in a `$(Back)` stage block with a
 simple BEAST pattern.
 
-```briv
+```briev
 // 2026-07-15: Demos Collect$/MatchIR$ BEAST pattern matching in stage blocks
-// Check: briv-compiler check --emit-beast collect-match.bv
+// Check: briev-compiler check --emit-beast collect-match.bv
 
 $(Back) {
     let patterns = Collect$();
@@ -238,9 +238,9 @@ $(Back) {
 
 Demonstrates `EmitError$` compile-time error in a `$(Front)` stage block.
 
-```briv
+```briev
 // 2026-07-15: Demos EmitError$ compile-time error
-// Check: briv-compiler check emit-error.bv  (will emit error)
+// Check: briev-compiler check emit-error.bv  (will emit error)
 
 $(Front) {
     EmitError$("This is a compile-time error message");
@@ -255,7 +255,7 @@ $(Front) {
 
 1. `cargo build --release` (clean build)
 2. `bash benchmarks/build_and_bench.sh --runtime --optimizer`
-3. Collect all ratios, Briv times, C times, correctness status
+3. Collect all ratios, Briev times, C times, correctness status
 4. Compare against the baseline from the Phase 7 completion commit
 5. Check for any regressions in runtime benchmarks
 
@@ -273,7 +273,7 @@ Before final commit:
 
 1. `cargo test --lib` — all tests pass
 2. `cargo build` — no warnings
-3. New example files pass `briv check` (typecheck only)
-4. `examples/dynamic-trigger-trg.bv` passes `briv build --llvm` (codegen)
+3. New example files pass `briev check` (typecheck only)
+4. `examples/dynamic-trigger-trg.bv` passes `briev build --llvm` (codegen)
 5. Run Praetor on new/changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6)
 6. Benchmark regression check confirms no regressions

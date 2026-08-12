@@ -124,7 +124,7 @@ fn parse_ts_function_decl(line: &str, prefix: &str) -> Option<AnalyzedFunction> 
     let return_type = if let Some(colon_pos) = rest[params_end + 1..].find(':') {
         let ret_str = rest[params_end + 1 + colon_pos + 1..].trim();
         let ret_type = ret_str.trim_end_matches(';').trim_end_matches(',');
-        js_type_to_briv(ret_type)
+        js_type_to_briev(ret_type)
     } else {
         "Void".to_string()
     };
@@ -151,7 +151,7 @@ fn parse_ts_arrow_function(line: &str) -> Option<AnalyzedFunction> {
     let return_type = after_arrow
         .strip_prefix("=>")
         .map(|s| s.trim())
-        .map(js_type_to_briv)
+        .map(js_type_to_briev)
         .unwrap_or_else(|| "Void".to_string());
 
     // Generate a name from the context if anonymous
@@ -193,7 +193,7 @@ fn parse_ts_method(line: &str) -> Option<AnalyzedFunction> {
             .trim()
             .trim_end_matches(';')
             .trim_end_matches(',');
-        js_type_to_briv(ret)
+        js_type_to_briev(ret)
     } else {
         "Void".to_string()
     };
@@ -278,7 +278,7 @@ fn parse_ts_single_param(param: &str) -> Option<(String, String)> {
             type_str
         };
 
-        Some((name, js_type_to_briv(type_str)))
+        Some((name, js_type_to_briev(type_str)))
     } else {
         // No type annotation - assume Int
         Some((param.to_string(), "Int".to_string()))
@@ -468,7 +468,7 @@ fn infer_js_return_type(jsdoc: &[String]) -> String {
                 if let Some(type_start) = after_at.find('{') {
                     if let Some(type_end) = after_at.find('}') {
                         let type_str = &after_at[type_start + 1..type_end];
-                        return js_type_to_briv(type_str.trim());
+                        return js_type_to_briev(type_str.trim());
                     }
                 }
             }
@@ -477,8 +477,8 @@ fn infer_js_return_type(jsdoc: &[String]) -> String {
     "Void".to_string() // Default if no JSDoc
 }
 
-/// Convert JavaScript/TypeScript type to Briv type
-pub fn js_type_to_briv(js_type: &str) -> String {
+/// Convert JavaScript/TypeScript type to Briev type
+pub fn js_type_to_briev(js_type: &str) -> String {
     let t = js_type.trim();
 
     // Handle union types (take first)
@@ -571,13 +571,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_js_type_to_briv() {
-        assert_eq!(js_type_to_briv("string"), "String");
-        assert_eq!(js_type_to_briv("number"), "Int");
-        assert_eq!(js_type_to_briv("boolean"), "Bool");
-        assert_eq!(js_type_to_briv("string | null"), "String");
-        assert_eq!(js_type_to_briv("Array<string>"), "List<Value>");
-        assert_eq!(js_type_to_briv("Promise<number>"), "Void");
+    fn test_js_type_to_briev() {
+        assert_eq!(js_type_to_briev("string"), "String");
+        assert_eq!(js_type_to_briev("number"), "Int");
+        assert_eq!(js_type_to_briev("boolean"), "Bool");
+        assert_eq!(js_type_to_briev("string | null"), "String");
+        assert_eq!(js_type_to_briev("Array<string>"), "List<Value>");
+        assert_eq!(js_type_to_briev("Promise<number>"), "Void");
     }
 
     #[test]

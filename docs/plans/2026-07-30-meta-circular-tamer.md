@@ -1,4 +1,4 @@
-# Meta-Circular Tamer: Briv Compiling Through Itself to Native
+# Meta-Circular Tamer: Briev Compiling Through Itself to Native
 
 ## Stdlib Extraction Principle
 
@@ -23,34 +23,34 @@ code.** The review question is: "Could someone use this without importing
 `lib/tamer/`?" If yes, extract it.
 
 This is not optional — it is the mechanism by which stdlib reaches 100% native
-and the tamer pipeline proves Briv's general-purpose fitness.
+and the tamer pipeline proves Briev's general-purpose fitness.
 
 ## Overview
 
-The meta-circular tamer is a stress test: a Briv program (the tamer VM interpreter)
-compiled to `.lair` bytecode by the Rust `brivc`, loaded into the C tamer VM, that
-then interprets a user's Briv program and emits LLVM IR to produce a native binary.
+The meta-circular tamer is a stress test: a Briev program (the tamer VM interpreter)
+compiled to `.lair` bytecode by the Rust `brievc`, loaded into the C tamer VM, that
+then interprets a user's Briev program and emits LLVM IR to produce a native binary.
 
 It answers three questions:
 
-1. **Can Briv function as a systems language?** The tamer does pointer arithmetic,
+1. **Can Briev function as a systems language?** The tamer does pointer arithmetic,
    struct field access, bytecode parsing, bitwise operations, and FFI calls — all in
-   Briv, running inside a VM, inside a C host.
+   Briev, running inside a VM, inside a C host.
 
 2. **Can the compilation pipeline survive a round-trip through itself?** The user's
-   program goes typed AST → beastpack → Briv deserializer → LLVM IR emission → clang.
-   Every step but clang is in Briv. If this works, the path to full self-hosting is
+   program goes typed AST → beastpack → Briev deserializer → LLVM IR emission → clang.
+   Every step but clang is in Briev. If this works, the path to full self-hosting is
    clear.
 
 3. **Are our abstractions general enough?** If the tamer works, then any program that
-   can be expressed in Briv can be compiled to a native binary through the same
+   can be expressed in Briev can be compiled to a native binary through the same
    pipeline. No special cases, no intrinsic knowledge of specific types.
 
 ### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ brivc bounty my_program.bv                                     │
+│ brievc bounty my_program.bv                                     │
 │                                                                 │
 │  my_program.bv                                                  │
 │       │                                                        │
@@ -84,7 +84,7 @@ It answers three questions:
 │                 beastpack_ptr, beastpack_len, output_dir)        │
 │  6. vm_execute(tame_fn_idx)                                     │
 │       │                                                         │
-│       ▼ Briv tamer (running inside C VM)                       │
+│       ▼ Briev tamer (running inside C VM)                       │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │ tame() validates headers, computes buffer sizes          │    │
 │  │ vm_loop() interprets user's .user.lair bytecode          │    │
@@ -104,26 +104,26 @@ It answers three questions:
 
 ## Why This Is Hard
 
-The VM backend (`src/backend/vm/emit_expr.rs`) compiles Briv source to `.lair`
+The VM backend (`src/backend/vm/emit_expr.rs`) compiles Briev source to `.lair`
 bytecode. The C interpreter (`tamer/interp.c`) executes `.lair` bytecode. The
-Briv tamer (`lib/tamer/vm.bv`) interprets `.lair` bytecode **inside** the C
+Briev tamer (`lib/tamer/vm.bv`) interprets `.lair` bytecode **inside** the C
 interpreter — a VM inside a VM.
 
-The user's program, when executed inside the Briv tamer's inner VM, must emit
+The user's program, when executed inside the Briev tamer's inner VM, must emit
 LLVM IR text via HCALL to the C host. This means the user's program's bytecode
-contains instructions that the Briv tamer understands, and when it encounters
+contains instructions that the Briev tamer understands, and when it encounters
 an HCALL instruction with a specific host function ID, it relays that call to
 the C host.
 
 **The critical insight**: The user's program doesn't know about LLVM IR. The
-Briv tamer's codegen pass reads the beastpack (serialized AST) and walks the
+Briev tamer's codegen pass reads the beastpack (serialized AST) and walks the
 AST tree, emitting LLVM IR for each node. The user's `.lair` bytecode is just
 the tamer's data — the tamer interprets it as a compiled representation of the
 user's logic, and uses that to drive codegen decisions.
 
-But for an MVP, we don't need the full beastpack → LLVM IR pipeline in Briv.
+But for an MVP, we don't need the full beastpack → LLVM IR pipeline in Briev.
 We can take a simpler approach: **the user's `.lair` bytecode, when executed by
-the Briv tamer's inner VM, performs the codegen via HCALL**. Each opcode in
+the Briev tamer's inner VM, performs the codegen via HCALL**. Each opcode in
 the inner VM maps to an LLVM IR emission strategy:
 
 - `PUSH_I64 42` → `host_llvm_emit("store i64 42, i64* %sp\n")`
@@ -169,7 +169,7 @@ register as ptr):
 The canonical helper `emit_inttoptr` at `mod.rs:1178` generates the correct
 pointer-width instruction using `int_bits` from the target data layout.
 
-This blocks native compilation of the tamer via `brivc build lib/tamer/main.bv`.
+This blocks native compilation of the tamer via `brievc build lib/tamer/main.bv`.
 
 **Test update**: `test_struct_param_ptrtoint_at_entry` in `tests.rs:1992`
 asserts the ptrtoint behavior (which is correct and stays). No test exists for
@@ -264,14 +264,14 @@ Update `src/main.rs` to:
 4. Pre-compile `lib/tamer/main.bv` to .lair
 5. Call `write_bounty_full(tamer_lair, user_lair, beastpack, manifest)`
 
-## Phase 1: Briv-Side Tamer Completeness (7 days)
+## Phase 1: Briev-Side Tamer Completeness (7 days)
 
-The Briv tamer (`lib/tamer/`) must handle all opcodes that the VM backend
+The Briev tamer (`lib/tamer/`) must handle all opcodes that the VM backend
 actually emits. Current gaps:
 
 ### 1a. Add missing opcodes to vm.bv (2 days)
 
-The VM backend emits opcodes that the Briv tamer's `vm.bv` doesn't handle:
+The VM backend emits opcodes that the Briev tamer's `vm.bv` doesn't handle:
 
 From `src/backend/vm/assembler.rs`:
 ```
@@ -289,13 +289,13 @@ OP_PUSH_STR (0xB0) — string constant
 
 Cross-reference `emit_expr.rs` match arms against `vm.bv` opcode handlers.
 Every opcode that the Rust VM backend can emit must have a corresponding arm
-in the Briv VM interpreter's `exec_op` match.
+in the Briev VM interpreter's `exec_op` match.
 
 ### 1b. Wire HCALL dispatch through to C host functions (2 days)
 
-The Briv tamer's `exec_op` handles `OP_HCALL`:
+The Briev tamer's `exec_op` handles `OP_HCALL`:
 
-```briv
+```briev
 0x71 => { // hcall
     let host_id = read_u32(bc, pc + 1);
     // HCall dispatching — placeholder for now
@@ -303,12 +303,12 @@ The Briv tamer's `exec_op` handles `OP_HCALL`:
 };
 ```
 
-This is a no-op — it skips the HCALL without calling the host. The Briv tamer
-executes inside the C VM, so an HCALL from the Briv tamer must trigger an HCALL
+This is a no-op — it skips the HCALL without calling the host. The Briev tamer
+executes inside the C VM, so an HCALL from the Briev tamer must trigger an HCALL
 in the outer C VM. But the outer C VM's HCALL mechanism expects the args to be on
 the outer VM's stack, not the inner VM's stack.
 
-**Solution**: When the Briv tamer's inner VM encounters an HCALL, it must:
+**Solution**: When the Briev tamer's inner VM encounters an HCALL, it must:
 1. Copy the inner VM's stack frame (args) to a buffer
 2. Signal to the outer C VM to dispatch the host function
 3. Copy the result back
@@ -316,8 +316,8 @@ the outer VM's stack, not the inner VM's stack.
 This is the **meta-circular relay**. The outer C VM's `host_log` function hooks
 into the inner VM's state to read arguments. The mechanism:
 
-The Briv tamer's `exec_op` for HCALL:
-```briv
+The Briev tamer's `exec_op` for HCALL:
+```briev
 0x71 => { // hcall
     let host_id = read_u32(bc, pc + 1);
     // Copy args from stack to a relay buffer
@@ -348,7 +348,7 @@ arrays (`VMStack { data: Int[1024] }`). Verify these bounds hold for real
 programs by running the DAG analysis against actual compiled `.lair` files.
 
 If bounds need adjustment, make them dynamic by taking the analysis results
-and sizing struct arrays at the Briv level. (Briv doesn't support runtime-sized
+and sizing struct arrays at the Briev level. (Briev doesn't support runtime-sized
 fixed arrays, so this may require a `MAX_*` constant that's verified against
 the DAG analysis.)
 
@@ -390,7 +390,7 @@ assembly — it delegates to the outer runtime.
 `lib/tamer/main.bv` reads `fn_table` entries by direct arithmetic. Extract into
 named loader helpers for clarity and correctness:
 
-```briv
+```briev
 defn fn_bc_offset(ft: Ptr<Int>, idx: Int) -> Int { ... }
 defn fn_bc_len(ft: Ptr<Int>, idx: Int) -> Int { ... }
 defn fn_local_count(ft: Ptr<Int>, idx: Int) -> Int { ... }
@@ -407,7 +407,7 @@ into `loader.bv`.
 from there. The `fn_bc_offset`/`fn_bc_len`/etc. helpers are `.lair`-format-specific
 and stay in `lib/tamer/`.
 
-## Phase 2: Beastpack Deserialization in Briv (10 days)
+## Phase 2: Beastpack Deserialization in Briev (10 days)
 
 ### 2a. Beastpack header parsing (2 days)
 
@@ -427,7 +427,7 @@ Offset  Size  Field
 
 Add to `lib/tamer/beastpack.bv`:
 
-```briv
+```briev
 struct BeastpackHeader {
     magic: Int[10];
     version: Int;
@@ -449,13 +449,13 @@ tamer-specific and stay in `lib/tamer/`.
 
 ### 2b. Gzip decompression (3 days)
 
-The beastpack data is gzip-compressed. The Briv tamer needs to decompress it
+The beastpack data is gzip-compressed. The Briev tamer needs to decompress it
 before parsing the BEAST text.
 
 **Option A**: Use the inner VM's `SysCall#` to invoke an external decompressor
 (zcat, gunzip). Simple but introduces a process-spawn dependency.
 
-**Option B**: Implement gzip decompression in Briv. This is ~200 lines of Briv
+**Option B**: Implement gzip decompression in Briev. This is ~200 lines of Briev
 for inflate + CRC32. Feasible but adds complexity to the tamer.
 
 **Option C**: Don't compress the beastpack in MVP mode. Set `FLAG_COMPRESSED = 0`
@@ -470,7 +470,7 @@ let text = to_beast(&clean, universe);
 // Write text directly without gzip
 ```
 
-### 2c. BEAST text parser in Briv (5 days)
+### 2c. BEAST text parser in Briev (5 days)
 
 The BEAST format is an S-expression tree. From `src/beast/sexpr.rs`, the
 grammar is:
@@ -498,7 +498,7 @@ The BEAST deserializer (`src/beast/deserialize.rs`) converts S-expressions into
 Implement a BEAST parser in `lib/tamer/beast_parse.bv` that produces an AST
 data structure:
 
-```briv
+```briev
 enum BeastExpr {
     Decimal(Int),
     String(String),
@@ -520,8 +520,8 @@ expression types — for MVP, only parse the subset that the user's program uses
 `defn`, `term`, `decimal`, `identifier`, `binary_op`, `unary_op`, `call`.
 
 **Stdlib extraction**: The S-expression parser is inherently general — it knows
-nothing about Briv's AST shape. It consumes text and produces `BeastExpr` trees.
-This goes in `lib/std/sexpr.bv`. Only the `BeastExpr`-to-Briv-AST mapping is
+nothing about Briev's AST shape. It consumes text and produces `BeastExpr` trees.
+This goes in `lib/std/sexpr.bv`. Only the `BeastExpr`-to-Briev-AST mapping is
 tamer-specific and stays in `lib/tamer/`.
 
 ### 2d. Preserve AsmFn and verification chains in beastpack (3 days)
@@ -577,7 +577,7 @@ matches this against `host_arch()` output from the C host.
 **Stdlib extraction**: No new stdlib — this is purely Rust-side BEAST
 serialization changes.
 
-## Phase 3: LLVM IR Emission in Briv (14 days)
+## Phase 3: LLVM IR Emission in Briev (14 days)
 
 ### 3a. Define a minimal LLVM IR subset (2 days)
 
@@ -591,16 +591,16 @@ For MVP, support only:
 - Integer literals as `i64` constants
 
 This subset is sufficient for programs like:
-```briv
+```briev
 defn add(a: Int, b: Int) -> Int { term a + b; }
 defn main() -> Int { term add(40, 2); }
 ```
 
-### 3b. LLVM IR string builder in Briv (3 days)
+### 3b. LLVM IR string builder in Briev (3 days)
 
 Create `lib/tamer/llvm_emit.bv` that builds LLVM IR strings:
 
-```briv
+```briev
 struct LlvmModule {
     declarations: String;
     functions: String;
@@ -629,7 +629,7 @@ register numbering, label deduplication), extract those helpers into
 
 Create `lib/tamer/codegen.bv`:
 
-```briv
+```briev
 defn compile_beast_to_llvm(ast: BeastExpr) -> Result<String, Int> {
     // Top-level: (:program (...))
     // Walk each (:definition ...) and emit LLVM function
@@ -663,7 +663,7 @@ Update `lib/tamer/main.bv` so `tame()`:
 7. Returns exit code
 
 The `tame()` signature stays the same:
-```briv
+```briev
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
                  beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
 ```
@@ -691,7 +691,7 @@ host_os_abi(id 2)  → returns OS identifier (0 = Linux)
 
 **Selection algorithm** in `lib/tamer/codegen.bv`:
 
-```briv
+```briev
 defn select_variant(chain: List<ChainSegment>) -> CodegenPath {
     // Walk chain in priority order (same as := declaration)
     for segment in chain {
@@ -709,13 +709,13 @@ defn select_variant(chain: List<ChainSegment>) -> CodegenPath {
                 match resolved {
                     ChainSegment::AsmFn(af) => { /* check target */ },
                     ChainSegment::Definition(d) => {
-                        term CodegenPath::Briv(d);
+                        term CodegenPath::Briev(d);
                     },
                 }
             },
         };
     };
-    // No match — error (should not happen with a Briv fallback)
+    // No match — error (should not happen with a Briev fallback)
     term CodegenPath::Error;
 };
 
@@ -741,7 +741,7 @@ calls `select_variant(chain)` and emits the selected variant. The chain is
 resolved at compile time (in the tamer, not in the Rust compiler), so the
 same `.bounty` file produces different native code on different targets.
 
-```briv
+```briev
 defn compile_beast_to_llvm(ast: BeastExpr) -> Result<String, Int> {
     for item in ast {
         match item {
@@ -754,11 +754,11 @@ defn compile_beast_to_llvm(ast: BeastExpr) -> Result<String, Int> {
                         let variant = select_variant(chain);
                         match variant {
                             CodegenPath::Asm(af)  => emit_asm_fn(af),
-                            CodegenPath::Briv(d) => emit_briv_fn(d),
+                            CodegenPath::Briev(d) => emit_briev_fn(d),
                         };
                     } else {
                         // Single definition: emit directly
-                        emit_briv_definition(item);
+                        emit_briev_definition(item);
                     };
                 };
             },
@@ -771,7 +771,7 @@ defn compile_beast_to_llvm(ast: BeastExpr) -> Result<String, Int> {
 
 When the tamer selects an `asm<>` variant, it must emit LLVM inline assembly:
 
-```briv
+```briev
 defn emit_asm_fn(mod: Ptr<LlvmModule>, af: AsmFn) {
     // Emit: define i64 @name(i64 %arg0) {
     //   entry:
@@ -829,7 +829,7 @@ defn emit_asm_fn(mod: Ptr<LlvmModule>, af: AsmFn) {
 The `asm<>` body uses `{result}` and `{param_name}` as placeholders. The
 LLVM emitter substitutes these with `$0` (output) and `$N` (input):
 
-```briv
+```briev
 defn substitute_placeholders(instr: String, params: List<(String, Type)>) -> String {
     let result = string_replace(instr, "{result}", "$0");
     let mut offset = 1;  // $1, $2, ... for input params
@@ -869,7 +869,7 @@ The BEAST parser and LLVM emitter need:
 - `int_to_string` — converting register numbers, constants to text
 - `string_replace` — string substitution
 
-Currently these are either FFI-only or missing. Port to native Briv or add
+Currently these are either FFI-only or missing. Port to native Briev or add
 as `#` intrinsics.
 
 ### 4c. Add HexParse, DecParse to stdlib for beastpack header parsing (1 day)
@@ -896,7 +896,7 @@ Each stdlib module extracted during Phases 1-4 must have its own tests in the
 appropriate location — not as tamer tests. The tamer-specific integration tests
 cover the pipeline. The stdlib tests cover the utilities.
 
-### 5a. Unit tests for the Briv tamer (2 days)
+### 5a. Unit tests for the Briev tamer (2 days)
 
 Each `lib/tamer/` module must have tests:
 
@@ -934,7 +934,7 @@ int main(void) {
 
 ### 5c. Regression: verify existing tamer tests still pass (1 day)
 
-The existing `test_briv_tamer.c` loads `combined.lair` and calls `tame()` at
+The existing `test_briev_tamer.c` loads `combined.lair` and calls `tame()` at
 hardcoded index 71. After adding `vm_find_function`, update the test to use
 name-based lookup instead.
 
@@ -942,16 +942,16 @@ name-based lookup instead.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Briv string operations too slow for BEAST parsing | Medium | High | Optimize hot paths; pre-allocate string builders; batch HCALLs |
+| Briev string operations too slow for BEAST parsing | Medium | High | Optimize hot paths; pre-allocate string builders; batch HCALLs |
 | HCALL relay between inner/outer VM too slow | Medium | Medium | Batch emissions; reduce relay frequency |
 | BEAST format changes break tamer | Low | High | Pin version; add format validation |
-| Gzip decompression in Briv too complex | Medium | Medium | Skip compression for MVP; use SysCall# for v1 |
+| Gzip decompression in Briev too complex | Medium | Medium | Skip compression for MVP; use SysCall# for v1 |
 | Inner VM (tamer) stack overflow from real programs | Low | High | DAG buffer sizing handles this; increase struct array sizes |
 | LLVM IR emission produces incorrect IR | Medium | High | Test each emission pattern against clang; run clang -S for validation |
 | `vm_find_function` loads wrong function | Low | Medium | Test with known .lair; verify by function count + name |
-| Byte order or alignment mismatch between Rust VM backend and Briv tamer | Medium | High | Auto-generate opcode constants from a shared source; add assertion tests |
-| The Briv language itself has a bug that blocks compilation | Medium | Critical | Test tamer compiles with current `brivc` first; fix bugs as found |
-| String building in Briv causes memory explosion | Medium | Medium | Use streaming emission via HCALL rather than building giant strings |
+| Byte order or alignment mismatch between Rust VM backend and Briev tamer | Medium | High | Auto-generate opcode constants from a shared source; add assertion tests |
+| The Briev language itself has a bug that blocks compilation | Medium | Critical | Test tamer compiles with current `brievc` first; fix bugs as found |
+| String building in Briev causes memory explosion | Medium | Medium | Use streaming emission via HCALL rather than building giant strings |
 | Utilities duplicated in tamer-private code instead of stdlib | Medium | Low | Phase-by-phase audit; enforce Stdlib Extraction Principle in review |
 | `os/fs.bv` corruption causes subtle bugs in file I/O | High | Medium | Rewrite entirely in Phase 4; add tests |
 | AsmFn variants missing from beastpack breaks cross-target compilation | High | High | Phase 2d adds round-trip serialization; test with popcount_chain.bv |
@@ -962,9 +962,9 @@ name-based lookup instead.
 
 | Phase | Effort | Stdlib extracted | Deliverable |
 |-------|--------|-----------------|-------------|
-| Phase 0: Plumbing | 5 days | None | `brivc bounty` produces correct `.bounty`; C tamer calls `tame()` by name |
+| Phase 0: Plumbing | 5 days | None | `brievc bounty` produces correct `.bounty`; C tamer calls `tame()` by name |
 | Phase 1: Tamer completeness | 8 days | `binary.bv` (read_u* from Ptr) | All opcodes handled; HCALL relay works; AsmFn registered in VM bytecode |
-| Phase 2: Beastpack in Briv | 13 days | `binary.bv` (extend), `sexpr.bv`, `hash/blake3.bv` | Beastpack header parsed; BEAST text parsed; AsmFn+chain round-trip in BEAST |
+| Phase 2: Beastpack in Briev | 13 days | `binary.bv` (extend), `sexpr.bv`, `hash/blake3.bv` | Beastpack header parsed; BEAST text parsed; AsmFn+chain round-trip in BEAST |
 | Phase 3: LLVM IR emission | 19 days | `string_builder.bv` (extend) | AST → LLVM IR; asm variant selection; `call asm` emission; clang produces binary |
 | Phase 4: Stdlib gaps | 7 days | `string.bv` (extend), `os/fs.bv` (fix) | String ops, binary parsing, `os/fs.bv` fixed |
 | Phase 5: Testing | 5 days | All extracted modules get tests | Unit tests, end-to-end bounty test, regression test |
@@ -973,7 +973,7 @@ name-based lookup instead.
 
 ### MVP Milestone (after Phase 0 + 1 + simplified Phase 2 + 3a-c + 5)
 
-**~25 days** to get `brivc bounty add.bv && tamer add.bounty` producing a
+**~25 days** to get `brievc bounty add.bv && tamer add.bounty` producing a
 working binary that computes `3 + 4` and exits with code 7.
 
 This uses:
@@ -991,7 +991,7 @@ This uses:
 - Full program compilation (not just straight-line arithmetic)
 - Beastpack preserves `asm<>` variants and `:=` verification chains
 - Tamer selects the right asm variant for the target architecture at install time
-- `popcount_chain.bv` compiles to native code with `popcnt` on x86, `cnt` on ARM, Briv fallback elsewhere
+- `popcount_chain.bv` compiles to native code with `popcnt` on x86, `cnt` on ARM, Briev fallback elsewhere
 - `os/fs.bv` fixed, stdlib complete, all tests passing
 
 ## Documentation
@@ -1017,7 +1017,7 @@ This plan follows AGENTS.md Plan Directives throughout:
 - ✓ **Comment the code** — every new/modified site gets a YYYY-MM-DD rationale
 - ✓ **Behavioral tests, not literal tests** — the end-to-end test asserts "binary exits with code 7", not "IR contains `add i64`"
 - ✓ **Documentation is code** — architecture docs updated in same commit as code
-- ✓ **No type name matching** — all Briv type queries go through protocol membership, not name strings
+- ✓ **No type name matching** — all Briev type queries go through protocol membership, not name strings
 - ✓ **DRY consolidation** — beastpack parsing, LLVM emission helpers are extracted into shared functions (not duplicated across phases)
 - ✓ **Full provenance** — every temporary solution flagged with `TEMP: 2026-07-30:` and describes the path to permanence
 - ✓ **Target-aware dispatch** — asm variant selection queries the host at install time, avoiding hardcoded architecture checks in the tamer

@@ -3,7 +3,7 @@
 
 ## Motivation
 
-Briv currently has a single FFI declaration — `frgn` — which **must** link or
+Briev currently has a single FFI declaration — `frgn` — which **must** link or
 compilation fails. This breaks in three scenarios:
 
 1. **Platform-adaptive code** — a function exists on Linux (`#POSIX`) but not
@@ -31,7 +31,7 @@ specifications replacing `from "c"`.
 
 ### `frgn` — Required Foreign Function
 
-```briv
+```briev
 frgn shm_open(name: String, oflag: Int, mode: Int) -> Int from #POSIX fallback -1;
 ```
 
@@ -41,7 +41,7 @@ frgn shm_open(name: String, oflag: Int, mode: Int) -> Int from #POSIX fallback -
 
 ### `frgn?` — Optional Foreign Function
 
-```briv
+```briev
 frgn? glCompileShader(shader: Int) -> Void from #OpenGL fallback;
 
 export defn compile_shader(s: Int) -> Int {
@@ -61,7 +61,7 @@ export defn compile_shader(s: Int) -> Int {
 
 ### `frgn!` — Fire-and-Forget
 
-```briv
+```briev
 frgn! emit_metric(name: String, value: Int) -> Void from #POSIX fallback;
 ```
 
@@ -72,7 +72,7 @@ frgn! emit_metric(name: String, value: Int) -> Void from #POSIX fallback;
 
 ### `frgn?!` — Fire-and-Forget with Delivery Check
 
-```briv
+```briev
 frgn?! send_message(addr: Int, data: Ptr<Int>) -> Bool from #POSIX fallback false;
 ```
 
@@ -86,7 +86,7 @@ frgn?! send_message(addr: Int, data: Ptr<Int>) -> Bool from #POSIX fallback fals
 
 The `?` suffix on a function name evaluates to a `Bool`:
 
-```briv
+```briev
 when glCompileShader? { term glCompileShader(s); };
 ```
 
@@ -108,7 +108,7 @@ when glCompileShader? { term glCompileShader(s); };
 exists), evaluate and return it. If it can't be resolved, continue to the
 next statement.
 
-```briv
+```briev
 export defn handle(x: Int) -> Int {
     term posix_fn(x)?;
     term fallback(x);
@@ -117,7 +117,7 @@ export defn handle(x: Int) -> Int {
 
 This is syntactic sugar for:
 
-```briv
+```briev
 export defn handle(x: Int) -> Int {
     when posix_fn? {
         term posix_fn(x);
@@ -135,7 +135,7 @@ runs.
 
 Replace `from "c"` with hashword-based platform protocols:
 
-```briv
+```briev
 // Before:
 frgn putchar(c: Int) -> Int from "c" fallback -1;
 
@@ -191,7 +191,7 @@ frgn puts(s: String) -> Int from #POSIX fallback -1
 If a function body calls a `frgn?` symbol without first checking `fn?`,
 the compiler emits an error:
 
-```briv
+```briev
 frgn? optional_fn(x: Int) -> Int from #POSIX fallback 0;
 
 export defn bad() -> Int {
@@ -208,7 +208,7 @@ export defn good() -> Int {
 
 **How the check works:** In the typechecker (or a dedicated pass after
 typechecking), for each function body, walk all `Expr::Call` sites. For each
-`Call(name)`, look up the `ForeignBinding` with `briv_name == name`. If the
+`Call(name)`, look up the `ForeignBinding` with `briev_name == name`. If the
 binding is `frgn?`/`frgn!`/`frgn?!`, check that `name?` appears as a guard
 in every path leading to the call. If not, emit an error.
 

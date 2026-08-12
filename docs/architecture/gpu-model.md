@@ -1,4 +1,4 @@
-# Briv GPU Model — Borrowing, Not Barriers
+# Briev GPU Model — Borrowing, Not Barriers
 
 **Date:** 2026-07-15
 **Status:** Foundational — thesis intact; reconciled 2026-08-06 for Design A
@@ -30,15 +30,15 @@ These barriers are:
 
 ---
 
-## How Briv Eliminates Barriers
+## How Briev Eliminates Barriers
 
-Briv's borrowing rules guarantee **data-race freedom by construction**. If a
+Briev's borrowing rules guarantee **data-race freedom by construction**. If a
 transaction writes to a variable, no other transaction can read or write it
 simultaneously. This is enforced at compile time, not at runtime.
 
 For GPU code, this means:
 
-```briv
+```briev
 // Each work-item has a unique i, guaranteed by the counted-loop counter
 // Each write is a slot affine in i — provably non-overlapping
 let i: Int = 0;
@@ -65,7 +65,7 @@ Therefore no barrier is needed. The backend simply:
 
 ## The Transaction-Work-Item Mapping
 
-| Briv construct | GPU meaning |
+| Briev construct | GPU meaning |
 |----------------|-------------|
 | `accel node k [i < N][i == N]` | Work-item map over counter i |
 | `[i < N]` precondition | The work-item bound (firing gate) |
@@ -126,4 +126,4 @@ expression/statement emitter against a kernel-scoped `%State` projection:
 4. **Termination:** `unreachable` after the (noreturn) exit
 
 No barrier analysis. No shared memory allocation. No synchronization pass.
-The eligibility proof has already done the hard work at the Briv level.
+The eligibility proof has already done the hard work at the Briev level.

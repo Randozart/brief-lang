@@ -1,13 +1,13 @@
-// ── Compiler Registry — `brivc registry` ──────────────────────────────
+// ── Compiler Registry — `brievc registry` ──────────────────────────────
 // 2026-07-26: Phase 1f — Per-user registry directory for installing
-// Briv modules and foreign sources. Managed by `brivc registry {add,list,remove}`.
+// Briev modules and foreign sources. Managed by `brievc registry {add,list,remove}`.
 //
-// Copy-only (version-locked, no symlinks). Project-local .briv/registry/
+// Copy-only (version-locked, no symlinks). Project-local .briev/registry/
 // overrides the user-wide dirs::data_dir() path.
 //
 // Lookup order for import <name> / from <name>:
-//   1. Project-local .briv/registry/<name>
-//   2. User-wide ~/.briv/registry/<name> (or platform equivalent)
+//   1. Project-local .briev/registry/<name>
+//   2. User-wide ~/.briev/registry/<name> (or platform equivalent)
 //   3. config/module-registry.toml (for imports)
 //   4. Stdlib path (for from <name> and import <name> fallback)
 
@@ -16,26 +16,26 @@ use std::path::{Path, PathBuf};
 /// Resolve the primary registry directory (user-wide).
 ///
 /// Uses dirs::data_dir() for cross-platform compatibility:
-/// - Linux:   ~/.local/share/briv/registry/
-/// - macOS:   ~/Library/Application Support/briv/registry/
-/// - Windows: %APPDATA%/briv/registry/
+/// - Linux:   ~/.local/share/briev/registry/
+/// - macOS:   ~/Library/Application Support/briev/registry/
+/// - Windows: %APPDATA%/briev/registry/
 ///
-/// 2026-07-26: Falls back to ~/.briv/registry/ if data_dir() fails.
+/// 2026-07-26: Falls back to ~/.briev/registry/ if data_dir() fails.
 pub fn user_registry_path() -> PathBuf {
     let base = dirs::data_dir()
         .unwrap_or_else(|| {
-            // Fallback: ~/.briv/
+            // Fallback: ~/.briev/
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            home.join(".briv")
+            home.join(".briev")
         });
-    base.join("briv").join("registry")
+    base.join("briev").join("registry")
 }
 
 /// Resolve the project-local registry directory.
 ///
-/// 2026-07-26: Returns .briv/registry/ relative to the given project root.
+/// 2026-07-26: Returns .briev/registry/ relative to the given project root.
 pub fn project_registry_path(project_root: &Path) -> PathBuf {
-    project_root.join(".briv").join("registry")
+    project_root.join(".briev").join("registry")
 }
 
 /// Resolve the best available registry directory for lookups.

@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 2 moves string and character operations from FFI to native Briv implementations. This is critical for writing the lexer in pure Briv without OS dependencies.
+Tier 2 moves string and character operations from FFI to native Briev implementations. This is critical for writing the lexer in pure Briev without OS dependencies.
 
 **Before Tier 2:**
 - Character classification: 100% FFI
@@ -27,7 +27,7 @@ Tier 2 moves string and character operations from FFI to native Briv implementat
 
 ### Classification Functions
 
-```briv
+```briev
 // Whitespace detection
 defn is_whitespace(c: Char) -> Bool
 // ' ' → true, '\t' → true, 'a' → false
@@ -57,7 +57,7 @@ defn is_valid_codepoint(n: Int) -> Bool  // valid codepoint check
 
 ### Conversion Functions
 
-```briv
+```briev
 // Type conversion
 defn char_to_int(c: Char) -> Int       // 'A' → 65
 defn int_to_char(n: Int) -> Char       // 65 → 'A'
@@ -83,7 +83,7 @@ defn char_ge(a: Char, b: Char) -> Bool
 
 ### Usage Examples
 
-```briv
+```briev
 import std.char;
 
 // Lexer keyword detection
@@ -118,7 +118,7 @@ defn matches_keyword(token: String, keyword: String) -> Bool {
 
 ### Case Conversion
 
-```briv
+```briev
 defn to_lower_str(s: String) -> String   // "HELLO" → "hello"
 defn to_upper_str(s: String) -> String   // "hello" -> "HELLO"
 defn capitalize(s: String) -> String     // "hello" → "Hello"
@@ -127,7 +127,7 @@ defn title_case(s: String) -> String     // "hello world" → "Hello World"
 
 ### Trimming
 
-```briv
+```briev
 defn trim_str(s: String) -> String       // "  hello  " → "hello"
 defn trim_left_str(s: String) -> String  // "  hello" → "hello"
 defn trim_right_str(s: String) -> String // "hello  " → "hello"
@@ -135,7 +135,7 @@ defn trim_right_str(s: String) -> String // "hello  " → "hello"
 
 ### Character Analysis
 
-```briv
+```briev
 defn is_whitespace_str(s: String) -> Bool  // all whitespace?
 defn is_alpha_str(s: String) -> Bool       // all letters?
 defn is_numeric_str(s: String) -> Bool     // all digits?
@@ -145,7 +145,7 @@ defn is_blank(s: String) -> Bool           // empty or whitespace?
 
 ### Manipulation
 
-```briv
+```briev
 defn reverse_str(s: String) -> String         // "hello" → "olleh"
 defn count_char(s: String, c: Char) -> Int    // count occurrences
 defn count_substr(s: String, substr: String) -> Int
@@ -154,7 +154,7 @@ defn repeat_char(c: Char, n: Int) -> String   // 'a', 3 → "aaa"
 
 ### Padding
 
-```briv
+```briev
 defn pad_left(s: String, width: Int) -> String   // "hi", 5 → "   hi"
 defn pad_right(s: String, width: Int) -> String  // "hi", 5 → "hi   "
 defn pad_center(s: String, width: Int) -> String // "hi", 5 → " hi  "
@@ -162,7 +162,7 @@ defn pad_center(s: String, width: Int) -> String // "hi", 5 → " hi  "
 
 ### Truncation
 
-```briv
+```briev
 defn truncate(s: String, max_len: Int) -> String
 defn truncate_with_ellipsis(s: String, max_len: Int) -> String
 // "Hello World", 8 → "Hello..."
@@ -170,7 +170,7 @@ defn truncate_with_ellipsis(s: String, max_len: Int) -> String
 
 ### Prefix/Suffix Operations
 
-```briv
+```briev
 defn ensure_prefix(s: String, prefix: String) -> String
 // "file.txt", "./" → "./file.txt"
 // "./file.txt", "./" → "./file.txt" (unchanged)
@@ -187,7 +187,7 @@ defn remove_suffix(s: String, suffix: String) -> String
 
 ### Stripping
 
-```briv
+```briev
 defn strip_chars(s: String, chars: String) -> String
 // "!!!hello!!!", "!" → "hello"
 ```
@@ -200,7 +200,7 @@ defn strip_chars(s: String, chars: String) -> String
 
 All classification uses direct character code comparison:
 
-```briv
+```briev
 defn is_digit(c: Char) -> Bool {
     [c >= '0' && c <= '9'] {
         term true;
@@ -215,7 +215,7 @@ This is O(1) and compiles to simple integer comparisons.
 
 ASCII case conversion uses the 32-codepoint offset:
 
-```briv
+```briev
 defn to_upper(c: Char) -> Char {
     [is_lower(c)] {
         let code = char_to_int(c);
@@ -230,7 +230,7 @@ defn to_upper(c: Char) -> Char {
 
 All string-building operations use StringBuilder for O(1) append:
 
-```briv
+```briev
 defn to_lower_str(s: String) -> String {
     let sb = new_builder();
     let i: Int = 0;
@@ -266,7 +266,7 @@ defn to_lower_str(s: String) -> String {
 With Tier 2 complete, the lexer can now:
 
 1. **Identify keywords without FFI:**
-   ```briv
+   ```briev
    defn is_keyword(token: String) -> Bool {
        let lower = to_lower_str(token);
        [lower == "txn" || lower == "rct" || lower == "defn"] {
@@ -277,7 +277,7 @@ With Tier 2 complete, the lexer can now:
    ```
 
 2. **Classify identifier characters:**
-   ```briv
+   ```briev
    defn is_identifier_start(c: Char) -> Bool {
        term is_alpha(c) || c == '_';
    };
@@ -288,7 +288,7 @@ With Tier 2 complete, the lexer can now:
    ```
 
 3. **Parse numeric literals:**
-   ```briv
+   ```briev
    defn is_hex_literal(s: String) -> Bool {
        [s .#Size >= 2] {
            [s[0..2] == "0x" || s[0..2] == "0X"] {
@@ -310,7 +310,7 @@ With Tier 2 complete, the lexer can now:
 ### Parser Benefits
 
 1. **String literal processing:**
-   ```briv
+   ```briev
    defn unescape_string(s: String) -> String {
        let sb = new_builder();
        let i: Int = 1;  // Skip opening quote
@@ -349,14 +349,14 @@ All functions tested with:
 ## Migration from FFI
 
 ### Before (FFI)
-```briv
+```briev
 frgn __to_lower(s: String) -> Result<String, StringError> from "string.toml";
 frgn __trim(s: String) -> Result<String, StringError> from "string.toml";
 frgn __is_whitespace(s: String) -> Result<Bool, StringError> from "string.toml";
 ```
 
 ### After (Native)
-```briv
+```briev
 defn to_lower_str(s: String) -> String
 defn trim_str(s: String) -> String
 defn is_whitespace_str(s: String) -> Bool
@@ -374,7 +374,7 @@ defn is_whitespace_str(s: String) -> Bool
 
 The following remain FFI by nature (require OS/hardware):
 
-```briv
+```briev
 // File I/O
 frgn __read_file(path: String) -> Result<String, IOError>
 frgn __write_file(path: String, content: String) -> Result<Void, IOError>
@@ -391,7 +391,7 @@ frgn __unicode_normalize(s: String) -> Result<String, UnicodeError>
 
 ## Next Steps
 
-With Tier 2 complete, the lexer can be implemented in pure Briv:
+With Tier 2 complete, the lexer can be implemented in pure Briev:
 
 **Tier 3: Lexer Components**
 - Token type definition (using enums)

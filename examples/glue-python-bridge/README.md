@@ -1,19 +1,19 @@
 # GLUE Python Bridge Example
 
-Call Briv-exported functions from Python via the GLUE protocol.
+Call Briev-exported functions from Python via the GLUE protocol.
 
 ## Quick Start
 
 ```bash
 cd examples/glue-python-bridge
-briv build --disable-plugin prelude --library bridge.bv --out .
+briev build --disable-plugin prelude --library bridge.bv --out .
 python3 gluerun.py
 ```
 
 Expected output:
 ```
 ═══ GLUE Python Bridge Demo ═══
-  Briv runtime initialized (state=0x...)
+  Briev runtime initialized (state=0x...)
   add(40, 2) = 42
   multiply(6, 7) = 42
 ═══ All bridge calls passed ═══
@@ -21,19 +21,19 @@ Expected output:
 
 ## How It Works
 
-1. `briv build --disable-plugin prelude --library bridge.bv --out .` compiles to `bridge.ll`
-   — a reusable LLVM IR module with `__briv_init_state()` + exports, no `main()`
+1. `briev build --disable-plugin prelude --library bridge.bv --out .` compiles to `bridge.ll`
+   — a reusable LLVM IR module with `__briev_init_state()` + exports, no `main()`
 2. `gluerun.py` automates:
    - `llc bridge.ll -filetype=obj -O2 -o bridge.o`
    - `cc -shared bridge.o -o libbridge.so`
    - `ctypes.CDLL("./libbridge.so")`
-3. Python calls `__briv_init_state()` once, then calls exports with `c_int64` args
+3. Python calls `__briev_init_state()` once, then calls exports with `c_int64` args
 
 ## C ABI Convention
 
 ```python
-lib.__briv_init_state.argtypes = []
-lib.__briv_init_state.restype = ctypes.c_void_p
+lib.__briev_init_state.argtypes = []
+lib.__briev_init_state.restype = ctypes.c_void_p
 
 lib.add.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
 lib.add.restype = ctypes.c_int64
@@ -43,4 +43,4 @@ lib.add.restype = ctypes.c_int64
 
 - LLVM toolchain (`llc`) + C compiler — `apt install llvm gcc`
 - Python 3 — `ctypes` is built-in
-- Briv compiler from this repo
+- Briev compiler from this repo

@@ -1,4 +1,4 @@
-// ── Phase I.1 — `briv accept` Command ────────────────────────────────
+// ── Phase I.1 — `briev accept` Command ────────────────────────────────
 // 2026-07-28: Fold doppelganger bodies from .derive.bv / .opt.bv into source.
 // Never mutates source without .bak backup. Flat code: max 2 nesting.
 
@@ -7,7 +7,7 @@ use crate::derive::doppelganger::Doppelganger;
 use std::fs;
 use std::path::Path;
 
-/// Handle `briv accept <file>` — fold doppelganger bodies into source.
+/// Handle `briev accept <file>` — fold doppelganger bodies into source.
 /// 1. Find derivation blocks in the original source (by span)
 /// 2. Read the doppelganger file (.derive.bv or .opt.bv)
 /// 3. For each derivation block, extract the synthesized body from the doppelganger
@@ -62,7 +62,7 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     };
     if !shadow_path.exists() {
         return Err(format!(
-            "no doppelganger at '{}' — run 'briv derive' first",
+            "no doppelganger at '{}' — run 'briev derive' first",
             shadow_path.display()
         ));
     }
@@ -104,7 +104,7 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     }
 
     if replacements.is_empty() {
-        return Err("no bodies found in doppelganger — did 'briv derive' succeed?".into());
+        return Err("no bodies found in doppelganger — did 'briev derive' succeed?".into());
     }
 
     // Sort in reverse order to preserve byte offsets during surgery
@@ -135,7 +135,7 @@ pub fn handle_accept_command(file_path: &str, use_opt: bool) -> Result<(), Strin
     Ok(())
 }
 
-/// Lex a Briv source file into (Token, byte_range) pairs.
+/// Lex a Briev source file into (Token, byte_range) pairs.
 fn lex_source_with_spans(source: &str) -> Result<Vec<(crate::lexer::Token, std::ops::Range<usize>)>, String> {
     use logos::Logos;
     let mut lexer = crate::lexer::Token::lexer(source);

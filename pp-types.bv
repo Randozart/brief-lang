@@ -3,40 +3,40 @@
 // the benchmark workload per plan 2026-08-03-host-callable-glue-export).
 // Exports pure functions that take/return C string pointers as Int, so the
 // round-trip tests (tests/pp_roundtrip_tests.rs) call them via the C ABI
-// without native Briv string construction. Conversion between C strings
-// and Briv strings uses the briv_rt.c runtime helpers.
+// without native Briev string construction. Conversion between C strings
+// and Briev strings uses the briev_rt.c runtime helpers.
 
 import "pp/types.bv";
 
-// C string ↔ Briv string conversion (briv_rt.c). Declared here because
+// C string ↔ Briev string conversion (briev_rt.c). Declared here because
 // no stdlib module wires these yet; the round-trip tests rely on them.
 
-frgn briv_cstr_to_briv(ptr: Int) -> String as cstr_to_briv from "lib/runtime/briv_rt.c" fallback "";
-frgn briv_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/briv_rt.c" fallback 0;
+frgn briev_cstr_to_briev(ptr: Int) -> String as cstr_to_briev from "lib/runtime/briev_rt.c" fallback "";
+frgn briev_str_to_c(handle: String) -> Int as str_to_c from "lib/runtime/briev_rt.c" fallback 0;
 
-export defn briv_test_cstr_roundtrip(input_ptr: Int) -> Int {
-    let s: String = cstr_to_briv(input_ptr);
+export defn briev_test_cstr_roundtrip(input_ptr: Int) -> Int {
+    let s: String = cstr_to_briev(input_ptr);
     term str_to_c(s);
 };
 
-export defn briv_test_custom_echo(input_ptr: Int) -> Int {
-    let s: String = cstr_to_briv(input_ptr);
+export defn briev_test_custom_echo(input_ptr: Int) -> Int {
+    let s: String = cstr_to_briev(input_ptr);
     let r: String = pp_type_custom(s);
     term str_to_c(r);
 };
 
-export defn briv_test_bits_static() -> Int {
+export defn briev_test_bits_static() -> Int {
     let r: String = "Bits(42): test";
     term str_to_c(r);
 };
 
-export defn briv_test_type_bits(input_ptr: Int) -> Int {
-    let s: String = cstr_to_briv(input_ptr);
+export defn briev_test_type_bits(input_ptr: Int) -> Int {
+    let s: String = cstr_to_briev(input_ptr);
     let r: String = pp_type_bits(s);
     term str_to_c(r);
 };
 
-export defn briv_test_type_void() -> Int {
+export defn briev_test_type_void() -> Int {
     let r: String = pp_type_void();
     term str_to_c(r);
 };

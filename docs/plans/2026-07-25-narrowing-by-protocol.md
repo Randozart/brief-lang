@@ -91,7 +91,7 @@ Updated item 20 to describe the intended behavior.
 cat > /tmp/t1.bv << 'EOF'
 defn f() -> Int { term 42; }
 EOF
-brivc build --backend llvm /tmp/t1.bv 2>&1
+brievc build --backend llvm /tmp/t1.bv 2>&1
 grep "define.*@f" /tmp/t1.ll        # → define i8 @f
 grep "add.*0.*42" /tmp/t1.ll        # → add i8 0, 42
 grep "ret" /tmp/t1.ll               # → ret i8 %tX
@@ -104,11 +104,11 @@ defn test() -> Int64 {
     term fd;
 }
 EOF
-brivc build --backend llvm /tmp/t2.bv 2>&1
+brievc build --backend llvm /tmp/t2.bv 2>&1
 llc -O0 /tmp/t2.ll -o /dev/null     # passes
 
 # 3. ShellCmd# compiles and runs
-brivc build --backend llvm /tmp/shell.bv 2>&1
-clang /tmp/shell.ll lib/runtime/briv_rt.c -o shell
+brievc build --backend llvm /tmp/shell.bv 2>&1
+clang /tmp/shell.ll lib/runtime/briev_rt.c -o shell
 ./shell                     # works
 ```

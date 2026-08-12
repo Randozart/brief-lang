@@ -1,4 +1,4 @@
-# Agent Handoff — Briv Compiler Baseline Recovery
+# Agent Handoff — Briev Compiler Baseline Recovery
 ## Handoff timestamp: 2026-07-28 ~12:00 (updated ~14:30)
 ## Current baseline: `b39461e2` — "SLP stride gate — all 19 benchmarks at parity or better"
 
@@ -72,46 +72,46 @@ time with verification.
 
 ```
 /home/randozart/Desktop/Projects/
-├── briv-compiler/                  # Main repo (main branch)
-│   ├── target/release/brivc
+├── briev-compiler/                  # Main repo (main branch)
+│   ├── target/release/brievc
 │   ├── .opencode/
 │   │   ├── HANDOFF.md
 │   │   └── plans/2026-07-28-baseline-recovery.md
 │   └── benchmarks/
 │
-├── briv-compiler-baseline/         # Read-only A/B comparison at b39461e2
-│   └── target/release/brivc        # (release build ready)
+├── briev-compiler-baseline/         # Read-only A/B comparison at b39461e2
+│   └── target/release/brievc        # (release build ready)
 │
-├── briv-compiler-recovery/         # Recovery worktree (recovery-branch)
-│   └── target/release/brivc        # (release build ready — baseline + our commits)
+├── briev-compiler-recovery/         # Recovery worktree (recovery-branch)
+│   └── target/release/brievc        # (release build ready — baseline + our commits)
 │
-└── briv-compiler-derive/           # Feature worktree (derivation + stochastic opt)
+└── briev-compiler-derive/           # Feature worktree (derivation + stochastic opt)
     └── commits Phases A–I           # (12 code commits on c3155e99 base)
 ```
 
-**All operations happen in `../briv-compiler-recovery`.** Use the baseline
+**All operations happen in `../briev-compiler-recovery`.** Use the baseline
 worktree only for comparison via `bash benchmarks/compare_baseline.sh <name>`.
 
 **VERY IMPORTANT:** All `compare_baseline.sh` and `build_and_bench.sh` commands
-must be run from the **main worktree** (`../briv-compiler`) because the scripts
-use relative paths to find the baseline worktree at `../briv-compiler-baseline`.
-The recovery worktree has its own `target/release/brivc` for compilation, but
+must be run from the **main worktree** (`../briev-compiler`) because the scripts
+use relative paths to find the baseline worktree at `../briev-compiler-baseline`.
+The recovery worktree has its own `target/release/brievc` for compilation, but
 benchmark scripts reference paths relative to the main repo.
 
 **Recommended workflow for single-benchmark testing from the recovery worktree:**
 
 ```bash
 # Compile with recovery compiler
-cd /home/randozart/Desktop/Projects/briv-compiler-recovery
+cd /home/randozart/Desktop/Projects/briev-compiler-recovery
 rm -f benchmarks/ring_buffer.ll benchmarks/ring_buffer
-./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out benchmarks
+./target/release/brievc build benchmarks/ring_buffer.bv --llvm --out benchmarks
 clang -O3 -flto -march=native -ffast-math \
-    benchmarks/ring_buffer.ll lib/runtime/briv_rt.c \
+    benchmarks/ring_buffer.ll lib/runtime/briev_rt.c \
     -o benchmarks/ring_buffer
 BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/ring_buffer 2>&1
 
 # Compare against baseline (must run from main worktree)
-cd /home/randozart/Desktop/Projects/briv-compiler
+cd /home/randozart/Desktop/Projects/briev-compiler
 bash benchmarks/compare_baseline.sh ring_buffer
 ```
 
@@ -238,9 +238,9 @@ bash benchmarks/build_and_bench.sh --runtime
 
 # Single benchmark for quick iteration
 rm -f benchmarks/ring_buffer.ll benchmarks/ring_buffer
-./target/release/brivc build benchmarks/ring_buffer.bv --llvm --out benchmarks
+./target/release/brievc build benchmarks/ring_buffer.bv --llvm --out benchmarks
 clang -O3 -flto -march=native -ffast-math benchmarks/ring_buffer.ll \
-    lib/runtime/briv_rt.c -o benchmarks/ring_buffer
+    lib/runtime/briev_rt.c -o benchmarks/ring_buffer
 BOUND=50000000 hyperfine -w 1 -r 5 ./benchmarks/ring_buffer
 
 # Compare against baseline
@@ -282,10 +282,10 @@ Three worktrees exist in parallel:
 
 | Worktree | Path | Branch/HEAD | Purpose |
 |----------|------|-------------|---------|
-| **Main** | `../briv-compiler` | `main` at `70ead990` | Integration target — feature merges here first |
-| **Baseline** | `../briv-compiler-baseline` | Detached HEAD at `b39461e2` | Read-only A/B comparison — never commit here |
-| **Recovery** | `../briv-compiler-recovery` | `recovery-branch` at `b39461e2` | Builds the 8-step recovery plan |
-| **Derive (feature)** | `../briv-compiler-derive` | Detached HEAD at `7c24d9e5` | `:=` derivation block + stochastic optimization feature |
+| **Main** | `../briev-compiler` | `main` at `70ead990` | Integration target — feature merges here first |
+| **Baseline** | `../briev-compiler-baseline` | Detached HEAD at `b39461e2` | Read-only A/B comparison — never commit here |
+| **Recovery** | `../briev-compiler-recovery` | `recovery-branch` at `b39461e2` | Builds the 8-step recovery plan |
+| **Derive (feature)** | `../briev-compiler-derive` | Detached HEAD at `7c24d9e5` | `:=` derivation block + stochastic optimization feature |
 
 **Critical rule:** Only work in your assigned worktree. Never modify files in another
 worktree's directory. Git worktrees share the object database but have independent
@@ -297,16 +297,16 @@ The recovery work is sequentialized with the derivation feature worktree:
 
 ### Step A — Feature merges to main (derivation agent's responsibility)
 
-The derivation worktree (`../briv-compiler-derive`, 12 code commits on
+The derivation worktree (`../briev-compiler-derive`, 12 code commits on
 Phases A–I of the `:=` derivation + stochastic optimization feature, forked
 from `c3155e99`) merges into `main` first. The feature agent resolves any
 conflicts between their 12 commits and the 17 post-baseline commits on `main`.
 
 ```bash
-# In ../briv-compiler-derive:
+# In ../briev-compiler-derive:
 git branch derive-feature
 git push .. HEAD:refs/heads/derive-feature
-cd ../briv-compiler
+cd ../briev-compiler
 git merge derive-feature    # resolve conflicts, commit
 ```
 
@@ -327,12 +327,12 @@ Conflict resolution is guided by this rule:
 | MetadataRegistry hooks | main | Keep feature's registry wiring, weave into our clean backend code |
 
 ```bash
-cd ../briv-compiler-recovery
+cd ../briev-compiler-recovery
 # Build 8 steps on recovery-branch (see plan document)
 # ... each step verified independently ...
 
-cd ../briv-compiler
-git fetch ../briv-compiler-recovery recovery-branch
+cd ../briev-compiler
+git fetch ../briev-compiler-recovery recovery-branch
 git merge recovery-branch
 # Resolve conflicts per the matrix above
 bash benchmarks/build_and_bench.sh --runtime && bash benchmarks/build_and_bench.sh --correctness

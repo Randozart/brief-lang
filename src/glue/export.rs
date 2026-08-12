@@ -1,6 +1,6 @@
 // GLUE Export Pipeline
 //
-// `briv export <bridge.bv> <language>` — reads a Briv bridge file,
+// `briev export <bridge.bv> <language>` — reads a Briev bridge file,
 // extracts #export, frgn, and meld declarations, then writes a
 // bridge-exports.dbvl metadata file alongside the compiled LLVM IR module.
 //
@@ -11,14 +11,14 @@
 //   3. Write bridge-exports.dbvl with tagged entries:
 //      - export lines: function signatures crossing the boundary
 //      - meld lines: type-layout compatibility proofs for the boundary
-//      - ctype lines: Briv type → C ABI type mappings (from glue.dbv)
-//   4. (Future) Compile bridge to .ll via `briv build --library`.
+//      - ctype lines: Briev type → C ABI type mappings (from glue.dbv)
+//   4. (Future) Compile bridge to .ll via `briev build --library`.
 //
 // 2026-07-10: GLUE v2. Replaced the $!macro adapter pipeline (which
 // generated C ABI wrapper crates) with direct bridge-exports.dbvl output
 // consumed by foreign build systems. The foreign build.rs or script reads
 // the .dbvl to generate bindings. Two interop paths exist:
-//   Path A (LLVM LTO) — for LLVM targets (Rust, C, Swift, Zig). Briv's
+//   Path A (LLVM LTO) — for LLVM targets (Rust, C, Swift, Zig). Briev's
 //     .ll merges with the host's .ll before optimization.
 //   Path B (Meld) — for managed runtimes (Python, Node). C ABI transport
 //     + meld projections for zero-copy data access.
@@ -69,19 +69,19 @@ pub struct FrgnDecl {
 /// 2026-07-10: GLUE v2. Removed macro_path (adapter $!macro system is
 /// gone). Added types_module (path to .bv with foreign type declarations)
 /// and llvm_triple (target triple for LLVM compilation, "any" for non-LLVM).
-/// Renamed type_map to c_type_map — now maps Briv types to C ABI types
+/// Renamed type_map to c_type_map — now maps Briev types to C ABI types
 /// (int64_t, double, etc.) instead of language-specific type names.
 #[derive(Debug, Clone)]
 pub struct AdapterEntry {
     /// Target language name (rust, python, etc.)
     pub language: String,
-    /// Path to .bv file declaring foreign type names for Briv's type universe
+    /// Path to .bv file declaring foreign type names for Briev's type universe
     pub types_module: String,
     /// Native source file extension without dot (rs, py, js)
     pub file_extension: String,
     /// LLVM target triple ("any" for non-LLVM targets like Python/Node)
     pub llvm_triple: String,
-    /// Briv type name → C ABI type name mapping (e.g., Int → int64_t)
+    /// Briev type name → C ABI type name mapping (e.g., Int → int64_t)
     pub c_type_map: HashMap<String, String>,
 }
 
@@ -102,10 +102,10 @@ fn has_export_modifier(modifiers: &[Annotation]) -> bool {
 fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
     // 2026-08-03: Body-dependent ABI — whether each export carries the
     // leading state param. Shared with the backend (src/analysis/export_abi.rs).
-    // 2026-08-04 (compiler-in-Briv, P4): the Briv pass (briv_pass.rs)
+    // 2026-08-04 (compiler-in-Briev, P4): the Briev pass (briev_pass.rs)
     // computes this through the GLUE C ABI when its library is present;
     // otherwise the Rust reference runs.
-    let needs_state = crate::glue::briv_pass::compute_export_needs_state(items);
+    let needs_state = crate::glue::briev_pass::compute_export_needs_state(items);
     let mut exports = Vec::new();
     for item in items {
         match item {
@@ -223,13 +223,13 @@ fn format_result_type(outputs: &[crate::ast::Type]) -> String {
 // =========================================================================
 // DBVL Serialization — bridge-exports.dbvl output format
 //
-// Architecture: Briv export produces a .dbvl metadata file alongside the
+// Architecture: Briev export produces a .dbvl metadata file alongside the
 // compiled .ll module. Each line is tagged with a discriminator field so
 // the consumer (build.rs, Python script) can dispatch on entry type:
 //
 //   export:  export, name, param_types|pipe|separated, return_type
 //   meld:    meld, from_type, to_type, route
-//   ctype:   ctype, briv_type, c_type
+//   ctype:   ctype, briev_type, c_type
 //
 // No quoting needed — none of our field values contain commas.
 // The consumer splits by "\n" then by "," and switches on field[0].
@@ -253,7 +253,7 @@ fn serialize_exports_tagged(exports: &[ExportDecl]) -> String {
 
 fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
     let mut lines: Vec<String> = c_type_map.iter()
-        .map(|(briv_type, c_type)| format!("ctype,{},{}", briv_type, c_type))
+        .map(|(briev_type, c_type)| format!("ctype,{},{}", briev_type, c_type))
         .collect();
     lines.sort();
     lines.join("\n")
@@ -374,7 +374,7 @@ fn protocol_category_of(ty: &str, type_protocols: &HashMap<String, String>) -> S
 }
 
 /// Per-export state-handle variables, joined WITHOUT a dangling separator
-/// when there are no user params (C rejects `(BrivState* state, )`).
+/// when there are no user params (C rejects `(BrievState* state, )`).
 fn state_vars(
     export: &ExportDecl,
     target: &GlueTarget,
@@ -421,8 +421,8 @@ fn render_ffi_decls(
     ffi_buf
 }
 
-/// `briv bindings <bridge.bv> <language> [--out <dir>]` — render only the
-/// language's `bindings.*` templates (e.g. briv_types.h, briv_bindings.rs)
+/// `briev bindings <bridge.bv> <language> [--out <dir>]` — render only the
+/// language's `bindings.*` templates (e.g. briev_types.h, briev_bindings.rs)
 /// for the exported functions, without the full wrapper crate.
 ///
 /// 2026-08-03: Config-driven — the bindings templates and per-export ABI
@@ -439,7 +439,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
 
     let target = crate::glue::config::load_glue_language(language)?;
     let info = extract_bridge_info(&items, bridge_name);
-    if std::env::var("BRIV_DEBUG_BINDINGS").is_ok() {
+    if std::env::var("BRIEV_DEBUG_BINDINGS").is_ok() {
         eprintln!("DBG target.templates keys: {:?}", target.templates.keys().collect::<Vec<_>>());
         eprintln!("DBG exports: {:?}", info.exports.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
     }
@@ -488,11 +488,11 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     Ok(())
 }
 
-/// `briv extension <bridge.bv> <language> [--out <dir>]` — build a native
+/// `briev extension <bridge.bv> <language> [--out <dir>]` — build a native
 /// host-language extension (no FFI marshalling layer). 2026-08-03 (plan
 /// 2026-08-03-native-python-meld-composite): for Python this generates a
 /// CPython C-extension module (`PyInit_<bridge>` + per-export methods) that
-/// calls the Briv exports directly — the ~1.9µs ctypes overhead disappears.
+/// calls the Briev exports directly — the ~1.9µs ctypes overhead disappears.
 /// Config-driven: the language's `native.*` templates + per-category
 /// parse/build snippets live in lib/glue/<lang>/glue.dbv; the compiler only renders.
 pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Result<(), String> {
@@ -513,13 +513,13 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
     let lib_dir = std::path::Path::new(out_dir);
     std::fs::create_dir_all(lib_dir).map_err(|e| format!("create {}: {}", lib_dir.display(), e))?;
     let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot locate brivc: {}", e))?;
+        .map_err(|e| format!("cannot locate brievc: {}", e))?;
     let build = std::process::Command::new(&exe)
         .args(["build", file_path, "--library", "--out", out_dir])
         .output()
-        .map_err(|e| format!("failed to run brivc build --library: {}", e))?;
+        .map_err(|e| format!("failed to run brievc build --library: {}", e))?;
     if !build.status.success() {
-        return Err(format!("brivc build --library failed:\n{}", String::from_utf8_lossy(&build.stderr)));
+        return Err(format!("brievc build --library failed:\n{}", String::from_utf8_lossy(&build.stderr)));
     }
 
     // Render the native shim (.c).
@@ -560,7 +560,7 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
         return Err(format!("link failed:\n{}", String::from_utf8_lossy(&cc_link.stderr)));
     }
     let _ = std::fs::remove_file(&shim_o);
-    if std::env::var("BRIV_KEEP_SHIM").is_ok() {
+    if std::env::var("BRIEV_KEEP_SHIM").is_ok() {
         println!("  Shim:    {}", shim_path.display());
     } else {
         let _ = std::fs::remove_file(&shim_path);
@@ -630,12 +630,12 @@ fn render_native_shim(
         let build = tpl_for(target, &format!("native.build.{}", ret_key), "return PyLong_FromLongLong(r);");
         let ret_jni = tpl_for(target, &format!("native.ret_jni.{}", ret_key), "jlong");
         // 2026-08-03 (node bridge): the shim calls each export under a unique
-        // C identifier (`__briv_export_<name>`) aliased to the real symbol via
+        // C identifier (`__briev_export_<name>`) aliased to the real symbol via
         // an `asm("...")` label. An export named like a libc/Python/Node header
         // function (`read`, `open`, `malloc`, …) would otherwise conflict with
         // the host's prototype at COMPILE time (conflicting types) and be
         // interposed at LINK time (read → libc read(2) → -1).
-        let call_name = format!("__briv_export_{}", export.name);
+        let call_name = format!("__briev_export_{}", export.name);
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("name".to_string(), export.name.clone());
         vars.insert("name_upper".to_string(), to_camel_case(&export.name));
@@ -663,7 +663,7 @@ fn render_native_shim(
         // Extern prototype for the export (the shim calls it directly).
         let mut proto_params: Vec<String> = Vec::new();
         if export.needs_state {
-            proto_params.push("BrivState* state".to_string());
+            proto_params.push("BrievState* state".to_string());
         }
         for (name, ty) in &export.params {
             let key = native_key(ty, type_protocols);
@@ -721,9 +721,9 @@ fn to_camel_case(name: &str) -> String {
         .collect()
 }
 
-/// CLI entry point for `briv export <bridge.bv> <language> [--out <dir>]`.
+/// CLI entry point for `briev export <bridge.bv> <language> [--out <dir>]`.
 ///
-/// 2026-07-22: Reads a Briv bridge file, extracts exports and foreign
+/// 2026-07-22: Reads a Briev bridge file, extracts exports and foreign
 /// declarations, generates LLVM IR with C-compatible wrappers, and writes
 /// bridge metadata alongside the compiled output.
 ///
@@ -764,7 +764,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
             if let Ok(dispatch) = crate::analysis::frgn_dispatch::resolve_single_frgn(
                 fb, &ext, &glue_targets, crate::target::BackendKind::Llvm, Some(&universe),
             ) {
-                resolved_frgns.insert(fb.effective_briv_name().to_string(), dispatch);
+                resolved_frgns.insert(fb.effective_briev_name().to_string(), dispatch);
             }
         }
     }
@@ -851,7 +851,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
 
     template_vars.insert("exports".to_string(), exports_buf.clone());
     template_vars.insert("ffi_decls".to_string(), ffi_buf.clone());
-    if std::env::var("BRIV_DEBUG_BINDINGS").is_ok() {
+    if std::env::var("BRIEV_DEBUG_BINDINGS").is_ok() {
         eprintln!("DBG exports_buf=[{}]", exports_buf);
     }
 
@@ -900,28 +900,28 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     Ok(())
 }
 
-/// Look up a Briv type's protocol mapping in a target's protocols map.
+/// Look up a Briev type's protocol mapping in a target's protocols map.
 /// Returns (native_type, c_abi_or_wasm_abi_type) or falls back to the input type name.
 /// 2026-07-26: c_abi is optional — for wasm_import targets, use wasm_abi instead.
 fn resolve_protocol(
-    briv_type_name: &str,
+    briev_type_name: &str,
     protocols: &HashMap<String, crate::glue::config::ProtocolEntry>,
     type_protocols: &HashMap<String, String>,
 ) -> (String, String) {
     // 2026-08-03: fn(P)->R — a function pointer IS the ABI. Both the native
     // and C forms are the C function-pointer type built from the inner
     // protocols (e.g. `fn(Int)->Int` → `i64 (*)(i64)`).
-    if briv_type_name.starts_with("fn(") {
-        let abi = fn_pointer_abi(briv_type_name, protocols, type_protocols);
+    if briev_type_name.starts_with("fn(") {
+        let abi = fn_pointer_abi(briev_type_name, protocols, type_protocols);
         return (abi.clone(), abi);
     }
     // 2026-08-03 (P3): a boundary type (`CStr`, `CDouble`) resolves to its
     // protocol CATEGORY so the config's category-keyed c_abi applies. The
     // protocol string may carry a variant (`#String<C_String>`) — the ABI
     // name comes from the category entry.
-    let category = type_protocols.get(briv_type_name)
+    let category = type_protocols.get(briev_type_name)
         .map(|p| protocol_category(p).to_string())
-        .unwrap_or_else(|| briv_type_name.to_string());
+        .unwrap_or_else(|| briev_type_name.to_string());
     let protocol_key = format!("#{}", category);
     if let Some(entry) = protocols.get(&protocol_key) {
         let abi = entry.c_abi.clone()
@@ -929,7 +929,7 @@ fn resolve_protocol(
             .unwrap_or_else(|| entry.native.clone());
         (entry.native.clone(), abi)
     } else {
-        (briv_type_name.to_string(), briv_type_name.to_string())
+        (briev_type_name.to_string(), briev_type_name.to_string())
     }
 }
 

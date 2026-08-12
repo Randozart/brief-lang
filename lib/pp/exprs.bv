@@ -1,5 +1,5 @@
 // lib/pp/exprs.bv — AST pretty-printer for expressions and operators
-// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Briv
+// 2026-07-22: Phase 8 — AST Pretty-Printer Port to Briev
 
 // ── Binary operators ──
 

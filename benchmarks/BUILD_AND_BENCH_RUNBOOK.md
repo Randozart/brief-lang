@@ -4,7 +4,7 @@ Run this before and after LLVM backend changes to detect regressions.
 
 ## Prerequisites
 
-- Baseline worktree at `../briv-compiler-baseline` (commit `be6583bc`)
+- Baseline worktree at `../briev-compiler-baseline` (commit `be6583bc`)
 - Both worktrees built with `cargo build --release`
 
 ## Steps
@@ -12,7 +12,7 @@ Run this before and after LLVM backend changes to detect regressions.
 ### 1. Build the baseline (first time only)
 
 ```bash
-cd ../briv-compiler-baseline
+cd ../briev-compiler-baseline
 cargo build --release
 ```
 

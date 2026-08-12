@@ -1,5 +1,5 @@
 // gen_wasm.bv — Tier 2: WebAssembly bridge generator
-// 2026-07-24: Generates a JavaScript bridge for Briv exports compiled to WASM.
+// 2026-07-24: Generates a JavaScript bridge for Briev exports compiled to WASM.
 // Overhead: ~75ns per call (vs 131ns for koffi, ~5ms for subprocess).
 //
 // 2026-07-25: With --int-bits 32, WASM exports i32 functions that return plain
@@ -9,7 +9,7 @@
 // For native (--int-bits 64), WASM exports i64 and JS must use BigInt.
 //
 // Two-phase workflow:
-//   1. briv build my_module.bv --llvm     → produces my_module.ll
+//   1. briev build my_module.bv --llvm     → produces my_module.ll
 //   2. bash wasm_build.sh                  → compiles .ll → .wasm, ready for JS
 //
 // The bridge.mjs wraps the .wasm with named export functions.
@@ -18,11 +18,11 @@
 //
 // Usage:
 //   import "lib/ffi/gen_wasm";
-//   // Then: briv build my_module.bv --llvm
+//   // Then: briev build my_module.bv --llvm
 //   // Then: bash ffi-out/wasm/build.sh
 
 $defn gen_wasm_bridge(exports: Selection, bridge_name: String) -> String {
-    let code = "// " + bridge_name + " — Briv WASM bridge (auto-generated)\n";
+    let code = "// " + bridge_name + " — Briev WASM bridge (auto-generated)\n";
     code += "// Overhead: ~75ns per call\n\n";
     code += "import { readFileSync } from 'fs';\n";
     code += "import { fileURLToPath } from 'url';\n";
@@ -72,7 +72,7 @@ $defn gen_wasm_bridge(exports: Selection, bridge_name: String) -> String {
 
 $defn gen_build_script(ll_path: String, wasm_path: String) -> String {
     let script = "#!/usr/bin/env bash\n";
-    script += "# Build script for Briv WASM module (auto-generated)\n";
+    script += "# Build script for Briev WASM module (auto-generated)\n";
     script += "set -euo pipefail\n\n";
     script += "LLC=" + "$" + "{LLC:-llc}\n";
     script += "LD=" + "$" + "{LD:-wasm-ld}\n";
@@ -90,7 +90,7 @@ $(Normalized @ highest) {
     when exports.Count$() > 0 {
         EmitInfo$("gen_wasm: generating bridge and build script");
 
-        let js_code = gen_wasm_bridge(exports, "briv_bridge");
+        let js_code = gen_wasm_bridge(exports, "briev_bridge");
         FileWrite$("ffi-out/wasm/bridge.mjs", js_code, true);
 
         let build_script = gen_build_script("module.ll", "module.wasm");

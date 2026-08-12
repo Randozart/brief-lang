@@ -3,7 +3,7 @@
 ## Pipeline
 
 ```
-Briv Source (.bv)
+Briev Source (.bv)
     ↓
 Lexer → Parser
     ↓
@@ -34,7 +34,7 @@ LLVM IR (.ll file)
 
 3. **Acyclic inlining** — If the call graph has no cycles, the backend emits all transaction bodies inline in the reactor loop. LLVM's inliner then sees the entire state machine as one SSA graph, maximizing optimization surface.
 
-4. **`noalias` as default** — Every `%State*` parameter is `noalias` + `nocapture`. Briv's memory model guarantees no pointer aliasing, so this is always safe.
+4. **`noalias` as default** — Every `%State*` parameter is `noalias` + `nocapture`. Briev's memory model guarantees no pointer aliasing, so this is always safe.
 
 ## Lowering Pass
 

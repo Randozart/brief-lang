@@ -1,10 +1,10 @@
-// link-example.bv — Link a C source file into a Briv program
+// link-example.bv — Link a C source file into a Briev program
 //
 // This demonstrates the link dependency system.
 // The compiler compiles helper.c to LLVM bitcode via clang,
 // merges it with the program IR, and runs LTO on both.
 //
-// Usage: briv-compiler build examples/link-demo/link-example.bv
+// Usage: briev-compiler build examples/link-demo/link-example.bv
 
 // Link the C helper — the compiler will find it relative to this file
 import "link-demo/helper.c";
@@ -15,7 +15,7 @@ frgn greet(name: String) -> Bool;
 
 txn run [true][result == 84] {
     let doubled: Int = double_it(42);
-    let greeted: Bool = greet("Briv");
+    let greeted: Bool = greet("Briev");
     result = doubled;
     term greeted;
 };

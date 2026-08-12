@@ -82,7 +82,7 @@ fn analyze_wat(wat_path: &Path) -> Result<Vec<AnalyzedFunction>, String> {
                     let parts: Vec<&str> = param.split_whitespace().collect();
                     if parts.len() >= 2 {
                         let name = parts[1].to_string();
-                        let type_ = wat_type_to_briv(parts[0]);
+                        let type_ = wat_type_to_briev(parts[0]);
                         current_params.push((name, type_));
                     }
                 }
@@ -92,7 +92,7 @@ fn analyze_wat(wat_path: &Path) -> Result<Vec<AnalyzedFunction>, String> {
             if trimmed.contains("(result ") {
                 let results_section = extract_wat_section(trimmed, "(result ");
                 for result in results_section {
-                    current_results.push(wat_type_to_briv(result.trim()));
+                    current_results.push(wat_type_to_briev(result.trim()));
                 }
             }
 
@@ -174,8 +174,8 @@ fn extract_wat_section(text: &str, prefix: &str) -> Vec<String> {
     results
 }
 
-/// Convert WASM type to Briv type
-fn wat_type_to_briv(wat_type: &str) -> String {
+/// Convert WASM type to Briev type
+fn wat_type_to_briev(wat_type: &str) -> String {
     match wat_type.trim() {
         "i32" | "i64" => "Int".to_string(),
         "f32" | "f64" => "Float".to_string(),
@@ -184,7 +184,7 @@ fn wat_type_to_briv(wat_type: &str) -> String {
     }
 }
 
-/// Convert WASM function to Briv frgn sig format
+/// Convert WASM function to Briev frgn sig format
 pub fn wasm_func_to_frgn_sig(func: &AnalyzedFunction) -> String {
     let params: Vec<String> = func
         .parameters

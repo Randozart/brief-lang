@@ -1,4 +1,4 @@
-=== Building Briv compiler (release) ===
+=== Building Briev compiler (release) ===
 warning: unexpected `cfg` condition name: `kani`
    --> src/annotator.rs:712:11
     |
@@ -326,7 +326,7 @@ note: but type `DbvlTableInner` is only usable at visibility `pub(crate)`
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: `#[warn(private_interfaces)]` on by default
 
-warning: `briv-compiler` (lib) generated 25 warnings
+warning: `briev-compiler` (lib) generated 25 warnings
     Finished `release` profile [optimized] target(s) in 0.14s
 
 
@@ -339,7 +339,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/iir_filter.ll
 warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
 1 warning generated.
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -350,7 +350,7 @@ info: program dispatched via direct SSA loop
 info: field(s) 'acc_b', 'acc_a' written by txn 'compute' are never read — wasted work
 note: not referenced by any precondition or #!exit; values computed but have no effect
   Output: benchmarks/precompute_sum.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/precompute_sum.ll:284:7: error: value doesn't match function result type 'i32'
   ret void
       ^
@@ -360,7 +360,7 @@ llc: error: llc: benchmarks/precompute_sum.ll:284:7: error: value doesn't match 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/precompute_sum.ll -o precompute_sum.opt.ll
     llc precompute_sum.opt.ll -filetype=obj -o benchmarks/precompute_sum.o
-    ld precompute_sum.o benchmarks/briv_rt.o -o precompute_sum
+    ld precompute_sum.o benchmarks/briev_rt.o -o precompute_sum
 benchmarks/precompute_sum.ll:284:7: error: value doesn't match function result type 'i32'
   284 |   ret void
       |       ^
@@ -377,7 +377,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/ring_buffer.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/ring_buffer
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -388,7 +388,7 @@ info: program dispatched via reactor loop (parallel thread pool)
   Output: benchmarks/async_counters.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/async_counters
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -399,7 +399,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/float_math.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/float_math
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -410,7 +410,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/float_math_nonzero.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/float_math_nonzero
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -421,7 +421,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/sparse_dispatch.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/sparse_dispatch
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -432,7 +432,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/const_heavy.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/const_heavy
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -443,7 +443,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/print_loop.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/print_loop
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -452,7 +452,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/nbody_newton.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/nbody_newton.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/nbody_newton.ll:2321:7: error: value doesn't match function result type 'i32'
   ret void
       ^
@@ -462,8 +462,8 @@ llc: error: llc: benchmarks/nbody_newton.ll:2321:7: error: value doesn't match f
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/nbody_newton.ll -o nbody_newton.opt.ll
     llc nbody_newton.opt.ll -filetype=obj -o benchmarks/nbody_newton.o
-    ld nbody_newton.o benchmarks/briv_rt.o -o nbody_newton
-  Briv binary ready.
+    ld nbody_newton.o benchmarks/briev_rt.o -o nbody_newton
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -472,7 +472,7 @@ llc: error: llc: benchmarks/nbody_newton.ll:2321:7: error: value doesn't match f
 Compiling to LLVM IR: benchmarks/nbody_sqrt.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/nbody_sqrt.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/nbody_sqrt.ll:292:24: error: use of undefined value '%t118'
   %nftr119 = trunc i64 %t118 to i32
                        ^
@@ -482,8 +482,8 @@ llc: error: llc: benchmarks/nbody_sqrt.ll:292:24: error: use of undefined value 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/nbody_sqrt.ll -o nbody_sqrt.opt.ll
     llc nbody_sqrt.opt.ll -filetype=obj -o benchmarks/nbody_sqrt.o
-    ld nbody_sqrt.o benchmarks/briv_rt.o -o nbody_sqrt
-  Briv binary ready.
+    ld nbody_sqrt.o benchmarks/briev_rt.o -o nbody_sqrt
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -494,7 +494,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/fasta.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/fasta
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -503,7 +503,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/fannkuch_redux.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/fannkuch_redux.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/fannkuch_redux.ll:473:7: error: value doesn't match function result type 'i32'
   ret void
       ^
@@ -513,8 +513,8 @@ llc: error: llc: benchmarks/fannkuch_redux.ll:473:7: error: value doesn't match 
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/fannkuch_redux.ll -o fannkuch_redux.opt.ll
     llc fannkuch_redux.opt.ll -filetype=obj -o benchmarks/fannkuch_redux.o
-    ld fannkuch_redux.o benchmarks/briv_rt.o -o fannkuch_redux
-  Briv binary ready.
+    ld fannkuch_redux.o benchmarks/briev_rt.o -o fannkuch_redux
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -525,7 +525,7 @@ info: program dispatched via direct SSA loop
 info: field(s) 't2', 't3', 'cr', 'ci', 't1' written by txn 'mb' are never read — wasted work
 note: not referenced by any precondition or #!exit; values computed but have no effect
   Output: benchmarks/mandelbrot.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/mandelbrot.ll:493:7: error: value doesn't match function result type 'i32'
   ret void
       ^
@@ -535,8 +535,8 @@ llc: error: llc: benchmarks/mandelbrot.ll:493:7: error: value doesn't match func
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/mandelbrot.ll -o mandelbrot.opt.ll
     llc mandelbrot.opt.ll -filetype=obj -o benchmarks/mandelbrot.o
-    ld mandelbrot.o benchmarks/briv_rt.o -o mandelbrot
-  Briv binary ready.
+    ld mandelbrot.o benchmarks/briev_rt.o -o mandelbrot
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -547,7 +547,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/kalman_filter_runtime.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/kalman_filter_runtime
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -556,7 +556,7 @@ info: program dispatched via direct SSA loop
 Compiling to LLVM IR: benchmarks/knucleotide.bv
 info: program dispatched via direct SSA loop
   Output: benchmarks/knucleotide.ll
-  Runtime object: benchmarks/briv_rt.o
+  Runtime object: benchmarks/briev_rt.o
 opt: benchmarks/knucleotide.ll:373:7: error: value doesn't match function result type 'i32'
   ret void
       ^
@@ -566,8 +566,8 @@ llc: error: llc: benchmarks/knucleotide.ll:373:7: error: value doesn't match fun
   Warning: LLVM toolchain not found or failed. Compile manually:
     opt -O2 -S benchmarks/knucleotide.ll -o knucleotide.opt.ll
     llc knucleotide.opt.ll -filetype=obj -o benchmarks/knucleotide.o
-    ld knucleotide.o benchmarks/briv_rt.o -o knucleotide
-  Briv binary ready.
+    ld knucleotide.o benchmarks/briev_rt.o -o knucleotide
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -578,7 +578,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/cancel_math.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/cancel_math
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -589,7 +589,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/bit_clear.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/bit_clear
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -604,7 +604,7 @@ LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
   Output: benchmarks/queue_drain.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/queue_drain
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -615,7 +615,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/queue_drain_sym.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/queue_drain_sym
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -630,7 +630,7 @@ LLVM backend stub: arrow operator (collect/discard/transfer) returns 0
   Output: benchmarks/queue_drain_idio.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/queue_drain_idio
-  Briv binary ready.
+  Briev binary ready.
   (no C reference — skipping)
 
 ================================================
@@ -641,7 +641,7 @@ info: program dispatched via direct SSA loop
   Output: benchmarks/interval_step.ll
   LTO-merged: program.bc + 1 foreign modules → optimized
   Binary: benchmarks/interval_step
-  Briv binary ready.
+  Briev binary ready.
   C binary ready.
 
 ================================================
@@ -649,14 +649,14 @@ info: program dispatched via direct SSA loop
 ================================================
 
 === iir_filter ===
-  briv binary: 1486B  (precompute_ok — skip runtime)
+  briev binary: 1486B  (precompute_ok — skip runtime)
   c binary:     1375B
   correctness: MISMATCH
-    briv: "__FAIL__"
+    briev: "__FAIL__"
     c:     ""
 
 === precompute_sum ===
-  briv binary: (no binary — linking issue)
+  briev binary: (no binary — linking issue)
   c binary:     1386B
   correctness: SKIP (binary missing)
 
@@ -861,7 +861,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 45000000
 50000000
 0 ")
-  Briv: .0007s  (min 0.000627s, max 0.000855s)
+  Briev: .0007s  (min 0.000627s, max 0.000855s)
   C:     5000000
 10000000
 15000000
@@ -967,7 +967,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
   correctness: MATCH (output: "")
 
 === async_counters ===
-  Briv: .0009s  (min 0.000796s, max 0.001219s)
+  Briev: .0009s  (min 0.000796s, max 0.001219s)
   C:     .0005s
   Ratio: 1.80x  →  C wins
   correctness: MATCH (output: "")
@@ -1173,7 +1173,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 6291456.000000000
 6291456.000000000
 0 ")
-  Briv: .0006s  (min 0.000625s, max 0.000760s)
+  Briev: .0006s  (min 0.000625s, max 0.000760s)
   C:     1434824.375000000
 3263811.000000000
 5138811.000000000
@@ -1476,7 +1476,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 0
 0
 0 ")
-  Briv: .0007s  (min 0.000637s, max 0.000975s)
+  Briev: .0007s  (min 0.000637s, max 0.000975s)
   C:     0
 0
 0
@@ -1781,7 +1781,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 45000000
 50000000
 0 ")
-  Briv: .0007s  (min 0.000657s, max 0.000937s)
+  Briev: .0007s  (min 0.000657s, max 0.000937s)
   C:     5000000
 10000000
 15000000
@@ -1887,7 +1887,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
   correctness: MATCH (output: "")
 
 === const_heavy ===
-  briv binary: 5511B  (precompute_ok — skip runtime)
+  briev binary: 5511B  (precompute_ok — skip runtime)
   c binary:     1825B
   correctness: MATCH (output: "")
 
@@ -11892,7 +11892,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 49900000
 50000000
 0 ")
-  Briv: .0006s  (min 0.000611s, max 0.000788s)
+  Briev: .0006s  (min 0.000611s, max 0.000788s)
   C:     100000
 200000
 300000
@@ -16896,7 +16896,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 50000000
 .0100x  →  ~tie wins
   correctness: MISMATCH
-    briv: ""
+    briev: ""
     c:     "100000
 200000
 300000
@@ -16928,7 +16928,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 8.676173016
 8.318135016
 1 ")
-  Briv: .0007s  (min 0.000631s, max 0.000860s)
+  Briev: .0007s  (min 0.000631s, max 0.000860s)
   C:     -.147468984
 9.195525016
 9.445663016
@@ -16942,7 +16942,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 0
 8.318135016
 1.7984x  →  ~tie wins
   correctness: MISMATCH
-    briv: ""
+    briev: ""
     c:     "-0.169203490"
 
 === nbody_sqrt ===
@@ -17018,7 +17018,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 19.65
 3.222943989
 3.370763989
 0 ")
-  Briv: 2.0090s  (min 1.953687s, max 2.052458s)
+  Briev: 2.0090s  (min 1.953687s, max 2.052458s)
   C:     .102234989
 3.331417989
 3.351159989
@@ -17032,7 +17032,7 @@ benchmarks/build_and_bench.sh: line 304: ((: 19.65
 3.370763989
 .6394x  →  ~tie wins
   correctness: MISMATCH
-    briv: "-0.169289857"
+    briev: "-0.169289857"
     c:     "-0.169288993"
 
 === fasta ===

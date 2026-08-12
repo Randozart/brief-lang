@@ -1,5 +1,5 @@
 /*
- * timing_bridge.c — Shared monotonic clock FFI for Briv benchmarks
+ * timing_bridge.c — Shared monotonic clock FFI for Briev benchmarks
  *
  * Provides:
  *   __monotonic_ns() → uint64_t — nanosecond timestamp from CLOCK_MONOTONIC

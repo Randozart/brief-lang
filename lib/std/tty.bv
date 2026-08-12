@@ -1,10 +1,10 @@
-// TTY — Terminal I/O for Briv
+// TTY — Terminal I/O for Briev
 //
 // Provides ergonomic terminal operations: raw mode, size detection,
 // and single-key reading. All operations route through the intrinsic
 // system which emits native LLVM IR for I/O operations.
 //
-// Previously used `frgn` declarations to call briv_rt.c directly;
+// Previously used `frgn` declarations to call briev_rt.c directly;
 // now uses the TTY intrinsic `#`-calls which provide native codegen.
 //
 // Import:
@@ -15,7 +15,7 @@
 //   let size: Int = tty.size();
 //   let key: Int = tty.read_key();
 
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 
 defn tty_raw_mode_inner(enable: Int) -> Int {
     term TtyRawMode#(enable);

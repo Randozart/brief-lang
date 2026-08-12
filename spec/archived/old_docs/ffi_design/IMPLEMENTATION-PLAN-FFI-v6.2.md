@@ -1,4 +1,4 @@
-# FFI Implementation Plan - Briv v6.2
+# FFI Implementation Plan - Briev v6.2
 
 **Date:** 2026-04-05  
 **Status:** Detailed Implementation Roadmap  
@@ -8,9 +8,9 @@
 
 ## Overview
 
-This plan details the implementation of Briv's robust Foreign Function Interface (FFI) system as specified in SPEC-v6.2.md. The system is built on three pillars:
+This plan details the implementation of Briev's robust Foreign Function Interface (FFI) system as specified in SPEC-v6.2.md. The system is built on three pillars:
 
-1. **TOML Binding Declarations** - Explicit contracts between Briv and foreign code
+1. **TOML Binding Declarations** - Explicit contracts between Briev and foreign code
 2. **frgn Syntax** - Lightweight foreign function declarations
 3. **Safe Wrapper Pattern** - defn handles all error cases and contracts
 
@@ -20,7 +20,7 @@ This plan details the implementation of Briv's robust Foreign Function Interface
 
 ### Phase 1: Core Data Structures & AST (Days 1-2)
 
-**Objective:** Establish FFI representation in Briv's type system
+**Objective:** Establish FFI representation in Briev's type system
 
 **Files to Create/Modify:**
 - `src/ast.rs` - Add FFI-related AST nodes
@@ -163,8 +163,8 @@ This plan details the implementation of Briv's robust Foreign Function Interface
        Struct(HashMap<String, FfiType>),
    }
    
-   pub fn briv_type_to_ffi_type(t: &Type) -> FfiType
-   pub fn ffi_type_to_briv_type(t: &FfiType) -> Type
+   pub fn briev_type_to_ffi_type(t: &Type) -> FfiType
+   pub fn ffi_type_to_briev_type(t: &FfiType) -> Type
    ```
 
 **Testing:**
@@ -182,7 +182,7 @@ This plan details the implementation of Briv's robust Foreign Function Interface
 
 ### Phase 3: Parser Integration (Days 4-5)
 
-**Objective:** Parse `frgn` declarations in Briv code
+**Objective:** Parse `frgn` declarations in Briev code
 
 **Files to Modify:**
 - `src/parser.rs` - Add frgn parsing
@@ -540,7 +540,7 @@ examples/
 ### Functionality
 - ✅ Can load and parse TOML binding files
 - ✅ Can validate frgn declarations against TOML
-- ✅ Can type check FFI usage in Briv code
+- ✅ Can type check FFI usage in Briev code
 - ✅ Can prove FFI contracts in defn bodies
 - ✅ Can handle all error cases properly
 

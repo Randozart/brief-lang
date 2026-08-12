@@ -21,7 +21,7 @@ what the scheduler decided.
 
 | Hint | Meaning | Contract | Codegen | Scheduler |
 |---|---|---|---|---|
-| `free x;` | the backing of `x` is freed HERE | a later read of `x` is a compile error | emits the strategy-aware free (`__briv_free`/`@free` for Malloc-backed, no-op otherwise) | excludes `x` from its auto-free (no double-free) |
+| `free x;` | the backing of `x` is freed HERE | a later read of `x` is a compile error | emits the strategy-aware free (`__briev_free`/`@free` for Malloc-backed, no-op otherwise) | excludes `x` from its auto-free (no double-free) |
 | `keep x;` | the scheduler must NOT auto-free `x` (it escapes / is freed elsewhere) | `x` must exist | no runtime emission (an analysis directive) | excludes `x` from its auto-free; a `keep` on a field it would not free anyway is a **redundant-keep warning** |
 
 Both are whole-statement hints (`free x;` / `keep x;`), parsed as
@@ -39,7 +39,7 @@ it — matching the consume semantics, so the two mechanisms share one rule:
 
 ## memcheck
 
-`brivc memcheck <file.bv>` is the diagnostics subcommand: it runs the
+`brievc memcheck <file.bv>` is the diagnostics subcommand: it runs the
 garbage-scheduler analysis and reports, per heap-backed state field:
 - whether the scheduler proved a last use and scheduled a free (and after
   which transaction),
@@ -50,7 +50,7 @@ garbage-scheduler analysis and reports, per heap-backed state field:
 ## Refcount free-check — SOUNDNESS ANALYSIS (2026-08-01)
 
 The plan's item 2 ("insert a refcount at the edge-of-use checkpoint; each use
-decrements; zero → `__briv_free`") is **UNSOUND for multi-fire transactions**,
+decrements; zero → `__briev_free`") is **UNSOUND for multi-fire transactions**,
 so it is NOT implemented. The scheduler's `txn_touches` is a per-transaction
 SET — a transaction may fire multiple times, and a per-fire decrement would
 over-decrement (a zero count while a later fire still uses the field →
@@ -61,7 +61,7 @@ genuinely unknown, and no counter can bound them.
 
 **The sound path is the developer-verified `free x;` annotation** (Phase 5a):
 the typechecker enforces no later read, and the scheduler excludes the field
-from its auto-free. `brivc memcheck` reports the unprovable fields so the
+from its auto-free. `brievc memcheck` reports the unprovable fields so the
 developer can add the verified `free` or an explicit `keep`.
 
 If a refcount is ever wanted, it must be scoped to provably-single-fire

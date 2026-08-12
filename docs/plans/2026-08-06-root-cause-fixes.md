@@ -108,10 +108,10 @@ Bridge `.continue` → `.end` in the pure-counter-fold path.
 
 - A pre-pass collects every `Expr::Lambda` with its free variables (idents not
   bound by the lambda, minus `#` intrinsics/field names) → `ClosureDef {
-  params, body, free_vars }` + a stable symbol `briv_closure_N`.
+  params, body, free_vars }` + a stable symbol `briev_closure_N`.
 - `Expr::Lambda` at runtime: heap-allocate an env block `[cap1..capN]`, closure
   value = block address (i64). The `let` binding stores the address.
-- The closure function `define i64 @briv_closure_N(ptr %env, i64 %p1..)`
+- The closure function `define i64 @briev_closure_N(ptr %env, i64 %p1..)`
   emitted after the enclosing function; params + captured vars bound, body
   emitted, return.
 - `Call` on a closure-typed name: load the env address, call the symbol with
@@ -178,10 +178,10 @@ lowering is new capability.
   `collect_free_stmts` (context.rs) — idents not bound by params/lets, `#`
   names excluded, deterministic order. Nested lambdas/blocks shadow.
 - **Env allocation**: `let f = lambda` allocates `[fn_ptr, cap1..capN]`
-  (8-byte slots), stores `ptrtoint @briv_closure_N` + the captured values;
+  (8-byte slots), stores `ptrtoint @briev_closure_N` + the captured values;
   the closure VALUE is the block address (was the `add i64 0, 0` placeholder).
 - **Closure function emission**: `emit_pending_closures` /
-  `emit_one_closure` (mod.rs) emit `define i64 @briv_closure_N(ptr %env,
+  `emit_one_closure` (mod.rs) emit `define i64 @briev_closure_N(ptr %env,
   i64 %p..)` at module end; captured vars loaded from env slots, params bound,
   body emitted, value returned.
 - **Indirect call**: `emit_closure_indirect_call` (emit_expr.rs) loads the

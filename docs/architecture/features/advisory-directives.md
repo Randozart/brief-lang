@@ -17,7 +17,7 @@ deciding.
 
 ## Syntax
 
-Briv has three directive modes:
+Briev has three directive modes:
 
 | Prefix | Name | Semantics |
 |--------|------|-----------|

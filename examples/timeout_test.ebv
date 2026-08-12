@@ -1,4 +1,4 @@
-// timeout-test.ebv — Embedded Briv with fetch timeout
+// timeout-test.ebv — Embedded Briev with fetch timeout
 // Demonstrates: sig declarations, union types, within-cycles timeout
 
 sig fetch: () -> Int;

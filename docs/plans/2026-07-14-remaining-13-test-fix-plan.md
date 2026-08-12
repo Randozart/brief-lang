@@ -114,7 +114,7 @@ The size estimation section is gated on `enumerable` being `Some`, which require
 
 Regression from wiring real analysis. Update assertion to match actual attribute.
 
-#### D2 — `test_data_conversion_basic` (dbriv/bridge.rs:385)
+#### D2 — `test_data_conversion_basic` (dbriev/bridge.rs:385)
 
 Entry iteration order changed. Change key assertion from `b"Item"` to `b"rusty_key"`.
 
@@ -124,7 +124,7 @@ Entry iteration order changed. Change key assertion from `b"Item"` to `b"rusty_k
 
 | # | Fix | File(s) | Lines | Est. Time |
 |---|-----|---------|-------|-----------|
-| 1 | D2: dbriv assertion | `bridge.rs:385` | 1 | 1 min |
+| 1 | D2: dbriev assertion | `bridge.rs:385` | 1 | 1 min |
 | 2 | D1: willreturn attr | `tests.rs:779` | 1 | 5 min |
 | 3 | A1: make_exit_program trigger | `tests.rs:790-833` | ~10 | 5 min |
 | 4 | A2: A000 main wrapper | `loop_engine/counter.rs:31-41` | ~20 | 10 min |

@@ -13,7 +13,7 @@ Method: grep the unoptimized IR for `add i64 0, %` in the hot function body.
 Expected: ~30% of all instructions are copies.
 
 ## Experiment 2: Hot loop instruction count (asm)
-Emit assembly from both C and Briv LTO-merged IR for the same benchmark.
+Emit assembly from both C and Briev LTO-merged IR for the same benchmark.
 Count instructions in the hot loop (between branch-back targets).
 Gives exact instruction-count gap, isolated from pipeline effects.
 
@@ -40,4 +40,4 @@ skip the copy and just return the original register name.
 ## Experiment 6: Switch dispatch for knucleotide
 Trace the 64-way guard dispatch structure.
 Check if LLVM's simplifycfg converts chained icmp/br to switch.
-If not: add a Briv-level optimization to emit switch directly.
+If not: add a Briev-level optimization to emit switch directly.

@@ -7,7 +7,7 @@
 
 ## The Core Question
 
-How can a programmer define a type (Posit32, ASCIIString, Bfloat16, Decimal64) in pure Briv —
+How can a programmer define a type (Posit32, ASCIIString, Bfloat16, Decimal64) in pure Briev —
 layout + operations — and have the backend compile it without hardcoded compiler knowledge,
 without TOML config files, and with LLVM optimizing the result as well as equivalent C code?
 
@@ -21,7 +21,7 @@ its op signatures.**
 
 ### Layer 0: Bits (the only primitive)
 
-```briv
+```briev
 // Exists implicitly. No layout. Only bitwise ops.
 op And(#Bits, #Bits);
 op Or(#Bits, #Bits);
@@ -37,7 +37,7 @@ Every type implicitly inherits from Bits. No explicit `: Bits` needed.
 
 A type's layout is determined by its fields — not by metadata properties:
 
-```briv
+```briev
 type ASCIIString {
     data: Bits<64>;     // pointer
     len: Bits<64>;      // length
@@ -50,7 +50,7 @@ No `bytes <~`, no `alignment <~`, no `ctd <~`, no `alu <~` metadata needed.
 
 For flat numeric types without field syntax:
 
-```briv
+```briev
 type Bfloat16 { data: Bits<16>; };
 // normalizer: bytes=2, llvm_type="i16" (raw bits)
 // With op Add(#Float): backend knows to use bfloat hardware
@@ -58,7 +58,7 @@ type Bfloat16 { data: Bits<16>; };
 
 ### Layer 2: Operations (ops define interaction)
 
-```briv
+```briev
 type Bfloat16 {
     data: Bits<16>;
     op Add(#Float, #Float) = bfloat_add(#L, #R);  // backend intrinsic
@@ -123,7 +123,7 @@ A conversion function between two `#String` types speaks `Char` — the universa
 currency. The backend's `Extract(#Char)` and `InsertAt(#Char)` decode/encode at the
 boundary, hiding the internal encoding.
 
-```briv
+```briev
 inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
     let len = source .#Size;
     let result = ASCIIString::alloc(len);
@@ -139,7 +139,7 @@ inline defn any_string_to_ASCII(source: #String) -> ASCIIString {
 
 Float conversion goes through the `CastTo`/`CastFrom` pair directly:
 
-```briv
+```briev
 inline defn any_float_to_posit(source: #Float) -> Posit32 {
     let intermediate: Float64 = source :> Cast(Float64);
     posit_from_double(intermediate)
@@ -148,7 +148,7 @@ inline defn any_float_to_posit(source: #Float) -> Posit32 {
 
 ### Layer 6: Inheritance (`<:`)
 
-```briv
+```briev
 type ASCIIString : String {
     op Add(ASCIIString) = ASCII_add(#L, #R);  // override String::Add
 };
@@ -350,7 +350,7 @@ determines the default (`.bv` → UTF8/unicode, `.ebv` → ASCII).
 
 **Cross-variant calls require explicit protocol:**
 
-```briv
+```briev
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
 ```
 
@@ -479,7 +479,7 @@ The `disamb <~ "value"` metadata property is a **hint** to the normalizer when
 structure + bytes + `#Category` ops are insufficient to determine the concrete
 representation. Currently only needed for 2-byte floats:
 
-```briv
+```briev
 type Bfloat16 : Bits {
     bytes <~ 2;
     alignment <~ 2;

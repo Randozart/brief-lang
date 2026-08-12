@@ -1,8 +1,8 @@
-# Hardware Validation for Embedded Briv (.ebv)
+# Hardware Validation for Embedded Briev (.ebv)
 
 ## Problem Statement
 
-The Briv compiler currently allows `.ebv` files to compile to SystemVerilog even when the generated hardware contains **dead code** - logic that will be optimized away by synthesis tools (Yosys) because:
+The Briev compiler currently allows `.ebv` files to compile to SystemVerilog even when the generated hardware contains **dead code** - logic that will be optimized away by synthesis tools (Yosys) because:
 
 1. **Orphan Variables**: Variables that are never written to by any transaction
 2. **Untriggerable Transactions**: Transactions whose preconditions can never be satisfied

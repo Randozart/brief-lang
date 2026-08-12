@@ -1,4 +1,4 @@
-# Briv Compiler Parser Bugs - Documentation Index
+# Briev Compiler Parser Bugs - Documentation Index
 
 **Analysis Date:** April 5, 2026  
 **Total Documentation:** 1,900+ lines across 4 files  

@@ -1,7 +1,7 @@
 // Float Math — C reference for float register promotion benchmark.
 // 12 float state fields, 50M iterations, matrix multiply body.
 //
-// Briv version: float_math.bv — same computation in reactive model
+// Briev version: float_math.bv — same computation in reactive model
 // with enum dispatch + SSA-mode folded loop.
 
 #include <stdlib.h>

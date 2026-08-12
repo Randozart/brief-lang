@@ -95,11 +95,11 @@ component tags produce a compile-time warning, not silence or dead DOM.**
 
 ## Verification
 
-- `brivc build examples/todo.rbv --backend webstack --out /tmp/w1`:
+- `brievc build examples/todo.rbv --backend webstack --out /tmp/w1`:
   `index.html` contains injected `id="..."`, `todo-bindings.mjs` (dom-shim)
   written, `_bindingTable` binds `items` (b-each row is Phase 2) and the
   `add_item`/`clear_all` triggers.
-- `brivc build examples/counter.rbv --backend webstack --out /tmp/w2`:
+- `brievc build examples/counter.rbv --backend webstack --out /tmp/w2`:
   view directives compile (b-text/b-trigger on the root instance) and a
   warning names `<Counter />` as a Phase 2 component.
 - A `.bv` with a bare `render` block (no `<view>`): index.html derives from the
@@ -115,5 +115,5 @@ component tags produce a compile-time warning, not silence or dead DOM.**
   layout/projection glue. No new passes, no new heuristics.
 - Rules satisfied: never silently ignore rejected directives (SPEC 21.4);
   undefined signals are compile errors not runtime nulls; the `.^` reflection
-  syntax is canonical Briv (parser/expressions.rs:307), so deref is not a
+  syntax is canonical Briev (parser/expressions.rs:307), so deref is not a
   mini-language.

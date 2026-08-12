@@ -1,4 +1,4 @@
-# Briv Compiler — Comprehensive Corrective Plan
+# Briev Compiler — Comprehensive Corrective Plan
 
 > Generated: 2026-05-29T14:30Z | Updated: 2026-05-30T12:50Z
 > Covers: 6 backend bugs, pragma normalization (`#!`/`#io`/`#wake`), IO registry, documentation, stdlib migration, parser fix, test suite (291 total), blocking-wait runtime, and future design insights.
@@ -43,7 +43,7 @@ Fixed in `src/backend/llvm.rs`:
 
 ## ✅ Phase 2 — Pragma Documentation (DONE, committed `8870c3b`)
 
-- `learn-briv/12-pragmas.md` — exhaustive reference with IO concepts table, migration guide
+- `learn-briev/12-pragmas.md` — exhaustive reference with IO concepts table, migration guide
 
 ---
 
@@ -164,14 +164,14 @@ if !wake_symbols.is_empty() {
 }
 ```
 
-**Constraint**: The `appending global` linkage type is intentionally used so that the C runtime (or linker script) can append additional wake sources without modifying the backend output. This is important for environments where the runtime needs to register system-level wake sources not declared in Briv source.
+**Constraint**: The `appending global` linkage type is intentionally used so that the C runtime (or linker script) can append additional wake sources without modifying the backend output. This is important for environments where the runtime needs to register system-level wake sources not declared in Briev source.
 
 **Edge cases**:
 - Zero wake triggers: emit nothing (busy-loop as today)
 - Trigger with `is_wake` but `LinkRef::Explicit` (MMIO): MMIO addresses are inherently wake-capable via interrupt lines, so the runtime should treat ALL explicit-address triggers as wake sources even without `#wake`. The backend emits them too.
 - Duplicate symbols: the C runtime deduplicates at init (same symbol → same fd)
 
-### 5b — C Runtime: `briv_rt.c` changes
+### 5b — C Runtime: `briev_rt.c` changes
 
 The runtime needs a new init function `__rt_init()` that:
 1. Scans `@llvm.wake_triggers` metadata at startup
@@ -182,7 +182,7 @@ The runtime needs a new init function `__rt_init()` that:
 3. Stores fds in an internal array
 4. Provides `__rt_wait()` which calls `epoll_wait` / `kevent` / `WFI` with the collected fds
 
-**Current `briv_rt.c` structure** (exists but is minimal):
+**Current `briev_rt.c` structure** (exists but is minimal):
 - Defines volatile globals: `__io_pending`, `__sigint_flag`, etc.
 - Signal handlers set flags
 - Timer handler increments counters
@@ -216,7 +216,7 @@ extern const int llvm_wake_triggers_size;  // linker-provided or computed
 
 Alternatively, use the named metadata `!llvm.wake_triggers` — but LLVM named metadata is not directly accessible from C. The `appending global` array IS accessible. The named metadata `!llvm.wake_triggers` is emitted for debug/llvm-pass consumption. The C runtime reads the `@llvm.wake_triggers` global array instead.
 
-**Platform dispatch** (already in `briv_rt.c` via `#ifdef`):
+**Platform dispatch** (already in `briev_rt.c` via `#ifdef`):
 ```c
 #ifdef __linux__
     // signalfd, epoll, timerfd
@@ -285,11 +285,11 @@ declare void @__rt_init() local_unnamed_addr
 declare void @__rt_wait() local_unnamed_addr
 ```
 
-These are always declared (they're weak symbols — if the runtime isn't linked, the linker resolves them to `@llvm.trap` via a weak stub, or the user gets a link error). No new Briv FFI or pragma needed — these are purely compiler-generated calls into the bundled C runtime, exactly like `@llvm.assume`.
+These are always declared (they're weak symbols — if the runtime isn't linked, the linker resolves them to `@llvm.trap` via a weak stub, or the user gets a link error). No new Briev FFI or pragma needed — these are purely compiler-generated calls into the bundled C runtime, exactly like `@llvm.assume`.
 
 ### 5d — `--link-rt` flag update
 
-The existing `--link-rt` flag (Phase G) embeds `runtime/briv_rt.c` via `include_str!`. When Phase 5 is implemented, `--link-rt` additionally:
+The existing `--link-rt` flag (Phase G) embeds `runtime/briev_rt.c` via `include_str!`. When Phase 5 is implemented, `--link-rt` additionally:
 1. Detects whether the emitted IR contains `@llvm.wake_triggers` (has wake triggers)
 2. If yes, appends `-lrt` (for timerfd) and `-lpthread` (for signalfd) to the linker command
 3. Adds a weak stub for `__rt_init` / `__rt_wait` in a separate section so unbundled builds still link
@@ -304,14 +304,14 @@ The existing `--link-rt` flag (Phase G) embeds `runtime/briv_rt.c` via `include_
 | P5.4 | `main()` with wake triggers | Program with `#io sigint;` | `main()` calls `__rt_init()` and `__rt_wait()` |
 | P5.5 | `main()` without wake triggers | No `#io` or `#wake` triggers | `main()` busy-loops without init/wait calls |
 | P5.6 | `__rt_init` / `__rt_wait` declared | Any program with `#io` | IR contains `declare void @__rt_init()` and `declare void @__rt_wait()` |
-| P5.7 | Runtime builds with `make` | `runtime/Makefile` | Compiles `briv_rt.c` with platform dispatch, links correctly |
+| P5.7 | Runtime builds with `make` | `runtime/Makefile` | Compiles `briev_rt.c` with platform dispatch, links correctly |
 
 ### 5f — Integration order
 
 1. Backend: emit `@llvm.wake_triggers` global + metadata
 2. Backend: emit `__rt_init` / `__rt_wait` declarations
 3. Backend: modify `main()` to call init/wait when wake triggers exist
-4. Runtime: implement `__rt_init()` and `__rt_wait()` in `briv_rt.c`
+4. Runtime: implement `__rt_init()` and `__rt_wait()` in `briev_rt.c`
 5. Runtime: add per-platform dispatch (epoll/kqueue/WFI/nanosleep)
 6. `--link-rt`: add `-lrt -lpthread` when wake triggers detected
 7. Tests: all P5.1–P5.7 pass
@@ -348,9 +348,9 @@ This reverses the traditional safety/performance trade-off: proving safety IS wh
 
 ### 6b — Big O / Complexity Analysis
 
-Briv's constraints (acyclic calls, SMT-bounded loops, no pointer aliasing) make it uniquely suited for static complexity analysis. Pragmas for asserting or querying complexity:
+Briev's constraints (acyclic calls, SMT-bounded loops, no pointer aliasing) make it uniquely suited for static complexity analysis. Pragmas for asserting or querying complexity:
 
-```briv
+```briev
 #assert_linear           // Compiler errors if analysis exceeds O(N)
 #limit_cycles 1000       // Budget worst-case execution time
 #address_space shared    // Route memory to hardware tier
@@ -383,7 +383,7 @@ Every directive that changes how the compiler processes code without changing th
 | `#limit_cycles 1000` | WCET budget |
 | `#address_space shared` | Memory tier |
 
-The `#` prefix is the visual and syntactic signal: "this is not application logic, this is a compiler instruction." It's Briv's single, universal escape hatch — and it's documented exhaustively so users always know exactly what the compiler knows.
+The `#` prefix is the visual and syntactic signal: "this is not application logic, this is a compiler instruction." It's Briev's single, universal escape hatch — and it's documented exhaustively so users always know exactly what the compiler knows.
 
 ---
 
@@ -430,12 +430,12 @@ The `#` prefix is the visual and syntactic signal: "this is not application logi
 | `src/io_registry.rs` | Fix timer symbols to match runtime (`__timer_*`) | 1c ✅ |
 | `src/io_registry.rs` | **New file** | 1c ✅ |
 | `lib/std/system.bv` | Migrate to `#io` | 1d ✅ |
-| `learn-briv/12-pragmas.md` | **New file** | 2 ✅ |
-| `learn-briv/11-triggers.md` | Update with `#io`/`#wake` reference | 2 ✅ |
+| `learn-briev/12-pragmas.md` | **New file** | 2 ✅ |
+| `learn-briev/11-triggers.md` | Update with `#io`/`#wake` reference | 2 ✅ |
 | `src/backend/llvm.rs` | Emit `@llvm.wake_triggers` metadata | 5 ✅ |
 | `src/backend/llvm.rs` | Emit `__rt_init` / `__rt_wait` decls + `emit_main()` factored out | 5 ✅ |
 | `src/backend/llvm.rs` | `emit_wake_metadata()` new method | 5 ✅ |
 | `src/backend/llvm.rs` | 7 new backend tests (Phase 5) | 5 ✅ |
-| `runtime/briv_rt.c` | Refactored: `__rt_init()` + `__rt_wait()` + `__wait_for_event()` wrapper | 5 ✅ |
+| `runtime/briev_rt.c` | Refactored: `__rt_init()` + `__rt_wait()` + `__wait_for_event()` wrapper | 5 ✅ |
 | `runtime/Makefile` | Added `make wake` target for `-lrt -lpthread` | 5 ✅ |
 | `src/main.rs` | `--link-rt`: detect wake triggers, add `-lrt -lpthread` hints | 5 ✅ |

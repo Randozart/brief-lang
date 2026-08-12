@@ -433,7 +433,7 @@ pub fn eval_nav_chain(
             // For regular frgn/defn, always exists (true).
             let exists = program.iter().any(|item| {
                 if let TopLevel::ForeignBinding(fb) = item {
-                    let bname = fb.briv_name.as_deref().unwrap_or(&fb.foreign_name);
+                    let bname = fb.briev_name.as_deref().unwrap_or(&fb.foreign_name);
                     bname == name && !fb.is_optional
                 } else {
                     false
@@ -1109,7 +1109,7 @@ fn eval_nav_call(
             ))))
         }
         // 2026-07-23: Quote$ — structural quasiquoting.
-        // Template string parsed as Briv source; $ident references resolved
+        // Template string parsed as Briev source; $ident references resolved
         // from compile-time scope variables. $$escapes to literal $.
         // Returns TopLevel (single item) or VecTopLevel (multiple items).
         "Quote$" => {
@@ -1885,7 +1885,7 @@ fn type_info_from_toplevel(tl: &TopLevel, field: &str) -> Result<String, String>
         }
         (TopLevel::Definition(d), "outputs.count") => Ok(d.outputs.len().to_string()),
         (TopLevel::ForeignBinding(fb), "name") => Ok(fb.foreign_name.clone()),
-        (TopLevel::ForeignBinding(fb), "briv_name") => Ok(fb.effective_briv_name().to_string()),
+        (TopLevel::ForeignBinding(fb), "briev_name") => Ok(fb.effective_briev_name().to_string()),
         (TopLevel::Import(i), "path") => Ok(i.path().to_string()),
         _ => Err(format!("TypeInfo$: unknown field '{}' for this item type", field)),
     }
@@ -1909,7 +1909,7 @@ fn single_type_name(ot: &OutputType) -> String {
 // 2026-07-23: AST-level quasiquoting — resolve $identifier references from
 // scope, convert NavValues to Exprs, and handle $$ escaping.
 
-/// Parse a string as a single Briv expression.
+/// Parse a string as a single Briev expression.
 fn parse_expr_from_string(s: &str) -> Result<Expr, String> {
     let tokens = crate::lexer::tokenize(s)
         .map_err(|e| format!("cannot tokenize expression '{}': {}", s, e))?;
@@ -2290,7 +2290,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
 /// that contain the sentinel byte.
 fn restore_double_dollar_in_toplevel(tl: &mut TopLevel) {
     // For the initial implementation, this is a no-op at the AST level
-    // because $$ is not a valid identifier start in Briv's lexer —
+    // because $$ is not a valid identifier start in Briev's lexer —
     // it would be lexed as two separate tokens: $ and $identifier.
     // The sentinel replacement at the string level handles this correctly.
     // This function is a hook for future $$-in-identifier support.
@@ -2543,8 +2543,8 @@ mod tests {
         let mut universe = TypeUniverse::new();
         // Set a test env var
         // SAFETY: single-threaded test environment — no concurrent reads
-        unsafe { std::env::set_var("BRIV_TEST_VAR", "hello_world"); }
-        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIV_TEST_VAR".into())], None);
+        unsafe { std::env::set_var("BRIEV_TEST_VAR", "hello_world"); }
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEV_TEST_VAR".into())], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
             StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result {
@@ -2557,7 +2557,7 @@ mod tests {
     fn test_env_get_missing_var() {
         let mut program = vec![];
         let mut universe = TypeUniverse::new();
-        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIV_VAR_THAT_DOES_NOT_EXIST_XYZ".into())], None);
+        let expr = Expr::Call("EnvGet$".into(), vec![Expr::Quoted("BRIEV_VAR_THAT_DOES_NOT_EXIST_XYZ".into())], None);
         let result = eval_nav_chain(&expr, &mut program, &mut universe,
             StageKind::Parsed, &empty_scope(), &mut test_sandbox(), &mut None).unwrap();
         match result {

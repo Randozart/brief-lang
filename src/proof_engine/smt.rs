@@ -49,7 +49,7 @@ pub fn prove_smt(formula: &Expr, _param_types: &[(String, Type)]) -> SmtResult {
     }
 }
 
-/// 2026-07-16: P6 — Prove an SMT-LIB2 formula string directly (not from a Briv Expr).
+/// 2026-07-16: P6 — Prove an SMT-LIB2 formula string directly (not from a Briev Expr).
 /// Writes formula to stdin of z3 -in -smt2, parses output.
 /// Returns Unsat if the formula is unsatisfiable (property holds).
 /// Uses a simple timeout wrapper around the cli invocation.
@@ -94,7 +94,7 @@ fn parse_smt_model(_stdout: &str) -> Vec<(String, String)> {
     Vec::new()
 }
 
-/// Build an SMT-LIB query from a Briv expression.
+/// Build an SMT-LIB query from a Briev expression.
 /// All values are encoded as (_ BitVec 64) — the only primitive.
 fn build_smt_query(expr: &Expr) -> String {
     let mut q = String::new();
@@ -108,7 +108,7 @@ fn build_smt_query(expr: &Expr) -> String {
     q
 }
 
-/// Encode a Briv expression as an SMT-LIB term.
+/// Encode a Briev expression as an SMT-LIB term.
 /// Only supports a subset of Expr — the Boolean constraint subset.
 /// Sanitizes #Self → self_var for SMT-LIB compatibility.
 fn encode_expr_smt(expr: &Expr) -> String {
@@ -176,7 +176,7 @@ pub fn build_contract_query(expr: &Expr, params: &[(String, Type)]) -> String {
     q
 }
 
-/// Sanitize a Briv identifier for SMT-LIB.
+/// Sanitize a Briev identifier for SMT-LIB.
 /// #Self → self_var (SMT-LIB doesn't allow # in simple symbols).
 fn sanitize_name(name: &str) -> String {
     if name == "#Self" || name == "#self" {
@@ -189,7 +189,7 @@ fn sanitize_name(name: &str) -> String {
 }
 
 /// 2026-07-23: Quick check if z3 is on PATH by spawning with --version.
-/// Also checks the managed binary directory (~/.local/share/briv-compiler/bin/).
+/// Also checks the managed binary directory (~/.local/share/briev-compiler/bin/).
 pub fn is_z3_available() -> bool {
     // Check PATH first
     if std::process::Command::new("z3")
@@ -203,7 +203,7 @@ pub fn is_z3_available() -> bool {
     {
         return true;
     }
-    // Check managed directory (installed via `brivc install-deps`)
+    // Check managed directory (installed via `brievc install-deps`)
     managed_z3_path().map_or(false, |p| p.exists())
 }
 
@@ -215,7 +215,7 @@ fn managed_z3_path() -> Option<std::path::PathBuf> {
         let home = std::env::var("HOME").ok()?;
         std::path::PathBuf::from(home).join(".local").join("share")
     };
-    Some(base.join("briv-compiler").join("bin").join("z3"))
+    Some(base.join("briev-compiler").join("bin").join("z3"))
 }
 
 /// 2026-07-23: Public SMT encoding for proof use.

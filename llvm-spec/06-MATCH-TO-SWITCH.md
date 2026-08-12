@@ -16,7 +16,7 @@ switch i64 %discriminant, label %default [
 
 Every enum in the `%State` type has a discriminant field (i64, 0-indexed):
 
-```briv
+```briev
 enum Option<Int> { Some(Int), None }
 // discriminant: 0 = None, 1 = Some
 ```
@@ -30,7 +30,7 @@ enum Option<Int> { Some(Int), None }
 
 ## Match Arm Translation
 
-```briv
+```briev
 match val {
     Ok(x) => handle_ok(x),
     Err(e) => handle_err(e),
@@ -95,7 +95,7 @@ For a variant with fields (`Ok(Int)`), the payload struct is embedded in the enu
 
 ## Guard Support
 
-```briv
+```briev
 match val {
     Ok(x) if x > 0 => handle_positive(x),
     _ => handle_other,

@@ -1,8 +1,8 @@
-# Briv-to-COBOL Transpiler Specification
+# Briev-to-COBOL Transpiler Specification
 
 ## Overview
 
-This document specifies the COBOL transpilation target for the Briv compiler, generating IBM Enterprise COBOL for z/OS from Briv's declarative, state-based logic.
+This document specifies the COBOL transpilation target for the Briev compiler, generating IBM Enterprise COBOL for z/OS from Briev's declarative, state-based logic.
 
 ## 1. Lexical & Structural Directives
 
@@ -11,7 +11,7 @@ This document specifies the COBOL transpilation target for the Briv compiler, ge
 
 ### 1.2 Program Definition
 - `IDENTIFICATION DIVISION.` followed by `PROGRAM-ID. [MODULE-NAME] RECURSIVE.`
-- The `RECURSIVE` keyword is always appended to support Briv's recursion model
+- The `RECURSIVE` keyword is always appended to support Briev's recursion model
 
 ### 1.3 Division Order
 Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
@@ -20,7 +20,7 @@ Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
 
 ### 2.1 Default Mappings
 
-| Briv Type | COBOL PIC Clause | Usage | Notes |
+| Briev Type | COBOL PIC Clause | Usage | Notes |
 |------------|------------------|-------|-------|
 | `int` | `PIC S9(18) COMP-5` | COMP-5 | Native binary, 64-bit |
 | `dec` | `PIC S9(13)V99 COMP-3` | COMP-3 | Packed decimal, 15 digits |
@@ -32,7 +32,7 @@ Strict ordering: `IDENTIFICATION`, `DATA`, `PROCEDURE`
 
 Override defaults using attributes:
 
-```briv
+```briev
 # Default: derives from type
 state balance: dec
 
@@ -57,7 +57,7 @@ COBOL has no native boolean. Map to single byte with Level 88 condition names:
 
 ### 2.4 Array/Vector Mapping
 
-```briv
+```briev
 state ids: vec[int, 10]  # OCCURS 10 TIMES
 ```
 
@@ -69,11 +69,11 @@ state ids: vec[int, 10]  # OCCURS 10 TIMES
 
 ### 3.1 Local State (WORKING-STORAGE)
 
-Briv state declared in module body → `WORKING-STORAGE SECTION`
+Briev state declared in module body → `WORKING-STORAGE SECTION`
 
 Name mangling: `{NAME}` → `WS-{MANGLED-NAME}`
 
-```briv
+```briev
 state count: int
 
 fn increment() {
@@ -90,7 +90,7 @@ WORKING-STORAGE SECTION.
 
 Parameters in function signatures → `LINKAGE SECTION` + `PROCEDURE DIVISION USING`
 
-```briv
+```briev
 fn process(balance: dec, amount: dec) -> dec
 ```
 
@@ -106,7 +106,7 @@ PROCEDURE DIVISION USING LS-BALANCE LS-AMOUNT.
 
 Return value becomes last parameter in USING clause:
 
-```briv
+```briev
 fn calc(a: int, b: int) -> int
 ```
 
@@ -125,21 +125,21 @@ PROCEDURE DIVISION USING LS-A LS-B LS-RESULT.
 
 Transpile to inverted IF traps at block start:
 
-```briv
+```briev
 fn withdraw(balance: dec, amount: dec) -> dec
     pre: amount > 0
     pre: balance >= amount
 ```
 
 ```cobol
-* BRIV PRE-CONDITION GUARDS
+* BRIEV PRE-CONDITION GUARDS
 IF LS-AMOUNT <= 0
-    DISPLAY "BRIV CONTRACT FAILED: PRECONDITION_01: amount > 0"
+    DISPLAY "BRIEV CONTRACT FAILED: PRECONDITION_01: amount > 0"
     MOVE 4000 TO RETURN-CODE
     GOBACK
 END-IF.
 IF LS-BALANCE < LS-AMOUNT
-    DISPLAY "BRIV CONTRACT FAILED: PRECONDITION_02: balance >= amount"
+    DISPLAY "BRIEV CONTRACT FAILED: PRECONDITION_02: balance >= amount"
     MOVE 4000 TO RETURN-CODE
     GOBACK
 END-IF.
@@ -160,7 +160,7 @@ MOVE LS-BALANCE TO WS-OLD-BALANCE.
 ```
 
 **Step 4:** Validate post-condition at end:
-```briv
+```briev
 fn withdraw(balance: dec, amount: dec) -> dec
     pre: amount > 0
     post: balance == old(balance) - amount
@@ -176,7 +176,7 @@ SUBTRACT LS-AMOUNT FROM LS-BALANCE.
 * POST-CONDITION GUARD
 COMPUTE WS-EXPECTED = WS-OLD-BALANCE - LS-AMOUNT.
 IF LS-BALANCE NOT = WS-EXPECTED
-    DISPLAY "BRIV CONTRACT FAILED: POSTCONDITION_01: balance == old(balance) - amount"
+    DISPLAY "BRIEV CONTRACT FAILED: POSTCONDITION_01: balance == old(balance) - amount"
     MOVE 4000 TO RETURN-CODE
     GOBACK
 END-IF.
@@ -186,7 +186,7 @@ END-IF.
 
 For critical failures requiring program termination:
 
-```briv
+```briev
 #[cobol, abend]
 fn critical_op() {
     pre: system_ready == true
@@ -195,7 +195,7 @@ fn critical_op() {
 
 ```cobol
 IF NOT (WS-SYSTEM-READY = 'Y')
-    DISPLAY "BRIV CONTRACT FAILED: PRECONDITION_01"
+    DISPLAY "BRIEV CONTRACT FAILED: PRECONDITION_01"
     MOVE 4000 TO RETURN-CODE
     CALL "CEE3ABD" USING BY VALUE 4000 BY VALUE 0
     GOBACK
@@ -206,7 +206,7 @@ END-IF.
 
 ### 5.1 RECURSIVE Keyword
 
-Always emit `RECURSIVE` in PROGRAM-ID to support Briv's recursion model:
+Always emit `RECURSIVE` in PROGRAM-ID to support Briev's recursion model:
 ```cobol
 PROGRAM-ID. TRANSFER RECURSIVE.
 ```
@@ -215,7 +215,7 @@ PROGRAM-ID. TRANSFER RECURSIVE.
 
 If watchdog is specified in contract, generate depth limiting:
 
-```briv
+```briev
 fn factorial(n: int) -> int
     pre: n >= 0
     post: result >= 0
@@ -230,7 +230,7 @@ WORKING-STORAGE SECTION.
 * At entry of recursive block
 ADD 1 TO WS-RECURSION-DEPTH.
 IF WS-RECURSION-DEPTH > WS-RECURSION-MAX
-    DISPLAY "BRIV WATCHDOG: Recursion depth exceeded"
+    DISPLAY "BRIEV WATCHDOG: Recursion depth exceeded"
     MOVE 4001 TO RETURN-CODE
     GOBACK
 END-IF.
@@ -243,7 +243,7 @@ SUBTRACT 1 FROM WS-RECURSION-DEPTH.
 
 ### 6.1 Functions/Blocks → PARAGRAPHs
 
-```briv
+```briev
 fn process() {
     step_one()
     step_two()
@@ -275,7 +275,7 @@ STEP-TWO SECTION.
 
 ### 6.2 If/Else → IF/ELSE/END-IF
 
-```briv
+```briev
 if x > 0 {
     y = 1
 } else {
@@ -293,7 +293,7 @@ END-IF.
 
 ### 6.3 Match/Switch → EVALUATE
 
-```briv
+```briev
 match status {
     "active" => state = 1
     "pending" => state = 2
@@ -314,7 +314,7 @@ END-EVALUATE.
 
 ### 6.4 Loops → PERFORM UNTIL
 
-```briv
+```briev
 while i < 10 {
     sum = sum + i
     i = i + 1
@@ -334,7 +334,7 @@ END-PERFORM.
 
 Set default transpilation target for subsequent attributes:
 
-```briv
+```briev
 #![cobol, program-id("BANK-TRANSFER")]
 #![cobol, keywords("RECURSIVE")]
 
@@ -344,7 +344,7 @@ Set default transpilation target for subsequent attributes:
 
 ### 7.2 Program ID Override
 
-```briv
+```briev
 #![cobol, program-id("MYMODULE")]
 ```
 
@@ -352,7 +352,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 7.3 Global COBOL Options
 
-```briv
+```briev
 #![cobol, abend-on-contract-fail]
 ```
 
@@ -360,7 +360,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 8.1 Operators
 
-| Briv | COBOL | Notes |
+| Briev | COBOL | Notes |
 |-------|-------|-------|
 | `+` | `+` | |
 | `-` | `-` | |
@@ -378,7 +378,7 @@ Output: `PROGRAM-ID. MYMODULE RECURSIVE.`
 
 ### 8.2 Assignment
 
-Briv: `x = y + 1`
+Briev: `x = y + 1`
 
 COBOL: Use MOVE for simple, COMPUTE for expressions:
 ```cobol
@@ -387,14 +387,14 @@ COMPUTE WS-X = WS-Y + 1.
 
 ### 8.3 Compound Assignment
 
-Briv: `x += 1`
+Briev: `x += 1`
 
 COBOL:
 ```cobol
 ADD 1 TO WS-X.
 ```
 
-Briv: `x = x - 1`
+Briev: `x = x - 1`
 ```cobol
 SUBTRACT 1 FROM WS-X.
 ```
@@ -429,7 +429,7 @@ END PROGRAM {MODULE-NAME}.
 
 ```bash
 # Compile to COBOL
-briv-compiler cobol <file.brv>
+briev-compiler cobol <file.brv>
 
 # Output: <file>.cbl
 ```

@@ -15,7 +15,7 @@ $defn js_type(t: String) -> String {
 };
 
 $defn gen_node_bridge(exports: Selection, bridge_name: String, so_path: String) -> String {
-    let code = "// " + bridge_name + " — Briv koffi bridge (auto-generated)\n";
+    let code = "// " + bridge_name + " — Briev koffi bridge (auto-generated)\n";
     code += "// Runtime: ~280ns per call\n\n";
     code += "import koffi from 'koffi';\n\n";
     code += "const lib = koffi.load('" + so_path + "');\n\n";
@@ -52,7 +52,7 @@ $defn gen_node_bridge(exports: Selection, bridge_name: String, so_path: String) 
 $(Normalized @ highest) {
     let exports = Tag$("export");
     when exports.Count$() > 0 {
-        let code = gen_node_bridge(exports, "briv_bridge", "./export_add.so");
+        let code = gen_node_bridge(exports, "briev_bridge", "./export_add.so");
         FileWrite$("ffi-out/node/bridge.mjs", code, true);
         EmitInfo$("gen_node: ffi-out/node/bridge.mjs");
     };

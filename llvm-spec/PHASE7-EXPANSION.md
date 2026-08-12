@@ -1,4 +1,4 @@
-# Phase 7 Expansion Plan: Full LLVM IR Emission in Briv
+# Phase 7 Expansion Plan: Full LLVM IR Emission in Briev
 
 **Date:** 2026-05-29  
 **Current state:** Foundation file exists at `lib/compiler/backends/llvm.bv` (285 lines, mostly stubs). Parses and typechecks. Blocked on Rust backend List-arg internal call fix for full `llc` validation.
@@ -70,9 +70,9 @@ defn align_of(ty) -> Int                          // "i64" → 8
 
 ## Data Structures
 
-The backend needs state across calls. In Briv, this uses closure-passing patterns (unlike Rust's struct fields):
+The backend needs state across calls. In Briev, this uses closure-passing patterns (unlike Rust's struct fields):
 
-```briv
+```briev
 // Field tracking — passed as parameter
 let field_names = collect_field_names(program);
 let field_types = collect_field_types(program);
@@ -102,11 +102,11 @@ Phase 7: expand llvm.bv to full IR emission
 
 ```bash
 # All existing fixtures still pass
-briv-compiler llvm tests/fixtures/counter.bv --out /tmp/r/
+briev-compiler llvm tests/fixtures/counter.bv --out /tmp/r/
 llc /tmp/r/counter.ll -o /dev/null
 
 # llvm.bv compiles through itself
-briv-compiler llvm lib/compiler/backends/llvm.bv --out /tmp/r/
+briev-compiler llvm lib/compiler/backends/llvm.bv --out /tmp/r/
 grep -c "fallback" /tmp/r/llvm.ll  # Should be 0
 llc /tmp/r/llvm.ll -o /dev/null
 ```

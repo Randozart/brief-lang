@@ -56,7 +56,7 @@ every boxing site routes through that intrinsic name — not a Type enum match.
 
 ### Phase 4 — identifier.rs state field extraction
 
-- `identifier.rs`: Replace `match briv_ty { Type::Char => zext i32, ... }`
+- `identifier.rs`: Replace `match briev_ty { Type::Char => zext i32, ... }`
   with universe-driven boxing via `box_op`
 
 ### Phase 5 — Validation

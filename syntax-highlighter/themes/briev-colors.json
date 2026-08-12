@@ -1,0 +1,23 @@
+{
+  "colors": {
+    "briev.keyword.control.txn": "#C586C0",
+    "briev.keyword.control.reactive": "#DCDCAA",
+    "briev.keyword.control.async": "#9CDCFE",
+    "briev.keyword.control.flow": "#D7BA7D",
+    "briev.keyword.declaration": "#569CD6",
+    "briev.keyword.import": "#C586C0",
+    "briev.support.type.primitive": "#4EC9B0",
+    "briev.entity.name.type.custom": "#B5CEA8",
+    "briev.string.quoted.double": "#CE9178",
+    "briev.constant.numeric.integer": "#B5CEA8",
+    "briev.constant.numeric.float": "#B5CEA8",
+    "briev.constant.language.true": "#569CD6",
+    "briev.constant.language.false": "#569CD6",
+    "briev.comment.line": "#6A9955",
+    "briev.comment.annotation": "#00FF00",
+    "briev.meta.annotation": "#FFD700",
+    "briev.storage.modifier.ownership": "#C586C0",
+    "briev.variable.language.prior-state": "#DCDCAA",
+    "briev.keyword.operator": "#D4D4D4"
+  }
+}

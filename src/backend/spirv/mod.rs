@@ -1,4 +1,4 @@
-/// SPIR-V backend — compiles Briv GPU kernels to SPIR-V binary modules.
+/// SPIR-V backend — compiles Briev GPU kernels to SPIR-V binary modules.
 ///
 /// 2026-07-15: v1 baseline. Supports `txn [idx < N]` kernels with
 /// GetGlobalId#, GetLocalId#, WorkgroupSize#, Load#, and Store# intrinsics.
@@ -19,7 +19,7 @@ use crate::ast::TopLevel;
 use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::kernel::{emit_kernel, is_kernel};
 
-/// 2026-07-15: Compile a Briv program to SPIR-V binary.
+/// 2026-07-15: Compile a Briev program to SPIR-V binary.
 ///
 /// # Parameters
 /// * `program` — The typed AST (must be type-checked already)

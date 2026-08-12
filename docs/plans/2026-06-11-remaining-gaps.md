@@ -6,7 +6,7 @@
 ## Current Benchmark Results
 
 ```
-Benchmark              Briv      C          Ratio    Winner
+Benchmark              Briev      C          Ratio    Winner
 fannkuch_redux         0.127s     0.069s     1.84x    C 1.84x       ← gap
 float_math_nonzero     0.183s     0.167s     1.10x    C 1.10x       ← gap
 ```

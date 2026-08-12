@@ -21,7 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::{Expr, Import, ImportKind, TopLevel, Type};
-use crate::dbriv::v2 as dbriv_v2;
+use crate::dbriev::v2 as dbriev_v2;
 use crate::lexer::Token;
 use logos::Logos;
 use std::collections::{HashMap, HashSet};
@@ -33,12 +33,12 @@ use std::path::{Path, PathBuf};
 // Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
 
 /// Load the module registry from config/module-registry.toml (or its Data
-/// Briv form module-registry.dbvl — Phase 3, 2026-08-03).
+/// Briev form module-registry.dbvl — Phase 3, 2026-08-03).
 /// When the file doesn't exist or can't be parsed, returns an empty map
 /// so that Registry imports fall back to literal filesystem resolution.
 /// 2026-07-15: Phase 7i
 fn load_module_registry() -> HashMap<String, String> {
-    crate::dbriv::config_db::load_string_registry(Path::new("config"), "module-registry")
+    crate::dbriev::config_db::load_string_registry(Path::new("config"), "module-registry")
 }
 
 pub struct ImportResolver {
@@ -59,7 +59,7 @@ pub struct ImportResolver {
     /// embedded target), the resolver prefers the `.ebv` stdlib variant over
     /// the `.bv` one instead of erroring "Ambiguous import". The `.ebv`
     /// stdlib provides the casting-lane symbols (int_to_str, str_to_int, …)
-    /// as Briv defns; the `.bv` stdlib + briv_rt.c provide them as C.
+    /// as Briev defns; the `.bv` stdlib + briev_rt.c provide them as C.
     prefer_ebv: bool,
     /// 2026-08-09 (Phase 11, Slice 2): the deterministic resolution record —
     /// (import specifier → canonical resolved path), in source order. SPEC
@@ -73,7 +73,7 @@ fn item_name(item: &TopLevel) -> Option<&str> {
     match item {
         TopLevel::Definition(d) => Some(d.name.as_str()),
         TopLevel::Signature(s) => Some(s.name.as_str()),
-        TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
+        TopLevel::ForeignBinding(fb) => Some(fb.effective_briev_name()),
         TopLevel::Transaction(t) => Some(t.name.as_str()),
         TopLevel::Constant(c) => Some(c.name.as_str()),
         TopLevel::Obj(s) => Some(s.name.as_str()),
@@ -191,7 +191,7 @@ impl ImportResolver {
 
     /// Resolve the stdlib root path, trying multiple sources in order:
     /// 1. Explicitly configured path (from --stdlib-path)
-    /// 2. BRIV_STDLIB_PATH env var
+    /// 2. BRIEV_STDLIB_PATH env var
     /// 3. Executable-relative (dev layout: target/release/ -> ../../lib/)
     /// 4. root_path/lib/ (project-local)
     pub fn resolve_stdlib_root(&self) -> Option<PathBuf> {
@@ -203,7 +203,7 @@ impl ImportResolver {
         }
 
         // 2. Environment variable
-        if let Ok(env_path) = std::env::var("BRIV_STDLIB_PATH") {
+        if let Ok(env_path) = std::env::var("BRIEV_STDLIB_PATH") {
             let p = PathBuf::from(env_path);
             if p.exists() {
                 return Some(p);
@@ -213,18 +213,18 @@ impl ImportResolver {
         // 3. Executable-relative (dev layout)
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                // Development: briv-compiler/target/release/ -> ../../lib/
+                // Development: briev-compiler/target/release/ -> ../../lib/
                 let dev_p = exe_dir.join("../../lib/");
                 if dev_p.exists() {
                     return Some(dev_p);
                 }
-                // Alternate: briv-compiler/target/debug/ -> ../../lib/
+                // Alternate: briev-compiler/target/debug/ -> ../../lib/
                 let debug_p = exe_dir.join("../../lib/");
                 if debug_p.exists() {
                     return Some(debug_p);
                 }
-                // Installed: ~/.local/bin/ -> ~/.local/share/briv/
-                let installed_p = exe_dir.join("../share/briv/");
+                // Installed: ~/.local/bin/ -> ~/.local/share/briev/
+                let installed_p = exe_dir.join("../share/briev/");
                 if installed_p.join("std/core").exists() {
                     return Some(installed_p);
                 }
@@ -299,7 +299,7 @@ impl ImportResolver {
         Ok(items)
     }
 
-    /// Resolve `import "target"` — loads the board D-briv description and emits typed constants.
+    /// Resolve `import "target"` — loads the board D-briev description and emits typed constants.
     /// 2026-08-06 (Phase 11): record which module path each imported name came
     /// from. Two DIFFERENT modules providing the same unqualified name is a
     /// hard error (SPEC 7.2) UNLESS the definitions are IDENTICAL (a benign
@@ -327,7 +327,7 @@ impl ImportResolver {
                     // 2026-08-09 (Phase 11, Slice 2): two imports providing the
                     // same exported name are legal when they carry DIFFERENT
                     // `:` module aliases — the alias is a collision-resolving
-                    // local TAG (SPEC §7.2; no qualified access — Briv inlines).
+                    // local TAG (SPEC §7.2; no qualified access — Briev inlines).
                     // Same path (diamond) and identical definitions stay benign.
                     let same_alias = match (imported_aliases.get(n), alias) {
                         (Some(a), Some(b)) => a == b,
@@ -374,14 +374,14 @@ impl ImportResolver {
 
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
-            let mut doc = crate::dbriv::v2::parse_document(&content)
+            let mut doc = crate::dbriev::v2::parse_document(&content)
                 .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?;
 
             // Merge the schema carrier (map.dbv) and register detail table.
             let schemas_path = path.with_file_name("map.dbv");
             if schemas_path.exists() {
                 if let Ok(schema_content) = std::fs::read_to_string(&schemas_path) {
-                    if let Ok(schema_doc) = crate::dbriv::v2::parse_document(&schema_content) {
+                    if let Ok(schema_doc) = crate::dbriev::v2::parse_document(&schema_content) {
                         doc.schemas.extend(schema_doc.schemas);
                         // map.dbv is merged inline — drop it from doc.imports so
                         // the bridge does not re-emit it as a literal import.
@@ -392,7 +392,7 @@ impl ImportResolver {
             let registers_path = path.with_file_name("registers.dbvl");
             if registers_path.exists() {
                 if let Ok(reg_content) = std::fs::read_to_string(&registers_path) {
-                    if let Ok(reg_doc) = crate::dbriv::v2::parse_document(&reg_content) {
+                    if let Ok(reg_doc) = crate::dbriev::v2::parse_document(&reg_content) {
                         doc.data_groups.extend(reg_doc.data_groups);
                     }
                 }
@@ -416,7 +416,7 @@ impl ImportResolver {
             };
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
-            crate::dbriv::v2::parse_document(&content)
+            crate::dbriev::v2::parse_document(&content)
                 .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?
         };
 
@@ -430,7 +430,7 @@ impl ImportResolver {
 
             if let Some(sp) = schema_path {
                 if let Ok(schema_content) = std::fs::read_to_string(&sp) {
-                    if let Ok(schema_doc) = crate::dbriv::v2::parse_document(&schema_content) {
+                    if let Ok(schema_doc) = crate::dbriev::v2::parse_document(&schema_content) {
                         doc.schemas.extend(schema_doc.schemas);
                         resolved_imports.push(import_path.clone());
                     }
@@ -439,7 +439,7 @@ impl ImportResolver {
         }
         doc.imports.retain(|i| !resolved_imports.contains(i));
 
-        let items = crate::dbriv::bridge::document_to_program(&doc, &board);
+        let items = crate::dbriev::bridge::document_to_program(&doc, &board);
 
         Ok(items)
     }
@@ -457,7 +457,7 @@ impl ImportResolver {
         // Handle Registry imports — look up name in registry dir first,
         // then fall back to the TOML module registry config.
         // 2026-07-15: Phase 7i
-        // 2026-07-26: Check ~/.briv/registry/ before TOML registry.
+        // 2026-07-26: Check ~/.briev/registry/ before TOML registry.
         if let ImportKind::Registry(name) = &import.kind {
             // 2026-07-26: Check registry directory first (user-installed modules
             // take priority over baked config/module-registry.toml entries).
@@ -570,37 +570,37 @@ impl ImportResolver {
             }
         }
 
-        // Check for DBriv import (.dbv, .dbvl)
+        // Check for DBriev import (.dbv, .dbvl)
         if import.path().ends_with(".dbv") || import.path().ends_with(".dbvl") {
-            let dbriv_src_dir = source_file
+            let dbriev_src_dir = source_file
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."));
 
-            let dbriv_path = self
+            let dbriev_path = self
                 .search_paths
                 .iter()
-                .map(|p| dbriv_src_dir.join(p).join(&import.path()))
-                .chain(std::iter::once(dbriv_src_dir.join(&import.path())))
+                .map(|p| dbriev_src_dir.join(p).join(&import.path()))
+                .chain(std::iter::once(dbriev_src_dir.join(&import.path())))
                 .find(|p| p.exists())
                 .ok_or_else(|| {
                     format!(
-                        "DBriv file not found: {} (searched in lib/, imports/, ./ and source dir)",
+                        "DBriev file not found: {} (searched in lib/, imports/, ./ and source dir)",
                         import.path()
                     )
                 })?;
 
-            let content = std::fs::read_to_string(&dbriv_path)
-                .map_err(|e| format!("Failed to read DBriv file '{}': {}", dbriv_path.display(), e))?;
+            let content = std::fs::read_to_string(&dbriev_path)
+                .map_err(|e| format!("Failed to read DBriev file '{}': {}", dbriev_path.display(), e))?;
 
             let is_dbvl = import.path().ends_with(".dbvl");
 
             // For .dbvl files, use offset-tracking parser for lazy loading
             let doc = if is_dbvl {
-                dbriv_v2::parse_document_track_offsets(&content)
+                dbriev_v2::parse_document_track_offsets(&content)
             } else {
-                dbriv_v2::parse_document(&content)
-            }.map_err(|e| format!("Failed to parse DBriv file '{}': {}", dbriv_path.display(), e))?;
+                dbriev_v2::parse_document(&content)
+            }.map_err(|e| format!("Failed to parse DBriev file '{}': {}", dbriev_path.display(), e))?;
 
             // Determine the constant name from import symbols
             let constant_name = import
@@ -608,28 +608,28 @@ impl ImportResolver {
                 .first()
                 .map(|(local, _)| local.clone())
                 .unwrap_or_else(|| {
-                    let fname = dbriv_path
+                    let fname = dbriev_path
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "data".to_string());
                     fname
                 });
 
-            let mut dbriv_items = crate::dbriv::bridge::document_to_program_flags(
+            let mut dbriev_items = crate::dbriev::bridge::document_to_program_flags(
                 &doc, &constant_name, is_dbvl,
             );
 
-            let program_for_cache = dbriv_items.clone();
+            let program_for_cache = dbriev_items.clone();
 
             self.loaded_modules.insert(
                 import.path().to_string(),
                 (program_for_cache, vec![]),
             );
 
-            return Ok(dbriv_items);
+            return Ok(dbriev_items);
         }
 
-        // Default: Briv module (.bv or .ebv)
+        // Default: Briev module (.bv or .ebv)
         let module_path = {
             if import.path().ends_with(".bv") {
                 import.path()[..import.path().len() - 3].replace('.', "/")
@@ -668,7 +668,7 @@ impl ImportResolver {
             let bv = bv_candidate.exists();
             let ebv = ebv_candidate.exists();
             if bv && ebv {
-                // 2026-08-04 (compiler-in-briv): prefer_ebv=false (the
+                // 2026-08-04 (compiler-in-briev): prefer_ebv=false (the
                 // default) prefers the `.bv` variant — the natural behavior
                 // before `.ebv` existed. Only an embedded target prefers
                 // `.ebv`. This was regressed to an "Ambiguous import" error,
@@ -778,7 +778,7 @@ impl ImportResolver {
         // 2026-07-14: Parse errors in imported files are non-fatal — the
         // imported file may use syntax (struct literals, etc.) that the
         // parser supports as AST but not yet as a fully parseable form.
-        // 2026-08-04 (compiler-in-Briv): the error is NOT swallowed — it is
+        // 2026-08-04 (compiler-in-Briev): the error is NOT swallowed — it is
         // reported as a visible warning so a silently-empty import (which
         // drops a module's defns, e.g. std/string's `..` slices) is never
         // hidden again. The import still proceeds with the items that DID
@@ -967,7 +967,7 @@ impl ImportResolver {
         match item {
             TopLevel::Definition(d) => Some(d.name.as_str()),
             TopLevel::Signature(s) => Some(s.name.as_str()),
-            TopLevel::ForeignBinding(fb) => Some(fb.effective_briv_name()),
+            TopLevel::ForeignBinding(fb) => Some(fb.effective_briev_name()),
             TopLevel::Transaction(t) => Some(t.name.as_str()),
             TopLevel::Constant(c) => Some(c.name.as_str()),
             TopLevel::Init(i) => Some(i.name.as_str()),
@@ -1012,7 +1012,7 @@ impl ImportResolver {
         let stdlib_root = self.resolve_stdlib_root().ok_or_else(|| {
             format!(
                 "Cannot resolve import '{}': no stdlib path configured. \
-                 Use --stdlib-path or set BRIV_STDLIB_PATH.",
+                 Use --stdlib-path or set BRIEV_STDLIB_PATH.",
                 module
             )
         })?;

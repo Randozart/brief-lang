@@ -8,7 +8,7 @@
 
 The stdlib currently imports `__builtin_*` frgn functions from `lib/std/__builtin/*.bv`, which resolve through `ffi_name_to_location` → `foreign_functions` → Rust closures in `src/ffi/registry.rs`. This is "magic" — hardcoded Rust string match arms behind a `frgn` facade.
 
-New architecture: **stdlib implemented entirely in Briv** using arrow syntax (`<-`), projections (`:>`), and `uni` pattern matching — zero Rust-side string matching for collection operations.
+New architecture: **stdlib implemented entirely in Briev** using arrow syntax (`<-`), projections (`:>`), and `uni` pattern matching — zero Rust-side string matching for collection operations.
 
 ## What Fits Where
 
@@ -133,13 +133,13 @@ Insert after step 4 (defn alias from state), before step 5 (FFI registry):
     }
 ```
 
-After this, `Ok(value)` in Briv source never hits any FFI registry — it's caught here.
+After this, `Ok(value)` in Briev source never hits any FFI registry — it's caught here.
 
 ## Step 6 — Rewrite stdlib `.bv` files
 
 ### `lib/std/hashmap.bv`
 
-```briv
+```briev
 defn new_map<K,V>() -> HashMap<K,V> [true][term :> Size == 0] {
     term {};
 };
@@ -219,7 +219,7 @@ Delete the `import __builtin_HashMap_*` line.
 
 ### `lib/std/hashset.bv`
 
-```briv
+```briev
 defn new_set<T>() -> HashSet<T> [true][term :> Size == 0] {
     term {};
 };
@@ -300,7 +300,7 @@ Delete `import __builtin_HashSet_*`.
 
 ### `lib/std/stack.bv`
 
-```briv
+```briev
 defn new_stack<T>() -> Stack<T> [true][term :> Size == 0] {
     term [] :> AsStack;
 };
@@ -347,7 +347,7 @@ defn from_list<T>(items: List<T>) -> Stack<T> {
 
 ### `lib/std/queue.bv`
 
-```briv
+```briev
 defn new_queue<T>() -> Queue<T> [true][term :> Size == 0] {
     term [] :> AsQueue;
 };
@@ -396,14 +396,14 @@ defn from_list<T>(items: List<T>) -> Queue<T> {
 ### `lib/std/result.bv`
 
 Delete the `import __builtin_Result_*` line. Rewrite inspection using `uni`:
-```briv
+```briev
 defn Ok<T,E>(value: T) [true][term.is_ok()] -> Result<T,E> { term __builtin_Result_Ok(value); };
 defn Err<T,E>(error: E) [true][term.is_err()] -> Result<T,E> { term __builtin_Result_Err(error); };
 ```
 
 Keep `Ok`/`Err` constructors as FFI entries for now (they'll dispatch through the enum variant path once Step 5 is wired). The functional combinators (`result_map`, `and_then`, etc.) already use `uni` matching and don't need FFI.
 
-Note: After Step 5, `Ok(value)` in Briv source will dispatch natively via enum variant lookup, never hitting FFI. The `__builtin_Result_Ok` frgn can be deleted once that's verified.
+Note: After Step 5, `Ok(value)` in Briev source will dispatch natively via enum variant lookup, never hitting FFI. The `__builtin_Result_Ok` frgn can be deleted once that's verified.
 
 ### `lib/std/option.bv`
 

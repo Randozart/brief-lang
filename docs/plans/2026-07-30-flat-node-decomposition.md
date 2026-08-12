@@ -11,9 +11,9 @@
 
 The current batch-loop optimization (`emit_countable_batched_main`) uses heuristics to split a composite convergence node into an inner pure-compute loop and outer boundary guard checks. This produces correct results for nbody_newton (0.83× C) but has a correctness bug for knucleotide and mandelbrot (missing the count=0 periodic print), and the heuristics are fragile, poorly-framed, and require repeated iteration to maintain.
 
-The root cause is not the batch-loop mechanism — it's the **framing**. The batch-loop was written as a collection of heuristics (`extract_batch_size_from_guards`, `is_safe_to_hoist`, `let_to_field` remapping, count=0 peel) instead of being derived from Briv's own reactor design.
+The root cause is not the batch-loop mechanism — it's the **framing**. The batch-loop was written as a collection of heuristics (`extract_batch_size_from_guards`, `is_safe_to_hoist`, `let_to_field` remapping, count=0 peel) instead of being derived from Briev's own reactor design.
 
-**Briv's reactor design (from the user, re-iterated):**
+**Briev's reactor design (from the user, re-iterated):**
 1. If two nodes can fire together simultaneously, they should.
 2. If two nodes firing together would lead to a race (one reading / one writing / both writing the same field), deny compilation. **Writing is a XOR condition.**
 3. Nodes should be hoisted with additional preconditions/postconditions injected to logically separate them.
@@ -92,7 +92,7 @@ The batch-loop (`emit_countable_batched_main` in counter.rs) was written across 
 Both benchmarks have `when count % 5000000 == 0 { PrintLn!(...) }`.
 
 - **C reference:** fires at `count = 0, 5M, 10M, ..., 50M` — 11 times.
-- **Briv batch-loop:** fires at `count = 5M, 10M, ..., 50M` — 10 times (missing count=0).
+- **Briev batch-loop:** fires at `count = 5M, 10M, ..., 50M` — 10 times (missing count=0).
 
 The inner loop runs `batch_size` iterations from `count = 0` to `count = 4999999` with NO guard checks. The guard only fires in `.inner_exit_124` when `count = 5000000`. The `0 % 5000000 == 0` check at count=0 is inside the inner loop where guards are removed.
 
@@ -134,7 +134,7 @@ But this is still framing-dependent. The **principled** framing: the io node's p
 
 A composite node `{ compute; when cond { io }; }` is decomposed into flat nodes:
 
-```briv
+```briev
 // Original composite:
 node kn [count < N][count == N] {
     compute body...
@@ -250,7 +250,7 @@ entry:
   br label %.oh_0
 ```
 
-**Verification:** `BOUND=50 ./target/release/brivc build benchmarks/knucleotide.bv` — output should now have 11 lines matching C (including count=0). Same for mandelbrot.
+**Verification:** `BOUND=50 ./target/release/brievc build benchmarks/knucleotide.bv` — output should now have 11 lines matching C (including count=0). Same for mandelbrot.
 
 ### Phase 3: Formalize the Decomposition Semantics (~2h)
 
@@ -333,7 +333,7 @@ This plan documents the investigation of commit `c4cec5d9` (batch-loop guard hoi
 
 ---
 
-## 10. Appendix: Briv's Reactor Design (as re-iterated by the user)
+## 10. Appendix: Briev's Reactor Design (as re-iterated by the user)
 
 1. **If two nodes can fire together simultaneously, they should.** The reactor supports concurrent node firing.
 2. **If two nodes firing together would lead to a race condition due to one reading or one writing or both writing, deny compilation. Writing is a XOR condition.** Write conflicts (read-write or write-write on the same field) are denied at compile time.
@@ -377,7 +377,7 @@ The pre/post-increment distinction (which caused the 8-benchmark MISMATCH in the
 
 To give the decomposition pass a single construct to handle, statement-level `match` is normalized to a `when` sequence:
 
-```briv
+```briev
 match x {
     0 => { ... }
     1 => { ... }
@@ -387,7 +387,7 @@ match x {
 
 normalizes to:
 
-```briv
+```briev
 when x == 0 { ... };
 when x == 1 { ... };
 when !(x == 0 || x == 1) { ... };   // fallback = negation of ALL other arm predicates
@@ -505,8 +505,8 @@ end: ...
 
 ### 11.9 Interaction with Prior Findings
 
-- **nbody_newton source symmetry fix (2026-07-31)**: The C reference `nbody_newton_c.c` prints only the final energy once; the Briv source had a periodic print that C lacked. This asymmetry was masked by the batch-loop's count=0 miss. Removed the periodic print from `nbody_newton.bv` — Briv now prints the final energy once, matching C. The decomposition handles the remaining termination guard (swan song) via the existing post-hoist mechanism.
-- **The 8 post-increment benchmarks** (float_math, float_math_nonzero, cancel_math, queue_drain, queue_drain_idio, queue_drain_sym, kalman_filter_runtime, print_loop): Briv and C are symmetric (both check `count % N` after increment). The version-DAG captures this via the split point — the guard-present version does NOT fire at count=0 for post-increment guards. No source changes needed.
+- **nbody_newton source symmetry fix (2026-07-31)**: The C reference `nbody_newton_c.c` prints only the final energy once; the Briev source had a periodic print that C lacked. This asymmetry was masked by the batch-loop's count=0 miss. Removed the periodic print from `nbody_newton.bv` — Briev now prints the final energy once, matching C. The decomposition handles the remaining termination guard (swan song) via the existing post-hoist mechanism.
+- **The 8 post-increment benchmarks** (float_math, float_math_nonzero, cancel_math, queue_drain, queue_drain_idio, queue_drain_sym, kalman_filter_runtime, print_loop): Briev and C are symmetric (both check `count % N` after increment). The version-DAG captures this via the split point — the guard-present version does NOT fire at count=0 for post-increment guards. No source changes needed.
 - **Phase 1 read-write conflicts**: These make the guard-present→absent dependency sequential. The decomposition relies on this to preserve the guard-present version reading the post-absent-commit state.
 
 ---

@@ -120,7 +120,7 @@ allocation, no mount registry. The honest first slice that fits the model:
   lands on the right pool row.
 - E2E: a two-`<Counter />` page — incrementing one doesn't move the other;
   `b-when` unmounts one.
-- `cargo test --lib`, `cargo test --bin brivc`, Praetor, per commit.
+- `cargo test --lib`, `cargo test --bin brievc`, Praetor, per commit.
 
 ## Documentation
 

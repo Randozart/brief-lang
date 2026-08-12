@@ -17,7 +17,7 @@
 | `pattern` matching subsystem | ❌ None | ✅ `error-handling.bv` | **Med** |
 | `ellipsis` in slices (`..`) | ❌ None | ⚠️ In multislice code | **Med** |
 | `<-` arrow mutation | ❌ None | ✅ `arrow-mutation.bv` | **Med** |
-| Data Briv (`.dbv`/`.dbvl`/`.dbvs`) | ❌ None | ✅ `data-briv/` | **Med** |
+| Data Briev (`.dbv`/`.dbvl`/`.dbvs`) | ❌ None | ✅ `data-briev/` | **Med** |
 | `within N cycles` timeout | ❌ None | ✅ `timeout_test.ebv` | **Med** |
 | `wake` trigger modifier | ❌ None | ⚠️ Benchmarks only | **Med** |
 | visibility (`pub`/`pvt`/`sed`) | ✅ `visibility.md` | ❌ None | **Med** |
@@ -51,7 +51,7 @@
 7. **`pattern.md`** — `Pattern` enum: literal patterns, variant patterns, wildcard, tuple patterns, field patterns. Separate from match/uni.
 8. **`ellipsis.md`** — `..` in multislice coordinates, `Expr::Ellipsis`, `SliceCoordinate::Ellipsis`
 9. **`arrow.md`** — `<-` push/pop/discard/transfer for all collection types. Dispatch on value type.
-10. **`dbvl.md`** — Data Briv: `.dbv` data, `.dbvs` schema, `.dbvl` lines format, validation
+10. **`dbvl.md`** — Data Briev: `.dbv` data, `.dbvs` schema, `.dbvl` lines format, validation
 11. **`within.md`** (or add to `statement.md`) — `within N cycles` / `within N ms` timeout syntax on assignments
 12. **`visibility.md`** example — Update existing doc or add `examples/visibility-demo.bv` with `pub`, `pvt`, `sed` field examples
 

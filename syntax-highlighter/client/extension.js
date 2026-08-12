@@ -6,9 +6,9 @@ const os = require('os');
 
 let client;
 
-function findBriv(context) {
+function findBriev(context) {
     // 1. Try bundled binary (most reliable for Flatpak/Snap)
-    const bundledPath = path.join(context.extensionPath, 'client', 'bin', 'briv');
+    const bundledPath = path.join(context.extensionPath, 'client', 'bin', 'briev');
     if (fs.existsSync(bundledPath)) {
         return bundledPath;
     }
@@ -16,10 +16,10 @@ function findBriv(context) {
     // 2. Try common locations
     const home = os.homedir();
     const commonPaths = [
-        path.join(home, '.local/bin/briv'),
-        path.join(home, 'bin/briv'),
-        '/usr/local/bin/briv',
-        '/usr/bin/briv'
+        path.join(home, '.local/bin/briev'),
+        path.join(home, 'bin/briev'),
+        '/usr/local/bin/briev',
+        '/usr/bin/briev'
     ];
 
     for (const p of commonPaths) {
@@ -29,31 +29,31 @@ function findBriv(context) {
     }
 
     // 3. Try PATH as a last resort
-    return 'briv';
+    return 'briev';
 }
 
 function activate(context) {
-    const logPath = path.join(os.tmpdir(), 'briv-extension.log');
-    fs.appendFileSync(logPath, 'Briv extension activate called\n');
+    const logPath = path.join(os.tmpdir(), 'briev-extension.log');
+    fs.appendFileSync(logPath, 'Briev extension activate called\n');
 
-    const brivPath = findBriv(context);
-    fs.appendFileSync(logPath, `Using Briv binary at: ${brivPath}\n`);
+    const brievPath = findBriev(context);
+    fs.appendFileSync(logPath, `Using Briev binary at: ${brievPath}\n`);
 
-    // The server is implemented in the briv binary
+    // The server is implemented in the briev binary
     const serverOptions = {
-        run: { command: brivPath, args: ['lsp'], transport: TransportKind.stdio },
-        debug: { command: brivPath, args: ['lsp'], transport: TransportKind.stdio }
+        run: { command: brievPath, args: ['lsp'], transport: TransportKind.stdio },
+        debug: { command: brievPath, args: ['lsp'], transport: TransportKind.stdio }
     };
 
     // Options to control the language client
     const clientOptions = {
-        // Register the server for Briv, DBriv, and Strict Briv files
+        // Register the server for Briev, DBriev, and Strict Briev files
         documentSelector: [
-            { scheme: 'file', language: 'briv' },
+            { scheme: 'file', language: 'briev' },
             { scheme: 'file', language: 'rbv' },
             { scheme: 'file', language: 'ebv' },
-            { scheme: 'file', language: 'dbriv' },
-            { scheme: 'file', language: 'sbriv' },
+            { scheme: 'file', language: 'dbriev' },
+            { scheme: 'file', language: 'sbriev' },
             { scheme: 'file', language: 'srbv' },
             { scheme: 'file', language: 'sebv' }
         ],
@@ -65,8 +65,8 @@ function activate(context) {
 
     // Create the language client and start the client.
     client = new LanguageClient(
-        'brivLanguageServer',
-        'Briv Language Server',
+        'brievLanguageServer',
+        'Briev Language Server',
         serverOptions,
         clientOptions
     );

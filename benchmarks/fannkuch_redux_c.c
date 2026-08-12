@@ -1,6 +1,6 @@
-// Fannkuch-Redux C reference — symmetric with Briv benchmark.
+// Fannkuch-Redux C reference — symmetric with Briev benchmark.
 // 12 flat fields, clockwise rotation, checksum via modulo-13.
-// Output via stderr to match Briv's __print_int convention.
+// Output via stderr to match Briev's __print_int convention.
 // Compile: clang -O3 -march=native -o fannkuch_redux_c fannkuch_redux_c.c
 
 #include <stdlib.h>

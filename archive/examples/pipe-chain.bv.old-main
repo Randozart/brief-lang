@@ -5,7 +5,7 @@
 //   = add_one(double(add_one(5)))
 //   = add_one(double(6)) = add_one(12) = 13
 //
-// Run: briv-compiler build --llvm examples/pipe-chain.bv
+// Run: briev-compiler build --llvm examples/pipe-chain.bv
 
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };

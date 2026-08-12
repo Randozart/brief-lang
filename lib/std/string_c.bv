@@ -1,5 +1,5 @@
-// 2026-07-15: Convert Briv string to C-style null-terminated string.
-// Briv string format: [8-byte length (i64)][UTF-8 data].
+// 2026-07-15: Convert Briev string to C-style null-terminated string.
+// Briev string format: [8-byte length (i64)][UTF-8 data].
 // C string format: [data][null byte].
 // Allocates via Malloc# — caller must free.
 

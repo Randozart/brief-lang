@@ -42,7 +42,7 @@ pub mod vocab;
 pub mod features;
 pub mod type_universe;
 pub mod cache;
-pub mod dbriv;
+pub mod dbriev;
 pub mod derive;
 pub mod desugarer;
 pub mod encoding_registry;

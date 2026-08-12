@@ -1,23 +1,23 @@
-# Briv Compiler
+# Briev Compiler
 
-<img src="briv-logo-draft.jpg" alt="Briv" width="400"/>
+<img src="briev-logo-draft.jpg" alt="Briev" width="400"/>
 
-A transactional, contract-enforced language compiler. Briv treats program execution as verified state transitions with mathematical proofs at compile time.
+A transactional, contract-enforced language compiler. Briev treats program execution as verified state transitions with mathematical proofs at compile time.
 
 ## Status
 
-**Active development.** The core compiler (lexer, parser, typechecker, interpreter) is complete. Rendered Briv (`.rbv`) UI framework is in progress.
+**Active development.** The core compiler (lexer, parser, typechecker, interpreter) is complete. Rendered Briev (`.rbv`) UI framework is in progress.
 
-## What is Briv?
+## What is Briev?
 
-Briv is a declarative language where:
+Briev is a declarative language where:
 
 - **Transactions are contracts.** Every state change is proven valid before execution.
 - **No runtime surprises.** The compiler verifies all state transitions, not the runtime.
 - **Lock-free concurrency.** Preconditions act as hardware-level gates — no mutexes needed.
 - **Formal verification without boilerplate.** Reactive state machines with pre/post conditions.
 
-```briv
+```briev
 let balance: Int = 100;
 let withdrawn: Int = 0;
 
@@ -38,16 +38,16 @@ cargo install --path .
 
 ```bash
 # Type check without execution
-briv check program.bv
+briev check program.bv
 
 # Build/execute
-briv build program.bv
+briev build program.bv
 
 # Initialize a new project
-briv init my-project
+briev init my-project
 
 # Add a dependency
-briv register <name> --path <location>
+briev register <name> --path <location>
 ```
 
 ## Project Structure
@@ -62,7 +62,7 @@ src/
 ├── interpreter.rs  # Reactive execution engine
 ├── reactor.rs      # Event-driven reactor loop
 ├── resolver.rs     # Import resolution
-├── manifest.rs     # Dependency management (briv.toml)
+├── manifest.rs     # Dependency management (briev.toml)
 ├── cache.rs        # Incremental compilation cache
 ├── watch.rs        # File watching
 └── main.rs         # CLI
@@ -72,29 +72,29 @@ src/
 
 | Spec | Description |
 |------|-------------|
-| [briv-lang-spec.md](spec/briv-lang-spec.md) | Briv language specification |
-| [rendered-briv-spec-v4.md](spec/rendered-briv-spec-v4.md) | Rendered Briv (`.rbv`) UI framework |
+| [briev-lang-spec.md](spec/briev-lang-spec.md) | Briev language specification |
+| [rendered-briev-spec-v4.md](spec/rendered-briev-spec-v4.md) | Rendered Briev (`.rbv`) UI framework |
 | [ARCHITECTURE.md](spec/ARCHITECTURE.md) | Compiler architecture decisions |
-| [briv-compiler-build-plan.md](spec/briv-compiler-build-plan.md) | Implementation roadmap |
+| [briev-compiler-build-plan.md](spec/briev-compiler-build-plan.md) | Implementation roadmap |
 
 ## VSCode Extension
 
 Syntax highlighting for `.bv` and `.rbv` files is included in `syntax-highlighter/`. Install to VSCodium:
 
 ```bash
-cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/briv
+cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/briev
 ```
 
-## Rendered Briv (.rbv)
+## Rendered Briev (.rbv)
 
-Rendered Briv (`.rbv`) is a reactive UI framework where Briv logic and HTML coexist in a single file.
+Rendered Briev (`.rbv`) is a reactive UI framework where Briev logic and HTML coexist in a single file.
 
-<img src="r-briv-logo-draft.jpg" alt="Rendered Briv" width="400"/>
+<img src="r-briev-logo-draft.jpg" alt="Rendered Briev" width="400"/>
 
-The Briv logic owns all state; HTML and CSS are declarative projections of that state. No virtual DOM, no component tree — just bindings.
+The Briev logic owns all state; HTML and CSS are declarative projections of that state. No virtual DOM, no component tree — just bindings.
 
 ```html
-<script type="briv">
+<script type="briev">
   let count: Int = 0;
   txn increment [true][count == @count + 1] {
     &count = count + 1;
@@ -112,7 +112,7 @@ The Briv logic owns all state; HTML and CSS are declarative projections of that 
 
 ```bash
 # Compile .rbv to a directory
-briv build --backend webstack component.rbv --out dist/
+briev build --backend webstack component.rbv --out dist/
 ```
 
 This generates:

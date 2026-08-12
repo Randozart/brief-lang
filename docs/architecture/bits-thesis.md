@@ -3,7 +3,7 @@
 **Date:** 2026-07-11  
 **Updated:** 2026-07-30 (casting graph, `!>` syntax, `→#Bit` ban)  
 **Status:** Foundational  
-**Applies to:** Briv compiler core architecture, interpreter, type system, backends
+**Applies to:** Briev compiler core architecture, interpreter, type system, backends
 
 ---
 
@@ -42,7 +42,7 @@ architecture.
 
 Type declarations now use `: Protocol` instead of `: Bits`:
 
-```briv
+```briev
 // Before:
 type Int : Bits { maxbits <~ 64; ... op Add(#Int, #Int); };
 
@@ -65,7 +65,7 @@ Key changes:
 - **`=>` token** added for match arm syntax.
 - **`<~` removed** in favour of `!> key: value;` for all metadata properties.
 
-```briv
+```briev
 // Protocol default — nothing to override:
 type Int: #Int;
 type String: #String;
@@ -154,7 +154,7 @@ membership can be set freely by the standard library.
 **Using `#Bit` as a protocol is fully legitimate.** You can create new types
 that participate in it:
 
-```briv
+```briev
 type ReorganisedBit: #Bit {
     !> bits: 42;
     op CastTo(#String): my_custom_encode(#L);
@@ -233,7 +233,7 @@ knows about bits, and everything else is a metadata overlay.
 
 ## The Three Axioms
 
-The entire Briv language is built from exactly three hardcoded assumptions.
+The entire Briev language is built from exactly three hardcoded assumptions.
 Everything else — every type, every operation, every data structure — follows
 from these axioms and is defined in the standard library prelude.
 
@@ -289,7 +289,7 @@ interpretations** bound to bits via the `op` metadata system.
 
 ### Axiom 3: Runes Map to `op` Bindings
 
-The Briv language surface has operator symbols (runes): `+`, `-`, `*`, `/`,
+The Briev language surface has operator symbols (runes): `+`, `-`, `*`, `/`,
 `==`, `<`, `>`, `[]`, `<-`, etc. The frontend hardcodes the mapping from each
 rune to an `op` contract name:
 
@@ -306,10 +306,10 @@ rune to an `op` contract name:
 | `term` | `op Term` | Return/implicit terminal |
 
 The type determines the *binding* for each `op`. The binding is either a
-compiler intrinsic (identified by a trailing `#`) or a standard Briv function
+compiler intrinsic (identified by a trailing `#`) or a standard Briev function
 (no trailing `#`):
 
-```briv
+```briev
 type Int: #Int {
     op Add(#Int): add(#L, #R);       // compiler intrinsic — backend emits i64 add
 };
@@ -334,7 +334,7 @@ From these three axioms, the entire language emerges.
 ### 1. The Universal Value: `Value::Bits(Vec<u8>)`
 
 The interpreter has a single representational value type. Every value in the
-Briv universe — from a boolean to a 10-megabyte database index — is
+Briev universe — from a boolean to a 10-megabyte database index — is
 represented internally as a raw byte sequence:
 
 ```rust
@@ -411,7 +411,7 @@ once, not once per build.
 The `Void` type is not a base type. It is a zero‑width specialization of
 `Bits`:
 
-```briv
+```briev
 type Void {
     !> maxbits: 0;
     !> alignment: 1;
@@ -427,7 +427,7 @@ of "Void" as a concept. Void has no protocol membership — it is pure zero-widt
 
 Memory management is not a compiler intrinsic. `Box<T>` is a library type:
 
-```briv
+```briev
 type Box<T>: Bits {
     ptr: Ptr<T>;
     op Drop(self) = __free_heap_allocation#;
@@ -446,7 +446,7 @@ need to know what a "box" is — it only needs to know whether `op Drop` exists.
 `List`, `HashMap`, `HashSet`, `Stack`, `Queue` are not compiler primitives.
 They are structs defined in `lib/std/` that manage pointers to heap memory:
 
-```briv
+```briev
 type List<T>: Bits {
     ptr: Ptr<T>;
     len: Int;
@@ -494,7 +494,7 @@ etc.) replaces all three. The frontend matches on protocol membership via
 
 Any property the frontend does not recognize is stored, serialized to the
 `.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,
-`briv-llvm`, `briv-circt`) interprets it.
+`briev-llvm`, `briev-circt`) interprets it.
 
 ### 6. The Three Token Forms (Compiler Axioms)
 
@@ -511,7 +511,7 @@ These are compiler axioms — they must exist because the lexer must produce
 something. All semantic meaning is attached by the type's codec via the
 `formatting <~` property:
 
-```briv
+```briev
 codec HexColor {
     formatting <~ Bare;     // ← FF00FF is accepted
     parse      <~ parse_hex;  // converts text to Value::Bits
@@ -532,7 +532,7 @@ still works but is deprecated in favour of `op Parse`.)
 **2026-07-20:** The `formatting` metadata property and the `codec`
 declaration form are superseded by the `op Parse` protocol:
 
-```briv
+```briev
 // Old (codec + formatting):
 codec HexColor {
     formatting <~ Bare;
@@ -643,7 +643,7 @@ complex lowering rules that are brittle and hard to verify.
 Under the Bits thesis, a type's physical representation in the compiler is
 identical to its representation in the SMT solver:
 
-| Briv type | Compiler value | SMT-LIB sort |
+| Briev type | Compiler value | SMT-LIB sort |
 |-----------|---------------|--------------|
 | `Int` | `Value::Bits(8 bytes)` | `(_ BitVec 64)` |
 | `Bool` | `Value::Bits(1 byte)` | `(_ BitVec 8)` |
@@ -673,7 +673,7 @@ variable, and operations become networks of primitive logic gates. These gate
 networks are fed to the solver's CDCL (Conflict-Driven Clause Learning) SAT
 engine, which can solve millions of boolean variables in microseconds.
 
-Because Briv values are already raw bytes, the compiler can emit SMT-LIB
+Because Briev values are already raw bytes, the compiler can emit SMT-LIB
 bit-vector constraints directly — no type-to-logic lowering step. The solver
 receives the same bit-level problem the hardware would execute.
 
@@ -703,7 +703,7 @@ operations — no modulo constraints needed.
 
 In SMT solvers, modeling a heap with arbitrary pointer aliasing requires
 expensive array theory axioms (select/store with frame conditions). Because
-Briv's value semantics and linear ownership guarantee that variables are
+Briev's value semantics and linear ownership guarantee that variables are
 unaliased, independent bit-vectors, the solver never needs to reason about
 aliasing. Every variable maps to a fresh `(_ BitVec N)` constant. The
 solver's state space is flat and localized — no interconnected pointer web.
@@ -729,7 +729,7 @@ same representation.
 
 ## How This Enables Decoupled Backends
 
-The `.bvsa` (Briv Value Semantic Archive) is a serialized representation of
+The `.bvsa` (Briev Value Semantic Archive) is a serialized representation of
 the typed program. It contains:
 
 - Type definitions with all properties (frontend- and backend-intrinsic)
@@ -784,7 +784,7 @@ the casting graph.** The compiler's casting graph has hardcoded lanes between
 base protocols, but the type checker never matches on protocol names. It
 checks protocol membership via `is_protocol_member()`:
 
-```briv
+```briev
 type Int: #Int;     // Int participates in #Int protocol → backend knows to use i64 ALU
 type Float: #Float; // Float participates in #Float protocol → backend uses float ALU
 type Bool: #Bool;   // Bool participates in #Bool protocol → backend uses i1 compare
@@ -859,7 +859,7 @@ same intrinsic could map to `i32`. The `.bv` source doesn't change — only
 the backend's interpretation of `#Int` changes. The `!> bits` metadata on
 `Int` would be set per-target:
 
-```briv
+```briev
 // x86_64 backend: !> bits: 64 → i64
 // ARM32 backend:  !> bits: 32 → i32
 type Int: #Int { !> bits: TARGET_PTR_SIZE; };
@@ -901,10 +901,10 @@ cross-protocol conversion — is the right balance.
 
 ### Q8: How does FFI fit into this? C expects specific types.
 
-The `meld` keyword bridges Briv's type system to foreign (C) ABIs. It
-explicitly maps Briv types to C types with layout guarantees:
+The `meld` keyword bridges Briev's type system to foreign (C) ABIs. It
+explicitly maps Briev types to C types with layout guarantees:
 
-```briv
+```briev
 meld type FileHandle: C "int" {
     !> bits: 32;
     !> signed: true;

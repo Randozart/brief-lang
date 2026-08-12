@@ -1,7 +1,7 @@
 // process-spawn.bv — Process spawning and environment
 // 2026-07-15: Rewritten to use std/os (auto-imported via prelude).
 // spawn, spawn_with_output, argv, setenv need further work.
-// 2026-08-05 (Phase 6): no `main` in Briv — the entry is the first-firing node.
+// 2026-08-05 (Phase 6): no `main` in Briev — the entry is the first-firing node.
 
 let pid: Int = getpid();
 let cwd: Int = getcwd();

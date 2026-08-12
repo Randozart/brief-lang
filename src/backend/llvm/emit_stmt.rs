@@ -6,7 +6,7 @@
 // into scalars for alias analysis and vectorization.
 
 use crate::ast::{Expr, Statement, Type};
-use crate::backend::llvm::{emit_expr::member_briv_name, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{emit_expr::member_briev_name, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 /// Emit LLVM IR for a statement. Returns the last expression's register.
@@ -103,7 +103,7 @@ pub(super) fn emit_web_flush_batch(backend: &mut LlvmBackend, out: &mut String, 
     }).count();
     writeln!(out, "{}call void @__web_flush_state(i32 ptrtoint (ptr @__web_flush_buf to i32), i32 {})", indent, count).ok();
     // 2026-08-10: bump the generation counter so the JS `generation` getter
-    // observes this commit (HMR/SSR contract in rendered-briv-wasm.md).
+    // observes this commit (HMR/SSR contract in rendered-briev-wasm.md).
     let g = backend.fun.gen_reg();
     let g2 = backend.fun.gen_reg();
     writeln!(out, "{}{} = load i32, ptr @__web_generation", indent, g).ok();
@@ -224,7 +224,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let free_vars =
                         crate::backend::llvm::context::collect_free_vars(body, &params);
                     let symbol =
-                        format!("briv_closure_{}", backend.ctx.pending_closures.len());
+                        format!("briev_closure_{}", backend.ctx.pending_closures.len());
                     backend
                         .fun
                         .closure_lets
@@ -285,7 +285,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
             };
-            // 2026-08-04 (compiler-in-Briv): a top-level let that is reassigned
+            // 2026-08-04 (compiler-in-Briev): a top-level let that is reassigned
             // later was PRE-BOUND to an entry-block alloca (emit_definition's
             // pre-declaration). Store the value into that alloca and keep the
             // binding — reassignments then store into the same entry alloca,
@@ -446,7 +446,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             reg
                         } else {
                             let slot = backend.fun.gen_reg();
-                            // 2026-07-31: The slot type must match the binding's Briv
+                            // 2026-07-31: The slot type must match the binding's Briev
                             // type — an outlined guard param that is a FLOAT state field
                             // (e.g. `sum = 0.0` reset in accumulator_flush) is a `float`
                             // register; boxing it as i64 produces
@@ -578,7 +578,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             Expr::Identifier(n) => backend.fun.volatile_locals.contains(n),
                             _ => false,
                         };
-                        // 2026-08-04 (compiler-in-Briv): collection slots are
+                        // 2026-08-04 (compiler-in-Briev): collection slots are
                         // i64 — a String element (a ptr) must be ptrtoint'd
                         // before the store (`inner.data[len] = val`), or
                         // `store i64 <ptr>, ptr` is invalid IR.
@@ -878,7 +878,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // 2026-08-06 (endprogram plan): `endprogram` genuinely exits the
             // process (SPEC §11.5) — unlike `term`, which ends the transaction.
             // Emit the value's side effects (the print), then call the
-            // runtime's `__exit` (briv_rt.c, runs atexit cleanup) with the
+            // runtime's `__exit` (briev_rt.c, runs atexit cleanup) with the
             // value's i64 result as the exit code (adapt_to_i64); the bare
             // form exits 0.
             if backend.ctx.webstack_enabled {
@@ -1072,11 +1072,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 }
                 Expr::Identifier(name) if backend.ctx.field_index_map.get(name).is_some() => {
                     let fidx = *backend.ctx.field_index_map.get(name).unwrap();
-                    let is_vector = matches!(backend.ctx.field_briv_types.get(fidx),
+                    let is_vector = matches!(backend.ctx.field_briev_types.get(fidx),
                         Some(t) if matches!(t, Type::Vector(_, _)));
                     if is_vector {
                         let gep = backend.emit_state_gep(out, indent, "f", "%state", fidx);
-                        let n = backend.ctx.field_briv_types.get(fidx)
+                        let n = backend.ctx.field_briev_types.get(fidx)
                             .map(|t| backend.vector_element_count(t))
                             .unwrap_or(0) as i64;
                         let count = backend.fun.gen_reg();
@@ -1337,13 +1337,13 @@ pub(super) fn emit_strategy_member_call(
     };
     let Expr::Identifier(recv_name) = &recv else { return None; };
     let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return None; };
-    let type_name = match backend.ctx.field_briv_types.get(ridx) {
+    let type_name = match backend.ctx.field_briev_types.get(ridx) {
         Some(Type::Custom(n)) => n.clone(),
         Some(Type::Applied(n, _)) => n.clone(),
         _ => return None,
     };
     let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
-    let member = members.iter().find(|m| member_briv_name(m) == fn_name.as_str()).cloned();
+    let member = members.iter().find(|m| member_briev_name(m) == fn_name.as_str()).cloned();
     let Some(member) = member else { return None; };
     // Emit the receiver (the struct address) and pass the value register.
     let recv_tmp = backend.fun.gen_reg();

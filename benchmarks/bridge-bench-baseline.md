@@ -27,7 +27,7 @@ Implemented in three ways:
 | Variant | Implementation | Calling path |
 |---------|---------------|--------------|
 | **C FFI** (baseline) | Hand-written `str_prepend(const char* s, const char* prefix) -> char*` | Python → ctypes → C → `malloc`+`sprintf` → Python |
-| **Briv GLUE** | `briv_test_cstr_roundtrip(input_ptr: Int) -> Int` from `pp-types.bv` | Python → ctypes → `.so` → Briv → Py |
+| **Briev GLUE** | `briev_test_cstr_roundtrip(input_ptr: Int) -> Int` from `pp-types.bv` | Python → ctypes → `.so` → Briev → Py |
 | **Rust FFI** (reference) | Same logic implemented as Rust `unsafe extern "C" fn` | Python → ctypes → Rust FFI → Py |
 
 ### Metrics
@@ -43,8 +43,8 @@ Implemented in three ways:
 | `benchmarks/bridge/bench_glue_cross.py` | Main benchmark harness (Python) |
 | `benchmarks/bridge/str_prepend.c` | C reference implementation |
 | `benchmarks/bridge/str_prepend.rs` | Rust FFI reference (optional) |
-| `benchmarks/bridge/bridge_tests.bv` | Briv bridge test file |
-| `benchmarks/bridge/Makefile` | Build: C `.so`, Briv `.so`, optionally Rust `.so` |
+| `benchmarks/bridge/bridge_tests.bv` | Briev bridge test file |
+| `benchmarks/bridge/Makefile` | Build: C `.so`, Briev `.so`, optionally Rust `.so` |
 
 ## Integration with `build_and_bench.sh`
 
@@ -52,7 +52,7 @@ Add a `--bridge` flag that:
 1. Builds all three `.so` variants:
    ```bash
    gcc -shared -fPIC -o libstr_prepend_c.so str_prepend.c -lm
-   briv export bridge_tests.bv rust --out /tmp/br/
+   briev export bridge_tests.bv rust --out /tmp/br/
    # (produced .so already linked)
    ```
 2. Runs `bench_glue_cross.py` which imports each `.so` via ctypes

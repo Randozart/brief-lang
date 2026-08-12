@@ -61,7 +61,7 @@ at the layer that possesses the relevant domain knowledge, not earlier.
  . . . . . .    . . . . . . . . . . .    . . . . . . . . . .    . . . . . . . .
                                            
  defn add_i64     ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-   a: Int         │  Frontend    │       │  .dbvl       │       │  briv-llvm  │
+   a: Int         │  Frontend    │       │  .dbvl       │       │  briev-llvm  │
    b: Int         │  parser      │──────→│  archive     │──────→│              │
  -> Int           │              │       │              │       │  reads       │
  {                │  type-checks │       │  defn add_i64│       │  llvm_instr  │
@@ -186,16 +186,16 @@ To prevent collisions between backends, metadata keys follow a
 | Prefix | Consumed by | Example |
 |--------|-------------|---------|
 | `alloc` | Frontend + all backends | Allocation annotation | `"Stack"`, `0x4000_2000`, `"Arena", ptr` |
-| `llvm_*` | `briv-llvm` backend | `llvm_instr`, `llvm_asm`, `llvm_asm_constraints`, `llvm_entry_arg` |
-| `circt_*` | `briv-circt` hardware backend | `circt_op`, `circt_module` |
-| `hls_*` | `briv-circt` HLS pass | `hls_storage`, `hls_capacity` |
-| `wasm_*` | `briv-webstack` backend | `wasm_op`, `wasm_module` |
+| `llvm_*` | `briev-llvm` backend | `llvm_instr`, `llvm_asm`, `llvm_asm_constraints`, `llvm_entry_arg` |
+| `circt_*` | `briev-circt` hardware backend | `circt_op`, `circt_module` |
+| `hls_*` | `briev-circt` HLS pass | `hls_storage`, `hls_capacity` |
+| `wasm_*` | `briev-webstack` backend | `wasm_op`, `wasm_module` |
 | `gpu_*` | GPU backends (future) | `gpu_layout`, `gpu_workgroup_size` |
 | `interpreter_*` | Compile-time interpreter | `interpreter_impl` |
-| No prefix | All backends (standard Briv) | `bytes`, `alignment` |
+| No prefix | All backends (standard Briev) | `bytes`, `alignment` |
 
 Backends MUST NOT read keys with other backends' prefixes. For example,
-`briv-llvm` must never read `circt_op`, and `briv-circt` must never
+`briev-llvm` must never read `circt_op`, and `briev-circt` must never
 read `llvm_asm`. Unknown keys are silently ignored — this ensures
 forward compatibility when new backends add new keys.
 
@@ -209,12 +209,12 @@ forward compatibility when new backends add new keys.
 |------|------------|-----|
 | Metadata key is valid identifier | ✅ Yes | Parser: `key <~ value;` |
 | Metadata value is valid property type | ✅ Yes | Parser: string, int, bool, list, identifier |
-| Metadata key is not a Briv reserved word | ✅ Yes | Parser: reserved word check |
+| Metadata key is not a Briev reserved word | ✅ Yes | Parser: reserved word check |
 | Metadata value *contents* (e.g., `"add nsw i65"`) | ❌ No | Opaque — backend's job |
 | Metadata key is known to any backend | ❌ No | Any key is valid; unknown keys ignored |
 | Metadata is internally consistent (e.g., constr. match) | ❌ No | Backend validates its own constraints |
 
-### 4.2 LLVM Backend Responsibilities (`briv-llvm`)
+### 4.2 LLVM Backend Responsibilities (`briev-llvm`)
 
 | Metadata key | Validation performed |
 |--------------|---------------------|
@@ -225,7 +225,7 @@ forward compatibility when new backends add new keys.
 | `alloc` | If value is a string, validate it's a known allocation strategy (`"Stack"`, `"Heap"`, `"Arena"`, etc.) or error. If value is an integer (physical address), validate address is in the target memory map or error. If value is a list `[strategy, ptr]`, validate the pointer is non-null. Unknown string values produce an error (known key, unparseable value). |
 | Unknown keys | Silently ignored. |
 
-### 4.3 CIRCT Backend Responsibilities (`briv-circt`)
+### 4.3 CIRCT Backend Responsibilities (`briev-circt`)
 
 | Metadata key | Validation performed |
 |--------------|---------------------|
@@ -234,12 +234,12 @@ forward compatibility when new backends add new keys.
 | `hls_capacity` | Validate requested capacity (bytes) fits within physical device limits. Report available vs. requested. |
 | `llvm_*` keys | Silently ignored — not relevant to hardware synthesis. |
 
-### 4.4 Webstack Backend Responsibilities (`briv-webstack`)
+### 4.4 Webstack Backend Responsibilities (`briev-webstack`)
 
 > **2026-07-26:** The webstack backend is migrating from a TS emitter to a
 > WASM-first architecture. Section under review — the `GlueWebGenerator` will
 > read additional metadata keys (`web_import`, `dom_binding`, `state_layout`)
-> in the new pipeline. See `docs/architecture/features/rendered-briv-wasm.md`.
+> in the new pipeline. See `docs/architecture/features/rendered-briev-wasm.md`.
 
 | Metadata key | Validation performed |
 |--------------|---------------------|
@@ -259,8 +259,8 @@ forward compatibility when new backends add new keys.
 
 ## 5. Example Function with Multi-Backend Metadata
 
-```briv
-// A single Briv function that compiles to three different targets.
+```briev
+// A single Briev function that compiles to three different targets.
 // The frontend validates syntax and types.
 // Each backend reads its own keys.
 
@@ -285,9 +285,9 @@ What each layer validates:
 | Layer | Validates | Ignores |
 |-------|-----------|---------|
 | Frontend parser | Key `llvm_asm` is valid ident; value `"rdtsc"` is valid string | Everything else |
-| `briv-llvm` | `"rdtsc"` is valid x86 instruction; registers exist | `circt_op`, `wasm_op`, `interpreter_impl` |
-| `briv-circt` | `"hw.cycle_count"` is valid CIRCT op | `llvm_asm`, `wasm_op` |
-| `briv-webstack` | `"i64.const 0"` is valid WASM | `llvm_asm`, `circt_op` |
+| `briev-llvm` | `"rdtsc"` is valid x86 instruction; registers exist | `circt_op`, `wasm_op`, `interpreter_impl` |
+| `briev-circt` | `"hw.cycle_count"` is valid CIRCT op | `llvm_asm`, `wasm_op` |
+| `briev-webstack` | `"i64.const 0"` is valid WASM | `llvm_asm`, `circt_op` |
 | Interpreter | `"emulate_cycle_count"` exists in dispatch table | Everything else |
 
 ---
@@ -332,7 +332,7 @@ domain expertise to diagnose it.
 
 ## 7. Adding a New Backend
 
-A developer writing a custom backend (e.g., `briv-spirv` for Vulkan
+A developer writing a custom backend (e.g., `briev-spirv` for Vulkan
 compute shaders) follows this process:
 
 1. **Define metadata keys** with the convention prefix:
@@ -373,7 +373,7 @@ are needed to support a new backend.
 
 ### Syntax
 
-```briv
+```briev
 defn read_cycle_counter() -> UInt64 {
     llvm_asm <~ "rdtsc";
     llvm_asm_constraints <~ "={ax},={dx}";
@@ -455,16 +455,16 @@ For example, a CI pipeline might:
 
 ```bash
 # 1. Frontend produces archive
-briv compile src/main.bv --archive build/main.dbvl
+briev compile src/main.bv --archive build/main.dbvl
 
 # 2. Run LLVM backend — validates llvm_* keys
-briv-llvm build/main.dbvl --output build/a.out
+briev-llvm build/main.dbvl --output build/a.out
 
 # 3. Run CIRCT backend — validates circt_*, hls_* keys (same archive)
-briv-circt build/main.dbvl --output build/design.v
+briev-circt build/main.dbvl --output build/design.v
 
 # 4. Run custom compliance checker — validates pii_*, gdpr_* keys
-briv-compliance build/main.dbvl --output build/compliance-report.json
+briev-compliance build/main.dbvl --output build/compliance-report.json
 ```
 
 Each backend validates only its relevant keys. No backend can fail due to

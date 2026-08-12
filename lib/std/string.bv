@@ -1,7 +1,7 @@
 // Standard String Library
 //
 // Functions marked with 'frgn' require foreign implementation.
-// Functions with 'defn' are implemented natively in Briv.
+// Functions with 'defn' are implemented natively in Briev.
 // Functions with name# syntax are intrinsics (compiler-known).
 
 // ===== PURE FOREIGN (requires external implementation) =====
@@ -247,7 +247,7 @@ defn repeat(s: String, count: Int) [count >= 0][term .^Len == s .^Len * count] -
 // 2026-08-04 (out-observability plan, Phase 3): `IntToStr#` was removed from
 // the intrinsic table in ffd55677 (the casting graph's `Int → #String`
 // ExtCall lane owns this conversion). Use the cast, which resolves through the
-// graph — `.bv` emits `call ptr @int_to_str`, `.ebv` will emit a Briv digit
+// graph — `.bv` emits `call ptr @int_to_str`, `.ebv` will emit a Briev digit
 // loop. Undo: restore `term IntToStr#(n);` only if the intrinsic is ever
 // re-registered.
 defn to_string(n: Int) [true][term .^Len >= 0] -> String {

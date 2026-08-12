@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the authoritative specification for the Metropolitan FFI system implementation in Briv v10+. It encompasses the complete feature set: FFI return type taxonomy, address system, resource negotiation, syscall support, memory architecture, and migration path from v1.
+This document defines the authoritative specification for the Metropolitan FFI system implementation in Briev v10+. It encompasses the complete feature set: FFI return type taxonomy, address system, resource negotiation, syscall support, memory architecture, and migration path from v1.
 
 ## Part 1: FFI Return Type Taxonomy
 
@@ -17,7 +17,7 @@ This document defines the authoritative specification for the Metropolitan FFI s
 
 ### Syntax Examples
 
-```briv
+```briev
 // Standard FFI - returns Result, must handle errors
 frgn calculate(x: Float) -> Result<Float, MathError> from "math.toml";
 
@@ -83,7 +83,7 @@ For explicit control:
 
 ### Declarative Structs with Bit Packing
 
-```briv
+```briev
 struct Pixel {
     r: 4bits,
     g: 4bits, 
@@ -104,7 +104,7 @@ The compiler handles the layout - programmer declares intent, compiler figures a
 
 Resources declare data that comes from OS/kernel negotiation:
 
-```briv
+```briev
 // Aliases: rsrc and resource are interchangeable
 rsrc screen: FrameBuffer(320, 200);
 resource display: FrameBuffer(640, 480);
@@ -127,7 +127,7 @@ The following resource types auto-negotiate with the kernel:
 ### Resource Acquisition Protocol
 
 ```
-1. Declare resource in Briv
+1. Declare resource in Briev
        ↓
 2. Compiler generates kernel calls (open → ioctl → mmap)
        ↓
@@ -135,12 +135,12 @@ The following resource types auto-negotiate with the kernel:
        ↓
 4. Address returned and bound to variable
        ↓
-5. Briv logic uses @address to access
+5. Briev logic uses @address to access
 ```
 
 ### Resource Struct Form
 
-```briv
+```briev
 // Type with constructor-style args
 rsrc framebuffer: FrameBuffer(width: 320, height: 200);
 
@@ -160,7 +160,7 @@ txn draw [tick][true] {
 
 ### Pre-defined Resource Constructors
 
-```briv
+```briev
 // FrameBuffer: width, height in pixels, 32bpp
 rsrc fb: FrameBuffer(1920, 1080);
 
@@ -212,7 +212,7 @@ fd = "Int"
 
 For richer type information:
 
-```briv
+```briev
 // Raw syscall returns Int (file descriptor or error code)
 syscall open(path: String, flags: Int) -> Result<Int, Error>;
 
@@ -231,7 +231,7 @@ syscall open(path: String, flags: Int) -> Result<FileDescriptor, Error>;
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    BRIV MEMORY MODELS                       │
+│                    BRIEV MEMORY MODELS                       │
 ├────────────────┬──────────────────────────────────────────┤
 │   .ebv          │           .bv / .rbv                     │
 │  (Embedded)     │        (OS / Browser)                   │
@@ -324,7 +324,7 @@ The compiler performs escape analysis to determine memory placement:
 
 Existing code continues to work:
 
-```briv
+```briev
 // v1 style - still valid, auto-upgrades
 frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
@@ -340,5 +340,5 @@ Compiler auto-generates:
 
 ---
 
-*Last updated: Briv v10.2 (latest)*
+*Last updated: Briev v10.2 (latest)*
 *Supersedes: METROPOLITAN_FFI_V2.md, METROPOLITAN_FFI_V2_ENHANCEMENTS.md*

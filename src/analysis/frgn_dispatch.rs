@@ -30,7 +30,7 @@ use crate::target::BackendKind;
 pub enum ResolvedFrgn {
     /// Backend inlines directly (compile/link the source, call the symbol)
     Inline {
-        /// The foreign symbol name (from `as` or briv_name)
+        /// The foreign symbol name (from `as` or briev_name)
         symbol: String,
         /// If true, the backend should compile this source to .o first
         compile_source: bool,
@@ -56,7 +56,7 @@ pub enum ResolvedFrgn {
 /// A single step in a protocol transform chain.
 ///
 /// 2026-07-22: Describes how to go from one type representation to another
-/// at the FFI boundary. Multiple steps form a path from Briv type to
+/// at the FFI boundary. Multiple steps form a path from Briev type to
 /// foreign type (or vice versa).
 #[derive(Debug, Clone)]
 pub struct ProtocolStep {
@@ -109,9 +109,9 @@ pub fn resolve_single_frgn(
             let web_lang = find_language_by_extension(glue_targets, "mjs");
             if let Some(target) = web_lang {
                 let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
-                    .map(|(_, briv_type)| {
-                        let foreign_type = lookup_foreign_type(briv_type, &target.protocols, universe);
-                        compute_protocol_path(briv_type, &foreign_type, universe)
+                    .map(|(_, briev_type)| {
+                        let foreign_type = lookup_foreign_type(briev_type, &target.protocols, universe);
+                        compute_protocol_path(briev_type, &foreign_type, universe)
                             .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -133,7 +133,7 @@ pub fn resolve_single_frgn(
         let lib = protocol_config.resolve(default_triple, proto).map_err(|e| {
             format!(
                 "frgn '{}': {}",
-                fb.effective_briv_name(),
+                fb.effective_briev_name(),
                 e
             )
         })?;
@@ -160,7 +160,7 @@ pub fn resolve_single_frgn(
         return Ok(ResolvedFrgn::Unsupported(format!(
             "frgn '{}' has no file extension in its 'from' path. \
              Add a file extension so the compiler can determine the dispatch strategy",
-            fb.effective_briv_name()
+            fb.effective_briev_name()
         )));
     }
 
@@ -185,9 +185,9 @@ pub fn resolve_single_frgn(
         // 2026-07-22: Compute protocol transform for each parameter (one step each),
         // using the target's protocol mapping to derive the foreign type.
         let param_paths: Vec<ProtocolStep> = fb.inputs.iter()
-            .map(|(_, briv_type)| {
-                let foreign_type = lookup_foreign_type(briv_type, &target.protocols, universe);
-                compute_protocol_path(briv_type, &foreign_type, universe)
+            .map(|(_, briev_type)| {
+                let foreign_type = lookup_foreign_type(briev_type, &target.protocols, universe);
+                compute_protocol_path(briev_type, &foreign_type, universe)
                     .and_then(|steps| steps.into_iter().next().ok_or_else(|| "empty path".to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -217,7 +217,7 @@ pub fn resolve_single_frgn(
     Ok(ResolvedFrgn::Unsupported(format!(
         "frgn '{}' from '{}': extension '.{}' is not supported by the {} backend. \
          Add a GLUE registry entry in config/glue.dbv or use a supported extension (.c, .rs, .py, .js, .mjs)",
-        fb.effective_briv_name(),
+        fb.effective_briev_name(),
         ext,
         ext,
         match backend {
@@ -234,19 +234,19 @@ pub fn resolve_single_frgn(
 /// Compute the protocol path between two types for a frgn boundary.
 ///
 /// 2026-07-22: Uses the existing BFS in find_cast_path() + meld lookup
-/// to determine how to transform a Briv type to/from a foreign type.
+/// to determine how to transform a Briev type to/from a foreign type.
 /// Returns the shortest path by cost.
 ///
 /// Stub: Returns an identity path. Full implementation in Phase 3.
 pub fn compute_protocol_path(
-    briv_type: &crate::ast::Type,
+    briev_type: &crate::ast::Type,
     _foreign_type: &crate::ast::Type,
     universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> Result<Vec<ProtocolStep>, String> {
     // 2026-07-22: If types are structurally identical, return identity.
-    if briv_type == _foreign_type {
+    if briev_type == _foreign_type {
         return Ok(vec![ProtocolStep {
-            source: briv_type.clone(),
+            source: briev_type.clone(),
             target: _foreign_type.clone(),
             kind: TransformKind::Identity,
         }]);
@@ -254,9 +254,9 @@ pub fn compute_protocol_path(
 
     // 2026-07-22: Use BFS via find_cast_path if universe is available.
     if let Some(u) = universe {
-        let briv_key = type_to_key(briv_type);
+        let briev_key = type_to_key(briev_type);
         let foreign_key = type_to_key(_foreign_type);
-        if let Some(path) = crate::analysis::layout_optimizer::find_cast_path(u, &briv_key, &foreign_key) {
+        if let Some(path) = crate::analysis::layout_optimizer::find_cast_path(u, &briev_key, &foreign_key) {
             let steps = path_to_protocol_steps(&path);
             if !steps.is_empty() {
                 return Ok(steps);
@@ -266,23 +266,23 @@ pub fn compute_protocol_path(
 
     // 2026-07-22: Fallback: return a bitcast path (Cast(#Bits)).
     Ok(vec![ProtocolStep {
-        source: briv_type.clone(),
+        source: briev_type.clone(),
         target: _foreign_type.clone(),
         kind: TransformKind::Bitcast,
     }])
 }
 
-/// Look up the foreign protocol category for a Briv type, then map it
+/// Look up the foreign protocol category for a Briev type, then map it
 /// to a foreign type via the target's protocol mapping.
-/// Falls back to the Briv type's universe key if no protocol exists.
+/// Falls back to the Briev type's universe key if no protocol exists.
 fn lookup_foreign_type(
-    briv_type: &crate::ast::Type,
+    briev_type: &crate::ast::Type,
     protocols: &std::collections::HashMap<String, crate::glue::config::ProtocolEntry>,
     universe: Option<&crate::type_universe::TypeUniverse>,
 ) -> crate::ast::Type {
-    // Find the protocol category that this Briv type participates in
+    // Find the protocol category that this Briev type participates in
     if let Some(u) = universe {
-        if let Some(key) = briv_type.universe_key() {
+        if let Some(key) = briev_type.universe_key() {
             if let Some(rt) = u.get(key) {
                 // Look for a CastTo property that points to a protocol category
                 for prop_key in rt.properties.keys() {
@@ -297,16 +297,16 @@ fn lookup_foreign_type(
         }
     }
     // Fallback: derive from the type's name
-    match briv_type {
+    match briev_type {
         crate::ast::Type::Custom(name) => {
             let protocol_key = format!("#{}", name);
             if protocols.contains_key(&protocol_key) {
                 crate::ast::Type::HashWord(name.clone())
             } else {
-                briv_type.clone()
+                briev_type.clone()
             }
         }
-        _ => briv_type.clone(),
+        _ => briev_type.clone(),
     }
 }
 
@@ -437,13 +437,13 @@ mod tests {
 
     #[test]
     fn test_resolve_single_frgn_inline_with_as() {
-        // foreign_name = "c_symbol", briv_name = Some("briv_alias")
-        let fb = make_frgn_with_as("c_symbol", "briv_alias", "c");
+        // foreign_name = "c_symbol", briev_name = Some("briev_alias")
+        let fb = make_frgn_with_as("c_symbol", "briev_alias", "c");
         let targets = sample_glue_targets();
         let result = resolve_single_frgn(&fb, "c", &targets, BackendKind::Llvm, None).unwrap();
         match result {
             ResolvedFrgn::Inline { symbol, .. } => {
-                // Backend links against the C symbol, not the Briv alias
+                // Backend links against the C symbol, not the Briev alias
                 assert_eq!(symbol, "c_symbol");
             }
             other => panic!("Expected Inline, got {:?}", other),

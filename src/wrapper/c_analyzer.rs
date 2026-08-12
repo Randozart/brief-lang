@@ -22,7 +22,7 @@
 
 //! C Header Analyzer - Parses C header files to extract function signatures
 
-use super::{c_type_is_pointer, c_type_to_briv, parse_c_signature, AnalyzedFunction};
+use super::{c_type_is_pointer, c_type_to_briev, parse_c_signature, AnalyzedFunction};
 use std::fs;
 use std::path::Path;
 
@@ -105,16 +105,16 @@ pub fn analyze_c_header(header_path: &Path) -> Result<Vec<AnalyzedFunction>, Str
     Ok(functions)
 }
 
-/// Convert C function to Briv frgn sig format
+/// Convert C function to Briev frgn sig format
 pub fn c_func_to_frgn_sig(func: &AnalyzedFunction) -> String {
     let mut params = Vec::new();
 
     for (name, c_type) in &func.parameters {
-        let briv_type = c_type_to_briv(c_type);
-        params.push(format!("{}: {}", name, briv_type));
+        let briev_type = c_type_to_briev(c_type);
+        params.push(format!("{}: {}", name, briev_type));
     }
 
-    let return_type = c_type_to_briv(&func.return_type);
+    let return_type = c_type_to_briev(&func.return_type);
 
     if params.is_empty() {
         format!("frgn sig {}() -> {};", func.name, return_type)
@@ -189,10 +189,10 @@ mod tests {
     }
 
     #[test]
-    fn test_c_type_to_briv() {
-        assert_eq!(c_type_to_briv("int"), "Int");
-        assert_eq!(c_type_to_briv("float"), "Float");
-        assert_eq!(c_type_to_briv("char*"), "String");
-        assert_eq!(c_type_to_briv("void*"), "Data");
+    fn test_c_type_to_briev() {
+        assert_eq!(c_type_to_briev("int"), "Int");
+        assert_eq!(c_type_to_briev("float"), "Float");
+        assert_eq!(c_type_to_briev("char*"), "String");
+        assert_eq!(c_type_to_briev("void*"), "Data");
     }
 }

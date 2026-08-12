@@ -13,7 +13,7 @@ treated the same as a program that ran correctly in 0.001s.
 Second, contract bounds like `[b0 > 0.0 && b0 < 1.0]` are checked by the
 proof engine for correctness but never fed into the optimizer. FFI results
 are fully opaque — no interval, no `value_set_size`, no path pruning. This
-is a gap: Briv's contracts should inform the optimizer about what values
+is a gap: Briev's contracts should inform the optimizer about what values
 are possible.
 
 ---
@@ -64,7 +64,7 @@ Path strings: `"pure counter fold"`, `"folded SSA"`, `"enum dispatch"`,
 
 ### Syntax
 
-```briv
+```briev
 let x: Int <: [0..100] = some_source();
 let y: Int <: [lo..hi] = another_source();
 ```
@@ -156,7 +156,7 @@ The parser never knows whether a string was raw or escaped.
 
 ### Constraint
 
-```briv
+```briev
 let email: String <: [@"\A(?:[a-z0-9]+)"] = get_input();
 ```
 
@@ -176,7 +176,7 @@ Parses as `Type::Constrained(String, RangeConstraint::Regex(pattern))`.
 ### Where `@"..."` applies
 
 Everywhere a string literal is valid:
-```briv
+```briev
 frgn open(path: String) -> Int;
 let fd = open(@"C:\tmp\file");       // raw path
 let name: String <: [@"[A-Z]+"];     // regex constraint

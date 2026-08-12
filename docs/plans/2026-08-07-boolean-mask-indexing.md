@@ -12,7 +12,7 @@ follow-up; the codegen hard-errors on them (no silent wrongness).
 Scope decision: **mask indexing on `Data` (the length-prefixed byte buffer)
 and i64-slot typed vectors (`Int[N]`/`Bool[N]`)**. The byte case ships first;
 the typed case (later in this session) produces a heap `List<T>` of the
-selected elements via `briv_mask_select64`. General containers (`List[mask]`,
+selected elements via `briev_mask_select64`. General containers (`List[mask]`,
 Float vectors — the latter scalarize in the backend with no contiguous
 array) are rejected consistently in both.
 

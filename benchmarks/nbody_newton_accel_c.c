@@ -1,4 +1,4 @@
-// nbody_newton_accel_c.c — C reference for the Briv `accel` benchmark
+// nbody_newton_accel_c.c — C reference for the Briev `accel` benchmark
 // (benchmarks/nbody_newton_accel.bv). Central-force N-body, parallel over
 // bodies. Same f32 math, same init, same update, same observable (body 0's
 // x-position after BOUND steps). Env: BODYCOUNT (default 2048), BOUND

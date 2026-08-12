@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-25
 **Status:** Planned
-**Previous:** `docs/plans/2026-06-25-native-briv-io.md` (Phases 1–2, Ext A done)
+**Previous:** `docs/plans/2026-06-25-native-briev-io.md` (Phases 1–2, Ext A done)
 **Dependencies:** Phase 4 (`#!cfg`), Phase 3 (`lib/std/syscall.bv`)
 
 ---
@@ -10,14 +10,14 @@
 ## Goal
 
 Replace C runtime calls for I/O intrinsics with direct syscall-based `inop!`
-declarations guarded by `#!cfg(target_os == "linux")`, then shrink `briv_rt.c`
+declarations guarded by `#!cfg(target_os == "linux")`, then shrink `briev_rt.c`
 by removing dead shim code.
 
 ## Key Finding
 
 The LLVM backend already emits **direct libc calls** for most intrinsics
 (fprintf, open, read, write, exit, nanosleep, etc.). These do NOT go through
-`briv_rt.c` shims. The remaining intrinsics that use C shims are:
+`briev_rt.c` shims. The remaining intrinsics that use C shims are:
 
 | Intrinsic | Current C shim | Replace with |
 |---|---|---|
@@ -60,7 +60,7 @@ For each intrinsic that currently calls a C shim, change the LLVM codegen in
 The benchmark intrinsics (`PrintInt`, `PutChar`, `PrintFloat`) already use
 direct libc. Add `#!cfg(target_os == "linux")` alternatives using syscalls:
 
-```briv
+```briev
 // lib/std/bench/print.bv
 #!cfg(target_os == "linux") {
     inop! print_int(n: Int) -> Bool [true][true] {
@@ -79,9 +79,9 @@ versions remain. The `flatten_cfg` pass removes inactive arms before codegen.
 **Files created:** `lib/std/bench/` directory
 **Tests:** Benchmark harness uses `--correctness` to verify output matches C.
 
-### Step 3: Remove dead C shims from briv_rt.c (30 min)
+### Step 3: Remove dead C shims from briev_rt.c (30 min)
 
-Remove the following sections from `briv_rt.c`:
+Remove the following sections from `briev_rt.c`:
 - Section 1.5b (`__print`, `__print_int`, `__exit`) — already handled by direct libc in LLVM codegen
 - Section 1.9 (`__trg_timerfd_open/read`, `__trg_signalfd_open/read`) — handled by direct libc `timerfd_create`, `timerfd_read`, etc.
 - Phase A: `__readln__`, `__sort_list__`, `__reverse_list__`, `__range__` — can use direct libc
@@ -89,12 +89,12 @@ Remove the following sections from `briv_rt.c`:
 - Phase A: `__ioctl__`, `__isatty__` — direct libc already used
 - Phase A: `__spawn_with_output__`, `__spawn__` — convert to direct libc
 - Phase A: `__trim_left__`, `__trim_right__`, `__to_lower__`, `__contains_at__`, `__find_from__`, `__int_to_str__`, `__float_to_str__`, `__to_str`, `__splitn__` — string ops that can use direct libc
-- Phase B: all `briv_open` through `briv_fcntl` — direct libc already used in codegen
+- Phase B: all `briev_open` through `briev_fcntl` — direct libc already used in codegen
 - Phase C: all filesystem shims — direct libc already used in codegen
 - Phase D–H: all memory/IPC/signal/networking shims — direct libc already used in codegen
 - D12–D18: all shims — direct libc already used in codegen
 
-**Files modified:** `lib/runtime/briv_rt.c` (1744 lines → ~200 lines)
+**Files modified:** `lib/runtime/briev_rt.c` (1744 lines → ~200 lines)
 **Kept:** Signal handlers, timer setup, `__rt_init`, thread pool, `@ link` globals
 
 ### Step 4: Verify (10 min)
@@ -111,5 +111,5 @@ Remove the following sections from `briv_rt.c`:
 - `cargo build` — no warnings
 - `_ => return None;` fallthrough unchanged in all optimization passes
 - No weakening of existing optimization paths
-- Briv benchmarks pass correctness check
-- briv_rt.c still links (no removed symbols that are referenced)
+- Briev benchmarks pass correctness check
+- briev_rt.c still links (no removed symbols that are referenced)

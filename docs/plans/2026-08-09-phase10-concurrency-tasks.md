@@ -105,7 +105,7 @@ reference → LLVM codegen → tests), plus the Kani/verification obligations.
 | LLVM | `src/backend/llvm/emit_stmt.rs`, `emit_toplevel.rs` |
 | cancellation analysis | `src/analysis/effect.rs` (new) or `src/analysis/frgn_dispatch.rs` |
 | Kani | `src/kani/` |
-| docs/highlighter/spec | `spec/SPEC.md` §12, `syntax-highlighter/syntaxes/briv.tmLanguage.json`, `learn-briv/` |
+| docs/highlighter/spec | `spec/SPEC.md` §12, `syntax-highlighter/syntaxes/briev.tmLanguage.json`, `learn-briev/` |
 
 ## 4. Verification
 

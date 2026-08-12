@@ -1,4 +1,4 @@
-# Briv Compiler - CS Optimizations
+# Briev Compiler - CS Optimizations
 
 **Last Updated:** 2026-05-06  
 **Status:** Active document - updated with each tier
@@ -7,7 +7,7 @@
 
 ## Overview
 
-This document tracks algorithmic optimizations and smart design decisions that give Briv favorable complexity characteristics.
+This document tracks algorithmic optimizations and smart design decisions that give Briev favorable complexity characteristics.
 
 ---
 
@@ -17,7 +17,7 @@ This document tracks algorithmic optimizations and smart design decisions that g
 
 **Optimization:** Hash-based lookup instead of linear search
 
-```briv
+```briev
 // BEFORE (if using List): O(n) lookup
 defn lookup_linear(list: List<(String, Type)>, name: String) -> Option<Type> {
     let i: Int = 0;
@@ -44,7 +44,7 @@ defn lookup_map(map: HashMap<String, Type>, name: String) -> Option<Type> {
 
 **Optimization:** Hash-based set instead of linear search
 
-```briv
+```briev
 // BEFORE: O(n) contains check
 defn contains_linear(list: List<String>, item: String) -> Bool {
     let i: Int = 0;
@@ -71,7 +71,7 @@ defn contains_set(set: HashSet<String>, item: String) -> Bool {
 
 **Optimization:** Amortized O(1) append vs O(n) string concatenation
 
-```briv
+```briev
 // BEFORE: O(n²) for building string of length n
 let s = "";
 let i: Int = 0;
@@ -100,7 +100,7 @@ let s = sb.to_string();  // O(n)
 
 **Optimization:** Native Vec/VecDeque operations
 
-```briv
+```briev
 // Stack: O(1) push/pop
 defn stack_push<T>(stack: Stack<T>, item: T) -> Stack<T> {
     term stack.push(item);  // Vec push_back: O(1)
@@ -122,7 +122,7 @@ defn queue_enqueue<T>(queue: Queue<T>, item: T) -> Queue<T> {
 
 **Optimization:** Direct codepoint comparison vs table lookup
 
-```briv
+```briev
 // O(1) - single comparison
 defn is_digit(c: Char) -> Bool {
     term c >= '0' && c <= '9';  // 2 comparisons
@@ -142,7 +142,7 @@ defn is_digit_slow(c: Char) -> Bool {
 
 **Optimization:** ASCII offset arithmetic vs table lookup
 
-```briv
+```briev
 // O(1) - single arithmetic operation
 defn to_upper(c: Char) -> Char {
     [is_lower(c)] {
@@ -162,7 +162,7 @@ defn to_upper(c: Char) -> Char {
 
 **Optimization:** Single pass over source, no backtracking
 
-```briv
+```briev
 defn tokenize(source: String) -> List<Token> {
     let tokens = [];
     let i: Int = 0;
@@ -185,7 +185,7 @@ defn tokenize(source: String) -> List<Token> {
 
 **Optimization:** Direct string comparison after identifier read
 
-```briv
+```briev
 defn read_identifier(source: String, pos: Int) -> (Token, Int) {
     // Read identifier: O(k) where k = identifier length
     let (text, new_pos) = read_chars(source, pos);
@@ -207,7 +207,7 @@ defn read_identifier(source: String, pos: Int) -> (Token, Int) {
 
 **Optimization:** Direct token → precedence mapping
 
-```briv
+```briev
 defn operator_precedence(tok: Token) -> Int {
     unification tok(OpStar) = 11;
     unification tok(OpSlash) = 11;
@@ -229,7 +229,7 @@ defn operator_precedence(tok: Token) -> Int {
 
 **Optimization:** Single pass, no backtracking (LL(1) grammar)
 
-```briv
+```briev
 defn parse_expression(tokens: List<Token>) -> Expr {
     // Each token examined once: O(n)
     // Each production rule: O(1)
@@ -245,7 +245,7 @@ defn parse_expression(tokens: List<Token>) -> Expr {
 
 **Optimization:** Precedence climbing instead of shunting-yard
 
-```briv
+```briev
 // No intermediate data structures
 // No operator stack
 // Direct recursive calls based on precedence
@@ -271,7 +271,7 @@ defn parse_expr(precedence: Int) -> Expr {
 
 **Optimization:** Direct AST building during parse (no intermediate representation)
 
-```briv
+```briev
 // Single pass: source → tokens → AST
 // No parse tree → AST transformation needed
 defn compile(source: String) -> AST {
@@ -291,7 +291,7 @@ defn compile(source: String) -> AST {
 
 **Optimization:** Stack of HashMaps, search from innermost scope
 
-```briv
+```briev
 defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
     // Search from innermost to outermost
     let i: Int = ctx.current_scope;
@@ -314,7 +314,7 @@ defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
 
 **Optimization:** Union-Find with path compression (nearly O(1))
 
-```briv
+```briev
 defn unify(t1: Type, t2: Type, subst: Substitution) -> Substitution {
     // Apply substitutions: O(α(n)) with path compression
     // Bind variables: O(1) HashMap insert
@@ -331,7 +331,7 @@ defn unify(t1: Type, t2: Type, subst: Substitution) -> Substitution {
 
 **Optimization:** Separate declaration collection from checking
 
-```briv
+```briev
 // Pass 1: Collect all declarations - O(n)
 for item in program.items {
     add_to_context(item);  // O(1) HashMap insert
@@ -355,7 +355,7 @@ for item in program.items {
 
 **Optimization:** Single pass over expression tree
 
-```briv
+```briev
 defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     // Visit each node once: O(n)
     // Each node: O(1) pattern match + HashMap lookup
@@ -369,7 +369,7 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
 
 **Optimization:** Simplify during evaluation, not as separate pass
 
-```briv
+```briev
 defn eval_and_simplify(expr: Expr, state: SymbolicState) -> SymbolicValue {
     unification expr(ExprBinOp("+", left, right)) = {
         let left_val = eval_and_simplify(*left, state);
@@ -393,7 +393,7 @@ defn eval_and_simplify(expr: Expr, state: SymbolicState) -> SymbolicValue {
 
 **Optimization:** BFS with feasibility checking
 
-```briv
+```briev
 defn explore_paths(stmts: List<Statement>, state: SymbolicState) -> List<ExecutionPath> {
     let queue = [(stmts, state, [])];
     let paths = [];
@@ -423,7 +423,7 @@ defn explore_paths(stmts: List<Statement>, state: SymbolicState) -> List<Executi
 
 **Optimization:** Collect writes once, compare sets
 
-```briv
+```briev
 defn check_mutual_exclusion(txn1, txn2) -> ConflictResult {
     let writes1 = collect_writes(txn1.body);  // O(n)
     let writes2 = collect_writes(txn2.body);  // O(m)
@@ -446,7 +446,7 @@ defn check_mutual_exclusion(txn1, txn2) -> ConflictResult {
 
 **Optimization:** DFS-based cycle detection
 
-```briv
+```briev
 defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     // Build dependency graph: O(V + E)
     let deps = build_graph(txns);
@@ -476,7 +476,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
 
 **Planned Optimization:** Linear scan instead of graph coloring
 
-```briv
+```briev
 // Graph coloring: O(n²) or worse
 // Linear scan: O(n)
 defn allocate_registers(instrs: List<Instruction>) -> List<Instruction> {
@@ -508,7 +508,7 @@ defn allocate_registers(instrs: List<Instruction>) -> List<Instruction> {
 
 **Planned Optimization:** Tree pattern matching with maximal munch
 
-```briv
+```briev
 defn select_instructions(expr: Expr) -> List<Instruction> {
     // Maximal munch: greedily match largest pattern
     // O(n) - single pass over expression tree
@@ -528,7 +528,7 @@ defn select_instructions(expr: Expr) -> List<Instruction> {
 
 **Planned Optimization:** Single pass with sliding window
 
-```briv
+```briev
 defn peephole_optimize(instrs: List<Instruction>) -> List<Instruction> {
     let result = [];
     let i: Int = 0;

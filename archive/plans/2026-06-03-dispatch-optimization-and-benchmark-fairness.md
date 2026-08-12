@@ -6,9 +6,9 @@
 
 ## Motivation
 
-C beats Briv on sparse_dispatch by 141×. Investigation revealed this is partly a benchmark artifact (C's switch with empty `break;` cases is eliminated by clang) and partly a real codegen issue — Briv's `emit_reactor` evaluates all 8 txn preconditions serially, each on the **post-update** state of the previous txn (a cascade bug).
+C beats Briev on sparse_dispatch by 141×. Investigation revealed this is partly a benchmark artifact (C's switch with empty `break;` cases is eliminated by clang) and partly a real codegen issue — Briev's `emit_reactor` evaluates all 8 txn preconditions serially, each on the **post-update** state of the previous txn (a cascade bug).
 
-Separately, iir_filter and const_heavy show Briv winning by extreme margins because dead-field elimination removes work that C's `volatile` or `return` keeps alive. These benchmarks need cleaning and the philosophy around `#!exit` needs clarification.
+Separately, iir_filter and const_heavy show Briev winning by extreme margins because dead-field elimination removes work that C's `volatile` or `return` keeps alive. These benchmarks need cleaning and the philosophy around `#!exit` needs clarification.
 
 ## Philosophy
 
@@ -89,10 +89,10 @@ done:
 
 Remove artificial hacks. Accept what compilers eliminate.
 
-| Benchmark | C changes | Briv changes | Classification |
+| Benchmark | C changes | Briev changes | Classification |
 |-----------|-----------|---------------|----------------|
 | iir_filter | Remove `volatile long count` | None (`x==x` already stripped) | **Elimination frontier** — both converge to O(1) |
-| const_heavy | None | None | **Asymmetrical** — C observes `acc` via `return`, Briv correctly eliminates it |
+| const_heavy | None | None | **Asymmetrical** — C observes `acc` via `return`, Briev correctly eliminates it |
 | sparse_dispatch | Replace empty `break` with `acc_N += 1` per case, sum all 8 at end | Phase 1-3 make dispatch O(N) correctly | **Real work benchmark** |
 
 ### Phase 5 — Proper structurally-live benchmarks (future)

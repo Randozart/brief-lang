@@ -201,7 +201,7 @@ pub enum PropertyValue {
 pub enum OpBinding {
     /// Intrinsic function: AddI64#, Sqrt#, Malloc#
     Intrinsic(String),
-    /// User-defined Briv function: my_add
+    /// User-defined Briev function: my_add
     Function(String),
 }
 

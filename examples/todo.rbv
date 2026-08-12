@@ -1,5 +1,5 @@
 // todo.rbv — Todo list app
-// 2026-07-26: Removed old <script> wrapper — Briv code is now the default content
+// 2026-07-26: Removed old <script> wrapper — Briev code is now the default content
 
 import <std/collections>;
 

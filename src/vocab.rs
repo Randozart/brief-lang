@@ -22,7 +22,7 @@
 //!
 //! Status semantics:
 //! - `Canonical`: valid, exact-spelling vocabulary in the normative grammar.
-//! - `Removed`: no longer part of Briv; the parser must reject it (Phase 3)
+//! - `Removed`: no longer part of Briev; the parser must reject it (Phase 3)
 //!   with migration guidance. Retained here only so diagnostics can explain.
 //! - `Reserved`: intentionally unavailable to user identifiers for a future
 //!   language contract (`sed`, `pvt`, `reg`).
@@ -341,11 +341,11 @@ pub fn regenerate_highlighter_grammar(grammar_path: &std::path::Path) -> Result<
         .filter(|n| *n != "true" && *n != "false" && *n != "cyc" && *n != "ms"
             && *n != "s" && *n != "min" && *n != "ns")
         .collect();
-    keywords.push(kw_pattern(&control, "keyword.control.briv"));
+    keywords.push(kw_pattern(&control, "keyword.control.briev"));
 
     // Boolean and duration literals.
-    keywords.push(kw_pattern(&["true", "false"], "constant.language.briv"));
-    keywords.push(kw_pattern(&["cyc", "ns", "ms", "s", "min"], "keyword.other.time-unit.briv"));
+    keywords.push(kw_pattern(&["true", "false"], "constant.language.briev"));
+    keywords.push(kw_pattern(&["cyc", "ns", "ms", "s", "min"], "keyword.other.time-unit.briev"));
 
     // Intrinsics: `Name#`.
     let intrinsics: Vec<&str> = vocab.intrinsics.iter().map(|s| s.as_str()).collect();
@@ -356,7 +356,7 @@ pub fn regenerate_highlighter_grammar(grammar_path: &std::path::Path) -> Result<
             .collect::<Vec<_>>()
             .join("|");
         keywords.push(serde_json::json!({
-            "name": "support.function.intrinsic.briv",
+            "name": "support.function.intrinsic.briev",
             "match": format!("\\b({})\\b", joined)
         }));
     }
@@ -365,7 +365,7 @@ pub fn regenerate_highlighter_grammar(grammar_path: &std::path::Path) -> Result<
     let types: Vec<&str> = vec![
         "Int", "Float", "Bool", "String", "Char", "Void", "Ptr", "Bits",
     ];
-    keywords.push(kw_pattern(&types, "support.type.primitive.briv"));
+    keywords.push(kw_pattern(&types, "support.type.primitive.briev"));
 
     // Guard: canonical keywords must be exact-lowercase; no uppercase aliases.
     assert!(
@@ -376,11 +376,11 @@ pub fn regenerate_highlighter_grammar(grammar_path: &std::path::Path) -> Result<
     grammar["repository"]["keywords"]["patterns"] = serde_json::Value::Array(keywords);
     grammar["repository"]["types"]["patterns"] = serde_json::Value::Array(vec![
         serde_json::json!({
-            "name": "support.type.primitive.briv",
+            "name": "support.type.primitive.briev",
             "match": format!("\\b({})\\b", types.join("|"))
         }),
         serde_json::json!({
-            "name": "entity.name.type.custom.briv",
+            "name": "entity.name.type.custom.briev",
             "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
         }),
     ]);

@@ -16,7 +16,7 @@
 //!
 //! 2026-08-05 (normative spec Phase 0): the implementation plan
 //! (`docs/plans/2026-08-05-implement-normative-language-spec.md`) requires that
-//! every active shipped Briv/Data Briv file is discoverable and, once migration
+//! every active shipped Briev/Data Briev file is discoverable and, once migration
 //! is complete, parsed/typechecked under its declared target/profile (§23.4 of
 //! `spec/SPEC.md`). This module owns the single inventory of active source
 //! roots and extension classification so CI, LSP, the formatter, and future
@@ -33,26 +33,26 @@ use std::path::{Path, PathBuf};
 /// precede the base extension as separate segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
-    /// General Briv: `.bv` (and `.s.bv`, `.f.bv`).
-    Briv,
-    /// Embedded Briv: `.ebv`.
+    /// General Briev: `.bv` (and `.s.bv`, `.f.bv`).
+    Briev,
+    /// Embedded Briev: `.ebv`.
     Embedded,
-    /// Accelerator Briv: `.abv`.
+    /// Accelerator Briev: `.abv`.
     Accelerator,
-    /// Circuit Briv: `.cbv`.
+    /// Circuit Briev: `.cbv`.
     Circuit,
-    /// Rendered Briv: `.rbv`.
+    /// Rendered Briev: `.rbv`.
     Rendered,
-    /// Structured Data Briv: `.dbv`.
+    /// Structured Data Briev: `.dbv`.
     DataStructured,
-    /// Line-oriented Data Briv: `.dbvl`.
+    /// Line-oriented Data Briev: `.dbvl`.
     DataLine,
 }
 
 impl SourceKind {
     pub fn label(self) -> &'static str {
         match self {
-            SourceKind::Briv => "briv",
+            SourceKind::Briev => "briev",
             SourceKind::Embedded => "embedded",
             SourceKind::Accelerator => "accelerator",
             SourceKind::Circuit => "circuit",
@@ -136,7 +136,7 @@ pub fn classify(path: &Path) -> Option<SourceKind> {
         }
     }
     match base {
-        "bv" => Some(SourceKind::Briv),
+        "bv" => Some(SourceKind::Briev),
         "ebv" => Some(SourceKind::Embedded),
         "abv" => Some(SourceKind::Accelerator),
         "cbv" => Some(SourceKind::Circuit),
@@ -196,9 +196,9 @@ mod tests {
 
     #[test]
     fn classify_normative_extensions() {
-        assert_eq!(classify(Path::new("main.bv")), Some(SourceKind::Briv));
-        assert_eq!(classify(Path::new("main.s.bv")), Some(SourceKind::Briv));
-        assert_eq!(classify(Path::new("main.f.bv")), Some(SourceKind::Briv));
+        assert_eq!(classify(Path::new("main.bv")), Some(SourceKind::Briev));
+        assert_eq!(classify(Path::new("main.s.bv")), Some(SourceKind::Briev));
+        assert_eq!(classify(Path::new("main.f.bv")), Some(SourceKind::Briev));
         assert_eq!(classify(Path::new("main.ebv")), Some(SourceKind::Embedded));
         assert_eq!(classify(Path::new("kernel.abv")), Some(SourceKind::Accelerator));
         assert_eq!(classify(Path::new("chip.cbv")), Some(SourceKind::Circuit));

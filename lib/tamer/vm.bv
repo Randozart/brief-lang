@@ -1,4 +1,4 @@
-// 2026-07-26: Briv VM interpreter — struct array buffers.
+// 2026-07-26: Briev VM interpreter — struct array buffers.
 // Memory by Proof: all buffer bounds proven by contract preconditions.
 // No Alloc#, no flat pointer arithmetic.
 

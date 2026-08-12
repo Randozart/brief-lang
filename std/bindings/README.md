@@ -1,6 +1,6 @@
-# Briv Standard Library FFI Bindings
+# Briev Standard Library FFI Bindings
 
-These are Rust FFI bindings for operations Briv cannot do natively.
+These are Rust FFI bindings for operations Briev cannot do natively.
 
 ## Organization
 
@@ -9,7 +9,7 @@ These are Rust FFI bindings for operations Briv cannot do natively.
 - **string.toml** - String utilities (parsing, manipulation)
 - **time.toml** - Time and timing operations
 
-## What's NOT Here (Use Native Briv Instead)
+## What's NOT Here (Use Native Briev Instead)
 
 For these, use functions from `std/core.bv`:
 
@@ -18,12 +18,12 @@ For these, use functions from `std/core.bv`:
 - Conditionals: `choose_if()` for select logic
 - Predicates: `is_positive()`, `is_negative()`, `is_zero()`, `is_even()`
 
-Native Briv functions are proven at compile time and have no FFI overhead.
+Native Briev functions are proven at compile time and have no FFI overhead.
 
 ## Usage
 
-```briv
-# Use native Briv for simple math
+```briev
+# Use native Briev for simple math
 let x: Int = -5;
 let abs_x: Int = absolute(x);  # Uses std/core.bv
 
@@ -34,5 +34,5 @@ let root: Float = sqrt(16.0);  # Uses FFI to Rust
 
 ## Philosophy
 
-- **Native Briv**: State management, transactions, simple computation
+- **Native Briev**: State management, transactions, simple computation
 - **FFI Rust**: I/O, OS operations, transcendental math, string utilities

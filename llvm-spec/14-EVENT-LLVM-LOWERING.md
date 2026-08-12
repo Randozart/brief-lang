@@ -5,7 +5,7 @@
 **Version:** 1.0
 
 This document specifies how the LLVM backend (src/backend/llvm.rs) compiles
-the Briv event model into LLVM IR. It is the compilation counterpart to
+the Briev event model into LLVM IR. It is the compilation counterpart to
 specs/EVENT-MODEL.md.
 
 ## 1. `@ link sym` → External Global Declaration
@@ -153,7 +153,7 @@ no-op dispatch chain — it simply does:
 
 The user (or stdlib) provides sleep as a regular `frgn` + `node [true]`:
 
-```briv
+```briev
 // In std/io.bv:
 frgn __wait_for_event() -> Void from "libruntime";
 
@@ -205,7 +205,7 @@ For `trg name: Type @ 0xABCD;`:
 
 ### Type Mapping
 
-| Briv Type | LLVM Type | Alignment |
+| Briev Type | LLVM Type | Alignment |
 |-----------|-----------|-----------|
 | Bool | i8 | 1 |
 | Int | i64 | 8 |

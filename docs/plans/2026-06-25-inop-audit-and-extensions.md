@@ -51,7 +51,7 @@ emit a warning or error for unknown keys.
 ### A-4. Fn* lens naming — Not idiomatic (MEDIUM)
 
 **Problem:** `FnPtr`, `FnName` etc. use a `Fn` namespace inconsistent with
-Briv's lens conventions (`Size`, `IsEmpty`, `Contains`, `Keys`).
+Briev's lens conventions (`Size`, `IsEmpty`, `Contains`, `Keys`).
 
 **Proposal:** Rename `FnPtr` -> `Address`, `FnName` -> `Name`, etc.
 

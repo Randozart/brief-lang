@@ -5,7 +5,7 @@
 
 ## Goal
 
-Remove non-essential transpilation targets from CLI, keep only LLVM, Webstack, VHDL, and SystemVerilog. Make `briv build` default to LLVM backend with sensible defaults.
+Remove non-essential transpilation targets from CLI, keep only LLVM, Webstack, VHDL, and SystemVerilog. Make `briev build` default to LLVM backend with sensible defaults.
 
 ## Phase 1 — Remove CLI subcommands (main.rs only)
 
@@ -27,7 +27,7 @@ Update `print_usage()` (line 314-386):
 - Remove `wasm`, `rust`, `c`, `arm`, `cobol` lines
 - Keep `verilog`, `vhdl`, `webstack`
 
-## Phase 2 — Make `briv build` default to LLVM
+## Phase 2 — Make `briev build` default to LLVM
 
 Current `run_build()` for `.bv/.sbv` transpiles to Rust then `rustc`. Change to:
 - Run LLVM backend with sensible defaults

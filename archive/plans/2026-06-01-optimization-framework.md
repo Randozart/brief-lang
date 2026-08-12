@@ -2,7 +2,7 @@
 
 ## Scope
 
-Build the optimization framework described in `docs/design/determinism-and-optimization-frontier.md` into the Briv compiler. Each phase is independent (later phases depend on earlier ones) and verifiable against the existing test suite.
+Build the optimization framework described in `docs/design/determinism-and-optimization-frontier.md` into the Briev compiler. Each phase is independent (later phases depend on earlier ones) and verifiable against the existing test suite.
 
 ---
 
@@ -61,7 +61,7 @@ Concretize frontier variables and emit switch-dispatch fast paths.
 | 2.1 | **Region cloning** — given a region and one concretized frontier variable, fold the region with that variable set to a constant | `src/backend/llvm.rs` | `trg: Bool` → 2 `.ll` modules with `true`/`false` concretized |
 | 2.2 | **Switch dispatch** — emit `switch(trg_val) { case v0: path_0; ... }` for enumerated paths | `src/backend/llvm.rs` | Multi-way branch in generated IR |
 | 2.3 | **Residual fallback** — uncovered inputs fall through to segment-folded reactive execution | `src/backend/llvm.rs` | Partial coverage emits fallthrough block |
-| 2.4 | **Integration** — wire enumeration into the compilation pipeline, controlled by budget | `src/main.rs`, `src/backend/mod.rs` | `briv-compiler llvm --optimize-budget 1000 input.bv` works end-to-end |
+| 2.4 | **Integration** — wire enumeration into the compilation pipeline, controlled by budget | `src/main.rs`, `src/backend/mod.rs` | `briev-compiler llvm --optimize-budget 1000 input.bv` works end-to-end |
 
 ### Design Notes
 
@@ -105,7 +105,7 @@ Collapse multi-transaction chains into parallel schedules when the net effect is
 Every phase must satisfy:
 
 1. `cargo test --lib` — all 299+ existing tests pass
-2. IIR benchmark — Briv maintains ≥ C speed (currently 0.14s vs 0.22s)
+2. IIR benchmark — Briev maintains ≥ C speed (currently 0.14s vs 0.22s)
 3. Phase-specific new tests (unit tests for new analysis, integration tests for new emission)
 
 ---

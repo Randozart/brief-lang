@@ -7,7 +7,7 @@
 //   1. `defn main()` exists (no explicit entry!): synthesize
 //        let __script_done: Bool = false;
 //        node __script_main [__script_done == false][__script_done] {
-//            <call to main() — emitted as briv_main by the backend>;
+//            <call to main() — emitted as briev_main by the backend>;
 //            __script_done = true;
 //        };
 //   2. Only bare top-level statements (TopLevel::Statement Let) and no
@@ -149,7 +149,7 @@ fn resolve_script(program: &mut Vec<TopLevel>) -> Result<(), String> {
     // Case 1: defn main — the node just calls it once.
     if has_main_defn(program) {
         let body = vec![
-            // The backend renames `defn main` → `briv_main`; calling `main()`
+            // The backend renames `defn main` → `briev_main`; calling `main()`
             // in the AST resolves to the same defn.
             Statement::Expression(Expr::Call("main".into(), vec![], None)),
             Statement::Assign(

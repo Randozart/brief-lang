@@ -26,4 +26,4 @@ on every `-> Type [pre][post]` syntax. Remove the note emission.
 ## Fix 3: Remove `let mut` from volatile-io.bv and target-import.bv
 
 Replace 8 occurrences of `let mut` with `let` across both files.
-Variables in Briv are mutable by default — `mut` is not a keyword.
+Variables in Briev are mutable by default — `mut` is not a keyword.

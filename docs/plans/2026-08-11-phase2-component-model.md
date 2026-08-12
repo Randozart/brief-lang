@@ -143,7 +143,7 @@ state is a single global `%State`) — planned here, implemented in a follow-up.
   - more than one → hard error "ambiguous — multiple transactions write
     'field'".
 - Value marshalling is **type-driven** (no name matching): the txn param type
-  (from the Briv signature in `items`) selects `_writeString` (#String),
+  (from the Briev signature in `items`) selects `_writeString` (#String),
   `Number(...)` (#Int/#Float), checkbox `.checked` (#Bool).
 - The resolution map `field → (txn, param_ty)` is extracted in `codegen` from
   `b.ctx.transition_graph` + `items`, returned alongside `web_layout`, and
@@ -178,7 +178,7 @@ state is a single global `%State`) — planned here, implemented in a follow-up.
   an explicit input event, not a view expression.
 - No new compiler knowledge of specific types: b-bind marshalling is param-type
   driven; b-each width comes from the state layout row (size/tag), never from
-  Briv type names.
+  Briev type names.
 - Phase 1 behavior preserved: Text/Show/Hide/Trigger/Class/Attr/Style and the
   `.s` strict SRBV verification unchanged. Full suite stays green.
 - `b-each`+`b-when` on the same subtree: unsupported in 2a (a hard diagnostic,
@@ -191,8 +191,8 @@ state is a single global `%State`) — planned here, implemented in a follow-up.
    + marshalling + error tests).
 3. 2a3 `b-each`+`b-key` (Each JS emission + reconciliation + item renderer +
    tests).
-4. Verify: `cargo test --lib`, `cargo test --bin brivc`, Praetor changed files,
-   E2E `brivc build` on a `.rbv` exercising all three + the dom-shim output.
+4. Verify: `cargo test --lib`, `cargo test --bin brievc`, Praetor changed files,
+   E2E `brievc build` on a `.rbv` exercising all three + the dom-shim output.
 5. Phase 2b plan doc (mount registry) follows as its own plan.
 
 ## Documentation updates

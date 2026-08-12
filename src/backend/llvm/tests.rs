@@ -114,7 +114,7 @@ fn test_no_accel_no_kernel_blob() {
     let program = vec![state_count(), make_txn("plain", vec![])];
     let output = backend.generate(&program, None);
     assert!(
-        !output.contains("briv_kernel_"),
+        !output.contains("briev_kernel_"),
         "no accel body must not embed kernels; got:\n{}",
         &output[output.len().saturating_sub(2000)..]
     );
@@ -350,7 +350,7 @@ fn mask_index_program() -> Vec<TopLevel> {
 fn test_mask_index_emits_gather_and_bmask_constant() {
     let mut backend = LlvmBackend::new();
     let output = backend.generate(&mask_index_program(), None);
-    assert!(output.contains("@briv_mask_select"),
+    assert!(output.contains("@briev_mask_select"),
         "mask index must call the runtime gather helper");
     assert!(output.contains("@bmask.0"),
         "a constant Boolean mask must be interned as a @bmask global");
@@ -409,7 +409,7 @@ fn mask_index_typed_program() -> Vec<TopLevel> {
 fn test_mask_index_typed_emits_select64() {
     let mut backend = LlvmBackend::new();
     let output = backend.generate(&mask_index_typed_program(), None);
-    assert!(output.contains("@briv_mask_select64"),
+    assert!(output.contains("@briev_mask_select64"),
         "an Int-vector mask index must call the typed gather helper");
     assert!(output.contains("ptrtoint ptr"),
         "the List result must be boxed to an i64 handle like emit_heap_seq");
@@ -468,7 +468,7 @@ fn test_mask_index_list_emits_element_gep() {
     let output = backend.generate(&mask_index_list_program(), None);
     assert!(output.contains("getelementptr i64, ptr"),
         "the heap-List mask gather must GEP past the length header");
-    assert!(output.contains("@briv_mask_select64"),
+    assert!(output.contains("@briev_mask_select64"),
         "the heap-List mask index must call the typed gather helper");
 }
 
@@ -523,7 +523,7 @@ fn mask_index_f32_program() -> Vec<TopLevel> {
 fn test_mask_index_f32_emits_float_gather() {
     let mut backend = LlvmBackend::new();
     let output = backend.generate(&mask_index_f32_program(), None);
-    assert!(output.contains("@briv_mask_select_f32"),
+    assert!(output.contains("@briev_mask_select_f32"),
         "a Float vector mask must call the f32 gather helper");
     assert!(output.contains("ptrtoint ptr"),
         "the List<Float> result must be boxed to an i64 handle");
@@ -1673,25 +1673,25 @@ fn test_inline_directive_absent_no_extra_attr() {
 }
 
 #[test]
-fn test_briv_accel_rt_self_test() {
+fn test_briev_accel_rt_self_test() {
     // 2026-08-06 (accel plan): the device-agnostic runtime's generic layer
     // (selection, pack math, dispatch, probe gate) is exercised standalone via
-    // its BRIV_ACCEL_SELF_TEST main — no device required. TOCTOU-safe temp
+    // its BRIEV_ACCEL_SELF_TEST main — no device required. TOCTOU-safe temp
     // output name (pid + atomic counter).
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
     static SELFTEST_SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SELFTEST_SEQ.fetch_add(1, Ordering::Relaxed);
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let rt = std::path::Path::new(&manifest).join("lib/runtime/briv_accel_rt.c");
+    let rt = std::path::Path::new(&manifest).join("lib/runtime/briev_accel_rt.c");
     let out = std::env::temp_dir().join(format!(
-        "briv_accel_selftest_{}_{}",
+        "briev_accel_selftest_{}_{}",
         std::process::id(),
         seq
     ));
     let compile = Command::new("cc")
         .arg("-Wall")
-        .arg("-DBRIV_ACCEL_SELF_TEST")
+        .arg("-DBRIEV_ACCEL_SELF_TEST")
         .arg(&rt)
         .arg("-ldl")
         .arg("-o")
@@ -1700,13 +1700,13 @@ fn test_briv_accel_rt_self_test() {
         .unwrap();
     assert!(
         compile.status.success(),
-        "briv_accel_rt self-test must compile: {}",
+        "briev_accel_rt self-test must compile: {}",
         String::from_utf8_lossy(&compile.stderr)
     );
     let run = Command::new(&out).output().unwrap();
     assert!(
         run.status.success(),
-        "briv_accel_rt self-test must pass: {}",
+        "briev_accel_rt self-test must pass: {}",
         String::from_utf8_lossy(&run.stderr)
     );
     let _ = std::fs::remove_file(&out);
@@ -1721,7 +1721,7 @@ fn test_accel_descriptors_emit() {
     let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
     backend.ctx.field_index_map.insert("a".to_string(), 0);
     backend.ctx.field_types.push("[16 x float]".to_string());
-    backend.ctx.field_briv_types.push(Type::Vector(
+    backend.ctx.field_briev_types.push(Type::Vector(
         Box::new(Type::Custom("Float".to_string())),
         vec![crate::ast::Dimension::Anonymous(16)],
     ));
@@ -1733,11 +1733,11 @@ fn test_accel_descriptors_emit() {
     };
     let (ir, idx_of) = crate::backend::llvm::kernel::emit_accel_descriptors(&backend, &[blob]);
     assert_eq!(idx_of["force"], 0, "txn → descriptor index");
-    assert!(ir.contains("%briv.field = type { ptr, i32, i64, i64, i64, i32 }"), "field type");
-    assert!(ir.contains("%briv.kernel = type { ptr, i32, i32, i32, ptr }"), "kernel type");
-    assert!(ir.contains("@briv_accel_descs"), "descs table");
-    assert!(ir.contains("declare i32 @briv_accel_init(ptr, i32)"), "init decl");
-    assert!(ir.contains("declare i32 @briv_accel_launch(i32, ptr, i64)"), "launch decl");
+    assert!(ir.contains("%briev.field = type { ptr, i32, i64, i64, i64, i32 }"), "field type");
+    assert!(ir.contains("%briev.kernel = type { ptr, i32, i32, i32, ptr }"), "kernel type");
+    assert!(ir.contains("@briev_accel_descs"), "descs table");
+    assert!(ir.contains("declare i32 @briev_accel_init(ptr, i32)"), "init decl");
+    assert!(ir.contains("declare i32 @briev_accel_launch(i32, ptr, i64)"), "launch decl");
     // a: array, host_offset 0 (fidx 0), elem 4 (float), count 16, write.
     assert!(ir.contains("i32 1, i64 0, i64 4, i64 16, i32 1"), "field entry: {ir}");
 }
@@ -1753,15 +1753,15 @@ fn test_accel_wrapper_emits_dispatch() {
     backend.accel_kernel_idx.insert("force".to_string(), 0);
     backend.ctx.field_index_map.insert("i".to_string(), 0);
     backend.ctx.field_types.push("i64".to_string());
-    backend.ctx.field_briv_types.push(Type::int());
+    backend.ctx.field_briev_types.push(Type::int());
     let entry = accel_test_entry("a", false); // Probe: verdict gate
     backend.accel_entries.insert("force".to_string(), entry);
     let mut out = String::new();
     backend.emit_accel_dispatch_wrapper(&mut out, "force");
     assert!(out.contains("define void @txn_force("), "wrapper define: {out}");
-    assert!(out.contains("@briv_accel_init(ptr @briv_accel_descs, i32 1)"), "lazy init");
-    assert!(out.contains("load i32, ptr @briv_accel_verdict"), "probe verdict gate");
-    assert!(out.contains("call i32 @briv_accel_launch(i32 0, ptr %state, i64 16)"), "launch call: {out}");
+    assert!(out.contains("@briev_accel_init(ptr @briev_accel_descs, i32 1)"), "lazy init");
+    assert!(out.contains("load i32, ptr @briev_accel_verdict"), "probe verdict gate");
+    assert!(out.contains("call i32 @briev_accel_launch(i32 0, ptr %state, i64 16)"), "launch call: {out}");
     // Design A: one dispatch covers all N work-items → fast-forward i to 16 so
     // the `[i < N]` counted loop exits after this single firing.
     assert!(out.contains("store i64 16, ptr %"), "counter fast-forward: {out}");
@@ -1805,24 +1805,24 @@ fn test_accel_probe_functions_emit() {
     backend.ctx.state_size_bytes = 32;
     backend.ctx.field_index_map.insert("i".to_string(), 0);
     backend.ctx.field_types.push("i64".to_string());
-    backend.ctx.field_briv_types.push(Type::int());
+    backend.ctx.field_briev_types.push(Type::int());
     backend.ctx.field_index_map.insert("a".to_string(), 1);
     backend.ctx.field_types.push("[4 x float]".to_string());
-    backend.ctx.field_briv_types.push(Type::Vector(
+    backend.ctx.field_briev_types.push(Type::Vector(
         Box::new(Type::Custom("Float".to_string())),
         vec![crate::ast::Dimension::Anonymous(4)],
     ));
     backend.accel_entries.insert("force".to_string(), accel_test_entry("a", true));
     let mut out = String::new();
     backend.emit_accel_probe_functions(&mut out, "force");
-    assert!(out.contains("define void @briv_accel_probe_cpu_force(ptr %state)"), "cpu lane: {out}");
+    assert!(out.contains("define void @briev_accel_probe_cpu_force(ptr %state)"), "cpu lane: {out}");
     assert!(out.contains("call void @txn_force_cpu(ptr %state)"), "cpu lane runs the loop");
-    assert!(out.contains("define void @briv_accel_probe_gpu_force(ptr %state)"), "gpu lane: {out}");
-    assert!(out.contains("call i32 @briv_accel_launch(i32 0, ptr %state, i64 16)"), "gpu lane launch");
-    assert!(out.contains("define i8 @briv_accel_gpu_ok_force(ptr %a, ptr %b, double %tol)"), "gate: {out}");
+    assert!(out.contains("define void @briev_accel_probe_gpu_force(ptr %state)"), "gpu lane: {out}");
+    assert!(out.contains("call i32 @briev_accel_launch(i32 0, ptr %state, i64 16)"), "gpu lane launch");
+    assert!(out.contains("define i8 @briev_accel_gpu_ok_force(ptr %a, ptr %b, double %tol)"), "gate: {out}");
     assert!(out.contains("fcmp oge float"), "float tolerance compare");
-    assert!(out.contains("define void @briv_accel_run_probe_force(ptr %state)"), "run_probe: {out}");
-    assert!(out.contains("store i32 %v, ptr @briv_accel_verdict_force"), "verdict commit");
+    assert!(out.contains("define void @briev_accel_run_probe_force(ptr %state)"), "run_probe: {out}");
+    assert!(out.contains("store i32 %v, ptr @briev_accel_verdict_force"), "verdict commit");
 }
 
 #[test]
@@ -1860,7 +1860,7 @@ fn test_endprogram_emits_process_exit() {
 #[test]
 fn test_beginprogram_entry_loop_emits_flag_and_goal_clear() {
     // 2026-08-06 (beginprogram plan): a beginprogram node emits its entry flag
-    // (@briv_begin_<name>, true until the goal) and a goal-check that clears
+    // (@briev_begin_<name>, true until the goal) and a goal-check that clears
     // it — `[beginprogram && i < N]` drives a one-shot entry loop with no
     // phase gate.
     let mut backend = LlvmBackend::new();
@@ -1915,11 +1915,11 @@ fn test_beginprogram_entry_loop_emits_flag_and_goal_clear() {
     });
     let output = backend.generate(&vec![i_state, init], None);
     assert!(
-        output.contains("@briv_begin_init = private global i1 1"),
+        output.contains("@briev_begin_init = private global i1 1"),
         "entry flag must emit: {output}"
     );
     assert!(
-        output.contains("store i1 false, ptr @briv_begin_init"),
+        output.contains("store i1 false, ptr @briev_begin_init"),
         "goal-check must clear the flag: {output}"
     );
 }
@@ -3942,7 +3942,7 @@ fn test_frgn_ptr_declare() {
     let program = vec![
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "test_fn".to_string(),
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("arg".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -3976,7 +3976,7 @@ fn test_frgn_ptr_return() {
     let program = vec![
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "make_ptr".to_string(),
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("n".to_string(), Type::int())],
@@ -4079,7 +4079,7 @@ fn test_addr_of_struct_literal() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_ptr".to_string(),
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -4166,7 +4166,7 @@ fn test_frgn_ptr_param_inttoptr() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_ptr".to_string(),
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -4419,7 +4419,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
         }),
         TopLevel::ForeignBinding(ForeignBinding {
             foreign_name: "use_methods".to_string(),
-            briv_name: None,
+            briev_name: None,
             from: FromSpec::CompilerRegistry("c".to_string()),
             target: ForeignTarget::C,
             inputs: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
@@ -4998,7 +4998,7 @@ fn test_out_let_computation_survives() {
 
 /// 2026-08-04 (Phase 4, .ebv heap reframe): an embedded target with String
 /// state must NOT error — the static bump arena (@embedded_heap) provides a
-/// heap without @malloc/briv_rt.c. The old hard rejection was a vestige of
+/// heap without @malloc/briev_rt.c. The old hard rejection was a vestige of
 /// the pre-split .ebv/.cbv entanglement; the heap rejection belongs to .cbv
 /// (CIRCT synthesizes hardware), not .ebv (LLVM embedded).
 #[test]
@@ -5235,12 +5235,12 @@ fn test_legacy_println_not_rewritten_by_plugin() {
 }
 
 /// 2026-08-01 (B1): String == / != on #String operands emits a content
-/// comparison (briv_str_eq) instead of `icmp eq ptr` (address comparison).
+/// comparison (briev_str_eq) instead of `icmp eq ptr` (address comparison).
 /// This is the backend half of B1; the interpreter already does content
 /// equality (rule #4). The entry!-shaped comparison `cmd == "build"` is the
 /// motivating pattern (Phase 3).
 #[test]
-fn test_string_content_eq_emits_briv_str_eq() {
+fn test_string_content_eq_emits_briev_str_eq() {
     let src = r#"
         let a: String = "abc";
         let b: String = "abc";
@@ -5258,8 +5258,8 @@ fn test_string_content_eq_emits_briv_str_eq() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @briv_str_eq(ptr "),
-        "String == must emit briv_str_eq content compare; got:\n{ir}"
+        ir.contains("call i64 @briev_str_eq(ptr "),
+        "String == must emit briev_str_eq content compare; got:\n{ir}"
     );
     assert!(
         !ir.contains("icmp eq ptr"),
@@ -5290,13 +5290,13 @@ fn test_int_eq_still_emits_icmp() {
         "int == must still emit icmp eq i64; got:\n{ir}"
     );
     assert!(
-        !ir.contains("call i64 @briv_str_eq("),
-        "int == must not call briv_str_eq; got:\n{ir}"
+        !ir.contains("call i64 @briev_str_eq("),
+        "int == must not call briev_str_eq; got:\n{ir}"
     );
 }
 
 /// 2026-08-01 (B1): String & | ^ ~ emit content-bitwise runtime calls
-/// (briv_str_band/bor/bxor/bnot) and return a String (ptr).
+/// (briev_str_band/bor/bxor/bnot) and return a String (ptr).
 #[test]
 fn test_string_bitwise_emits_content_ops() {
     let src = r#"
@@ -5320,20 +5320,20 @@ fn test_string_bitwise_emits_content_ops() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call ptr @briv_str_band("),
-        "String & must emit briv_str_band; got:\n{ir}"
+        ir.contains("call ptr @briev_str_band("),
+        "String & must emit briev_str_band; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @briv_str_bor("),
-        "String | must emit briv_str_bor; got:\n{ir}"
+        ir.contains("call ptr @briev_str_bor("),
+        "String | must emit briev_str_bor; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @briv_str_bxor("),
-        "String ^ must emit briv_str_bxor; got:\n{ir}"
+        ir.contains("call ptr @briev_str_bxor("),
+        "String ^ must emit briev_str_bxor; got:\n{ir}"
     );
     assert!(
-        ir.contains("call ptr @briv_str_bnot("),
-        "String ~ must emit briv_str_bnot; got:\n{ir}"
+        ir.contains("call ptr @briev_str_bnot("),
+        "String ~ must emit briev_str_bnot; got:\n{ir}"
     );
 }
 
@@ -5360,12 +5360,12 @@ fn test_main_signature_and_argv_capture() {
         "main must take (i32 %argc, ptr %argv); got:\n{ir}"
     );
     assert!(
-        ir.contains("store i32 %argc, ptr @__briv_argc"),
-        "main must store argc into @__briv_argc; got:\n{ir}"
+        ir.contains("store i32 %argc, ptr @__briev_argc"),
+        "main must store argc into @__briev_argc; got:\n{ir}"
     );
     assert!(
-        ir.contains("store ptr %argv, ptr @__briv_argv"),
-        "main must store argv into @__briv_argv; got:\n{ir}"
+        ir.contains("store ptr %argv, ptr @__briev_argv"),
+        "main must store argv into @__briev_argv; got:\n{ir}"
     );
     assert!(
         !ir.contains("define i32 @main()"),
@@ -5432,7 +5432,7 @@ fn test_string_to_bit_content_view() {
 
 /// 2026-08-01 (B2): `#Bit → #String` is the ENCODING DOOR — wraps the bits
 /// (a [len][bytes] buffer) back into a String by materializing the header via
-/// briv_bits_to_str. Not a bitcast.
+/// briev_bits_to_str. Not a bitcast.
 #[test]
 fn test_bit_to_string_encoding_door() {
     let src = r#"
@@ -5453,8 +5453,8 @@ fn test_bit_to_string_encoding_door() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call ptr @briv_bits_to_str(ptr "),
-        "#Bit → #String must emit briv_bits_to_str (UTF8 wrap); got:\n{ir}"
+        ir.contains("call ptr @briev_bits_to_str(ptr "),
+        "#Bit → #String must emit briev_bits_to_str (UTF8 wrap); got:\n{ir}"
     );
     assert!(
         !ir.contains("extractvalue"),
@@ -5463,7 +5463,7 @@ fn test_bit_to_string_encoding_door() {
 }
 
 /// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
-/// char count (briv_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
+/// char count (briev_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
 /// header read (byte length). Also verifies a String `let` used only via
 /// reflection stays live (not eliminated as a dead state field).
 #[test]
@@ -5486,8 +5486,8 @@ fn test_string_len_and_bytes_reflect() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @briv_char_len(ptr "),
-        "String .^Len must emit briv_char_len (UTF8 char count); got:\n{ir}"
+        ir.contains("call i64 @briev_char_len(ptr "),
+        "String .^Len must emit briev_char_len (UTF8 char count); got:\n{ir}"
     );
     assert!(
         ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
@@ -5753,7 +5753,7 @@ fn test_float64_field_init_stores_double() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let _ir = backend.generate(&items, None);
     // The end-to-end correctness (a double slot stores the f64 bits, not a
-    // float32 boxed with 4 garbage bytes) is verified by the brivc build path
+    // float32 boxed with 4 garbage bytes) is verified by the brievc build path
     // (d=3.25 / d=-3.25 print correctly); the bare generate here is a smoke
     // test that Float64 literals + the coercion typecheck and emit.
 }
@@ -5864,7 +5864,7 @@ fn test_closure_let_emits_env_and_indirect_call() {
     ]);
     let ir = backend.generate(&vec![txn], None);
     assert!(
-        ir.contains("briv_closure_"),
+        ir.contains("briev_closure_"),
         "a closure function must be emitted; got:\n{ir}"
     );
     assert!(
@@ -5872,7 +5872,7 @@ fn test_closure_let_emits_env_and_indirect_call() {
         "the closure call must go indirect through the fn_ptr; got:\n{ir}"
     );
     assert!(
-        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        ir.contains("define i64 @briev_closure_0(ptr %env, i64 %p0)"),
         "the closure function must take env + the param; got:\n{ir}"
     );
     assert!(
@@ -5947,7 +5947,7 @@ node start [true][false] {
 fn test_loop_txn_last_consumer_emits_free_after_loop() {
     // A countable-loop txn (the benchmark's countdown shape, with a periodic
     // `when` guard) that is a heap-backed field's last consumer must emit
-    // __briv_free AFTER the loop exits (never inside the iterating body).
+    // __briev_free AFTER the loop exits (never inside the iterating body).
     let src = r#"
 let N: Int = GetEnvInt#("BOUND");
 let buf: Ptr<Int> = Malloc#(64) as Ptr<Int>;
@@ -5967,14 +5967,14 @@ node life [sum < N][sum == N] {
     let mut backend = LlvmBackend::new();
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call void @__briv_free"),
+        ir.contains("call void @__briev_free"),
         "the scheduler must free the heap buffer after the loop; got:\n{ir}"
     );
     // The free must be in a terminal block (after the loop) — find its
     // position and ensure it precedes a `ret`.
     let free_line = ir
         .lines()
-        .position(|l| l.contains("call void @__briv_free"))
+        .position(|l| l.contains("call void @__briev_free"))
         .expect("free call line");
     let tail: Vec<&str> = ir.lines().skip(free_line).take(6).collect();
     assert!(
@@ -6036,7 +6036,7 @@ node start [true][false] {
     let mut backend = LlvmBackend::new();
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("define i64 @briv_closure_0(ptr %env, i64 %p0)"),
+        ir.contains("define i64 @briev_closure_0(ptr %env, i64 %p0)"),
         "closure function must take env + param; got:\n{ir}"
     );
     assert!(

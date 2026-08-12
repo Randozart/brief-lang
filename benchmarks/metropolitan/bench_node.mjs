@@ -1,5 +1,5 @@
 // Node.js bridge benchmark — Tier 2: koffi ESM (gen_node output)
-// 2026-07-24: Measures per-call latency of Briv export via koffi FFI.
+// 2026-07-24: Measures per-call latency of Briev export via koffi FFI.
 // Usage: node bench_node.mjs
 
 import koffi from 'koffi';

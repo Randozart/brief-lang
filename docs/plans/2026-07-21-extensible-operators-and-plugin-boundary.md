@@ -14,7 +14,7 @@ frozen for reference and may be implemented in a future phase.
 
 ### 1.1 What the user wants to write
 
-```briv
+```briev
 // Pipeline syntax: pipe one expression's result into a function
 x |> f            // → f(x)
 x |> f()          // → f(x)
@@ -127,7 +127,7 @@ The question became: can we eliminate even this small core footprint?
 
 Allow any `$(PreLex)` plugin to register custom infix operators:
 
-```briv
+```briev
 $(PreLex) {
     Token$.Register$("|>", 30, Left);
     Token$.Register$(".1|>", 30, Left);
@@ -284,7 +284,7 @@ never reach these systems in practice.
 
 A `$`-suffixed intrinsic callable at `$(PreLex)`:
 
-```briv
+```briev
 $(PreLex) @ 0 {
     Token$.Register$("|>", 30, Left);
     Token$.Register$("~>", 30, Left);
@@ -509,7 +509,7 @@ The plugin walks Bottom-up:
 3. Outer `Pipe{1}`: depth 1 → take `f(x)` from the stack → `Call("h", [Call("f", [x])])`
 
 For the plugin to implement this, it needs to track the pipeline stack
-recursively. This is achievable in Briv compile-time code but requires
+recursively. This is achievable in Briev compile-time code but requires
 the Level C interpreter to support recursion and `match` on AST nodes.
 
 ### 5.3 Should `|>` just be wired up?
@@ -534,7 +534,7 @@ in `src/parser/definitions.rs`. The parser knows that `[[` means
 "postcondition-only" and `]]` means "precondition-only." This is hardcoded
 knowledge in the parser.
 
-```briv
+```briev
 // Current syntax (hardcoded in parser):
 defn main() -> Int [[result > 0]
 // Equivalent to: defn main() -> Int [true][result > 0]
@@ -558,7 +558,7 @@ TopLevel::BracketBlock {
 
 A `$(Parsed)` plugin then rewrites these into contracts:
 
-```briv
+```briev
 $(Parsed) @ 200 {
     // [[post] → Contract([true], post)
     foreach(block in Tag$("bracket_block").Named$("double_open")) {
@@ -586,7 +586,7 @@ $(Parsed) @ 200 {
 
 ### 6.4 Why this matters
 
-The contract syntax is one of the most distinctive features of Briv. Making
+The contract syntax is one of the most distinctive features of Briev. Making
 its sugar plugin-extensible proves that even core language ergonomics can be
 moved into the plugin layer, keeping the parser minimalist and the stdlib
 responsible for language feel.
@@ -605,7 +605,7 @@ operator.
 ### 7.2 The solution: grammar snippet files
 
 Each plugin can ship a `.highlight.json` file alongside its `.bv` file.
-These files contain TextMate grammar snippets that are merged into the Briv
+These files contain TextMate grammar snippets that are merged into the Briev
 grammar at editor startup.
 
 **Plugin directory convention:**
@@ -630,11 +630,11 @@ plugins/
   "patterns": [
     {
       "match": "\\|>",
-      "name": "keyword.operator.pipe.briv"
+      "name": "keyword.operator.pipe.briev"
     },
     {
       "match": "\\.[0-9]+\\|>",
-      "name": "keyword.operator.pipe.depth.briv"
+      "name": "keyword.operator.pipe.depth.briev"
     }
   ]
 }
@@ -647,13 +647,13 @@ plugins/
   "name": "contract-sugar",
   "patterns": [
     {
-      "name": "meta.contract.double-open.briv",
+      "name": "meta.contract.double-open.briev",
       "begin": "\\[\\[",
       "end": "\\]",
       "patterns": [{ "include": "#expressions" }]
     },
     {
-      "name": "meta.contract.double-close.briv",
+      "name": "meta.contract.double-close.briev",
       "begin": "\\[",
       "end": "\\]\\]",
       "patterns": [{ "include": "#expressions" }]
@@ -665,7 +665,7 @@ plugins/
 ### 7.3 How it's loaded
 
 The VSCode extension reads all `.highlight.json` files from plugin directories
-at activation time and merges their patterns into the Briv grammar's
+at activation time and merges their patterns into the Briev grammar's
 repository. This happens in `extension.ts`:
 
 ```typescript
@@ -698,7 +698,7 @@ function loadPluginHighlighters() {
 }
 ```
 
-Each pattern is added to the Briv grammar's `repository` so it participates
+Each pattern is added to the Briev grammar's `repository` so it participates
 in the full highlighting pipeline (including inside contract brackets, string
 interpolation, etc.).
 
@@ -708,10 +708,10 @@ Plugin highlight scopes follow a fixed naming convention for consistency:
 
 | Pattern | Scope |
 |---------|-------|
-| Plugin-registered operator | `keyword.operator.plugin.<name>.briv` |
-| Plugin-registered bracket | `meta.bracket.plugin.<name>.briv` |
-| Plugin-registered keyword | `keyword.plugin.<name>.briv` |
-| Plugin-specific constant | `constant.plugin.<name>.briv` |
+| Plugin-registered operator | `keyword.operator.plugin.<name>.briev` |
+| Plugin-registered bracket | `meta.bracket.plugin.<name>.briev` |
+| Plugin-registered keyword | `keyword.plugin.<name>.briev` |
+| Plugin-specific constant | `constant.plugin.<name>.briev` |
 
 Where `<name>` is the plugin's identifier (e.g., `pipe`, `contract-sugar`).
 

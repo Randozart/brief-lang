@@ -14,7 +14,7 @@ is documented in `docs/architecture/features/metadata-dispatch.md`.
 
 ## Overview
 
-This plan adds **Derivation-as-a-First-Class-Feature** to Briv. The `:=`
+This plan adds **Derivation-as-a-First-Class-Feature** to Briev. The `:=`
 operator introduces three capabilities from a single syntactic primitive:
 
 | Capability | What | Phase |
@@ -29,7 +29,7 @@ operator introduces three capabilities from a single syntactic primitive:
 1. **The `:=` block is immortal** — never consumed or removed from source.
    It remains the permanent specification / single source of truth.
 
-2. **No body overwriting** — `briv derive` only fills holes (`body: None`).
+2. **No body overwriting** — `briev derive` only fills holes (`body: None`).
    An existing body is never modified by the tool.
 
 3. **Additive-only optimization** — Existing optimization paths are never
@@ -41,7 +41,7 @@ operator introduces three capabilities from a single syntactic primitive:
    preserved.
 
 5. **SMT solver is optional** — A fallback enumerative search (depth-bounded)
-   ensures `briv derive` works offline. The SMT solver is a performance
+   ensures `briev derive` works offline. The SMT solver is a performance
    accelerator, not a hard dependency.
 
 ---
@@ -88,7 +88,7 @@ that coexist with function bodies.
 
 **File**: `src/lexer.rs`
 
-**What**: Add a new token variant for the `:=` operator. Briv currently has
+**What**: Add a new token variant for the `:=` operator. Briev currently has
 `Colon` (`:`), `ColonColon` (`::`), `ColonGreaterThan` (`:>`), and
 `LtColon` (`<:`). `ColonEq` slots naturally between `ColonGreaterThan` and
 `ColonColon` in the enum ordering.
@@ -226,12 +226,12 @@ signature when the body is omitted (drafting state).
 **Two syntactic states**:
 
 **State A — Drafting (body omitted)**:
-```briv
+```briev
 defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; 3, 5 -> 8; };
 ```
 
 **State B — Resolved (body present)**:
-```briv
+```briev
 defn add(x: Int, y: Int) -> Int { term x + y; } := { 2, 2 -> 4; 3, 5 -> 8; };
 ```
 
@@ -354,7 +354,7 @@ with guard clauses — depth 2. `parse_derivation_example` is sequential
 **What**: Lambda-style definitions (`defn f(x) -> Int;`) can also have
 derivation blocks. Extend the lambda parsing to check for `:=` before `;`:
 
-```briv
+```briev
 defn f(x: Int) -> Int := { 0 -> 0; };
 ```
 
@@ -791,7 +791,7 @@ AST node, not the source syntax.
 
 **What:** Document the complete guard statement model:
 
-```briv
+```briev
 // Guards are compile-time verified — the SMT solver proves the
 // condition before the body executes.
 
@@ -912,7 +912,7 @@ token set. Remove the `parse_inop_declaration()` parser path.
 **Replacement:** All existing `inop` declarations in `lib/std/os/*.bv` are
 rewritten as standard `defn` with metadata:
 
-```briv
+```briev
 // Before (inop):
 // inop! getpid() -> Int;
 
@@ -1075,10 +1075,10 @@ explicit — declared as metadata on the function itself.
 **The `observable` property:**
 
 A boolean metadata key that marks a function as having side effects visible
-outside the Briv program. The compiler's DCE pass must preserve calls to
+outside the Briev program. The compiler's DCE pass must preserve calls to
 `observable` functions even when the result is unused.
 
-```briv
+```briev
 defn print_int(n: Int) -> Bool {
     observable <~ true;
     llvm_asm <~ "call @printf";
@@ -1158,7 +1158,7 @@ external SMT solver), Phase 1B (property system for operator cost model)
 ### Goal
 
 When a definition has a derivation block but NO body (`body: None`), the
-`briv derive` command invokes the synthesis engine to infer the minimal
+`briev derive` command invokes the synthesis engine to infer the minimal
 formula satisfying all examples.
 
 ### Step 9.0 — Create `src/derive.rs` module
@@ -1174,7 +1174,7 @@ the shared error type used across all derivation phases:
 
 pub mod engine;   // Synthesis orchestration, cost model, enumerative search
 pub mod smt;      // SMT solver interface (via WASM plugin)
-pub mod cli;      // CLI command handlers for `briv derive`
+pub mod cli;      // CLI command handlers for `briev derive`
 ```
 
 **Shared error type** (used by all derivation phases):
@@ -1216,7 +1216,7 @@ pub mod derive;
 
 **File**: `src/derive/engine.rs`
 
-**What**: Define the grammar of valid Briv expressions that the synthesizer
+**What**: Define the grammar of valid Briev expressions that the synthesizer
 can generate. Each operator has a cost weight (Occam's Razor) — the
 synthesizer searches for the lowest-cost program satisfying all examples.
 
@@ -1443,7 +1443,7 @@ pub fn synthesize_via_smt(
 (check-synth)
 ```
 
-**Building the query**: The function maps Briv types to SMT-LIB sorts:
+**Building the query**: The function maps Briev types to SMT-LIB sorts:
 - `UInt8`, `Int8` → `(_ BitVec 8)`
 - `UInt16`, `Int16` → `(_ BitVec 16)`
 - `UInt32`, `Int32`, `Float32` → `(_ BitVec 32)`
@@ -1458,7 +1458,7 @@ For each example, emit an `(assert (= (f <inputs>) <output>))` constraint.
   with consistent examples)
 - `unknown` — solver could not decide
 
-Parse the `define-fun` body back into a Briv `Vec<Statement>`.
+Parse the `define-fun` body back into a Briev `Vec<Statement>`.
 
 **Nesting check**: Sequential logic: build query → try plugin → parse
 response. Depth 1.
@@ -1512,7 +1512,7 @@ changes are needed — the pragma is simply a `#` annotation on the
 definition.
 
 **Usage in source**:
-```briv
+```briev
 #no_derive
 defn complex_fn(x: Int) -> Int := {
     0 -> 0; // Still drafting — leave the body empty
@@ -1608,7 +1608,7 @@ during parsing) provides the exact byte offset for insertion. The source
 bytes are passed through unchanged alongside the AST.
 
 ```rust
-/// Parse a Briv source file and return both the AST and the raw source bytes.
+/// Parse a Briev source file and return both the AST and the raw source bytes.
 /// The source bytes are used for byte-offset surgical write-back.
 /// 2026-07-11: Phase 9.6
 fn parse_file_with_offsets(path: &Path) -> Result<(Program, Vec<u8>), DeriveError> {
@@ -1779,7 +1779,7 @@ extend, write) — depth 1. The body formatter is a loop — depth 1.
 
 **File**: `src/derive/cli.rs`
 
-**What**: When `--all` is passed, `briv derive` must process all
+**What**: When `--all` is passed, `briev derive` must process all
 transitive imports in dependency order (topological sort of the DAG).
 
 **Algorithm**:
@@ -1921,7 +1921,7 @@ provided examples.
 **What**: When a definition has contracts `[pre][post]` but neither body
 nor examples (or an empty `:= {}`), synthesize a body from the contracts.
 
-```briv
+```briev
 defn abs(val: Int) -> Int
     [true]
     [result >= 0]
@@ -2013,7 +2013,7 @@ finds the cheapest program that:
 This is strictly more powerful than examples alone — it acts as a formal
 generalization guarantee.
 
-```briv
+```briev
 defn clamp(val: Int) -> Int
     [result >= 0]
     [result <= 100]
@@ -2157,7 +2157,7 @@ the compiler synthesizes the `match` boilerplate.
 ### Background
 
 Foreign function calls are inherently unpredictable — they can fail due to
-network timeouts, missing files, or memory limits. Briv's `frgn` signature
+network timeouts, missing files, or memory limits. Briev's `frgn` signature
 returns a monadic `Result<T, E>` to model this. However, writing the
 boilerplate `match` statement for every FFI call pollutes the happy path.
 
@@ -2172,7 +2172,7 @@ body, and declare the error-to-value mapping in a `:=` block.
 `Result<T, E>` and the function's declared return type is `T`, check for a
 derivation block that provides the `E -> T` mapping.
 
-```briv
+```briev
 frgn read_config_file(path: String) -> Result<Config, FileError>;
 
 defn load_config(path: String) -> Config {
@@ -2582,7 +2582,7 @@ impl ArchiveWriter {
         let mut out = BufWriter::new(File::create(&self.output_path)?);
 
         // Optional: emit a comment header with version info
-        writeln!(out, "// archive generated by brivc {}", env!("CARGO_PKG_VERSION"))?;
+        writeln!(out, "// archive generated by brievc {}", env!("CARGO_PKG_VERSION"))?;
 
         // Write type entries: type,<name>,<slots_map>,<properties_map>
         for (name, resolved_type) in &program.type_universe.types {
@@ -2750,7 +2750,7 @@ depth 1.
 
 **File**: `src/compile.rs` or `src/main.rs`
 
-**What**: Add `--archive` flag to `briv compile` to produce the `.dbvl`
+**What**: Add `--archive` flag to `briev compile` to produce the `.dbvl`
 archive file instead of (or in addition to) final binary output.
 
 ```rust
@@ -2763,7 +2763,7 @@ if let Some(archive_path) = matches.get_one::<String>("archive") {
 ```
 
 **Tests**:
-- `test_emit_archive_flag`: `briv compile main.bv --archive out.dbvl`
+- `test_emit_archive_flag`: `briev compile main.bv --archive out.dbvl`
   → file exists, valid
 - `test_emit_archive_roundtrip_compile`: Emit archive → read back → compile
   again → same binary
@@ -2779,16 +2779,16 @@ file, any language with a comma-split + `{ }` brace parser can consume it.
 
 ```bash
 # 1. Frontend: Parse, run plugins, resolve derivations, emit archive
-briv compile main.bv --archive build/main.dbvl
+briev compile main.bv --archive build/main.dbvl
 
 # 2. CPU backend (independent binary)
-briv-llvm build/main.dbvl --output a.out
+briev-llvm build/main.dbvl --output a.out
 
 # 3. Hardware backend (independent binary)
-briv-circt build/main.dbvl --output design.v
+briev-circt build/main.dbvl --output design.v
 
 # 4. Documentation generator (independent script)
-briv-doc build/main.dbvl --output docs/
+briev-doc build/main.dbvl --output docs/
 ```
 
 **Backend interface** (backends read archive via `ArchiveReader` — can be
@@ -2813,11 +2813,11 @@ pub trait ArchiveBackend {
 
 **Migration path for existing backends**:
 
-1. Add `--archive` to `briv compile` (Step 12.2)
-2. Create `briv-llvm` wrapper binary that reads the archive and calls the
+1. Add `--archive` to `briev compile` (Step 12.2)
+2. Create `briev-llvm` wrapper binary that reads the archive and calls the
    existing LLVM codegen
 3. Keep the old in-process path for backwards compatibility
-4. After all users migrate, remove in-process linking — `briv compile`
+4. After all users migrate, remove in-process linking — `briev compile`
    only produces the archive, backends handle codegen
 
 **Dead backends**: `verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`,
@@ -2825,7 +2825,7 @@ pub trait ArchiveBackend {
 They continue to exist with their current (dead) status.
 
 **Tests**:
-- `test_backend_process_archive`: Create an archive, run `briv-llvm` on it,
+- `test_backend_process_archive`: Create an archive, run `briev-llvm` on it,
   verify output binary
 - `test_backend_unknown_entry_ignored`: Backend ignores entries it doesn't
   understand (forward compat)
@@ -2834,13 +2834,13 @@ They continue to exist with their current (dead) status.
 
 ---
 
-## Phase 13 — CLI: `briv derive` Commands
+## Phase 13 — CLI: `briev derive` Commands
 
 **Depends on**: Phases 8, 9, 10, 11, 12
 
 ### Goal
 
-Implement the `briv derive` subcommand with three modes (file, `--all`,
+Implement the `briev derive` subcommand with three modes (file, `--all`,
 directory), all using the surgical write-back from Phase 9.6.
 
 ### Step 13.0 — Register `derive` subcommand in CLI
@@ -2894,10 +2894,10 @@ Some(("derive", sub_m)) => {
 ```
 
 **Tests**:
-- `test_cli_derive_file_exists`: Run `briv derive test.bv` → exit 0
-- `test_cli_derive_all_flag`: Run `briv derive --all test.bv` → processes
+- `test_cli_derive_file_exists`: Run `briev derive test.bv` → exit 0
+- `test_cli_derive_all_flag`: Run `briev derive --all test.bv` → processes
   imports
-- `test_cli_derive_directory`: Run `briv derive ./src` → processes all
+- `test_cli_derive_directory`: Run `briev derive ./src` → processes all
   `.bv` files
 - `test_cli_derive_nonexistent_file`: Run on missing file → exit 1 with
   error
@@ -2906,7 +2906,7 @@ Some(("derive", sub_m)) => {
 
 **File**: `src/derive/cli.rs`
 
-**What**: `briv derive <file>` — process a single file.
+**What**: `briev derive <file>` — process a single file.
 
 ```rust
 /// Derive all body-less definitions in a single file.
@@ -3072,7 +3072,7 @@ pub fn derive_directory(dir_path: &Path, depth: u8, recursive: bool) -> Result<(
 
 ### Goal
 
-Make the `briv derive` synthesis engine accessible as a WASM plugin, so
+Make the `briev derive` synthesis engine accessible as a WASM plugin, so
 that the SMT solver (and eventually user-defined synthesis strategies) can
 run as sandboxed plugins.
 
@@ -3081,7 +3081,7 @@ run as sandboxed plugins.
 **File**: `wit/synthesis.wit` (new)
 
 ```wit
-// Synthesis plugin interface for Briv.
+// Synthesis plugin interface for Briev.
 // 2026-07-11: Phase 14.0
 
 /// A single derivation example.
@@ -3133,7 +3133,7 @@ resource synthesizer {
 **File**: `src/plugin/hooks.rs`
 
 **What**: Add derivation hooks to the plugin lifecycle so synthesis
-plugins are called during `briv derive`.
+plugins are called during `briev derive`.
 
 ```rust
 /// Plugin hooks for derivation.
@@ -3199,11 +3199,11 @@ property system from Phase 1B.
 
 **Proposal by**: [@revred](https://github.com/revred) — reviewed the
 existing `--library` infrastructure and identified five gaps between
-Briv's `.ll`-level library mode and a linkable `.a`/`.so` with proper
+Briev's `.ll`-level library mode and a linkable `.a`/`.so` with proper
 headers and type marshaling.
 
 Adds the `export` keyword (replacing `#export` pragma), `.ll` → `.o` →
-`.a` packaging, `__briv_init_state`/`__glue_release` in generated
+`.a` packaging, `__briev_init_state`/`__glue_release` in generated
 headers, `Bool`/`String` marshaling at the FFI boundary, and an
 end-to-end C driver integration test.
 
@@ -3250,7 +3250,7 @@ Detailed in the existing plan at
 | `docs/architecture/features/sad-path.md` | 11 | FFI error recovery via derivation, exhaustiveness, contract verification |
 | `docs/architecture/archive.md` | 8G, 12 | Archive schema, tagged `.dbvl` format, backend decoupling, ArchiveWriter/Reader; 8G adds metadata round-trip proof |
 | `docs/architecture/features/contracts-synthesis.md` | 10 | Contract-guided synthesis, SyGuS, LLVM metadata emission |
-| `docs/architecture/features/derive-cli.md` | 13 | `briv derive` CLI commands, modes, surgical write-back |
+| `docs/architecture/features/derive-cli.md` | 13 | `briev derive` CLI commands, modes, surgical write-back |
 | `docs/architecture/features/derive-plugins.md` | 14 | WASM synthesis plugin WIT interface and hooks |
 | `docs/plans/2026-07-11-derivation-synthesis-comprehensive.md` | All | This document |
 

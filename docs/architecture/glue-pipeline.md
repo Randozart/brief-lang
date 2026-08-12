@@ -8,13 +8,13 @@ graph TD
         DBVL[("glue.dbvl")]
     end
 
-    subgraph LINK["briv link"]
+    subgraph LINK["briev link"]
         NM["nm --defined-only -g"]
         XREF["Cross-reference vs Intrinsic enum"]
         GEN_BV["Generate bridge .bv"]
     end
 
-    subgraph EXPORT["briv export"]
+    subgraph EXPORT["briev export"]
         PARSE["Parse bridge AST"]
         EXTRACT["Extract #export / frgn / meld"]
         DBVL_SER["Serialize to DBVL strings"]
@@ -50,9 +50,9 @@ graph TD
 
 ## Flow Description
 
-1. **`briv link <library>`** — Analyzes a foreign `.so`/`.a` via `nm`, extracts T (text) symbols, cross-references each against the compiler's `Intrinsic` enum. Known intrinsics become `intrinsic_call#()` wrappers; unknowns become `frgn` skeletons.
+1. **`briev link <library>`** — Analyzes a foreign `.so`/`.a` via `nm`, extracts T (text) symbols, cross-references each against the compiler's `Intrinsic` enum. Known intrinsics become `intrinsic_call#()` wrappers; unknowns become `frgn` skeletons.
 
-2. **`briv export <bridge.bv> <language>`** — Parses the bridge, extracts `#export`/`frgn`/`meld` declarations, serializes them as D-Briv Lines (bare comma-separated), looks up the language adapter in `glue.dbvl`, invokes the adapter's `$!macro`, which calls `emit_file#()` to write wrapper source files.
+2. **`briev export <bridge.bv> <language>`** — Parses the bridge, extracts `#export`/`frgn`/`meld` declarations, serializes them as D-Briev Lines (bare comma-separated), looks up the language adapter in `glue.dbvl`, invokes the adapter's `$!macro`, which calls `emit_file#()` to write wrapper source files.
 
 3. **Adapters** — Each language has a `.bv` `macro` at `glue/adapters/<lang>.bv`. The macro generates native source files without any Rust template engine. Adding a language = writing one `.bv` file.
 

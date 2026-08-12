@@ -4,7 +4,7 @@
 // (only count is in #!exit).
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/iir_filter_runtime.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/iir_filter_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
 

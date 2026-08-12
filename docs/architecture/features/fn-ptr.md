@@ -6,12 +6,12 @@
 ## Design
 
 Function pointers use the existing `.#Ptr` projection syntax rather than a
-new `&f` address-of operator (which would conflict with Briv's mutable `&`
+new `&f` address-of operator (which would conflict with Briev's mutable `&`
 syntax).
 
 ### Getting a Function Pointer
 
-```briv
+```briev
 let cmp_fn = my_compare .#Ptr;  // produces fn pointer
 ```
 
@@ -21,7 +21,7 @@ for the projection result.
 
 ### Indirect Call
 
-```briv
+```briev
 let result = cmp_fn(a, b);  // indirect call through fn pointer
 ```
 

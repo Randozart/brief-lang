@@ -85,7 +85,7 @@ Step 17  view_compiler  950 LOC  12 tests  ~1.5 hr
 |------|------------------|
 | `test_find_mapper_no_custom_path` | Delegates to registry |
 | `test_create_mapper_registry_succeeds` | Default registry created |
-| `test_describe_mapper_type` | Briv/Rust strings returned |
+| `test_describe_mapper_type` | Briev/Rust strings returned |
 
 ### Step 5 — `src/ffi/mappers.rs` (191 LOC, 6 tests)
 
@@ -96,7 +96,7 @@ Step 17  view_compiler  950 LOC  12 tests  ~1.5 hr
 | `test_find_mapper_builtin_name` | Looking up known mapper (if any registered) |
 | `test_find_mapper_not_found` | Unknown mapper → `None` |
 | `test_mapper_info_debug_clone` | Derive traits work |
-| `test_mapper_type_equality` | `MapperType::Briv == MapperType::Briv` |
+| `test_mapper_type_equality` | `MapperType::Briev == MapperType::Briev` |
 
 ### Step 6 — `src/errors.rs` (645 LOC, 8 tests)
 
@@ -191,7 +191,7 @@ Uses `tempfile::TempDir` to create real file structures.
 | `test_resolve_checked_cached_modules` | Second resolve returns cached program |
 | `test_import_css_file` | `.css` import returns `TopLevel::Stylesheet` |
 | `test_import_svg_file` | `.svg` import returns parsed SVG content |
-| `test_import_dbv_file` | `.dbv` DBriv file parsed by dbriv v2 parser |
+| `test_import_dbv_file` | `.dbv` DBriev file parsed by dbriev v2 parser |
 | `test_import_dbvl_file` | `.dbvl` creates `Expr::DbvlTable` with path + fields |
 | `test_strict_mode_propagation` | `with_strict_mode(true)` propagates to all programs |
 | `test_filter_items_by_name` | `filter_items` selects only matching definitions |

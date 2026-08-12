@@ -1,4 +1,4 @@
-# Briv Language Specification — v0.14.0 Draft Additions
+# Briev Language Specification — v0.14.0 Draft Additions
 
 **Date:** 2026-05-16  
 **Status:** Draft for discussion  
@@ -8,7 +8,7 @@
 
 ## §10. Alka Escape Hatch
 
-The `alka` block embeds raw Alka Drop packets inside a Briv transaction or definition body. Like `asm`, it is an opaque text passthrough — Briv validates brace-matching and extracts the content for the Alka backend to compile into binary Drop packets, but does not parse or validate the Alka syntax itself.
+The `alka` block embeds raw Alka Drop packets inside a Briev transaction or definition body. Like `asm`, it is an opaque text passthrough — Briev validates brace-matching and extracts the content for the Alka backend to compile into binary Drop packets, but does not parse or validate the Alka syntax itself.
 
 ### 10.1 Grammar
 
@@ -18,7 +18,7 @@ alka_line  ::= [^;]+ ";"
 ```
 
 - `alka { ... };` — safe coordination Drop (fences, signals, watches)
-- `alka! { ... };` — dangerous hardware pulse (doorbell rings, raw register writes). The `!` denotes a break from Briv's normal control flow, consistent with `asm!`
+- `alka! { ... };` — dangerous hardware pulse (doorbell rings, raw register writes). The `!` denotes a break from Briev's normal control flow, consistent with `asm!`
 
 ### 10.2 Placement
 
@@ -36,7 +36,7 @@ When targeting C, a build flag (`--emit-alka-ffi`) can change the emitted code f
 
 ### 10.4 Examples
 
-```briv
+```briev
 // Safe coordination Drop — signal completion to orchestrator
 node push_expert [src != 0][state == RESIDENT] {
     ce_dma(src, dst, size);
@@ -76,7 +76,7 @@ Scoped tags (`#[target]tag`) restrict the modifier to a specific target backend.
 
 The `#on_exit { ... };` block pragma registers a cleanup handler within the enclosing body. When the body exits (normally via `term` or via early exit), the cleanup executes. Multiple `#on_exit` blocks stack in LIFO order.
 
-```briv
+```briev
 node claim_gpu {
     &CLAIMED = true;
     #on_exit {
@@ -102,32 +102,32 @@ In strict mode, the proof engine verifies that `#on_exit` cleanup does not inval
 Hashtags may appear in the following positions (and only these — `#` on standalone expressions is a parse error to prevent ambiguity):
 
 1. **After `let` declarations**, before `:` type, `@` address, or `=` initializer
-   ```briv
+   ```briev
    let DOORBELL @ 0x90 #volatile : UInt32;
    let buf : Byte[4096] #!aligned(4096);
    ```
 
 2. **After `&` assignment expressions**, before `;`
-   ```briv
+   ```briev
    &DOORBELL = token #!sfence;
    &REG = val #!sfence|volatile;
    ```
 
 3. **After `term`**, before `;`
-   ```briv
+   ```briev
    term #gold;
    term #retry;
    ```
 
 4. **After `}`** closing a block-based definition
-   ```briv
+   ```briev
    node push [pre][post] {
        // ...
    } #vessel;
    ```
 
 5. **Before a variant body** (applies to that body only)
-   ```briv
+   ```briev
    node push
        [use_ce] #!direct_ce { build_pushbuffer(); }
        [use_cpu]             { memcpy(); }
@@ -173,7 +173,7 @@ For `node` and `defn`, the `[pre]` conditions are evaluated **at runtime** in de
 - A body without `[pre]` is the catch-all (must be last)
 - Strict mode requires exhaustive coverage — the proof engine must verify all possible states are handled
 
-```briv
+```briev
 node transfer_expert
     [loc == SSD] [post ready] {
         dma_from_ssd(expert);
@@ -202,7 +202,7 @@ For `type` and `struct`, the `[pre]` condition is a **discriminant value** set a
 - Use `+` to add members, `-` to remove members from the base type
 - The base type definition is the default variant (when no discriminant matches)
 
-```briv
+```briev
 type GPU {
     vendor: UInt16;
     bar0: Ptr;
@@ -213,7 +213,7 @@ type GPU {
 };
 ```
 
-```briv
+```briev
 // Base variant — no CE engine
 let gpu1: GPU { vendor: 0x10DE, bar0: 0xE0000000 };
 
@@ -225,7 +225,7 @@ let gpu2: GPU { vendor: 0x10DE, bar0: 0xE0000000, has_ce: true };
 
 Accessing a member that does not exist in the selected variant is a compile-time error:
 
-```briv
+```briev
 let engine = gpu1.ce_engine;  // Error: ce_engine not in base GPU variant
 let engine = gpu2.ce_engine;  // OK: has_ce variant includes ce_engine
 ```
@@ -233,7 +233,7 @@ let engine = gpu2.ce_engine;  // OK: has_ce variant includes ce_engine
 #### Strict Mode
 
 In `.sbv`/`.sebv`, accessing a variant-only member through a code path where the discriminant is not guaranteed is a proof error:
-```briv
+```briev
 [gpu.has_ce] {
     let engine = gpu.ce_engine;  // OK: guarded
 };
@@ -260,7 +260,7 @@ When `expression` is a literal (number or hex literal), the address is static an
 
 ### 13.2 Runtime Resolution
 
-```briv
+```briev
 let userd_ptr: Ptr = discover_userd_page();  // obtained at runtime
 
 // Dynamic binding — the address is resolved at first access
@@ -277,7 +277,7 @@ The compiler emits a pointer dereference to `userd_ptr` rather than an immediate
 
 In `.sbv`/`.sebv`, the expression must be provably non-null before the mapped variable is accessed:
 
-```briv
+```briev
 node use_userd [userd_ptr != 0] {
     let USERD @ userd_ptr #volatile : { ... };
     &USERD.DOORBELL = token #!sfence;
@@ -290,7 +290,7 @@ Accessing a dynamically-bound variable without a non-null guard is a proof error
 
 If a `#!aligned(N)` modifier is present on a dynamically-bound variable, the proof engine must verify the alignment constraint at access time:
 
-```briv
+```briev
 let PB @ pb_ptr #!aligned(4096) : UInt32[128];
 ```
 
@@ -312,12 +312,12 @@ This generates a runtime alignment check in non-strict mode, or a proof obligati
 
 This draft is based on analysis of the following existing documents:
 
-### Briv Compiler (`briv-compiler/`)
+### Briev Compiler (`briev-compiler/`)
 - `spec/SPEC.md` — Master specification v0.13.0 (canonical reference)
 - `spec/LANGUAGE-TUTORIAL.md` — Step-by-step language guide
 - `spec/QUICK-REFERENCE.md` — Syntax reference
 - `spec/old_docs/language_specs/` — Archived spec versions (v4–v8)
-  - `EMBEDDED_BRIV_2.0_SPEC.md`, `EMBEDDED_BRIV_2.1_SPEC.md` — Embedded Briv (.ebv) design
+  - `EMBEDDED_BRIEV_2.0_SPEC.md`, `EMBEDDED_BRIEV_2.1_SPEC.md` — Embedded Briev (.ebv) design
 - `spec/old_docs/ffi_design/` — FFI system evolution
 - `spec/old_docs/hardware_design/` — Hardware validation and config guides
 - `spec/old_docs/design/` — Individual design decisions (guard blocks, symbolic execution, etc.)

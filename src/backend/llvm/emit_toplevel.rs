@@ -15,7 +15,7 @@ struct ProbeCmpArg<'a> {
 }
 
 impl LlvmBackend {
-    /// 2026-08-04 (compiler-in-Briv): top-level `let` names in a body that are
+    /// 2026-08-04 (compiler-in-Briev): top-level `let` names in a body that are
     /// ASSIGNED later (incl. inside when/if/foreach/sync blocks). Such lets get
     /// an entry-block alloca instead of a bare SSA register, so a reassignment
     /// inside a guard/loop stores into an entry alloca — the old demotion at the
@@ -118,7 +118,7 @@ impl LlvmBackend {
     /// the variable's type in the TypeUniverse.
     fn lookup_strategy_type_name(&self, var_name: &str) -> Option<String> {
         // 2026-07-01: First check let_original_types (populated for function params).
-        // If not found, fall back to ctx.field_briv_types (populated for state vars).
+        // If not found, fall back to ctx.field_briev_types (populated for state vars).
         // State variables like `queue: RingBuffer<Int>` are NOT in let_original_types
         // (only function params go there). Without this fallback, strategy dispatch
         // returns None and custom types like RingBuffer fall through to the default
@@ -131,7 +131,7 @@ impl LlvmBackend {
             };
         }
         if let Some(&idx) = self.ctx.field_index_map.get(var_name) {
-            let ty = self.ctx.field_briv_types.get(idx)?;
+            let ty = self.ctx.field_briev_types.get(idx)?;
             return match ty {
                 crate::ast::Type::Custom(n) => Some(n.clone()),
                 crate::ast::Type::Applied(n, _) => Some(n.clone()),
@@ -185,7 +185,7 @@ impl LlvmBackend {
     /// Emit LLVM struct type declarations for user-defined struct types.
     /// Each struct becomes a named LLVM type so foreign callers (Rust via LTO,
     /// Python via ctypes) can match the memory layout. All fields are boxed
-    /// as i64 (Briv's universal scalar storage type).
+    /// as i64 (Briev's universal scalar storage type).
     ///
     /// Called after `emit_header()` and before `emit_declares()` so that
     /// struct types are available for use in function signatures emitted
@@ -277,18 +277,18 @@ impl LlvmBackend {
         writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — the
-        // optional-frgn runtime availability check (briv_rt.c).
-        writeln!(out, "declare i64 @briv_symbol_available(ptr)").ok();
+        // optional-frgn runtime availability check (briev_rt.c).
+        writeln!(out, "declare i64 @briev_symbol_available(ptr)").ok();
         // 2026-08-01 (D2): garbage scheduling — scheduled frees route through
-        // __briv_free so a benchmark can assert frees == allocs. argmemonly:
+        // __briev_free so a benchmark can assert frees == allocs. argmemonly:
         // the call only touches memory via its pointer arg, so a scheduled
         // free after a loop must not make LLVM treat the whole function's
         // memory as clobbered (without it, hash_ops' loop ran 23x slower —
         // LLVM could not promote the state slots to registers).
-        writeln!(out, "declare void @__briv_free(ptr) nounwind argmemonly").ok();
+        writeln!(out, "declare void @__briev_free(ptr) nounwind argmemonly").ok();
         // 2026-08-01 (D2): `Now#` — monotonic clock for the watchdog
         // `within N ms` deadline compare.
-        writeln!(out, "declare i64 @__briv_now() nounwind").ok();
+        writeln!(out, "declare i64 @__briev_now() nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
@@ -296,15 +296,15 @@ impl LlvmBackend {
         // 2026-07-26: ~50 dead declares removed — no Rust code path generated
         // calls to them. Only ShellCmd is kept (called via ShellCmd# intrinsic).
         // 2026-07-15: Raw OS syscall (SysCall# intrinsic)
-        writeln!(out, "declare i64 @briv_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @briev_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
         // 2026-07-15: Runtime system configuration (SysConf# intrinsic)
-        writeln!(out, "declare i64 @briv_sysconf(i64)").ok();
+        writeln!(out, "declare i64 @briev_sysconf(i64)").ok();
         // 2026-07-15: Dynamic linker (DlOpen#/DlSym#/DlClose# intrinsics)
         writeln!(out, "declare ptr @dlopen(ptr, i32) nounwind").ok();
         writeln!(out, "declare ptr @dlsym(ptr, ptr) nounwind").ok();
         writeln!(out, "declare i32 @dlclose(ptr) nounwind").ok();
         // 2026-07-15: Stack backtrace (Backtrace# intrinsic)
-        writeln!(out, "declare i64 @briv_backtrace()").ok();
+        writeln!(out, "declare i64 @briev_backtrace()").ok();
         // 2026-07-15: POSIX socket/ioctl declarations removed — they conflict
         // with the defn wrappers in std/os/ (which now use SysCall# internally).
     }
@@ -372,7 +372,7 @@ impl LlvmBackend {
                 }
             }
         }
-        // 2026-07-22: Strings use ptr (opaque pointer) — a Briv String value
+        // 2026-07-22: Strings use ptr (opaque pointer) — a Briev String value
         // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
         // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
         // of the type-name match.
@@ -480,7 +480,7 @@ impl LlvmBackend {
         }
         // 2026-07-17: If the register is Float (32-bit) but the caller expects
         // double (e.g. Print# passes to printf which variadic-promotes float),
-        // emit an fpext to double. All briv floats are represented as float
+        // emit an fpext to double. All briev floats are represented as float
         // (32-bit), but C variadic functions receive double (64-bit).
         if reg.ty == Type::float() {
             let dbl = self.fun.gen_reg();
@@ -788,7 +788,7 @@ impl LlvmBackend {
     // WHY emit_init_state as a separate function AND emit_inline_init_stores:
     //   Two callers need init logic. The main reactor loop uses the inline path
     //   (emit_inline_init_stores) so SROA can scalarize %State. But library-mode
-    //   and external-C callers (via __briv_init_state) need a callable function
+    //   and external-C callers (via __briev_init_state) need a callable function
     //   that returns an initialized ptr — those callers don't have an alloca
     //   to inline into, so they need @init_state as a named function. Both share
     //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
@@ -810,19 +810,19 @@ impl LlvmBackend {
         idx: usize,
         init_expr: Option<&Expr>,
     ) -> bool {
-        let briv_ty = match self.ctx.field_briv_types.get(idx) {
+        let briev_ty = match self.ctx.field_briev_types.get(idx) {
             Some(Type::Custom(n)) => n.clone(),
             Some(Type::Applied(n, _)) => n.clone(),
             _ => return false,
         };
         // 2026-07-31 (A8): a generic field (`let q: RingBuffer<Int> = 0`)
         // monomorphizes to the applied key.
-        let field_ty_clone = self.ctx.field_briv_types.get(idx).cloned();
+        let field_ty_clone = self.ctx.field_briev_types.get(idx).cloned();
         let type_key = match field_ty_clone.as_ref() {
             Some(ty) => self.resolve_obj_key(ty),
             None => None,
-        }.unwrap_or_else(|| briv_ty.clone());
-        let defs = self.ctx.operator_defs.get(&briv_ty).cloned().unwrap_or_default();
+        }.unwrap_or_else(|| briev_ty.clone());
+        let defs = self.ctx.operator_defs.get(&briev_ty).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
             None => return false,
@@ -836,7 +836,7 @@ impl LlvmBackend {
             _ => return false,
         };
         let members = self.ctx.obj_members.get(&type_key).cloned().unwrap_or_default();
-        let member = members.iter().find(|m| super::emit_expr::member_briv_name(m) == fn_name).cloned();
+        let member = members.iter().find(|m| super::emit_expr::member_briev_name(m) == fn_name).cloned();
         let Some(member) = member else { return false; };
         // Allocate the instance storage and pass its address as `self`.
         let size = self.struct_type_size(&type_key);
@@ -894,7 +894,7 @@ impl LlvmBackend {
         };
         let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
         let member = members.iter()
-            .find(|m| super::emit_expr::member_briv_name(m) == fn_name)
+            .find(|m| super::emit_expr::member_briev_name(m) == fn_name)
             .cloned();
         let Some(member) = member else { return; };
         let mut arg_regs: Vec<(String, Type)> = Vec::new();
@@ -1007,7 +1007,7 @@ impl LlvmBackend {
         };
         let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
         let member = members.iter()
-            .find(|m| super::emit_expr::member_briv_name(m) == fn_name)
+            .find(|m| super::emit_expr::member_briev_name(m) == fn_name)
             .cloned();
         let Some(member) = member else { return; };
         let mut arg_regs: Vec<(String, Type)> = Vec::new();
@@ -1266,7 +1266,7 @@ impl LlvmBackend {
                 // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
                 // 2026-08-01 (B4): always the UNTAGGED store — a String value is
                 // an untagged ptr to [len][bytes] (bits model); the SSO static-tag
-                // (OR 1) path was retired (it misaligned the header for briv_str_eq).
+                // (OR 1) path was retired (it misaligned the header for briev_str_eq).
                 let s_str = String::from_utf8_lossy(&s);
                 let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
@@ -1602,7 +1602,7 @@ impl LlvmBackend {
         let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = has_ret;
-        // 2026-08-05 (Phase 6): there is no `main` in Briv. The entry point is
+        // 2026-08-05 (Phase 6): there is no `main` in Briev. The entry point is
         // whichever node fires first (reactor-driven). User declarations named
         // `main` are rejected by name-collision with the runtime `@main`, so no
         // renaming is performed here.
@@ -1713,7 +1713,7 @@ impl LlvmBackend {
         // the function falls through to "ret i64 0" — every defn silently
         // returns zero regardless of its actual computation.
         self.fun.in_callable_txn = true;
-        // 2026-08-04 (compiler-in-Briv): pre-declare entry-block allocas for
+        // 2026-08-04 (compiler-in-Briev): pre-declare entry-block allocas for
         // top-level lets that are reassigned inside a guard/loop — the 
         // reassignment must NOT demote to an alloca at the assignment site
         // (dominance violation). The alloca is bound BEFORE the body so the
@@ -1782,7 +1782,7 @@ impl LlvmBackend {
     // 2026-06-13: Added ptr %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
-    // 2026-07-04: Return the known !range bounds for a Briv type based on
+    // 2026-07-04: Return the known !range bounds for a Briev type based on
     // its byte size in the type universe.  Narrow integer types have
     // representation-level ranges that LLVM can exploit for bounds-check
     // elimination — no contract precondition required.
@@ -1964,9 +1964,9 @@ impl LlvmBackend {
         // provides for free that LLVM uses to eliminate bounds checks.
         if let Some(ref universe) = self.ctx.type_universe {
             for (field_name, &idx) in &self.ctx.field_index_map {
-                let briv_ty = self.ctx.field_briv_types.get(idx);
-                let Some(briv_ty) = briv_ty else { continue; };
-                let Some(range_bounds) = Self::type_driven_range(universe, briv_ty) else { continue; };
+                let briev_ty = self.ctx.field_briev_types.get(idx);
+                let Some(briev_ty) = briev_ty else { continue; };
+                let Some(range_bounds) = Self::type_driven_range(universe, briev_ty) else { continue; };
                 // Only add if no contract-driven range already exists
                 // (contract ranges are tighter and take priority).
                 if !self.ctx.field_to_meta_idx.contains_key(field_name) {
@@ -2238,7 +2238,7 @@ impl LlvmBackend {
             enum ParamSrc {
                 StateField(usize),
                 LetBinding(String), // LLVM type string ("float" or "i64")
-                Constant(Expr, Type), // value expression + Briv type
+                Constant(Expr, Type), // value expression + Briev type
             }
             // Scan body for FFI guards that can be outlined.
             let outlined_info: Vec<(usize, String, Vec<(String, String, ParamSrc)>)> = {
@@ -2296,18 +2296,18 @@ impl LlvmBackend {
                         if let Some(&idx) = self.ctx.field_index_map.get(ident) {
                             // Ptr<T> fields are stored as i64 in %State (opaque handles).
                             // Float fields use the native float type. All others use i64.
-                            let briv_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
+                            let briev_ty = self.ctx.field_briev_types.get(idx).cloned().unwrap_or(Type::int());
                             // 2026-07-31 (A4): aggregate (array) fields cannot be
                             // outlined as scalar cold-function params — the guard
                             // must stay inline so it reads them via the %State GEP.
-                            if matches!(briv_ty, Type::Vector(_, _)) {
+                            if matches!(briev_ty, Type::Vector(_, _)) {
                                 can_outline_all = false;
                                 break;
                             }
-                            let llvm_ty = if matches!(briv_ty, Type::Ptr(_)) {
+                            let llvm_ty = if matches!(briev_ty, Type::Ptr(_)) {
                                 "i64".to_string()
                             } else {
-                                self.llvm_type(&briv_ty)
+                                self.llvm_type(&briev_ty)
                             };
                             params.push((ident.clone(), llvm_ty, ParamSrc::StateField(idx)));
                         } else if txn_let_names.contains(ident) {
@@ -2635,7 +2635,7 @@ impl LlvmBackend {
                 self.fun.reg_float_cache.clear();
                 self.fun.reg_type_cache.clear();
 
-                // Build param list — register with correct Briv type so that
+                // Build param list — register with correct Briev type so that
                 // emit_statement uses pointer semantics (inttoptr+GEP+load) rather
                 // than vector semantics (extractelement) for Ptr<Int> fields.
                 let field_names: Vec<String> = fields.iter().map(|(f, _, _)| f.clone()).collect();
@@ -2643,18 +2643,18 @@ impl LlvmBackend {
                 let mut param_sig: Vec<String> = Vec::new();
                 for (fi, (f_name, llvm_ty, src)) in fields.iter().enumerate() {
                     param_sig.push(format!("{} %{}", llvm_ty, cp_names[fi]));
-                    let briv_ty = match src {
+                    let briev_ty = match src {
                         ParamSrc::StateField(idx) => {
-                            self.ctx.field_briv_types.get(*idx).cloned().unwrap_or(Type::int())
+                            self.ctx.field_briev_types.get(*idx).cloned().unwrap_or(Type::int())
                         }
                         ParamSrc::LetBinding(llvm_ty) => {
                             if llvm_ty == "float" { Type::float() } else { Type::int() }
                         }
-                        ParamSrc::Constant(_, briv_ty) => briv_ty.clone(),
+                        ParamSrc::Constant(_, briev_ty) => briev_ty.clone(),
                     };
                     self.fun.let_bindings.insert(cp_names[fi].clone(), format!("%{}", cp_names[fi]));
-                    self.fun.let_binding_types.insert(cp_names[fi].clone(), briv_ty.clone());
-                    self.fun.let_original_types.insert(cp_names[fi].clone(), briv_ty);
+                    self.fun.let_binding_types.insert(cp_names[fi].clone(), briev_ty.clone());
+                    self.fun.let_original_types.insert(cp_names[fi].clone(), briev_ty);
                 }
                 writeln!(out, "define void @{}({}) local_unnamed_addr #0 {{", cold_name, param_sig.join(", ")).ok();
 
@@ -2683,7 +2683,7 @@ impl LlvmBackend {
     /// 2026-08-06 (accel plan): emit `@txn_<name>` as the dispatch wrapper for
     /// an accel body. The reactor calls `@txn_<name>` by name at every
     /// dispatch site (loop_engine counter/ssa paths), so the wrapper — lazy
-    /// registry init + device/verdict gate → `briv_accel_launch`, else the CPU
+    /// registry init + device/verdict gate → `briev_accel_launch`, else the CPU
     /// body `@txn_<name>_cpu` — is picked up automatically.
     pub(super) fn emit_accel_dispatch_wrapper(&mut self, out: &mut String, name: &str) {
         let Some(&idx) = self.accel_kernel_idx.get(name) else { return; };
@@ -2693,33 +2693,33 @@ impl LlvmBackend {
         let n_kernels = self.accel_kernel_idx.len();
         writeln!(out, "define void @txn_{}({}) local_unnamed_addr {{", name, self.ctx.state_ptr_param).ok();
         writeln!(out, "entry:").ok();
-        writeln!(out, "  %ready = load i32, ptr @briv_accel_ready").ok();
+        writeln!(out, "  %ready = load i32, ptr @briev_accel_ready").ok();
         writeln!(out, "  %need = icmp eq i32 %ready, 0").ok();
         writeln!(out, "  br i1 %need, label %accel_init, label %accel_gate").ok();
         writeln!(out, "accel_init:").ok();
-        writeln!(out, "  %ok = call i32 @briv_accel_init(ptr @briv_accel_descs, i32 {})", n_kernels).ok();
-        writeln!(out, "  store i32 1, ptr @briv_accel_ready").ok();
+        writeln!(out, "  %ok = call i32 @briev_accel_init(ptr @briev_accel_descs, i32 {})", n_kernels).ok();
+        writeln!(out, "  store i32 1, ptr @briev_accel_ready").ok();
         // 2026-08-06 (Design A / probe): a Probe-decision body runs the
         // auto-tuning probe once here (device + workload measurement, output
         // equality gate), committing its own verdict global. Gpu-decision
         // bodies skip the probe (static crossover already decided).
         if !forced {
-            writeln!(out, "  call void @briv_accel_run_probe_{}(ptr %state)", name).ok();
+            writeln!(out, "  call void @briev_accel_run_probe_{}(ptr %state)", name).ok();
         }
         writeln!(out, "  br label %accel_gate").ok();
         writeln!(out, "accel_gate:").ok();
         // Gpu decision → gate on device availability. Probe → gate on the
-        // committed verdict global (set by briv_accel_run_probe_<name>).
+        // committed verdict global (set by briev_accel_run_probe_<name>).
         if forced {
-            writeln!(out, "  %dev = call i32 @briv_accel_available()").ok();
+            writeln!(out, "  %dev = call i32 @briev_accel_available()").ok();
         } else {
-            writeln!(out, "  %dev = load i32, ptr @briv_accel_verdict_{}", name).ok();
+            writeln!(out, "  %dev = load i32, ptr @briev_accel_verdict_{}", name).ok();
         }
         writeln!(out, "  %use = icmp ne i32 %dev, 0").ok();
         writeln!(out, "  br i1 %use, label %accel_gpu, label %accel_cpu").ok();
         writeln!(out, "accel_gpu:").ok();
         let work = self.emit_work_item_count(out, name);
-        writeln!(out, "  %r = call i32 @briv_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
+        writeln!(out, "  %r = call i32 @briev_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
         // 2026-08-06 (Design A): the accel node is a NATIVE counted loop over
         // the counter (`[i < N]`, `i = i + 1`). One GPU dispatch covers all N
         // work-items, so fast-forward the counter to N — the loop's `i < N`
@@ -2765,7 +2765,7 @@ impl LlvmBackend {
     /// (Design A): CPU lane (run the counted loop to completion), GPU lane (one
     /// dispatch + counter fast-forward), output-equality gate (write buffers
     /// within tolerance), and the run_probe that times both lanes and commits
-    /// the verdict global. The runtime (`briv_accel_probe`) manages the two
+    /// the verdict global. The runtime (`briev_accel_probe`) manages the two
     /// lane state copies.
     pub(super) fn emit_accel_probe_functions(&mut self, out: &mut String, name: &str) {
         let Some(&idx) = self.accel_kernel_idx.get(name) else { return; };
@@ -2776,7 +2776,7 @@ impl LlvmBackend {
 
         // ── CPU lane: reset the counter to 0, then run the counted loop to
         //    completion (each @txn_<name>_cpu firing advances `i`).
-        writeln!(out, "define void @briv_accel_probe_cpu_{}(ptr %state) {{", name).ok();
+        writeln!(out, "define void @briev_accel_probe_cpu_{}(ptr %state) {{", name).ok();
         writeln!(out, "entry:").ok();
         let cg = self.emit_state_gep(out, "  ", "pc", "%state", cfidx);
         writeln!(out, "  store i64 0, ptr {}", cg).ok();
@@ -2797,12 +2797,12 @@ impl LlvmBackend {
 
         // ── GPU lane: reset the counter, one dispatch of N work-items, then
         //    fast-forward the counter so the state matches the CPU lane's.
-        writeln!(out, "define void @briv_accel_probe_gpu_{}(ptr %state) {{", name).ok();
+        writeln!(out, "define void @briev_accel_probe_gpu_{}(ptr %state) {{", name).ok();
         writeln!(out, "entry:").ok();
         let cg2 = self.emit_state_gep(out, "  ", "pg", "%state", cfidx);
         writeln!(out, "  store i64 0, ptr {}", cg2).ok();
         let ng = self.emit_work_item_count(out, name);
-        writeln!(out, "  %r = call i32 @briv_accel_launch(i32 {}, ptr %state, i64 {})", idx, ng).ok();
+        writeln!(out, "  %r = call i32 @briev_accel_launch(i32 {}, ptr %state, i64 {})", idx, ng).ok();
         writeln!(out, "  store i64 {}, ptr {}", ng, cg2).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -2810,7 +2810,7 @@ impl LlvmBackend {
         // ── Output-equality gate: compare every write buffer element-wise
         //    within tolerance (Float) / exactly (Int). The gate doubles as the
         //    safety net against GPU codegen bugs (D7).
-        writeln!(out, "define i8 @briv_accel_gpu_ok_{}(ptr %a, ptr %b, double %tol) {{", name).ok();
+        writeln!(out, "define i8 @briev_accel_gpu_ok_{}(ptr %a, ptr %b, double %tol) {{", name).ok();
         writeln!(out, "entry:").ok();
         self.emit_probe_ok_body(out, name, cfidx);
         writeln!(out, "fail:").ok();
@@ -2821,13 +2821,13 @@ impl LlvmBackend {
         //    runtime, commit the verdict global. Tunables from
         //    config/ir-lowering.dbvl (config_tuning::ir_lowering).
         let tuning = crate::config_tuning::ir_lowering();
-        writeln!(out, "define void @briv_accel_run_probe_{}(ptr %state) {{", name).ok();
+        writeln!(out, "define void @briev_accel_run_probe_{}(ptr %state) {{", name).ok();
         writeln!(out, "entry:").ok();
-        writeln!(out, "  %v = call i32 @briv_accel_probe(").ok();
-        writeln!(out, "    ptr @briv_accel_probe_cpu_{}, ptr @briv_accel_probe_gpu_{},", name, name).ok();
+        writeln!(out, "  %v = call i32 @briev_accel_probe(").ok();
+        writeln!(out, "    ptr @briev_accel_probe_cpu_{}, ptr @briev_accel_probe_gpu_{},", name, name).ok();
         writeln!(out, "    ptr %state, i64 {}, i64 {}, double {:e}, double {:e},", state_size, tuning.accel_probe_k, tuning.accel_probe_tolerance, tuning.accel_probe_margin).ok();
-        writeln!(out, "    ptr @briv_accel_gpu_ok_{})", name).ok();
-        writeln!(out, "  store i32 %v, ptr @briv_accel_verdict_{}", name).ok();
+        writeln!(out, "    ptr @briev_accel_gpu_ok_{})", name).ok();
+        writeln!(out, "  store i32 %v, ptr @briev_accel_verdict_{}", name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
@@ -2942,7 +2942,7 @@ fn probe_ok_checks(
     }
 
     /// Emit the beginprogram entry-loop goal check: after a firing, evaluate
-    /// the postcondition; when it is met, clear `@briv_begin_<name>` so the
+    /// the postcondition; when it is met, clear `@briev_begin_<name>` so the
     /// precondition (which reads the flag) stops gating future ticks. This
     /// makes `[beginprogram && <state>]` drive a one-shot entry loop without a
     /// phase gate.
@@ -2963,7 +2963,7 @@ fn probe_ok_checks(
         let cont_lbl = format!("begin.cont{}", label_n);
         writeln!(out, "  br i1 {}, label %{}, label %{}", goal_i1, done_lbl, cont_lbl).ok();
         writeln!(out, "{}:", done_lbl).ok();
-        writeln!(out, "  store i1 false, ptr @briv_begin_{}", txn.name).ok();
+        writeln!(out, "  store i1 false, ptr @briev_begin_{}", txn.name).ok();
         writeln!(out, "  br label %{}", cont_lbl).ok();
         writeln!(out, "{}:", cont_lbl).ok();
     }
@@ -3153,7 +3153,7 @@ fn probe_ok_checks(
             // LLVM's optimizer merges redundant loads via SROA.
             self.fun.let_bindings.insert(n.clone(), slot.clone());
             // 2026-08-11 (Phase 2a2 fix): boxed params keep their ORIGINAL
-            // Briv type — the old `Type::int()` downgrade made a boxed String
+            // Briev type — the old `Type::int()` downgrade made a boxed String
             // param look like an Int, and on wasm32 (int_bits=32) `int()` maps
             // to i32, so `name = n` emitted `sext i32` on a value that is
             // genuinely i64 (the boxed address). The identifier load now unboxes
@@ -3336,7 +3336,7 @@ fn probe_ok_checks(
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
         // 2026-08-06 (beginprogram plan): the precondition may read the node's
-        // `@briv_begin_<name>` entry flag — set the txn name so
+        // `@briev_begin_<name>` entry flag — set the txn name so
         // `Expr::BeginProgram` resolves it.
         self.fun.txn_name = name.to_string();
         // 2026-07-04: Use #7 (memory(readonly)) for @pre_* functions.
@@ -3394,7 +3394,7 @@ fn probe_ok_checks(
     //   enables the async runtime to call each body independently.
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         // 2026-08-06 (beginprogram plan): the precondition may read the node's
-        // `@briv_begin_<name>` entry flag — bind the txn name for the body's
+        // `@briev_begin_<name>` entry flag — bind the txn name for the body's
         // precondition check.
         self.fun.txn_name = name.to_string();
         let async_name = format!("async_body_{}", name);
@@ -3497,7 +3497,7 @@ fn probe_ok_checks(
     }
 }
 
-/// Map a Briv signal name (e.g. "SIGWINCH", "SIGINT") to its POSIX number.
+/// Map a Briev signal name (e.g. "SIGWINCH", "SIGINT") to its POSIX number.
 fn sig_number(name: &str) -> i32 {
     match name {
         "SIGHUP" => 1,
@@ -3536,7 +3536,7 @@ fn sig_number(name: &str) -> i32 {
 }
 
 impl LlvmBackend {
-    /// Emit a library shim — no main function, only `__briv_init_state`
+    /// Emit a library shim — no main function, only `__briev_init_state`
     /// and dso_local wrappers for #export functions.
     /// 2026-07-19: Emit wrappers for exported functions in shared library.
     /// In --shared mode, exported functions keep their original names (e.g., @add)
@@ -3554,24 +3554,24 @@ impl LlvmBackend {
                 }
             }
         }
-        writeln!(out, "define dso_local void @__briv_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
+        writeln!(out, "define dso_local void @__briev_init_state({}) #0 {{", self.ctx.state_ptr_param).ok();
         // 2026-08-09 (init kind, Phase 2): library mode seeds runtime-seeded
         // invariants before any exported function runs.
         self.emit_init_seeding_stores(out, "  ");
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__briv_init() #0 {{").ok();
+        writeln!(out, "define void @__briev_init() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define void @__briv_fini() #0 {{").ok();
+        writeln!(out, "define void @__briev_fini() #0 {{").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__briv_init, ptr null }}]").ok();
+        writeln!(out, "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] [{{ i32, ptr, ptr }} {{ i32 65535, ptr @__briev_init, ptr null }}]").ok();
     }
 
     /// Called when `self.ctx.library_mode` is true.
 
-    /// 2026-08-04 (compiler-in-Briv): the LLVM ABI return type for a
+    /// 2026-08-04 (compiler-in-Briev): the LLVM ABI return type for a
     /// function. Struct/obj values are pointer handles (alloca + ptrtoint),
     /// so a function returning `List<T>` or any struct returns the i64
     /// HANDLE, not the struct ABI type — `llvm_type(List<String>)` resolves
@@ -3591,18 +3591,18 @@ impl LlvmBackend {
 
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
-        // earlier in generate()). We only need to add __briv_init_state.
-        // 2026-08-03 (node bridge): __briv_init_state MUST return a
+        // earlier in generate()). We only need to add __briev_init_state.
+        // 2026-08-03 (node bridge): __briev_init_state MUST return a
         // long-lived state pointer — the previous `alloca %State` returned a
         // stack address that dangled as soon as the call returned. It stayed
         // latent while no export touched a state field (rank.bv), but any
         // stateful export (save/read on `saved`) read garbage/crashed. The
         // library model is one state per process, so a module global is
         // correct; init_state fills it, __glue_release stays a no-op.
-        writeln!(out, "@__briv_state = global %State zeroinitializer").ok();
-        writeln!(out, "define dso_local i64 @__briv_init_state() local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  call void @init_state(ptr @__briv_state)").ok();
-        writeln!(out, "  %ptr = ptrtoint ptr @__briv_state to i64").ok();
+        writeln!(out, "@__briev_state = global %State zeroinitializer").ok();
+        writeln!(out, "define dso_local i64 @__briev_init_state() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  call void @init_state(ptr @__briev_state)").ok();
+        writeln!(out, "  %ptr = ptrtoint ptr @__briev_state to i64").ok();
         writeln!(out, "  ret i64 %ptr").ok();
         writeln!(out, "}}").ok();
         // Also emit a __glue_release placeholder (no-op for arena-free bridge)
@@ -3612,12 +3612,12 @@ impl LlvmBackend {
         // 2026-08-03: host cancellation — raise/clear the process-global
         // flag that CancelRequested#() polls. The state pointer is accepted
         // (future: per-state flag) but unused; the flag is process-global.
-        writeln!(out, "define dso_local void @__briv_set_cancel(ptr %state, i32 %flag) local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  store atomic i32 %flag, ptr @__briv_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "define dso_local void @__briev_set_cancel(ptr %state, i32 %flag) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 %flag, ptr @__briev_cancel_flag seq_cst, align 4").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "define dso_local void @__briv_clear_cancel(ptr %state) local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  store atomic i32 0, ptr @__briv_cancel_flag seq_cst, align 4").ok();
+        writeln!(out, "define dso_local void @__briev_clear_cancel(ptr %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  store atomic i32 0, ptr @__briev_cancel_flag seq_cst, align 4").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }

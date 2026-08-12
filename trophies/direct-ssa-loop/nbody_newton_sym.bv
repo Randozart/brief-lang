@@ -3,13 +3,13 @@
 // Matches nbody_newton.bv algorithm but with hot-loop FFI like nbody_sqrt.
 //
 // Build:
-//   ./target/release/briv-compiler llvm benchmarks/nbody_newton_sym.bv \
+//   ./target/release/briev-compiler llvm benchmarks/nbody_newton_sym.bv \
 //       --out benchmarks --optimize-budget 256
 
 #!exit count == bound;
 
 import { get_env_int } from "std/env.bv";
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 
 frgn #out __print_float(val: Float) -> Bool;
 frgn #out __print_int(n: Int) -> Bool;

@@ -1,4 +1,4 @@
-// Ring Buffer — C reference for Briv LLVM backend
+// Ring Buffer — C reference for Briev LLVM backend
 //
 // Allocates a 1024-slot ring buffer, enqueues TOTAL items,
 // prints fill level every 5M ops. Symmetric with ring_buffer.bv.

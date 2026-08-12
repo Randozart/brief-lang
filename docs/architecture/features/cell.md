@@ -8,7 +8,7 @@
 
 ## Anatomy of a Cell
 
-```briv
+```briev
 cell! timer(duration: Int) -> elapsed: Int, done: Bool {
     elapsed: Int = 0;
     done: Bool = false;
@@ -24,7 +24,7 @@ cell! timer(duration: Int) -> elapsed: Int, done: Bool {
 };
 ```
 
-A `cell` is not a class. A class is a passive data structure with imperative accessors. A cell is an **intentionally isolated Briv-in-Briv state space** — a sealed state machine with a defined interface, its own reactor loop, and no external coupling.
+A `cell` is not a class. A class is a passive data structure with imperative accessors. A cell is an **intentionally isolated Briev-in-Briev state space** — a sealed state machine with a defined interface, its own reactor loop, and no external coupling.
 
 ---
 
@@ -45,7 +45,7 @@ A `cell`'s `node` **cannot** see the parent's `%State`. They react only to:
 - The cell's own input arguments
 - The cell's own `trg` variables (internal triggers)
 
-This is enforced by the compiler, not by convention. In hardware, physical epoxy enforces the boundary. In Briv, the compiler **is the epoxy casing** — it rejects any attempt to read cell internals from outside, or reference parent state from inside.
+This is enforced by the compiler, not by convention. In hardware, physical epoxy enforces the boundary. In Briev, the compiler **is the epoxy casing** — it rejects any attempt to read cell internals from outside, or reference parent state from inside.
 
 ---
 
@@ -67,7 +67,7 @@ When you open `std/system_cell.bv` to modify the `Console!` state machine, you s
 
 Alan Kay's original vision of Object-Oriented Programming was biological — cells communicating by passing messages, sharing no memory. Mainstream OOP (C++, Java, C#) abandoned this for hierarchical class inheritance and shared mutable state. A `cell` reconstructs Kay's original vision:
 
-| Property | Mainstream Class | Briv `cell` |
+| Property | Mainstream Class | Briev `cell` |
 |----------|-----------------|--------------|
 | State | Public/private fields, mutable from outside | Private, sealed — no direct reads |
 | Mutation | Setter methods (imperative, synchronous) | Input arguments (perturbations) |
@@ -94,7 +94,7 @@ A cell is not a mechanism for organizing code. It is a mechanism for organizing 
 
 **`cell!`** is an allostatic agent: maintain internal homeostasis while processing signals. Use it for console I/O, protocol handlers, hardware drivers, sensor fusion.
 
-The `!` signals "altered control flow — pay attention," consistent with Briv's `!` semantics (e.g. `term!` for program exit).
+The `!` signals "altered control flow — pay attention," consistent with Briev's `!` semantics (e.g. `term!` for program exit).
 
 ---
 
@@ -102,7 +102,7 @@ The `!` signals "altered control flow — pay attention," consistent with Briv's
 
 You cannot imperatively force a state change on a cell. You pass input arguments at creation:
 
-```briv
+```briev
 let t = cell timer(1000);           // sync, blocking
 let t = async cell! console(path);  // async, non-blocking
 ```
@@ -115,7 +115,7 @@ The cell's internal reactor loop decides *if* and *how* to transition based on i
 
 You cannot read a cell's internal fields directly. You must bind a trigger to an output port:
 
-```briv
+```briev
 trg elapsed: Int @ timer.elapsed;
 trg done: Bool @ timer.done;
 ```
@@ -126,9 +126,9 @@ The cell only communicates when it has executed a state transition that produces
 
 ## The Hardware Mapping
 
-"Cell" is already a standard term in digital design: **standard cells** are the basic building blocks of silicon. A Briv `cell` maps directly:
+"Cell" is already a standard term in digital design: **standard cells** are the basic building blocks of silicon. A Briev `cell` maps directly:
 
-| Briv Concept | Hardware Equivalent |
+| Briev Concept | Hardware Equivalent |
 |--------------|---------------------|
 | `cell` (auto-terminating) | Combinational logic |
 | `cell!` (persistent) | Sequential logic (clocked) |
@@ -153,12 +153,12 @@ The compiler enforces the boundary, freeing cognitive attention. This is the ult
 
 ---
 
-## Relationship to Briv Philosophy
+## Relationship to Briev Philosophy
 
-Cells embody every core Briv principle:
+Cells embody every core Briev principle:
 
 - **Contract-First**: the output port types and `->` interface are the cell's contract with the world
-- **No Magic**: all cell behavior is implemented in Briv, not in hardcoded Rust
+- **No Magic**: all cell behavior is implemented in Briev, not in hardcoded Rust
 - **Self-Documenting Failure**: a mistyped `trg` is a compile error, not a runtime segfault
 - **Reactive Transactions**: the cell body is a set of `node` blocks — the same primitive as the top-level program
 - **Composition over Inheritance**: cells compose via triggers, not class hierarchies
@@ -454,7 +454,7 @@ Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8
 
 The `trg @` binding syntax supports an optional `@Hz` suffix:
 
-```briv
+```briev
 trg X: Int @ counter();
 trg Y: Int @ filter(raw);
 ```
@@ -467,7 +467,7 @@ trg Y: Int @ filter(raw);
 
 The `cell` keyword can be used in expression position to create a synchronous cell call:
 
-```briv
+```briev
 let result = cell timer(1000);
 let x = cell add_one(41);
 ```

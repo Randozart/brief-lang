@@ -46,7 +46,7 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     /// 2026-07-23: Target profiles for multi-target compilation.
-    /// Defined as `[target.<name>]` sections in briv.toml.
+    /// Defined as `[target.<name>]` sections in briev.toml.
     #[serde(default)]
     pub target: HashMap<String, TargetProfile>,
 }
@@ -295,7 +295,7 @@ pub fn find_manifest(start_dir: &Path) -> Option<PathBuf> {
     let mut current = start_dir.to_path_buf();
 
     loop {
-        let manifest_path = current.join("briv.toml");
+        let manifest_path = current.join("briev.toml");
         if manifest_path.exists() {
             return Some(manifest_path);
         }
@@ -356,7 +356,7 @@ utils = { path = "lib/utils.bv" }
         let project_dir = tmp.path();
 
         fs::create_dir(project_dir.join("src")).unwrap();
-        let manifest_path = project_dir.join("briv.toml");
+        let manifest_path = project_dir.join("briev.toml");
         fs::write(&manifest_path, "").unwrap();
 
         let found = find_manifest(&project_dir.join("src").join("main.bv"));

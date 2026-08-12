@@ -1,17 +1,17 @@
 use std::fmt::Write;
 // ── LLVM ABI Marshaling ───────────────────────────────────────────────
 // 2026-07-12: Phase 2.7/4 — Marshaling between C calling convention
-// and Briv internal types (Bool zext/trunc, String ptr extract, etc.).
+// and Briev internal types (Bool zext/trunc, String ptr extract, etc.).
 
 use crate::ast::Type;
 use crate::type_universe::TypeUniverse;
 
-/// Marshal a C parameter value into a Briv internal value.
+/// Marshal a C parameter value into a Briev internal value.
 /// Bool: trunc i8 to i1
 ///
 /// 2026-07-31: Phase 3 (§8.4-D9) — Bool detection via the `Cast.#Bool`
 /// protocol property (universe) instead of the type name.
-pub fn marshal_param_to_briv(
+pub fn marshal_param_to_briev(
     param_ty: &Type,
     param_reg: &str,
     universe: &Option<TypeUniverse>,
@@ -23,10 +23,10 @@ pub fn marshal_param_to_briv(
     }
 }
 
-/// Marshal a Briv return value to C calling convention.
+/// Marshal a Briev return value to C calling convention.
 /// Bool: zext i1 to i8
 /// String: extract .ptr field as ptr
-pub fn marshal_briv_to_return(
+pub fn marshal_briev_to_return(
     ret_ty: &Type,
     ret_reg: &str,
     universe: &Option<TypeUniverse>,
@@ -39,7 +39,7 @@ pub fn marshal_briv_to_return(
 }
 
 /// Generate the LLVM IR for an export wrapper function.
-/// The wrapper handles type marshaling between C ABI and Briv internal types.
+/// The wrapper handles type marshaling between C ABI and Briev internal types.
 pub fn marshal_export_wrapper(
     defn_name: &str,
     export_name: &str,
@@ -79,7 +79,7 @@ pub fn marshal_export_wrapper(
         params_llvm
             .iter()
             .enumerate()
-            .map(|(i, t)| marshal_param_to_briv(&param_tys[i], &format!("p{}", i), universe))
+            .map(|(i, t)| marshal_param_to_briev(&param_tys[i], &format!("p{}", i), universe))
             .collect::<Vec<_>>()
             .join(", ")
     )

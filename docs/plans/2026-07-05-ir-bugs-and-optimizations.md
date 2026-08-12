@@ -130,7 +130,7 @@ in `emit_ssa_main` to set `main_body = true` before `emit_state_allocas`.
 
 ### 2.4 nbody_newton — MISMATCH (2 lines vs 1)
 
-**Error:** Briv outputs 2 lines, C outputs 1 line.
+**Error:** Briev outputs 2 lines, C outputs 1 line.
 
 **Root cause:** The periodic guard `[count % 5000000 == 0]` evaluates using
 the phi register `%phi_count` which holds the **pre-increment** counter
@@ -175,7 +175,7 @@ patch.
 
 ### 2.5 Precomputation Drop — knucleotide, fasta, cancel_math
 
-**Symptom:** Briv runs in 0.0006s (600μs, just process overhead), outputs
+**Symptom:** Briev runs in 0.0006s (600μs, just process overhead), outputs
 "" (empty).  C produces correct output (e.g., knucleotide outputs "3").
 
 **Root cause:** The A005a dispatch path (`emit_folded_main` with
@@ -212,7 +212,7 @@ using the precomputed final values.
 willreturn memory(argmem: readwrite) }`
 
 **Functions using #8:**
-- `briv_main` (user `defn` definitions)
+- `briev_main` (user `defn` definitions)
 - `@txn_name` (callable `txn` definitions)
 
 **The problem:** `memory(argmem: readwrite)` tells LLVM the function only
@@ -226,14 +226,14 @@ globals incorrectly, or removing the fprintf entirely.
 **Why it's currently safe:** All print intrinsics (`term! -> print_int#`,
 `term! -> printf#`) are hoisted to the `done:` block of `@main()` by
 `hoist_terminating_guard` (mod.rs:129-173).  The `@main()` function uses
-`#0` (no `argmemonly`) or `#3` (no `argmemonly`).  So `@briv_main` and
+`#0` (no `argmemonly`) or `#3` (no `argmemonly`).  So `@briev_main` and
 `@txn_name` never contain inline prints.
 
 **The risk:** Any future change that adds inline (non-hoisted) FFI calls
 to `defn` or callable `txn` bodies would trigger this bug silently.
 
 **Fix (optional, belt-and-suspenders):** When emitting a `@txn_name` or
-`briv_main`, scan the body for FFI calls that access globals.  If found,
+`briev_main`, scan the body for FFI calls that access globals.  If found,
 use `#0` instead of `#8`.
 
 ### 3.2 #1 willreturn on exit/abort — Pre-Existing, Low Impact
@@ -266,7 +266,7 @@ defined in `mod.rs` but never referenced by any function declaration.
 
 `!invariant.load` is only applied to fields NOT in the transaction's
 `write_set`.  These fields are guaranteed to be unmodified by the loop
-body (Briv has no hidden mutation through pointers).  The latch uses
+body (Briev has no hidden mutation through pointers).  The latch uses
 identity backedge (no reload from %State) for these fields.
 
 **No fix needed.**
@@ -274,7 +274,7 @@ identity backedge (no reload from %State) for these fields.
 ## 4. LLVM IR Output Convention
 
 The LLVM IR emitted by the compiler is an INTERMEDIATE REPRESENTATION.
-It is not user-facing code and does not need to satisfy the Briv compiler's
+It is not user-facing code and does not need to satisfy the Briev compiler's
 coding standards (max 2 nesting, flat control flow, etc.).  The generated
 IR must:
 
@@ -357,6 +357,6 @@ Phase E additionally needs:
 4. Update BUGS.md if a bug diagnosis was confirmed
 5. Benchmark the fixed benchmark(s) individually:
    ```bash
-   ./target/release/briv-compiler llvm benchmarks/<name>.bv --out /tmp/test
+   ./target/release/briev-compiler llvm benchmarks/<name>.bv --out /tmp/test
    opt -O2 -S /tmp/test/<name>.ll -o /dev/null 2>&1 | head -5
    ```

@@ -481,7 +481,7 @@ pub enum ImportKind {
     pub symbols: Vec<(String, String)>,
     /// 2026-08-09 (Phase 11, Slice 2): a `:` module alias
     /// (`import collections: <std/collections>;`). A collision-resolving local
-    /// TAG only — Briv inlines imports into one namespace with no
+    /// TAG only — Briev inlines imports into one namespace with no
     /// module-qualified access operator, so the alias records provenance and
     /// lets two imports of the same exported name coexist (SPEC §7.2). Not a
     /// new access form.
@@ -748,14 +748,14 @@ impl Default for ForeignSignature {
 
 /// Foreign function binding — a `frgn` declaration that wraps an external function.
 /// 2026-07-22: Treated as an import. `foreign_name` is the C/foreign symbol the
-/// linker looks for. `briv_name` (from `as` clause) is what Briv code calls it.
+/// linker looks for. `briev_name` (from `as` clause) is what Briev code calls it.
 #[derive(Debug, Clone)]
 pub struct ForeignBinding {
     /// The C/foreign symbol name — what the linker looks for in the foreign module.
     pub foreign_name: String,
-    /// The Briv name for this foreign function. `None` means `foreign_name` is used.
-    /// Set via the `as <briv_name>` clause in `frgn` declarations.
-    pub briv_name: Option<String>,
+    /// The Briev name for this foreign function. `None` means `foreign_name` is used.
+    /// Set via the `as <briev_name>` clause in `frgn` declarations.
+    pub briev_name: Option<String>,
     pub from: FromSpec,
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
@@ -789,13 +789,13 @@ impl ForeignBinding {
     /// 2026-07-22: Construct a ForeignBinding.
     pub fn new(
         foreign_name: String,
-        briv_name: Option<String>,
+        briev_name: Option<String>,
         from: FromSpec,
         target: ForeignTarget,
     ) -> Self {
         ForeignBinding {
             foreign_name,
-            briv_name,
+            briev_name,
             from,
             target,
             inputs: vec![],
@@ -819,9 +819,9 @@ impl ForeignBinding {
         }
     }
 
-    /// The effective Briv name — uses `briv_name` if set, otherwise `foreign_name`.
-    pub fn effective_briv_name(&self) -> &str {
-        self.briv_name.as_deref().unwrap_or(&self.foreign_name)
+    /// The effective Briev name — uses `briev_name` if set, otherwise `foreign_name`.
+    pub fn effective_briev_name(&self) -> &str {
+        self.briev_name.as_deref().unwrap_or(&self.foreign_name)
     }
 }
 

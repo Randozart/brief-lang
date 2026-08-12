@@ -1,4 +1,4 @@
-# Briv LLVM Backend Specification
+# Briev LLVM Backend Specification
 
 **Version:** 1.2  
 **Date:** 2026-05-29  
@@ -6,14 +6,14 @@
 
 ## Overview
 
-The Briv LLVM Backend compiles Briv AST structures into optimized LLVM IR (`.ll` files). Two implementations are planned:
+The Briev LLVM Backend compiles Briev AST structures into optimized LLVM IR (`.ll` files). Two implementations are planned:
 
 - **Rust backend** (`src/backend/llvm.rs`) — text IR emitter, currently 509 lines of working scaffold
-- **Self-hosted backend** (`lib/compiler/backends/llvm.bv`) — Briv-in-Briv mirror emitting `.ll` via `StringBuilder`
+- **Self-hosted backend** (`lib/compiler/backends/llvm.bv`) — Briev-in-Briev mirror emitting `.ll` via `StringBuilder`
 
 ## Design Philosophy
 
-Briv enforces strict memory boundaries, transactional atomicity, and contract-driven constraints. The LLVM backend exploits these guarantees to bypass conservative compiler safety assumptions:
+Briev enforces strict memory boundaries, transactional atomicity, and contract-driven constraints. The LLVM backend exploits these guarantees to bypass conservative compiler safety assumptions:
 
 1. **Acyclic call graph** → direct calls, `norecurse`, full inlining into one SSA graph
 2. **Isolated state transitions** → `noalias` + `nocapture` on every `%State*` pointer
@@ -26,7 +26,7 @@ Briv enforces strict memory boundaries, transactional atomicity, and contract-dr
 | File | Content |
 |------|---------|
 | `01-ARCHITECTURE.md` | Pipeline: AST → Lowering → Codegen → `.ll` |
-| `02-TYPE-MAPPING.md` | Briv types → LLVM types, alignment, ABI |
+| `02-TYPE-MAPPING.md` | Briev types → LLVM types, alignment, ABI |
 | `03-TRANSACTIONS.md` | txn → `define void @name(%State* noalias nocapture)` |
 | `04-NOALIAS.md` | noalias/nocapture synthesis, register promotion |
 | `05-CONTRACT-TO-METADATA.md` | !range, llvm.assume, constant propagation from contracts |
@@ -39,7 +39,7 @@ Briv enforces strict memory boundaries, transactional atomicity, and contract-dr
 | `08e-AOT-SIZE-INFERENCE.md` | List→Vector[N] promotion via contract-bound analysis |
 | `09-SIMD.md` | `<N x T>` vectors, `!llvm.loop.vectorize.enable` |
 | `10-FULL-EXAMPLE.md` | Counter.increment from .bv → annotated .ll |
-| `11-SELF-HOSTED.md` | Porting to Briv: StringBuilder IR emission |
+| `11-SELF-HOSTED.md` | Porting to Briev: StringBuilder IR emission |
 | `12-IMPLEMENTATION-ORDER.md` | Phases 0-7 with deps and effort |
 | `13-GPU-TARGET.md` | Future roadmap: NVPTX/SPIR-V, bank conflict elimination |
 | `CHANGELOG-LLVM-SPEC.md` | Design journal tracking all spec revisions |

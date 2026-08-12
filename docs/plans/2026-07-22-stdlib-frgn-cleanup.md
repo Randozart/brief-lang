@@ -14,13 +14,13 @@ The stdlib accumulated several outdated patterns during rapid iteration:
 
 2. **sig #out modifier** — Predates the `observable <~ true` metadata system. Now redundant; metadata handles observability.
 
-3. **Inconsistent frgn naming** — ~180 frgn declarations use a `__` prefix (`__to_upper`, `__now`), but some use nothing (`XXH64`, `XXH32`). No consistent convention for distinguishing "raw FFI" from "Briv wrapper" at call sites.
+3. **Inconsistent frgn naming** — ~180 frgn declarations use a `__` prefix (`__to_upper`, `__now`), but some use nothing (`XXH64`, `XXH32`). No consistent convention for distinguishing "raw FFI" from "Briev wrapper" at call sites.
 
 4. **No fallback clauses** — The new frgn syntax supports `fallback <expr>` but no stdlib frgn uses it. Every FFI call silently fails on unavailable libraries.
 
 5. **No from clauses** — Most frgns omit `from`, meaning the compiler can't determine which foreign module provides the symbol. This blocks module-level compilation and provenance tracking.
 
-6. **from pointing to .bv files** — Some frgns use `from "std/briv_rt.bv"` but a `.bv` file is a Briv source, not a foreign module. Frgn should always point to foreign code — `.c`, `.so`, `link/...`, or similar.
+6. **from pointing to .bv files** — Some frgns use `from "std/briev_rt.bv"` but a `.bv` file is a Briev source, not a foreign module. Frgn should always point to foreign code — `.c`, `.so`, `link/...`, or similar.
 
 7. **Duplicate std/ffi/ directory** — `lib/std/X.bv` and `lib/std/ffi/X.bv` are identical copies that will drift independently. One should be canonical, the other should import.
 
@@ -28,44 +28,44 @@ The stdlib accumulated several outdated patterns during rapid iteration:
 
 9. **#export modifier in examples** — Still uses `#export defn` instead of the standard `export defn`.
 
-10. **ForeignBinding field semantics reversed** — `name` stores the Briv name and `as_name` stores the foreign/C symbol, but the import analogy demands the opposite: the first name after `frgn` is the foreign symbol, and `as` provides the Briv renaming.
+10. **ForeignBinding field semantics reversed** — `name` stores the Briev name and `as_name` stores the foreign/C symbol, but the import analogy demands the opposite: the first name after `frgn` is the foreign symbol, and `as` provides the Briev renaming.
 
 ---
 
 ## Architecture: Frgn Declarations as Imports
 
-A `frgn` declaration IS an import statement. It imports a foreign function into Briv's namespace.
+A `frgn` declaration IS an import statement. It imports a foreign function into Briev's namespace.
 
-```briv
+```briev
 frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;
 // ^^^^^                                              ^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^
-// foreign/C symbol (what the library exports)        Briv name       source (provenance)          fallback
+// foreign/C symbol (what the library exports)        Briev name       source (provenance)          fallback
 ```
 
-This reads naturally as: "import function `XXH64` from `xxhash.c`, call it `frgn__xxh64` in Briv, and if unavailable return 0."
+This reads naturally as: "import function `XXH64` from `xxhash.c`, call it `frgn__xxh64` in Briev, and if unavailable return 0."
 
 ### The `frgn__` convention
 
-All raw FFI functions exposed to Briv code use a `frgn__` prefix. This makes every call site visually unambiguous:
+All raw FFI functions exposed to Briev code use a `frgn__` prefix. This makes every call site visually unambiguous:
 
-```briv
+```briev
 defn to_upper(s: String) -> Result<String, StringError> {
     term frgn__to_upper(s);  // the __ marks "this is a raw FFI call"
 };
 ```
 
-Without the prefix, readers can't distinguish "this is a Briv function" from "this crosses the FFI boundary."
+Without the prefix, readers can't distinguish "this is a Briev function" from "this crosses the FFI boundary."
 
 When the C symbol already follows the convention (e.g., `frgn__to_upper`), no `as` clause is needed:
 
-```briv
-frgn frgn__to_upper(s: String) -> Result<String, StringError> from "link/briv_rt.c";
+```briev
+frgn frgn__to_upper(s: String) -> Result<String, StringError> from "link/briev_rt.c";
 ```
 
-When the C symbol differs, `as` provides the Briv name:
+When the C symbol differs, `as` provides the Briev name:
 
-```briv
-frgn __print_int(n: Int) -> Int as frgn__print_int from "link/briv_rt.c" fallback ;
+```briev
+frgn __print_int(n: Int) -> Int as frgn__print_int from "link/briev_rt.c" fallback ;
 frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;
 ```
 
@@ -77,8 +77,8 @@ Every frgn MUST have a `from` clause. Without it, the compiler cannot determine 
 
 The `as` clause comes BEFORE `from` in the declaration to reduce ambiguity when reading:
 
-```briv
-frgn func(...) -> Ret as briv_name from "source" fallback ...;
+```briev
+frgn func(...) -> Ret as briev_name from "source" fallback ...;
 ```
 
 And `as` is only valid when `from` is also present (you can't rename an import without specifying what you're importing from).
@@ -98,7 +98,7 @@ The current field names `name` and `as_name` encode the pre-import-model semanti
 ```rust
 pub struct ForeignBinding {
     pub foreign_name: String,           // C/foreign symbol name (was `name`)
-    pub briv_name: Option<String>,     // Briv name (was `as_name`), None = same as foreign_name
+    pub briev_name: Option<String>,     // Briev name (was `as_name`), None = same as foreign_name
     pub from: FromSpec,                 // Required frgn -- provenance source
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
@@ -118,37 +118,37 @@ pub struct ForeignBinding {
 }
 
 impl ForeignBinding {
-    /// Returns the name that Briv code uses to call this frgn.
-    /// When `briv_name` is None, falls back to `foreign_name`.
-    pub fn effective_briv_name(&self) -> &str {
-        self.briv_name.as_deref().unwrap_or(&self.foreign_name)
+    /// Returns the name that Briev code uses to call this frgn.
+    /// When `briev_name` is None, falls back to `foreign_name`.
+    pub fn effective_briev_name(&self) -> &str {
+        self.briev_name.as_deref().unwrap_or(&self.foreign_name)
     }
 }
 ```
 
-**Constructor** — update `ForeignBinding::new(name, as_name, ...)` to `ForeignBinding::new(foreign_name, briv_name, ...)`.
+**Constructor** — update `ForeignBinding::new(name, as_name, ...)` to `ForeignBinding::new(foreign_name, briev_name, ...)`.
 
 ### All 16+ call sites
 
 | File | Current usage | New usage |
 |------|---------------|-----------|
-| `src/parser/definitions.rs` | `name: name, as_name: as_name` | `foreign_name: foreign_name, briv_name: briv_name` |
-| `src/analysis/frgn_dispatch.rs:101` | `fb.name` (error msg) | `fb.effective_briv_name()` |
+| `src/parser/definitions.rs` | `name: name, as_name: as_name` | `foreign_name: foreign_name, briev_name: briev_name` |
+| `src/analysis/frgn_dispatch.rs:101` | `fb.name` (error msg) | `fb.effective_briev_name()` |
 | `src/analysis/frgn_dispatch.rs:113` | `fb.as_name.unwrap_or(fb.name)` (symbol) | `fb.foreign_name` (simpler) |
 | `src/analysis/frgn_dispatch.rs:135` | `fb.as_name.unwrap_or(fb.name)` (symbol) | `fb.foreign_name` (simpler) |
-| `src/analysis/frgn_dispatch.rs:145` | `fb.name` (error msg) | `fb.effective_briv_name()` |
-| `src/compile.rs:232` | `fb.name` (dispatch key) | `fb.effective_briv_name()` |
-| `src/backend/llvm/mod.rs:1770` | `fb.name` | `fb.effective_briv_name()` |
-| `src/backend/llvm/mod.rs:1778` | `fb.name` | `fb.effective_briv_name()` |
-| `src/backend/webstack.rs:350` | `fb.name` | `fb.effective_briv_name()` |
-| `src/backend/webstack.rs:352` | `fb.name` | `fb.effective_briv_name()` |
-| `src/import_resolver.rs:633` | `fb.name` | `fb.effective_briv_name()` |
-| `src/import_resolver.rs:763` | `&fb.name` | `fb.effective_briv_name()` |
-| `src/lsp.rs:797` | `fb.name` | `fb.effective_briv_name()` |
-| `src/analysis/layout_optimizer.rs:68` | `fb.name` | `fb.effective_briv_name()` |
+| `src/analysis/frgn_dispatch.rs:145` | `fb.name` (error msg) | `fb.effective_briev_name()` |
+| `src/compile.rs:232` | `fb.name` (dispatch key) | `fb.effective_briev_name()` |
+| `src/backend/llvm/mod.rs:1770` | `fb.name` | `fb.effective_briev_name()` |
+| `src/backend/llvm/mod.rs:1778` | `fb.name` | `fb.effective_briev_name()` |
+| `src/backend/webstack.rs:350` | `fb.name` | `fb.effective_briev_name()` |
+| `src/backend/webstack.rs:352` | `fb.name` | `fb.effective_briev_name()` |
+| `src/import_resolver.rs:633` | `fb.name` | `fb.effective_briev_name()` |
+| `src/import_resolver.rs:763` | `&fb.name` | `fb.effective_briev_name()` |
+| `src/lsp.rs:797` | `fb.name` | `fb.effective_briev_name()` |
+| `src/analysis/layout_optimizer.rs:68` | `fb.name` | `fb.effective_briev_name()` |
 | `src/glue/export.rs:260` | `e.name` (export name) | `e.name` (Export struct unchanged) |
 | `src/library.rs:124` | `defn.name` (Definition, not FB) | Unchanged |
-| All test files | `fb.name`, `fb.as_name` | `fb.foreign_name`, `fb.briv_name` |
+| All test files | `fb.name`, `fb.as_name` | `fb.foreign_name`, `fb.briev_name` |
 
 ---
 
@@ -163,7 +163,7 @@ The current parser places `as` immediately after `frgn name` (before params). Th
 ```
 frgn_decl ::= "frgn" frgn_body ";"
 frgn_body ::= foreign_name "(" params ")" [ "->" ret ]
-              [ "as" briv_name ]
+              [ "as" briev_name ]
               "from" source_spec
               [ "fallback" fallback_expr ]
 ```
@@ -172,7 +172,7 @@ frgn_body ::= foreign_name "(" params ")" [ "->" ret ]
 
 ```rust
 fn parse_frgn_decl() {
-    let name = self.expect_identifier()?;                    // Briv name
+    let name = self.expect_identifier()?;                    // Briev name
     let as_name = if self.eat_identifier("as") {             // C symbol
         Some(self.expect_identifier()?)
     } else { None };
@@ -197,7 +197,7 @@ fn parse_frgn_decl() {
     // ... parse params ...
     self.expect(Token::RParen)?;
     // ... parse return type ...
-    let briv_name = if self.eat_identifier("as") {          // Briv name (optional)
+    let briev_name = if self.eat_identifier("as") {          // Briev name (optional)
         Some(self.expect_identifier()?)
     } else { None };
     if !self.eat(&Token::From) {                             // Required from
@@ -205,7 +205,7 @@ fn parse_frgn_decl() {
     }
     let from = self.parse_from_spec()?;
     // ... parse fallback ...
-    // ... construct ForeignBinding { foreign_name, briv_name, ... }
+    // ... construct ForeignBinding { foreign_name, briev_name, ... }
 }
 ```
 
@@ -245,7 +245,7 @@ Available atomic intrinsics: `AtomicLoad#`, `AtomicStore#`, `AtomicCas#`, `Atomi
 
 ### C2. `lib/std/syscall.bv` — 6 inop! declarations
 
-```briv
+```briev
 // Before:
 inop! syscall6(nr: Int, a1..a6: Int) -> Int { asm target { x86_64 { ... }; aarch64 { ... }; riscv64 { ... }; default { ... }; } } fallback -1;
 
@@ -261,15 +261,15 @@ defn syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> 
 
 `sl_insert` and `sl_remove` currently use BILD LLVM IR with `malloc`/`memcpy`/`free`. Replace with `defn` wrappers using `Malloc#`/`Copy#`/`Free#` intrinsics and pointer arithmetic.
 
-If the Briv-level implementation is slower than the C equivalent, create:
-- `benchmarks/skiplist.bv` — Briv implementation benchmark
+If the Briev-level implementation is slower than the C equivalent, create:
+- `benchmarks/skiplist.bv` — Briev implementation benchmark
 - `benchmarks/skiplist.c` — C reference benchmark
 
 ### C4. `lib/std/state.bv` — Delete
 
-Single `inop! accum` with `(%state)` marker for direct State struct access. This pattern is obsolete — accumulation is expressed directly in Briv:
+Single `inop! accum` with `(%state)` marker for direct State struct access. This pattern is obsolete — accumulation is expressed directly in Briev:
 
-```briv
+```briev
 // Instead of inop! accum(val: Int) -> Int {%state}
 // User writes:
 let counter: Int;
@@ -296,19 +296,19 @@ All raw FFI declarations should use `frgn__` prefix so call sites are visually u
 
 ### Rules
 
-1. Every `frgn` declaration's effective Briv name (from `as` clause, or the foreign name itself) starts with `frgn__`.
+1. Every `frgn` declaration's effective Briev name (from `as` clause, or the foreign name itself) starts with `frgn__`.
 2. The C/foreign symbol name stays unchanged (whatever the library exports).
 3. If the C symbol already uses a recognizable prefix, that's fine — the `as` clause maps it to `frgn__`.
 
 ### Migration table
 
-| File | C symbol | Briv name (new) | as clause |
+| File | C symbol | Briev name (new) | as clause |
 |------|----------|-------------------|-----------|
 | `ffi/io.bv` | `__print_int` | `frgn__print_int` | `as frgn__print_int` |
 | `ffi/io.bv` | `__print_str` | `frgn__print_str` | `as frgn__print_str` |
 | `ffi/io.bv` | `__print_float` | `frgn__print_float` | `as frgn__print_float` |
 | `ffi/io.bv` | `__print_char` | `frgn__print_char` | `as frgn__print_char` |
-| `ffi/env.bv` | `__getenv_briv` | `frgn__getenv_briv` | `as frgn__getenv_briv` |
+| `ffi/env.bv` | `__getenv_briev` | `frgn__getenv_briev` | `as frgn__getenv_briev` |
 | `ffi/env.bv` | `__getenv_int` | `frgn__getenv_int` | `as frgn__getenv_int` |
 | `string.bv` | `frgn__to_upper` | `frgn__to_upper` | (none — name matches) |
 | `string.bv` | `frgn__to_lower` | `frgn__to_lower` | (none) |
@@ -344,10 +344,10 @@ Every frgn must declare its provenance. The `from` clause tells the compiler whi
 
 | File(s) | C source | from value |
 |---------|----------|------------|
-| `ffi/io.bv`, `ffi/env.bv`, `string.bv`, `encoding.bv`, `time.bv`, `shm.bv` (mmap/msync), `metro_bridge.bv` (partially) | `lib/std/briv_rt.c` (linked via `import "link/briv_rt.c"`) | `from "link/briv_rt.c"` |
+| `ffi/io.bv`, `ffi/env.bv`, `string.bv`, `encoding.bv`, `time.bv`, `shm.bv` (mmap/msync), `metro_bridge.bv` (partially) | `lib/std/briev_rt.c` (linked via `import "link/briev_rt.c"`) | `from "link/briev_rt.c"` |
 | `xxhash.bv` | `lib/link/xxhash/xxhash.c` | `from "link/xxhash/xxhash.c"` |
-| `http.bv` | C runtime linked in `briv_rt.c` | `from "link/briv_rt.c"` |
-| `metro_bridge.bv` (SHM/mmap parts) | `lib/std/briv_rt.c` | `from "link/briv_rt.c"` |
+| `http.bv` | C runtime linked in `briev_rt.c` | `from "link/briev_rt.c"` |
+| `metro_bridge.bv` (SHM/mmap parts) | `lib/std/briev_rt.c` | `from "link/briev_rt.c"` |
 | `syscall.bv` | (Replaced by `SysCall#` intrinsic, no `frgn` needed) | N/A |
 | `atomic.bv` | (Replaced by atomic intrinsics, no `frgn` needed) | N/A |
 
@@ -375,17 +375,17 @@ Every FFI call must handle the case where the foreign library is unavailable. Th
 
 ---
 
-## Part G: Briv Wrapper defns
+## Part G: Briev Wrapper defns
 
 ### Why
 
-Raw `frgn` calls should have a Briv wrapper that provides a clean, idiomatic API. This separates the FFI boundary from the public interface.
+Raw `frgn` calls should have a Briev wrapper that provides a clean, idiomatic API. This separates the FFI boundary from the public interface.
 
 ### Wrapper strategy
 
 **I/O functions** (`print_int`, `print_str`, `print_float`, `putchar`): Retry loop (3 attempts).
 
-```briv
+```briev
 defn print_int(n: Int, retries: Int = 3) -> Bool {
     let attempt: Int = 0;
     txn retry [attempt < retries][attempt == retries] -> Bool {
@@ -400,7 +400,7 @@ defn print_int(n: Int, retries: Int = 3) -> Bool {
 
 **Compute functions** (string, encoding, time, env, xxhash): Passthrough with error normalization.
 
-```briv
+```briev
 defn to_upper(s: String) -> Result<String, StringError> {
     term frgn__to_upper(s);
 };
@@ -408,7 +408,7 @@ defn to_upper(s: String) -> Result<String, StringError> {
 
 **Network/IO** (HTTP): Retry loop.
 
-```briv
+```briev
 defn http_get(url: String, retries: Int = 3) -> Result<String, StringError> {
     let attempt: Int = 0;
     txn retry [attempt < retries][attempt == retries] -> Result<String, StringError> {
@@ -473,7 +473,7 @@ Check for any files importing from `std/out.bv` — if found, redirect to the ap
 
 `lib/std/encoding.bv` has 2 frgn declarations missing terminating `;`:
 
-```briv
+```briev
 frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError>
 frgn __UTF8_encode(s: String) -> Result<List<Int>, EncodingError>
 ```
@@ -513,9 +513,9 @@ Add `;` after each. Same fix in duplicate `lib/std/ffi/encoding.bv`.
 ## Execution Order
 
 ```
-1.  src/ast/top.rs          — rename ForeignBinding fields, add effective_briv_name()
+1.  src/ast/top.rs          — rename ForeignBinding fields, add effective_briev_name()
 2.  src/parser/definitions.rs — restructure parse_frgn_decl, enforce required from
-3.  All 14 call sites       — update to new field names and effective_briv_name()
+3.  All 14 call sites       — update to new field names and effective_briev_name()
 4.  cargo test --lib        — verify no regressions
 5.  lib/std/encoding.bv     — fix missing ;
 6.  lib/std/ffi/encoding.bv — same fix

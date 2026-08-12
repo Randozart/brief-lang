@@ -10,7 +10,7 @@
 
 The current async `cell!` ticks all persistent cells cooperatively in the main reactor loop — one convergence pass per cell per iteration, single-threaded. True threading means each persistent cell runs its convergence loop in its own thread (or async task), communicating output changes to the parent via atomic channels.
 
-```briv
+```briev
 // Current (cooperative — all cells tick in main loop):
 trg count: Int @ counter();     // ticks every main loop iteration
 trg buffer: String @ console(); // ticks every main loop iteration

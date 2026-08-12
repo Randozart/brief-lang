@@ -1,34 +1,34 @@
 # Phase 0 — Baseline Results (frontend-driven dispatch effort)
 
 **Date:** 2026-07-31
-**Commit:** `5fed0573` (FDD worktree at `../briv-compiler-fdd`, branch `feat/frontend-driven-dispatch`)
-**Compiler code equivalent to:** `666fb502` (baseline worktree `../briv-compiler-baseline`)
+**Commit:** `5fed0573` (FDD worktree at `../briev-compiler-fdd`, branch `feat/frontend-driven-dispatch`)
+**Compiler code equivalent to:** `666fb502` (baseline worktree `../briev-compiler-baseline`)
 **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
 **Toolchain:** `clang 18.1.3`, `llc 18.1.3`
 **Raw output:** `/tmp/opencode/phase0-runtime.txt`
 
-## Runtime ratios (Briv vs C, ratio < 1 = Briv faster)
+## Runtime ratios (Briev vs C, ratio < 1 = Briev faster)
 
-| Benchmark | Briv time | Ratio | Winner | Correct |
+| Benchmark | Briev time | Ratio | Winner | Correct |
 |-----------|-----------:|:-----:|:------:|:-------:|
 | ring_buffer | 0.0543s | 1.13× | C | MATCH |
-| float_math | 0.0721s | 0.97× | Briv | MATCH |
+| float_math | 0.0721s | 0.97× | Briev | MATCH |
 | float_math_nonzero | 0.2082s | 1.24× | C | MATCH |
-| sparse_dispatch | 0.0527s | 0.84× | Briv | MATCH |
+| sparse_dispatch | 0.0527s | 0.84× | Briev | MATCH |
 | print_loop | 0.0620s | 1.01× | C | MATCH |
-| nbody_newton | 6.8833s | 0.83× | Briv | MATCH |
-| nbody_sqrt | 2.1812s | 0.77× | Briv | MATCH |
-| nbody_sqrt_idio | 2.7124s | 0.75× | Briv | MATCH |
-| fasta | 0.2040s | 0.97× | Briv | MATCH |
-| fannkuch_redux | 0.0621s | 0.97× | Briv | MATCH |
+| nbody_newton | 6.8833s | 0.83× | Briev | MATCH |
+| nbody_sqrt | 2.1812s | 0.77× | Briev | MATCH |
+| nbody_sqrt_idio | 2.7124s | 0.75× | Briev | MATCH |
+| fasta | 0.2040s | 0.97× | Briev | MATCH |
+| fannkuch_redux | 0.0621s | 0.97× | Briev | MATCH |
 | mandelbrot | 0.6769s | 1.02× | C | MATCH |
 | kalman_filter_runtime | 0.2191s | 1.22× | C | MATCH |
-| knucleotide | 0.1874s | 0.99× | Briv | MATCH |
-| cancel_math | 0.0519s | 0.85× | Briv | MATCH |
+| knucleotide | 0.1874s | 0.99× | Briev | MATCH |
+| cancel_math | 0.0519s | 0.85× | Briev | MATCH |
 | bit_clear | 0.0001s | ~tie | ~tie | MATCH |
-| queue_drain | 0.0540s | 0.86× | Briv | MATCH |
-| queue_drain_sym | 0.0553s | 0.89× | Briv | MATCH |
-| queue_drain_idio | 0.0567s | 0.94× | Briv | MATCH |
+| queue_drain | 0.0540s | 0.86× | Briev | MATCH |
+| queue_drain_sym | 0.0553s | 0.89× | Briev | MATCH |
+| queue_drain_idio | 0.0567s | 0.94× | Briev | MATCH |
 | interval_step | 0.0632s | 1.01× | C | MATCH |
 
 **Zero MISMATCH.**

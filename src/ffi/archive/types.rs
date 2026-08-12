@@ -22,7 +22,7 @@
 
 //! FFI Type System
 //!
-//! Type mapping and conversion between Briv types and foreign language types
+//! Type mapping and conversion between Briev types and foreign language types
 
 use crate::ast::Type;
 
@@ -196,8 +196,8 @@ impl std::fmt::Display for FfiType {
     }
 }
 
-/// Convert Briv type to FFI type
-pub fn briv_type_to_ffi(t: &Type) -> Result<FfiType, String> {
+/// Convert Briev type to FFI type
+pub fn briev_type_to_ffi(t: &Type) -> Result<FfiType, String> {
     match t {
         Type::Custom(__t) if __t == "String" => Ok(FfiType::String),
         Type::Custom(__t) if __t == "Int" => Ok(FfiType::Int),
@@ -208,12 +208,12 @@ pub fn briv_type_to_ffi(t: &Type) -> Result<FfiType, String> {
             // Custom types are treated as struct names
             Ok(FfiType::Struct(name.clone(), vec![]))
         }
-        _ => Err(format!("Unsupported Briv type for FFI: {:?}", t)),
+        _ => Err(format!("Unsupported Briev type for FFI: {:?}", t)),
     }
 }
 
-/// Convert FFI type back to Briv type
-pub fn ffi_type_to_briv(t: &FfiType) -> Type {
+/// Convert FFI type back to Briev type
+pub fn ffi_type_to_briev(t: &FfiType) -> Type {
     match t {
         FfiType::String => Type::string(),
         FfiType::Int => Type::int(),
@@ -231,19 +231,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_briv_type_to_ffi_basic() {
-        assert_eq!(briv_type_to_ffi(&Type::string()).unwrap(), FfiType::String);
-        assert_eq!(briv_type_to_ffi(&Type::int()).unwrap(), FfiType::Int);
-        assert_eq!(briv_type_to_ffi(&Type::float()).unwrap(), FfiType::Float);
-        assert_eq!(briv_type_to_ffi(&Type::bool_()).unwrap(), FfiType::Bool);
-        assert_eq!(briv_type_to_ffi(&Type::Void).unwrap(), FfiType::Void);
+    fn test_briev_type_to_ffi_basic() {
+        assert_eq!(briev_type_to_ffi(&Type::string()).unwrap(), FfiType::String);
+        assert_eq!(briev_type_to_ffi(&Type::int()).unwrap(), FfiType::Int);
+        assert_eq!(briev_type_to_ffi(&Type::float()).unwrap(), FfiType::Float);
+        assert_eq!(briev_type_to_ffi(&Type::bool_()).unwrap(), FfiType::Bool);
+        assert_eq!(briev_type_to_ffi(&Type::Void).unwrap(), FfiType::Void);
     }
 
     #[test]
     fn test_ffi_type_roundtrip() {
         let ffi = FfiType::String;
-        let briv = ffi_type_to_briv(&ffi);
-        assert_eq!(briv, Type::string());
+        let briev = ffi_type_to_briev(&ffi);
+        assert_eq!(briev, Type::string());
     }
 
     #[test]

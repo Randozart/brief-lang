@@ -17,11 +17,11 @@
 | ArrowDiscard/Transfer return values | Return real list handle instead of `add i64 0, 0` | Phase 1+2 |
 | Memory leak in arrow ops | `free` old buffer before `malloc` in push/pop/discard/transfer | Phase 1+2 |
 | Sleep intrinsic | Real `nanosleep`-based implementation (was stub) | Phase 1+2 |
-| WriteFile intrinsic | Via `briv_write_file` C helper (was stub) | Phase 1+2 |
+| WriteFile intrinsic | Via `briev_write_file` C helper (was stub) | Phase 1+2 |
 | SSA phi label mismatch | `done` → `pdoneloop` in phi-indvar path (1 line) | Phase 1+2 |
 | Slice alloca → malloc | Replaced invalid dynamic `alloca` with `malloc` + TBAA | Phase 1+2 |
 | 14 projection targets | Ptr, Type, Alignment, Popcount, LZ/TZ, Abs, BitRev, Keys, Values, AsStack/Queue, Index, Pop, PtrBang, Contains | Phase 1+2 |
-| LTO bitcode pipeline | Auto-detect `briv_rt.c` and use `llvm-link` + `opt` before `cc` fallback | Phase 3 |
+| LTO bitcode pipeline | Auto-detect `briev_rt.c` and use `llvm-link` + `opt` before `cc` fallback | Phase 3 |
 
 ---
 
@@ -29,15 +29,15 @@
 
 The following issues were documented here earlier but have since been fixed:
 
-### ✅ Fixed: #1 — C-Bound Intrinsics Pass Briv Header Pointer as C String
+### ✅ Fixed: #1 — C-Bound Intrinsics Pass Briev Header Pointer as C String
 
 **Status:** Fixed at C level. All C shims (`__read_file__`, `__spawn_with_output__`,
-`__write_file__`, etc.) now take `int64_t` (Briv string handle) and use
-`briv_str_to_c()` to convert to C strings before use. The old `briv_read_file`
+`__write_file__`, etc.) now take `int64_t` (Briev string handle) and use
+`briev_str_to_c()` to convert to C strings before use. The old `briev_read_file`
 signature `const char*` was replaced with `int64_t` matching the convention.
 
 **Verification:** `emit_expr.rs` calls `@__read_file__(i64)` and `@__spawn_with_output__(i64)`.
-The C functions use `briv_str_to_c(path_bstr)` to extract the character data.
+The C functions use `briev_str_to_c(path_bstr)` to extract the character data.
 
 ### ✅ Fixed: #2 — `emit_inline_concat` Doesn't Null-Terminate
 
@@ -65,7 +65,7 @@ In `emit_inline_concat`, after copying both operands' data into the new buffer:
 `emit_inline_concat` lines 3316-3319 mask with `and i64, -2`, and lines 3363-3390
 emit conditional `free` blocks for each operand.
 
-### ✅ Fixed: #4 — `briv_spawn_with_output` Declaration Mismatch
+### ✅ Fixed: #4 — `briev_spawn_with_output` Declaration Mismatch
 
 **Status:** Fixed. Both the LLVM declaration and call use `i64`:
 ```llvm
@@ -76,8 +76,8 @@ declare i64 @__spawn_with_output__(i64)
 
 ### ✅ Fixed: #5 — Intrinsic Stubs (sort, reverse, range, readln)
 
-**Status:** All four are implemented via C helpers in `briv_rt.c`:
-- `__readln__` — `fgets` + `buf_to_briv`
+**Status:** All four are implemented via C helpers in `briev_rt.c`:
+- `__readln__` — `fgets` + `buf_to_briev`
 - `__sort_list__` — `qsort` on the list data
 - `__reverse_list__` — in-place element swap
 - `__range__` — allocates list `[0, 1, ..., end-1]`
@@ -95,7 +95,7 @@ Backend Hardening session and Macro System Gaps session:
 | # | Issue | Resolution |
 |---|-------|-----------|
 | 4 | `spawn_with_output` type mismatch | ✅ All declarations and call sites use `i64` consistently |
-| 5 | `read_file` path type mismatch | ✅ Changed to `i64` throughout, C functions use `briv_str_to_c()` |
+| 5 | `read_file` path type mismatch | ✅ Changed to `i64` throughout, C functions use `briev_str_to_c()` |
 | 9 | `Range` projection stub | ✅ Dedicated GEP+load implementation in `emit_expr.rs` |
 
 ## Known Issues (Still Open)
@@ -105,7 +105,7 @@ Backend Hardening session and Macro System Gaps session:
 #### 6. Remaining Intrinsic Stubs (readln, sort, reverse, range)
 
 These four intrinsics (`readln`, `Sort`, `Reverse`, `Range`) have been implemented
-via C helpers in `briv_rt.c`. The `add i64 0, 0` paths remain only as
+via C helpers in `briev_rt.c`. The `add i64 0, 0` paths remain only as
 no-argument fallbacks in `emit_expr.rs`.
 
 **Priority:** Low — not used by officina or any current stdlib path.
@@ -118,7 +118,7 @@ by another transaction in the same tick.
 **Risk:** Low — the concat function frees the operand buffer, but the state
 field still holds a reference to the old buffer in the `%State` struct. If
 another transaction reads the same field in the same tick, it gets freed
-memory. In practice, Briv's SSA pipeline transforms each state field access
+memory. In practice, Briev's SSA pipeline transforms each state field access
 into a local copy, so the state field's buffer is only freed after the value
 box is replaced. The risk exists but hasn't manifested.
 
@@ -143,7 +143,7 @@ is not modified — slice creates a new list. Acceptable by design.
 
 #### 10. `PtrBang` Returns First Header Slot
 
-`ProjectionTarget::PtrBang` is currently implemented as loading the first i64 from the pointer. For a `Ptr<Int>`, this returns the dereferenced integer value. For a Briv string, this returns the data pointer (hdr[0]). This is correct for typed pointers but may surprise users.
+`ProjectionTarget::PtrBang` is currently implemented as loading the first i64 from the pointer. For a `Ptr<Int>`, this returns the dereferenced integer value. For a Briev string, this returns the data pointer (hdr[0]). This is correct for typed pointers but may surprise users.
 
 **Action:** Verify against interpreter semantics. Add docs if behavior is correct.
 
@@ -159,9 +159,9 @@ These are collection-specific operations (HashMap, Stack, Queue, HashSet) not us
 
 #### 12. `read_file` Path String Needs Null Terminator
 
-Even after fixing #1 (converting Briv string to C string), the path may be a runtime-concatenated string without a null terminator. `briv_str_to_c` handles this (it mallocs + copies + null-terminates). But if we use a direct approach (loading `hdr[0]` as `i8*`), runtime paths would be unterminated.
+Even after fixing #1 (converting Briev string to C string), the path may be a runtime-concatenated string without a null terminator. `briev_str_to_c` handles this (it mallocs + copies + null-terminates). But if we use a direct approach (loading `hdr[0]` as `i8*`), runtime paths would be unterminated.
 
-**Note:** The `briv_str_to_c` approach always works because it malloc-copies. The overhead is acceptable for file operations (not hot-path).
+**Note:** The `briev_str_to_c` approach always works because it malloc-copies. The overhead is acceptable for file operations (not hot-path).
 
 #### 13. Officina `draw_prompt` SIGSEGV
 
@@ -193,11 +193,11 @@ All items in the original execution plan have been resolved:
 
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
-| 1 | C string → Briv header confusion | 🔴 Critical | ✅ Fixed (C level: `briv_str_to_c`) |
+| 1 | C string → Briev header confusion | 🔴 Critical | ✅ Fixed (C level: `briev_str_to_c`) |
 | 2 | `emit_inline_concat` no null terminator | 🔴 Critical | ✅ Fixed (null byte stored after memcpy) |
 | 3 | Concat memory leak | 🔴 Critical | ✅ Fixed (tagged-pointer static/heap detection + free) |
 | 4 | `spawn_with_output` type mismatch | 🟠 High | ✅ Fixed (all `i64` consistently) |
-| 5 | `read_file` path type mismatch | 🟠 High | ✅ Fixed (`i64` throughout, `briv_str_to_c`) |
+| 5 | `read_file` path type mismatch | 🟠 High | ✅ Fixed (`i64` throughout, `briev_str_to_c`) |
 | 6 | `readln`, `sort`, `reverse`, `range` stubs | 🟡 Medium | ✅ Implemented via C helpers |
 | 7 | Slice source buffer leak | 🟡 Medium | ✅ By design (source not modified) |
 | 8 | MapLiteral/SetLiteral verification | 🟡 Medium | ✅ Confirmed working |
@@ -212,7 +212,7 @@ All items in the original execution plan have been resolved:
 
 | File | Issues |
 |------|--------|
-| `lib/runtime/briv_rt.c` | 1, 5 — fix `briv_read_file` signature, add `read_file#` uses `briv_str_to_c` |
+| `lib/runtime/briev_rt.c` | 1, 5 — fix `briev_read_file` signature, add `read_file#` uses `briev_str_to_c` |
 | `src/backend/llvm/emit_expr.rs` | 2, 3, 4, 5, 6, 7, 9, 11 — concat, intrinsics, projections |
 | `src/backend/llvm/emit_toplevel.rs` | 4, 5 — fix declarations |
 | `src/backend/llvm/mod.rs` | 4, 5 — fix declarations |
@@ -242,6 +242,6 @@ int main() { printf("hello %s\\n", "world"); return 0; }' > /tmp/test.c
 # Compile to LLVM IR:
 clang -S -emit-llvm -O3 -fno-discard-value-names /tmp/test.c -o -
 
-# Compare with what Briv emits for equivalent construct.
+# Compare with what Briev emits for equivalent construct.
 # Key differences tell you what to fix.
 ```

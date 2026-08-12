@@ -7,7 +7,7 @@
 
 Three calibration benchmarks (`float_math.bv`, `const_heavy.bv`, `sparse_dispatch.bv`) have syntax errors that prevent compilation: missing `};` after `node` blocks, missing `;` on `let` declarations, missing `[postcondition]` contracts. Additionally, the parser error for a missing `;` after `node { body }` is cryptic: `expected Semicolon, found end of file at 0:0`.
 
-Worse: a compiler gap in `is_trigger_gated()` at `src/backend/llvm.rs:139` prevents the enum dispatch optimizer from recognizing preconditions with `Eq(trigger, literal)` patterns (e.g., `t == 101`). This means any dispatch benchmark using `trigger == value` syntax never enters the enum dispatch path — a critical optimization gap that defeats Briv's declarative advantage.
+Worse: a compiler gap in `is_trigger_gated()` at `src/backend/llvm.rs:139` prevents the enum dispatch optimizer from recognizing preconditions with `Eq(trigger, literal)` patterns (e.g., `t == 101`). This means any dispatch benchmark using `trigger == value` syntax never enters the enum dispatch path — a critical optimization gap that defeats Briev's declarative advantage.
 
 ## Tasks
 
@@ -45,15 +45,15 @@ Expr::Eq(l, r) => {
 
 Without this, any txn with precondition `t == 101` is invisible to the enum dispatch optimizer. This was the root cause of `is_trigger_gated` failing for Int-triggered dispatch.
 
-### Task 5 — Redesign `benchmarks/sparse_dispatch.bv` (Briv-Native)
+### Task 5 — Redesign `benchmarks/sparse_dispatch.bv` (Briev-Native)
 
-The original benchmark tried to mimic C's `io_pending = keys[idx % 8]` pattern — impossible in Briv because `io_pending` is a `trg` (read-only OS event flag). Replace with a Briv-native cyclic dispatch:
+The original benchmark tried to mimic C's `io_pending = keys[idx % 8]` pattern — impossible in Briev because `io_pending` is a `trg` (read-only OS event flag). Replace with a Briev-native cyclic dispatch:
 
-```briv
+```briev
 #!exit count == total;
 
-import { io_pending } from "std/briv_rt.bv";
-import "link/briv_rt.o";
+import { io_pending } from "std/briev_rt.bv";
+import "link/briev_rt.o";
 
 let count: Int = 0;
 let total: Int = __get_env_int("BOUND");

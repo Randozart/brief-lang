@@ -19,7 +19,7 @@ Source
   │  - Strips contracts
   │  - Emits bounded-ness metadata
   │  - Wires reactive components
-  │  - Output: rich Briv AST with all metadata attached
+  │  - Output: rich Briev AST with all metadata attached
   │
   ▼ [PLUGIN CHAIN (optional)]
   │  - User-supplied transforms
@@ -149,7 +149,7 @@ An external normalizer executable can be specified as a path:
 ```toml
 [".bv"]
 backend = "llvm"
-normalizer = "/usr/lib/briv/my-normalizer"
+normalizer = "/usr/lib/briev/my-normalizer"
 ```
 
 External normalizers use the same stdin/stdout BEAST contract as plugins.

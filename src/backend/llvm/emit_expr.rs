@@ -143,11 +143,11 @@ impl LlvmBackend {
             }
             Expr::BeginProgram => {
                 // True exactly once at program start (entry-loop). Reads the
-                // node's `@briv_begin_<name>` flag; the node's body clears it
+                // node's `@briev_begin_<name>` flag; the node's body clears it
                 // when its goal is met, so the precondition stops gating after
                 // the entry loop completes. Outside a transaction (no txn_name)
                 // it evaluates as `true`.
-                let flag = format!("@briv_begin_{}", self.fun.txn_name);
+                let flag = format!("@briev_begin_{}", self.fun.txn_name);
                 if self.fun.txn_name.is_empty() {
                     writeln!(out, "{}{} = add i8 0, 1", indent, v).ok();
                 } else {
@@ -221,14 +221,14 @@ impl LlvmBackend {
                     .filter(|r| self.fun.let_binding_allocas.contains(*r))
                     .cloned();
                 if let Some(slot) = slot_opt {
-                    let briv_ty = self.get_local_type(name);
-                    let llvm_ty = self.llvm_type(&briv_ty);
+                    let briev_ty = self.get_local_type(name);
+                    let llvm_ty = self.llvm_type(&briev_ty);
                     let loaded = self.fun.gen_reg();
                     writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, loaded,
                         llvm_ty, slot).ok();
                     return TypedRegister {
                         name: loaded,
-                        ty: briv_ty,
+                        ty: briev_ty,
                     };
                 }
                 // 2026-08-06 (fix): a closure-let identifier reads its env
@@ -239,7 +239,7 @@ impl LlvmBackend {
                 // read must return the just-computed value, not the loop-header phi,
                 // so the first write forms a live dependency chain (not dead code).
                 if let Some(reg) = self.fun.last_val_temps.get(name) {
-                    let briv_ty = self
+                    let briev_ty = self
                         .fun
                         .last_val_types
                         .get(name)
@@ -248,12 +248,12 @@ impl LlvmBackend {
                             self.ctx
                                 .field_index_map
                                 .get(name)
-                                .and_then(|idx| self.ctx.field_briv_types.get(*idx).cloned())
+                                .and_then(|idx| self.ctx.field_briev_types.get(*idx).cloned())
                         })
                         .unwrap_or(Type::int());
                     return TypedRegister {
                         name: reg.clone(),
-                        ty: briv_ty,
+                        ty: briev_ty,
                     };
                 }
                 // 2026-07-29: Path 2 — Vector phi group extractelement.
@@ -267,13 +267,13 @@ impl LlvmBackend {
                         &mut self.fun, out, name, &groups_clone,
                         &f2p_clone, &f2l_clone, indent,
                     ) {
-                        let briv_ty = self
+                        let briev_ty = self
                             .ctx
                             .field_index_map
                             .get(name)
-                            .and_then(|idx| self.ctx.field_briv_types.get(*idx).cloned())
+                            .and_then(|idx| self.ctx.field_briev_types.get(*idx).cloned())
                             .unwrap_or(Type::int());
-                        return TypedRegister { name: lane_reg, ty: briv_ty };
+                        return TypedRegister { name: lane_reg, ty: briev_ty };
                     }
                 }
                 // 2026-07-31 (A5): obj member `self` slot read — a bare slot
@@ -369,7 +369,7 @@ impl LlvmBackend {
                             // param (`Int` on wasm32 is i32) is widened to the
                             // i64 slot at function entry; reading it back must
                             // truncate to the native width so the register type
-                            // matches the value's Briv type (i32, not i64).
+                            // matches the value's Briev type (i32, not i64).
                             let lt = self.llvm_type(&ty);
                             if lt.starts_with('i') && lt != "i64" {
                                 let t = self.fun.gen_reg();
@@ -386,13 +386,13 @@ impl LlvmBackend {
                         }
                     }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
-                    let briv_ty = self
+                    let briev_ty = self
                         .ctx
                         .field_index_map
                         .get(name)
-                        .and_then(|idx| self.ctx.field_briv_types.get(*idx).cloned())
+                        .and_then(|idx| self.ctx.field_briev_types.get(*idx).cloned())
                         .unwrap_or(Type::int());
-                    if briv_ty == Type::float64() {
+                    if briev_ty == Type::float64() {
                         // 2026-07-21: With native float types, phi is already double.
                         // Check field_types to determine if conversion is needed.
                         let is_native = self.ctx.field_index_map.get(name)
@@ -408,7 +408,7 @@ impl LlvmBackend {
                             self.fun.reg_float_cache.insert(phi_reg_str, dbl.clone());
                             TypedRegister { name: dbl, ty: Type::float64() }
                         }
-                    } else if briv_ty == Type::float() {
+                    } else if briev_ty == Type::float() {
                         // 2026-07-21: With native float types, phi is already float.
                         let is_native = self.ctx.field_index_map.get(name)
                             .and_then(|idx| self.ctx.field_types.get(*idx))
@@ -428,7 +428,7 @@ impl LlvmBackend {
                     } else {
                         TypedRegister {
                             name: phi_reg_str,
-                            ty: briv_ty,
+                            ty: briev_ty,
                         }
                     }
                 } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
@@ -438,23 +438,23 @@ impl LlvmBackend {
                     // 2026-07-20: State fields are always i64 in %State. For float-typed
                     // fields, trunc+bitcast i64 → float so downstream arithmetic gets
                     // correct types (matches the phi path at lines 100-104).
-                    let (loaded, briv_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
+                    let (loaded, briev_ty) = self.emit_state_load_i64_by_idx(out, indent, idx);
                     // 2026-07-21: With native float types, the load already returns
                     // float/double. Check field_types[idx] to skip the conversion.
                     let field_llvm_ty = self.ctx.field_types.get(idx)
                         .cloned().unwrap_or_else(|| "i64".to_string());
-                    if briv_ty == Type::float64() && field_llvm_ty == "double" {
+                    if briev_ty == Type::float64() && field_llvm_ty == "double" {
                         TypedRegister { name: loaded, ty: Type::float64() }
-                    } else if briv_ty == Type::float() && field_llvm_ty == "float" {
+                    } else if briev_ty == Type::float() && field_llvm_ty == "float" {
                         TypedRegister { name: loaded, ty: Type::float() }
-                    } else if briv_ty == Type::float64() {
+                    } else if briev_ty == Type::float64() {
                         let dbl = self.fun.gen_reg();
                         writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, loaded).ok();
                         TypedRegister {
                             name: dbl,
                             ty: Type::float64(),
                         }
-                    } else if briv_ty == Type::float() {
+                    } else if briev_ty == Type::float() {
                         let tr = self.fun.gen_reg();
                         let fl = self.fun.gen_reg();
                         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, loaded).ok();
@@ -463,8 +463,8 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
-                    } else if self.is_string_operand(&briv_ty) || self.is_data_operand(&briv_ty) {
-                        // 2026-08-01 (B0): A Briv String value is a ptr to a
+                    } else if self.is_string_operand(&briev_ty) || self.is_data_operand(&briev_ty) {
+                        // 2026-08-01 (B0): A Briev String value is a ptr to a
                         // length-prefixed [len][bytes] buffer. State slots hold
                         // the address as an i64 machine word (uniform %State
                         // layout, push_field_type), so a String field load must
@@ -478,7 +478,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_p, loaded).ok();
                         TypedRegister {
                             name: str_p,
-                            ty: briv_ty,
+                            ty: briev_ty,
                         }
                     } else {
                         // 2026-08-10: flexible Int/UInt %State slots are now
@@ -487,7 +487,7 @@ impl LlvmBackend {
                         // Data/Ptr slots stay i64 and are boxed/unboxed above.
                         TypedRegister {
                             name: loaded,
-                            ty: briv_ty,
+                            ty: briev_ty,
                         }
                     }
                 } else if let Some((ty, _)) = self.ctx.constants.get(name) {
@@ -769,7 +769,7 @@ impl LlvmBackend {
                             _ => {
                                 if let Expr::Identifier(nm) = obj.as_ref() {
                                     self.ctx.field_index_map.get(nm)
-                                        .and_then(|i| self.ctx.field_briv_types.get(*i))
+                                        .and_then(|i| self.ctx.field_briev_types.get(*i))
                                         .and_then(|t| match t {
                                             Type::Custom(n) => Some(n.clone()),
                                             _ => None,
@@ -821,7 +821,7 @@ impl LlvmBackend {
                     let field_idx = match index.as_ref() {
                         Expr::Identifier(name) => self.ctx.field_index_map.get(name).copied().filter(
                             |fidx| matches!(
-                                self.ctx.field_briv_types.get(*fidx),
+                                self.ctx.field_briev_types.get(*fidx),
                                 Some(t) if matches!(t, Type::Vector(inner, _)
                                     if self.is_protocol_member(inner, "#Bool"))
                             ),
@@ -1051,9 +1051,9 @@ impl LlvmBackend {
                     .ok();
                     // 2026-08-01 (E): `vol let` — Ptr-Index reads emit
                     // `load volatile` (MMIO register arrays).
-                    // 2026-08-04 (compiler-in-Briv): a String element is
+                    // 2026-08-04 (compiler-in-Briev): a String element is
                     // boxed in the i64 list slot — inttoptr it back to a real
-                    // ptr so consumers (briv_str_eq) see a pointer, matching
+                    // ptr so consumers (briev_str_eq) see a pointer, matching
                     // how string literals are represented.
                     if self.is_string_operand(&index_elem_ty) {
                         let raw = self.fun.gen_reg();
@@ -1086,7 +1086,7 @@ impl LlvmBackend {
                     )
                     .ok();
                 }
-                // 2026-08-04 (compiler-in-Briv): the element type was computed
+                // 2026-08-04 (compiler-in-Briev): the element type was computed
                 // early (index_elem_ty) so the load path could inttoptr string
                 // elements.
                 let elem_ty = index_elem_ty.clone();
@@ -1197,7 +1197,7 @@ impl LlvmBackend {
                             // 2026-07-31 (A7): a struct-typed state field's
                             // slot holds the INSTANCE address — `&b` is that
                             // address, not the %State slot pointer.
-                            let is_struct_field = self.ctx.field_briv_types.get(idx)
+                            let is_struct_field = self.ctx.field_briev_types.get(idx)
                                 .map_or(false, |t| matches!(t, Type::Custom(n)
                                     if self.ctx.struct_types.contains_key(n)));
                             if is_struct_field {
@@ -1391,9 +1391,9 @@ impl LlvmBackend {
     /// `@bmask` constant) or a Bool[N] state field (an i64-slot array in
     /// %State). Two object kinds:
     ///   - a byte buffer (Data/String/Bits) → a new [len][bytes] Data buffer
-    ///     via `briv_mask_select` (ptr-typed, like a byte literal);
+    ///     via `briev_mask_select` (ptr-typed, like a byte literal);
     ///   - an Int/Bool vector state field (`[N x i64]`) → a new heap List of
-    ///     the selected elements via `briv_mask_select64`.
+    ///     the selected elements via `briev_mask_select64`.
     /// Mask lengths longer than the data truncate (the mask governs), matching
     /// the interpreter. The typechecker has already rejected unsupported
     /// containers, so the object here is a byte buffer or an i64-slot vector.
@@ -1423,7 +1423,7 @@ impl LlvmBackend {
             }
             MaskSource::StateField(fidx) => {
                 let gep = self.emit_state_gep(out, indent, "m", "%state", fidx);
-                let n = self.ctx.field_briv_types.get(fidx)
+                let n = self.ctx.field_briev_types.get(fidx)
                     .map(|t| self.vector_element_count(t))
                     .unwrap_or(0);
                 (gep, n as i64)
@@ -1435,7 +1435,7 @@ impl LlvmBackend {
             let r = self.fun.gen_reg();
             writeln!(
                 out,
-                "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
+                "{}{} = call ptr @briev_mask_select(ptr {}, ptr {}, i64 {})",
                 indent, r, data_ptr, mask_ptr, mask_len
             )
             .ok();
@@ -1453,7 +1453,7 @@ impl LlvmBackend {
             let r = self.fun.gen_reg();
             writeln!(
                 out,
-                "{}{} = call ptr @briv_mask_select(ptr {}, ptr {}, i64 {})",
+                "{}{} = call ptr @briev_mask_select(ptr {}, ptr {}, i64 {})",
                 indent, r, p, mask_ptr, mask_len
             )
             .ok();
@@ -1474,7 +1474,7 @@ impl LlvmBackend {
             let buf = self.fun.gen_reg();
             writeln!(
                 out,
-                "{}{} = call ptr @briv_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
+                "{}{} = call ptr @briev_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
                 indent, buf, elems, len, mask_ptr, mask_len
             )
             .ok();
@@ -1507,7 +1507,7 @@ impl LlvmBackend {
             let buf = self.fun.gen_reg();
             writeln!(
                 out,
-                "{}{} = call ptr @briv_mask_select_f32(ptr {}, i64 {}, ptr {}, i64 {})",
+                "{}{} = call ptr @briev_mask_select_f32(ptr {}, i64 {}, ptr {}, i64 {})",
                 indent, buf, data_ptr, n, mask_ptr, mask_len
             )
             .ok();
@@ -1523,14 +1523,14 @@ impl LlvmBackend {
             };
         }
         // A Float64 (double) vector is NOT an i64-slot array — routing it to
-        // briv_mask_select64 would read `[N x double]` as i64s (garbage).
+        // briev_mask_select64 would read `[N x double]` as i64s (garbage).
         // No f64 gather exists yet: hard error, no silent wrongness.
         if matches!(&op.obj_reg.ty, Type::Vector(inner, _)
             if self.is_protocol_member(inner, "#Float"))
         {
             panic!("mask indexing on Float64 (double) vectors is not yet supported");
         }
-        let helper = "@briv_mask_select64";
+        let helper = "@briev_mask_select64";
         let buf = self.fun.gen_reg();
         writeln!(
             out,
@@ -1599,7 +1599,7 @@ impl LlvmBackend {
                     i + 1
                 )
                 .ok();
-                // 2026-08-04 (compiler-in-Briv): list slots are i64 — a
+                // 2026-08-04 (compiler-in-Briev): list slots are i64 — a
                 // String element (a ptr to [len][bytes]) must be ptrtoint'd
                 // before the store, or `store i64 <ptr>, ptr` is invalid IR.
                 let e64 = self.adapt_to_i64(out, indent, &e);
@@ -1896,11 +1896,11 @@ impl LlvmBackend {
             });
         let g = format!("@str.{}", si);
         // 2026-07-22: The handle is a pointer to the start of the struct
-        // {i64 length, [N x i8] chars}, so that the runtime's briv_str_to_c
+        // {i64 length, [N x i8] chars}, so that the runtime's briev_str_to_c
         // reads *(int64_t*)handle as the length and data at handle+8 — the
         // [len][bytes] buffer layout. Do NOT add offset — emit_load_length
         // expects the struct pointer.
-        // 2026-08-01 (B0): the value register IS the pointer (a Briv String
+        // 2026-08-01 (B0): the value register IS the pointer (a Briev String
         // value is a ptr to [len][bytes] in every type-claiming site). The
         // old ptrtoint→i64 boxing here was one arm of the split-brain; the
         // ptr is passed straight to consumers (Print#, frgn calls, state
@@ -2088,18 +2088,18 @@ impl LlvmBackend {
             (recv_reg, type_name)
         };
         // 2026-07-31: a struct-typed state field loads as i64 (its address);
-        // recover the struct type from field_briv_types for member lookup.
+        // recover the struct type from field_briev_types for member lookup.
         if type_name.is_empty() {
             if let Expr::Identifier(rname) = recv {
                 if let Some(&ridx) = self.ctx.field_index_map.get(rname) {
-                    if let Some(Type::Custom(n)) = self.ctx.field_briv_types.get(ridx) {
+                    if let Some(Type::Custom(n)) = self.ctx.field_briev_types.get(ridx) {
                         type_name = n.clone();
                     }
                 }
             }
         }
         let members = self.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
-        let member = members.iter().find(|m| member_briv_name(m) == name).cloned();
+        let member = members.iter().find(|m| member_briev_name(m) == name).cloned();
         let Some(member) = member else {
             panic!("method call '.{}()': no member '{}' on '{}'", name, name, type_name);
         };
@@ -2118,7 +2118,7 @@ impl LlvmBackend {
     /// (emit_strategy_member_call).
     /// 2026-08-07 (object instance pools): GEP an unpacked instance's member
     /// COLUMN at row 0 (the static instance) and return the row register, the
-    /// member's Briv type (the column's dims[1..]; an empty tail means a
+    /// member's Briev type (the column's dims[1..]; an empty tail means a
     /// scalar member), and the row's LLVM load type (the column's inner). A
     /// spawned instance would pass its id instead of 0.
     pub(crate) fn emit_instance_column_row(
@@ -2128,7 +2128,7 @@ impl LlvmBackend {
         idx: usize,
         row_reg: &str,
     ) -> (String, Type, String) {
-        let slot_ty = self.ctx.field_briv_types.get(idx).cloned().unwrap_or(Type::int());
+        let slot_ty = self.ctx.field_briev_types.get(idx).cloned().unwrap_or(Type::int());
         let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
         // 2026-08-09 (Phase 5): a BOXED/SPILLED instance's handle is its heap
         // block ADDRESS, not a pooled row id. When this slot's base is boxed,
@@ -2232,7 +2232,7 @@ impl LlvmBackend {
                 panic!(
                     "obj instance member call '.{}' on '{}' reached the retired boxed self path \
                      (instance must resolve to a pool prefix; this is a codegen regression)",
-                    member_briv_name(member), type_name
+                    member_briev_name(member), type_name
                 );
             }
             let self_ptr = self.fun.gen_reg();
@@ -2265,7 +2265,7 @@ impl LlvmBackend {
         };
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
-                // 2026-08-04 (compiler-in-Briv): a String argument (a real
+                // 2026-08-04 (compiler-in-Briev): a String argument (a real
                 // ptr) binds to a boxed parameter (an i64 handle) — ptrtoint
                 // at the param boundary so `inner.data[len] = val` in the
                 // member body stores an i64, not a ptr. This is the bits-model
@@ -2321,7 +2321,7 @@ impl LlvmBackend {
         match (target, kind) {
             // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a
             // compile-time descriptor reflect that folds to a runtime
-            // briv_symbol_available(symbol) check for an `optional frgn`. The
+            // briev_symbol_available(symbol) check for an `optional frgn`. The
             // receiver is the frgn's local name; its FOREIGN symbol is what
             // gets checked (the codegen resolves it via the frgn declaration).
             ("Available", ReflectKind::CompileTime) => {
@@ -2361,7 +2361,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nul, buf, sym_bytes.len()).ok();
                 writeln!(out, "{}  store i8 0, ptr {}, align 1", indent, nul).ok();
                 let r = self.fun.gen_reg();
-                writeln!(out, "{}{} = call i64 @briv_symbol_available(ptr {})", indent, r, buf).ok();
+                writeln!(out, "{}{} = call i64 @briev_symbol_available(ptr {})", indent, r, buf).ok();
                 let b = self.fun.gen_reg();
                 writeln!(out, "{}{} = trunc i64 {} to i1", indent, b, r).ok();
                 let c = self.fun.gen_reg();
@@ -2451,7 +2451,7 @@ impl LlvmBackend {
                  // length (header) is `x.^^Bytes` below.
                  ty if self.is_string_operand(ty) => {
                      let r = self.fun.gen_reg();
-                     writeln!(out, "{}{} = call i64 @briv_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                     writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
                  // 2026-08-06 (Phase 7): `x.^Len` on a #Data — the byte length
@@ -2462,16 +2462,16 @@ impl LlvmBackend {
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                // 2026-08-04 (compiler-in-Briv): a String value boxed to an
+                // 2026-08-04 (compiler-in-Briev): a String value boxed to an
                 // i64 HANDLE at a call/binding boundary (String param, frgn
                 // result) is typed Custom("Int")/Int here — the physical value
                 // is still the [len][bytes] pointer. Recover the semantic type
                 // from the binding (the let's declared type) and inttoptr the
-                // handle before briv_char_len. Mirrors the `==` operand fix.
+                // handle before briev_char_len. Mirrors the `==` operand fix.
                 other if self.is_semantic_string(recv, &recv_reg) => {
                     let p = self.string_ptr(out, indent, &recv_reg);
                     let r = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @briv_char_len(ptr {})", indent, r, p).ok();
+                    writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, p).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
                 other => panic!(
@@ -2764,7 +2764,7 @@ impl LlvmBackend {
     ) -> TypedRegister {
         // 2026-08-01 (C3): a boxed Float param (i64 handle boxed at defn entry)
         // has its native float cached (reg_float_cache maps boxed→native) —
-        // llvm_type() reports "float" from the briv type, so src_llvm == param
+        // llvm_type() reports "float" from the briev type, so src_llvm == param
         // would early-return the i64 handle. Unbox through the cache FIRST.
         if matches!(param_llvm_ty, "float" | "double") {
             if let Some(cached) = self.fun.reg_float_cache.get(&arg_reg.name) {
@@ -2817,7 +2817,7 @@ impl LlvmBackend {
             ("ptr", "i64") => {
                 // 2026-07-30: Ptr values are stored as i64 internally (ptrtoint
                 // at function entry). The register is already i64 — no conversion
-                // needed. The Briv type says Ptr but the LLVM value is i64.
+                // needed. The Briev type says Ptr but the LLVM value is i64.
                 TypedRegister { name: arg_reg.name.clone(), ty: Type::int() }
             }
             // Integer widening: i8/i16/i32 → i64 (zext for unsigned, sext for signed)
@@ -2844,7 +2844,7 @@ impl LlvmBackend {
     }
 
     /// 2026-07-22: Emit a direct foreign function call (Inline path).
-    /// Uses the `symbol` parameter (from `as_name` or briv_name) as the
+    /// Uses the `symbol` parameter (from `as_name` or briev_name) as the
     /// callee, applies meld extension conversion to arguments, and emits
     /// the LLVM `call` instruction.
     fn emit_direct_frgn_call(
@@ -3031,7 +3031,7 @@ impl LlvmBackend {
             ).ok();
         }
 
-        // 2026-07-22: Transform return value back to Briv type.
+        // 2026-07-22: Transform return value back to Briev type.
         let final_reg = if let Some(ret_path) = return_path {
             crate::glue::bridge::emit_protocol_chain(
                 out, v, std::slice::from_ref(ret_path), &ret_llvm,
@@ -3115,7 +3115,7 @@ impl LlvmBackend {
                     .unwrap_or_else(|| reg_llvm_ty.to_string());
                 // 2026-07-30: Ptr values are stored as i64 internally (ptrtoint at
                 // function entry). Convert back to LLVM ptr when the function expects
-                // ptr but the register's Briv type is Ptr (meaning it's an i64 handle).
+                // ptr but the register's Briev type is Ptr (meaning it's an i64 handle).
                 if param_llvm_ty == "ptr" && (reg_llvm_ty == "i64" || matches!(reg.ty, Type::Ptr(_))) {
                     let conv = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, conv, reg.name).ok();
@@ -3150,8 +3150,8 @@ impl LlvmBackend {
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
         let ret_llvm = self.llvm_ret_abi_type(&ret_type);
-        // 2026-08-05 (Phase 6): there is no `main` in Briv — no call-site
-        // renaming to `briv_main`; the symbol is the declaration name.
+        // 2026-08-05 (Phase 6): there is no `main` in Briev — no call-site
+        // renaming to `briev_main`; the symbol is the declaration name.
         let symbol = name;
         writeln!(
             out,
@@ -3256,7 +3256,7 @@ impl LlvmBackend {
             let body_block_label;
             if let Some(guard) = &arm.guard {
                 let gv = self.emit_expr(out, guard, indent);
-                // Briv bool comparisons emit i8 (0/1) — narrow to i1 for `br`.
+                // Briev bool comparisons emit i8 (0/1) — narrow to i1 for `br`.
                 let g1 = self.fun.gen_reg();
                 writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, g1, gv.name).ok();
                 let body_label = format!(".match_guard_{}_{}", counter, i);
@@ -3439,7 +3439,7 @@ impl LlvmBackend {
         // template path. Their flexible primordial has bytes=0, so the
         // integer template derivation produces `i0` (invalid IR), and more
         // fundamentally Eq/Ne on Strings is a CONTENT comparison handled by
-        // the dedicated arm in emit_binary_op (briv_str_eq). Returning None
+        // the dedicated arm in emit_binary_op (briev_str_eq). Returning None
         // here routes String ops to that arm.
         if self.is_string_operand(&l.ty)
             || self.is_string_operand(&r.ty)
@@ -3691,7 +3691,7 @@ impl LlvmBackend {
             }
             crate::ast::BinaryOpKind::Eq => {
                 // 2026-08-01 (B1): String operands compare CONTENT, not
-                // addresses. 2026-08-04 (compiler-in-Briv): fire when EITHER
+                // addresses. 2026-08-04 (compiler-in-Briev): fire when EITHER
                 // operand is #String — the typechecker guarantees both are
                 // strings, but the other may have been boxed to i64
                 // (adapt_to_i64 loses the String type), so inttoptr it before
@@ -3702,7 +3702,7 @@ impl LlvmBackend {
                     let eq = self.fun.gen_reg();
                     let lp = self.string_ptr(out, indent, l);
                     let rp = self.string_ptr(out, indent, r);
-                    writeln!(out, "{}{} = call i64 @briv_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
+                    writeln!(out, "{}{} = call i64 @briev_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
                     let icmp = self.fun.gen_reg();
                     writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, icmp, eq).ok();
                     writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
@@ -3740,7 +3740,7 @@ impl LlvmBackend {
                     let eq = self.fun.gen_reg();
                     let lp = self.string_ptr(out, indent, l);
                     let rp = self.string_ptr(out, indent, r);
-                    writeln!(out, "{}{} = call i64 @briv_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
+                    writeln!(out, "{}{} = call i64 @briev_str_eq(ptr {}, ptr {})", indent, eq, lp, rp).ok();
                     let icmp = self.fun.gen_reg();
                     writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, icmp, eq).ok();
                     writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
@@ -3904,9 +3904,9 @@ impl LlvmBackend {
                     && self.is_string_operand(&r.ty)
                 {
                     let rt = match kind {
-                        crate::ast::BinaryOpKind::BitAnd => "@briv_str_band",
-                        crate::ast::BinaryOpKind::BitOr => "@briv_str_bor",
-                        _ => "@briv_str_bxor",
+                        crate::ast::BinaryOpKind::BitAnd => "@briev_str_band",
+                        crate::ast::BinaryOpKind::BitOr => "@briev_str_bor",
+                        _ => "@briev_str_bxor",
                     };
                     let res = self.fun.gen_reg();
                     writeln!(out, "{}{} = call ptr {}(ptr {}, ptr {})", indent, res, rt, l.name, r.name).ok();
@@ -3975,7 +3975,7 @@ impl LlvmBackend {
                 // length). Numeric operands keep the i64 xor path below.
                 if self.is_string_operand(&operand.ty) {
                     let res = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call ptr @briv_str_bnot(ptr {})", indent, res, operand.name).ok();
+                    writeln!(out, "{}{} = call ptr @briev_str_bnot(ptr {})", indent, res, operand.name).ok();
                     return TypedRegister { name: res, ty: Type::string() };
                 }
                 writeln!(out, "{}{} = xor i64 {}, -1", indent, v, operand.name).ok();
@@ -4256,7 +4256,7 @@ impl LlvmBackend {
                 }
                 crate::casting::graph::LaneKind::ExtCallDyn(fn_name) => {
                     // 2026-08-03: proto-binding transform (owned function
-                    // name), e.g. cstr_to_briv/str_to_c for #String<CString>.
+                    // name), e.g. cstr_to_briev/str_to_c for #String<CString>.
                     writeln!(out, "{}{} = call {} @{}({} {})",
                         indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
                 }
@@ -4302,7 +4302,7 @@ impl LlvmBackend {
                     // A registered CastFrom(#Bit) override for the target type
                     // calls the override function; otherwise the #String default
                     // is the UTF8 wrap: inttoptr the address, then
-                    // briv_cstr_to_briv materializes the [len][bytes] header
+                    // briev_cstr_to_briev materializes the [len][bytes] header
                     // by construction (length derived from the bytes). The
                     // header is never inherited from the bits — it is created.
                     let override_fn = match target.universe_key() {
@@ -4319,7 +4319,7 @@ impl LlvmBackend {
                     } else {
                         let p = self.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, cur).ok();
-                        writeln!(out, "{}{} = call ptr @briv_bits_to_str(ptr {})",
+                        writeln!(out, "{}{} = call ptr @briev_bits_to_str(ptr {})",
                             indent, dst, p).ok();
                     }
                 }
@@ -4418,8 +4418,8 @@ mod tests {
 
 }
 
-/// 2026-07-31 (A5): the briv name of a member declaration (txn/defn/node).
-pub(crate) fn member_briv_name(m: &crate::ast::TopLevel) -> &str {
+/// 2026-07-31 (A5): the briev name of a member declaration (txn/defn/node).
+pub(crate) fn member_briev_name(m: &crate::ast::TopLevel) -> &str {
     match m {
         crate::ast::TopLevel::Transaction(t) => &t.name,
         crate::ast::TopLevel::Definition(d) => &d.name,

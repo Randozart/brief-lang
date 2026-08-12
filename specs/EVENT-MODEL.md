@@ -6,7 +6,7 @@
 
 ## 1. Philosophy: No Magic
 
-Briv's event model has zero compiler-generated functions, zero hidden keywords,
+Briev's event model has zero compiler-generated functions, zero hidden keywords,
 zero implicit behavior, and zero intrinsic symbols. Everything is composed from
 five existing language primitives. Nothing is known to the compiler by name:
 
@@ -29,7 +29,7 @@ There is no `__wait_for_event` intrinsic. The equilibrium path in the LLVM IR
 just does `ret void`. The user (or stdlib) provides sleep as an explicit
 `frgn` + `node [true]` pattern:
 
-```briv
+```briev
 // User code:
 frgn __wait_for_event() -> Void from "libruntime";
 // ^ A regular FFI declaration. The linker resolves it.
@@ -50,7 +50,7 @@ consumer can read it within the same tick.
 This is the "equilibrium sleep" pattern, composed entirely from existing
 primitives.
 
-The same symbol `__wait_for_event` is provided by `runtime/briv_rt.c` (one C
+The same symbol `__wait_for_event` is provided by `runtime/briev_rt.c` (one C
 file, `#ifdef` handles platforms). The user links it once. No compiler knows
 its name.
 
@@ -79,7 +79,7 @@ only what the user's `frgn` declarations and `node` bodies tell it to.
 
 ### Declaration
 
-```briv
+```briev
 trg io_pending: Bool @ link __io_pending;
 trg sigint_flag: Bool @ link __sigint_flag;
 ```
@@ -111,7 +111,7 @@ user's own runtime or linker script.
 
 ### MMIO vs Link
 
-```briv
+```briev
 // MMIO — bare-metal, FPGA: hardware writes to 0x40001000
 trg button: Bool @ 0x40001000;
 
@@ -131,7 +131,7 @@ The standard library (`lib/std/io.bv`) demonstrates the pattern:
 
 ### Layer 1: FFI Boundary
 
-```briv
+```briev
 // io/internal.bv — the raw FFI contract
 frgn __raw_poll() -> Vector<u8> from "libruntime";
 ```
@@ -141,7 +141,7 @@ determined (via `__wait_for_event` / interrupt handler) that data is available.
 
 ### Layer 2: Pump Transaction
 
-```briv
+```briev
 // io.bv
 import system from "std/system.bv";
 // system.bv declares: trg __io_pending: Bool @ link __io_pending;
@@ -164,7 +164,7 @@ fills the buffer, and signals `__io_ready` for downstream consumers.
 
 ### Layer 3: Accessor Defns
 
-```briv
+```briev
 // io.bv — pure functions on the cached buffer, zero FFI
 defn key_pressed(key: String) -> Bool {
     let i: Int = 0;
@@ -193,7 +193,7 @@ defn get_mouse_position() -> (Int, Int) {
 
 ### Layer 4: User Code
 
-```briv
+```briev
 import io from "std/io.bv";
 import system from "std/system.bv";
 
@@ -221,7 +221,7 @@ pure scan of the cached buffer.
 
 Independent reactive transactions can gate on independent triggers:
 
-```briv
+```briev
 trg mouse_click: Bool @ link __mouse_click;
 trg timer_tick: Bool @ link __timer_100hz;
 
@@ -297,7 +297,7 @@ implemented in any backend. Every backend emits `trg!` as a comment.
 
 The correct pattern is:
 
-```briv
+```briev
 // Instead of:
 node bad [true] {
     phase1();

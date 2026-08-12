@@ -375,7 +375,7 @@ fn coerce_to_param_type(
         return arg_reg.clone();
     }
 
-    // Determine Briv types for semantic conversion.
+    // Determine Briev types for semantic conversion.
     // i64 ↔ float: bitcast via i32 bridge
     // i64 ↔ double: bitcast directly
     // ptr ↔ i64: inttoptr/ptrtoint
@@ -676,7 +676,7 @@ Every feature must have tests that assert behavioral outcomes, not literal IR sn
 
 **File:** `src/backend/llvm/tests.rs` (or `src/analysis/allocation.rs` tests)
 
-1. **No allocation benchmark**: Create a minimal `.bv` file with a `node` that has no `Alloc#` calls. Compile with `brivc`. Verify the generated `.ll` has no `call ptr @malloc(i64` in the main loop or txn functions.
+1. **No allocation benchmark**: Create a minimal `.bv` file with a `node` that has no `Alloc#` calls. Compile with `brievc`. Verify the generated `.ll` has no `call ptr @malloc(i64` in the main loop or txn functions.
 
 2. **Arena-needed benchmark**: Create a `.bv` file with a `txn` that calls `Alloc#(64)`. Compile. Verify the generated `.ll` has `call ptr @malloc(i64 65536)` in the arena init path.
 

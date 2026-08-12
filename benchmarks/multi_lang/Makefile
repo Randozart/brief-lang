@@ -2,13 +2,13 @@
 # 2026-07-24
 #
 # Targets:
-#   all       — build Briv .so + protocol shim
+#   all       — build Briev .so + protocol shim
 #   run       — build and run all benchmarks
 #   clean     — remove build artifacts
 
 PROJECT_ROOT ?= $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 BUILD_DIR ?= $(PROJECT_ROOT)/target/multi_lang
-BRIVC ?= $(PROJECT_ROOT)/target/release/briv-compiler
+BRIEVC ?= $(PROJECT_ROOT)/target/release/briev-compiler
 CC ?= gcc
 
 .PHONY: all run clean
@@ -18,13 +18,13 @@ all: $(BUILD_DIR)/export_add.so $(BUILD_DIR)/proto_shim
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# ── Briv .so ───────────────────────────────────────────────────────────
+# ── Briev .so ───────────────────────────────────────────────────────────
 # Build the shared library with export defn add/mul
 
-$(BUILD_DIR)/export_add.so: $(PROJECT_ROOT)/benchmarks/multi_lang/export_add.bv $(BRIVC)
+$(BUILD_DIR)/export_add.so: $(PROJECT_ROOT)/benchmarks/multi_lang/export_add.bv $(BRIEVC)
 	@mkdir -p $(BUILD_DIR)
 	cd $(PROJECT_ROOT) && \
-	  $(BRIVC) build benchmarks/multi_lang/export_add.bv --shared --out $(BUILD_DIR) 2>&1
+	  $(BRIEVC) build benchmarks/multi_lang/export_add.bv --shared --out $(BUILD_DIR) 2>&1
 
 # ── Protocol shim ───────────────────────────────────────────────────────
 # Standalone executable that dlopens the .so and communicates via stdin/stdout

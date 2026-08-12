@@ -7,7 +7,7 @@
 
 ## Problem Summary
 
-The Briv self-hosted compiler (`lib/compiler/`) has **6 files** that fail to parse due to Rust-isms that leaked in during porting. The Rust bootstrap parser (`src/parser.rs`) short-circuits on the first error, forcing a fix-compile-repeat cycle. The LSP inherits the same limitation.
+The Briev self-hosted compiler (`lib/compiler/`) has **6 files** that fail to parse due to Rust-isms that leaked in during porting. The Rust bootstrap parser (`src/parser.rs`) short-circuits on the first error, forcing a fix-compile-repeat cycle. The LSP inherits the same limitation.
 
 ---
 
@@ -56,7 +56,7 @@ fn parse_statements(&mut self) -> (Vec<Statement>, Vec<SyntaxError>) {
 
 ---
 
-## Part B: Fix Briv Source Rust-isms (10 changes, ~15 min)
+## Part B: Fix Briev Source Rust-isms (10 changes, ~15 min)
 
 ### Files and exact fixes
 
@@ -92,7 +92,7 @@ The `++` operator for list concatenation is used in `call_graph.bv` (`called ++ 
 Session 1 (this session):
   Part C: Add ++ to lexer + parser (30 min)
   Part B: Fix all 10 source Rust-isms (15 min)
-  └─ Verify all 9/9 core Briv files parse
+  └─ Verify all 9/9 core Briev files parse
 
 Session 2 (next session):
   Part A: Multi-error parser recovery (1 session)

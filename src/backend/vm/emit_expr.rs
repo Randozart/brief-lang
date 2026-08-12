@@ -57,7 +57,7 @@ impl VmBackend {
             // ── Binary operations ──────────────────────────────────────
             Expr::BinaryOp(kind, lhs, rhs) => {
                 // 2026-07-25: Ptr<Int> + Int — scale Int by 8 before adding.
-                // In Briv, Ptr arithmetic is scaled by element size.
+                // In Briev, Ptr arithmetic is scaled by element size.
                 // The VM's add is unscaled, so we multiply the offset by 8.
                 if matches!(kind, BinaryOpKind::Add) {
                     if let Expr::Identifier(name) = lhs.as_ref() {
@@ -107,7 +107,7 @@ impl VmBackend {
                     }
                     UnaryOpKind::Not => {
                         // 2026-07-26: Logical NOT — emit NOT which is now
-                        // a logical NOT (0→1, else→0) in both C and Briv VM.
+                        // a logical NOT (0→1, else→0) in both C and Briev VM.
                         self.asm.emit_not();
                     }
                     UnaryOpKind::BitNot => {

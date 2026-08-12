@@ -3,12 +3,12 @@
 // Matches nbody_newton.bv algorithm but with hot-loop FFI like nbody_sqrt.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/nbody_newton_sym.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/nbody_newton_sym.bv \
 //       --out benchmarks --optimize-budget 256
 
 
 import { get_env_int } from "std/env.bv";
-// 2026-07-15: briv_rt.c linked automatically by compiler
+// 2026-07-15: briev_rt.c linked automatically by compiler
 
 let bound: Int = get_env_int("BOUND");
 let count: Int = 0;

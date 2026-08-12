@@ -5,7 +5,7 @@
 //! 2. lib/ffi/mappers/<name>/ (default mappers)
 //!
 //! Mappers can be:
-//! - Briv files (.bv)
+//! - Briev files (.bv)
 //! - Rust crates
 
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ pub struct MapperInfo {
 /// Type of mapper
 #[derive(Debug, Clone, PartialEq)]
 pub enum MapperType {
-    Briv,
+    Briev,
     Rust,
 }
 
@@ -91,7 +91,7 @@ impl MapperRegistry {
                 return Some(MapperInfo {
                     name: name.to_string(),
                     path: single_file,
-                    mapper_type: MapperType::Briv,
+                    mapper_type: MapperType::Briev,
                 });
             }
         }
@@ -106,26 +106,26 @@ impl MapperRegistry {
             return MapperType::Rust;
         }
 
-        // Check for Briv files
+        // Check for Briev files
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 if let Some(ext) = entry.path().extension() {
                     if ext == "bv" {
-                        return MapperType::Briv;
+                        return MapperType::Briev;
                     }
                 }
             }
         }
 
-        // Default to Briv for .bv files at root level
+        // Default to Briev for .bv files at root level
         if let Some(ext) = path.extension() {
             if ext == "bv" {
-                return MapperType::Briv;
+                return MapperType::Briev;
             }
         }
 
-        // Default to Briv
-        MapperType::Briv
+        // Default to Briev
+        MapperType::Briev
     }
 
     /// Register a mapper explicitly

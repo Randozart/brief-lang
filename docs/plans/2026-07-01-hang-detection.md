@@ -13,7 +13,7 @@ unbounded iteration) instead of producing a compile-time error:
 
 ## Principle
 
-"If hanging is even suspected, Briv throws a compile time error. If it's not
+"If hanging is even suspected, Briev throws a compile time error. If it's not
 an error state, it's a bug in the compiler."
 
 The cycle-budget watchdog is the exception — when enabled, it correctly

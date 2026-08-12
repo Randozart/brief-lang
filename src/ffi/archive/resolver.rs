@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 /// This is resolved at runtime based on the compiler's installation location
 fn std_lib_path() -> Option<PathBuf> {
     // Try environment variable first (explicit override)
-    if let Ok(path) = std::env::var("BRIV_STDLIB_PATH") {
+    if let Ok(path) = std::env::var("BRIEV_STDLIB_PATH") {
         let stdlib_path = PathBuf::from(path);
         if stdlib_path.exists() {
             return Some(stdlib_path);
@@ -47,11 +47,11 @@ fn std_lib_path() -> Option<PathBuf> {
         if let Some(exe_dir) = exe_path.parent() {
             // Check for typical installation layouts
             let possible_paths = vec![
-                // Development: briv-compiler/target/release/
+                // Development: briev-compiler/target/release/
                 exe_dir.join("../../lib/ffi/bindings"),
                 exe_dir.join("../lib/ffi/bindings"),
-                // Installed: ~/.local/bin/ -> ~/.local/share/briv/ffi/bindings
-                exe_dir.join("../share/briv/ffi/bindings"),
+                // Installed: ~/.local/bin/ -> ~/.local/share/briev/ffi/bindings
+                exe_dir.join("../share/briev/ffi/bindings"),
             ];
 
             for path in possible_paths {
@@ -64,9 +64,9 @@ fn std_lib_path() -> Option<PathBuf> {
 
     // Try OS-specific data directory
     if let Some(data_dir) = dirs::data_dir() {
-        let briv_data = data_dir.join("briv").join("ffi").join("bindings");
-        if briv_data.exists() {
-            return Some(briv_data);
+        let briev_data = data_dir.join("briev").join("ffi").join("bindings");
+        if briev_data.exists() {
+            return Some(briev_data);
         }
     }
 

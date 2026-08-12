@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-GLUE Python Bridge — call Briv exports from Python via ctypes.
+GLUE Python Bridge — call Briev exports from Python via ctypes.
 
 Workflow:
-  1. briv build --disable-plugin prelude --library bridge.bv --out .  → bridge.ll
+  1. briev build --disable-plugin prelude --library bridge.bv --out .  → bridge.ll
   2. llc -filetype=obj bridge.ll -o bridge.o              → bridge.o
   3. cc -shared bridge.o -o libbridge.so                  → libbridge.so
   4. python3 gluerun.py                                   → runs this script
@@ -25,7 +25,7 @@ def build_bridge():
     bridge_ll = SCRIPT_DIR / "bridge.ll"
     if not bridge_ll.exists():
         print("ERROR: bridge.ll not found. Run first:", file=sys.stderr)
-        print(f"  briv build --disable-plugin prelude --library bridge.bv --out {SCRIPT_DIR}", file=sys.stderr)
+        print(f"  briev build --disable-plugin prelude --library bridge.bv --out {SCRIPT_DIR}", file=sys.stderr)
         sys.exit(1)
 
     bridge_o = SCRIPT_DIR / "bridge.o"
@@ -50,14 +50,14 @@ def build_bridge():
 
 
 def run_demo(lib_path):
-    """Load the shared library and call Briv exports."""
+    """Load the shared library and call Briev exports."""
     lib = ctypes.CDLL(str(lib_path))
 
     # --- Configure function signatures ---
 
-    # __briv_init_state() -> c_void_p
-    lib.__briv_init_state.argtypes = []
-    lib.__briv_init_state.restype = ctypes.c_void_p
+    # __briev_init_state() -> c_void_p
+    lib.__briev_init_state.argtypes = []
+    lib.__briev_init_state.restype = ctypes.c_void_p
 
     # add(State, i64, i64) -> i64
     lib.add.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
@@ -70,8 +70,8 @@ def run_demo(lib_path):
     # --- Call it ---
     print("═══ GLUE Python Bridge Demo ═══")
 
-    state = lib.__briv_init_state()
-    print(f"  Briv runtime initialized (state={state:#x})")
+    state = lib.__briev_init_state()
+    print(f"  Briev runtime initialized (state={state:#x})")
 
     result = lib.add(state, 40, 2)
     print(f"  add(40, 2) = {result}")

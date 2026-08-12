@@ -8,7 +8,7 @@
 
 ## Overview
 
-Tier 1 provides the fundamental data structures required for the Briv compiler to be written in Briv itself. These types are used extensively in:
+Tier 1 provides the fundamental data structures required for the Briev compiler to be written in Briev itself. These types are used extensively in:
 - **Lexer:** Char, StringBuilder for tokenization
 - **Parser:** Stack for recursive descent, HashMap for symbol tables
 - **Type Checker:** HashMap for scopes, HashSet for dependency tracking
@@ -21,7 +21,7 @@ Tier 1 provides the fundamental data structures required for the Briv compiler t
 **Purpose:** Unicode codepoint representation for string iteration
 
 **Syntax:**
-```briv
+```briev
 let c: Char = 'a';
 let newline: Char = '\n';
 let tab: Char = '\t';
@@ -37,7 +37,7 @@ let emoji: Char = '\u{1F600}';  // 😀
 - `\u{XXXX}` - Unicode codepoint (hex)
 
 **Standard Library:** `lib/std/char.bv`
-```briv
+```briev
 defn char_to_int(c: Char) -> Int
 defn int_to_char(n: Int) -> Char
 defn char_to_string(c: Char) -> String
@@ -63,13 +63,13 @@ defn to_lower(c: Char) -> Char
 **Purpose:** O(1) key-value lookup for symbol tables
 
 **Syntax:**
-```briv
+```briev
 let map: HashMap<String, Int>;
 let nested: HashMap<String, HashSet<Int> >;  // Note space in >>
 ```
 
 **Methods:**
-```briv
+```briev
 // Construction
 defn new_map<K, V>() -> HashMap<K, V>
 defn with_capacity<K, V>(capacity: Int) -> HashMap<K, V>
@@ -91,7 +91,7 @@ defn iter<K, V>(map: HashMap<K, V>) -> List<(K, V)>
 ```
 
 **Usage:**
-```briv
+```briev
 let map = new_map<String, Int>();
 map = map.insert("key", 42);
 let val = map.get("key");  // Some(42)
@@ -112,12 +112,12 @@ let has = map.contains_key("key");  // true
 **Purpose:** O(1) membership testing
 
 **Syntax:**
-```briv
+```briev
 let set: HashSet<String>;
 ```
 
 **Methods:**
-```briv
+```briev
 defn new_set<T>() -> HashSet<T>
 defn insert<T>(set: HashSet<T>, item: T) -> HashSet<T>
 defn contains<T>(set: HashSet<T>, item: T) -> Bool
@@ -140,12 +140,12 @@ defn is_empty<T>(set: HashSet<T>) -> Bool
 **Purpose:** O(1) amortized string concatenation
 
 **Syntax:**
-```briv
+```briev
 let builder: StringBuilder;
 ```
 
 **Methods:**
-```briv
+```briev
 defn new_builder() -> StringBuilder
 defn with_capacity(capacity: Int) -> StringBuilder
 
@@ -164,7 +164,7 @@ defn capacity(builder: StringBuilder) -> Int
 ```
 
 **Usage:**
-```briv
+```briev
 let sb = new_builder();
 sb = sb.append_str("Hello");
 sb = sb.append_char(' ');
@@ -190,13 +190,13 @@ let result = sb.to_string();  // "Hello World"
 **Purpose:** LIFO and FIFO data structures for parser infrastructure
 
 **Syntax:**
-```briv
+```briev
 let stack: Stack<Int>;
 let queue: Queue<String>;
 ```
 
 **Stack Methods (LIFO):**
-```briv
+```briev
 defn new_stack<T>() -> Stack<T>
 defn push<T>(stack: Stack<T>, item: T) -> Stack<T>
 defn pop<T>(stack: Stack<T>) -> Option<(T, Stack<T>)>
@@ -207,7 +207,7 @@ defn clear<T>(stack: Stack<T>) -> Stack<T>
 ```
 
 **Queue Methods (FIFO):**
-```briv
+```briev
 defn new_queue<T>() -> Queue<T>
 defn enqueue<T>(queue: Queue<T>, item: T) -> Queue<T>
 defn dequeue<T>(queue: Queue<T>) -> Option<(T, Queue<T>)>
@@ -218,7 +218,7 @@ defn clear<T>(queue: Queue<T>) -> Queue<T>
 ```
 
 **Usage:**
-```briv
+```briev
 // Stack
 let s = new_stack<Int>();
 s = s.push(1);
@@ -247,7 +247,7 @@ let (val, q) = q.dequeue();  // (Some("hello"), queue with ["world"])
 
 ### Option Methods
 
-```briv
+```briev
 // Transformation
 defn option_map<T, U>(opt: Option<T>, f: T -> U) -> Option<U>
 defn option_and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U>
@@ -262,7 +262,7 @@ defn option_filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T>
 ```
 
 **Usage:**
-```briv
+```briev
 let opt: Option<Int> = Some(42);
 let doubled = option_map(opt, |x| x * 2);  // Some(84)
 let result = option_and_then(opt, |x| if x > 0 { Some(x) } else { None });
@@ -270,7 +270,7 @@ let result = option_and_then(opt, |x| if x > 0 { Some(x) } else { None });
 
 ### Result Methods
 
-```briv
+```briev
 // Transformation
 defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
 defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F>
@@ -288,7 +288,7 @@ defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U,
 ```
 
 **Usage:**
-```briv
+```briev
 let result: Result<Int, String> = Ok(42);
 let doubled = result_map(result, |x| x * 2);  // Ok(84)
 let chained = result_and_then(result, |x| if x > 0 { Ok(x) } else { Err("negative") });
@@ -305,7 +305,7 @@ let chained = result_and_then(result, |x| if x > 0 { Ok(x) } else { Err("negativ
 All Tier 1 types are fully integrated:
 
 ### Parsing
-```briv
+```briev
 // All valid type declarations
 let c: Char;
 let map: HashMap<String, Int>;
@@ -382,7 +382,7 @@ With Tier 1 complete, the foundation is laid for:
 - SIMD-optimized tokenization (later)
 
 **Tier 4: Parser Components**
-- AST definition in Briv
+- AST definition in Briev
 - Recursive descent parser using Stack
 - Error reporting with StringBuilder
 
@@ -461,5 +461,5 @@ With Tier 1 complete, the foundation is laid for:
 - String functions: **95% native**, 5% FFI
 - Character classification: **100% native**
 
-This enables the lexer to be written entirely in Briv without FFI dependencies.
+This enables the lexer to be written entirely in Briev without FFI dependencies.
 

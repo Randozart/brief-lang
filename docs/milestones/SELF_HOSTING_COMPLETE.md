@@ -1,4 +1,4 @@
-# Briv Self-Hosting Implementation - COMPLETE! 🎉
+# Briev Self-Hosting Implementation - COMPLETE! 🎉
 
 **Completion Date:** 2026-05-06  
 **Total Implementation Time:** ~8 hours  
@@ -9,7 +9,7 @@
 ## Final Architecture
 
 ```
-Briv Compiler
+Briev Compiler
 ├── Frontend (Complete)
 │   ├── Lexer (token.bv, lexer.bv)
 │   ├── Parser (parser.bv, ast.bv)
@@ -96,7 +96,7 @@ Briv Compiler
 ## File Organization
 
 ```
-briv-compiler/
+briev-compiler/
 ├── src/                          # Rust compiler (bootstrap)
 ├── lib/
 │   ├── std/                      # Standard Library
@@ -239,7 +239,7 @@ briv-compiler/
 
 ### Bootstrap Process
 1. Compile compiler with Rust version
-2. Use that to compile Briv version
+2. Use that to compile Briev version
 3. Verify binary equivalence
 4. Self-hosting achieved!
 
@@ -267,14 +267,14 @@ briv-compiler/
 
 ## Acknowledgments
 
-This implementation proves that Briv can:
+This implementation proves that Briev can:
 - ✅ Parse itself
 - ✅ Type-check itself
 - ✅ Verify its own contracts
 - ✅ Generate code for itself
 - ✅ Run on multiple targets
 
-**Briv is now ready for self-hosting!**
+**Briev is now ready for self-hosting!**
 
 ---
 

@@ -43,8 +43,8 @@ line 791:
 1. Extract field name from inner expression
 2. Look up idx in field_index_map
 3. Get ty = field_types[idx] (e.g., "float", "i8", "i32", "i64")
-4. Get briv_ty = field_briv_types[idx] (for universe unboxing)
-5. Call ensure_typed_value(out, indent, &ty, &val.name, briv_ty)
+4. Get briev_ty = field_briev_types[idx] (for universe unboxing)
+5. Call ensure_typed_value(out, indent, &ty, &val.name, briev_ty)
 6. Emit store with correct ty, typed_value, and align_of(&ty)
 ```
 
@@ -59,8 +59,8 @@ let Some(&idx) = self.ctx.field_index_map.get(name) else {
 let ty = self.ctx.field_types[idx].clone();
 let sr = self.fun.state_reg_name.clone();
 let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
-let briv_ty = self.ctx.field_briv_types.get(idx).cloned();
-let tv = self.ensure_typed_value(out, indent, &ty, &val.name, briv_ty);
+let briev_ty = self.ctx.field_briev_types.get(idx).cloned();
+let tv = self.ensure_typed_value(out, indent, &ty, &val.name, briev_ty);
 writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
 ```
 
@@ -101,8 +101,8 @@ pub(crate) fn emit_typed_store(
     let ty = self.ctx.field_types[idx].clone();
     let sr = self.fun.state_reg_name.clone();
     let p = self.emit_state_gep(out, indent, "ts", &sr, idx);
-    let briv_ty = self.ctx.field_briv_types.get(idx).cloned();
-    let tv = self.ensure_typed_value(out, indent, &ty, &val.name, briv_ty);
+    let briev_ty = self.ctx.field_briev_types.get(idx).cloned();
+    let tv = self.ensure_typed_value(out, indent, &ty, &val.name, briev_ty);
     writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
 }
 ```

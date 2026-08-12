@@ -1,5 +1,5 @@
 // nbody_newton — 5-body gravity sim with Newton's method sqrt
-// Compares Briv vs C on identical algorithm: inline Newton iterations, unrolled pairs.
+// Compares Briev vs C on identical algorithm: inline Newton iterations, unrolled pairs.
 
 
 let bound: Int = get_env_int!("BOUND");
@@ -351,11 +351,11 @@ node simulate [
 
     // 2026-07-31: Removed the periodic print (when count % 5000000 == 0) to
     // make this benchmark symmetric with nbody_newton_c.c, which prints only
-    // the final energy once. Briv's benchmark philosophy mandates symmetry —
+    // the final energy once. Briev's benchmark philosophy mandates symmetry —
     // the periodic print was an asymmetry that the batch-loop's count=0 miss
     // happened to mask at BOUND=5. With the count=0 peel (which restores the
     // periodic print for the knucleotide/mandelbrot class), the asymmetry
-    // became visible. Keeping the benchmark symmetric: Briv prints the final
+    // became visible. Keeping the benchmark symmetric: Briev prints the final
     // energy once, matching C.
     when count == bound {
         endprogram println!(last_energy);

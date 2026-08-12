@@ -7,7 +7,7 @@ operations through equality reasoning.
 **Why it matters**: Before codegen, many expressions contain redundant or
 constant-foldable sub-expressions that LLVM's peephole optimizer could
 eventually eliminate, but which nonetheless bloat the IR and confuse earlier
-analysis passes. The equality saturation pass catches these at the Briv IR
+analysis passes. The equality saturation pass catches these at the Briev IR
 level, producing cleaner LLVM IR from the start.
 
 **How**: The engine applies rewrite rules in a fixpoint loop (5 iterations

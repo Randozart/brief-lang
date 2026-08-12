@@ -41,7 +41,7 @@ impl FunctionRegistry {
     }
 
     pub fn load_syscall_bindings(&mut self) -> Result<(), String> {
-        let binding_dir = std::env::var("BRIV_STDLIB_PATH")
+        let binding_dir = std::env::var("BRIEV_STDLIB_PATH")
             .map(|p| PathBuf::from(p).join("syscalls"))
             .unwrap_or_else(|_| PathBuf::from("std/bindings/syscalls"));
         if binding_dir.exists() {
@@ -116,7 +116,7 @@ impl FunctionRegistry {
     fn load_from_dbv(&mut self, path: &std::path::Path) -> Result<(), String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
-        let doc = crate::dbriv::v2::parse_document(&content)
+        let doc = crate::dbriev::v2::parse_document(&content)
             .map_err(|e| format!("Failed to parse DBV: {}", e))?;
         for group in &doc.data_groups {
             if group.schema_name.as_deref() != Some("FnBinding") {
@@ -124,11 +124,11 @@ impl FunctionRegistry {
             }
             for entry in &group.entries {
                 let name = match entry.fields.first() {
-                    Some(crate::dbriv::v2::DataField::Positional(crate::dbriv::v2::DataValue::String(s))) => s.clone(),
+                    Some(crate::dbriev::v2::DataField::Positional(crate::dbriev::v2::DataValue::String(s))) => s.clone(),
                     _ => continue,
                 };
                 let impl_location = match entry.fields.get(1) {
-                    Some(crate::dbriv::v2::DataField::Positional(crate::dbriv::v2::DataValue::String(s))) => s.clone(),
+                    Some(crate::dbriev::v2::DataField::Positional(crate::dbriev::v2::DataValue::String(s))) => s.clone(),
                     _ => continue,
                 };
                 self.fn_locations_by_name.insert(name.clone(), impl_location.clone());

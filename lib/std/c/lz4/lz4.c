@@ -4,7 +4,7 @@
  * #define LZ4_IMPLEMENTATION must be defined in exactly one compilation unit
  * before including lz4.h. This file is that unit.
  *
- * Included by: import "link/lz4/lz4.c" in Briv source.
+ * Included by: import "link/lz4/lz4.c" in Briev source.
  */
 #define LZ4_IMPLEMENTATION
 #include "lz4.h"

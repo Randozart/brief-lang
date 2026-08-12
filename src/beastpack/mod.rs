@@ -3,7 +3,7 @@
 // compression, checksums, and metadata stripping for distribution.
 //
 // The .beastpack file is the portable distribution format for
-// Briv's install-time compilation pipeline. It contains the typed
+// Briev's install-time compilation pipeline. It contains the typed
 // AST after the $(Typed) pipeline stage, with Source$/Comment$
 // metadata stripped and internal identifiers optionally obfuscated.
 //

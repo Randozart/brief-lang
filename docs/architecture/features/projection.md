@@ -6,7 +6,7 @@
 
 ## Design
 
-The `:>` operator (`expr :> Target(args)`) extracts compile-time metadata or applies a type-defined projection. It is the primary mechanism for type-directed operations in Briv.
+The `:>` operator (`expr :> Target(args)`) extracts compile-time metadata or applies a type-defined projection. It is the primary mechanism for type-directed operations in Briev.
 
 Syntax: `source :> ProjectionName(arg1, arg2, ...)`
 

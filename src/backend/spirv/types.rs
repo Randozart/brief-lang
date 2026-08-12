@@ -1,6 +1,6 @@
-/// SPIR-V type lowering — maps Briv types to SPIR-V type IDs.
+/// SPIR-V type lowering — maps Briev types to SPIR-V type IDs.
 ///
-/// 2026-07-15: Each Briv type is Bits(N) or Void or Ptr(T). We map
+/// 2026-07-15: Each Briev type is Bits(N) or Void or Ptr(T). We map
 /// to OpTypeVoid, OpTypeBool, OpTypeInt, OpTypePointer, etc.
 /// Results are cached by hash to avoid duplicate instructions.
 
@@ -35,7 +35,7 @@ impl TypeCache {
         id
     }
 
-    /// 2026-07-15: Lower a Briv Type to a SPIR-V type Word.
+    /// 2026-07-15: Lower a Briev Type to a SPIR-V type Word.
     /// Returns Ok(id) on success.
     pub fn lower(&mut self, ty: &Type) -> Result<Word, String> {
         let key = hash_type(ty);
@@ -117,7 +117,7 @@ impl TypeCache {
                 Ok(id)
             }
             Type::Custom(name) if name == "String" => {
-                // String is a 24-byte struct in Briv
+                // String is a 24-byte struct in Briev
                 let ids: Vec<Word> = (0..3).map(|_| self.alloc_id()).collect();
                 for &sub_id in &ids {
                     self.push_type(spirv::Op::TypeInt, sub_id, vec![

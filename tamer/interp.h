@@ -1,9 +1,9 @@
-// 2026-07-25: Briv VM interpreter — stack-based 64-bit virtual machine.
+// 2026-07-25: Briev VM interpreter — stack-based 64-bit virtual machine.
 // Executes .lair bytecode for the install-time compilation pipeline.
 // Hosted in the tamer system tool (tamer/main.c). No dependencies beyond C99.
 
-#ifndef BRIV_VM_H
-#define BRIV_VM_H
+#ifndef BRIEV_VM_H
+#define BRIEV_VM_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -187,4 +187,4 @@ int vm_find_function(VmState* vm, const char* name);
 // Get the last error message.
 const char* vm_error(VmState* vm);
 
-#endif // BRIV_VM_H
+#endif // BRIEV_VM_H

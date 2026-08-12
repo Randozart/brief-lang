@@ -1,4 +1,4 @@
-// 2026-07-25: Rust assembler for the Briv VM .lair bytecode format.
+// 2026-07-25: Rust assembler for the Briev VM .lair bytecode format.
 // Converts a sequence of instruction emits into a complete .lair binary
 // with header, string table, function table, and bytecode sections.
 // Handles label resolution for forward/backward jumps.

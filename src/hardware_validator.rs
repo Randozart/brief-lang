@@ -22,7 +22,7 @@
 
 use crate::ast::{Expr, Statement, TopLevel, Type, UnaryOpKind};
 // 2026-07-26: DbvsEngine removed — V2 parser replaces .dbvs format
-// use crate::dbriv::DbvsEngine;
+// use crate::dbriev::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
 use std::collections::HashSet;
@@ -397,9 +397,9 @@ impl HardwareValidator {
         for (schema_path, full_path) in &schema_files {
             match std::fs::read_to_string(full_path) {
                 Ok(content) => {
-                    match crate::dbriv::v2::parse_document(&content) {
+                    match crate::dbriev::v2::parse_document(&content) {
                         Ok(_doc) => {
-                            // 2026-07-26: V2 parser produces DbrivDocument with schemas.
+                            // 2026-07-26: V2 parser produces DbrievDocument with schemas.
                             // Schema-to-alias mapping will be re-added with proper V2 support.
                             // For now, collect schema paths for existence checking.
                         }

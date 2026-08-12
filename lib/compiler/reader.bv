@@ -1,26 +1,26 @@
-// reader.bv — shared projection-reading primitives for compiler-in-Briv
-// passes. 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi, P5):
-// every Briv pass (needs_state.bv, soa_reorder.bv, ...) reads a tagged Data
-// Briv projection as a String with these primitives. All iteration is
+// reader.bv — shared projection-reading primitives for compiler-in-Briev
+// passes. 2026-08-04 (plan 2026-08-04-compiler-in-briev-dogfood-ffi, P5):
+// every Briev pass (needs_state.bv, soa_reorder.bv, ...) reads a tagged Data
+// Briev projection as a String with these primitives. All iteration is
 // RECURSION (`when` is an if-guard, not a while loop, in both the interpreter
 // and the LLVM backend). Character comparisons use char_at (an Int-returning
-// frgn — a per-char briv_str_substr corrupted the heap under long recursion,
-// see BUGS.md); substrings use briv_str_substr (the runtime half of dynamic
+// frgn — a per-char briev_str_substr corrupted the heap under long recursion,
+// see BUGS.md); substrings use briev_str_substr (the runtime half of dynamic
 // String slicing, which the LLVM backend emits as the whole array).
 
 import "glue/c.bv";
 
-frgn briv_str_substr(handle: String, a: Int, b: Int) -> String : briv_str_substr from "lib/runtime/briv_rt.c";
-frgn briv_str_char_at(handle: String, i: Int) -> Int : briv_str_char_at from "lib/runtime/briv_rt.c";
+frgn briev_str_substr(handle: String, a: Int, b: Int) -> String : briev_str_substr from "lib/runtime/briev_rt.c";
+frgn briev_str_char_at(handle: String, i: Int) -> Int : briev_str_char_at from "lib/runtime/briev_rt.c";
 
 // char_at(s, i): the i-th byte as an Int (no allocation).
 defn char_at(s: String, i: Int) -> Int {
-    term briv_str_char_at(s, i);
+    term briev_str_char_at(s, i);
 };
 
-// str_substr(a, b): byte-wise substring [a, b) of a Briv String.
+// str_substr(a, b): byte-wise substring [a, b) of a Briev String.
 defn str_substr(s: String, a: Int, b: Int) -> String {
-    term briv_str_substr(s, a, b);
+    term briev_str_substr(s, a, b);
 };
 
 // line_end(proj, i, n): index of the first '\n' at/after i, else n.
@@ -39,8 +39,8 @@ defn token_at(line: String, idx: Int) -> String {
 };
 defn token_at_scan(line: String, i: Int, n: Int, idx: Int, cur: Int, start: Int) -> String {
     when cur == idx {
-        when i >= n { term briv_str_substr(line, start, n); };
-        when char_at(line, i) == 32 { term briv_str_substr(line, start, i); };
+        when i >= n { term briev_str_substr(line, start, n); };
+        when char_at(line, i) == 32 { term briev_str_substr(line, start, i); };
         term token_at_scan(line, i + 1, n, idx, cur, start);
     };
     when i >= n { term ""; };
@@ -53,9 +53,9 @@ defn has_token(line: String, name: String) -> Bool {
     term has_token_scan(line, 0, line .^Len, name, 0);
 };
 defn has_token_scan(line: String, i: Int, n: Int, name: String, start: Int) -> Bool {
-    when i >= n { term briv_str_substr(line, start, n) == name; };
+    when i >= n { term briev_str_substr(line, start, n) == name; };
     when char_at(line, i) == 32 {
-        when briv_str_substr(line, start, i) == name { term true; };
+        when briev_str_substr(line, start, i) == name { term true; };
         term has_token_scan(line, i + 1, n, name, i + 1);
     };
     term has_token_scan(line, i + 1, n, name, start);
@@ -74,16 +74,16 @@ defn scan_sections(proj: String, i: Int, n: Int, key: String, name: String) -> B
 };
 defn line_has_key(proj: String, ls: Int, n: Int, key: String) -> Bool {
     let le: Int = line_end(proj, ls, n);
-    let line: String = briv_str_substr(proj, ls, le);
+    let line: String = briev_str_substr(proj, ls, le);
     let klen: Int = key .^Len;
-    when line .^Len >= klen + 1 && briv_str_substr(line, 0, klen) == key && char_at(line, klen) == 32 { term true; };
+    when line .^Len >= klen + 1 && briev_str_substr(line, 0, klen) == key && char_at(line, klen) == 32 { term true; };
     term false;
 };
 defn line_has_name(proj: String, ls: Int, n: Int, key: String, name: String) -> Bool {
     let le: Int = line_end(proj, ls, n);
-    let line: String = briv_str_substr(proj, ls, le);
+    let line: String = briev_str_substr(proj, ls, le);
     let klen: Int = key .^Len;
-    let rest: String = briv_str_substr(line, klen + 1, line .^Len);
+    let rest: String = briev_str_substr(line, klen + 1, line .^Len);
     term has_token(rest, name);
 };
 
@@ -99,7 +99,7 @@ defn find_section(proj: String, i: Int, n: Int, key: String) -> String {
 };
 defn line_text(proj: String, ls: Int, n: Int) -> String {
     let le: Int = line_end(proj, ls, n);
-    term briv_str_substr(proj, ls, le);
+    term briev_str_substr(proj, ls, le);
 };
 
 // ── token name after ':' ────────────────────────────────────────────────
@@ -108,6 +108,6 @@ defn token_name(tok: String) -> String {
 };
 defn tok_after_colon(tok: String, i: Int, n: Int) -> String {
     when i >= n { term ""; };
-    when char_at(tok, i) == 58 { term briv_str_substr(tok, i + 1, n); };
+    when char_at(tok, i) == 58 { term briev_str_substr(tok, i + 1, n); };
     term tok_after_colon(tok, i + 1, n);
 };

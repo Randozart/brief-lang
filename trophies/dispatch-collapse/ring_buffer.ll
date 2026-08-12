@@ -13,9 +13,9 @@ declare i64 @llvm.ctlz.i64(i64, i1) #1
 declare i64 @llvm.cttz.i64(i64, i1) #1
 declare i64 @llvm.abs.i64(i64, i1) #1
 declare i64 @llvm.bitreverse.i64(i64) #1
-declare void @briv_barrier_release()
-declare void @briv_barrier_wait()
-declare void @briv_thread_pool_init(i32, i8**)
+declare void @briev_barrier_release()
+declare void @briev_barrier_wait()
+declare void @briev_thread_pool_init(i32, i8**)
 declare i64 @__get_env_int(i8*) #1
 declare i64 @__print_int(i64) #1
 %State = type { i64, i64 }

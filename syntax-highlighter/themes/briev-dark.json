@@ -1,0 +1,162 @@
+{
+  "name": "Briev Dark",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1E1E1E",
+    "editor.foreground": "#D4D4D4",
+    "editor.lineHighlightBackground": "#2D2D2D",
+    "editor.selectionBackground": "#264F78",
+    "editorCursor.foreground": "#FFFFFF",
+    "editorLineNumber.foreground": "#858585"
+  },
+  "tokenColors": [
+    {
+      "scope": "keyword.control.txn.briev",
+      "settings": { "foreground": "#C586C0", "fontStyle": "bold" }
+    },
+    {
+      "scope": "keyword.control.reactive.briev",
+      "settings": { "foreground": "#DCDCAA", "fontStyle": "bold" }
+    },
+    {
+      "scope": "keyword.control.async.briev",
+      "settings": { "foreground": "#9CDCFE", "fontStyle": "italic" }
+    },
+    {
+      "scope": "keyword.control.flow.briev",
+      "settings": { "foreground": "#D7BA7D", "fontStyle": "bold" }
+    },
+    {
+      "scope": "keyword.declaration.briev",
+      "settings": { "foreground": "#569CD6" }
+    },
+    {
+      "scope": "keyword.import.briev",
+      "settings": { "foreground": "#C586C0" }
+    },
+    {
+      "scope": "support.type.primitive.briev",
+      "settings": { "foreground": "#4EC9B0" }
+    },
+    {
+      "scope": "entity.name.type.custom.briev",
+      "settings": { "foreground": "#B5CEA8" }
+    },
+    {
+      "scope": "string.quoted.double.briev",
+      "settings": { "foreground": "#CE9178" }
+    },
+    {
+      "scope": "constant.numeric.integer.briev",
+      "settings": { "foreground": "#B5CEA8" }
+    },
+    {
+      "scope": "constant.numeric.float.briev",
+      "settings": { "foreground": "#B5CEA8" }
+    },
+    {
+      "scope": "constant.language.true.briev",
+      "settings": { "foreground": "#569CD6", "fontStyle": "bold" }
+    },
+    {
+      "scope": "constant.language.false.briev",
+      "settings": { "foreground": "#569CD6", "fontStyle": "bold" }
+    },
+    {
+      "scope": "comment.line.briev",
+      "settings": { "foreground": "#6A9955", "fontStyle": "italic" }
+    },
+    {
+      "scope": "comment.annotation.briev",
+      "settings": { "foreground": "#00FF00", "fontStyle": "bold" }
+    },
+    {
+      "scope": "meta.annotation.briev",
+      "settings": { "foreground": "#FFD700", "fontStyle": "bold underline" }
+    },
+    {
+      "scope": "storage.modifier.ownership.briev",
+      "settings": { "foreground": "#C586C0", "fontStyle": "bold" }
+    },
+    {
+      "scope": "keyword.operator.comparison.briev",
+      "settings": { "foreground": "#D4D4D4" }
+    },
+    {
+      "scope": "keyword.operator.logical.briev",
+      "settings": { "foreground": "#D4D4D4" }
+    },
+    {
+      "scope": "keyword.operator.term-until.briev",
+      "settings": { "foreground": "#DCDCAA", "fontStyle": "bold" }
+    },
+    {
+      "scope": "entity.name.function.briev",
+      "settings": { "foreground": "#DCDCAA" }
+    },
+    {
+      "scope": "punctuation.terminator.briev",
+      "settings": { "foreground": "#808080" }
+    },
+    {
+      "scope": "punctuation.separator.comma.briev",
+      "settings": { "foreground": "#808080" }
+    },
+    {
+      "scope": "meta.attribute.briev-binding",
+      "settings": { "foreground": "#FF79C6" }
+    },
+    {
+      "scope": "tag.embedded.script.briev",
+      "settings": { "foreground": "#569CD6" }
+    },
+    {
+      "scope": "tag.embedded.view.briev",
+      "settings": { "foreground": "#569CD6" }
+    },
+    {
+      "scope": "tag.embedded.style.briev",
+      "settings": { "foreground": "#569CD6" }
+    },
+    {
+      "scope": "text.plain",
+      "settings": { "foreground": "#D4D4D4" }
+    },
+    {
+      "scope": "keyword.other.property.briev",
+      "settings": { "foreground": "#DCDCAA" }
+    },
+    {
+      "scope": "entity.name.function.stage-block.briev",
+      "settings": { "foreground": "#D7BA7D" }
+    },
+    {
+      "scope": "keyword.operator.property.briev",
+      "settings": { "foreground": "#DCDCAA" }
+    },
+    {
+      "scope": "keyword.operator.push.briev",
+      "settings": { "foreground": "#D7BA7D" }
+    },
+    {
+      "scope": "keyword.operator.bitwise.briev",
+      "settings": { "foreground": "#808080" }
+    },
+    {
+      "scope": "keyword.operator.arrow.briev",
+      "settings": { "foreground": "#D7BA7D" }
+    },
+    {
+      "scope": "keyword.operator.projection.briev",
+      "settings": { "foreground": "#4EC9B0" }
+    },
+    {
+      "scope": "variable.other.constant.briev",
+      "settings": { "foreground": "#CE9178" }
+    },
+    {
+      "scope": "constant.language.result.briev",
+      "settings": { "foreground": "#C586C0" }
+    }
+  ]
+}

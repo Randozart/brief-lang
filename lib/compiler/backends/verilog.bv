@@ -1,5 +1,5 @@
-// SystemVerilog Backend for Briv Compiler
-// Generates synthesizable SystemVerilog from Briv programs
+// SystemVerilog Backend for Briev Compiler
+// Generates synthesizable SystemVerilog from Briev programs
 // Uses modern SV features for concise, efficient RTL
 
 import "call_graph";
@@ -55,12 +55,12 @@ obj AlwaysBlock {
 
 // ===== TYPE MAPPING =====
 
-defn briv_type_to_sv(briv_type: Type) -> SvDataType {
-    uni briv_type(TypeBool) = { term Logic(1); };
-    uni briv_type(TypeInt) = { term Logic(32); };
-    uni briv_type(TypeUInt) = { term Logic(32); };
-    uni briv_type(TypeChar) = { term Logic(8); };
-    uni briv_type(TypeFloat) = { term Real; };
+defn briev_type_to_sv(briev_type: Type) -> SvDataType {
+    uni briev_type(TypeBool) = { term Logic(1); };
+    uni briev_type(TypeInt) = { term Logic(32); };
+    uni briev_type(TypeUInt) = { term Logic(32); };
+    uni briev_type(TypeChar) = { term Logic(8); };
+    uni briev_type(TypeFloat) = { term Real; };
     term Logic(32); // default
 }
 
@@ -227,7 +227,7 @@ defn expr_to_sv(expr: Expr) -> String {
 // ===== MAIN GENERATION ENTRY POINT =====
 
 defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
-    let module_name: String = "briv_top";
+    let module_name: String = "briev_top";
     let ports: List<Port> = [];
     let wires: List<Wire> = [];
     let regs: List<Reg> = [];
@@ -240,11 +240,11 @@ defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
             ports = append(ports, Port {
                 name: decl.name,
                 direction: Output,
-                data_type: briv_type_to_sv(decl.state_type)
+                data_type: briev_type_to_sv(decl.state_type)
             });
             regs = append(regs, Reg {
                 name: decl.name,
-                data_type: briv_type_to_sv(decl.state_type),
+                data_type: briev_type_to_sv(decl.state_type),
                 init_value: None
             });
         };

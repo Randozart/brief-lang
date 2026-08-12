@@ -12,7 +12,7 @@ registers. Each spill costs ~3 cycles×50M iterations = ~0.69s, accounting for
 97% of the 0.76s gap.
 
 C's clang avoids this by using arrays (`float vx[5]`) which LLVM's SROA
-promotes to `<4 x float>` vector phis.  Briv uses flat fields (`vx0..vx4`)
+promotes to `<4 x float>` vector phis.  Briev uses flat fields (`vx0..vx4`)
 that stay as individual scalar phis.
 
 **The fix**: Group fields (e.g., `vx0..vx3`) into `<4 x float>` vector phis.

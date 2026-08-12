@@ -3,12 +3,12 @@
 **2026-07-31:** Reference material moved out of `AGENTS.md` during the
 guidelines rewrite (AGENTS.md is now the operating rules; `AGENTS.md.archive`
 is the full pre-rewrite document). This file is the day-to-day reference for
-Briv language syntax, contract/intrinsic conventions, coding standards, and
+Briev language syntax, contract/intrinsic conventions, coding standards, and
 backend architecture rules.
 
 ---
 
-## 1. Briv Language Syntax
+## 1. Briev Language Syntax
 
 ### 1.0 Protocol variants
 
@@ -103,7 +103,7 @@ divide. "Until this holds" contracts use the `[!/X]` / `[!/!X]` invert form.
 use-after-free compile error; the garbage scheduler excludes `x` from its
 auto-free. `keep x;` — SUPPRESS the scheduler's auto-free of `x`; a `keep` on a
 field the scheduler would not free anyway is a redundant-keep warning.
-`brivc memcheck <file.bv>` reports the scheduler's per-field decisions.
+`brievc memcheck <file.bv>` reports the scheduler's per-field decisions.
 See `docs/plans/2026-08-01-free-check.md`.
 
 ### 1.3.4 Triggers (Phase 4)
@@ -113,11 +113,11 @@ is removed. `@ link sym` binds an external runtime symbol.
 
 ### 1.4 `frgn` is an import
 
-First name after `frgn` is the C/foreign symbol, `as` gives the Briv name.
+First name after `frgn` is the C/foreign symbol, `as` gives the Briev name.
 `from` is required. `from "libruntime"` is forbidden — use `from "c"` or
-`from "link/briv_rt.c"`:
+`from "link/briev_rt.c"`:
 
-```briv
+```briev
 frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;
 ```
 
@@ -173,7 +173,7 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
    The `within N <unit>` clause (`ms`/`seconds`/`minute`/`cyc`) adds a deadline
    — the fire happens even if the condition never stops holding (via the `Now#`
    monotonic clock or a cycle counter). See
-   `learn-briv/02-contracts.md` §7.
+   `learn-briev/02-contracts.md` §7.
 
 ### Intrinsic conventions
 
@@ -225,7 +225,7 @@ produce them) so `Print#(a < b)` prints `true`, matching the backend.
 Iteration requires `txn` with `[pre][post]` convergence, NOT `defn` + `[guard]`
 (`Statement::Guarded` is a one-shot conditional):
 
-```briv
+```briev
 txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list.^Len][i == list.^Len] -> List<U>
 {
@@ -329,13 +329,13 @@ Pass only the data a function needs, not large context structs.
 
 ### Metropolitan FFI / export
 
-- `briv export` generates wrappers from `lib/glue.toml` templates — no Rust
+- `briev export` generates wrappers from `lib/glue.toml` templates — no Rust
   knows specific languages. GLUE = compile-time bridge; Metropipe =
   runtime shared-memory IPC (`src/ffi/metropipe.rs`).
-- `briv export` calls `LlvmBackend::generate()` — the same path as
-  `briv build --llvm`. No `ret i64 0` stubs.
+- `briev export` calls `LlvmBackend::generate()` — the same path as
+  `briev build --llvm`. No `ret i64 0` stubs.
 - Strings in LLVM: `[i64 length][data\0]`; globals use `<{ i64, [N x i8] }>`;
-  `emit_load_length` reads `handle[0]`; `briv_str_to_c` strips tag bits `& ~3`.
+  `emit_load_length` reads `handle[0]`; `briev_str_to_c` strips tag bits `& ~3`.
 - Protocol paths via BFS (`find_cast_path()` from `layout_optimizer.rs`);
   fall back to `Cast(#Bits)`; `emit_protocol_chain()` emits real IR.
 
@@ -358,7 +358,7 @@ lookups are fine. Reference: commit `139c345`,
 - Rust string-match built-ins when stdlib/import should be used
 - Pre-populating interpreter state with enum constants (None, Some, Ok, Err)
 - `x == x` self-references to force liveness; synthetic exit-condition fields
-- Hardcoded `from "libruntime"` (use `from "c"` / `from "link/briv_rt.c"`);
+- Hardcoded `from "libruntime"` (use `from "c"` / `from "link/briev_rt.c"`);
   missing `from` on `frgn`
 - `#export` (use `export defn`); `#out` (use the `out` keyword)
 - Hardcoded runtime declares (`__rt_init` must be `frgn` in `std/rt.bv`)
@@ -483,18 +483,18 @@ chosen approach is optimal for the targeted situation.
 
 ## 9. Compiler Registry
 
-`~/.briv/registry/` (or `dirs::data_dir()/briv/registry/`) is the per-user
-directory for installing Briv modules and foreign sources. Managed by
-`brivc registry {add,list,remove}`:
+`~/.briev/registry/` (or `dirs::data_dir()/briev/registry/`) is the per-user
+directory for installing Briev modules and foreign sources. Managed by
+`brievc registry {add,list,remove}`:
 
-- `brivc registry add ./my-lib.bv` — copies the file (version-locked, no symlink)
-- `brivc registry add ./xxhash/ --name xxhash` — copies a directory tree
-- `brivc registry list` — enumerates contents
-- `brivc registry remove <name>` — deletes the matching entry
+- `brievc registry add ./my-lib.bv` — copies the file (version-locked, no symlink)
+- `brievc registry add ./xxhash/ --name xxhash` — copies a directory tree
+- `brievc registry list` — enumerates contents
+- `brievc registry remove <name>` — deletes the matching entry
 
 Lookup order for `import <name>` / `from <name>`:
-1. Project-local `.briv/registry/<name>` (if it exists)
-2. User-wide `~/.briv/registry/<name>`
+1. Project-local `.briev/registry/<name>` (if it exists)
+2. User-wide `~/.briev/registry/<name>`
 3. `config/module-registry.dbvl` (for imports)
 4. Stdlib path (for `from <name>` and `import <name>` fallback)
 

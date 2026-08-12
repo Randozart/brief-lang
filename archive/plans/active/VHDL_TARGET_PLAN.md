@@ -8,7 +8,7 @@
 
 ## 1. Scope
 
-Add VHDL as a second transpile target for Embedded Briv (.ebv), alongside existing SystemVerilog target.
+Add VHDL as a second transpile target for Embedded Briev (.ebv), alongside existing SystemVerilog target.
 
 ---
 
@@ -26,7 +26,7 @@ Add VHDL as a second transpile target for Embedded Briv (.ebv), alongside existi
 
 ### 3.1 Type Mapping
 
-| Briv Type | VHDL Type | Notes |
+| Briev Type | VHDL Type | Notes |
 |------------|-----------|-------|
 | `Bool` | `std_logic` | Single bit |
 | `UInt[N]` | `std_logic_vector(N-1 downto 0)` | Unsigned |
@@ -38,7 +38,7 @@ Add VHDL as a second transpile target for Embedded Briv (.ebv), alongside existi
 
 ### 3.2 Translation
 
-| Briv Construct | VHDL Output |
+| Briev Construct | VHDL Output |
 |----------------|-------------|
 | `state` | Signal declaration |
 | `node` | Clocked process |
@@ -48,7 +48,7 @@ Add VHDL as a second transpile target for Embedded Briv (.ebv), alongside existi
 
 ### 3.3 PSL Assertions
 
-| Briv Contract | PSL Property |
+| Briev Contract | PSL Property |
 |----------------|--------------|
 | `pre[condition]` | `assert never condition` |
 | `post[condition]` | `assert always condition -> next` |
@@ -100,7 +100,7 @@ Add VHDL as a second transpile target for Embedded Briv (.ebv), alongside existi
 ## 6. Example Translation
 
 ### Input (.ebv)
-```briv
+```briev
 led_on: Bool = false
 ALIAS led: Bool @0xFF5E0000
 

@@ -1,4 +1,4 @@
-# Briv Compiler Architecture
+# Briev Compiler Architecture
 
 **Document Version:** 6.2 (Current)  
 **Date:** 2026-04-05  
@@ -17,7 +17,7 @@
 6. [Manifest System](#6-manifest-system)
 7. [Watch Mode](#7-watch-mode)
 8. [Cache Architecture](#8-cache-architecture)
-9. [Rendered Briv (Future)](#9-rendered-briv-future)
+9. [Rendered Briev (Future)](#9-rendered-briev-future)
 10. [Decision Log](#10-decision-log)
 
 ---
@@ -61,7 +61,7 @@ Closed World + No Dynamic Dispatch
 ## 2. Language Structure
 
 ### 2.1 File Extension
-**Decision:** `.bv` (Briv)
+**Decision:** `.bv` (Briev)
 
 ### 2.2 Top-Level Elements
 
@@ -168,7 +168,7 @@ This independence enables:
 | Context | Requirement |
 |---------|-------------|
 | Interactive editing | <100ms feedback |
-| Rendered Briv web | Hot reload |
+| Rendered Briev web | Hot reload |
 | Large codebases | Don't re-verify unchanged code |
 
 ### 4.2 Durability Levels
@@ -274,7 +274,7 @@ source ::= identifier
 
 ## 6. Manifest System
 
-### 6.1 File: `briv.toml`
+### 6.1 File: `briev.toml`
 
 **Decision:** TOML format. Standard, well-understood, tooling exists.
 
@@ -289,7 +289,7 @@ entry = "main.bv"
 [dependencies]
 auth = { path = "lib/auth.bv" }
 utils = { path = "lib/utils.bv" }
-std-io = { registry = "briv-std", version = "1.0.0" }
+std-io = { registry = "briev-std", version = "1.0.0" }
 ```
 
 ### 6.3 Dependency Declaration Options
@@ -297,7 +297,7 @@ std-io = { registry = "briv-std", version = "1.0.0" }
 | Property | Description | Example |
 |----------|-------------|---------|
 | `path` | Local file relative to project root | `path = "lib/auth.bv"` |
-| `registry` | Package from registry | `registry = "briv-std"` |
+| `registry` | Package from registry | `registry = "briev-std"` |
 | `version` | Semver constraint | `version = "1.0.0"` |
 | `git` | Git URL (future) | `git = "https://..."` |
 | `optional` | May not be installed | `optional = true` |
@@ -305,11 +305,11 @@ std-io = { registry = "briv-std", version = "1.0.0" }
 ### 6.4 CLI Commands
 
 ```bash
-briv import <name>              # Add from registry
-briv import <name> --path <loc> # Add local path
-briv install                    # Install all from manifest
-briv list                      # List dependencies
-briv remove <name>             # Remove from manifest
+briev import <name>              # Add from registry
+briev import <name> --path <loc> # Add local path
+briev install                    # Install all from manifest
+briev list                      # List dependencies
+briev remove <name>             # Remove from manifest
 ```
 
 ### 6.5 Error Resolution
@@ -324,14 +324,14 @@ error[E0001]: unresolved import 'auth'
 3  | import { login } from auth;
    |                       ^^^^
 
-help: 'auth' is not in your briv.toml
+help: 'auth' is not in your briev.toml
 
   Available packages in scope:
     - ./lib/auth.bv       (found, not yet declared)
     
   To add 'auth', either:
-    1. Run: briv import auth --path lib/auth.bv
-    2. Or add manually to briv.toml:
+    1. Run: briev import auth --path lib/auth.bv
+    2. Or add manually to briev.toml:
        
        [dependencies]
        auth = { path = "lib/auth.bv" }
@@ -425,7 +425,7 @@ fn on_file_saved(path: &Path) {
 **Decision:** Project-local cache, version-aware.
 
 ```
-.briv-cache/
+.briev-cache/
 ├── manifest.json          # Cache config, version
 ├── modules/
 │   ├── auth.ast          # Parsed (hash of source)
@@ -473,12 +473,12 @@ Benefits:
 
 ---
 
-## 9. Rendered Briv (Future)
+## 9. Rendered Briev (Future)
 
 ### 9.1 Derivation Model
 
 ```
-Briv Compiler Core
+Briev Compiler Core
         │
         ├── .bv interpretation (desktop)
         │
@@ -487,13 +487,13 @@ Briv Compiler Core
                 ▼
         ┌───────────────────────┐
         │   .rbv Parser         │  Extract <script> + <view>
-        │   (extends Briv)      │
+        │   (extends Briev)      │
         └───────────────────────┘
                 │
                 ▼
         ┌───────────────────────┐
         │   Semantic Analysis    │  Symbol table, directives
-        │   (extends Briv)      │
+        │   (extends Briev)      │
         └───────────────────────┘
                 │
                 ▼
@@ -509,7 +509,7 @@ Briv Compiler Core
 
 ### 9.2 Shared Components
 
-| Component | Briv | Rendered Briv |
+| Component | Briev | Rendered Briev |
 |-----------|-------|----------------|
 | Lexer | ✓ | ✓ (extends) |
 | Parser | ✓ | ✓ (extends) |
@@ -567,7 +567,7 @@ Rationale:
 | 2026-04-04 | Manifest-driven package management | Explicit deps, registry-ready | Active |
 | 2026-04-04 | TOML for manifest | Standard, tooling exists | Active |
 | 2026-04-04 | On-save + debounced watch | Balance feedback speed vs. stability | Active |
-| 2026-04-04 | Rendered Briv derived from Briv | Shared core, separate compilation | Planned |
+| 2026-04-04 | Rendered Briev derived from Briev | Shared core, separate compilation | Planned |
 | 2026-04-04 | Rust → wasm-pack for WASM | Portability, mature ecosystem | Planned |
 
 ---
@@ -577,7 +577,7 @@ Rationale:
 ### Registry System
 Not implemented in v1.0. Design allows for:
 ```toml
-std-io = { registry = "briv-std", version = "1.2.0" }
+std-io = { registry = "briev-std", version = "1.2.0" }
 ```
 
 ### Workspace Support

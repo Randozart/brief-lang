@@ -1,8 +1,8 @@
 // Sparse Dispatch — C reference.
-// Equivalent to the Briv-native cyclic dispatch benchmark.
+// Equivalent to the Briev-native cyclic dispatch benchmark.
 // Measures: direct switch (count % 8) overhead, 50M iterations.
 //
-// Briv version: sparse_dispatch.bv — 8 reactive txns gated by
+// Briev version: sparse_dispatch.bv — 8 reactive txns gated by
 //   io_pending && (count % 8) == N, enum switch dispatch path.
 
 #include <stdlib.h>

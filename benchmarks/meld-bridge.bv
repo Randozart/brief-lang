@@ -15,7 +15,7 @@
 // Tag: --runtime (disabled in the harness — no compiled .bv gate)
 
 
-// briv_rt.c linked automatically
+// briev_rt.c linked automatically
 
 frgn consume_buffer(data: Int, size: Int) -> Int ;
 

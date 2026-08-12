@@ -74,13 +74,13 @@ expression is `Expr::Decimal(0)` or `Expr::UnaryOp(Neg, Decimal(0))`.
 1. Fix 1a–1e: Param name remapping (5 edits) → unblocks ALL benchmarks
 2. Fix 2: Lazy candidate generation → makes depth 4 feasible
 3. Fix 3: Division-by-zero pruning → cheap additional speedup
-4. Test popcount end-to-end with `briv derive --enumerative-depth 4`
+4. Test popcount end-to-end with `briev derive --enumerative-depth 4`
 5. Run `bash build_and_bench.sh --derive --correctness`
 
 ## Verification
 
 - `cargo test --lib` — all 1148+ existing tests pass
 - `cargo test --test derive_pipeline_test` — all 4 integration tests pass
-- Manual test: `brivc derive --enumerative-depth 4 popcount_derive.bv`
+- Manual test: `brievc derive --enumerative-depth 4 popcount_derive.bv`
   produces a valid `.derive.bv` with a correct body
-- `brivc build popcount_derive.derive.bv` compiles without "undefined variable" errors
+- `brievc build popcount_derive.derive.bv` compiles without "undefined variable" errors

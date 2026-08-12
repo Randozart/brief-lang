@@ -3,7 +3,7 @@
 // step-for-step to measure raw throughput without collection overhead.
 //
 // Build:
-//   ./target/release/briv-compiler build --llvm benchmarks/queue_drain_sym.bv \
+//   ./target/release/briev-compiler build --llvm benchmarks/queue_drain_sym.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: queue_drain_sym_c.c

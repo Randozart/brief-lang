@@ -28,7 +28,7 @@
 /// - Evaluates postconditions against symbolic state
 /// - Enumerates execution paths through guard blocks
 ///
-/// Coverage: ~90% of real Briv contracts
+/// Coverage: ~90% of real Briev contracts
 use crate::ast::{BinaryOpKind, Expr, Statement, UnaryOpKind};
 use std::collections::HashMap;
 

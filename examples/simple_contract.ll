@@ -41,12 +41,12 @@ declare i64 @__splitn__(ptr, ptr, i64)
 declare i64 @__float_to_str(float)
 declare i64 @__to_str(i64)
 declare i64 @__stack_top__(i64)
-declare i64 @briv_syscall(i64, i64, i64, i64, i64, i64, i64)
-declare i64 @briv_sysconf(i64)
+declare i64 @briev_syscall(i64, i64, i64, i64, i64, i64, i64)
+declare i64 @briev_sysconf(i64)
 declare ptr @dlopen(ptr, i32) nounwind
 declare ptr @dlsym(ptr, ptr) nounwind
 declare i32 @dlclose(ptr) nounwind
-declare i64 @briv_backtrace()
+declare i64 @briev_backtrace()
 declare i64 @__queue_front__(i64)
 declare i64 @__hashmap_get__(i64, i64)
 declare i64 @__hashset_elements__(i64)
@@ -92,85 +92,85 @@ declare i64 @__print_char(i64) #6
 declare i64 @__getenv_int(ptr) #6
 declare i64 @__print_int(i64) #6
 declare void @__print_str(ptr) #6
-declare ptr @__getenv_briv(ptr) #6
+declare ptr @__getenv_briev(ptr) #6
 declare i8* @__chr_to_str(i32) #1
 declare i64 @__int_to_str__(i64) #1
 declare i64 @__str_bytes__(i64) #1
 declare i64 @__str_to_int(i8*) #1
-declare i64 @briv_open(i64, i64, i64) #1
-declare i64 @briv_close(i64) #1
-declare i64 @briv_read(i64, i64, i64) #1
-declare i64 @briv_write(i64, i64, i64) #1
-declare i64 @briv_lseek(i64, i64, i64) #1
-declare i64 @briv_pread(i64, i64, i64, i64) #1
-declare i64 @briv_pwrite(i64, i64, i64, i64) #1
-declare i64 @briv_stat(i64, i64) #1
-declare i64 @briv_fstat(i64) #1
-declare i64 @briv_truncate(i64, i64) #1
-declare i64 @briv_ftruncate(i64, i64) #1
-declare i64 @briv_fsync(i64) #1
-declare i64 @briv_dup(i64) #1
-declare i64 @briv_dup2(i64, i64) #1
-declare i64 @briv_fcntl(i64, i64, i64) #1
-declare i64 @briv_socket(i64, i64, i64) #1
-declare i64 @briv_bind(i64, i64, i64) #1
-declare i64 @briv_listen(i64, i64) #1
-declare i64 @briv_accept(i64, i64, i64) #1
-declare i64 @briv_connect(i64, i64, i64) #1
-declare i64 @briv_send(i64, i64, i64, i64) #1
-declare i64 @briv_recv(i64, i64, i64, i64) #1
-declare i64 @briv_sendto(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_recvfrom(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_setsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @briv_getsockopt(i64, i64, i64, i64, i64) #1
-declare i64 @briv_shutdown(i64, i64) #1
-declare i64 @briv_mkdir(i64, i64) #1
-declare i64 @briv_rmdir(i64) #1
-declare i64 @briv_unlink(i64) #1
-declare i64 @briv_rename(i64, i64) #1
-declare i64 @briv_symlink(i64, i64) #1
-declare i64 @briv_link(i64, i64) #1
-declare i64 @briv_chdir(i64) #1
-declare i64 @briv_chmod(i64, i64) #1
-declare i64 @briv_chown(i64, i64, i64) #1
-declare i64 @briv_umask(i64) #1
-declare i64 @briv_access(i64, i64) #1
-declare i64 @briv_mmap(i64, i64, i64, i64, i64, i64) #1
-declare i64 @briv_munmap(i64, i64) #1
-declare i64 @briv_mprotect(i64, i64, i64) #1
-declare i64 @briv_brk(i64) #1
-declare i64 @briv_mlock(i64, i64) #1
-declare i64 @briv_pipe(i64) #1
-declare i64 @briv_shm_open(i64, i64, i64) #1
-declare i64 @briv_shm_unlink(i64) #1
-declare i64 @briv_sem_open(i64, i64, i64, i64) #1
-declare i64 @briv_sem_wait(i64) #1
-declare i64 @briv_sem_post(i64) #1
-declare i64 @briv_getpid() #1
-declare i64 @briv_getppid() #1
-declare i64 @briv_clock_gettime(i64, i64) #1
-declare i64 @briv_nanosleep(i64, i64) #1
-declare i64 @briv_getenv(i64, i64, i64) #1
-declare i64 @briv_setenv(i64, i64, i64) #1
-declare i64 @briv_unsetenv(i64) #1
-declare i64 @briv_futex(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_open(i64, i64, i64) #1
+declare i64 @briev_close(i64) #1
+declare i64 @briev_read(i64, i64, i64) #1
+declare i64 @briev_write(i64, i64, i64) #1
+declare i64 @briev_lseek(i64, i64, i64) #1
+declare i64 @briev_pread(i64, i64, i64, i64) #1
+declare i64 @briev_pwrite(i64, i64, i64, i64) #1
+declare i64 @briev_stat(i64, i64) #1
+declare i64 @briev_fstat(i64) #1
+declare i64 @briev_truncate(i64, i64) #1
+declare i64 @briev_ftruncate(i64, i64) #1
+declare i64 @briev_fsync(i64) #1
+declare i64 @briev_dup(i64) #1
+declare i64 @briev_dup2(i64, i64) #1
+declare i64 @briev_fcntl(i64, i64, i64) #1
+declare i64 @briev_socket(i64, i64, i64) #1
+declare i64 @briev_bind(i64, i64, i64) #1
+declare i64 @briev_listen(i64, i64) #1
+declare i64 @briev_accept(i64, i64, i64) #1
+declare i64 @briev_connect(i64, i64, i64) #1
+declare i64 @briev_send(i64, i64, i64, i64) #1
+declare i64 @briev_recv(i64, i64, i64, i64) #1
+declare i64 @briev_sendto(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_recvfrom(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_setsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briev_getsockopt(i64, i64, i64, i64, i64) #1
+declare i64 @briev_shutdown(i64, i64) #1
+declare i64 @briev_mkdir(i64, i64) #1
+declare i64 @briev_rmdir(i64) #1
+declare i64 @briev_unlink(i64) #1
+declare i64 @briev_rename(i64, i64) #1
+declare i64 @briev_symlink(i64, i64) #1
+declare i64 @briev_link(i64, i64) #1
+declare i64 @briev_chdir(i64) #1
+declare i64 @briev_chmod(i64, i64) #1
+declare i64 @briev_chown(i64, i64, i64) #1
+declare i64 @briev_umask(i64) #1
+declare i64 @briev_access(i64, i64) #1
+declare i64 @briev_mmap(i64, i64, i64, i64, i64, i64) #1
+declare i64 @briev_munmap(i64, i64) #1
+declare i64 @briev_mprotect(i64, i64, i64) #1
+declare i64 @briev_brk(i64) #1
+declare i64 @briev_mlock(i64, i64) #1
+declare i64 @briev_pipe(i64) #1
+declare i64 @briev_shm_open(i64, i64, i64) #1
+declare i64 @briev_shm_unlink(i64) #1
+declare i64 @briev_sem_open(i64, i64, i64, i64) #1
+declare i64 @briev_sem_wait(i64) #1
+declare i64 @briev_sem_post(i64) #1
+declare i64 @briev_getpid() #1
+declare i64 @briev_getppid() #1
+declare i64 @briev_clock_gettime(i64, i64) #1
+declare i64 @briev_nanosleep(i64, i64) #1
+declare i64 @briev_getenv(i64, i64, i64) #1
+declare i64 @briev_setenv(i64, i64, i64) #1
+declare i64 @briev_unsetenv(i64) #1
+declare i64 @briev_futex(i64, i64, i64, i64, i64, i64) #1
 declare i64 @__ioctl__(i64, i64, i64) #1
 declare i64 @__isatty__(i64) #1
 declare i64 @__print(i64) #1
-declare i64 @briv_getuid() #1
-declare i64 @briv_geteuid() #1
-declare i64 @briv_getgid() #1
-declare i64 @briv_getegid() #1
-declare i64 @briv_sched_yield() #1
-declare i64 @briv_getpriority(i64, i64) #1
-declare i64 @briv_setpriority(i64, i64, i64) #1
-declare i64 @briv_getrlimit(i64) #1
-declare i64 @briv_setrlimit(i64, i64) #1
-declare i64 @briv_pagesize() #1
-declare i64 @briv_cpu_count() #1
-declare i64 @briv_ttyname(i64) #1
-declare i64 @briv_ring_push(i64, i64) #1
-declare i64 @briv_ring_pop(i64) #1
+declare i64 @briev_getuid() #1
+declare i64 @briev_geteuid() #1
+declare i64 @briev_getgid() #1
+declare i64 @briev_getegid() #1
+declare i64 @briev_sched_yield() #1
+declare i64 @briev_getpriority(i64, i64) #1
+declare i64 @briev_setpriority(i64, i64, i64) #1
+declare i64 @briev_getrlimit(i64) #1
+declare i64 @briev_setrlimit(i64, i64) #1
+declare i64 @briev_pagesize() #1
+declare i64 @briev_cpu_count() #1
+declare i64 @briev_ttyname(i64) #1
+declare i64 @briev_ring_push(i64, i64) #1
+declare i64 @briev_ring_pop(i64) #1
 declare i64 @__tty_read_key__(i64) #1
 declare i64 @__tty_size__() #1
 declare i64 @cpu_count() #1
@@ -193,7 +193,7 @@ define i64 @file_close(ptr noalias nocapture align 8 %state, i64 %arg0) local_un
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 3, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 3, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -203,7 +203,7 @@ define i64 @file_read(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 0, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 0, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -213,7 +213,7 @@ define i64 @file_write(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 1, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 1, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -222,7 +222,7 @@ define i64 @file_lseek(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 8, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 8, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -232,7 +232,7 @@ define i64 @file_ftruncate(ptr noalias nocapture align 8 %state, i64 %arg0, i64 
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 77, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 77, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -243,7 +243,7 @@ define i64 @file_fsync(ptr noalias nocapture align 8 %state, i64 %arg0) local_un
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 74, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 74, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -254,7 +254,7 @@ define i64 @file_dup(ptr noalias nocapture align 8 %state, i64 %arg0) local_unna
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 32, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 32, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -264,7 +264,7 @@ define i64 @file_dup2(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 33, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 33, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -273,7 +273,7 @@ define i64 @file_fcntl(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 72, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 72, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -289,7 +289,7 @@ define i64 @socket(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1, i
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 41, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 41, i64 %arg0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -299,7 +299,7 @@ define i64 @bind(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, i64
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 49, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 49, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -309,7 +309,7 @@ define i64 @listen(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1) l
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 50, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 50, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -320,7 +320,7 @@ define i64 @accept(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, p
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 43, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 43, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -330,7 +330,7 @@ define i64 @connect(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, 
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 42, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 42, i64 %arg0, i64 %ac1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -339,7 +339,7 @@ define i64 @send(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, i64
   %ac1 = ptrtoint ptr %arg1 to i64
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 44, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 44, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -348,7 +348,7 @@ define i64 @recv(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, i64
   %ac1 = ptrtoint ptr %arg1 to i64
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 45, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 45, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -356,7 +356,7 @@ define i64 @sendto(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1, i
   entry:
   %ac1 = ptrtoint ptr %arg1 to i64
   %ac4 = ptrtoint ptr %arg4 to i64
-  %t0 = call i64 @briv_syscall(i64 44, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %ac4, i64 %arg5)
+  %t0 = call i64 @briev_syscall(i64 44, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %ac4, i64 %arg5)
   ret i64 %t0
 }
 
@@ -365,7 +365,7 @@ define i64 @recvfrom(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1,
   %ac1 = ptrtoint ptr %arg1 to i64
   %ac4 = ptrtoint ptr %arg4 to i64
   %ac5 = ptrtoint ptr %arg5 to i64
-  %t0 = call i64 @briv_syscall(i64 45, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %ac4, i64 %ac5)
+  %t0 = call i64 @briev_syscall(i64 45, i64 %arg0, i64 %ac1, i64 %arg2, i64 %arg3, i64 %ac4, i64 %ac5)
   ret i64 %t0
 }
 
@@ -373,7 +373,7 @@ define i64 @setsockopt(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg
   entry:
   %ac3 = ptrtoint ptr %arg3 to i64
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 54, i64 %arg0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %arg4, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 54, i64 %arg0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %arg4, i64 %t6)
   ret i64 %t0
 }
 
@@ -382,7 +382,7 @@ define i64 @getsockopt(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg
   %ac3 = ptrtoint ptr %arg3 to i64
   %ac4 = ptrtoint ptr %arg4 to i64
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 55, i64 %arg0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %ac4, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 55, i64 %arg0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %ac4, i64 %t6)
   ret i64 %t0
 }
 
@@ -392,7 +392,7 @@ define i64 @shutdown(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %arg1)
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 48, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 48, i64 %arg0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -403,7 +403,7 @@ define i64 @sigaction(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %arg1
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 13, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 13, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -414,7 +414,7 @@ define i64 @sigprocmask(ptr noalias nocapture align 8 %state, i64 %arg0, ptr %ar
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 14, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 14, i64 %arg0, i64 %ac1, i64 %ac2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -426,7 +426,7 @@ define i64 @pipe(ptr noalias nocapture align 8 %state, ptr %arg0) local_unnamed_
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 22, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 22, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -438,7 +438,7 @@ define i64 @sem_wait(ptr noalias nocapture align 8 %state, ptr %arg0) local_unna
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 65, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 65, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -450,7 +450,7 @@ define i64 @sem_post(ptr noalias nocapture align 8 %state, ptr %arg0) local_unna
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 65, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 65, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -463,14 +463,14 @@ define i64 @thread_create(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %
   %t6 = add i64 0, 1
   %t5 = sub i64 0, %t6
   %t7 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 9, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t7)
+  %t0 = call i64 @briev_syscall(i64 9, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t7)
   %t8 = add i64 0, 0
   %t11 = add i64 0, 65536
   %t9 = add nsw i64 %t0, %t11
   %t12 = add i64 0, 4001536
   %t18 = add i64 0, 0
   %t19 = add i64 0, 0
-  %t13 = call i64 @briv_syscall(i64 56, i64 %t12, i64 %t9, i64 %arg0, i64 %arg1, i64 %t18, i64 %t19)
+  %t13 = call i64 @briev_syscall(i64 56, i64 %t12, i64 %t9, i64 %arg0, i64 %arg1, i64 %t18, i64 %t19)
   ret i64 %t13
 }
 
@@ -482,7 +482,7 @@ define i64 @thread_join(ptr noalias nocapture align 8 %state, i64 %arg0) local_u
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 39, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 39, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -493,7 +493,7 @@ define i64 @thread_exit(ptr noalias nocapture align 8 %state, i64 %arg0) local_u
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 60, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 60, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -504,7 +504,7 @@ define i64 @mutex_lock(ptr noalias nocapture align 8 %state, i64 %arg0) local_un
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -515,7 +515,7 @@ define i64 @mutex_unlock(ptr noalias nocapture align 8 %state, i64 %arg0) local_
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -525,7 +525,7 @@ define i64 @condvar_wait(ptr noalias nocapture align 8 %state, i64 %arg0, i64 %a
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 202, i64 %arg0, i64 %t2, i64 %arg1, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %arg0, i64 %t2, i64 %arg1, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -536,7 +536,7 @@ define i64 @condvar_signal(ptr noalias nocapture align 8 %state, i64 %arg0) loca
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -547,7 +547,7 @@ define i64 @condvar_broadcast(ptr noalias nocapture align 8 %state, i64 %arg0) l
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %arg0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -559,7 +559,7 @@ define i64 @getuid(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 {
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 102, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 102, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -571,7 +571,7 @@ define i64 @geteuid(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 107, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 107, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -583,7 +583,7 @@ define i64 @getgid(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 {
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 104, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 104, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -595,14 +595,14 @@ define i64 @getegid(ptr noalias nocapture align 8 %state) local_unnamed_addr #8 
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 108, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 108, i64 %t1, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
 define i64 @mmap(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, i64 %arg3, i64 %arg4, i64 %arg5) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t0 = call i64 @briv_syscall(i64 9, i64 %ac0, i64 %arg1, i64 %arg2, i64 %arg3, i64 %arg4, i64 %arg5)
+  %t0 = call i64 @briev_syscall(i64 9, i64 %ac0, i64 %arg1, i64 %arg2, i64 %arg3, i64 %arg4, i64 %arg5)
   ret i64 %t0
 }
 
@@ -613,7 +613,7 @@ define i64 @munmap(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) l
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 11, i64 %ac0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 11, i64 %ac0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -623,7 +623,7 @@ define i64 @mprotect(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1,
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 10, i64 %ac0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 10, i64 %ac0, i64 %arg1, i64 %arg2, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -635,7 +635,7 @@ define i64 @brk(ptr noalias nocapture align 8 %state, ptr %arg0) local_unnamed_a
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 12, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 12, i64 %ac0, i64 %t2, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -646,7 +646,7 @@ define i64 @mlock(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) lo
   %t4 = add i64 0, 0
   %t5 = add i64 0, 0
   %t6 = add i64 0, 0
-  %t0 = call i64 @briv_syscall(i64 149, i64 %ac0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
+  %t0 = call i64 @briev_syscall(i64 149, i64 %ac0, i64 %arg1, i64 %t3, i64 %t4, i64 %t5, i64 %t6)
   ret i64 %t0
 }
 
@@ -706,14 +706,14 @@ define i64 @futex(ptr noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i6
   %ac0 = ptrtoint ptr %arg0 to i64
   %ac3 = ptrtoint ptr %arg3 to i64
   %ac4 = ptrtoint ptr %arg4 to i64
-  %t0 = call i64 @briv_syscall(i64 202, i64 %ac0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %ac4, i64 %arg5)
+  %t0 = call i64 @briev_syscall(i64 202, i64 %ac0, i64 %arg1, i64 %arg2, i64 %ac3, i64 %ac4, i64 %arg5)
   ret i64 %t0
 }
 
 define ptr @get_env(ptr noalias nocapture align 8 %state, ptr %arg0) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-   %t0 = call ptr @__getenv_briv(i64 %ac0)
+   %t0 = call ptr @__getenv_briev(i64 %ac0)
   ret ptr %t0
 }
 
@@ -845,7 +845,7 @@ attributes #10 = {
 
 !50 = !{ i64 -9223372036854775808, i64 10 }
 
-!0 = !{!"Briv"}
+!0 = !{!"Briev"}
 !1 = !{!"Int", !0}
 !2 = !{!"Char", !0}
 !3 = !{!"Data", !0}

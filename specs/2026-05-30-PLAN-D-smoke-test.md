@@ -20,7 +20,7 @@ Extend the existing integration test infrastructure to cover the wake-trigger co
 
 **File**: `tests/fixtures/wake_triggers.bv`
 
-```briv
+```briev
 #!dispatch(parallel)
 #io sigint;
 #io sigterm;
@@ -34,7 +34,7 @@ This creates two wake triggers (`__sigint_flag`, `__sigterm_flag`) and two react
 
 Read the existing file:
 ```
-/home/randozart/Desktop/Projects/briv-compiler/tests/llvm_backend_test.rs
+/home/randozart/Desktop/Projects/briev-compiler/tests/llvm_backend_test.rs
 ```
 
 Add a new test function:

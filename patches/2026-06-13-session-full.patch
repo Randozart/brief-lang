@@ -26,7 +26,7 @@ index 363573a..9e3c615 100644
 -                        writeln!(out, "{}{} = add i64 0, 0 ; read_file stub", indent, v).ok();
 +                        if args.len() >= 1 {
 +                            let path_val = self.emit_expr(out, &args[0], indent);
-+                            writeln!(out, "{}{} = call i64 @briv_read_file(i64 {})", indent, v, path_val.name).ok();
++                            writeln!(out, "{}{} = call i64 @briev_read_file(i64 {})", indent, v, path_val.name).ok();
 +                        } else {
 +                            writeln!(out, "{}{} = add i64 0, 0 ; read_file: missing arg", indent, v).ok();
 +                        }
@@ -66,12 +66,12 @@ index dfb4071..175fe9e 100644
 --- a/src/backend/llvm/emit_toplevel.rs
 +++ b/src/backend/llvm/emit_toplevel.rs
 @@ -29,6 +29,9 @@ impl LlvmBackend {
-         writeln!(out, "declare void @briv_barrier_release()").ok();
-         writeln!(out, "declare void @briv_barrier_wait()").ok();
-         writeln!(out, "declare void @briv_thread_pool_init(i32, i8**)").ok();
+         writeln!(out, "declare void @briev_barrier_release()").ok();
+         writeln!(out, "declare void @briev_barrier_wait()").ok();
+         writeln!(out, "declare void @briev_thread_pool_init(i32, i8**)").ok();
 +        writeln!(out, "declare i64 @time(i64*) nounwind").ok();
 +        writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
-+        writeln!(out, "declare i64 @briv_read_file(i64)").ok();
++        writeln!(out, "declare i64 @briev_read_file(i64)").ok();
      }
  
      pub(super) fn llvm_type(&self, ty: &Type) -> &str {

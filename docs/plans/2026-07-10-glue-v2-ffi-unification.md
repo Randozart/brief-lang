@@ -2,30 +2,30 @@
 
 **Date:** 2026-07-10
 **Status:** Plan — pre-implementation
-**Driver:** End-to-end bidirectional FFI (Briv → foreign, foreign → Briv) with zero-copy data, no C compiler dependency, and cross-language LLVM LTO for LLVM-based targets.
+**Driver:** End-to-end bidirectional FFI (Briev → foreign, foreign → Briev) with zero-copy data, no C compiler dependency, and cross-language LLVM LTO for LLVM-based targets.
 
 ---
 
 ## 1. Philosophy
 
-The GLUE protocol (General Language Unification Engine) is Briv's strategy for
+The GLUE protocol (General Language Unification Engine) is Briev's strategy for
 piecemeal language adoption ("strangler fig" pattern). A developer replaces one
-function at a time with Briv, and the boundary is invisible to the host language.
+function at a time with Briev, and the boundary is invisible to the host language.
 
 Two integration paths exist, selected automatically by the compiler based on
 target capability:
 
 **Path A — LLVM Inlining (for Rust, C, C++, Swift, Zig):**
-Briv emits LLVM IR with proper function definitions. GLUE merges Briv's IR
+Briev emits LLVM IR with proper function definitions. GLUE merges Briev's IR
 with the host language's IR before LLVM optimization. The result is a single
 compilation unit — LLVM cross-language inlines, DCEs, constant-propagates,
 and vectorizes across the former language boundary. The host linker sees only
-native symbols. Briv's `#export` functions ARE native functions.
+native symbols. Briev's `#export` functions ARE native functions.
 
 **Path B — Meld Projection (for Python, Node, JVM):**
-Briv compiles to a shared library with C ABI exports. Data does NOT cross a
-marshaling layer — meld declarations project Briv types onto the host
-runtime's heap memory (PyObject*, v8::Value, jobject). Briv reads/writes
+Briev compiles to a shared library with C ABI exports. Data does NOT cross a
+marshaling layer — meld declarations project Briev types onto the host
+runtime's heap memory (PyObject*, v8::Value, jobject). Briev reads/writes
 foreign memory through typed accessors derived from meld routes. The C ABI
 is the call transport only; zero-copy comes from meld.
 
@@ -47,7 +47,7 @@ is the call transport only; zero-copy comes from meld.
 | `#export` pragma extraction | `src/glue/export.rs:extract_exports()` | Identifies boundary-crossing functions |
 | `frgn` declaration extraction | `src/glue/export.rs:extract_frgns()` | Identifies imported foreign functions |
 | `meld` declaration extraction | `src/glue/export.rs:extract_melds()` | Identifies type-layout compatibility proofs |
-| DBVL parser | `src/glue/dbvl_reader.rs` | Briv's native data-interchange format |
+| DBVL parser | `src/glue/dbvl_reader.rs` | Briev's native data-interchange format |
 | DBVS schema validator | `src/glue/dbvs_validator.rs` | Schema validation for DBVL files |
 | `emit_file#()` intrinsic | `src/ast.rs` | General-purpose compile-time file output |
 
@@ -71,7 +71,7 @@ is the call transport only; zero-copy comes from meld.
 | Node adapter macro | `glue/adapters/node.bv` | Same |
 | Adapter macro invocation | `src/glue/export.rs` (~50 lines) | No more MacroContext/expand_macros() for adapter generation |
 | Adapter directory | `glue/adapters/` | All three .bv files removed |
-| `briv link` subcommand | `src/main.rs`, `src/glue/link.rs` | nm-based symbol analysis was a convenience, not core to the vision |
+| `briev link` subcommand | `src/main.rs`, `src/glue/link.rs` | nm-based symbol analysis was a convenience, not core to the vision |
 
 ---
 
@@ -84,7 +84,7 @@ The adapter registry now records target-language metadata, not adapter macros.
 ```
 entry GlueTarget {
     language: String;       // Target language name (rust, python, etc.)
-    types_module: String;   // Path to .bv declaring foreign type names for Briv's universe
+    types_module: String;   // Path to .bv declaring foreign type names for Briev's universe
     file_extension: String; // Native source extension without dot (rs, py)
     llvm_triple: String;    // LLVM target triple ("any" for non-LLVM targets)
     c_type_map: Optional<Map<String, String; pair_separator=:, value_delimiter=space, brace=required>>;
@@ -100,14 +100,14 @@ rust, glue/rust/types.bv, rs, x86_64-unknown-linux-gnu,
 
 ### Fields
 
-- **language**: Lookup key for `briv export bridge.bv <language>`
-- **types_module**: Briv source file declaring foreign type names. A bridge
-  file imports this module and uses `meld` to connect Briv types to foreign types.
+- **language**: Lookup key for `briev export bridge.bv <language>`
+- **types_module**: Briev source file declaring foreign type names. A bridge
+  file imports this module and uses `meld` to connect Briev types to foreign types.
   Example content: `type i64; type f64; type cstring;`
 - **file_extension**: Used for generated stub files if any
 - **llvm_triple**: Target triple for LLVM compilation. `"any"` means this language
   does not use LLVM; interop goes through C ABI + meld projections
-- **c_type_map**: Maps each Briv type name to its C ABI representation. This is
+- **c_type_map**: Maps each Briev type name to its C ABI representation. This is
   the canonical mapping for the FFI boundary. LLVM targets derive LLVM types from
   C types (int64_t → i64). Non-LLVM targets use C types directly for the FFI boundary.
   Complex types (String, Data, List) use C struct representations defined in the
@@ -115,7 +115,7 @@ rust, glue/rust/types.bv, rs, x86_64-unknown-linux-gnu,
 
 ### Why C types in the registry and not in meld declarations
 
-Meld proves layout compatibility between two types in Briv's universe. The C ABI
+Meld proves layout compatibility between two types in Briev's universe. The C ABI
 type mapping is a separate concern: when crossing the FFI boundary, what C type
 does the function signature use? This is recorded in glue.dbvl because:
 1. It is the same for most targets (int64_t for Int, double for Float)
@@ -128,7 +128,7 @@ does the function signature use? This is recorded in glue.dbvl because:
 ## 4. Foreign Type Modules (`glue/<lang>/types.bv`)
 
 Each target language has a `.bv` file declaring its primitive types as names in
-Briv's type universe. These are minimal — just enough for `meld` to reference
+Briev's type universe. These are minimal — just enough for `meld` to reference
 the foreign side of a compatibility proof.
 
 ```
@@ -166,7 +166,7 @@ meld Int <:> i64 {
 
 ## 5. Export Output: `bridge-exports.dbvl`
 
-`briv export bridge.bv rust --out ./out` produces:
+`briev export bridge.bv rust --out ./out` produces:
 
 ```
 out/bridge.ll              (LLVM IR module — compiled bridge)
@@ -176,7 +176,7 @@ out/bridge-exports.dbvl    (metadata — exports + melds + ctype mappings)
 ### Output format
 
 ```
-// bridge-exports.dbvl — auto-generated by briv export
+// bridge-exports.dbvl — auto-generated by briev export
 // No schema validation needed — the consumer (build.rs, Python script)
 // splits by "\n" then by "," and dispatches on the discriminator field.
 
@@ -184,11 +184,11 @@ out/bridge-exports.dbvl    (metadata — exports + melds + ctype mappings)
 export, add, Int|Int, Int
 export, greet, String, String
 
-// Melds: meld, briv_type, foreign_type, routes_semicolon_separated
+// Melds: meld, briev_type, foreign_type, routes_semicolon_separated
 meld, Int, i64, Ptr->Ptr;Size->8;Bytes->8
 meld, Float, f64, Ptr->Ptr;Size->8;Bytes->8
 
-// C type mappings: ctype, briv_type, c_type
+// C type mappings: ctype, briev_type, c_type
 // (injected from glue.dbvl's c_type_map for the target language)
 ctype, Int, int64_t
 ctype, Float, double
@@ -278,7 +278,7 @@ All steps are additive or replacement. No existing optimization path is modified
 - `glue/rust/types.bv` — NEW
 - `glue/python/types.bv` — NEW
 
-**Content:** Minimal type declarations (`type i64; type f64; type cstring; type bool; type char;`) for each target. These register foreign type names in Briv's type universe so `meld` can reference them.
+**Content:** Minimal type declarations (`type i64; type f64; type cstring; type bool; type char;`) for each target. These register foreign type names in Briev's type universe so `meld` can reference them.
 
 ### Step 2: Update registry files
 
@@ -324,7 +324,7 @@ Remove the following from `run_export()`:
 - `collect_macro_defs()` call
 - Synthetic `Expr::MacroCall` construction
 - `expand_macros()` call
-- `std::env::set_var("BRIV_OUTPUT_DIR", ...)` — no longer needed
+- `std::env::set_var("BRIEV_OUTPUT_DIR", ...)` — no longer needed
 - All imports related to features::macros
 
 Replace with:
@@ -344,7 +344,7 @@ Output: String (DBVL content)
 Lines written:
   export, <name>, <params|pipe|separated>, <return_type>   // for each export
   meld, <from_type>, <to_type>, <routes>                    // for each meld
-  ctype, <briv_type>, <c_type>                             // for each entry in c_type_map
+  ctype, <briev_type>, <c_type>                             // for each entry in c_type_map
 ```
 
 ### Step 6: Remove old adapter files
@@ -448,7 +448,7 @@ let file = parse_dbvl(&source);
 // invocation. Instead of running an adapter .bv macro to generate
 // C ABI wrappers, we write a bridge-exports.dbvl metadata file
 // that the foreign build system consumes directly. The $!macro
-// approach generated Cargo.toml/build.rs/src/ that wrapped Briv
+// approach generated Cargo.toml/build.rs/src/ that wrapped Briev
 // behind C ABI; the new approach ships the LLVM IR + type metadata
 // and lets the host build.rs generate bindings from the .dbvl.
 // This supports both LLVM LTO (Rust) and C ABI + meld (Python).
@@ -459,7 +459,7 @@ let file = parse_dbvl(&source);
 // 2026-07-10: GLUE v2 registry format. Removed macro_path and
 // output_dir; added types_module (path to foreign type declarations)
 // and llvm_triple (target triple, "any" for non-LLVM targets).
-// c_type_map now maps Briv types to C ABI types, not adapter-
+// c_type_map now maps Briev types to C ABI types, not adapter-
 // specific type names. The old adapter $!macro approach generated
 // C ABI wrapper crates; the new approach uses LLVM IR merging
 // (Path A) or meld projections (Path B) instead.
@@ -503,7 +503,7 @@ let file = parse_dbvl(&source);
 - `test_find_adapter_new_format` — new test for new field layout
 
 ### New tests
-- `test_serialize_ctype_dbvl` — ctype lines emitted as `ctype,<briv>,<c>`
+- `test_serialize_ctype_dbvl` — ctype lines emitted as `ctype,<briev>,<c>`
 - `test_write_export_dbvl_full` — end-to-end: exports + melds + ctypes interleaved
 - `test_find_adapter_old_format_rejected` — old-format glue.dbvl raises error
 
@@ -545,7 +545,7 @@ let file = parse_dbvl(&source);
 C-callable library.
 
 The `--library` mode, `.ll` → `.o` → `.a` packaging, bindgen completeness
-(`__briv_init_state`/`__glue_release`), type marshaling (`Bool`/`String`),
+(`__briev_init_state`/`__glue_release`), type marshaling (`Bool`/`String`),
 and the end-to-end C driver test are now specified as Phase 15 of the
 overall roadmap, building on top of both this plan's `bridge-exports.dbvl`
 output and the derivation plan's `.dbvl` archive format.
@@ -554,5 +554,5 @@ output and the derivation plan's `.dbvl` archive format.
 
 - Python meld layouts for PyLongObject, PyUnicodeObject, PyListObject — requires
   C struct definitions + meld routes, covered in a future plan.
-- Rust dogfooding test — linking a Briv bridge into the Briv compiler's own
+- Rust dogfooding test — linking a Briev bridge into the Briev compiler's own
   build. Requires the Phase 15 library artifact as a prerequisite.

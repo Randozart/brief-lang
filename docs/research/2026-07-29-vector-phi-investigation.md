@@ -2,7 +2,7 @@
 
 ## Background
 
-The nbody_newton benchmark reached **0.75x** (Briv beating C by 25%) in Era 5
+The nbody_newton benchmark reached **0.75x** (Briev beating C by 25%) in Era 5
 (commit `8a827db`, Jul 11) using our own `<4 x float>` vector phi emission +
 SLP hazard gating. After Phase 4 (SLP cleanup, hazard/reorder removal), nbody
 regressed to **1.22x** with no intervention. This document records every attempt

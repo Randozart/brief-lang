@@ -167,7 +167,7 @@ fn verify_postcondition(
 
 Design: `#Term` replaces `@result` in the postcondition expression.
 
-```briv
+```briev
 // Before:
 } [[ @result >= 0 && @result < 64 ]];
 
@@ -178,6 +178,6 @@ Design: `#Term` replaces `@result` in the postcondition expression.
 ## Verification
 
 1. `cargo test --lib` — 1167 tests pass
-2. `brivc derive popcount_derive.bv` — produces body
-3. `brivc build popcount_derive.derive.bv` — assertion checks postcondition
+2. `brievc derive popcount_derive.bv` — produces body
+3. `brievc build popcount_derive.derive.bv` — assertion checks postcondition
 4. If the ite chain violates `#Term < 64` for any example, build FAILS

@@ -13,7 +13,7 @@
 
 Sometimes we want to assert that a function **always returns true**:
 
-```briv
+```briev
 sig always_succeeds: String -> true;
 ```
 
@@ -42,7 +42,7 @@ The `-> true` assertion is a **compile-time verification** that proves:
 
 ### 2.1 Assertion Syntax
 
-```briv
+```briev
 sig always_succeeds: Args -> true;
 ```
 
@@ -55,7 +55,7 @@ sig always_succeeds: Args -> true;
 ### 2.2 Two Verification Modes
 
 **Mode 1: Absolute Truth**
-```briv
+```briev
 defn always_true() [true][result == true] -> Bool {
   term true;
 };
@@ -65,7 +65,7 @@ sig always_true_cast: void -> true;
 ```
 
 **Mode 2: Context-Aware**
-```briv
+```briev
 defn maybe_true(b: Bool) [true][true] -> Bool {
   term b;
 };
@@ -83,7 +83,7 @@ sig contextualized: Bool -> true;
 
 ### 2.3 What Fails Assertion
 
-```briv
+```briev
 defn conditional(x: Int) -> Bool {
   [x > 0] term true;
   [x <= 0] term false;  // Can return false
@@ -309,7 +309,7 @@ fn test_context_aware_assertion() {
 
 Create `examples/assertions.bv`:
 
-```briv
+```briev
 defn always_succeeds() [true][result == true] -> Bool {
   term true;
 };

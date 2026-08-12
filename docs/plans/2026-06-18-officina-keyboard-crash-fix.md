@@ -17,7 +17,7 @@ function then reads `hdr[0]` (cap) and `hdr[1]` (len) from this 2-byte buffer
 as 8-byte i64 values, reading **garbage** into the length field.  `memcpy`
 copies that garbage number of bytes → buffer overflow → SIGSEGV.
 
-This is a compiler bug: the backend must produce a valid Briv string struct
+This is a compiler bug: the backend must produce a valid Briev string struct
 `{cap, len, data}` from a Char→String cast, not a raw C string pointer.
 
 ## Fix
@@ -61,5 +61,5 @@ sets bit-0 = 1:
 
 1. `cargo test --lib` — all tests pass
 2. `cargo build --release` — no warnings
-3. Recompile officina: `./target/release/briv-compiler build <path>/officina.bv`
+3. Recompile officina: `./target/release/briev-compiler build <path>/officina.bv`
 4. Run officina, type characters, verify no crash

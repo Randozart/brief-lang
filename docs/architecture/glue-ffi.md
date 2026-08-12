@@ -1,23 +1,23 @@
-# The GLUE FFI Architecture — Briv, the central language
+# The GLUE FFI Architecture — Briev, the central language
 
 **Date:** 2026-08-04
 **Status:** Active architecture documentation
 **Related:** `docs/guides/ffi-and-export.md` (practical how-to),
 `docs/architecture/frgn-export-glue-architecture.md` (deep pipeline),
-`learn-briv/07-ffi.md` (tutorial),
+`learn-briev/07-ffi.md` (tutorial),
 `docs/plans/2026-08-04-zero-friction-ffi-gate.md`.
 
 ---
 
 ## 1. The model
 
-Briv compiles to a native library that any host language calls at **native
+Briev compiles to a native library that any host language calls at **native
 speed**. The FFI is:
 
 - **Config-driven.** Every language is a folder `lib/glue/<lang>/` — a `glue.dbvl`
   config file (protocols, ABI, templates, toolchain recipe) + `types.bv`
   (boundary declarations). The compiler carries **zero language knowledge**:
-  `briv bindings|export|extension <bridge> <lang>` resolves `lib/glue/<lang>/`
+  `briev bindings|export|extension <bridge> <lang>` resolves `lib/glue/<lang>/`
   by name and renders through a single generic pipeline.
 - **Protocol-driven.** A boundary type is a protocol variant (`CStr` is
   `#String<C_String>`). The casting graph derives the ABI width, LLVM type, and
@@ -31,7 +31,7 @@ speed**. The FFI is:
   cgo/JNI boundaries are the accepted FFI bounds for Go/Java — the gate proves
   we sit *on* the floor, never above it.
 
-**Mental model:** a host calling `briv.feature_hash(...)` should feel like
+**Mental model:** a host calling `briev.feature_hash(...)` should feel like
 calling a super-efficient version of itself. The zero-friction gate (§7) proves
 this per host.
 
@@ -42,7 +42,7 @@ this per host.
 Build the bridge as a static + shared library:
 
 ```bash
-brivc build examples/glue-host/bench.bv --library --out build/
+brievc build examples/glue-host/bench.bv --library --out build/
 #   → build/libbench.a   (real ELF, gcc/rustc-linkable, -O3)
 #   → build/bench.so     (PIC shared, for dlopen/ctypes/P/Invoke)
 ```
@@ -54,12 +54,12 @@ The `.a` pipeline runs `opt -passes='default<O3>'` **before** llc — a plain
 
 | Function | Purpose |
 |----------|---------|
-| `BrivState* __briv_init_state(void)` | Allocate + init the process-global state; returns its address |
-| `void __glue_release(BrivState* state)` | Release (no-op today; arena is process-lifetime) |
-| `void __briv_set_cancel(BrivState*, int32_t)` | Raise the process-global cancel flag |
-| `void __briv_clear_cancel(BrivState*)` | Clear it |
+| `BrievState* __briev_init_state(void)` | Allocate + init the process-global state; returns its address |
+| `void __glue_release(BrievState* state)` | Release (no-op today; arena is process-lifetime) |
+| `void __briev_set_cancel(BrievState*, int32_t)` | Raise the process-global cancel flag |
+| `void __briev_clear_cancel(BrievState*)` | Clear it |
 
-`__briv_init_state` returns a **module-global** state (not a stack address —
+`__briev_init_state` returns a **module-global** state (not a stack address —
 a prior `alloca` version dangled on return; see `BUGS.md`). The library model
 is one state per process.
 
@@ -73,7 +73,7 @@ cgo (`#cgo LDFLAGS: -L${SRCDIR} -lbench`), P/Invoke
 
 ### 3.1 The export signature IS the boundary contract
 
-```briv
+```briev
 import "glue/c.bv";                 // the C boundary types + the CStr↔String meld
 
 export defn echo(name: CStr) -> CStr { term name; };
@@ -95,7 +95,7 @@ decision is a first-class frontend analysis (`compute_export_needs_state`,
 `src/analysis/export_abi.rs`) — transitive through calls, and it detects bare
 state-field reads even after the marshalling rewrites them into frgn-call args.
 
-```briv
+```briev
 let saved: String = "";
 export defn read() -> CStr { term saved; };   // needs_state → takes %state
 ```
@@ -104,18 +104,18 @@ export defn read() -> CStr { term saved; };   // needs_state → takes %state
 
 | Command | Renders | Example target |
 |---------|---------|----------------|
-| `briv bindings <bridge> <lang>` | Declarative bindings | C header, C# P/Invoke class |
-| `briv export <bridge> <lang>` | A language package/wrapper | Go package, Java class, Rust crate |
-| `briv extension <bridge> <lang>` | A **native extension** (compiled shim) | Python `.so`, Node `.node`, Java JNI `lib*.so`, Lua C module |
+| `briev bindings <bridge> <lang>` | Declarative bindings | C header, C# P/Invoke class |
+| `briev export <bridge> <lang>` | A language package/wrapper | Go package, Java class, Rust crate |
+| `briev extension <bridge> <lang>` | A **native extension** (compiled shim) | Python `.so`, Node `.node`, Java JNI `lib*.so`, Lua C module |
 
-`briv extension` builds the bridge library, renders the shim from the
+`briev extension` builds the bridge library, renders the shim from the
 language's `native.*` templates, and compiles+links it via the language's
 **toolchain recipe** (`native_include_cmd` / `native_suffix` /
 `native_link_cmd` / `native_cc` / `native_prefix`) — the compiler only knows
 "compile C, link a shared library."
 
 **Shim correctness invariants** (all config/template-driven):
-- Every export is declared in the shim as `__briv_export_<name>` with an
+- Every export is declared in the shim as `__briev_export_<name>` with an
   `asm("<name>")` label — an export named like a libc/header function (`read`,
   `open`, `malloc`) would otherwise collide at compile time and be PLT-interposed
   at link time.
@@ -125,17 +125,17 @@ language's `native.*` templates, and compiles+links it via the language's
 
 ## 4. How to import
 
-### 4.1 `frgn` — call a foreign function from Briv
+### 4.1 `frgn` — call a foreign function from Briev
 
-```briv
-// frgn <C_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [fallback <expr>];
-frgn __read_file__(path: String) -> Int as briv_read_file_raw
-  from "lib/runtime/briv_rt.c" fallback 0;
-frgn __write_file__(path: String, data: String) -> Int as briv_write_file
-  from "lib/runtime/briv_rt.c" fallback 0;
+```briev
+// frgn <C_symbol>(<params>) [-> <ret>] [as <briev_name>] from <source> [fallback <expr>];
+frgn __read_file__(path: String) -> Int as briev_read_file_raw
+  from "lib/runtime/briev_rt.c" fallback 0;
+frgn __write_file__(path: String, data: String) -> Int as briev_write_file
+  from "lib/runtime/briev_rt.c" fallback 0;
 ```
 
-The first identifier is the **C/runtime symbol**; `as` gives the Briv name used
+The first identifier is the **C/runtime symbol**; `as` gives the Briev name used
 at call sites. `from` resolves to: an inlined C source (`file.c`), a GLUE bridge
 target (`.py`/`.mjs`/…), or a linked library (`#Link<name>`). A `fallback`
 expression covers "cannot call this" (checked at compile time).
@@ -150,7 +150,7 @@ melds and boundary vocabulary of a library apply to the importing bridge.
 
 ## 5. How to add a new language
 
-> **New to Briv? Start with `docs/guides/add-an-ffi-target.md`** — a complete,
+> **New to Briev? Start with `docs/guides/add-an-ffi-target.md`** — a complete,
 > field-by-field walkthrough with the shipped Lua target as the worked example
 > (plus a copy-the-right-folder table and a checklist). The anatomy below is the
 > reference summary; the guide is the tutorial.
@@ -189,12 +189,12 @@ language needs.
 
 ### 5.3 templates
 
-- **`bindings.*`** — declarative files rendered by `briv bindings`
+- **`bindings.*`** — declarative files rendered by `briev bindings`
   (C header, C# class). Whole-file templates use `{{ffi_decls}}`
   (from `bindings.ffi_template`).
-- **`templates.*`** — package files rendered by `briv export`, with
+- **`templates.*`** — package files rendered by `briev export`, with
   `{{exports}}` (from `fn_template`) for per-export wrappers.
-- **`native.*`** — the extension shim rendered by `briv extension`:
+- **`native.*`** — the extension shim rendered by `briev extension`:
   - `native.module` — module boilerplate + init (`PyInit_<bridge>`,
     `NAPI_MODULE_INIT()`, `JNI_OnLoad`, `luaopen_<bridge>`).
   - `native.method` — the per-export method.
@@ -218,7 +218,7 @@ explained with a real example in `docs/guides/add-an-ffi-target.md` §4.
 
 `tests/c_driver_<lang>.rs` — a **render assertion** (runs everywhere) plus a
 **toolchain-guarded round-trip** (runs where the toolchain exists). The
-toolchain discovery pattern: PATH first, then `~/briv-tools/<tool>-*`.
+toolchain discovery pattern: PATH first, then `~/briev-tools/<tool>-*`.
 
 ---
 
@@ -226,36 +226,36 @@ toolchain discovery pattern: PATH first, then `~/briv-tools/<tool>-*`.
 
 | Language | Flavor | Command | Round-trip test |
 |----------|--------|---------|-----------------|
-| C | bindings | `briv bindings <b> c` | `c_driver_boundary` |
+| C | bindings | `briev bindings <b> c` | `c_driver_boundary` |
 | C++ | bindings | same C header (`extern "C"`) | `c_driver_cpp` |
-| Rust | bindings | `briv export <b> rust` | `rust-host` crate |
-| Python | native ext | `briv extension <b> python` | `c_driver_python` |
-| Node | native ext | `briv extension <b> node` | `c_driver_node` |
-| Go | cgo package | `briv export <b> go` | `c_driver_go` |
-| Java | native ext (JNI) | `briv extension <b> java` + `briv export <b> java` | `c_driver_java` |
-| Lua | native ext (C module) | `briv extension <b> lua` | `c_driver_lua` |
-| C# | bindings (P/Invoke) | `briv bindings <b> csharp` | `c_driver_csharp` |
+| Rust | bindings | `briev export <b> rust` | `rust-host` crate |
+| Python | native ext | `briev extension <b> python` | `c_driver_python` |
+| Node | native ext | `briev extension <b> node` | `c_driver_node` |
+| Go | cgo package | `briev export <b> go` | `c_driver_go` |
+| Java | native ext (JNI) | `briev extension <b> java` + `briev export <b> java` | `c_driver_java` |
+| Lua | native ext (C module) | `briev extension <b> lua` | `c_driver_lua` |
+| C# | bindings (P/Invoke) | `briev bindings <b> csharp` | `c_driver_csharp` |
 
 ### The zero-friction speed table
 
-`feature_hash(count=1000)` — **Briv vs the host writing it natively**
+`feature_hash(count=1000)` — **Briev vs the host writing it natively**
 (median ns/call, `benchmarks/bridge/gate/run_gate.sh`; 2026-08-04).
 
-| host | Briv | native | ratio | |
+| host | Briev | native | ratio | |
 |------|-------|--------|-------|---|
 | C | 1098 | 1100 | **1.00** | parity |
 | C++ | 1107 | 1094 | **1.01** | parity |
 | Java | 1116 | 1122 | **1.00** | parity (JIT) |
 | Go | 1189 | 1107 | **1.07** | parity (cgo) |
-| Lua | 1162 | 12309 | **0.09** | Briv 11× |
-| Python | 1179 | 229794 | **0.01** | Briv 195× |
-| Node | 1282 | 190498 | **0.01** | Briv 149× |
+| Lua | 1162 | 12309 | **0.09** | Briev 11× |
+| Python | 1179 | 229794 | **0.01** | Briev 195× |
+| Node | 1282 | 190498 | **0.01** | Briev 149× |
 
-Compiled hosts are at parity; **interpreted hosts get Briv's native-machine-code
+Compiled hosts are at parity; **interpreted hosts get Briev's native-machine-code
 compute and win by 1–2 orders of magnitude** — "as if Python calls a super
 efficient version of itself."
 
-**Dispatch** (Briv `add` vs the host's pure-internal `add`): C 1.07, C++ 1.09,
+**Dispatch** (Briev `add` vs the host's pure-internal `add`): C 1.07, C++ 1.09,
 Lua 1.10, **Python 0.77** (the `METH_FASTCALL` shim dispatches *faster* than
 Python's own function call), Node 2.17, Java ~6×, Go ~70×. Node/Java/Go sit at
 their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
@@ -265,10 +265,10 @@ their structural FFI bounds (NAPI/JNI/cgo — the host's own foreign-call cost).
 ## 7. The zero-friction gate
 
 `benchmarks/bridge/gate/run_gate.sh` builds `bench.bv` and drives every host
-whose toolchain is present — **Gate A** (real work: Briv vs native
-`feature_hash`) and **Gate B** (dispatch: Briv vs native internal `add`), 3
+whose toolchain is present — **Gate A** (real work: Briev vs native
+`feature_hash`) and **Gate B** (dispatch: Briev vs native internal `add`), 3
 interleaved rounds, medians. Committed as an opt-in regression canary:
-`BRIV_RUN_GATE=1 cargo test --test gate` (~3 min).
+`BRIEV_RUN_GATE=1 cargo test --test gate` (~3 min).
 
 **Gate hygiene** (a fair gate is hard to get right):
 - Native functions take a **runtime-varying argument** so no compiler hoists the
@@ -278,6 +278,6 @@ interleaved rounds, medians. Committed as an opt-in regression canary:
 - Go's native is measured in a **pure-Go binary** — a cgo-linked binary
   distorted the Go-native numbers.
 
-The gate asserts (generous canaries): every present host's Briv `feature_hash`
+The gate asserts (generous canaries): every present host's Briev `feature_hash`
 < 1.6× native; Python/Lua/Node win by > 1.7×; Python's `METH_FASTCALL` dispatch
 stays < 2×. See `docs/plans/2026-08-04-zero-friction-ffi-gate.md`.

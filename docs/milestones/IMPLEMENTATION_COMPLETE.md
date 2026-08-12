@@ -1,4 +1,4 @@
-# Briv Compiler - Implementation Complete ✅
+# Briev Compiler - Implementation Complete ✅
 
 **Date:** 2026-05-06  
 **Status:** Self-Hosting Capable  
@@ -40,7 +40,7 @@
 ### 1. Contract-First Design
 
 Every transaction declares pre/post conditions:
-```briv
+```briev
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]  // Compiler verifies this
     [balance == @balance - amount]      // Compiler proves this
@@ -53,7 +53,7 @@ txn withdraw(amount: Int)
 ### 2. Reactive Transactions
 
 Fire automatically, loop until termination (proven by compiler):
-```briv
+```briev
 node auto_increment() [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
@@ -64,17 +64,17 @@ node auto_increment() [counter < 100][counter == @counter + 1] {
 ### 3. Metropolitan FFI
 
 Zero-copy shared memory with foreign languages:
-```briv
+```briev
 let channel = create_metropolitan_channel("ml", "python")?;
 metropolitan_send(channel, image)?;
 let result = metropolitan_receive(channel, 100)?;
 // No marshalling, no context switches
 ```
 
-### 4. Data Briv Configuration
+### 4. Data Briev Configuration
 
 Type-safe configs replace TOML:
-```briv
+```briev
 // hardware.dbvs
 schema Hardware {
     name: String,
@@ -112,13 +112,13 @@ Hardware {
 ## Documentation Created
 
 **Tutorials:**
-- learn-briv/00-welcome.md
-- learn-briv/01-basics.md
-- learn-briv/02-contracts.md
-- learn-briv/03-reactive.md
-- learn-briv/04-functions.md
-- learn-briv/05-data-types.md
-- learn-briv/06-string.md
+- learn-briev/00-welcome.md
+- learn-briev/01-basics.md
+- learn-briev/02-contracts.md
+- learn-briev/03-reactive.md
+- learn-briev/04-functions.md
+- learn-briev/05-data-types.md
+- learn-briev/06-string.md
 
 **Technical Guides:**
 - SELF_HOSTING_COMPLETE.md
@@ -126,7 +126,7 @@ Hardware {
 - OPTIMIZATIONS.md
 - TESTING_SUMMARY.md
 - METROPOLITAN_FFI.md
-- DATABRIV_GUIDE.md
+- DATABRIEV_GUIDE.md
 
 **Reference:**
 - README.md (complete rewrite)
@@ -149,7 +149,7 @@ Hardware {
 - ✅ Symbolic Execution (Literals, operations)
 - ✅ Type Checking (Projections, unions)
 - ✅ FFI (Registry, resolver, validator)
-- ✅ Data Briv (Parser, allocator, evaluator)
+- ✅ Data Briev (Parser, allocator, evaluator)
 - ✅ Cache (Validity, interface detection)
 - ✅ Scheduler (Speed, reactor management)
 
@@ -158,7 +158,7 @@ Hardware {
 ## File Organization
 
 ```
-briv-compiler/
+briev-compiler/
 ├── src/                          # Rust bootstrap (26 modules)
 ├── lib/
 │   ├── std/                      # Standard Library (15+ modules)
@@ -178,7 +178,7 @@ briv-compiler/
 │   │   ├── result.bv             # Result combinators
 │   │   └── metropolitan_ffi.bv   # Metropolitan FFI ✨
 │   │
-│   └── compiler/                 # Compiler in Briv ✨
+│   └── compiler/                 # Compiler in Briev ✨
 │       ├── token.bv              # Token definitions
 │       ├── lexer.bv              # Lexer
 │       ├── parser.bv             # Parser
@@ -191,8 +191,8 @@ briv-compiler/
 │           ├── rust.bv           # Rust source
 │           └── c.bv              # C source
 │
-├── learn-briv/                  # Complete tutorial ✨
-├── targets/                      # Data Briv target schemas
+├── learn-briev/                  # Complete tutorial ✨
+├── targets/                      # Data Briev target schemas
 │   ├── aarch64.dbvs
 │   ├── x86_64.dbvs
 │   ├── rust.dbvs
@@ -204,7 +204,7 @@ briv-compiler/
     ├── OPTIMIZATIONS.md
     ├── TESTING_SUMMARY.md
     ├── METROPOLITAN_FFI.md
-    ├── DATABRIV_GUIDE.md
+    ├── DATABRIEV_GUIDE.md
     └── IMPLEMENTATION_COMPLETE.md
 ```
 
@@ -218,7 +218,7 @@ briv-compiler/
 | **Lines of Code** | ~12,000+ |
 | **Lines of Documentation** | ~8,000+ |
 | **Standard Library Functions** | 300+ |
-| **Compiler Modules** | 26 (Rust) + 7 (Briv) |
+| **Compiler Modules** | 26 (Rust) + 7 (Briev) |
 | **Backends** | 4 production-ready |
 | **Tests Passing** | 148/148 |
 | **Tiers Complete** | 9/9 (100%) |
@@ -230,7 +230,7 @@ briv-compiler/
 
 ### 1. Mathematical Verification
 No other language can prove its own compiler is correct:
-```briv
+```briev
 CHECK compiler_correctness [
     forall source in @test_sources:
         logic_equiv(compile(source), reference_compile(source))
@@ -238,12 +238,12 @@ CHECK compiler_correctness [
 ```
 
 ### 2. Universal Targets
-Same Briv code → FPGA, ARM, x86, WASM:
-```briv
+Same Briev code → FPGA, ARM, x86, WASM:
+```briev
 // Same source, different targets
-briv compile program.bv --target aarch64.dbvs
-briv compile program.bv --target vhdl_fpga.dbvs
-briv compile program.bv --target wasm.dbvs
+briev compile program.bv --target aarch64.dbvs
+briev compile program.bv --target vhdl_fpga.dbvs
+briev compile program.bv --target wasm.dbvs
 ```
 
 ### 3. Zero-Overhead FFI
@@ -254,7 +254,7 @@ Metropolitan FFI eliminates marshalling:
 
 ### 4. Self-Documenting Code
 Contracts serve as executable documentation:
-```briv
+```briev
 txn transfer(amount: Int) 
     [amount > 0 && balance >= amount]  // Documents requirements
     [balance == @balance - amount]      // Documents guarantees
@@ -302,10 +302,10 @@ This implementation proves that:
 - ✅ Self-documenting code is achievable with contracts
 - ✅ One language can target software AND hardware
 
-**Briv is ready for self-hosting.** 🚀
+**Briev is ready for self-hosting.** 🚀
 
 ---
 
 *Implementation Date: 2026-05-06*  
 *Status: COMPLETE ✅*  
-*Version: Briv v0.12.0*
+*Version: Briev v0.12.0*

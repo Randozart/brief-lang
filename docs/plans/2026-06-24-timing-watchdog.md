@@ -22,7 +22,7 @@ time (0-cycle intrinsic or proven-termination function).
 
 ### Expression form — `within ... ~?`
 
-```briv
+```briev
 // Basic: time foo(), retry up to 3 times, fallback to bar()
 let result = foo() within 10 cycles (3) ~? bar();
 
@@ -41,7 +41,7 @@ let result = query() within 50 ms (2) ~? cache_lookup();
 
 ### Watchdog bracket form — `?[cycles <= N retry M] ~? fallback`
 
-```briv
+```briev
 node process [x < N][x == N] ?[cycles <= 1000 retry 3] ~? log_timeout() {
     &x = x + 1; term;
 };
@@ -49,14 +49,14 @@ node process [x < N][x == N] ?[cycles <= 1000 retry 3] ~? log_timeout() {
 
 ### Import-level default
 
-```briv
+```briev
 import frgn read_sensor() -> Int within 10 cycles (3) ~? 0;
 // Every call to read_sensor() is automatically wrapped
 ```
 
 ### Chaining (right-associative `~?`)
 
-```briv
+```briev
 let result = foo() within 10 cyc (3) ~? bar() within 5 cyc (2) ~? baz();
 // Parsed as: foo() within 10 cyc (3) ~? (bar() within 5 cyc (2) ~? baz())
 // If foo times out → try bar (5 cyc, 2 retries) → if that times out → run baz
@@ -64,7 +64,7 @@ let result = foo() within 10 cyc (3) ~? bar() within 5 cyc (2) ~? baz();
 
 ### Retry syntax (both forms)
 
-```briv
+```briev
 foo() within 10 cycles retry 3 ~? bar()     // explicit keyword
 foo() within 10 cycles (3) ~? bar()          // compact parenthesized
 ```
@@ -98,7 +98,7 @@ A new multi-character token `TildeQuestion`. Design rationale:
 
 The body and the fallback must unify to the same type:
 
-```briv
+```briev
 let x: Int = foo() within 10 cyc (3) ~? 0;           // OK: both Int
 let x: String = foo() within 10 cyc (3) ~? "";        // OK: both String
 let x: Int = foo() within 10 cyc (3) ~? "fallback";   // ERROR: Int vs String
@@ -224,7 +224,7 @@ Followed by optional `~? fallback_expr`.
 
 ### Import frgn parsing
 
-```briv
+```briev
 import frgn name(args) -> Type within N cycles (M) ~? fallback_expr;
 ```
 
@@ -321,7 +321,7 @@ The `%cycle_count` field in `%State` (from Phase 4) is read before the
 body starts, the bound is added, and a bounds check is inserted before
 each statement in the body. On overflow, branch to the retry/trap logic.
 
-## Syntax Highlighter (`briv.tmLanguage.json`, `dbriv.tmLanguage.json`)
+## Syntax Highlighter (`briev.tmLanguage.json`, `dbriev.tmLanguage.json`)
 
 ### Operators section — add `~?` before `~`
 
@@ -329,7 +329,7 @@ Must come first so `~?` is matched as a single token before `~` grabs it.
 
 ```json
 {
-  "name": "keyword.operator.temporal-fallback.briv",
+  "name": "keyword.operator.temporal-fallback.briev",
   "match": "~\\?"
 }
 ```
@@ -341,7 +341,7 @@ pre-existing bug where `~/` was never matched).
 
 ```json
 {
-  "name": "keyword.control.temporal.briv",
+  "name": "keyword.control.temporal.briev",
   "match": "\\b(within|retry)\\b"
 }
 ```
@@ -350,7 +350,7 @@ pre-existing bug where `~/` was never matched).
 
 ```json
 {
-  "name": "keyword.other.time-unit.briv",
+  "name": "keyword.other.time-unit.briev",
   "match": "\\b(cycles|cyc|seconds|s|milliseconds|ms|minutes|min|nanoseconds|ns)\\b"
 }
 ```
@@ -378,8 +378,8 @@ Update `docs/architecture/features/` with:
 
 | File | Change |
 |------|--------|
-| `syntax-highlighter/syntaxes/briv.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
-| `syntax-highlighter/syntaxes/dbriv.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
+| `syntax-highlighter/syntaxes/briev.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
+| `syntax-highlighter/syntaxes/dbriev.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
 | `src/lexer.rs` | `TildeQuestion`, `within`, `retry`, time unit tokens |
 | `src/ast.rs` | `Expr::Within`, `TimeUnit`, `WatchdogSpec.*`, `ForeignBinding.default_watchdog` |
 | `src/parser.rs` | Parse `within` expressions, retry in watchdogs, frgn defaults |

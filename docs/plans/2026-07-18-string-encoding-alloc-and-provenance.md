@@ -17,7 +17,7 @@
 
 ## Executive Summary
 
-Four closely related designs that together form Briv's memory model:
+Four closely related designs that together form Briev's memory model:
 
 1. **SSO String handle** — 16-byte handle passed in 2 registers, short strings inline
 2. **Encoding registry** — PascalCase = compiler-known `char_width`, quoted = config file
@@ -67,7 +67,7 @@ Long string (bit 0 of word 0 = 0):
 
 ### Type property
 
-```briv
+```briev
 type String {
     ctd <~ String;
     alu <~ Int;
@@ -155,7 +155,7 @@ resolve_encoding(name):
 
 ### Property on types
 
-```briv
+```briev
 type String {
     encoding <~ UTF8;              // PascalCase = compiler understands
 }
@@ -181,13 +181,13 @@ Alloc#(size)
 
 ### Extension: optional 2nd argument
 
-```briv
+```briev
 Alloc#(256)                       // compiler picks (existing triple dispatch)
 Alloc#(256, Arena)                // PascalCase — intrinsic dispatch table
 Alloc#(256, Malloc)               // PascalCase — intrinsic dispatch table
 Alloc#(256, Alloca)               // PascalCase — intrinsic dispatch table
 Alloc#(256, "pool_serial")        // quoted — config/alloc-strategies.toml or plugin
-Alloc#(256, my_custom_alloc_fn)   // identifier — Briv function call
+Alloc#(256, my_custom_alloc_fn)   // identifier — Briev function call
 ```
 
 ### PascalCase dispatch (intrinsic)
@@ -229,7 +229,7 @@ free_template = """
 
 ### Identifier (user function)
 
-```briv
+```briev
 defn my_alloc(size: Int) -> Ptr<Byte> {
     &result <- Malloc#(size);    // or arena, or whatever
     term result;
@@ -244,14 +244,14 @@ Semantics: `Alloc#(size, fn_name)` emits `call @fn_name(i64 %size)`, returns the
 
 When `Alloc#(256, my_alloc)` is used, the compiler doesn't know the strategy. `Free#(buf)` conservatively emits `@free`. The programmer can annotate:
 
-```briv
+```briev
 let buf = Alloc#(256, my_alloc) using Malloc;   // tells Free#: call @free
 let buf = Alloc#(256, my_alloc) using Arena;    // tells Free#: no-op
 ```
 
 Or the custom function itself declares:
 
-```briv
+```briev
 defn my_alloc(size: Int) -> Ptr<Byte> [result != null] {
     metadata alloc_strategy <~ Malloc;
     &result <- Malloc#(size);
@@ -288,7 +288,7 @@ remaining = total bytes from this position to end of buffer
 
 ### O(1) Length and bounds check
 
-```briv
+```briev
 let s: String = "hello world";
 let mid = &s[6];          // {base=&s, offset=6, remaining=5}
 let remaining = Length#(mid);  // 5 — no pointer chase
@@ -396,7 +396,7 @@ The compiler must guarantee `char_width` is known for O(1) indexing. PascalCase 
 ### Why no CoW?
 
 - CoW requires atomic refcounts → unpredictable in threaded code
-- Strings are immutable after construction in Briv (every operation creates a new handle)
+- Strings are immutable after construction in Briev (every operation creates a new handle)
 - Arena reset at txn/tick boundaries is the correct bulk reclamation strategy
 - SSO eliminates allocation entirely for the common case (strings ≤ 15 bytes)
 

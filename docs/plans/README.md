@@ -1,4 +1,4 @@
-# Briv Compiler — Plan Documents Index
+# Briev Compiler — Plan Documents Index
 
 **Last updated:** 2026-07-23
 
@@ -89,5 +89,5 @@ cargo test --test pp_roundtrip_tests -- --test-threads=1  # 8/8 pass
 
 ```bash
 cargo build                # 0 errors, 0 warnings
-./target/debug/briv-compiler build <file.bv> --llvm --out <dir>
+./target/debug/briev-compiler build <file.bv> --llvm --out <dir>
 ```

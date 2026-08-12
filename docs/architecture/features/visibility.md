@@ -5,7 +5,7 @@
 
 ## Syntax
 
-```briv
+```briev
 // Struct fields
 struct BTree<T> {
     pvt  root: Ptr<Node<T>>;      // struct boundary only

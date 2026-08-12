@@ -22,7 +22,7 @@
 
 ## Principle
 
-Each backend owns a **first-class normalizer pass** that converts Briv protocol
+Each backend owns a **first-class normalizer pass** that converts Briev protocol
 + metadata into the backend's **native type**:
 
 | Backend | Native type | Derived via |

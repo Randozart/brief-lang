@@ -3,7 +3,7 @@
 2026-07-28: Phase G.0 — Complete reference for every `!>` metadata key,
 its values, semantics, and which backends honor it.
 
-The machine-readable source of truth is `config/meta-vocab.dbv` (Data Briv format).
+The machine-readable source of truth is `config/meta-vocab.dbv` (Data Briev format).
 This document is a human-readable rendering. When adding a new key, update both.
 
 ## Arithmetic Semantics

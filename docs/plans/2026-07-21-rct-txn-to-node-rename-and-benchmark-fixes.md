@@ -312,7 +312,7 @@ uni tok(KeywordNode) = "node";
 output as the Rust compiler for the same input. Test:
 ```bash
 # Compile a test file with Rust compiler
-./target/release/briv-compiler build tests/fixtures/counter.bv -o /tmp/rust_out
+./target/release/briev-compiler build tests/fixtures/counter.bv -o /tmp/rust_out
 
 # Compile the self-hosting compiler with itself (once self-hosting works)
 ```
@@ -379,8 +379,8 @@ find spec -name '*.md' -exec sed -i \
   -e 's/async node/node async/g' \
   {} +
 
-# Learn-briv docs
-find learn-briv -name '*.md' -exec sed -i \
+# Learn-briev docs
+find learn-briev -name '*.md' -exec sed -i \
   -e 's/rct txn/node/g' \
   -e 's/async node/node async/g' \
   {} +
@@ -426,14 +426,14 @@ git grep -n -i '\brct\b' -- '*.rs' '*.bv' '*.md' \
   | grep -v 'old_docs'
 
 # 4. Compile a simple file to verify parsing
-./target/release/briv-compiler build examples/simple_contract.bv -o /tmp/test_node
+./target/release/briev-compiler build examples/simple_contract.bv -o /tmp/test_node
 
 # 5. Run the compiled binary
 /tmp/test_node
 
 # 6. Compile all benchmarks
 for b in benchmarks/*.bv; do
-  BOUND=50000000 ./target/release/briv-compiler build "$b" --out benchmarks 2>&1 \
+  BOUND=50000000 ./target/release/briev-compiler build "$b" --out benchmarks 2>&1 \
     | grep -v "warning:" || echo "FAIL: $b"
 done
 ```
@@ -458,7 +458,7 @@ find lib/compiler -name '*.bv' -exec sed -i \
   {} +
 
 # ── Markdown files ──
-find docs spec learn-briv -name '*.md' -exec sed -i \
+find docs spec learn-briev -name '*.md' -exec sed -i \
   -e 's/\brct txn\b/node/g' \
   -e 's/\basync node\b/node async/g' \
   -e 's/\brct\b/node/g' \
@@ -478,13 +478,13 @@ sed -i 's/#\[token("rct")\]/#[token("node")]/' src/lexer.rs
 
 ### 2.1 fasta — 105× regression
 
-**Root cause:** `__print_char()` in `lib/runtime/briv_rt.c:163` calls
+**Root cause:** `__print_char()` in `lib/runtime/briev_rt.c:163` calls
 `fflush(stdout)` after every non-newline character. 50M fflush syscalls
 vs C's buffered `fputc`.
 
 **Fix:** Remove `fflush(stdout)` from `__print_char`.
 
-**File: `lib/runtime/briv_rt.c`** (lines 163-171):
+**File: `lib/runtime/briev_rt.c`** (lines 163-171):
 
 ```c
 // BEFORE:
@@ -512,7 +512,7 @@ int64_t __print_char(int64_t c) {
 **Verification:**
 ```bash
 cargo build --release
-BOUND=50000000 ./target/release/briv-compiler build benchmarks/fasta.bv --out benchmarks
+BOUND=50000000 ./target/release/briev-compiler build benchmarks/fasta.bv --out benchmarks
 hyperfine -w 2 'BOUND=50000000 benchmarks/fasta > /dev/null' \
                'BOUND=50000000 benchmarks/fasta_c > /dev/null'
 ```
@@ -577,8 +577,8 @@ backend struct before writing.
 **Verification:**
 ```bash
 cargo test --lib
-BOUND=50000000 ./target/release/briv-compiler build benchmarks/queue_drain.bv --out benchmarks
-BOUND=50000000 ./target/release/briv-compiler build benchmarks/queue_drain_idio.bv --out benchmarks
+BOUND=50000000 ./target/release/briev-compiler build benchmarks/queue_drain.bv --out benchmarks
+BOUND=50000000 ./target/release/briev-compiler build benchmarks/queue_drain_idio.bv --out benchmarks
 BOUND=50000000 bash -c 'diff <(benchmarks/queue_drain) <(benchmarks/queue_drain_c)'
 ```
 
@@ -681,7 +681,7 @@ schedules them in parallel.
 **Verification:**
 ```bash
 cargo test --lib
-BOUND=50000000 ./target/release/briv-compiler build benchmarks/float_math_nonzero.bv --out benchmarks
+BOUND=50000000 ./target/release/briev-compiler build benchmarks/float_math_nonzero.bv --out benchmarks
 BOUND=50000000 bash -c 'diff <(benchmarks/float_math_nonzero) <(benchmarks/float_math_nonzero_c)'
 hyperfine -w 2 'BOUND=50000000 benchmarks/float_math_nonzero' \
                'BOUND=50000000 benchmarks/float_math_nonzero_c'
@@ -694,7 +694,7 @@ Expected ratio after Fix A + benchmark rewrite: ~1.0×.
 ### 2.4 ring_buffer — 1.77× regression (low priority)
 
 **Analysis:** After `clang -O3` (the actual compilation pipeline), the
-Briv hot loop body is structurally identical to C's — 9 instructions
+Briev hot loop body is structurally identical to C's — 9 instructions
 including the `mul` for modulus. Both DCE the buffer store as dead
 code (no FFI reads the buffer). The 1.77× ratio is likely measurement
 noise at sub-60ms absolute runtimes.
@@ -715,7 +715,7 @@ and the 1.77× persists after all other changes.
 
 **Verification:**
 ```bash
-BOUND=50000000 ./target/release/briv-compiler build benchmarks/ring_buffer.bv --out benchmarks
+BOUND=50000000 ./target/release/briev-compiler build benchmarks/ring_buffer.bv --out benchmarks
 hyperfine -w 2 'BOUND=50000000 benchmarks/ring_buffer' \
                'BOUND=50000000 benchmarks/ring_buffer_c'
 ```
@@ -780,7 +780,7 @@ find lib/compiler -name '*.bv' -exec sed -i \
   {} +
 
 # ── Markdown files ──
-find docs spec learn-briv -name '*.md' -exec sed -i \
+find docs spec learn-briev -name '*.md' -exec sed -i \
   -e 's/\brct txn\b/node/g' \
   -e 's/\basync node\b/node async/g' \
   -e 's/\brct\b/node/g' \
@@ -803,9 +803,9 @@ git grep -n -i '\brct\b' -- '*.rs' '*.bv' '*.md' \
 
 ---
 
-## Stage 3: Rename `.beast` → `.beast` (Briv Expressive AST)
+## Stage 3: Rename `.beast` → `.beast` (Briev Expressive AST)
 
-The BEAST intermediate representation is renamed to BEAST — Briv Expressive
+The BEAST intermediate representation is renamed to BEAST — Briev Expressive
 AST. File extension `.beast`, CLI flag `--emit-beast`, module path
 `src/beast/`.
 
@@ -853,7 +853,7 @@ pub mod beast;  →  pub mod beast;
 | 380 | Doc comment: `--emit-beast` → `--emit-beast` |
 | 382 | `fn emit_beast_snapshot` → `fn emit_beast_snapshot` |
 | 389 | `opts.emit_beast_stages` → `opts.emit_beast_stages` |
-| 397 | `briv_compiler::beast::to_beast` → `briv_compiler::beast::to_beast` |
+| 397 | `briev_compiler::beast::to_beast` → `briev_compiler::beast::to_beast` |
 | 399 | `{}.beast.{}` → `{}.beast.{}` (file extension in output path) |
 
 **File: `src/beast/mod.rs`** (formerly `src/beast/mod.rs`):
@@ -975,16 +975,16 @@ fork+exec harness at `BOUND=50000000`. Single iteration per benchmark (not avera
 
 ### Runtime Benchmarks
 
-| Benchmark | Briv | C | Ratio | Winner | Note |
+| Benchmark | Briev | C | Ratio | Winner | Note |
 |-----------|-------|---|-------|--------|------|
 | ring_buffer | 0.0448s | 0.0326s | 1.37x | C | Loop eliminated to counter-only; 1.37x is binary-size noise |
 | float_math | 0.0736s | 0.0721s | 1.02x | ~tie | |
-| **float_math_nonzero** | **0.1579s** | **0.1677s** | **0.94x** | **Briv** | Fixed p22 phi + atomic reads + float print |
+| **float_math_nonzero** | **0.1579s** | **0.1677s** | **0.94x** | **Briev** | Fixed p22 phi + atomic reads + float print |
 | sparse_dispatch | 0.0668s | 0.0638s | 1.04x | ~tie | |
 | print_loop | 0.0629s | 0.0574s | 1.09x | C | Redundant state stores |
 | nbody_newton | 11.3080s | 9.1152s | 1.24x | C | Memory counter loop overhead |
-| **nbody_sqrt** | **2.4426s** | **2.8129s** | **0.86x** | **Briv** | |
-| **nbody_sqrt_idio** | **2.4757s** | **3.6449s** | **0.67x** | **Briv** | |
+| **nbody_sqrt** | **2.4426s** | **2.8129s** | **0.86x** | **Briev** | |
+| **nbody_sqrt_idio** | **2.4757s** | **3.6449s** | **0.67x** | **Briev** | |
 | fasta | 0.2599s | 0.2193s | 1.18x | C | %State escape blocks SROA |
 | fannkuch_redux | 0.0786s | 0.0694s | 1.13x | C | 6-phi cap too small for 16 fields |
 | mandelbrot | 0.6705s | 0.6675s | 1.00x | ~tie | |
@@ -1172,16 +1172,16 @@ and instruction-level uop accounting.
 
 All times at `BOUND=50000000`, single run, nanosecond-precision fork+exec timer.
 
-| Benchmark | Briv | C | Ratio | Winner | Status |
+| Benchmark | Briev | C | Ratio | Winner | Status |
 |-----------|-------|---|-------|--------|--------|
 | ring_buffer | 0.0549s | 0.0318s | 1.72x | C | **Missing `nuw` flag** |
-| float_math | 0.0712s | 0.0752s | 0.94x | Briv | ✓ |
-| float_math_nonzero | 0.1624s | 0.1687s | 0.96x | Briv | ✓ Fixed Stage 2 |
-| **sparse_dispatch** | **0.0517s** | **0.0781s** | **0.66x** | **Briv** | ✓ Fixed Stage 5 |
+| float_math | 0.0712s | 0.0752s | 0.94x | Briev | ✓ |
+| float_math_nonzero | 0.1624s | 0.1687s | 0.96x | Briev | ✓ Fixed Stage 2 |
+| **sparse_dispatch** | **0.0517s** | **0.0781s** | **0.66x** | **Briev** | ✓ Fixed Stage 5 |
 | **print_loop** | **0.0597s** | **0.0571s** | **1.04x** | **~tie** | ✓ Fixed Stage 5 |
 | nbody_newton | 11.3802s | 8.3289s | 1.36x | C | LLVM `vdivss` vs `vrcpps` |
-| nbody_sqrt | 2.4571s | 2.7958s | 0.87x | Briv | ✓ |
-| nbody_sqrt_idio | 2.5028s | 3.6368s | 0.68x | Briv | ✓ |
+| nbody_sqrt | 2.4571s | 2.7958s | 0.87x | Briev | ✓ |
+| nbody_sqrt_idio | 2.5028s | 3.6368s | 0.68x | Briev | ✓ |
 | fasta | 0.2622s | 0.2121s | 1.23x | C | **No LTO → extra call layer** |
 | fannkuch_redux | 0.0770s | 0.0588s | 1.31x | C | **6-phi cap → register pressure** |
 | mandelbrot | 0.6687s | 0.6626s | 1.00x | ~tie | ✓ |
@@ -1189,7 +1189,7 @@ All times at `BOUND=50000000`, single run, nanosecond-precision fork+exec timer.
 | knucleotide | 0.1904s | 0.1938s | 0.98x | ~tie | ✓ |
 | cancel_math | 0.0654s | 0.0630s | 1.03x | ~tie | ✓ |
 | bit_clear | 0.0011s | 0.0008s | 1.34x | C | **Measurement noise** (1µs work, 640µs startup) |
-| queue_drain | 0.0597s | 0.0616s | 0.96x | Briv | ✓ Fixed Stage 2 |
+| queue_drain | 0.0597s | 0.0616s | 0.96x | Briev | ✓ Fixed Stage 2 |
 | queue_drain_sym | 0.0648s | 0.0606s | 1.06x | ~tie | ✓ Improved Stage 5 |
 | queue_drain_idio | 0.0645s | — | — | — | No C reference |
 
@@ -1214,7 +1214,7 @@ where both are non-negative and total is a known bound).
 ### P1: Enable `-flto` in benchmark build (fasta)
 
 **Root cause:** `__print_char` wrapper adds an extra function call layer per iteration
-(call/ret pair + stack frame). C calls `fputc@plt` directly, Briv calls
+(call/ret pair + stack frame). C calls `fputc@plt` directly, Briev calls
 `__print_char` → `putc@plt`. The wrapper costs ~5-8 cycles/iteration at 50M iter:
 ~50-80ms overhead at 3GHz (matches actual 52ms delta).
 
@@ -1262,27 +1262,27 @@ with more state fields than before, the phi cap may have regressed it.
 
 All times at `BOUND=50000000`, single run, nanosecond-precision fork+exec timer.
 
-| Benchmark | Briv | C | Ratio | Winner | Change |
+| Benchmark | Briev | C | Ratio | Winner | Change |
 |-----------|-------|---|-------|--------|--------|
 | ring_buffer | 0.0617s | 0.0461s | 1.33x | C | Now tests real buffer ops (was 1.72x) |
 | float_math | 0.0769s | 0.0709s | 1.08x | ~tie | |
-| **float_math_nonzero** | **0.1603s** | **0.1689s** | **0.94x** | **Briv** | ✓ Fixed |
-| **sparse_dispatch** | **0.0600s** | **0.0641s** | **0.93x** | **Briv** | ✓ |
-| **print_loop** | **0.0588s** | **0.0633s** | **0.93x** | **Briv** | ✓ Fixed |
+| **float_math_nonzero** | **0.1603s** | **0.1689s** | **0.94x** | **Briev** | ✓ Fixed |
+| **sparse_dispatch** | **0.0600s** | **0.0641s** | **0.93x** | **Briev** | ✓ |
+| **print_loop** | **0.0588s** | **0.0633s** | **0.93x** | **Briev** | ✓ Fixed |
 | nbody_newton | 12.0403s | 8.8564s | 1.35x | C | Missing fast-math attributes |
-| **nbody_sqrt** | **2.6511s** | **3.1134s** | **0.85x** | **Briv** | ✓ |
-| **nbody_sqrt_idio** | **2.5850s** | **3.7576s** | **0.68x** | **Briv** | ✓ |
+| **nbody_sqrt** | **2.6511s** | **3.1134s** | **0.85x** | **Briev** | ✓ |
+| **nbody_sqrt_idio** | **2.5850s** | **3.7576s** | **0.68x** | **Briev** | ✓ |
 | **fasta** | **0.2163s** | **0.2204s** | **0.98x** | **~tie** | ↑ 1.23x via LTO |
-| **fannkuch_redux** | **0.0697s** | **0.0749s** | **0.93x** | **Briv** | ↑ 1.31x via adaptive cap |
+| **fannkuch_redux** | **0.0697s** | **0.0749s** | **0.93x** | **Briev** | ↑ 1.31x via adaptive cap |
 | mandelbrot | 0.6713s | 0.6729s | 0.99x | ~tie | |
 | kalman_filter_runtime | 0.1819s | 0.1846s | 0.98x | ~tie | |
 | knucleotide | 0.1990s | 0.1958s | 1.01x | ~tie | |
 | cancel_math | 0.0617s | 0.0593s | 1.03x | ~tie | |
 | bit_clear | ~0.0007s | ~0.0007s | ~1.00x | noise | 63 iter, startup-dominated |
-| **queue_drain** | **0.0618s** | **0.0655s** | **0.94x** | **Briv** | ✓ Fixed |
+| **queue_drain** | **0.0618s** | **0.0655s** | **0.94x** | **Briev** | ✓ Fixed |
 | queue_drain_sym | 0.0635s | 0.0628s | 1.01x | ~tie | |
 
-**Briv wins: 7 | Parity: 8 | C wins: 2** (ring_buffer 1.33x, nbody_newton 1.35x)
+**Briev wins: 7 | Parity: 8 | C wins: 2** (ring_buffer 1.33x, nbody_newton 1.35x)
 
 ---
 
@@ -1340,16 +1340,16 @@ redundant phis for pointer-type fields.
 
 ### Current Benchmark State (After Fixes 1–3)
 
-| Benchmark | Briv | C | Ratio | Winner |
+| Benchmark | Briev | C | Ratio | Winner |
 |-----------|-------|---|-------|--------|
 | ring_buffer | 0.0607s | 0.0496s | 1.22x | C |
 | float_math | 0.0766s | 0.0737s | 1.04x | ~tie |
-| float_math_nonzero | 0.1603s | 0.1689s | 0.94x | Briv |
-| sparse_dispatch | 0.0577s | 0.0597s | 0.96x | Briv |
-| print_loop | 0.0568s | 0.0588s | 0.96x | Briv |
+| float_math_nonzero | 0.1603s | 0.1689s | 0.94x | Briev |
+| sparse_dispatch | 0.0577s | 0.0597s | 0.96x | Briev |
+| print_loop | 0.0568s | 0.0588s | 0.96x | Briev |
 | nbody_newton | 11.3905s | 8.3634s | 1.36x | C |
-| nbody_sqrt | 2.4367s | 2.8136s | 0.86x | Briv |
-| nbody_sqrt_idio | 2.4866s | 3.6580s | 0.67x | Briv |
+| nbody_sqrt | 2.4367s | 2.8136s | 0.86x | Briev |
+| nbody_sqrt_idio | 2.4866s | 3.6580s | 0.67x | Briev |
 | fasta | 0.2268s | 0.2235s | 1.01x | ~tie |
 | fannkuch_redux | 0.0640s | 0.0636s | 1.00x | ~tie |
 | mandelbrot | 0.6689s | 0.6590s | 1.01x | ~tie |
@@ -1357,10 +1357,10 @@ redundant phis for pointer-type fields.
 | knucleotide | 0.1858s | 0.1898s | 0.97x | ~tie |
 | cancel_math | 0.0613s | 0.0580s | 1.05x | ~tie |
 | bit_clear | ~0.0007s | ~0.0007s | ~1.00x | noise |
-| queue_drain | 0.0618s | 0.0655s | 0.94x | Briv |
+| queue_drain | 0.0618s | 0.0655s | 0.94x | Briev |
 | queue_drain_sym | 0.0635s | 0.0628s | 1.01x | ~tie |
 
-**Briv/Parity: 16 out of 17 benchmarks at parity or better.**
+**Briev/Parity: 16 out of 17 benchmarks at parity or better.**
 **Behind: 2** — ring_buffer (1.22x), nbody_newton (1.36x)
 
 ---
@@ -1375,7 +1375,7 @@ as `i64`. For float fields, every access requires:
 That's 7 instructions per float field access just for type conversion, before any
 actual computation. C accesses float fields directly: load `float` (1 insn).
 
-**Fix:** In `push_field_type`, check `field_briv_types[idx]` — if the type is `float`
+**Fix:** In `push_field_type`, check `field_briev_types[idx]` — if the type is `float`
 or `float64`, push `"float"` or `"double"` instead of `"i64"`. Then in the load/store
 paths (`emit_stmt.rs`, `emit_countable_body`), use the native type directly without
 trunc/bitcast/zext.
@@ -1388,7 +1388,7 @@ phi-tracked field), not for every use within the body.
 **File:** `src/backend/llvm/emit_stmt.rs` (load/store paths)
 **Lines of change:** ~20
 
-**Risk:** Low. The field_briv_types already tracks the original type. The change is
+**Risk:** Low. The field_briev_types already tracks the original type. The change is
 pure addition — non-float fields keep i64. Float fields get native type.
 
 **Expected Impact:**
@@ -1479,7 +1479,7 @@ only bundles phi nodes, not operations.
 3. Different pairs have identical computation structure
 4. LLVM's SLP vectorizer can't see through the i64 boxing and individual field GEPs
 
-**Concept:** The Briv compiler detects that:
+**Concept:** The Briev compiler detects that:
 ```
 dx01 = bx0 - bx1;  dy01 = by0 - by1;  dz01 = bz0 - bz1;
 ```
@@ -1517,7 +1517,7 @@ This requires:
 **Key Design Decisions:**
 
 **When to bundle:** Only when ALL of:
-- Fields have same Briv type (float/float64)
+- Fields have same Briev type (float/float64)
 - Fields are contiguous in %State (adjacent in field_index_map)
 - Operations are structurally identical (same operator, same constants, same operand fields with matching indices)
 - Register pressure estimate from `hazard.rs` is below target threshold
@@ -1566,16 +1566,16 @@ after A, B, and C are merged.
 
 After all Fixes 1–3 from the session:
 
-| Benchmark | Briv | C | Ratio | Winner | Note |
+| Benchmark | Briev | C | Ratio | Winner | Note |
 |-----------|-------|---|-------|--------|------|
 | **ring_buffer** | **0.058s** | **0.047s** | **1.15x** | C | `mul` eliminated; phi overhead remains |
 | float_math | 0.077s | 0.074s | 1.04x | ~tie | |
-| float_math_nonzero | 0.160s | 0.169s | 0.94x | Briv | ✓ |
-| **sparse_dispatch** | **0.058s** | **0.060s** | **0.96x** | Briv | ✓ |
-| **print_loop** | **0.057s** | **0.059s** | **0.96x** | Briv | ✓ |
+| float_math_nonzero | 0.160s | 0.169s | 0.94x | Briev | ✓ |
+| **sparse_dispatch** | **0.058s** | **0.060s** | **0.96x** | Briev | ✓ |
+| **print_loop** | **0.057s** | **0.059s** | **0.96x** | Briev | ✓ |
 | **nbody_newton** | **11.39s** | **8.36s** | **1.36x** | C | SLP unblocked; scalar fdiv remains |
-| nbody_sqrt | 2.44s | 2.81s | 0.86x | Briv | ✓ |
-| nbody_sqrt_idio | 2.49s | 3.66s | 0.67x | Briv | ✓ |
+| nbody_sqrt | 2.44s | 2.81s | 0.86x | Briev | ✓ |
+| nbody_sqrt_idio | 2.49s | 3.66s | 0.67x | Briev | ✓ |
 | **fasta** | **0.214s** | **0.218s** | **0.98x** | **~tie** | LTO inlining fixed |
 | **fannkuch_redux** | **0.063s** | **0.064s** | **0.98x** | **~tie** | Adaptive phi cap fixed |
 | mandelbrot | 0.669s | 0.659s | 1.01x | ~tie | |
@@ -1583,10 +1583,10 @@ After all Fixes 1–3 from the session:
 | knucleotide | 0.186s | 0.190s | 0.97x | ~tie | |
 | cancel_math | 0.061s | 0.058s | 1.05x | ~tie | |
 | bit_clear | ~0.001s | ~0.001s | ~1.00x | noise | 63 iter, startup-dominated |
-| **queue_drain** | **0.062s** | **0.066s** | **0.94x** | Briv | ✓ |
+| **queue_drain** | **0.062s** | **0.066s** | **0.94x** | Briev | ✓ |
 | queue_drain_sym | 0.064s | 0.061s | 1.06x | ~tie | |
 
-**Briv/Parity: 16 of 18. Behind: 2** — ring_buffer (1.15x), nbody_newton (1.36x)
+**Briev/Parity: 16 of 18. Behind: 2** — ring_buffer (1.15x), nbody_newton (1.36x)
 
 ---
 

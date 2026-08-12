@@ -1,6 +1,6 @@
 //! 2026-08-07 (object instance pools): predictably-inexhaustible pools.
 //!
-//! Briv has no runtime errors: a spawn pool must be PROVABLY inexhaustible.
+//! Briev has no runtime errors: a spawn pool must be PROVABLY inexhaustible.
 //! This analysis computes, per obj base, the TOTAL lifetime spawn count
 //! (each bounded firing context's spawns, summed across every node that
 //! spawns the base — the monotonic `__spawn_next_<base>` counter is shared,

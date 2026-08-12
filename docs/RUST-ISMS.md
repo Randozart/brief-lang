@@ -1,6 +1,6 @@
-# Rust-isms to Avoid in Briv
+# Rust-isms to Avoid in Briev
 
-This document tracks patterns from Rust that accidentally leaked into Briv code but violate Briv's philosophy.
+This document tracks patterns from Rust that accidentally leaked into Briev code but violate Briev's philosophy.
 
 ## ❌ `panic()` - Runtime Error Handling
 
@@ -8,7 +8,7 @@ This document tracks patterns from Rust that accidentally leaked into Briv code 
 
 ### The Mistake
 
-```briv
+```briev
 // WRONG - Rust thinking
 defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
     uni opt(Some(v)) = { term v; };
@@ -19,17 +19,17 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
 };
 ```
 
-### Why This Violates Briv Philosophy
+### Why This Violates Briev Philosophy
 
-1. **Contracts, Not Crashes**: Briv uses contracts to guarantee safety at compile-time, not runtime checks
-2. **No `Never` Type**: Briv has no `!` (diverges) type - every function must return
+1. **Contracts, Not Crashes**: Briev uses contracts to guarantee safety at compile-time, not runtime checks
+2. **No `Never` Type**: Briev has no `!` (diverges) type - every function must return
 3. **Lazy Error Handling**: `panic` is a shortcut that avoids proper error propagation
 4. **Philosophy Violation**: "Contracts are the source of truth" - if contract says `[opt.is_some()]`, the None case is impossible
 
 ### The Correct Approaches
 
 **Option 1: Trust the Contract** (Preferred for internal code)
-```briv
+```briev
 defn unwrap<T>(opt: Option<T>) [opt.is_some()][result == @opt.Some_value] -> T {
     uni opt(Some(v)) = { term v; };
     // None case omitted - contract guarantees Some
@@ -38,7 +38,7 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][result == @opt.Some_value] -> T {
 ```
 
 **Option 2: Use Result** (Preferred for public APIs)
-```briv
+```briev
 defn try_unwrap<T>(opt: Option<T>) [true][result.is_ok() || result.is_err()] -> Result<T, String> {
     uni opt(Some(v)) = { term Ok(v); };
     uni opt(None) = { term Err("unwrap on None"); };
@@ -46,7 +46,7 @@ defn try_unwrap<T>(opt: Option<T>) [true][result.is_ok() || result.is_err()] -> 
 ```
 
 **Option 3: Unwrap Or Default**
-```briv
+```briev
 defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
     uni opt(Some(v)) = { term v; };
     uni opt(None) = { term default; };
@@ -75,12 +75,12 @@ defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
 
 ### The Mistake
 
-```briv
+```briev
 // WRONG - No contract!
 defn compile_file(path: String) -> Result<String, String> [true][true]
 ```
 
-### Why This Violates Briv Philosophy
+### Why This Violates Briev Philosophy
 
 - Provides zero compile-time guarantees
 - Equivalent to no contract at all
@@ -88,7 +88,7 @@ defn compile_file(path: String) -> Result<String, String> [true][true]
 
 ### The Fix
 
-```briv
+```briev
 // RIGHT - Meaningful contracts
 defn compile_file(path: String) [path .#Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
 ```
@@ -104,9 +104,9 @@ defn compile_file(path: String) [path .#Size > 0][result.is_ok() || result.is_er
 - [ ] Check all `defn` have non-trivial postconditions
 - [ ] Check all `txn` have non-trivial preconditions
 
-# Rust-isms to Avoid in Briv
+# Rust-isms to Avoid in Briev
 
-This document tracks patterns from Rust that accidentally leaked into Briv code but violate Briv's philosophy.
+This document tracks patterns from Rust that accidentally leaked into Briev code but violate Briev's philosophy.
 
 ## ❌ `panic()` - Runtime Error Handling
 
@@ -114,7 +114,7 @@ This document tracks patterns from Rust that accidentally leaked into Briv code 
 
 ### The Mistake
 
-```briv
+```briev
 // WRONG - Rust thinking
 defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
     uni opt(Some(v)) = { term v; };
@@ -125,17 +125,17 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
 };
 ```
 
-### Why This Violates Briv Philosophy
+### Why This Violates Briev Philosophy
 
-1. **Contracts, Not Crashes**: Briv uses contracts to guarantee safety at compile-time, not runtime checks
-2. **No `Never` Type**: Briv has no `!` (diverges) type - every function must return
+1. **Contracts, Not Crashes**: Briev uses contracts to guarantee safety at compile-time, not runtime checks
+2. **No `Never` Type**: Briev has no `!` (diverges) type - every function must return
 3. **Lazy Error Handling**: `panic` is a shortcut that avoids proper error propagation
 4. **Philosophy Violation**: "Contracts are the source of truth" - if contract says `[opt.is_some()]`, the None case is impossible
 
 ### The Correct Approaches
 
 **Option 1: Trust the Contract** (Preferred for internal code)
-```briv
+```briev
 defn unwrap<T>(opt: Option<T>) [opt.is_some()][result == @opt.Some_value] -> T {
     uni opt(Some(v)) = { term v; };
     // None case omitted - contract guarantees Some
@@ -144,7 +144,7 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][result == @opt.Some_value] -> T {
 ```
 
 **Option 2: Use Result** (Preferred for public APIs)
-```briv
+```briev
 defn try_unwrap<T>(opt: Option<T>) [true][result.is_ok() || result.is_err()] -> Result<T, String> {
     uni opt(Some(v)) = { term Ok(v); };
     uni opt(None) = { term Err("unwrap on None"); };
@@ -152,7 +152,7 @@ defn try_unwrap<T>(opt: Option<T>) [true][result.is_ok() || result.is_err()] -> 
 ```
 
 **Option 3: Unwrap Or Default**
-```briv
+```briev
 defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
     uni opt(Some(v)) = { term v; };
     uni opt(None) = { term default; };
@@ -181,12 +181,12 @@ defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
 
 ### The Mistake
 
-```briv
+```briev
 // WRONG - No contract!
 defn compile_file(path: String) -> Result<String, String> [true][true]
 ```
 
-### Why This Violates Briv Philosophy
+### Why This Violates Briev Philosophy
 
 - Provides zero compile-time guarantees
 - Equivalent to no contract at all
@@ -194,7 +194,7 @@ defn compile_file(path: String) -> Result<String, String> [true][true]
 
 ### The Fix
 
-```briv
+```briev
 // RIGHT - Meaningful contracts
 defn compile_file(path: String) [path .#Size > 0][result.is_ok() || result.is_err()] -> Result<String, String>
 ```

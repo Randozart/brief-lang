@@ -1,4 +1,4 @@
-# Briv Compiler - Agent Guidelines
+# Briev Compiler - Agent Guidelines
 
 See CLAUDE.md for complete documentation. This file ensures OpenCode picks up the same guidelines.
 
@@ -6,7 +6,7 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 
 ### Philosophy (One Sentence)
 
-Briv's contract system (`[pre][post]`) is not a correctness tax — it is
+Briev's contract system (`[pre][post]`) is not a correctness tax — it is
 information the compiler uses to optimize harder. Safety IS the
 optimization enabler. Full machine access is available through contracts
 proven at compile time, not `unsafe` blocks. See
@@ -14,55 +14,55 @@ proven at compile time, not `unsafe` blocks. See
 
 ### GLUE — General Language Unification Engine
 
-GLUE is a universal FFI broker built on Briv's `meld` system. Any two
+GLUE is a universal FFI broker built on Briev's `meld` system. Any two
 languages that consume LLVM-compatible object code can be linked through GLUE.
-Neither language knows Briv exists. Both see their own native interface.
-Briv is the invisible translator — `meld` proves type compatibility at
+Neither language knows Briev exists. Both see their own native interface.
+Briev is the invisible translator — `meld` proves type compatibility at
 compile time, `frgn` declares calls into the target language, `#export`
 exposes functions to the caller.
 
 **The bridge is native object code.** No C compiler, no `extern "C"`, no `cc`
-crate. Briv emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
+crate. Briev emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
 linker consumes it directly.
 
-**GLUE adapters use Briv's `$!` macro system**, not a separate template engine.
+**GLUE adapters use Briev's `$!` macro system**, not a separate template engine.
 A `$!macro` takes the bridge's `#export`/`frgn`/`meld` declarations at compile
 time and emits native wrapper source code for the target language. Adding a
 language = writing one `.bv` macro file.
 
 **Key directives:**
-- `briv link <path> <function>` — analyzes a foreign library, generates a `.bv`
+- `briev link <path> <function>` — analyzes a foreign library, generates a `.bv`
   with `frgn` declarations. Cross-references against the `Intrinsic` enum in
   `src/ast.rs` — if a `frgn` name matches an intrinsic, emit `intrinsic_call#()`
   instead. This replaces the old TOML binding system.
-- `briv export <bridge.bv> <language>` — compiles to `.a` (library mode, no
+- `briev export <bridge.bv> <language>` — compiles to `.a` (library mode, no
   `main`), reads `glue.dbvl` to find the adapter entry for `<language>`, invokes
   the `$!` macro for that language, generates native wrappers.
-- `glue <target> <function> <language>` — one-shot wrapper: `briv link` + `briv export`.
+- `glue <target> <function> <language>` — one-shot wrapper: `briev link` + `briev export`.
 
 **GLUE protocol files:**
-- `glue.dbvl` — Data Briv Lines adapter registry (one language per line)
-- `glue.dbvs` — Data Briv Schema that validates `glue.dbvl` entries
+- `glue.dbvl` — Data Briev Lines adapter registry (one language per line)
+- `glue.dbvs` — Data Briev Schema that validates `glue.dbvl` entries
 - Adapter macros live in `glue/adapters/<language>.bv`
 
-**Data Briv naming:**
-- `.dbv` — Data Briv, universal data extension. The `V` stands for "Briv."
-- `.dbvl` — Data Briv Lines. Raw data, one line per entry.
-- `.dbvs` — Data Briv Schema. Validates `.dbvl` and `.dbv` files.
+**Data Briev naming:**
+- `.dbv` — Data Briev, universal data extension. The `V` stands for "Briev."
+- `.dbvl` — Data Briev Lines. Raw data, one line per entry.
+- `.dbvs` — Data Briev Schema. Validates `.dbvl` and `.dbv` files.
 
 ### Correctness Over Speed (All Development)
 
-The Briv compiler is built to be correct, not to ship an MVP as fast as
+The Briev compiler is built to be correct, not to ship an MVP as fast as
 possible. Being able to test between changes is important, but test with code
 that won't need rewriting immediately.
 
 **This applies to every feature, not just GLUE.** Before any implementation:
 1. Understand WHY the approach is correct (not just THAT it works)
 2. Document the reasoning in the commit
-3. Use Briv's existing systems (`$!` macros, `meld`, contracts) rather than
+3. Use Briev's existing systems (`$!` macros, `meld`, contracts) rather than
    building parallel Rust infrastructure that will be thrown away during
    self-hosting. Every throwaway Rust template engine is technical debt that
-   must be rewritten in Briv later.
+   must be rewritten in Briev later.
 4. When you encounter a deprecated pattern (frgn where intrinsic exists,
    double `[true][true]` contracts, TOML bindings for intrinsics), fix it
    rather than propagating it. The codebase is a living artifact — clean as
@@ -93,12 +93,12 @@ Instead:
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
-- **Compile RBV**: `./target/release/briv-compiler rbv <file.rbv>`
+- **Compile RBV**: `./target/release/briev-compiler rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness (nanosecond CLOCK_MONOTONIC, 5-iteration average). Ad-hoc timing produces false hangs and imprecise numbers.
 
 ### Examples Library
 
-Whenever you encounter an obscure or under-documented Briv syntax pattern, create
+Whenever you encounter an obscure or under-documented Briev syntax pattern, create
 a minimal self-contained example in `examples/` and mention it in the relevant
 architecture doc. Name the file after the pattern (e.g., `examples/wasm-import.rbv`).
 
@@ -106,19 +106,19 @@ This builds a living library of real syntax usage. If an example already exists
 for a pattern, add a comment referencing it rather than duplicating.
 
 ### File Types
-- **.bv** - Briv (standard Briv file, cosmopolitan tier — any FFI, any language, OS assumed)
-- **.sbv** - Strict Briv (full contracts required, no sugar defaults)
-- **.abv** - Accelerated Briv (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Briv Accel")
-- **.rbv** - Rendered Briv (Briv + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Briv Render")
-- **.srbv** - Strict Rendered Briv (full contracts required in web target)
-- **.ebv** - Embedded Briv (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Briv Embed")
-- **.sebv** - Strict Embedded Briv (full contracts required, bare metal)
-- **.cbv** - Circuit Briv (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Briv Circuit"; formerly Hardware Embedded Briv / `.hebv`)
-- **.dbv/.dbvs/.dbvl** - Data Briv (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Briv" or "Briv Data")
+- **.bv** - Briev (standard Briev file, cosmopolitan tier — any FFI, any language, OS assumed)
+- **.sbv** - Strict Briev (full contracts required, no sugar defaults)
+- **.abv** - Accelerated Briev (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Briev Accel")
+- **.rbv** - Rendered Briev (Briev + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Briev Render")
+- **.srbv** - Strict Rendered Briev (full contracts required in web target)
+- **.ebv** - Embedded Briev (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Briev Embed")
+- **.sebv** - Strict Embedded Briev (full contracts required, bare metal)
+- **.cbv** - Circuit Briev (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Briev Circuit"; formerly Hardware Embedded Briev / `.hebv`)
+- **.dbv/.dbvs/.dbvl** - Data Briev (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Briev" or "Briev Data")
 
 ### Contract Sugar Syntax
 
-Briv provides sugar for single-sided contracts. Use these where possible in the stdlib
+Briev provides sugar for single-sided contracts. Use these where possible in the stdlib
 to teach readers the pattern:
 
 | Syntax | Precondition | Postcondition | Meaning |
@@ -137,11 +137,11 @@ postcondition (defaults to `true`).
 
 ### Pipe Chaining Sugar
 
-Briv provides pipe chaining (`|>`) as a syntactic sugar that desugars to
+Briev provides pipe chaining (`|>`) as a syntactic sugar that desugars to
 flat let-bindings before typechecking. All three active backends see only
 the desugared form — zero runtime overhead.
 
-```briv
+```briev
 x |> f()            // f(x) — pipeline value prepended as first arg
 x |> f() |> g()     // g(f(x)) — multi-step chain
 x |> f() .|> g()    // .|> reads from 1 position back in pipeline stack
@@ -163,7 +163,7 @@ See `docs/architecture/features/pipe.md` for full documentation.
 
 **INTRINSICS BEFORE FRGN**: Before reaching for a `frgn` declaration, check if
 an `Intrinsic` variant already exists that does the same thing. This is
-especially critical in `.abv` (Accelerated Briv) files, where `frgn` is banned:
+especially critical in `.abv` (Accelerated Briev) files, where `frgn` is banned:
   - Need to print? → `print_int#`, `print_float#`, `putchar#` (already exist)
   - Need input? → `get_env_int#`, `read_stdin#` (already exist)
   - Need GPU thread ID? → `get_global_id#`, `get_local_id#` (already exist)
@@ -197,7 +197,7 @@ especially critical in `.abv` (Accelerated Briv) files, where `frgn` is banned:
 
 A program that produces no observable effect IS dead code. The compiler is correct to eliminate it.
 
-Briv's liveness model: **a value is live if an FFI call consumes it.** Every program must interact with the world — print, file I/O, network — via `frgn` calls.
+Briev's liveness model: **a value is live if an FFI call consumes it.** Every program must interact with the world — print, file I/O, network — via `frgn` calls.
 
 If the compiler folded your hot loop to `store i64 N`, **the compiler is right.** Your program produced no observable output. The fix is NOT liveness hacks (`x == x`, synthetic exit fields). The fix IS `frgn __print_int(result)`.
 
@@ -218,7 +218,7 @@ is structurally live by construction.
   the compiler is RIGHT to eliminate it. The fix is `frgn __print_int(result)`, not hacks.
 
 **The correct pattern:**
-```briv
+```briev
 frgn __get_env_int(name: Ptr<Byte>) -> Int ;
 frgn __print_int(n: Int) -> Bool ;
 frgn XXH64(data: Int, len: Int, seed: Int) -> Int ;
@@ -249,17 +249,17 @@ conventions. This section summarizes the key rules.
 
 ### Benchmarks test semantic goals, not syntactic features
 
-Briv benchmarks answer: **"Can Briv compute X with competitive performance vs C?"** — not "Does Briv have feature Y?" Implement the semantic goal using Briv's idioms, not a line-by-line port.
+Briev benchmarks answer: **"Can Briev compute X with competitive performance vs C?"** — not "Does Briev have feature Y?" Implement the semantic goal using Briev's idioms, not a line-by-line port.
 
-### Benchmarks exist to find flaws in Briv
+### Benchmarks exist to find flaws in Briev
 
 A benchmark that fails (won't compile, hangs, wrong output) tells you something is missing. A benchmark that is "too good to be true" (0.001s for real work) tells you the compiler folded your dead code. Both are diagnostic signals.
 
-If Briv beats C by an implausible margin, suspect the C reference has been hobbled (volatile, unused return). Fix the C reference — the only valid victory is symmetric, structurally-live programs.
+If Briev beats C by an implausible margin, suspect the C reference has been hobbled (volatile, unused return). Fix the C reference — the only valid victory is symmetric, structurally-live programs.
 
 ### When a benchmark can't be implemented as-is: find the isomorphism
 
-| C pattern | Briv-idiomatic equivalent |
+| C pattern | Briev-idiomatic equivalent |
 |-----------|---------------------------|
 | `malloc` + pointer navigation | Contract-proven struct arrays + index traversal |
 | `double u[N]` (runtime-sized) | Contract-proven compile-time bound + `<-` push |
@@ -298,7 +298,7 @@ The harness detects precomputed binaries by `.text` size ratio (< 25% of C → `
 
 ### The C reference is symmetric, always
 
-Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused variables. Any asymmetry is a signal of a missing Briv optimization — fix the compiler, not the C code.
+Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused variables. Any asymmetry is a signal of a missing Briev optimization — fix the compiler, not the C code.
 
 ### Useful utilities become standard library functions
 
@@ -311,22 +311,22 @@ When a benchmark produces a general-purpose helper (rolling hash, vector math, f
 
 ### Symmetric by Default
 
-Every Briv benchmark must compute the **same output** as its C reference for
-the same input. If Briv's idiomatic approach differs fundamentally from C's
+Every Briev benchmark must compute the **same output** as its C reference for
+the same input. If Briev's idiomatic approach differs fundamentally from C's
 (different data structures, control flow, or algorithm), create **two**
 benchmarks:
 
 | Variant | Intent |
 |---------|--------|
-| **Symmetric** (`_sym`) | Mirrors C step-for-step using Briv features. Answers: "Given the same algorithm, does Briv's throughput match C's?" |
-| **Idiomatic** (`_idio`) | Uses Briv-native patterns (contract-proven loops, reactive transactions) for the same semantic result. Answers: "Can Briv's optimizer find a better path?" |
+| **Symmetric** (`_sym`) | Mirrors C step-for-step using Briev features. Answers: "Given the same algorithm, does Briev's throughput match C's?" |
+| **Idiomatic** (`_idio`) | Uses Briev-native patterns (contract-proven loops, reactive transactions) for the same semantic result. Answers: "Can Briev's optimizer find a better path?" |
 
 Both must produce identical output for the same input. Neither claims to be
 the single "fair" comparison. When fixing a broken benchmark (wrong output,
 wrong algorithm), fix the bug — do not split into two variants unless the
 approaches genuinely differ.
 
-See also: Hillel Wayne's observation about `queue_drain` — C and Briv
+See also: Hillel Wayne's observation about `queue_drain` — C and Briev
 were computing the same result through different algorithms. The fix is
 not to hobble either version but to create a symmetric pair.
 
@@ -355,7 +355,7 @@ If the compiler precomputes your benchmark, **increase the budget or make the bo
 
 ## Language Architecture
 
-Briv is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
+Briev is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`node`):
 - **Precondition** (guard): `[x > 0 && y < N]`
 - **Postcondition** (contract): `[x == N]`
 - **Body**: `{ &x = x + 1; &y = y * 2; }`
@@ -366,10 +366,10 @@ Loops are transactions with bounded convergence. Recursion is a transaction chai
 
 | Wrong | Correct |
 |-------|---------|
-| "Briv is a reactive state machine DSL" | Briv is general-purpose. Transactions ARE loops, iteration, and recursion. |
-| "Briv has no arrays/strings/collections" | Interpreter supports `List<T>`, `String`, `HashMap`, `HashSet`, `Stack`, `Queue`, `StringBuilder`. Stdlib has 26 modules. |
-| "Briv can't do tree/heap benchmarks" | Interpreter supports recursive enums, structs, field access, match. |
-| "Briv needs malloc/FFI for buffers" | Compiler proves bounds from contracts, allocates accordingly. |
+| "Briev is a reactive state machine DSL" | Briev is general-purpose. Transactions ARE loops, iteration, and recursion. |
+| "Briev has no arrays/strings/collections" | Interpreter supports `List<T>`, `String`, `HashMap`, `HashSet`, `Stack`, `Queue`, `StringBuilder`. Stdlib has 26 modules. |
+| "Briev can't do tree/heap benchmarks" | Interpreter supports recursive enums, structs, field access, match. |
+| "Briev needs malloc/FFI for buffers" | Compiler proves bounds from contracts, allocates accordingly. |
 | "The LLVM backend is the language" | Interpreter is the reference. Backend is an optimization pass. |
 
 ### Two-Layer Architecture
@@ -514,7 +514,7 @@ Preserve contract information in codegen so the optimizer can reason about it.
 5. Document bugs and root causes in BUGS.md
 6. Never add Rust built-ins for things the standard library should provide
 7. **No prototyping — build clean**: Every optimization in its proper module. Never inline new analysis into codegen.
-8. **Never weaken C benchmarks**: Fix Briv to match or beat C, not hobble C.
+8. **Never weaken C benchmarks**: Fix Briev to match or beat C, not hobble C.
 9. **Interpreter IS the reference**: Add to interpreter first, then codegen.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
 11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
@@ -529,7 +529,7 @@ Preserve contract information in codegen so the optimizer can reason about it.
 
 ## Self-Hosting Pipeline
 
-The Briv-in-Briv compiler lives in `lib/compiler/`. Run via `briv-compiler selfhost <file.bv>`.
+The Briev-in-Briev compiler lives in `lib/compiler/`. Run via `briev-compiler selfhost <file.bv>`.
 
 **NOT currently being worked on.** Broken at parser level (multidimensional slice bug). Deferred.
 
@@ -554,7 +554,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 - **SLP hazard analyzer** — disables SLP when peak register demand exceeds hardware.
 - **Equality saturation** — lightweight recursive simplification (5-pass fixpoint, 9 rewrite rules).
 - **Compile-time PGO** — interpreter profiling guides LLVM branch weights.
-- **LTO pipeline** — merges `briv_rt.c` bitcode with program IR.
+- **LTO pipeline** — merges `briev_rt.c` bitcode with program IR.
 - **MMIO / DBVS / hardware handoff** — address plumbing, schema validation, Vivado XSA extraction.
 - **alka/on_exit permanently abandoned** — parser paths commented out, code left only as a historical artifact. No revisit planned.
 - **`__rt_poll()`** — non-blocking event drain at main() entry.
@@ -594,7 +594,7 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **`?#` proof oracle** complete: AST/parser, interpreter with fuel injection + state rollback + handler, structural recursion checker (P021), all match arms
 - **Instruction reordering** complete: read/write set analysis, dependency DAG, Kahn's topological sort ILP optimization
 - **Variadic `fprintf` syntax** fixed: 3 call sites now use `(ptr, ptr, ...)` prototype (loop_engine.rs:872, emit_expr.rs:1747, emit_expr.rs:1769)
-- **TBAA metadata** implemented: 6-node type tree (Briv/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
+- **TBAA metadata** implemented: 6-node type tree (Briev/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
 - **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
 - **Webstack backend gaps closed** (2026-06-21): ARM bare-metal codegen path no longer emits `true` placeholder — `statement_to_rust()`/`expr_to_rust()` cover all Statement and Expr variants with native Rust codegen. TS path: intrinsic handler expanded from 4 to 25+ variants (Math.*, String(), Date.now(), etc.), all Statement types (Foreach, SyncBlock, OnExit, Oracle, Await, Async, AsyncAwait, Unification, InlineAsm) emit real TS code instead of `// statement omitted`. 9 new tests.
 - **CIRCT backend gaps closed** (2026-06-21): `Expr::Call` emits `hw.instance` submodule instantiation instead of returning `None`. `Expr::IntrinsicCall` handles Abs (comb.neg+comb.mux), Ctpop/Ctlz/Cttz (comb.*), Bitreverse (comb.rev), Size, Sqrt/Fabs/Ceil/Floor/Sin/Cos/Pow (comb.*f f64). Fixed duplicate trigger processing bug. 5 new tests.
@@ -644,9 +644,9 @@ See `docs/plans/2026-06-15-trinity-work-items.md` for the full plan. Summary:
 
 `Statement::Guarded` is a **one-shot conditional** — it evaluates the guard once and executes the body zero or one times. It does NOT loop. A `defn` body executes as a straight-line sequence with no implicit transaction wrapping.
 
-The correct pattern for iteration in Briv is a **callable `txn`** (not `node`). A regular `txn` takes parameters and returns values like a `defn`, but its body executes in a convergence loop: evaluate precondition → execute body → check postcondition → repeat if precondition still holds. The precondition becoming false is the convergence signal.
+The correct pattern for iteration in Briev is a **callable `txn`** (not `node`). A regular `txn` takes parameters and returns values like a `defn`, but its body executes in a convergence loop: evaluate precondition → execute body → check postcondition → repeat if precondition still holds. The precondition becoming false is the convergence signal.
 
-```briv
+```briev
 // CORRECT — convergence loop via txn + [pre][post]:
 txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list :> Size][i == list :> Size] -> List<U>
@@ -734,7 +734,7 @@ docs/architecture/
                            #   proof → analyze → codegen
   praetor-log.md           # Running log of diagnostics found/resolved (datestamped)
   kani-harnesses.md        # Inventory of formal verification proofs
-  glossary.md              # Briv-specific terminology
+  glossary.md              # Briev-specific terminology
 ```
 
 ### Rules
@@ -760,7 +760,7 @@ interaction patterns.
 | Section | Content | Length |
 |---------|---------|--------|
 | Header | Purpose, date added, phase | 2 lines |
-| Syntax | Briv syntax for the construct with examples | 10–30 lines |
+| Syntax | Briev syntax for the construct with examples | 10–30 lines |
 | Typechecking | How types are inferred/checked | 5–15 lines |
 | Evaluation | How it evaluates in the interpreter | 5–15 lines |
 | Codegen | Per-backend notes (LLVM, VHDL, Webstack) | 10–30 lines |
@@ -945,7 +945,7 @@ for all `*_NONBLOCK` constants.
 ### 2026-06-17: `read_file#` returns null instead of error — FFI must use `Result<T, E>`
 
 **Root cause**: `read_file#` returned `i8*` — either a valid C string or NULL if
-the file didn't exist. The Briv type system has no notion of "nullable pointer".
+the file didn't exist. The Briev type system has no notion of "nullable pointer".
 When the file was missing, the code dereferenced a null string → **SIGSEGV**.
 
 **Fix**: Changed `read_file#` to return `Result<String, String>` — `Ok(contents)`
@@ -953,7 +953,7 @@ on success, `Err("file not found")` on failure. The LLVM backend constructs a
 heap-allocated `Result` enum (malloc + discriminant + payload), consistent with
 the existing enum construction path at `emit_expr.rs:428-463`.
 
-**Architectural rule**: Every Briv `#`-intrinsic that can fail MUST return
+**Architectural rule**: Every Briev `#`-intrinsic that can fail MUST return
 `Result<T, E>` where `E` describes the failure. Raw `String` returns that can
 be null are forbidden — they subvert the type system.
 
@@ -1011,7 +1011,7 @@ address this but only covered `done_boot` while the template kept
 
 ### 2026-06-17: TBAA metadata tree for `i64`-boxed types
 
-**Implementation**: Added 6-node TBAA metadata tree (Briv root + Int, Bool,
+**Implementation**: Added 6-node TBAA metadata tree (Briev root + Int, Bool,
 Char, String, Float sub-types). Annotated ALL state field loads
 (`pre_load_all_fields`), non-SSA state stores, and struct `FieldAccess`
 loads with `!tbaa !N` metadata. This enables LLVM's type-based alias
@@ -1019,7 +1019,7 @@ analysis to disambiguate accesses at different type roots even though all
 values are stored as `i64` at the IR level.
 
 **Nodes defined**: `mod.rs:1669-1675`
-- `!0 = !{!"Briv"}`
+- `!0 = !{!"Briev"}`
 - `!1 = !{!"Int", !0}`   — i64-stored values
 - `!2 = !{!"Bool", !0}`  — i8-stored Bool
 - `!3 = !{!"Char", !0}`  — i32-stored Char

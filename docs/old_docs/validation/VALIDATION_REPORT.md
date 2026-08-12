@@ -1,4 +1,4 @@
-# Briv Compiler Validation Report
+# Briev Compiler Validation Report
 **Date:** 2026-04-05  
 **Status:** ✅ PROOF OF CONCEPT SUCCESSFUL
 
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Briv's compiler successfully validates its core value proposition: **compile-time detection of concurrency bugs, contract violations, and state management errors that would require extensive testing in imperative languages**.
+Briev's compiler successfully validates its core value proposition: **compile-time detection of concurrency bugs, contract violations, and state management errors that would require extensive testing in imperative languages**.
 
 **Test Results:** 8/8 real-world programs compile successfully with full proof verification.
 
@@ -60,7 +60,7 @@ Briv's compiler successfully validates its core value proposition: **compile-tim
 ## Compiler Achievements
 
 ### 1. Catches Concurrency Bugs at Compile Time
-```briv
+```briev
 # This FAILS at compile time (ownership conflict):
 async node writer_a [true] { &x = 1; term; };
 async node writer_b [true] { &x = 2; term; };
@@ -68,7 +68,7 @@ async node writer_b [true] { &x = 2; term; };
 Error message clearly explains the conflict and suggests fix.
 
 ### 2. Verifies Contract Implications
-```briv
+```briev
 # The compiler PROVES this works:
 txn increment [counter < 10] [counter == @counter + 1] {
   &counter = counter + 1;
@@ -77,7 +77,7 @@ txn increment [counter < 10] [counter == @counter + 1] {
 ```
 
 ### 3. Enforces Lock-Free Safety
-```briv
+```briev
 # Safe - preconditions are mutually exclusive:
 async node reader [state == 0] { ... };
 async node writer [state == 1] { &state = 0; ... };
@@ -102,7 +102,7 @@ Successfully compiled 7-stage order processing with:
 - Integration test suites ❌ (slow feedback)
 - Runtime deadlock detection ❌ (production issues)
 
-**In Briv**, the compiler:
+**In Briev**, the compiler:
 - ✅ Verifies no races possible
 - ✅ Proves contracts satisfied
 - ✅ Guarantees termination paths exist
@@ -110,7 +110,7 @@ Successfully compiled 7-stage order processing with:
 
 ### Unique Value Proposition
 
-Briv is **not just another language** — it's a **verified execution engine** where:
+Briev is **not just another language** — it's a **verified execution engine** where:
 
 1. **Preconditions = Guards**: State-driven execution, not imperative control flow
 2. **Postconditions = Guarantees**: Compiler proves outcomes before runtime
@@ -174,7 +174,7 @@ VALIDATION_REPORT.md      (this file)
 
 ## Conclusion
 
-**Briv's compiler is ready for production use.**
+**Briev's compiler is ready for production use.**
 
 The proof system successfully:
 - Catches concurrency bugs impossible to prevent in imperative languages

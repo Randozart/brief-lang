@@ -1,25 +1,25 @@
-# Link-Demo — Foreign C Source Linked into Briv
+# Link-Demo — Foreign C Source Linked into Briev
 
 This example demonstrates linking a C source file (`helper.c`) into a
-Briv program via `import "link-demo/helper.c"`.
+Briev program via `import "link-demo/helper.c"`.
 
 ## Files
 
-- `link-example.bv` — Briv program that calls C functions
+- `link-example.bv` — Briev program that calls C functions
 - `helper.c` — C source with `double_it()` and `greet()`
 
 ## How it works
 
 1. `import "link-demo/helper.c"` tells the compiler to find `helper.c`
    relative to the importing file and compile it to LLVM bitcode.
-2. The `frgn` declarations in `.bv` expose the C functions to Briv.
-3. The compiler runs LTO across both the Briv-generated IR and the
+2. The `frgn` declarations in `.bv` expose the C functions to Briev.
+3. The compiler runs LTO across both the Briev-generated IR and the
    C-generated bitcode, producing a single optimized binary.
 
 ## Running
 
 ```bash
-briv-compiler build examples/link-demo/link-example.bv
+briev-compiler build examples/link-demo/link-example.bv
 ```
 
 ## Language support

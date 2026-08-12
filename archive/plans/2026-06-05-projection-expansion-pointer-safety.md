@@ -49,9 +49,9 @@
 
 New file: `lib/std/bits.bv`
 
-Pure `defn` wrappers over `:>` projections. No FFI, no TOML, no DBriv.
+Pure `defn` wrappers over `:>` projections. No FFI, no TOML, no DBriev.
 
-```briv
+```briev
 defn popcount(x: Int) [true][term >= 0 && term <= 64] -> Int { term x :> Popcount; };
 defn leading_zeros(x: Int) [true][term >= 0 && term <= 64] -> Int { term x :> LeadingZeros; };
 defn trailing_zeros(x: Int) [true][term >= 0 && term <= 64] -> Int { term x :> TrailingZeros; };
@@ -121,7 +121,7 @@ For each ptr[i] in the program:
 
 New file: `lib/std/ptr.bv`
 
-```briv
+```briev
 defn read<T>(p: Ptr<T>, i: Int)
   [i >= 0 && (i + 1) * (T :> Bytes) <= p :> Bytes]
   [true] -> T
@@ -168,7 +168,7 @@ schema BottleneckConfig {
 ```
 
 Extended `CodegenSection` with `bottlenecks: Option<String>` pointing to `.dbvs` path.
-Parsed via existing `src/dbriv/parser.rs`.
+Parsed via existing `src/dbriev/parser.rs`.
 
 ### 4b: `RooflineAnalyzer` Pass
 

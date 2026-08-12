@@ -10,9 +10,9 @@
 
 ### Core Architecture Change
 All LLVM SSA values carry their natural types instead of being boxed in `i64`:
-| Briv type | Was (i64 boxed) | Now (native) |
+| Briev type | Was (i64 boxed) | Now (native) |
 |------------|----------------|--------------|
-| `String` / `Data` | `i64` (ptrtoint of header) | `i8*` (pointer to Briv 2-slot header) |
+| `String` / `Data` | `i64` (ptrtoint of header) | `i8*` (pointer to Briev 2-slot header) |
 | `Bool` | `i64` (trunc/zext round-trip) | `i1` (SSA ops), `i8` (memory) |
 | `Char` | `i64` (zext from i32) | `i32` |
 | `Int` / `UInt` | `i64` | `i64` (no change) |
@@ -21,9 +21,9 @@ All LLVM SSA values carry their natural types instead of being boxed in `i64`:
 Every `inttoptr`/`ptrtoint` round-trip for strings is eliminated. Every `trunc`/`zext` for bools and chars is eliminated. The state field type system (`trg_llvm_storage_ty`) already returns native types — the only problem was the expression system boxing them.
 
 ### String Concatenation Strategy
-- **Both operands compile-time constant** → fold at compile time (single global Briv header)
+- **Both operands compile-time constant** → fold at compile time (single global Briev header)
 - **One or both runtime** → always-allocate inline concat (malloc + memcpy + header setup)
-- **No buffer reuse** — Briv compiler has no ownership/lifetime analysis (would need to be built from scratch)
+- **No buffer reuse** — Briev compiler has no ownership/lifetime analysis (would need to be built from scratch)
 
 ---
 
@@ -46,7 +46,7 @@ Every `inttoptr`/`ptrtoint` round-trip for strings is eliminated. Every `trunc`/
 + Type::String | Type::Data => "i8*",    // CORRECT — C functions expect char*
 ```
 
-**1c. String constant globals → Briv headers**
+**1c. String constant globals → Briev headers**
 
 Already done in prior edit. Verify format:
 ```llvm
@@ -68,7 +68,7 @@ Every expression variant that produces or consumes strings (i8*), bools (i1), or
 ```rust
 /// Emit inline string concat: malloc + header setup + memcpy.
 /// No buffer reuse — we lack ownership analysis.
-/// Both %a and %b are i8* (Briv header pointers).
+/// Both %a and %b are i8* (Briev header pointers).
 /// Returns TypedRegister with ty: Type::String.
 fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &str, b: &str) -> TypedRegister {
     let ha = format!("%cha{}", self.txn_counter); self.txn_counter += 1;
@@ -272,9 +272,9 @@ AFTER:
 
 **2h. `Expr::Call(name, args)` — native types for FFI**
 
-Currently marshals params (lines 290, 327) with `inttoptr i64 %raw to i8*` for String params. With native types, String params are already `i8*`, so we just pass them through directly. BUT we still need to extract `data_ptr` from the Briv header — the C function expects `char*`, not `i8*` (Briv header pointer).
+Currently marshals params (lines 290, 327) with `inttoptr i64 %raw to i8*` for String params. With native types, String params are already `i8*`, so we just pass them through directly. BUT we still need to extract `data_ptr` from the Briev header — the C function expects `char*`, not `i8*` (Briev header pointer).
 
-Wait — this is the key issue. Even with native `i8*` for strings, the `i8*` is a **Briv header pointer**, not a C string pointer. The C function expects `char*` pointing to the actual string data. So we still need to extract slot 0.
+Wait — this is the key issue. Even with native `i8*` for strings, the `i8*` is a **Briev header pointer**, not a C string pointer. The C function expects `char*` pointing to the actual string data. So we still need to extract slot 0.
 
 WITH native types, the code changes from:
 ```llvm
@@ -285,7 +285,7 @@ WITH native types, the code changes from:
 ```
 to:
 ```llvm
-; NEW: %raw is i8* (native Briv header pointer)
+; NEW: %raw is i8* (native Briev header pointer)
 %hp = bitcast i8* %raw to i64*     ; header pointer
 %dp = load i64, i64* %hp           ; data_ptr
 %cstr = inttoptr i64 %dp to i8*    ; C string
@@ -293,7 +293,7 @@ to:
 
 The only difference is `bitcast` instead of `inttoptr` (because the input is already a pointer). The rest is the same.
 
-For return marshaling: when C returns `i8*` and Briv expects String → wrap in Briv header via `strlen` + `malloc` + memcpy inline.
+For return marshaling: when C returns `i8*` and Briev expects String → wrap in Briev header via `strlen` + `malloc` + memcpy inline.
 
 **2i. `Expr::IntrinsicCall { intrinsic, args }` — native types**
 
@@ -305,7 +305,7 @@ The stubs currently return `add i64 0, 0` — these need their types updated.
 Example intrinsic returns that change:
 - `Intrinsic::Exit` → currently emits `add i64 0, 0` after call — stays `i64` (exit has no meaningful return)
 - `Intrinsic::Time` → currently `call i64 @time(i64* null)` — returns `i64`, NO change
-- `Intrinsic::ReadFile` → currently `call ptr @briv_read_file(ptr %fp)` then `ptrtoint ptr %raw to i64` — change to just use ptr directly as `i8*`
+- `Intrinsic::ReadFile` → currently `call ptr @briev_read_file(ptr %fp)` then `ptrtoint ptr %raw to i64` — change to just use ptr directly as `i8*`
 - `Intrinsic::Readln` → `add i64 0, 0 ; readln stub` — change to return `i8*`
 - `Intrinsic::TtyRawMode` → returns Int (i64), no change
 - `Intrinsic::TtySize` → returns Int (i64), no change
@@ -365,7 +365,7 @@ Store let values with native types. String → `i8*` in alloca. Bool → `i8` in
 
 ---
 
-### FILE 4: `lib/runtime/briv_rt.c`
+### FILE 4: `lib/runtime/briev_rt.c`
 
 **4a. Remove `#include <unistd.h>` block** (line 148-150 area)
 **4b. Remove `safe_cstr` function** (lines 152-159)
@@ -448,7 +448,7 @@ The `query_state`, `ensure_state`, `query_show` branches call `spawn_with_output
 **`docs/architecture/features/string-concat.md`**
 
 Cover:
-- Briv string format (2-slot header)
+- Briev string format (2-slot header)
 - LLVM IR lowering for string constants
 - Inline concat IR pattern
 - FFI marshaling at the boundary
@@ -479,7 +479,7 @@ Step 16: emit_stmt.rs — State loads/stores with native types
 Step 17: emit_stmt.rs — Guard conditions (native i1)
 Step 18: cargo test --lib  ◀ VERIFICATION POINT 1
 Step 19: cargo build --release  ◀ VERIFICATION POINT 2
-Step 20: briv_rt.c — cleanup
+Step 20: briev_rt.c — cleanup
 Step 21: Parser — string interpolation
 Step 22: cargo test --lib  ◀ VERIFICATION POINT 3
 Step 23: Officina — all BV fixes
@@ -504,8 +504,8 @@ Parser tests must pass.
 ### VP4 — Officina compilation (Step 26)
 ```bash
 cd ~/Desktop/Projects/officina-cli
-/path/to/briv-compiler llvm officina.bv
-clang -O3 officina.ll /path/to/briv_rt.c -lc -o officina_bin
+/path/to/briev-compiler llvm officina.bv
+clang -O3 officina.ll /path/to/briev_rt.c -lc -o officina_bin
 timeout 5 ./officina_bin
 ```
 Verify: binary boots, TUI renders, input works, no crash within 5 seconds.
@@ -516,7 +516,7 @@ Verify: binary boots, TUI renders, input works, no crash within 5 seconds.
 
 ```
 1. "compiler: native LLVM types for strings (i8*), bools (i1/i8), chars (i32)"
-   Steps 1-19, Step 20. All emit_*.rs + mod.rs + briv_rt.c changes.
+   Steps 1-19, Step 20. All emit_*.rs + mod.rs + briev_rt.c changes.
    Message body: explain the i64 unboxing and inline concat.
 
 2. "feat: string interpolation and @"..." anchor syntax"
@@ -533,7 +533,7 @@ Verify: binary boots, TUI renders, input works, no crash within 5 seconds.
 
 ## Risk Areas
 
-1. **String comparison (`Expr::Eq` on strings)** — currently compares i64 header pointers (identity comparison). With native `i8*`, comparing Briv header `i8*` pointers still gives identity comparison. If content comparison is needed, that's a separate feature. For now, pointer comparison is correct — it matches the interpreter's behavior for `==` on values (interpreter compares `Value` enum, which for `Value::String` compares the Rust `String` contents). Actually, the interpreter compares string CONTENTS, not pointers! So the LLVM backend's pointer comparison is INCONSISTENT with the interpreter. But this was already the case before our changes (the old code compared the `i64` header pointers too). Fixing string comparison is a separate work item.
+1. **String comparison (`Expr::Eq` on strings)** — currently compares i64 header pointers (identity comparison). With native `i8*`, comparing Briev header `i8*` pointers still gives identity comparison. If content comparison is needed, that's a separate feature. For now, pointer comparison is correct — it matches the interpreter's behavior for `==` on values (interpreter compares `Value` enum, which for `Value::String` compares the Rust `String` contents). Actually, the interpreter compares string CONTENTS, not pointers! So the LLVM backend's pointer comparison is INCONSISTENT with the interpreter. But this was already the case before our changes (the old code compared the `i64` header pointers too). Fixing string comparison is a separate work item.
 
 2. **`Expr::Cast from Int to Bool`** — currently emits `trunc i64 %v to i8; %test = icmp ne i8 %v, 0; %r = zext i1 %test to i64`. With native types: `icmp ne i64 %v, 0` (produces i1 directly). This is correct.
 

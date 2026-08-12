@@ -1,4 +1,4 @@
-// Webstack Backend for Briv Compiler
+// Webstack Backend for Briev Compiler
 // Generates Rust code with wasm-bindgen glue for web frontends
 
 import "call_graph";
@@ -180,13 +180,13 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
 // Type Helpers
 // ============================================================================
 
-// Map Briv types to Rust/wasm-bindgen types
-defn type_to_webstack_type(briv_type: Type) -> String {
-    uni briv_type(TypeInt) = { term "i32".to_string() };
-    uni briv_type(TypeFloat) = { term "f64".to_string() };
-    uni briv_type(TypeBool) = { term "bool".to_string() };
-    uni briv_type(TypeString) = { term "String".to_string() };
-    uni briv_type(TypeU64) = { term "u64".to_string() };
+// Map Briev types to Rust/wasm-bindgen types
+defn type_to_webstack_type(briev_type: Type) -> String {
+    uni briev_type(TypeInt) = { term "i32".to_string() };
+    uni briev_type(TypeFloat) = { term "f64".to_string() };
+    uni briev_type(TypeBool) = { term "bool".to_string() };
+    uni briev_type(TypeString) = { term "String".to_string() };
+    uni briev_type(TypeU64) = { term "u64".to_string() };
     term "JsValue".to_string();
 }
 

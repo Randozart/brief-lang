@@ -1,4 +1,4 @@
-# Briv Compiler — Agent Guidelines
+# Briev Compiler — Agent Guidelines
 
 **2026-07-31:** This is the condensed operating manual (~300 lines). The full
 pre-rewrite document is preserved in `AGENTS.md.archive`; reference material
@@ -9,7 +9,7 @@ pre-rewrite document is preserved in `AGENTS.md.archive`; reference material
 ## Operating Contract
 
 You are building a compiler that must be correct for **all programs** written
-in Briv, not just the test case in front of you. Zero tolerance: "probably
+in Briev, not just the test case in front of you. Zero tolerance: "probably
 fine" is a critical failure. Every edge case, undefined behavior, or bug in a
 file you touch is solved completely NOW — never deferred, never "out of scope,"
 never "pre-existing."
@@ -72,7 +72,7 @@ Patches are unacceptable. There is no "go fast and break things."
     table of ALL benchmark results at the current commit BEFORE changes, and the
     new results AFTER. Baseline from a clean `cargo build --release` +
     `bash benchmarks/build_and_bench.sh --runtime`.
-11b. **PERSISTENT BASELINE WORKTREE**: `../briv-compiler-baseline` holds the
+11b. **PERSISTENT BASELINE WORKTREE**: `../briev-compiler-baseline` holds the
     baseline commit for controlled A/B regression detection
     (`bash benchmarks/compare_baseline.sh <name>`). Never excuse a regression as
     "noise" without this experiment.
@@ -91,7 +91,7 @@ Patches are unacceptable. There is no "go fast and break things."
     call sites when changing a helper's behavior.
 17. **MIGRATE WHEN TOUCHED**: When you modify a file, migrate its hand-rolled
     instances to the centralized helpers at the same time.
-18. **NO TYPE NAME MATCHING**: Never match Briv type names (`t == "Int"`) in
+18. **NO TYPE NAME MATCHING**: Never match Briev type names (`t == "Int"`) in
     Rust. Derive LLVM type, protocol category, and ABI width from the
     `TypeUniverse` (via `universe_key()`/`Cast.#` properties) + `CastingGraph`.
     Exceptions: `Type::Ptr(_)`/`Type::Vector`/`Type::Bits(N)` (compiler
@@ -150,7 +150,7 @@ Experiment link command (match the harness exactly):
 
 ```bash
 clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
-    -Wl,--gc-sections "<name>.ll" "lib/runtime/briv_rt.c" -o "<name>"
+    -Wl,--gc-sections "<name>.ll" "lib/runtime/briev_rt.c" -o "<name>"
 ```
 
 ## Architecture Pillars
@@ -176,7 +176,7 @@ clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
 - **`#Category` hashwords** (`#Int`, `#Float`, `#String`, …) are backend
   directives in op signatures; `#Link<name>` emits `-l<name>`; `#System` is the
   sole bare protocol hashword. See `docs/architecture/hash-words.md`.
-- **Intrinsics vs stdlib**: `rm -rf lib/std && brivc --no-stdlib` still
+- **Intrinsics vs stdlib**: `rm -rf lib/std && brievc --no-stdlib` still
   type-checks `let x: Int = 5` ⇒ intrinsic; else stdlib.
 
 ## Observability as Liveness
@@ -192,14 +192,14 @@ contracts.
 
 ## Benchmarks
 
-- **Semantic goals, not syntax**: "Can Briv compute X competitively vs C?" —
-  not "Does Briv have feature Y?"
+- **Semantic goals, not syntax**: "Can Briev compute X competitively vs C?" —
+  not "Does Briev have feature Y?"
 - **Benchmarks exist to find flaws**: a failing benchmark means something is
   missing; a "too good to be true" time means the compiler folded dead code.
 - **Symmetric by default**: same output as the C reference. When approaches
   differ fundamentally, create `_sym` (mirrors C step-for-step) and `_idio`
-  (idiomatic, Briv-native patterns) variants. Never hobble C with `volatile` —
-  fix Briv to match or beat C.
+  (idiomatic, Briev-native patterns) variants. Never hobble C with `volatile` —
+  fix Briev to match or beat C.
 - **Two categories**: `--runtime` (throughput, FFI in hot loop) vs
   `--optimizer` (compile-time folding). The harness detects precomputed
   binaries by `.text` ratio.
@@ -258,7 +258,7 @@ contracts.
 
 - **Build**: `cargo build` · **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
-- **Compile RBV**: `./target/release/brivc rbv <file.rbv>`
+- **Compile RBV**: `./target/release/brievc rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness.
   Ad-hoc timing produces false hangs and imprecise numbers.
 - **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>`
@@ -301,7 +301,7 @@ contracts.
 | **kalman/float_math parity (active plan)** | `docs/plans/2026-07-31-regain-kalman-float-math-parity.md` |
 | **accel GPU offload (implemented 2026-08-06)** | `docs/plans/2026-08-06-accel-gpu-offload.md` |
 | **endprogram/beginprogram (active plan)** | `docs/plans/2026-08-06-endprogram-beginprogram.md` |
-| **Spec / tutorial** | `spec/SPEC.md`, `learn-briv/` |
+| **Spec / tutorial** | `spec/SPEC.md`, `learn-briev/` |
 
 ## For OpenCode
 
@@ -311,7 +311,7 @@ contracts.
 4. Document bugs and root causes in BUGS.md.
 5. Never add Rust built-ins for things the standard library provides.
 6. **No prototyping**: every optimization is a first-class pass in its module.
-7. **Never weaken C benchmarks**: fix Briv to match or beat C.
+7. **Never weaken C benchmarks**: fix Briev to match or beat C.
 8. **Interpreter IS the reference**: add to interpreter first, then codegen.
 9. Write `docs/plans/YYYY-MM-DD-<topic>.md` before plan-driven work.
 10. Update `docs/architecture/` in the same commit as structural changes.

@@ -1,4 +1,4 @@
-// Parser - Recursive descent parser for Briv
+// Parser - Recursive descent parser for Briev
 // Tier 4: Parser Components
 
 import "token";

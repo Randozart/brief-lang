@@ -35,7 +35,7 @@ Two casting forms:
 | 1 | Parser | `parser.rs` | Detect `(Type)expr` in `parse_primary`: `LParen` + built-in type token + `RParen` → parse inner expr → emit `Expr::Cast` |
 | 2 | Typechecker | `typechecker.rs` | Add `Expr::Cast(inner, target_ty)` in `infer_expression`: infer `inner` type, validate conversion compatibility, return `target_ty` |
 | 3 | Interpreter | `interpreter.rs` | Add `Expr::Cast(inner, _)` in `eval_expr`: match on (inner_type, target_type) pairs, implement actual conversion |
-| 4 | C runtime | `briv_rt.c` | Add `__int_to_str(i64) → i8*`, `__str_to_int(i8*) → i64`, `__chr_to_str(i32) → i8*` |
+| 4 | C runtime | `briev_rt.c` | Add `__int_to_str(i64) → i8*`, `__str_to_int(i8*) → i64`, `__chr_to_str(i32) → i8*` |
 | 5 | LLVM backend | `emit_expr.rs` | Add `Expr::Cast` arm + update `emit_cast_convert` for all conversion pairs |
 | 6 | Tests | `tests.rs`, parser tests | Add tests for both syntaxes and all type pairs |
 | 7 | LLVM declares | `mod.rs` | Declare C helper functions |

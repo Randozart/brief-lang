@@ -1,5 +1,5 @@
 [package]
-name = "briv-ffi-native"
+name = "briev-ffi-native"
 version = "0.1.0"
 edition = "2021"
 

@@ -60,7 +60,7 @@ Clang's zero-memory-overhead pattern.
 |---|---|---|---|---|
 | nbody_sqrt | 2.81× | 3.72s | 3.17s | 1.17× |
 | float_math_nonzero | 2.43× | 0.194s | 0.169s | 1.14× |
-| knucleotide | 1.21× | 0.111s | 0.199s | **0.56× Briv wins** |
-| kalman_filter_runtime | 3.62× | 0.178s | 0.184s | **0.96× Briv wins** |
+| knucleotide | 1.21× | 0.111s | 0.199s | **0.56× Briev wins** |
+| kalman_filter_runtime | 3.62× | 0.178s | 0.184s | **0.96× Briev wins** |
 | nbody_newton | 1.08× | precomputed | 9.1s | No hot-loop FFI |
 | fannkuch_redux | 5.06× | precomputed | 0.07s | No hot-loop FFI |

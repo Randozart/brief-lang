@@ -1,8 +1,8 @@
-# Type Mapping: Briv → LLVM
+# Type Mapping: Briev → LLVM
 
 ## Primitive Types
 
-| Briv Type | LLVM Type | Alignment | Notes |
+| Briev Type | LLVM Type | Alignment | Notes |
 |------------|-----------|-----------|-------|
 | `Int` | `i64` | 8 | Signed |
 | `UInt` | `i64` | 8 | Unsigned |
@@ -15,7 +15,7 @@
 
 ## Struct / Rstruct
 
-```briv
+```briev
 rstruct Counter {
     count: Int;
     active: Bool;
@@ -30,7 +30,7 @@ Alignment: first field at offset 0, subsequent fields aligned to their natural a
 
 ## Enum (Tagged Union)
 
-```briv
+```briev
 enum Option<Int> { Some(Int), None }
 ```
 
@@ -45,7 +45,7 @@ enum Option<Int> { Some(Int), None }
 
 ## Tuple
 
-```briv
+```briev
 (Int, Bool)
 ```
 
@@ -57,7 +57,7 @@ Tuples are anonymous structs with numbered fields.
 
 ## List (Dynamic Array)
 
-```briv
+```briev
 [Int]
 ```
 
@@ -70,7 +70,7 @@ Lists are heap-allocated. The LLVM backend emits calls to `malloc`/`free` or use
 
 ## SIMD Vector
 
-```briv
+```briev
 let data: Float[64];
 ```
 

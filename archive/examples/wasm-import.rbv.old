@@ -1,4 +1,4 @@
-// wasm-import.rbv — (wasm) import syntax for compute-heavy Briv sub-programs
+// wasm-import.rbv — (wasm) import syntax for compute-heavy Briev sub-programs
 // The `(wasm)` annotation tells the compiler to compile the imported .bv to
 // a WASM sidecar module and auto-generate TypeScript wrapper functions.
 //
@@ -7,13 +7,13 @@
 // generated in the TS output.
 //
 // Custom `frgn from "c"` in the imported .bv is a compile-time error — WASM
-// modules can only use built-in intrinsics and pure Briv logic.
+// modules can only use built-in intrinsics and pure Briev logic.
 //
 // Other import targets: (circt) for hardware compilation, (javascript) for
 // inline JS/TS functions, (native) for default (no prefix needed).
 //
 // Compilation:
-//   briv build wasm-import.rbv   → emits wasm-import.ts, wasm-import.js, wasm-import.html
+//   briev build wasm-import.rbv   → emits wasm-import.ts, wasm-import.js, wasm-import.html
 //   The physics.wasm sidecar is compiled and embedded as a Uint8Array
 //   in the .ts file, instantiated via WebAssembly.instantiate() at runtime.
 //

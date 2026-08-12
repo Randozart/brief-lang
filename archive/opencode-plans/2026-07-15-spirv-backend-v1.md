@@ -5,7 +5,7 @@
 
 ## Summary
 
-Wire up a minimal SPIR-V backend that compiles Briv GPU kernels
+Wire up a minimal SPIR-V backend that compiles Briev GPU kernels
 (`txn [idx < N]`) to SPIR-V binary modules using the `rspirv` crate.
 6 new files, ~630 lines, 1 new intrinsic.
 
@@ -31,7 +31,7 @@ outputs `Result<Vec<u8>>` (SPIR-V binary). Delegates to builder + kernel modules
 
 ### 2. `src/backend/spirv/types.rs` (~100 lines)
 
-`BrivType → spirv::Word` mapping. Caches in a `HashMap<TypeId, Word>`.
+`BrievType → spirv::Word` mapping. Caches in a `HashMap<TypeId, Word>`.
 
 | Bits(N) type | SPIR-V |
 |--------------|--------|

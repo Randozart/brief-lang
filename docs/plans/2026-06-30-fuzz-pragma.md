@@ -12,13 +12,13 @@ right." It catches logic errors where the contract is technically satisfied
 but the implementation is wrong.
 
 This is especially important for `inop` blocks, where the BILD body is opaque
-to the Briv-level proof engine. A fuzz case with a BILD simulator can
+to the Briev-level proof engine. A fuzz case with a BILD simulator can
 concretely verify that the BILD instructions compute what the programmer
 expects — no fallback expression required.
 
 ## Syntax
 
-```briv
+```briev
 #fuzz(param = expr, param = expr, ...) -> expected_expr
 ```
 
@@ -28,7 +28,7 @@ before an item define multiple test cases.
 
 ### Examples
 
-```briv
+```briev
 // defn — uses interpreter
 #fuzz(x = 0, y = 0) -> 0
 #fuzz(x = 1, y = 2) -> 3
@@ -68,7 +68,7 @@ cell! Squarer(x: Int) -> Int {
 If a function references a top-level `let` or `const`, that must also be bound
 in the fuzz:
 
-```briv
+```briev
 let threshold: Int = 10;
 
 #fuzz(x = 5, threshold = 3) -> 8    // overrides threshold locally
@@ -265,7 +265,7 @@ Simpler than LLVM's — each BILD instruction line is split by whitespace:
 
 Type tokens (`i64`, `float`, `ptr`, etc.) are recognized and consumed but
 only used for result type determination. The concrete LLVM type is not
-critical for simulation — values are already typed at the Briv level.
+critical for simulation — values are already typed at the Briev level.
 
 ### `src/fuzz_checker/mod.rs` — Orchestrator
 
@@ -400,14 +400,14 @@ if program.has_fuzz_cases() {
 ### New subcommand: `"fuzz"` / `"fz"`
 
 ```
-briv fuzz <file.bv>
+briev fuzz <file.bv>
 ```
 
 Stands alone — only runs: parse → resolve → desugar → typecheck → fuzz check.
 Skips proof engine and codegen.
 
 ```
-$ briv fuzz examples/my_program.bv
+$ briev fuzz examples/my_program.bv
 ✓ safe_div case 0: a=10, b=2 → 5
 ✓ safe_div case 1: a=0, b=1 → 0
 ✗ add_threshold case 2: x=-1, y=5 → 4 (got 6)
@@ -469,12 +469,12 @@ Exit 0 if all cases pass, 1 if any fail.
 
 | Test | Command | Expected |
 |------|---------|----------|
-| All fuzz pass | `briv fuzz passing.bv` | Exit 0, all `✓` |
-| Some fuzz fail | `briv fuzz failing.bv` | Exit 1, errors printed |
-| Mixed fuzz and skip | `briv fuzz mixed.bv` | Exit 1, skip warnings |
-| Fuzz in check | `briv check passing.bv` | Exit 0 |
-| Fuzz in check | `briv check failing.bv` | Exit 1 |
-| Fuzz in compile | `briv build failing.bv` | Exit 1, no binary |
+| All fuzz pass | `briev fuzz passing.bv` | Exit 0, all `✓` |
+| Some fuzz fail | `briev fuzz failing.bv` | Exit 1, errors printed |
+| Mixed fuzz and skip | `briev fuzz mixed.bv` | Exit 1, skip warnings |
+| Fuzz in check | `briev check passing.bv` | Exit 0 |
+| Fuzz in check | `briev check failing.bv` | Exit 1 |
+| Fuzz in compile | `briev build failing.bv` | Exit 1, no binary |
 
 ## Files to Create/Modify
 

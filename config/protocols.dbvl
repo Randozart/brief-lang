@@ -7,7 +7,7 @@
 // Use "c" for libc (linked by default with clang), or specific library
 // names for other system libraries.
 //
-// 2026-08-03 (Phase 3, data-briv-config plan): migrated from protocols.toml.
+// 2026-08-03 (Phase 3, data-briev-config plan): migrated from protocols.toml.
 // Each line is `<target-triple>: { "<Protocol>": "<lib>"; ... };` — the map
 // keys are quoted because `#` is not an identifier char; parsed in quoted mode.
 // A protocol absent from the map is unavailable on that target.

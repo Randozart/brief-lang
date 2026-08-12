@@ -4,7 +4,7 @@
 
 All 22 benchmarks MATCH (0 MISMATCH, 1 SKIP). Run at BOUND=50000000, 5 iterations.
 
-| Benchmark | Ratio | Briv Time | C Time | Dispatch | Fields | Status |
+| Benchmark | Ratio | Briev Time | C Time | Dispatch | Fields | Status |
 |-----------|-------|-----------|--------|----------|-------|--------|
 | float_math | **0.84x** | .0636s | .0757s | A005c | 13 | **BEATS C** |
 | nbody_sqrt | **0.70x** | 2.0985s | 2.9834s | A005c | 31 | **BEATS C** |

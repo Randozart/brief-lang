@@ -10,12 +10,12 @@
 
 ## Executive Summary
 
-Migrate terminal I/O and environment variable access from compiler intrinsics (`Print#`, `PutChar#`, `GetEnv#`, `GetEnvInt#`) to the standard library. Operations that can be expressed in pure Briv using lower-level intrinsics (`SysCall#`, `Load#`) should not be compiler-known.
+Migrate terminal I/O and environment variable access from compiler intrinsics (`Print#`, `PutChar#`, `GetEnv#`, `GetEnvInt#`) to the standard library. Operations that can be expressed in pure Briev using lower-level intrinsics (`SysCall#`, `Load#`) should not be compiler-known.
 
 This removes 4 intrinsic names from the compiler, replacing them with:
 - A `!` plugin-intercept system for dispatch
 - Two Front-stage Rust plugins (print/io, env)
-- Pure-Briv stdlib implementations using `SysCall#(Write, ...)` and `Load#`-based environ scan
+- Pure-Briev stdlib implementations using `SysCall#(Write, ...)` and `Load#`-based environ scan
 
 ### What stays (genuinely necessary intrinsics — per the embedded criterion)
 
@@ -26,7 +26,7 @@ This removes 4 intrinsic names from the compiler, replacing them with:
 | `Load#`/`Store#`/`Copy#`/`Fill#` | Raw memory access — building blocks |
 | `Alloc#`/`Malloc#`/`Free#` | Compiler escape analysis intercepts for arena/alloca decisions |
 | `AtomicLoad#`/`AtomicStore#`/`AtomicCas#`/etc | Platform CPU barriers — no portable alternative |
-| `Sqrt#`/`Sin#`/`Cos#`/`Fabs#`/`Ceil#`/`Floor#`/`Pow#` | LLVM `@llvm.*` intrinsics — no portable pure-Briv impl |
+| `Sqrt#`/`Sin#`/`Cos#`/`Fabs#`/`Ceil#`/`Floor#`/`Pow#` | LLVM `@llvm.*` intrinsics — no portable pure-Briev impl |
 | `AddressOf#` | Compiler knows struct field layout |
 | `DlOpen#`/`DlSym#`/`DlClose#` | Dynamic linker — platform-specific |
 | GPU intrinsics | `GetGlobalId#`, `WorkgroupSize#`, etc — platform-specific |
@@ -43,8 +43,8 @@ This removes 4 intrinsic names from the compiler, replacing them with:
 |-----------|-------------|-----------|
 | `Print#(x)` | `lib/std/io.bv`: `print_int`, `print_str`, `print_float`, `print_char` | `SysCall#(Write, 1, ...)` |
 | `PutChar#(c)` | `lib/std/io.bv`: `print_char(c)` | `SysCall#(Write, 1, &c, 1, ...)` |
-| `GetEnv#(name)` | `lib/std/env.bv`: `getenv(key) -> String` | pure-Briv `Load#`-based environ scan |
-| `GetEnvInt#(name)` | `lib/std/env.bv`: `get_env_int(key) -> Int` | `getenv` + `parse_int` in Briv |
+| `GetEnv#(name)` | `lib/std/env.bv`: `getenv(key) -> String` | pure-Briev `Load#`-based environ scan |
+| `GetEnvInt#(name)` | `lib/std/env.bv`: `get_env_int(key) -> Int` | `getenv` + `parse_int` in Briev |
 
 ---
 
@@ -84,7 +84,7 @@ The plugins run at Front stage so they can use the type checker's `TypeUniverse`
 
 ---
 
-## Phase 1: GetEnv#/GetEnvInt# → Pure-Briv Environ Scan
+## Phase 1: GetEnv#/GetEnvInt# → Pure-Briev Environ Scan
 
 ### How the environ scan works
 
@@ -97,7 +97,7 @@ environ[1] = "HOME=/home/user\0"
 environ[2] = NULL
 ```
 
-**Mechanism:** A one-line C helper returns the `environ` pointer as an integer. Pure-Briv code then:
+**Mechanism:** A one-line C helper returns the `environ` pointer as an integer. Pure-Briev code then:
 1. Calls `__get_environ()` to get the envp array address
 2. Loads each entry pointer via `Load#`
 3. Compares the prefix against the key
@@ -105,7 +105,7 @@ environ[2] = NULL
 
 ### C runtime addition
 
-**File:** `lib/runtime/briv_rt.c`
+**File:** `lib/runtime/briev_rt.c`
 ```c
 int64_t __get_environ(void) {
     extern char **environ;
@@ -116,16 +116,16 @@ int64_t __get_environ(void) {
 ### Stdlib FFI declaration
 
 **File:** `lib/std/ffi/env.bv`
-```briv
+```briev
 // 2026-07-19: Returns the environ pointer (char **environ cast to Int).
-// Pure-Briv getenv scans this pointer array to find key=value pairs.
+// Pure-Briev getenv scans this pointer array to find key=value pairs.
 frgn __get_environ() -> Int;
 ```
 
-### Pure-Briv getenv implementation
+### Pure-Briev getenv implementation
 
 **File:** `lib/std/env.bv`
-```briv
+```briev
 import "std/ffi/env.bv";
 
 defn getenv(key: String) -> String {
@@ -136,7 +136,7 @@ defn getenv(key: String) -> String {
         [entry_ptr == 0] {
             term "";
         };
-        // Compare key prefix — pure-Briv string ops
+        // Compare key prefix — pure-Briev string ops
         let entry: String = ptr_to_string(entry_ptr);
         [entry.starts_with(key) && entry[key.len] == 61 as Byte] {
             term entry.slice(key.len + 1, entry.len - key.len - 1);
@@ -155,7 +155,7 @@ defn get_env_int(key: String) -> Int {
 };
 ```
 
-> Note: `starts_with`, `slice`, `parse_int` are pure-Briv string utilities available in stdlib. `Load#` is the retained memory-read intrinsic. `ptr_to_string` converts a null-terminated C string pointer to a Briv String — uses `Load#` + byte iteration.
+> Note: `starts_with`, `slice`, `parse_int` are pure-Briev string utilities available in stdlib. `Load#` is the retained memory-read intrinsic. `ptr_to_string` converts a null-terminated C string pointer to a Briev String — uses `Load#` + byte iteration.
 
 ### Compiler files to modify
 
@@ -175,7 +175,7 @@ defn get_env_int(key: String) -> Int {
 
 | File | Change |
 |------|--------|
-| `lib/runtime/briv_rt.c` | Add `__get_environ()` |
+| `lib/runtime/briev_rt.c` | Add `__get_environ()` |
 | `lib/std/ffi/env.bv` | Replace `frgn __get_env_int` with `frgn __get_environ` |
 | `lib/std/env.bv` | Full `getenv` + `get_env_int` implementation |
 | `lib/std/ffi/env.bv` | Remove old frgn |
@@ -191,7 +191,7 @@ defn get_env_int(key: String) -> Int {
 All 23 benchmarks: `GetEnvInt#("BOUND")` → `!GetEnvInt("BOUND")`
 
 `UTF8_ops.bv` — also change `const TOTAL` → `let TOTAL`:
-```briv
+```briev
 let TOTAL: Int = !GetEnvInt("BOUND");
 let SEED: Int = !GetEnvInt("SEED");
 ```
@@ -216,7 +216,7 @@ The `print` Front plugin receives `!Print(x)` / `!PrintLn(x)` from the parser. U
 ### Stdlib print implementation
 
 **File:** `lib/std/io.bv`
-```briv
+```briev
 defn print_str(s: String) -> Void {
     let _: Int = SysCall#(Write, 1, s.data, s.len, 0, 0, 0);
 };
@@ -238,8 +238,8 @@ defn print_float(f: Float) -> Void {
 };
 ```
 
-**Helper — `int_to_str` in pure Briv:**
-```briv
+**Helper — `int_to_str` in pure Briev:**
+```briev
 defn int_to_str(n: Int) -> String {
     [n == 0] { term "0"; };
     let neg: Bool = n < 0;
@@ -311,7 +311,7 @@ The `type_args` field is populated by the type checker after inferring the argum
 ### Prelude plugin update
 
 **File:** `plugins/front/prelude.bv`
-```briv
+```briev
 $(Front @ highest) {
     InsertLiteralImport$("std/types/bootstrap.bv");
     InsertLiteralImport$("std/os/fs.bv");
@@ -340,7 +340,7 @@ Line 50: Change `Print#` example to a retained intrinsic:
 
 Update the Intrinsic Categories table — the "I/O" row changes:
 ```markdown
-| ~~I/O~~ Terminal & Env | — | Moved to stdlib. `!Print`/`!PrintLn` dispatched via Front plugin; `!GetEnv`/`!GetEnvInt` resolved to pure-Briv environ scan. All use `SysCall#(Write, ...)` or `Load#` underneath. |
+| ~~I/O~~ Terminal & Env | — | Moved to stdlib. `!Print`/`!PrintLn` dispatched via Front plugin; `!GetEnv`/`!GetEnvInt` resolved to pure-Briev environ scan. All use `SysCall#(Write, ...)` or `Load#` underneath. |
 ```
 
 ### `docs/architecture/overview.md`
@@ -364,7 +364,7 @@ Line 217: `Print#` reference in CIRCT normalizer will naturally become dead code
 - Register in PluginManager
 - Add `__get_environ()` C helper
 - Implement `lib/std/ffi/env.bv` + `lib/std/env.bv`
-- Test: `!GetEnvInt("BOUND")` → `get_env_int("BOUND")` → pure-Briv scan
+- Test: `!GetEnvInt("BOUND")` → `get_env_int("BOUND")` → pure-Briev scan
 
 ### Step 3: Remove GetEnv#/GetEnvInt# from compiler (Phase 1)
 - Signatures, LLVM codegen, webstack, interpreter, normalizer, proof_engine
@@ -415,7 +415,7 @@ Line 217: `Print#` reference in CIRCT normalizer will naturally become dead code
 ### Integration tests
 
 - Run each benchmark's `.ll` compilation (they use `!Print`/`!PrintLn`/`!GetEnvInt`)
-- Compare output of Briv and C programs for `print_loop`, `mandelbrot`, `fannkuch_redux`
+- Compare output of Briev and C programs for `print_loop`, `mandelbrot`, `fannkuch_redux`
 - Run `bash benchmarks/build_and_bench.sh --correctness` — all pass
 
 ### Regression guards
@@ -434,8 +434,8 @@ Line 217: `Print#` reference in CIRCT normalizer will naturally become dead code
 |------|---------|
 | `src/plugin/print.rs` | Front plugin: `!Print`/`!PrintLn` dispatch |
 | `src/plugin/env.rs` | Front plugin: `!GetEnv`/`!GetEnvInt` rewrite |
-| `lib/std/io.bv` | Pure-Briv I/O: `print_int`, `print_str`, `print_float`, `print_char`, `int_to_str` |
-| `lib/std/env.bv` | Pure-Briv env: `getenv`, `get_env_int` |
+| `lib/std/io.bv` | Pure-Briev I/O: `print_int`, `print_str`, `print_float`, `print_char`, `int_to_str` |
+| `lib/std/env.bv` | Pure-Briev env: `getenv`, `get_env_int` |
 
 ### Modified files (~25)
 
@@ -452,7 +452,7 @@ Line 217: `Print#` reference in CIRCT normalizer will naturally become dead code
 | `src/backend/webstack.rs` | 1+2 — remove handlers |
 | `src/interpreter/intrinsics.rs` | 1+2 — remove handlers |
 | `src/proof_engine/mod.rs` | 1+2 — remove from lists |
-| `lib/runtime/briv_rt.c` | 1 — add `__get_environ()` |
+| `lib/runtime/briev_rt.c` | 1 — add `__get_environ()` |
 | `lib/std/ffi/env.bv` | 1 — replace frgn |
 | `lib/std/env.bv` | 1 — full implementation |
 | `plugins/front/prelude.bv` | 1+2 — add auto-imports |
@@ -475,7 +475,7 @@ Every modified code site must carry a `// 2026-07-19: <why>` comment:
 - **Intrinsic removal sites**: `// 2026-07-19: Removed — migrated to stdlib. !Print dispatching via plugin.`
 - **LLVM declare removals**: `// 2026-07-19: Removed with Print#/PutChar# — no longer needed.`
 - **Benchmark changes**: `// 2026-07-19: !GetEnvInt replaces compiler intrinsic GetEnvInt#`
-- **C runtime**: `// 2026-07-19: Helper for pure-Briv environ scan. Returns char **environ as Int.`
+- **C runtime**: `// 2026-07-19: Helper for pure-Briev environ scan. Returns char **environ as Int.`
 
 ---
 

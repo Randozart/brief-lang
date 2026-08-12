@@ -1,7 +1,7 @@
-# Briv CLI Guide
+# Briev CLI Guide
 
 **Version:** 1.0  
-**Purpose:** Complete command reference for the Briv compiler CLI  
+**Purpose:** Complete command reference for the Briev compiler CLI  
 
 ---
 
@@ -39,7 +39,7 @@
 
 ```bash
 cargo build --release
-./target/release/briv install
+./target/release/briev install
 ```
 
 ### From Binary
@@ -52,14 +52,14 @@ Download the latest release from GitHub and add to your PATH.
 
 ```bash
 # Create a new project
-briv init my-project
+briev init my-project
 cd my-project
 
 # Run development server
-briv run src/main.bv
+briev run src/main.bv
 
 # Build for production
-briv build src/main.bv
+briev build src/main.bv
 ```
 
 ---
@@ -86,10 +86,10 @@ briv build src/main.bv
 
 ### check
 
-Type check a Briv file without executing it. Fastest way to validate code.
+Type check a Briev file without executing it. Fastest way to validate code.
 
 ```bash
-briv check <file.bv>
+briev check <file.bv>
 ```
 
 **Options:**
@@ -100,7 +100,7 @@ briv check <file.bv>
 
 **Example:**
 ```bash
-briv check src/main.bv
+briev check src/main.bv
 ```
 
 **Output:**
@@ -113,10 +113,10 @@ briv check src/main.bv
 
 ### build
 
-Full compilation of a Briv file. Runs type checking, proof verification, and generates output.
+Full compilation of a Briev file. Runs type checking, proof verification, and generates output.
 
 ```bash
-briv build <file.bv>
+briev build <file.bv>
 ```
 
 **Options:**
@@ -124,7 +124,7 @@ briv build <file.bv>
 
 **Example:**
 ```bash
-briv build src/main.bv
+briev build src/main.bv
 ```
 
 **Output:**
@@ -142,7 +142,7 @@ Compiling main.bv...
 Compile, build WASM, serve locally, and open browser.
 
 ```bash
-briv run <file>
+briev run <file>
 ```
 
 **Options:**
@@ -155,13 +155,13 @@ briv run <file>
 **Example:**
 ```bash
 # Run with defaults
-briv run src/main.bv
+briev run src/main.bv
 
 # Custom port, watch mode
-briv run src/main.bv --port 3000 --watch
+briev run src/main.bv --port 3000 --watch
 
 # No browser open
-briv run src/main.bv --no-open
+briev run src/main.bv --no-open
 ```
 
 ---
@@ -170,10 +170,10 @@ briv run src/main.bv --no-open
 
 ### rbv
 
-Compile Rendered Briv (RBV) to browser-ready files. RBV files combine Briv code with HTML views.
+Compile Rendered Briev (RBV) to browser-ready files. RBV files combine Briev code with HTML views.
 
 ```bash
-briv rbv <file.rbv>
+briev rbv <file.rbv>
 ```
 
 **Options:**
@@ -182,7 +182,7 @@ briv rbv <file.rbv>
 
 **Example:**
 ```bash
-briv rbv src/view.rbv
+briev rbv src/view.rbv
 ```
 
 ---
@@ -192,7 +192,7 @@ briv rbv src/view.rbv
 Serve static files locally.
 
 ```bash
-briv serve [dir]
+briev serve [dir]
 ```
 
 **Options:**
@@ -202,13 +202,13 @@ briv serve [dir]
 **Example:**
 ```bash
 # Serve current directory
-briv serve
+briev serve
 
 # Serve specific directory
-briv serve dist
+briev serve dist
 
 # Custom port
-briv serve --port 9000
+briev serve --port 9000
 ```
 
 ---
@@ -217,19 +217,19 @@ briv serve --port 9000
 
 ### init
 
-Create a new Briv project.
+Create a new Briev project.
 
 ```bash
-briv init [name]
+briev init [name]
 ```
 
 **Example:**
 ```bash
 # Create project in current directory
-briv init
+briev init
 
 # Create project in subdirectory
-briv init my-project
+briev init my-project
 ```
 
 **Creates:**
@@ -238,7 +238,7 @@ my-project/
 ├── src/
 │   └── main.bv
 ├── Cargo.toml
-└── briv.toml
+└── briev.toml
 ```
 
 ---
@@ -248,13 +248,13 @@ my-project/
 Add a dependency to the current project.
 
 ```bash
-briv import <name>
+briev import <name>
 ```
 
 **Example:**
 ```bash
-briv import std/io
-briv import my-library
+briev import std/io
+briev import my-library
 ```
 
 ---
@@ -266,7 +266,7 @@ briv import my-library
 Generate FFI bindings for a library. Writes generated files to disk.
 
 ```bash
-briv wrap <lib> [options]
+briev wrap <lib> [options]
 ```
 
 **Options:**
@@ -284,22 +284,22 @@ briv wrap <lib> [options]
 **Example:**
 ```bash
 # Auto-detect language
-briv wrap lib/my_library.h
+briev wrap lib/my_library.h
 
 # Specify mapper explicitly
-briv wrap lib/my_module.py --mapper python
+briev wrap lib/my_module.py --mapper python
 
 # Output to custom directory
-briv wrap lib/crypto --out src/ffi
+briev wrap lib/crypto --out src/ffi
 
 # Force overwrite
-briv wrap lib/my_lib.rs --force
+briev wrap lib/my_lib.rs --force
 ```
 
 **Generated Files:**
 ```
 lib/ffi/generated/my_lib/
-├── lib.bv          # Briv declarations
+├── lib.bv          # Briev declarations
 └── bindings.toml   # TOML metadata
 ```
 
@@ -310,7 +310,7 @@ lib/ffi/generated/my_lib/
 Analyze a library and preview generated bindings (dry-run). Does not write files.
 
 ```bash
-briv map <lib> [options]
+briev map <lib> [options]
 ```
 
 **Options:**
@@ -319,13 +319,13 @@ briv map <lib> [options]
 **Example:**
 ```bash
 # Preview C library bindings
-briv map lib/my_lib.h
+briev map lib/my_lib.h
 
 # Preview Python library
-briv map lib/utils.py --mapper python
+briev map lib/utils.py --mapper python
 
 # Preview TypeScript
-briv map types/api.d.ts --mapper js
+briev map types/api.d.ts --mapper js
 ```
 
 **Output:**
@@ -362,16 +362,16 @@ mapper = "c"
 
 ### install
 
-Install the Briv CLI to `~/.local/bin`.
+Install the Briev CLI to `~/.local/bin`.
 
 ```bash
-briv install
+briev install
 ```
 
 **Example:**
 ```bash
-$ briv install
-Installed 'briv' to /home/user/.local/bin/briv
+$ briev install
+Installed 'briev' to /home/user/.local/bin/briev
 
 Add to your PATH if needed:
   export PATH="$PATH:/home/user/.local/bin"
@@ -383,19 +383,19 @@ Add this line to your ~/.bashrc or ~/.zshrc to make it permanent.
 
 ### lsp
 
-Start the Briv Language Server for IDE integration.
+Start the Briev Language Server for IDE integration.
 
 ```bash
-briv lsp
+briev lsp
 ```
 
 **Example:**
 ```bash
 # Start LSP server
-briv lsp
+briev lsp
 
 # LSP clients:
-# - VSCode: Briv extension
+# - VSCode: Briev extension
 # - Neovim: nvim-lspconfig
 # - Emacs: eglans-lsp-mode
 ```
@@ -429,7 +429,7 @@ These options work with all commands:
 
 ## Configuration
 
-### briv.toml
+### briev.toml
 
 Project configuration file:
 
@@ -454,9 +454,9 @@ search_paths = ["lib", "vendor"]
 
 | Variable | Description |
 |----------|-------------|
-| `BRIV_HOME` | Briv home directory |
-| `BRIV_OUT` | Default output directory |
-| `BRIV_PORT` | Default server port |
+| `BRIEV_HOME` | Briev home directory |
+| `BRIEV_OUT` | Default output directory |
+| `BRIEV_PORT` | Default server port |
 
 ---
 
@@ -466,27 +466,27 @@ search_paths = ["lib", "vendor"]
 
 ```bash
 # 1. Create project
-briv init my-app
+briev init my-app
 cd my-app
 
 # 2. Run with watch mode
-briv run src/main.bv --watch
+briev run src/main.bv --watch
 
 # 3. Type check while editing
-briv check src/main.bv -v
+briev check src/main.bv -v
 
 # 4. Build for production
-briv build src/main.bv
+briev build src/main.bv
 ```
 
 ### FFI Workflow
 
 ```bash
 # 1. Preview bindings for a C library
-briv map libsqlite.h
+briev map libsqlite.h
 
 # 2. Generate bindings
-briv wrap libsqlite.h --out src/ffi
+briev wrap libsqlite.h --out src/ffi
 
 # 3. Use in code
 echo 'frgn sig sqlite_open: String -> Int from "src/ffi/bindings.toml";'
@@ -503,23 +503,23 @@ echo 'frgn sig sqlite_open: String -> Int from "src/ffi/bindings.toml";'
 #     io.bv
 
 # Run with multiple files
-briv run src/main.bv
+briev run src/main.bv
 
 # Check all files
-briv check src/lib/*.bv src/main.bv
+briev check src/lib/*.bv src/main.bv
 ```
 
 ### CI/CD Usage
 
 ```bash
 # Minimal output for CI
-briv check src/main.bv --quiet
+briev check src/main.bv --quiet
 
 # Skip expensive proof verification
-briv check src/main.bv --skip-proof
+briev check src/main.bv --skip-proof
 
 # Exit code based
-briv check src/main.bv || exit 1
+briev check src/main.bv || exit 1
 ```
 
 ---

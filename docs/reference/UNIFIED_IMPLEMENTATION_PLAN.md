@@ -1,12 +1,12 @@
-# Unified Implementation Plan: DBriv + VHDL Target
+# Unified Implementation Plan: DBriev + VHDL Target
 
 **Date:** 2026-05-05
 **Status:** Implementation Complete
 **Related:**
-- `DBRIV_SPEC.md` - Language specification
+- `DBRIEV_SPEC.md` - Language specification
 - `VHDL_TARGET_RESEARCH.md` - VHDL research notes
-- `BRIV_ADVENTURES_RESEARCH.md` - Game engine concept (research only)
-- `../briv-adventures/IMPLEMENTATION_PLAN.md` - Adventure demo plan (separate)
+- `BRIEV_ADVENTURES_RESEARCH.md` - Game engine concept (research only)
+- `../briev-adventures/IMPLEMENTATION_PLAN.md` - Adventure demo plan (separate)
 
 ---
 
@@ -14,9 +14,9 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Briv (.bv/.ebv) - Logic & State Machines             │
+│  Briev (.bv/.ebv) - Logic & State Machines             │
 ├─────────────────────────────────────────────────────────┤
-│  DBriv (.dbv/.dbvs/.dbvl) - Data & Rules              │
+│  DBriev (.dbv/.dbvs/.dbvl) - Data & Rules              │
 │  - .dbv: Static configuration (ALIAS with addresses)  │
 │  - .dbvs: Schema definitions (REGISTER, STRUCT, ENUM)  │
 │  - .dbvl: Mutable line-based database                 │
@@ -37,16 +37,16 @@
 - Type mapping (std_logic, signed, unsigned)
 - Transaction → VHDL process translation
 
-### ✅ Phase 2: DBriv Core (.dbv)
+### ✅ Phase 2: DBriev Core (.dbv)
 
 **Status:** Complete
 
 - Parse `.dbv` files
 - `@address` syntax resolution
-- Type system (Briv types + Addr, RegOffset)
+- Type system (Briev types + Addr, RegOffset)
 - `CHECK` contracts
 
-### ✅ Phase 3: DBriv Query Engine
+### ✅ Phase 3: DBriev Query Engine
 
 **Status:** Complete
 
@@ -55,7 +55,7 @@
 - ALIAS binding (schema `.dbvs` to config `.dbv`)
 - `@auto` address allocation
 
-### ✅ Phase 4: DBriv Rules (Basic)
+### ✅ Phase 4: DBriev Rules (Basic)
 
 **Status:** Partial - RULE syntax exists, inference not implemented
 
@@ -63,7 +63,7 @@
 - Non-recursive rules (basic Datalog)
 - Full inference engine - deferred
 
-### ✅ Phase 5: DBriv Database (.dbvl)
+### ✅ Phase 5: DBriev Database (.dbvl)
 
 **Status:** Complete
 
@@ -87,16 +87,16 @@
 
 ```bash
 # Verilog with hardware config
-./briv-compiler verilog design.ebv --hw hardware.toml
+./briev-compiler verilog design.ebv --hw hardware.toml
 
-# Verilog with DBriv config
-./briv-compiler verilog design.ebv --hw config.dbv
+# Verilog with DBriev config
+./briev-compiler verilog design.ebv --hw config.dbv
 
-# Verilog with DBriv schema
-./briv-compiler verilog design.ebv --hw schema.dbvs
+# Verilog with DBriev schema
+./briev-compiler verilog design.ebv --hw schema.dbvs
 
 # VHDL compilation
-./briv-compiler vhdl design.ebv --hw config.dbv
+./briev-compiler vhdl design.ebv --hw config.dbv
 ```
 
 ---
@@ -106,13 +106,13 @@
 | Phase | Criteria | Status |
 |-------|----------|--------|
 | VHDL | Valid .vhd output | ✅ Passes GHDL |
-| DBriv Core | .dbv parses without error | ✅ Verified |
-| DBriv Core | CHECK contracts verify | ✅ Verified |
+| DBriev Core | .dbv parses without error | ✅ Verified |
+| DBriev Core | CHECK contracts verify | ✅ Verified |
 | Query Engine | Queries return correct data | ✅ Tested |
 | Query Engine | ALIAS binds correctly | ✅ Tested |
-| DBriv .dbvl | Mutable operations work | ✅ Tested |
-| DBriv .dbvs | Schema parse and import | ✅ Tested |
+| DBriev .dbvl | Mutable operations work | ✅ Tested |
+| DBriev .dbvs | Schema parse and import | ✅ Tested |
 
 ---
 
-*Adventure research: ../briv-adventures/IMPLEMENTATION_PLAN.md*
+*Adventure research: ../briev-adventures/IMPLEMENTATION_PLAN.md*

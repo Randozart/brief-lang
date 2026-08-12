@@ -2,16 +2,16 @@
 // 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): the casting
 // graph resolves the minimal path between a boundary representation and the
 // base protocol; codegen must emit the DELTA (the binding call), not a chain.
-// But Briv's boxing turns String/CStr values into i64 registers, losing the
+// But Briev's boxing turns String/CStr values into i64 registers, losing the
 // type at codegen — `emit_cast_path` sees `Int` and picks the Int→String lane.
 //
 // This pass runs AFTER typechecking (like string_concat.rs) and rewrites a
 // same-category representation cast (`CStr as String`, `s as CStr`) into the
-// graph-resolved binding call (`cstr_to_briv`, `str_to_c`) on the typed AST,
+// graph-resolved binding call (`cstr_to_briev`, `str_to_c`) on the typed AST,
 // so the backend emits the marshalling directly. The protocol decision stays
 // in the frontend (the graph's minimal path), not hardcoded per type.
 //
-// Undo: if values ever stop being boxed (registers keep their Briv type),
+// Undo: if values ever stop being boxed (registers keep their Briev type),
 // delete this pass and let emit_cast_path handle representation casts.
 
 use crate::ast::{Expr, Statement, TopLevel, Type};
@@ -95,7 +95,7 @@ pub fn rewrite_boundary_marshalling(items: &mut [TopLevel], universe: &TypeUnive
             }
             TopLevel::ForeignBinding(fb) => {
                 fn_param_types.insert(
-                    fb.effective_briv_name().to_string(),
+                    fb.effective_briev_name().to_string(),
                     fb.inputs.iter().map(|(_, t)| t.clone()).collect(),
                 );
             }
@@ -347,7 +347,7 @@ fn variant_concat_fn(
 }
 
 /// Resolve the binding function for a same-category representation cast:
-/// `CStr → String` emits `cstr_to_briv`, `String → CStr` emits `str_to_c`.
+/// `CStr → String` emits `cstr_to_briev`, `String → CStr` emits `str_to_c`.
 /// Uses the casting graph's minimal path (a single ExtCallDyn binding step).
 fn marshalling_fn(
     graph: &CastingGraph,
@@ -359,7 +359,7 @@ fn marshalling_fn(
     let (mut src_cat, mut src_var) = resolve_category(graph, universe, type_protocols, src_ty);
     let (mut dst_cat, mut dst_var) = resolve_category(graph, universe, type_protocols, target);
     // A bare base endpoint resolves to its DEFAULT variant (String → UTF8) so
-    // the variant↔base path resolves (C_String → UTF8 via cstr_to_briv).
+    // the variant↔base path resolves (C_String → UTF8 via cstr_to_briev).
     // The casting graph's BFS cannot reach the bare "" node from a variant.
     if src_var.is_empty() {
         src_var = graph.default_variant(&src_cat).to_string();
@@ -429,7 +429,7 @@ mod tests {
                     target_category: "String".to_string(),
                     target_variant: "UTF8".to_string(),
                     binding: Some(crate::ast::top::CastBinding {
-                        fn_name: "cstr_to_briv".to_string(),
+                        fn_name: "cstr_to_briev".to_string(),
                         param: "#Lh".to_string(),
                     }),
                 },
@@ -507,7 +507,7 @@ mod tests {
         let Statement::Term(Some(expr)) = &d.body[0] else { panic!() };
         match expr {
             Expr::Call(name, args, _) => {
-                assert_eq!(name, "cstr_to_briv", "CStr→String must emit cstr_to_briv");
+                assert_eq!(name, "cstr_to_briev", "CStr→String must emit cstr_to_briev");
                 assert!(matches!(args[0], Expr::Identifier(ref n) if n == "name"));
             }
             other => panic!("expected a binding call, got {:?}", other),

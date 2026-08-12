@@ -2,7 +2,7 @@
 // `sum(n)` recurses to sum 1..n; the depth is the runtime BOUND, so the
 // compiler cannot fold it. Validates the proof engine's termination proof
 // against a non-constant bound (the defn contract `[n >= 0][n == 0]` proves
-// the recursion terminates). Both Briv and C share the C stack, so a deep
+// the recursion terminates). Both Briev and C share the C stack, so a deep
 // depth overflows identically — the benchmark runs at a moderate depth.
 //
 // C reference: deep_recursion_c.c

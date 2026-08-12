@@ -16,12 +16,12 @@ Three asks from the author:
    metadata; and `2.0 as Float64` emits a bitcast+sitofp mess instead of
    `fpext float to double`.
 2. **Verify export to Rust at native Rust speed** — so parts of the compiler
-   itself could be written in Briv without loss of efficiency.
+   itself could be written in Briev without loss of efficiency.
 3. **Guarantee parity with Python** — the GLUE path must be at least as fast
    as calling C through Python's ctypes.
 
 The overriding constraint (the author's reminder): **only protocols are hard
-coded.** No Briv type names (`Float64`, `Double`, `String`, `Int`, …) in Rust.
+coded.** No Briev type names (`Float64`, `Double`, `String`, `Int`, …) in Rust.
 All resolution is protocol-property-driven and metadata-driven.
 
 ## P-A — Protocol-only Float width
@@ -73,15 +73,15 @@ frontend passes.
 ## P-C — Rust native speed (measure; LTO deferred)
 
 Add a Rust benchmark in `examples/glue-host/rust-host`: `feature_hash(count,
-seed)` — Rust → Briv via `librank.a` (plain C ABI, zero marshalling) vs a
+seed)` — Rust → Briev via `librank.a` (plain C ABI, zero marshalling) vs a
 native Rust FNV-1a — per-call latency + throughput over N calls. The boundary
-is one function call, so Briv should land within a few % of native Rust when
+is one function call, so Briev should land within a few % of native Rust when
 the work dominates. LTO (bitcode archive for `rustc -C lto` inlining) is
 deferred until the measured overhead justifies it.
 
 ## P-D — Python parity
 
-Fresh `make speed`: confirm Briv within ~10% of C through ctypes. The ~1.9µs
+Fresh `make speed`: confirm Briev within ~10% of C through ctypes. The ~1.9µs
 per-call is ctypes marshalling (identical for both); the `.so` compute is
 native.
 
@@ -110,15 +110,15 @@ native.
 
   | path | ns/call | vs native |
   |------|---------|-----------|
-  | Rust → Briv (GLUE) | 1127 | 2.4% |
+  | Rust → Briev (GLUE) | 1127 | 2.4% |
   | native Rust | 1101 | — |
-  | C → Briv (.a) | 1092 | 1% |
+  | C → Briev (.a) | 1092 | 1% |
   | native C | 1082 | — |
 
   The boundary is a single C-ABI call (~26ns), compute-dominated. This is the
-  **compiler-in-Briv** path — near-native without LTO.
-- **P-D (Python parity):** DONE. Python → Briv 2033ns vs Python → C 1927ns
-  (within 5%) — both dominated by the ~1.9µs ctypes marshalling; the Briv
+  **compiler-in-Briev** path — near-native without LTO.
+- **P-D (Python parity):** DONE. Python → Briev 2033ns vs Python → C 1927ns
+  (within 5%) — both dominated by the ~1.9µs ctypes marshalling; the Briev
   compute is native.
 
 ## Cross-Cutting

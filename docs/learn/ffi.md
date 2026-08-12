@@ -1,13 +1,13 @@
-# Briv FFI Architecture — Zero-Cost Multi-Language Interop
+# Briev FFI Architecture — Zero-Cost Multi-Language Interop
 
 ## Core Insight
 
-`frgn` is just a `call` instruction. Nothing more. No marshaling, no context switch, no runtime boundary. The exact same LLVM `call` that Briv uses for its own `defn` functions is used for foreign functions.
+`frgn` is just a `call` instruction. Nothing more. No marshaling, no context switch, no runtime boundary. The exact same LLVM `call` that Briev uses for its own `defn` functions is used for foreign functions.
 
 ## How It Works
 
 ```
-Briv source:    frgn __print_int(n: Int) -> Result<Bool, Error>;
+Briev source:    frgn __print_int(n: Int) -> Result<Bool, Error>;
                          ↓
 Parser:          stores name="__print_int", params=[(n, Int)], return=Result<Bool,Error>
                          ↓
@@ -15,20 +15,20 @@ LLVM codegen:    declare i64 @__print_int(i64)     ← just a symbol declaration
                          ↓
 LLVM call site:  %result = call i64 @__print_int(i64 %n)   ← same as any function call
                          ↓
-LTO link:        llvm-link program.bc briv_rt.bc          ← merges IR modules
+LTO link:        llvm-link program.bc briev_rt.bc          ← merges IR modules
                          ↓
 Inlining:        opt -O3                                    ← inlines across language boundaries
 ```
 
 ## `import "link/..."` — The Bridge
 
-`import "link/briv_rt.c"` tells the compiler:
+`import "link/briev_rt.c"` tells the compiler:
 
 | Step | Command | What happens |
 |------|---------|-------------|
-| 1 | `clang -c -emit-llvm -O2 briv_rt.c` | Compile C to LLVM bitcode |
-| 2 | `llvm-as program.ll` | Compile Briv to LLVM bitcode |
-| 3 | `llvm-link program.bc briv_rt.bc` | Merge both into one module |
+| 1 | `clang -c -emit-llvm -O2 briev_rt.c` | Compile C to LLVM bitcode |
+| 2 | `llvm-as program.ll` | Compile Briev to LLVM bitcode |
+| 3 | `llvm-link program.bc briev_rt.bc` | Merge both into one module |
 | 4 | `opt -O3 program_merged.bc` | Inline across language boundary |
 | 5 | `llc -filetype=obj -O3` | Generate native code |
 
@@ -48,7 +48,7 @@ The file extension tells the compiler which toolchain to use:
 
 ```
 frgn __print_int(n: Int) -> Result<Bool, Error>;  
-  // ^ found in briv_rt.c → uses C convention
+  // ^ found in briev_rt.c → uses C convention
 ```
 
 Only needed when two link targets export the same symbol:
@@ -90,9 +90,9 @@ Python, JavaScript, Java, etc. cannot produce LLVM IR. They are **interpreter-on
 
 ## Prelude Auto-Import (std/os/)
 
-The compiler auto-imports 20 modules from `lib/std/os/` as a prelude, replacing 127 former compiler intrinsics. These modules declare `inop` functions that call `briv_rt.c` wrappers:
+The compiler auto-imports 20 modules from `lib/std/os/` as a prelude, replacing 127 former compiler intrinsics. These modules declare `inop` functions that call `briev_rt.c` wrappers:
 
-```briv
+```briev
 // No explicit import needed — these are auto-loaded:
 let fd = open#("/path/file", 0, 0);       // from std/os/fs.bv
 let pid = getpid#();                        // from std/os/process.bv
@@ -127,24 +127,24 @@ Available modules:
 
 Use `--no-std` to disable prelude auto-import.
 
-## ABI Bridge (briv_rt.c)
+## ABI Bridge (briev_rt.c)
 
-Briv's native integer type is `i64` for all scalar values (Int, pointers, etc.).
+Briev's native integer type is `i64` for all scalar values (Int, pointers, etc.).
 libc functions often take/return `i32` or `uid_t` (different widths). The
-`briv_rt.c` runtime provides wrapper functions that bridge between the two:
+`briev_rt.c` runtime provides wrapper functions that bridge between the two:
 
 ```c
 // libc: uid_t getuid(void);  (returns i32 on most platforms)
-// briv_rt.c wrapper:
-int64_t briv_getuid(void) { return (int64_t)getuid(); }
+// briev_rt.c wrapper:
+int64_t briev_getuid(void) { return (int64_t)getuid(); }
 ```
 
 In the generated LLVM IR, the wrapper is declared then called from the inop:
 
 ```
-declare i64 @briv_getuid()     // preamble
+declare i64 @briev_getuid()     // preamble
 define internal i64 @__sys_getuid(i64 %s) {
-  %r = call i64 @briv_getuid();
+  %r = call i64 @briev_getuid();
   ret i64 %r;
 }
 ```
@@ -153,19 +153,19 @@ The `internal` linkage on the inop function prevents symbol conflicts with
 libc — `define internal i64 @read(...)` coexists with `declare i64 @read(...)`
 from the C library preamble.
 
-53 wrapper functions currently exist in `lib/runtime/briv_rt.c`, covering
+53 wrapper functions currently exist in `lib/runtime/briev_rt.c`, covering
 all prelude module requirements.
 
 ## No Magic
 
 | Bad (old) | Good (new) |
 |-----------|------------|
-| `from "libruntime"` (parsed and discarded) | `import "link/briv_rt.c"` + optional `frgn name()` |
+| `from "libruntime"` (parsed and discarded) | `import "link/briev_rt.c"` + optional `frgn name()` |
 | Hardcoded `emit_declares("__rt_init")` | `frgn __rt_init()` declared in `std/rt.bv`, imported explicitly |
 | Interpreter match on `"insert"` string | Type-based dispatch on `Value::HashMap` — same native code |
 | `"None"`/`"Err"` => discriminant 0 | Enum declaration drives discriminant |
 | 127 compiler intrinsics (Socket, Open, MkDir, ...) | 20 `std/os/*.bv` prelude modules with `inop` declarations |
-| Hardcoded `Intrinsic::from_name()` dispatches | Universe-resolved `inop` + `frgn` calls through `briv_rt.c` |
+| Hardcoded `Intrinsic::from_name()` dispatches | Universe-resolved `inop` + `frgn` calls through `briev_rt.c` |
 | Type dispatch on `Type::Int8`, `Type::Float64`, etc. | TypeUniverse query: `universe.get(name).ops["add"]` |
 
 The FFI is transparent. Every function name you see is the actual symbol the linker resolves. No hidden name mapping, no string matching, no magic destinations.

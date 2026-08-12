@@ -1,5 +1,5 @@
-// helper.c — C source linked into a Briv program
-// Compiled via clang -c -emit-llvm -O2, then LTO'd with Briv IR
+// helper.c — C source linked into a Briev program
+// Compiled via clang -c -emit-llvm -O2, then LTO'd with Briev IR
 
 #include <stdio.h>
 

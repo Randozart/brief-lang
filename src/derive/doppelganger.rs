@@ -39,7 +39,7 @@ impl Doppelganger {
         source.to_path_buf()
     }
 
-    /// Format a synthesized program body as a Briv source string.
+    /// Format a synthesized program body as a Briev source string.
     pub fn format_body(prog: &SynthesizedProgram) -> String {
         let mut out = String::new();
         for expr in &prog.body {
@@ -49,7 +49,7 @@ impl Doppelganger {
     }
 
     /// 2026-07-28: Format an ite chain (Expr::If) as `when` guards with `term`.
-    /// The if-then-else chain from SMT ite is converted to valid Briv:
+    /// The if-then-else chain from SMT ite is converted to valid Briev:
     ///   when cond1 { term val1; };
     ///   when cond2 { term val2; };
     ///   term else_val;
@@ -97,7 +97,7 @@ pub fn write_doppelganger(
     let mut insertions: Vec<(usize, String)> = Vec::new();
     for ((name, prog), (_, block)) in syntheses.iter().zip(derivations.iter()) {
         let insert_at = block.span.start as usize;
-        // 2026-07-28: Use `term expr;` — Briv's termination statement.
+        // 2026-07-28: Use `term expr;` — Briev's termination statement.
         // In a callable txn / defn, `term expr` stores the value to %result and
         // branches to the convergence check. This is the correct way to return
         // a value from a synthesized body.

@@ -13,7 +13,7 @@
 1. [Problem Statement](#1-problem-statement)
 2. [Design Philosophy (What We Keep Tripping On)](#2-design-philosophy)
 3. [Route B Solution](#3-route-b-solution)
-4. [Phase 1: Briv-in-Briv Parser](#4-phase-1-briv-in-briv-parser)
+4. [Phase 1: Briev-in-Briev Parser](#4-phase-1-briev-in-briev-parser)
 5. [Phase 2: Rust Parser](#5-phase-2-rust-parser)
 6. [Phase 3: Revert Renames](#6-phase-3-revert-renames)
 7. [Phase 4: Verify](#7-phase-4-verify)
@@ -23,7 +23,7 @@
 
 ## 1. Problem Statement
 
-The Briv lexer (`src/lexer.rs`) defines ~60+ keyword tokens (e.g., `Token::Txn`, `Token::Registry`, `Token::From`, `Token::TypeU32`). These tokens are recognized by logos before identifier matching, meaning these names can never be used as variable names, parameter names, or pattern variables in `.bv` files.
+The Briev lexer (`src/lexer.rs`) defines ~60+ keyword tokens (e.g., `Token::Txn`, `Token::Registry`, `Token::From`, `Token::TypeU32`). These tokens are recognized by logos before identifier matching, meaning these names can never be used as variable names, parameter names, or pattern variables in `.bv` files.
 
 This caused us to manually rename every keyword-conflicting variable across ~10 `.bv` files:
 - `txn` → `txn_item`, `transaction_arg`, `contract_txn`
@@ -33,17 +33,17 @@ This caused us to manually rename every keyword-conflicting variable across ~10 
 
 These renames are semantically meaningless, reduce code clarity, and don't scale — any new `.bv` file risks hitting the same issue.
 
-**Route B**: Instead of renaming variables in `.bv` files, teach both parsers (Rust and Briv-in-Briv) that keywords are also valid identifiers.
+**Route B**: Instead of renaming variables in `.bv` files, teach both parsers (Rust and Briev-in-Briev) that keywords are also valid identifiers.
 
 ---
 
 ## 2. Design Philosophy (What We Keep Tripping On)
 
-A running catalog of design mismatches between the Rust host compiler and the Briv-in-Briv target:
+A running catalog of design mismatches between the Rust host compiler and the Briev-in-Briev target:
 
-### 2.1 Rust has `self.method()` — Briv has `function(state, arg)`
+### 2.1 Rust has `self.method()` — Briev has `function(state, arg)`
 
-| Concept | Rust | Briv |
+| Concept | Rust | Briev |
 |---|---|---|
 | Advance token stream | `self.advance()` | `advance(state)` |
 | Get current token | `self.current_token()` | `current_token(state)` |
@@ -56,11 +56,11 @@ The postfix `.method()` syntax IS supported — parser.rs:4154-4180 handles `exp
 
 In Rust: `uni ty(TypeList(inner)) = { type_to_rust(*inner) };` — the `*` dereferences the `Box<Type>`.
 
-In Briv: `uni ty(TypeList(inner)) = { type_to_rust(inner) };` — no `*`, patterns bind directly to the inner value. The Rust parser's `*` token (`Token::Star`) is only used for pointer/multiplication, not pattern dereferencing.
+In Briev: `uni ty(TypeList(inner)) = { type_to_rust(inner) };` — no `*`, patterns bind directly to the inner value. The Rust parser's `*` token (`Token::Star`) is only used for pointer/multiplication, not pattern dereferencing.
 
 ### 2.3 Named struct literals are NOT supported
 
-```briv
+```briev
 // THIS DOES NOT WORK:
 let info = TransactionInfo { name: "foo", index: 0 };
 
@@ -74,7 +74,7 @@ Affected files: `backend_aarch64.bv` (RegisterAllocator { ... }, MMIORegister { 
 
 ### 2.4 `uni` is a statement, not an expression
 
-```briv
+```briev
 // THIS DOES NOT WORK:
 [!uni x(Pattern) = true] { ... };
 
@@ -91,7 +91,7 @@ Logos (`src/lexer.rs` line 27): `#[logos(skip r"//[^\n]*")]`
 
 `//` comments are completely removed by the lexer, never reaching the parser. This means an empty block containing only a comment is still an empty block:
 
-```briv
+```briev
 // This block IS empty after lexing:
 [cond] {
     // just a comment
@@ -102,8 +102,8 @@ This caused the guarded-block rejection in `proof_engine.bv`.
 
 ### 2.6 Functional update, not mutation
 
-```briv
-// Briv: returns a NEW value
+```briev
+// Briev: returns a NEW value
 output = output.append_str("hello");
 
 // NOT: output.append_str("hello");  // doesn't modify in place
@@ -113,7 +113,7 @@ This is pure functional style. Every "method" returns a new value with the modif
 
 ### 2.7 Contract-after-arrow parser bug
 
-```briv
+```briev
 // THIS HAS A PARSER BUG — both pre and post become Bool(true):
 defn foo(x: Int) -> Int [x > 0][term > 0] { ... }
 
@@ -125,22 +125,22 @@ The Rust parser's `parse_contract()` at `src/parser.rs:2646` has a state issue w
 
 ### 2.8 `.bv` files are NEVER loaded by the Rust binary at runtime
 
-The `lib/compiler/*.bv` files are a parallel self-hosted implementation. The Rust binary does not read, interpret, or execute them. They must be compiled through the Briv-in-Briv pipeline (lexer.bv → parser.bv → typechecker.bv → ...) which currently has no invocation path — there's no CLI command for it.
+The `lib/compiler/*.bv` files are a parallel self-hosted implementation. The Rust binary does not read, interpret, or execute them. They must be compiled through the Briev-in-Briev pipeline (lexer.bv → parser.bv → typechecker.bv → ...) which currently has no invocation path — there's no CLI command for it.
 
-### 2.9 `Result<(), String>` in Briv vs Result type
+### 2.9 `Result<(), String>` in Briev vs Result type
 
-```briv
+```briev
 // Rust: Ok(()) and Err("msg") use keywords
-// Briv's Rust parser maps:
+// Briev's Rust parser maps:
 //   Token::Ok → "Ok" as identifier → Expr::Call("Ok", [expr]) or Expr::Identifier("Ok")
 //   Token::Err → "Err" as identifier → Expr::Call("Err", [expr]) or Expr::Identifier("Err")
 ```
 
 `Ok` and `Err` are keyword tokens but are already handled in `expect_identifier()` and `parse_primary_expr()`. However, `Ok(())` fails because `()` is an empty tuple expression that consumes both parens, leaving the `Call("Ok", ...)` without its closing `)`.
 
-### 2.10 Briv type annotations use `name: Type`, not `name: type`
+### 2.10 Briev type annotations use `name: Type`, not `name: type`
 
-```briv
+```briev
 // Correct:
 defn foo(x: Int) -> String { ... }
 let y: List<Int> = [];
@@ -148,7 +148,7 @@ let y: List<Int> = [];
 // NOT: defn foo(x: i32) -> str { ... }
 ```
 
-Briv uses PascalCase for all types: `Int`, `String`, `Bool`, `Float`, `Char`, `Void`, `List<T>`, `Option<T>`, `Result<T,E>`, `HashMap<K,V>`, `HashSet<T>`. Lowercase types like `u8`, `i32`, `str` are Rust-isms that don't exist in Briv.
+Briev uses PascalCase for all types: `Int`, `String`, `Bool`, `Float`, `Char`, `Void`, `List<T>`, `Option<T>`, `Result<T,E>`, `HashMap<K,V>`, `HashSet<T>`. Lowercase types like `u8`, `i32`, `str` are Rust-isms that don't exist in Briev.
 
 ---
 
@@ -156,14 +156,14 @@ Briv uses PascalCase for all types: `Int`, `String`, `Bool`, `Float`, `Char`, `V
 
 Two independent changes that together eliminate keyword conflicts:
 
-1. **Briv-in-Briv parser**: `is_identifier()` returns true for keywords, `unwrap_identifier()` falls back to `keyword_to_string()`. 24 sites in parser.bv updated.
+1. **Briev-in-Briev parser**: `is_identifier()` returns true for keywords, `unwrap_identifier()` falls back to `keyword_to_string()`. 24 sites in parser.bv updated.
 2. **Rust parser**: 44 missing keyword tokens added to `expect_identifier()` and 4 `parse_primary_expr()` blocks.
 
 Then revert all the manual renames in `.bv` files.
 
 ---
 
-## 4. Phase 1: Briv-in-Briv Parser
+## 4. Phase 1: Briev-in-Briev Parser
 
 ### 4.1 `lib/compiler/token.bv` — 2 functions + 1 bugfix
 
@@ -198,14 +198,14 @@ Line 185 already has `uni tok(KeywordRstruct) = "rstruct";`. Line 196 is an iden
 #### Pattern A: SIMPLE+ADVANCE-SIDE (18 sites)
 
 Each site has the structure:
-```briv
+```briev
 let tok = current_token(state);
 uni tok(TokenIdentifier(name)) = { &state = advance(state); };
 [!is_identifier(tok)] { term Err("Expected name"); };
 ```
 
 Change to:
-```briv
+```briev
 let tok = current_token(state);
 [!is_identifier(tok) && !is_keyword(tok)] { term Err("Expected name"); };
 let name = unwrap_identifier(tok);
@@ -276,7 +276,7 @@ No `is_identifier` guard — just a `uni` pattern with a terminal error. Replace
 | 2258 | `parse_import_path` — first path segment | `"Expected import path"` |
 
 **Note on site 2258**: Also has a nested `uni tok2(TokenIdentifier(next))` at line 2266 for subsequent path segments. Apply same fix there:
-```briv
+```briev
 let next_name = unwrap_identifier(tok2);
 [next_name == ""] { term Err("Expected import path"); };
 ```
@@ -445,7 +445,7 @@ After each, verify with grep that no unintended replacements occurred.
    ```bash
    for f in lib/compiler/*.bv lib/compiler/backends/*.bv; do
        echo "=== $f ==="
-       cargo run --bin briv-compiler -- check "$f" 2>&1 | grep -E "Parse error|All checks|Import error"
+       cargo run --bin briev-compiler -- check "$f" 2>&1 | grep -E "Parse error|All checks|Import error"
    done
    ```
 4. Expect: wasm.bv, x86_64.bv, backend_aarch64.bv, webstack.bv still have non-keyword parse errors (deep Rust-isms, not keyword conflicts).

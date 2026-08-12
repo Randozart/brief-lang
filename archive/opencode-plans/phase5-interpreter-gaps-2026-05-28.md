@@ -94,7 +94,7 @@ For safety, implement both `TupleDestructure` and `Tuple`.
 **Used by**: `range.bv`, contract verification  
 **Implementation**: Eval `expr` (should be a List containing predicate), bind var, check all.
 
-**Key insight**: `ForAll` in Briv contracts desugars to a list iteration. The `var` is bound, `expr` is the list expression or condition. Actually looking at the AST more carefully, `ForAll` in `Expr` context is just `forall var in list: condition` which means the `var` gets bound to each element and a condition is evaluated.
+**Key insight**: `ForAll` in Briev contracts desugars to a list iteration. The `var` is bound, `expr` is the list expression or condition. Actually looking at the AST more carefully, `ForAll` in `Expr` context is just `forall var in list: condition` which means the `var` gets bound to each element and a condition is evaluated.
 
 But actually, `ForAll` in the interpreter may not even be hit — `proof_engine.bv` handles it, not the main pipeline. Let me just stub it to avoid the error:
 
@@ -160,7 +160,7 @@ Actually, this is overcomplicated. `MultiSlice` is unlikely to be hit. I'll stub
 
 1. `cargo build` — compiles with new variants
 2. `cargo test --lib` — 269/269 continue to pass
-3. `briv-compiler selfhost examples/counter.rbv` — reaches backend stub and produces output
+3. `briev-compiler selfhost examples/counter.rbv` — reaches backend stub and produces output
 
 ---
 
@@ -168,4 +168,4 @@ Actually, this is overcomplicated. `MultiSlice` is unlikely to be hit. I'll stub
 
 When the pipeline produces output (even stub `"// TODO"` strings), the next step is:
 - **Phase 6**: Implement `backends/rust.bv` or `backends/c.bv` to generate real code
-- Briv compiler can then compile its own code → bootstrap
+- Briev compiler can then compile its own code → bootstrap

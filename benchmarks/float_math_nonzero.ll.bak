@@ -1139,7 +1139,7 @@ attributes #2 = { mustprogress nofree norecurse nosync nounwind memory(readwrite
 attributes #3 = { nofree norecurse nosync nounwind memory(readwrite) }
 attributes #6 = { nounwind }
 
-!0 = !{!"Briv"}
+!0 = !{!"Briev"}
 !1 = !{!"Int", !0}
 !2 = !{!"Char", !0}
 !3 = !{!"Float", !0}

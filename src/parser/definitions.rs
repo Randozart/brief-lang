@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             // 2026-08-09 (Phase 12, SPEC §19.6): `meld` is removed — foreign
-            // shapes adapt through GLUE/Data Briv descriptors, explicit
+            // shapes adapt through GLUE/Data Briev descriptors, explicit
             // protocol cast edges, ownership contracts, and effects. Rejected
             // as staged (SPEC §25), not silently accepted.
             Some(Token::Meld) => Err(SyntaxError::StagedFeature {
@@ -278,13 +278,13 @@ impl<'a> Parser<'a> {
                     self.pos += 1; // consume `init` identifier
                     return Ok(TopLevel::Init(self.parse_init_declaration()?));
                 }
-                // 2026-08-04 (remove-vestigial-return): Briv has no `return`
+                // 2026-08-04 (remove-vestigial-return): Briev has no `return`
                 // statement — give the same helpful error at top level as in
                 // statement bodies (src/parser/statements.rs parse_statement).
                 if self.check_identifier("return") {
                     self.pos += 1; // consume `return`
                     return Err(SyntaxError::InvalidStatement {
-                        reason: "Briv has no `return` statement. To return a value \
+                        reason: "Briev has no `return` statement. To return a value \
                                  from a defn use `term <value>`; to mark a convergence \
                                  checkpoint use bare `term;`; `term!` closes the program."
                             .to_string(),
@@ -324,15 +324,15 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-22: Parse `frgn` declaration (import model).
     /// Syntax:
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback <expr>];
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback <fn>(<args>)];
-    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briv_name>] from <source> [target "c"] [fallback ;];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briev_name>] from <source> [target "c"] [fallback <expr>];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briev_name>] from <source> [target "c"] [fallback <fn>(<args>)];
+    ///   frgn <foreign_symbol>(<params>) [-> <ret>] [as <briev_name>] from <source> [target "c"] [fallback ;];
     ///
     /// `from` is required (provenance for the foreign module).
-    /// `as` is optional and comes before `from` (Briv name, different from the C symbol).
+    /// `as` is optional and comes before `from` (Briev name, different from the C symbol).
     fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
         // 2026-08-09 (Phase 12, SPEC §19.1): the declaration name is the LOCAL
-        // Briv name; a `:` binds a DIFFERENT external (link) symbol. `as` is
+        // Briev name; a `:` binds a DIFFERENT external (link) symbol. `as` is
         // not an alias operator (removed — the 2026-07-22 inversion).
         let local_name = self.expect_identifier()?;
 
@@ -372,8 +372,8 @@ impl<'a> Parser<'a> {
 
         // 2026-08-09 (SPEC §19.1): `: external_symbol` binds the link symbol.
         // Absent → the local name IS the external symbol. The old `as
-        // <briv_name>` form is removed (it inverted the names).
-        let (foreign_name, briv_name): (String, Option<String>) = if self.eat(&Token::Colon) {
+        // <briev_name>` form is removed (it inverted the names).
+        let (foreign_name, briev_name): (String, Option<String>) = if self.eat(&Token::Colon) {
             (self.expect_identifier()?, Some(local_name))
         } else {
             (local_name.clone(), None)
@@ -424,7 +424,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         Ok(ForeignBinding {
             foreign_name,
-            briv_name,
+            briev_name,
             from,
             target,
             inputs,
@@ -965,7 +965,7 @@ impl<'a> Parser<'a> {
         // Import with symbols: import sym from "module" or from <name>
         let first = self.expect_identifier()?;
         // 2026-08-09 (Phase 11, Slice 2): `import alias: <path>` — a `:` module
-        // alias. Collision-resolving local TAG only (no qualified access — Briv
+        // alias. Collision-resolving local TAG only (no qualified access — Briev
         // inlines imports). The path follows the `:`.
         if self.eat(&Token::Colon) {
             let kind = parse_import_path(self)?;
@@ -2453,15 +2453,15 @@ mod tests {
 
     #[test]
     fn test_frgn_colon_binds_external_symbol() {
-        // SPEC §19.1: the declaration name is the LOCAL Briv name; `:` binds a
+        // SPEC §19.1: the declaration name is the LOCAL Briev name; `:` binds a
         // different external (link) symbol. `as` is not an alias operator.
         let fb = parse_frgn(
             r#"frgn local_add(a: Int, b: Int) -> Int: external_add from #System;"#,
         )
         .unwrap();
         assert_eq!(fb.foreign_name, "external_add", "the `:` symbol is the link name");
-        assert_eq!(fb.briv_name.as_deref(), Some("local_add"), "the declaration name is the local Briv name");
-        assert_eq!(fb.effective_briv_name(), "local_add");
+        assert_eq!(fb.briev_name.as_deref(), Some("local_add"), "the declaration name is the local Briev name");
+        assert_eq!(fb.effective_briev_name(), "local_add");
     }
 
     #[test]

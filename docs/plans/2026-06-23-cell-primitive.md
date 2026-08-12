@@ -1,7 +1,7 @@
 # `cell` — Cybernetic Cell Primitive
 
 **Date**: 2026-06-23  
-**Author**: Briv Compiler Architecture  
+**Author**: Briev Compiler Architecture  
 **Status**: Plan (ready for implementation)  
 
 ---
@@ -24,7 +24,7 @@
 
 ## 1. Core Concept
 
-A `cell` (component) is an **intentionally isolated Briv-in-Briv state space**. It wraps a complete Briv program (private state, reactive transactions, triggers) into a sealed box with a well-defined output interface. The outside world interacts only through:
+A `cell` (component) is an **intentionally isolated Briev-in-Briev state space**. It wraps a complete Briev program (private state, reactive transactions, triggers) into a sealed box with a well-defined output interface. The outside world interacts only through:
 
 - **Input arguments**: ephemeral values passed per invocation
 - **Output ports**: named variables declared in the return type, continuously updated and trigger-able
@@ -96,7 +96,7 @@ cell name(args) -> name: Type [| name: Type]*     // Union — exactly one port 
 
 ### 2.5 Trigger Binding
 
-```briv
+```briev
 // One-liner with explicit port (cell! only):
 trg X: Type @ cell!(args).port_name;
 
@@ -129,7 +129,7 @@ trg A @ c.port;
 
 ### 2.6 Direct Reads — FORBIDDEN
 
-```briv
+```briev
 let c = async cell!(args);
 let x = c.port;              // COMPILE ERROR — can't read cell variables directly
 trg X @ c.port;              // OK — trigger binding
@@ -160,7 +160,7 @@ trg_decl       ::= "trg" ident "@" source ";"          (* internal triggers *)
 
 ### 3.2 Full Example
 
-```briv
+```briev
 // ── Timer component ──
 cell! timer(duration: Int) -> elapsed: Int, done: Bool {
     elapsed: Int = 0;
@@ -1123,7 +1123,7 @@ The `officina-cli` project at `~/Desktop/Projects/officina-cli` requires complex
 
 A standard library component that encapsulates all TTY plumbing:
 
-```briv
+```briev
 // lib/std/system_comp.bv
 // Console component — reads raw stdin, produces clean strings
 
@@ -1170,7 +1170,7 @@ cell! Console -> buffer: String {
 
 ### 10.3 Parent Usage
 
-```briv
+```briev
 import { Console } from "std/system_comp";
 
 // One-liner: creates async Console instance, binds trigger to buffer output
@@ -1201,7 +1201,7 @@ node displayOutput [consoleBuffer != "" && consoleBuffer != savedBuffer]
 
 The same pattern works for many system interaction points:
 
-```briv
+```briev
 // lib/std/system_comp.bv (extended)
 cell! FileReader(path: String) -> line: String;
 cell! Clock -> tick: Int;

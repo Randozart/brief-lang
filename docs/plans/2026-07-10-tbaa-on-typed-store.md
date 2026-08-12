@@ -2,10 +2,10 @@
 
 ## Symptom
 
-On `main`: Briv 0.0682s, C 0.0685s → **0.99x** (Briv wins, MATCH)
-On branch:  Briv 0.1047s, C 0.0647s → **1.61x** (C wins, MATCH)
+On `main`: Briev 0.0682s, C 0.0685s → **0.99x** (Briev wins, MATCH)
+On branch:  Briev 0.1047s, C 0.0647s → **1.61x** (C wins, MATCH)
 
-Briv slowed by **54%** with identical dispatch (both A005c, both work correctly).
+Briev slowed by **54%** with identical dispatch (both A005c, both work correctly).
 
 ## Root Cause
 

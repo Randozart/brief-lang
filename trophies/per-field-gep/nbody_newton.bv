@@ -1,10 +1,10 @@
 // nbody_newton — 5-body gravity sim with Newton's method sqrt
-// Compares Briv vs C on identical algorithm: inline Newton iterations, unrolled pairs.
+// Compares Briev vs C on identical algorithm: inline Newton iterations, unrolled pairs.
 
 #!exit count == bound;
 
 import { get_env_int } from "std/env.bv";
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 
 frgn #out __print_float(val: Float) -> Bool;
 

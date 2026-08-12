@@ -30,14 +30,14 @@ render Counter {
     </div>
 };
 
-// Briv-side instance — the program owns it: seeded in Briv, mounted as <main />.
+// Briev-side instance — the program owns it: seeded in Briev, mounted as <main />.
 // The <Counter /> tag below is an anonymous reactor-owned spawn (zero-init).
 let main: Counter = Counter { count: 5 };
 
 <view>
   <div class="container">
     <h1>Counter Component</h1>
-    <p>Seeded (Briv-side):</p>
+    <p>Seeded (Briev-side):</p>
     <main />
     <p>Anonymous (HTML-side):</p>
     <Counter />

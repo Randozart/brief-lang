@@ -3,43 +3,43 @@
 ## Task 1: Enable 6 Excluded Prelude Modules
 
 **Problem:** The runtime preamble (`src/backend/llvm/mod.rs:1727-1744`) declares libc
-functions with C types (`i32`), but our inop wrappers call them with `i64` (Briv's ABI).
+functions with C types (`i32`), but our inop wrappers call them with `i64` (Briev's ABI).
 
 **Current excludes:** `user.bv`, `sched.bv`, `resource.bv`, `sysinfo.bv`, `ring.bv`, `atomic.bv`
 
-**Fix per module:** Add a briv_rt.c wrapper function that takes `int64_t` and calls the libc
-function. Then add `declare i64 @briv_wrapper(i64...)` to the preamble, and update the inop
-to call the `briv_` wrapper.
+**Fix per module:** Add a briev_rt.c wrapper function that takes `int64_t` and calls the libc
+function. Then add `declare i64 @briev_wrapper(i64...)` to the preamble, and update the inop
+to call the `briev_` wrapper.
 
 Example:
 ```c
-// briv_rt.c addition
-int64_t briv_getuid(void) { return (int64_t)getuid(); }
+// briev_rt.c addition
+int64_t briev_getuid(void) { return (int64_t)getuid(); }
 ```
 ```llvm
 // preamble addition (mod.rs)
-declare i64 @briv_getuid() #1
+declare i64 @briev_getuid() #1
 ```
-```briv
+```briev
 // inop in user.bv
-inop __sys_getuid() -> Int { %r = call i64 @briv_getuid(); ret i64 %r; };
+inop __sys_getuid() -> Int { %r = call i64 @briev_getuid(); ret i64 %r; };
 ```
 
 Functions needing wrappers:
-| Module | libc function | briv_rt.c wrapper |
+| Module | libc function | briev_rt.c wrapper |
 |--------|--------------|-------------------|
-| user.bv | `getuid()` → `uid_t` | `briv_getuid()` |
-| user.bv | `geteuid()` → `uid_t` | `briv_geteuid()` |
-| user.bv | `getgid()` → `gid_t` | `briv_getgid()` |
-| user.bv | `getegid()` → `gid_t` | `briv_getegid()` |
-| sched.bv | `sched_yield()` → `int` | `briv_sched_yield()` |
-| sched.bv | `getpriority(int, int)` → `int` | `briv_getpriority(i64, i64)` |
-| sched.bv | `setpriority(int, int, int)` → `int` | `briv_setpriority(i64, i64, i64)` |
-| resource.bv | `getrlimit(int, struct*)` → `int` | `briv_getrlimit(i64)` (stub) |
-| resource.bv | `setrlimit(int, struct*)` → `int` | `briv_setrlimit(i64, i64)` (stub) |
-| sysinfo.bv | `sysconf(int)` → `long` | `briv_pagesize()` uses `sysconf(_SC_PAGE_SIZE)` |
-| sysinfo.bv | `sysconf(int)` → `long` | `briv_cpu_count()` uses `sysconf(_SC_NPROCESSORS_ONLN)` |
-| ring.bv | — | wrapper functions `briv_ring_push/briv_ring_pop` (stubs) |
+| user.bv | `getuid()` → `uid_t` | `briev_getuid()` |
+| user.bv | `geteuid()` → `uid_t` | `briev_geteuid()` |
+| user.bv | `getgid()` → `gid_t` | `briev_getgid()` |
+| user.bv | `getegid()` → `gid_t` | `briev_getegid()` |
+| sched.bv | `sched_yield()` → `int` | `briev_sched_yield()` |
+| sched.bv | `getpriority(int, int)` → `int` | `briev_getpriority(i64, i64)` |
+| sched.bv | `setpriority(int, int, int)` → `int` | `briev_setpriority(i64, i64, i64)` |
+| resource.bv | `getrlimit(int, struct*)` → `int` | `briev_getrlimit(i64)` (stub) |
+| resource.bv | `setrlimit(int, struct*)` → `int` | `briev_setrlimit(i64, i64)` (stub) |
+| sysinfo.bv | `sysconf(int)` → `long` | `briev_pagesize()` uses `sysconf(_SC_PAGE_SIZE)` |
+| sysinfo.bv | `sysconf(int)` → `long` | `briev_cpu_count()` uses `sysconf(_SC_NPROCESSORS_ONLN)` |
+| ring.bv | — | wrapper functions `briev_ring_push/briev_ring_pop` (stubs) |
 | atomic.bv | — | **excluded permanently** — needs LLVM IR atomics, not C calls |
 
 ## Task 2: Remove 127 Dead Intrinsic Enum Variants

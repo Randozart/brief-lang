@@ -54,7 +54,7 @@ fn default_cross_verify_samples() -> u32 { 50 }
 
 /// Split a whitespace-separated list field into words (parser has no array
 /// grammar — space-separated values round-trip as one String field).
-/// 2026-08-03 (Phase 3, data-briv-config plan).
+/// 2026-08-03 (Phase 3, data-briev-config plan).
 fn split_words(s: &str) -> Vec<String> {
     s.split_whitespace().map(|w| w.to_string()).collect()
 }
@@ -90,21 +90,21 @@ pub struct ProtocolConfig {
 impl ProtocolConfig {
     /// Load the compiled-in protocol config (baked at compile time).
     ///
-    /// 2026-08-03 (Phase 3, data-briv-config plan): reads config/protocols.dbvl
+    /// 2026-08-03 (Phase 3, data-briev-config plan): reads config/protocols.dbvl
     /// (quoted mode — the `#System`/`#Web` map keys are quoted because `#` is
     /// not an identifier char). Shape is `<triple>: { "<protocol>": "<lib>"; }`.
     pub fn load() -> Self {
         let content = include_str!("../config/protocols.dbvl");
-        let db = crate::dbriv::config_db::ConfigDb::from_quoted_str(content)
+        let db = crate::dbriev::config_db::ConfigDb::from_quoted_str(content)
             .unwrap_or_else(|e| panic!("config/protocols.dbvl parse error: {}", e));
         let mut per_target = HashMap::new();
         for key in db.keys() {
             let map = match db.field(&key, 0) {
-                Some(crate::dbriv::v2::DataValue::Map(entries)) => entries
+                Some(crate::dbriev::v2::DataValue::Map(entries)) => entries
                     .iter()
                     .map(|(protocol, lib)| {
                         let lib = match lib {
-                            crate::dbriv::v2::DataValue::String(s) => Some(s.clone()),
+                            crate::dbriev::v2::DataValue::String(s) => Some(s.clone()),
                             _ => None,
                         };
                         (protocol.clone(), lib)
@@ -166,7 +166,7 @@ impl ProtocolConfig {
 impl TargetConfig {
     /// Load the compiled-in target config (fallback).
     ///
-    /// 2026-08-03 (Phase 3, data-briv-config plan): reads config/targets.dbvl.
+    /// 2026-08-03 (Phase 3, data-briev-config plan): reads config/targets.dbvl.
     /// Extension entries are `<.ext>: <backend>; <defaults space-sep>;
     /// <plugins space-sep>; [assembler]; [cross_verify_samples];
     /// [target_triple]; [data_layout];` — the two overrides are optional and
@@ -174,7 +174,7 @@ impl TargetConfig {
     /// The `target.*` tuning rows are consumed by config_tuning, not here.
     pub fn load() -> Self {
         let content = include_str!("../config/targets.dbvl");
-        let db = crate::dbriv::config_db::ConfigDb::from_str(content)
+        let db = crate::dbriev::config_db::ConfigDb::from_str(content)
             .unwrap_or_else(|e| panic!("config/targets.dbvl parse error: {}", e));
         let mut entries = HashMap::new();
         for key in db.keys() {
@@ -202,7 +202,7 @@ impl TargetConfig {
         if ext == "dbvl" || ext == "dbv" {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
-            let db = crate::dbriv::config_db::ConfigDb::from_str(&content)
+            let db = crate::dbriev::config_db::ConfigDb::from_str(&content)
                 .map_err(|e| format!("parse error in '{}': {}", path.display(), e))?;
             let mut entries = HashMap::new();
             for key in db.keys() {

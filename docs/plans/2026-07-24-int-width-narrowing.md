@@ -46,7 +46,7 @@ Each primordial gets `min_bits` and `max_bits` instead of `bytes`:
 
 ### 3. Bootstrap Declaration
 
-```briv
+```briev
 // New: maxbits is an upper bound, not an exact size
 type Int : Bits {
     maxbits <~ 64;
@@ -210,7 +210,7 @@ stores bits, not bytes (unit change throughout the compiler).
 ```rust
 // After normalizer, before Normalized stage:
 #[cfg(feature = "optimizer")]
-briv_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe)?;
+briev_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe)?;
 ```
 
 The pass is optional (behind `optimizer` feature) so `--optimize-budget 0`

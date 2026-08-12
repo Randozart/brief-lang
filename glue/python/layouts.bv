@@ -1,7 +1,7 @@
 // CPython 3.x heap object layouts (64-bit, default build)
 //
 // These structs mirror CPython's C obj memory layout exactly, enabling
-// zero-copy access to Python heap objects from Briv via meld projections.
+// zero-copy access to Python heap objects from Briev via meld projections.
 //
 // Usage in a bridge file:
 //   import { PyLongObject, PyUnicodeObject } from "glue/python/layouts.bv";
@@ -17,7 +17,7 @@
 // CPython memory layout reference (64-bit):
 //   https://docs.python.org/3/c-api/structures.html
 //
-// Types used (all 8 bytes in Briv/LLVM):
+// Types used (all 8 bytes in Briev/LLVM):
 //   Int     = int64 (8 bytes)
 //   Ptr     = int64 (8 bytes, pointer-width)
 

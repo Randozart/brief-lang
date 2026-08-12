@@ -1,16 +1,16 @@
 // nbody_sqrt — 5-body gravity sim with libm sqrtf (FFI)
-// Compares Briv vs C on identical algorithm: libm sqrtf, unrolled pairs.
+// Compares Briev vs C on identical algorithm: libm sqrtf, unrolled pairs.
 // The sqrt FFI call inside the hot body prevents pure-counter fold
 // via statement_contains_ffi, keeping all field stores live.
 //
 // Build:
-//   ./target/release/briv-compiler llvm benchmarks/nbody_sqrt.bv \
+//   ./target/release/briev-compiler llvm benchmarks/nbody_sqrt.bv \
 //       --out benchmarks --optimize-budget 2048
 
 #!exit count == bound;
 
 import { get_env_int } from "std/env.bv";
-import "link/briv_rt.c";
+import "link/briev_rt.c";
 
 frgn #out __print_float(val: Float) -> Bool;
 

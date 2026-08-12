@@ -4,8 +4,8 @@
 // AddressOf# reads from config/address-map.toml at compile time and
 // returns a typed pointer that can be used with trigger bindings.
 //
-// Build: briv-compiler build --llvm examples/dynamic-trigger-trg.bv
-// Check: briv-compiler check examples/dynamic-trigger-trg.bv
+// Build: briev-compiler build --llvm examples/dynamic-trigger-trg.bv
+// Check: briev-compiler check examples/dynamic-trigger-trg.bv
 
 // Resolve "uart_status" from the address map
 let uart_addr: Int = AddressOf#("uart_status");

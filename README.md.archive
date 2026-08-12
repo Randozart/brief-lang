@@ -1,10 +1,10 @@
-# Briv: A Programming Language
+# Briev: A Programming Language
 
 ### TL;DR
 
-**Briv is currently a WIP, be aware the design has not been entirely locked in yet**
+**Briev is currently a WIP, be aware the design has not been entirely locked in yet**
 
-Briv is programming language with the following features:
+Briev is programming language with the following features:
 
 - Contract driven partial correctness verification (without needing to write essays of formal proof)
 - Partially declarative, partially imperative, functional invariant based programming
@@ -17,7 +17,7 @@ Briv is programming language with the following features:
 - Memory management by proof through AST graphing
 - Syntax which encourages and optimizes for flat programming
 - Legible metaprogramming syntax for macros and compiler plugins with intermediate `.beast` AST files for understanding how the compiler transforms the code
-- The Metropolitan FFI which adapts compiled Briv code to any and every other programming language by adapting their calling and memory conventions through the Metropipe and GLUE system
+- The Metropolitan FFI which adapts compiled Briev code to any and every other programming language by adapting their calling and memory conventions through the Metropipe and GLUE system
 - Helpful compiler hints on failed compilation
 - Optional Python-like indent-based syntax for those who despise curly braces through the opt-in `.f.*bv` extension argument
 - Optional extra strictness through the `.s.*bv` extension argument
@@ -29,29 +29,29 @@ And for those people for whom this is very important, even if the language itsel
 
 - A cute mascot called _Syn_
 
-| <img src="assets/syn_present.png" alt="Syn showing you the logos" width="250"/><br/> <p align="center">*Syn*, the Cybersphinx<p> <p align="center"><sup><sub>(For those people who like a mascot to come with their language)</sup></sub><p> | <img src="assets/briv-logo.svg" alt="Briv" width="200"/><br/><p align="center">**Briv**<p><img src="assets/e-briv-logo.svg" alt="Embedded Briv" width="200"/><br/><p align="center">**Embedded Briv**<p><img src="assets/a-briv-logo.svg" alt="Accelerated Briv" width="200"/><br/><p align="center">**Accelerated Briv**<p> | <img src="assets/r-briv-logo.svg" alt="Rendered Briv" width="200"/><br/><p align="center">**Rendered Briv**<p><img src="assets/d-briv-logo.svg" alt="Data Briv" width="200"/><br/><p align="center">**Data Briv**<p><img src="assets/c-briv-logo.svg" alt="Circuit Briv" width="200"/><p align="center">**Circuit Briv**<p> |
+| <img src="assets/syn_present.png" alt="Syn showing you the logos" width="250"/><br/> <p align="center">*Syn*, the Cybersphinx<p> <p align="center"><sup><sub>(For those people who like a mascot to come with their language)</sup></sub><p> | <img src="assets/briev-logo.svg" alt="Briev" width="200"/><br/><p align="center">**Briev**<p><img src="assets/e-briev-logo.svg" alt="Embedded Briev" width="200"/><br/><p align="center">**Embedded Briev**<p><img src="assets/a-briev-logo.svg" alt="Accelerated Briev" width="200"/><br/><p align="center">**Accelerated Briev**<p> | <img src="assets/r-briev-logo.svg" alt="Rendered Briev" width="200"/><br/><p align="center">**Rendered Briev**<p><img src="assets/d-briev-logo.svg" alt="Data Briev" width="200"/><br/><p align="center">**Data Briev**<p><img src="assets/c-briev-logo.svg" alt="Circuit Briev" width="200"/><p align="center">**Circuit Briev**<p> |
 |---|---|---|
 
-## Briv Doesn't Break
+## Briev Doesn't Break
 
 **Status:** v0.18.0 — GLUE Bridge Protocol, TOML-Driven Export, Cross-Language FFI Pipeline
 
-Briv is a contract-enforced language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
+Briev is a contract-enforced language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
 | Extension | Variant | Compiles to |
 |-----------|---------|-------------|
-| `.bv` | **Briv** | LLVM native binary (optional SPIR-V offload) |
-| `.rbv` | **Rendered Briv** | TypeScript + frontend code + WASM sidecars |
-| `.ebv` | **Embedded Briv** | LLVM microcontroller binary |
-| `.abv` | **Accelerated Briv** | SPIR-V GPU kernel |
-| `.cbv` | **Circuit Briv** | CIRCT hardware description (Verilog/VHDL) |
-| `.dbv` / `.dbvs` / `.dbvl` | **Data Briv** | Configuration data parsed by Briv itself |
+| `.bv` | **Briev** | LLVM native binary (optional SPIR-V offload) |
+| `.rbv` | **Rendered Briev** | TypeScript + frontend code + WASM sidecars |
+| `.ebv` | **Embedded Briev** | LLVM microcontroller binary |
+| `.abv` | **Accelerated Briev** | SPIR-V GPU kernel |
+| `.cbv` | **Circuit Briev** | CIRCT hardware description (Verilog/VHDL) |
+| `.dbv` / `.dbvs` / `.dbvl` | **Data Briev** | Configuration data parsed by Briev itself |
 
-The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Briv is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
+The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Briev is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
 
 Note that much of this language design was inspired by designing a language that would be impossible for an LLM to get wrong. Therefore it feels important to me to disclaim a lot of AI has been used in building this compiler. The design is fully my own (Randy Smits-Schreuder Goedheijt), but much of the programming was handled by LLMs, and the verification by hand and a series of unit tests (which LLMs somehow manage to cut the corners of). As such, you will find comments, markdown files and many more typical signs of LLM usage in this repository. These all exist to help steer the LLM into *correctly* modifying and applying the design decisions I have made, as it would otherwise be prone to hallucinate a novel language like this. Ergo, you will find a veritable library of markdown files written by AI, just to make sure everything got documented as I went.
 
-If you've gotten this far, I thank you for reading, and I hope you will have enjoyed your *Briv* time here so far.
+If you've gotten this far, I thank you for reading, and I hope you will have enjoyed your *Briev* time here so far.
 
 Regards,
 
@@ -59,15 +59,15 @@ Regards,
 
 ## The Thesis: Topology over Timing
 
-Most programming languages are built around _operations in sequence_. Briv describes the _sequence of operations_ - the spatial connections between logical states.
+Most programming languages are built around _operations in sequence_. Briev describes the _sequence of operations_ - the spatial connections between logical states.
 
-*   **Logic as a Map:** Briv defines a world where roads exist all at once. The "sequence" is then can call o _connection_, not the _timing_.
+*   **Logic as a Map:** Briev defines a world where roads exist all at once. The "sequence" is then can call o _connection_, not the _timing_.
 *   **Physical Isomorphism:** Because the logic defines a _shape_ rather than a _schedule_, it adapts to the physics of its material:
     *   **In Software:** The compiler hires a worker (the CPU) to walk these roads in order.
     *   **In Hardware:** The compiler builds the roads directly out of copper.
 *   **Variable Logic:** The logic remains invariant while the material changes. A square is a square whether it's drawn in the sand or forged in steel.
 
-**Deep Dive:** There are several .md documents scattered across the repo with random ideas on optimizing the language. Some are outdated, some aren't, but they should show the development of the Briv philosophy over time, and ways in which the topological approach has allowed backend optimization not otherwise available.
+**Deep Dive:** There are several .md documents scattered across the repo with random ideas on optimizing the language. Some are outdated, some aren't, but they should show the development of the Briev philosophy over time, and ways in which the topological approach has allowed backend optimization not otherwise available.
 
 ## The Philosophical Pillars
 
@@ -75,9 +75,9 @@ Most programming languages are built around _operations in sequence_. Briv descr
 
 Nodes and transactions are inherently cyclical. If you properly define a postcondition a cyclically executed transaction will eventually reach, it automatically starts behaving like a loop, but one that can predictably halt. A transaction with `[pre][post]` converges when the precondition becomes false. This means the postcondition describes the terminal state, and the precondition is the loop condition. You do not write `while (counter < 100)`, instead the precondition `[counter < 100]` already says "keep running while this holds." You do not write `for (i = 0; i < N; i++)`, here too the postcondition `[i == @i + 1]` expresses the step and the invariant all at once. The compiler proves the postcondition is reachable and that the loop terminates. This gives the contract system a role beyond *merely* serving the proof engine.
 
-### Briv doesn't need you to be correct, it just needs you to be right.
+### Briev doesn't need you to be correct, it just needs you to be right.
 
-The contract logic often just requires you to declare either the precondition or postcondition, not both. Contracts are simultaneously specification AND optimization input. In most languages, types/specs are safety rails that constrain what you can do. In Briv, they're also what the optimizer feeds on. The more you declare, the more the compiler can prove, and the faster your program runs. The file extension system (.bv → warnings, .sbv → hard errors) embodies the idea that you opt into strictness as your understanding deepens. Partial contracts compile with warnings. Full contracts with strict mode compile with proofs. This is a choice that distinguishes Briv from total languages (Coq, Agda) where you must prove everything upfront, and from mainstream languages where you prove nothing.
+The contract logic often just requires you to declare either the precondition or postcondition, not both. Contracts are simultaneously specification AND optimization input. In most languages, types/specs are safety rails that constrain what you can do. In Briev, they're also what the optimizer feeds on. The more you declare, the more the compiler can prove, and the faster your program runs. The file extension system (.bv → warnings, .sbv → hard errors) embodies the idea that you opt into strictness as your understanding deepens. Partial contracts compile with warnings. Full contracts with strict mode compile with proofs. This is a choice that distinguishes Briev from total languages (Coq, Agda) where you must prove everything upfront, and from mainstream languages where you prove nothing.
 
 ### Execution is inferred, not prescribed.
 
@@ -85,19 +85,19 @@ Programs are declared through a combination of variables, definitions and transa
 
 ### No magic, but I had to compromise somewhere.
 
-Every function and keyword in Briv must be traceable to a source following the same rules as every other definition. If it looks like `foo(x)`, it is user-defined. Period. The exception is `#`-suffixed intrinsics like `print_int#`, `sqrt#`, `put_char#`. These are baked into `Expr::IntrinsicCall` in the AST, but they are *explicitly* marked with the `#` at every call site. You can never mistake `sqrt` for `sqrt#`. The `#` is the compiler saying "I have a hand in this one." It is a compromise, but an honest one.
+Every function and keyword in Briev must be traceable to a source following the same rules as every other definition. If it looks like `foo(x)`, it is user-defined. Period. The exception is `#`-suffixed intrinsics like `print_int#`, `sqrt#`, `put_char#`. These are baked into `Expr::IntrinsicCall` in the AST, but they are *explicitly* marked with the `#` at every call site. You can never mistake `sqrt` for `sqrt#`. The `#` is the compiler saying "I have a hand in this one." It is a compromise, but an honest one.
 
 The "coding" system, where top-level `let` declarations and guarded blocks get implicitly wrapped into a reactive transaction, is the one invisible transformation the compiler does. But the transformation is predictable and the same for every program. It is the practical muscle behind "execution is inferred, not prescribed." The compiler tells you what it inferred. You can always look at the expanded form.
 
 Anything interacting with an external language or interrupt source must be declared explicitly. Which FFI path that takes depends on your target:
-- **LLVM target** (`.bv`, `.ebv`): `frgn from "c"` resolved via `briv_rt.c`.
+- **LLVM target** (`.bv`, `.ebv`): `frgn from "c"` resolved via `briev_rt.c`.
 - **Web target** (`.rbv`): `frgn from "javascript"` inlined into generated TypeScript.
 - **Hardware target** (`.cbv`): no FFI allowed. If you need something external, it comes through an intrinsic. This is the strictest tier, because you are describing copper.
 - **GPU target** (`.abv`): intrinsics only, same as hardware.
 
 ### Contracts are optimization fuel, not a correctness tax.
 
-This is an odd one I discovered I could do while optimizing Briv. In most languages, a precondition, assertion or some other safety wrapper is you doing the compiler or even just the runtime a favor to prevent messy logic from crashing the program. In Briv, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety enables speed.
+This is an odd one I discovered I could do while optimizing Briev. In most languages, a precondition, assertion or some other safety wrapper is you doing the compiler or even just the runtime a favor to prevent messy logic from crashing the program. In Briev, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety enables speed.
 
 A precondition like `[x < N]` does more than guard the transaction. The compiler uses this information to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. More contracts means more metadata, which means more guarantees about the code. The optimizer feeds on what the prover proves.
 
@@ -107,7 +107,7 @@ So, instead of thinking *"safety checks slow me down, I will add them later."*, 
 
 ### Friction is a signal...
 
-There is no `if/else` in Briv. There are guarded blocks: `[condition] { body }`. This is not an omission. A guard forces you to ask "what must be true for this to execute?" rather than "which branch do I take?" If it feels harder than `if`, that is because you are specifying an invariant instead of a jump. The friction is the point. Operators that alter normal flow are marked with `!`: `term!` exits the program, `trg!` fires a hardware trigger, `sync!` forces a barrier, `$!` marks a high-power macro with access to `compile#`, `gensym#`, and `error#`. The `!` is the language saying "this is not a normal operation." If it feels heavy, good. It should. The strict variants (`.sbv`, `.cbv`) exist precisely to add friction. Sugar is banned, full contracts are required. You opt into strictness as your understanding deepens. The compiler does not let you take shortcuts when the material (hardware, safety) cannot afford them.
+There is no `if/else` in Briev. There are guarded blocks: `[condition] { body }`. This is not an omission. A guard forces you to ask "what must be true for this to execute?" rather than "which branch do I take?" If it feels harder than `if`, that is because you are specifying an invariant instead of a jump. The friction is the point. Operators that alter normal flow are marked with `!`: `term!` exits the program, `trg!` fires a hardware trigger, `sync!` forces a barrier, `$!` marks a high-power macro with access to `compile#`, `gensym#`, and `error#`. The `!` is the language saying "this is not a normal operation." If it feels heavy, good. It should. The strict variants (`.sbv`, `.cbv`) exist precisely to add friction. Sugar is banned, full contracts are required. You opt into strictness as your understanding deepens. The compiler does not let you take shortcuts when the material (hardware, safety) cannot afford them.
 
 ### ...but the compiler must help you through it.
 
@@ -115,7 +115,7 @@ Friction without explanation is frustration. Every denied sugar, every strict-mo
 
 ### Operator Taxonomy
 
-Briv's operators are organized into three conceptual groups:
+Briev's operators are organized into three conceptual groups:
 
 | Group | Operators | Purpose |
 |-------|-----------|---------|
@@ -144,7 +144,7 @@ cargo test --lib
 
 Create `counter.bv`:
 
-```briv
+```briev
 let counter: Int = 0;
 
 txn increment() [counter < 100][counter == @counter + 1] {
@@ -164,32 +164,32 @@ txn main() [true][true] {
 
 ```bash
 # Type-check only (fast)
-./target/debug/briv-compiler check counter.bv
+./target/debug/briev-compiler check counter.bv
 
 # Compile to a native binary (LLVM → machine code)
-./target/debug/briv-compiler build counter.bv
+./target/debug/briev-compiler build counter.bv
 
 # Web frontend (TypeScript + view bindings)
-./target/debug/briv-compiler build counter.rbv
+./target/debug/briev-compiler build counter.rbv
 
 # Embedded/microcontroller binary
-./target/debug/briv-compiler build counter.ebv
+./target/debug/briev-compiler build counter.ebv
 
 # SPIR-V GPU kernel
-./target/debug/briv-compiler build counter.abv
+./target/debug/briev-compiler build counter.abv
 
 # CIRCT hardware description
-./target/debug/briv-compiler build counter.cbv
+./target/debug/briev-compiler build counter.cbv
 
-# Validate Data Briv configuration
-./target/debug/briv-compiler build counter.dbv
+# Validate Data Briev configuration
+./target/debug/briev-compiler build counter.dbv
 
 # Emit LLVM IR instead of a binary
-./target/debug/briv-compiler build --llvm counter.bv
+./target/debug/briev-compiler build --llvm counter.bv
 
 # Check + Build (typecheck without execution, then compile)
-./target/debug/briv-compiler check counter.bv
-./target/debug/briv-compiler build counter.bv
+./target/debug/briev-compiler check counter.bv
+./target/debug/briev-compiler build counter.bv
 ```
 
 ## Language Variants
@@ -198,42 +198,42 @@ The file extension selects which backend compiles your program, and what syntax 
 
 | Type | File Ext | Description | Compilation Target |
 |------|----------|-------------|-------------------|
-| <img src="assets/briv-icon.svg" alt="Briv" width="25"/> **Briv** | `.bv` | Pure declarative logic | LLVM → native binary, optional SPIR-V offload |
-| <img src="assets/a-briv-icon.svg" alt="Briv Accel" width="25"/> **Accelerated Briv** | `.abv` | GPU compute kernel | SPIR-V (GPU intrinsics, no FFI, restricted types) |
-| <img src="assets/r-briv-icon.svg" alt="Rendered Briv" width="25"/> **Rendered Briv** | `.rbv` | Reactive web UI | TypeScript + WASM sidecars + view bindings |
-| <img src="assets/e-briv-icon.svg" alt="Embedded Briv" width="25"/> **Embedded Briv** | `.ebv` | Microcontroller bare-metal | LLVM → microcontroller binary (no OS, no GC) |
-| <img src="assets/c-briv-icon.svg" alt="Circuit Briv" width="25"/> **Circuit Briv** | `.cbv` | Pure hardware logic graph | CIRCT → Verilog/VHDL (no FFI, no external deps) |
-| <img src="assets/d-briv-icon.svg" alt="Data Briv" width="25"/> **Data Briv** | `.dbv` / `.dbvs` / `.dbvl` | Configuration data, schemas, line-based databases | Parsed and validated by Briv itself, consumed by all targets |
+| <img src="assets/briev-icon.svg" alt="Briev" width="25"/> **Briev** | `.bv` | Pure declarative logic | LLVM → native binary, optional SPIR-V offload |
+| <img src="assets/a-briev-icon.svg" alt="Briev Accel" width="25"/> **Accelerated Briev** | `.abv` | GPU compute kernel | SPIR-V (GPU intrinsics, no FFI, restricted types) |
+| <img src="assets/r-briev-icon.svg" alt="Rendered Briev" width="25"/> **Rendered Briev** | `.rbv` | Reactive web UI | TypeScript + WASM sidecars + view bindings |
+| <img src="assets/e-briev-icon.svg" alt="Embedded Briev" width="25"/> **Embedded Briev** | `.ebv` | Microcontroller bare-metal | LLVM → microcontroller binary (no OS, no GC) |
+| <img src="assets/c-briev-icon.svg" alt="Circuit Briev" width="25"/> **Circuit Briev** | `.cbv` | Pure hardware logic graph | CIRCT → Verilog/VHDL (no FFI, no external deps) |
+| <img src="assets/d-briev-icon.svg" alt="Data Briev" width="25"/> **Data Briev** | `.dbv` / `.dbvs` / `.dbvl` | Configuration data, schemas, line-based databases | Parsed and validated by Briev itself, consumed by all targets |
 
 ### Why Variants Exist
 
-Each variant has a different *contract baseline* and *feature set* appropriate to its target. The `s` prefix (Strict Briv — `.sbv`, `.srbv`, `.sebv`) uses the **same backend** as its base variant but enforces stricter syntax rules:
+Each variant has a different *contract baseline* and *feature set* appropriate to its target. The `s` prefix (Strict Briev — `.sbv`, `.srbv`, `.sebv`) uses the **same backend** as its base variant but enforces stricter syntax rules:
 
 | Variant | Contract Sugar | Intrinsics | `frgn` | Typical Use |
 |---------|---------------|------------|--------|-------------|
-| `.bv` (Briv) | `[[post]`, `[pre]]` | All available | C, Rust, Python, Java, JavaScript | General-purpose |
+| `.bv` (Briev) | `[[post]`, `[pre]]` | All available | C, Rust, Python, Java, JavaScript | General-purpose |
 | `.rbv` (Render) | sugar allowed | All available | JavaScript (inlined); C/Rust via WASM | Web frontends |
 | `.ebv` (Embed) | sugar allowed | All available | C, Rust (Python/Java warned) | Bare-metal MCU |
 | `.cbv` (Circuit) | sugar banned | Hardware subset only | Banned | Hardware synthesis |
 | `.dbv` (Data) | No contracts | None | None | Configuration |
 
 
-The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Briv different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
+The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Briev different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
 
 **Planned:** COBOL backend (future target for enterprise integration).
 
 ## Key Features
 
-The **Metropolitan FFI** is the umbrella architecture for Briv's cross-language interoperability, comprising two mechanisms:
+The **Metropolitan FFI** is the umbrella architecture for Briev's cross-language interoperability, comprising two mechanisms:
 
-- **GLUE** (compile-time bridge generation) — exports Briv functions as native wrappers for any language, driven by protocol-path BFS in `lib/glue.toml`
+- **GLUE** (compile-time bridge generation) — exports Briev functions as native wrappers for any language, driven by protocol-path BFS in `lib/glue.toml`
 - **Metropipe** (runtime shared memory IPC) — zero-copy communication between processes via `src/ffi/metropipe.rs`
 
 ### 1. Contracts First
 
 Every transaction declares what must be true **before** and **after**:
 
-```briv
+```briev
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]  // Precondition
     [balance == @balance - amount]      // Postcondition
@@ -249,7 +249,7 @@ The compiler **verifies** that your code satisfies these contracts.
 
 Transactions fire automatically when preconditions are met:
 
-```briv
+```briev
 node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
     &dirty = false;
@@ -263,7 +263,7 @@ No event handlers. No polling. Just logic.
 
 No `if/else` chains. Use guards:
 
-```briv
+```briev
 [x > 0] {
     &result = x * 2;
 };
@@ -277,45 +277,45 @@ No `if/else` chains. Use guards:
 
 ### 4. Metropolitan FFI — GLUE (Compile-Time Bridge Generation)
 
-The GLUE bridge system exports Briv functions as native wrappers for any language, driven entirely by `lib/glue.toml`:
+The GLUE bridge system exports Briev functions as native wrappers for any language, driven entirely by `lib/glue.toml`:
 
-Briv can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system, part of the broader **Metropolitan FFI** architecture:
+Briev can export functions to any language via the GLUE (Generated Language Universal Exchange) bridge system, part of the broader **Metropolitan FFI** architecture:
 
-```briv
+```briev
 // Export a function for Rust/Python/Node
-export defn briv_pp_type(n: String) -> String {
+export defn briev_pp_type(n: String) -> String {
     term pp_type(n);
 };
 ```
 
 ```bash
 # Generate native wrappers for any language (TOML-driven, no hardcoded generators)
-briv export bridge.bv rust --out ./rust-crate   # Compilable Rust crate with safe wrappers
-briv export bridge.bv python --out ./py-module  # ctypes Python module
-briv export bridge.bv node --out ./node-module  # ffi-napi Node.js module
+briev export bridge.bv rust --out ./rust-crate   # Compilable Rust crate with safe wrappers
+briev export bridge.bv python --out ./py-module  # ctypes Python module
+briev export bridge.bv node --out ./node-module  # ffi-napi Node.js module
 ```
 
 **How it works — Protocol-Driven, Not Type-Driven:**
-- The TOML config maps protocol categories (`#String`, `#Int`, `#Float`) to language-native types — not Briv internal types
-- The BFS protocol path optimizer finds the cheapest transform between Briv's representation and the target language's representation
+- The TOML config maps protocol categories (`#String`, `#Int`, `#Float`) to language-native types — not Briev internal types
+- The BFS protocol path optimizer finds the cheapest transform between Briev's representation and the target language's representation
 - Identity paths (same protocol with compatible layout) compile to **zero instructions** at LTO time
 - Redundant CastTo/CastFrom chains cancel out — ASCIIString → `#String` → Rust `&str` produces zero work
 - Adding a new language = adding a `[lang]` section to `lib/glue.toml` — zero Rust changes
 
 **The GLUE pipeline:**
 ```
-.bv → briv build --llvm → .ll (real function bodies, no stubs)
+.bv → briev build --llvm → .ll (real function bodies, no stubs)
     → llc → .o → cc → .so → loaded via libloading/ctypes/ffi-napi
-    → 7μs per call (C FFI), 6.5μs per call (Briv GLUE) — 3.5% slower, both correct
+    → 7μs per call (C FFI), 6.5μs per call (Briev GLUE) — 3.5% slower, both correct
 ```
 
 **GLUE is an ABI generator, not an FFI.** It computes, emits, and optimizes away the interface between languages. See `docs/architecture/glue-as-abi-generator.md`.
 
 ### 5. Metropolitan FFI — Metropipe (Runtime Shared Memory IPC)
 
-Metropipe provides zero-copy communication between Briv processes and foreign programs via shared memory:
+Metropipe provides zero-copy communication between Briev processes and foreign programs via shared memory:
 
-```briv
+```briev
 let ch = frgn__metro_create_channel("my_channel", 1024, 1024);
 frgn__mmap_write(addr, 0, data, len);
 ```
@@ -325,7 +325,7 @@ frgn__mmap_write(addr, 0, data, len);
 - **Consensus protocol** for multi-process coordination
 - **60+ built-in mapper functions** for byte serialization
 - **876 lines** of production code in `src/ffi/metropipe.rs`
-- **661 lines** in `src/ffi/metropipe_cli.rs` (`briv metrod connect`)
+- **661 lines** in `src/ffi/metropipe_cli.rs` (`briev metrod connect`)
 
 ### 6. Compile-Time Verification
 
@@ -443,21 +443,21 @@ The `std/os/` modules replace 127 former compiler intrinsics:
 
 **Total:** 300+ native functions across 15+ modules + 20 auto-imported OS modules
 
-## Learning Briv
+## Learning Briev
 
 Start with our comprehensive tutorial:
 
 ```bash
-cd learn-briv
+cd learn-briev
 ```
 
-1. **[00-welcome.md](learn-briv/00-welcome.md)** - What is Briv?
-2. **[01-basics.md](learn-briv/01-basics.md)** - Variables, types, transactions
-3. **[02-contracts.md](learn-briv/02-contracts.md)** - Preconditions & postconditions
-4. **[03-reactive.md](learn-briv/03-reactive.md)** - Reactive transactions
-5. **[11-triggers.md](learn-briv/11-triggers.md)** - Triggers and reactive I/O (`trg`, `trg!`)
-6. **[13-projections.md](learn-briv/13-projections.md)** - `:>` metadata projections (Width, Endian, Codec, Ops)
-7. **[15-custom-types.md](learn-briv/15-custom-types.md)** - Custom type definitions with operator declarations
+1. **[00-welcome.md](learn-briev/00-welcome.md)** - What is Briev?
+2. **[01-basics.md](learn-briev/01-basics.md)** - Variables, types, transactions
+3. **[02-contracts.md](learn-briev/02-contracts.md)** - Preconditions & postconditions
+4. **[03-reactive.md](learn-briev/03-reactive.md)** - Reactive transactions
+5. **[11-triggers.md](learn-briev/11-triggers.md)** - Triggers and reactive I/O (`trg`, `trg!`)
+6. **[13-projections.md](learn-briev/13-projections.md)** - `:>` metadata projections (Width, Endian, Codec, Ops)
+7. **[15-custom-types.md](learn-briev/15-custom-types.md)** - Custom type definitions with operator declarations
 
 **Full documentation:**
 - [spec/SPEC.md](spec/SPEC.md) - Complete language specification
@@ -466,14 +466,14 @@ cd learn-briv
 - [lib/std/README.md](lib/std/README.md) - Standard library guide
 - [lib/compiler/README.md](lib/compiler/README.md) - Compiler architecture
 - [docs/architecture/bits-thesis.md](docs/architecture/bits-thesis.md) - Strong Bits thesis design
-- [learn-briv/15-custom-types.md](learn-briv/15-custom-types.md) - Custom type definitions guide
+- [learn-briev/15-custom-types.md](learn-briev/15-custom-types.md) - Custom type definitions guide
 
 ---
 
 ## Examples
 
 ### Counter (Basic)
-```briv
+```briev
 let counter: Int = 0;
 
 txn increment() [counter < 100][counter == @counter + 1] {
@@ -483,7 +483,7 @@ txn increment() [counter < 100][counter == @counter + 1] {
 ```
 
 ### Bank Account (Contracts)
-```briv
+```briev
 let balance: Int = 1000;
 
 txn deposit(amount: Int) 
@@ -504,7 +504,7 @@ txn withdraw(amount: Int)
 ```
 
 ### Shopping Cart (Reactive)
-```briv
+```briev
 let items: Int = 0;
 let total: Float = 0.0;
 let discount_applied: Bool = false;
@@ -553,11 +553,11 @@ cargo test --lib lexer::tests
 cargo test --lib analysis::call_graph::tests
 cargo test --lib backend::llvm::tests
 
-# Check a Briv file
-./target/debug/briv-compiler check examples/counter.rbv
+# Check a Briev file
+./target/debug/briev-compiler check examples/counter.rbv
 
 # Check in strict mode
-./target/debug/briv-compiler check --strict counter.sbv
+./target/debug/briev-compiler check --strict counter.sbv
 ```
 
 **Test Suite (1,403 tests):**
@@ -577,29 +577,29 @@ cargo test --lib backend::llvm::tests
 
 ## Self-Hosting Status
 
-The Briv compiler can now:
+The Briev compiler can now:
 - Parse itself
 - Type-check itself
 - Verify its own contracts
 - Generate code for itself (3 canonical backends)
-- Run shared analysis (CallGraph, range inference) in both Rust and Briv
+- Run shared analysis (CallGraph, range inference) in both Rust and Briev
 
 **Implementation:**
 - 3 canonical backends (LLVM, CIRCT, Webstack)
 - 300+ standard library functions
 - ~141,000 lines of Rust bootstrap compiler
-- ~11,300 lines of Briv self-hosted compiler
+- ~11,300 lines of Briev self-hosted compiler
 - ~75,000 lines of documentation
 - 1,403 passing tests
 
 **Key v0.18.0 additions:**
-- **GLUE Protocol Bridge**: TOML-driven cross-language FFI, protocol-path BFS optimization, `briv export` subcommand
+- **GLUE Protocol Bridge**: TOML-driven cross-language FFI, protocol-path BFS optimization, `briev export` subcommand
 - **Protocol-driven type mapping**: `type_map`/`c_type_map`/`conversions` replaced by `protocols` mapping protocol categories to language types
-- **Full backend export**: `briv export` uses `LlvmBackend::generate()` (no `ret i64 0` stubs)
+- **Full backend export**: `briev export` uses `LlvmBackend::generate()` (no `ret i64 0` stubs)
 - **Round-trip FFI tests**: 8 integration tests verifying full pipeline from `.bv` to FFI call
-- **Bridge benchmark**: Python ↔ C vs Briv via ctypes (C 5988ns, Briv 6203ns, ✅ all match)
+- **Bridge benchmark**: Python ↔ C vs Briev via ctypes (C 5988ns, Briev 6203ns, ✅ all match)
 - **Dynamic GLUE config**: `#[serde(flatten)]` language discovery — zero hardcoded language names in Rust
-- **C-compatible string format**: `[length][data]` format matching `briv_rt.c`
+- **C-compatible string format**: `[length][data]` format matching `briev_rt.c`
 - **`emit_protocol_chain`**: Real LLVM IR emission for Bitcast, MeldShuffle, ProtocolTransform kinds
 - **Arena allocator budget control**: `--optimize-budget 0` uses direct `malloc`
 - **Configurable arena size**: `arena_initial_size` field replaces magic 65536 constant
@@ -608,17 +608,17 @@ The Briv compiler can now:
 | Benchmark | v0.16 | v0.17 | Winner |
 |-----------|-------|-------|--------|
 | nbody_newton | 1.35x | **1.05x** | **~tie** |
-| fannkuch_redux | 1.31x | **0.95x** | **Briv** |
+| fannkuch_redux | 1.31x | **0.95x** | **Briev** |
 | fasta | 1.23x | **1.10x** | ~tie |
 | ring_buffer | 1.45x | **1.10x** | ~tie |
-| float_math_nonzero | 2.21x | **0.94x** | **Briv** |
+| float_math_nonzero | 2.21x | **0.94x** | **Briev** |
 
 **See:** [docs/plans/2026-07-21-rct-txn-to-node-rename-and-benchmark-fixes.md](docs/plans/2026-07-21-rct-txn-to-node-rename-and-benchmark-fixes.md) for the comprehensive plan and current benchmark results.
 
 ## Project Structure
 
 ```
-briv-compiler/
+briev-compiler/
 ├── src/                          # Rust bootstrap compiler
 │   ├── main.rs                   # CLI: check, build, compile, bind, metrod, lsp
 │   ├── lib.rs                    # Crate root
@@ -668,7 +668,7 @@ briv-compiler/
 │   │   ├── native_mapper.rs      # Byte serialization
 │   │   ├── loader.rs             # DBVS binding file loader
 │   │   ├── resolver.rs           # Binding path resolution
-│   │   ├── metro_cli.rs          # `briv metrod connect` CLI (661 lines)
+│   │   ├── metro_cli.rs          # `briev metrod connect` CLI (661 lines)
 │   │   ├── types.rs              # FfiValue, MemoryLayout, FfiType
 │   │   ├── error.rs              # Error conventions
 │   │   ├── protocol.rs           # Mapper trait
@@ -678,7 +678,7 @@ briv-compiler/
 │   │   ├── validator.rs          # Binding validation
 │   │   └── mod.rs                # FFI crate root
 │   │
-│   ├── dbriv/                   # Data Briv (DBVS) subsystem
+│   ├── dbriev/                   # Data Briev (DBVS) subsystem
 │   │   ├── ast.rs                # DBVS AST + Fn/Trigger/Result types
 │   │   ├── parser.rs             # DBVS parser
 │   │   └── ...                   # DBVS compiler
@@ -708,7 +708,7 @@ briv-compiler/
 │   │   ├── metro_bridge.bv       # Metropolitan FFI frgn declarations
 │   │   └── ...                   # 15+ modules total
 │   │
-│   └── compiler/                 # Briv Self-Hosted Compiler
+│   └── compiler/                 # Briev Self-Hosted Compiler
 │       ├── token.bv              # Token definitions
 │       ├── lexer.bv              # Lexer
 │       ├── parser.bv             # Parser (strict mode aware)
@@ -718,7 +718,7 @@ briv-compiler/
 │       ├── call_graph.bv         # CallGraph analysis (mirrors Rust)
 │       ├── range.bv              # Range analysis (mirrors Rust)
 │       ├── main.bv               # CLI entry point (--strict flag)
-│       └── backends/             # Briv code backends
+│       └── backends/             # Briev code backends
 │           ├── aarch64.bv        # ARM64 binary
 │           ├── x86_64.bv         # AMD64 binary
 │           ├── rust.bv           # Rust source
@@ -739,7 +739,7 @@ briv-compiler/
 ├── plans/active/                 # Active plans
 │   └── ROADMAP.md                # Comprehensive roadmap (supersedes all others)
 │
-├── learn-briv/                  # Tutorial
+├── learn-briev/                  # Tutorial
 │   ├── 00-welcome.md
 │   ├── 01-basics.md
 │   ├── 02-contracts.md
@@ -766,7 +766,7 @@ briv-compiler/
 - [x] Three canonical backends: LLVM (native/embedded/SPIR-V), Webstack (TypeScript + WASM), CIRCT (HLS)
 - [x] TypeScript emitter with native-typed signals (no JsValue boxing)
 - [x] `(wasm) import` syntax for compute-heavy WASM sidecars
-- [x] `.rbv` Briv-as-default format (no `<script>` wrapper)
+- [x] `.rbv` Briev-as-default format (no `<script>` wrapper)
 - [x] CIRCT FSM: pre/postcondition guards, sized integers, modern output ports, MMIO, sync blocks
 - [x] `!range` metadata + TBAA type trees for LLVM optimization passes
 - [x] `?#` proof oracle with structural recursion checker
@@ -776,13 +776,13 @@ briv-compiler/
 - [x] Dead-field elimination, LTO pipeline, compile-time PGO
 - [x] 1,403 passing tests, 0 Rust warnings
 - [x] 9 retired backends archived (no dead code in active pipeline)
-- [x] `docs/architecture/bits-thesis.md`, `learn-briv/15-custom-types.md`
+- [x] `docs/architecture/bits-thesis.md`, `learn-briev/15-custom-types.md`
 - [x] **GLUE Protocol Bridge**: TOML-driven export system, protocol-path BFS, cross-language FFI
 - [x] **Protocol-driven type mapping**: `protocols` sections replace `type_map`/`c_type_map`/`conversions`
 - [x] **Full backend export**: No stub functions in generated bridge code
 - [x] **Dynamic GLUE config**: `#[serde(flatten)]` language discovery — zero hardcoded language names
 - [x] **8 round-trip FFI tests**: Full pipeline verification (.bv → FFI call → correct result)
-- [x] **Bridge benchmark**: Python ↔ C vs Briv (3.5% slower, all correct)
+- [x] **Bridge benchmark**: Python ↔ C vs Briev (3.5% slower, all correct)
 - [x] **Arena allocator budget control**: `--optimize-budget 0` path uses `malloc`
 - [x] **Configurable arena size**: Magic 65536 replaced with configurable `arena_initial_size`
 
@@ -808,4 +808,4 @@ Apache 2.0 with explicit runtime exception
 ---
 
 *Last updated: 2026-07-22*  
-*Version: Briv v0.18.0*
+*Version: Briev v0.18.0*

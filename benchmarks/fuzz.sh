@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fuzz Runner for Briv Optimization Benchmarks
+# Fuzz Runner for Briev Optimization Benchmarks
 #
 # Two modes:
 #   compile-time: recompile per random input (both languages know the value)
@@ -13,9 +13,9 @@
 #
 # Output:
 #   benchmark: ring_buffer (runtime, n=50)
-#     briv: mean=0.045s median=0.044s min=0.042s max=0.052s sigma=0.0023
+#     briev: mean=0.045s median=0.044s min=0.042s max=0.052s sigma=0.0023
 #     c:     mean=0.042s median=0.041s min=0.040s max=0.048s sigma=0.0018
-#     ratio: 1.07x (briv is 7% slower)
+#     ratio: 1.07x (briev is 7% slower)
 #     correct: 50/50 exit codes match
 
 set -euo pipefail
@@ -45,10 +45,10 @@ done
 if [ -z "$BENCH" ] || [ -z "$MODE" ]; then usage; fi
 if [ "$MODE" != "compile-time" ] && [ "$MODE" != "runtime" ]; then usage; fi
 
-COMPILER="./target/release/briv-compiler"
+COMPILER="./target/release/briev-compiler"
 if [ ! -x "$COMPILER" ]; then
     echo "Building release compiler..."
-    cargo build --release --bin briv-compiler 2>&1
+    cargo build --release --bin briev-compiler 2>&1
 fi
 
 # Generate a random bound based on seed + run index
@@ -96,19 +96,19 @@ bench_runtime() {
     echo "=== $BENCH (runtime, n=$RUNS) ==="
 
     # Compile once
-    local briv_src="benchmarks/${BENCH}_runtime.bv"
+    local briev_src="benchmarks/${BENCH}_runtime.bv"
     local c_src="benchmarks/${BENCH}_runtime_c.c"
-    local briv_bin="benchmarks/${BENCH}_runtime_briv"
+    local briev_bin="benchmarks/${BENCH}_runtime_briev"
     local c_bin="benchmarks/${BENCH}_runtime_c"
 
-    if [ ! -f "$briv_src" ]; then
-        echo "  ERROR: $briv_src not found"
+    if [ ! -f "$briev_src" ]; then
+        echo "  ERROR: $briev_src not found"
         return 1
     fi
 
-    echo "  Compiling Briv..."
-    $COMPILER llvm "$briv_src" --out /tmp --optimize-budget 256 2>&1 | tail -1
-    clang -O3 -march=native "/tmp/${BENCH}_runtime.ll" -o "$briv_bin" -lm 2>&1 | tail -1
+    echo "  Compiling Briev..."
+    $COMPILER llvm "$briev_src" --out /tmp --optimize-budget 256 2>&1 | tail -1
+    clang -O3 -march=native "/tmp/${BENCH}_runtime.ll" -o "$briev_bin" -lm 2>&1 | tail -1
 
     echo "  Compiling C..."
     local extra=""
@@ -117,7 +117,7 @@ bench_runtime() {
     clang -O3 -march=native -o "$c_bin" "$c_src" $extra 2>&1 | tail -1
 
     # Run
-    local briv_times=()
+    local briev_times=()
     local c_times=()
     local passed=0
 
@@ -125,9 +125,9 @@ bench_runtime() {
         local bound=$(gen_bound "$i" "$SEED")
         export BOUND="$bound"
 
-        # Run Briv
-        local bt=$( (export BOUND="$bound"; /usr/bin/time -f "%e" "$briv_bin" 2>&1) 2>/dev/null | tail -1)
-        briv_times+=("$bt")
+        # Run Briev
+        local bt=$( (export BOUND="$bound"; /usr/bin/time -f "%e" "$briev_bin" 2>&1) 2>/dev/null | tail -1)
+        briev_times+=("$bt")
 
         # Run C
         local ct=$( (export BOUND="$bound"; /usr/bin/time -f "%e" "$c_bin" 2>&1) 2>/dev/null | tail -1)
@@ -136,15 +136,15 @@ bench_runtime() {
         passed=$((passed + 1))
     done
 
-    local b_stats=($(compute_stats "${briv_times[@]}"))
+    local b_stats=($(compute_stats "${briev_times[@]}"))
     local c_stats=($(compute_stats "${c_times[@]}"))
 
-    local briv_mean="${b_stats[0]}" briv_median="${b_stats[1]}" briv_min="${b_stats[2]}" briv_max="${b_stats[3]}" briv_sigma="${b_stats[4]}"
+    local briev_mean="${b_stats[0]}" briev_median="${b_stats[1]}" briev_min="${b_stats[2]}" briev_max="${b_stats[3]}" briev_sigma="${b_stats[4]}"
     local c_mean="${c_stats[0]}" c_median="${c_stats[1]}" c_min="${c_stats[2]}" c_max="${c_stats[3]}" c_sigma="${c_stats[4]}"
 
-    local ratio=$(awk "BEGIN { if ($c_mean > 0) print $briv_mean / $c_mean; else print 0 }")
+    local ratio=$(awk "BEGIN { if ($c_mean > 0) print $briev_mean / $c_mean; else print 0 }")
 
-    echo "    briv: mean=${briv_mean}s median=${briv_median}s min=${briv_min}s max=${briv_max}s sigma=${briv_sigma}"
+    echo "    briev: mean=${briev_mean}s median=${briev_median}s min=${briev_min}s max=${briev_max}s sigma=${briev_sigma}"
     echo "    c:     mean=${c_mean}s median=${c_median}s min=${c_min}s max=${c_max}s sigma=${c_sigma}"
     echo "    ratio: ${ratio}x"
 
@@ -158,19 +158,19 @@ bench_runtime() {
 bench_compile_time() {
     echo "=== $BENCH (compile-time, n=$RUNS) ==="
 
-    local briv_tmpl="benchmarks/${BENCH}.bv"
+    local briev_tmpl="benchmarks/${BENCH}.bv"
     local c_tmpl="benchmarks/${BENCH}_c.c"
-    local briv_src="/tmp/${BENCH}_fuzz.bv"
+    local briev_src="/tmp/${BENCH}_fuzz.bv"
     local c_src="/tmp/${BENCH}_fuzz.c"
-    local briv_bin="/tmp/${BENCH}_fuzz_briv"
+    local briev_bin="/tmp/${BENCH}_fuzz_briev"
     local c_bin="/tmp/${BENCH}_fuzz_c"
 
-    if [ ! -f "$briv_tmpl" ]; then
-        echo "  ERROR: $briv_tmpl not found"
+    if [ ! -f "$briev_tmpl" ]; then
+        echo "  ERROR: $briev_tmpl not found"
         return 1
     fi
 
-    local briv_times=()
+    local briev_times=()
     local c_times=()
     local passed=0
 
@@ -179,9 +179,9 @@ bench_compile_time() {
 
         # Substitute into .bv
         sed "s/const [A-Z][A-Za-z]*: Int = [0-9]*;/const N: Int = $bound;/" \
-            "$briv_tmpl" > "$briv_src" 2>/dev/null || \
+            "$briev_tmpl" > "$briev_src" 2>/dev/null || \
         sed "s/const total: Int = [0-9]*;/const total: Int = $bound;/" \
-            "$briv_tmpl" > "$briv_src" 2>/dev/null || true
+            "$briev_tmpl" > "$briev_src" 2>/dev/null || true
 
         # Substitute into .c
         sed "s/const long N = [0-9]*L;/const long N = ${bound}L;/" \
@@ -190,10 +190,10 @@ bench_compile_time() {
             "$c_tmpl" > "$c_src" 2>/dev/null || \
         cp "$c_tmpl" "$c_src" 2>/dev/null || true
 
-        # Compile Briv
-        $COMPILER llvm "$briv_src" --out /tmp --optimize-budget 256 2>&1 | tail -1
-        local llfile="/tmp/$(basename "$briv_src" .bv).ll"
-        clang -O3 -march=native "$llfile" -o "$briv_bin" -lm 2>&1 | tail -1
+        # Compile Briev
+        $COMPILER llvm "$briev_src" --out /tmp --optimize-budget 256 2>&1 | tail -1
+        local llfile="/tmp/$(basename "$briev_src" .bv).ll"
+        clang -O3 -march=native "$llfile" -o "$briev_bin" -lm 2>&1 | tail -1
 
         # Compile C
         local extra=""
@@ -202,17 +202,17 @@ bench_compile_time() {
         clang -O3 -march=native -o "$c_bin" "$c_src" $extra 2>&1 | tail -1
 
         # Time
-        local bt=$(/usr/bin/time -f "%e" "$briv_bin" 2>&1 | tail -1)
-        briv_times+=("$bt")
+        local bt=$(/usr/bin/time -f "%e" "$briev_bin" 2>&1 | tail -1)
+        briev_times+=("$bt")
         local ct=$(/usr/bin/time -f "%e" "$c_bin" 2>&1 | tail -1)
         c_times+=("$ct")
         passed=$((passed + 1))
     done
 
-    local b_stats=($(compute_stats "${briv_times[@]}"))
+    local b_stats=($(compute_stats "${briev_times[@]}"))
     local c_stats=($(compute_stats "${c_times[@]}"))
 
-    echo "    briv: mean=${b_stats[0]}s median=${b_stats[1]}s min=${b_stats[2]}s max=${b_stats[3]}s sigma=${b_stats[4]}"
+    echo "    briev: mean=${b_stats[0]}s median=${b_stats[1]}s min=${b_stats[2]}s max=${b_stats[3]}s sigma=${b_stats[4]}"
     echo "    c:     mean=${c_stats[0]}s median=${c_stats[1]}s min=${c_stats[2]}s max=${c_stats[3]}s sigma=${c_stats[4]}"
 
     local ratio=$(awk "BEGIN { if (${c_stats[0]} > 0) print ${b_stats[0]} / ${c_stats[0]}; else print 0 }")

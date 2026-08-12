@@ -8,7 +8,7 @@ Based on: AI agent evaluation + manual investigation of float_math_nonzero 2.25Ã
 ## Context
 
 The float_math_nonzero 2.25Ã— gap (0.371s vs 0.165s) is a **microarchitectural scheduling artifact**,
-not an LLVM IR or codegen quality issue. Both Briv and C produce identical 15-instruction
+not an LLVM IR or codegen quality issue. Both Briev and C produce identical 15-instruction
 AVX hot loops (vmulss/vaddss, no spills, same alignment, same dependency structure).
 Option 4 (alloca-based loop) would converge to the same IR through SROA+mem2reg.
 

@@ -13,7 +13,7 @@ For each: compile → link → run with `BOUND=5` → compare stderr output agai
 
 These benchmarks produce the same output (or no output) at BOUND=5.
 
-| Benchmark | Tag | Briv exit | C exit | Output |
+| Benchmark | Tag | Briev exit | C exit | Output |
 |-----------|-----|-----------|--------|--------|
 | `ring_buffer` | runtime | 0 | 0 | both silent (print fires at 5M, BOUND=5 < 5M) |
 | `sparse_dispatch` | runtime | 0 | 0 | both silent |
@@ -31,11 +31,11 @@ the binary doesn't crash and exits cleanly.
 
 ### 6 DIFFER or FAIL
 
-| Benchmark | Status | Briv | C | Root cause |
+| Benchmark | Status | Briev | C | Root cause |
 |-----------|--------|-------|---|------------|
-| `cancel_math` | DIFF | prints first value at count=0 | prints at count=1 | Guard checks pre-tick (Briv) vs post-increment (C) |
+| `cancel_math` | DIFF | prints first value at count=0 | prints at count=1 | Guard checks pre-tick (Briev) vs post-increment (C) |
 | `queue_drain` | DIFF | silent | prints "0" at start | Same guard asymmetry. Also flagged by Hillel Wayne for algorithm-level asymmetry. |
-| `fannkuch_redux` | DIFF | stderr: "10" | exit code: 10 | Output mechanism mismatch — Briv writes to stderr, C returns value as exit code |
+| `fannkuch_redux` | DIFF | stderr: "10" | exit code: 10 | Output mechanism mismatch — Briev writes to stderr, C returns value as exit code |
 | `mandelbrot` | FAIL | stderr: "73108" | — | Times out at BOUND=5. Possible infinite loop (term! in guard). |
 | `nbody_newton` | DIFF | `-nan` | `-0.169203` | Float computation — rebuild with fixed constant emission |
 | `nbody_sqrt` | DIFF | `-nan` | `-0.169289` | Same float issue |
@@ -68,7 +68,7 @@ All 4 M0 observability messages were observed during compilation:
 ## Files Modified During Audit
 
 - `benchmarks/ring_buffer_c.c` — was empty (no output). Updated to match
-  Briv version: count + print every 5M iterations.
+  Briev version: count + print every 5M iterations.
 - `benchmarks/cancel_math_c.c` — moved increment after guard to match
-  Briv's pre-tick semantics. Still produces different output at BOUND=5
-  (C prints "0" at start, Briv doesn't). Needs further investigation.
+  Briev's pre-tick semantics. Still produces different output at BOUND=5
+  (C prints "0" at start, Briev doesn't). Needs further investigation.

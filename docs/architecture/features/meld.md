@@ -8,7 +8,7 @@
 
 ## Syntax
 
-```briv
+```briev
 // Tier 1 — Fully inferred: routes derived from @/ bit-range matching
 meld Float <:> CFloat;
 

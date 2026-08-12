@@ -5,10 +5,10 @@ export defn echo(name: CStr) -> CStr {
 };
 
 // The CStr <-> String adaptation uses EXPLICIT protocol casts
-// (cstr_to_briv / str_to_c from glue/c.bv) — the meld implicit admission was
+// (cstr_to_briev / str_to_c from glue/c.bv) — the meld implicit admission was
 // removed (SPEC 19.6).
 export defn greet(name: CStr) -> CStr {
-    let s: String = cstr_to_briv(name as Int);
+    let s: String = cstr_to_briev(name as Int);
     term str_to_c(s) as CStr;
 };
 

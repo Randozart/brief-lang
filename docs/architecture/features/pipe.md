@@ -6,11 +6,11 @@
 
 ## Syntax
 
-Briv supports pipe chaining as a syntactic sugar that desugars to flat
+Briev supports pipe chaining as a syntactic sugar that desugars to flat
 let-bindings before typechecking. All forms use the intrinsic system for
 output — no `frgn` declarations needed:
 
-```briv
+```briev
 x |> f()              // Call f(x) — pipeline value is first arg
 x |> f() |> g()       // g(f(x)) — multi-step chain
 x |> f() .|> g()      // .|> reads from 1 position back (skip=1)
@@ -35,7 +35,7 @@ f() |> g()            // pipeline can start with a function call
 The dot-skip operator `.N|>` causes the step to receive the value from
 N positions further back in the pipeline history. For example:
 
-```briv
+```briev
 a |> f() |> g() .|> h()
 // Step 1: f(a)              — position 1
 // Step 2: g(f(a))            — position 2
@@ -59,7 +59,7 @@ typechecker, interpreter, or any backend.
 
 `x |> f() |> g() .|> h()` desugars to:
 
-```briv
+```briev
 {
     let __pipe_0 = x;
     let __pipe_1 = f(__pipe_0);       // step 0, reads __pipe_0
@@ -128,7 +128,7 @@ Files modified:
 
 Pipe chains work with `<:` subtype projections via the two-statement pattern:
 
-```briv
+```briev
 let result : database { FILTER(.active); };
 result |> print_rows();
 ```

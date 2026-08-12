@@ -1,6 +1,6 @@
 # spec/old_docs
 
-Archived documentation from earlier Briv compiler versions. These documents are no longer authoritative — refer to `spec/SPEC.md` and `spec/LANGUAGE-REFERENCE.md` for current specifications.
+Archived documentation from earlier Briev compiler versions. These documents are no longer authoritative — refer to `spec/SPEC.md` and `spec/LANGUAGE-REFERENCE.md` for current specifications.
 
 ## Organization
 
@@ -8,11 +8,11 @@ Archived documentation from earlier Briv compiler versions. These documents are 
 Version-specific language specifications and architecture documents.
 - `v4-*.md` — v4.x era specifications (2026-04-04)
 - `SPEC-v*.md` — Stubs indicating consolidation into spec/SPEC.md
-- `EMBEDDED_BRIV_*.md` — Embedded Briv version stubs
+- `EMBEDDED_BRIEV_*.md` — Embedded Briev version stubs
 
 ### getting_started/
 Historical getting started guides and onboarding documentation.
-- `GETTING-STARTED.md` — Original Briv tutorial
+- `GETTING-STARTED.md` — Original Briev tutorial
 - `ARCHITECTURE.md` — System architecture overview
 - `FFI-STDLIB-REFERENCE.md` — Foreign Function Interface guide
 

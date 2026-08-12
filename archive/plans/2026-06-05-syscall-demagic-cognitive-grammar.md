@@ -7,7 +7,7 @@
 
 ## Symbolic Design Philosophy: What the Symbols Mean
 
-Briv's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+Briev's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
 ### The Shape-to-Meaning Mapping
 
@@ -119,7 +119,7 @@ Syscall numbers are **NOT** hardcoded in Rust. They are defined declaratively in
 ### Implementation
 
 #### C1. Extend `.dbvs` parser (if needed)
-The existing `src/dbriv/parser.rs` must support schema-valued fields (nested structs in schemas).
+The existing `src/dbriev/parser.rs` must support schema-valued fields (nested structs in schemas).
 
 #### C2. Add `SyscallMap` schema to target files
 
@@ -188,9 +188,9 @@ Thread `ffi_kind` from `ForeignSignature` into the `Expr::Call` codegen. For `Sy
 
 ---
 
-## Phase E: Update "The Briv Mindset" Document
+## Phase E: Update "The Briev Mindset" Document
 
-**File:** `learn-briv/00a-base-design.md`
+**File:** `learn-briev/00a-base-design.md`
 
 ### Changes
 - Add Symbolic Design Philosophy section at the top
@@ -235,7 +235,7 @@ A, B, C can be parallel. D needs A+C. E needs B.
 | `targets/aarch64.dbvs` | C | Add `SyscallMap` schema |
 | `src/ffi/registry.rs:45-98` | C | Replace TOML syscall loading with `.dbvs` |
 | `src/backend/llvm.rs` | D | Add syscall inline asm for x86_64 + aarch64 |
-| `learn-briv/00a-base-design.md` | E | Full cognitive grammar update |
+| `learn-briev/00a-base-design.md` | E | Full cognitive grammar update |
 
 ## Anti-Patterns to Avoid
 

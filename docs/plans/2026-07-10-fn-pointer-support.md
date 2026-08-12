@@ -5,7 +5,7 @@
 Make `&my_func` produce `Ptr<Fn(Tuple(params), ret)>` (a proper function pointer
 type) instead of `Ptr<Custom("my_func")>`, enabling:
 
-```briv
+```briev
 let fp = &my_func;     // fp: Ptr<Fn((Int), Int)>
 let r = (*fp)(42);     // dereference + indirect call
 ```

@@ -6,7 +6,7 @@
 
 ## 1. Philosophy: Safety as Optimization Fuel
 
-Briv's three first-class safety features are not a runtime tax — they are
+Briev's three first-class safety features are not a runtime tax — they are
 compile-time optimization intrinsics:
 
 | Feature | Syntax | LLVM Optimization |
@@ -30,7 +30,7 @@ that get stripped in release mode:
 | C/C++ | `assert()` | Stripped by `NDEBUG` — no protection |
 | Rust | `bounds_check` | Compiler removes provably-safe checks, keeps others |
 | Ada | `pragma Pre(...)` | Runtime assertion unless proven |
-| **Briv** | `[pre][post]` | Proven at compile-time → converted to `!range` + `@llvm.assume` → **code gets faster** |
+| **Briev** | `[pre][post]` | Proven at compile-time → converted to `!range` + `@llvm.assume` → **code gets faster** |
 
 Because contracts are first-class syntactic citizens parsed directly into the
 AST, the compiler's proof engine can statically verify them. Once proven:
@@ -42,7 +42,7 @@ AST, the compiler's proof engine can statically verify them. Once proven:
 4. The resulting binary is *faster* than unverified code, because LLVM has
    *more* invariants to optimize against
 
-This is the core architectural insight of Briv's LLVM backend: **safety
+This is the core architectural insight of Briev's LLVM backend: **safety
 features pay a performance dividend.**
 
 ## 2. Performance Architecture (Three Tiers)
@@ -153,7 +153,7 @@ barrier.
 ### Optimization Hierarchy Summary
 
 ```
-Briv Source
+Briev Source
     ↓ (parsing + type checking)
 AST with Contracts
     ↓ (proof engine)
@@ -211,7 +211,7 @@ Rationale:
 pub struct LlvmBackend {
     // ... existing fields ...
     
-    /// Tracks the logical Briv type of each SSA register, for use at
+    /// Tracks the logical Briev type of each SSA register, for use at
     /// boundary points (stores, binary ops, FFI marshaling).
     register_types: HashMap<String, Type>,
 }
@@ -301,7 +301,7 @@ All line references target `src/backend/llvm.rs` at commit `ef992b8`.
 | 1A | 396,405 | `self.terminated` leaks across branches — a `term` inside a guarded block suppresses the implicit `ret` at the function's end, leaving the trailing block without a terminator | Save/restore `self.terminated` around `Statement::Guarded`, match arms, and unification. If the inner block terminated, the outer block still needs its own `ret`. |
 | 1B | 277-312 | `let_bindings` not cleared on definition entry — bindings from prior functions leak into subsequent definitions, causing register names from different functions to be referenced | `self.let_bindings.clear()` at start of `emit_definition`. Then convert parameters. |
 | 1C | 715-726 | Match arm labels `ma{}` use a local `vi` counter — two `match` expressions in one function produce duplicate `ma0`, `ma1` labels | Incorporate `self.txn_counter`: `format!("ma{}_{}", self.txn_counter, vi)` |
-| 5A | 484-494 | Unification dominance violation — `%upX` defined only in the matching arm but inserted into `self.let_bindings` globally; the `def_l` (default) path never defines it, yet `merge_l` references it | Change `def_l` to `unreachable` (Briv guarantees the pattern must match or the program panics) |
+| 5A | 484-494 | Unification dominance violation — `%upX` defined only in the matching arm but inserted into `self.let_bindings` globally; the `def_l` (default) path never defines it, yet `merge_l` references it | Change `def_l` to `unreachable` (Briev guarantees the pattern must match or the program panics) |
 | S6 | 447-460 | Guard-select optimization hardcodes `i64`/`i64*` for `load`/`store`, but the GEP pointer may be `i8*` or `float*` | Use `self.field_types[idx]` to determine the load/store type. Apply trunc/bitcast/zext accordingly. |
 
 ### Group B: Type Safety (produces invalid IR)
@@ -372,7 +372,7 @@ Safety bypass — critical for correctness of fused dispatch.
 15. Fix fused txn precondition lookup (2A)
 
 ### Phase F: Optimization Enhancement
-Not correctness-critical, but realizes Briv's optimization vision.
+Not correctness-critical, but realizes Briev's optimization vision.
 
 16. Emit `nuw nsw` on `add`/`sub`/`mul` when contracts prove bounds
 17. Wire `@llvm.assume` for complex preconditions (currently declared but unused)
@@ -404,7 +404,7 @@ For each (name, sig) in frgn_map:
 
 ### Argument Marshaling at Call Sites
 
-| Briv Type | C ABI Type | LLVM Conversion |
+| Briev Type | C ABI Type | LLVM Conversion |
 |------------|------------|-----------------|
 | `Int` | `int64_t` | `i64 %raw` (direct) |
 | `Float` | `float` | `trunc i64 %raw to i32` → `bitcast i32 to float` |
@@ -430,7 +430,7 @@ For each (name, sig) in frgn_map:
 %v   = ptrtoint i8* %sp0 to i64  ; i64 representation
 ```
 
-If strings need to be mutable (unlikely in Briv's semantics), fall back to
+If strings need to be mutable (unlikely in Briev's semantics), fall back to
 `alloca` + `memcpy` from the global constant.
 
 ### Trigger Global Declarations
@@ -448,7 +448,7 @@ If strings need to be mutable (unlikely in Briv's semantics), fall back to
 
 ### LLVM Type Mapping
 
-| Briv Type | LLVM Type | Storage in %State | i64 Representation |
+| Briev Type | LLVM Type | Storage in %State | i64 Representation |
 |-----------|-----------|-------------------|-------------------|
 | `Int` | `i64` | `i64` | Direct |
 | `UInt` | `i64` | `i64` | Direct |
@@ -503,18 +503,18 @@ opt -O3 -S input.ll -o /dev/null   # Verify nuw/nsw emitted where applicable
 ### Runtime Linking
 
 After code generation, the compiled `.ll` file must be linked against
-`runtime/briv_rt.c`:
+`runtime/briev_rt.c`:
 
 ```bash
 llc input.ll -o input.s
 as input.s -o input.o
-cc -c runtime/briv_rt.c -o briv_rt.o
-ld input.o briv_rt.o -o program
+cc -c runtime/briev_rt.c -o briev_rt.o
+ld input.o briev_rt.o -o program
 ```
 
-On bare-metal targets, `briv_rt.c` provides `wfi`/`hlt` implementations.
+On bare-metal targets, `briev_rt.c` provides `wfi`/`hlt` implementations.
 On OS targets, it provides epoll/kqueue implementations.
-One file, C preprocessor handles platform detection. See `runtime/briv_rt.c`.
+One file, C preprocessor handles platform detection. See `runtime/briev_rt.c`.
 
 ## 9. Event Model Integration
 
@@ -523,7 +523,7 @@ documented in two companion documents:
 
 - **`specs/EVENT-MODEL.md`** — Core language event architecture
 - **`llvm-spec/14-EVENT-LLVM-LOWERING.md`** — LLVM IR lowering for events
-- **`runtime/briv_rt.c`** — Single-file C runtime providing `@ link` global definitions
+- **`runtime/briev_rt.c`** — Single-file C runtime providing `@ link` global definitions
   and `__wait_for_event()` per platform
 
 ### Impact on This Document
@@ -559,13 +559,13 @@ The event model analysis reveals one additional backend issue:
 |---|-------|-----|-----|-------|
 | E2 | 532-545 | Trigger identifiers emit fresh `load volatile` per reference instead of using pre-sampled register | Move trigger sampling to reactor_tick prologue; Expr::Identifier references pre-sampled `%sz_<name>` registers | F |
 
-## 10. Summary: What Makes Briv's LLVM Backend Unique
+## 10. Summary: What Makes Briev's LLVM Backend Unique
 
 1. **Contracts are optimization fuel.** No other language feeds precondition
    bounds into LLVM's `!range` and `@llvm.assume` as a first-class codegen
    path. The safety feature pays a performance dividend.
 
-2. **`noalias` as a language guarantee.** Briv's prohibition on arbitrary
+2. **`noalias` as a language guarantee.** Briev's prohibition on arbitrary
    pointers means every `%State*` can carry `noalias nocapture` without the
    programmer writing `restrict`. LLVM gets alias analysis for free.
 

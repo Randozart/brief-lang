@@ -121,7 +121,7 @@ fn get_effective_max_bits(ty: &Type, scope: &FunctionContext, ctx: &CompilerCont
 
 ```rust
 // compile.rs — after Normalized stage:
-let narrow_bindings = briv_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe);
+let narrow_bindings = briev_compiler::optimizer::narrow_int::narrow_types(&mut items, &mut universe);
 ctx.narrow_bindings = narrow_bindings;
 ```
 

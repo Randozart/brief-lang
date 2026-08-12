@@ -15,8 +15,8 @@ Address 5 active bugs/cleanup items from codebase review, plus revert clang code
 - **Change**: Add `|| !s.is_char_boundary(start_idx)` to guard
 - **Risk**: None — same pattern already used in `__contains_at`
 
-### 2. Dbriv pipeline terminal operations
-- **File**: `src/dbriv/eval.rs`
+### 2. Dbriev pipeline terminal operations
+- **File**: `src/dbriev/eval.rs`
 - **Changes**:
   - `apply_operation`: add match arms for all terminal ops (Count → QueryResult::Count, Sum → Aggregated(Sum), etc.)
   - `execute_pipeline`: refactor loop to work with `QueryResult` step-state

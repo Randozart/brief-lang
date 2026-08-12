@@ -1,4 +1,4 @@
-# Briv Standard Library
+# Briev Standard Library
 
 **Version:** 0.11.0  
 **Status:** Actively developed  
@@ -55,7 +55,7 @@
 ### Math (`math.bv`)
 **Status:** ✅ 100% native
 
-```briv
+```briev
 // Basic
 defn abs(n: Int) -> Int
 defn min(a: Int, b: Int) -> Int
@@ -86,7 +86,7 @@ defn is_zero(n: Int) -> Bool
 ### String (`string.bv`)
 **Status:** ⚠️ 65% native, 35% FFI
 
-```briv
+```briev
 // Native
 defn len(s: String) -> Int
 defn concat(a: String, b: String) -> String
@@ -114,7 +114,7 @@ frgn __UTF8_len(s: String) -> Result<Int, StringError>
 ### Collections (`collections.bv`)
 **Status:** ✅ 100% native
 
-```briv
+```briev
 // List operations
 defn len<T>(list: List<T>) -> Int
 defn append<T>(list: List<T>, item: T) -> List<T>
@@ -139,7 +139,7 @@ frgn __reduce<T, U>(list: List<T>, initial: U, reducer: (U, T) -> U) -> Result<U
 ### Time (`time.bv`)
 **Status:** ✅ 100% native
 
-```briv
+```briev
 defn duration_seconds(secs: Int) -> Int
 defn duration_millis(ms: Int) -> Int
 defn duration_minutes(mins: Int) -> Int
@@ -158,7 +158,7 @@ defn diff_days(t1: Int, t2: Int) -> Int
 ### IO (`io.bv`)
 **Status:** ⚠️ FFI (requires OS access)
 
-```briv
+```briev
 defn print(msg: String) -> Bool
 defn println(msg: String) -> Bool
 defn input() -> String
@@ -172,7 +172,7 @@ frgn __file_exists(path: String) -> Result<Bool, IOError>
 ### JSON (`json.bv`)
 **Status:** ✅ 100% native
 
-```briv
+```briev
 defn to_json(value: Object) -> String
 defn from_json(json: String) -> Result<Object, String>
 defn parse(json: String) -> Result<Object, String>
@@ -182,7 +182,7 @@ defn stringify(obj: Object) -> String
 ### HTTP (`http.bv`)
 **Status:** ⚠️ FFI (requires network)
 
-```briv
+```briev
 defn http_get(url: String) -> Result<String, String>
 defn http_post(url: String, body: String) -> Result<String, String>
 ```
@@ -190,7 +190,7 @@ defn http_post(url: String, body: String) -> Result<String, String>
 ### Encoding (`encoding.bv`)
 **Status:** ⚠️ Partial FFI
 
-```briv
+```briev
 // Native
 defn base64_encode(data: Data) -> String
 defn base64_decode(s: String) -> Result<Data, String>
@@ -228,7 +228,7 @@ defn hex_decode(s: String) -> Result<Data, String>
 ## Usage Examples
 
 ### HashMap
-```briv
+```briev
 import "std/hashmap";
 
 let map = new_map<String, Int>();
@@ -243,7 +243,7 @@ let age = map.get("age");
 ```
 
 ### StringBuilder
-```briv
+```briev
 import "std/string_builder";
 
 let sb = new_builder();
@@ -258,7 +258,7 @@ println(message);
 ```
 
 ### Stack
-```briv
+```briev
 import "std/stack";
 
 let s = new_stack<Int>();
@@ -271,7 +271,7 @@ let top = s.peek();  // Some(2)
 ```
 
 ### Result Combinators
-```briv
+```briev
 import "std/result";
 
 let result: Result<Int, String> = Ok(42);

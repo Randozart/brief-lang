@@ -6,11 +6,11 @@
 
 ## Syntax
 
-```briv
+```briev
 fn_name(arg1, arg2, ...)
 ```
 
-`Call` is the only expression-level dispatch point in Briv. It resolves
+`Call` is the only expression-level dispatch point in Briev. It resolves
 the target function through a priority-ordered chain:
 
 1. User definitions (`defn`) → `Interpreter::call_defn()`

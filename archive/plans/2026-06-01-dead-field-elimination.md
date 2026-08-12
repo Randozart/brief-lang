@@ -5,20 +5,20 @@
 
 ## Problem
 
-After Phase 1 (fair C benchmarks), C beats Briv on IIR filter 1.67×:
-- Briv: 0.15s — keeps 50M biquad iterations (FMUL/FADD/FSUB + stores)
+After Phase 1 (fair C benchmarks), C beats Briev on IIR filter 1.67×:
+- Briev: 0.15s — keeps 50M biquad iterations (FMUL/FADD/FSUB + stores)
 - C: 0.09s — clang proved non-volatile floats are never observed, eliminated ALL float math, kept only `volatile long count` incq loop
 
-Briv emits every state store faithfully, regardless of whether the field value
+Briev emits every state store faithfully, regardless of whether the field value
 is ever consumed. Clang performs liveness analysis and eliminates dead stores.
-Briv should match this — the contract system already gives us precise knowledge
+Briev should match this — the contract system already gives us precise knowledge
 of which fields matter.
 
 ## Root Cause
 
-**No liveness analysis in Briv.** The program's output set is well-defined:
+**No liveness analysis in Briev.** The program's output set is well-defined:
 
-```briv
+```briev
 // IIR filter's state:
 let x1: Float = 0.0;  // dead — consumed only within process body
 let x2: Float = 0.0;  // dead
@@ -163,7 +163,7 @@ node.is_effectively_pure = if let (Some(ref bp), Some(ref inc)) = (&node.bounded
 | ring_buffer | 0.00s | 0.00s (unchanged) |
 | async_counters | 0.00s | 0.00s (unchanged) |
 
-C is still at 0.09s (volatile incq loop). Briv should drop to 0.00s — the
+C is still at 0.09s (volatile incq loop). Briev should drop to 0.00s — the
 `store i64 50000000` is faster than 50M `incq`.
 
 ## Files Changed

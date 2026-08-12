@@ -33,7 +33,7 @@ let has_42: Bool = seen :> Contains(42);
 // Stack usage
 let stack: Stack<String> = new_stack();
 txn push_item [true][stack .#Size == @stack .#Size + 1] {
-    &stack <- "briv";
+    &stack <- "briev";
     term;
 };
 

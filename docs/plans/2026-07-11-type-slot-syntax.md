@@ -33,7 +33,7 @@ Inside a `type` body, alongside property bindings (`name <~ expr;`),
 operators (`op Rune(Param) -> Ret = intrinsic;`), and constraints
 (`[expr];`), allow slot declarations:
 
-```briv
+```briev
 type String {
     ptr: Ptr<UInt8>;      // slot: bits 0..63 → Ptr<UInt8>
     len: Int;             // slot: bits 64..127 → Int
@@ -172,7 +172,7 @@ The hardcoded `struct_layout` hack at `type_universe.rs:488-500` is
 removed. String's bootstrap declaration in
 `lib/std/types/bootstrap.bv` gains slot declarations:
 
-```briv
+```briev
 type String {
     ptr: Ptr<UInt8>;
     len: Int;

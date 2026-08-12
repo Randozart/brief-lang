@@ -1,0 +1,21 @@
+// config.dbv — Data Briev configuration file
+// Schema defined inline, > marks positional entries
+
+schema Config {
+    app: String;
+    version: String;
+    debug: Bool;
+    optimization: OptimConfig;
+    backends: String[];
+    threads: Int;
+};
+
+schema OptimConfig {
+    budget: Int;
+    simplify: Bool;
+    vectorize: Bool;
+};
+
+as Config {
+    main: briev-compiler; 1.0.0; false; { 256; true; true }; llvm webstack circt; 4;
+};

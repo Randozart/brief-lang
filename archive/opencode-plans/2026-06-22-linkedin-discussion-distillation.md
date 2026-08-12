@@ -1,4 +1,4 @@
-# LinkedIn Discussion Distillation — New Directions for Briv
+# LinkedIn Discussion Distillation — New Directions for Briev
 
 **Date:** 2026-06-22  
 **Source:** LinkedIn comment chain on "Types are just bits with expectations"  
@@ -123,7 +123,7 @@ Paul's question ("how is this different from calling strlen each time?") is the 
 
 When two values have **compatible type lenses** (same codec, same layout), the compiler performs operations **symbolically on the lens representation** without materializing the underlying bits:
 
-```briv
+```briev
 let a: String = "hello ";
 let b: String = "world";
 let c = a ++ b;  // Computed symbolically via String lens at compile time
@@ -205,7 +205,7 @@ Konst's insight: a **proven integer** (non-negative, bounded) lets LLVM optimize
 
 A formalized **`crack<T>` operation** with proof-engine guarantees:
 
-```briv
+```briev
 // Safe — proof-checked at compile time via ?#:
 let raw = crack<MyStruct>(val) :> [layout == expected];
 

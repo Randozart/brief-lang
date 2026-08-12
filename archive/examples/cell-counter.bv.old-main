@@ -1,5 +1,5 @@
 // cell-counter.bv — Demonstrates cell and cell! primitives
-// Compile: briv-compiler build examples/cell-counter.bv
+// Compile: briev-compiler build examples/cell-counter.bv
 
 // A transient cell that adds numbers
 cell adder(a: Int, b: Int) -> sum: Int {

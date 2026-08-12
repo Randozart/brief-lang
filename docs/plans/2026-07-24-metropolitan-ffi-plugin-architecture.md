@@ -3,7 +3,7 @@
 
 ## Goal
 
-Provide a **Briv-native plugin system** for cross-language FFI. Each language
+Provide a **Briev-native plugin system** for cross-language FFI. Each language
 gets a standalone `.bv` plugin that generates the **most efficient bridge** for
 that language's runtime. The plugin system is infinitely extensible: adding a
 new language = creating one `.bv` file.
@@ -12,7 +12,7 @@ new language = creating one `.bv` file.
 
 ### Tier 1 — Zero-Cost (LTO-Compatible)
 Languages that compile to the C ABI (C, Rust, C++, Zig, etc.) get **zero bridge
-overhead** after LTO. The Briv function IS the native function.
+overhead** after LTO. The Briev function IS the native function.
 
 | Language | Method | Overhead | Mechanism |
 |----------|--------|----------|-----------|
@@ -55,11 +55,11 @@ lib/ffi/
 
 ### Each Plugin Has Three Parts
 
-```briv
+```briev
 // 1. Type-mapping helpers ($defn functions)
-$defn map_type_to_target(briv_type: String) -> String {
-    when briv_type == "Int"    { term "native_int_t"; };
-    when briv_type == "Float"  { term "native_float_t"; };
+$defn map_type_to_target(briev_type: String) -> String {
+    when briev_type == "Int"    { term "native_int_t"; };
+    when briev_type == "Float"  { term "native_float_t"; };
     // ...
 };
 
@@ -77,7 +77,7 @@ $(Normalized @ highest) {
 
 ### Usage Patterns
 
-```briv
+```briev
 // Single language:
 import "lib/ffi/gen_python";
 
@@ -95,11 +95,11 @@ $(Normalized @ highest) {
 
 ### Zero-Cost Usage (Tier 1)
 
-For embedding Briv in C/Rust/etc., the most efficient pattern is:
+For embedding Briev in C/Rust/etc., the most efficient pattern is:
 
 ```bash
 # Build as a shared library
-briv build my_module.bv --shared --out target/
+briev build my_module.bv --shared --out target/
 # Link directly with your C/Rust project
 gcc -o my_program main.c target/my_module.so
 ```
@@ -115,7 +115,7 @@ match the `.so`'s ABI exactly — no runtime marshalling, no binding overhead.
 4. Add `$(Normalized @ highest)` stage block
 5. Add `import "lib/ffi/gen_<lang>";` to `metropolitan.bv`
 
-No Rust code changes needed. The plugin system is pure-Briv.
+No Rust code changes needed. The plugin system is pure-Briev.
 
 ## Implementation Status
 

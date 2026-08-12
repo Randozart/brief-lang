@@ -4,7 +4,7 @@
 // functions for each backend. Replaces hardcoded key→attribute matching.
 // Flat code: max 2 nesting levels.
 
-use crate::dbriv::v2::{parse_document_quoted, DataEntry, DataField, DataValue};
+use crate::dbriev::v2::{parse_document_quoted, DataEntry, DataField, DataValue};
 use std::collections::HashMap;
 
 /// A metadata field definition from the vocabulary.

@@ -23,7 +23,7 @@ the remaining unambiguous §7.2/§7.3/§7.4 forms:
    re-exported names propagate to importers.
 
 Deferred (needs a design decision): the `:` module alias (`import collections:
-<std/collections>`). Briv inlines imports into one name space with no
+<std/collections>`). Briev inlines imports into one name space with no
 module-qualified access operator, so the alias's collision-resolution semantics
 (prefixing vs a new `alias.name` access form) is a language design question —
 separate slice.
@@ -116,12 +116,12 @@ Commit `cf2a5659` (docs refresh). 37/37 runtime MATCH. Expectation unchanged.
   melds — the GLUE `CStr <-> String` meld failed to survive imports. The
   full `Self::item_name` is now used; the two GLUE reference tests pass again.
 - Deferred: the `:` module alias (needs a module-qualified-access design
-  decision — Briv inlines imports with no namespace operator).
+  decision — Briev inlines imports with no namespace operator).
 
 ## 8. Delivered (2026-08-09) — Slice 2
 
 - **`:` module alias** (`import collections: <std/collections>`) — a
-  collision-resolving local TAG (no qualified access; Briv inlines imports).
+  collision-resolving local TAG (no qualified access; Briev inlines imports).
   `Import.alias` field; parser accepts `import <ident> : <path>`; the resolver
   treats two imports of the same exported name as legal when they carry
   DIFFERENT aliases (same alias still collides). Per SPEC §7.2.

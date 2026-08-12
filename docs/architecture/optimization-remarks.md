@@ -83,7 +83,7 @@ In `emit_inline_concat`:
 4. If set → static constant → skip free.
 
 This is safe because `malloc` guarantees at least 8-byte alignment on all
-platforms Briv targets, so bit 0 is always usable as a tag.
+platforms Briev targets, so bit 0 is always usable as a tag.
 
 ### Files
 - `emit_expr.rs` — `Expr::String` handler (tagging) and `emit_inline_concat`

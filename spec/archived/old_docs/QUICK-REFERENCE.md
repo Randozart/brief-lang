@@ -1,6 +1,6 @@
-# Briv Quick Reference
+# Briev Quick Reference
 
-**Cheat sheet for Briv syntax and patterns.**
+**Cheat sheet for Briev syntax and patterns.**
 **Version: 8.0**
 
 ## New in v8.0
@@ -22,7 +22,7 @@
 
 ## Basics
 
-```briv
+```briev
 // State
 let name: Type = value;
 const MAX: Int = 100;
@@ -47,14 +47,14 @@ sig toString: Bool -> String = complex(x);
 
 ## Types
 
-```briv
+```briev
 Int, Float, String, Bool, Void, Data
 Type1 | Type2                    # Union
 ```
 
 ## Enums
 
-```briv
+```briev
 enum Color { Red, Green, Blue }
 
 enum Result<T, E> { Ok(T), Err(E) }
@@ -64,7 +64,7 @@ enum Option<T> { Some(T), None }
 
 ## Statements
 
-```briv
+```briev
 &var = expr;                     # Mutate state
 let local: Type = expr;          # Local var
 [condition] statement;           # Guard
@@ -78,7 +78,7 @@ escape value;                   # Return error
 ```
 
 ### Implicit term true (v7.0)
-```briv
+```briev
 # When postcondition is literal true, term; is implicit
 txn activate [ready][true] {
     term;  # becomes: term true;
@@ -87,7 +87,7 @@ txn activate [ready][true] {
 
 ## Operators
 
-```briv
+```briev
 a + b, a - b, a * b, a / b     # Arithmetic
 a == b, a != b                 # Equality
 a < b, a <= b, a > b, a >= b   # Comparison
@@ -96,7 +96,7 @@ a && b, a || b, !a             # Logic
 
 ## Contracts
 
-```briv
+```briev
 txn name [precondition][postcondition] { body }
 
 # Prior state
@@ -110,7 +110,7 @@ txn name [precondition][postcondition] { body }
 
 ### Counter
 
-```briv
+```briev
 let count: Int = 0;
 
 txn increment [count < 100][count == @count + 1] {
@@ -121,7 +121,7 @@ txn increment [count < 100][count == @count + 1] {
 
 ### Reactive Loop
 
-```briv
+```briev
 let done: Bool = false;
 
 node process [!done][done] {
@@ -133,7 +133,7 @@ node process [!done][done] {
 
 ### State Machine
 
-```briv
+```briev
 let state: Int = 0;
 
 node step [state == 0][state == 1] {
@@ -144,7 +144,7 @@ node step [state == 0][state == 1] {
 
 ### FFI Call
 
-```briv
+```briev
 frgn read_file(path: String) -> Result<String, Error> from "std::io";
 
 defn load(path: String) -> String [true][true] {
@@ -155,7 +155,7 @@ defn load(path: String) -> String [true][true] {
 
 ### Struct Instances
 
-```briv
+```briev
 // Define a struct with methods
 struct Counter {
     count: Int;
@@ -183,7 +183,7 @@ let first = counters[0];
 
 ### Error Handling (v7.0 - FFI Error Enforcement)
 
-```briv
+```briev
 sig compute: Int -> Int | Error;
 
 # MUST check .is_ok() or .is_err() before accessing .value
@@ -201,7 +201,7 @@ txn process [true][true] {
 ```
 
 ### Reactor Throttling (v7.0)
-```briv
+```briev
 reactor @10Hz;                    # File-level default
 
 node fast [cond][post] { } @60Hz;  # Per-txn override
@@ -209,7 +209,7 @@ node fast [cond][post] { } @60Hz;  # Per-txn override
 
 ## Native Stdlib
 
-```briv
+```briev
 import std.core;
 
 # Integer Math
@@ -250,34 +250,34 @@ from_json(json_str)                     # Parse JSON -> Result<Object, String>
 ## FFI Modules
 
 ### I/O
-```briv
+```briev
 read_file(path: String) -> Result<String, IoError>
 write_file(path: String, content: String) -> Result<Void, IoError>
 file_exists(path: String) -> Result<Bool, IoError>
 ```
 
 ### Math
-```briv
+```briev
 sqrt(x: Float) -> Result<Float, MathError>
 sin(x: Float) -> Result<Float, MathError>
 pow(base: Float, exp: Float) -> Result<Float, MathError>
 ```
 
 ### String
-```briv
+```briev
 string_length(s: String) -> Result<Int, StringError>
 string_to_upper(s: String) -> Result<String, StringError>
 parse_int(s: String) -> Result<Int, ParseError>
 ```
 
 ### Time
-```briv
+```briev
 current_timestamp() -> Result<Int, TimeError>
 sleep_ms(ms: Int) -> Result<Void, TimeError>
 ```
 
 ### HTTP
-```briv
+```briev
 http_get(url: String) -> Result<String, String>
 http_post(url: String, body: String) -> Result<String, String>
 ```
@@ -287,10 +287,10 @@ See [FFI-GUIDE.md](FFI-GUIDE.md) for FFI details.
 ## CLI
 
 ```bash
-briv check program.bv       # Type check & verify
-briv build program.bv       # Run
-briv init project           # Create project
-briv lsp                    # Language server
+briev check program.bv       # Type check & verify
+briev build program.bv       # Run
+briev init project           # Create project
+briev lsp                    # Language server
 ```
 
 ## Syntax Rules
@@ -306,7 +306,7 @@ briv lsp                    # Language server
 
 ## View Directives (.rbv)
 
-```briv
+```briev
 b-text="expr"                      # Reactive text content
 b-show="cond"                      # Show/hide based on condition
 b-trigger:event="txn"              # Bind event to transaction
@@ -316,14 +316,14 @@ b-style:name="value"               # Dynamic style property
 ```
 
 ### SVG Imports
-```briv
+```briev
 import "./logo.svg" as Logo;       # Import SVG as component
 # Use: <Logo /> in view
 ```
 
 ## What Compiles
 
-```briv
+```briev
 # ✓ Works
 txn work [true][x == 42] {
   &x = 42;

@@ -188,7 +188,7 @@ directly, and the increment detection is decoupled from the Size projection.
 The `Range` projection + SMT range analyzer enables deterministic safe pointer
 arithmetic. When a developer writes:
 
-```briv
+```briev
 let ptr = buffer :> Ptr;
 let element = ptr + (idx * 8);
 ```
@@ -202,7 +202,7 @@ This is a strict improvement over:
 - **Rust**: Requires `unsafe { }`, no SMT prover, developer responsible
 - **SPARK Ada**: Bans pointer arithmetic entirely
 
-Briv proves pointer safety statically using data the compiler already has
+Briev proves pointer safety statically using data the compiler already has
 (ranges from contracts + allocation sizes from types), without runtime checks
 and without unsafe blocks.
 

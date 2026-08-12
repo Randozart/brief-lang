@@ -13,9 +13,9 @@ declare i64 @llvm.bitreverse.i64(i64) #1
 declare void @__rt_init() local_unnamed_addr
 declare void @__rt_poll() local_unnamed_addr
 declare void @__rt_wait() local_unnamed_addr
-declare void @briv_thread_pool_init(i32, i8**) local_unnamed_addr
-declare void @briv_barrier_release() local_unnamed_addr
-declare void @briv_barrier_wait() local_unnamed_addr
+declare void @briev_thread_pool_init(i32, i8**) local_unnamed_addr
+declare void @briev_barrier_release() local_unnamed_addr
+declare void @briev_barrier_wait() local_unnamed_addr
 declare void @__exit(i64) local_unnamed_addr
 declare i64 @__get_env_int(i8*) #1
 declare i64 @__print_int(i64) #6

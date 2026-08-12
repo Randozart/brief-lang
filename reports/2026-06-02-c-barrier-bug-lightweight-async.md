@@ -5,7 +5,7 @@
 
 ## The Finding
 
-Runtime input fuzzing exposed a latent bug in Briv's thread pool barrier and an
+Runtime input fuzzing exposed a latent bug in Briev's thread pool barrier and an
 incidental optimization opportunity. Both stem from the same root cause: **the
 thread pool path was never actually exercised at runtime.**
 
@@ -15,13 +15,13 @@ The compile-time async benchmarks (e.g., `async_counters.bv` with `const N`)
 all hit the **pure-counter O(1) store path** in the LLVM backend, completely
 bypassing thread creation, barrier synchronization, and worker dispatch.
 
-The actual thread pool barrier in `runtime/briv_rt.c` is a custom portable
+The actual thread pool barrier in `runtime/briev_rt.c` is a custom portable
 implementation for macOS (which lacks `pthread_barrier_t` pre-10.12). It uses
 `pthread_mutex` + `pthread_cond` directly:
 
 ```c
 // CUSTOM barrier — broken at scale
-static void briv_barrier_wait_impl(briv_barrier_t *b) {
+static void briev_barrier_wait_impl(briev_barrier_t *b) {
     pthread_mutex_lock(&b->mutex);
     b->count++;
     if (b->count >= b->target) {
@@ -48,9 +48,9 @@ This is glibc's protection against recursive locking on a non-recursive mutex.
 The thread that enters the next tick's barrier still holds the mutex from the
 previous tick's corrupted exit.
 
-**This is fundamentally a C runtime bug, not a compiler bug.** Briv's LLVM IR
-is correct — the generated `call void @briv_barrier_release()` and
-`call void @briv_barrier_wait()` are exactly right. The C implementation of
+**This is fundamentally a C runtime bug, not a compiler bug.** Briev's LLVM IR
+is correct — the generated `call void @briev_barrier_release()` and
+`call void @briev_barrier_wait()` are exactly right. The C implementation of
 those functions is wrong.
 
 ### Optimization: Lightweight Async Dispatch
@@ -70,7 +70,7 @@ Current dispatch for `async` txns with runtime bounds:
 ```
 main:
   init_state()
-  briv_thread_pool_init(2, ...)   // 50µs overhead
+  briev_thread_pool_init(2, ...)   // 50µs overhead
   tick:
     barrier_release()               // 1µs barrier wait
     reactor_tick()                  // 2ns of actual work
@@ -105,8 +105,8 @@ A txn is "lightweight async" when ALL of these hold:
 | Bound is runtime-variable | `field_initializers.get(bound_var) ∉ Expr::Integer` | LLVM backend |
 
 When all conditions are met, the compiler:
-1. Skips `briv_thread_pool_init()` in `emit_main()` / `emit_enum_main()`
-2. Skips `briv_barrier_release()` / `briv_barrier_wait()` in the main loop
+1. Skips `briev_thread_pool_init()` in `emit_main()` / `emit_enum_main()`
+2. Skips `briev_barrier_release()` / `briev_barrier_wait()` in the main loop
 3. Skips `@llvm.thread_pool` + `@thread_pool_fns` metadata
 4. Uses the existing sequential `reactor_tick()` dispatch
 
@@ -115,7 +115,7 @@ The existing sequential path already handles multi-txn programs correctly —
 
 ## The Irony
 
-Briv's compiler is so good at optimization that it never exercised its own
+Briev's compiler is so good at optimization that it never exercised its own
 runtime thread pool. The pure-counter fold eliminates the loop entirely, so the
 barrier code lay dormant — compiled, linked, but never called. Only runtime-
 variable bounds (which defeat constant folding) revealed the C bug.
@@ -134,9 +134,9 @@ The fix is in two layers:
 |------|--------|---------|
 | `src/backend/llvm.rs` | +~15 | Lightweight async classification + dispatch gating |
 | `src/parser.rs` | ~10 | Accept plain return types for `frgn` (e.g., `-> Int`) |
-| `runtime/briv_rt.c` | ~20 | `__get_env_int()` function + barrier generation fix |
+| `runtime/briev_rt.c` | ~20 | `__get_env_int()` function + barrier generation fix |
 | `lib/std/env.bv` | NEW | `frgn __get_env_int(name: String) -> Int` |
-| `benchmarks/*_runtime.bv` | 4 NEW | Runtime-variant Briv benchmarks |
+| `benchmarks/*_runtime.bv` | 4 NEW | Runtime-variant Briev benchmarks |
 | `benchmarks/*_runtime_c.c` | 4 NEW | Runtime-variant C reference benchmarks |
 | `benchmarks/fuzz.sh` | NEW | Fuzzing runner script |
 | `benchmarks/build_and_bench.sh` | EDIT | `--fuzz N` flag support |

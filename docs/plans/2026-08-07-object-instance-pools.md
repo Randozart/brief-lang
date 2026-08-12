@@ -13,7 +13,7 @@ reactive nodes operate over the pool. The current boxed model (a %State slot
 holding a heap/stack struct address, members behind self-slot offsets) is
 retired.
 
-This follows the user's design intent ("obj in Briv are unpacked into top level
+This follows the user's design intent ("obj in Briev are unpacked into top level
 cross-bound values") and the spec: §9.5 "an object owns identity, lifecycle,
 logical state, ports, and reactive behavior **in its parent reactor**"; §12.2
 "spawn creates a persistent task or component instance and returns a linear
@@ -178,7 +178,7 @@ loop-shape analysis's handling of the inlined member writes.
 
 ## Predictably-inexhaustible pools 2026-08-07 (late)
 
-Adopted the principle: Briv has NO runtime errors — a spawn pool is PROVABLY
+Adopted the principle: Briev has NO runtime errors — a spawn pool is PROVABLY
 inexhaustible. The `obj_instance_capacity` config default is removed; the
 capacity is DERIVED by a new frontend analysis:
 

@@ -34,7 +34,7 @@ pub enum RbvError {
 
 #[derive(Debug, Clone)]
 pub struct RbvFile {
-    pub briv_source: String,
+    pub briev_source: String,
     pub view_html: String,
     pub style_css: Option<String>,
 }
@@ -42,8 +42,8 @@ pub struct RbvFile {
 impl RbvFile {
     /// Parse an `.rbv` file.
     ///
-    /// Briv code is the default content — everything outside `<view>` and
-    /// `<style>` tags is treated as Briv source.
+    /// Briev code is the default content — everything outside `<view>` and
+    /// `<style>` tags is treated as Briev source.
     ///
     /// 2026-08-09 (Phase 14, SPEC 21.1): legacy `<script>` wrappers are
     /// INVALID — the script-wrapper compatibility was removed. A `<script>`
@@ -61,7 +61,7 @@ impl RbvFile {
             });
         if has_script_tag {
             return Err(RbvError::Parse(
-                "<script> wrappers are invalid (SPEC 21.1) — write Briv source \
+                "<script> wrappers are invalid (SPEC 21.1) — write Briev source \
                  directly; the `<view>`/`<style>` blocks carry the markup"
                     .into(),
             ));
@@ -70,10 +70,10 @@ impl RbvFile {
 
         let style = extract_tag(source, "<style>", "</style>");
 
-        let briv_source = strip_known_blocks(source).trim().to_string();
+        let briev_source = strip_known_blocks(source).trim().to_string();
 
         Ok(RbvFile {
-            briv_source,
+            briev_source,
             view_html: view.trim().to_string(),
             style_css: style.map(|s| s.trim().to_string()),
         })
@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_rbv_briv_as_default() {
+    fn test_parse_rbv_briev_as_default() {
         let source = r#"
 let count: Int = 0;
 
@@ -121,15 +121,15 @@ txn increment [true][@count + 1 == count] {
 </view>
 "#;
         let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.briv_source.contains("count"));
-        assert!(rbv.briv_source.contains("increment"));
+        assert!(rbv.briev_source.contains("count"));
+        assert!(rbv.briev_source.contains("increment"));
         assert!(rbv.view_html.contains("b-text"));
         assert!(rbv.style_css.is_none());
     }
 
     #[test]
     fn test_parse_rbv_no_script_style_is_extracted() {
-        // Briv code interleaved with view — everything outside <view> is source
+        // Briev code interleaved with view — everything outside <view> is source
         let source = r#"
 let x: Int = 42;
 
@@ -143,8 +143,8 @@ txn double [true][@x * 2 == x] {
 };
 "#;
         let rbv = RbvFile::parse(source).unwrap();
-        assert!(rbv.briv_source.contains("let x: Int = 42"));
-        assert!(rbv.briv_source.contains("txn double"));
+        assert!(rbv.briev_source.contains("let x: Int = 42"));
+        assert!(rbv.briev_source.contains("txn double"));
         assert!(rbv.view_html.contains("b-text"));
     }
 
@@ -152,7 +152,7 @@ txn double [true][@x * 2 == x] {
     #[test]
     fn test_parse_rbv_script_wrapper_is_invalid() {
         let source = r#"
-<script type="briv">
+<script type="briev">
 let count: Int = 0;
 </script>
 
@@ -172,7 +172,7 @@ let count: Int = 0;
     /// in a comment and must still compile.
     #[test]
     fn test_parse_rbv_script_in_comment_is_allowed() {
-        let source = r#"// removed old <script> wrapper — plain Briv now
+        let source = r#"// removed old <script> wrapper — plain Briev now
 let count: Int = 0;
 txn inc [count < 10][true] {
     count = count + 1;
@@ -183,7 +183,7 @@ txn inc [count < 10][true] {
 </view>
 "#;
         let rbv = RbvFile::parse(source).expect("comment mentioning <script> must not be rejected");
-        assert!(rbv.briv_source.contains("let count: Int = 0;"));
+        assert!(rbv.briev_source.contains("let count: Int = 0;"));
         assert!(rbv.view_html.contains("b-text"));
     }
 

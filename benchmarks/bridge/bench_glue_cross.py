@@ -3,17 +3,17 @@
 
 Compares three paths:
   C FFI:  Python → ctypes → C .so → Python
-  Briv:  Python → ctypes → Briv .so → Python
+  Briev:  Python → ctypes → Briev .so → Python
   Native: Pure Python implementation (reference)
 
 Usage:
   python3 bench_glue_cross.py          # runs all variants
   python3 bench_glue_cross.py c        # C only
-  python3 bench_glue_cross.py briv    # Briv only
+  python3 bench_glue_cross.py briev    # Briev only
 
 Requires:
   libstr_prepend_c.so  — compiled from str_prepend.c
-  libpp_types.so       — compiled from pp-types.bv (via briv build)
+  libpp_types.so       — compiled from pp-types.bv (via briev build)
 """
 
 import ctypes
@@ -35,15 +35,15 @@ def load_c_lib():
     lib.c_str_echo.restype = ctypes.c_int64
     return lib
 
-def load_briv_lib():
-    """Load the Briv bridge .so."""
+def load_briev_lib():
+    """Load the Briev bridge .so."""
     path = os.path.join(BRIDGE_DIR, "libpp_types.so")
     lib = ctypes.CDLL(path)
-    # 2026-08-09 (Bug 5): briv_test_cstr_roundtrip needs NO state — its export
+    # 2026-08-09 (Bug 5): briev_test_cstr_roundtrip needs NO state — its export
     # ABI is fn(i64) -> i64. A 2-arg declaration here silently passed state(0)
     # as input_ptr and returned '<null>'.
-    lib.briv_test_cstr_roundtrip.argtypes = [ctypes.c_int64]
-    lib.briv_test_cstr_roundtrip.restype = ctypes.c_int64
+    lib.briev_test_cstr_roundtrip.argtypes = [ctypes.c_int64]
+    lib.briev_test_cstr_roundtrip.restype = ctypes.c_int64
     return lib
 
 # ── String helpers ─────────────────────────────────────────────────────
@@ -74,14 +74,14 @@ def bench_c(lib, _state, s: str) -> str:
     result_ptr = lib.c_str_echo(s_ptr)
     return from_c_str(result_ptr)
 
-def bench_briv(lib, state, s: str) -> str:
-    """Call via Briv GLUE bridge — briv_test_cstr_roundtrip(input_ptr)."""
+def bench_briev(lib, state, s: str) -> str:
+    """Call via Briev GLUE bridge — briev_test_cstr_roundtrip(input_ptr)."""
     s_ptr = c_str(s)
-    # 2026-08-09 (Bug 5): briv_test_cstr_roundtrip does NOT need the runtime
-    # state (its body only calls the cstr_to_briv/str_to_c FFI), so the export
+    # 2026-08-09 (Bug 5): briev_test_cstr_roundtrip does NOT need the runtime
+    # state (its body only calls the cstr_to_briev/str_to_c FFI), so the export
     # ABI is `fn(i64) -> i64` — a 2-arg call would pass state(0) as input_ptr
     # and return `<null>`. Match the Rust pp_roundtrip test: single arg.
-    result_ptr = lib.briv_test_cstr_roundtrip(s_ptr)
+    result_ptr = lib.briev_test_cstr_roundtrip(s_ptr)
     return from_c_str(result_ptr)
 
 def bench_native(s: str) -> str:
@@ -127,19 +127,19 @@ def main():
     c_state = ctypes.c_int64(0)
     run_bench("c_str_echo", bench_c, lib_c, c_state, test_string)
 
-    # Briv GLUE
-    print("\n[Briv GLUE]")
-    lib_briv = load_briv_lib()
+    # Briev GLUE
+    print("\n[Briev GLUE]")
+    lib_briev = load_briev_lib()
     # Allocate fresh state buffer per call
-    run_bench("briv_cstr_rt", bench_briv, lib_briv, ctypes.c_int64(0), test_string)
+    run_bench("briev_cstr_rt", bench_briev, lib_briev, ctypes.c_int64(0), test_string)
 
     # Correctness check
     print("\n[Correctness]")
     c_result = bench_c(lib_c, c_state, test_string)
-    b_result = bench_briv(lib_briv, ctypes.c_int64(0), test_string)
+    b_result = bench_briev(lib_briev, ctypes.c_int64(0), test_string)
     n_result = bench_native(test_string)
     print(f"  C:      {c_result!r}")
-    print(f"  Briv:  {b_result!r}")
+    print(f"  Briev:  {b_result!r}")
     print(f"  Native: {n_result!r}")
     if c_result == n_result == b_result:
         print("  ✅ All match")

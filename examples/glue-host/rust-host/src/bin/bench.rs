@@ -1,21 +1,21 @@
-// Rust native-speed benchmark: Rust → Briv (GLUE, C ABI) vs native Rust.
-// 2026-08-03: quantifies the boundary overhead so Briv can be used for
+// Rust native-speed benchmark: Rust → Briev (GLUE, C ABI) vs native Rust.
+// 2026-08-03: quantifies the boundary overhead so Briev can be used for
 // compiler-internal components without loss of efficiency. The boundary is a
 // single C ABI call (zero marshalling); the work is FNV-1a folding over
-// `count` features, identical in Briv and native Rust.
+// `count` features, identical in Briev and native Rust.
 //
-// Run: BRIVC=<repo>/target/release/brivc cargo run --release --bin bench
+// Run: BRIEVC=<repo>/target/release/brievc cargo run --release --bin bench
 
-#[path = "../briv_bindings.rs"]
-mod briv_bindings;
-use briv_bindings::*;
+#[path = "../briev_bindings.rs"]
+mod briev_bindings;
+use briev_bindings::*;
 use std::ffi::c_void;
 use std::time::Instant;
 
 const COUNT: i64 = 1000;
 const ITERS: u64 = 200_000;
 
-/// The exact FNV-1a folding the Briv bridge implements (i64 wrapping).
+/// The exact FNV-1a folding the Briev bridge implements (i64 wrapping).
 fn feature_hash_native(count: i64, seed: i64) -> i64 {
     let mut h = seed;
     for i in 0..count {
@@ -40,19 +40,19 @@ fn bench(name: &str, mut f: impl FnMut() -> i64) {
 
 fn main() {
     let seed = 42i64;
-    let briv = unsafe {
-        let state: *mut c_void = __briv_init_state();
+    let briev = unsafe {
+        let state: *mut c_void = __briev_init_state();
         move || feature_hash(state, COUNT, seed)
     };
     let native = || feature_hash_native(COUNT, seed);
 
     // Correctness first: identical output.
-    let briv_out = std::hint::black_box(briv());
+    let briev_out = std::hint::black_box(briev());
     let native_out = native();
-    assert_eq!(briv_out, native_out, "Briv and native must agree");
-    println!("output identical: feature_hash({COUNT}, {seed}) = {briv_out}\n");
+    assert_eq!(briev_out, native_out, "Briev and native must agree");
+    println!("output identical: feature_hash({COUNT}, {seed}) = {briev_out}\n");
 
     println!("per-call latency over {ITERS} calls (feature_hash count={COUNT}):");
-    bench("Rust -> Briv (GLUE)", &briv);
+    bench("Rust -> Briev (GLUE)", &briev);
     bench("native Rust", &native);
 }

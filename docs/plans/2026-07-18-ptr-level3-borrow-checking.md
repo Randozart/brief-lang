@@ -8,7 +8,7 @@
   - `src/analysis/provenance.rs` (existing provenance infrastructure — 316 lines, 7 tests)
   - `src/ast/expr.rs` (Expr::AddrOf, Expr::Deref — already committed)
   - `src/backend/llvm/emit_expr.rs` (LLVM codegen for AddrOf/Deref — already committed)
-  - `lib/std/core/ring_buffer.bv` (native ring_push/pop in pure Briv — already committed)
+  - `lib/std/core/ring_buffer.bv` (native ring_push/pop in pure Briev — already committed)
 
 ---
 
@@ -54,7 +54,7 @@ Finish the Ptr Level 3 borrow checker system. The foundational work (AST variant
 | `check_dangling_ptrs()` | ✅ Done (but stub) | `src/analysis/provenance.rs:102-112` |
 | `is_local_provenance()` | ❌ **Stub — always false** | `src/analysis/provenance.rs:57-70` |
 | `check_convergence_safety()` | ✅ Done | `src/analysis/provenance.rs:187-237` |
-| `ring_push`/`ring_pop` in pure Briv | ✅ Done | `lib/std/core/ring_buffer.bv:23-47` |
+| `ring_push`/`ring_pop` in pure Briev | ✅ Done | `lib/std/core/ring_buffer.bv:23-47` |
 | `Intrinsic::RingPush`/`RingPop` removed | ✅ Done | — |
 | 7 provenance unit tests | ✅ Done | `src/analysis/provenance.rs:239-316` |
 | `PtrConst` type | ❌ **Not implemented** | — |
@@ -426,14 +426,14 @@ if let Expr::Deref(ptr) = &stmt.lhs {
 ```
 
 **Test:** `test_write_through_const_pointer_errors`
-```briv
+```briev
 let x = 5;
 let p = &x;  // Ptr<const Int>
 *p = 6;      // error: cannot write through const pointer
 ```
 
 **Test:** `test_write_through_mutable_pointer_ok`
-```briv
+```briev
 state { x: Int };
 let p = &x;  // Ptr<Int>
 *p = 6;      // ok

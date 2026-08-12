@@ -1,4 +1,4 @@
-# Briv Compiler - Agent Guidelines
+# Briev Compiler - Agent Guidelines
 
 ## 🛑 IMMEDIATE INSTRUCTION — READ FIRST
 
@@ -19,7 +19,7 @@ the full snapshot backup at `AGENTS_HISTORY_2.md`.
 ## Roleplay Instruction
 
 You are not writing code for one benchmark. You are building a compiler that
-must be correct for **all programs** written in Briv — every possible well-typed
+must be correct for **all programs** written in Briev — every possible well-typed
 program, not just the test case you happen to be working on. Every decision must
 pass three questions:
 
@@ -36,7 +36,7 @@ pass three questions:
    intrinsic. Everything else belongs in configuration or stdlib.
 
 3. **If this were the only rule left, would the architecture still hold?**
-   `ring_push` is a Briv function using Ptr arithmetic, not a compiler intrinsic.
+   `ring_push` is a Briev function using Ptr arithmetic, not a compiler intrinsic.
    `InsertAt <~ ring_push(#L, #R)` is a type property, not a Rust match arm.
    The `<-` operator works for any type that declares `InsertAt`/`ExtractFrom`.
    Each of these is true independently, and removing any one doesn't break the
@@ -48,11 +48,11 @@ becomes the rule tomorrow.
 
 ## IMPORTANT CONSIDERATION
 
-This is NOT some "go fast and break things" type SaaS. We are building a compiler. Whenever you think "This would be too much effort" or "This is too large a refactor, we should defer/drop this", DON'T. Patches are UNACCEPTABLE. We are going for code correctness for ALL programs written in Briv, not just the test case we happen to be working on. This is also why we MUST comment on EVERY code change we make. This makes it visible WHY the code is there, and prevents critical code from being removed.
+This is NOT some "go fast and break things" type SaaS. We are building a compiler. Whenever you think "This would be too much effort" or "This is too large a refactor, we should defer/drop this", DON'T. Patches are UNACCEPTABLE. We are going for code correctness for ALL programs written in Briev, not just the test case we happen to be working on. This is also why we MUST comment on EVERY code change we make. This makes it visible WHY the code is there, and prevents critical code from being removed.
 
 ## Philosophy
 
-Briv's contract system (`[pre][post]`) is not a correctness tax — it is
+Briev's contract system (`[pre][post]`) is not a correctness tax — it is
 information the compiler uses to optimize harder. Safety IS the
 optimization enabler. Full machine access is available through contracts
 proven at compile time, not `unsafe` blocks.
@@ -62,11 +62,11 @@ proven at compile time, not `unsafe` blocks.
 **Everything that MUST hold with no stdlib loaded is an intrinsic.**
 **Everything else is stdlib.**
 
-If `rm -rf lib/std && brivc --no-stdlib` still type-checks and compiles
+If `rm -rf lib/std && brievc --no-stdlib` still type-checks and compiles
 `let x: Int = 5`, it's an intrinsic. If a user could write a `.bv` file
 that achieves the same thing, it belongs in stdlib.
 
-The `ring_push` case proves the pattern: a 15-line Briv function with Ptr
+The `ring_push` case proves the pattern: a 15-line Briev function with Ptr
 arithmetic replaces a compiler intrinsic + Rust match arm. A user writing
 `MyQueue<T>` with `InsertAt <~ my_push(#L, #R)` gets the same `<-` syntax
 without touching the compiler.
@@ -93,7 +93,7 @@ can compile.
 
 Types declare operations using hashword categories as backend directives:
 
-```briv
+```briev
 type Int : Bits {
     op Add(#Int, #Int);       // backend emits its native integer add
     op Sub(#Int, #Int);
@@ -137,18 +137,18 @@ See `docs/architecture/conditional-ffi.md`.
 
 ### Compiler Registry
 
-`~/.briv/registry/` (or `dirs::data_dir()`/briv/registry/ on each platform)
-is a per-user directory for installing Briv modules and foreign sources.
-Managed by `brivc registry {add,list,remove}`.
+`~/.briev/registry/` (or `dirs::data_dir()`/briev/registry/ on each platform)
+is a per-user directory for installing Briev modules and foreign sources.
+Managed by `brievc registry {add,list,remove}`.
 
-- `brivc registry add ./my-lib.bv` — copies file to registry (version-locked, no symlink)
-- `brivc registry add ./xxhash/ --name xxhash` — copies directory tree
-- `brivc registry list` — enumerates registry contents
-- `brivc registry remove <name>` — deletes matching entry
+- `brievc registry add ./my-lib.bv` — copies file to registry (version-locked, no symlink)
+- `brievc registry add ./xxhash/ --name xxhash` — copies directory tree
+- `brievc registry list` — enumerates registry contents
+- `brievc registry remove <name>` — deletes matching entry
 
 Lookup order for `import <name>` / `from <name>`:
-1. Project-local `.briv/registry/<name>` (if `.briv/registry/` exists)
-2. User-wide `~/.briv/registry/<name>`
+1. Project-local `.briev/registry/<name>` (if `.briev/registry/` exists)
+2. User-wide `~/.briev/registry/<name>`
 3. `config/module-registry.toml` (for imports)
 4. Stdlib path (for `from <name>` and `import <name>` fallback)
 
@@ -261,7 +261,7 @@ The `CastingGraph` owns:
 2. **LLVM type resolution** (`resolve_llvm_type()`)
 3. **Protocol variant membership** (hardcoded variants + proto declarations)
 
-Every codegen site that needs to know "what LLVM type does this Briv type
+Every codegen site that needs to know "what LLVM type does this Briev type
 have?" calls `self.ctx.casting_graph.resolve_llvm_type(universe, ty, int_bits)`.
 No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
 
@@ -319,7 +319,7 @@ No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
     implement them first.
 
 11. **PLAN WITH BENCHMARKS**: Every performance optimization plan MUST include
-    a baseline table of ALL benchmark results (ratios, Briv times, C times,
+    a baseline table of ALL benchmark results (ratios, Briev times, C times,
     correctness status) at the current commit BEFORE any changes. After
     implementation, the plan MUST be updated with the new results for
     comparison. This prevents "optimizations" that fix one benchmark while
@@ -327,7 +327,7 @@ No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
     --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
 
 11b. **PERSISTENT BASELINE WORKTREE**: A permanent git worktree at
-    `../briv-compiler-baseline` holds the current baseline commit (`b39461e2`)
+    `../briev-compiler-baseline` holds the current baseline commit (`b39461e2`)
     for regression detection. Always compare against this baseline before
     committing performance-sensitive changes:
 
@@ -340,10 +340,10 @@ No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
     current benchmarks equal or exceed the baseline:
 
     ```bash
-    rm -rf ../briv-compiler-baseline
+    rm -rf ../briev-compiler-baseline
     git worktree prune
-    git worktree add ../briv-compiler-baseline <new-tip-commit>
-    cd ../briv-compiler-baseline && cargo build --release
+    git worktree add ../briev-compiler-baseline <new-tip-commit>
+    cd ../briev-compiler-baseline && cargo build --release
     ```
 
     This provides a controlled A/B experiment (same machine, same hardware)
@@ -399,7 +399,7 @@ No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
      helpers at the same time. The centralized helpers already exist; this rule
      ensures they are adopted incrementally without dedicated refactoring passes.
 
- 18. **NO TYPE NAME MATCHING**: Never match on Briv type names (`t == "Int"`,
+ 18. **NO TYPE NAME MATCHING**: Never match on Briev type names (`t == "Int"`,
       `t == "Float"`, `s == "String"`) in Rust code. The type's LLVM representation,
       protocol category, boxing behavior, and ABI width are derived from its
       `ResolvedType` in the `TypeUniverse` and the `CastingGraph` — specifically
@@ -409,7 +409,7 @@ No exceptions. No special cases. No fallbacks to `rt.properties["llvm_type"]`.
       hardcoded protocol lanes. The only exceptions
       are: (a) `Type::Ptr(_)` and `Type::Vector(_, _)` — compiler constructs not
       stored in the universe, (b) `Type::Bits(N)` — a width construct, and
-      (c) the `tbaa_node` function — operates on LLVM IR type strings, not Briv
+      (c) the `tbaa_node` function — operates on LLVM IR type strings, not Briev
       type names. Everything else must go through the universe or the casting graph.
 
       **DO**:  `self.is_protocol_member(&ty, "#Float")`
@@ -558,7 +558,7 @@ This makes dependencies explicit, improves testability, and documents which data
 
 ### 8. Metropolitan FFI — GLUE Export Is TOML-Driven (Phase 8)
 
-The `briv export` command generates language wrappers entirely from
+The `briev export` command generates language wrappers entirely from
 `lib/glue.toml` templates. No Rust code knows about specific languages.
 Adding a language = adding a `[lang]` section with `protocols` and `templates`.
 Config discovery uses `#[serde(flatten)]` — no named struct fields for languages.
@@ -569,16 +569,16 @@ memory IPC (`src/ffi/metropipe.rs`).
 
 ### 9. Export Uses the Full LLVM Backend (Phase 8)
 
-`briv export` calls `LlvmBackend::generate()` — the same code path as
-`briv build --llvm`. No `ret i64 0` stubs. The stub codegen in `library.rs`
-is deprecated for the export path but kept for `briv library` backward compat.
+`briev export` calls `LlvmBackend::generate()` — the same code path as
+`briev build --llvm`. No `ret i64 0` stubs. The stub codegen in `library.rs`
+is deprecated for the export path but kept for `briev library` backward compat.
 
 ### 10. String Format Is C-Compatible (Phase 8)
 
 The LLVM backend stores strings as `[i64 length][data\0]` — the same format
-as `briv_rt.c`. Global constants use `<{ i64, [N x i8] }>` with the handle
+as `briev_rt.c`. Global constants use `<{ i64, [N x i8] }>` with the handle
 pointing to the struct start. `emit_load_length` reads `handle[0]`.
-`briv_str_to_c` strips tag bits via `& ~3` before reading.
+`briev_str_to_c` strips tag bits via `& ~3` before reading.
 
 ### 11. Protocol Paths Are Computed via BFS (Phase 8)
 
@@ -625,12 +625,12 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
-- **Compile RBV**: `./target/release/brivc rbv <file.rbv>`
+- **Compile RBV**: `./target/release/brievc rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness.
   Ad-hoc timing produces false hangs and imprecise numbers.
 - **Compare against baseline**: `bash benchmarks/compare_baseline.sh <name>` —
   compiles and times a benchmark on both the main worktree and the permanent
-  baseline worktree at `../briv-compiler-baseline` (post-SLP anchor `be6583bc`).
+  baseline worktree at `../briev-compiler-baseline` (post-SLP anchor `be6583bc`).
 
 ## Anti-Patterns (NEVER DO)
 
@@ -641,7 +641,7 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 - Pre-populating interpreter state with enum constants (None, Some, Ok, Err)
 - Adding `x == x` self-references in preconditions to force liveness
 - Adding synthetic exit-condition fields solely to prevent dead-field elimination
-- **Hardcoded `from` strings**: `from "libruntime"` — use `from "c"` or `from "link/briv_rt.c"`
+- **Hardcoded `from` strings**: `from "libruntime"` — use `from "c"` or `from "link/briev_rt.c"`
 - **Missing `from` on frgn**: `from` is required for every frgn declaration
 - **`#export` modifier**: Use `export defn` (straight keyword), never `#export`
 - **`#out` modifier**: Removed — use `observable <~ true` metadata instead
@@ -674,7 +674,7 @@ and the warning comment at `src/backend/llvm/context.rs:223`.
 4. Document bugs and root causes in BUGS.md
 5. Never add Rust built-ins for things the standard library provides
 6. **No prototyping**: Every optimization is a first-class pass in its proper module
-7. **Never weaken C benchmarks**: Fix Briv to match or beat C, never hobble C with `volatile`
+7. **Never weaken C benchmarks**: Fix Briev to match or beat C, never hobble C with `volatile`
 8. **Interpreter IS the reference**: Add to interpreter first, then codegen
 9. **Benchmarks on our own terms**: End-to-end results. Features must add language value
 10. Write `docs/plans/YYYY-MM-DD-<topic>.md` before starting plan-driven work
@@ -761,7 +761,7 @@ hacks (`x == x`, synthetic exit fields). The fix IS `frgn __print_int(result)`.
 
 ### `term! -> swan_song` is the correct liveness pattern for terminal programs
 
-```briv
+```briev
 term! -> __print_int(result);   // swan song runs before ret — structurally live
 ```
 
@@ -772,7 +772,7 @@ term! -> __print_int(result);   // swan song runs before ret — structurally li
 - Complain that `main` is just `ret` — the compiler is RIGHT. Fix your program.
 
 **The correct pattern:**
-```briv
+```briev
 let N: Int = GetEnvInt#("BOUND");   // runtime-determined
 
 node compute [done < N][done == N] {
@@ -800,9 +800,9 @@ it or use runtime bounds — never weaken contracts or add hacks.
 
 ### Semantic goals, not syntax
 
-Briv benchmarks answer: **"Can Briv compute X with competitive performance
-vs C?"** — not "Does Briv have feature Y?" Implement the semantic goal using
-Briv's idioms, not a line-by-line port.
+Briev benchmarks answer: **"Can Briev compute X with competitive performance
+vs C?"** — not "Does Briev have feature Y?" Implement the semantic goal using
+Briev's idioms, not a line-by-line port.
 
 ### Benchmarks exist to find flaws
 
@@ -812,7 +812,7 @@ dead code. Both are diagnostic signals.
 
 ### When a benchmark can't be implemented as-is: find the isomorphism
 
-| C pattern | Briv-idiomatic equivalent |
+| C pattern | Briev-idiomatic equivalent |
 |-----------|---------------------------|
 | `malloc` + pointer navigation | Contract-proven struct arrays + index traversal |
 | `double u[N]` (runtime-sized) | Contract-proven compile-time bound + `<-` push |
@@ -823,16 +823,16 @@ dead code. Both are diagnostic signals.
 
 ### Symmetric by default
 
-Every Briv benchmark must compute the **same output** as its C reference for
+Every Briev benchmark must compute the **same output** as its C reference for
 the same input. If approaches differ fundamentally, create two benchmarks:
 
 | Variant | Intent |
 |---------|--------|
-| **Symmetric** (`_sym`) | Mirrors C step-for-step. Answers: "Does Briv's throughput match C?" |
-| **Idiomatic** (`_idio`) | Uses Briv-native patterns. Answers: "Can Briv's optimizer find a better path?" |
+| **Symmetric** (`_sym`) | Mirrors C step-for-step. Answers: "Does Briev's throughput match C?" |
+| **Idiomatic** (`_idio`) | Uses Briev-native patterns. Answers: "Can Briev's optimizer find a better path?" |
 
 Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused
-variables. Any asymmetry is a signal of a missing Briv optimization — fix
+variables. Any asymmetry is a signal of a missing Briev optimization — fix
 the compiler, not the C code.
 
 ### Two benchmark categories
@@ -865,7 +865,7 @@ takes parameters and returns values like `defn`, but its body executes in a
 convergence loop: precondition → body → postcondition → repeat if precondition
 still holds.
 
-```briv
+```briev
 txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list :> Size][i == list :> Size] -> List<U>
 {
@@ -946,7 +946,7 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 8. **Intrinsics follow PascalCase with `#` suffix** — `Sqrt#`, `Malloc#`,
    `PrintInt#`, `GetEnvInt#`. The `#` is part of the identifier lexically.
-   The `_` prefix convention does not exist in Briv.
+   The `_` prefix convention does not exist in Briev.
 
 9. **No `inop` keyword** — `inop` is removed. All compiler-known operations
    are `#` intrinsics with entries in `get_intrinsic_signature()` and
@@ -984,7 +984,7 @@ it. The more LLVM knows, the more aggressively it can optimize.
     exists without importing. If the type isn't needed, use `Int`.
 
 14. **`frgn` is an import** — first name after `frgn` is the C/foreign symbol,
-    `as` gives the Briv name. `from` is required. Example:
+    `as` gives the Briev name. `from` is required. Example:
     `frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/xxhash/xxhash.c" fallback 0;`
 
 15. **`>>` in nested generics** — `Ptr<Ptr<Int>>` triggers the shift-right token.
@@ -1100,7 +1100,7 @@ it. The more LLVM knows, the more aggressively it can optimize.
     level is only valid as a convergence gate (`[cond];`) or a guarded single
     statement (`[cond] stmt;`). Block bodies always require the `when` keyword.
 
- 32. **No `main()` function** — Briv has no `main()` entry point. Programs start
+ 32. **No `main()` function** — Briev has no `main()` entry point. Programs start
      via state-space triggers on `node` declarations. The compiler implicitly
      creates an entry point by instantiating a node and wiring a corresponding
      bootup variable. The scripting plugin (`script` pragma) is one way to
@@ -1391,7 +1391,7 @@ Always update them in the same commit as corresponding code changes:
 
 | Category | Files | Update Requirement |
 |----------|-------|-------------------|
-| **Tutorial** | `learn-briv/` | Must reflect current language syntax |
+| **Tutorial** | `learn-briev/` | Must reflect current language syntax |
 | **Specification** | `spec/SPEC.md` | Ground truth — update on any syntax/semantic change |
 | **Architecture** | `docs/architecture/` | Update when dispatch decisions or codegen strategy changes |
 | **Tooling** | `syntax-highlighter/README.md` | New keywords/reserved tokens |
@@ -1422,14 +1422,14 @@ for current benchmark results and architecture decisions.
 | **Hash words** | `docs/architecture/hash-words.md` |
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
-| **Bounty architecture** | `docs/plans/2026-07-25-phase6-tamer-in-briv.md` |
+| **Bounty architecture** | `docs/plans/2026-07-25-phase6-tamer-in-briev.md` |
 | **Memory by Proof** | `docs/plans/2026-07-25-memory-by-proof.md` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
 | **Granular pipeline + AST navigation DSL** | `docs/plans/2026-07-21-granular-pipeline-and-ast-navigation.md` |
 | **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |
 | **Layout DSL** | `docs/architecture/layout-dsl.md` |
-| **Data Briv spec** | `docs/architecture/data-briv.md` — `.dbv` and `.dbvl` format specification |
-| **Data Briv cheat sheet** | `docs/architecture/data-briv-cheat-sheet.md` — one-page syntax reference |
+| **Data Briev spec** | `docs/architecture/data-briev.md` — `.dbv` and `.dbvl` format specification |
+| **Data Briev cheat sheet** | `docs/architecture/data-briev-cheat-sheet.md` — one-page syntax reference |
 | **TOML → DBV conversion** | `docs/architecture/applications/toml-to-dbv-guide.md` — patterns for replacing TOML config with DBV |
 
 ## Hypothesised Features

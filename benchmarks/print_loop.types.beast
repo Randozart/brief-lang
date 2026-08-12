@@ -115,11 +115,11 @@
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__getenv_briv", from: Literal("std/briv_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("String"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__getenv_briev", from: Literal("std/briev_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("String"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "toplevel"
-  "ForeignBinding(ForeignBinding { name: "__getenv_int", from: Literal("std/briv_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("Int"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
+  "ForeignBinding(ForeignBinding { name: "__getenv_int", from: Literal("std/briev_rt.bv"), target: C, inputs: [("key", Custom("String"))], success_output: [("", Custom("Int"))], error_type: "Error", error_fields: [], input_layout: None, output_layout: None, precondition: None, postcondition: None, buffer_mode: None, default_watchdog: None, wasm_impl: None, wasm_setup: None, span: None })"
 )
   (
   "defn"

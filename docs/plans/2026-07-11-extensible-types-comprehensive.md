@@ -7,12 +7,12 @@ paths, code snippets, and test lists.
 
 ## Overview
 
-This plan covers the full transformation from Briv's current type system
+This plan covers the full transformation from Briev's current type system
 (hardcoded `ResolvedType` fields, string-name dispatch in codegen, no codec
 system, no plugin architecture) to the complete vision: a self-describing,
 user-extensible type system where every property is metadata, every backend
 is a property consumer, and the compiler is a platform for plugins written
-in Briv itself.
+in Briev itself.
 
 The plan is organized into 9 sequential phases (Phase 0, 1A, 1B, 2–7). Each
 phase is independently testable and commit-able. No phase may break the
@@ -460,7 +460,7 @@ fn peek_token(&self, n: usize) -> Option<&Result<Token, SyntaxError>> {
 **1A.1d — Chained annotations**: If a user wants multiple annotations,
 they can just write multiple `<~` statements:
 
-```briv
+```briev
 defn foo() -> Int {
     jira <~ "FIN-8422";
     priority <~ 2;
@@ -642,7 +642,7 @@ they modify what the compiler does with an annotation ("obey it" / "explain your
 reasoning"). Metadata via `<~` is **declarative data**, not a directive.
 
 Examples where the distinction matters:
-```briv
+```briev
 #!gpu                    // "MUST defer to GPU" — compiler directive
 #?vectorize              // "Explain vectorization decision" — compiler diagnostic
 
@@ -834,7 +834,7 @@ not yet implemented. The grammar recognizes the pattern and produces a
 clear error.
 
 **Syntax** (reserved):
-```briv
+```briev
 let x: Int = 42;
 x <~ (jira: "FIN-8422", range: [0, 100]);
 ```
@@ -1183,7 +1183,7 @@ to `%String*`.
 **File**: `lib/std/types/bootstrap.bv` (line 270)
 
 **Before**:
-```briv
+```briev
 type String : Bits {
     bytes <~ 8;
     alignment <~ 8;
@@ -1198,7 +1198,7 @@ type String : Bits {
 ```
 
 **After**:
-```briv
+```briev
 type String {
     ptr: Ptr<UInt8>;
     len: Int;
@@ -1343,7 +1343,7 @@ Enable `let r: RomanNumeral = XIV;` with codec-based parse handlers.
 
 ### Goal
 
-Compile Briv to WebAssembly via LLVM's `wasm32-unknown-wasi` target.
+Compile Briev to WebAssembly via LLVM's `wasm32-unknown-wasi` target.
 
 ### Steps
 
@@ -1364,7 +1364,7 @@ Compile Briv to WebAssembly via LLVM's `wasm32-unknown-wasi` target.
 
 ### Goal
 
-Enable Briv to compile to WebAssembly and load those WASM modules as
+Enable Briev to compile to WebAssembly and load those WASM modules as
 compiler plugins.
 
 ### Steps
@@ -1374,7 +1374,7 @@ compiler plugins.
 7.3 — Create plugin loader
 7.4 — Define plugin loading API
 7.5 — Wire plugin hooks into compilation pipeline
-7.6 — Example plugin in Briv
+7.6 — Example plugin in Briev
 7.7 — Test plugin system
 
 (Full implementation in the old plan — copy verbatim.)
@@ -1580,12 +1580,12 @@ ignored.
 
 **Plan**: `docs/plans/2026-07-11-library-mode-completion.md`
 
-**Proposal by**: [@revred](https://github.com/revred) — reviewed Briv's
+**Proposal by**: [@revred](https://github.com/revred) — reviewed Briev's
 `--library` infrastructure and identified five gaps between the existing
 `.ll`-level library mode and a consumable C-callable library.
 
 Adds the `export` keyword, `.ll` → `.o` → `.a` packaging,
-`__briv_init_state`/`__glue_release` in generated headers,
+`__briev_init_state`/`__glue_release` in generated headers,
 `Bool`/`String` marshaling at the FFI boundary, and an end-to-end
 C driver test.
 

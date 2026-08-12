@@ -147,7 +147,7 @@ No regression allowed. 1045 tests pass.
 
 Each change measured with:
 1. `cargo test --lib`
-2. Single nbody_newton benchmark: `BOUND=50000000 brivc build` + `clang` + `time`
+2. Single nbody_newton benchmark: `BOUND=50000000 brievc build` + `clang` + `time`
 3. SLP remarks: `opt -O3 -pass-remarks=slp-vectorizer`
 4. Full suite: `bash benchmarks/build_and_bench.sh --runtime`
 

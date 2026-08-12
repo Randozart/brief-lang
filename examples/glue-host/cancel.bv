@@ -1,7 +1,7 @@
 // cancel.bv — GLUE host cancellation demo.
 // 2026-08-03: a long-running loop polls CancelRequested#() explicitly in its
 // precondition; the host raises the process-global flag via
-// __briv_set_cancel and the loop stops early (partial result).
+// __briev_set_cancel and the loop stops early (partial result).
 
 txn sum_loop(acc: Int, i: Int, count: Int)
     [i < count && !CancelRequested#()][i == count] -> Int

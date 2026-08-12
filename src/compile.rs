@@ -1,5 +1,5 @@
 // ── Compilation Pipeline ──────────────────────────────────────────────
-// 2026-07-12: Phase 7 — Compile a Briv source file end-to-end.
+// 2026-07-12: Phase 7 — Compile a Briev source file end-to-end.
 // Pipeline: lex -> parse -> typecheck -> codegen -> output.
 // 2026-07-14: Wire real LlvmBackend instead of stub codegen.
 //             Add binary compilation via clang. Add --out / --optimize-budget flags.
@@ -14,17 +14,17 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use briv_compiler::backend::llvm::LlvmBackend;
-use briv_compiler::ast::{Expr, StageKind, TopLevel};
-use briv_compiler::lexer::Token;
-use briv_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
-use briv_compiler::plugin::PluginManager;
-use briv_compiler::target::{BackendKind, TargetConfig, get_extension};
-use briv_compiler::type_universe::TypeUniverse;
+use briev_compiler::backend::llvm::LlvmBackend;
+use briev_compiler::ast::{Expr, StageKind, TopLevel};
+use briev_compiler::lexer::Token;
+use briev_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
+use briev_compiler::plugin::PluginManager;
+use briev_compiler::target::{BackendKind, TargetConfig, get_extension};
+use briev_compiler::type_universe::TypeUniverse;
 
 /// Re-export the LLVM backend's TrgUnresolvedAction for CLI flag parsing.
 /// 2026-07-15: Phase 7i — Defined in the backend to avoid circular deps.
-pub use briv_compiler::backend::llvm::TrgUnresolvedAction;
+pub use briev_compiler::backend::llvm::TrgUnresolvedAction;
 
 /// Pipeline stage at which to emit a BEAST snapshot or IR snapshot.
 /// 2026-07-21: Expanded to granular stages matching the pipeline.
@@ -121,7 +121,7 @@ impl std::str::FromStr for BeastFilter {
     }
 }
 
-/// Options parsed from the `briv-compiler build` CLI flags.
+/// Options parsed from the `briev-compiler build` CLI flags.
 #[derive(Clone)]
 pub struct BuildOptions {
     pub config_dir: Option<String>,
@@ -149,7 +149,7 @@ pub struct BuildOptions {
     pub shared: bool,
     /// 2026-08-03: Build a linkable static library (.a) — the `extern "C"`
     /// on-ramp. Runs the full backend in library_mode (emit_library_shim
-    /// with __briv_init_state/__glue_release), packages .o + runtime into
+    /// with __briev_init_state/__glue_release), packages .o + runtime into
     /// `ar rcs lib<name>.a`, and a PIC .so for c_abi hosts.
     pub library_mode: bool,
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
@@ -173,7 +173,7 @@ pub struct BuildOptions {
     pub view_html: Option<String>,
     /// 2026-07-26: Phase 6b — View bindings from processed <html> template.
     /// Passed to GlueWebGenerator for DOM binding table generation.
-    pub view_bindings: Vec<briv_compiler::view_compiler::Binding>,
+    pub view_bindings: Vec<briev_compiler::view_compiler::Binding>,
     /// 2026-07-26: Item 3 — Enable SSR (Server-Side Rendering).
     /// Pre-renders initial state into the HTML at compile time.
     /// Only meaningful for webstack backend.
@@ -205,11 +205,11 @@ pub struct BuildOptions {
     pub diff_mode: bool,
     /// 2026-07-23: Overrides for SysQuery$ results.
     /// Populated by --sysquery <key=value> and --sysquery-file <path> flags.
-    /// Also populated by --target <name> from briv.toml profiles.
+    /// Also populated by --target <name> from briev.toml profiles.
     /// Empty = query real host. Later values override earlier ones.
     pub sysquery_overrides: HashMap<String, String>,
     /// 2026-07-23: Target profile name (--target). None = default/single build.
-    /// Overrides are resolved from briv.toml and merged into sysquery_overrides.
+    /// Overrides are resolved from briev.toml and merged into sysquery_overrides.
     pub target: Option<String>,
     /// 2026-07-23: Raw --sysquery flag pairs (unresolved, for run_build).
     pub sysquery_pairs: Vec<(String, String)>,
@@ -217,7 +217,7 @@ pub struct BuildOptions {
     pub sysquery_files: Vec<String>,
 }
 
-/// Compile a Briv source file: produce an executable binary (or `.ll` with `--llvm`).
+/// Compile a Briev source file: produce an executable binary (or `.ll` with `--llvm`).
 /// 2026-07-25: Evaluate pending $let/$const compile-time variable initializers.
 /// Called after both extract_inline_stage_blocks calls, before any stage blocks
 /// execute. This ensures $let/$const values are available to all stage blocks.
@@ -226,7 +226,7 @@ fn evaluate_pending_comptime(
     program: &mut Vec<TopLevel>,
     universe: &mut TypeUniverse,
 ) -> Result<(), String> {
-    let pending: Vec<(String, briv_compiler::ast::Expr, bool)> = pm.pending_comptime.drain()
+    let pending: Vec<(String, briev_compiler::ast::Expr, bool)> = pm.pending_comptime.drain()
         .map(|(k, (e, c))| (k, e, c))
         .collect();
     // 2026-07-25: Use a fresh sandbox cloned from pm for evaluation, then
@@ -235,7 +235,7 @@ fn evaluate_pending_comptime(
     for (name, expr, is_const) in pending {
         let val = {
             let mut pm_opt: Option<&mut PluginManager> = Some(pm);
-            briv_compiler::macros::eval::eval_nav_chain(
+            briev_compiler::macros::eval::eval_nav_chain(
                 &expr, program, universe, StageKind::Parsed,
                 &std::collections::HashMap::new(),
                 &mut sandbox, &mut pm_opt,
@@ -286,17 +286,17 @@ fn resolve_comptime_refs(
 }
 
 /// 2026-07-25: Convert a NavValue to its corresponding Expr literal.
-fn nav_value_to_expr(val: &briv_compiler::macros::eval::NavValue) -> Result<Expr, String> {
+fn nav_value_to_expr(val: &briev_compiler::macros::eval::NavValue) -> Result<Expr, String> {
     match val {
-        briv_compiler::macros::eval::NavValue::Int(n) => Ok(Expr::Decimal(*n)),
-        briv_compiler::macros::eval::NavValue::Bool(b) => Ok(Expr::Bool(*b)),
-        briv_compiler::macros::eval::NavValue::Str(s) => Ok(Expr::Quoted(s.as_bytes().to_vec())),
+        briev_compiler::macros::eval::NavValue::Int(n) => Ok(Expr::Decimal(*n)),
+        briev_compiler::macros::eval::NavValue::Bool(b) => Ok(Expr::Bool(*b)),
+        briev_compiler::macros::eval::NavValue::Str(s) => Ok(Expr::Quoted(s.as_bytes().to_vec())),
         _ => Err(format!("cannot convert {:?} to Expr literal", val)),
     }
 }
 
 struct PreprocessedSource {
-    briv_source: String,
+    briev_source: String,
     style_css: Option<String>,
     view_html: Option<String>,
 }
@@ -304,35 +304,35 @@ struct PreprocessedSource {
 /// Normalize source text by file kind before lexing.
 ///
 /// `.rbv` files carry `<view>`/`<style>` markup that must not reach the lexer.
-/// The Briv parser consumes only extracted Briv source, while webstack output
+/// The Briev parser consumes only extracted Briev source, while webstack output
 /// still receives the extracted HTML/CSS payload.
 fn preprocess_source_for_path(file_path: &str, source: &str) -> Result<PreprocessedSource, String> {
     if get_extension(file_path) != ".rbv" {
         return Ok(PreprocessedSource {
-            briv_source: source.to_string(),
+            briev_source: source.to_string(),
             style_css: None,
             view_html: None,
         });
     }
 
     // Support logic-only `.rbv` files: if no RBV markup/script tags are
-    // present, treat the file as plain Briv source.
+    // present, treat the file as plain Briev source.
     let has_rbv_markup = source.contains("<view>")
         || source.contains("<style>")
         || source.contains("<script")
         || source.contains("</script>");
     if !has_rbv_markup {
         return Ok(PreprocessedSource {
-            briv_source: source.to_string(),
+            briev_source: source.to_string(),
             style_css: None,
             view_html: None,
         });
     }
 
-    let rbv = briv_compiler::rbv::RbvFile::parse(source)
+    let rbv = briev_compiler::rbv::RbvFile::parse(source)
         .map_err(|e| format!("{}: rbv parse error: {}", file_path, e))?;
     Ok(PreprocessedSource {
-        briv_source: rbv.briv_source,
+        briev_source: rbv.briev_source,
         style_css: rbv.style_css,
         view_html: Some(rbv.view_html),
     })
@@ -341,7 +341,7 @@ fn preprocess_source_for_path(file_path: &str, source: &str) -> Result<Preproces
 /// Compiled view output, produced once before codegen (webstack backend).
 #[derive(Debug)]
 struct CompiledView {
-    bindings: Vec<briv_compiler::view_compiler::Binding>,
+    bindings: Vec<briev_compiler::view_compiler::Binding>,
     /// ID-injected HTML — the dom-shim's getElementById() calls resolve
     /// against this, never the raw markup. None when the build has no view.
     modified_html: Option<String>,
@@ -349,18 +349,18 @@ struct CompiledView {
 }
 
 /// 2026-08-12 (2b3): the view-compiler mount specs — HTML-side pool specs
-/// (component type → per-mount specs) and Briv-side instance specs (instance
+/// (component type → per-mount specs) and Briev-side instance specs (instance
 /// var → spec). Bundled so compile_view stays at five parameters.
 pub struct ViewMountSpecs {
     /// Component type → per-mount pool specs (`<Counter />` anonymous spawns).
     pub pools: std::collections::HashMap<
         String,
-        Vec<briv_compiler::analysis::component_instances::MountSpec>,
+        Vec<briev_compiler::analysis::component_instances::MountSpec>,
     >,
-    /// Briv-side instance var → spec (`<c1 />` mounts `let c1: Counter`).
+    /// Briev-side instance var → spec (`<c1 />` mounts `let c1: Counter`).
     pub instances: std::collections::HashMap<
         String,
-        briv_compiler::analysis::component_instances::MountSpec,
+        briev_compiler::analysis::component_instances::MountSpec,
     >,
 }
 
@@ -372,7 +372,7 @@ pub struct ViewMountSpecs {
 /// them — observability-as-liveness).
 fn compile_view(
     file_path: &str,
-    items: &[briv_compiler::ast::TopLevel],
+    items: &[briev_compiler::ast::TopLevel],
     opts: &BuildOptions,
     preprocessed: &PreprocessedSource,
     specs: &ViewMountSpecs,
@@ -386,7 +386,7 @@ fn compile_view(
         });
     };
 
-    let mut vc = briv_compiler::view_compiler::ViewCompiler::new();
+    let mut vc = briev_compiler::view_compiler::ViewCompiler::new();
     // 2026-08-11 (Phase 2b, SPEC 21.3): `render Name { ... }` blocks are
     // reusable view fragments — `<Name />` mounts them at compile time. The
     // analysis supplies the per-mount rewrite SPECS (decisions); the view
@@ -395,7 +395,7 @@ fn compile_view(
     let raw_blocks: std::collections::HashMap<String, String> = items
         .iter()
         .filter_map(|item| match item {
-            briv_compiler::ast::TopLevel::RenderBlock(rb) => {
+            briev_compiler::ast::TopLevel::RenderBlock(rb) => {
                 Some((rb.struct_name.clone(), rb.view_html.clone()))
             }
             _ => None,
@@ -406,13 +406,13 @@ fn compile_view(
     vc.set_instance_specs(specs.instances.clone());
     for item in items {
         match item {
-            briv_compiler::ast::TopLevel::StateDecl(sd) => {
+            briev_compiler::ast::TopLevel::StateDecl(sd) => {
                 vc.register_signal(&sd.name, 0);
             }
-            briv_compiler::ast::TopLevel::Transaction(t) => {
+            briev_compiler::ast::TopLevel::Transaction(t) => {
                 vc.register_transaction(&t.name, 0);
             }
-            briv_compiler::ast::TopLevel::Definition(d) => {
+            briev_compiler::ast::TopLevel::Definition(d) => {
                 vc.register_transaction(&d.name, 0);
             }
             _ => {}
@@ -428,12 +428,12 @@ fn compile_view(
     // array). A heap `List`/`String` iterable cannot be indexed by the slot
     // renderer; warn (the generator skips it — never a wrong render) instead
     // of silently rendering garbage.
-    let field_types: std::collections::HashMap<String, briv_compiler::ast::Type> = items
+    let field_types: std::collections::HashMap<String, briev_compiler::ast::Type> = items
         .iter()
         .filter_map(|item| match item {
-            briv_compiler::ast::TopLevel::StateDecl(sd) => Some((sd.name.clone(), sd.ty.clone())),
-            briv_compiler::ast::TopLevel::Statement(stmt) => {
-                if let briv_compiler::ast::Statement::Let { name, ty, .. } = stmt.as_ref() {
+            briev_compiler::ast::TopLevel::StateDecl(sd) => Some((sd.name.clone(), sd.ty.clone())),
+            briev_compiler::ast::TopLevel::Statement(stmt) => {
+                if let briev_compiler::ast::Statement::Let { name, ty, .. } = stmt.as_ref() {
                     ty.clone().map(|t| (name.clone(), t))
                 } else {
                     None
@@ -444,10 +444,10 @@ fn compile_view(
         .collect();
     let mut warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
     for binding in &bindings {
-        if let briv_compiler::view_compiler::Directive::Each { iterable, .. } = &binding.directive {
+        if let briev_compiler::view_compiler::Directive::Each { iterable, .. } = &binding.directive {
             let is_vector = field_types
                 .get(iterable)
-                .map(|t| matches!(t, briv_compiler::ast::Type::Vector(..)))
+                .map(|t| matches!(t, briev_compiler::ast::Type::Vector(..)))
                 .unwrap_or(false);
             if !is_vector {
                 warnings.push(format!(
@@ -470,8 +470,8 @@ fn compile_view(
     // 2026-08-11: SRBV view-state verification applies only to the `.s` strict
     // profile (SPEC §3.2: `ui.s.rbv`) — strict changes ACCEPTANCE criteria.
     // Plain `.rbv`/`.bv` builds surface ViewCompiler diagnostics as warnings.
-    if briv_compiler::conformance::is_strict(std::path::Path::new(file_path)) {
-        let srbv = briv_compiler::view_compiler::verify_srbv(&bindings, items);
+    if briev_compiler::conformance::is_strict(std::path::Path::new(file_path)) {
+        let srbv = briev_compiler::view_compiler::verify_srbv(&bindings, items);
         if !srbv.is_empty() {
             return Err(format!(
                 "{}: view reference errors:\n{}",
@@ -490,44 +490,44 @@ fn compile_view(
 /// 2026-08-11: the state fields a view actually references (root names of
 /// directive signals). Cache-slots and dead-field elimination must keep them.
 fn view_root_signals(
-    bindings: &[briv_compiler::view_compiler::Binding],
+    bindings: &[briev_compiler::view_compiler::Binding],
 ) -> std::collections::HashSet<String> {
-    use briv_compiler::view_compiler::Directive;
+    use briev_compiler::view_compiler::Directive;
     let mut set = std::collections::HashSet::new();
     for b in bindings {
         match &b.directive {
             Directive::Text { signal } => {
-                set.insert(briv_compiler::view_compiler::root_signal(signal).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(signal).0.to_string());
             }
             Directive::Show { expr } | Directive::Hide { expr } => {
-                set.insert(briv_compiler::view_compiler::root_signal(expr).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(expr).0.to_string());
             }
             Directive::When { expr } => {
                 set.insert(
-                    briv_compiler::view_compiler::condition_root_signal(expr)
+                    briev_compiler::view_compiler::condition_root_signal(expr)
                         .0
                         .to_string(),
                 );
             }
             Directive::Class { pairs } => {
                 for (_, v) in pairs {
-                    set.insert(briv_compiler::view_compiler::root_signal(v).0.to_string());
+                    set.insert(briev_compiler::view_compiler::root_signal(v).0.to_string());
                 }
             }
             Directive::Attr { value, .. } => {
-                set.insert(briv_compiler::view_compiler::root_signal(value).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(value).0.to_string());
             }
             Directive::Style { value, .. } => {
-                set.insert(briv_compiler::view_compiler::root_signal(value).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(value).0.to_string());
             }
             Directive::Each { iterable, .. } => {
-                set.insert(briv_compiler::view_compiler::root_signal(iterable).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(iterable).0.to_string());
             }
             Directive::Bind { target } => {
                 // 2026-08-11 (Phase 2a2): b-bind WRITES the target — the field
                 // must stay live so its slot exists for the transaction's
                 // write + flush.
-                set.insert(briv_compiler::view_compiler::root_signal(target).0.to_string());
+                set.insert(briev_compiler::view_compiler::root_signal(target).0.to_string());
             }
             Directive::Trigger { .. } => {}
         }
@@ -546,12 +546,12 @@ fn view_root_signals(
 /// - the sole writer takes no/several params → "transaction '<txn>' takes N
 ///   parameter(s); b-bind requires exactly one".
 fn resolve_bind_routes(
-    graph: &Option<briv_compiler::analysis::transition_graph::ReactorTransitionGraph>,
-    items: &[briv_compiler::ast::TopLevel],
+    graph: &Option<briev_compiler::analysis::transition_graph::ReactorTransitionGraph>,
+    items: &[briev_compiler::ast::TopLevel],
     universe: &TypeUniverse,
-) -> std::collections::HashMap<String, Result<briv_compiler::glue::web_generator::BindRoute, String>>
+) -> std::collections::HashMap<String, Result<briev_compiler::glue::web_generator::BindRoute, String>>
 {
-    use briv_compiler::glue::web_generator::{BindRoute, ParamKind, TypeTag};
+    use briev_compiler::glue::web_generator::{BindRoute, ParamKind, TypeTag};
     use std::collections::HashMap;
 
     let mut writers: HashMap<String, Vec<String>> = HashMap::new();
@@ -570,12 +570,12 @@ fn resolve_bind_routes(
         writers.entry(field).or_default().push(txn);
     }
 
-    // Transaction → sole parameter Briv type (type-driven marshalling).
-    let mut param_ty: HashMap<String, briv_compiler::ast::Type> = HashMap::new();
+    // Transaction → sole parameter Briev type (type-driven marshalling).
+    let mut param_ty: HashMap<String, briev_compiler::ast::Type> = HashMap::new();
     for item in items {
         let (name, params) = match item {
-            briv_compiler::ast::TopLevel::Transaction(t) => (&t.name, &t.parameters),
-            briv_compiler::ast::TopLevel::Definition(d) => (&d.name, &d.parameters),
+            briev_compiler::ast::TopLevel::Transaction(t) => (&t.name, &t.parameters),
+            briev_compiler::ast::TopLevel::Definition(d) => (&d.name, &d.parameters),
             _ => continue,
         };
         if let Some((_, ty)) = params.first() {
@@ -600,7 +600,7 @@ fn resolve_bind_routes(
         let txn = txns[0].clone();
         match param_ty.get(&txn) {
             Some(ty) => {
-                let cat = briv_compiler::type_universe::protocol_category(universe, ty);
+                let cat = briev_compiler::type_universe::protocol_category(universe, ty);
                 let kind = ParamKind::from_type_tag(TypeTag::from_protocol_category(cat.as_deref()));
                 out.insert(field.clone(), Ok(BindRoute { txn, param_kind: kind }));
             }
@@ -628,18 +628,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         .map_err(|e| format!("cannot determine project root: {}", e))?;
     let project_root_str = project_root.to_string_lossy().to_string();
     if opts.update_lockfile {
-        let granted = briv_compiler::macros::lockfile::cli_granted_set(
+        let granted = briev_compiler::macros::lockfile::cli_granted_set(
             opts.allow_read,
             opts.allow_write,
             opts.allow_run,
             opts.allow_sys_query,
             opts.allow_net,
         );
-        let lock = briv_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
-        briv_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
+        let lock = briev_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
+        briev_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
     } else {
-        if let Some(lock) = briv_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
-            briv_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
+        if let Some(lock) = briev_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
+            briev_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
         }
     }
 
@@ -647,7 +647,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let preprocessed = preprocess_source_for_path(file_path, source)?;
     // 2026-08-11: clone — preprocessed (view_html/style_css) is consumed again
     // by the early view compilation; a partial move would forbid that borrow.
-    let mut source = preprocessed.briv_source.clone();
+    let mut source = preprocessed.briev_source.clone();
     pm.run_source(StageKind::PreLex, &mut source)?;
 
     // ── Parse ─────────────────────────────────────────────────────────
@@ -691,12 +691,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // No auto-import of string.ebv; the backend handles it.
 
     // ── Resolved stage (after import resolution) ──────────────────────
-    let mut resolver = briv_compiler::import_resolver::ImportResolver::new();
+    let mut resolver = briev_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
     // 2026-08-04 (Phase 4): an .ebv embedded target prefers the .ebv stdlib
-    // variant (the casting-lane symbols as Briv defns, not C).
+    // variant (the casting-lane symbols as Briev defns, not C).
     // 2026-08-09 (Phase 11, Slice 2): the target profile declares the
     // preferred sibling variant (`prefer_ebv` in config/targets.dbvl, SPEC
     // §3.3); the resolver consults it via target_settings_for once a triple
@@ -733,7 +733,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // hint. Runs here (typed AST, pre-normalizer) so the backend never sees
     // a body whose semantics the interpreter would unwind early.
     {
-        let (term_errors, term_warnings) = briv_compiler::analysis::termination::analyze(&items);
+        let (term_errors, term_warnings) = briev_compiler::analysis::termination::analyze(&items);
         for w in &term_warnings {
             eprintln!("warning: {w}");
         }
@@ -743,9 +743,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     }
     // 2026-08-07 (object instance pools): spawn pools must be predictably
     // inexhaustible — the spawn-count analysis rejects any spawn whose
-    // multiplicity cannot be statically bounded (Briv has no runtime errors).
+    // multiplicity cannot be statically bounded (Briev has no runtime errors).
     {
-        let (_, _, spawn_errors, _) = briv_compiler::analysis::spawn_pool::analyze(&items);
+        let (_, _, spawn_errors, _) = briev_compiler::analysis::spawn_pool::analyze(&items);
         if !spawn_errors.is_empty() {
             return Err(format!(
                 "spawn pool errors:\n{}",
@@ -756,18 +756,18 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-08-03: `+` is string concat for #String/#Data operands — rewrite
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).
-    briv_compiler::analysis::string_concat::rewrite_plus_concat(&mut items, &universe);
+    briev_compiler::analysis::string_concat::rewrite_plus_concat(&mut items, &universe);
     // 2026-08-03: same-category representation casts (`CStr as String`) become
-    // the graph-resolved binding calls (cstr_to_briv / str_to_c) — Briv's
+    // the graph-resolved binding calls (cstr_to_briev / str_to_c) — Briev's
     // boxing loses the boundary type at codegen, so the marshalling decision
     // (the casting graph's minimal path) is made on the typed AST.
-    briv_compiler::analysis::boundary_marshalling::rewrite_boundary_marshalling(&mut items, &universe);
+    briev_compiler::analysis::boundary_marshalling::rewrite_boundary_marshalling(&mut items, &universe);
 
     // ── Concurrency gate (Phase 3c, rule #21: no implicit concurrency) ──
     // Any pair of reactive txns that can fire together must be classified
     // (async on both, or sync<group> on both). Runs after typechecking so the
     // AST is stable; frontend-computed per the frontend-driven-dispatch pillar.
-    let gate_errors = briv_compiler::analysis::concurrency_gate::run_concurrency_gate(&items);
+    let gate_errors = briev_compiler::analysis::concurrency_gate::run_concurrency_gate(&items);
     if !gate_errors.is_empty() {
         return Err(format!(
             "concurrency gate:\n  {}",
@@ -785,22 +785,22 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let int_bits = opts.int_bits;
     match opts.backend {
         BackendKind::Llvm | BackendKind::Gpu => {
-            briv_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+            briev_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Circt => {
-            briv_compiler::backend::circt::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+            briev_compiler::backend::circt::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Webstack => {
             // Webstack is always wasm32 (32-bit pointers)
-            briv_compiler::backend::webstack::normalizer::normalize(&mut items, &mut universe, 32)?;
+            briev_compiler::backend::webstack::normalizer::normalize(&mut items, &mut universe, 32)?;
         }
         BackendKind::Spirv => {
-            briv_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+            briev_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
         BackendKind::Vm => {
             // 2026-08-10: VM is untyped but the universe must be populated
             // uniformly — minimal shared registration, nothing backend-specific.
-            briv_compiler::backend::vm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
+            briev_compiler::backend::vm::normalizer::normalize(&mut items, &mut universe, int_bits)?;
         }
     }
 
@@ -814,7 +814,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // the invariant holds using the SMT solver. If unprovable, deny.
     // Also validate that all CastTo/CastFrom have bindings.
     for item in &items {
-        if let briv_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+        if let briev_compiler::ast::TopLevel::ProtocolDef(pd) = item {
             // Validate bindings exist on all CastTo/CastFrom edges
             for edge in &pd.cast_edges {
                 if edge.binding.is_none() {
@@ -822,8 +822,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                         "protocol '{}': {} must have a binding (e.g., CastTo(#target) = fn(#L))",
                         pd.name,
                         match edge.direction {
-                            briv_compiler::ast::top::CastDirection::CastTo => "CastTo",
-                            briv_compiler::ast::top::CastDirection::CastFrom => "CastFrom",
+                            briev_compiler::ast::top::CastDirection::CastTo => "CastTo",
+                            briev_compiler::ast::top::CastDirection::CastFrom => "CastFrom",
                         }
                     ));
                 }
@@ -832,17 +832,17 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             if let Some(ref contract) = pd.contract {
                 let pre = &contract.pre_condition;
                 let post = &contract.post_condition;
-                let params = vec![("Self".to_string(), briv_compiler::ast::Type::int())];
-                if let Err(errs) = briv_compiler::proof_engine::prove_contract(pre, post, &params, contract.explicit) {
+                let params = vec![("Self".to_string(), briev_compiler::ast::Type::int())];
+                if let Err(errs) = briev_compiler::proof_engine::prove_contract(pre, post, &params, contract.explicit) {
                     return Err(format!("protocol contract violation in '{}': {:?}", pd.name, errs));
                 }
             }
             // 2026-07-23: Round-trip proof — CastFrom(CastTo(x)) == x
-            if let Err(msg) = briv_compiler::analysis::protocol_graph::verify_protocol_roundtrip(pd, &items) {
+            if let Err(msg) = briev_compiler::analysis::protocol_graph::verify_protocol_roundtrip(pd, &items) {
                 return Err(msg);
             }
             // 2026-07-23: Cross-op equivalence proof
-            if let Err(msg) = briv_compiler::analysis::protocol_graph::verify_crossop_equivalence(pd, &items) {
+            if let Err(msg) = briev_compiler::analysis::protocol_graph::verify_crossop_equivalence(pd, &items) {
                 return Err(msg);
             }
         }
@@ -850,7 +850,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // ── frgn? guard safety check ────────────────────────────────────
     // 2026-07-25: Verify every frgn?/frgn!/frgn?! call is guarded by fn?.
-    briv_compiler::analysis::frgn_guard::check_frgn_guards(&items)
+    briev_compiler::analysis::frgn_guard::check_frgn_guards(&items)
         .map_err(|e| format!("frgn guard error:\n{}", e))?;
 
     // ── Tautology check (Phase 4) ─────────────────────────────────────
@@ -858,20 +858,20 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // `[true][true]` and `0 == 0` constrain nothing and provide no
     // optimization leverage. Parser stays permissive; proof is the gate.
     for item in &items {
-        let contract: Option<&briv_compiler::ast::Contract> = match item {
-            briv_compiler::ast::TopLevel::Transaction(t) => Some(&t.contract),
-            briv_compiler::ast::TopLevel::Definition(d) => Some(&d.contract),
+        let contract: Option<&briev_compiler::ast::Contract> = match item {
+            briev_compiler::ast::TopLevel::Transaction(t) => Some(&t.contract),
+            briev_compiler::ast::TopLevel::Definition(d) => Some(&d.contract),
             _ => None,
         };
         if let Some(c) = contract {
-            if let Some(err) = briv_compiler::proof_engine::detect_tautology(
+            if let Some(err) = briev_compiler::proof_engine::detect_tautology(
                 &c.pre_condition,
                 &c.post_condition,
                 c.explicit,
             ) {
                 let name = match item {
-                    briv_compiler::ast::TopLevel::Transaction(t) => t.name.clone(),
-                    briv_compiler::ast::TopLevel::Definition(d) => d.name.clone(),
+                    briev_compiler::ast::TopLevel::Transaction(t) => t.name.clone(),
+                    briev_compiler::ast::TopLevel::Definition(d) => d.name.clone(),
                     _ => "<unknown>".into(),
                 };
                 return Err(format!("tautological contract on '{}': {:?}", name, err));
@@ -883,16 +883,16 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-08-01: wire the trigger->handler watchdog analysis into the
     // pipeline, and validate the `-> handler(val)` on-fire callback (the
     // handler must exist and be callable with the last computed value).
-    let watchdog_errors = briv_compiler::analysis::watchdog::analyze(&items);
+    let watchdog_errors = briev_compiler::analysis::watchdog::analyze(&items);
     if !watchdog_errors.is_empty() {
         let msgs: Vec<String> = watchdog_errors.iter().map(|e| e.to_string()).collect();
         return Err(format!("watchdog errors:\n{}", msgs.join("\n")));
     }
-    briv_compiler::analysis::watchdog::check_on_fire_handlers(&items)
+    briev_compiler::analysis::watchdog::check_on_fire_handlers(&items)
         .map_err(|e| format!("watchdog error:\n{}", e))?;
 
     // ── Protocol round-trip verification ──────────────────────────────
-    briv_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
+    briev_compiler::protocol_verify::verify_roundtrips(&items, &universe)?;
 
     emit_beast_snapshot(file_path, BeastStage::Verify, BeastPosition::Before, &items, &universe, opts)?;
     pm.run_ast(StageKind::Verified, &mut items, &mut universe)?;
@@ -900,15 +900,15 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
     // ── Slice narrowing ───────────────────────────────────────────────
     // 2026-07-26: Convert constant-bounds Expr::Slice to direct array access.
-    briv_compiler::analysis::narrow_slice::narrow_slices(&mut items);
+    briev_compiler::analysis::narrow_slice::narrow_slices(&mut items);
 
     // ── Allocation strategy analysis ──────────────────────────────────
-    let alloc_strategies = briv_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
+    let alloc_strategies = briev_compiler::analysis::allocation::analyze_alloc_strategies(&mut items);
     // 2026-07-27: Compute transitive arena need from the same allocation walk.
     // This determines which functions need the 64KB arena buffer. When empty,
     // arena fields in %State and all arena init/fini calls are skipped — saving
     // 64KB malloc and 24 bytes of %State for benchmarks with no Alloc# calls.
-    let needs_arena = briv_compiler::analysis::allocation::analyze_arena_need(&mut items);
+    let needs_arena = briev_compiler::analysis::allocation::analyze_arena_need(&mut items);
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::Before, &items, &universe, opts)?;
     pm.run_ast(StageKind::Allocated, &mut items, &mut universe)?;
     emit_beast_snapshot(file_path, BeastStage::Alloc, BeastPosition::After, &items, &universe, opts)?;
@@ -920,9 +920,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // appears (a future pointer form that slips past PtrConst inference), the
     // program is denied at compile time instead of dereferencing a dead stack
     // address.
-    use briv_compiler::analysis::provenance::{check_dangling_ptrs, collect_local_names};
+    use briev_compiler::analysis::provenance::{check_dangling_ptrs, collect_local_names};
     for item in &items {
-        if let briv_compiler::ast::TopLevel::Transaction(txn) = item {
+        if let briev_compiler::ast::TopLevel::Transaction(txn) = item {
             let local_names = collect_local_names(&txn.body, &txn.parameters);
             let warnings = check_dangling_ptrs(&txn.body, &local_names);
             if !warnings.is_empty() {
@@ -947,25 +947,25 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-22: Resolve each frgn declaration's dispatch strategy before
     // codegen. The backend receives the resolved strategies and does not
     // re-implement dispatch logic.
-    let glue_targets = briv_compiler::glue::config::load_glue_config(
+    let glue_targets = briev_compiler::glue::config::load_glue_config(
         opts.glue_config.as_deref().map(Path::new),
     )?;
     let mut resolved_frgns: std::collections::HashMap<
-        String, briv_compiler::analysis::frgn_dispatch::ResolvedFrgn,
+        String, briev_compiler::analysis::frgn_dispatch::ResolvedFrgn,
     > = std::collections::HashMap::new();
     for item in &items {
-        let briv_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
+        let briev_compiler::ast::TopLevel::ForeignBinding(fb) = item else { continue; };
         let ext = fb.from.extension().unwrap_or_default();
-        let dispatch = briv_compiler::analysis::frgn_dispatch::resolve_single_frgn(
+        let dispatch = briev_compiler::analysis::frgn_dispatch::resolve_single_frgn(
             fb, &ext, &glue_targets, opts.backend, Some(&universe),
         )?;
-        resolved_frgns.insert(fb.effective_briv_name().to_string(), dispatch);
+        resolved_frgns.insert(fb.effective_briev_name().to_string(), dispatch);
     }
 
     // 2026-07-26: Collect protocol library names from resolved frgns
     // for passing as -l<lib> flags to clang during linking.
     let protocol_libs: Vec<String> = resolved_frgns.values().filter_map(|rf| {
-        if let briv_compiler::analysis::frgn_dispatch::ResolvedFrgn::Inline { protocol_lib: Some(lib), .. } = rf {
+        if let briev_compiler::analysis::frgn_dispatch::ResolvedFrgn::Inline { protocol_lib: Some(lib), .. } = rf {
             Some(lib.clone())
         } else {
             None
@@ -976,11 +976,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-22: Propose adopting foreign type layouts to minimize
     // protocol transform costs. Only applies to bridge-path frgns.
     // This is additive — removing this pass does not affect correctness.
-    let layout_changes = briv_compiler::analysis::layout_optimizer::optimize_layouts(
+    let layout_changes = briev_compiler::analysis::layout_optimizer::optimize_layouts(
         &items, &universe, &resolved_frgns, &glue_targets,
     )?;
     for change in &layout_changes {
-        briv_compiler::analysis::layout_optimizer::apply_layout_change(&mut items, change)?;
+        briev_compiler::analysis::layout_optimizer::apply_layout_change(&mut items, change)?;
     }
     if !layout_changes.is_empty() {
         eprintln!("layout optimizer: {} change(s) applied", layout_changes.len());
@@ -990,12 +990,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-07-23: If --diff was specified, show what macros changed and exit
     // before codegen/writing. No output file is produced.
     if let Some(ref pre_macro) = pre_macro_items {
-        let diff = briv_compiler::macros::diff::compute_diff(pre_macro, &items);
+        let diff = briev_compiler::macros::diff::compute_diff(pre_macro, &items);
         if diff.is_empty() {
             println!("(no changes)");
         } else {
             println!("\n=== Macro Changes ({} change(s)) ===", diff.len());
-            briv_compiler::macros::diff::print_diff(&diff);
+            briev_compiler::macros::diff::print_diff(&diff);
             println!("=== End Macro Changes ===");
         }
         return Ok(());
@@ -1006,9 +1006,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // derivation block, evaluate each example through the interpreter and
     // compare to expected output. A mismatch is a fatal build error.
     {
-        let mut interp = briv_compiler::interpreter::Interpreter::new();
+        let mut interp = briev_compiler::interpreter::Interpreter::new();
         interp.load_program(&items);
-        if let Err(errors) = briv_compiler::derive::verify_derivation_assertions(&items, &mut interp) {
+        if let Err(errors) = briev_compiler::derive::verify_derivation_assertions(&items, &mut interp) {
             for e in &errors {
                 eprintln!("error: derivation assertion: {}", e);
             }
@@ -1026,19 +1026,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // variants; the per-mount fragments drive the view compiler.
     let mut component_specs: std::collections::HashMap<
         String,
-        Vec<briv_compiler::analysis::component_instances::MountSpec>,
+        Vec<briev_compiler::analysis::component_instances::MountSpec>,
     > = std::collections::HashMap::new();
     let mut component_initializers: std::collections::HashMap<
         String,
-        briv_compiler::ast::Expr,
+        briev_compiler::ast::Expr,
     > = std::collections::HashMap::new();
     let mut instance_specs: std::collections::HashMap<
         String,
-        briv_compiler::analysis::component_instances::MountSpec,
+        briev_compiler::analysis::component_instances::MountSpec,
     > = std::collections::HashMap::new();
     if opts.backend == BackendKind::Webstack {
         let view_html = effective_view_html(opts, &preprocessed, &items).unwrap_or_default();
-        match briv_compiler::analysis::component_instances::expand_component_instances(
+        match briev_compiler::analysis::component_instances::expand_component_instances(
             &mut items,
             &view_html,
         ) {
@@ -1074,12 +1074,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // 2026-08-10: real state layout captured from the webstack codegen path,
     // consumed by the GlueWebGenerator below (falls back to the hardcoded
     // stub when no webstack codegen ran, e.g. --emit-ir-only).
-    let mut web_layout: Option<briv_compiler::glue::web_generator::StateLayout> = None;
+    let mut web_layout: Option<briev_compiler::glue::web_generator::StateLayout> = None;
     // 2026-08-11 (Phase 2a2): b-bind routes resolved during codegen from the
     // transition graph; surfaced here so unresolvable routes are hard errors.
     let mut bind_routes: Option<std::collections::HashMap<
         String,
-        Result<briv_compiler::glue::web_generator::BindRoute, String>,
+        Result<briev_compiler::glue::web_generator::BindRoute, String>,
     >> = None;
 
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers)?;
@@ -1117,7 +1117,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         let binary_base = out_path.strip_suffix(ext).unwrap_or(&out_path);
         // 2026-08-03: --library — package a static .a (+ PIC .so) instead of
         // a linked executable. The archive bundles the bridge .o and the
-        // briv_rt runtime so a host links `-l<name>` standalone.
+        // briev_rt runtime so a host links `-l<name>` standalone.
         if opts.library_mode && opts.backend == BackendKind::Llvm {
             // Merge CLI-provided extra_objects with ones collected from frgn
             // declarations (frgn .c/.cpp sources are auto-compiled to .o).
@@ -1137,14 +1137,14 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             // Merge CLI-provided extra_objects with ones collected from frgn
             // declarations (frgn .c/.cpp sources are auto-compiled to .o).
             // 2026-07-26: Deduplicate — multiple frgns may reference the same
-            // .c source (e.g., briv_rt.c), producing identical cached .o paths.
+            // .c source (e.g., briev_rt.c), producing identical cached .o paths.
             let mut all_objects = opts.extra_objects.clone();
             all_objects.extend(extra_objects);
             // 2026-08-06 (accel plan): always link the device-agnostic accel
-            // runtime (briv_accel_rt.c). It is LTO + --gc-sections'd away when
+            // runtime (briev_accel_rt.c). It is LTO + --gc-sections'd away when
             // the program has no accel kernels, so the cost is a cached .o.
             let accel_rt = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("lib/runtime/briv_accel_rt.c");
+                .join("lib/runtime/briev_accel_rt.c");
             let accel_obj = compile_source_to_object(&accel_rt, &get_ffi_cache_dir())?;
             all_objects.push(accel_obj);
             all_objects.sort();
@@ -1169,10 +1169,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     // reactive txn emits `@txn_<name>`. Export both forms —
                     // wasm-ld ignores names without a matching symbol, and the
                     // shim's `_txn()` resolver tries both.
-                    briv_compiler::ast::TopLevel::Transaction(t) => {
+                    briev_compiler::ast::TopLevel::Transaction(t) => {
                         Some(vec![t.name.clone(), format!("txn_{}", t.name)])
                     }
-                    briv_compiler::ast::TopLevel::Definition(d) => {
+                    briev_compiler::ast::TopLevel::Definition(d) => {
                         Some(vec![d.name.clone(), format!("txn_{}", d.name)])
                     }
                     _ => None,
@@ -1234,7 +1234,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 // the standard app.html with an SSR-enabled version that
                 // embeds initial state as JSON and pre-renders the view.
                 if opts.ssr {
-                    let ssr_out = briv_compiler::ssr::render_ssr(
+                    let ssr_out = briev_compiler::ssr::render_ssr(
                         html,
                         &items,
                         style_css.map(|s| s.as_str()),
@@ -1256,10 +1256,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             {
                 let routes = bind_routes.as_ref();
                 for binding in &view_bindings {
-                    if let briv_compiler::view_compiler::Directive::Bind { target } =
+                    if let briev_compiler::view_compiler::Directive::Bind { target } =
                         &binding.directive
                     {
-                        let (root, _) = briv_compiler::view_compiler::root_signal(target);
+                        let (root, _) = briev_compiler::view_compiler::root_signal(target);
                         let resolution = routes
                             .and_then(|r| r.get(root))
                             .cloned()
@@ -1280,10 +1280,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             }
 
             // 2026-07-26: Phase 6c — Generate dom-shim.mjs + .d.ts from frgn decls.
-            let frgn_decls: Vec<briv_compiler::ast::ForeignBinding> = items.iter()
+            let frgn_decls: Vec<briev_compiler::ast::ForeignBinding> = items.iter()
                 .filter_map(|item| {
-                    if let briv_compiler::ast::TopLevel::ForeignBinding(fb) = item {
-                        if matches!(fb.from, briv_compiler::ast::FromSpec::Protocol(ref p) if p == "#Web") {
+                    if let briev_compiler::ast::TopLevel::ForeignBinding(fb) = item {
+                        if matches!(fb.from, briev_compiler::ast::FromSpec::Protocol(ref p) if p == "#Web") {
                             Some(fb.clone())
                         } else {
                             None
@@ -1298,7 +1298,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 // codegen path when available; fall back to the historical
                 // hardcoded stub (empty fields) for paths that skipped codegen.
                 let state_layout = web_layout.clone().unwrap_or_else(|| {
-                    briv_compiler::glue::web_generator::StateLayout {
+                    briev_compiler::glue::web_generator::StateLayout {
                         app_name: binary_base.to_string(),
                         generation_offset: 0,
                         flush_buffer_offset: 64,
@@ -1314,7 +1314,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     .flat_map(|r| r.iter())
                     .filter_map(|(field, res)| res.clone().ok().map(|route| (field.clone(), route)))
                     .collect();
-                let web_gen = briv_compiler::glue::web_generator::GlueWebGenerator::new(
+                let web_gen = briev_compiler::glue::web_generator::GlueWebGenerator::new(
                     Vec::new(), // wasm bytes not needed for stub generation
                     view_bindings.clone(),
                     state_layout,
@@ -1425,17 +1425,17 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 2026-08-09 (Phase 13, SPEC 22.6): `briv check file.dbv|file.dbvl` — parse a
-/// Data Briv document and validate it against its asserted schemas. A `.dbvl`
+/// 2026-08-09 (Phase 13, SPEC 22.6): `briev check file.dbv|file.dbvl` — parse a
+/// Data Briev document and validate it against its asserted schemas. A `.dbvl`
 /// file uses the line-oriented parser (offsets tracked); `.dbv` the structured
-/// parser. The document is not a Briv program — it never enters the .bv
+/// parser. The document is not a Briev program — it never enters the .bv
 /// pipeline.
 pub fn check_data_source(file_path: &str, source: &str) -> Result<(), String> {
     let is_dbvl = file_path.ends_with(".dbvl");
     let mut doc = if is_dbvl {
-        briv_compiler::dbriv::v2::parse_document_track_offsets(source)
+        briev_compiler::dbriev::v2::parse_document_track_offsets(source)
     } else {
-        briv_compiler::dbriv::v2::parse_document(source)
+        briev_compiler::dbriev::v2::parse_document(source)
     }
     .map_err(|e| format!("{}: {}", file_path, e))?;
     // Resolve `schema X from "file.dbv"` imports: load the referenced schema
@@ -1454,11 +1454,11 @@ pub fn check_data_source(file_path: &str, source: &str) -> Result<(), String> {
                 file_path, imp, candidate.display()
             ));
         };
-        let imported = briv_compiler::dbriv::v2::parse_document(&import_src)
+        let imported = briev_compiler::dbriev::v2::parse_document(&import_src)
             .map_err(|e| format!("{}: schema import '{}': {}", file_path, imp, e))?;
         doc.schemas.extend(imported.schemas);
     }
-    let errors = briv_compiler::dbriv::validate::validate_document(&doc);
+    let errors = briev_compiler::dbriev::validate::validate_document(&doc);
     if errors.is_empty() {
         println!("OK ({} schema{}, {} data groups)",
             doc.schemas.len(),
@@ -1481,10 +1481,10 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     discover_system_plugins(&mut pm);
 
     // Register built-in Rust plugins
-    pm.register(Box::new(briv_compiler::plugin::env_plugin::EnvPlugin));
-    pm.register(Box::new(briv_compiler::plugin::print_plugin::PrintPlugin));
-    pm.register(Box::new(briv_compiler::plugin::entry_plugin::EntryPlugin));
-    pm.register(Box::new(briv_compiler::plugin::script_plugin::ScriptPlugin));
+    pm.register(Box::new(briev_compiler::plugin::env_plugin::EnvPlugin));
+    pm.register(Box::new(briev_compiler::plugin::print_plugin::PrintPlugin));
+    pm.register(Box::new(briev_compiler::plugin::entry_plugin::EntryPlugin));
+    pm.register(Box::new(briev_compiler::plugin::script_plugin::ScriptPlugin));
 
     // Apply per-extension filtering from config/targets.dbvl
     let ext = get_extension(file_path);
@@ -1504,7 +1504,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     }
 
     // Apply sandbox from CLI flags
-    use briv_compiler::macros::eval::Sandbox;
+    use briev_compiler::macros::eval::Sandbox;
     let sandbox = Sandbox {
         allow_read: opts.allow_read,
         allow_write: opts.allow_write,
@@ -1524,27 +1524,27 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
 /// plugin IR stages, and return (output_text, extension).
 /// 2026-07-15: Phase 2 — Extracted from compile_source for flat flow.
 fn codegen(
-    items: &[briv_compiler::ast::TopLevel],
+    items: &[briev_compiler::ast::TopLevel],
     universe: &mut TypeUniverse,
     pm: &PluginManager,
     opts: &BuildOptions,
-    alloc_strategies: std::collections::HashMap<usize, briv_compiler::backend::llvm::AllocStrategy>,
+    alloc_strategies: std::collections::HashMap<usize, briev_compiler::backend::llvm::AllocStrategy>,
     needs_arena: std::collections::HashSet<String>,
-    resolved_frgns: std::collections::HashMap<String, briv_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
+    resolved_frgns: std::collections::HashMap<String, briev_compiler::analysis::frgn_dispatch::ResolvedFrgn>,
     enable_module_init: bool,
-    web_layout: &mut Option<briv_compiler::glue::web_generator::StateLayout>,
+    web_layout: &mut Option<briev_compiler::glue::web_generator::StateLayout>,
     view_signals: &std::collections::HashSet<String>,
     bind_routes: &mut Option<std::collections::HashMap<
         String,
-        Result<briv_compiler::glue::web_generator::BindRoute, String>,
+        Result<briev_compiler::glue::web_generator::BindRoute, String>,
     >>,
-    component_initializers: &std::collections::HashMap<String, briv_compiler::ast::Expr>,
+    component_initializers: &std::collections::HashMap<String, briev_compiler::ast::Expr>,
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
-    let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
+    let mut operator_defs: std::collections::HashMap<String, Vec<briev_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
     let mut cast_from_bit_overrides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for item in items.iter() {
-        if let briv_compiler::ast::TopLevel::TypeDef(td) = item {
+        if let briev_compiler::ast::TopLevel::TypeDef(td) = item {
             let mut all_ops = td.body.operators.clone();
             // 2026-07-30: Convert op_bindings (new-style) to OperatorDef format.
             // CastFrom(#Bit) goes to the casting graph (sole user-extensible cast edge).
@@ -1566,7 +1566,7 @@ fn codegen(
 
                 if b.name == "CastFrom" && is_bit_target {
                     // Register in casting graph as the sole user-extensible cast edge
-                    if let briv_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
+                    if let briev_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
                         cast_from_bit_overrides.insert(td.name.clone(), fn_name.clone());
                     }
                     continue; // skip operator_defs — handled by casting graph
@@ -1578,17 +1578,17 @@ fn codegen(
                 // '<-' dispatch and `op Init` construction look these up.
                 let params = match &b.protocol_variant {
                     Some(pv) if pv.starts_with('#') => {
-                        vec![briv_compiler::ast::Type::Custom(pv.clone())]
+                        vec![briev_compiler::ast::Type::Custom(pv.clone())]
                     }
-                    Some(pv) => vec![briv_compiler::ast::Type::Custom(pv.clone())],
+                    Some(pv) => vec![briev_compiler::ast::Type::Custom(pv.clone())],
                     None => vec![],
                 };
-                let impl_args = if let briv_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
-                    Some(briv_compiler::ast::PropertyValue::Identifier(fn_name.clone()))
+                let impl_args = if let briev_compiler::ast::Expr::Call(fn_name, _, _) = &b.expr {
+                    Some(briev_compiler::ast::PropertyValue::Identifier(fn_name.clone()))
                 } else {
                     None
                 };
-                all_ops.push(briv_compiler::ast::top::OperatorDef {
+                all_ops.push(briev_compiler::ast::top::OperatorDef {
                     op: b.name.clone(),
                     params,
                     pre: b.pre.clone(),
@@ -1642,7 +1642,7 @@ fn codegen(
             // Register proto declarations on the casting graph
             if let Some(ref mut graph) = b.ctx.casting_graph {
                 for item in items.iter() {
-                    if let briv_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                    if let briev_compiler::ast::TopLevel::ProtocolDef(pd) = item {
                         graph.register_protocol_def(pd);
                     }
                 }
@@ -1726,7 +1726,7 @@ output = b.generate(items, None);
             ".ll"
         }
         BackendKind::Circt => {
-            let mut b = briv_compiler::backend::circt::CirctBackend::new();
+            let mut b = briev_compiler::backend::circt::CirctBackend::new();
             output = b.generate(items);
             ".mlir"
         }
@@ -1762,7 +1762,7 @@ output = b.generate(items, None);
             // Register proto declarations on the casting graph
             if let Some(ref mut graph) = b.ctx.casting_graph {
                 for item in items.iter() {
-                    if let briv_compiler::ast::TopLevel::ProtocolDef(pd) = item {
+                    if let briev_compiler::ast::TopLevel::ProtocolDef(pd) = item {
                         graph.register_protocol_def(pd);
                     }
                 }
@@ -1781,7 +1781,7 @@ output = b.generate(items, None);
         }
         BackendKind::Spirv => {
             // 2026-07-15: SPIR-V backend compiles kernels to binary
-            let binary = briv_compiler::backend::spirv::compile_spirv(items, "main")?;
+            let binary = briev_compiler::backend::spirv::compile_spirv(items, "main")?;
             let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
             let out_path = out.replace(".ll", ".spv");
             std::fs::write(&out_path, &binary)
@@ -1792,7 +1792,7 @@ output = b.generate(items, None);
         }
         BackendKind::Vm => {
             // 2026-07-25: VM backend emits .lair bytecode
-            let mut b = briv_compiler::backend::vm::VmBackend::new();
+            let mut b = briev_compiler::backend::vm::VmBackend::new();
             let lair_data = b.generate(items, universe);
             let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
             let out_path = out.replace(".ll", ".lair");
@@ -1812,7 +1812,7 @@ fn emit_beast_snapshot(
     file_path: &str,
     stage: BeastStage,
     position: BeastPosition,
-    items: &[briv_compiler::ast::TopLevel],
+    items: &[briev_compiler::ast::TopLevel],
     universe: &TypeUniverse,
     opts: &BuildOptions,
 ) -> Result<(), String> {
@@ -1835,7 +1835,7 @@ fn emit_beast_snapshot(
         BeastStage::Optimize => ("opt", false),
     };
     let ext = if is_ast { "beast" } else { "ir" };
-    let data = briv_compiler::beast::to_beast(items, universe);
+    let data = briev_compiler::beast::to_beast(items, universe);
     let base = file_path.strip_suffix(".bv").unwrap_or(file_path);
     let priority = position.priority();
     let path = format!("{}.{}.{:03}.{}", base, stage_name, priority, ext);
@@ -1847,24 +1847,24 @@ fn emit_beast_snapshot(
 
 /// Compile a source file up to the $(Typed) stage.
 /// Returns items and universe at the Typed stage, ready for beastpack serialization.
-/// Used by `brivc bounty` — additive new function, no existing paths modified.
+/// Used by `brievc bounty` — additive new function, no existing paths modified.
 pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
     let mut pm = build_plugin_manager(file_path, opts);
     let project_root = std::env::current_dir()
         .map_err(|e| format!("cannot determine project root: {}", e))?;
     let project_root_str = project_root.to_string_lossy().to_string();
     if opts.update_lockfile {
-        let granted = briv_compiler::macros::lockfile::cli_granted_set(
+        let granted = briev_compiler::macros::lockfile::cli_granted_set(
             opts.allow_read, opts.allow_write, opts.allow_run,
             opts.allow_sys_query, opts.allow_net,
         );
-        let lock = briv_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
-        briv_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
-    } else if let Some(lock) = briv_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
-        briv_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
+        let lock = briev_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
+        briev_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
+    } else if let Some(lock) = briev_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
+        briev_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
     }
     let preprocessed = preprocess_source_for_path(file_path, source)?;
-    let mut source = preprocessed.briv_source;
+    let mut source = preprocessed.briev_source;
     pm.run_source(StageKind::PreLex, &mut source)?;
     let tokens = lex_for_path(file_path, &source)?;
     let mut items = parse(file_path, &tokens, &source)?;
@@ -1877,7 +1877,7 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
         let mut parsed_universe = TypeUniverse::new();
         pm.run_ast(StageKind::Parsed, &mut items, &mut parsed_universe)?;
     }
-    let mut resolver = briv_compiler::import_resolver::ImportResolver::new();
+    let mut resolver = briev_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
@@ -1916,21 +1916,21 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
 /// 2026-07-16: P4 — Collect extra object files from ForeignBinding FromSpec paths.
 /// Each frgn declaration with a .c/.so/.a/etc. path triggers compilation or direct
 /// inclusion. The resolver is used to resolve compiler-relative <name> paths.
-fn collect_extra_objects(items: &[briv_compiler::ast::TopLevel], resolver: &briv_compiler::import_resolver::ImportResolver, skip_briv_rt: bool) -> Result<Vec<PathBuf>, String> {
+fn collect_extra_objects(items: &[briev_compiler::ast::TopLevel], resolver: &briev_compiler::import_resolver::ImportResolver, skip_briev_rt: bool) -> Result<Vec<PathBuf>, String> {
     let cache_dir = get_ffi_cache_dir();
     let mut objects = Vec::new();
     for item in items {
         let fb = match item {
-            briv_compiler::ast::TopLevel::ForeignBinding(fb) => fb,
+            briev_compiler::ast::TopLevel::ForeignBinding(fb) => fb,
             _ => continue,
         };
         let ext = fb.from.extension();
         // 2026-08-04 (Phase 4, .ebv heap reframe): for .ebv freestanding
-        // targets, skip briv_rt.c — the .ebv stdlib provides the symbols
-        // (int_to_str, etc.) as Briv defns over the static bump arena.
-        if skip_briv_rt && ext.as_deref() == Some("c") {
+        // targets, skip briev_rt.c — the .ebv stdlib provides the symbols
+        // (int_to_str, etc.) as Briev defns over the static bump arena.
+        if skip_briev_rt && ext.as_deref() == Some("c") {
             let from_str = fb.from.as_str();
-            if from_str.contains("briv_rt") || from_str.contains("lib/runtime") {
+            if from_str.contains("briev_rt") || from_str.contains("lib/runtime") {
                 continue;
             }
         }
@@ -1939,8 +1939,8 @@ fn collect_extra_objects(items: &[briv_compiler::ast::TopLevel], resolver: &briv
         let resolved_path = || -> PathBuf {
             let from_str = fb.from.as_str();
             // Check registry for CompilerRegistry entries (<name>)
-            if let briv_compiler::ast::top::FromSpec::CompilerRegistry(_) = &fb.from {
-                if let Some(reg_path) = briv_compiler::registry::find_registry_entry(&from_str) {
+            if let briev_compiler::ast::top::FromSpec::CompilerRegistry(_) = &fb.from {
+                if let Some(reg_path) = briev_compiler::registry::find_registry_entry(&from_str) {
                     return reg_path;
                 }
             }
@@ -1966,14 +1966,14 @@ fn collect_extra_objects(items: &[briv_compiler::ast::TopLevel], resolver: &briv
 fn get_ffi_cache_dir() -> PathBuf {
     let base = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("briv-compiler")
+        .join("briev-compiler")
         .join("ffi");
     std::fs::create_dir_all(&base).ok();
     base
 }
 
 /// 2026-07-16: P4 — Compile a C/C++ source to a .o object file.
-/// Content-hash cached at ~/.cache/briv-compiler/ffi/<hash>.o.
+/// Content-hash cached at ~/.cache/briev-compiler/ffi/<hash>.o.
 fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<PathBuf, String> {
     let content = std::fs::read(source_path)
         .map_err(|e| format!("cannot read '{}': {}", source_path.display(), e))?;
@@ -2015,10 +2015,10 @@ fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<Path
 /// `from #System` frgns are passed as `-l<lib>` flags to clang.
 fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf], protocol_libs: &[String], shared: bool) -> Result<(), String> {
     let mut cmd = Command::new("clang");
-    // 2026-07-26: briv_rt.c is no longer hardcoded here — frgn declarations in
-    // stdlib (e.g., `frgn __print_int from "lib/runtime/briv_rt.c"`) are compiled
+    // 2026-07-26: briev_rt.c is no longer hardcoded here — frgn declarations in
+    // stdlib (e.g., `frgn __print_int from "lib/runtime/briev_rt.c"`) are compiled
     // by collect_extra_objects and passed via extra_objects. This removes the
-    // duplicate symbol error that occurred when briv_rt.c was compiled twice.
+    // duplicate symbol error that occurred when briev_rt.c was compiled twice.
     if shared {
         cmd.args(["-O3", "-flto", "-shared", "-fPIC", ll_path]);
     } else {
@@ -2052,11 +2052,11 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathB
 
 /// Compile LLVM IR to a linkable static library (`ar rcs lib<name>.a`),
 /// plus a PIC `.so` for c_abi hosts. 2026-08-03: the `--library` on-ramp —
-/// exported defns become C-callable symbols, `__briv_init_state()` returns
+/// exported defns become C-callable symbols, `__briev_init_state()` returns
 /// a state handle.
 ///
 /// The .a is gcc-linkable: it packages the bridge .o (real ELF from llc)
-/// plus a NON-LTO briv_rt.o. frgn-derived objects are LTO bitcode (clang
+/// plus a NON-LTO briev_rt.o. frgn-derived objects are LTO bitcode (clang
 /// -flto) and live in the .so; plain C hosts link the .a. Bridges with
 /// custom C frgns use the .so / clang.
 fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) -> Result<(), String> {
@@ -2084,13 +2084,13 @@ fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) 
         return Err(format!("llc failed for '{}'", ll_path));
     }
 
-    // Step 2: compile briv_rt.c WITHOUT -flto → a real object plain C hosts
+    // Step 2: compile briev_rt.c WITHOUT -flto → a real object plain C hosts
     // can link (frgn-derived objects are LTO bitcode and cannot be read by
     // gcc). The .ll references the runtime transitively even when the bridge
-    // declares no explicit frgn from briv_rt.c.
+    // declares no explicit frgn from briev_rt.c.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let rt_c = manifest.join("lib/runtime/briv_rt.c");
-    let rt_o = format!("{}.briv_rt.o", base);
+    let rt_c = manifest.join("lib/runtime/briev_rt.c");
+    let rt_o = format!("{}.briev_rt.o", base);
     let mut cc_rt = Command::new("cc");
     cc_rt.args(["-c", "-fPIC", "-o", &rt_o]);
     cc_rt.arg(&rt_c);
@@ -2100,7 +2100,7 @@ fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) 
         return Err(format!("cc failed for '{}'", rt_c.display()));
     }
 
-    // Step 3: ar rcs lib<name>.a <base>.o briv_rt.o
+    // Step 3: ar rcs lib<name>.a <base>.o briev_rt.o
     let base_path = std::path::Path::new(base);
     let a_name = match base_path.file_name().and_then(|s| s.to_str()) {
         Some(stem) => format!("lib{}.a", stem),
@@ -2187,13 +2187,13 @@ fn compile_wasm(ll_path: &str, wasm_path: &str, exports: &[String]) -> Result<()
 fn effective_view_html(
     opts: &BuildOptions,
     preprocessed: &PreprocessedSource,
-    items: &[briv_compiler::ast::TopLevel],
+    items: &[briev_compiler::ast::TopLevel],
 ) -> Option<String> {
     if let Some(h) = opts.view_html.as_ref().or(preprocessed.view_html.as_ref()) {
         return Some(h.clone());
     }
     let root = items.iter().find_map(|item| match item {
-        briv_compiler::ast::TopLevel::RenderBlock(rb) if rb.struct_name == "Root" => {
+        briev_compiler::ast::TopLevel::RenderBlock(rb) if rb.struct_name == "Root" => {
             Some(rb.view_html.clone())
         }
         _ => None,
@@ -2204,7 +2204,7 @@ fn effective_view_html(
     let parts: Vec<String> = items
         .iter()
         .filter_map(|item| match item {
-            briv_compiler::ast::TopLevel::RenderBlock(rb) => Some(rb.view_html.clone()),
+            briev_compiler::ast::TopLevel::RenderBlock(rb) => Some(rb.view_html.clone()),
             _ => None,
         })
         .collect();
@@ -2216,12 +2216,12 @@ fn effective_view_html(
 }
 
 /// Lex + parse + resolve imports + typecheck, returning items and universe.
-fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<briv_compiler::ast::TopLevel>, TypeUniverse), String> {
+fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<briev_compiler::ast::TopLevel>, TypeUniverse), String> {
     let preprocessed = preprocess_source_for_path(file_path, source)?;
-    let tokens = lex_for_path(file_path, &preprocessed.briv_source)?;
-    let items = parse(file_path, &tokens, &preprocessed.briv_source)?;
+    let tokens = lex_for_path(file_path, &preprocessed.briev_source)?;
+    let items = parse(file_path, &tokens, &preprocessed.briev_source)?;
 
-    let mut resolver = briv_compiler::import_resolver::ImportResolver::new();
+    let mut resolver = briev_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
@@ -2231,19 +2231,19 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     let universe = TypeUniverse::new();
     check_types(&mut items, &universe)?;
     // 2026-08-01 (C4): watchdog contract checks also run on the `check` path
-    // (parse_and_check) — `brivc check` must catch trigger/handler violations
-    // and missing on-fire handlers the same way `brivc build` does.
-    let watchdog_errors = briv_compiler::analysis::watchdog::analyze(&items);
+    // (parse_and_check) — `brievc check` must catch trigger/handler violations
+    // and missing on-fire handlers the same way `brievc build` does.
+    let watchdog_errors = briev_compiler::analysis::watchdog::analyze(&items);
     if !watchdog_errors.is_empty() {
         let msgs: Vec<String> = watchdog_errors.iter().map(|e| e.to_string()).collect();
         return Err(format!("watchdog errors:\n{}", msgs.join("\n")));
     }
-    briv_compiler::analysis::watchdog::check_on_fire_handlers(&items)
+    briev_compiler::analysis::watchdog::check_on_fire_handlers(&items)
         .map_err(|e| format!("watchdog error:\n{}", e))?;
     // 2026-08-04: term termination diagnostics — `check` must catch
     // unreachable code after a terminating `term <value>`/`term! <value>`
     // exactly like `build` does, or the two paths silently diverge.
-    let (term_errors, term_warnings) = briv_compiler::analysis::termination::analyze(&items);
+    let (term_errors, term_warnings) = briev_compiler::analysis::termination::analyze(&items);
     for w in &term_warnings {
         eprintln!("warning: {w}");
     }
@@ -2251,8 +2251,8 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
         return Err(format!("termination errors:\n{}", term_errors.join("\n")));
     }
     // 2026-08-07 (object instance pools): `check` must reject unprovable
-    // spawn counts exactly like `build` (Briv has no runtime errors).
-    let (_, _, spawn_errors, _) = briv_compiler::analysis::spawn_pool::analyze(&items);
+    // spawn counts exactly like `build` (Briev has no runtime errors).
+    let (_, _, spawn_errors, _) = briev_compiler::analysis::spawn_pool::analyze(&items);
     if !spawn_errors.is_empty() {
         return Err(format!(
             "spawn pool errors:\n{}",
@@ -2267,7 +2267,7 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
 fn load_target_config(opts: &BuildOptions) -> TargetConfig {
     match &opts.config_dir {
         Some(dir) => {
-            match briv_compiler::dbriv::config_db::resolve_config_file(Path::new(dir), "targets") {
+            match briev_compiler::dbriev::config_db::resolve_config_file(Path::new(dir), "targets") {
                 Some(path) => TargetConfig::load_from(&path).unwrap_or_else(|e| {
                     eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
                     TargetConfig::load()
@@ -2306,8 +2306,8 @@ fn lex_for_path(
     file_path: &str,
     source: &str,
 ) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
-    if briv_compiler::conformance::is_formatted(std::path::Path::new(file_path)) {
-        briv_compiler::layout::layout_process(source).map_err(|e| {
+    if briev_compiler::conformance::is_formatted(std::path::Path::new(file_path)) {
+        briev_compiler::layout::layout_process(source).map_err(|e| {
             format!("{}: formatted-source error: {}", file_path, e)
         })
     } else {
@@ -2316,31 +2316,31 @@ fn lex_for_path(
 }
 
 /// Parse tokens into an AST.
-fn parse(file_path: &str, tokens: &[(Token, std::ops::Range<usize>)], source: &str) -> Result<Vec<briv_compiler::ast::TopLevel>, String> {
-    let mut parser = briv_compiler::parser::Parser::new(tokens.to_vec(), source);
+fn parse(file_path: &str, tokens: &[(Token, std::ops::Range<usize>)], source: &str) -> Result<Vec<briev_compiler::ast::TopLevel>, String> {
+    let mut parser = briev_compiler::parser::Parser::new(tokens.to_vec(), source);
     parser.parse_program().map_err(|e| format!("{}: parse error: {}", file_path, e))
 }
 
 /// 2026-07-20: Validate type parameter bounds (K: #String, V: #Float).
 /// Checks that types declaring bounded type params have at least one
 /// operator referencing the bound hashword in their params.
-fn validate_constraints(items: &[briv_compiler::ast::TopLevel]) -> Result<(), String> {
+fn validate_constraints(items: &[briev_compiler::ast::TopLevel]) -> Result<(), String> {
     for item in items {
-        let briv_compiler::ast::TopLevel::TypeDef(td) = item else { continue; };
+        let briev_compiler::ast::TopLevel::TypeDef(td) = item else { continue; };
         for tp in &td.type_params {
-            let briv_compiler::ast::top::TypeParam { name, bound: Some(bound) } = tp else { continue; };
+            let briev_compiler::ast::top::TypeParam { name, bound: Some(bound) } = tp else { continue; };
             let bound_category = match bound {
-                briv_compiler::ast::Type::HashWord(c) => c.as_str(),
-                briv_compiler::ast::Type::HashWordVariant(c, _) => c.as_str(),
+                briev_compiler::ast::Type::HashWord(c) => c.as_str(),
+                briev_compiler::ast::Type::HashWordVariant(c, _) => c.as_str(),
                 _ => continue,
             };
             // Check at least one operator references this hashword in its params
             let has_op = td.body.operators.iter().any(|op| {
                 op.params.iter().any(|p| {
                     matches!(p,
-                        briv_compiler::ast::Type::HashWord(c) if c == bound_category
+                        briev_compiler::ast::Type::HashWord(c) if c == bound_category
                     ) || matches!(p,
-                        briv_compiler::ast::Type::HashWordVariant(c, _) if c == bound_category
+                        briev_compiler::ast::Type::HashWordVariant(c, _) if c == bound_category
                     )
                 })
             });
@@ -2358,9 +2358,9 @@ fn validate_constraints(items: &[briv_compiler::ast::TopLevel]) -> Result<(), St
 }
 
 /// Type-check the program against a TypeUniverse.
-fn check_types(items: &mut [briv_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
+fn check_types(items: &mut [briev_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
     validate_constraints(items)?;
-    briv_compiler::typechecker::check_program(items, universe)
+    briev_compiler::typechecker::check_program(items, universe)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
             format!("type errors:\n  {}", msgs.join("\n  "))
@@ -2372,12 +2372,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_preprocess_source_for_path_rbv_extracts_briv_and_view() {
+    fn test_preprocess_source_for_path_rbv_extracts_briev_and_view() {
         let source = "let x: Int = 0;\n<view><div>ok</div></view>\n<style>.a{color:red;}</style>\n";
         let parsed = preprocess_source_for_path("/tmp/sample.rbv", source)
             .expect("rbv parse should succeed");
 
-        assert!(parsed.briv_source.contains("let x: Int = 0;"));
+        assert!(parsed.briev_source.contains("let x: Int = 0;"));
         assert_eq!(parsed.view_html.as_deref(), Some("<div>ok</div>"));
         assert_eq!(parsed.style_css.as_deref(), Some(".a{color:red;}"));
     }
@@ -2388,7 +2388,7 @@ mod tests {
         let parsed = preprocess_source_for_path("/tmp/sample.bv", source)
             .expect("bv passthrough should succeed");
 
-        assert_eq!(parsed.briv_source, source);
+        assert_eq!(parsed.briev_source, source);
         assert!(parsed.view_html.is_none());
         assert!(parsed.style_css.is_none());
     }
@@ -2399,7 +2399,7 @@ mod tests {
         let parsed = preprocess_source_for_path("/tmp/sample.rbv", source)
             .expect("logic-only rbv should pass through");
 
-        assert_eq!(parsed.briv_source, source);
+        assert_eq!(parsed.briev_source, source);
         assert!(parsed.view_html.is_none());
         assert!(parsed.style_css.is_none());
     }
@@ -2451,7 +2451,7 @@ mod tests {
 
     fn preprocessed_with_view(view_html: &str) -> PreprocessedSource {
         PreprocessedSource {
-            briv_source: "".to_string(),
+            briev_source: "".to_string(),
             style_css: None,
             view_html: Some(view_html.to_string()),
         }
@@ -2461,12 +2461,12 @@ mod tests {
     fn test_compile_view_injects_ids_and_extracts_bindings() {
         let opts = webstack_opts("/tmp/app.rbv");
         let items = vec![
-            briv_compiler::ast::TopLevel::Statement(Box::new(
-                briv_compiler::ast::Statement::Let {
+            briev_compiler::ast::TopLevel::Statement(Box::new(
+                briev_compiler::ast::Statement::Let {
                     name: "count".to_string(),
                     names: vec![],
-                    ty: Some(briv_compiler::ast::Type::int()),
-                    expr: Some(briv_compiler::ast::Expr::Decimal(0)),
+                    ty: Some(briev_compiler::ast::Type::int()),
+                    expr: Some(briev_compiler::ast::Expr::Decimal(0)),
                     modifiers: vec![],
                 },
             )),
@@ -2484,7 +2484,7 @@ mod tests {
         let has_text = cv.bindings.iter().any(|b| {
             matches!(
                 &b.directive,
-                briv_compiler::view_compiler::Directive::Text { signal } if signal == "count"
+                briev_compiler::view_compiler::Directive::Text { signal } if signal == "count"
             )
         });
         assert!(has_text, "b-text binding for count present");
@@ -2523,7 +2523,7 @@ mod tests {
             cv.bindings.iter().any(|b| {
                 matches!(
                     &b.directive,
-                    briv_compiler::view_compiler::Directive::Text { signal } if signal == "nope"
+                    briev_compiler::view_compiler::Directive::Text { signal } if signal == "nope"
                 )
             }),
             "binding still extracted (dead in the shim until the field exists)"
@@ -2535,15 +2535,15 @@ mod tests {
         // A .bv with `render Name { ... }` and no <view> block derives its
         // view from the render attachment.
         let opts = webstack_opts("/tmp/app.bv");
-        let items = vec![briv_compiler::ast::TopLevel::RenderBlock(
-            briv_compiler::ast::RenderBlock {
+        let items = vec![briev_compiler::ast::TopLevel::RenderBlock(
+            briev_compiler::ast::RenderBlock {
                 struct_name: "Root".to_string(),
                 view_html: r#"<span b-text="count">0</span>"#.to_string(),
                 span: None,
             },
         )];
         let pre = PreprocessedSource {
-            briv_source: "".to_string(),
+            briev_source: "".to_string(),
             style_css: None,
             view_html: None,
         };
@@ -2555,7 +2555,7 @@ mod tests {
 
     #[test]
     fn test_view_root_signals_derefs_projection() {
-        use briv_compiler::view_compiler::{Binding, Directive};
+        use briev_compiler::view_compiler::{Binding, Directive};
         let bindings = vec![
             Binding {
                 element_id: "a".to_string(),
@@ -2588,14 +2588,14 @@ mod tests {
     fn test_resolve_bind_routes_unique_writer() {
         // 2026-08-11 (Phase 2a2): a field written by exactly one transaction
         // resolves to that transaction with the param marshalling category.
-        use briv_compiler::analysis::transition_graph::ReactorNode;
-        use briv_compiler::glue::web_generator::{BindRoute, ParamKind};
+        use briev_compiler::analysis::transition_graph::ReactorNode;
+        use briev_compiler::glue::web_generator::{BindRoute, ParamKind};
         use std::collections::HashSet;
 
         let node = |name: &str, fields: &[&str]| ReactorNode {
             name: name.to_string(),
             is_reactive: false,
-            precondition: briv_compiler::ast::Expr::Bool(true),
+            precondition: briev_compiler::ast::Expr::Bool(true),
             body: vec![],
             bounded_pre: None,
             increments: None,
@@ -2604,27 +2604,27 @@ mod tests {
             is_effectively_pure: false,
             lexicographic_vars: vec![],
         };
-        let graph = briv_compiler::analysis::transition_graph::ReactorTransitionGraph {
+        let graph = briev_compiler::analysis::transition_graph::ReactorTransitionGraph {
             nodes: vec![node("set_name", &["name"])],
             has_triggers: false,
             live_fields: HashSet::new(),
             has_unguarded_ffi: HashSet::new(),
         };
-        let items = vec![briv_compiler::ast::TopLevel::Transaction(
-            briv_compiler::ast::Transaction {
+        let items = vec![briev_compiler::ast::TopLevel::Transaction(
+            briev_compiler::ast::Transaction {
                 name: "set_name".to_string(),
                 is_reactive: false,
                 is_async: false,
                 type_params: vec![],
                 parameters: vec![(
                     "n".to_string(),
-                    briv_compiler::ast::Type::Custom("String".to_string()),
+                    briev_compiler::ast::Type::Custom("String".to_string()),
                 )],
                 output_type: None,
                 outputs: Vec::new(),
-                contract: briv_compiler::ast::Contract::new(
-                    briv_compiler::ast::Expr::Bool(true),
-                    briv_compiler::ast::Expr::Bool(true),
+                contract: briev_compiler::ast::Contract::new(
+                    briev_compiler::ast::Expr::Bool(true),
+                    briev_compiler::ast::Expr::Bool(true),
                 ),
                 body: vec![],
                 metadata: std::collections::HashMap::new(),
@@ -2650,13 +2650,13 @@ mod tests {
         // A field written by two transactions is ambiguous (SPEC 21.4 needs a
         // single proven write contract); a field no transaction writes has no
         // route at all.
-        use briv_compiler::analysis::transition_graph::ReactorNode;
+        use briev_compiler::analysis::transition_graph::ReactorNode;
         use std::collections::HashSet;
 
         let node = |name: &str| ReactorNode {
             name: name.to_string(),
             is_reactive: false,
-            precondition: briv_compiler::ast::Expr::Bool(true),
+            precondition: briev_compiler::ast::Expr::Bool(true),
             body: vec![],
             bounded_pre: None,
             increments: None,
@@ -2665,7 +2665,7 @@ mod tests {
             is_effectively_pure: false,
             lexicographic_vars: vec![],
         };
-        let graph = briv_compiler::analysis::transition_graph::ReactorTransitionGraph {
+        let graph = briev_compiler::analysis::transition_graph::ReactorTransitionGraph {
             nodes: vec![node("w1"), node("w2")],
             has_triggers: false,
             live_fields: HashSet::new(),
@@ -2685,7 +2685,7 @@ mod tests {
     fn with_temp_file<F>(content: &str, f: F)
     where F: FnOnce(&Path)
     {
-        let dir = std::env::temp_dir().join("briv_compile_test");
+        let dir = std::env::temp_dir().join("briev_compile_test");
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join(format!("test_{}.c", std::process::id()));
         std::fs::write(&path, content).ok();

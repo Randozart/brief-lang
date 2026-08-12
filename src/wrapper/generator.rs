@@ -20,14 +20,14 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-//! File Generator - Generates Briv FFI files from analysis results
+//! File Generator - Generates Briev FFI files from analysis results
 
 use super::c_analyzer::{c_func_to_frgn_sig, suggest_postconditions, suggest_preconditions};
 use super::js_analyzer::js_func_to_frgn_sig;
 use super::python_analyzer::py_func_to_frgn_sig;
 use super::rust_analyzer::rust_func_to_frgn_sig;
 use super::wasm_analyzer::wasm_func_to_frgn_sig;
-use super::{c_type_to_briv, AnalysisResult, AnalyzedFunction};
+use super::{c_type_to_briev, AnalysisResult, AnalyzedFunction};
 use std::fs;
 use std::path::Path;
 
@@ -137,8 +137,8 @@ pub fn generate_bindings_toml(result: &AnalysisResult) -> String {
         }
 
         output.push_str("\n[functions.input]\n");
-        for (name, briv_type) in &func.parameters {
-            output.push_str(&format!("{} = \"{}\"\n", name, briv_type));
+        for (name, briev_type) in &func.parameters {
+            output.push_str(&format!("{} = \"{}\"\n", name, briev_type));
         }
 
         output.push_str("\n[functions.output.success]\n");
@@ -230,9 +230,9 @@ pub fn generate_bindings_dbv(result: &AnalysisResult) -> String {
         let params_str: Vec<String> = func
             .parameters
             .iter()
-            .map(|(_, t)| c_type_to_briv(t))
+            .map(|(_, t)| c_type_to_briev(t))
             .collect();
-        let return_briv = c_type_to_briv(&func.return_type);
+        let return_briev = c_type_to_briev(&func.return_type);
 
         output.push_str(&format!(
             "register 0x{:02X} as \"{}\" {{\n",
@@ -242,7 +242,7 @@ pub fn generate_bindings_dbv(result: &AnalysisResult) -> String {
         output.push_str(&format!(
             "    type: Fn({}) -> {};\n",
             params_str.join(", "),
-            return_briv
+            return_briev
         ));
         output.push_str(&format!("    location: \"{}::{}\";\n", result.library_name, func.name));
         output.push_str(&format!("    target: {};\n", detect_target(&result.mapper)));
@@ -269,10 +269,10 @@ pub fn generate_service_dbv(result: &AnalysisResult) -> String {
 
     for func in &result.functions {
         for (pname, ptype) in &func.parameters {
-            let t = c_type_to_briv(ptype);
+            let t = c_type_to_briev(ptype);
             output.push_str(&format!("    INPUT {}: {};\n", pname, t));
         }
-        let rt = c_type_to_briv(&func.return_type);
+        let rt = c_type_to_briev(&func.return_type);
         output.push_str(&format!("    OUTPUT {}_result: {};\n", func.name, rt));
     }
 
@@ -344,7 +344,7 @@ pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
     let mut output = String::new();
 
     output.push_str(&format!(
-        "// Auto-generated bridge for {}\n// Mapper: {}\n// Import this file to call {} functions from Briv\n\n",
+        "// Auto-generated bridge for {}\n// Mapper: {}\n// Import this file to call {} functions from Briev\n\n",
         result.library_name, result.mapper, result.library_name
     ));
     output.push_str("import \"std/metro_bridge\";\n\n");
@@ -354,18 +354,18 @@ pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
         let params: Vec<String> = func
             .parameters
             .iter()
-            .map(|(n, t)| format!("{}: {}", n, c_type_to_briv(t)))
+            .map(|(n, t)| format!("{}: {}", n, c_type_to_briev(t)))
             .collect();
-        let return_briv = if func.return_type == "Void" || func.return_type == "void" {
+        let return_briev = if func.return_type == "Void" || func.return_type == "void" {
             "Void".to_string()
         } else {
-            c_type_to_briv(&func.return_type)
+            c_type_to_briev(&func.return_type)
         };
         output.push_str(&format!(
             "frgn __raw_{}({}) -> Result<{}, String>;\n\n",
             func.name,
             params.join(", "),
-            return_briv
+            return_briev
         ));
     }
 
@@ -374,12 +374,12 @@ pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
         let params: Vec<String> = func
             .parameters
             .iter()
-            .map(|(n, t)| format!("{}: {}", n, c_type_to_briv(t)))
+            .map(|(n, t)| format!("{}: {}", n, c_type_to_briev(t)))
             .collect();
-        let return_briv = if func.return_type == "Void" || func.return_type == "void" {
+        let return_briev = if func.return_type == "Void" || func.return_type == "void" {
             "Void".to_string()
         } else {
-            c_type_to_briv(&func.return_type)
+            c_type_to_briev(&func.return_type)
         };
         let params_names: Vec<String> = func
             .parameters
@@ -411,7 +411,7 @@ pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
             params_names.join(", "),
             func.name,
             params.join(", "),
-            return_briv,
+            return_briev,
             args_list
         ));
     }

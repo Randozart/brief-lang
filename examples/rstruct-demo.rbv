@@ -1,7 +1,7 @@
 // render-struct-demo.rbv — render component definition
 // 2026-08-12 (2b3): obj-backed — obj Greeter owns state + member txns; the
 // render fragment binds the obj's slots. HTML-side spawn (<Greeter />) is
-// reactor-owned + zero-init; Briv-side seeds land with the 2b3 Briv-side
+// reactor-owned + zero-init; Briev-side seeds land with the 2b3 Briev-side
 // slice (let g1: Greeter = Greeter { name: "World" }).
 
 obj Greeter {

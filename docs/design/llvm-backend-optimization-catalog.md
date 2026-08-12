@@ -3,7 +3,7 @@
 **Date**: 2026-05-31
 **Tests**: 343 passing
 
-This document catalogues every optimization path in the Briv LLVM backend, the conditions that trigger each, and what each path achieves in terms of runtime performance.
+This document catalogues every optimization path in the Briev LLVM backend, the conditions that trigger each, and what each path achieves in terms of runtime performance.
 
 ---
 

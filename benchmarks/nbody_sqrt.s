@@ -7,7 +7,7 @@ get_env:                                # @get_env
 # %bb.0:                                # %entry
 	pushq	%rax
 	movq	%rsi, %rdi
-	callq	__getenv_briv@PLT
+	callq	__getenv_briev@PLT
 	popq	%rcx
 	retq
 .Lfunc_end0:

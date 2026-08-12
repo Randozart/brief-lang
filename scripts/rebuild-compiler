@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Rebuild Compiler Script
-# Rebuilds the Briv compiler and reinstalls the VSIX extension
+# Rebuilds the Briev compiler and reinstalls the VSIX extension
 #
 
 set -e
@@ -9,7 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "=== Building Briv Compiler ==="
+echo "=== Building Briev Compiler ==="
 cargo build --release
 
 echo ""
@@ -23,11 +23,11 @@ npx vsce package --allow-missing-repository 2>&1 | tail -5
 
 echo ""
 echo "=== Installing Extension ==="
-cp briv-language-0.1.0.vsix ../briv-language.vsix
-flatpak run com.vscodium.codium --install-extension ../briv-language.vsix 2>&1 | grep -E "(Installing|successfully installed|Error)" || true
+cp briev-language-0.1.0.vsix ../briev-language.vsix
+flatpak run com.vscodium.codium --install-extension ../briev-language.vsix 2>&1 | grep -E "(Installing|successfully installed|Error)" || true
 
 cd ..
-rm -f syntax-highlighter/briv-language-0.1.0.vsix
+rm -f syntax-highlighter/briev-language-0.1.0.vsix
 
 echo ""
 echo "=== Done ==="

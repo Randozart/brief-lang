@@ -150,7 +150,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── Host cancellation ─────────────────────────────────────────
         // 2026-08-03: per-process cancel flag the host can raise via
-        // __briv_set_cancel. A long-running Briv loop polls
+        // __briev_set_cancel. A long-running Briev loop polls
         // CancelRequested#() explicitly (no implicit polling) and bails.
         "CancelRequested#" => Some(Signature {
             name: "CancelRequested#",

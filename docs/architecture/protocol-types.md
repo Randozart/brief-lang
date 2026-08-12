@@ -15,7 +15,7 @@ support the operations of this category."
 for the program's actual usage. The protocol contract guarantees *behavior*,
 not *bytes*.
 
-```briv
+```briev
 type String: #String;   // "I can concatenate, compare, slice"
                         // layout: whatever the optimizer picks
 ```
@@ -45,7 +45,7 @@ Source:  #String, op Add, op Length
 
 A protocol variant is declared with `proto` — a new top-level form:
 
-```briv
+```briev
 proto ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -89,7 +89,7 @@ variants (ASCII, UTF16, Posit32) are provided by the prelude plugin.
 Non-default variants are declared in `lib/std/protocols.bv`, auto-loaded by
 the prelude:
 
-```briv
+```briev
 proto ASCII: #String {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
@@ -129,7 +129,7 @@ When a type declares `type MyString: #String`, it automatically inherits
 all edges from the `#String` category's protocol graph. A type only writes
 `op CastTo(...) = fn(...)` to **override** the protocol-level default.
 
-```briv
+```briev
 type MyString: #String;   // inherits CastTo(#String<UTF8>), CastFrom, all ops
 
 type MySpecialString: #String {
@@ -143,7 +143,7 @@ For every protocol declaration, the compiler runs two proofs:
 
 ### Proof 1: Round-Trip Identity
 
-```briv
+```briev
 CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
 CastFrom(#String<UTF8>) = UTF8_to_ASCII(#L);
 // Proved: UTF8_to_ASCII(ASCII_to_UTF8(x)) == x
@@ -155,7 +155,7 @@ denied — inconsistent transformations are bugs.
 
 ### Proof 2: Cross-Op Equivalence
 
-```briv
+```briev
 op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);
 // Proved: ASCII_add_with_UTF8(x, y) == UTF8_to_ASCII(ASCII_to_UTF8(x) + y)
 ```
@@ -169,7 +169,7 @@ correct.
 If a protocol declares a contract `[expr]`, the compiler proves it at
 every boundary crossing via SMT:
 
-```briv
+```briev
 proto ASCII: #String [#Self[i] < 128] {
     CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
 };
@@ -181,7 +181,7 @@ proto ASCII: #String [#Self[i] < 128] {
 In protocol declarations, `#L` is always the protocol's own variant (self)
 and `#R` is the target variant parameter:
 
-```briv
+```briev
 // #L = self (ASCII), #R = target (UTF8)
 CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
 op Add(#String<UTF8>) = ASCII_add_with_UTF8(#L, #R);

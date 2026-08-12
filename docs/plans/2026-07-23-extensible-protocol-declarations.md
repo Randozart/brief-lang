@@ -25,7 +25,7 @@ This plan covers the third topic: user-declarable protocol variants.
 
 Every other language dilutes at the FFI boundary. C++ diluted OOP and template safety for C compat. Java, C#, JS locked into UTF-16. Rust pays a runtime translation tax at every FFI call. All of them mix water into their wine.
 
-Briv does not dilute. The protocol graph keeps the source experience pure wine and lets the compiler become perfect water at the boundary — zero runtime translation, zero compromise on either side. The architecture's job is to keep these two domains separate: the programmer writes pure wine, the compiler emits perfect water.
+Briev does not dilute. The protocol graph keeps the source experience pure wine and lets the compiler become perfect water at the boundary — zero runtime translation, zero compromise on either side. The architecture's job is to keep these two domains separate: the programmer writes pure wine, the compiler emits perfect water.
 
 Proost.
 
@@ -67,7 +67,7 @@ Defaults (UTF8, IEEE754, unicode) are hardcoded in the parser — they work with
 
 ### Syntax — minimal by design
 
-```briv
+```briev
 // Minimal — just edges, no contract
 proto ASCII: #String {
     CastTo(#String<UTF8>);
@@ -93,7 +93,7 @@ A protocol declaration is primarily about **edges**. Self-referencing ops (e.g. 
 - `proto variant: #Category { ... }` — new top-level form using `proto` keyword. Follows the same `: #Category` pattern as `type Name: #Protocol { ... }`. The `proto` keyword is contextual (like `type`, `fn`, `node`), not reserved.
 - `CastTo(#Other<Variant>)` / `CastFrom(#Other<Variant>)` — edges in the protocol graph
 - `op Name(#TargetCategory<target_variant>) = fn(#L, #R)` — *optional* cross-variant override. Add maps to `+`, so `#L` is the left operand (the protocol's own variant) and `#R` is the right operand (the target variant). No self-referencing ops — those delegate to default.
-- `[contract]` before the body — *optional* contract, recommended. Uses Briv expression syntax with `#Self` as a hashword referencing the value at the protocol boundary. `#Self` follows the PascalCase hashword convention (`#Int`, `#String`, `#Self`). Contracts are not required — a protocol without one trusts the programmer.
+- `[contract]` before the body — *optional* contract, recommended. Uses Briev expression syntax with `#Self` as a hashword referencing the value at the protocol boundary. `#Self` follows the PascalCase hashword convention (`#Int`, `#String`, `#Self`). Contracts are not required — a protocol without one trusts the programmer.
 - No `layout` field — layout is implicit. Types that participate in a protocol declare their own layout. The protocol only defines *semantic compatibility*.
 
 ### Three tiers of effort
@@ -127,7 +127,7 @@ When a protocol has an optional contract `[expr]`, the proof engine checks it at
 
 The `#Self` hashword in the contract refers to the value at the boundary crossing. For example:
 
-```briv
+```briev
 proto ASCII: #String [forall(i in 0..#Self:>Size, #Self[i] < 128)] { ... }
 ```
 
@@ -137,7 +137,7 @@ The compiler does not need to know what "ASCII" means. It only knows: "data in t
 
 When a user declares a cross-variant override like:
 
-```briv
+```briev
 op Add(#String<UTF8>) = add_UTF8_to_ASCII(#L, #R);
 ```
 
@@ -277,7 +277,7 @@ No existing arms modified. Protocol graph is additional data for the same BFS.
 
 In `plugins/parsed/prelude.bv` (or a companion file discovered by the same plugin system):
 
-```briv
+```briev
 // Non-default protocol variants.
 // Defaults (UTF8, IEEE754, unicode) are primordial — no declaration needed.
 // These only declare Cast edges; self-ops implicitly delegate to defaults.

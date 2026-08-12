@@ -53,7 +53,7 @@ A meld-backed value satisfies **all contracts of both types simultaneously**. Wh
 
 ### Declaration
 
-```briv
+```briev
 // Tier 1 — Fully inferred. Same bytes+alignment → zero-cost identity routing.
 meld Float <:> CFloat;
 
@@ -80,7 +80,7 @@ meld MyFloat <:> YourFloat {
 
 ### Usage
 
-```briv
+```briev
 meld Float <:> CFloat;
 
 let f: Float = 3.14;
@@ -89,7 +89,7 @@ cf :> Size                        // reads Float Size (which is 1 — both are s
 cf :> Add(CFloat(2.0))            // emits fadd float — same opcode regardless of lens
 ```
 
-```briv
+```briev
 meld String <:> CString {
     String.Len = CString :> Size;
 };
@@ -311,7 +311,7 @@ At the `term` boundary:
 
 The backing type is the **original type before the first meld cast**:
 
-```briv
+```briev
 let s: String = "hello";
 let cs: CString = s as CString;     // Backed by String (original type)
 // cs chimera uses String's layout. CString projections derive from String fields.
@@ -336,7 +336,7 @@ A chimera **decays (materializes)** to the canonical layout of the target type i
 
 **Rule 1 — Struct field write:** When a chimera is stored into a struct field, it decays to the field's declared type.
 
-```briv
+```briev
 struct Packet {
     name: CString;
 };
@@ -351,7 +351,7 @@ Rationale: Structs require strictly static memory footprints. If a struct field 
 
 **Rule 2 — FFI call argument:** When a chimera is passed to a `frgn` function, it decays to the parameter's declared type.
 
-```briv
+```briev
 frgn puts(s: CString) -> Int from "c";
 let s: String = "hello";
 puts(s as CString);  // ← Decay: chimera → CString ABI
@@ -360,7 +360,7 @@ puts(s as CString);  // ← Decay: chimera → CString ABI
 
 **Rule 3 — Function return type:** When a chimera is returned from a `defn` or `txn`, it decays to the declared return type.
 
-```briv
+```briev
 defn get_path() -> CString {
     let s: String = read_file("path.txt")?;
     term s as CString;  // ← Decay: chimera → CString
@@ -371,7 +371,7 @@ defn get_path() -> CString {
 
 A chimera does NOT decay in the following situations:
 
-- **Internal function parameter:** If the function is internal to Briv and the compiler can analyze liveness across the call graph, the parameter remains a chimera.
+- **Internal function parameter:** If the function is internal to Briev and the compiler can analyze liveness across the call graph, the parameter remains a chimera.
 - **Temporary expression:** `(cs as String) :> Size` — the `cs as String` is a temporary lens switch, not a storage change. The value is still backed by whatever it was backed by.
 - **Assignment to same-type variable:** `let cs2 = cs;` where both are `CString` and `cs` is a chimera — no decay, chimera identity is preserved.
 
@@ -418,7 +418,7 @@ For the common case (`CString`-typed chimera backed by `String`, returned as `CS
 | `src/type_universe.rs` | Add `compatible_with: Vec<MeldRelation>` to `ResolvedType` | Stores all meld relationships for this type. |
 | `src/typechecker.rs` | Extend `is_cast_valid()` | Add arm: if `src` and `dst` are `Custom` names that have a `MeldRelation` in TypeUniverse, cast is valid. Do NOT run the existing scalar-only whitelist for meld-backed casts. |
 | `src/typechecker.rs` | Allow `Custom` → `Custom` cast | Currently, casting between two user-defined types falls through the whitelist to an error. Meld-backed casts must bypass this. |
-| `src/analysis/mod.rs` | Add `compute_projection_usage()` | New analysis pass: for each state field, collect which `ProjectionTarget::UserDefined(name)` calls are made on it. Track the Briv type of the expression at each call site. Output: `HashMap<String, HashSet<(String, String)>>` mapping state field name → set of (type_name, projection_name) pairs. |
+| `src/analysis/mod.rs` | Add `compute_projection_usage()` | New analysis pass: for each state field, collect which `ProjectionTarget::UserDefined(name)` calls are made on it. Track the Briev type of the expression at each call site. Output: `HashMap<String, HashSet<(String, String)>>` mapping state field name → set of (type_name, projection_name) pairs. |
 
 **Tests to add:**
 - Parser: `meld Float <:> CFloat;` parses to correct AST
@@ -706,7 +706,7 @@ help: remove the empty router body for clarity:
 Add a command-line flag `--layout` that prints the chosen layout for every state field:
 
 ```
-$ briv-compiler rbv program.rbv --layout
+$ briev-compiler rbv program.rbv --layout
 Layout for `s` (String):
   mode: Always (16 bytes, backing type: String)
   fields: ptr @/0..63, len @/64..127
@@ -772,12 +772,12 @@ check_meld_validity(A, B, routes):
 
 ### Design (for future implementation)
 
-```briv
+```briev
 // Generic meld — structural equivalence applies for any T
 meld List<T> <:> Vec<T>;
 ```
 
-`List<T>` in Briv: `{ ptr: Ptr<T>, len: u64, cap: u64 }` (24 bytes).  
+`List<T>` in Briev: `{ ptr: Ptr<T>, len: u64, cap: u64 }` (24 bytes).  
 `Vec<T>` in C/Rust: `{ ptr: Ptr<T>, len: usize, cap: usize }` (24 bytes on 64-bit).
 
 The structural equivalence proof for generics:
@@ -939,7 +939,7 @@ Every variant, every match arm, every code path in the meld feature must be full
 
 ### 12.1 FFI Escape — Cache Invalidation on Raw Pointer Mutation
 
-**Scenario:** A `CString`-typed chimera in Hot Dual mode (holding both `ptr` and a cached `strlen` value). The raw pointer `cs :> Ptr` is passed to an external C function via `frgn`. The C function mutates the character data in-place (inserting `\0`, truncating, etc.). Because the mutation happens inside compiled C code, Briv's compiler cannot trace this write statically.
+**Scenario:** A `CString`-typed chimera in Hot Dual mode (holding both `ptr` and a cached `strlen` value). The raw pointer `cs :> Ptr` is passed to an external C function via `frgn`. The C function mutates the character data in-place (inserting `\0`, truncating, etc.). Because the mutation happens inside compiled C code, Briev's compiler cannot trace this write statically.
 
 **Bug:** The cached `strlen` value remains marked `valid = true` after the FFI call returns. Subsequent reads of `:> Size` return a stale, corrupted length.
 
@@ -950,7 +950,7 @@ Every variant, every match arm, every code path in the meld feature must be full
 
 **Refinement (Phase 3+):** Allow the user to annotate FFI parameters as `readonly` to suppress invalidation:
 
-```briv
+```briev
 frgn puts(s: CString) -> Int from "c";  // readonly by convention
 frgn strcat(buf: CString!, src: CString) -> CString from "c";  // mutates buf
 ```

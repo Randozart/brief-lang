@@ -37,11 +37,11 @@ remaining in the compiler.
 phi placement differences — 14 per-field phis vs C's 12 rotation phis.
 
 **Investigation**:
-1. Run `opt -O3 -pass-remarks-missed=sroa,gvn,licm` on both Briv and
+1. Run `opt -O3 -pass-remarks-missed=sroa,gvn,licm` on both Briev and
    C `.ll` files to see what LLVM can't optimize in each.
 2. Check if `-march=native` closes the gap (already used in benchmark
    harness but may not be passed through `llc` properly).
-3. Compare the phi placement in the unrolled body — Briv uses
+3. Compare the phi placement in the unrolled body — Briev uses
    `insertvalue`/`extractvalue` chains while C uses direct phi nodes.
 
 **Low effort, potentially closes to 1.0x**.
@@ -70,10 +70,10 @@ errors. The `compile --target native` subcommand is used.
 - **Arrow operator stubs**: 7 warnings — `<-` (collect/discard/transfer)
   are stubs returning 0 in the LLVM backend. Officina-cli uses these
   for list/map operations. Stubs cause silent data corruption.
-- **Missing runtime symbols**: `briv_spawn_with_output`, `briv_getenv`,
-  `json_parse`, `briv_tty_raw_mode`, `briv_tty_size`, `briv_read_file`,
+- **Missing runtime symbols**: `briev_spawn_with_output`, `briev_getenv`,
+  `json_parse`, `briev_tty_raw_mode`, `briev_tty_size`, `briev_read_file`,
   `__int_to_str`, `__rt_wait`, etc. are declared as `frgn` but the
-  runtime library (`briv_rt.c`) was deleted in Phase I. The `compile`
+  runtime library (`briev_rt.c`) was deleted in Phase I. The `compile`
   subcommand doesn't link against any runtime.
 - **No exit path**: Warning: "program has wake triggers but no exit
   path" — the reactive loop spins forever after convergence.
@@ -104,7 +104,7 @@ manual testing with `-o /tmp/foo.ll` silently writes to `./foo.ll`.
 ## Test Plan
 
 - All work items: `cargo test --lib` must pass
-- Fasta: `BOUND=100M briv-compiler llvm fasta.bv --out /tmp/` + compile/run
+- Fasta: `BOUND=100M briev-compiler llvm fasta.bv --out /tmp/` + compile/run
 - Fannkuch: `BOUND=50M` timing, compare before/after ratios
-- Officina: `briv compile officina.bv --target native`, verify IR is valid
+- Officina: `briev compile officina.bv --target native`, verify IR is valid
 - Every commit: 909+ tests pass, no regression in existing benchmarks

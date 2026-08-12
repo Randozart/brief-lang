@@ -18,7 +18,7 @@ pub fn check_frgn_guards(items: &[TopLevel]) -> Result<(), String> {
     for item in items {
         if let TopLevel::ForeignBinding(fb) = item {
             if fb.is_optional || fb.is_fire_forget || fb.is_delivery {
-                let name = fb.briv_name.clone().unwrap_or(fb.foreign_name.clone());
+                let name = fb.briev_name.clone().unwrap_or(fb.foreign_name.clone());
                 optional_frgns.insert(name, true);
             }
         }

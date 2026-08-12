@@ -144,13 +144,13 @@ Then dispatch on `(category, bytes)` instead of type names.
 
 ### Group D: `primitive_from_name` in `mod.rs:115-132`
 
-This maps LLVM type string → Briv type name for `operator_defs` lookup. Fix: iterate the universe looking for a type whose `resolve_llvm_type()` matches the requested LLVM type string:
+This maps LLVM type string → Briev type name for `operator_defs` lookup. Fix: iterate the universe looking for a type whose `resolve_llvm_type()` matches the requested LLVM type string:
 
 ```rust
 fn resolve_primitive_name(llvm_ty: &str, graph: &CastingGraph, univ: &TypeUniverse) -> Option<String> {
     for rt in univ.types.values() {
-        let briv_ty = rt.to_type();
-        if graph.resolve_llvm_type(univ, &briv_ty, 64) == llvm_ty {
+        let briev_ty = rt.to_type();
+        if graph.resolve_llvm_type(univ, &briev_ty, 64) == llvm_ty {
             return Some(rt.name.clone());
         }
     }
@@ -164,7 +164,7 @@ Cache the result (universe is small — O(n) is fine).
 
 **File:** `docs/architecture/backend-architecture.md`
 
-**Audience:** AI coding agent or new contributor who understands Briv's type system (protocol + metadata) and LLVM IR, but not the specific backend codebase.
+**Audience:** AI coding agent or new contributor who understands Briev's type system (protocol + metadata) and LLVM IR, but not the specific backend codebase.
 
 **Outline:**
 
@@ -179,7 +179,7 @@ Cache the result (universe is small — O(n) is fine).
      → build_field_index() — assign state slot indices
      → declare_types() — emit LLVM type declarations
      → declare_state() — emit %State struct
-     → emit_main_or_bootup() — emit @main or __briv_init_state
+     → emit_main_or_bootup() — emit @main or __briev_init_state
        → init_state / reactor / txn dispatch
        → body emission (PerFieldPhi / InlineSsa / Batch-loop)
    ```
@@ -198,7 +198,7 @@ Cache the result (universe is small — O(n) is fine).
 
 5. **Key Data Structures**
    - `field_index_map`: field name → state slot index
-   - `field_types` / `field_briv_types`: LLVM / Briv type per slot
+   - `field_types` / `field_briev_types`: LLVM / Briev type per slot
    - `phi_field_regs`: per-field phi register (inside loop body)
    - `pending_phi_backedge`: computed values awaiting latch emission
    - `field_to_phi` / `field_to_lane`: vector phi group mapping

@@ -1,33 +1,33 @@
 // C Mapper - Handles C string null-termination, UTF-8, etc.
 
-// Convert C string to Briv String
+// Convert C string to Briev String
 // Precondition: C string is valid and not null
-// Postcondition: Returns Briv String with content
-defn c_string_to_briv(c_str: CString) -> String [c_str.is_valid() && c_str.not_null()][true] {
+// Postcondition: Returns Briev String with content
+defn c_string_to_briev(c_str: CString) -> String [c_str.is_valid() && c_str.not_null()][true] {
   term c_str.to_str();
 };
 
-// Convert Briv String to C string
-// Precondition: Briv String is valid
+// Convert Briev String to C string
+// Precondition: Briev String is valid
 // Postcondition: Returns CString (caller must free)
-defn briv_string_to_c(s: String) -> CString [true][term.not_null()] {
+defn briev_string_to_c(s: String) -> CString [true][term.not_null()] {
   term CString::new(s);
 };
 
-// Convert C int to Briv Int
-defn c_int_to_briv(c_int: CInt) -> Int [true][term == c_int.value] {
+// Convert C int to Briev Int
+defn c_int_to_briev(c_int: CInt) -> Int [true][term == c_int.value] {
   term c_int.value;
 };
 
-// Convert Briv Int to C int
-defn briv_int_to_c(n: Int) -> CInt [true][term.value == n] {
+// Convert Briev Int to C int
+defn briev_int_to_c(n: Int) -> CInt [true][term.value == n] {
   term CInt { value: n };
 };
 
-// Map C error to Briv error
+// Map C error to Briev error
 // Precondition: C error is valid
-// Postcondition: Returns Briv error string
-defn c_error_to_briv(c_err: CError) -> String [true][term.len() >= 0] {
+// Postcondition: Returns Briev error string
+defn c_error_to_briev(c_err: CError) -> String [true][term.len() >= 0] {
   term c_err.message;
 };
 
@@ -39,7 +39,7 @@ defn c_ptr_to_maybe(ptr: CPtr) -> Bool [true][term == true || term == false] {
   term true;
 };
 
-// Convert C pointer to Briv Int (as address)
+// Convert C pointer to Briev Int (as address)
 defn c_ptr_to_address(ptr: CPtr) -> Int [ptr.not_null()][term >= 0] {
   term ptr.address();
 };

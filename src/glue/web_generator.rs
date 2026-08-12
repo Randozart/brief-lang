@@ -14,11 +14,11 @@
 // Trade-off: One FFI crossing per transaction (not per field). This is optimal
 // for transactions with 1-5 field mutations (the common case). For transactions
 // with 20+ field mutations, a single large batch still beats per-field crossings.
-// See docs/architecture/features/rendered-briv-wasm.md.
+// See docs/architecture/features/rendered-briev-wasm.md.
 
 use std::collections::HashMap;
 
-/// 2026-08-11 (housekeeping, Part 2): convert a Briv literal token to a JS
+/// 2026-08-11 (housekeeping, Part 2): convert a Briev literal token to a JS
 /// literal — `'str'`/`"str"` → a quoted JS string, `true`/`false` → booleans,
 /// numbers pass through.
 fn js_literal(s: &str) -> String {
@@ -38,7 +38,7 @@ fn js_literal(s: &str) -> String {
 pub struct FieldLayout {
     /// Unique handle for this field. Matches bindings in the view compiler output.
     pub field_handle: u32,
-    /// 2026-08-10: The Briv field NAME (e.g. "count"). Compile-time only — the
+    /// 2026-08-10: The Briev field NAME (e.g. "count"). Compile-time only — the
     /// WASM table carries handle/offset/size/tag, but the Rust-side layout adds
     /// the name so view bindings (whose `signal` is a field name) can map to
     /// handles. Absent in old hardcoded layouts (empty string).
@@ -66,7 +66,7 @@ pub enum TypeTag {
 }
 
 impl TypeTag {
-    /// 2026-08-10: Derive the JS type tag from a Briv TYPE via its protocol
+    /// 2026-08-10: Derive the JS type tag from a Briev TYPE via its protocol
     /// category (Cast.# lanes) — never by matching type names (rule 18).
     /// Matches the webstack normalizer's js_type mapping: Int/UInt/Float →
     /// number, Bool → boolean, String/Char/Data → string, everything else
@@ -157,7 +157,7 @@ pub struct GlueWebGenerator {
 }
 
 /// JS marshalling category for a `b-bind:value` transaction parameter,
-/// derived from the Briv parameter type (type-driven — no name matching).
+/// derived from the Briev parameter type (type-driven — no name matching).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamKind {
     /// #String — write via `_writeString(value)` (pointer into WASM memory).
@@ -171,7 +171,7 @@ pub enum ParamKind {
 impl ParamKind {
     /// 2026-08-11 (Phase 2a2): derive the marshalling category from the
     /// existing type-tag machinery (protocol category → TypeTag → ParamKind).
-    /// No Briv type-name matching.
+    /// No Briev type-name matching.
     pub fn from_type_tag(tag: TypeTag) -> ParamKind {
         match tag {
             TypeTag::String => ParamKind::String,
@@ -356,7 +356,7 @@ export class WasmDomRuntime {{
   _readString(ptr) {{
     if (!ptr) return null;
     const mem = new Uint8Array(this._memory.buffer);
-    // Briv strings: [i64 length][data\0] — read length, then slice data
+    // Briev strings: [i64 length][data\0] — read length, then slice data
     const lenView = new DataView(this._memory.buffer);
     const len = Number(lenView.getBigUint64(ptr, true));
     const bytes = mem.slice(Number(ptr) + 8, Number(ptr) + 8 + len);
@@ -364,7 +364,7 @@ export class WasmDomRuntime {{
   }}
 
   _writeString(str) {{
-    // Allocate WASM memory for a Briv string (i64 length + bytes + \0)
+    // Allocate WASM memory for a Briev string (i64 length + bytes + \0)
     // and return the pointer. Uses Module.malloc or pre-allocated buffer.
     const encoder = new TextEncoder();
     const bytes = encoder.encode(str);
@@ -492,7 +492,7 @@ export async function createApp(wasmBytes) {{
     /// 2026-07-26: Phase 3 — Each binding directive (Text, Show, Trigger, etc.)
     /// produces a JS apply function that wires the binding-table entry for the
     /// bound state field to the DOM element.
-    /// 2026-08-10: real wiring — signal (a Briv field name) is mapped to the
+    /// 2026-08-10: real wiring — signal (a Briev field name) is mapped to the
     /// state_layout handle, and the emitted JS overrides that handle's
     /// binding-table applyFn with the DOM mutation. Previously a placeholder
     /// (comments only). Trigger directives wire event listeners that call the
@@ -514,7 +514,7 @@ export async function createApp(wasmBytes) {{
         out
     }
 
-    /// Map a binding's signal (Briv field name) to its state_layout handle.
+    /// Map a binding's signal (Briev field name) to its state_layout handle.
     /// 2026-08-10: the state_layout fields carry `name`; a binding whose signal
     /// names a field resolves to that field's handle. Unresolved signals (e.g.
     /// compound expressions) fall back to `None` — the binding is left to the
@@ -1053,7 +1053,7 @@ export async function createApp(wasmBytes) {{
     /// using from #Web, emit a JS import stub in the WASM instantiation's
     /// import object. The stub unmarshals each parameter from WASM ABI to JS
     /// value (using GLUE protocol mappings), calls the native function by its
-    /// Briv name, then marshals the return value back to WASM ABI.
+    /// Briev name, then marshals the return value back to WASM ABI.
     ///
     /// No function name matching — the TYPE determines marshalling:
     ///   #String       → _readString(ptr) / _writeString(str)
@@ -1069,7 +1069,7 @@ export async function createApp(wasmBytes) {{
     fn generate_imports(&self) -> String {
         let mut out = String::new();
         for fb in &self.frgn_decls {
-            let fn_name = fb.effective_briv_name();
+            let fn_name = fb.effective_briev_name();
             let param_names = self.frgn_param_names(&fb.inputs);
             let marshal_in = self.frgn_marshal_in(&fb.inputs, &param_names);
             let marshal_out = self.frgn_marshal_out(&fb.success_output);
@@ -1109,7 +1109,7 @@ export async function createApp(wasmBytes) {{
         out
     }
 
-    /// Derive JS parameter names from Briv parameter types.
+    /// Derive JS parameter names from Briev parameter types.
     /// 2026-07-26: Phase 6 — Type-driven naming so the generated JS is readable.
     fn frgn_param_names(&self, inputs: &[(String, crate::ast::Type)]) -> Vec<String> {
         inputs.iter().enumerate().map(|(i, (name, ty))| {
@@ -1121,7 +1121,7 @@ export async function createApp(wasmBytes) {{
         }).collect()
     }
 
-    /// Generate a JS parameter name based on its Briv type.
+    /// Generate a JS parameter name based on its Briev type.
     fn param_name_from_type(&self, ty: &crate::ast::Type, idx: usize) -> String {
         match ty {
             crate::ast::Type::Ptr(_) => format!("ptr{}", idx),

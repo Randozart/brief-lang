@@ -14,7 +14,7 @@ or have measurement bugs.
   `get_env_int#("BOUND")` returns 0 when the env var is unset; C defaults
   to 50M. Fix: add default-50M fallback in the benchmark source.
 - **Files**: `benchmarks/nbody_newton.bv`, `benchmarks/nbody_sqrt_idio.bv`
-- **Also**: Run `--correctness` on all benchmarks to verify Briv == C output.
+- **Also**: Run `--correctness` on all benchmarks to verify Briev == C output.
 - **Expected**: nbody ratios become ~1.0–1.15× (not 0.007×).
 
 ### Phase 2: Double-load elimination in reactive tick
@@ -53,7 +53,7 @@ or have measurement bugs.
 ### Phase 4: Correctness sweep
 - **What**: Run `bash benchmarks/build_and_bench.sh --correctness`.
   Investigate any mismatches.
-- **Known**: print_loop showed Briv: "0" vs C: "" at BOUND=5. The
+- **Known**: print_loop showed Briev: "0" vs C: "" at BOUND=5. The
   mismatch suggests C's output line is empty (possibly newline diff).
 - **Action**: Fix mismatches or document as expected (e.g., float
   formatting differences).
@@ -126,7 +126,7 @@ or have measurement bugs.
 ### Phase 6: Trophy folder evaluation
 - After all phases complete, re-benchmark. If any benchmark genuinely
   beats C by 1.5×+, move it to a `trophy/` directory with a README
-  explaining why Briv outperforms C (e.g., "contracts enabled LLVM to
+  explaining why Briev outperforms C (e.g., "contracts enabled LLVM to
   unroll the loop by proving the iteration count at compile time").
 
 ## Success Criteria

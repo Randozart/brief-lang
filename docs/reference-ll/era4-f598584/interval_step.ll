@@ -780,7 +780,7 @@ attributes #10 = {
     mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: read)
 }
 
-!0 = !{!"Briv"}
+!0 = !{!"Briev"}
 !1 = !{!"Int", !0}
 !2 = !{!"Char", !0}
 !3 = !{!"Float", !0}
