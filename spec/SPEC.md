@@ -1364,11 +1364,51 @@ render Counter {
 
 ### 21.3 Components
 
-Custom component tags create first-class reactive instances. The rendered parent owns each mounted component handle. Mounting creates the handle; unmounting releases state and subscriptions.
+Components ARE objects. `obj Name` owns the component's state slots and member
+transactions; `render Name { ... }` is the view fragment bound to that obj. The
+fragment's directives bind only the obj's slots and trigger only its member
+transactions — `render Name` requires `obj Name`, and any other reference is a
+compile error, never silently dead DOM.
 
-A `render Name { ... }` block is a reusable view fragment: `<Name />` mounts the fragment's HTML at that position (each mount gets its own element IDs; nested fragments mount recursively). The fragment's directives bind the state they reference — per-instance state (each mount owning its own field slots) is the full instance model. A `<Name />` for an unknown `Name` is a compile-time warning; a render cycle (`A` mounts `B` mounts `A`) is a compile error.
+There are two mount forms, split by ownership:
 
-Each `<Name />` mount owns its own copy of the fields its fragment references, plus per-mount variants of the transactions that write them — incrementing one counter does not move another. The per-instance slots are dotted state fields (`Counter.0.count`, `Counter.1.count`); a mount's `b-trigger` fires its own txn variant. A mount may pass props: `<Name attr="value" />` seeds the mount's instance slot for the fragment-referenced field `attr` (`<Counter count="5" />` initializes that counter to 5).
+- **Briv-side instance — the program owns it.** `let c1: Counter = Counter { count: 5 };`
+  creates an instance seeded in Briv (the literal's field values are the
+  initial state; the frontend invents nothing). `<c1 />` mounts the fragment
+  routed to that instance's slots (`count` → `c1.count`); its `b-trigger`
+  fires the per-instance txn variant (`increment_c1`).
+- **HTML-side spawn — the reactor owns it.** `<Counter />` spawns an anonymous,
+  pool-indexed instance (`Counter.0.count`, `Counter.1.count`, …) with
+  zero-init defaults. It is not referenceable by Briv code; only its txn
+  variants touch it.
+
+There are NO HTML props (`<Counter count="5" />` is invalid). All seeding is
+Briv source.
+
+The tag namespace resolves deterministically: a declared instance var
+(`<c1 />`) mounts the instance; else a component type (`<Counter />`) spawns
+an anonymous instance; else a lowercase HTML element; else an unknown-tag
+warning. An instance var shadowing a component type name or a reserved HTML
+element name is a compile error — the namespaces stay separated.
+
+A `render Name { ... }` block is a reusable view fragment: a mount splices the
+fragment's HTML at that position (each mount gets its own element IDs; nested
+fragments mount recursively). A render cycle (`A` mounts `B` mounts `A`) is a
+compile error.
+
+Every instance is created at compile time as a fixed pool of dotted state
+fields; each mount owns its own copy of the fields its fragment references,
+plus per-mount variants of the member transactions that write them —
+incrementing one counter does not move another.
+
+`b-when` unmounting a subtree releases the component instances inside it: the
+shim fires each instance's **reset txn** (`__reset_c1`, `__reset_Counter_0`),
+a callable transaction that re-applies the instance's initial state (the Briv
+seeds for a Briv-side instance, the type defaults for an HTML-side spawn).
+The reset flows through the reactive machinery — its contract is carried and
+its write set drives the flush, so the DOM updates immediately; a slot with
+neither a seed nor a type default is a compile error, never silently left
+stale.
 
 ### 21.4 Directives
 

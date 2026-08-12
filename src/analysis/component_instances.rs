@@ -121,93 +121,16 @@ pub fn expand_component_instances(
             continue;
         }
         // 2026-08-12 (2b3): components ARE objects — `render Name` requires
-        // `obj Name` (the globals-based fragment form is gone).
-        let Some(obj) = obj_defs.get(component) else {
-            return Err(format!(
-                "render '{}' requires an obj of the same name (components ARE \
-                 objects): declare `obj {} {{ ... }}` with the component's \
-                 state slots and member transactions",
-                component, component
-            ));
-        };
-        // 2026-08-12 (2b3): the fragment must bind ONLY the obj's own slots and
-        // member txns — a reference to a non-member is never silently dead.
-        let missing_fields: Vec<&String> = refs
-            .fields
-            .iter()
-            .filter(|f| !obj.slots.contains_key(*f))
-            .collect();
-        if !missing_fields.is_empty() {
-            return Err(format!(
-                "render '{}' references field(s) {} not in obj '{}' slots",
-                component,
-                missing_fields
-                    .iter()
-                    .map(|f| format!("'{}'", f))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                component
-            ));
-        }
-        let missing_txns: Vec<&String> = refs
-            .txns
-            .iter()
-            .filter(|t| !obj.member_txns.contains_key(*t))
-            .collect();
-        if !missing_txns.is_empty() {
-            return Err(format!(
-                "render '{}' triggers transaction(s) {} not members of obj '{}'",
-                component,
-                missing_txns
-                    .iter()
-                    .map(|t| format!("'{}'", t))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                component
-            ));
-        }
+        // `obj Name`; the fragment binds ONLY the obj's slots + member txns.
+        let obj = require_component_obj(&obj_defs, component)?;
+        validate_component_refs(obj, component, &refs)?;
         let mount_count = count_component_mounts(view_html, component, &render_blocks);
         let mut per_mount: Vec<MountSpec> = Vec::with_capacity(mount_count);
         // for_each (not a `for`) keeps expand single-level for Praetor.
         (0..mount_count).for_each(|i| {
-            let prefix = format!("{}.{}", component, i);
-            // Instance slots = the fragment's fields ∪ every slot a variant
-            // member references — all typed by the obj (never `Type::int()`
-            // guessed). The qualifier maps obj-slot identifiers to their
-            // instance-qualified names in the member bodies + contracts.
-            let slot_set = instance_slot_set(items, obj, &refs, &prefix);
-            let qualifier = |id: &str| -> Option<String> {
-                if slot_set.contains(id) {
-                    Some(format!("{}.{}", prefix, id))
-                } else {
-                    None
-                }
-            };
-            let variant_txns = build_txn_variants(items, obj, &i.to_string(), &refs, &qualifier);
-            let slot_types = slot_set
-                .iter()
-                .map(|f| {
-                    (
-                        format!("{}.{}", prefix, f),
-                        obj.slots.get(f).cloned().unwrap_or_else(Type::int),
-                    )
-                })
-                .collect();
-            pending_resets.push((prefix.clone(), slot_types));
-            // The declarative mount spec — the view layer applies it to the
-            // raw fragment (no HTML formatting here).
-            let fields = refs
-                .fields
-                .iter()
-                .map(|field| (field.clone(), format!("{}.{}", prefix, field)))
-                .collect();
-            per_mount.push(MountSpec {
-                component: component.clone(),
-                index: i,
-                marker: prefix.clone(),
-                fields,
-                txn_variants: variant_txns,
-            });
+            let (spec, slot_types) = build_pool_mount(items, obj, &refs, component, i);
+            pending_resets.push((format!("{}.{}", component, i), slot_types));
+            per_mount.push(spec);
             plan.instances.push((component.clone(), i));
         });
         plan.mounts.insert(component.clone(), per_mount);
@@ -217,9 +140,7 @@ pub fn expand_component_instances(
     // defaults, zero) so a b-when unmount starts fresh; the write flows
     // through the reactive machinery (contract + flush).
     for (prefix, slot_types) in pending_resets {
-        if let Err(msg) = emit_reset_txn(items, &prefix, &slot_types, &plan.initializers) {
-            return Err(msg);
-        }
+        emit_reset_txn(items, &prefix, &slot_types, &plan.initializers)?;
     }
     // Briv-side instances: their specs (slots + variants, routed to the
     // instance-name prefix) are added to the plan after the pool pass.
@@ -230,71 +151,214 @@ pub fn expand_component_instances(
         if refs.fields.is_empty() && refs.txns.is_empty() {
             continue;
         }
-        let slot_set = instance_slot_set(items, obj, &refs, var_name);
-        let qualifier = |id: &str| -> Option<String> {
-            if slot_set.contains(id) {
-                Some(format!("{}.{}", var_name, id))
-            } else {
-                None
-            }
-        };
-        let variant_txns = build_txn_variants(items, obj, var_name, &refs, &qualifier);
-        // The literal's field values seed the instance slots (Briv source —
-        // the frontend invents nothing).
-        if let Some(literal) = literal {
-            for (field, value) in literal {
-                plan.initializers
-                    .insert(format!("{}.{}", var_name, field), value.clone());
-            }
-        }
-        let fields = refs
-            .fields
-            .iter()
-            .map(|field| (field.clone(), format!("{}.{}", var_name, field)))
-            .collect();
-        plan.instance_specs.insert(
-            var_name.clone(),
-            MountSpec {
-                component: component.clone(),
-                index: instance_infos
-                    .iter()
-                    .position(|(n, _, _)| n == var_name)
-                    .unwrap_or(0),
-                marker: var_name.clone(),
-                fields,
-                txn_variants: variant_txns,
-            },
-        );
-        // 2026-08-12 (2b3 slice 3): the Briv-side reset — a callable txn that
-        // re-applies the instance's SEEDS (the StructLiteral values), so a
-        // b-when unmount restarts the instance at its Briv-declared state.
-        let slot_types = slot_set
-            .iter()
-            .map(|f| {
-                (
-                    format!("{}.{}", var_name, f),
-                    obj.slots.get(f).cloned().unwrap_or_else(Type::int),
-                )
-            })
-            .collect();
-        emit_reset_txn(items, var_name, &slot_types, &plan.initializers)?;
+        build_instance_spec(items, obj, &refs, &(var_name, component, literal), &mut plan)?;
     }
     Ok(plan)
+}
+
+/// The obj a stateful `render Name` fragment must pair with — a render without
+/// its obj is a compile error, never silently-mounted globals.
+fn require_component_obj<'a>(
+    obj_defs: &'a HashMap<String, ObjInfo>,
+    component: &str,
+) -> Result<&'a ObjInfo, String> {
+    obj_defs.get(component).ok_or_else(|| {
+        format!(
+            "render '{}' requires an obj of the same name (components ARE \
+             objects): declare `obj {} {{ ... }}` with the component's \
+             state slots and member transactions",
+            component, component
+        )
+    })
+}
+
+/// Validate the fragment binds ONLY the obj's own slots and member txns — a
+/// reference to a non-member is never silently dead.
+fn validate_component_refs(
+    obj: &ObjInfo,
+    component: &str,
+    refs: &FragmentRefs,
+) -> Result<(), String> {
+    let missing_fields: Vec<&String> = refs
+        .fields
+        .iter()
+        .filter(|f| !obj.slots.contains_key(*f))
+        .collect();
+    if !missing_fields.is_empty() {
+        return Err(format!(
+            "render '{}' references field(s) {} not in obj '{}' slots",
+            component,
+            missing_fields
+                .iter()
+                .map(|f| format!("'{}'", f))
+                .collect::<Vec<_>>()
+                .join(", "),
+            component
+        ));
+    }
+    let missing_txns: Vec<&String> = refs
+        .txns
+        .iter()
+        .filter(|t| !obj.member_txns.contains_key(*t))
+        .collect();
+    if !missing_txns.is_empty() {
+        return Err(format!(
+            "render '{}' triggers transaction(s) {} not members of obj '{}'",
+            component,
+            missing_txns
+                .iter()
+                .map(|t| format!("'{}'", t))
+                .collect::<Vec<_>>()
+                .join(", "),
+            component
+        ));
+    }
+    Ok(())
+}
+
+/// Build one HTML-side pool mount's spec: the instance slots (typed by the
+/// obj) + per-mount txn variants, plus the slot→type map the reset needs.
+fn build_pool_mount(
+    items: &mut Vec<TopLevel>,
+    obj: &ObjInfo,
+    refs: &FragmentRefs,
+    component: &str,
+    i: usize,
+) -> (MountSpec, HashMap<String, Type>) {
+    let prefix = format!("{}.{}", component, i);
+    // Instance slots = the fragment's fields ∪ every slot a variant member
+    // references — all typed by the obj (never `Type::int()` guessed). The
+    // qualifier maps obj-slot identifiers to their instance-qualified names in
+    // the member bodies + contracts.
+    let slot_set = instance_slot_set(items, obj, refs, &prefix);
+    let qualifier = |id: &str| -> Option<String> {
+        if slot_set.contains(id) {
+            Some(format!("{}.{}", prefix, id))
+        } else {
+            None
+        }
+    };
+    let variant_txns = build_txn_variants(items, obj, &i.to_string(), refs, &qualifier);
+    let slot_types = slot_set
+        .iter()
+        .map(|f| {
+            (
+                format!("{}.{}", prefix, f),
+                obj.slots.get(f).cloned().unwrap_or_else(Type::int),
+            )
+        })
+        .collect();
+    // The declarative mount spec — the view layer applies it to the raw
+    // fragment (no HTML formatting here).
+    let fields = refs
+        .fields
+        .iter()
+        .map(|field| (field.clone(), format!("{}.{}", prefix, field)))
+        .collect();
+    let spec = MountSpec {
+        component: component.to_string(),
+        index: i,
+        marker: prefix,
+        fields,
+        txn_variants: variant_txns,
+    };
+    (spec, slot_types)
+}
+
+/// Build a Briv-side instance's spec: slots + variants routed to the
+/// instance-name prefix, the literal's seeds, and its reset txn.
+fn build_instance_spec(
+    items: &mut Vec<TopLevel>,
+    obj: &ObjInfo,
+    refs: &FragmentRefs,
+    instance: &(&String, &String, &Option<HashMap<String, Expr>>),
+    plan: &mut ComponentInstancePlan,
+) -> Result<(), String> {
+    let (var_name, component, literal) = instance;
+    let var_name = var_name.as_str();
+    let component = component.as_str();
+    let slot_set = instance_slot_set(items, obj, refs, var_name);
+    let qualifier = |id: &str| -> Option<String> {
+        if slot_set.contains(id) {
+            Some(format!("{}.{}", var_name, id))
+        } else {
+            None
+        }
+    };
+    let variant_txns = build_txn_variants(items, obj, var_name, refs, &qualifier);
+    // The literal's field values seed the instance slots (Briv source — the
+    // frontend invents nothing).
+    if let Some(literal) = literal {
+        for (field, value) in literal {
+            plan.initializers
+                .insert(format!("{}.{}", var_name, field), value.clone());
+        }
+    }
+    let fields = refs
+        .fields
+        .iter()
+        .map(|field| (field.clone(), format!("{}.{}", var_name, field)))
+        .collect();
+    plan.instance_specs.insert(
+        var_name.to_string(),
+        MountSpec {
+            component: component.to_string(),
+            index: 0,
+            marker: var_name.to_string(),
+            fields,
+            txn_variants: variant_txns,
+        },
+    );
+    // 2026-08-12 (2b3 slice 3): the Briv-side reset — a callable txn that
+    // re-applies the instance's SEEDS (the StructLiteral values), so a
+    // b-when unmount restarts the instance at its Briv-declared state.
+    let slot_types = slot_set
+        .iter()
+        .map(|f| {
+            (
+                format!("{}.{}", var_name, f),
+                obj.slots.get(f).cloned().unwrap_or_else(Type::int),
+            )
+        })
+        .collect();
+    emit_reset_txn(items, var_name, &slot_types, &plan.initializers)
+}
+
+/// Validate a StructLiteral's field seeds against the obj's slots — a seeded
+/// field the obj does not own is a compile error.
+fn validate_literal_fields(
+    name: &str,
+    base: &str,
+    obj: &ObjInfo,
+    fields: &[(String, Expr)],
+) -> Result<Option<HashMap<String, Expr>>, String> {
+    let mut map = HashMap::new();
+    for (field, value) in fields {
+        if !obj.slots.contains_key(field) {
+            return Err(format!(
+                "component instance '{}' seeds field '{}' which is not an obj '{}' slot",
+                name, field, base
+            ));
+        }
+        map.insert(field.clone(), value.clone());
+    }
+    Ok(Some(map))
 }
 
 /// The Briv zero-default for a bootstrap-primitive slot type — used when a
 /// reset must re-seed an unseeded slot. Custom/compound slot types have no
 /// synthesizable default (a seeded value is the only way they reset).
 fn default_expr_for_type(ty: &Type) -> Option<Expr> {
-    if ty == &Type::int() || ty == &Type::float() || ty == &Type::float64() {
-        Some(Expr::Decimal(0))
-    } else if ty == &Type::bool_() {
-        Some(Expr::Bool(false))
-    } else if ty == &Type::string() {
-        Some(Expr::Quoted(Vec::new()))
-    } else {
-        None
+    if ty == &Type::bool_() {
+        return Some(Expr::Bool(false));
     }
+    if ty == &Type::string() {
+        return Some(Expr::Quoted(Vec::new()));
+    }
+    if ty == &Type::int() || ty == &Type::float() || ty == &Type::float64() {
+        return Some(Expr::Decimal(0));
+    }
+    None
 }
 
 /// Emit a per-instance RESET — a callable txn that re-applies the instance's
@@ -319,17 +383,7 @@ fn emit_reset_txn(
     let mut body: Vec<Statement> = Vec::new();
     let mut conjuncts: Vec<Expr> = Vec::new();
     for slot in &slots {
-        let value = if let Some(seed) = seeds.get(slot) {
-            seed.clone()
-        } else if let Some(def) = slot_types.get(slot).and_then(default_expr_for_type) {
-            def
-        } else {
-            return Err(format!(
-                "component slot '{}' has no seed and no type default — it cannot \
-                 be reset on unmount; seed the instance (`let {}: … = … {{ {}: value }}`)",
-                slot, prefix, slot
-            ));
-        };
+        let value = reset_value_for_slot(slot, slot_types, seeds)?;
         let lhs = Expr::Identifier(slot.clone());
         body.push(Statement::Assign(lhs.clone(), value.clone()));
         conjuncts.push(Expr::BinaryOp(
@@ -367,6 +421,33 @@ fn emit_reset_txn(
     Ok(())
 }
 
+/// The value a reset txn writes for one slot: the Briv seed when seeded, else
+/// the type default (bootstrap primitives only). A slot with neither is a
+/// compile error — never silently left stale on a reset.
+fn reset_value_for_slot(
+    slot: &str,
+    slot_types: &HashMap<String, Type>,
+    seeds: &HashMap<String, Expr>,
+) -> Result<Expr, String> {
+    if let Some(seed) = seeds.get(slot) {
+        return Ok(seed.clone());
+    }
+    if let Some(def) = slot_types.get(slot).and_then(default_expr_for_type) {
+        return Ok(def);
+    }
+    Err(format!(
+        "component slot '{}' has no seed and no type default — it cannot be \
+         reset on unmount; seed the instance (`let {}: … = … {{ {}: value }}`)",
+        slot, prefix_for_error(slot), slot
+    ))
+}
+
+/// The instance prefix (everything before the last `.field`) for an error
+/// message — `c1.count` → `c1`, `Counter.0.count` → `Counter.0`.
+fn prefix_for_error(slot: &str) -> String {
+    slot.rfind('.').map(|i| slot[..i].to_string()).unwrap_or_else(|| slot.to_string())
+}
+
 /// The HTML element names reserved against Briv instance vars — an instance
 /// named `div` mounted as `<div />` would silently shadow the HTML element,
 /// so such a name is a compile error (the namespaces stay separated).
@@ -387,6 +468,7 @@ fn collect_instance_lets(
 ) -> Result<Vec<(String, String, Option<HashMap<String, Expr>>)>, String> {
     let mut infos: Vec<(String, String, Option<HashMap<String, Expr>>)> = Vec::new();
     let mut to_remove: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     for item in items.iter() {
         let TopLevel::Statement(stmt) = item else { continue };
         let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() else {
@@ -395,7 +477,7 @@ fn collect_instance_lets(
         let Some(Type::Custom(base)) = ty else { continue };
         let Some(obj) = obj_defs.get(base) else { continue };
         let Some(_frag) = render_blocks.get(base) else { continue };
-        if infos.iter().any(|(n, _, _)| n == name) {
+        if !seen.insert(name.clone()) {
             continue;
         }
         // Tag namespace separation: an instance var may not shadow a
@@ -423,18 +505,7 @@ fn collect_instance_lets(
                         name, base, type_name
                     ));
                 }
-                let mut map = HashMap::new();
-                for (field, value) in fields {
-                    if !obj.slots.contains_key(field) {
-                        return Err(format!(
-                            "component instance '{}' seeds field '{}' which is not \
-                             an obj '{}' slot",
-                            name, field, base
-                        ));
-                    }
-                    map.insert(field.clone(), value.clone());
-                }
-                Some(map)
+                validate_literal_fields(name, base, obj, fields)?
             }
             Some(other) => {
                 return Err(format!(

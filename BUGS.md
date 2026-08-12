@@ -1,5 +1,45 @@
 # Bugs
 
+## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
+
+**Date:** 2026-08-12
+**Status:** Fixed (commits ffcc5142, db9a9230, cb7ca1d0).
+
+The 2b2 component model seeded instance state from the FRONTEND and reset it
+with Rust-emitted direct stores — both violated the "frontend state changes
+must be bound to a trg" rule.
+
+1. **`<Counter count="7" />` props were Rust-invented seeds.** Rust
+   (`parse_prop_value`) converted HTML attribute strings to `Expr` literals and
+   injected direct `init_state` stores — the value never existed in Briv
+   source. **Fixed:** HTML props dropped entirely; seeding is a Briv
+   StructLiteral (`let c1: Counter = Counter { count: 7 }`), parsed by the Briv
+   parser.
+2. **`__instance_reset_<Name>_<i>` direct-store reset never flushed.** The shim
+   stored values into %State on b-when unmount but nothing ran `__web_flush_*`
+   — the DOM kept the stale value until an unrelated txn flushed (on remount a
+   fresh clone showed authored content, not the reset value). **Fixed:** resets
+   are now callable TXNs (`__reset_c1`) whose write set drives the flush.
+3. **`b-show="step == 0"` was inverted/inert.** The shim's Show/When applyFn
+   tested only the raw field value (`value ? none : ''`), never the comparison
+   — `step == 0` SHOWED the element whenever step was non-zero. The old
+   fragment rewrite even double-qualified the expression
+   (`ShoppingCart.0.ShoppingCart.0.items == 0`). **Fixed:** b-show/b-when bind
+   the root field (first token) and the shim evaluates the comparison via
+   `simple_expr_js` (`value == 0`).
+4. **`tests/instances_test.bv` was stale/aspirational.** `txn Counter.increment`
+   (dotted member name), `&count = ...` (AddrOf-assign), and `@count` (prior
+   state) do not parse/work today. The working obj member form is bare:
+   `obj Counter { count: Int; txn increment [...] { count = count + 1; term; } }`.
+5. **`examples/rstruct-demo.rbv` didn't compile** — `set_name` referenced
+   `new_name` without declaring the parameter (`undefined variable 'new_name'`).
+   **Fixed:** `txn set_name(new_name: String)`. Its compound `b-text="'Hello, ' +
+   name + '!'"` was also silently inert — b-text now rejects compound
+   expressions (bare field + `.^` projection only).
+
+Regression tests: `component_instances` suite (obj pairing, Briv-side routing,
+collision guards, trg reset generation).
+
 ## Global b-class/b-style/b-attr emitted no JS + comment-tag validation — FIXED
 
 **Date:** 2026-08-11
