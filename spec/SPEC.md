@@ -38,6 +38,18 @@ The frontend decides meaning. LLVM, SPIR-V, CIRCT, Webstack, and future backends
 
 Every runtime value selected for a concrete target must be materializable by that target. Failure to resolve a representation is a compile-time error; there is no generic integer fallback.
 
+Iteration, length, and indexed access are likewise selected from a type's
+operation surface, never from a compiler-known collection layout. The
+compiler holds no collection representation: a sequence's elements are read
+through the operations the type itself declares (see §11.4). The compiler
+also holds no collection or element type names as semantic keys — a type is
+iterable because it provides the iteration operations, not because of its
+name or an explicit conformance marker.
+
+> **2026-08-12 (Iterable protocol):** `String`, `List<T>`, `Stack<T>`, and a
+> user-declared collection are all ordinary types whose iteration resolves
+> structurally (§11.4). No collection or string is a compiler special case.
+
 ### 2.2 Semantic values and materialization
 
 The reference interpreter operates on generic semantic values:
@@ -836,6 +848,64 @@ foreach(item in items) {
 
 There are no `for`, `while`, or `loop` keywords. Counted iteration uses iterable ranges or reactive/transactional structure.
 
+#### 11.4.1 Iteration is structural
+
+A type is iterable if, and only if, it provides the iteration operations
+below. Satisfaction is **structural** — there is no `Iterable` keyword, no
+conformance marker, and no compiler-known collection type. A type that
+provides the operations is iterable; one that does not is rejected with a
+compile-time error, never a panic and never a silently skipped loop.
+
+Iteration operations are declared **op-as-member**: the operator name is the
+member name (`op Count() -> Int { … }`), disclosed by the `op` keyword, and no
+bare member name is resolved by the compiler.
+
+The iteration contract has two tiers, selected per type:
+
+- **Tier 2 — Random access sequence.** `op Count() -> Int` and
+  `op At(i: Int) -> &T`. `foreach` lowers to a counted `0..Count` loop that
+  reads each element through `op At` — eligible for vectorization. Used by
+  `List<T>`, `Stack<T>`, inline vectors, and fixed-width `String`.
+- **Tier 1 — General iterable.** `op Iter() -> Cursor` and
+  `op Step(cur) -> Option<&T>`. `foreach` lowers to an external stack cursor:
+  `let cur = c.iter(); while let Some(item) = step(cur) { … }`. Re-iterable,
+  reentrant, zero heap. Used by `HashMap<K,V>`, `LinkedList<T>`, streams, and
+  variable-width `String`.
+
+`foreach` uses the best available tier (Tier 2 when both are present).
+
+Iteration yields **references** (`&T`), not copies. The loop variable binds
+the reference; the body reads through it, and an explicit copy is required to
+materialize a value. This keeps iteration zero-cost for large or inline
+elements.
+
+Indexed read `c[i]` resolves `op At` (Tier 2). `foreach` lowering uses the
+iteration operations internally; it never consults the reflection surface.
+A collection's logical length is the type's own member surface (`list.len`,
+`map.size()`); the reflection target `.^Length` (§17.1) is stored-length
+reflection and is not the collection-length mechanism. Transfer `c <- x` /
+`x <- c` resolves the mutation operators (§15.3).
+
+#### 11.4.2 `String` is `Iterable<Char>`
+
+`String` is a bare `#String` protocol member with no declared fields
+(§16.2); its layout and encoding are derived by the casting graph. It
+satisfies the iteration contract structurally as a sequence of `Char` with
+encoding variants (`#String<UTF8>`, `#String<UTF16>`, `#String<ASCII>`),
+selecting tiers by encoding:
+
+- **Fixed-width encodings** (e.g. `ASCII`): Tier 2 — `op Count` = char count
+  (equal to byte count), `op At(i)` is an O(1) byte load.
+- **Variable-width encodings** (e.g. `UTF8`): Tier 1 for characters — `op Step`
+  is the 1–4-byte decoder yielding `Char`; Tier 2 is available on the byte
+  view (`.Bytes`, a `Slice<U8>`/`Data` over the underlying buffer). Character
+  random access by index on a variable-width encoding is a compile error, never
+  a silent O(N) surprise.
+
+`.^Length` on a `String` is the **stored byte count** (header read). The
+**character count** is a computed property and is an intrinsic operation —
+`CharCount#` — never a reflection target.
+
 ### 11.5 Local and process completion
 
 - `term expression;`: complete the current callable/transition.
@@ -1069,6 +1139,24 @@ Implementations may bind the following syntax families:
 
 Concatenation has no dedicated `++`; it resolves through an ordinary operation binding.
 
+Operations are declared **op-as-member**: the operator name is a member name
+on the type (`op Count() -> Int { … }`, `op At(i: Int) -> &T { … }`), disclosed
+by the `op` keyword. The compiler resolves the operator and inlines the
+member body; it never resolves a bare user-facing member name as a semantic
+key. The iteration operators are:
+
+- `op Count() -> Int` — Tier-2 element count;
+- `op At(i: Int) -> &T` — Tier-2 indexed read (a borrow, not a copy);
+- `op Iter() -> Cursor` — Tier-1 iterator creation;
+- `op Step(cur) -> Option<&T>` — Tier-1 cursor advance;
+- `op InsertAt(v: T)`, `op ExtractFrom() -> T`, `op CopyFrom() -> T` —
+  mutation and value-out (see §15.3);
+- `op Init(v: T)` — type-directed construction (§16.3).
+
+The indexing family distinguishes read from extract: bracket read `[]`
+resolves `op At` (a borrow); the transfer arrow `<-` resolves the extraction
+operators (a value out).
+
 ### 15.3 Transfer arrows
 
 ```briev
@@ -1079,6 +1167,10 @@ map[key] <- value;
 ```
 
 The complete semantic shape of insertion/extraction is carried to the resolved operation binding. The compiler does not hardcode `List`, `Map`, `Entry`, stack, or queue behavior.
+
+Insertion `c <- x` resolves the type's `op InsertAt`; extraction `x <- c`
+resolves `op ExtractFrom` (destructive) or `op CopyFrom` (value out). Both are
+op-as-member declarations (§15.2).
 
 ### 15.4 Precedence
 
@@ -1134,6 +1226,19 @@ Custom parse-prefix/suffix bindings are not currently exposed. Unknown prefixes 
 
 Both are type-directed. Associative literals lower through expected-type construction/insertion behavior; they do not imply a compiler-known hash map.
 
+An ordered literal lowers to the expected type's `op Init` (first element) and
+`op InsertAt` (remaining elements):
+
+```briev
+let x: Stack<Int> = [1, 2, 3];
+// lowers to: op Init(1); op InsertAt(2); op InsertAt(3);
+```
+
+An associative literal lowers through the expected type's construction and
+insertion bindings. A literal with no observable expected type
+(`let x = [1, 2, 3]` with `x` unannotated) is a compile error — type
+annotation required for an unconstrained collection literal.
+
 There is no universal `null` or `nil`. Absence uses an ordinary sum variant such as `Option::None`.
 
 ### 16.4 Ranges
@@ -1174,6 +1279,18 @@ value.^Field
 
 Runtime reflection reads a declared/materialized logical field. Missing fields are compile-time errors for the selected program/target.
 
+`value.^Length` is **stored-length reflection**: it reads a length that is an
+intrinsic property of the value's representation and unreachable through the
+declared member surface — the `Data` byte header, the `String` byte header, or
+the `Vector` descriptor count. It is valid only for those value kinds; on any
+other receiver (a `List`, a `HashMap`, a custom collection) it is a
+compile-time error, because that length is member-managed or computed, not
+intrinsic. **Reflection never routes to an operation:** a length that must be
+computed (for example a UTF8 character count) is an intrinsic — `CharCount#` —
+called explicitly, not a reflection target (§17.3).
+
+`value[i]` resolves the receiver type's `op At` (an indexed borrow, §15.2).
+
 ### 17.2 Compile-time descriptor reflection
 
 ```briev
@@ -1191,6 +1308,11 @@ Descriptor fields include, where applicable:
 - `Type`, `Ops`, `Effects`;
 - `Bytes`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
 - declaration metadata `Name`, `Params`, `Returns`, `Arity`, `Loc`, `FnSpan`, `Doc`, `Hash`, `Contracts`, `Module`, `IsPure`.
+
+`value.^^Element` is the element type of an iterable receiver, derived from
+the receiver type's generic arguments (`List<String>` → `String`,
+`HashMap<K,V>` → `V`, `String` → `Char`). Iteration capability is inspected
+via `value.^^Ops` (the type's operator surface, §15.2).
 
 Declaration/source metadata is compile-time-only unless explicitly materialized.
 
@@ -1429,6 +1551,16 @@ Canonical directives include:
 `b-when` structurally mounts/unmounts a subtree. `b-show` changes presentation only and preserves identity/state.
 
 Dynamic repetition requires a stable `b-key` whenever children may be inserted, removed, or reordered.
+
+`b-each` renders over **any structurally iterable** value (§11.4): a type that
+provides the iteration operations (`op Count`+`op At`, or `op Iter`+`op Step`)
+— `List<T>`, `Stack<T>`, `HashMap<K,V>`, `String` (chars), vectors, or a
+user-declared collection. It never depends on a compiler-known collection
+type. The web backend materializes the iterable into an array by driving the
+same iteration operations; the shim decodes each element by its type tag. A
+view expression `.^Length` on an iterable field reads the materialized array's
+stored length; a non-iterable `b-each` iterable is a compile error, never a
+silently skipped render.
 
 Reactive component nodes and view-event handlers obey the same no-implicit-concurrency rule as every other node: eligible simultaneous pairs require `async` or `sync<group>` classification.
 
