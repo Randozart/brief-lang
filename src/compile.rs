@@ -548,9 +548,13 @@ fn resolve_bind_routes(
     let mut writers: HashMap<String, Vec<String>> = HashMap::new();
     // Flat scan of every (field, txn) write pair — the total write entries,
     // not nodes × fields (single logical pass; grouping below is linear).
+    // 2026-08-12 (2b3 slice 3): compiler-generated lifecycle txns (`__reset_*`,
+    // the b-when unmount resets) are not user routes — a b-bind:value must
+    // resolve to the single USER writer, never the reset.
     let write_pairs: Vec<(String, String)> = graph
         .iter()
         .flat_map(|g| g.nodes.iter())
+        .filter(|n| !n.name.starts_with("__reset_"))
         .flat_map(|n| n.write_set.iter().map(move |f| (f.clone(), n.name.clone())))
         .collect();
     for (field, txn) in write_pairs {
@@ -1019,7 +1023,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         String,
         briv_compiler::ast::Expr,
     > = std::collections::HashMap::new();
-    let mut component_instances: Vec<(String, usize)> = Vec::new();
     let mut instance_specs: std::collections::HashMap<
         String,
         briv_compiler::analysis::component_instances::MountSpec,
@@ -1033,7 +1036,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             Ok(plan) => {
                 component_specs = plan.mounts;
                 component_initializers = plan.initializers;
-                component_instances = plan.instances;
                 instance_specs = plan.instance_specs;
             }
             Err(msg) => return Err(format!("{}: component instance error: {}", file_path, msg)),
@@ -1068,7 +1070,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         Result<briv_compiler::glue::web_generator::BindRoute, String>,
     >> = None;
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers, &component_instances)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -1166,11 +1168,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 .flatten()
                 .collect();
             exports.push("state_layout".to_string());
-            // 2026-08-11 (2b2 lifecycle): per-instance reset exports the shim
-            // calls on b-when unmount.
-            exports.extend(component_instances.iter().map(|(component, idx)| {
-                format!("__instance_reset_{}_{}", component, idx)
-            }));
             exports.sort_unstable();
             exports.dedup();
             compile_wasm(&out_path, &wasm_path, &exports)?;
@@ -1530,7 +1527,6 @@ fn codegen(
         Result<briv_compiler::glue::web_generator::BindRoute, String>,
     >>,
     component_initializers: &std::collections::HashMap<String, briv_compiler::ast::Expr>,
-    component_instances: &[(String, usize)],
 ) -> Result<(String, &'static str), String> {
     // 2026-07-20: Extract operator definitions from AST for backend dispatch.
     let mut operator_defs: std::collections::HashMap<String, Vec<briv_compiler::ast::top::OperatorDef>> = std::collections::HashMap::new();
@@ -1676,8 +1672,7 @@ output = b.generate(items, None);
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init)
-                .with_component_initializers(component_initializers.clone())
-                .with_component_instances(component_instances.to_vec());
+                .with_component_initializers(component_initializers.clone());
             // 2026-08-11 (view wiring): view-bound fields are observability —
             // the DOM consumes them, so dead-field elimination must keep them.
             b.ctx.view_bound_fields = view_signals.clone();

@@ -1408,11 +1408,6 @@ impl LlvmBackend {
     /// 2026-08-11 (2b2 lifecycle): the component instances `(component,
     /// index)` — emit a per-instance reset export so a b-when unmount can
     /// re-seed the instance's slots.
-    pub fn with_component_instances(mut self, instances: Vec<(String, usize)>) -> Self {
-        self.ctx.component_instances = instances;
-        self
-    }
-
     pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
         self.trg_unresolved_action = action;
         self

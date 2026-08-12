@@ -69,13 +69,9 @@ pub struct CompilerContext {
     pub field_briv_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
     /// 2026-08-11 (2b2 slice 2b): component-instance slot initializers from
-    /// mount props (`Counter.0.count` → 5). build_field_index merges them into
+    /// Briv-side seeds (`c1.count` → 5). build_field_index merges them into
     /// field_initializers after the StateDecl registration.
     pub component_initializers: HashMap<String, Expr>,
-    /// 2026-08-11 (2b2 lifecycle): every component instance `(component,
-    /// index)` — the backend emits a per-instance reset export so a b-when
-    /// unmount can re-seed the instance's slots (remount = fresh).
-    pub component_instances: Vec<(String, usize)>,
     pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
     /// 2026-07-02: Tracks RingBuffer variables whose fields are stored inline
     /// in %State (data_ptr, head, tail, mask) instead of via an opaque handle.
@@ -350,7 +346,6 @@ impl CompilerContext {
             field_briv_types: Vec::new(),
             field_initializers: HashMap::new(),
             component_initializers: HashMap::new(),
-            component_instances: Vec::new(),
             ringbuf_inline: HashMap::new(),
             field_modes: HashMap::new(),
             cache_slots: HashMap::new(),

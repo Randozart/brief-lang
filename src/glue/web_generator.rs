@@ -623,12 +623,12 @@ export async function createApp(wasmBytes) {{
                       \x20             template = template || el.cloneNode(true);\n\
                       \x20             anchor = document.createComment('b-when');\n\
                       \x20             el.parentNode.insertBefore(anchor, el);\n\
-                      \x20             // 2026-08-11 (2b2 lifecycle): unmounting a subtree\n\
-                      \x20             // releases any component instances inside it — reset their\n\
-                      \x20             // state so a remount starts fresh.\n\
+                      \x20             // 2026-08-12 (2b3 slice 3): unmounting a subtree\n\
+                      \x20             // releases any component instances inside it — fire their\n\
+                      \x20             // reset TXN (contract + flush) so a remount starts fresh.\n\
                       \x20             el.querySelectorAll('[data-instance]').forEach((m) => {{\n\
                       \x20               const inst = m.getAttribute('data-instance');\n\
-                      \x20               const reset = this._txn('__instance_reset_' + inst.replace('.', '_'));\n\
+                      \x20               const reset = this._txn('__reset_' + inst.replace('.', '_'));\n\
                       \x20               if (reset) reset();\n\
                       \x20             }});\n\
                       \x20             el.remove();\n\
@@ -1013,7 +1013,10 @@ export async function createApp(wasmBytes) {{
                 || (s.starts_with('"') && s.len() >= 2
                     && s[1..].find('"').map_or(false, |i| i == s.len() - 2))
         };
-        if is_identifier(e) && !e.contains('.') {
+        // 2026-08-12 (2b3): a bare identifier INCLUDING dotted instance slots
+        // (`p1.show`, `Counter.0.step`) is a field reference → the flushed
+        // value. (`items.^Size` projections contain `^` and never reach here.)
+        if is_identifier(e) {
             return if value_var.is_empty() {
                 "true".to_string()
             } else {

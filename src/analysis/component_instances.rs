@@ -21,7 +21,7 @@
 //! Scope (slice 2b3): compile-time instance pools for both paths. Dynamic
 //! component counts (`b-each` of components) remain a follow-up.
 
-use crate::ast::{Expr, Statement, TopLevel, Transaction, Type};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Transaction, Type};
 use std::collections::{HashMap, HashSet};
 
 /// A single component mount's per-instance view-rewrite decision — the VIEW
@@ -101,6 +101,7 @@ pub fn expand_component_instances(
     // these: seeds are the literal's field values (Briv source), and the
     // `<name />` tag mounts the fragment routed to the instance's slots.
     let instance_infos = collect_instance_lets(items, &render_blocks, &obj_defs)?;
+    let mut pending_resets: Vec<(String, HashMap<String, Type>)> = Vec::new();
     for (component, fragment_html) in &render_blocks {
         let refs = collect_fragment_refs(fragment_html);
         // A fragment with no state fields is a static view fragment — a single
@@ -165,7 +166,7 @@ pub fn expand_component_instances(
                 component
             ));
         }
-        let mount_count = count_component_mounts(view_html, component);
+        let mount_count = count_component_mounts(view_html, component, &render_blocks);
         let mut per_mount: Vec<MountSpec> = Vec::with_capacity(mount_count);
         // for_each (not a `for`) keeps expand single-level for Praetor.
         (0..mount_count).for_each(|i| {
@@ -183,6 +184,16 @@ pub fn expand_component_instances(
                 }
             };
             let variant_txns = build_txn_variants(items, obj, &i.to_string(), &refs, &qualifier);
+            let slot_types = slot_set
+                .iter()
+                .map(|f| {
+                    (
+                        format!("{}.{}", prefix, f),
+                        obj.slots.get(f).cloned().unwrap_or_else(Type::int),
+                    )
+                })
+                .collect();
+            pending_resets.push((prefix.clone(), slot_types));
             // The declarative mount spec — the view layer applies it to the
             // raw fragment (no HTML formatting here).
             let fields = refs
@@ -200,6 +211,15 @@ pub fn expand_component_instances(
             plan.instances.push((component.clone(), i));
         });
         plan.mounts.insert(component.clone(), per_mount);
+    }
+    // 2026-08-12 (2b3 slice 3): trg-based resets for the HTML-side pool
+    // spawns — a callable txn re-applies the instance's initial state (type
+    // defaults, zero) so a b-when unmount starts fresh; the write flows
+    // through the reactive machinery (contract + flush).
+    for (prefix, slot_types) in pending_resets {
+        if let Err(msg) = emit_reset_txn(items, &prefix, &slot_types, &plan.initializers) {
+            return Err(msg);
+        }
     }
     // Briv-side instances: their specs (slots + variants, routed to the
     // instance-name prefix) are added to the plan after the pool pass.
@@ -245,8 +265,106 @@ pub fn expand_component_instances(
                 txn_variants: variant_txns,
             },
         );
+        // 2026-08-12 (2b3 slice 3): the Briv-side reset — a callable txn that
+        // re-applies the instance's SEEDS (the StructLiteral values), so a
+        // b-when unmount restarts the instance at its Briv-declared state.
+        let slot_types = slot_set
+            .iter()
+            .map(|f| {
+                (
+                    format!("{}.{}", var_name, f),
+                    obj.slots.get(f).cloned().unwrap_or_else(Type::int),
+                )
+            })
+            .collect();
+        emit_reset_txn(items, var_name, &slot_types, &plan.initializers)?;
     }
     Ok(plan)
+}
+
+/// The Briv zero-default for a bootstrap-primitive slot type — used when a
+/// reset must re-seed an unseeded slot. Custom/compound slot types have no
+/// synthesizable default (a seeded value is the only way they reset).
+fn default_expr_for_type(ty: &Type) -> Option<Expr> {
+    if ty == &Type::int() || ty == &Type::float() || ty == &Type::float64() {
+        Some(Expr::Decimal(0))
+    } else if ty == &Type::bool_() {
+        Some(Expr::Bool(false))
+    } else if ty == &Type::string() {
+        Some(Expr::Quoted(Vec::new()))
+    } else {
+        None
+    }
+}
+
+/// Emit a per-instance RESET — a callable txn that re-applies the instance's
+/// initial state on b-when unmount (remount = fresh). The write flows through
+/// the reactive machinery: the contract is carried (`[true][slot == value …]`)
+/// and the body's write set drives the flush, so the DOM updates immediately —
+/// the old direct-store reset never flushed (stale DOM after reset). A slot
+/// with no seed and no type default is a compile error — never silently left
+/// stale.
+fn emit_reset_txn(
+    items: &mut Vec<TopLevel>,
+    prefix: &str,
+    slot_types: &HashMap<String, Type>,
+    seeds: &HashMap<String, Expr>,
+) -> Result<(), String> {
+    let marker = prefix.replace('.', "_");
+    let mut slots: Vec<String> = slot_types.keys().cloned().collect();
+    slots.sort_unstable();
+    if slots.is_empty() {
+        return Ok(());
+    }
+    let mut body: Vec<Statement> = Vec::new();
+    let mut conjuncts: Vec<Expr> = Vec::new();
+    for slot in &slots {
+        let value = if let Some(seed) = seeds.get(slot) {
+            seed.clone()
+        } else if let Some(def) = slot_types.get(slot).and_then(default_expr_for_type) {
+            def
+        } else {
+            return Err(format!(
+                "component slot '{}' has no seed and no type default — it cannot \
+                 be reset on unmount; seed the instance (`let {}: … = … {{ {}: value }}`)",
+                slot, prefix, slot
+            ));
+        };
+        let lhs = Expr::Identifier(slot.clone());
+        body.push(Statement::Assign(lhs.clone(), value.clone()));
+        conjuncts.push(Expr::BinaryOp(
+            BinaryOpKind::Eq,
+            Box::new(lhs),
+            Box::new(value),
+        ));
+    }
+    body.push(Statement::Term(None));
+    let post = conjuncts.into_iter().rev().reduce(|acc, c| {
+        Expr::BinaryOp(BinaryOpKind::And, Box::new(c), Box::new(acc))
+    }).unwrap_or(Expr::Bool(true));
+    items.push(TopLevel::Transaction(Transaction {
+        name: format!("__reset_{}", marker),
+        is_reactive: false,
+        is_async: false,
+        type_params: Vec::new(),
+        parameters: Vec::new(),
+        output_type: None,
+        outputs: Vec::new(),
+        contract: crate::ast::Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: post,
+            watchdog: None,
+            explicit: true,
+            span: None,
+        },
+        body,
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: Vec::new(),
+        span: None,
+        doc: None,
+    }));
+    Ok(())
 }
 
 /// The HTML element names reserved against Briv instance vars — an instance
@@ -439,12 +557,33 @@ fn strip_quotes(v: &str) -> Option<&str> {
     }
 }
 
-/// Count `<Name .../>` mount tags in the view for the component type `Name`.
-/// The name match stops at the first non-identifier byte so `<counter1 />`
-/// never counts as a `<Counter />` mount.
-fn count_component_mounts(view_html: &str, component: &str) -> usize {
+/// Count `<Name .../>` mount tags across the view AND every OTHER render
+/// fragment — a component can be mounted inside a sibling component's
+/// fragment (nested mounts), not just the root view. The component's OWN
+/// fragment is excluded (a self-mount is a cycle error, handled elsewhere).
+fn count_component_mounts(
+    view_html: &str,
+    component: &str,
+    fragments: &HashMap<String, String>,
+) -> usize {
+    let mut total = count_mounts_in(view_html, component);
+    for (name, html) in fragments {
+        // Skip the component's OWN fragment (a self-mount is a cycle error,
+        // handled elsewhere) and any fragment that IS the view (its mounts are
+        // already counted — the view is often the `render Root` block).
+        if name != component && *html != view_html {
+            total += count_mounts_in(html, component);
+        }
+    }
+    total
+}
+
+/// Count `<Name .../>` occurrences in one HTML string. The name match stops at
+/// the first non-identifier byte so `<counter1 />` never counts as a
+/// `<Counter />` mount.
+fn count_mounts_in(html: &str, component: &str) -> usize {
     let needle = format!("<{}", component.to_lowercase());
-    let lower = view_html.to_lowercase();
+    let lower = html.to_lowercase();
     let mut count = 0usize;
     let mut pos = 0usize;
     while let Some(rel) = lower[pos..].find(&needle) {
@@ -1164,6 +1303,104 @@ render Root {
 "#;
         let err = check(src).unwrap_err();
         assert!(err.contains("HTML element"), "{err}");
+    }
+
+    /// 2026-08-12 (2b3 slice 3): a Briv-side instance gets a callable reset
+    /// txn that re-applies its SEED — the write flows through the reactive
+    /// machinery (contract + flush), never a direct store.
+    #[test]
+    fn briv_side_instance_reset_reapplies_seed() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let c1: Counter = Counter { count: 9 };
+render Root {
+    <c1 />
+};
+"#;
+        let (items, _plan) = check(src).unwrap();
+        let reset = items.iter().find_map(|item| match item {
+            TopLevel::Transaction(t) if t.name == "__reset_c1" => Some(t),
+            _ => None,
+        }).expect("reset txn __reset_c1");
+        let writes: Vec<String> = reset.body.iter().filter_map(|s| match s {
+            Statement::Assign(l, _) => Some(format!("{:?}", l)),
+            _ => None,
+        }).collect();
+        assert!(
+            writes.iter().any(|w| w.contains("c1.count")),
+            "reset writes the seeded slot: {writes:?}"
+        );
+        assert!(
+            matches!(reset.contract.post_condition, Expr::BinaryOp(..)),
+            "reset carries a non-trivial post (not [true][true]): {:?}",
+            reset.contract.post_condition
+        );
+        assert!(!reset.is_reactive, "reset is callable-only (no tick livelock)");
+    }
+
+    /// 2026-08-12 (2b3 slice 3): an HTML-side spawn's reset re-applies the
+    /// type default (zero) — a b-when unmount of an anonymous pool instance
+    /// restarts it fresh.
+    #[test]
+    fn html_side_reset_uses_zero_default() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+render Root {
+    <Counter />
+};
+"#;
+        let (items, _plan) = check(src).unwrap();
+        let reset = items.iter().find_map(|item| match item {
+            TopLevel::Transaction(t) if t.name == "__reset_Counter_0" => Some(t),
+            _ => None,
+        }).expect("reset txn __reset_Counter_0");
+        assert!(
+            reset.body.iter().any(|s| matches!(s, Statement::Assign(l, v)
+                if format!("{:?}", l).contains("Counter.0.count")
+                    && matches!(v, Expr::Decimal(0)))),
+            "HTML-side reset writes the zero default: {:?}",
+            reset.body
+        );
+    }
+
+    /// 2026-08-12 (2b3 slice 3): an unseeded slot of a type with no
+    /// synthesizable default is a compile error — never silently left stale on
+    /// a reset.
+    #[test]
+    fn unseedable_slot_reset_rejected() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    buf: Data;
+};
+render Counter {
+    <span b-text="count">0</span>
+    <div b-show="buf">x</div>
+};
+render Root {
+    <Counter />
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(err.contains("no seed and no type default"), "{err}");
     }
 
     /// 2026-08-12 (2b3 slice 2): a component can mount BOTH ways — anonymous

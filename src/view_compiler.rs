@@ -1495,7 +1495,10 @@ if attr.starts_with("b-text") {
                 || (s.starts_with('"') && s.len() >= 2
                     && s[1..].find('"').map_or(false, |i| i == s.len() - 2))
         };
-        if is_identifier(e) && !e.contains('.') {
+        // 2026-08-12 (2b3): a bare identifier INCLUDING dotted instance slots
+        // (`p1.show`, `Counter.0.step`) is a field reference — the shim
+        // evaluates the flushed value. `.^` projections are handled elsewhere.
+        if is_identifier(e) {
             return Ok(Some(e.to_string()));
         }
         // `field <op> literal` — operator first char scan (no loop).
