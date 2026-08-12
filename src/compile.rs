@@ -363,28 +363,12 @@ fn compile_view(
         String,
         Vec<briv_compiler::analysis::component_instances::MountSpec>,
     >,
+    instance_specs: &std::collections::HashMap<
+        String,
+        briv_compiler::analysis::component_instances::MountSpec,
+    >,
 ) -> Result<CompiledView, String> {
-    let raw_view = opts
-        .view_html
-        .as_ref()
-        .or(preprocessed.view_html.as_ref())
-        .cloned()
-        .or_else(|| {
-            // .bv with no <view>/--html: the view is the concatenation of
-            // `render Name { ... }` attachments.
-            let parts: Vec<String> = items
-                .iter()
-                .filter_map(|item| match item {
-                    briv_compiler::ast::TopLevel::RenderBlock(rb) => Some(rb.view_html.clone()),
-                    _ => None,
-                })
-                .collect();
-            if parts.is_empty() {
-                None
-            } else {
-                Some(parts.join("\n"))
-            }
-        });
+    let raw_view = effective_view_html(opts, preprocessed, items);
     let Some(html) = raw_view else {
         return Ok(CompiledView {
             bindings: opts.view_bindings.clone(),
@@ -410,6 +394,7 @@ fn compile_view(
         .collect();
     vc.set_render_blocks(raw_blocks);
     vc.set_component_specs(component_specs.clone());
+    vc.set_instance_specs(instance_specs.clone());
     for item in items {
         match item {
             briv_compiler::ast::TopLevel::StateDecl(sd) => {
@@ -1035,12 +1020,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         briv_compiler::ast::Expr,
     > = std::collections::HashMap::new();
     let mut component_instances: Vec<(String, usize)> = Vec::new();
+    let mut instance_specs: std::collections::HashMap<
+        String,
+        briv_compiler::analysis::component_instances::MountSpec,
+    > = std::collections::HashMap::new();
     if opts.backend == BackendKind::Webstack {
-        let view_html = opts
-            .view_html
-            .clone()
-            .or_else(|| preprocessed.view_html.clone())
-            .unwrap_or_default();
+        let view_html = effective_view_html(opts, &preprocessed, &items).unwrap_or_default();
         match briv_compiler::analysis::component_instances::expand_component_instances(
             &mut items,
             &view_html,
@@ -1049,12 +1034,13 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 component_specs = plan.mounts;
                 component_initializers = plan.initializers;
                 component_instances = plan.instances;
+                instance_specs = plan.instance_specs;
             }
             Err(msg) => return Err(format!("{}: component instance error: {}", file_path, msg)),
         }
     }
     let compiled_view: CompiledView = if opts.backend == BackendKind::Webstack {
-        compile_view(file_path, &items, opts, &preprocessed, &component_specs)?
+        compile_view(file_path, &items, opts, &preprocessed, &component_specs, &instance_specs)?
     } else {
         CompiledView {
             bindings: Vec::new(),
@@ -2184,6 +2170,42 @@ fn compile_wasm(ll_path: &str, wasm_path: &str, exports: &[String]) -> Result<()
     let _ = std::fs::remove_file(&obj_path);
     println!("wrote {}", wasm_path);
     Ok(())
+}
+
+/// The effective view HTML: the `<view>` tag / `--html` value when present;
+/// else the `render Root` container fragment (2026-08-12, 2b3 — component
+/// fragments are mounted via tags, so the Root container is the view, not the
+/// concatenation of every fragment); else the legacy concatenation of render
+/// attachments.
+fn effective_view_html(
+    opts: &BuildOptions,
+    preprocessed: &PreprocessedSource,
+    items: &[briv_compiler::ast::TopLevel],
+) -> Option<String> {
+    if let Some(h) = opts.view_html.as_ref().or(preprocessed.view_html.as_ref()) {
+        return Some(h.clone());
+    }
+    let root = items.iter().find_map(|item| match item {
+        briv_compiler::ast::TopLevel::RenderBlock(rb) if rb.struct_name == "Root" => {
+            Some(rb.view_html.clone())
+        }
+        _ => None,
+    });
+    if root.is_some() {
+        return root;
+    }
+    let parts: Vec<String> = items
+        .iter()
+        .filter_map(|item| match item {
+            briv_compiler::ast::TopLevel::RenderBlock(rb) => Some(rb.view_html.clone()),
+            _ => None,
+        })
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
 }
 
 /// Lex + parse + resolve imports + typecheck, returning items and universe.

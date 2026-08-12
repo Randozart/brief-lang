@@ -34,6 +34,10 @@ pub struct MountSpec {
     pub component: String,
     /// This mount's index.
     pub index: usize,
+    /// The `data-instance` marker value — the slot prefix: `Counter.0` for an
+    /// HTML-side pool spawn, `c1` for a Briv-side instance. The shim's b-when
+    /// unmount resets the instance via this key.
+    pub marker: String,
     /// Fragment-referenced field → instance-qualified slot
     /// (`count` → `Counter.0.count`).
     pub fields: Vec<(String, String)>,
@@ -45,8 +49,12 @@ pub struct MountSpec {
 #[derive(Debug)]
 pub struct ComponentInstancePlan {
     /// Component name → per-mount view-rewrite specs (decisions only — the
-    /// view layer applies them to the raw fragment).
+    /// view layer applies them to the raw fragment). HTML-side anonymous
+    /// spawns (`<Counter />`) route here.
     pub mounts: std::collections::HashMap<String, Vec<MountSpec>>,
+    /// Briv-side instances (`let c1: Counter = Counter { count: 5 }` +
+    /// `<c1 />`), keyed by the instance var name. The PROGRAM owns these.
+    pub instance_specs: std::collections::HashMap<String, MountSpec>,
     /// Instance slot → Briv seed (`c1.count` → 5, from a StructLiteral). The
     /// backend seeds these into %State at init; the VALUES are Briv source.
     pub initializers: std::collections::HashMap<String, Expr>,
@@ -84,9 +92,15 @@ pub fn expand_component_instances(
 
     let mut plan = ComponentInstancePlan {
         mounts: HashMap::new(),
+        instance_specs: HashMap::new(),
         initializers: HashMap::new(),
         instances: Vec::new(),
     };
+    // 2026-08-12 (2b3 slice 2): Briv-side instances — `let <name>: <Obj> =
+    // <StructLiteral>` where the type has a render block. The PROGRAM owns
+    // these: seeds are the literal's field values (Briv source), and the
+    // `<name />` tag mounts the fragment routed to the instance's slots.
+    let instance_infos = collect_instance_lets(items, &render_blocks, &obj_defs)?;
     for (component, fragment_html) in &render_blocks {
         let refs = collect_fragment_refs(fragment_html);
         // A fragment with no state fields is a static view fragment — a single
@@ -98,6 +112,7 @@ pub fn expand_component_instances(
                 vec![MountSpec {
                     component: component.clone(),
                     index: 0,
+                    marker: format!("{}.0", component),
                     fields: Vec::new(),
                     txn_variants: HashMap::new(),
                 }],
@@ -167,7 +182,7 @@ pub fn expand_component_instances(
                     None
                 }
             };
-            let variant_txns = build_txn_variants(items, obj, i, &refs, &qualifier);
+            let variant_txns = build_txn_variants(items, obj, &i.to_string(), &refs, &qualifier);
             // The declarative mount spec — the view layer applies it to the
             // raw fragment (no HTML formatting here).
             let fields = refs
@@ -178,6 +193,7 @@ pub fn expand_component_instances(
             per_mount.push(MountSpec {
                 component: component.clone(),
                 index: i,
+                marker: prefix.clone(),
                 fields,
                 txn_variants: variant_txns,
             });
@@ -185,7 +201,146 @@ pub fn expand_component_instances(
         });
         plan.mounts.insert(component.clone(), per_mount);
     }
+    // Briv-side instances: their specs (slots + variants, routed to the
+    // instance-name prefix) are added to the plan after the pool pass.
+    for (var_name, component, literal) in &instance_infos {
+        let Some(obj) = obj_defs.get(component) else { continue };
+        let Some(fragment_html) = render_blocks.get(component) else { continue };
+        let refs = collect_fragment_refs(fragment_html);
+        if refs.fields.is_empty() && refs.txns.is_empty() {
+            continue;
+        }
+        let slot_set = instance_slot_set(items, obj, &refs, var_name);
+        let qualifier = |id: &str| -> Option<String> {
+            if slot_set.contains(id) {
+                Some(format!("{}.{}", var_name, id))
+            } else {
+                None
+            }
+        };
+        let variant_txns = build_txn_variants(items, obj, var_name, &refs, &qualifier);
+        // The literal's field values seed the instance slots (Briv source —
+        // the frontend invents nothing).
+        if let Some(literal) = literal {
+            for (field, value) in literal {
+                plan.initializers
+                    .insert(format!("{}.{}", var_name, field), value.clone());
+            }
+        }
+        let fields = refs
+            .fields
+            .iter()
+            .map(|field| (field.clone(), format!("{}.{}", var_name, field)))
+            .collect();
+        plan.instance_specs.insert(
+            var_name.clone(),
+            MountSpec {
+                component: component.clone(),
+                index: instance_infos
+                    .iter()
+                    .position(|(n, _, _)| n == var_name)
+                    .unwrap_or(0),
+                marker: var_name.clone(),
+                fields,
+                txn_variants: variant_txns,
+            },
+        );
+    }
     Ok(plan)
+}
+
+/// The HTML element names reserved against Briv instance vars — an instance
+/// named `div` mounted as `<div />` would silently shadow the HTML element,
+/// so such a name is a compile error (the namespaces stay separated).
+const RESERVED_TAG_NAMES: &[&str] = &[
+    "a", "button", "div", "form", "h1", "h2", "h3", "h4", "h5", "h6", "img",
+    "input", "label", "li", "ol", "p", "select", "span", "table", "tbody",
+    "td", "textarea", "th", "thead", "tr", "ul",
+];
+
+/// Collect Briv-side component instances: top-level `let <name>: <Obj> =
+/// <StructLiteral>` where `<Obj>` has a render block. Returns `(var name,
+/// component, literal field values)`. The consumed lets are removed (their
+/// state becomes the `name.<field>` slots).
+fn collect_instance_lets(
+    items: &mut Vec<TopLevel>,
+    render_blocks: &HashMap<String, String>,
+    obj_defs: &HashMap<String, ObjInfo>,
+) -> Result<Vec<(String, String, Option<HashMap<String, Expr>>)>, String> {
+    let mut infos: Vec<(String, String, Option<HashMap<String, Expr>>)> = Vec::new();
+    let mut to_remove: Vec<String> = Vec::new();
+    for item in items.iter() {
+        let TopLevel::Statement(stmt) = item else { continue };
+        let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() else {
+            continue;
+        };
+        let Some(Type::Custom(base)) = ty else { continue };
+        let Some(obj) = obj_defs.get(base) else { continue };
+        let Some(_frag) = render_blocks.get(base) else { continue };
+        if infos.iter().any(|(n, _, _)| n == name) {
+            continue;
+        }
+        // Tag namespace separation: an instance var may not shadow a
+        // component type name or a reserved HTML element name.
+        if render_blocks.contains_key(name) {
+            return Err(format!(
+                "instance variable '{}' shadows component type '{}' — rename the \
+                 instance (the tag namespace resolves instance vars before \
+                 component types)",
+                name, name
+            ));
+        }
+        if RESERVED_TAG_NAMES.contains(&name.as_str()) {
+            return Err(format!(
+                "instance variable '{}' collides with the HTML element '{}' — \
+                 rename it (HTML element names are reserved)",
+                name, name
+            ));
+        }
+        let literal_fields = match expr {
+            Some(Expr::StructLiteral { type_name, fields }) => {
+                if type_name != base {
+                    return Err(format!(
+                        "component instance '{}' is typed '{}' but constructed as '{}'",
+                        name, base, type_name
+                    ));
+                }
+                let mut map = HashMap::new();
+                for (field, value) in fields {
+                    if !obj.slots.contains_key(field) {
+                        return Err(format!(
+                            "component instance '{}' seeds field '{}' which is not \
+                             an obj '{}' slot",
+                            name, field, base
+                        ));
+                    }
+                    map.insert(field.clone(), value.clone());
+                }
+                Some(map)
+            }
+            Some(other) => {
+                return Err(format!(
+                    "component instance '{}' must be constructed with an object \
+                     literal (`{} {{ field: value }}`) — a scalar initializer has \
+                     no per-instance meaning",
+                    name, base
+                ));
+            }
+            None => None,
+        };
+        infos.push((name.clone(), base.clone(), literal_fields));
+        to_remove.push(name.clone());
+    }
+    if !to_remove.is_empty() {
+        items.retain(|item| {
+            let TopLevel::Statement(stmt) = item else { return true };
+            let crate::ast::Statement::Let { name, .. } = stmt.as_ref() else {
+                return true;
+            };
+            !to_remove.contains(name)
+        });
+    }
+    Ok(infos)
 }
 
 /// Collect `obj Name { slot: Type; txn member [...] {...}; }` definitions as
@@ -304,7 +459,7 @@ fn count_component_mounts(view_html: &str, component: &str) -> usize {
         }
         pos = after;
     }
-    count.max(1)
+    count
 }
 
 /// The per-mount instance slots: the fragment's fields ∪ every obj slot a
@@ -347,11 +502,13 @@ fn collect_txn_slots(txn: &Transaction, slots: &HashMap<String, Type>, out: &mut
 
 /// Build per-mount variants of the obj's member txns that write the
 /// fragment's fields (or are triggered by it). Returns the variant names
-/// keyed by the original member name.
+/// keyed by the original member name. `suffix` is the mount identity — the
+/// mount index (`0`) for an HTML-side spawn, the instance var name (`c1`)
+/// for a Briv-side instance.
 fn build_txn_variants(
     items: &mut Vec<TopLevel>,
     obj: &ObjInfo,
-    mount: usize,
+    suffix: &str,
     refs: &FragmentRefs,
     qualifier: &dyn Fn(&str) -> Option<String>,
 ) -> HashMap<String, String> {
@@ -365,7 +522,7 @@ fn build_txn_variants(
         .map(|(name, t)| (name.clone(), t.clone()))
         .collect();
     for (name, mut t) in members {
-        let variant_name = format!("{}_{}", name, mount);
+        let variant_name = format!("{}_{}", name, suffix);
         // for_each keeps the body-rewrite single-level for Praetor.
         t.body.iter_mut().for_each(|stmt| rewrite_stmt(stmt, qualifier));
         let pre = rewrite_expr(&t.contract.pre_condition, qualifier);
@@ -850,6 +1007,201 @@ render Root {
             plan.mounts.get("Counter").map(|s| s.len()).unwrap_or(0),
             2,
             "two per-mount specs"
+        );
+    }
+
+    /// 2026-08-12 (2b3 slice 2): a Briv-side instance — `let c1: Counter =
+    /// Counter { count: 5 }` + `<c1 />` — routes to the `c1.*` slots, seeds
+    /// from the StructLiteral (Briv source), and the let is consumed.
+    #[test]
+    fn briv_side_instance_seeds_and_routes() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
+};
+render Counter {
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+};
+let c1: Counter = Counter { count: 5 };
+render Root {
+    <c1 />
+};
+"#;
+        let (items, plan) = check(src).unwrap();
+        let spec = plan.instance_specs.get("c1").expect("c1 spec");
+        assert_eq!(spec.marker, "c1", "data-instance marker is the instance name");
+        assert_eq!(
+            spec.fields,
+            vec![("count".to_string(), "c1.count".to_string())],
+            "fragment routes to c1.count"
+        );
+        assert_eq!(
+            spec.txn_variants.get("increment").map(|v| v.as_str()),
+            Some("increment_c1"),
+            "variant named by the instance"
+        );
+        assert_eq!(
+            plan.initializers.get("c1.count"),
+            Some(&Expr::Decimal(5)),
+            "seed is the Briv literal"
+        );
+        let states: Vec<String> = items.iter().filter_map(|item| match item {
+            TopLevel::StateDecl(sd) => Some(sd.name.clone()),
+            _ => None,
+        }).collect();
+        assert!(states.contains(&"c1.count".to_string()), "{states:?}");
+        let txns: Vec<String> = items.iter().filter_map(|item| match item {
+            TopLevel::Transaction(t) => Some(t.name.clone()),
+            _ => None,
+        }).collect();
+        assert!(txns.contains(&"increment_c1".to_string()), "{txns:?}");
+        assert!(
+            !items.iter().any(|item| matches!(item, TopLevel::Statement(s) if matches!(
+                s.as_ref(), crate::ast::Statement::Let { name, .. } if name == "c1"))),
+            "the consumed let is removed (its state became the c1.* slots)"
+        );
+        assert!(
+            plan.mounts.get("Counter").map(|s| s.is_empty()).unwrap_or(true),
+            "no spurious HTML-side pool mount"
+        );
+    }
+
+    /// Two Briv-side instances of the same obj are fully independent — each
+    /// seeds its own slot and fires its own variant.
+    #[test]
+    fn two_briv_side_instances_are_independent() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let c1: Counter = Counter { count: 5 };
+let c2: Counter = Counter { count: 7 };
+render Root {
+    <c1 />
+    <c2 />
+};
+"#;
+        let (_items, plan) = check(src).unwrap();
+        assert_eq!(
+            plan.initializers.get("c1.count"),
+            Some(&Expr::Decimal(5)),
+            "c1 seeds 5"
+        );
+        assert_eq!(
+            plan.initializers.get("c2.count"),
+            Some(&Expr::Decimal(7)),
+            "c2 seeds 7"
+        );
+        assert!(plan.instance_specs.contains_key("c1"), "c1 spec");
+        assert!(plan.instance_specs.contains_key("c2"), "c2 spec");
+    }
+
+    /// A seeded field the obj does not own is a compile error.
+    #[test]
+    fn instance_seed_field_must_be_obj_slot() {
+        let src = r#"
+obj Counter {
+    count: Int;
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let c1: Counter = Counter { total: 5 };
+render Root {
+    <c1 />
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(err.contains("'total'") && err.contains("slot"), "{err}");
+    }
+
+    /// An instance var shadowing a component type name is a compile error.
+    #[test]
+    fn instance_var_shadowing_component_type_rejected() {
+        let src = r#"
+obj Counter {
+    count: Int;
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let Counter: Counter = Counter { count: 5 };
+render Root {
+    <Counter />
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(err.contains("shadows component type"), "{err}");
+    }
+
+    /// An instance var colliding with a reserved HTML element name is a
+    /// compile error — the tag namespaces stay separated.
+    #[test]
+    fn instance_var_colliding_with_html_element_rejected() {
+        let src = r#"
+obj Counter {
+    count: Int;
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let div: Counter = Counter { count: 5 };
+render Root {
+    <div />
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(err.contains("HTML element"), "{err}");
+    }
+
+    /// 2026-08-12 (2b3 slice 2): a component can mount BOTH ways — anonymous
+    /// `<Counter />` pool spawns AND a Briv-side `<c1 />` instance.
+    #[test]
+    fn mixed_html_and_briv_mounts() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
+};
+render Counter {
+    <span b-text="count">0</span>
+};
+let c1: Counter = Counter { count: 5 };
+render Root {
+    <Counter />
+    <c1 />
+};
+"#;
+        let (_items, plan) = check(src).unwrap();
+        assert_eq!(
+            plan.mounts.get("Counter").map(|s| s.len()).unwrap_or(0),
+            1,
+            "one HTML-side pool mount"
+        );
+        assert!(plan.instance_specs.contains_key("c1"), "c1 spec present");
+        assert_eq!(
+            plan.initializers.get("c1.count"),
+            Some(&Expr::Decimal(5)),
+            "c1 seeds from Briv"
+        );
+        assert!(
+            !plan.initializers.contains_key("Counter.0.count"),
+            "HTML-side spawn stays zero-init"
         );
     }
 }

@@ -149,6 +149,11 @@ pub struct ViewCompiler {
     /// txns → mount variants, and the fragment root gets a `data-instance`
     /// marker so the shim can reset the instance on b-when unmount.
     pub component_specs: HashMap<String, Vec<crate::analysis::component_instances::MountSpec>>,
+    /// 2026-08-12 (2b3 slice 2): Briv-side instance specs, keyed by the
+    /// instance var name (`c1`). A `<c1 />` tag mounts the component's
+    /// fragment routed to the instance's slots — no mount counter (the
+    /// instance is unique by name).
+    pub instance_specs: HashMap<String, crate::analysis::component_instances::MountSpec>,
     /// 2026-08-11 (2b2 slice 2a): per-component mount counter, used to pick the
     /// per-mount fragment variant for each `<Name />` tag.
     pub component_mounts: HashMap<String, usize>,
@@ -179,6 +184,7 @@ impl ViewCompiler {
             each_depth: 0,
             render_blocks: HashMap::new(),
             component_specs: HashMap::new(),
+            instance_specs: HashMap::new(),
             component_mounts: HashMap::new(),
             diagnostics: Vec::new(),
             validation_errors: Vec::new(),
@@ -210,6 +216,15 @@ impl ViewCompiler {
         self.component_mounts.clear();
     }
 
+    /// 2026-08-12 (2b3 slice 2): register the Briv-side instance specs
+    /// (keyed by instance var name).
+    pub fn set_instance_specs(
+        &mut self,
+        specs: HashMap<String, crate::analysis::component_instances::MountSpec>,
+    ) {
+        self.instance_specs = specs;
+    }
+
     /// 2026-08-11 (2b2 slice 2a/2b): apply a mount's rewrite SPEC to the raw
     /// fragment — the view layer's formatting (analysis supplies only the
     /// decisions): field directive values become the instance-qualified slots,
@@ -228,7 +243,7 @@ impl ViewCompiler {
         for (orig, variant) in &spec.txn_variants {
             html = Self::replace_directive_value(&html, orig, variant);
         }
-        Self::mark_fragment_root(&html, &format!("{}.{}", spec.component, spec.index))
+        Self::mark_fragment_root(&html, &spec.marker)
     }
 
     /// 2026-08-11 (2b2 slice 2a/2b): inject `data-instance="<id>"` into the
@@ -450,44 +465,60 @@ impl ViewCompiler {
                             .unwrap_or("")
                             .trim_end_matches('>')
                             .to_string();
-                        if self.render_blocks.contains_key(&tag_name_raw) {
-                            if in_progress.contains(&tag_name_raw) {
+                        // 2026-08-12 (2b3): tag namespace resolution — a Briv-side
+                        // instance var (`<c1 />`) mounts the component's fragment
+                        // routed to the instance's slots; a component type
+                        // (`<Counter />`) spawns an anonymous pool instance.
+                        let inst_spec = self.instance_specs.get(&tag_name_raw).cloned();
+                        let is_instance = inst_spec.is_some();
+                        if is_instance || self.render_blocks.contains_key(&tag_name_raw) {
+                            // The spec decides the routing: instance name for
+                            // Briv-side, mount-index pool for HTML-side.
+                            let spec = inst_spec.unwrap_or_else(|| {
+                                let mount = self
+                                    .component_mounts
+                                    .entry(tag_name_raw.clone())
+                                    .or_insert(0);
+                                let specs = self
+                                    .component_specs
+                                    .get(&tag_name_raw)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let s = specs
+                                    .get(*mount % specs.len().max(1))
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        crate::analysis::component_instances::MountSpec {
+                                            component: tag_name_raw.clone(),
+                                            index: 0,
+                                            marker: format!("{}.0", tag_name_raw),
+                                            fields: Vec::new(),
+                                            txn_variants: std::collections::HashMap::new(),
+                                        }
+                                    });
+                                *mount += 1;
+                                s
+                            });
+                            let comp = if is_instance {
+                                spec.component.clone()
+                            } else {
+                                tag_name_raw.clone()
+                            };
+                            if in_progress.contains(&comp) {
                                 self.validation_errors.push(format!(
                                     "component cycle: render '{}' mounts itself (directly or transitively)",
-                                    tag_name_raw
+                                    comp
                                 ));
                                 result.push_str(tag_str);
                                 pos += end_pos;
                                 continue;
                             }
-                            in_progress.insert(tag_name_raw.clone());
-                            // 2026-08-11 (2b2 slice 2a/2b): pick the per-mount
-                            // REWRITE SPEC (decisions) and apply it to the raw
-                            // fragment — the view layer formats the HTML.
-                            let mount = self
-                                .component_mounts
-                                .entry(tag_name_raw.clone())
-                                .or_insert(0);
-                            let specs = self
-                                .component_specs
-                                .get(&tag_name_raw)
-                                .cloned()
-                                .unwrap_or_default();
-                            let spec = specs
-                                .get(*mount % specs.len().max(1))
-                                .cloned()
-                                .unwrap_or(crate::analysis::component_instances::MountSpec {
-                                    component: tag_name_raw.clone(),
-                                    index: 0,
-                                    fields: Vec::new(),
-                                    txn_variants: std::collections::HashMap::new(),
-                                });
+                            in_progress.insert(comp.clone());
                             let raw = self
                                 .render_blocks
-                                .get(&tag_name_raw)
+                                .get(&comp)
                                 .cloned()
                                 .unwrap_or_default();
-                            *mount += 1;
                             // The raw fragment, rewritten for this mount.
                             let fragment = self.apply_mount_spec(&raw, &spec);
                             // Self-closing `<Name />` skips just the tag; the
@@ -502,7 +533,7 @@ impl ViewCompiler {
                             };
                             let spliced = self.inject_ids_inner(&fragment, in_progress);
                             result.push_str(&spliced);
-                            in_progress.remove(&tag_name_raw);
+                            in_progress.remove(&comp);
                             pos += skip_to;
                             continue;
                         }
