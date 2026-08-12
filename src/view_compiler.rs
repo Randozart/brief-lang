@@ -1213,7 +1213,39 @@ if attr.starts_with("b-text") {
                 }
             }
         }
+        // 2026-08-12 (2b3): the shim EVALUATES b-show/b-when comparisons on
+        // flush (`step == 0` → `value == 0`) and b-text renders a bare field +
+        // `.^` projections. Any other expression shape is rejected at compile
+        // time — a directive the shim cannot evaluate is never silently dead.
+        for directive in ["b-show", "b-when"] {
+            if let Some(expr) = self.extract_attr_value(tag, directive) {
+                if let Err(msg) = self.bounded_view_expr(&expr) {
+                    return Some(format!("`{directive}` {msg}"));
+                }
+            }
+        }
+        if let Some(expr) = self.extract_attr_value(tag, "b-text") {
+            if Self::compound_text_signal(&expr) {
+                return Some(format!(
+                    "`b-text` accepts only a bare field (`count`) or a `.^` projection \
+                     (`items.^Size`) — complex expressions (string concat, arithmetic, \
+                     calls) are unsupported (never silently dead DOM)"
+                ));
+            }
+        }
         None
+    }
+
+    /// 2026-08-12 (2b3): whether a `b-text` value is a compound expression the
+    /// shim cannot render. A bare field / `.^` projection / quoted literal /
+    /// number contains none of the operator or whitespace markers.
+    fn compound_text_signal(expr: &str) -> bool {
+        let e = expr.trim();
+        if e.is_empty() {
+            return true;
+        }
+        let has_op = e.contains(['=', '!', '<', '>', '+', '-', '*', '/', '(', ')', '?', ':', ',']);
+        has_op || e.chars().any(|c| c.is_whitespace())
     }
 
     /// Conservative purity check for a view-binding expression: rejects

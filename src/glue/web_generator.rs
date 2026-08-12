@@ -569,16 +569,23 @@ export async function createApp(wasmBytes) {{
                 )
             }
             Directive::Show { expr } | Directive::Hide { expr } => {
-                let Some(handle) = self.field_handle_for_signal(expr) else {
+                // 2026-08-12 (2b3): `b-show="step == 0"` binds the ROOT field
+                // (first token) and the shim EVALUATES the comparison on flush —
+                // previously only the raw value was tested (`step != 0` showed
+                // the element). Literal-only exprs have no field handle.
+                let (root, _) = crate::view_compiler::condition_root_signal(expr);
+                let Some(handle) = self.field_handle_for_signal(root) else {
                     return String::new();
                 };
                 let hidden = matches!(binding.directive, Directive::Hide { .. });
+                let cond = Self::simple_expr_js(expr, "value");
                 format!(
                     "this._registerViewEffect({handle}, (value) => {{\n\
                      \x20         const el = {el};\n\
-                     \x20         if (el) el.style.display = ({hidden} ? !value : value) ? 'none' : '';\n\
+                     \x20         if (el) el.style.display = ({hidden} ? !({cond}) : ({cond})) ? 'none' : '';\n\
                      \x20       }});",
-                    hidden = if hidden { "false" } else { "true" }
+                    hidden = if hidden { "true" } else { "false" },
+                    cond = cond
                 )
             }
             Directive::When { expr } => {
@@ -596,6 +603,10 @@ export async function createApp(wasmBytes) {{
                 let Some(handle) = self.field_handle_for_signal(root) else {
                     return String::new();
                 };
+                // 2026-08-12 (2b3): the shim EVALUATES the b-when comparison on
+                // flush (`step == 0` → `value == 0`) — the raw value alone
+                // would mount on `step != 0`.
+                let cond = Self::simple_expr_js(expr, "value");
                 format!(
                     "(() => {{\n\
                      \x20         const el = {el};\n\
@@ -604,7 +615,7 @@ export async function createApp(wasmBytes) {{
                      \x20         let template = null;\n\
                      \x20         let mounted = true;\n\
                      \x20         this._registerViewEffect({handle}, (value) => {{\n\
-                     \x20           const show = value ? true : false;\n\
+                     \x20           const show = ({cond}) ? true : false;\n\
                       \x20           if (show && !mounted) {{\n\
                       \x20             anchor.parentNode.insertBefore(template.cloneNode(true), anchor);\n\
                       \x20             mounted = true;\n\
@@ -624,9 +635,10 @@ export async function createApp(wasmBytes) {{
                       \x20             mounted = false;\n\
                       \x20           }}\n\
                       \x20         }});\n\
-                      \x20       }})();"
+                      \x20       }})();",
+                    cond = cond
                  )
-             }
+            }
             Directive::Bind { target } => {
                 // 2026-08-11 (Phase 2a2, SPEC 21.4): `b-bind:value="field"` wires
                 // the `input` event to the UNIQUE transaction that writes the

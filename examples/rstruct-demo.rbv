@@ -1,25 +1,27 @@
 // render-struct-demo.rbv — render component definition
-// 2026-07-26: Migrated from rstruct to render syntax
-//
-// A render attaches view HTML to state fields and transactions.
-// The struct defines the data layout; render defines the view.
+// 2026-08-12 (2b3): obj-backed — obj Greeter owns state + member txns; the
+// render fragment binds the obj's slots. HTML-side spawn (<Greeter />) is
+// reactor-owned + zero-init; Briv-side seeds land with the 2b3 Briv-side
+// slice (let g1: Greeter = Greeter { name: "World" }).
 
-let name: String = "World";
-let count: Int = 0;
+obj Greeter {
+    name: String;
+    count: Int;
 
-txn set_name [true][name == new_name] {
-    name = new_name;
-    term;
-};
+    txn set_name(new_name: String) [true][name == new_name] {
+        name = new_name;
+        term;
+    };
 
-txn greet [count < 100][true] {
-    count = count + 1;
-    term;
+    txn greet [count < 100][true] {
+        count = count + 1;
+        term;
+    };
 };
 
 render Greeter {
     <div class="greeter">
-        <h1 b-text="'Hello, ' + name + '!'">Hello, World!</h1>
+        <h1>Hello, <span b-text="name">World</span>!</h1>
         <p>Greeted <span b-text="count">0</span> times</p>
         <button b-trigger:click="greet">Greet</button>
         <input type="text" b-bind:value="name" />

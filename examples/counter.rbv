@@ -1,21 +1,24 @@
-// counter.rbv — Counter component using render struct
-// 2026-07-26: Migrated from rstruct to render syntax
+// counter.rbv — Counter component (obj-backed, Phase 2b3)
+// 2026-08-12: components ARE objects — obj Counter owns state + member txns;
+// render Counter binds the obj's slots.
 
-let count: Int = 0;
+obj Counter {
+    count: Int;
 
-txn increment [count < 100][true] {
-    count = count + 1;
-    term;
-};
+    txn increment [count < 100][true] {
+        count = count + 1;
+        term;
+    };
 
-txn decrement [count > 0][true] {
-    count = count - 1;
-    term;
-};
+    txn decrement [count > 0][true] {
+        count = count - 1;
+        term;
+    };
 
-txn reset [count != 0][0 == count] {
-    count = 0;
-    term;
+    txn reset [count != 0][0 == count] {
+        count = 0;
+        term;
+    };
 };
 
 render Counter {
