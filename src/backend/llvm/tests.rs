@@ -5486,8 +5486,12 @@ fn test_string_len_and_bytes_reflect() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @briev_char_len(ptr "),
-        "String .^Length must emit briev_char_len (UTF8 char count); got:\n{ir}"
+        ir.contains("load i64, ptr "),
+        "String .^Length must read the stored byte header (SPEC 17.1); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @briev_char_len(ptr "),
+        ".^Length must NOT emit the char scan (that is CharCount#); got:\n{ir}"
     );
     assert!(
         ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),

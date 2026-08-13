@@ -2541,13 +2541,14 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                 // 2026-08-01 (B3): `x.^Length` on a #String → the `Size` prop
-                 // default = UTF8 character count (runtime helper reads the
-                 // [len][bytes] buffer and counts codepoints). The O(1) byte
-                 // length (header) is `x.^^Bytes` below.
+                 // 2026-08-12 (Iterable protocol): `x.^Length` on a #String is
+                 // the STORED byte count — the [len] header of the
+                 // [len][bytes] handle (O(1), no scan). The UTF8 CHARACTER
+                 // count is the `CharCount#` intrinsic (a computed scan; SPEC
+                 // §17.1/§17.3).
                  ty if self.is_string_operand(ty) => {
                      let r = self.fun.gen_reg();
-                     writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
                  // 2026-08-06 (Phase 7): `x.^Length` on a #Data — the byte length
@@ -2558,18 +2559,19 @@ impl LlvmBackend {
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                // 2026-08-04 (compiler-in-Briev): a String value boxed to an
-                // i64 HANDLE at a call/binding boundary (String param, frgn
-                // result) is typed Custom("Int")/Int here — the physical value
-                // is still the [len][bytes] pointer. Recover the semantic type
-                // from the binding (the let's declared type) and inttoptr the
-                // handle before briev_char_len. Mirrors the `==` operand fix.
-                other if self.is_semantic_string(recv, &recv_reg) => {
-                    let p = self.string_ptr(out, indent, &recv_reg);
-                    let r = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, p).ok();
-                    TypedRegister { name: r, ty: Type::int() }
-                }
+                 // 2026-08-04 (compiler-in-Briev): a String value boxed to an
+                 // i64 HANDLE at a call/binding boundary (String param, frgn
+                 // result) is typed Custom("Int")/Int here — the physical value
+                 // is still the [len][bytes] pointer. Recover the semantic type
+                 // from the binding (the let's declared type) and inttoptr the
+                 // handle before the byte-header read. 2026-08-12: `.^Length` is
+                 // the STORED byte count; `CharCount#` is the char scan.
+                 other if self.is_semantic_string(recv, &recv_reg) => {
+                     let p = self.string_ptr(out, indent, &recv_reg);
+                     let r = self.fun.gen_reg();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, p).ok();
+                     TypedRegister { name: r, ty: Type::int() }
+                 }
                 other => panic!(
                     "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",
                     recv, recv_reg.ty

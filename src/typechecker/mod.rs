@@ -3161,13 +3161,31 @@ fn resolve_reflect(
             if is_compile_time {
                 return Err(wrong_kind("runtime"));
             }
-            // Len is meaningful on value-carrying types (String, vectors,
-            // collections); scalars have no length.
+            // 2026-08-12 (Iterable protocol): `.^Length` is STORED-length
+            // reflection (SPEC §17.1) — the String byte header, the Data byte
+            // header, the Vector element count. A COLLECTION's count is
+            // member-managed (`op Count`), and a computed count (a String's
+            // UTF8 chars) is an intrinsic (`CharCount#`) — neither is
+            // `.^Length`, so both are compile errors, never silent.
             match receiver {
-                Type::Custom(n) if n == "String" => Ok(Type::int()),
-                Type::Vector(..) | Type::Applied(..) | Type::Custom(_) => Ok(Type::int()),
+                Type::Custom(n) if n == "String" || n == "Data" => Ok(Type::int()),
+                Type::Vector(..) => Ok(Type::int()),
+                Type::Applied(..) => Err(TypeError::InvalidOperation {
+                    operation: "reflection target 'Length'".into(),
+                    type_name: format!(
+                        "{} has no INTRINSIC length — its count is member-managed; use `op Count`",
+                        receiver
+                    ),
+                }),
+                Type::Custom(_) => Err(TypeError::InvalidOperation {
+                    operation: "reflection target 'Length'".into(),
+                    type_name: format!(
+                        "type {} has no intrinsic (stored) length; a computed count is an intrinsic (`CharCount#`)",
+                        receiver
+                    ),
+                }),
                 _ => Err(TypeError::InvalidOperation {
-                    operation: format!("reflection target 'Len'"),
+                    operation: format!("reflection target 'Length'"),
                     type_name: format!("type {} has no runtime length", receiver),
                 }),
             }
