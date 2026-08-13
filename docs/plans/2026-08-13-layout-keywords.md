@@ -518,8 +518,68 @@ changed dirs, architecture docs in the same commit.
 
 ## 6. Baseline table (filled at Phase 0 from the clean harness)
 
-> Placeholder — `cargo build --release` + `bash benchmarks/build_and_bench.sh --runtime`,
-> results pasted here at Phase 0. `compare_baseline.sh` A/B run after Phase 7.
+**Date:** 2026-08-13 · **Commit:** `4dccf5d9` + Phase 0 prerequisite fixes
+(pp-types.bv frgn migration, tests `briefc`→`brievc` rename repair)
+· **Worktree:** `../briv-compiler-spec`, branch `feat/spec-layout-keywords`
+· **Harness:** `bash benchmarks/build_and_bench.sh --runtime`, BOUND=50000000
+· **Log:** `/tmp/opencode/bench_baseline.log` · **Toolchain:** clang 18, llc 18
+
+> **Phase 0 prerequisite fixes** (pre-existing HEAD regressions, landed with this
+> baseline): (1) `pp-types.bv` used the removed `frgn ... as <sym> from ... fallback
+> <e>` form (SPEC §19.1 `: sym`, §19.3 `fallback` removal) — the `--runtime` suite
+> and `tests/pp_roundtrip_tests.rs`/`tests/c_driver_library.rs` were broken at HEAD;
+> (2) both test files referenced the pre-rename `briefc` bin and `briv_*`/`BrivState`
+> symbols (renamed at `62ae145d` "Massive rename"); the generated header is
+> `briev_types.h`. 9/9 pp tests now pass. The remaining 7 stale integration-test
+> files (`tests/c_driver_{cpp,callback,lua,java,node,boundary,go,csharp}.rs`,
+> `tests/glue_integration.sh`) are recorded as a known HEAD regression in
+> `BUGS.md`; they do not compile and were already dead at HEAD (not gated by
+> `cargo test --lib`).
+
+| Benchmark | Briev | C | Ratio | Winner | Correct |
+|-----------|:-----:|:--:|:-----:|:------:|:-------:|
+| ring_buffer | .0553s | .0496s | 1.11x | C | MATCH |
+| float_math | .0455s | .0739s | .61x | Briev | MATCH |
+| float_math_nonzero | .1609s | .1681s | .95x | Briev | MATCH |
+| sparse_dispatch | .0489s | .0604s | .80x | Briev | MATCH |
+| print_loop | .0346s | .0616s | .56x | Briev | MATCH |
+| nbody_newton | 7.5469s | 8.9636s | .84x | Briev | MATCH |
+| nbody_newton_accel | 1.0031s | .1373s | 7.30x | C | MATCH |
+| nbody_sqrt | 2.4032s | 3.1360s | .76x | Briev | MATCH |
+| nbody_sqrt_idio | 3.0421s | 3.9631s | .76x | Briev | MATCH |
+| fasta | .2343s | .2236s | 1.04x | C | MATCH |
+| fannkuch_redux | .0673s | .0677s | .99x | Briev | MATCH |
+| mandelbrot | .7150s | .6913s | 1.03x | C | MATCH |
+| kalman_filter_runtime | .1559s | .1818s | .85x | Briev | MATCH |
+| knucleotide | .1909s | .1934s | .98x | Briev | MATCH |
+| cancel_math | .0564s | .0643s | .87x | Briev | MATCH |
+| bit_clear | .0002s | .0002s | 1.00x | ~tie | MATCH |
+| queue_drain | .0352s | .0608s | .57x | Briev | MATCH |
+| queue_drain_sym | .0347s | .0620s | .55x | Briev | MATCH |
+| queue_drain_idio | .0364s | .0603s | .60x | Briev | MATCH |
+| stack_push_pop | .0346s | .0611s | .56x | Briev | MATCH |
+| interval_step | .0620s | .0620s | 1.00x | ~tie | MATCH |
+| telemetry_stream | .1938s | .2013s | .96x | Briev | MATCH |
+| pid_control | .3440s | .3516s | .97x | Briev | MATCH |
+| matrix_pipeline | .4682s | .7466s | .62x | Briev | MATCH |
+| accumulator_flush | .1242s | .1505s | .82x | Briev | MATCH |
+| sweep_sparse | .2212s | .1558s | 1.41x | C | MATCH |
+| sweep_mid | .2621s | .2377s | 1.10x | C | MATCH |
+| sweep_dense | .4011s | .2678s | 1.49x | C | MATCH |
+| sweep_arr | .4108s | .3515s | 1.16x | C | MATCH |
+| series_converge | .0001s | .0003s | .33x | Briev | MATCH |
+| global_lifetime | .0328s | .0701s | .46x | Briev | MATCH |
+| deep_recursion | .0001s | .0004s | .25x | Briev | MATCH |
+| arena_churn | .0882s | .1029s | .85x | Briev | MATCH |
+| linked_list | 1.2131s | 1.7952s | .67x | Briev | MATCH |
+| hash_ops | 1.0341s | 1.1215s | .92x | Briev | MATCH |
+| hash_ops_idio | .0286s | .0517s | .55x | Briev | MATCH |
+| enemy_swarm | .0964s | .1319s | .73x | Briev | MATCH |
+| bridge_glue | done | | | | MATCH |
+| bridge_multi | done | | | | PASS |
+
+All 39 benchmarks: no MISMATCH, no FAIL. `bridge_glue`/`bridge_multi` build
++ run via Makefile (timed as "done" by the harness — python driver).
 
 ## 7. Risks & open checks
 

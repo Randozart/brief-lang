@@ -4,8 +4,8 @@
 // includes the header, calls __briv_init_state() and exported functions,
 // links the archive, and gets correct results.
 //
-// Pipeline: briefc build pp-types.bv --library → libpp-types.a + pp-types.so
-//           briefc bindings pp-types.bv c → briv_types.h
+// Pipeline: brievc build pp-types.bv --library → libpp-types.a + pp-types.so
+//           brievc bindings pp-types.bv c → briev_types.h
 //           cc driver.c -L. -lpp-types → driver (toolchain-guarded)
 
 use std::path::Path;
@@ -30,7 +30,7 @@ fn cc_guard() -> Option<()> {
 #[test]
 fn c_driver_calls_briv_library() {
     let Some(()) = cc_guard() else { return };
-    let briefc = env!("CARGO_BIN_EXE_briefc");
+    let briefc = env!("CARGO_BIN_EXE_brievc");
     let out_dir = std::env::temp_dir().join("briv_c_driver_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
@@ -48,13 +48,13 @@ fn c_driver_calls_briv_library() {
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
         .output().expect("failed briefc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
-    let header = out_dir.join("pp-types-bindings").join("briv_types.h");
-    assert!(header.exists(), "briv_types.h not generated");
+    let header = out_dir.join("pp-types-bindings").join("briev_types.h");
+    assert!(header.exists(), "briev_types.h not generated");
 
     // 3. Write a C driver that includes the header and calls exports.
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "briv_types.h"
+#include "briev_types.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -67,10 +67,10 @@ static char* read_cstr(int64_t p) {
 }
 
 int main(void) {
-    BrivState* st = __briv_init_state();
-    printf("bits:%s\n", read_cstr(briv_test_type_bits(st, (int64_t)"42")));
-    printf("void:%s\n", read_cstr(briv_test_type_void(st)));
-    printf("static:%s\n", read_cstr(briv_test_bits_static()));
+    BrievState* st = __briev_init_state();
+    printf("bits:%s\n", read_cstr(briev_test_type_bits(st, (int64_t)"42")));
+    printf("void:%s\n", read_cstr(briev_test_type_void(st)));
+    printf("static:%s\n", read_cstr(briev_test_bits_static()));
     __glue_release(st);
     return 0;
 }

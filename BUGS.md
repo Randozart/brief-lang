@@ -1,5 +1,23 @@
 # Bugs
 
+## 7 stale integration-test files reference pre-rename `briefc` bin + `briv_*` symbols — OPEN (pre-existing, not gated by `cargo test --lib`)
+
+**Date:** 2026-08-13 (found during Phase 0 of layout-keywords)
+**Status:** Open — pre-existing. The bin was renamed `briefc` → `brievc` and
+the C-ABI symbols `briv_*`/`BrivState` → `briev_*`/`BrievState` / header
+`briv_types.h` → `briev_types.h` at commit `62ae145d` "Massive rename"; the
+following test files were never migrated and do **not compile**:
+
+- `tests/c_driver_cpp.rs`, `tests/c_driver_callback.rs`, `tests/c_driver_lua.rs`,
+  `tests/c_driver_java.rs`, `tests/c_driver_node.rs`, `tests/c_driver_boundary.rs`,
+  `tests/c_driver_go.rs`, `tests/c_driver_csharp.rs`, `tests/glue_integration.sh`
+
+The two fixtures for `pp-types.bv` (`tests/pp_roundtrip_tests.rs`,
+`tests/c_driver_library.rs`) were fixed during Phase 0 (9/9 green). The rest are
+a straightforward mechanical sweep: `CARGO_BIN_EXE_briefc` →
+`CARGO_BIN_EXE_brievc`, `briv_test_*` → `briev_test_*`, `BrivState`/`__briv_init_state`
+→ `BrievState`/`__briev_init_state`, `briv_types.h` → `briev_types.h`.
+
 ## String state-field reads emit undefined globals + String element ptr mismatches — OPEN (pre-existing, block String iteration)
 
 **Date:** 2026-08-12 (found while verifying Tier 2 foreach)
