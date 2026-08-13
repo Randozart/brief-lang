@@ -82,6 +82,11 @@ pub enum Token {
     #[token("pack")]
     Pack,
 
+    /// 2026-08-13 (layout-keywords plan Phase 4): `trap` — hardware abort
+    /// (statement, guard body, match-arm value).
+    #[token("trap")]
+    Trap,
+
     /// 2026-08-01 (E): `vol` — memory-visibility modifier (prefix).
     /// `vol let x` emits volatile load/store.
     #[token("vol")]
@@ -526,6 +531,7 @@ impl std::fmt::Display for Token {
             Token::Async => write!(f, "async"),
             Token::Seq => write!(f, "seq"),
             Token::Pack => write!(f, "pack"),
+            Token::Trap => write!(f, "trap"),
             Token::Vol => write!(f, "vol"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),
@@ -663,7 +669,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "spec", "pack", "await", "spawn", "term", "term!", "rollback", "import",
+            "vol", "out", "spec", "pack", "trap", "await", "spawn", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

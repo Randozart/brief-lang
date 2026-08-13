@@ -2684,6 +2684,31 @@ mod tests {
     }
 
     #[test]
+    fn test_trap_statement_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort.
+        let src = "defn f(x: Int) -> Int {\n  if x > 0 {\n    trap;\n  } else {\n    term 0;\n  };\n  term 1;\n};\n";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let crate::ast::TopLevel::Definition(def) = &items[0] else { panic!("expected defn") };
+        let has_trap = def.body.iter().any(|s| match s {
+            crate::ast::Statement::If(_, then, _) => {
+                then.iter().any(|t| matches!(t, crate::ast::Statement::Trap))
+            }
+            _ => false,
+        });
+        assert!(has_trap, "trap; in an if-body must parse to Statement::Trap");
+    }
+
+    #[test]
+    fn test_trap_in_guard_body_parses() {
+        let src = "let g: Int = 0;\nnode n [g < 3][g == 3] {\n  when g == 1 { trap; };\n  g = g + 1;\n  term;\n};\n";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        assert!(p.parse_program().is_ok(), "trap; in a when-body must parse");
+    }
+
+    #[test]
     fn test_spec_in_obj_body() {
         let tl = parse_top("obj Widget { spec Bits: 8; x: Int; };").unwrap();
         let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef (obj)") };

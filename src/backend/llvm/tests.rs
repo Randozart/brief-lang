@@ -6704,3 +6704,22 @@ fn test_packed_struct_rejects_overwide_at_parse() {
     let mut p = crate::parser::Parser::new(tokens, src);
     assert!(p.parse_program().is_err(), "Bits<128> packed field must not parse");
 }
+
+// ── trap (layout-keywords plan Phase 4) ───────────────────────────────
+
+#[test]
+fn test_trap_statement_emits_llvm_trap() {
+    // 2026-08-13 (layout-keywords plan Phase 4): `trap;` compiles to
+    // `call void @llvm.trap()` + `unreachable` (SPEC §8.8), declared once in
+    // the module header and terminating the block.
+    let mut backend = LlvmBackend::new();
+    let program = vec![packed_main_def(vec![
+        Statement::Trap,
+        Statement::Term(Some(Expr::Decimal(0))),
+    ])];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("declare void @llvm.trap() noreturn"),
+        "module must declare @llvm.trap; got:\n{ir}");
+    assert!(ir.contains("call void @llvm.trap()") && ir.contains("unreachable"),
+        "trap; must emit call void @llvm.trap() then unreachable; got:\n{ir}");
+}

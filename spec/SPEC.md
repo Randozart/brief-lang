@@ -608,6 +608,27 @@ Inherent implementations may appear only in the target declaration's module. Exp
 
 `type`, `obj`, and `cell` keep their cohesive behavior in their own declarations; `impl` does not arbitrarily split those definitions.
 
+### 8.8.1 `trap`
+
+`trap;` is a hardware abort. It is a never-type: the control flow past it is
+dead, so it needs no value and unifies with any expected type. It is valid as
+a statement, as a guarded (`when`) body, and as a `match`-arm body.
+
+```briev
+defn parse(tag: Int) -> Int {
+    if tag > 4095 {
+        trap;            // protocol violation — abort the process
+    };
+    term tag;
+};
+```
+
+> **2026-08-13 (layout-keywords plan Phase 4).** The LLVM backend emits
+> `call void @llvm.trap()` followed by `unreachable` (marking subsequent
+> statements dead). The reference interpreter raises an abort diagnostic
+> (`RuntimeError::Trap`), and the reactor stops on it — matching the process
+> abort at runtime.
+
 ### 8.9 Metadata
 
 `!>` is the canonical metadata-binding operator.

@@ -502,6 +502,20 @@ resurrection of a pattern language needs a real consumer first.
 3. **Tests**: all three positions; IR contains `llvm.trap`; arm-type
    unification; interpreter `Trap`.
 
+**Phase 4 implementation result (2026-08-13, done):** `trap` wired lexer →
+vocab (`kw("trap", Canonical, Statement)`) → parser (statement arm in
+`parse_statement`; valid in `if`/`when`/`match`-block bodies) → AST
+(`Statement::Trap`) → codegen (`call void @llvm.trap()` + `unreachable`,
+`terminated = true` so trailing statements are not emitted; `@llvm.trap` is
+already declared in `emit_declares`) → typechecker (never-type `Ok(())`) →
+reactor (`RuntimeError::Trap` stops the reactor) → interpreter
+(`RuntimeError::Trap` abort diagnostic) → all 11 `Statement` match sites
+wired (annotator, display, dataflow, llvm helpers/mod, macros, reactor,
+typechecker). Tests: parser (if-body + when-body), IR (`@llvm.trap` +
+`unreachable` + module declare), interpreter (abort diagnostic). End-to-end:
+a `trap;` under `x > 2` prints 0,1,2 then aborts with SIGILL (exit 132),
+matching the LLVM trap semantics. `cargo test --lib` 1821 green.
+
 ### Phase 5 — `atomic` field modifier
 
 1. **Parser**: `atomic` field prefix in struct/obj/type bodies →
@@ -607,8 +621,8 @@ MATCH/PASS exit=0.
 1. `docs/plans/2026-08-13-layout-keywords.md` (this file) + baseline table.
 2. Phase 1 (spec + Bits fix + consumers + canonical + SPEC §2.1/§8.9). **done** `15117132`.
 3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** `a3040db2`.
-4. Phase 3 (DSL removal + SPEC cleanup). **done** (this commit).
-5. Phase 4 (trap).
+4. Phase 3 (DSL removal + SPEC cleanup). **done** `7f506e3a`.
+5. Phase 4 (trap). **done** (this commit).
 6. Phase 5 (atomic).
 7. Phase 6 (union).
 8. Phase 7 (stdlib migration + docs + highlighter + AGENTS.md fix + BUGS.md).

@@ -270,6 +270,12 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
+    /// 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort
+    /// (SPEC §8.8). Compiles to `call void @llvm.trap(); unreachable`, a
+    /// never-type in the typechecker, and an abort diagnostic in the
+    /// reference interpreter. Valid as a statement, a guarded body, and a
+    /// match-arm value.
+    Trap,
     /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
     /// process-exit codegen is staged (SPEC §11.5).

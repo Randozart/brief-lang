@@ -843,6 +843,23 @@ mod tests {
     }
 
     #[test]
+    fn trap_statement_aborts_interpreter() {
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` raises the abort
+        // diagnostic in the reference interpreter (SPEC §8.8), mirroring the
+        // LLVM `llvm.trap` + `unreachable` sequence.
+        let program = parse_program(
+            "defn f() -> Int {\n  trap;\n  term 1;\n};\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let err = interp.call_function("f", &[]).unwrap_err();
+        assert!(
+            matches!(err, crate::errors::RuntimeError::Trap),
+            "trap; must raise RuntimeError::Trap, got {err}"
+        );
+    }
+
+    #[test]
     fn init_value_form_seeds_and_reads() {
         // Value form: the expr is evaluated once and the name resolves.
         let program = parse_program("init BufSize: Int = 64;\n");

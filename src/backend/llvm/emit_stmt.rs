@@ -1302,6 +1302,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort
+        // (SPEC §8.8). `@llvm.trap` is declared in emit_declares; the
+        // `unreachable` terminator marks the rest of the block dead so later
+        // statements (which LLVM verifies unreachable) are not emitted.
+        Statement::Trap => {
+            writeln!(out, "{}call void @llvm.trap()", indent).ok();
+            writeln!(out, "{}unreachable", indent).ok();
+            backend.fun.terminated = true;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         _ => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

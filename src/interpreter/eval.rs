@@ -1273,6 +1273,7 @@ pub fn eval_statement(
             Ok(Value::Void)
         }
         Statement::KeepHint(_) => Ok(Value::Void),
+        Statement::Trap => Err(RuntimeError::Trap),
         Statement::ArrowAssign { target, value, consume } => {
             let val = eval_expr(value, heap, bindings, functions)?;
             if let Some(t) = target.as_ref() {

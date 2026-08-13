@@ -444,6 +444,7 @@ pub fn stmt_tag(stmt: &Statement) -> &str {
         Statement::ArrowAssign { .. } => "arrow",
         Statement::FreeHint(_) => "free-hint",
         Statement::KeepHint(_) => "keep-hint",
+        Statement::Trap => "trap",
         Statement::Term(_) => "term",
         Statement::EndProgram(_) => "term!",
         Statement::Guarded(_, _) => "when",
