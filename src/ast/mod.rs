@@ -13,7 +13,6 @@
 mod display;
 mod canonical;
 mod expr;
-pub mod layout;
 pub mod top;
 mod types;
 

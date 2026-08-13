@@ -474,6 +474,24 @@ interpreter byte-layout changes needed (rule 4 holds on the value domain).
   and points to this plan for the resurrection rule (a consumer must exist).
 - **Docs in-commit**: SPEC §8.1/§8.6 layout-DSL references removed.
 
+**Phase 3 implementation result (2026-08-13, done):** the `<...>` layout DSL is
+deleted. Removed: `src/ast/layout.rs` + `src/beast/layout.rs` (and their `mod
+layout;` declarations), `read_layout_body` (`src/parser/helpers.rs`), the
+`"layout"`/`"layout_struct"` arms in `parse_metadata_clause` +
+`parse_layout_struct_body` (`src/parser/definitions.rs`), and the
+`layout`/`layout_struct` sizing + `attach_layout_fields` +
+`compute_layout_total_bits`/`layout_pattern_bits` in `register_types.rs` (the
+`bytes` precedence chain now ends at slot-sum → primordial, matching §2.1's
+Bytes > Bits > slot-sum > primordial with no DSL fallback). SPEC had no
+remaining DSL references (Phase 1 replaced them). Regression guard:
+`grep` for `layout_struct`/`read_layout_body`/`LayoutPattern`/`beast::layout`
+/`!> layout` across `src/`/`spec/`/`benchmarks/`/`lib/` → zero; `cargo test
+--lib` 1817 green (one layout-unit test removed). Rationale preserved here for
+rule 15: the DSL was a dead prototype (history via `git log -S
+read_layout_body` predates the 2026-08-01 frontend-driven-dispatch rewrite);
+physical layout is now the declared `spec` keys + `pack struct`, and a future
+resurrection of a pattern language needs a real consumer first.
+
 ### Phase 4 — `trap`
 
 1. **Lexer**: `Token::Trap`. **Parser**: statement (`trap;`), `when`-guard
@@ -588,8 +606,8 @@ MATCH/PASS exit=0.
 
 1. `docs/plans/2026-08-13-layout-keywords.md` (this file) + baseline table.
 2. Phase 1 (spec + Bits fix + consumers + canonical + SPEC §2.1/§8.9). **done** `15117132`.
-3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** (this commit).
-4. Phase 3 (DSL removal + SPEC cleanup).
+3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** `a3040db2`.
+4. Phase 3 (DSL removal + SPEC cleanup). **done** (this commit).
 5. Phase 4 (trap).
 6. Phase 5 (atomic).
 7. Phase 6 (union).

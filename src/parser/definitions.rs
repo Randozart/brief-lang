@@ -2017,14 +2017,13 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// 2026-07-16: Parse struct-format layout body: { field: Type, ... }.
-    /// Returns PropertyValue::List of [name_string, type_name_identifier] pairs.
     /// 2026-08-13 (layout-keywords plan): parse one metadata clause in a type/
     /// obj/struct body. Two spellings:
     ///   `!> <lowercase_key>: <value>;`       — annotation form (legacy)
     ///   `spec <PascalCase>: <value>;`         — declared-layout form (modern)
     /// Both write the SAME lowercase metadata keys, so consumers have a single
-    /// read path. `!>` keeps the ctd/alu/layout special cases; `spec` has the
+    /// read path. `!>` keeps the ctd/alu special cases (the `<...>` layout DSL
+    /// was removed 2026-08-13 — see the layout-keywords plan); `spec` has the
     /// five physical-layout keys (Alignment/Bits/MaxBits/Bytes/Endian).
     /// Invoked with the cursor AT the `!>` or `spec` token.
     fn parse_metadata_clause(
@@ -2054,16 +2053,6 @@ impl<'a> Parser<'a> {
                         let alu_str = self.expect_string()?;
                         metadata.insert("alu".into(), PropertyValue::String(alu_str));
                     }
-                }
-                self.eat(&Token::Semicolon);
-            }
-            "layout" => {
-                if self.check(&Token::LBrace) {
-                    let fields = self.parse_layout_struct_body()?;
-                    metadata.insert("layout_struct".into(), fields);
-                } else {
-                    let raw = self.read_layout_body()?;
-                    metadata.insert("layout".into(), PropertyValue::String(raw));
                 }
                 self.eat(&Token::Semicolon);
             }
@@ -2118,27 +2107,6 @@ impl<'a> Parser<'a> {
         }
         self.eat(&Token::Semicolon);
         Ok(())
-    }
-
-    /// 2026-08-13 (layout-keywords plan): PascalCase spec key → canonical
-    /// lowercase metadata key. The reverse map lives in canonical.rs for the
-    /// formatter (keep in sync).
-    fn parse_layout_struct_body(&mut self) -> Result<PropertyValue, SyntaxError> {
-        self.expect(Token::LBrace)?;
-        let mut fields = Vec::new();
-        while !self.check(&Token::RBrace) && !self.is_at_end() {
-            let name = self.expect_identifier()?;
-            self.expect(Token::Colon)?;
-            let ty = self.parse_type()?;
-            self.eat(&Token::Comma);
-            self.eat(&Token::Semicolon);
-            fields.push(PropertyValue::List(vec![
-                PropertyValue::String(name),
-                PropertyValue::Identifier(ty.to_string()),
-            ]));
-        }
-        self.expect(Token::RBrace)?;
-        Ok(PropertyValue::List(fields))
     }
 
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
