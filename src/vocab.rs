@@ -128,6 +128,10 @@ impl LanguageVocab {
                 // 2026-08-13 (layout-keywords plan Phase 4): `trap` — hardware
                 // abort (statement, guard body, match-arm value). Never-type.
                 kw("trap", VocabStatus::Canonical, KeywordContext::Statement),
+                // 2026-08-13 (layout-keywords plan Phase 5): `atomic` —
+                // per-field concurrency modifier (`atomic x: Int;`). Disclosed,
+                // never a speed path; plain fields keep the default path.
+                kw("atomic", VocabStatus::Canonical, KeywordContext::Modifier),
                 // 2026-08-13 (layout-keywords plan): `spec` — physical-layout
                 // metadata statement (`spec Bits: 64;`). Declared layout, the
                 // disclosed sibling of the `!>` annotation form.

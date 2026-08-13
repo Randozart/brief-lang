@@ -462,6 +462,17 @@ seq struct Header {
 > truncates to exactly `N` bits (a `Bits<4>` can never hold 16). The reference
 > interpreter and the LLVM backend agree on this; packed stores also mask to
 > the field width defensively.
+>
+> **2026-08-13 (field modifiers).** A field may be declared `atomic`
+> (`atomic count: Int;`) in a struct or obj/type body. It is a concurrency
+> declaration, never a speed path: plain fields stay on the default
+> (non-atomic) path. The LLVM backend emits `load atomic`/`store atomic`
+> (`seq_cst`) for atomic fields, and lowers `obj.f = obj.f + c` /
+> `obj.f = obj.f - c` to `atomicrmw add/sub` (read-modify-write). The
+> reference interpreter is single-threaded check mode, so atomic fields behave
+> as plain fields there — atomicity is a target concern (the explicit
+> `AtomicLoad#`/`AtomicStore#`/`AtomicAdd#` intrinsics remain for address-based
+> access).
 
 Behavior for a struct is attached through an inherent `impl` in the defining module.
 

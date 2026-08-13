@@ -162,6 +162,12 @@ pub struct CompilerContext {
     /// only protocol + declared metadata; codegen consults the packed layout
     /// helper when it must materialize the representation.
     pub packed_structs: HashSet<String>,
+    /// 2026-08-13 (layout-keywords plan Phase 5): atomic field slots, keyed
+    /// `"<type>.<field>"` (type name + field name disambiguate across
+    /// structs). Populated at registration from the parser's
+    /// `metadata["atomic_fields"]` carrier; field load/store emitters check
+    /// membership to emit `load atomic`/`store atomic` (SPEC §8.2).
+    pub atomic_fields: HashSet<String>,
     /// 2026-07-31 (A8): obj member declarations (txn/defn/node bodies), keyed
     /// by type name. Used by MethodCall codegen to emit the member body with
     /// `self` bound to the receiver instance.
@@ -383,6 +389,7 @@ impl CompilerContext {
             inits: HashMap::new(),
             struct_types: HashMap::new(),
             packed_structs: HashSet::new(),
+            atomic_fields: HashSet::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
             enum_types: HashMap::new(),

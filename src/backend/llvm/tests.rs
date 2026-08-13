@@ -6723,3 +6723,76 @@ fn test_trap_statement_emits_llvm_trap() {
     assert!(ir.contains("call void @llvm.trap()") && ir.contains("unreachable"),
         "trap; must emit call void @llvm.trap() then unreachable; got:\n{ir}");
 }
+
+// ── atomic field modifier (layout-keywords plan Phase 5) ───────────────
+
+#[test]
+fn test_atomic_field_load_store_rmw() {
+    // 2026-08-13 (Phase 5): `atomic` fields read/write with seq_cst atomic
+    // ops; `obj.f = obj.f + c` lowers to atomicrmw add; plain fields stay on
+    // the default non-atomic path (no `atomic` in their ops).
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let mut meta = HashMap::new();
+    meta.insert(
+        "atomic_fields".to_string(),
+        crate::ast::PropertyValue::List(vec![crate::ast::PropertyValue::String("count".into())]),
+    );
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
+            name: "Counter".to_string(),
+            fields: vec![
+                ("count".to_string(), Type::int()),
+                ("other".to_string(), Type::int()),
+            ],
+            metadata: meta,
+            seq: false,
+            pack: false,
+            span: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                struct_literal_stmt(
+                    "Counter",
+                    "c",
+                    vec![("count", Expr::Decimal(0)), ("other", Expr::Decimal(1))],
+                ),
+                // atomic field RMW: c.count = c.count + 1
+                Statement::Assign(
+                    Expr::Field(Box::new(Expr::Identifier("c".into())), "count".into()),
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Field(Box::new(Expr::Identifier("c".into())), "count".into())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                ),
+                // atomic field read
+                print_field("c", "count"),
+                // plain field read (must stay non-atomic)
+                print_field("c", "other"),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("load atomic i64, ptr") && ir.contains("seq_cst"),
+        "atomic field read must be an atomic load; got:\n{ir}");
+    assert!(ir.contains("atomicrmw add"),
+        "c.count = c.count + 1 must lower to atomicrmw add; got:\n{ir}");
+    assert!(ir.contains("store atomic i64"),
+        "atomic struct-literal field store must be atomic; got:\n{ir}");
+    assert!(ir.contains("load i64, ptr"),
+        "plain field read stays on the default (non-atomic) path; got:\n{ir}");
+}

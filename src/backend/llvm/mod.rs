@@ -765,6 +765,24 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_unive
 ///
 /// 2026-07-31: Phase 3 (§8.4-D6) — the front-member is chosen by #Int protocol
 /// membership (the `Cast.#Int` universe property) instead of the literal type
+/// 2026-08-13 (layout-keywords plan Phase 5): read the parser's structured
+/// `atomic_fields` metadata (a PropertyValue::List of field-name Strings) and
+/// record each `<type>.<field>` slot in `ctx.atomic_fields` — the carrier the
+/// field load/store emitters consult. Plain (non-atomic) fields are untouched.
+fn register_atomic_fields(
+    ctx: &mut CompilerContext,
+    type_name: &str,
+    metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>,
+) {
+    if let Some(crate::ast::PropertyValue::List(entries)) = metadata.get("atomic_fields") {
+        for entry in entries {
+            if let crate::ast::PropertyValue::String(field) = entry {
+                ctx.atomic_fields.insert(format!("{}.{}", type_name, field));
+            }
+        }
+    }
+}
+
 /// name "Int". All three TBAA sites use this helper so the metadata
 /// declaration and the node-index lookups stay in agreement.
 fn sort_tbaa_groups(universe: Option<&crate::type_universe::TypeUniverse>, groups: &mut Vec<String>) {
@@ -2409,6 +2427,8 @@ impl LlvmBackend {
                     if s.pack {
                         self.ctx.packed_structs.insert(s.name.clone());
                     }
+                    // 2026-08-13 (Phase 5): `atomic` field slots.
+                    register_atomic_fields(&mut self.ctx, &s.name, &s.metadata);
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             // 2026-08-13 (layout-keywords plan): the spec-aware
@@ -2430,6 +2450,8 @@ impl LlvmBackend {
                         .collect();
                     // 2026-07-24: Register struct type in both struct_types and universe
                     self.ctx.struct_types.insert(td.name.clone(), fields.clone());
+                    // 2026-08-13 (Phase 5): `atomic` field slots (obj/type body).
+                    register_atomic_fields(&mut self.ctx, &td.name, &td.body.metadata);
                     // 2026-07-31 (A5): register obj members for MethodCall codegen.
                     if !td.body.members.is_empty() {
                         self.ctx.obj_members.insert(td.name.clone(), td.body.members.clone());

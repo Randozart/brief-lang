@@ -310,6 +310,19 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, gep).ok();
                                 return TypedRegister { name: addr, ty: slot_ty };
                             }
+                            // 2026-08-13 (Phase 5): an `atomic` self-slot reads
+                            // with an atomic load.
+                            if self.is_atomic_field(self_type, name) {
+                                let alt = if matches!(slot_ty, Type::Ptr(_)) {
+                                    format!("i{}", self.ctx.int_bits)
+                                } else {
+                                    self.llvm_type(&slot_ty)
+                                };
+                                let asz = types::type_size(&slot_ty, self.ctx.type_universe.as_ref()).max(1);
+                                let aval = self.fun.gen_reg();
+                                writeln!(out, "{}{} = load atomic {}, ptr {} seq_cst, align {}", indent, aval, alt, gep, asz).ok();
+                                return TypedRegister { name: aval, ty: slot_ty };
+                            }
                             // 2026-08-13 (pack): a packed self-slot reads its
                             // bit-slice out of the byte image (whole-byte =
                             // plain aligned load); typed Bits(bits) — the
@@ -1962,6 +1975,22 @@ impl LlvmBackend {
             writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, ptr_reg, alloca_reg, offset).ok();
             // 2026-08-13 (pack): a packed struct-literal field stores its
             // bit-slice into the byte image (L-M-S for sub-byte fields).
+            // 2026-08-13 (Phase 5): an `atomic` struct-literal field is
+            // written with an atomic store (checked before the packed path).
+            if self.is_atomic_field(type_name, field_name) {
+                let alt = if matches!(val.ty, Type::Ptr(_)) {
+                    format!("i{}", self.ctx.int_bits)
+                } else {
+                    self.llvm_type(&val.ty)
+                };
+                let asz = types::type_size(&val.ty, self.ctx.type_universe.as_ref()).max(1);
+                let store_val = self.ensure_typed_value(
+                    out, indent, &alt, &val.name, Some(val.ty.clone()),
+                    self.ctx.type_universe.clone().as_ref(),
+                );
+                writeln!(out, "{}  store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, ptr_reg, asz).ok();
+                continue;
+            }
             if let Some(pf) = self.packed_field(type_name, field_name) {
                 out.push_str(&self.emit_packed_field_store(indent, &ptr_reg, &pf, &val));
                 continue;
@@ -2073,6 +2102,20 @@ impl LlvmBackend {
         writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr, recv_reg.name).ok();
         let gep = self.fun.gen_reg();
         writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+        // 2026-08-13 (Phase 5): an `atomic` field reads with an atomic load
+        // (SPEC §8.2). Tried before the packed path — a whole-byte packed
+        // atomic field is an atomic load of the field's LLVM type.
+        if self.is_atomic_field(&type_name, name) {
+            let lt = if matches!(field_ty, Type::Ptr(_)) {
+                format!("i{}", self.ctx.int_bits)
+            } else {
+                self.llvm_type(&field_ty)
+            };
+            let sz = types::type_size(&field_ty, self.ctx.type_universe.as_ref()).max(1);
+            let val = self.fun.gen_reg();
+            writeln!(out, "{}  {} = load atomic {}, ptr {} seq_cst, align {}", indent, val, lt, gep, sz).ok();
+            return TypedRegister { name: val, ty: field_ty.clone() };
+        }
         // 2026-08-13 (pack): a packed field reads its bit-slice out of the
         // byte image (whole-byte fields = the same plain aligned load). The
         // register is typed `Bits(bits)` — its true width — so `as Int`
@@ -2689,6 +2732,22 @@ impl LlvmBackend {
                 let ptr_reg = self.fun.gen_reg();
                 writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}",
                     indent, ptr_reg, alloca_reg, offset).ok();
+                // 2026-08-13 (Phase 5): an `atomic` array element field is
+                // written with an atomic store (before the packed path).
+                if self.is_atomic_field(type_name, field_name) {
+                    let alt = if matches!(val.ty, Type::Ptr(_)) {
+                        format!("i{}", self.ctx.int_bits)
+                    } else {
+                        self.llvm_type(&val.ty)
+                    };
+                    let asz = types::type_size(&val.ty, self.ctx.type_universe.as_ref()).max(1);
+                    let store_val = self.ensure_typed_value(
+                        out, indent, &alt, &val.name, Some(val.ty.clone()),
+                        self.ctx.type_universe.clone().as_ref(),
+                    );
+                    writeln!(out, "{}  store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, ptr_reg, asz).ok();
+                    continue;
+                }
                 // 2026-08-13 (pack): packed elements store field bit-slices.
                 if let Some(pf) = self.packed_field(type_name, field_name) {
                     out.push_str(&self.emit_packed_field_store(indent, &ptr_reg, &pf, &val));
@@ -2786,6 +2845,13 @@ impl LlvmBackend {
             }
         }
         0
+    }
+
+    /// 2026-08-13 (Phase 5): whether a struct field is declared `atomic`.
+    /// Keyed `<type>.<field>` (registration populated the set from the
+    /// parser's structured `atomic_fields` carrier).
+    pub(crate) fn is_atomic_field(&self, type_name: &str, field_name: &str) -> bool {
+        self.ctx.atomic_fields.contains(&format!("{}.{}", type_name, field_name))
     }
 
     /// 2026-08-13 (pack, layout-keywords plan Phase 2): the packed slice for

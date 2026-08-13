@@ -303,6 +303,22 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
     }
 }
 
+/// 2026-08-13 (layout-keywords plan Phase 5): the set of field names declared
+/// `atomic`, from the structured `atomic_fields` metadata List. Shared by the
+/// struct and TypeDef formatters so the `atomic` prefix prints for both.
+fn atomic_field_set(metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) -> std::collections::HashSet<&str> {
+    match metadata.get("atomic_fields") {
+        Some(crate::ast::PropertyValue::List(entries)) => entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::ast::PropertyValue::String(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect(),
+        _ => std::collections::HashSet::new(),
+    }
+}
+
 fn format_struct_into(
     out: &mut String,
     level: usize,
@@ -323,27 +339,40 @@ fn format_struct_into(
         let _ = write!(out, "<{}>", params.join(", "));
     }
     let _ = write!(out, " {{ ");
+    let atomic = atomic_field_set(&def.metadata);
     for (i, (fname, fty)) in def.fields.iter().enumerate() {
         if i > 0 {
             out.push(' ');
+        }
+        if atomic.contains(fname.as_str()) {
+            out.push_str("atomic ");
         }
         let _ = write!(out, "{}: {};", fname, fty);
     }
     // 2026-08-13 (layout-keywords plan): struct physical-layout metadata prints
     // in the declared form. Deterministic: sorted keys.
-    let mut meta_keys: Vec<&String> = def.metadata.keys().collect();
+    print_metadata_clauses(out, &def.metadata);
+    let _ = write!(out, " }};");
+}
+
+/// 2026-08-13 (layout-keywords plan): print a type/struct body's metadata —
+/// physical-layout keys in the declared `spec <PascalCase>` form, everything
+/// else as `!> <key>: <value>`. Deterministic: sorted keys. The internal
+/// `atomic_fields` carrier is skipped (the `atomic` field prefix encodes it).
+fn print_metadata_clauses(out: &mut String, metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) {
+    let mut meta_keys: Vec<&String> = metadata.keys().collect();
     meta_keys.sort();
     for key in meta_keys {
+        if key == "atomic_fields" {
+            continue;
+        }
         out.push(' ');
         if let Some(spec_name) = spec_display_key(key) {
-            let _ = write!(out, "spec {}: {};", spec_name, def.metadata[key]);
+            let _ = write!(out, "spec {}: {};", spec_name, metadata[key]);
         } else {
-            // Non-layout struct metadata (e.g. `annotations` from `#` field
-            // markers) round-trips as `!>` like the TypeDef formatter.
-            let _ = write!(out, "!> {}: {};", key, def.metadata[key]);
+            let _ = write!(out, "!> {}: {};", key, metadata[key]);
         }
     }
-    let _ = write!(out, " }};");
 }
 
 /// 2026-08-13 (layout-keywords plan): lowercase metadata key → PascalCase spec
@@ -665,25 +694,19 @@ fn format_typedef_into(t: &TypeDef, out: &mut String, level: usize) {
         let _ = write!(out, ": {}", protocol);
     }
     let _ = write!(out, " {{ ");
+    let atomic = atomic_field_set(&t.body.metadata);
     for (i, slot) in t.body.slots.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
+        if atomic.contains(slot.name.as_str()) {
+            out.push_str("atomic ");
+        }
         let _ = write!(out, "{}: {};", slot.name, slot.ty);
     }
-    // 2026-08-13 (layout-keywords plan): TypeDef metadata round-trips. The five
-    // physical-layout keys print in the declared form `spec <PascalCase>`; all
-    // other keys stay `!>`. Deterministic output: sorted keys (HashMap order).
-    let mut meta_keys: Vec<&String> = t.body.metadata.keys().collect();
-    meta_keys.sort();
-    for key in meta_keys {
-        out.push(' ');
-        if let Some(spec_name) = spec_display_key(key) {
-            let _ = write!(out, "spec {}: {};", spec_name, t.body.metadata[key]);
-        } else {
-            let _ = write!(out, "!> {}: {};", key, t.body.metadata[key]);
-        }
-    }
+    // 2026-08-13 (layout-keywords plan): TypeDef metadata round-trips via the
+    // shared printer (spec form for physical-layout keys, `!>` otherwise).
+    print_metadata_clauses(out, &t.body.metadata);
     let _ = write!(out, " }};");
 }
 
@@ -744,6 +767,9 @@ mod tests {
         // prefix preserved, alongside its spec metadata.
         "pack struct Eth {\n  spec Endian: Big;\n  dst: Bits<48>;\n  src: Bits<48>;\n  etype: Bits<16>;\n};\n",
         "seq pack struct Mix {\n  spec Alignment: 1;\n  a: Bits<12>;\n  b: Bits<4>;\n};\n",
+        // 2026-08-13 (layout-keywords plan Phase 5): the `atomic` field
+        // modifier round-trips through the prefix (not `!> atomic_fields`).
+        "struct Counter {\n  atomic count: Int;\n  other: Int;\n};\n",
         // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
         "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
         "init BufferSize: [64 | lo..hi] Int = 64;\n",

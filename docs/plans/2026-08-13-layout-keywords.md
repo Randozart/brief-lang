@@ -531,6 +531,25 @@ matching the LLVM trap semantics. `cargo test --lib` 1821 green.
    no-speed-path regression (plain fields unchanged).
 5. **Docs in-commit**: SPEC §8.2 field modifiers table + new atomic note.
 
+**Phase 5 implementation result (2026-08-13, done):** `atomic` field modifier
+wired: lexer `Token::Atomic` + vocab; parser `parse_field_prefixes` (the
+`atomic` keyword mixes with `#` markers before a field name) in all three body
+kinds (`struct`, obj/type slots); the parser records atomic field names in a
+structured `metadata["atomic_fields"]` `PropertyValue::List` (NOT the
+debug-format `annotations` string, which is not round-trippable — `atomic`
+stays out of it). Registration (`register_atomic_fields`) populates
+`ctx.atomic_fields: HashSet<String>` keyed `<type>.<field>`. Codegen: field
+load/store emitters check membership and emit `load atomic`/`store atomic
+seq_cst, align N` (checked before the packed path); `obj.f = obj.f + c` /
+`- c` lower to `atomicrmw add/sub`; struct-literal construction of atomic
+fields uses atomic stores. Interpreter: single-threaded check mode — atomic
+fields behave as plain fields (documented; the address-based intrinsics
+remain). Canonical formatter emits the `atomic` field prefix (round-trips;
+`atomic_fields` metadata is not printed as `!>`). Tests: parser (struct +
+type-slot), canonical fixture, IR (atomic load/store/atomicrmw + plain-field
+regression). End-to-end `benchmarks/atomic_test.bv` vs C: output IDENTICAL.
+`cargo test --lib` 1824 green.
+
 ### Phase 6 — `union`
 
 1. **Lexer**: `Token::Union`. **Parser**: `union Name { field: Type, … };`
@@ -622,8 +641,8 @@ MATCH/PASS exit=0.
 2. Phase 1 (spec + Bits fix + consumers + canonical + SPEC §2.1/§8.9). **done** `15117132`.
 3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** `a3040db2`.
 4. Phase 3 (DSL removal + SPEC cleanup). **done** `7f506e3a`.
-5. Phase 4 (trap). **done** (this commit).
-6. Phase 5 (atomic).
+5. Phase 4 (trap). **done** `8ef2eaee`.
+6. Phase 5 (atomic). **done** (this commit).
 7. Phase 6 (union).
 8. Phase 7 (stdlib migration + docs + highlighter + AGENTS.md fix + BUGS.md).
 

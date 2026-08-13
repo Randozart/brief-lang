@@ -414,6 +414,26 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .and_then(|f| f.iter().find(|(n, _)| n == name))
                                 .map(|(_, ty)| (ty.clone(), ()))
                                 .unwrap_or((Type::int(), ()));
+                            // 2026-08-13 (Phase 5): an `atomic` self-slot stores
+                            // with an atomic store.
+                            if backend.is_atomic_field(self_type, name) {
+                                let salt = if matches!(slot_ty, Type::Ptr(_)) {
+                                    format!("i{}", backend.ctx.int_bits)
+                                } else {
+                                    backend.llvm_type(&slot_ty)
+                                };
+                                let sasz = crate::backend::llvm::types::type_size(
+                                    &slot_ty, backend.ctx.type_universe.as_ref(),
+                                ).max(1);
+                                let store_val = backend.ensure_typed_value(
+                                    out, indent, &salt, &val.name, Some(val.ty.clone()),
+                                    backend.ctx.type_universe.clone().as_ref(),
+                                );
+                                writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, salt, store_val, gep, sasz).ok();
+                                backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                                backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                                return TypedRegister { name: val.name, ty: Type::void() };
+                            }
                             // 2026-08-13 (pack): a packed self-slot stores its
                             // bit-slice (L-M-S for sub-byte, plain aligned
                             // store for whole-byte) — skip the scalar packing.
@@ -643,6 +663,50 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                     let gep = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                    // 2026-08-13 (Phase 5): an `atomic` state-field store.
+                    // `obj.f = obj.f + c` / `obj.f = obj.f - c` lower to
+                    // atomicrmw add/sub (read-modify-write); anything else is
+                    // an atomic store (SPEC §8.2).
+                    if backend.is_atomic_field(&obj_key, name) {
+                        let field_ty = backend.ctx.struct_types.get(&obj_key)
+                            .and_then(|f| f.iter().find(|(n, _)| n == name))
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or_else(|| Type::int());
+                        let alt = if matches!(field_ty, Type::Ptr(_)) {
+                            format!("i{}", backend.ctx.int_bits)
+                        } else {
+                            backend.llvm_type(&field_ty)
+                        };
+                        let asz = crate::backend::llvm::types::type_size(
+                            &field_ty, backend.ctx.type_universe.as_ref(),
+                        ).max(1);
+                        let rmw = match rhs {
+                            Expr::BinaryOp(op, l, r)
+                                if matches!(op, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Sub) =>
+                            {
+                                let same_field = matches!(l.as_ref(), Expr::Field(r2, f2) if **r2 == **obj && f2 == name);
+                                if same_field {
+                                    let cval = backend.emit_expr(out, r, indent);
+                                    let op_name = if matches!(op, crate::ast::BinaryOpKind::Add) { "add" } else { "sub" };
+                                    Some((op_name, cval.name))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        if let Some((op_name, cval)) = rmw {
+                            let old = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = atomicrmw {} ptr {}, i64 {} seq_cst", indent, old, op_name, gep, cval).ok();
+                        } else {
+                            let store_val = backend.ensure_typed_value(
+                                out, indent, &alt, &val.name, Some(val.ty.clone()),
+                                backend.ctx.type_universe.clone().as_ref(),
+                            );
+                            writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, gep, asz).ok();
+                        }
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    }
                     // 2026-08-13 (pack): a packed state-field store writes the
                     // bit-slice into the byte image (L-M-S for sub-byte, plain
                     // aligned store for whole-byte).

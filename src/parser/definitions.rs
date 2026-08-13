@@ -1752,6 +1752,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut atomic_slots: Vec<String> = Vec::new();
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         if self.eat(&Token::LBrace) {
@@ -1761,10 +1762,14 @@ impl<'a> Parser<'a> {
                     self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
+                let prefixes = self.parse_field_prefixes();
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
+                }
+                if prefixes.iter().any(|a| a == "atomic") {
+                    atomic_slots.push(slot_name.clone());
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -1772,6 +1777,9 @@ impl<'a> Parser<'a> {
                 slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
             }
             self.expect(Token::RBrace)?;
+        }
+        if !atomic_slots.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_slots);
         }
         Ok(Box::new(TypeDef {
             name,
@@ -2122,6 +2130,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         let mut metadata = std::collections::HashMap::new();
+        let mut atomic_slots: Vec<String> = Vec::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         if self.eat(&Token::LBrace) {
@@ -2150,10 +2159,14 @@ impl<'a> Parser<'a> {
                     self.eat(&Token::Semicolon);
                     continue;
                 }
+                let prefixes = self.parse_field_prefixes();
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
+                }
+                if prefixes.iter().any(|a| a == "atomic") {
+                    atomic_slots.push(slot_name.clone());
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -2163,6 +2176,9 @@ impl<'a> Parser<'a> {
             self.expect(Token::RBrace)?;
         }
         self.eat(&Token::Semicolon);
+        if !atomic_slots.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_slots);
+        }
         Ok(Box::new(TypeDef {
             name, type_params, parent: None,
             protocol: None,
@@ -2172,6 +2188,27 @@ impl<'a> Parser<'a> {
                 slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, constraints: vec![], members, span: None,
             },
         }))
+    }
+
+    /// Parse the optional field-modifier prefixes that precede a field name:
+    /// the `atomic` keyword (Phase 5) and `#` hashword markers (`#Stack`,
+    /// `#Heap`, `#Scalar`) in any order. Returns the collected markers.
+    fn parse_field_prefixes(&mut self) -> Vec<String> {
+        let mut anns = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::Atomic) => {
+                    self.pos += 1;
+                    anns.push("atomic".to_string());
+                }
+                Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
+                    anns.push(s.clone());
+                    self.pos += 1;
+                }
+                _ => break,
+            }
+        }
+        anns
     }
 
     /// struct Name { field: Type; } — static fixed-layout struct.
@@ -2197,6 +2234,8 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_type_params()?;
         let mut fields = Vec::new();
         let mut annotations: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        // 2026-08-13 (layout-keywords plan Phase 5): `atomic` field names.
+        let mut atomic_fields = Vec::new();
         // 2026-08-13 (layout-keywords plan): structs gain physical-layout
         // metadata (`spec Bits`, `spec Align`, `spec Bytes`, `spec MaxBits`,
         // `spec Endian`) consumed at StaticStruct registration (llvm/mod.rs).
@@ -2208,23 +2247,28 @@ impl<'a> Parser<'a> {
                     self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
-                // 2026-07-26: Parse optional hashword annotations (#Stack, #Heap, #Scalar)
-                let mut field_annotations = Vec::new();
-                while let Some(&Token::Identifier(ref s)) = self.peek() {
-                    if s.starts_with('#') {
-                        field_annotations.push(s.clone());
-                        self.pos += 1;
-                    } else {
-                        break;
-                    }
-                }
+                // 2026-07-26 / 2026-08-13 (Phase 5): field prefixes — `#`
+                // hashword markers and the `atomic` modifier (both can mix, in
+                // any order, before the field name).
+                let field_prefixes = self.parse_field_prefixes();
                 let field_name = self.expect_identifier()?;
                 self.expect(Token::Colon)?;
                 let field_type = self.parse_type()?;
                 self.eat(&Token::Semicolon);
                 fields.push((field_name.clone(), field_type));
-                if !field_annotations.is_empty() {
-                    annotations.insert(field_name, field_annotations);
+                if field_prefixes.iter().any(|a| a == "atomic") {
+                    atomic_fields.push(field_name.clone());
+                }
+                // `atomic` is carried by the structured `atomic_fields`
+                // metadata, NOT the `#`-marker annotations string (which is a
+                // debug-format reflection value and is not round-trippable).
+                let markers: Vec<String> = field_prefixes
+                    .iter()
+                    .filter(|a| a.as_str() != "atomic")
+                    .cloned()
+                    .collect();
+                if !markers.is_empty() {
+                    annotations.insert(field_name, markers);
                 }
             }
             self.expect(Token::RBrace)?;
@@ -2232,6 +2276,9 @@ impl<'a> Parser<'a> {
         self.eat(&Token::Semicolon);
         if !annotations.is_empty() {
             metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
+        }
+        if !atomic_fields.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_fields);
         }
         // 2026-08-13 (layout-keywords plan): `pack struct` fields must be
         // bit-sliceable — no array fields (bit-contiguous arrays are a
@@ -2553,6 +2600,19 @@ impl<'a> Parser<'a> {
 /// 2026-08-13 (layout-keywords plan): PascalCase spec key → canonical
 /// lowercase metadata key. The reverse map (formatter) lives in canonical.rs —
 /// keep the two tables in sync.
+/// Record the `atomic` field names as a structured metadata property
+/// (PropertyValue::List of field-name Strings) — the reliable carrier the
+/// backend registration reads (no debug-string parsing).
+fn record_atomic_fields(
+    metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    atomic_fields: &[String],
+) {
+    metadata.insert(
+        "atomic_fields".to_string(),
+        PropertyValue::List(atomic_fields.iter().map(|n| PropertyValue::String(n.clone())).collect()),
+    );
+}
+
 fn spec_name_to_key(name: &str) -> Option<&'static str> {
     match name {
         "Alignment" => Some("alignment"),
@@ -2706,6 +2766,35 @@ mod tests {
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         assert!(p.parse_program().is_ok(), "trap; in a when-body must parse");
+    }
+
+    #[test]
+    fn test_atomic_struct_field_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 5): `atomic x: Int;` records
+        // the field in the structured `atomic_fields` metadata carrier.
+        let tl = parse_top("struct Counter { atomic count: Int; other: Int; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        match s.metadata.get("atomic_fields") {
+            Some(crate::ast::PropertyValue::List(entries)) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("count".into()));
+            }
+            other => panic!("expected atomic_fields list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_atomic_type_slot_parses() {
+        // The `atomic` modifier also applies to obj/type body slots.
+        let tl = parse_top("type Meter: #Int { atomic ticks: Int; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        match td.body.metadata.get("atomic_fields") {
+            Some(crate::ast::PropertyValue::List(entries)) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("ticks".into()));
+            }
+            other => panic!("expected atomic_fields list, got {other:?}"),
+        }
     }
 
     #[test]
