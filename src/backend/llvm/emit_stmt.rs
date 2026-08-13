@@ -326,7 +326,26 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     if is_vol {
                         backend.fun.volatile_read = true;
                     }
-                    let v = backend.emit_expr(out, e, indent);
+                    // 2026-08-12 (Iterable protocol): a LOCAL collection
+                    // (`let xs: List<Int> = [2,4,6]`) constructs through the
+                    // collection's own ops (op Init/op InsertAt) — never the
+                    // hardcoded [len][elem] heap-seq layout the members can't
+                    // read. The binding below resolves the value.
+                    let constructed = {
+                        let is_coll = ty.as_ref().map(|t| matches!(
+                            t, crate::ast::Type::Applied(..)
+                        )).unwrap_or(false);
+                        if is_coll && matches!(e, crate::ast::Expr::List(_)) {
+                            let briev = ty.clone().unwrap_or(crate::ast::Type::int());
+                            backend.construct_local_collection(out, indent, &briev, e)
+                        } else {
+                            None
+                        }
+                    };
+                    let v = match constructed {
+                        Some(v) => v,
+                        None => backend.emit_expr(out, e, indent),
+                    };
                     backend.fun.volatile_read = false;
                     v
                 }
@@ -1568,11 +1587,23 @@ pub(super) fn emit_strategy_member_call(
         _ => target.clone(),
     };
     let Expr::Identifier(recv_name) = &recv else { return None; };
-    let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) else { return None; };
-    let type_name = match backend.ctx.field_briev_types.get(ridx) {
-        Some(Type::Custom(n)) => n.clone(),
-        Some(Type::Applied(n, _)) => n.clone(),
-        _ => return None,
+    // 2026-08-12 (Iterable protocol): a LOCAL collection receiver
+    // (`let ys: List<Int> = []; &ys <- 10`) resolves its type from the local
+    // binding, not just a state field.
+    let type_name = if let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) {
+        match backend.ctx.field_briev_types.get(ridx) {
+            Some(Type::Custom(n)) => n.clone(),
+            Some(Type::Applied(n, _)) => n.clone(),
+            _ => return None,
+        }
+    } else if let Some(ty) = backend.fun.let_original_types.get(recv_name) {
+        match ty {
+            Type::Custom(n) => n.clone(),
+            Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        }
+    } else {
+        return None;
     };
     let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
     let member = members.iter().find(|m| member_briev_name(m) == fn_name.as_str()).cloned();

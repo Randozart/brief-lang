@@ -1089,6 +1089,110 @@ impl LlvmBackend {
         true
     }
 
+    /// 2026-08-12 (Iterable protocol): construct a LOCAL collection value
+    /// (`let xs: List<Int> = [2, 4, 6]` inside a body) through the collection's
+    /// OWN construction members — `op Init(first)` + `op InsertAt(rest)`, or
+    /// `op InitEmpty` for `[]` — and return the boxed handle. Previously a
+    /// local List literal emitted the hardcoded `[len][elem]` heap-seq buffer,
+    /// which the At/Count members (expecting the List STRUCT layout) read as
+    /// garbage (segfault). Mirrors emit_init_op_construction for locals.
+    pub(super) fn construct_local_collection(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        briev_ty: &Type,
+        list_literal: &Expr,
+    ) -> Option<TypedRegister> {
+        use crate::ast::TopLevel;
+        let (base, args) = match briev_ty {
+            Type::Custom(n) => (n.clone(), Vec::new()),
+            Type::Applied(n, a) => (n.clone(), a.clone()),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base).cloned().unwrap_or_default();
+        let has = |op: &str| {
+            members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+        };
+        // Only Tier-2 collections (op Count + op At) get the op construction —
+        // others fall back to the generic literal value.
+        if !(has("Count") && has("At")) {
+            return None;
+        }
+        let type_key = self.resolve_obj_key(briev_ty).unwrap_or_else(|| base.clone());
+        let defs = self.ctx.operator_defs.get(&base).cloned().unwrap_or_default();
+        let size = self.struct_type_size(&type_key);
+        let inst = self.fun.gen_reg();
+        writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
+        let box_recv = TypedRegister {
+            name: addr.clone(),
+            ty: Type::Custom(type_key.clone()),
+        };
+        let elems: Vec<Expr> = match list_literal {
+            Expr::List(e) => e.clone(),
+            _ => return None,
+        };
+        if elems.is_empty() {
+            // `op InitEmpty` for the empty literal.
+            let empty_member = defs.iter().find(|d| d.op == "InitEmpty").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = empty_member {
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(out, &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv, type_name: &type_key, member: &member,
+                        arg_regs: &[], prefix: None,
+                    }, indent);
+            }
+        } else {
+            let init_member = defs.iter().find(|d| d.op == "Init").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = init_member {
+                let arg_tmp = self.fun.gen_reg();
+                let first = self.emit_expr_inner(out, &arg_tmp, &elems[0], indent);
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(out, &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv, type_name: &type_key, member: &member,
+                        arg_regs: &[(first.name, first.ty)], prefix: None,
+                    }, indent);
+            }
+            let insert_member = defs.iter().find(|d| d.op == "InsertAt").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = insert_member {
+                for e in elems.iter().skip(1) {
+                    let arg_tmp = self.fun.gen_reg();
+                    let ar = self.emit_expr_inner(out, &arg_tmp, e, indent);
+                    let out_tmp = self.fun.gen_reg();
+                    self.emit_member_body(out, &out_tmp,
+                        super::emit_expr::MemberInvocation {
+                            recv_reg: &box_recv, type_name: &type_key, member: &member,
+                            arg_regs: &[(ar.name, ar.ty)], prefix: None,
+                        }, indent);
+                }
+            }
+        }
+        let _ = args;
+        Some(TypedRegister {
+            name: addr,
+            ty: briev_ty.clone(),
+        })
+    }
+
     /// 2026-08-07 (object instance pools): run an UNPACKED obj instance's
     /// Init member against its prefixed top-level slots during init_state —
     /// `let b: Box<Int, 5> = 0` runs `init` with `self_prefix` = "b", so
