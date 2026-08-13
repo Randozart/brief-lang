@@ -83,10 +83,20 @@ obj List<T> {
     op Count() -> Int { term len; };
     op At(i: Int) -> T { term inner.data[i]; };
 
+    // 2026-08-12 (type-directed literals, SPEC §16.3): an EMPTY literal
+    // (`let x: List<Int> = []`) lowers through the zero-arg construction.
+    op InitEmpty: init_empty(#Lh);
+
     op InsertAt: push(#Lh, #Rh);
     op ExtractFrom: pop(#Rh);
     op CopyFrom: get(#Rh);
     op Init: init(#Lh, #Rh);
+
+    txn init_empty() [true][len == 0] {
+        inner.data = Malloc#(128) as Ptr<T>;
+        inner.cap = 16;
+        len = 0;
+    };
 
     txn init(val: T) [true][len == 1] {
         // 2026-08-04 (compiler-in-Briev): allocate 16 ELEMENTS (128 bytes for

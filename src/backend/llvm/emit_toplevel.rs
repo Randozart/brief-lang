@@ -145,10 +145,15 @@ impl LlvmBackend {
     /// variable's type in the operator_defs map (populated from AST).
     /// Returns None when the type has no InsertAt operator definition.
     pub(super) fn find_insert_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
-        let var_name = match target {
-            crate::ast::Expr::Identifier(n) => n,
-            _ => target.as_var_name()?,
-        };
+        // 2026-08-12 (slice 2 gap 3): peel AddrOf layers — the documented push
+        // form `&items <- 3` lowers the target to AddrOf(Identifier(items));
+        // without the peel the strategy lookup returned None and the push was
+        // SILENTLY DROPPED (the arrow fell through to a plain assign).
+        let mut t = target;
+        while let crate::ast::Expr::AddrOf(inner) = t {
+            t = inner;
+        }
+        let var_name = t.as_var_name()?;
         let type_name = self.lookup_strategy_type_name(var_name)?;
         self.ctx.operator_defs.get(&type_name)?
             .iter().find(|d| d.op == "InsertAt")
@@ -852,6 +857,99 @@ impl LlvmBackend {
             ty: Type::Custom(type_key.clone()),
         };
         let mut arg_regs: Vec<(String, Type)> = Vec::new();
+        // 2026-08-12 (Iterable protocol, slice 2 gap 3 / type-directed
+        // literals, SPEC §16.3): `let x: List<Int> = [e0, e1]` lowers through
+        // the collection's OWN construction members — `op Init(e0)` then
+        // `op InsertAt(e1)` — never through a hardcoded `[len][elem]` heap
+        // buffer. The old path passed the WHOLE literal as init's single
+        // element (storing the buffer/sentinel address into data[0]).
+        if let Some(crate::ast::Expr::List(elems)) = init_expr {
+            let box_recv = crate::backend::llvm::TypedRegister {
+                name: addr.clone(),
+                ty: Type::Custom(type_key.clone()),
+            };
+            if elems.is_empty() {
+                // An EMPTY literal (`let x: List<Int> = []`) constructs a
+                // zero-length collection via the collection's zero-arg
+                // construction member (op InitEmpty) — never a hardcoded
+                // empty sentinel.
+                let empty_member = {
+                    let empty_def = defs.iter().find(|d| d.op == "InitEmpty").cloned();
+                    empty_def.and_then(|d| match d.impl_args.as_ref() {
+                        Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                            .find(|m| super::emit_expr::member_briev_name(m) == s)
+                            .cloned(),
+                        _ => None,
+                    })
+                };
+                if let Some(empty_member) = empty_member {
+                    let out_tmp = self.fun.gen_reg();
+                    self.emit_member_body(
+                        out,
+                        &out_tmp,
+                        super::emit_expr::MemberInvocation {
+                            recv_reg: &box_recv,
+                            type_name: &type_key,
+                            member: &empty_member,
+                            arg_regs: &[],
+                            prefix: None,
+                        },
+                        indent,
+                    );
+                }
+            } else {
+                let arg_tmp = self.fun.gen_reg();
+                let first = self.emit_expr_inner(out, &arg_tmp, &elems[0], indent);
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(
+                    out,
+                    &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv,
+                        type_name: &type_key,
+                        member: &member,
+                        arg_regs: &[(first.name, first.ty)],
+                        prefix: None,
+                    },
+                    indent,
+                );
+                let insert_member = {
+                    let insert_def = defs.iter().find(|d| d.op == "InsertAt").cloned();
+                    insert_def.and_then(|d| match d.impl_args.as_ref() {
+                        Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                            .find(|m| super::emit_expr::member_briev_name(m) == s)
+                            .cloned(),
+                        _ => None,
+                    })
+                };
+                if let Some(insert_member) = insert_member {
+                    for e in elems.iter().skip(1) {
+                        let arg_tmp = self.fun.gen_reg();
+                        let ar = self.emit_expr_inner(out, &arg_tmp, e, indent);
+                        let out_tmp = self.fun.gen_reg();
+                        self.emit_member_body(
+                            out,
+                            &out_tmp,
+                            super::emit_expr::MemberInvocation {
+                                recv_reg: &box_recv,
+                                type_name: &type_key,
+                                member: &insert_member,
+                                arg_regs: &[(ar.name, ar.ty)],
+                                prefix: None,
+                            },
+                            indent,
+                        );
+                    }
+                }
+            }
+            // Store the instance address into the field slot.
+            let gep = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
+            let field_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+            writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, addr, gep).ok();
+            let _ = field_name;
+            return true;
+        }
         if let Some(e) = init_expr {
             let tmp = self.fun.gen_reg();
             let vr = self.emit_expr_inner(out, &tmp, e, indent);
