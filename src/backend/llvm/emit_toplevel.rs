@@ -205,6 +205,79 @@ impl LlvmBackend {
         Some((element_ty, base))
     }
 
+    /// 2026-08-12 (Iterable protocol, Tier 1, SPEC §11.4.1): does the list
+    /// expression name a value whose type exposes `op Iter`/`op Step`/
+    /// `op IsEnd`/`op Current` as op-as-member operators (and NOT Tier 2's
+    /// Count/At)? If so, returns `(element type, base name)` — the element
+    /// type is the Current member's return with the concrete args substituted.
+    pub(super) fn tier1_cursor_collection(
+        &self,
+        list: &crate::ast::Expr,
+    ) -> Option<(crate::ast::Type, String)> {
+        use crate::ast::TopLevel;
+        let crate::ast::Expr::Identifier(name) = list else { return None; };
+        let full_ty = self.identifier_collection_type(name)?;
+        let base = match &full_ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base)?;
+        let has = |op: &str| {
+            members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+        };
+        // Tier 1 requires the cursor ops; Tier 2 (Count/At) takes priority and
+        // is handled by tier2_op_collection first.
+        if !(has("Iter") && has("Step") && has("IsEnd") && has("Current")) {
+            return None;
+        }
+        if has("Count") && has("At") {
+            return None;
+        }
+        let current = members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "Current" => Some(d),
+            _ => None,
+        })?;
+        let raw_elem = current.output_type
+            .as_ref()
+            .and_then(|o| o.all_types().into_iter().next())
+            .unwrap_or_else(crate::ast::Type::int);
+        let args = match &full_ty {
+            crate::ast::Type::Applied(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, crate::ast::Type> =
+            params.into_iter().zip(args.into_iter()).collect();
+        let element_ty = crate::typechecker::substitute_type(&raw_elem, &subst);
+        Some((element_ty, base))
+    }
+
+    /// 2026-08-12 (Iterable protocol): the FULL type of an identifier used as
+    /// an iterable — a function local, a state field, or a POOLED instance
+    /// (`let m = spawn HashMap(0)` — the identifier isn't a field, so its
+    /// base comes from the instance mapping; the args are recovered from the
+    /// monomorphized obj key when available).
+    fn identifier_collection_type(&self, name: &str) -> Option<crate::ast::Type> {
+        if let Some(ty) = self.fun.let_original_types.get(name) {
+            return Some(ty.clone());
+        }
+        if let Some(&idx) = self.ctx.field_index_map.get(name) {
+            return self.ctx.field_briev_types.get(idx).cloned();
+        }
+        if let Some((base, _)) = self.unpacked_instance_prefix(name) {
+            // 2026-08-12: a POOLED instance (`let m = spawn HashMap(0)`)
+            // unpacks into columns — the identifier isn't a field; the base
+            // comes from the instance mapping. The concrete generic args are
+            // recovered from the monomorphized member types at the member call
+            // (emit_method_call resolves the mono key); the element-type
+            // pre-derivation here uses the base only (a generic `V` element
+            // type is refined to the concrete type by the Current member's
+            // mono emission).
+            return Some(crate::ast::Type::Custom(base));
+        }
+        None
+    }
+
     /// 2026-07-20: Find an OperatorDef for ExtractFrom by looking up the
     /// variable's type in the operator_defs map (populated from AST).
     /// Returns None when the type has no ExtractFrom operator definition.

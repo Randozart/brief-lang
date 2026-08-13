@@ -174,6 +174,11 @@ enum IterKind {
     /// its own operator members — `op Count` for the bound, `op At(i)` per
     /// item (SPEC §11.4). The item is the At member's return value.
     OpCollection { count: String, list: Expr, element_ty: Type },
+    /// 2026-08-12 (Iterable protocol, Tier 1): an external-cursor collection
+    /// (`op Iter`/`op Step`/`op IsEnd`/`op Current` — SPEC §11.4.1). The
+    /// cursor is a plain value; the loop advances it and reads the item
+    /// through the ops. No Option/union machinery required.
+    Tier1Cursor { iter_reg: String, list: Expr, element_ty: Type },
 }
 
 /// 2026-08-07 (Phase 7): classify an emitted collection register as a
@@ -1101,11 +1106,20 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let e = backend.emit_expr(out, end, indent);
                     IterKind::Counter { init: s.name, bound: e.name, inclusive: *inclusive }
                 }
-                Expr::Identifier(name) if backend.ctx.field_index_map.get(name).is_some() => {
-                    let fidx = *backend.ctx.field_index_map.get(name).unwrap();
-                    let is_vector = matches!(backend.ctx.field_briev_types.get(fidx),
-                        Some(t) if matches!(t, Type::Vector(_, _)));
+                // 2026-08-12 (Iterable protocol): a POOLED instance
+                // (`let m = spawn HashMap(0)`) unpacks into columns — the
+                // identifier isn't a field, but its base is a Tier-1/Tier-2
+                // collection; run the structural tier resolution for it too.
+                Expr::Identifier(name)
+                    if backend.ctx.field_index_map.get(name).is_some()
+                        || backend.unpacked_instance_prefix(name).is_some() =>
+                {
+                    let fidx = backend.ctx.field_index_map.get(name).copied();
+                    let is_vector = matches!(&fidx, Some(idx) if matches!(
+                        backend.ctx.field_briev_types.get(*idx),
+                        Some(t) if matches!(t, Type::Vector(_, _))));
                     if is_vector {
+                        let fidx = fidx.unwrap();
                         let gep = backend.emit_state_gep(out, indent, "f", "%state", fidx);
                         let n = backend.ctx.field_briev_types.get(fidx)
                             .map(|t| backend.vector_element_count(t))
@@ -1127,6 +1141,20 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             list: list.as_ref().clone(),
                             element_ty,
                         }
+                    } else if let Some((element_ty, base)) = backend.tier1_cursor_collection(list) {
+                        // 2026-08-12 (Iterable protocol, Tier 1): the
+                        // collection exposes op Iter/op Step/op IsEnd/
+                        // op Current — the external-cursor contract.
+                        let _ = base;
+                        let out_tmp = backend.fun.gen_reg();
+                        let iter_reg = backend.emit_method_call(
+                            out, &out_tmp, list, "Iter", &[], indent,
+                        );
+                        IterKind::Tier1Cursor {
+                            iter_reg: iter_reg.name,
+                            list: list.as_ref().clone(),
+                            element_ty,
+                        }
                     } else {
                         // A non-vector state field is not iterable.
                         let lreg = backend.emit_expr(out, list, indent);
@@ -1145,7 +1173,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let end_lbl = format!("foreach.end{}", label_n);
             let slot = backend.fun.gen_reg();
             writeln!(out, "{}{} = alloca i64", indent, slot).ok();
-            // Header compare setup.
+            // Header compare setup. Tier 1 (cursor) stores the Iter() result
+            // and checks IsEnd (a bool exit); the counter/tier-2 forms use the
+            // icmp bound compare.
             let (init_reg, bound_reg, cmp_op) = match &iter {
                 IterKind::Counter { init, bound, inclusive } => {
                     (init.clone(), bound.clone(), if *inclusive { "sle" } else { "slt" })
@@ -1160,6 +1190,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
                     (zero, count.clone(), "slt")
                 }
+                IterKind::Tier1Cursor { iter_reg, .. } => {
+                    (iter_reg.clone(), String::new(), "")
+                }
                 IterKind::VectorField { count, .. } => {
                     let zero = backend.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
@@ -1171,14 +1204,30 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             writeln!(out, "{}{}:", indent, header).ok();
             let cur = backend.fun.gen_reg();
             writeln!(out, "{}{} = load i64, ptr {}", indent, cur, slot).ok();
-            let cmp = backend.fun.gen_reg();
-            writeln!(
-                out,
-                "{}{} = icmp {} i64 {}, {}",
-                indent, cmp, cmp_op, cur, bound_reg
-            )
-            .ok();
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, body_lbl, end_lbl).ok();
+            if let IterKind::Tier1Cursor { list, .. } = &iter {
+                // Tier 1: exit when the cursor is past the end — the IsEnd op.
+                let cur_tmp = "__foreach_cur".to_string();
+                backend.fun.let_bindings.insert(cur_tmp.clone(), cur.clone());
+                backend.fun.let_binding_types.insert(cur_tmp.clone(), Type::int());
+                backend.fun.let_original_types.insert(cur_tmp.clone(), Type::int());
+                let arg = Expr::Identifier(cur_tmp);
+                let out_tmp = backend.fun.gen_reg();
+                let end = backend.emit_method_call(out, &out_tmp, list, "IsEnd", &[arg], indent);
+                let end_i1 = backend.fun.gen_reg();
+                // 2026-08-12: the IsEnd op returns a native Bool (i8); the
+                // loop condition needs i1 — the standard Bool truncation.
+                writeln!(out, "{}{} = trunc i8 {} to i1", indent, end_i1, end.name).ok();
+                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, end_i1, end_lbl, body_lbl).ok();
+            } else {
+                let cmp = backend.fun.gen_reg();
+                writeln!(
+                    out,
+                    "{}{} = icmp {} i64 {}, {}",
+                    indent, cmp, cmp_op, cur, bound_reg
+                )
+                .ok();
+                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cmp, body_lbl, end_lbl).ok();
+            }
             writeln!(out, "{}{}:", indent, body_lbl).ok();
             // Derive the item value for this iteration.
             let item_reg = match &iter {
@@ -1207,6 +1256,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         at.name = p;
                     }
                     at.name
+                }
+                // 2026-08-12 (Iterable protocol, Tier 1): the item is the
+                // collection's `op Current(cur)` member call at the cursor.
+                IterKind::Tier1Cursor { list, element_ty, .. } => {
+                    let cur_tmp = "__foreach_cur".to_string();
+                    backend.fun.let_bindings.insert(cur_tmp.clone(), cur.clone());
+                    backend.fun.let_binding_types.insert(cur_tmp.clone(), Type::int());
+                    backend.fun.let_original_types.insert(cur_tmp.clone(), Type::int());
+                    let arg = Expr::Identifier(cur_tmp);
+                    let out_tmp = backend.fun.gen_reg();
+                    let mut item = backend.emit_method_call(out, &out_tmp, list, "Current", &[arg], indent);
+                    if backend.is_string_operand(element_ty) || backend.is_data_operand(element_ty) {
+                        let p = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, item.name).ok();
+                        item.name = p;
+                    }
+                    item.name
                 }
                 IterKind::List { ptr, .. } => {
                     let off = backend.fun.gen_reg();
@@ -1242,6 +1308,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // Int — `foreach(x in strList)` binds x as String.
             let item_ty = match &iter {
                 IterKind::OpCollection { element_ty, .. } => element_ty.clone(),
+                IterKind::Tier1Cursor { element_ty, .. } => element_ty.clone(),
                 _ => Type::int(),
             };
             backend.fun.last_val_temps.insert(item.clone(), item_reg.clone());
@@ -1254,8 +1321,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 emit_statement(backend, out, stmt, indent);
             }
             if !backend.fun.terminated {
-                let next = backend.fun.gen_reg();
-                writeln!(out, "{}{} = add i64 {}, 1", indent, next, cur).ok();
+                let next = if let IterKind::Tier1Cursor { list, .. } = &iter {
+                    // 2026-08-12 (Iterable protocol, Tier 1): advance the
+                    // cursor via the collection's `op Step(cur)` member.
+                    let cur_tmp = "__foreach_cur".to_string();
+                    backend.fun.let_bindings.insert(cur_tmp.clone(), cur.clone());
+                    backend.fun.let_binding_types.insert(cur_tmp.clone(), Type::int());
+                    backend.fun.let_original_types.insert(cur_tmp.clone(), Type::int());
+                    let arg = Expr::Identifier(cur_tmp);
+                    let out_tmp = backend.fun.gen_reg();
+                    let step = backend.emit_method_call(out, &out_tmp, list, "Step", &[arg], indent);
+                    step.name
+                } else {
+                    let n = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, n, cur).ok();
+                    n
+                };
                 writeln!(out, "{}store i64 {}, ptr {}", indent, next, slot).ok();
                 writeln!(out, "{}br label %{}", indent, header).ok();
             }

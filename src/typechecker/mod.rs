@@ -3316,8 +3316,11 @@ fn foreach_item_type(ctx: &TypecheckContext, list_ty: &Type) -> Type {
         _ => return Type::int(),
     };
     let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
-    if let Some(at) = operator_member(&members, "At") {
-        if let Some(raw) = at.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) {
+    // Tier 2 first (op At), then Tier 1 (op Current) — the element type is the
+    // read op's return with the concrete args substituted.
+    let read = operator_member(&members, "At").or_else(|| operator_member(&members, "Current"));
+    if let Some(read) = read {
+        if let Some(raw) = read.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) {
             let params = ctx.type_params.get(&base).cloned().unwrap_or_default();
             let subst: std::collections::HashMap<String, Type> =
                 params.into_iter().zip(args).collect();
@@ -3543,6 +3546,52 @@ node main [beginprogram][true] {
 };
 "#;
         check(ok).expect("parenless foreach must parse and typecheck");
+    }
+
+    /// 2026-08-12 (Iterable protocol, Tier 1): a `foreach` over a cursor
+    /// collection (op Iter/op Step/op IsEnd/op Current) typechecks with the
+    /// element type from the Current op's return.
+    #[test]
+    fn foreach_tier1_cursor_collection() {
+        let ok = r#"
+obj CursorList {
+    data: Int[4];
+    n: Int;
+    op Init: init(#Lh, #Rh);
+    txn init(v: Int) [true][n == 1] { data[0] = v; n = 1; };
+    op Iter() -> Int { term 0; };
+    op Step(i: Int) -> Int { term i + 1; };
+    op IsEnd(i: Int) -> Bool { term i >= n; };
+    op Current(i: Int) -> Int { term data[i]; };
+};
+let c: CursorList = spawn CursorList(0);
+let sum: Int = 0;
+node main [beginprogram][true] {
+    foreach v in c {
+        sum = sum + v;
+    };
+};
+"#;
+        check(ok).expect("cursor foreach must typecheck");
+        let bad = r#"
+obj CursorList {
+    data: Int[4];
+    n: Int;
+    op Init: init(#Lh, #Rh);
+    txn init(v: Int) [true][n == 1] { data[0] = v; n = 1; };
+    op Iter() -> Int { term 0; };
+    op Step(i: Int) -> Int { term i + 1; };
+    op IsEnd(i: Int) -> Bool { term i >= n; };
+    op Current(i: Int) -> Int { term data[i]; };
+};
+let c: CursorList = spawn CursorList(0);
+let acc: String = "";
+node main [beginprogram][true] {
+    foreach v in c { acc = acc + v; };
+};
+"#;
+        let err = check(bad).unwrap_err();
+        assert!(!err.is_empty(), "Int cursor item used as String must error");
     }
 
     /// `Int * Float` is a type error — no implicit numeric coercion.
