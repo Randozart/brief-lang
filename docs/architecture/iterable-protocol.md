@@ -163,6 +163,56 @@ element type tag (numbers raw, strings as pointers, objects as handles). View
 `.^Length` reads the materialized array's stored `.length`. `Applied`/`Vector`
 fields classify structurally (mirror `signal_type_for`).
 
+Implementation notes:
+
+- `CompiledView.collection_iterables` / `collection_string_iterables` carry
+  the iterable fields per view; the backend emits one
+  `__view_items_<field>(%state)` snapshot materializer per iterable field.
+  It calls `op Count`/`op At` (or the Tier-1 cursor ops) and stores
+  `[len][word…]` into a scratch buffer. The materializer is a **snapshot**:
+  it runs per flush, so the view sees a consistent array even if the
+  collection mutates between flushes (never a dangling handle).
+- The shim (`emit_collection_each`) reconciles the `[len][word…]` snapshot
+  into the DOM with a **stable `b-key`** (index by default); children are
+  keyed so insertion/removal/reorder updates the minimum number of nodes.
+- **String elements** (`collection_string_iterables`): the materializer boxes
+  each `op At` result `String` (a `[len][bytes]` pointer) via `ptrtoint` and
+  the shim decodes it by the string header — `[len][bytes]` is emitted as a
+  JS string. Numeric elements are raw words; object elements are boxed
+  handles.
+- `signal_type_for` classifies `Applied` vs `Vector` fields structurally so
+  the materializer knows whether the iteration ops exist at all; a
+  non-iterable `b-each` iterable is a compile error, never a skipped render.
+
+## 10a. Local collection construction
+
+A collection literal in a **local** scope (not an instance field) is
+constructed through the same operator surface as everywhere else:
+
+- `construct_local_collection` emits `op InitEmpty`/`op Init` then one
+  `op InsertAt` per element, returning the boxed handle. The local is a
+  pointer to the collection object, like any pooled-instance field.
+- Arrow-inserts against a local receiver (`&items <- 3`) resolve the local
+  bound type via `emit_strategy_member_call` (no state field required) —
+  a local collection is usable exactly like a field collection.
+- Verified end-to-end: local literal + `op At` read, local literal + push,
+  `foreach` over a local-built collection (native and web).
+
+## 10b. Web interactive state
+
+The rendered backend keeps the whole program state in one `@__web_state`
+global; every `_txn` export takes `%state` first and the shim passes
+`__briev_state_ptr()`:
+
+- `__briev_state_ptr()` returns the state pointer (the shim marshals each
+  transaction's input into the state then reads the output fields back out).
+- `__web_boot()` runs any boot initialization before the first flush.
+- `render_frame()` is the flush driver — the JS side calls it in a
+  `requestAnimationFrame` loop (see `rendered-briev-wasm.md`).
+- If the program's observable side effects fold away, `render_frame()` and
+  `reactor_tick` are still emitted (a folded program has no state to render,
+  but the shim contract is stable).
+
 ## 11. Deletion map (old site → new mechanism)
 
 | Old hardcode | Location | Replaced by |
