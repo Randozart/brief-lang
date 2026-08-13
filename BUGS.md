@@ -1,30 +1,18 @@
 # Bugs
 
-## String state-field reads emit undefined globals + String element ptr mismatches — OPEN (pre-existing, block String iteration)
+## String state-field liveness + String-element foreach — FIXED (slice 2)
 
-**Date:** 2026-08-12 (found while verifying Tier 2 foreach)
-**Status:** Open — pre-existing, separate from the iterable protocol.
+**Date:** 2026-08-12 — **both fixed** (commit `77d934ae`).
 
-1. **A top-level `let a: String = "hi"` read emits `load i64, ptr @a`** — an
-   undefined global, not a %State GEP. `if a == b` on two String state fields
-   fails clang ("use of undefined value '@a'"). This is the same
-   global-vs-state-GEP class as the pooled-instance gap, but for String
-   top-level lets.
-2. **String elements in a `List<String>` foreach hit a ptr/i64 mismatch**
-   ("`%t29` defined with type 'i64' but expected 'ptr'") — the boxed String
-   element is loaded as i64 but consumed as a ptr. The foreach ELEMENT TYPING
-   is correct (the typecheck resolves `n` as String); the codegen unboxing of
-   String elements is the gap.
-
-Both block `foreach` over a `List<String>` end-to-end. The Int case
-(`List<Int>`) is fully green.
-
-## Obj-literal seeding + List runtime value gaps — FIXED (slice 2)
-
-**Date:** 2026-08-12 — **all three fixed** (pooled field/member access,
-StructLiteral seeding, type-directed list literals, empty-init, AddrOf push
-peel). See commits `551c7868` and `ff2ac799`. The `foreach` over `List<Int>`
-now works end-to-end (`foreach(x in [3,5,7])` sums to 15).
+1. The field-liveness scanner had no `Statement::If` arm — a field read only
+   inside an `if` (`if a == "hi"`) was never marked referenced, pruned as
+   `Never`, and the body emitted an undefined `@a` global. Added the If/Block/
+   Gate arms to `scan_for_state_identifiers`.
+2. The `foreach` item over a `List<String>` bound the i64 collection handle
+   instead of the ptr representation — `briev_str_eq` failed ("defined with
+   type 'i64' but expected 'ptr'"). The OpCollection item derivation now
+   inttoptrs String/Data elements. `foreach n in names` with `n == "Bob"`
+   works end-to-end.
 
 ## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
 
