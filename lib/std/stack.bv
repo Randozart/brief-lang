@@ -1,14 +1,14 @@
-defn new_stack<T>() -> Stack<T> [true][term .^Length == 0] {
+defn new_stack<T>() -> Stack<T> [true][term.Count() == 0] {
     term [] :> AsStack;
 };
-defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][term .^Length == 0] {
+defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][term.Count() == 0] {
     term [] :> AsStack;
 };
 defn push<T>(stack: Stack<T>, item: T) -> Stack<T> {
     term &stack <- item;
 };
 defn pop<T>(stack: Stack<T>)
-    [stack .^Length > 0][term :> 1 .^Length == stack .^Length - 1] -> (T, Stack<T>)
+    [stack.Count() > 0][term :> 1 .Count() == stack.Count() - 1] -> (T, Stack<T>)
 {
     let v: T = <- &stack;
     term (v, stack);
@@ -20,10 +20,10 @@ defn top<T>(stack: Stack<T>) -> T {
     uni stack :> Top(Some(v)) = { term v; };
 };
 defn len<T>(stack: Stack<T>) -> Int {
-    term stack .^Length;
+    term stack.Count();
 };
 defn is_empty<T>(stack: Stack<T>) -> Bool {
-    term (stack .^Length) == 0;
+    term (stack.Count()) == 0;
 };
 defn to_list<T>(stack: Stack<T>) -> List<T> {
     let result: List<T> = [];
@@ -35,7 +35,7 @@ defn to_list<T>(stack: Stack<T>) -> List<T> {
     term result;
 };
 txn from_list_loop<T>(items: List<T>, result: Stack<T>, i: Int)
-    [i < items .^Length][i == items .^Length] -> Stack<T>
+    [i < items.Count()][i == items.Count()] -> Stack<T>
 {
     &result <- items[i];
     i = i + 1;

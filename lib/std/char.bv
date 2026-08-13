@@ -12,7 +12,7 @@ defn int_to_char(n: Int) [n >= 0 && n <= 0x10FFFF][true] -> Char {
     term n as Char;
 };
 
-defn char_to_string(c: Char) [true][term .^Length == 1] -> String {
+defn char_to_string(c: Char) [true][CharCount#(term) == 1] -> String {
     let sb = new_builder();
     sb = sb.append_char(c);
     term sb.to_string();

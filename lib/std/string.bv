@@ -24,52 +24,52 @@ defn bytes(s: String) -> Result<List<Int>, StringError> {
 // ===== NATIVE DEFINITIONS =====
 
 // Length
-defn len(s: String) [s .^Length >= 0][term == s .^Length] -> Int {
-  term s .^Length;
+defn len(s: String) [CharCount#(s) >= 0][term == CharCount#(s)] -> Int {
+  term CharCount#(s);
 };
 
 // Basic concatenation
-defn concat(a: String, b: String) [true][term .^Length == a .^Length + b .^Length] -> String {
+defn concat(a: String, b: String) [true][CharCount#(term) == CharCount#(a) + CharCount#(b)] -> String {
   let result: String = a + b;
   term result;
 };
 
-defn append(s: String, c: String) [true][term .^Length == s .^Length + c .^Length] -> String {
+defn append(s: String, c: String) [true][CharCount#(term) == CharCount#(s) + CharCount#(c)] -> String {
   let result: String = s + c;
   term result;
 };
 
-defn prepend(c: String, s: String) [true][term .^Length == c .^Length + s .^Length] -> String {
+defn prepend(c: String, s: String) [true][CharCount#(term) == CharCount#(c) + CharCount#(s)] -> String {
   let result: String = c + s;
   term result;
 };
 
 // Trim operations
-defn trim(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   term s;
 };
 
-defn trim_left(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_left(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   term s;
 };
 
-defn trim_right(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_right(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   term s;
 };
 
-defn trim_start(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_start(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   term s;
 };
 
-defn trim_end(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_end(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   term s;
 };
 
 // Basic search
 txn contains_loop(haystack: String, needle: String, i: Int)
-    [i < haystack .^Length][i == haystack .^Length] -> Bool
+    [i < CharCount#(haystack)][i == CharCount#(haystack)] -> Bool
 {
-  when i + needle .^Length <= haystack .^Length && haystack[i:i+needle .^Length] == needle {
+  when i + CharCount#(needle) <= CharCount#(haystack) && haystack[i:i+CharCount#(needle)] == needle {
     term true;
   };
   i = i + 1;
@@ -81,25 +81,25 @@ defn contains(haystack: String, needle: String) [true][term == true || term == f
 };
 
 defn starts_with(s: String, prefix: String) [true][term == true || term == false] -> Bool {
-  when prefix .^Length > s .^Length {
+  when CharCount#(prefix) > CharCount#(s) {
     term false;
   };
-  term s[0:prefix .^Length] == prefix;
+  term s[0:CharCount#(prefix)] == prefix;
 };
 
 defn ends_with(s: String, suffix: String) [true][term == true || term == false] -> Bool {
-  when suffix .^Length > s .^Length {
+  when CharCount#(suffix) > CharCount#(s) {
     term false;
   };
-  let slen = s .^Length;
-  let suflen = suffix .^Length;
+  let slen = CharCount#(s);
+  let suflen = CharCount#(suffix);
   term s[slen - suflen:slen] == suffix;
 };
 
 txn find_loop(s: String, needle: String, i: Int)
-    [i < s .^Length][i == s .^Length] -> Int
+    [i < CharCount#(s)][i == CharCount#(s)] -> Int
 {
-  when i + needle .^Length <= s .^Length && s[i:i+needle .^Length] == needle {
+  when i + CharCount#(needle) <= CharCount#(s) && s[i:i+CharCount#(needle)] == needle {
     term i;
   };
   i = i + 1;
@@ -111,74 +111,74 @@ defn find(s: String, needle: String) [true][term >= -1] -> Int {
 };
 
 // Character access
-defn char_at(s: String, index: Int) [index >= 0 && index < s .^Length][term .^Length == 1] -> String {
+defn char_at(s: String, index: Int) [index >= 0 && index < CharCount#(s)][CharCount#(term) == 1] -> String {
   term s[index:index+1];
 };
 
 // Substring operations
-defn substr(s: String, start: Int) [start >= 0 && start <= s .^Length][term .^Length == s .^Length - start] -> String {
-  term s[start:s .^Length];
+defn substr(s: String, start: Int) [start >= 0 && start <= CharCount#(s)][CharCount#(term) == CharCount#(s) - start] -> String {
+  term s[start:CharCount#(s)];
 };
 
-defn substr_range(s: String, start: Int, end: Int) [start >= 0 && end >= start && end <= s .^Length][term .^Length == end - start] -> String {
+defn substr_range(s: String, start: Int, end: Int) [start >= 0 && end >= start && end <= CharCount#(s)][CharCount#(term) == end - start] -> String {
   term s[start:end];
 };
 
 // Single replace (native)
-defn replace(s: String, old: String, new: String) [true][term .^Length >= 0] -> String {
+defn replace(s: String, old: String, new: String) [true][CharCount#(term) >= 0] -> String {
   let idx: Int = find(s, old);
   when idx >= 0 {
     let before: String = s[0:idx];
-    let after: String = s[idx+old .^Length:s .^Length];
+    let after: String = s[idx+CharCount#(old):CharCount#(s)];
     term before + new + after;
   };
   term s;
 };
 
 // Split (basic version)
-defn split(s: String, delim: String) [delim .^Length > 0][true] -> List<String> {
+defn split(s: String, delim: String) [CharCount#(delim) > 0][true] -> List<String> {
   let result: List<String> = [];
   let i: Int = 0;
   let last: Int = 0;
-  when i < s .^Length {
-    when i + delim .^Length <= s .^Length && s[i:i+delim .^Length] == delim {
+  when i < CharCount#(s) {
+    when i + CharCount#(delim) <= CharCount#(s) && s[i:i+CharCount#(delim)] == delim {
       result = result + [s[last:i]];
-      last = i + delim .^Length;
-      i = i + delim .^Length;
+      last = i + CharCount#(delim);
+      i = i + CharCount#(delim);
     };
-    when i + delim .^Length > s .^Length || s[i:i+delim .^Length] != delim {
+    when i + CharCount#(delim) > CharCount#(s) || s[i:i+CharCount#(delim)] != delim {
       i = i + 1;
     };
   };
-  result = result + [s[last:s .^Length]];
+  result = result + [s[last:CharCount#(s)]];
   term result;
 };
 
 // Lines
-defn lines(s: String) [true][term .^Length >= 0] -> List<String> {
+defn lines(s: String) [true][CharCount#(term) >= 0] -> List<String> {
   let result: List<String> = split(s, "\n");
   term result;
 };
 
 // Join
 txn join_loop(list: List<String>, delim: String, result: String, i: Int)
-    [i < list .^Length][i == list .^Length] -> String
+    [i < list.Count()][i == list.Count()] -> String
 {
   result = result + delim + list[i];
   i = i + 1;
   term result;
 };
 
-defn join(list: List<String>, delim: String) [true][term .^Length >= 0] -> String {
-  when list .^Length == 0 {
+defn join(list: List<String>, delim: String) [true][CharCount#(term) >= 0] -> String {
+  when list.Count() == 0 {
     term "";
   };
   term join_loop(list, delim, list[0], 1);
 };
 
 // Padding (basic)
-defn pad_left(s: String, width: Int) [width >= s .^Length][term .^Length == width.max(s .^Length)] -> String {
-  let spaces: Int = width - s .^Length;
+defn pad_left(s: String, width: Int) [width >= CharCount#(s)][CharCount#(term) == width.max(CharCount#(s))] -> String {
+  let spaces: Int = width - CharCount#(s);
   when spaces > 0 {
     let pad: String = "";
     let i: Int = 0;
@@ -191,8 +191,8 @@ defn pad_left(s: String, width: Int) [width >= s .^Length][term .^Length == widt
   term s;
 };
 
-defn pad_right(s: String, width: Int) [width >= s .^Length][term .^Length == width.max(s .^Length)] -> String {
-  let spaces: Int = width - s .^Length;
+defn pad_right(s: String, width: Int) [width >= CharCount#(s)][CharCount#(term) == width.max(CharCount#(s))] -> String {
+  let spaces: Int = width - CharCount#(s);
   when spaces > 0 {
     let pad: String = "";
     let i: Int = 0;
@@ -205,8 +205,8 @@ defn pad_right(s: String, width: Int) [width >= s .^Length][term .^Length == wid
   term s;
 };
 
-defn pad_both(s: String, width: Int) [width >= s .^Length][term .^Length == width.max(s .^Length)] -> String {
-  let spaces: Int = width - s .^Length;
+defn pad_both(s: String, width: Int) [width >= CharCount#(s)][CharCount#(term) == width.max(CharCount#(s))] -> String {
+  let spaces: Int = width - CharCount#(s);
   when spaces > 0 {
     let left: Int = spaces / 2;
     let right: Int = spaces - left;
@@ -236,7 +236,7 @@ txn repeat_loop(s: String, count: Int, result: String, i: Int)
   term result;
 };
 
-defn repeat(s: String, count: Int) [count >= 0][term .^Length == s .^Length * count] -> String {
+defn repeat(s: String, count: Int) [count >= 0][CharCount#(term) == CharCount#(s) * count] -> String {
   when count == 0 {
     term "";
   };
@@ -250,7 +250,7 @@ defn repeat(s: String, count: Int) [count >= 0][term .^Length == s .^Length * co
 // graph — `.bv` emits `call ptr @int_to_str`, `.ebv` will emit a Briev digit
 // loop. Undo: restore `term IntToStr#(n);` only if the intrinsic is ever
 // re-registered.
-defn to_string(n: Int) [true][term .^Length >= 0] -> String {
+defn to_string(n: Int) [true][CharCount#(term) >= 0] -> String {
   term n as String;
 };
 
@@ -270,7 +270,7 @@ defn to_int(s: String) [true][term == 0 || term != 0] -> Int {
 // The `_loop` suffix marks the internal txn; the `defn` provides the public API.
 
 txn is_whitespace_loop(s: String, i: Int)
-    [i < s .^Length][i == s .^Length] -> Bool
+    [i < CharCount#(s)][i == CharCount#(s)] -> Bool
 {
     let c = s[i:i+1];
     when !c.is_whitespace() {
@@ -285,7 +285,7 @@ defn is_whitespace_str(s: String) [true][term == true || term == false] -> Bool 
 };
 
 txn is_alpha_loop(s: String, i: Int)
-    [i < s .^Length][i == s .^Length] -> Bool
+    [i < CharCount#(s)][i == CharCount#(s)] -> Bool
 {
     let c = s[i:i+1];
     when !c.is_alpha() {
@@ -296,14 +296,14 @@ txn is_alpha_loop(s: String, i: Int)
 };
 
 defn is_alpha_str(s: String) [true][term == true || term == false] -> Bool {
-    when s .^Length == 0 {
+    when CharCount#(s) == 0 {
         term false;
     };
     term is_alpha_loop(s, 0);
 };
 
 txn is_numeric_loop(s: String, i: Int)
-    [i < s .^Length][i == s .^Length] -> Bool
+    [i < CharCount#(s)][i == CharCount#(s)] -> Bool
 {
     let c = s[i:i+1];
     when !c.is_digit() {
@@ -314,14 +314,14 @@ txn is_numeric_loop(s: String, i: Int)
 };
 
 defn is_numeric_str(s: String) [true][term == true || term == false] -> Bool {
-    when s .^Length == 0 {
+    when CharCount#(s) == 0 {
         term false;
     };
     term is_numeric_loop(s, 0);
 };
 
 txn to_lower_loop(s: String, sb: StringBuilder, i: Int)
-    [i < s .^Length][i == s .^Length] -> String
+    [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
     let c = s[i:i+1];
     sb = sb.append_char(c.to_lower());
@@ -329,12 +329,12 @@ txn to_lower_loop(s: String, sb: StringBuilder, i: Int)
     term sb.to_string();
 };
 
-defn to_lower_str(s: String) [true][term .^Length == s .^Length] -> String {
+defn to_lower_str(s: String) [true][CharCount#(term) == CharCount#(s)] -> String {
     term to_lower_loop(s, new_builder(), 0);
 };
 
 txn to_upper_loop(s: String, sb: StringBuilder, i: Int)
-    [i < s .^Length][i == s .^Length] -> String
+    [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
     let c = s[i:i+1];
     sb = sb.append_char(c.to_upper());
@@ -342,39 +342,39 @@ txn to_upper_loop(s: String, sb: StringBuilder, i: Int)
     term sb.to_string();
 };
 
-defn to_upper_str(s: String) [true][term .^Length == s .^Length] -> String {
+defn to_upper_str(s: String) [true][CharCount#(term) == CharCount#(s)] -> String {
     term to_upper_loop(s, new_builder(), 0);
 };
 
 txn trim_left_loop(s: String, i: Int)
-    [i < s .^Length && s[i:i+1].is_whitespace()][i == s .^Length || !s[i:i+1].is_whitespace()] -> String
+    [i < CharCount#(s) && s[i:i+1].is_whitespace()][i == CharCount#(s) || !s[i:i+1].is_whitespace()] -> String
 {
     i = i + 1;
-    term s[i:s .^Length];
+    term s[i:CharCount#(s)];
 };
 
-defn trim_str(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_str(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
     let start: Int = 0;
-    when start < s .^Length && s[start:start+1].is_whitespace() {
+    when start < CharCount#(s) && s[start:start+1].is_whitespace() {
         start = start + 1;
     };
-    let end: Int = s .^Length;
+    let end: Int = CharCount#(s);
     when end > start && s[end-1:end].is_whitespace() {
         end = end - 1;
     };
     term s[start:end];
 };
 
-defn trim_left_str(s: String) [true][term .^Length <= s .^Length] -> String {
+defn trim_left_str(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
     let i: Int = 0;
-    when i < s .^Length && s[i:i+1].is_whitespace() {
+    when i < CharCount#(s) && s[i:i+1].is_whitespace() {
         i = i + 1;
     };
-    term s[i:s .^Length];
+    term s[i:CharCount#(s)];
 };
 
-defn trim_right_str(s: String) [true][term .^Length <= s .^Length] -> String {
-    let end: Int = s .^Length;
+defn trim_right_str(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
+    let end: Int = CharCount#(s);
     when end > 0 && s[end-1:end].is_whitespace() {
         end = end - 1;
     };
@@ -382,7 +382,7 @@ defn trim_right_str(s: String) [true][term .^Length <= s .^Length] -> String {
 };
 
 txn capitalize_loop(s: String, sb: StringBuilder, i: Int)
-    [i < s .^Length][i == s .^Length] -> String
+    [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
     let c = s[i:i+1];
     sb = sb.append_char(c.to_lower());
@@ -390,8 +390,8 @@ txn capitalize_loop(s: String, sb: StringBuilder, i: Int)
     term sb.to_string();
 };
 
-defn capitalize(s: String) [true][term .^Length == s .^Length] -> String {
-    when s .^Length == 0 {
+defn capitalize(s: String) [true][CharCount#(term) == CharCount#(s)] -> String {
+    when CharCount#(s) == 0 {
         term s;
     };
     let sb = new_builder();
@@ -400,20 +400,20 @@ defn capitalize(s: String) [true][term .^Length == s .^Length] -> String {
 };
 
 txn reverse_loop(s: String, sb: StringBuilder, i: Int)
-    [i < s .^Length][i == s .^Length] -> String
+    [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
-    let c = s[s .^Length-1-i:s .^Length-i];
+    let c = s[CharCount#(s)-1-i:CharCount#(s)-i];
     sb = sb.append_char(c);
     i = i + 1;
     term sb.to_string();
 };
 
-defn reverse_str(s: String) [true][term .^Length == s .^Length] -> String {
+defn reverse_str(s: String) [true][CharCount#(term) == CharCount#(s)] -> String {
     term reverse_loop(s, new_builder(), 0);
 };
 
 txn count_char_loop(s: String, c: String, count: Int, i: Int)
-    [i < s .^Length][i == s .^Length] -> Int
+    [i < CharCount#(s)][i == CharCount#(s)] -> Int
 {
     when s[i:i+1] == c {
         count = count + 1;
@@ -427,7 +427,7 @@ defn count_char(s: String, c: Char) [true][term >= 0] -> Int {
 };
 
 txn is_blank_loop(s: String, i: Int)
-    [i < s .^Length][i == s .^Length] -> Bool
+    [i < CharCount#(s)][i == CharCount#(s)] -> Bool
 {
     when !s[i:i+1].is_whitespace() {
         term false;
@@ -440,15 +440,15 @@ defn is_blank(s: String) [true][term == true || term == false] -> Bool {
     term is_blank_loop(s, 0);
 };
 
-defn truncate(s: String, max_len: Int) [max_len >= 0][term .^Length <= max_len] -> String {
-    when s .^Length <= max_len {
+defn truncate(s: String, max_len: Int) [max_len >= 0][CharCount#(term) <= max_len] -> String {
+    when CharCount#(s) <= max_len {
         term s;
     };
     term s[0:max_len];
 };
 
-defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][term .^Length <= max_len] -> String {
-    when s .^Length <= max_len {
+defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][CharCount#(term) <= max_len] -> String {
+    when CharCount#(s) <= max_len {
         term s;
     };
     let sb = new_builder();
@@ -457,7 +457,7 @@ defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][term .^Lengt
     term sb.to_string();
 };
 
-defn ensure_prefix(s: String, prefix: String) [true][term .^Length >= s .^Length] -> String {
+defn ensure_prefix(s: String, prefix: String) [true][CharCount#(term) >= CharCount#(s)] -> String {
     when s.starts_with(prefix) {
         term s;
     };
@@ -467,7 +467,7 @@ defn ensure_prefix(s: String, prefix: String) [true][term .^Length >= s .^Length
     term sb.to_string();
 };
 
-defn ensure_suffix(s: String, suffix: String) [true][term .^Length >= s .^Length] -> String {
+defn ensure_suffix(s: String, suffix: String) [true][CharCount#(term) >= CharCount#(s)] -> String {
     when s.ends_with(suffix) {
         term s;
     };
@@ -477,22 +477,22 @@ defn ensure_suffix(s: String, suffix: String) [true][term .^Length >= s .^Length
     term sb.to_string();
 };
 
-defn remove_prefix(s: String, prefix: String) [true][term .^Length <= s .^Length] -> String {
+defn remove_prefix(s: String, prefix: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
     when s.starts_with(prefix) {
-        term s[prefix .^Length:s .^Length];
+        term s[CharCount#(prefix):CharCount#(s)];
     };
     term s;
 };
 
-defn remove_suffix(s: String, suffix: String) [true][term .^Length <= s .^Length] -> String {
+defn remove_suffix(s: String, suffix: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
     when s.ends_with(suffix) {
-        term s[0:s .^Length-suffix .^Length];
+        term s[0:CharCount#(s)-CharCount#(suffix)];
     };
     term s;
 };
 
-defn is_empty_str(s: String) [true][term == (s .^Length == 0)] -> Bool {
-    term s .^Length == 0;
+defn is_empty_str(s: String) [true][term == (CharCount#(s) == 0)] -> Bool {
+    term CharCount#(s) == 0;
 };
 
 // 2026-07-30: CastTo/CastFrom on String is handled by the casting graph's
