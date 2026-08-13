@@ -4145,3 +4145,30 @@ functions (len/concat/trim/case/reverse/capitalize/count_char/starts/ends/
 find/replace/substr/truncate/ensure/remove-prefix) plus bytes/split/join
 verified correct. `StringError` was referenced but never defined — added to
 `std/ffi/string.bv`.
+
+## String state fields stored the raw `ptr` into the i64 slot — FIXED 2026-08-13 (main, via merge)
+
+**Date:** 2026-08-13 (surfaced by the main<->feat/spec-layout-keywords merge's
+`c_driver_node`/`needs_state` gates)
+**Status:** Fixed (merged into main `7b20cf16`).
+**Root cause:** main's flat-dotted state-field store (`emit_stmt.rs`, slice 4)
+called `emit_state_store_i64` which stored the value raw with the slot's type.
+A String value is a `ptr` ([len][bytes]) while the slot is i64 — `store i64
+%ptr` was an LLVM type error (`node_bridge.save`).
+**Fix:** the state-store path adapts the value to the slot's LLVM type via
+`ensure_typed_value`: String/Data → ptrtoint to i64, Bool → trunc to the i8
+slot, Float → bitcast, Ptr/struct/collection HANDLES (i64 registers typed
+Custom/Ptr, whose llvm_type maps to "ptr") pass through unchanged.
+
+## Ptr/struct/collection handles double-ptrtoint'd into state slots — FIXED 2026-08-13 (main, via merge)
+
+**Date:** 2026-08-13 (surfaced by `queue_drain_idio` / `float_math` bench gates)
+**Status:** Fixed (merged into main `7b20cf16`).
+**Root cause:** values typed `Ptr<T>` or Custom (struct/collection) are stored
+as i64 HANDLES internally, but `llvm_type` maps them to "ptr". Adding a
+`("ptr", "i64")` → ptrtoint arm to `ensure_typed_value` (for String state
+fields) fired on these handles too, producing `ptrtoint ptr <i64 handle>`
+(LLVM type error).
+**Fix:** `ensure_typed_value` returns Ptr/Custom/Applied handle-typed values
+unchanged; the `("ptr", "i64")` arm now only fires for genuine String/Data
+registers.
