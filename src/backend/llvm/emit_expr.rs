@@ -1953,7 +1953,7 @@ impl LlvmBackend {
     /// stores each field at its offset.
     /// 2026-07-24: Reads StructDef from type universe for layout info.
     /// Falls back to struct_types (from registration pass) when universe unavailable.
-    fn emit_struct_literal(
+    pub(crate) fn emit_struct_literal(
         &mut self,
         out: &mut String,
         v: &str,
@@ -1965,7 +1965,15 @@ impl LlvmBackend {
         let struct_ty = crate::ast::Type::Custom(type_name.to_string());
 
         let alloca_reg = self.fun.gen_reg();
-        writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+        // 2026-08-13 (reactor fix): inside a reactor loop body the alloca is
+        // deferred to the loop PREHEADER (flush_pending_struct_allocas) — an
+        // alloca in the loop makes clang -O3 peel the loop and emit a bogus
+        // exit assumption (the node fires once). Elsewhere it stays inline.
+        if self.fun.defer_struct_allocas {
+            self.fun.pending_struct_allocas.push(format!("{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size));
+        } else {
+            writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+        }
 
         for (field_name, field_expr) in fields {
             let fr = self.fun.gen_reg();
@@ -2709,7 +2717,7 @@ impl LlvmBackend {
     // 2026-07-24: Struct array list codegen — emit a contiguous stack array
     // for a list literal whose elements are all struct literals of the same
     // known struct type. Used by bridge code for C-compatible method tables.
-    fn emit_struct_array(
+    pub(crate) fn emit_struct_array(
         &mut self,
         out: &mut String,
         v: &str,
@@ -2722,7 +2730,15 @@ impl LlvmBackend {
         let total_size = elem_size * count;
 
         let alloca_reg = self.fun.gen_reg();
-        writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+        // 2026-08-13 (reactor fix): inside a reactor loop body the alloca is
+        // deferred to the loop PREHEADER (flush_pending_struct_allocas) — an
+        // alloca in the loop makes clang -O3 peel the loop and emit a bogus
+        // exit assumption (the node fires once). Elsewhere it stays inline.
+        if self.fun.defer_struct_allocas {
+            self.fun.pending_struct_allocas.push(format!("{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size));
+        } else {
+            writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+        }
 
         for (i, expr) in exprs.iter().enumerate() {
             let Expr::StructLiteral { type_name, fields } = expr else { continue; };
@@ -2860,6 +2876,17 @@ impl LlvmBackend {
             }
         }
         0
+    }
+
+    /// 2026-08-13 (reactor fix): write the deferred struct-literal allocas
+    /// into the output at the caller's chosen point (function entry or loop
+    /// preheader). The allocas precede the buffered body textually (SSA
+    /// dominance) but sit OUTSIDE any loop (clang -O3 peel hazard).
+    pub(super) fn flush_pending_struct_allocas(&mut self, out: &mut String) {
+        let allocas = std::mem::take(&mut self.fun.pending_struct_allocas);
+        for line in allocas {
+            writeln!(out, "{}", line).ok();
+        }
     }
 
     /// 2026-08-13 (Phase 5): whether a struct field is declared `atomic`.

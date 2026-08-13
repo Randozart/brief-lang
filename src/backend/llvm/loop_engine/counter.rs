@@ -271,6 +271,14 @@ impl LlvmBackend {
         self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
+        // 2026-08-13 (reactor fix): buffer the loop construction so the
+        // deferred struct-literal allocas can be flushed into the PREHEADER
+        // (before the loop). An alloca inside a loop body makes clang -O3 peel
+        // the loop and emit a bogus exit assumption — reactive nodes with
+        // struct-typed state slots fired exactly once.
+        let mut loop_buf = String::new();
+        {
+        let out = &mut loop_buf;
         let c0 = self.fun.txn_counter;
         let bound_reg = self.fun.next_reg_with_prefix("cmb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);
@@ -468,7 +476,12 @@ impl LlvmBackend {
         // pending_post_hoist is behind &self.fun).
         let hoist = self.fun.pending_post_hoist.clone();
         let mut empty = Vec::new();
+        // 2026-08-13 (reactor fix): defer struct-literal allocas in the loop
+        // body so they flush to the loop PREHEADER (emit_countable_main's
+        // trailing flush) — an in-loop alloca makes clang -O3 peel the loop.
+        self.fun.defer_struct_allocas = true;
         self.emit_countable_body(out, body, write_set, &mut empty);
+        self.fun.defer_struct_allocas = false;
         writeln!(out, "  br label %.cm_latch").ok();
         writeln!(out, ".cm_latch:").ok();
         // 2026-07-26: Counter increment uses the field's native type, not i64.
@@ -543,6 +556,9 @@ impl LlvmBackend {
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
+        }
+        self.flush_pending_struct_allocas(out);
+        out.push_str(&loop_buf);
     }
 
     // ── Garbage-scheduler free emission ───────────────────────────────

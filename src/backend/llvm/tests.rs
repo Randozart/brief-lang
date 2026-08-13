@@ -6837,3 +6837,36 @@ fn test_union_emits_byte_array_and_offset_zero() {
     assert!(ir.contains("getelementptr i8, ptr") && ir.contains("i64 0"),
         "union field access must GEP at offset 0; got:\n{ir}");
 }
+
+// ── reactor struct-slot loop (2026-08-13 fix) ─────────────────────────
+
+#[test]
+fn test_struct_literal_alloca_deferred_in_loop() {
+    // The reactor fix defers struct-literal allocas while `defer_struct_allocas`
+    // is set (loop bodies), flushing them to the loop preheader. Assert the
+    // mechanism: with the flag set the alloca is NOT emitted to `out`; the
+    // flush writes it. (A struct alloca inside a reactor loop body made clang
+    // -O3 peel the loop and emit a bogus exit assumption — nodes with
+    // struct-typed state slots fired once.)
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    backend.ctx.struct_types.insert(
+        "Point".to_string(),
+        vec![("x".to_string(), Type::int()), ("y".to_string(), Type::int())],
+    );
+    let mut out = String::new();
+    backend.fun.defer_struct_allocas = true;
+    let reg = backend.emit_struct_literal(
+        &mut out, "%v", "Point",
+        &[("x".to_string(), Expr::Decimal(1)), ("y".to_string(), Expr::Decimal(2))],
+        "  ",
+    );
+    assert!(!out.contains("alloca"),
+        "with defer_struct_allocas set, the alloca must NOT be emitted inline; got:\n{out}");
+    assert_eq!(backend.fun.pending_struct_allocas.len(), 1,
+        "the alloca must be deferred to pending_struct_allocas");
+    backend.flush_pending_struct_allocas(&mut out);
+    assert!(out.contains("alloca i8, i64 16"),
+        "flush_pending_struct_allocas must write the alloca; got:\n{out}");
+    let _ = reg;
+}

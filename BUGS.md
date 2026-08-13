@@ -4050,6 +4050,35 @@ lowered to i32 correctly). Phase 2 fixed this for the packed authority
 **Fix:** `llvm_type` resolves `Applied("Bits", [N])` to `i{N}` (early check,
 matching the direct `Type::Bits` arm). `lower_type` does the same.
 
-## Reactive nodes with struct-typed state slots fire once then stop — OPEN (pre-existing)
+## `Ptr<Bits<8>>` was an i64 element pointer under the byte-era Bits unit — FIXED 2026-08-13
 
-(reference: earlier entry; union/atomic fields hit the same reactor gap)
+**Date:** 2026-08-13 (logged per the layout-keywords plan DoD)
+**Status:** Fixed by Phase 1 (`15117132`, Bits-unit restoration).
+**Root cause:** before the Bits-unit fix, `Type::bits(N)` stored BYTES, so
+`emit_address_of` (`src/backend/llvm/intrinsics.rs:724`) constructed
+`Ptr<Type::bits(8)>` intending a byte pointer but produced an i64 element
+type. Every `Type::bits(N)`-as-byte consumer had the same unit ambiguity.
+**Fix:** `Type::Bits(N)` is now exactly N bits; `Ptr<Bits(8)>` is a true i8
+(byte) pointer. No further action needed — logged to close the plan's DoD.
+
+## Reactive nodes with struct-typed state slots fire once then stop — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found while writing pack end-to-end benchmarks)
+**Status:** Fixed (reactor fix, `feat/spec-layout-keywords`).
+**Root cause:** a node reading/writing a struct-typed `let s: S;` slot fired
+once. The struct literal's `alloca` sat inside the reactor loop body (the
+`@main` `.cm_body`), and clang `-O3` peeled the loop + emitted a bogus
+`llvm.assume(N == 1)` exit assumption — a single-iteration loop. Works at
+`-O0` (7 lines) but breaks at `-O3 -flto` (1 line). Verified by
+hand-hoisting the alloca to the function entry (fixed) and confirming the
+loop-carried pointer phi / heap allocation / guard-assume removal were NOT
+sufficient.
+**Fix:** `emit_struct_literal`/`emit_struct_array` defer their `alloca` to
+`pending_struct_allocas` while `fun.defer_struct_allocas` is set; the reactor
+loop builders (`emit_countable_main`) buffer the loop construction and flush
+the allocas into the loop PREHEADER (before `.cm_header`). `emit_definition`
+hoists defn-body struct allocas to the function entry. Verified: the struct
+node now loops correctly at `-O3 -flto` (7 lines at BOUND=20, matching the
+non-struct shape); `benchmarks/pack_struct_runtime.bv` / `pack_be_selfcheck.bv`
+output IDENTICAL to C. Packed/union/atomic structs hit the same gap — all
+fixed by the hoist.
