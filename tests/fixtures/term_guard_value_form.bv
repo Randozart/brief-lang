@@ -8,6 +8,6 @@ let a: Int = 0;
 
 node n [a == 0][a == 1] {
   a = 1;
-  when a == 1 { term! -> Print#(1); };
+  when a == 1 { endprogram Print#(1); };
   Print#(2);
 };

@@ -1,7 +1,7 @@
-use briv_compiler::ast::*;
-use briv_compiler::interpreter::{Interpreter, Value};
-use briv_compiler::parser::Parser;
-use briv_compiler::lexer::tokenize;
+use briev_compiler::ast::*;
+use briev_compiler::interpreter::{Atom, Interpreter, Value};
+use briev_compiler::parser::Parser;
+use briev_compiler::lexer::tokenize;
 
 fn parse_and_init(source: &str) -> (Interpreter, Vec<TopLevel>) {
     let tokens = tokenize(source).unwrap();
@@ -37,15 +37,15 @@ fn test_ptr_arithmetic_e2e() {
 
     let dr = interp.state.get("UART_DR").unwrap().clone();
     let fr = interp.state.get("UART_FR").unwrap().clone();
-    assert_eq!(dr, Value::Int(0x40011000));
-    assert_eq!(fr, Value::Int(0x40011004));
+    assert_eq!(dr, Value::Atom(Atom::Int(0x40011000)));
+    assert_eq!(fr, Value::Atom(Atom::Int(0x40011004)));
 
     let computed = interp.eval_expr(&Expr::BinaryOp(
         BinaryOpKind::Add,
         Box::new(Expr::Identifier("UART_DR".into())),
         Box::new(Expr::Decimal(4)),
     )).expect("Ptr add");
-    assert_eq!(computed, Value::Int(0x40011004), "DR + 4 == FR");
+    assert_eq!(computed, Value::Atom(Atom::Int(0x40011004)), "DR + 4 == FR");
 
     let eq_result = interp.eval_expr(&Expr::BinaryOp(
         BinaryOpKind::Eq,
@@ -58,7 +58,7 @@ fn test_ptr_arithmetic_e2e() {
         Box::new(Expr::Identifier("UART_DR".into())),
         Type::Custom("Int".to_string()),
     )).expect("Ptr to Int cast");
-    assert_eq!(addr, Value::Int(0x40011000));
+    assert_eq!(addr, Value::Atom(Atom::Int(0x40011000)));
 }
 
 #[test]
@@ -72,13 +72,13 @@ fn test_ptr_type_punning_e2e() {
         Box::new(Expr::Decimal(0x100)),
         ptr_int_ty,
     )).expect("Ptr<Int>");
-    assert_eq!(ptr_int, Value::Int(0x100));
+    assert_eq!(ptr_int, Value::Atom(Atom::Int(0x100)));
 
     let ptr_char = interp.eval_expr(&Expr::Cast(
         Box::new(Expr::Decimal(0x100)),
         ptr_char_ty,
     )).expect("Ptr<Char>");
-    assert_eq!(ptr_char, Value::Int(0x100));
+    assert_eq!(ptr_char, Value::Atom(Atom::Int(0x100)));
 
     let advanced = interp.eval_expr(&Expr::BinaryOp(
         BinaryOpKind::Add,
@@ -88,7 +88,7 @@ fn test_ptr_type_punning_e2e() {
         )),
         Box::new(Expr::Decimal(4)),
     )).expect("Ptr<Char> + 4");
-    assert_eq!(advanced, Value::Int(0x104));
+    assert_eq!(advanced, Value::Atom(Atom::Int(0x104)));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_ptr_contract_bounds_e2e() {
         Type::Custom("Int".to_string()),
     );
     let addr_int = interp.eval_expr(&cast_addr).expect("Cast Int to Int");
-    assert_eq!(addr_int, Value::Int(ptr_addr));
+    assert_eq!(addr_int, Value::Atom(Atom::Int(ptr_addr)));
 
     let check_ge = interp.eval_expr(&Expr::BinaryOp(
         BinaryOpKind::Ge,

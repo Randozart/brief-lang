@@ -1,25 +1,25 @@
 // ── Term Termination Diagnostics — end-to-end ────────────────────────
 // 2026-08-04: the fixtures in tests/fixtures/term_*.bv are run through the
-// real `briefc check` binary. Behavioral tests: a .bv that provably cannot
+// real `brievc check` binary. Behavioral tests: a .bv that provably cannot
 // run its trailing statement must fail; valid shapes must pass.
 
 use std::process::Command;
 
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
-fn briefc_check(bv: &str) -> (bool, String) {
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out = Command::new(briefc)
+fn brievc_check(bv: &str) -> (bool, String) {
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out = Command::new(brievc)
         .args(["check", bv])
         .output()
-        .expect("failed to run briefc check");
+        .expect("failed to run brievc check");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     (out.status.success(), stderr)
 }
 
 #[test]
 fn check_rejects_unreachable_after_terminating_term() {
-    let (ok, err) = briefc_check(&format!("{}/tests/fixtures/term_unreachable.bv", PROJECT_ROOT));
+    let (ok, err) = brievc_check(&format!("{}/tests/fixtures/term_unreachable.bv", PROJECT_ROOT));
     assert!(!ok, "unreachable code after term! must fail check; stderr: {err}");
     assert!(err.contains("unreachable code"), "missing diagnostic: {err}");
     assert!(err.contains("termination errors"), "error must be tagged: {err}");
@@ -27,20 +27,20 @@ fn check_rejects_unreachable_after_terminating_term() {
 
 #[test]
 fn check_warns_on_bare_term_guard_hint() {
-    let (ok, err) = briefc_check(&format!("{}/tests/fixtures/term_guard_hint.bv", PROJECT_ROOT));
+    let (ok, err) = brievc_check(&format!("{}/tests/fixtures/term_guard_hint.bv", PROJECT_ROOT));
     assert!(ok, "bare-term guard is valid; check must pass; stderr: {err}");
     assert!(err.contains("checkpoint"), "hint warning missing: {err}");
 }
 
 #[test]
 fn check_accepts_valid_swan_song() {
-    let (ok, err) = briefc_check(&format!("{}/tests/fixtures/term_valid_swan_song.bv", PROJECT_ROOT));
+    let (ok, err) = brievc_check(&format!("{}/tests/fixtures/term_valid_swan_song.bv", PROJECT_ROOT));
     assert!(ok, "valid swan song must pass; stderr: {err}");
 }
 
 #[test]
 fn check_rejects_unreachable_after_defn_term_return() {
-    let (ok, err) = briefc_check(&format!("{}/tests/fixtures/term_defn_unreachable.bv", PROJECT_ROOT));
+    let (ok, err) = brievc_check(&format!("{}/tests/fixtures/term_defn_unreachable.bv", PROJECT_ROOT));
     assert!(!ok, "unreachable code after term x; in a defn must fail; stderr: {err}");
     assert!(err.contains("unreachable code"), "missing diagnostic: {err}");
 }
@@ -62,18 +62,18 @@ fn member_inline_term_links_in_countdown_loop() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_term_member_inline_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_term_member_inline_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/tests/fixtures/term_member_inline_countdown.bv", PROJECT_ROOT);
 
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .env("BOUND", "5000")
         .args(["build", &bv, "--out", &out_dir.to_string_lossy(), "--optimize-budget", "256"])
         .output()
-        .expect("failed briefc build");
+        .expect("failed brievc build");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
     let stderr = String::from_utf8_lossy(&build.stderr);
     assert!(stderr.contains("countdown loop"),
@@ -84,7 +84,7 @@ fn member_inline_term_links_in_countdown_loop() {
     let link = Command::new("clang")
         .args(["-O3", "-flto", "-march=native", "-ffast-math", "-fdata-sections", "-ffunction-sections",
                "-Wl,--gc-sections", &ll.to_string_lossy(),
-               &format!("{}/lib/runtime/briv_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
+               &format!("{}/lib/runtime/briev_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
         .output()
         .expect("failed clang link");
     assert!(link.status.success(),
@@ -107,7 +107,7 @@ fn member_inline_term_links_in_countdown_loop() {
 // the guard must NOT run. Pre-fix the LLVM backend fell through past the guard
 // and printed "12"; the fix (void_txn_abort_label + conditional convergence)
 // prints only "1". The statement after the guard IS reachable when the guard is
-// false, so `briefc check` must pass — this is a codegen-only parity test.
+// false, so `brievc check` must pass — this is a codegen-only parity test.
 #[test]
 fn guard_value_form_term_unwinds_body() {
     for tool in ["clang"] {
@@ -116,25 +116,25 @@ fn guard_value_form_term_unwinds_body() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_term_guard_value_form_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_term_guard_value_form_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/tests/fixtures/term_guard_value_form.bv", PROJECT_ROOT);
 
-    let check = Command::new(briefc)
+    let check = Command::new(brievc)
         .args(["check", &bv])
         .output()
-        .expect("failed briefc check");
+        .expect("failed brievc check");
     assert!(check.status.success(),
         "statement after a conditional guard is reachable — check must pass: {}",
         String::from_utf8_lossy(&check.stderr));
 
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--out", &out_dir.to_string_lossy(), "--optimize-budget", "256"])
         .output()
-        .expect("failed briefc build");
+        .expect("failed brievc build");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
     let ll = out_dir.join("term_guard_value_form.ll");
@@ -142,7 +142,7 @@ fn guard_value_form_term_unwinds_body() {
     let link = Command::new("clang")
         .args(["-O3", "-flto", "-march=native", "-ffast-math", "-fdata-sections", "-ffunction-sections",
                "-Wl,--gc-sections", &ll.to_string_lossy(),
-               &format!("{}/lib/runtime/briv_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
+               &format!("{}/lib/runtime/briev_rt.c", PROJECT_ROOT), "-o", &exe.to_string_lossy()])
         .output()
         .expect("failed clang link");
     assert!(link.status.success(),

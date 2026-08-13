@@ -3514,13 +3514,13 @@ fn probe_ok_checks(
                         let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-                        // LLVM range syntax: `!range !{i32 0, i32 100}` for
-                        // typed widths, `!range !{0, 100}` for i64.
-                        let range = if bits >= 64 {
-                            format!("{{ {}, {} }}", 0i64, rhi)
-                        } else {
-                            format!("{{ {} {}, {} {} }}", ty, 0i64, ty, rhi)
-                        };
+                        // LLVM range syntax requires TYPED bounds in every
+                        // width (`!range !{ i64 0, i64 100 }`). The untyped
+                        // `!{ 0, 100 }` short form for i64 was accepted by
+                        // older LLVM but is rejected by clang/opt 18+
+                        // (2026-08-13, found via tests/llvm_compile_test.sh on
+                        // the bounded-counter fixture).
+                        let range = format!("{{ {} {}, {} {} }}", ty, 0i64, ty, rhi);
                         writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{}",
                             indent, rl, ty, gep, self.align_of(&ty), tn, range).ok();
                     } else {

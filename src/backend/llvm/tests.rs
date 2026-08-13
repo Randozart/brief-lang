@@ -6870,3 +6870,27 @@ fn test_struct_literal_alloca_deferred_in_loop() {
         "flush_pending_struct_allocas must write the alloca; got:\n{out}");
     let _ = reg;
 }
+
+// ── typed !range metadata (2026-08-13 fix) ────────────────────────────
+
+#[test]
+fn test_range_metadata_bounds_are_typed() {
+    // A bounded i64 precondition (`[count < 10]`) emits `!range` on the
+    // pre-load. Bounds must be typed (`!{ i64 0, i64 10 }`) — the untyped
+    // legacy form (`!{ 0, 10 }`) is rejected by clang/opt 18+.
+    let src = "let count: Int = 0;\n\
+        node n [count < 10][true] {\n\
+            count = count + 1;\n\
+            term;\n\
+        };\n";
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("!range !{ i64 0, i64 10 }"),
+        "range bounds must be typed i64; got:\n{ir}");
+    assert!(!ir.contains("!range !{ 0, 10 }"),
+        "the untyped legacy range form must not be emitted; got:\n{ir}");
+}

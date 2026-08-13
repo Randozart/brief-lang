@@ -1,5 +1,5 @@
 // ── Lua Round-Trip Test (native C module) ──────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briev
 // extension <bridge> lua` renders + builds a Lua C module (luaopen_<bridge>);
 // strings cross via luaL_checkstring / lua_pushstring on the composite
 // NUL-invariant data. Toolchain-guarded on a Lua built from source at
@@ -42,15 +42,15 @@ fn lua_roundtrip() {
         eprintln!("SKIP: lua not found at ~/briv-tools/lua-*/src/lua");
         return;
     };
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("briv_lua_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let base = std::env::temp_dir().join("briev_lua_test");
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let ext = Command::new(briefc)
+    let ext = Command::new(brievc)
         .args(["extension", &bv, "lua", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc extension lua");
+        .output().expect("failed brievc extension lua");
     assert!(ext.status.success(), "lua ext failed: {}", String::from_utf8_lossy(&ext.stderr));
     assert!(base.join("boundary.so").exists(), "boundary.so missing");
 

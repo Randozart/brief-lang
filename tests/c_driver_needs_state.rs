@@ -1,5 +1,5 @@
 // ── Compiler-in-Briv: needs_state transition test ─────────────────────
-// 2026-08-04 (plan 2026-08-04-compiler-in-briv-dogfood-ffi): the Briv pass
+// 2026-08-04 (plan 2026-08-04-compiler-in-briev-dogfood-ffi): the Briv pass
 // lib/compiler/needs_state.bv must produce the SAME needs_state bitmask as the
 // Rust reference (compute_export_needs_state) on a corpus of bridges. This is
 // the P4 behavioral gate: Rust serializes the projection, the linked Briv
@@ -21,16 +21,16 @@ fn needs_state_pass_matches_reference() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_needs_state_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_needs_state_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     // Build the Briv pass as a library (the compiler-in-Briv payload).
     let pass_bv = format!("{}/lib/compiler/needs_state.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &pass_bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "pass build failed: {}", String::from_utf8_lossy(&build.stderr));
 
     // Corpus: bridges with and without state. Each entry is (file, expected
@@ -48,9 +48,9 @@ fn needs_state_pass_matches_reference() {
     for (rel, expect) in &corpus {
         let src = format!("{}/{}", PROJECT_ROOT, rel);
         let source = std::fs::read_to_string(&src).unwrap();
-        let (items, _u) = briv_compiler::library::parse_and_check(&src, &source).unwrap();
-        let proj = briv_compiler::analysis::needs_state_projection::serialize_needs_state_projection(&items);
-        let needs = briv_compiler::analysis::export_abi::compute_export_needs_state(&items);
+        let (items, _u) = briev_compiler::library::parse_and_check(&src, &source).unwrap();
+        let proj = briev_compiler::analysis::needs_state_projection::serialize_needs_state_projection(&items);
+        let needs = briev_compiler::analysis::export_abi::compute_export_needs_state(&items);
         let mut exports: Vec<String> = needs.keys().cloned().collect();
         exports.sort();
         let mut ref_mask = 0i64;
@@ -65,10 +65,10 @@ fn needs_state_pass_matches_reference() {
         let driver_c = out_dir.join(format!("{}.c", rel.replace('/', "_")));
         std::fs::write(&driver_c, format!(r#"
 #include <stdio.h>
-long __briv_init_state(void);
+long __briev_init_state(void);
 long needs_state_compute(long st, const char* s);
 int main(void) {{
-    long st = __briv_init_state();
+    long st = __briev_init_state();
     const char* p = "{}";
     printf("%ld\n", needs_state_compute(st, p));
     return 0;

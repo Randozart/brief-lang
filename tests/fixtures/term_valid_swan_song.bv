@@ -4,5 +4,5 @@ let a: Int = 0;
 // hoist (`analysis/swan_song.rs`) handles it. Must pass with no warning.
 node n [a == 0][a == 1] {
   a = 1;
-  when a == 1 { term! -> Print#(a); };
+  when a == 1 { endprogram Print#(a); };
 };

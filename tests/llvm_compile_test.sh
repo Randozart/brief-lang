@@ -14,9 +14,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="/tmp/briv-llvm-test-$$"
+BUILD_DIR="/tmp/briev-llvm-test-$$"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
-BRIV="$PROJECT_DIR/target/release/briv-compiler"
+BRIV="$PROJECT_DIR/target/release/brievc"
 PASS=0
 FAIL=0
 SKIP=0
@@ -27,8 +27,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-pass_msg() { echo -e "  ${GREEN}PASS${NC} $1"; ((PASS++)); }
-fail_msg() { echo -e "  ${RED}FAIL${NC} $1"; ((FAIL++)); }
+pass_msg() { echo -e "  ${GREEN}PASS${NC} $1"; ((PASS++)); return 0; }
+fail_msg() { echo -e "  ${RED}FAIL${NC} $1"; ((FAIL++)); return 0; }
 skip_msg() { echo -e "  ${YELLOW}SKIP${NC} $1"; ((SKIP++)); }
 
 # --- Setup ---
@@ -37,7 +37,7 @@ trap cleanup EXIT
 mkdir -p "$BUILD_DIR"/{ir,obj,run}
 
 build_compiler() {
-    echo "--- Building briv-compiler ---"
+    echo "--- Building briev-compiler ---"
     cargo build --release -q 2>/dev/null
 }
 
@@ -49,7 +49,7 @@ test_compile() {
 
     echo "  compile: $name.bv"
 
-    if ! "$BRIV" llvm "$fixture" --out "$BUILD_DIR/ir" 2>/dev/null; then
+    if ! "$BRIV" build "$fixture" --llvm --out "$BUILD_DIR/ir" 2>/dev/null; then
         fail_msg "compile $name.bv → exit non-zero"
         return 1
     fi
@@ -146,7 +146,7 @@ test_verify() {
 
     echo "  verify: $name.ll"
 
-    if opt -verify "$ll_file" -o /dev/null 2>/dev/null; then
+    if opt -passes=verify "$ll_file" -o /dev/null 2>/dev/null; then
         pass_msg "opt -verify $name.ll → valid"
     else
         fail_msg "opt -verify $name.ll → verification errors"
@@ -203,9 +203,10 @@ for tool in llc opt; do
     fi
 done
 
-# Run tests
+# Run tests. Skip the term_* fixtures — they are termination-diagnostics
+# fixtures (some intentionally fail compilation by design).
 for fixture in "$FIXTURES_DIR"/*.bv; do
-    if [ -f "$fixture" ]; then
+    if [ -f "$fixture" ] && [[ "$(basename "$fixture")" != term_* ]]; then
         run_suite "$fixture"
     fi
 done

@@ -14,40 +14,40 @@ fn has(cmd: &str) -> bool {
 }
 
 #[test]
-fn host_callback_into_briv_roundtrip() {
+fn host_callback_into_briev_roundtrip() {
     for tool in ["cc", "ar", "llc", "clang"] {
         if !has(tool) {
             eprintln!("SKIP: {} not available", tool);
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_cb_driver_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_cb_driver_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/callback.bv", PROJECT_ROOT);
 
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
 
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "callback-bindings/briv_types.h"
+#include "callback-bindings/briev_types.h"
 #include <stdio.h>
 
 static int64_t doubler(int64_t x) { return x * 2; }
 static int64_t plus_one(int64_t x) { return x + 1; }
 
 int main(void) {
-    BrivState* st = __briv_init_state();
+    BrievState* st = __briev_init_state();
     printf("double:%ld\n", apply(doubler, 21));
     printf("inc:%ld\n", apply(plus_one, 41));
     __glue_release(st);

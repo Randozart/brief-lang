@@ -1,22 +1,39 @@
 # Bugs
 
-## 7 stale integration-test files reference pre-rename `briefc` bin + `briv_*` symbols — OPEN (pre-existing, not gated by `cargo test --lib`)
+## Stale integration tests referenced pre-rename `briefc`/`briv_*` symbols — FIXED 2026-08-13
 
 **Date:** 2026-08-13 (found during Phase 0 of layout-keywords)
-**Status:** Open — pre-existing. The bin was renamed `briefc` → `brievc` and
-the C-ABI symbols `briv_*`/`BrivState` → `briev_*`/`BrievState` / header
-`briv_types.h` → `briev_types.h` at commit `62ae145d` "Massive rename"; the
-following test files were never migrated and do **not compile**:
+**Status:** Fixed (integration-test rename sweep, `feat/spec-layout-keywords`).
+**Scope (actual, larger than the original "7 files" claim):** 20 test files /
+~169 references: `briefc`→`brievc` (incl. `CARGO_BIN_EXE_briefc`),
+`briv_compiler`→`briev_compiler` (lib crate), `briv_types.h`→`briev_types.h`,
+`BrivState`→`BrievState`, `__briv_*`→`__briev_*`, `briv_rt(.c/.o)`→`briev_rt`,
+`briv-compiler`→`briev-compiler`, and the cosmetic `briv_*_test` temp-dir
+names. `~/briv-tools` (a real user tool path) was deliberately left untouched.
+**Fix:** scripted rename sweep + three API-drift fixes: deleted the dead
+`tests/fallback_tests.rs` (the `Fallback` feature was removed at `5f2107bc5`
+"remove frgn fallback clause"); dropped the `Fallback` arg from
+`glue_bridge_tests.rs`; `Value::Int`→`Value::Atom(Atom::Int)` in
+`pointer_trickery_test.rs`; `glue.dbvl`→`glue.dbv` config paths;
+`term! -> X`→`endprogram X` in the three term fixtures; and
+`lib/compiler/needs_state.bv` now casts `CStr`→`String` explicitly
+(`cstr_to_briev`) after the String-param library-export codegen bug surfaced
+(`%ac0` i64-vs-ptr, logged below). `glue_integration.sh` Test 5 now checks the
+per-language `lib/glue/<lang>/glue.dbv` folders.
+**Verification:** `cargo test` fully green (lib 1828 + bin 14 + all 30
+integration-test binaries incl. the C/C++/Java/Node/Python/C#/Go/Lua drivers);
+`tests/glue_integration.sh` 11/11.
 
-- `tests/c_driver_cpp.rs`, `tests/c_driver_callback.rs`, `tests/c_driver_lua.rs`,
-  `tests/c_driver_java.rs`, `tests/c_driver_node.rs`, `tests/c_driver_boundary.rs`,
-  `tests/c_driver_go.rs`, `tests/c_driver_csharp.rs`, `tests/glue_integration.sh`
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
 
-The two fixtures for `pp-types.bv` (`tests/pp_roundtrip_tests.rs`,
-`tests/c_driver_library.rs`) were fixed during Phase 0 (9/9 green). The rest are
-a straightforward mechanical sweep: `CARGO_BIN_EXE_briefc` →
-`CARGO_BIN_EXE_brievc`, `briv_test_*` → `briev_test_*`, `BrivState`/`__briv_init_state`
-→ `BrievState`/`__briev_init_state`, `briv_types.h` → `briev_types.h`.
+**Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
+**Status:** Open. An exported defn with a `String` parameter, built via
+`brievc build --library`, emits `%ac0` typed i64 in the shim while the body
+expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
+'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
+and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
+marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
+a ptr).
 
 ## String state-field reads emit undefined globals + String element ptr mismatches — OPEN (pre-existing, block String iteration)
 
@@ -4081,3 +4098,27 @@ node now loops correctly at `-O3 -flto` (7 lines at BOUND=20, matching the
 non-struct shape); `benchmarks/pack_struct_runtime.bv` / `pack_be_selfcheck.bv`
 output IDENTICAL to C. Packed/union/atomic structs hit the same gap — all
 fixed by the hoist.
+
+## `!range` metadata emitted untyped for i64 (malformed in LLVM 18+) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found via tests/llvm_compile_test.sh on the bounded counter fixture)
+**Status:** Fixed.
+**Root cause:** `emit_precondition_proof` (src/backend/llvm/emit_toplevel.rs:3519)
+emitted `!range !{ 0, 10 }` (untyped bounds) for i64 loads, using the legacy
+short form. clang/opt 18+ reject untyped range bounds ("expected metadata
+operand"), so any `.bv` with a bounded i64 precondition (e.g.
+`node [count < 10]`) produced IR that clang refuses to compile. The bench suite
+never hit it (no benchmark uses bounded i64 preconditions).
+**Fix:** always emit typed bounds (`!range !{ i64 0, i64 10 }`), matching the
+typed form used by `emit_range_metadata` for narrower widths.
+
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
+
+**Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
+**Status:** Open. An exported defn with a `String` parameter, built via
+`brievc build --library`, emits `%ac0` typed i64 in the shim while the body
+expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
+'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
+and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
+marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
+a ptr).

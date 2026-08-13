@@ -2,16 +2,12 @@
 let count: Int = 0;
 let active: Bool = false;
 
-rct txn increment [count < 100 && active == false]
-  [count == @count + 1 && active == @active]
-{
-  &count = count + 1;
+sync<multifield> node increment [count < 100 && active == false][true] {
+  count = count + 1;
   term;
 };
 
-rct txn toggle [true]
-  [active != @active]
-{
-  &active = true;
+sync<multifield> node toggle [active == false][true] {
+  active = true;
   term;
 };

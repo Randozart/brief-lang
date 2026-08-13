@@ -4,6 +4,6 @@ let a: Int = 0;
 // returns TermReturn and unwinds), so Print#(2) can never run.
 node n [a == 0][a == 1] {
   a = 1;
-  term! -> Print#(a);
+  endprogram Print#(a);
   Print#(2);
 };

@@ -26,8 +26,8 @@ fn python_node_cross_language_bridge() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("briv_py_node_bridge");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let base = std::env::temp_dir().join("briev_py_node_bridge");
     let _ = std::fs::remove_dir_all(&base);
     let node_dir = base.join("node");
     let py_dir = base.join("py");
@@ -36,14 +36,14 @@ fn python_node_cross_language_bridge() {
 
     let bv = format!("{}/examples/glue-host/node_bridge.bv", PROJECT_ROOT);
 
-    let ext_node = Command::new(briefc)
+    let ext_node = Command::new(brievc)
         .args(["extension", &bv, "node", "--out", &node_dir.to_string_lossy()])
-        .output().expect("failed briefc extension node");
+        .output().expect("failed brievc extension node");
     assert!(ext_node.status.success(), "node ext failed: {}", String::from_utf8_lossy(&ext_node.stderr));
 
-    let ext_py = Command::new(briefc)
+    let ext_py = Command::new(brievc)
         .args(["extension", &bv, "python", "--out", &py_dir.to_string_lossy()])
-        .output().expect("failed briefc extension python");
+        .output().expect("failed brievc extension python");
     assert!(ext_py.status.success(), "python ext failed: {}", String::from_utf8_lossy(&ext_py.stderr));
 
     // Step 1: Node saves + persists "hello from node".

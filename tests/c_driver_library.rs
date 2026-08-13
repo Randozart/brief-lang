@@ -1,7 +1,7 @@
 // ── C-Driver Library Test ─────────────────────────────────────────────
 // 2026-08-03: the `--library` acceptance criterion — compile a Briv bridge
 // to a static library (.a) + generated C header, then a plain C program
-// includes the header, calls __briv_init_state() and exported functions,
+// includes the header, calls __briev_init_state() and exported functions,
 // links the archive, and gets correct results.
 //
 // Pipeline: brievc build pp-types.bv --library → libpp-types.a + pp-types.so
@@ -28,25 +28,25 @@ fn cc_guard() -> Option<()> {
 }
 
 #[test]
-fn c_driver_calls_briv_library() {
+fn c_driver_calls_briev_library() {
     let Some(()) = cc_guard() else { return };
-    let briefc = env!("CARGO_BIN_EXE_brievc");
-    let out_dir = std::env::temp_dir().join("briv_c_driver_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_c_driver_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/pp-types.bv", PROJECT_ROOT);
 
     // 1. Build the static library + .so.
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build --library failed: {}", String::from_utf8_lossy(&build.stderr));
 
     // 2. Generate the C header.
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
     let header = out_dir.join("pp-types-bindings").join("briev_types.h");
     assert!(header.exists(), "briev_types.h not generated");
