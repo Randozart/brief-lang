@@ -11,6 +11,12 @@
 >
 > The document is retained for historical reference during the transition.
 
+> **2026-08-13 (transition complete):** physical-layout metadata is now spelled
+> with `spec` (`spec Bits: 32;`, `spec MaxBits: 64;`, `spec Alignment: 8;`) —
+> the lowercase keys below (`bits`, `maxbits`, `alignment`) are unchanged and
+> still what every backend reads; `spec` writes them. See
+> `docs/architecture/agent-reference.md` §Physical layout.
+
 ## Design Philosophy
 
 The Briev compiler does NOT hardcode primitive type mappings in Rust match arms.

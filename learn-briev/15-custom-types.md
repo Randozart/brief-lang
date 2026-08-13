@@ -28,7 +28,10 @@ type MyInt : #Int {
 - **Parse ops**: `op Parse(Decimal): fn(#L)` — custom literal construction
 
 No `!> maxbits:`, `!> alignment:`, `!> llvm:`, `!> storage:`, `default_width`,
-`commuting`, or LLVM opcode strings needed.
+`commuting`, or LLVM opcode strings needed. When a physical layout must be
+pinned, declare it with `spec` (`spec Bits: 12;`, `spec Alignment: 2;`, `spec
+Endian: Big;`, §8.2 of the spec) or a `pack`/`union` struct modifier — never
+the `!>` spelling.
 
 ## 2. Protocol-Centric Ops
 

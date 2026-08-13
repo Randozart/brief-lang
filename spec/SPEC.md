@@ -416,7 +416,7 @@ A plain struct is layout-adaptive: a backend may reorder, split, scalarize, or e
 
 ```briev
 type Length32: #Int {
-    !> bits: 32;
+    spec Bits: 32;
 };
 
 seq struct Header {
@@ -654,11 +654,11 @@ defn parse(tag: Int) -> Int {
 
 ### 8.9 Metadata
 
-`!>` is the canonical metadata-binding operator.
+`!>` is the canonical annotation operator for non-physical metadata.
 
 ```briev
 type Int32: #Int {
-    !> bits: 32;
+    !> ctd: Int;      // annotation (e.g. cell-tag dispatch)
 };
 ```
 
@@ -670,9 +670,9 @@ type Int32: #Int {
 > keys are PascalCase; values use the same grammar as `!>` values. `!>` remains
 > the annotation operator for non-physical metadata (`ctd`, `accel`, …); it no
 > longer carries physical-layout keys. `spec` and `!>` share one metadata map —
-> a physical key spelled with `!>` still parses during the migration (§7.x
-> moves stdlib to `spec`), but `spec` supersedes it; an unknown `spec` name is
-> an error, never silently accepted.
+> a physical key spelled with `!>` still parses for backward compatibility
+> (stdlib and examples migrated to `spec` in 2026-08-13), but `spec`
+> supersedes it; an unknown `spec` name is an error, never silently accepted.
 
 **Staged.** At module top level, `!>` binds metadata to the module as a whole.
 Top-level `!>` is a shortcut for attaching metadata to the script; it never
@@ -1415,7 +1415,7 @@ Compile-time reflection occurs after semantic/layout freezing. Reflection-driven
 Descriptor fields include, where applicable:
 
 - `Type`, `Ops`, `Effects`;
-- `Bytes`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
+- `Bytes`, `Bits`, `MaxBits`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
 - declaration metadata `Name`, `Params`, `Returns`, `Arity`, `Loc`, `FnSpan`, `Doc`, `Hash`, `Contracts`, `Module`, `IsPure`.
 
 `value.^^Element` is the element type of an iterable receiver, derived from
