@@ -43,8 +43,9 @@ Patches are unacceptable. There is no "go fast and break things."
    - **Disclose special treatment.** Every compiler-known behavior carries an
      explicit marker: `#` suffix (intrinsic `Sqrt#`), `#` prefix (hashword
      `#Int`), `!` suffix (compile-time expansion `my_macro!`), `.^`/`.^^`
-     (reflection). User-facing directives (`seq`, `vol`, `async`, `sync<g>`)
-     are ordinary keywords — no `#` — and **must never make code faster**:
+     (reflection). User-facing directives (`seq`, `pack`, `vol`, `async`,
+     `sync<g>`, `atomic`, `union`, `trap`) are ordinary keywords — no `#` —
+     and **must never make code faster**:
      the default is always the efficient path; a modifier-beaten default is a
      compiler bug (fix the default, never let the modifier be the win).
    - **NEVER hardcode Rust string matches as built-in functions.**
