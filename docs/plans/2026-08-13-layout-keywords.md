@@ -789,11 +789,14 @@ All 39 benchmarks: no MISMATCH, no FAIL. `bridge_glue`/`bridge_multi` build
 - `BUGS.md` records the Bits-unit bug, the `intrinsics.rs:724` pointer bug,
   and the `IsZero/IsOne` audit result.
 
-**Phase 1 + 2 gate status (2026-08-13):** `cargo test --lib` 1818 green (Phase 1
-added +19, Phase 2 added +13); Praetor on all changed files vs the Phase-1
+**Final gate status (2026-08-13, all phases 1–7 + bugfixes done):**
+`cargo test --lib` 1828 green; Praetor on all changed files vs the Phase-1
 baseline copies → zero genuinely-new diagnostics (lib warnings unchanged);
-full `--runtime` suite after Phase 2 → all 39 benchmarks MATCH/PASS at parity
-with the §6 baseline table (0.52s–7.85x spread, no regression vs baseline).
-Phase-2 end-to-end pairs `benchmarks/pack_struct_runtime.bv|_c.c` and
-`benchmarks/pack_be_selfcheck.bv` output IDENTICAL to their C references at
-BOUND=5/1000/1000000 (LE + BE + whole-byte + sub-byte, incl. byte-reverse).
+full `--runtime` suite → all 39 benchmarks MATCH/PASS at parity with the §6
+baseline table (no regression vs baseline). End-to-end pairs
+`benchmarks/pack_struct_runtime.bv|_c.c` and `benchmarks/pack_be_selfcheck.bv`
+output IDENTICAL to their C references at BOUND=5/1000/1000000 (LE + BE +
+whole-byte + sub-byte, incl. byte-reverse). Post-plan bugfixes: the reactor
+struct-slot single-fire loop (alloca hoisted to the loop preheader) and the
+`Bits<N>` Applied-alias i64 widening (llvm_type resolves to i{N}) — both
+verified end-to-end vs C and logged in BUGS.md with root-cause analysis.

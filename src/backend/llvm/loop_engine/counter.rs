@@ -611,6 +611,14 @@ impl LlvmBackend {
         self.emit_main_header(out, "#0", true);
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
+        // 2026-08-13 (reactor fix): buffer the batched loop so deferred
+        // struct-literal allocas flush into the PREHEADER (before the loop) —
+        // an in-loop alloca makes clang -O3 peel the loop + emit a bogus exit
+        // assumption (nodes with struct-typed state slots fired once).
+        let mut batch_buf = String::new();
+        {
+        let out = &mut batch_buf;
+        self.fun.defer_struct_allocas = true;
         let c0 = self.fun.txn_counter;
         self.fun.txn_counter += 1;
         let bound_reg = self.fun.next_reg_with_prefix("obb");
@@ -862,6 +870,10 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
         writeln!(out).ok();
         let _ = txn_name;
+        self.fun.defer_struct_allocas = false;
+        }
+        self.flush_pending_struct_allocas(out);
+        out.push_str(&batch_buf);
     }
 
     // 2026-07-29: emit_countable_memory_main removed — dead code after Phase 4.

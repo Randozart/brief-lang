@@ -4014,18 +4014,6 @@ exactly N bits; `emit_cast_steps`'s Bitcast lane zext/truncs across differing
 integer widths; the reference interpreter mirrors the truncation (rule 4);
 packed stores mask to the field width defensively.
 
-## Reactive nodes with struct-typed state slots fire once then stop — OPEN (pre-existing)
-
-**Date:** 2026-08-13 (found while writing pack end-to-end benchmarks)
-**Status:** Open — pre-existing (reproduces with a plain non-packed `struct`
-state slot too). A node that reads/writes a struct-typed `let s: S;` slot
-(`s = S { ... }`, `s.f = v`, `s.f`) dispatches once and the reactor never
-re-queues it, so the tick loop emits a single iteration. Packed structs hit
-this identically. Workaround: construct/read packed structs inside `defn`
-locals (the benchmark pair `benchmarks/pack_struct_runtime.bv` does this). The
-reactor's per-field-phi write classification needs to recognize struct-slot
-writes as txn writes.
-
 ## BE sub-byte packed shift formula — FIXED 2026-08-13
 
 **Date:** 2026-08-13
@@ -4060,6 +4048,17 @@ matching the direct `Type::Bits` arm). `lower_type` does the same.
 type. Every `Type::bits(N)`-as-byte consumer had the same unit ambiguity.
 **Fix:** `Type::Bits(N)` is now exactly N bits; `Ptr<Bits(8)>` is a true i8
 (byte) pointer. No further action needed — logged to close the plan's DoD.
+
+## `!> IsZero:` / `!> IsOne:` stdlib metadata was dead — REMOVED 2026-08-13
+
+**Date:** 2026-08-13 (layout-keywords plan DoD audit, Phase 7)
+**Status:** Removed — audited, no consumers.
+**Audit:** `lib/std/types.bv` carried `!> IsZero: _ == 0;` and
+`!> IsOne: _ == 1;` metadata. A `grep` across `src/` (and the typechecker /
+strategy resolution) found zero readers — the metadata did not parse as any
+current metadata value and was never consulted. Removed from `types.bv` as
+truly dead (rule 14: no type-specific knowledge; if a zero/one predicate is
+needed later it belongs in stdlib as an `op`, not metadata).
 
 ## Reactive nodes with struct-typed state slots fire once then stop — FIXED 2026-08-13
 
