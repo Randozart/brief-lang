@@ -78,6 +78,11 @@ obj List<T> {
     inner: ListBuffer<T>;
     len: Int;
 
+    // 2026-08-12 (Iterable protocol): Tier-2 iteration ops — the operator IS
+    // the member (SPEC §11.4/§15.2). `foreach x in list` lowers through these.
+    op Count() -> Int { term len; };
+    op At(i: Int) -> T { term inner.data[i]; };
+
     op InsertAt: push(#Lh, #Rh);
     op ExtractFrom: pop(#Rh);
     op CopyFrom: get(#Rh);
