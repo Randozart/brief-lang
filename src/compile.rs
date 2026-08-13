@@ -351,6 +351,9 @@ struct CompiledView {
     /// these (driving op Count/op At), and the dom-shim renders from the
     /// snapshot instead of vector layout bytes.
     collection_iterables: std::collections::HashSet<String>,
+    /// 2026-08-12 (slice 4): the subset whose ELEMENT type is String — the
+    /// shim decodes each snapshot word as a `[len][bytes]` string pointer.
+    collection_string_iterables: std::collections::HashSet<String>,
     warnings: Vec<String>,
 }
 
@@ -389,6 +392,7 @@ fn compile_view(
             bindings: opts.view_bindings.clone(),
             modified_html: opts.view_html.clone(),
             collection_iterables: std::collections::HashSet::new(),
+            collection_string_iterables: std::collections::HashSet::new(),
             warnings: Vec::new(),
         });
     };
@@ -451,6 +455,7 @@ fn compile_view(
         .collect();
     let mut warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
     let mut collection_iterables: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut collection_string_iterables: std::collections::HashSet<String> = std::collections::HashSet::new();
     for binding in &bindings {
         if let briev_compiler::view_compiler::Directive::Each { iterable, .. } = &binding.directive {
             let ty = field_types.get(iterable);
@@ -467,6 +472,19 @@ fn compile_view(
                 }).unwrap_or(false);
                 if is_collection {
                     collection_iterables.insert(iterable.clone());
+                    // 2026-08-12 (slice 4, String elements): a collection whose
+                    // element type is String materializes string POINTERS in the
+                    // snapshot — the shim decodes them as `[len][bytes]`.
+                    let is_string_elem = ty.map(|t| match t {
+                        briev_compiler::ast::Type::Applied(_, args) => args
+                            .first()
+                            .map(|a| *a == briev_compiler::ast::Type::string())
+                            .unwrap_or(false),
+                        _ => false,
+                    }).unwrap_or(false);
+                    if is_string_elem {
+                        collection_string_iterables.insert(iterable.clone());
+                    }
                 } else {
                     warnings.push(format!(
                         "b-each iterable '{}' is neither a static vector field (Int[N]/Bool[N]) \
@@ -503,6 +521,7 @@ fn compile_view(
         bindings,
         modified_html: Some(modified_html),
         collection_iterables,
+        collection_string_iterables,
         warnings,
     })
 }
@@ -1080,6 +1099,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             bindings: Vec::new(),
             modified_html: None,
             collection_iterables: std::collections::HashSet::new(),
+            collection_string_iterables: std::collections::HashSet::new(),
             warnings: Vec::new(),
         }
     };
@@ -1087,6 +1107,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let view_bindings = compiled_view.bindings.clone();
     let modified_view_html = compiled_view.modified_html.clone();
     let collection_iterables = compiled_view.collection_iterables.clone();
+    let collection_string_iterables = compiled_view.collection_string_iterables.clone();
     let view_signals = view_root_signals(&view_bindings);
 
     // ── Code generation ───────────────────────────────────────────────
@@ -1355,7 +1376,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     frgn_decls,
                 )
                 .with_bind_routes(resolved_routes)
-                .with_collection_iterables(collection_iterables.clone());
+                .with_collection_iterables(collection_iterables.clone())
+                .with_collection_string_iterables(collection_string_iterables.clone());
                 match web_gen.generate() {
                     Ok(output) => {
                         let mjs_path = format!("{}.mjs", binary_base);

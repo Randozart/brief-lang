@@ -2371,23 +2371,13 @@ impl LlvmBackend {
             .collect();
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
-                // 2026-08-04 (compiler-in-Briev): a String argument (a real
-                // ptr) binds to a boxed parameter (an i64 handle) — ptrtoint
-                // at the param boundary so `inner.data[len] = val` in the
-                // member body stores an i64, not a ptr. This is the bits-model
-                // invariant: "a String crossing a call boundary is an i64
-                // handle; a String in a register is a ptr."
-                let bound = if self.is_string_operand(rty) {
-                    let boxed = self.adapt_to_i64(
-                        out,
-                        indent,
-                        &TypedRegister { name: reg.clone(), ty: rty.clone() },
-                    );
-                    boxed
-                } else {
-                    reg.clone()
-                };
-                self.fun.let_bindings.insert(pname.clone(), bound);
+                // 2026-08-12 (slice 4): a String arg is bound as the PTR (the
+                // "String in a register is a ptr" invariant) — the member body's
+                // own stores (inner.data[len] = val) box it via adapt_to_i64.
+                // The previous pre-boxing here (ptrtoint at the boundary) made
+                // wasm32 DOUBLE-box (the store adapts again), producing
+                // `ptrtoint ptr <i64 handle>`.
+                self.fun.let_bindings.insert(pname.clone(), reg.clone());
                 self.fun.let_binding_types.insert(pname.clone(), pty.clone());
                 self.fun.let_original_types.insert(pname.clone(), pty.clone());
             }

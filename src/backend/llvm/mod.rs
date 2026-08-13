@@ -4239,8 +4239,16 @@ impl LlvmBackend {
             let arg = crate::ast::Expr::Identifier(cur_tmp);
             let at_tmp = self.fun.gen_reg();
             let word = self.emit_method_call(out, &at_tmp, &crate::ast::Expr::Identifier(field.clone()), "At", &[arg], "  ");
+            // 2026-08-12 (slice 4, String elements): a String/Data element's At
+            // return is a PTR (the [len][bytes] address) — box it to the i64
+            // snapshot word via adapt_to_i64 (ptrtoint); an Int element zexts
+            // from i32 on wasm32.
             let word64 = if self.llvm_type(&word.ty) == "i64" {
                 word.name.clone()
+            } else if self.is_string_operand(&word.ty) || self.is_data_operand(&word.ty) {
+                let p = self.fun.gen_reg();
+                writeln!(out, "  {} = ptrtoint {} {} to i64", p, self.llvm_type(&word.ty), word.name).ok();
+                p
             } else {
                 let z = self.fun.gen_reg();
                 writeln!(out, "  {} = zext i32 {} to i64", z, word.name).ok();

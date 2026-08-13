@@ -158,6 +158,9 @@ pub struct GlueWebGenerator {
     /// are generic collections — the shim renders them from a
     /// `__view_items_<field>()` snapshot instead of vector layout bytes.
     collection_iterables: HashSet<String>,
+    /// 2026-08-12 (slice 4): the subset whose ELEMENT type is String — the
+    /// shim decodes each snapshot word as a `[len][bytes]` string pointer.
+    collection_string_iterables: HashSet<String>,
 }
 
 /// JS marshalling category for a `b-bind:value` transaction parameter,
@@ -215,6 +218,7 @@ impl GlueWebGenerator {
             frgn_decls,
             bind_routes: HashMap::new(),
             collection_iterables: HashSet::new(),
+            collection_string_iterables: HashSet::new(),
         }
     }
 
@@ -231,6 +235,13 @@ impl GlueWebGenerator {
     /// iterable fields (rendered from a snapshot materializer).
     pub fn with_collection_iterables(mut self, fields: HashSet<String>) -> Self {
         self.collection_iterables = fields;
+        self
+    }
+
+    /// 2026-08-12 (slice 4): the collection `b-each` iterables whose ELEMENT
+    /// type is String — the shim decodes snapshot words as strings.
+    pub fn with_collection_string_iterables(mut self, fields: HashSet<String>) -> Self {
+        self.collection_string_iterables = fields;
         self
     }
 
@@ -567,6 +578,19 @@ export async function createApp(wasmBytes) {{
             .collect();
         let ibs_js = format!("[{}]", ibs.join(", "));
         let materializer = format!("__view_items_{}", iterable);
+        // 2026-08-12 (slice 4): a String-element collection materializes the
+        // string POINTERS — the shim reads each `[len][bytes]` string. An Int
+        // element is the raw number.
+        let is_string_items = self.collection_string_iterables.contains(iterable);
+        let item_reader = if is_string_items {
+            "const __word = Number(dv.getBigInt64(snapPtr + 8 + i * 8, true));\
+             const __sp = Number(BigInt.asUintN(32, BigInt(__word)));\
+             const __len = Number(dv.getBigInt64(__sp, true));\
+             const __bytes = new Uint8Array(this._memory.buffer, __sp + 8, __len);\
+             const item = String.fromCharCode(...__bytes);".to_string()
+        } else {
+            "const item = Number(dv.getBigInt64(snapPtr + 8 + i * 8, true));".to_string()
+        };
         format!(
             "(() => {{\n\
              \x20         const anchor = {el};\n\
@@ -613,18 +637,18 @@ export async function createApp(wasmBytes) {{
              \x20           const snapPtr = this._instance.exports['{materializer}'](this._statePtr);\n\
              \x20           if (!snapPtr) return;\n\
              \x20           const dv = new DataView(this._memory.buffer);\n\
-             \x20           const n = Number(dv.getBigInt64(snapPtr, true));\n\
-             \x20           const seen = new Set();\n\
-             \x20           for (let i = 0; i < n; i++) {{\n\
-             \x20             const item = Number(dv.getBigInt64(snapPtr + 8 + i * 8, true));\n\
-             \x20             const key = String(item);\n\
-             \x20             seen.add(key);\n\
-             \x20             let el2 = rendered.get(key);\n\
-             \x20             if (!el2) {{\n\
-             \x20               el2 = document.createElement(tagName);\n\
-             \x20               el2.innerHTML = templateInner;\n\
-             \x20               applyItem(el2, item);\n\
-             \x20               container.appendChild(el2);\n\
+              \x20           const n = Number(dv.getBigInt64(snapPtr, true));\n\
+              \x20           const seen = new Set();\n\
+              \x20           for (let i = 0; i < n; i++) {{\n\
+              \x20             {item_reader}\n\
+              \x20             const key = String(item);\n\
+              \x20             seen.add(key);\n\
+              \x20             let el2 = rendered.get(key);\n\
+              \x20             if (!el2) {{\n\
+              \x20               el2 = document.createElement(tagName);\n\
+              \x20               el2.innerHTML = templateInner;\n\
+              \x20               applyItem(el2, item);\n\
+              \x20               container.appendChild(el2);\n\
              \x20               rendered.set(key, el2);\n\
              \x20             }}\n\
              \x20           }}\n\
@@ -639,6 +663,7 @@ export async function createApp(wasmBytes) {{
             handle = handle,
             template_html = template_html,
             materializer = materializer,
+            item_reader = item_reader,
         )
     }
 
