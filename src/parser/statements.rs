@@ -224,11 +224,18 @@ impl<'a> Parser<'a> {
     /// foreach(item in list) { ... }
     fn parse_foreach_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
-        self.expect(Token::LParen)?;
+        // 2026-08-12 (Iterable protocol): the PARENLESS form `foreach x in
+        // expr { ... }` is primary — the `in` keyword IS the binding; the
+        // parens were redundant call-lookalike syntax (SPEC §11.4, and the
+        // `()`-means-application delimiter rule). The `( item in list )` paren
+        // form remains a tolerated legacy form during migration.
+        let had_paren = self.eat(&Token::LParen);
         let item = self.expect_identifier()?;
         self.eat_identifier("in");
         let list = self.parse_expression()?;
-        self.expect(Token::RParen)?;
+        if had_paren {
+            self.expect(Token::RParen)?;
+        }
         let body = self.parse_block()?;
         // 2026-08-05 (Phase 2 canonical formatter): consume optional `;`
         // (matches when/match termination).

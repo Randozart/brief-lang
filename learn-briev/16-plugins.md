@@ -63,7 +63,7 @@ is evaluated at compile time. Navigation selections are first-class values.
 let imports = Tag$("import");
 
 // Iterate over matches
-foreach(imp in imports) {
+foreach imp in imports) {
     imp.After$().Insert$(Import$("std/debug.bv"));
 };
 
@@ -206,7 +206,7 @@ compile time:
 $(Parsed) {
     defn count_tagged(sel: Selection, tag: String) -> Int {
         let total = 0;
-        foreach(item in sel) {
+        foreach item in sel) {
             when item.Tag$(tag).Count$() > 0 {
                 total = total + 1;
             };
@@ -238,7 +238,7 @@ A plugin can register new plugins for later stages:
 $(Parsed) {
     when Tag$("call").Named$("Unsafe#").Count$() > 0 {
         Stage$.Insert$(Typed) {
-            foreach(call in Tag$("call").Named$("Unsafe#")) {
+            foreach call in Tag$("call").Named$("Unsafe#")) {
                 EmitWarning$("unsafe: " + call.Names$().First$());
             };
         };

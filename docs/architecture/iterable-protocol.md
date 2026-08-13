@@ -201,3 +201,34 @@ stdlib wrappers and software fallbacks per target:
 - **Reflection never computes**; computed properties are intrinsics.
 - **Never panic or skip** — a non-iterable is a compile error with guidance.
 - **Deletions follow replacements.**
+
+## 14. Design decisions (2026-08-12)
+
+### 14.1 `foreach` is parenless (`foreach x in list { … }`)
+
+The `in` keyword IS the binding; the `( item in list )` parens were redundant
+call-lookalike syntax with no disambiguation role (the list expression
+terminates unambiguously at `{`). The parenless form matches the
+`()`-means-application delimiter rule (#20) and Rust/Python/C++ range-for.
+The paren form is tolerated as legacy and gradually removed. **Why:** the
+parens implied a function call where none exists; the delimiter rule reserves
+`()` for application and binding, and `in` already binds.
+
+### 14.2 The `b-` directive prefix is kept (not legacy)
+
+`b-text`, `b-show`, `b-when`, `b-each`, `b-class`, `b-bind`, `b-trigger` use
+the `b-` prefix as the **attribute-namespace separator** — the same pattern as
+Vue's `v-`, Alpine's `x-`, Angular's `*ng-`. **Why it is not legacy:**
+
+1. **Namespace separation** — `b-` marks compiler-owned attributes; every
+   other attribute passes through as plain HTML. Without it, `class="x"` is
+   ambiguous (an HTML class or a binding?), and the view compiler would have
+   to know every HTML attribute to avoid clobbering user markup.
+2. **Disclosure** (Rule 2) — `b-text` is visibly special; no hidden magic in
+   an ordinary-looking attribute.
+3. **Passthrough** — `.s.rbv` views being HTML-compatible is the point;
+   non-`b-` attributes work as HTML.
+
+The `b` letter is a style choice (like Vue's `v`); the *separator* is the
+substance. Removing it would force every attribute through the directive
+parser and break HTML passthrough.

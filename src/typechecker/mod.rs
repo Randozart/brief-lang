@@ -3527,6 +3527,24 @@ node main [beginprogram][true] {
         assert!(!err.is_empty(), "Int item used as String must error");
     }
 
+    /// 2026-08-12 (Iterable protocol): the PARENLESS foreach form
+    /// (`foreach x in expr { }`) parses and typechecks — the `in` keyword is
+    /// the binding; the parens were redundant.
+    #[test]
+    fn foreach_parenless_form_parses() {
+        let ok = r#"
+import <std/collections>;
+let items: List<Int> = [3, 5];
+let sum: Int = 0;
+node main [beginprogram][true] {
+    foreach x in items {
+        sum = sum + x;
+    };
+};
+"#;
+        check(ok).expect("parenless foreach must parse and typecheck");
+    }
+
     /// `Int * Float` is a type error — no implicit numeric coercion.
     #[test]
     fn mixed_int_float_arithmetic_errors() {

@@ -846,6 +846,16 @@ foreach(item in items) {
 };
 ```
 
+The parens are legacy and tolerated; the binding is the `in` keyword. The
+canonical form is parenless — matching the `()`-means-application delimiter
+rule and Rust/Python/C++ range-for:
+
+```briev
+foreach item in items {
+    consume(item);
+};
+```
+
 There are no `for`, `while`, or `loop` keywords. Counted iteration uses iterable ranges or reactive/transactional structure.
 
 #### 11.4.1 Iteration is structural
