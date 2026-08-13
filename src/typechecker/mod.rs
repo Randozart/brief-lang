@@ -3501,6 +3501,32 @@ obj Counter {
         assert!(!err.is_empty(), "mis-typed op body must error");
     }
 
+    /// 2026-08-12 (Iterable protocol, Tier 2): a `foreach` item is typed by
+    /// the collection's ELEMENT type (the `op At` return, substituted) — a
+    /// String-list item is String, so an Int operation on it errors.
+    #[test]
+    fn foreach_item_is_element_typed() {
+        let ok = r#"
+import <std/collections>;
+let items: List<Int> = [3, 5];
+let sum: Int = 0;
+node main [beginprogram][true] {
+    foreach(x in items) { sum = sum + x; };
+};
+"#;
+        check(ok).expect("Int-list foreach must typecheck");
+        let bad = r#"
+import <std/collections>;
+let items: List<Int> = [3, 5];
+let acc: String = "";
+node main [beginprogram][true] {
+    foreach(x in items) { acc = acc + x; };
+};
+"#;
+        let err = check(bad).unwrap_err();
+        assert!(!err.is_empty(), "Int item used as String must error");
+    }
+
     /// `Int * Float` is a type error — no implicit numeric coercion.
     #[test]
     fn mixed_int_float_arithmetic_errors() {

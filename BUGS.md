@@ -1,30 +1,30 @@
 # Bugs
 
-## Obj-literal seeding + List runtime value gaps — OPEN (pre-existing, block foreach runtime)
+## String state-field reads emit undefined globals + String element ptr mismatches — OPEN (pre-existing, block String iteration)
 
-**Date:** 2026-08-12 (found while verifying the op-as-member slice)
-**Status:** Open — pre-existing, blocks runtime verification of iteration.
+**Date:** 2026-08-12 (found while verifying Tier 2 foreach)
+**Status:** Open — pre-existing, separate from the iterable protocol.
 
-1. **`let c: Counter = Counter { count: 5 };` loses the seed.** `init_state`
-   zero-initializes the unpacked obj (`store [1 x i64] zeroinitializer`); the
-   StructLiteral field values are never applied. `Counter { count: 5 }` then
-   has `count == 0`. Same gap the 2b3 plan flagged. A node precondition on the
-   literal value fails, so the program prints nothing.
-2. **A member call on a top-level obj `let` emits an undefined global `@c`**
-   (`load i64, ptr @c` — clang: use of undefined value). Affects a plain
-   `defn` member identically, so it is NOT op-as-member-specific; it is the
-   top-level-obj-instance member-call path (self_prefix / unpacked_instance
-   machinery).
-3. **`List<Int>` element reads return a heap address, not the element.**
-   `items.get(0)` and `items.At(0)` both print a pointer-sized garbage value
-   after `&items <- 3; &items <- 5;` — so `let items: List<Int> = []` does not
-   initialize the List (op Init not wired for empty literals) or the element
-   read dereferences the wrong layer. Not op-as-member-specific (`get` fails
-   identically).
+1. **A top-level `let a: String = "hi"` read emits `load i64, ptr @a`** — an
+   undefined global, not a %State GEP. `if a == b` on two String state fields
+   fails clang ("use of undefined value '@a'"). This is the same
+   global-vs-state-GEP class as the pooled-instance gap, but for String
+   top-level lets.
+2. **String elements in a `List<String>` foreach hit a ptr/i64 mismatch**
+   ("`%t29` defined with type 'i64' but expected 'ptr'") — the boxed String
+   element is loaded as i64 but consumed as a ptr. The foreach ELEMENT TYPING
+   is correct (the typecheck resolves `n` as String); the codegen unboxing of
+   String elements is the gap.
 
-The op-as-member MECHANISM is verified (parse/typecheck/arrow-dispatch/emit +
-tests); these are the runtime paths the iteration slices must repair before
-`foreach` over a `List` can be exercised end-to-end.
+Both block `foreach` over a `List<String>` end-to-end. The Int case
+(`List<Int>`) is fully green.
+
+## Obj-literal seeding + List runtime value gaps — FIXED (slice 2)
+
+**Date:** 2026-08-12 — **all three fixed** (pooled field/member access,
+StructLiteral seeding, type-directed list literals, empty-init, AddrOf push
+peel). See commits `551c7868` and `ff2ac799`. The `foreach` over `List<Int>`
+now works end-to-end (`foreach(x in [3,5,7])` sums to 15).
 
 ## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
 
