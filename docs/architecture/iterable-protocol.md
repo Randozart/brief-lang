@@ -73,14 +73,19 @@ Satisfaction is **structural** — presence of the ops is iterable-ness.
 | Tier | Requires | Loop | Covers |
 |---|---|---|---|
 | **2 — Random Access** | `op Count() -> Int` + `op At(i: Int) -> &T` | counted `0..Count` loop (vectorizable) | `List`, `Stack`, fixed-width `String`, inline vectors |
-| **1 — General** | `op Iter() -> Cursor` + `op Step(cur) -> Option<&T>` | external stack cursor | `HashMap`, `LinkedList`, streams, variable-width `String` |
+| **1 — General** | `op Iter() -> Cursor` + `op Step(cur) -> Cursor` + `op IsEnd(cur) -> Bool` + `op Current(cur) -> &T` | external stack cursor: `iter; while !is_end { item = current; …; cur = step; }` | `HashMap`, `LinkedList`, streams, variable-width `String` |
 
 - `foreach`/`b-each` pick the best available tier.
 - `c[i]` requires `op At`; anything absent → **compile error**, never panic,
   never a skipped render.
-- Tier-1 cursor is an external stack value (`op Iter()` yields fresh walk
-  state; `op Step(cur)` advances) — re-iterable, reentrant, zero heap. A
-  `LinkedList` cursor is a `Ptr<Node>`; a `HashMap` cursor is a bucket index.
+- Tier-1 cursor is an external stack value (`op Iter()` yields the first
+  element's cursor or the end sentinel; `op Step(cur)` advances to the next or
+  the sentinel; `op IsEnd` tests exhaustion; `op Current` reads the element) —
+  re-iterable, reentrant, zero heap. A `LinkedList` cursor is a `Ptr<Node>`; a
+  `HashMap` cursor is a slot index.
+- *(2026-08-12: the cursor + IsEnd + Current form supersedes the plan's
+  original `op Step(cur) -> Option<&T>` — Option/union returns do not codegen
+  natively yet; the cursor form is equivalent and implementable.)*
 
 ## 5. Borrow semantics
 
