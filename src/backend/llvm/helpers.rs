@@ -2348,6 +2348,19 @@ impl LlvmBackend {
         briev_ty: Option<Type>,
         _universe: Option<&crate::type_universe::TypeUniverse>,
     ) -> String {
+        // 2026-08-13 (merge fix): Ptr<T> and struct/collection HANDLES are
+        // stored as i64 (their llvm_type maps to "ptr" but the register is an
+        // integer handle) — returned unchanged so a state-slot store never
+        // double-ptrtoints them. Only genuine ptr registers (String/Data
+        // values) convert in the ("ptr","i64") arm below.
+        if let Some(ref bt) = briev_ty {
+            if matches!(bt, Type::Ptr(_))
+                || matches!(bt, Type::Custom(n) if self.ctx.struct_types.contains_key(n) || self.ctx.obj_types.contains(n))
+                || matches!(bt, Type::Applied(n, _) if self.ctx.struct_types.contains_key(n) || self.ctx.obj_types.contains(n))
+            {
+                return val.to_string();
+            }
+        }
         let Some(ref bt) = briev_ty else {
             return val.to_string();
         };
@@ -2387,6 +2400,28 @@ impl LlvmBackend {
             ("i32", "i64") => {
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, r, val).ok();
+                r
+            }
+            // 2026-08-13 (merge fix): state-slot adaptation. A String/Data
+            // value is a `ptr` ([len][bytes]) while the slot is i64 (the
+            // %State struct stores most slots as i64) — store the pointer
+            // as its integer address. A boxed i64 value into an i8 slot
+            // (Bool state fields) or i32 slot truncates. (Callers skip this
+            // for struct/collection HANDLES, whose registers are already i64
+            // though their type maps to "ptr".)
+            ("ptr", "i64") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, r, val).ok();
+                r
+            }
+            ("i64", "i8") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i64 {} to i8", indent, r, val).ok();
+                r
+            }
+            ("i64", "i32") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, r, val).ok();
                 r
             }
             _ => val.to_string(),

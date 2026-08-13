@@ -680,16 +680,13 @@ fn eval_reflect(
     let val = eval_expr(recv, heap, scope.bindings, scope.functions)?;
     let ct = matches!(kind, ReflectKind::CompileTime);
     match (name, ct) {
-        // 2026-08-01 (B3): String `Len` = UTF8 character count (not bytes).
-        // A String is Value::Bits(bytes) or a heap handle Int atom.
-        ("Len", false) => match val {
+        // 2026-08-12 (Iterable protocol): String `Length` = the STORED BYTE
+        // count (the [len] header). The UTF8 CHARACTER count is the
+        // `CharCount#` intrinsic (a computed scan; SPEC §17.1/§17.3).
+        ("Length", false) => match val {
             Value::Bits(_) => {
                 let bytes = val.string_bytes(heap).unwrap_or_default();
-                let chars = bytes
-                    .iter()
-                    .filter(|b| (**b & 0xC0) != 0x80)
-                    .count();
-                Ok(Value::int(chars as i64))
+                Ok(Value::int(bytes.len() as i64))
             }
             (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
                 Ok(Value::int(fields.len() as i64))
@@ -2335,7 +2332,7 @@ mod tests {
     fn test_reflect_len_on_product_is_field_count() {
         let r = Expr::Reflect(
             Box::new(person()),
-            "Len".into(),
+            "Length".into(),
             ReflectKind::Runtime,
         );
         assert_eq!(eval1(&r).as_i64(), Some(2));

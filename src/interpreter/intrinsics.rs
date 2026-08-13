@@ -45,6 +45,17 @@ pub fn execute_intrinsic(
     heap: &mut VirtualHeap,
 ) -> Result<Value, RuntimeError> {
     match name {
+        // 2026-08-12 (Iterable protocol): `CharCount#(s)` — the UTF8 CHAR
+        // count of a String (a computed property, so an intrinsic; `.^Length`
+        // is the stored byte count).
+        "CharCount#" => {
+            let s = args.first().ok_or_else(|| crate::errors::RuntimeError::HeapError(
+                "CharCount# takes one argument".into(),
+            ))?;
+            let bytes = s.string_bytes(heap).unwrap_or_default();
+            let chars = bytes.iter().filter(|b| (**b & 0xC0) != 0x80).count();
+            Ok(Value::int(chars as i64))
+        }
         // ── Arithmetic (type-polymorphic) ───────────────────────────
         "Add#" => exec_binop(args, |a, b| a + b, |a, b| a + b),
         "Sub#" => exec_binop(args, |a, b| a - b, |a, b| a - b),
@@ -871,21 +882,29 @@ mod tests {
 
     #[test]
     fn test_reflect_len_and_bytes() {
-        // 2026-08-01 (B3): `x.^Len` = UTF8 char count, `x.^^Bytes` = byte
-        // length (interpreter parity with the backend's briev_char_len /
-        // header read). 'héllo' is 5 chars / 6 bytes.
-        use crate::ast::{Expr, ReflectKind};
+        // 2026-08-12 (Iterable protocol): `x.^Length` = the STORED byte count
+        // (the [len] header), `x.^^Bytes` = byte length, `CharCount#` = the
+        // UTF8 char count. 'héllo' is 5 chars / 6 bytes.
+        use crate::ast::Expr;
         use crate::interpreter::eval_expr;
+        use crate::interpreter::ReflectKind;
         let mut heap = VirtualHeap::new();
         let mut bindings = std::collections::HashMap::new();
         bindings.insert("s".into(), Value::bits("héllo".as_bytes().to_vec()));
         let len_expr = Expr::Reflect(
             Box::new(Expr::Identifier("s".into())),
-            "Len".into(),
+            "Length".into(),
             ReflectKind::Runtime,
         );
         let len = eval_expr(&len_expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
-        assert_eq!(len.as_i64(), Some(5), "héllo has 5 UTF8 chars");
+        assert_eq!(len.as_i64(), Some(6), "héllo is 6 bytes (stored header)");
+        let chars = eval_expr(
+            &Expr::Call("CharCount#".into(), vec![Expr::Identifier("s".into())], None),
+            &mut heap,
+            &mut bindings,
+            &HashMap::new(),
+        ).unwrap();
+        assert_eq!(chars.as_i64(), Some(5), "héllo has 5 UTF8 chars (CharCount#)");
         let bytes_expr = Expr::Reflect(
             Box::new(Expr::Identifier("s".into())),
             "Bytes".into(),

@@ -102,6 +102,11 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── String ───────────────────────────────────────────────────
         "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        // ── Value-category semantics ──────────────────────────────────
+        // 2026-08-12 (Iterable protocol): the UTF8 CHAR count of a String —
+        // a COMPUTED property (the scan), so it is an intrinsic, not
+        // reflection. `.^Length` is the stored byte count (SPEC §17.1).
+        "CharCount#" => Some(Signature { name: "CharCount#", parameters: vec![("s", Type::string())], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "Length#"    => Some(Signature { name: "Length#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "ToInt#"     => Some(Signature { name: "ToInt#",     parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "ToFloat#"   => Some(Signature { name: "ToFloat#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
@@ -327,6 +332,7 @@ mod tests {
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
             "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
+            "CharCount#",
             "Get#", "Insert#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
             "GetGroupId#", "GetNumGroups#", "Dims#",

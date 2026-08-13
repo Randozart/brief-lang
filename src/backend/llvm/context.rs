@@ -111,6 +111,15 @@ pub struct CompilerContext {
     /// pruned by dead-field elimination. Frontend-computed (ViewCompiler
     /// root signals) and copied here before generate().
     pub view_bound_fields: std::collections::HashSet<String>,
+    /// 2026-08-12 (Iterable protocol, slice 4): the `b-each` iterable fields
+    /// that are generic collections — the backend emits a
+    /// `__view_items_<field>()` snapshot materializer for each (driving the
+    /// collection's op Count/op At into a `[len][word…]` buffer the shim reads).
+    pub collection_iterables: std::collections::HashSet<String>,
+    /// 2026-08-12 (slice 4): whether `@reactor_tick` was emitted — a folded
+    /// program (no live reactive nodes) omits it, so `render_frame` must not
+    /// call it (an undefined `@reactor_tick` fails llc).
+    pub has_reactor_tick: bool,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -172,6 +181,14 @@ pub struct CompilerContext {
     /// fields overlay at offset 0; the type materializes as a byte array of
     /// the largest aligned field storage (SPEC §8.2).
     pub unions: HashSet<String>,
+    /// 2026-08-13 (obj value ABI): `obj` declaration names whose VALUES are
+    /// boxed i64 (or i{int_bits}) handles — the pooled-instance representation
+    /// used by state slots, struct literals, and field access. Distinct from
+    /// `struct_types`, which also holds StaticStruct (C-compatible) names that
+    /// are REAL pointers at the FFI boundary. `llvm_type`/params/returns use
+    /// the handle width for obj types so a defn returning an obj (new_builder)
+    /// and one taking it (append_char) share one representation.
+    pub obj_types: std::collections::HashSet<String>,
     /// 2026-07-31 (A8): obj member declarations (txn/defn/node bodies), keyed
     /// by type name. Used by MethodCall codegen to emit the member body with
     /// `self` bound to the receiver instance.
@@ -371,6 +388,8 @@ impl CompilerContext {
             observable_names: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
+            collection_iterables: std::collections::HashSet::new(),
+            has_reactor_tick: false,
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,
@@ -395,6 +414,7 @@ impl CompilerContext {
             packed_structs: HashSet::new(),
             atomic_fields: HashSet::new(),
             unions: HashSet::new(),
+            obj_types: std::collections::HashSet::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
             enum_types: HashMap::new(),

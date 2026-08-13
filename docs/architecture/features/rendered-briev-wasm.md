@@ -135,6 +135,28 @@ The key property: **no JS runs unless a transaction actually commits.** Briev's 
 
 Compare to the old TS emitter: every watcher was a JS `Proxy` or `Object.defineProperty` that ran on every field write, even intermediate values. The WASM approach batches all updates to the transaction commit point — exactly one FFI boundary crossing per transaction, regardless of how many fields changed.
 
+### Interactive State Exports
+
+The whole program state lives in one `@__web_state` global; every `_txn`
+export takes `%state` **first**, and the shim passes `__briev_state_ptr()`
+so the marshalled input lands in the state before the txn body reads it.
+The exported contract:
+
+- `__briev_state_ptr()` — returns the state pointer; the shim marshals each
+  transaction's input into the state, then reads the output fields back out
+  of the same state (the `_txn` wrapper prepends it to every export's
+  signature).
+- `__web_boot()` — boot initialization before the first flush.
+- `render_frame()` — the flush driver; the JS side calls it in a
+  `requestAnimationFrame` loop.
+- If the program's observable side effects fold away, `render_frame()` and
+  `reactor_tick` are still emitted (a folded program has no state to render,
+  but the shim contract stays stable).
+
+Verified end-to-end with a Node harness: an incrementing counter
+(`main.count = ...`) stepped 5→6→7→8 across flushes, each with its flush
+record.
+
 ## Memory Layout as the Bridge
 
 ```

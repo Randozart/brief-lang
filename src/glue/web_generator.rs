@@ -16,7 +16,7 @@
 // with 20+ field mutations, a single large batch still beats per-field crossings.
 // See docs/architecture/features/rendered-briev-wasm.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 2026-08-11 (housekeeping, Part 2): convert a Briev literal token to a JS
 /// literal — `'str'`/`"str"` → a quoted JS string, `true`/`false` → booleans,
@@ -154,6 +154,13 @@ pub struct GlueWebGenerator {
     /// parameter. Resolved at build time from the transition-graph write sets
     /// (the same source the flush batch covers) — never guessed at runtime.
     bind_routes: HashMap<String, BindRoute>,
+    /// 2026-08-12 (Iterable protocol, slice 4): `b-each` iterable fields that
+    /// are generic collections — the shim renders them from a
+    /// `__view_items_<field>()` snapshot instead of vector layout bytes.
+    collection_iterables: HashSet<String>,
+    /// 2026-08-12 (slice 4): the subset whose ELEMENT type is String — the
+    /// shim decodes each snapshot word as a `[len][bytes]` string pointer.
+    collection_string_iterables: HashSet<String>,
 }
 
 /// JS marshalling category for a `b-bind:value` transaction parameter,
@@ -210,6 +217,8 @@ impl GlueWebGenerator {
             protocol_mappings,
             frgn_decls,
             bind_routes: HashMap::new(),
+            collection_iterables: HashSet::new(),
+            collection_string_iterables: HashSet::new(),
         }
     }
 
@@ -219,6 +228,20 @@ impl GlueWebGenerator {
         routes: HashMap<String, BindRoute>,
     ) -> Self {
         self.bind_routes = routes;
+        self
+    }
+
+    /// 2026-08-12 (Iterable protocol, slice 4): the collection `b-each`
+    /// iterable fields (rendered from a snapshot materializer).
+    pub fn with_collection_iterables(mut self, fields: HashSet<String>) -> Self {
+        self.collection_iterables = fields;
+        self
+    }
+
+    /// 2026-08-12 (slice 4): the collection `b-each` iterables whose ELEMENT
+    /// type is String — the shim decodes snapshot words as strings.
+    pub fn with_collection_string_iterables(mut self, fields: HashSet<String>) -> Self {
+        self.collection_string_iterables = fields;
         self
     }
 
@@ -267,6 +290,15 @@ export class WasmDomRuntime {{
     const wasm = await WebAssembly.instantiate(wasmBytes, importObject);
     this._instance = wasm.instance;
     this._memory = wasm.instance.exports.memory;
+    // 2026-08-12 (Iterable protocol, slice 4): run init_state into the
+    // long-lived @__web_state and remember its pointer — EVERY txn export
+    // takes `%state` as its first param, and the shim must pass it (the
+    // exports were previously called with no state, silently operating on
+    // garbage at the wasm heap base).
+    if (this._instance.exports.__web_boot) this._instance.exports.__web_boot();
+    this._statePtr = this._instance.exports.__briev_state_ptr
+      ? this._instance.exports.__briev_state_ptr()
+      : 0;
     this._loadStateLayout();
     this._startRenderLoop();
   }}
@@ -458,7 +490,11 @@ export class WasmDomRuntime {{
   _txn(name) {{
     // 2026-08-11 (Phase 2a3): a callable txn exports as `@<name>`, a reactive
     // txn as `@txn_<name>`. Resolve either so the DOM can fire both.
-    return this._instance.exports[name] || this._instance.exports["txn_" + name];
+    // 2026-08-12 (slice 4): prepend the state pointer — every txn export
+    // takes `%state` as its first param.
+    const fn = this._instance.exports[name] || this._instance.exports["txn_" + name];
+    if (!fn) return fn;
+    return (...args) => fn(this._statePtr, ...args);
   }}
 
   get generation() {{
@@ -485,6 +521,149 @@ export async function createApp(wasmBytes) {{
             max_flush_entries = self.state_layout.max_flush_entries,
             bindings_js = bindings_js,
             imports_js = imports_js,
+        )
+    }
+
+    /// 2026-08-12 (Iterable protocol, slice 4): a `b-each` over a COLLECTION
+    /// iterable. The shim calls the `__view_items_<field>(statePtr)` wasm
+    /// materializer — which drives the collection's own op Count/op At into a
+    /// `[len][word…]` snapshot the shim CAN index — and renders one template
+    /// clone per item, reconciled by key, exactly like the vector renderer.
+    /// Element words are i64 (Int items for now; String/struct elements are a
+    /// documented follow-up that decodes each word by the element type tag).
+    fn emit_collection_each(
+        &self,
+        iterable: &str,
+        item_name: &str,
+        template_html: &str,
+        container_id: &str,
+        item_bindings: &[crate::view_compiler::ItemBinding],
+        key_expr: &str,
+        el: &str,
+    ) -> String {
+        if key_expr.trim() != item_name {
+            return String::new();
+        }
+        let Some(handle) = self.field_handle_for_signal(iterable) else {
+            return String::new();
+        };
+        let ibs: Vec<String> = item_bindings
+            .iter()
+            .map(|ib| {
+                let (kind, expr) = match &ib.directive {
+                    crate::view_compiler::ItemDirective::Text { signal } => ("text", signal.as_str()),
+                    crate::view_compiler::ItemDirective::Class { .. } => ("class", ""),
+                    crate::view_compiler::ItemDirective::Show { expr } => ("show", expr.as_str()),
+                    crate::view_compiler::ItemDirective::When { expr } => ("when", expr.as_str()),
+                    crate::view_compiler::ItemDirective::Trigger { .. } => ("trigger", ""),
+                };
+                let extra = match &ib.directive {
+                    crate::view_compiler::ItemDirective::Trigger { event, txn } => {
+                        format!(", event: {event:?}, txn: {txn:?}")
+                    }
+                    crate::view_compiler::ItemDirective::Class { pairs } => {
+                        let cls: Vec<String> = pairs
+                            .iter()
+                            .map(|(cls_name, cls_expr)| format!("({cls_name:?}, {cls_expr:?})"))
+                            .collect();
+                        format!(", cls: [{}]", cls.join(", "))
+                    }
+                    _ => String::new(),
+                };
+                format!(
+                    "{{ marker: {m}, kind: {kind:?}, expr: {expr:?}{extra} }}",
+                    m = ib.marker
+                )
+            })
+            .collect();
+        let ibs_js = format!("[{}]", ibs.join(", "));
+        let materializer = format!("__view_items_{}", iterable);
+        // 2026-08-12 (slice 4): a String-element collection materializes the
+        // string POINTERS — the shim reads each `[len][bytes]` string. An Int
+        // element is the raw number.
+        let is_string_items = self.collection_string_iterables.contains(iterable);
+        let item_reader = if is_string_items {
+            "const __word = Number(dv.getBigInt64(snapPtr + 8 + i * 8, true));\
+             const __sp = Number(BigInt.asUintN(32, BigInt(__word)));\
+             const __len = Number(dv.getBigInt64(__sp, true));\
+             const __bytes = new Uint8Array(this._memory.buffer, __sp + 8, __len);\
+             const item = String.fromCharCode(...__bytes);".to_string()
+        } else {
+            "const item = Number(dv.getBigInt64(snapPtr + 8 + i * 8, true));".to_string()
+        };
+        format!(
+            "(() => {{\n\
+             \x20         const anchor = {el};\n\
+             \x20         if (!anchor) return;\n\
+             \x20         const container = anchor.parentNode;\n\
+             \x20         if (!container) return;\n\
+             \x20         const tagName = anchor.tagName.toLowerCase();\n\
+             \x20         const templateInner = {template_html:?};\n\
+             \x20         anchor.remove();\n\
+             \x20         const itemBindings = {ibs_js};\n\
+             \x20         const evalItem = (expr, item) => {{\n\
+             \x20           if (expr === {item_name:?}) return Boolean(item);\n\
+             \x20           for (const op of [\"==\", \"!=\", \"<=\", \">=\", \"<\", \">\"]) {{\n\
+             \x20             const i = expr.indexOf(op);\n\
+             \x20             if (i < 0) continue;\n\
+             \x20             const l = expr.slice(0, i).trim(), r = expr.slice(i + op.length).trim();\n\
+             \x20             const lv = l === {item_name:?} ? item : Number(l);\n\
+             \x20             const rv = r === {item_name:?} ? item : Number(r);\n\
+             \x20             switch (op) {{\n\
+             \x20               case \"==\": return lv === rv;\n\
+             \x20               case \"!=\": return lv !== rv;\n\
+             \x20               case \"<=\": return lv <= rv;\n\
+             \x20               case \">=\": return lv >= rv;\n\
+             \x20               case \"<\": return lv < rv;\n\
+             \x20               case \">\": return lv > rv;\n\
+             \x20             }}\n\
+             \x20           }}\n\
+             \x20           return Boolean(item);\n\
+             \x20         }};\n\
+             \x20         const applyItem = (el, item) => {{\n\
+             \x20           for (const ib of itemBindings) {{\n\
+             \x20             const target = ib.marker === 0 ? el : el.querySelector('[data-itm=\"' + ib.marker + '\"]');\n\
+             \x20             if (!target) continue;\n\
+             \x20             if (ib.kind === \"text\") target.textContent = evalItem(ib.expr, item);\n\
+             \x20             else if (ib.kind === \"show\") target.style.display = evalItem(ib.expr, item) ? '' : 'none';\n\
+             \x20             else if (ib.kind === \"when\") target.style.display = evalItem(ib.expr, item) ? '' : 'none';\n\
+             \x20             else if (ib.kind === \"trigger\") {{\n\
+             \x20               target.addEventListener(ib.event, () => this._txn(ib.txn)(item));\n\
+             \x20             }}\n\
+             \x20           }}\n\
+             \x20         }};\n\
+             \x20         let rendered = new Map();\n\
+             \x20         this._registerViewEffect({handle}, () => {{\n\
+             \x20           const snapPtr = this._instance.exports['{materializer}'](this._statePtr);\n\
+             \x20           if (!snapPtr) return;\n\
+             \x20           const dv = new DataView(this._memory.buffer);\n\
+              \x20           const n = Number(dv.getBigInt64(snapPtr, true));\n\
+              \x20           const seen = new Set();\n\
+              \x20           for (let i = 0; i < n; i++) {{\n\
+              \x20             {item_reader}\n\
+              \x20             const key = String(item);\n\
+              \x20             seen.add(key);\n\
+              \x20             let el2 = rendered.get(key);\n\
+              \x20             if (!el2) {{\n\
+              \x20               el2 = document.createElement(tagName);\n\
+              \x20               el2.innerHTML = templateInner;\n\
+              \x20               applyItem(el2, item);\n\
+              \x20               container.appendChild(el2);\n\
+             \x20               rendered.set(key, el2);\n\
+             \x20             }}\n\
+             \x20           }}\n\
+             \x20           for (const [key, el2] of rendered) {{\n\
+             \x20             if (!seen.has(key)) {{\n\
+             \x20               el2.remove();\n\
+             \x20               rendered.delete(key);\n\
+             \x20             }}\n\
+             \x20           }}\n\
+             \x20         }});\n\
+             \x20       }})();",
+            handle = handle,
+            template_html = template_html,
+            materializer = materializer,
+            item_reader = item_reader,
         )
     }
 
@@ -549,12 +728,12 @@ export async function createApp(wasmBytes) {{
                     return String::new();
                 };
                 // 2026-08-11: apply `.^X` reflection projections inline in JS.
-                // `.^Size`/`.^Len` on a string/collection → `.length`; other
+                // `.^Size`/`.^Length` on a string/collection → `.length`; other
                 // reflections pass through as a property access.
                 let mut apply_value = "value".to_string();
                 for p in &proj {
                     match *p {
-                        "Size" | "Len" => apply_value.push_str(".length"),
+                        "Size" | "Length" => apply_value.push_str(".length"),
                         other => {
                             apply_value.push('.');
                             apply_value.push_str(other);
@@ -725,6 +904,17 @@ export async function createApp(wasmBytes) {{
                 };
                 let field = self.state_layout.fields.iter().find(|f| f.field_handle == handle);
                 let Some(field) = field else { return String::new(); };
+                // 2026-08-12 (Iterable protocol, slice 4): a COLLECTION
+                // iterable renders from the `__view_items_<field>()` snapshot —
+                // the wasm materializer drives the collection's own op Count/
+                // op At into `[len][word…]`, which the shim CAN index (the
+                // heap List's flush bytes are just the handle and cannot be).
+                if self.collection_iterables.contains(iterable.as_str()) {
+                    return self.emit_collection_each(
+                        iterable.as_str(), item_name.as_str(), template_html.as_str(),
+                        container_id.as_str(), item_bindings, key_expr.as_str(), el.as_str(),
+                    );
+                }
                 // 2026-08-11 (housekeeping 1b): only a VECTOR field is
                 // iterable — for a scalar field element_size == size (one
                 // "element" the whole value), and a heap List is a pointer

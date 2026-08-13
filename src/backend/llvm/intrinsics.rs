@@ -27,6 +27,13 @@ pub fn emit_intrinsic_call(
     // Special-case intrinsics that don't fit the template pattern
     match name {
         "Malloc#" => return emit_malloc(backend, out, v, args, indent),
+        // 2026-08-12 (Iterable protocol): the UTF8 CHAR count of a String —
+        // the scan (a computed property, so an intrinsic; `.^Length` is the
+        // stored byte count).
+        // 2026-08-12 (Iterable protocol): the UTF8 CHAR count of a String — the
+    // scan (a computed property, so an intrinsic; `.^Length` is the stored
+    // byte count).
+    "CharCount#" => return emit_char_count(backend, out, v, args, indent),
         "Alloc#" => return emit_alloc(backend, out, v, args, indent, analysis_id),
         "Free#" => return emit_free(backend, out, v, args, indent),
         "Now#" => {
@@ -235,11 +242,28 @@ fn narrow_int_result(backend: &mut LlvmBackend, out: &mut String, v: &str, inden
 
 // ─── Memory intrinsics ────────────────────────────────────────────────
 
-fn emit_malloc(
+/// 2026-08-12 (Iterable protocol): `CharCount#(s)` — the UTF8 CHAR count of
+/// a String (the scan). The arg is the String (a ptr in the bits model; a
+/// boxed i64 handle at a call/binding boundary — recover the ptr via
+/// string_ptr). Emits `call i64 @briev_char_len(ptr ...)`.
+fn emit_char_count(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let size = emit_arg(backend, out, &args[0], indent);
+    if args.is_empty() {
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+    }
+    let reg = backend.emit_expr(out, &args[0], indent);
+    let p = backend.string_ptr(out, indent, &reg);
+    writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, v, p).ok();
+    let narrowed = narrow_int_result(backend, out, v, indent);
+    BTypedRegister { name: narrowed, ty: Type::int() }
+}
+
+fn emit_malloc(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {    let size = emit_arg(backend, out, &args[0], indent);
     // 2026-08-11 (wasm32 obj-member fix): the size is an Int value at
     // i{int_bits} (i32 on wasm32) — widen to i64 for the C malloc ABI. The
     // old bare `i64 {size}` broke wasm32 (i32 value in an i64 call arg). A

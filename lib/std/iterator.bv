@@ -10,20 +10,20 @@
 
 // Map over iterator
 txn iter_map_loop<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
-    [i < list .^Len][i == list .^Len] -> List<U>
+    [i < list.Count()][i == list.Count()] -> List<U>
 {
     result = result.append(f(list[i]));
     i = i + 1;
     term result;
 };
 
-defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term .^Len == list .^Len] {
+defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term.Count() == list.Count()] {
     term iter_map_loop(list, f, [], 0);
 };
 
 // Filter iterator
 txn iter_filter_loop<T>(list: List<T>, pred: T -> Bool, result: List<T>, i: Int)
-    [i < list .^Len][i == list .^Len] -> List<T>
+    [i < list.Count()][i == list.Count()] -> List<T>
 {
     when pred(list[i]) {
         result = result.append(list[i]);
@@ -32,13 +32,13 @@ txn iter_filter_loop<T>(list: List<T>, pred: T -> Bool, result: List<T>, i: Int)
     term result;
 };
 
-defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term .^Len <= list .^Len] {
+defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term.Count() <= list.Count()] {
     term iter_filter_loop(list, pred, [], 0);
 };
 
 // Fold (reduce) iterator
 txn iter_fold_loop<T, U>(list: List<T>, f: (U, T) -> U, acc: U, i: Int)
-    [i < list .^Len][i == list .^Len] -> U
+    [i < list.Count()][i == list.Count()] -> U
 {
     acc = f(acc, list[i]);
     i = i + 1;
@@ -51,46 +51,46 @@ defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null]
 
 // Take first n items
 txn iter_take_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
-    [i < n && i < list .^Len][i == n || i == list .^Len] -> List<T>
+    [i < n && i < list.Count()][i == n || i == list.Count()] -> List<T>
 {
     result = result.append(list[i]);
     i = i + 1;
     term result;
 };
 
-defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term .^Len == n.min(list .^Len)] {
+defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.Count() == n.min(list.Count())] {
     term iter_take_loop(list, n, [], 0);
 };
 
 // Skip first n items
 txn iter_skip_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
-    [i < list .^Len][i == list .^Len] -> List<T>
+    [i < list.Count()][i == list.Count()] -> List<T>
 {
     result = result.append(list[i]);
     i = i + 1;
     term result;
 };
 
-defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term .^Len == (list .^Len - n).max(0)] {
+defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.Count() == (list.Count() - n).max(0)] {
     term iter_skip_loop(list, n, [], n);
 };
 
 // Enumerate (index, value)
 txn iter_enumerate_loop<T>(list: List<T>, result: List<(Int, T)>, i: Int)
-    [i < list .^Len][i == list .^Len] -> List<(Int, T)>
+    [i < list.Count()][i == list.Count()] -> List<(Int, T)>
 {
     result = result.append((i, list[i]));
     i = i + 1;
     term result;
 };
 
-defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term .^Len == list .^Len] {
+defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term.Count() == list.Count()] {
     term iter_enumerate_loop(list, [], 0);
 };
 
 // Find first matching
 txn iter_find_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
-    [i < list .^Len][i == list .^Len] -> Option<T>
+    [i < list.Count()][i == list.Count()] -> Option<T>
 {
     when pred(list[i]) {
         term Some(list[i]);
@@ -105,7 +105,7 @@ defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][tr
 
 // Check if any match
 txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
-    [i < list .^Len][i == list .^Len] -> Bool
+    [i < list.Count()][i == list.Count()] -> Bool
 {
     when pred(list[i]) {
         term true;
@@ -120,7 +120,7 @@ defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || 
 
 // Check if all match
 txn iter_all_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
-    [i < list .^Len][i == list .^Len] -> Bool
+    [i < list.Count()][i == list.Count()] -> Bool
 {
     when !pred(list[i]) {
         term false;
@@ -134,21 +134,21 @@ defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || 
 };
 
 // Collect into list (identity for List)
-defn iter_collect<T>(list: List<T>) -> List<T> [true][term .^Len == list .^Len] {
+defn iter_collect<T>(list: List<T>) -> List<T> [true][term.Count() == list.Count()] {
     term list;
 };
 
 // Chain two iterators (pure concatenation, no loop needed)
-defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term .^Len == a .^Len + b .^Len] {
+defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term.Count() == a.Count() + b.Count()] {
     term a + b;
 };
 
 // Flat map (map then flatten)
 txn iter_flatmap_loop<T, U>(list: List<T>, f: T -> List<U>, result: List<U>, i: Int, j: Int)
-    [i < list .^Len][i == list .^Len] -> List<U>
+    [i < list.Count()][i == list.Count()] -> List<U>
 {
     let mapped = f(list[i]);
-    when j < mapped .^Len {
+    when j < mapped.Count() {
         result = result.append(mapped[j]);
         j = j + 1;
     };
@@ -162,7 +162,7 @@ defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][t
 
 // Partition into two lists
 txn iter_partition_loop<T>(list: List<T>, pred: T -> Bool, trues: List<T>, falses: List<T>, i: Int)
-    [i < list .^Len][i == list .^Len] -> (List<T>, List<T>)
+    [i < list.Count()][i == list.Count()] -> (List<T>, List<T>)
 {
     when pred(list[i]) {
         trues = trues.append(list[i]);
@@ -180,14 +180,14 @@ defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pr
 
 // Zip two iterators
 txn iter_zip_loop<T, U>(a: List<T>, b: List<U>, result: List<(T, U)>, i: Int)
-    [i < a .^Len && i < b .^Len][i == a .^Len || i == b .^Len] -> List<(T, U)>
+    [i < a.Count() && i < b.Count()][i == a.Count() || i == b.Count()] -> List<(T, U)>
 {
     result = result.append((a[i], b[i]));
     i = i + 1;
     term result;
 };
 
-defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term .^Len == a .^Len.min(b .^Len)] {
+defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term.Count() == a.Count().min(b.Count())] {
     term iter_zip_loop(a, b, [], 0);
 };
 
@@ -203,7 +203,7 @@ defn iter_product(list: List<Int>) -> Int [true][term >= 0] {
 
 // Maximum element
 txn iter_max_loop<T>(list: List<T>, max_val: T, i: Int)
-    [i < list .^Len][i == list .^Len] -> Option<T>
+    [i < list.Count()][i == list.Count()] -> Option<T>
 {
     when list[i] > max_val {
         max_val = list[i];
@@ -212,13 +212,13 @@ txn iter_max_loop<T>(list: List<T>, max_val: T, i: Int)
     term Some(max_val);
 };
 
-defn iter_max<T>(list: List<T>) -> Option<T> [list .^Len > 0][true] {
+defn iter_max<T>(list: List<T>) -> Option<T> [list.Count() > 0][true] {
     term iter_max_loop(list, list[0], 1);
 };
 
 // Minimum element
 txn iter_min_loop<T>(list: List<T>, min_val: T, i: Int)
-    [i < list .^Len][i == list .^Len] -> Option<T>
+    [i < list.Count()][i == list.Count()] -> Option<T>
 {
     when list[i] < min_val {
         min_val = list[i];
@@ -227,6 +227,6 @@ txn iter_min_loop<T>(list: List<T>, min_val: T, i: Int)
     term Some(min_val);
 };
 
-defn iter_min<T>(list: List<T>) -> Option<T> [list .^Len > 0][true] {
+defn iter_min<T>(list: List<T>) -> Option<T> [list.Count() > 0][true] {
     term iter_min_loop(list, list[0], 1);
 };

@@ -53,7 +53,7 @@ defn metropolitan_rpc(
         let layout = frgn__metro_get_channel_layout(ch_id);
         when layout.is_ok() {
             let layout_addr = layout.value;
-            let written = frgn__mmap_write(layout_addr, 32, request, request .^Len);
+            let written = frgn__mmap_write(layout_addr, 32, request, request.Count());
             when written.is_ok() {
                 let signaled = frgn__atomic_store_u32(layout_addr, 0, 1);
                 when signaled.is_ok() {

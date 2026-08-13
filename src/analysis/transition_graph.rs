@@ -1010,6 +1010,21 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
             Statement::Guarded(_, statements) => {
                 scan_for_state_identifiers(statements, state_fields, out);
             }
+            // 2026-08-12 (slice 2 String gap): an `if` condition and branches
+            // reference state fields — without this arm a field read ONLY in an
+            // if (`if a == "hi"`) was never marked referenced, pruned as Never,
+            // and the body emitted an undefined `@a` global.
+            Statement::If(cond, then_b, else_b) => {
+                collect_state_identifiers(cond, state_fields, out);
+                scan_for_state_identifiers(then_b, state_fields, out);
+                scan_for_state_identifiers(else_b, state_fields, out);
+            }
+            Statement::Block(body) => {
+                scan_for_state_identifiers(body, state_fields, out);
+            }
+            Statement::Gate(cond) => {
+                collect_state_identifiers(cond, state_fields, out);
+            }
             Statement::Term(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
@@ -1363,10 +1378,10 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Field(obj, _) => {
             collect_identifiers(obj, out);
         }
-        // 2026-08-01 (B3): reflection (`s.^Len`, `s.^^Bytes`, `s.^Ptr`)
+        // 2026-08-01 (B3): reflection (`s.^Length`, `s.^^Bytes`, `s.^Ptr`)
         // READS its receiver — the field must stay live. Without this arm,
         // a String `let` used only via reflection was eliminated as a dead
-        // state field, and `s.^Len` emitted `load i64, ptr @s` with @s
+        // state field, and `s.^Length` emitted `load i64, ptr @s` with @s
         // undefined (the field was dropped from %State). This is the same
         // liveness rule as FFI args: an observation keeps the value alive.
         Expr::Reflect(recv, _, _) => {

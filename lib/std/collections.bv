@@ -146,6 +146,11 @@ obj List<T> {
 obj HashMap<K, V> {
     keys: Ptr<K>;
     vals: Ptr<V>;
+    // 2026-08-12 (Iterable protocol, Tier 1): occupancy flags (1 = occupied)
+    // — an empty slot holds garbage keys/vals, so iteration must skip
+    // unoccupied slots. Int (not Bool) avoids boxed-Bool element unboxing in
+    // the scan conditions.
+    occupied: Ptr<Int>;
     count: Int;
     cap: Int;
 
@@ -154,9 +159,36 @@ obj HashMap<K, V> {
     op CopyFrom: get(#Rh);
     op Init: init(#Lh, #Rh);
 
+    // 2026-08-12 (Iterable protocol, Tier 1): the external cursor contract.
+    // The cursor is the slot INDEX; the end sentinel is `cap` (past-the-end).
+    // The skip-empties scan uses `foreach` over the slot range with a done
+    // flag + sentinel — the language deliberately has no while/for/loop
+    // (SPEC §11.4), so iteration structure must come from ranges + foreach.
+    op Iter() -> Int {
+        let j: Int = cap;
+        foreach k in 0..cap {
+            if occupied[k] == 1 && j == cap {
+                j = k;
+            };
+        };
+        term j;
+    };
+    op Step(i: Int) -> Int {
+        let j: Int = cap;
+        foreach k in 0..cap {
+            if k > i && occupied[k] == 1 && j == cap {
+                j = k;
+            };
+        };
+        term j;
+    };
+    op IsEnd(i: Int) -> Bool { term i >= cap; };
+    op Current(i: Int) -> V { term vals[i]; };
+
     txn init(val: K) [true][count == 0] {
         keys = Malloc#(256 * 8) as Ptr<K>;
         vals = Malloc#(256 * 8) as Ptr<V>;
+        occupied = Malloc#(256 * 8) as Ptr<Int>;
         cap = 256;
         count = 0;
     };
@@ -169,12 +201,14 @@ obj HashMap<K, V> {
         let h = (key as Int) % cap;
         keys[h] = key;
         vals[h] = val;
+        occupied[h] = 1;
         count = count + 1;
     };
 
     txn remove(key: K) -> V [count > 0][count >= 0] {
         let h = (key as Int) % cap;
         let r: V = vals[h];
+        occupied[h] = 0;
         count = count - 1;
         term r;
     };

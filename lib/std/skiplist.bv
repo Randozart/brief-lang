@@ -8,7 +8,7 @@
 // -- Defn wrappers (replacing former inop declarations) --
 
 defn sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [[term .^Len == list .^Len + 1]
+    [[term.Count() == list.Count() + 1]
 {
     term sl_append(list, val);
 };
@@ -19,13 +19,13 @@ defn sl_append(list: List<Int>, val: Int) -> List<Int> {
 };
 
 defn sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
-    [list .^Len > 0]]
+    [list.Count() > 0]]
 {
     term sl_remove_fallback(list);
 };
 
 defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
-    let len: Int = list .^Len;
+    let len: Int = list.Count();
     let last: Int = list[len - 1];
     let ahead: List<Int> = list[0..len - 1];
     term (last, ahead);
@@ -34,7 +34,7 @@ defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
 // -- Public API (all types are List<Int> for type checker compatibility) --
 
 txn sl_contains_loop(list: List<Int>, val: Int, i: Int)
-    [i < list .^Len][i == list .^Len] -> Bool
+    [i < list.Count()][i == list.Count()] -> Bool
 {
     when list[i] == val { term true; };
     i = i + 1;
@@ -46,5 +46,5 @@ defn sl_contains(list: List<Int>, val: Int) -> Bool {
 };
 
 defn sl_to_list(list: List<Int>) -> List<Int> { term list; };
-defn sl_len(list: List<Int>) -> Int { term list .^Len; };
-defn sl_is_empty(list: List<Int>) -> Bool { term (list .^Len) == 0; };
+defn sl_len(list: List<Int>) -> Int { term list.Count(); };
+defn sl_is_empty(list: List<Int>) -> Bool { term (list.Count()) == 0; };

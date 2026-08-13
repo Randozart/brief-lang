@@ -404,7 +404,7 @@ ExclaimArrow,
     #[token(".^^")]
     DotCaretCaret,
 
-    /// `.^` — runtime reflection access (`x.^Len`, `x.^Ptr`).
+    /// `.^` — runtime reflection access (`x.^Length`, `x.^Ptr`).
     /// The caret alone remains bitwise XOR (`a ^ b`); the dot disambiguates.
     #[token(".^")]
     DotCaret,

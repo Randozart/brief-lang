@@ -205,6 +205,79 @@ impl LlvmBackend {
         Some((element_ty, base))
     }
 
+    /// 2026-08-12 (Iterable protocol, Tier 1, SPEC §11.4.1): does the list
+    /// expression name a value whose type exposes `op Iter`/`op Step`/
+    /// `op IsEnd`/`op Current` as op-as-member operators (and NOT Tier 2's
+    /// Count/At)? If so, returns `(element type, base name)` — the element
+    /// type is the Current member's return with the concrete args substituted.
+    pub(super) fn tier1_cursor_collection(
+        &self,
+        list: &crate::ast::Expr,
+    ) -> Option<(crate::ast::Type, String)> {
+        use crate::ast::TopLevel;
+        let crate::ast::Expr::Identifier(name) = list else { return None; };
+        let full_ty = self.identifier_collection_type(name)?;
+        let base = match &full_ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base)?;
+        let has = |op: &str| {
+            members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+        };
+        // Tier 1 requires the cursor ops; Tier 2 (Count/At) takes priority and
+        // is handled by tier2_op_collection first.
+        if !(has("Iter") && has("Step") && has("IsEnd") && has("Current")) {
+            return None;
+        }
+        if has("Count") && has("At") {
+            return None;
+        }
+        let current = members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "Current" => Some(d),
+            _ => None,
+        })?;
+        let raw_elem = current.output_type
+            .as_ref()
+            .and_then(|o| o.all_types().into_iter().next())
+            .unwrap_or_else(crate::ast::Type::int);
+        let args = match &full_ty {
+            crate::ast::Type::Applied(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, crate::ast::Type> =
+            params.into_iter().zip(args.into_iter()).collect();
+        let element_ty = crate::typechecker::substitute_type(&raw_elem, &subst);
+        Some((element_ty, base))
+    }
+
+    /// 2026-08-12 (Iterable protocol): the FULL type of an identifier used as
+    /// an iterable — a function local, a state field, or a POOLED instance
+    /// (`let m = spawn HashMap(0)` — the identifier isn't a field, so its
+    /// base comes from the instance mapping; the args are recovered from the
+    /// monomorphized obj key when available).
+    fn identifier_collection_type(&self, name: &str) -> Option<crate::ast::Type> {
+        if let Some(ty) = self.fun.let_original_types.get(name) {
+            return Some(ty.clone());
+        }
+        if let Some(&idx) = self.ctx.field_index_map.get(name) {
+            return self.ctx.field_briev_types.get(idx).cloned();
+        }
+        if let Some((base, _)) = self.unpacked_instance_prefix(name) {
+            // 2026-08-12: a POOLED instance (`let m = spawn HashMap(0)`)
+            // unpacks into columns — the identifier isn't a field; the base
+            // comes from the instance mapping. The concrete generic args are
+            // recovered from the monomorphized member types at the member call
+            // (emit_method_call resolves the mono key); the element-type
+            // pre-derivation here uses the base only (a generic `V` element
+            // type is refined to the concrete type by the Current member's
+            // mono emission).
+            return Some(crate::ast::Type::Custom(base));
+        }
+        None
+    }
+
     /// 2026-07-20: Find an OperatorDef for ExtractFrom by looking up the
     /// variable's type in the operator_defs map (populated from AST).
     /// Returns None when the type has no ExtractFrom operator definition.
@@ -454,8 +527,23 @@ impl LlvmBackend {
         // "ptr" (LLVM opaque pointer). The named struct type is declared in
         // `declare_struct_types()` for the foreign caller's reference.
         if let Type::Custom(name) = ty {
+            // 2026-08-13 (obj value ABI): an `obj` VALUE is a boxed handle
+            // (i{int_bits}), NOT a pointer — state slots, struct literals, and
+            // field access all use the handle form. Checked BEFORE the
+            // struct_types "ptr" (which is the StaticStruct FFI-pointer ABI).
+            if self.ctx.obj_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
+            }
             if self.ctx.struct_types.contains_key(name) {
                 return "ptr".to_string();
+            }
+        }
+        // 2026-08-13: the mono form of an applied obj (`List<Int>`) is a
+        // boxed handle too — `llvm_type` maps the applied base through the
+        // same obj registry.
+        if let Type::Applied(name, _) = ty {
+            if self.ctx.obj_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
             }
         }
         // 2026-07-18: SVO List — return multi-slot struct type for vector-like types.
@@ -1061,6 +1149,115 @@ impl LlvmBackend {
         writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, addr, gep).ok();
         let _ = field_name;
         true
+    }
+
+    /// 2026-08-12 (Iterable protocol): construct a LOCAL collection value
+    /// (`let xs: List<Int> = [2, 4, 6]` inside a body) through the collection's
+    /// OWN construction members — `op Init(first)` + `op InsertAt(rest)`, or
+    /// `op InitEmpty` for `[]` — and return the boxed handle. Previously a
+    /// local List literal emitted the hardcoded `[len][elem]` heap-seq buffer,
+    /// which the At/Count members (expecting the List STRUCT layout) read as
+    /// garbage (segfault). Mirrors emit_init_op_construction for locals.
+    pub(super) fn construct_local_collection(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        briev_ty: &Type,
+        list_literal: &Expr,
+    ) -> Option<TypedRegister> {
+        use crate::ast::TopLevel;
+        let (base, args) = match briev_ty {
+            Type::Custom(n) => (n.clone(), Vec::new()),
+            Type::Applied(n, a) => (n.clone(), a.clone()),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base).cloned().unwrap_or_default();
+        let has = |op: &str| {
+            members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+        };
+        // Only Tier-2 collections (op Count + op At) get the op construction —
+        // others fall back to the generic literal value.
+        if !(has("Count") && has("At")) {
+            return None;
+        }
+        let type_key = self.resolve_obj_key(briev_ty).unwrap_or_else(|| base.clone());
+        let defs = self.ctx.operator_defs.get(&base).cloned().unwrap_or_default();
+        let size = self.struct_type_size(&type_key);
+        let inst = self.fun.gen_reg();
+        // 2026-08-13 (collection value lifetime): a LOCAL collection lives on
+        // the HEAP, not the stack. A `let result: List<Int> = []` in a defn
+        // returned its stack-alloca handle — the caller read a dead frame
+        // (bytes()/split()/join() returned garbage). Same fix as struct
+        // literals: the handle must survive the constructing function's return.
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, inst, size).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
+        let box_recv = TypedRegister {
+            name: addr.clone(),
+            ty: Type::Custom(type_key.clone()),
+        };
+        let elems: Vec<Expr> = match list_literal {
+            Expr::List(e) => e.clone(),
+            _ => return None,
+        };
+        if elems.is_empty() {
+            // `op InitEmpty` for the empty literal.
+            let empty_member = defs.iter().find(|d| d.op == "InitEmpty").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = empty_member {
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(out, &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv, type_name: &type_key, member: &member,
+                        arg_regs: &[], prefix: None,
+                    }, indent);
+            }
+        } else {
+            let init_member = defs.iter().find(|d| d.op == "Init").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = init_member {
+                let arg_tmp = self.fun.gen_reg();
+                let first = self.emit_expr_inner(out, &arg_tmp, &elems[0], indent);
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(out, &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv, type_name: &type_key, member: &member,
+                        arg_regs: &[(first.name, first.ty)], prefix: None,
+                    }, indent);
+            }
+            let insert_member = defs.iter().find(|d| d.op == "InsertAt").cloned()
+                .and_then(|d| match d.impl_args.as_ref() {
+                    Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                        .find(|m| super::emit_expr::member_briev_name(m) == s).cloned(),
+                    _ => None,
+                });
+            if let Some(member) = insert_member {
+                for e in elems.iter().skip(1) {
+                    let arg_tmp = self.fun.gen_reg();
+                    let ar = self.emit_expr_inner(out, &arg_tmp, e, indent);
+                    let out_tmp = self.fun.gen_reg();
+                    self.emit_member_body(out, &out_tmp,
+                        super::emit_expr::MemberInvocation {
+                            recv_reg: &box_recv, type_name: &type_key, member: &member,
+                            arg_regs: &[(ar.name, ar.ty)], prefix: None,
+                        }, indent);
+                }
+            }
+        }
+        let _ = args;
+        Some(TypedRegister {
+            name: addr,
+            ty: briev_ty.clone(),
+        })
     }
 
     /// 2026-08-07 (object instance pools): run an UNPACKED obj instance's
@@ -3801,6 +3998,11 @@ impl LlvmBackend {
             crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
             _ => return self.llvm_type(ty),
         };
+        // 2026-08-13 (obj value ABI): an `obj` return is the boxed i{int_bits}
+        // handle (llvm_type); a StaticStruct return keeps the legacy i64 box.
+        if self.ctx.obj_types.contains(base) {
+            return self.llvm_type(ty);
+        }
         if self.ctx.struct_types.contains_key(base) {
             "i64".to_string()
         } else {

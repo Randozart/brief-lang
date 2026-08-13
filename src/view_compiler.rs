@@ -1658,7 +1658,7 @@ pub fn condition_root_signal<'a>(expr: &'a str) -> (&'a str, Vec<&'a str>) {
 
 /// Split a view signal into its root field name and any `.^X` reflection
 /// projection suffixes. `count` → (`count`, []); `items.^Size` →
-/// (`items`, ["Size"]); `a.^Size.^Len` → (`a`, ["Size", "Len"]).
+/// (`items`, ["Size"]); `a.^Size.^Length` → (`a`, ["Size", "Len"]).
 ///
 /// 2026-08-11: single definition — reused by the web generator's
 /// `field_handle_for_signal` (handle lookup binds the root field), by

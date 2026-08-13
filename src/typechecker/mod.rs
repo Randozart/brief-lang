@@ -1035,7 +1035,7 @@ pub fn infer_expression(
             let (ty, prov) = infer_expression(inner, ctx)?;
             Ok((ty, prov))
         }
-        // 2026-07-31: Reflection: x.^Len / x.^^Size (see resolve_reflect).
+        // 2026-07-31: Reflection: x.^Length / x.^^Size (see resolve_reflect).
         Expr::Reflect(recv, target, kind) => {
             // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a
             // compile-time descriptor Bool for an `optional frgn`. Only an
@@ -3161,17 +3161,35 @@ fn resolve_reflect(
         }
     };
     match target {
-        "Len" => {
+        "Length" => {
             if is_compile_time {
                 return Err(wrong_kind("runtime"));
             }
-            // Len is meaningful on value-carrying types (String, vectors,
-            // collections); scalars have no length.
+            // 2026-08-12 (Iterable protocol): `.^Length` is STORED-length
+            // reflection (SPEC §17.1) — the String byte header, the Data byte
+            // header, the Vector element count. A COLLECTION's count is
+            // member-managed (`op Count`), and a computed count (a String's
+            // UTF8 chars) is an intrinsic (`CharCount#`) — neither is
+            // `.^Length`, so both are compile errors, never silent.
             match receiver {
-                Type::Custom(n) if n == "String" => Ok(Type::int()),
-                Type::Vector(..) | Type::Applied(..) | Type::Custom(_) => Ok(Type::int()),
+                Type::Custom(n) if n == "String" || n == "Data" => Ok(Type::int()),
+                Type::Vector(..) => Ok(Type::int()),
+                Type::Applied(..) => Err(TypeError::InvalidOperation {
+                    operation: "reflection target 'Length'".into(),
+                    type_name: format!(
+                        "{} has no INTRINSIC length — its count is member-managed; use `op Count`",
+                        receiver
+                    ),
+                }),
+                Type::Custom(_) => Err(TypeError::InvalidOperation {
+                    operation: "reflection target 'Length'".into(),
+                    type_name: format!(
+                        "type {} has no intrinsic (stored) length; a computed count is an intrinsic (`CharCount#`)",
+                        receiver
+                    ),
+                }),
                 _ => Err(TypeError::InvalidOperation {
-                    operation: format!("reflection target 'Len'"),
+                    operation: format!("reflection target 'Length'"),
                     type_name: format!("type {} has no runtime length", receiver),
                 }),
             }
@@ -3217,7 +3235,7 @@ fn resolve_reflect(
         }
         _ => Err(TypeError::InvalidOperation {
             operation: format!("reflection target '{}'", target),
-            type_name: "unknown reflection target — expected Len, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
+            type_name: "unknown reflection target — expected Length, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
         }),
     }
 }
@@ -3320,8 +3338,11 @@ fn foreach_item_type(ctx: &TypecheckContext, list_ty: &Type) -> Type {
         _ => return Type::int(),
     };
     let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
-    if let Some(at) = operator_member(&members, "At") {
-        if let Some(raw) = at.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) {
+    // Tier 2 first (op At), then Tier 1 (op Current) — the element type is the
+    // read op's return with the concrete args substituted.
+    let read = operator_member(&members, "At").or_else(|| operator_member(&members, "Current"));
+    if let Some(read) = read {
+        if let Some(raw) = read.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) {
             let params = ctx.type_params.get(&base).cloned().unwrap_or_default();
             let subst: std::collections::HashMap<String, Type> =
                 params.into_iter().zip(args).collect();
@@ -3426,6 +3447,14 @@ pub(crate) fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type 
                 _ => d.clone(),
             }).collect(),
         ),
+        // 2026-08-12 (slice 4, wasm32 maze): Ptr must descend — `Ptr<T>` with
+        // {T: Int} → `Ptr<Int>`. The mono substitution (ensure_mono) builds
+        // `ListBuffer<Int>`'s struct fields; without this, `inner.data`
+        // resolved to the generic `Ptr<T>` and the wasm32 element width
+        // couldn't be derived (the load stayed i64 while the member returned
+        // i32).
+        Type::Ptr(inner) => Type::Ptr(Box::new(substitute_type(inner, subst))),
+        Type::PtrConst(inner) => Type::PtrConst(Box::new(substitute_type(inner, subst))),
         Type::Tuple(elems) => Type::Tuple(elems.iter().map(|e| substitute_type(e, subst)).collect()),
         _ => ty.clone(),
     }
@@ -3547,6 +3576,52 @@ node main [beginprogram][true] {
 };
 "#;
         check(ok).expect("parenless foreach must parse and typecheck");
+    }
+
+    /// 2026-08-12 (Iterable protocol, Tier 1): a `foreach` over a cursor
+    /// collection (op Iter/op Step/op IsEnd/op Current) typechecks with the
+    /// element type from the Current op's return.
+    #[test]
+    fn foreach_tier1_cursor_collection() {
+        let ok = r#"
+obj CursorList {
+    data: Int[4];
+    n: Int;
+    op Init: init(#Lh, #Rh);
+    txn init(v: Int) [true][n == 1] { data[0] = v; n = 1; };
+    op Iter() -> Int { term 0; };
+    op Step(i: Int) -> Int { term i + 1; };
+    op IsEnd(i: Int) -> Bool { term i >= n; };
+    op Current(i: Int) -> Int { term data[i]; };
+};
+let c: CursorList = spawn CursorList(0);
+let sum: Int = 0;
+node main [beginprogram][true] {
+    foreach v in c {
+        sum = sum + v;
+    };
+};
+"#;
+        check(ok).expect("cursor foreach must typecheck");
+        let bad = r#"
+obj CursorList {
+    data: Int[4];
+    n: Int;
+    op Init: init(#Lh, #Rh);
+    txn init(v: Int) [true][n == 1] { data[0] = v; n = 1; };
+    op Iter() -> Int { term 0; };
+    op Step(i: Int) -> Int { term i + 1; };
+    op IsEnd(i: Int) -> Bool { term i >= n; };
+    op Current(i: Int) -> Int { term data[i]; };
+};
+let c: CursorList = spawn CursorList(0);
+let acc: String = "";
+node main [beginprogram][true] {
+    foreach v in c { acc = acc + v; };
+};
+"#;
+        let err = check(bad).unwrap_err();
+        assert!(!err.is_empty(), "Int cursor item used as String must error");
     }
 
     /// `Int * Float` is a type error — no implicit numeric coercion.

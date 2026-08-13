@@ -3692,8 +3692,8 @@ fn test_struct_param_uses_ptr_in_signature() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("define i64 @process(ptr noundef noalias nocapture align 8 %state, ptr %arg0"),
-        "Struct param should be 'ptr' in function signature.\nGot:\n{}", output);
+    assert!(output.contains("define i64 @process(ptr noundef noalias nocapture align 8 %state, i64 %arg0"),
+        "Struct param should be the boxed i64 handle in the function signature.\nGot:\n{}", output);
 }
 
 #[test]
@@ -3733,8 +3733,13 @@ fn test_struct_param_ptrtoint_at_entry() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("ptrtoint ptr %arg0 to i64"),
-        "Struct param should have ptrtoint at entry.\nGot:\n{}", output);
+    // 2026-08-13 (obj value ABI): a struct PARAM arrives as the boxed i64
+    // handle directly — no ptrtoint boxing at entry (the old ptr-param ABI
+    // boxed a `ptr` param to i64 for SSA). Field access inttoprs the handle.
+    assert!(!output.contains("ptrtoint ptr %arg0"),
+        "Struct param arrives boxed — no ptrtoint at entry.\nGot:\n{}", output);
+    assert!(output.contains("i64 %arg0"),
+        "Struct param is the boxed i64 handle.\nGot:\n{}", output);
 }
 
 #[test]
@@ -4142,12 +4147,14 @@ fn test_addr_of_struct_literal() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // &pt should emit ptrtoint on the struct alloca, NOT ptrtoint on a function ptr
-    // The alloca is created by emit_struct_literal: alloca i8, i64 16 (2 x i64 = 16B)
-    assert!(output.contains("alloca i8, i64 16"),
-        "Struct literal should allocate 16 bytes (2 x 8B fields).\nGot:\n{}", output);
+    // &pt should emit ptrtoint on the struct allocation, NOT ptrtoint on a
+    // function ptr. 2026-08-13 (struct value lifetime): the struct literal is
+    // HEAP-allocated (a stack alloca's handle dangles once the constructing
+    // function returns), so the assertion is malloc, not `alloca`.
+    assert!(output.contains("call ptr @malloc(i64 16)"),
+        "Struct literal should malloc 16 bytes (2 x 8B fields).\nGot:\n{}", output);
     assert!(output.contains("ptrtoint ptr %t"),
-        "Should emit ptrtoint of the struct alloca for &pt.\nGot:\n{}", output);
+        "Should emit ptrtoint of the struct allocation for &pt.\nGot:\n{}", output);
     // Should NOT reference @pt as a function symbol
     assert!(!output.contains("ptrtoint ptr @pt"),
         "Should NOT emit ptrtoint of @pt as if it were a function.\nGot:\n{}", output);
@@ -5472,7 +5479,7 @@ fn test_bit_to_string_encoding_door() {
     );
 }
 
-/// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
+/// 2026-08-01 (B3): `x.^Length` on a String → the `Size` prop default = UTF8
 /// char count (briev_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
 /// header read (byte length). Also verifies a String `let` used only via
 /// reflection stays live (not eliminated as a dead state field).
@@ -5482,7 +5489,7 @@ fn test_string_len_and_bytes_reflect() {
         let s: String = "hello";
         let tick: Int = 0;
         node report [tick < 1][tick == 1] {
-            let c: Int = s.^Len;
+            let c: Int = s.^Length;
             let b: Int = s.^^Bytes;
             term;
         };
@@ -5496,8 +5503,12 @@ fn test_string_len_and_bytes_reflect() {
     let mut backend = LlvmBackend::new().with_type_universe(universe);
     let ir = backend.generate(&items, None);
     assert!(
-        ir.contains("call i64 @briev_char_len(ptr "),
-        "String .^Len must emit briev_char_len (UTF8 char count); got:\n{ir}"
+        ir.contains("load i64, ptr "),
+        "String .^Length must read the stored byte header (SPEC 17.1); got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call i64 @briev_char_len(ptr "),
+        ".^Length must NOT emit the char scan (that is CharCount#); got:\n{ir}"
     );
     assert!(
         ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
@@ -6094,7 +6105,7 @@ fn test_byte_literal_emits_raw_bstr_constant() {
     let src = r#"
 node start [true][false] {
     let b: Data = #b"\x89PNG";
-    let c: Int = b.^Len;
+    let c: Int = b.^Length;
     term Print#(c);
 };
 "#;
@@ -6154,7 +6165,7 @@ fn test_state_layout_emits_real_field_rows() {
     let src = r#"
 let count: Int = 0;
 let name: String = "";
-node start [true][name .^Len == 0] {
+node start [true][name .^Length == 0] {
     term Print#(count);
 };
 "#;
@@ -6842,12 +6853,14 @@ fn test_union_emits_byte_array_and_offset_zero() {
 
 #[test]
 fn test_struct_literal_alloca_deferred_in_loop() {
-    // The reactor fix defers struct-literal allocas while `defer_struct_allocas`
-    // is set (loop bodies), flushing them to the loop preheader. Assert the
-    // mechanism: with the flag set the alloca is NOT emitted to `out`; the
-    // flush writes it. (A struct alloca inside a reactor loop body made clang
+    // The reactor fix defers struct-literal storage while `defer_struct_allocas`
+    // is set (loop bodies), flushing it to the loop preheader. Assert the
+    // mechanism: with the flag set the allocation is NOT emitted to `out`; the
+    // flush writes it. (An allocation inside a reactor loop body made clang
     // -O3 peel the loop and emit a bogus exit assumption — nodes with
-    // struct-typed state slots fired once.)
+    // struct-typed state slots fired once.) The allocation is a heap `malloc`
+    // (struct-literal lifetime: the handle crosses function boundaries), so the
+    // deferred line is the malloc call, not a stack alloca.
     let tu = crate::type_universe::TypeUniverse::new();
     let mut backend = LlvmBackend::new().with_type_universe(tu);
     backend.ctx.struct_types.insert(
@@ -6861,13 +6874,13 @@ fn test_struct_literal_alloca_deferred_in_loop() {
         &[("x".to_string(), Expr::Decimal(1)), ("y".to_string(), Expr::Decimal(2))],
         "  ",
     );
-    assert!(!out.contains("alloca"),
-        "with defer_struct_allocas set, the alloca must NOT be emitted inline; got:\n{out}");
+    assert!(!out.contains("malloc"),
+        "with defer_struct_allocas set, the allocation must NOT be emitted inline; got:\n{out}");
     assert_eq!(backend.fun.pending_struct_allocas.len(), 1,
-        "the alloca must be deferred to pending_struct_allocas");
+        "the allocation must be deferred to pending_struct_allocas");
     backend.flush_pending_struct_allocas(&mut out);
-    assert!(out.contains("alloca i8, i64 16"),
-        "flush_pending_struct_allocas must write the alloca; got:\n{out}");
+    assert!(out.contains("call ptr @malloc(i64 16)"),
+        "flush_pending_struct_allocas must write the malloc call; got:\n{out}");
     let _ = reg;
 }
 

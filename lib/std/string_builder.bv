@@ -20,7 +20,7 @@ defn with_capacity(capacity: Int) -> StringBuilder {
 // ===== APPEND OPERATIONS =====
 
 defn append_char(builder: StringBuilder, c: Char) -> StringBuilder {
-    term StringBuilder { buffer: builder.buffer + c };
+    term StringBuilder { buffer: builder.buffer + c as String };
 };
 
 defn append_str(builder: StringBuilder, s: String) -> StringBuilder {
@@ -28,7 +28,7 @@ defn append_str(builder: StringBuilder, s: String) -> StringBuilder {
 };
 
 defn append_int(builder: StringBuilder, n: Int) -> StringBuilder {
-    term StringBuilder { buffer: builder.buffer + n };
+    term StringBuilder { buffer: builder.buffer + n as String };
 };
 
 defn append_bool(builder: StringBuilder, b: Bool) -> StringBuilder {
@@ -39,7 +39,7 @@ defn append_bool(builder: StringBuilder, b: Bool) -> StringBuilder {
 };
 
 defn append_float(builder: StringBuilder, f: Float) -> StringBuilder {
-    term StringBuilder { buffer: builder.buffer + f };
+    term StringBuilder { buffer: builder.buffer + f as String };
 };
 
 // ===== CONVERSION =====
@@ -58,16 +58,16 @@ defn len(builder: StringBuilder)
     [true][term >= 0]
     -> Int
 {
-    term builder.buffer .^Len;
+    term CharCount#(builder.buffer);
 };
 
 defn is_empty(builder: StringBuilder) -> Bool {
-    term builder.buffer .^Len == 0;
+    term CharCount#(builder.buffer) == 0;
 };
 
 defn capacity(builder: StringBuilder)
-    [true][term >= builder .^Len]
+    [true][term >= builder.buffer .^Length]
     -> Int
 {
-    term builder.buffer .^Len;
+    term builder.buffer .^Length;
 };

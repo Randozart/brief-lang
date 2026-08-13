@@ -975,11 +975,17 @@ The iteration contract has two tiers, selected per type:
   `op At(i: Int) -> &T`. `foreach` lowers to a counted `0..Count` loop that
   reads each element through `op At` — eligible for vectorization. Used by
   `List<T>`, `Stack<T>`, inline vectors, and fixed-width `String`.
-- **Tier 1 — General iterable.** `op Iter() -> Cursor` and
-  `op Step(cur) -> Option<&T>`. `foreach` lowers to an external stack cursor:
-  `let cur = c.iter(); while let Some(item) = step(cur) { … }`. Re-iterable,
-  reentrant, zero heap. Used by `HashMap<K,V>`, `LinkedList<T>`, streams, and
-  variable-width `String`.
+- **Tier 1 — General iterable.** `op Iter() -> Cursor` returns the first
+  element's cursor (or the end sentinel); `op Step(cur) -> Cursor` advances to
+  the next element (or the sentinel); `op IsEnd(cur) -> Bool` is true past the
+  end; `op Current(cur) -> &T` reads the element at the cursor. `foreach`
+  lowers to an external stack cursor loop:
+  `let cur = c.iter(); while !is_end(cur) { item = current(cur); …; cur = step(cur); }`.
+  Re-iterable, reentrant, zero heap. Used by `HashMap<K,V>`, `LinkedList<T>`,
+  streams, and variable-width `String`.
+  *(2026-08-12: the cursor + IsEnd + Current form supersedes the original
+  `op Step(cur) -> Option<&T>` plan — Option/union returns do not codegen
+  natively yet; the cursor form is equivalent and implementable.)*
 
 `foreach` uses the best available tier (Tier 2 when both are present).
 
@@ -1005,11 +1011,11 @@ selecting tiers by encoding:
 
 - **Fixed-width encodings** (e.g. `ASCII`): Tier 2 — `op Count` = char count
   (equal to byte count), `op At(i)` is an O(1) byte load.
-- **Variable-width encodings** (e.g. `UTF8`): Tier 1 for characters — `op Step`
-  is the 1–4-byte decoder yielding `Char`; Tier 2 is available on the byte
-  view (`.Bytes`, a `Slice<U8>`/`Data` over the underlying buffer). Character
-  random access by index on a variable-width encoding is a compile error, never
-  a silent O(N) surprise.
+- **Variable-width encodings** (e.g. `UTF8`): Tier 1 for characters — the
+  cursor ops (`op Iter`/`op Step`/`op IsEnd`/`op Current`) decode 1–4-byte
+  `Char`s; Tier 2 is available on the byte view (`.Bytes`, a `Slice<U8>`/`Data`
+  over the underlying buffer). Character random access by index on a
+  variable-width encoding is a compile error, never a silent O(N) surprise.
 
 `.^Length` on a `String` is the **stored byte count** (header read). The
 **character count** is a computed property and is an intrinsic operation —
@@ -1257,7 +1263,10 @@ key. The iteration operators are:
 - `op Count() -> Int` — Tier-2 element count;
 - `op At(i: Int) -> &T` — Tier-2 indexed read (a borrow, not a copy);
 - `op Iter() -> Cursor` — Tier-1 iterator creation;
-- `op Step(cur) -> Option<&T>` — Tier-1 cursor advance;
+- `op Step(cur) -> Cursor` — Tier-1 cursor advance (returns the next cursor or
+  the end sentinel);
+- `op IsEnd(cur) -> Bool` — Tier-1 cursor exhaustion test;
+- `op Current(cur) -> &T` — Tier-1 element at the cursor;
 - `op InsertAt(v: T)`, `op ExtractFrom() -> T`, `op CopyFrom() -> T` —
   mutation and value-out (see §15.3);
 - `op Init(v: T)` — type-directed construction (§16.3).

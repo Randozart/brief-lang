@@ -35,31 +35,29 @@ and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
 marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
 a ptr).
 
-## String state-field reads emit undefined globals + String element ptr mismatches — OPEN (pre-existing, block String iteration)
+## Local collection values segfault — FIXED (slice 4)
 
-**Date:** 2026-08-12 (found while verifying Tier 2 foreach)
-**Status:** Open — pre-existing, separate from the iterable protocol.
 
-1. **A top-level `let a: String = "hi"` read emits `load i64, ptr @a`** — an
-   undefined global, not a %State GEP. `if a == b` on two String state fields
-   fails clang ("use of undefined value '@a'"). This is the same
-   global-vs-state-GEP class as the pooled-instance gap, but for String
-   top-level lets.
-2. **String elements in a `List<String>` foreach hit a ptr/i64 mismatch**
-   ("`%t29` defined with type 'i64' but expected 'ptr'") — the boxed String
-   element is loaded as i64 but consumed as a ptr. The foreach ELEMENT TYPING
-   is correct (the typecheck resolves `n` as String); the codegen unboxing of
-   String elements is the gap.
+**Date:** 2026-08-12 — **fixed** (commit `459dc980`). A local
+`let xs: List<Int> = [2,4,6]` emitted the hardcoded `[len][elem]` heap-seq
+buffer, which the At/Count members (expecting the List STRUCT layout) read as
+garbage. `construct_local_collection` now builds a local collection through
+its own ops (op Init/op InsertAt / op InitEmpty); the arrow insert resolves a
+local receiver's type from the local binding. Verified: literal+At (4),
+literal+push (15), foreach+push (42).
 
-Both block `foreach` over a `List<String>` end-to-end. The Int case
-(`List<Int>`) is fully green.
+## wasm32 collection member codegen width maze — FIXED (slice 4)
 
-## Obj-literal seeding + List runtime value gaps — FIXED (slice 2)
+**Date:** 2026-08-12 — **all fixed** (commit `dd73d510`). The `b-each` over a
+`List<Int>` now compiles to wasm and the `__view_items_items` materializer
+returns `[3][3,5,7]` (Node-verified).
 
-**Date:** 2026-08-12 — **all three fixed** (pooled field/member access,
-StructLiteral seeding, type-directed list literals, empty-init, AddrOf push
-peel). See commits `551c7868` and `ff2ac799`. The `foreach` over `List<Int>`
-now works end-to-end (`foreach(x in [3,5,7])` sums to 15).
+1. `substitute_type` did not descend into `Type::Ptr` — the mono
+   `ListBuffer<Int>` struct fields stayed generic `Ptr<T>`.
+2. `StaticStruct` type params weren't registered, so the mono substitution had
+   no key.
+3. The foreach's i64 counter vs the Count's i32 result + the At index width.
+4. `render_frame` called `@reactor_tick` even when a folded program omitted it.
 
 ## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
 
@@ -4122,3 +4120,28 @@ expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
 and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
 marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
 a ptr).
+
+## Bare collection literal as a function ARG crashes — KNOWN (string.bv unblock)
+
+**Date:** 2026-08-13 — **known gap, workaround: bind the literal to a `let` first.**
+
+`join(["a", "b"], "-")` — a bare `[elem…]` literal in ARGUMENT position —
+still lowers through the generic `emit_heap_seq` 2-slot buffer
+(`[len][elem…]`), which `op At`/`op Count` (expecting the List STRUCT layout
+`{ inner, cap, len }`) read as garbage → segfault. The `let`-bound form
+(`let items: List<String> = ["a","b"]; join(items, "-")`) constructs a proper
+instance via `op Init`/`op InsertAt` and works. Routing argument-position
+literals through the type-directed construction is the fix (the arg's expected
+type is known at the call site).
+
+## string.bv was uninstantiable — FIXED (commits d6107022, and the 2026-08-13 slice)
+
+**Date:** 2026-08-13 — **fixed.** `import "std/string"` previously failed to
+typecheck/compile (the file was never reachable — `bytes()` called the
+unregistered `StrBytes#` intrinsic; classification/case/trim loops used
+method-call syntax against free functions; the StringBuilder chain hit five
+backend ABI bugs). All fixed; `<std/string>` now compiles and the scalar
+functions (len/concat/trim/case/reverse/capitalize/count_char/starts/ends/
+find/replace/substr/truncate/ensure/remove-prefix) plus bytes/split/join
+verified correct. `StringError` was referenced but never defined — added to
+`std/ffi/string.bv`.

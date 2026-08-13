@@ -483,6 +483,16 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
         TopLevel::Statement(stmt) => {
             collect_strings_stmt(stmt, seen, out);
         }
+        // 2026-08-13 (obj member string literals): an `obj` member body
+        // (append_bool's `"true"`/`"false"`, a member contract) holds quoted
+        // strings that the emitted member references. Without this arm the
+        // globals are referenced but undefined once the member is actually
+        // compiled (it was unreachable before the obj value ABI fix).
+        TopLevel::TypeDef(td) => {
+            for member in &td.body.members {
+                collect_strings_tl(member, seen, out);
+            }
+        }
         _ => {}
     }
 }
@@ -571,6 +581,12 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         Expr::Block(stmts) => {
             for s in stmts { collect_strings_stmt(s, seen, out); }
+        }
+        // 2026-08-13: a struct-literal field holds a quoted string
+        // (`StringBuilder { buffer: builder.buffer + "false" }`) — collect it
+        // or the @str.N global is referenced but undefined.
+        Expr::StructLiteral { fields, .. } => {
+            for (_, fexpr) in fields { collect_strings_expr(fexpr, seen, out); }
         }
         Expr::If(cond, then_b, else_b) => {
             collect_strings_expr(cond, seen, out);
@@ -2208,6 +2224,12 @@ impl LlvmBackend {
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
                     self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
+                    // 2026-08-13 (obj value ABI): a slotted `obj`/`type` VALUE
+                    // is a boxed i{int_bits} handle (struct literals box, state
+                    // slots store the handle, field access inttoprs it), NOT a
+                    // pointer. Registered alongside struct_types so llvm_type,
+                    // defn params, and defn returns all agree on the handle.
+                    self.ctx.obj_types.insert(td.name.clone());
                     if !td.type_params.is_empty() {
                         self.ctx.obj_type_params.entry(td.name.clone())
                             .or_insert_with(|| td.type_params.iter().map(|p| p.name.clone()).collect());
@@ -2395,6 +2417,11 @@ impl LlvmBackend {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
+                    // 2026-08-13 (obj value ABI): an `obj` value is a boxed
+                    // i{int_bits} handle, not an FFI pointer — register the
+                    // name separately from struct_types so llvm_type/params/
+                    // returns agree on the handle representation.
+                    self.ctx.obj_types.insert(s.name.clone());
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
@@ -2432,6 +2459,15 @@ impl LlvmBackend {
                     }
                     // 2026-08-13 (Phase 5): `atomic` field slots.
                     register_atomic_fields(&mut self.ctx, &s.name, &s.metadata);
+                    // 2026-08-12 (slice 4, wasm32 maze): register a StaticStruct's
+                    // type params so the mono substitution (`ListBuffer<Int>`'s
+                    // `Ptr<T>` → `Ptr<Int>`) can derive the wasm32 element width.
+                    if !s.type_params.is_empty() {
+                        self.ctx.obj_type_params.insert(
+                            s.name.clone(),
+                            s.type_params.iter().map(|p| p.name.clone()).collect(),
+                        );
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             // 2026-08-13 (layout-keywords plan): the spec-aware
@@ -2813,6 +2849,15 @@ impl LlvmBackend {
         // call site, so the backend declares the ABI: String = ptr to a
         // length-prefixed [len][bytes] buffer.
         writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
+         // 2026-08-13 (dynamic String slice): `s[a:b]` emits a byte-wise
+         // substring (the runtime's briev_str_substr; bounds clamp to [0,len]).
+         // Skipped when a `frgn briev_str_substr` import already declares it
+         // (lib/compiler/reader.bv does) — a duplicate `declare` is an LLVM
+         // redefinition error (surfaced in the main<->layout-keywords merge,
+         // c_driver_needs_state).
+         if !self.ctx.frgn_map.contains_key("briev_str_substr") {
+             writeln!(out, "declare ptr @briev_str_substr(ptr, i64, i64) #1").ok();
+         }
         // 2026-08-01 (B1): content equality for String operands. The compiler
         // emits a call to briev_str_eq(ptr, ptr) instead of `icmp eq ptr`
         // (address comparison) when both operands are #String — see
@@ -3681,6 +3726,7 @@ impl LlvmBackend {
                 self.emit_thread_pool_metadata(&mut out);
             } else {
         writeln!(out, "define void @reactor_tick({}) local_unnamed_addr #2 {{", self.ctx.state_ptr_param).ok();
+        self.ctx.has_reactor_tick = true;
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();
@@ -4157,6 +4203,31 @@ impl LlvmBackend {
             writeln!(out, "define i32 @state_layout() {{").ok();
             writeln!(out, "  ret i32 ptrtoint ({{ {} }}* @__web_layout to i32)", layout_ty).ok();
             writeln!(out, "}}").ok();
+            // 2026-08-12 (Iterable protocol, slice 4): the web runtime's state
+            // passing was never wired — the shim called txn exports with no
+            // args, so `%state` defaulted to 0 and the txns operated on garbage
+            // at the wasm heap base (silently wrong; the 2b2 demos never
+            // exercised interactive clicks). Provide a long-lived `@__web_state`
+            // global, a `__briev_state_ptr()` the shim passes to EVERY export,
+            // a `__web_boot()` that runs init_state, and a `render_frame()` that
+            // ticks the reactor (the shim's `_startRenderLoop` calls it).
+            writeln!(out, "@__web_state = global %State zeroinitializer").ok();
+            writeln!(out, "define i32 @__briev_state_ptr() {{").ok();
+            writeln!(out, "  ret i32 ptrtoint (%State* @__web_state to i32)").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out, "define void @__web_boot() {{").ok();
+            writeln!(out, "  call void @init_state(ptr @__web_state)").ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out, "define void @render_frame() {{").ok();
+            // 2026-08-12 (slice 4): a folded program (no live reactive nodes)
+            // omits @reactor_tick — emit a no-op frame in that case.
+            if self.ctx.has_reactor_tick {
+                writeln!(out, "  call void @reactor_tick(ptr @__web_state)").ok();
+            }
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            self.emit_view_materializers(&mut out);
         }
 
         // 2026-08-06 (fix): escaping closures — emit the collected closure
@@ -4164,6 +4235,99 @@ impl LlvmBackend {
         self.emit_pending_closures(&mut out);
 
         out
+    }
+
+    /// 2026-08-12 (Iterable protocol, slice 4): for each `b-each` iterable that
+    /// is a Tier-2 collection (op Count + op At as op-as-member members), emit a
+    /// `__view_items_<field>(ptr %state)` snapshot materializer. It drives the
+    /// collection's own ops to fill `@__web_view_buf` as `[len][word…]` and
+    /// returns the buffer pointer — the shim's b-each renderer reads the
+    /// snapshot instead of vector layout bytes (which cannot index a heap
+    /// collection). Structural: the compiler knows only the op surface, never a
+    /// collection layout.
+    fn emit_view_materializers(&mut self, out: &mut String) {
+        use crate::ast::TopLevel;
+        if self.ctx.collection_iterables.is_empty() {
+            return;
+        }
+        writeln!(out, "@__web_view_buf = private global [1024 x i64] zeroinitializer").ok();
+        let mut names: Vec<String> = self.ctx.collection_iterables.iter().cloned().collect();
+        names.sort_unstable();
+        for field in &names {
+            let Some(&idx) = self.ctx.field_index_map.get(field) else { continue };
+            let briev_ty = self.ctx.field_briev_types.get(idx).cloned().unwrap_or(crate::ast::Type::int());
+            let base = match &briev_ty {
+                crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+                _ => continue,
+            };
+            let members = self.ctx.obj_members.get(&base).cloned().unwrap_or_default();
+            let has = |op: &str| {
+                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+            };
+            if !(has("Count") && has("At")) {
+                continue;
+            }
+            let fn_name = format!("__view_items_{}", field);
+            writeln!(out, "define i32 @{}(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {{", fn_name).ok();
+            let count_tmp = self.fun.gen_reg();
+            let count = self.emit_method_call(out, &count_tmp, &crate::ast::Expr::Identifier(field.clone()), "Count", &[], "  ");
+            // The Int width on wasm32 is i32; the At index + loop counter are
+            // Int, so use i32 (the count register may be i32 already or i64 —
+            // adapt).
+            let count_is_64 = self.llvm_type(&count.ty) == "i64";
+            let n_i32 = if count_is_64 {
+                let t = self.fun.gen_reg();
+                writeln!(out, "  {} = trunc i64 {} to i32", t, count.name).ok();
+                t
+            } else {
+                count.name.clone()
+            };
+            writeln!(out, "  %hdr = alloca i32").ok();
+            writeln!(out, "  store i32 0, ptr %hdr").ok();
+            writeln!(out, "  br label %hlbl").ok();
+            writeln!(out, "hlbl:").ok();
+            writeln!(out, "  %c = load i32, ptr %hdr").ok();
+            writeln!(out, "  %cmp = icmp slt i32 %c, {}", n_i32).ok();
+            writeln!(out, "  br i1 %cmp, label %blbl, label %elbl").ok();
+            writeln!(out, "blbl:").ok();
+            // word = field.At(c)
+            let cur_tmp = "__view_cur".to_string();
+            self.fun.let_bindings.insert(cur_tmp.clone(), "%c".to_string());
+            self.fun.let_binding_types.insert(cur_tmp.clone(), crate::ast::Type::int());
+            self.fun.let_original_types.insert(cur_tmp.clone(), crate::ast::Type::int());
+            let arg = crate::ast::Expr::Identifier(cur_tmp);
+            let at_tmp = self.fun.gen_reg();
+            let word = self.emit_method_call(out, &at_tmp, &crate::ast::Expr::Identifier(field.clone()), "At", &[arg], "  ");
+            // 2026-08-12 (slice 4, String elements): a String/Data element's At
+            // return is a PTR (the [len][bytes] address) — box it to the i64
+            // snapshot word via adapt_to_i64 (ptrtoint); an Int element zexts
+            // from i32 on wasm32.
+            let word64 = if self.llvm_type(&word.ty) == "i64" {
+                word.name.clone()
+            } else if self.is_string_operand(&word.ty) || self.is_data_operand(&word.ty) {
+                let p = self.fun.gen_reg();
+                writeln!(out, "  {} = ptrtoint {} {} to i64", p, self.llvm_type(&word.ty), word.name).ok();
+                p
+            } else {
+                let z = self.fun.gen_reg();
+                writeln!(out, "  {} = zext i32 {} to i64", z, word.name).ok();
+                z
+            };
+            writeln!(out, "  %w32 = add i32 %c, 1").ok();
+            writeln!(out, "  %w = sext i32 %w32 to i64").ok();
+            writeln!(out, "  %p = getelementptr [1024 x i64], ptr @__web_view_buf, i64 0, i64 %w").ok();
+            writeln!(out, "  store i64 {}, ptr %p", word64).ok();
+            writeln!(out, "  %next = add i32 %c, 1").ok();
+            writeln!(out, "  store i32 %next, ptr %hdr").ok();
+            writeln!(out, "  br label %hlbl").ok();
+            writeln!(out, "elbl:").ok();
+            // buf[0] = n (the real len, at i64)
+            let n64 = self.fun.gen_reg();
+            writeln!(out, "  {} = sext i32 {} to i64", n64, n_i32).ok();
+            writeln!(out, "  store i64 {}, ptr @__web_view_buf", n64).ok();
+            writeln!(out, "  ret i32 ptrtoint ([1024 x i64]* @__web_view_buf to i32)").ok();
+            writeln!(out, "}}").ok();
+        }
     }
 
     /// 2026-08-06 (fix): emit the top-level closure functions collected during

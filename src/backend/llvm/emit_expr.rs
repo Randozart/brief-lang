@@ -401,9 +401,40 @@ impl LlvmBackend {
                             }
                         }
                     } else {
-                        TypedRegister {
-                            name: reg.clone(),
-                            ty: self.get_local_type(name),
+                        let ty = self.get_local_type(name);
+                        // 2026-08-13: a boxed Bool/Char param is registered in
+                        // let_binding_types as Int (emit_definition line 2066);
+                        // let_original_types keeps the true Briev type. Recover
+                        // it so the Char case can unbox below.
+                        let orig_ty = self.fun.let_original_types.get(name).cloned().unwrap_or_else(|| ty.clone());
+                        // 2026-08-13: a Float/Double param is boxed to an i64
+                        // handle at function entry (emit_box_param), with the
+                        // native float register cached in reg_float_cache. Any
+                        // read of the local must yield the NATIVE float, else a
+                        // `f as String` cast emits `call float_to_str(float %boxed_i64)`
+                        // (a type mismatch). Unbox through the cache.
+                        if (ty == Type::float() || ty == Type::float64())
+                            && let Some(cached) = self.fun.reg_float_cache.get(&reg)
+                        {
+                            TypedRegister { name: cached.clone(), ty }
+                        } else if self.is_protocol_member(&orig_ty, "#Char") {
+                            // 2026-08-13: a Char param is boxed to i64 at
+                            // entry (emit_box_param "zext.i32.to.i64#") but its
+                            // native register is i32. A comparison against a
+                            // Char literal (`c >= ' '`) emits the literal as
+                            // i32, so the read must truncate the box to i32
+                            // (an `icmp eq i64 %ac0, i32 %t7` is a mismatch).
+                            // The register keeps the CHAR type (not the boxed
+                            // Int) so downstream casts dispatch to char_to_str
+                            // and Print# routes to __print_char.
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, reg).ok();
+                            TypedRegister { name: t, ty: orig_ty }
+                        } else {
+                            TypedRegister {
+                                name: reg.clone(),
+                                ty,
+                            }
                         }
                     }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
@@ -534,7 +565,7 @@ impl LlvmBackend {
                         // with the DECLARED constant type (a #String member, not
                         // a hardcoded Type::string()) so reflection/ops see the
                         // right protocol. Was load i64 typed Int, which broke
-                        // `s.^Len` on an unwritten literal (const-folded to a
+                        // `s.^Length` on an unwritten literal (const-folded to a
                         // global).
                         writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
                         TypedRegister {
@@ -830,6 +861,34 @@ impl LlvmBackend {
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-13 (c[i] dispatches op At): a Tier-2 collection
+                // (`op Count` + `op At`) index must inline the At member body —
+                // the legacy struct/heap-seq paths below read a List value's
+                // fields directly (`b[0]` read the `inner` slot, then fed the
+                // buffer pointer to briev_char_len → garbage/crash). Same
+                // dispatch foreach uses. tier2_op_collection handles identifier
+                // receivers; a call-result receiver (`bytes("abc")[0]`) is
+                // dispatched by its register's type.
+                let recv_is_tier2 = self.tier2_op_collection(obj).is_some()
+                    || {
+                        let base = match &obj_reg.ty {
+                            Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
+                            _ => None,
+                        };
+                        base.map_or(false, |b| {
+                            self.ctx.obj_members.get(&b).map_or(false, |members| {
+                                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"))
+                            })
+                        })
+                    };
+                if recv_is_tier2 {
+                    // 2026-08-13: inline the At member body. The member's
+                    // `term inner.data[i]` already unboxes String/Data elements
+                    // (the Index arm's String-element path inttoprts), so no
+                    // extra conversion here.
+                    let out_tmp = self.fun.gen_reg();
+                    return self.emit_method_call(out, &out_tmp, obj, "At", &[(**index).clone()], indent);
+                }
                 // 2026-08-10: clone so gep_index can take &mut self while the
                 // struct_types borrow for self-array slots is live below.
                 let idx_clone = idx_reg.clone();
@@ -1034,14 +1093,29 @@ impl LlvmBackend {
                         };
                     }
                 }
+                // 2026-08-13: a bare `[99]`/`(1,2)` seq literal now carries the
+                // boxed i64 handle type (Type::int) — recognize it by its AST
+                // form so the 2-slot heap path still applies (it is a heap seq
+                // with a length header, exactly like an Applied List value).
+                let is_seq_literal = matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_));
                 if matches!(obj_reg.ty, Type::Ptr(_))
                     || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
+                    || is_seq_literal
                 {
                     let ptr = self.fun.gen_reg();
                     // 2026-08-11 (wasm32 obj-member fix): the Ptr/List receiver
                     // handle is i{int_bits} (i32 on wasm32) — inttoptr at that
-                    // width, not hardcoded i64.
-                    let hw = format!("i{}", self.ctx.int_bits);
+                    // width, not hardcoded i64. 2026-08-12 (slice 4): a
+                    // COLLECTION data pointer (`inner.data`, a struct Ptr field)
+                    // loads/stores at i64 (the boxed-handle ABI), so inttoptr
+                    // at i64 when the receiver value is i64; a local Ptr handle
+                    // is i{int_bits}. Match the receiver register's LLVM type.
+                    let recv_llvm = self.llvm_type(&obj_reg.ty);
+                    let hw = if matches!(recv_llvm.as_str(), "i64" | "ptr") {
+                        "i64".to_string()
+                    } else {
+                        format!("i{}", self.ctx.int_bits)
+                    };
                     writeln!(
                         out,
                         "{}{} = inttoptr {} {} to ptr",
@@ -1056,7 +1130,8 @@ impl LlvmBackend {
                     // list identifiers also need the +1 offset.
                     // 2026-07-21: Only List types have a length header at slot 0.
                     // Raw Ptr<T> from Malloc# has no header — offset is the index.
-                    let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
+                    let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
+                        || is_seq_literal;
                     let gep_idx = self.gep_index(out, indent, &idx_clone);
                     if is_list_type {
                         writeln!(out, "{}{} = add i64 {}, 1", indent, offset, gep_idx).ok();
@@ -1091,6 +1166,17 @@ impl LlvmBackend {
                         let tr = self.fun.gen_reg();
                         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, tr).ok();
+                    } else if self.is_protocol_member(&index_elem_ty, "#Int") {
+                        // 2026-08-12 (slice 4, wasm32 maze): an Int element is
+                        // stored as a boxed i64 handle; on wasm32 the value is
+                        // in the low i32 — load at the ELEMENT's native width
+                        // (`llvm_type(Int)` = i32 on wasm32, i64 on x86_64) so
+                        // the member's term return + consumers match. Loading
+                        // the full i64 then returning it as i32 produced
+                        // `%t117 defined with type 'i64' but expected 'i32'`.
+                        writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
+                            if self.fun.volatile_read { "volatile " } else { "" },
+                            self.llvm_type(&index_elem_ty), gep).ok();
                     } else {
                         writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
                             if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
@@ -1360,6 +1446,43 @@ impl LlvmBackend {
                 // The narrowing pass converts constant-bounds slices to Vector<T,N>
                 // before codegen; this arm handles dynamic slices.
                 let array_reg = self.emit_expr(out, array, indent);
+                // 2026-08-13 (dynamic String slice): `s[a:b]` on a String was a
+                // STUB that returned the whole array — every string.bv function
+                // using a dynamic slice (replace, trim, substr, split, ...)
+                // silently produced the full string (documented in BUGS.md).
+                // The runtime half (briev_str_substr) has always existed; wire
+                // it here. Vector slices stay on the narrowing-pass path.
+                let arr_is_str = self.is_string_operand(&array_reg.ty)
+                    || match array.as_ref() {
+                        Expr::Identifier(nm) => self.is_string_operand(
+                            &self.fun.let_original_types.get(nm).cloned().unwrap_or(Type::int())
+                        ),
+                        _ => false,
+                    };
+                if arr_is_str {
+                    let sp = self.string_ptr(out, indent, &array_reg);
+                    let lo = match start {
+                        Some(s) => self.emit_expr(out, s, indent),
+                        None => {
+                            let z = self.fun.gen_reg();
+                            writeln!(out, "{}{} = add i64 0, 0", indent, z).ok();
+                            TypedRegister { name: z, ty: Type::int() }
+                        }
+                    };
+                    let hi = match end {
+                        Some(e) => self.emit_expr(out, e, indent),
+                        None => {
+                            let n = self.fun.gen_reg();
+                            writeln!(out, "{}{} = add i64 0, 0", indent, n).ok();
+                            TypedRegister { name: n, ty: Type::int() }
+                        }
+                    };
+                    let _ = stride;
+                    let sub = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr @briev_str_substr(ptr {}, i64 {}, i64 {})",
+                        indent, sub, sp, lo.name, hi.name).ok();
+                    return TypedRegister { name: sub, ty: crate::ast::Type::Custom("String".to_string()) };
+                }
                 if let Some(s) = start { self.emit_expr(out, s, indent); }
                 if let Some(e) = end { self.emit_expr(out, e, indent); }
                 if let Some(s) = stride { self.emit_expr(out, s, indent); }
@@ -1636,9 +1759,14 @@ impl LlvmBackend {
             }
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, hdr).ok();
         }
+        // 2026-08-13 (obj value ABI): the seq value is a BOXED i64 handle
+        // (ptrtoint'd above), so its register type is Int — NOT Ptr. A Ptr
+        // type made the defn-call arg coercion (`param i64, reg ptr`) re-ptrtoint
+        // the boxed handle, double-boxing the empty-list sentinel passed to a
+        // List param.
         TypedRegister {
             name: v.to_string(),
-            ty: Type::ptr(Type::int()),
+            ty: Type::int(),
         }
     }
 
@@ -1964,15 +2092,24 @@ impl LlvmBackend {
         let total_size = self.struct_type_size(type_name);
         let struct_ty = crate::ast::Type::Custom(type_name.to_string());
 
+        // 2026-08-13 (struct value lifetime): a struct literal must live on the
+        // HEAP, not the stack. The handle (`ptrtoint`) crosses function
+        // boundaries (`term StringBuilder { ... }` from new_builder/append_*),
+        // and a stack alloca's handle dangles once the constructing function
+        // returns — the caller then reads a dead frame (append_str("") returned
+        // a builder whose buffer read garbage). State-slot/field consumers read
+        // the handle in the same function, so heap is a strict superset.
         let alloca_reg = self.fun.gen_reg();
-        // 2026-08-13 (reactor fix): inside a reactor loop body the alloca is
-        // deferred to the loop PREHEADER (flush_pending_struct_allocas) — an
-        // alloca in the loop makes clang -O3 peel the loop and emit a bogus
-        // exit assumption (the node fires once). Elsewhere it stays inline.
+        // 2026-08-13 (reactor fix, merged with main's heap lifetime): the
+        // allocation (heap malloc per main, so the handle survives function
+        // boundaries) is deferred to the loop PREHEADER when inside a reactor
+        // loop body (flush_pending_struct_allocas) — an allocation in the loop
+        // makes clang -O3 peel the loop and emit a bogus exit assumption (the
+        // node fires once). Elsewhere it stays inline.
         if self.fun.defer_struct_allocas {
-            self.fun.pending_struct_allocas.push(format!("{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size));
+            self.fun.pending_struct_allocas.push(format!("{}  {} = call ptr @malloc(i64 {})", indent, alloca_reg, total_size));
         } else {
-            writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+            writeln!(out, "{}  {} = call ptr @malloc(i64 {})", indent, alloca_reg, total_size).ok();
         }
 
         for (field_name, field_expr) in fields {
@@ -2341,6 +2478,14 @@ impl LlvmBackend {
         // GEP a fake boxed self instead of the pool column) — fail loudly.
         let saved_prefix = self.fun.self_prefix.clone();
         let saved = self.fun.self_binding.clone();
+        // 2026-08-13: clear the enclosing callable-txn convergence state while
+        // the member body runs (see the restore below).
+        let saved_ctr = self.fun.callable_txn_result.clone();
+        let saved_ctpl = self.fun.callable_txn_post_label.clone();
+        let saved_terminated = self.fun.terminated;
+        self.fun.callable_txn_result = None;
+        self.fun.callable_txn_post_label = None;
+        self.fun.terminated = false;
         if let Some((prefix, row_reg)) = &self_prefix {
             self.fun.self_prefix = Some((prefix.clone(), row_reg.clone()));
             self.fun.self_binding = None;
@@ -2397,25 +2542,60 @@ impl LlvmBackend {
             ),
             _ => (Vec::new(), Vec::new()),
         };
+        // 2026-08-12 (Iterable protocol, slice 4): substitute the member's
+        // PARAM types with the collection's concrete args (`List<Int>` init's
+        // `val: T` → `val: Int`) — without it a wasm32 member body bound `val`
+        // as the raw generic `T`, so adapt_to_i64 couldn't widen the i32 value
+        // to the i64 collection slot (`store i64 <i32>` was invalid IR). The
+        // receiver type is usually a MONO key (`List<Int>`), so parse the base
+        // + args from the type name.
+        let (recv_base, recv_args) = match &recv_reg.ty {
+            crate::ast::Type::Applied(n, a) => (n.clone(), a.clone()),
+            crate::ast::Type::Custom(n) => {
+                if let Some((b, rest)) = n.split_once('<') {
+                    let inner = rest.trim_end_matches('>');
+                    let args: Vec<crate::ast::Type> = inner
+                        .split(',')
+                        .filter_map(|a| {
+                            let a = a.trim();
+                            if a == "Int" {
+                                Some(crate::ast::Type::int())
+                            } else if a == "Bool" {
+                                Some(crate::ast::Type::bool_())
+                            } else if a == "String" {
+                                Some(crate::ast::Type::string())
+                            } else if a == "Float" {
+                                Some(crate::ast::Type::float())
+                            } else if a == "Float64" {
+                                Some(crate::ast::Type::float64())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    (b.to_string(), args)
+                } else {
+                    (n.clone(), Vec::new())
+                }
+            }
+            _ => (String::new(), Vec::new()),
+        };
+        let recv_type_params = self.ctx.obj_type_params.get(&recv_base).cloned().unwrap_or_default();
+        let recv_subst: std::collections::HashMap<String, crate::ast::Type> =
+            recv_type_params.into_iter().zip(recv_args.into_iter()).collect();
+        let params: Vec<(String, crate::ast::Type)> = params
+            .into_iter()
+            .map(|(n, t)| (n.clone(), crate::typechecker::substitute_type(&t, &recv_subst)))
+            .collect();
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
-                // 2026-08-04 (compiler-in-Briev): a String argument (a real
-                // ptr) binds to a boxed parameter (an i64 handle) — ptrtoint
-                // at the param boundary so `inner.data[len] = val` in the
-                // member body stores an i64, not a ptr. This is the bits-model
-                // invariant: "a String crossing a call boundary is an i64
-                // handle; a String in a register is a ptr."
-                let bound = if self.is_string_operand(rty) {
-                    let boxed = self.adapt_to_i64(
-                        out,
-                        indent,
-                        &TypedRegister { name: reg.clone(), ty: rty.clone() },
-                    );
-                    boxed
-                } else {
-                    reg.clone()
-                };
-                self.fun.let_bindings.insert(pname.clone(), bound);
+                // 2026-08-12 (slice 4): a String arg is bound as the PTR (the
+                // "String in a register is a ptr" invariant) — the member body's
+                // own stores (inner.data[len] = val) box it via adapt_to_i64.
+                // The previous pre-boxing here (ptrtoint at the boundary) made
+                // wasm32 DOUBLE-box (the store adapts again), producing
+                // `ptrtoint ptr <i64 handle>`.
+                self.fun.let_bindings.insert(pname.clone(), reg.clone());
                 self.fun.let_binding_types.insert(pname.clone(), pty.clone());
                 self.fun.let_original_types.insert(pname.clone(), pty.clone());
             }
@@ -2429,6 +2609,14 @@ impl LlvmBackend {
         self.fun.let_original_types = saved_orig;
         self.fun.last_val_temps = saved_lvt;
         self.fun.last_val_types = saved_lvt_types;
+        // 2026-08-13 (member term inside a callable txn): the member body's
+        // `term X` must record member_result, NOT terminate the ENCLOSING txn.
+        // With callable_txn_result left set, an inlined `op At` body (`term
+        // inner.data[i]`) inside join_loop stored to %result + br post +
+        // terminated=true, silently dropping join_loop's own `term result`.
+        self.fun.callable_txn_result = saved_ctr;
+        self.fun.callable_txn_post_label = saved_ctpl;
+        self.fun.terminated = saved_terminated;
         let _ = v;
         // 2026-08-01 (D3): a defn member's `term` value is the call's result —
         // return it (the caller binds it). Otherwise fall back to a fresh
@@ -2572,23 +2760,24 @@ impl LlvmBackend {
                 let ptr_tmp = self.fun.gen_reg();
                 self.emit_expr_inner(out, &ptr_tmp, &Expr::AddrOf(Box::new(recv.clone())), indent)
             }
-            ("Len", ReflectKind::Runtime) => match &recv_reg.ty {
+            ("Length", ReflectKind::Runtime) => match &recv_reg.ty {
                 Type::Vector(_, _) => {
                     let count = self.vector_element_count(&recv_reg.ty);
                     let r = self.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                 // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
-                 // default = UTF8 character count (runtime helper reads the
-                 // [len][bytes] buffer and counts codepoints). The O(1) byte
-                 // length (header) is `x.^^Bytes` below.
+                 // 2026-08-12 (Iterable protocol): `x.^Length` on a #String is
+                 // the STORED byte count — the [len] header of the
+                 // [len][bytes] handle (O(1), no scan). The UTF8 CHARACTER
+                 // count is the `CharCount#` intrinsic (a computed scan; SPEC
+                 // §17.1/§17.3).
                  ty if self.is_string_operand(ty) => {
                      let r = self.fun.gen_reg();
-                     writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, recv_reg.name).ok();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                 // 2026-08-06 (Phase 7): `x.^Len` on a #Data — the byte length
+                 // 2026-08-06 (Phase 7): `x.^Length` on a #Data — the byte length
                  // is the [len] header of the [len][bytes] handle (O(1), no
                  // codepoint scan). Data values are ptr handles like Strings.
                  ty if matches!(ty, Type::Custom(n) if n == "Data") => {
@@ -2596,18 +2785,19 @@ impl LlvmBackend {
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                // 2026-08-04 (compiler-in-Briev): a String value boxed to an
-                // i64 HANDLE at a call/binding boundary (String param, frgn
-                // result) is typed Custom("Int")/Int here — the physical value
-                // is still the [len][bytes] pointer. Recover the semantic type
-                // from the binding (the let's declared type) and inttoptr the
-                // handle before briev_char_len. Mirrors the `==` operand fix.
-                other if self.is_semantic_string(recv, &recv_reg) => {
-                    let p = self.string_ptr(out, indent, &recv_reg);
-                    let r = self.fun.gen_reg();
-                    writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, p).ok();
-                    TypedRegister { name: r, ty: Type::int() }
-                }
+                 // 2026-08-04 (compiler-in-Briev): a String value boxed to an
+                 // i64 HANDLE at a call/binding boundary (String param, frgn
+                 // result) is typed Custom("Int")/Int here — the physical value
+                 // is still the [len][bytes] pointer. Recover the semantic type
+                 // from the binding (the let's declared type) and inttoptr the
+                 // handle before the byte-header read. 2026-08-12: `.^Length` is
+                 // the STORED byte count; `CharCount#` is the char scan.
+                 other if self.is_semantic_string(recv, &recv_reg) => {
+                     let p = self.string_ptr(out, indent, &recv_reg);
+                     let r = self.fun.gen_reg();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, p).ok();
+                     TypedRegister { name: r, ty: Type::int() }
+                 }
                 other => panic!(
                     "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",
                     recv, recv_reg.ty
@@ -2798,6 +2988,14 @@ impl LlvmBackend {
     /// 2026-07-24: Falls back to struct_types (registration pass) when the
     /// type universe is unavailable (common in test environments).
     fn get_struct_fields(&self, type_name: &str) -> Option<&[(String, Type)]> {
+        // 2026-08-12 (slice 4, wasm32 maze): a MONO key (`ListBuffer<Int>`)
+        // must prefer the SUBSTITUTED struct_types — the universe holds the
+        // generic base fields (`Ptr<T>`), which leak the raw type param into
+        // wasm32 width resolution (`inner.data` resolved to `Ptr<T>`, so the
+        // element width couldn't be derived and the load stayed i64).
+        if type_name.contains('<') {
+            return self.ctx.struct_types.get(type_name).map(|v| v.as_slice());
+        }
         // Try type universe first (production path, has precise types)
         if let Some(ref u) = self.ctx.type_universe {
             if let Some(info) = u.types.get(type_name) {
@@ -4597,9 +4795,12 @@ impl LlvmBackend {
         let universe = self.ctx.type_universe.as_ref()?;
         let (src_cat, src_var) = graph.type_to_protocol(universe, &src.ty);
         let (dst_cat, dst_var) = graph.type_to_protocol(universe, target);
-        let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var)?;
+        let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var);
 
-        self.emit_cast_steps(out, v, src, target, indent, &path)
+        match &path {
+            Some(p) => self.emit_cast_steps(out, v, src, target, indent, p),
+            None => None,
+        }
     }
 
     /// Emit LLVM IR for a sequence of cast steps returned by the graph.
@@ -4699,8 +4900,18 @@ impl LlvmBackend {
                     // `#String → Int` emits `call i64 @str_to_int(...)`. The
                     // old hardcoded `i64` made int_to_str return an i64 that
                     // the String target then ptrtoint'd (a type mismatch).
+                    // 2026-08-13: a native Char source (i32, from a boxed Char
+                    // param unboxed at read) must be widened to the boxed i64
+                    // the runtime helpers expect (`char_to_str(int64_t)`).
+                    let (arg_ll, arg) = if cur_ll == "i32" && self.is_protocol_member(&src.ty, "#Char") {
+                        let w = self.fun.gen_reg();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, w, cur).ok();
+                        ("i64".to_string(), w)
+                    } else {
+                        (cur_ll.clone(), cur.clone())
+                    };
                     writeln!(out, "{}{} = call {} @{}({} {})",
-                        indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
+                        indent, dst, dst_ll, fn_name, arg_ll, arg).ok();
                 }
                 crate::casting::graph::LaneKind::ExtCallDyn(fn_name) => {
                     // 2026-08-03: proto-binding transform (owned function

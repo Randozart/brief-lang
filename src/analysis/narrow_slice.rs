@@ -54,17 +54,28 @@ fn walk_expr(expr: &mut Expr) {
             if let Some(s) = stride { walk_expr(s); }
 
             let stride_val = stride.as_ref().and_then(|e| expr_as_i64(e)).unwrap_or(1i64);
-            if stride_val == 1 {
-                let _has_start = start.is_some();
-                let _has_end = end.is_some();
-                let s_const = start.as_ref().and_then(|e| expr_as_i64(e));
-                let e_const = end.as_ref().and_then(|e| expr_as_i64(e));
-                if s_const.is_some() || e_const.is_some() {
-                    // Contiguous, at least one bound constant — narrow to base array.
-                    // For contiguous slices, access arr[start + i] = arr[i] offset.
-                    *expr = (*array.clone()).clone();
-                }
+            if stride_val != 1 {
+                return;
             }
+            // 2026-08-13 (String slices): narrowing a slice to its base
+            // array is only valid for Vector offset-views. A String slice
+            // `s[0:idx]` IS a substring — replacing it with `s` silently
+            // returns the whole string (every string.bv dynamic slice was
+            // broken by this). This pass has no type info, so identifier-
+            // based slices are left intact for the backend's Slice arm,
+            // which emits briev_str_substr for Strings and the base-array
+            // view for Vectors.
+            if matches!(array.as_ref(), Expr::Identifier(_)) {
+                return;
+            }
+            let s_const = start.as_ref().and_then(|e| expr_as_i64(e));
+            let e_const = end.as_ref().and_then(|e| expr_as_i64(e));
+            if s_const.is_none() && e_const.is_none() {
+                return;
+            }
+            // Contiguous, at least one bound constant — narrow to base array.
+            // For contiguous slices, access arr[start + i] = arr[i] offset.
+            *expr = (*array.clone()).clone();
         }
         Expr::BinaryOp(_, a, b) => { walk_expr(a); walk_expr(b); }
         Expr::UnaryOp(_, a) => { walk_expr(a); }
