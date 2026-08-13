@@ -4134,6 +4134,26 @@ impl LlvmBackend {
             writeln!(out, "define i32 @state_layout() {{").ok();
             writeln!(out, "  ret i32 ptrtoint ({{ {} }}* @__web_layout to i32)", layout_ty).ok();
             writeln!(out, "}}").ok();
+            // 2026-08-12 (Iterable protocol, slice 4): the web runtime's state
+            // passing was never wired — the shim called txn exports with no
+            // args, so `%state` defaulted to 0 and the txns operated on garbage
+            // at the wasm heap base (silently wrong; the 2b2 demos never
+            // exercised interactive clicks). Provide a long-lived `@__web_state`
+            // global, a `__briev_state_ptr()` the shim passes to EVERY export,
+            // a `__web_boot()` that runs init_state, and a `render_frame()` that
+            // ticks the reactor (the shim's `_startRenderLoop` calls it).
+            writeln!(out, "@__web_state = global %State zeroinitializer").ok();
+            writeln!(out, "define i32 @__briev_state_ptr() {{").ok();
+            writeln!(out, "  ret i32 ptrtoint (%State* @__web_state to i32)").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out, "define void @__web_boot() {{").ok();
+            writeln!(out, "  call void @init_state(ptr @__web_state)").ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out, "define void @render_frame() {{").ok();
+            writeln!(out, "  call void @reactor_tick(ptr @__web_state)").ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
         }
 
         // 2026-08-06 (fix): escaping closures — emit the collected closure
@@ -4623,6 +4643,7 @@ impl LlvmBackend {
             // can evaluate and store the runtime value at startup.
             } else if let TopLevel::Statement(stmt) = item {
                 if let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
+                    if name == "a" { eprintln!("DBG build_field_index sees let a ty={:?} expr={:?}", ty, expr.is_some()); }
                     let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
                     // 2026-08-07 (object instance pools): a top-level obj
                     // instance (`let st: Stack<Int, 256> = 0`) UNPACKS its

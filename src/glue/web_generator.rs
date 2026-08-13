@@ -267,6 +267,15 @@ export class WasmDomRuntime {{
     const wasm = await WebAssembly.instantiate(wasmBytes, importObject);
     this._instance = wasm.instance;
     this._memory = wasm.instance.exports.memory;
+    // 2026-08-12 (Iterable protocol, slice 4): run init_state into the
+    // long-lived @__web_state and remember its pointer — EVERY txn export
+    // takes `%state` as its first param, and the shim must pass it (the
+    // exports were previously called with no state, silently operating on
+    // garbage at the wasm heap base).
+    if (this._instance.exports.__web_boot) this._instance.exports.__web_boot();
+    this._statePtr = this._instance.exports.__briev_state_ptr
+      ? this._instance.exports.__briev_state_ptr()
+      : 0;
     this._loadStateLayout();
     this._startRenderLoop();
   }}
@@ -458,7 +467,11 @@ export class WasmDomRuntime {{
   _txn(name) {{
     // 2026-08-11 (Phase 2a3): a callable txn exports as `@<name>`, a reactive
     // txn as `@txn_<name>`. Resolve either so the DOM can fire both.
-    return this._instance.exports[name] || this._instance.exports["txn_" + name];
+    // 2026-08-12 (slice 4): prepend the state pointer — every txn export
+    // takes `%state` as its first param.
+    const fn = this._instance.exports[name] || this._instance.exports["txn_" + name];
+    if (!fn) return fn;
+    return (...args) => fn(this._statePtr, ...args);
   }}
 
   get generation() {{

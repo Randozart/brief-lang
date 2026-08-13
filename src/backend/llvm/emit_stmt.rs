@@ -436,6 +436,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             return TypedRegister { name: val.name, ty: Type::void() };
                         }
                     }
+                    // 2026-08-12 (slice 4): a FLAT dotted state field
+                    // (`main.count = ...` from the component-instance rewrite)
+                    // stores through the state slot. Previously this fell
+                    // through and the assignment was silently DROPPED (the web
+                    // counter's increment never moved the count; the volatile
+                    // swan-song store to ptr 0 was all that remained).
+                    if backend.ctx.field_index_map.contains_key(name) {
+                        backend.emit_state_store_i64(out, indent, name, &val.name);
+                        // NOTE: do NOT insert into last_val_temps here —
+                        // that map persists across txn emissions (only
+                        // emit_member_body saves/restores it), so a stale
+                        // register would leak into a later txn's contract
+                        // read (the undefined-%t12 reset_0 regression). The
+                        // state slot is the source of truth; a subsequent read
+                        // loads it.
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    }
                     // 2026-07-18: Push — emit call @fn_name(handle, val).
                     // 2026-07-20: Uses find_insert_strategy (reads OperatorDef from context).
                     // 2026-07-31 (A6): when the InsertAt op is bound to an obj

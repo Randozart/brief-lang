@@ -1180,6 +1180,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 .flatten()
                 .collect();
             exports.push("state_layout".to_string());
+            // 2026-08-12 (Iterable protocol, slice 4): the state-pointer + boot
+            // + render-frame exports — the shim passes __briev_state_ptr() to
+            // every txn export and ticks render_frame each frame.
+            exports.push("__briev_state_ptr".to_string());
+            exports.push("__web_boot".to_string());
+            exports.push("render_frame".to_string());
             exports.sort_unstable();
             exports.dedup();
             compile_wasm(&out_path, &wasm_path, &exports)?;
