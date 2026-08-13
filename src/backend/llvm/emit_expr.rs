@@ -513,7 +513,7 @@ impl LlvmBackend {
                         // with the DECLARED constant type (a #String member, not
                         // a hardcoded Type::string()) so reflection/ops see the
                         // right protocol. Was load i64 typed Int, which broke
-                        // `s.^Len` on an unwritten literal (const-folded to a
+                        // `s.^Length` on an unwritten literal (const-folded to a
                         // global).
                         writeln!(out, "{}{} = load ptr, ptr @{}", indent, v, name).ok();
                         TypedRegister {
@@ -2534,14 +2534,14 @@ impl LlvmBackend {
                 let ptr_tmp = self.fun.gen_reg();
                 self.emit_expr_inner(out, &ptr_tmp, &Expr::AddrOf(Box::new(recv.clone())), indent)
             }
-            ("Len", ReflectKind::Runtime) => match &recv_reg.ty {
+            ("Length", ReflectKind::Runtime) => match &recv_reg.ty {
                 Type::Vector(_, _) => {
                     let count = self.vector_element_count(&recv_reg.ty);
                     let r = self.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                     TypedRegister { name: r, ty: Type::int() }
                 }
-                 // 2026-08-01 (B3): `x.^Len` on a #String → the `Size` prop
+                 // 2026-08-01 (B3): `x.^Length` on a #String → the `Size` prop
                  // default = UTF8 character count (runtime helper reads the
                  // [len][bytes] buffer and counts codepoints). The O(1) byte
                  // length (header) is `x.^^Bytes` below.
@@ -2550,7 +2550,7 @@ impl LlvmBackend {
                      writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                 // 2026-08-06 (Phase 7): `x.^Len` on a #Data — the byte length
+                 // 2026-08-06 (Phase 7): `x.^Length` on a #Data — the byte length
                  // is the [len] header of the [len][bytes] handle (O(1), no
                  // codepoint scan). Data values are ptr handles like Strings.
                  ty if matches!(ty, Type::Custom(n) if n == "Data") => {

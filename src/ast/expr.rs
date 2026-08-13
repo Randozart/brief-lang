@@ -69,7 +69,7 @@ pub enum Expr {
     /// 2026-07-31: Method call with a receiver: a.f(x). The receiver is
     /// preserved and bound to the `self` parameter of the obj member.
     MethodCall(Box<Expr>, String, Vec<Expr>, Option<usize>),
-    /// 2026-07-31: Reflection access: `a.^Len` (runtime) / `a.^^Size`
+    /// 2026-07-31: Reflection access: `a.^Length` (runtime) / `a.^^Size`
     /// (compile-time). The receiver is preserved; the target is a PascalCase
     /// compiler-known identifier resolved by the D1 reflection table.
     Reflect(Box<Expr>, String, ReflectKind),
@@ -165,7 +165,7 @@ pub enum Expr {
 /// reflection from type-derived (compile-time, foldable) reflection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectKind {
-    /// `x.^Len`, `x.^Ptr` — runtime value-derived.
+    /// `x.^Length`, `x.^Ptr` — runtime value-derived.
     Runtime,
     /// `x.^^Size`, `x.^^Bytes` — compile-time type-derived, foldable.
     CompileTime,

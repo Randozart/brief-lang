@@ -308,7 +308,7 @@ impl<'a> Parser<'a> {
                 let name = self.expect_identifier()?;
                 expr = Expr::Reflect(Box::new(expr), name, ReflectKind::CompileTime);
             } else if self.eat(&Token::DotCaret) {
-                // 2026-07-31: Runtime reflection: a.^Len, a.^Ptr.
+                // 2026-07-31: Runtime reflection: a.^Length, a.^Ptr.
                 let name = self.expect_identifier()?;
                 expr = Expr::Reflect(Box::new(expr), name, ReflectKind::Runtime);
             } else if self.eat(&Token::LBracket) {

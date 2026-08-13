@@ -1035,7 +1035,7 @@ pub fn infer_expression(
             let (ty, prov) = infer_expression(inner, ctx)?;
             Ok((ty, prov))
         }
-        // 2026-07-31: Reflection: x.^Len / x.^^Size (see resolve_reflect).
+        // 2026-07-31: Reflection: x.^Length / x.^^Size (see resolve_reflect).
         Expr::Reflect(recv, target, kind) => {
             // 2026-08-09 (Phase 12, SPEC §19.3): `feature.^^Available` — a
             // compile-time descriptor Bool for an `optional frgn`. Only an
@@ -3157,7 +3157,7 @@ fn resolve_reflect(
         }
     };
     match target {
-        "Len" => {
+        "Length" => {
             if is_compile_time {
                 return Err(wrong_kind("runtime"));
             }
@@ -3213,7 +3213,7 @@ fn resolve_reflect(
         }
         _ => Err(TypeError::InvalidOperation {
             operation: format!("reflection target '{}'", target),
-            type_name: "unknown reflection target — expected Len, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
+            type_name: "unknown reflection target — expected Length, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
         }),
     }
 }

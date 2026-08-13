@@ -675,7 +675,7 @@ fn eval_reflect(
     match (name, ct) {
         // 2026-08-01 (B3): String `Len` = UTF8 character count (not bytes).
         // A String is Value::Bits(bytes) or a heap handle Int atom.
-        ("Len", false) => match val {
+        ("Length", false) => match val {
             Value::Bits(_) => {
                 let bytes = val.string_bytes(heap).unwrap_or_default();
                 let chars = bytes
@@ -2288,7 +2288,7 @@ mod tests {
     fn test_reflect_len_on_product_is_field_count() {
         let r = Expr::Reflect(
             Box::new(person()),
-            "Len".into(),
+            "Length".into(),
             ReflectKind::Runtime,
         );
         assert_eq!(eval1(&r).as_i64(), Some(2));

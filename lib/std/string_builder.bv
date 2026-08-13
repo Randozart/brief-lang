@@ -58,16 +58,16 @@ defn len(builder: StringBuilder)
     [true][term >= 0]
     -> Int
 {
-    term builder.buffer .^Len;
+    term builder.buffer .^Length;
 };
 
 defn is_empty(builder: StringBuilder) -> Bool {
-    term builder.buffer .^Len == 0;
+    term builder.buffer .^Length == 0;
 };
 
 defn capacity(builder: StringBuilder)
-    [true][term >= builder .^Len]
+    [true][term >= builder .^Length]
     -> Int
 {
-    term builder.buffer .^Len;
+    term builder.buffer .^Length;
 };

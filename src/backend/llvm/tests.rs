@@ -5462,7 +5462,7 @@ fn test_bit_to_string_encoding_door() {
     );
 }
 
-/// 2026-08-01 (B3): `x.^Len` on a String → the `Size` prop default = UTF8
+/// 2026-08-01 (B3): `x.^Length` on a String → the `Size` prop default = UTF8
 /// char count (briev_char_len); `x.^^Bytes` → the `Bytes` prop default = O(1)
 /// header read (byte length). Also verifies a String `let` used only via
 /// reflection stays live (not eliminated as a dead state field).
@@ -5472,7 +5472,7 @@ fn test_string_len_and_bytes_reflect() {
         let s: String = "hello";
         let tick: Int = 0;
         node report [tick < 1][tick == 1] {
-            let c: Int = s.^Len;
+            let c: Int = s.^Length;
             let b: Int = s.^^Bytes;
             term;
         };
@@ -5487,7 +5487,7 @@ fn test_string_len_and_bytes_reflect() {
     let ir = backend.generate(&items, None);
     assert!(
         ir.contains("call i64 @briev_char_len(ptr "),
-        "String .^Len must emit briev_char_len (UTF8 char count); got:\n{ir}"
+        "String .^Length must emit briev_char_len (UTF8 char count); got:\n{ir}"
     );
     assert!(
         ir.contains("load i64, ptr ") || ir.contains("load i64, ptr %"),
@@ -6084,7 +6084,7 @@ fn test_byte_literal_emits_raw_bstr_constant() {
     let src = r#"
 node start [true][false] {
     let b: Data = #b"\x89PNG";
-    let c: Int = b.^Len;
+    let c: Int = b.^Length;
     term Print#(c);
 };
 "#;
@@ -6144,7 +6144,7 @@ fn test_state_layout_emits_real_field_rows() {
     let src = r#"
 let count: Int = 0;
 let name: String = "";
-node start [true][name .^Len == 0] {
+node start [true][name .^Length == 0] {
     term Print#(count);
 };
 "#;

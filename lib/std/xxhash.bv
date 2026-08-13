@@ -31,12 +31,12 @@ import "link/xxhash/xxhash.c";
 
 defn xxh64(data: String, seed: Int) -> Int {
     let addr: Int = data .^Ptr .^Ptr;
-    let len: Int = data .^Len;
+    let len: Int = data .^Length;
     term XXH64(addr, len, seed);
 };
 
 defn xxh32(data: String, seed: Int) -> Int {
     let addr: Int = data .^Ptr .^Ptr;
-    let len: Int = data .^Len;
+    let len: Int = data .^Length;
     term XXH32(addr, len, seed);
 };

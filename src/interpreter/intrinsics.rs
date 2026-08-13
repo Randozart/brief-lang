@@ -871,7 +871,7 @@ mod tests {
 
     #[test]
     fn test_reflect_len_and_bytes() {
-        // 2026-08-01 (B3): `x.^Len` = UTF8 char count, `x.^^Bytes` = byte
+        // 2026-08-01 (B3): `x.^Length` = UTF8 char count, `x.^^Bytes` = byte
         // length (interpreter parity with the backend's briev_char_len /
         // header read). 'héllo' is 5 chars / 6 bytes.
         use crate::ast::{Expr, ReflectKind};
@@ -881,7 +881,7 @@ mod tests {
         bindings.insert("s".into(), Value::bits("héllo".as_bytes().to_vec()));
         let len_expr = Expr::Reflect(
             Box::new(Expr::Identifier("s".into())),
-            "Len".into(),
+            "Length".into(),
             ReflectKind::Runtime,
         );
         let len = eval_expr(&len_expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();

@@ -22,7 +22,7 @@
 // Simple hex digit to int
 import "std/ffi/encoding.bv";
 
-defn hex_digit_to_int(c: String) [c .^Len == 1][term >= 0 && term <= 15] -> Int {
+defn hex_digit_to_int(c: String) [c .^Length == 1][term >= 0 && term <= 15] -> Int {
   when c == "0" { term 0; };
   when c == "1" { term 1; };
   when c == "2" { term 2; };
@@ -43,7 +43,7 @@ defn hex_digit_to_int(c: String) [c .^Len == 1][term >= 0 && term <= 15] -> Int 
 };
 
 // Int to hex digit
-defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][term .^Len == 1] -> String {
+defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][term .^Length == 1] -> String {
   when n == 0 { term "0"; };
   when n == 1 { term "1"; };
   when n == 2 { term "2"; };
@@ -64,7 +64,7 @@ defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][term .^Len == 1] -> String {
 };
 
 // Simple byte to hex (for single byte)
-defn byte_to_hex(b: Int) [b >= 0 && b <= 255][term .^Len == 2] -> String {
+defn byte_to_hex(b: Int) [b >= 0 && b <= 255][term .^Length == 2] -> String {
   let high: Int = b / 16;
   let low: Int = b % 16;
   term int_to_hex_digit(high) + int_to_hex_digit(low);
@@ -72,7 +72,7 @@ defn byte_to_hex(b: Int) [b >= 0 && b <= 255][term .^Len == 2] -> String {
 
 // Simple URL encode (basic version - only encodes spaces)
 txn url_encode_loop(s: String, result: String, i: Int)
-    [i < s .^Len][i == s .^Len] -> String
+    [i < s .^Length][i == s .^Length] -> String
 {
   let c: String = s[i..i+1];
   when c == " " {
@@ -84,15 +84,15 @@ txn url_encode_loop(s: String, result: String, i: Int)
   term result;
 };
 
-defn url_encode_simple(s: String) [true][term .^Len >= s .^Len] -> String {
+defn url_encode_simple(s: String) [true][term .^Length >= s .^Length] -> String {
   term url_encode_loop(s, "", 0);
 };
 
 // Simple URL decode (basic version - only decodes %20)
 txn url_decode_loop(s: String, result: String, i: Int)
-    [i < s .^Len][i == s .^Len] -> String
+    [i < s .^Length][i == s .^Length] -> String
 {
-  when i + 2 < s .^Len && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
+  when i + 2 < s .^Length && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
     result = result + " ";
     i = i + 3;
   } {
@@ -102,13 +102,13 @@ txn url_decode_loop(s: String, result: String, i: Int)
   term result;
 };
 
-defn url_decode_simple(s: String) [true][term .^Len <= s .^Len] -> String {
+defn url_decode_simple(s: String) [true][term .^Length <= s .^Length] -> String {
   term url_decode_loop(s, "", 0);
 };
 
 // Check if string is valid hex
 txn is_hex_loop(s: String, i: Int)
-    [i < s .^Len][i == s .^Len] -> Bool
+    [i < s .^Length][i == s .^Length] -> Bool
 {
   when !is_hex_digit(s[i..i+1]) {
     term false;
@@ -118,7 +118,7 @@ txn is_hex_loop(s: String, i: Int)
 };
 
 defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
-  when s .^Len == 0 { term false; };
+  when s .^Length == 0 { term false; };
   term is_hex_loop(s, 0);
 };
 
@@ -131,14 +131,14 @@ txn reverse_string_loop(s: String, result: String, i: Int)
   term result;
 };
 
-defn reverse_string(s: String) [true][term .^Len == s .^Len] -> String {
-  when s .^Len <= 1 { term s; };
-  term reverse_string_loop(s, "", s .^Len - 1);
+defn reverse_string(s: String) [true][term .^Length == s .^Length] -> String {
+  when s .^Length <= 1 { term s; };
+  term reverse_string_loop(s, "", s .^Length - 1);
 };
 
 // Count occurrences (useful for validation)
 txn count_char_loop(s: String, c: String, count: Int, i: Int)
-    [i < s .^Len][i == s .^Len] -> Int
+    [i < s .^Length][i == s .^Length] -> Int
 {
   when s[i..i+1] == c {
     count = count + 1;
@@ -147,7 +147,7 @@ txn count_char_loop(s: String, c: String, count: Int, i: Int)
   term count;
 };
 
-defn count_char(s: String, c: String) [c .^Len == 1][term >= 0] -> Int {
+defn count_char(s: String, c: String) [c .^Length == 1][term >= 0] -> Int {
   term count_char_loop(s, c, 0, 0);
 };
     i = i + 1;
@@ -156,11 +156,11 @@ defn count_char(s: String, c: String) [c .^Len == 1][term >= 0] -> Int {
 };
 
 // Simple URL decode (basic version - only decodes %20)
-defn url_decode_simple(s: String) [true][term .^Len <= s .^Len] -> String {
+defn url_decode_simple(s: String) [true][term .^Length <= s .^Length] -> String {
   let result: String = "";
   let i: Int = 0;
-  when i < s .^Len {
-    when i + 2 < s .^Len && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
+  when i < s .^Length {
+    when i + 2 < s .^Length && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
       result = result + " ";
       i = i + 3;
     } {
@@ -172,7 +172,7 @@ defn url_decode_simple(s: String) [true][term .^Len <= s .^Len] -> String {
 };
 
 // Check if char is hex digit
-defn is_hex_digit(c: String) [c .^Len == 1][term == true || term == false] -> Bool {
+defn is_hex_digit(c: String) [c .^Length == 1][term == true || term == false] -> Bool {
   when c >= "0" && c <= "9" { term true; };
   when c >= "a" && c <= "f" { term true; };
   when c >= "A" && c <= "F" { term true; };
@@ -181,10 +181,10 @@ defn is_hex_digit(c: String) [c .^Len == 1][term == true || term == false] -> Bo
 
 // Check if string is valid hex
 defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
-  when s .^Len == 0 { term false; };
+  when s .^Length == 0 { term false; };
   let i: Int = 0;
   let valid: Bool = true;
-  when i < s .^Len && valid {
+  when i < s .^Length && valid {
     when is_hex_digit(s[i..i+1]) {
       valid = true;
     } {
@@ -196,10 +196,10 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
 };
 
 // Reverse string (useful for some encodings)
-defn reverse_string(s: String) [true][term .^Len == s .^Len] -> String {
-  when s .^Len <= 1 { term s; };
+defn reverse_string(s: String) [true][term .^Length == s .^Length] -> String {
+  when s .^Length <= 1 { term s; };
   let result: String = "";
-  let i: Int = s .^Len - 1;
+  let i: Int = s .^Length - 1;
   when i >= 0 {
     result = result + s[i..i+1];
     i = i - 1;
@@ -208,10 +208,10 @@ defn reverse_string(s: String) [true][term .^Len == s .^Len] -> String {
 };
 
 // Count occurrences (useful for validation)
-defn count_char(s: String, c: String) [c .^Len == 1][term >= 0] -> Int {
+defn count_char(s: String, c: String) [c .^Length == 1][term >= 0] -> Int {
   let count: Int = 0;
   let i: Int = 0;
-  when i < s .^Len {
+  when i < s .^Length {
     when s[i..i+1] == c {
       count = count + 1;
     };

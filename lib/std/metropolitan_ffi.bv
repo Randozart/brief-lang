@@ -77,7 +77,7 @@ defn map_ffi_to_memory(
 
 // Write data to shared memory
 defn write_to_shared(region: SharedRegion, offset: Int, data: Data) -> Result<Void, String> {
-    when offset + data .^Len <= region.size {
+    when offset + data .^Length <= region.size {
         // Write data to shared memory at offset
         term Ok();
     };

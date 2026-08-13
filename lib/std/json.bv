@@ -57,7 +57,7 @@ defn json_is_array(v: JsonValue) -> Result<Bool, String> {
 };
 
 defn json_length(v: JsonValue) -> Result<Int, String> {
-    uni v(Array(list)) -> { term Ok(list .^Len); };
+    uni v(Array(list)) -> { term Ok(list .^Length); };
     term err_int(e_utoken());
 };
 
@@ -73,14 +73,14 @@ defn json_get(v: JsonValue, key: String) -> Result<String, String> {
 };
 
 txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
-    [i < pairs .^Len][i >= pairs .^Len || pairs[i][0] == key]
+    [i < pairs .^Length][i >= pairs .^Length || pairs[i][0] == key]
     -> Result<JsonValue, String>
 {
     when pairs[i][0] == key {
         term ok_value(pairs[i][1]);
     };
     i = i + 1;
-    when i >= pairs .^Len {
+    when i >= pairs .^Length {
         term err_value(e_utoken());
     };
     term err_value(e_utoken());
@@ -88,7 +88,7 @@ txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
 
 defn json_get_by_index(v: JsonValue, i: Int) -> Result<JsonValue, String> {
     uni v(Array(list)) -> {
-        when i >= 0 && i < list .^Len {
+        when i >= 0 && i < list .^Length {
             term ok_value(list[i]);
         };
         term err_value(e_utoken());
@@ -99,8 +99,8 @@ defn json_get_by_index(v: JsonValue, i: Int) -> Result<JsonValue, String> {
 // ===== Whitespace Skipper =====
 
 txn skip_ws(s: String, pos: Int)
-    [pos < (s .^Len) && is_whitespace(s[pos])]
-    [pos >= (s .^Len) || !is_whitespace(s[pos])]
+    [pos < (s .^Length) && is_whitespace(s[pos])]
+    [pos >= (s .^Length) || !is_whitespace(s[pos])]
     -> Int
 {
     pos = pos + 1;
@@ -123,7 +123,7 @@ defn choose_neg_if(b: Bool, val: Int) -> Int {
 
 defn parse_value(s: String, pos: Int) -> Result<ParseFrame, String> {
     let p = skip_ws(s, pos);
-    when p >= s .^Len {
+    when p >= s .^Length {
         term err_frame(e_unexpend());
     };
     let c: Char = s[p];
@@ -140,8 +140,8 @@ defn parse_value(s: String, pos: Int) -> Result<ParseFrame, String> {
 // ===== Keyword Parser =====
 
 defn parse_keyword(s: String, pos: Int, kw: String, val: JsonValue) -> Result<ParseFrame, String> {
-    let klen = kw .^Len;
-    when pos + klen <= s .^Len && s[pos .. pos + klen] == kw {
+    let klen = kw .^Length;
+    when pos + klen <= s .^Length && s[pos .. pos + klen] == kw {
         term Ok(ParseFrame { value: val, pos: pos + klen });
     };
     term err_frame(e_utoken());
@@ -150,7 +150,7 @@ defn parse_keyword(s: String, pos: Int, kw: String, val: JsonValue) -> Result<Pa
 // ===== String Parser =====
 
 defn parse_string(s: String, pos: Int) -> Result<ParseFrame, String> {
-    when pos >= s .^Len || s[pos] != '"' {
+    when pos >= s .^Length || s[pos] != '"' {
         term err_frame(e_utoken());
     };
     let content = parse_str_chars(s, pos + 1, new_builder());
@@ -161,13 +161,13 @@ defn parse_string(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_str_chars(s: String, pos: Int, sb: StringBuilder)
-    [pos < (s .^Len) && s[pos] != '"']
-    [pos < (s .^Len) && s[pos] == '"']
+    [pos < (s .^Length) && s[pos] != '"']
+    [pos < (s .^Length) && s[pos] == '"']
     -> Result<ParseFrame, String>
 {
     when s[pos] == '\\' {
         pos = pos + 1;
-        when pos < s .^Len {
+        when pos < s .^Length {
             let esc: Char = s[pos];
             when esc == '"' { sb = sb.append_char('"');  };
             when esc == '\\' { sb = sb.append_char('\\'); };
@@ -197,7 +197,7 @@ txn parse_str_chars(s: String, pos: Int, sb: StringBuilder)
 };
 
 defn parse_hex_escape(s: String, pos: Int) -> Result<Char, String> {
-    [pos + 4 <= s .^Len
+    [pos + 4 <= s .^Length
         && is_hex_digit(s[pos])
         && is_hex_digit(s[pos+1])
         && is_hex_digit(s[pos+2])
@@ -226,12 +226,12 @@ defn parse_number(s: String, pos: Int) -> Result<ParseFrame, String> {
         let after_int = frame.pos;
         let raw_val = frame.value;
         uni raw_val(IntVal(n)) -> {
-            when after_int < s .^Len && s[after_int] == '.' {
+            when after_int < s .^Length && s[after_int] == '.' {
                 let frac = parse_float_remainder(s, after_int, is_neg, n);
                 uni frac(Ok(fr)) -> { term Ok(fr); };
                 term frac;
             };
-            when after_int < s .^Len && (s[after_int] == 'e' || s[after_int] == 'E') {
+            when after_int < s .^Length && (s[after_int] == 'e' || s[after_int] == 'E') {
                 let fp = parse_exponent(s, after_int, IntVal(n), is_neg);
                 uni fp(Ok(fr)) -> { term Ok(fr); };
                 term fp;
@@ -245,8 +245,8 @@ defn parse_number(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_int_digits(s: String, pos: Int, val: Int)
-    [pos < (s .^Len) && is_digit(s[pos])]
-    [pos >= (s .^Len) || !is_digit(s[pos])]
+    [pos < (s .^Length) && is_digit(s[pos])]
+    [pos >= (s .^Length) || !is_digit(s[pos])]
     -> Result<ParseFrame, String>
 {
     let d = digit_to_int(s[pos]);
@@ -267,14 +267,14 @@ defn parse_float_remainder(s: String, pos: Int, is_neg: Bool, int_part: Int) -> 
             let total: Float = int_f + f;
             when is_neg {
                 let full: Float = -total;
-                when fr.pos < s .^Len && (s[fr.pos] == 'e' || s[fr.pos] == 'E') {
+                when fr.pos < s .^Length && (s[fr.pos] == 'e' || s[fr.pos] == 'E') {
                     let exp = parse_exponent(s, fr.pos, FloatVal(full), false);
                     uni exp(Ok(ef)) -> { term Ok(ef); };
                     term exp;
                 };
                 term Ok(ParseFrame { value: FloatVal(full), pos: fr.pos });
             };
-            when fr.pos < s .^Len && (s[fr.pos] == 'e' || s[fr.pos] == 'E') {
+            when fr.pos < s .^Length && (s[fr.pos] == 'e' || s[fr.pos] == 'E') {
                 let exp = parse_exponent(s, fr.pos, FloatVal(total), false);
                 uni exp(Ok(ef)) -> { term Ok(ef); };
                 term exp;
@@ -287,8 +287,8 @@ defn parse_float_remainder(s: String, pos: Int, is_neg: Bool, int_part: Int) -> 
 };
 
 txn parse_float_digits(s: String, pos: Int, frac: Float, place: Float)
-    [pos < (s .^Len) && is_digit(s[pos])]
-    [pos >= (s .^Len) || !is_digit(s[pos])]
+    [pos < (s .^Length) && is_digit(s[pos])]
+    [pos >= (s .^Length) || !is_digit(s[pos])]
     -> Result<ParseFrame, String>
 {
     let d = digit_to_int(s[pos]) as Float;
@@ -300,7 +300,7 @@ txn parse_float_digits(s: String, pos: Int, frac: Float, place: Float)
 
 defn parse_exponent(s: String, pos: Int, base: JsonValue, base_is_neg: Bool) -> Result<ParseFrame, String> {
     let ep = pos + 1;
-    when ep >= s .^Len {
+    when ep >= s .^Length {
         term err_frame(e_invnum());
     };
     let is_neg_exp: Bool = s[ep] == '-';
@@ -357,17 +357,17 @@ defn ten_pow(e: Int) -> Float {
 // ===== Array Parser =====
 
 defn parse_array(s: String, pos: Int) -> Result<ParseFrame, String> {
-    when pos >= s .^Len || s[pos] != '[' {
+    when pos >= s .^Length || s[pos] != '[' {
         term err_frame(e_utoken());
     };
     let after_bracket = pos + 1;
     let p = skip_ws(s, after_bracket);
-    when p < s .^Len && s[p] == ']' {
+    when p < s .^Length && s[p] == ']' {
         term Ok(ParseFrame { value: Array([]), pos: p + 1 });
     };
     let result = parse_array_elems(s, p, []);
     uni result(Ok(frame)) -> {
-        when frame.pos < s .^Len && s[frame.pos] == ']' {
+        when frame.pos < s .^Length && s[frame.pos] == ']' {
             term Ok(ParseFrame { value: Array(frame.value), pos: frame.pos + 1 });
         };
         term err_frame(e_expcomma());
@@ -376,8 +376,8 @@ defn parse_array(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_array_elems(s: String, pos: Int, elems: List<JsonValue>)
-    [pos < (s .^Len) && s[pos] != ']']
-    [pos < (s .^Len) && s[pos] == ']']
+    [pos < (s .^Length) && s[pos] != ']']
+    [pos < (s .^Length) && s[pos] == ']']
     -> Result<ParseFrame, String>
 {
     let val = parse_value(s, pos);
@@ -385,7 +385,7 @@ txn parse_array_elems(s: String, pos: Int, elems: List<JsonValue>)
         elems = elems + [frame.value];
         pos = frame.pos;
         pos = skip_ws(s, pos);
-        when pos < s .^Len && s[pos] == ',' {
+        when pos < s .^Length && s[pos] == ',' {
             pos = pos + 1;
             pos = skip_ws(s, pos);
         };
@@ -397,17 +397,17 @@ txn parse_array_elems(s: String, pos: Int, elems: List<JsonValue>)
 // ===== Object Parser =====
 
 defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
-    when pos >= s .^Len || s[pos] != '{' {
+    when pos >= s .^Length || s[pos] != '{' {
         term err_frame(e_utoken());
     };
     let after_brace = pos + 1;
     let p = skip_ws(s, after_brace);
-    when p < s .^Len && s[p] == '}' {
+    when p < s .^Length && s[p] == '}' {
         term Ok(ParseFrame { value: Object([]), pos: p + 1 });
     };
     let result = parse_object_pairs(s, p, []);
     uni result(Ok(frame)) -> {
-        when frame.pos < s .^Len && s[frame.pos] == '}' {
+        when frame.pos < s .^Length && s[frame.pos] == '}' {
             term Ok(ParseFrame { value: Object(frame.value), pos: frame.pos + 1 });
         };
         term err_frame(e_expcomma());
@@ -416,8 +416,8 @@ defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
-    [pos < (s .^Len) && s[pos] != '}']
-    [pos < (s .^Len) && s[pos] == '}']
+    [pos < (s .^Length) && s[pos] != '}']
+    [pos < (s .^Length) && s[pos] == '}']
     -> Result<ParseFrame, String>
 {
     when s[pos] != '"' {
@@ -427,7 +427,7 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
     uni key_res(Ok(kf)) -> {
         uni kf.value(StrVal(key)) -> {
             pos = skip_ws(s, kf.pos);
-            when pos >= s .^Len || s[pos] != ':' {
+            when pos >= s .^Length || s[pos] != ':' {
                 term err_frame(e_expcolon());
             };
             pos = skip_ws(s, pos + 1);
@@ -435,7 +435,7 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
             uni val_res(Ok(vf)) -> {
                 pos = skip_ws(s, vf.pos);
                 pairs = pairs + [(key, vf.value)];
-                when pos < s .^Len && s[pos] == ',' {
+                when pos < s .^Length && s[pos] == ',' {
                     pos = pos + 1;
                     pos = skip_ws(s, pos);
                 };
@@ -449,17 +449,17 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
 };
 
 defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
-    when pos >= s .^Len || s[pos] != '{' {
+    when pos >= s .^Length || s[pos] != '{' {
         term err_frame(e_utoken());
     };
     let after_brace: Int = pos + 1;
     let p: Int = skip_ws(s, after_brace);
-    when p < s .^Len && s[p] == '}' {
+    when p < s .^Length && s[p] == '}' {
         term Ok(ParseFrame { value: Object([]), pos: p + 1 });
     };
     let result = parse_object_pairs(s, p, []);
     uni result(Ok(frame)) -> {
-        when frame.pos < s .^Len && s[frame.pos] == '}' {
+        when frame.pos < s .^Length && s[frame.pos] == '}' {
             term Ok(ParseFrame { value: Object(frame.value), pos: frame.pos + 1 });
         };
         term err_frame(e_expcomma());
@@ -468,17 +468,17 @@ defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
-    when pos >= s .^Len || s[pos] != '{' {
+    when pos >= s .^Length || s[pos] != '{' {
         term err_frame(e_utoken());
     };
     let after_brace: Int = pos + 1;
     let p: Int = skip_ws(s, after_brace);
-    when p < s .^Len && s[p] == '}' {
+    when p < s .^Length && s[p] == '}' {
         term Ok(ParseFrame { value: Object([]), pos: p + 1 });
     };
     let result = parse_object_pairs(s, p, []);
     uni result(Ok(frame)) -> {
-        when frame.pos < s .^Len && s[frame.pos] == '}' {
+        when frame.pos < s .^Length && s[frame.pos] == '}' {
             term Ok(ParseFrame { value: Object(frame.value), pos: frame.pos + 1 });
         };
         term err_frame(e_expcomma());
@@ -487,8 +487,8 @@ defn parse_object(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
-    [pos < (s .^Len) && s[pos] != '}']
-    [pos < (s .^Len) && s[pos] == '}']
+    [pos < (s .^Length) && s[pos] != '}']
+    [pos < (s .^Length) && s[pos] == '}']
     -> Result<ParseFrame, String>
 {
     when s[pos] != '"' {
@@ -498,7 +498,7 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
     uni key_res(Ok(kf)) -> {
         uni kf.value(StrVal(key)) -> {
             pos = skip_ws(s, kf.pos);
-            when pos >= s .^Len || s[pos] != ':' {
+            when pos >= s .^Length || s[pos] != ':' {
                 term err_frame(e_expcolon());
             };
             pos = skip_ws(s, pos + 1);
@@ -506,7 +506,7 @@ txn parse_object_pairs(s: String, pos: Int, pairs: List<(String, JsonValue)>)
             uni val_res(Ok(vf)) -> {
                 pos = skip_ws(s, vf.pos);
                 pairs = pairs + [(key, vf.value)];
-                when pos < s .^Len && s[pos] == ',' {
+                when pos < s .^Length && s[pos] == ',' {
                     pos = pos + 1;
                     pos = skip_ws(s, pos);
                 };

@@ -728,12 +728,12 @@ export async function createApp(wasmBytes) {{
                     return String::new();
                 };
                 // 2026-08-11: apply `.^X` reflection projections inline in JS.
-                // `.^Size`/`.^Len` on a string/collection → `.length`; other
+                // `.^Size`/`.^Length` on a string/collection → `.length`; other
                 // reflections pass through as a property access.
                 let mut apply_value = "value".to_string();
                 for p in &proj {
                     match *p {
-                        "Size" | "Len" => apply_value.push_str(".length"),
+                        "Size" | "Length" => apply_value.push_str(".length"),
                         other => {
                             apply_value.push('.');
                             apply_value.push_str(other);

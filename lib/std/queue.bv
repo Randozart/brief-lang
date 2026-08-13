@@ -1,14 +1,14 @@
-defn new_queue<T>() -> Queue<T> [true][term .^Len == 0] {
+defn new_queue<T>() -> Queue<T> [true][term .^Length == 0] {
     term [] :> AsQueue;
 };
-defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term .^Len == 0] {
+defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term .^Length == 0] {
     term [] :> AsQueue;
 };
 defn enqueue<T>(queue: Queue<T>, item: T) -> Queue<T> {
     term &queue <- item;
 };
 defn dequeue<T>(queue: Queue<T>)
-    [queue .^Len > 0][term :> 1 .^Len == queue .^Len - 1] -> (T, Queue<T>)
+    [queue .^Length > 0][term :> 1 .^Length == queue .^Length - 1] -> (T, Queue<T>)
 {
     let v: T = <- &queue;
     term (v, queue);
@@ -20,10 +20,10 @@ defn head<T>(queue: Queue<T>) -> T {
     uni queue :> Front(Some(v)) = { term v; };
 };
 defn len<T>(queue: Queue<T>) -> Int {
-    term queue .^Len;
+    term queue .^Length;
 };
 defn is_empty<T>(queue: Queue<T>) -> Bool {
-    term (queue .^Len) == 0;
+    term (queue .^Length) == 0;
 };
 defn to_list<T>(queue: Queue<T>) -> List<T> {
     let result: List<T> = [];
@@ -35,7 +35,7 @@ defn to_list<T>(queue: Queue<T>) -> List<T> {
     term result;
 };
 txn from_list_loop<T>(items: List<T>, result: Queue<T>, i: Int)
-    [i < items .^Len][i == items .^Len] -> Queue<T>
+    [i < items .^Length][i == items .^Length] -> Queue<T>
 {
     &result <- items[i];
     i = i + 1;
