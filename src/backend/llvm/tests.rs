@@ -4024,6 +4024,8 @@ fn test_struct_literal_field_offsets() {
             ],
             metadata: HashMap::new(),
             seq: false,
+            pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4080,6 +4082,8 @@ fn test_addr_of_struct_literal() {
             ],
             metadata: HashMap::new(),
             seq: false,
+            pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4169,6 +4173,8 @@ fn test_frgn_ptr_param_inttoptr() {
             ],
             metadata: HashMap::new(),
             seq: false,
+            pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4350,6 +4356,8 @@ fn test_struct_array_list_literal() {
             ],
             metadata: HashMap::new(),
             seq: false,
+            pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4422,6 +4430,8 @@ fn test_struct_array_addr_of_and_frgn_call() {
             ],
             metadata: HashMap::new(),
             seq: false,
+            pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -6515,4 +6525,385 @@ fn test_webstack_array_field_store_gep_widens_index() {
     let ir = backend.generate(&program, None);
     assert!(ir.contains("sext i32") && ir.contains("getelementptr [4 x i32]"),
         "array store GEP index must sext i32 → i64; got:\n{ir}");
+}
+
+// ── pack struct (layout-keywords plan Phase 2) ────────────────────────
+
+fn packed_struct_def(
+    name: &str,
+    fields: Vec<(&str, Type)>,
+    endian: Option<&str>,
+) -> StructDef {
+    let mut metadata = HashMap::new();
+    if let Some(e) = endian {
+        metadata.insert(
+            "endian".to_string(),
+            crate::ast::PropertyValue::Identifier(e.to_string()),
+        );
+    }
+    StructDef {
+        type_params: vec![],
+        name: name.to_string(),
+        fields: fields.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+        metadata,
+        seq: false,
+        pack: true,
+        union: false,
+        span: None,
+    }
+}
+
+fn struct_literal_stmt(name: &str, bind: &str, fields: Vec<(&str, Expr)>) -> Statement {
+    Statement::Let {
+        names: vec![],
+        name: bind.to_string(),
+        ty: None,
+        expr: Some(Expr::StructLiteral {
+            type_name: name.to_string(),
+            fields: fields.into_iter().map(|(n, e)| (n.to_string(), e)).collect(),
+        }),
+        modifiers: vec![],
+    }
+}
+
+fn term_field(recv: &str, field: &str) -> Statement {
+    Statement::Term(Some(Expr::Field(
+        Box::new(Expr::Identifier(recv.to_string())),
+        field.to_string(),
+    )))
+}
+
+fn print_field(recv: &str, field: &str) -> Statement {
+    Statement::Expression(Expr::Call(
+        "__print_int".to_string(),
+        vec![Expr::Field(
+            Box::new(Expr::Identifier(recv.to_string())),
+            field.to_string(),
+        )],
+        None,
+    ))
+}
+
+fn packed_main_def(body: Vec<Statement>) -> TopLevel {
+    TopLevel::Definition(Definition {
+        name: "main".to_string(),
+        type_params: vec![],
+        parameters: vec![],
+        outputs: vec![],
+        output_type: None,
+        contract: default_contract(),
+        body,
+        modifiers: vec![],
+        metadata: HashMap::new(),
+        derivation: None,
+        annotations: vec![],
+        span: None,
+        doc: None,
+    })
+}
+
+#[test]
+fn test_packed_whole_byte_emits_native_aggregate() {
+    // 2026-08-13 (pack): whole-byte packed structs (every field % 8 == 0)
+    // declare LLVM's native packed type `<{ ... }>` and keep byte-offset GEP +
+    // aligned loads/stores — the rule-19-validated native path.
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::StaticStruct(packed_struct_def(
+            "Eth",
+            vec![
+                ("dst", Type::bits(48)),
+                ("src", Type::bits(48)),
+                ("etype", Type::bits(16)),
+            ],
+            Some("Big"),
+        )),
+        packed_main_def(vec![
+            struct_literal_stmt(
+                "Eth",
+                "x",
+                vec![
+                    ("dst", Expr::Decimal(0x00_60_80_00_AA_BB)),
+                    ("src", Expr::Decimal(0x00_20_40_00_CC_DD)),
+                    ("etype", Expr::Decimal(0x0800)),
+                ],
+            ),
+            term_field("x", "dst"),
+        ]),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%Eth = type <{ i48, i48, i16 }>"),
+        "whole-byte packed struct must emit the native packed aggregate; got:\n{ir}");
+    assert!(ir.contains("store i48") && ir.contains("align 1"),
+        "whole-byte packed stores must be i48 with align 1; got:\n{ir}");
+    assert!(ir.contains("load i48, ptr") && ir.contains("align 1"),
+        "whole-byte packed reads must be aligned i48 loads; got:\n{ir}");
+}
+
+#[test]
+fn test_packed_sub_byte_le_emits_byte_array_and_slices() {
+    // 2026-08-13 (pack): sub-byte packed structs hide behind a byte array
+    // `{ [N x i8] }`; fields read via load-shift-trunc (LE: shift = bit pos).
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::StaticStruct(packed_struct_def(
+            "Nib",
+            vec![
+                ("a", Type::bits(12)),
+                ("b", Type::bits(4)),
+                ("c", Type::bits(8)),
+            ],
+            None,
+        )),
+        packed_main_def(vec![
+            struct_literal_stmt(
+                "Nib",
+                "x",
+                vec![
+                    ("a", Expr::Decimal(0xABC)),
+                    ("b", Expr::Decimal(0xF)),
+                    ("c", Expr::Decimal(0xFF)),
+                ],
+            ),
+            print_field("x", "b"),
+            print_field("x", "a"),
+        ]),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%Nib = type { [3 x i8] }"),
+        "sub-byte packed struct must hide fields behind a byte array; got:\n{ir}");
+    assert!(ir.contains("lshr i8") && ir.contains("trunc i8") && ir.contains("to i4"),
+        "LE sub-byte read must shift the byte and truncate to i4; got:\n{ir}");
+    assert!(ir.contains("lshr i16") || ir.contains("trunc i16") && ir.contains("to i12"),
+        "LE 12-bit cross-byte read must handle the i16 covering load; got:\n{ir}");
+    assert!(ir.contains("and i8") && ir.contains("or i8"),
+        "sub-byte store must clear+insert (and/or) in the byte; got:\n{ir}");
+}
+
+#[test]
+fn test_packed_be_sub_byte_byte_reverses() {
+    // 2026-08-13 (pack): Big-endian packed fields read the COVERED bytes
+    // little-endian, mirror the byte order, then shift (cov*8 - bits).
+    let mut backend = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new());
+    let program = vec![
+        TopLevel::StaticStruct(packed_struct_def(
+            "BigP",
+            vec![("a", Type::bits(12)), ("b", Type::bits(4))],
+            Some("Big"),
+        )),
+        packed_main_def(vec![
+            struct_literal_stmt(
+                "BigP",
+                "x",
+                vec![("a", Expr::Decimal(0xABC)), ("b", Expr::Decimal(0xF))],
+            ),
+            print_field("x", "a"),
+            print_field("x", "b"),
+        ]),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%BigP = type { [2 x i8] }"),
+        "12+4 bits must collapse to a 2-byte array; got:\n{ir}");
+    assert!(ir.contains("lshr i16") && ir.contains("to i12"),
+        "BE 12-bit read must reverse bytes then shift; got:\n{ir}");
+    assert!(ir.contains("shl i16") || ir.contains("trunc i16"),
+        "BE read must place the high byte into the low position; got:\n{ir}");
+    assert!(ir.contains("trunc i8") && ir.contains("to i4"),
+        "BE single-byte low-nibble read truncs the byte (shift 0); got:\n{ir}");
+}
+
+#[test]
+fn test_packed_struct_rejects_overwide_at_parse() {
+    // 2026-08-13 (pack): Bits(>64) packed fields are rejected at parse time
+    // (the 64-bit slice machinery). Parser-side test mirrors codegen guard.
+    let src = "pack struct W { wide: Bits<128>; };";
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    assert!(p.parse_program().is_err(), "Bits<128> packed field must not parse");
+}
+
+// ── trap (layout-keywords plan Phase 4) ───────────────────────────────
+
+#[test]
+fn test_trap_statement_emits_llvm_trap() {
+    // 2026-08-13 (layout-keywords plan Phase 4): `trap;` compiles to
+    // `call void @llvm.trap()` + `unreachable` (SPEC §8.8), declared once in
+    // the module header and terminating the block.
+    let mut backend = LlvmBackend::new();
+    let program = vec![packed_main_def(vec![
+        Statement::Trap,
+        Statement::Term(Some(Expr::Decimal(0))),
+    ])];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("declare void @llvm.trap() noreturn"),
+        "module must declare @llvm.trap; got:\n{ir}");
+    assert!(ir.contains("call void @llvm.trap()") && ir.contains("unreachable"),
+        "trap; must emit call void @llvm.trap() then unreachable; got:\n{ir}");
+}
+
+// ── atomic field modifier (layout-keywords plan Phase 5) ───────────────
+
+#[test]
+fn test_atomic_field_load_store_rmw() {
+    // 2026-08-13 (Phase 5): `atomic` fields read/write with seq_cst atomic
+    // ops; `obj.f = obj.f + c` lowers to atomicrmw add; plain fields stay on
+    // the default non-atomic path (no `atomic` in their ops).
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let mut meta = HashMap::new();
+    meta.insert(
+        "atomic_fields".to_string(),
+        crate::ast::PropertyValue::List(vec![crate::ast::PropertyValue::String("count".into())]),
+    );
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
+            name: "Counter".to_string(),
+            fields: vec![
+                ("count".to_string(), Type::int()),
+                ("other".to_string(), Type::int()),
+            ],
+            metadata: meta,
+            seq: false,
+            pack: false,
+            union: false,
+            span: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                struct_literal_stmt(
+                    "Counter",
+                    "c",
+                    vec![("count", Expr::Decimal(0)), ("other", Expr::Decimal(1))],
+                ),
+                // atomic field RMW: c.count = c.count + 1
+                Statement::Assign(
+                    Expr::Field(Box::new(Expr::Identifier("c".into())), "count".into()),
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Field(Box::new(Expr::Identifier("c".into())), "count".into())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                ),
+                // atomic field read
+                print_field("c", "count"),
+                // plain field read (must stay non-atomic)
+                print_field("c", "other"),
+            ],
+            modifiers: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("load atomic i64, ptr") && ir.contains("seq_cst"),
+        "atomic field read must be an atomic load; got:\n{ir}");
+    assert!(ir.contains("atomicrmw add"),
+        "c.count = c.count + 1 must lower to atomicrmw add; got:\n{ir}");
+    assert!(ir.contains("store atomic i64"),
+        "atomic struct-literal field store must be atomic; got:\n{ir}");
+    assert!(ir.contains("load i64, ptr"),
+        "plain field read stays on the default (non-atomic) path; got:\n{ir}");
+}
+
+// ── union (layout-keywords plan Phase 6) ───────────────────────────────
+
+#[test]
+fn test_union_emits_byte_array_and_offset_zero() {
+    // 2026-08-13 (Phase 6): a union materializes as a byte array of its
+    // largest aligned field storage; every field overlays at offset 0.
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
+            name: "Word".to_string(),
+            fields: vec![
+                ("i".to_string(), Type::int()),
+                ("b".to_string(), Type::bits(64)),
+            ],
+            metadata: HashMap::new(),
+            seq: false,
+            pack: false,
+            union: true,
+            span: None,
+        }),
+        packed_main_def(vec![
+            struct_literal_stmt("Word", "w", vec![("i", Expr::Decimal(7))]),
+            print_field("w", "b"),
+        ]),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%Word = type { [8 x i8] }"),
+        "union must materialize as a byte array of the largest field; got:\n{ir}");
+    assert!(ir.contains("getelementptr i8, ptr") && ir.contains("i64 0"),
+        "union field access must GEP at offset 0; got:\n{ir}");
+}
+
+// ── reactor struct-slot loop (2026-08-13 fix) ─────────────────────────
+
+#[test]
+fn test_struct_literal_alloca_deferred_in_loop() {
+    // The reactor fix defers struct-literal storage while `defer_struct_allocas`
+    // is set (loop bodies), flushing it to the loop preheader. Assert the
+    // mechanism: with the flag set the allocation is NOT emitted to `out`; the
+    // flush writes it. (An allocation inside a reactor loop body made clang
+    // -O3 peel the loop and emit a bogus exit assumption — nodes with
+    // struct-typed state slots fired once.) The allocation is a heap `malloc`
+    // (struct-literal lifetime: the handle crosses function boundaries), so the
+    // deferred line is the malloc call, not a stack alloca.
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    backend.ctx.struct_types.insert(
+        "Point".to_string(),
+        vec![("x".to_string(), Type::int()), ("y".to_string(), Type::int())],
+    );
+    let mut out = String::new();
+    backend.fun.defer_struct_allocas = true;
+    let reg = backend.emit_struct_literal(
+        &mut out, "%v", "Point",
+        &[("x".to_string(), Expr::Decimal(1)), ("y".to_string(), Expr::Decimal(2))],
+        "  ",
+    );
+    assert!(!out.contains("malloc"),
+        "with defer_struct_allocas set, the allocation must NOT be emitted inline; got:\n{out}");
+    assert_eq!(backend.fun.pending_struct_allocas.len(), 1,
+        "the allocation must be deferred to pending_struct_allocas");
+    backend.flush_pending_struct_allocas(&mut out);
+    assert!(out.contains("call ptr @malloc(i64 16)"),
+        "flush_pending_struct_allocas must write the malloc call; got:\n{out}");
+    let _ = reg;
+}
+
+// ── typed !range metadata (2026-08-13 fix) ────────────────────────────
+
+#[test]
+fn test_range_metadata_bounds_are_typed() {
+    // A bounded i64 precondition (`[count < 10]`) emits `!range` on the
+    // pre-load. Bounds must be typed (`!{ i64 0, i64 10 }`) — the untyped
+    // legacy form (`!{ 0, 10 }`) is rejected by clang/opt 18+.
+    let src = "let count: Int = 0;\n\
+        node n [count < 10][true] {\n\
+            count = count + 1;\n\
+            term;\n\
+        };\n";
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("!range !{ i64 0, i64 10 }"),
+        "range bounds must be typed i64; got:\n{ir}");
+    assert!(!ir.contains("!range !{ 0, 10 }"),
+        "the untyped legacy range form must not be emitted; got:\n{ir}");
 }

@@ -49,6 +49,11 @@ impl<'a> Parser<'a> {
                 Ok(stmt)
             }
             Some(Token::Term) => self.parse_term_statement(),
+            Some(Token::Trap) => {
+                self.pos += 1;
+                self.eat(&Token::Semicolon);
+                Ok(Statement::Trap)
+            }
             Some(Token::EndProgram) => self.parse_endprogram_statement(),
             Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),

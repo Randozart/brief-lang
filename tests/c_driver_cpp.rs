@@ -20,31 +20,31 @@ fn cpp_roundtrip() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_cpp_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_cpp_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
 
     let inc = out_dir.join("boundary-bindings");
     let driver_cpp = out_dir.join("driver.cpp");
     std::fs::write(&driver_cpp, r#"
-#include "boundary-bindings/briv_types.h"
+#include "boundary-bindings/briev_types.h"
 #include <cstdio>
 #include <cstring>
 
 int main() {
-    BrivState* st = __briv_init_state();
+    BrievState* st = __briev_init_state();
     int64_t echoed = echo((int64_t)"hello");
     int64_t greeted = greet((int64_t)"hello");
     int64_t joined = join((int64_t)"foo", (int64_t)"bar");

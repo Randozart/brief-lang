@@ -1,0 +1,54 @@
+// pack_struct_runtime — end-to-end `pack struct` verification (Phase 2)
+//
+// Exercises all three packed codegen paths against a runtime counter so
+// nothing folds (structs are reconstructed from `count` every iteration):
+//   - Eth:  whole-byte packed (48/48/16), `spec Endian: Big` → native
+//     `<{ i48, i48, i16 }>` aggregate + aligned i48 loads.
+//   - Nib:  LE sub-byte (12/4/8) → byte array + load/shift/trunc bit-slices.
+//   - Bp:   native sub-byte (12/4) → byte-array + bit-slices (C-comparable;
+//     C bitfields on an x86 host are LSB-first; BE sub-byte is verified
+//     separately in pack_be_selfcheck.bv against hand-computed bytes).
+//
+// Struct instances live in defn locals (not reactor state slots — reactive
+// nodes with struct slots are a pre-existing limitation, BUGS.md).
+//
+// C reference: pack_struct_runtime_c.c mirrors the byte math exactly.
+
+let N: Int = get_env_int!("BOUND");
+
+pack struct Eth {
+    spec Endian: Big;
+    dst: Bits<48>;
+    src: Bits<48>;
+    etype: Bits<16>;
+};
+
+pack struct Nib {
+    a: Bits<12>;
+    b: Bits<4>;
+    c: Bits<8>;
+};
+
+pack struct Bp {
+    hi: Bits<12>;
+    lo: Bits<4>;
+};
+
+defn packmix(i: Int) -> Int {
+    let e: Eth = Eth { dst: (0x00608000AABB + i) as Bits<48>, src: 0x00204000CCDD as Bits<48>, etype: 0x0800 as Bits<16> };
+    let n: Nib = Nib { a: (0xABC + i) as Bits<12>, b: (0xF + i) as Bits<4>, c: 0xFF as Bits<8> };
+    let p: Bp = Bp { hi: (0xABC + i) as Bits<12>, lo: (0xF + i) as Bits<4> };
+    term (e.dst as Int) + (e.src as Int) * 3 + (e.etype as Int) * 7 + (n.a as Int) + (n.b as Int) * 5 + (n.c as Int) * 11 + (p.hi as Int) + (p.lo as Int) * 13;
+};
+
+let count: Int = 0;
+let chk: Int = 0;
+
+node pk [count < N][count == N] {
+    chk = (chk * 31 + packmix(count)) & 0x7FFFFFFF;
+    when count % 3 == 0 {
+        println!(chk);
+    };
+    count = count + 1;
+    term;
+};

@@ -1,0 +1,44 @@
+// pack_eth_exp — rule-19 packed-emission experiment (Phase 2, layout-keywords plan)
+//
+// Simulates the `[N x i8]` sub-byte packed emission shape: an Ethernet header
+// (dst_mac:48, src_mac:48, ethertype:16) stored in two i64 words, extracted
+// per iteration via covering-word loads + shift/mask — byte index = bitpos/8,
+// load the covering word, shift + mask. This is EXACTLY the operator sequence
+// the compiler will emit for a sub-byte `pack` struct field access.
+//
+// The buffer is mutated from the runtime counter (`buf[i] ^= count`, i = count%2)
+// so the loads cannot be hoisted or folded by the optimizer.
+//
+// C reference: pack_eth_exp_c.c reads the SAME bytes through a native
+// `__attribute__((packed))` bitfield struct — the `<{ i48, i48, i16 }>` GEP
+// analog. Protocol (AGENTS.md rule 19/6): link with the harness's exact clang
+// line, verify output equality at a bound that crosses a print boundary, then
+// interleave Briev/C timings ×N. Equal output + parity timing ⇒ the byte-array
+// + mask strategy folds to plain loads and is competitive with native packed
+// structs at -O3 -flto.
+
+let N: Int = get_env_int!("BOUND");
+let buf: Int[2];
+let count: Int = 0;
+let chk: Int = 0;
+
+node eth [count < N][count == N] {
+    when count == 0 {
+        buf[0] = 0x45670123456789AB;
+        buf[1] = 0x00000800CDEF0123;
+    };
+    let i: Int = count % 2;
+    buf[i] = buf[i] ^ count;
+    let w0: Int = buf[0];
+    let w1: Int = buf[1];
+    // Field extraction — sub-byte packed access, little-endian buffer.
+    let dst: Int = w0 & 0xFFFFFFFFFFFF;          // bits 0..47
+    let src: Int = ((w0 >> 48) & 0xFFFF) | ((w1 & 0xFFFFFFFF) << 16);  // bits 48..95
+    let etype: Int = (w1 >> 32) & 0xFFFF;        // bits 96..111
+    chk = (chk * 31 + dst + src * 3 + etype * 7) & 0x7FFFFFFF;
+    when count % 3 == 0 {
+        println!(chk);
+    };
+    count = count + 1;
+    term;
+};

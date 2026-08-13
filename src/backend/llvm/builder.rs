@@ -570,15 +570,15 @@ impl TypeConverter {
             builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
         } else if *ty == BrievType::float64() {
             builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
-        } else if *ty == BrievType::bits(1) {
+        } else if *ty == BrievType::bits(8) {
             // Int8/UInt8 both lower to i8; zext preserves the bit pattern for
             // the boxed i64 representation (the old name-based arms disagreed
             // on sext vs zext — zext is correct for unsigned and bit-preserving
             // for signed, so it is used uniformly here).
             builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
-        } else if *ty == BrievType::bits(2) {
+        } else if *ty == BrievType::bits(16) {
             builder.emit_zext(LlvmType::I16, LlvmType::I64, val)
-        } else if *ty == BrievType::bits(4) {
+        } else if *ty == BrievType::bits(32) {
             builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
         } else {
             val.to_string()
@@ -614,11 +614,11 @@ impl TypeConverter {
             builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
         } else if *target_ty == BrievType::float64() {
             builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
-        } else if *target_ty == BrievType::bits(1) {
+        } else if *target_ty == BrievType::bits(8) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
-        } else if *target_ty == BrievType::bits(2) {
+        } else if *target_ty == BrievType::bits(16) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
-        } else if *target_ty == BrievType::bits(4) {
+        } else if *target_ty == BrievType::bits(32) {
             builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
         } else {
             val.to_string()

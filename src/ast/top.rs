@@ -270,6 +270,12 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
+    /// 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort
+    /// (SPEC §8.8). Compiles to `call void @llvm.trap(); unreachable`, a
+    /// never-type in the typechecker, and an abort diagnostic in the
+    /// reference interpreter. Valid as a statement, a guarded body, and a
+    /// match-arm value.
+    Trap,
     /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
     /// process-exit codegen is staged (SPEC §11.5).
@@ -918,6 +924,15 @@ pub struct StructDef {
     /// 2026-08-05 (Phase 4): `seq struct` preserves field order and
     /// containment (SPEC §8.2). A plain struct is layout-adaptive.
     pub seq: bool,
+    /// 2026-08-13 (layout-keywords plan): `pack struct` — bit-contiguous,
+    /// zero-padding physical layout (SPEC §8.2). Bit order couples to the
+    /// declared `spec Endian` (Default Target = native; `packed_field_offsets`
+    /// derives each field's bit offset).
+    pub pack: bool,
+    /// 2026-08-13 (layout-keywords plan Phase 6): `union` — an untagged
+    /// overlay: all fields share storage at offset 0; size is the largest
+    /// aligned field storage (SPEC §8.2). Exclusive with `pack`/`seq`.
+    pub union: bool,
 }
 
 #[derive(Debug, Clone)]

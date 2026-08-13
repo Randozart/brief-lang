@@ -2,7 +2,7 @@
 //
 // TypeDef links `<-` to sl_insert and sl_remove via the Custom strategy.
 // The defn bodies delegate to the List<-;
-    !> ExtractFrom: sl_remove;
+    op ExtractFrom: sl_remove(#Rh);
 };
 
 // -- Defn wrappers (replacing former inop declarations) --

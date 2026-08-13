@@ -1,5 +1,5 @@
 // ── Native Python Extension Round-Trip Test ─────────────────────────────
-// 2026-08-03 (plan 2026-08-03-native-python-meld-composite): `briv extension
+// 2026-08-03 (plan 2026-08-03-native-python-meld-composite): `briev extension
 // <bridge.bv> python` generates a CPython C-extension module that calls the
 // Briv exports directly — no ctypes. The shim accepts native Python str/int/
 // float and returns native Python values. The CStr <-> String meld makes the
@@ -22,15 +22,15 @@ fn python_native_extension_roundtrip() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_python_native_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_python_native_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let ext = Command::new(briefc)
+    let ext = Command::new(brievc)
         .args(["extension", &bv, "python", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc extension python");
+        .output().expect("failed brievc extension python");
     assert!(ext.status.success(), "extension failed: {}", String::from_utf8_lossy(&ext.stderr));
 
     let py = out_dir.join("check.py");

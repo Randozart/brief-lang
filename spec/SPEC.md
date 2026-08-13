@@ -38,6 +38,15 @@ The frontend decides meaning. LLVM, SPIR-V, CIRCT, Webstack, and future backends
 
 Every runtime value selected for a concrete target must be materializable by that target. Failure to resolve a representation is a compile-time error; there is no generic integer fallback.
 
+> **2026-08-13 (Deferred Layout).** When a type must pin its physical
+> representation — a C-exposed record, a register file, a packed bitfield —
+> the author declares that layout explicitly with the **`spec`** keyword
+> (`spec Bits: 12;`, `spec Bytes: 4;`, `spec Alignment: 2;`, `spec Endian: Big;`,
+> §8.2/§8.9) or the layout directives of §8.2. This is **deferred layout**: the
+> type's abstract semantics never assume a representation, and the physical
+> rendering is a declared, backend-compatible choice layered on top. See the
+> corresponding plan (`docs/plans/2026-08-13-layout-keywords.md`).
+
 Iteration, length, and indexed access are likewise selected from a type's
 operation surface, never from a compiler-known collection layout. The
 compiler holds no collection representation: a sequence's elements are read
@@ -407,7 +416,7 @@ A plain struct is layout-adaptive: a backend may reorder, split, scalarize, or e
 
 ```briev
 type Length32: #Int {
-    !> bits: 32;
+    spec Bits: 32;
 };
 
 seq struct Header {
@@ -417,6 +426,65 @@ seq struct Header {
 ```
 
 `seq struct` preserves field order and containment. Target protocol/ABI configuration still determines widths, alignment, and padding unless more explicit boundary constraints apply.
+
+> **2026-08-13 (`pack struct`).** `pack struct` is bit-contiguous: fields are
+> packed with zero padding in declaration order, so the storage volume is
+> `ceil(Σ field widths / 8)` bytes. A packed field must be a scalar bit-width
+> (`Bits<N>`, `0 < N ≤ 64`); array (vector) fields are rejected. `pack` and
+> `seq` are order-independent prefix flags (`pack seq struct`, `seq pack
+> struct`).
+>
+> ```briev
+> pack struct Header {
+>     spec Endian: Big;
+>     dst: Bits<48>;
+>     src: Bits<48>;
+>     ethertype: Bits<16>;
+> };
+> ```
+>
+> Whole-byte packed fields (width % 8 == 0) lay out exactly like a
+> byte-granular struct and use LLVM's native packed aggregate (`<{ ... }>`).
+> Sub-byte fields (e.g. `Bits<12>`) occupy a bit-aligned slice of the byte
+> image and are accessed with load-shift-mask / load-modify-store; a sub-byte
+> packed struct materializes as a byte array. A zero-width `Bits<0>` field is
+> padding: it occupies no storage and reads as 0.
+>
+> Bit order is endian-coupled: default/`Target` is native (the bit at
+> position `p` is bit `p % 8` of byte `p / 8`, LSB-first), `Big` is MSB-first
+> within each byte with big-endian multi-byte fields. For a sub-byte field at
+> stream position `p` (`within = p % 8`, `cov = ceil((within + width)/8)`),
+> Big-endian reads shift the covered region by `cov*8 − within − width`.
+> Packed alignment defaults to 1 (no inter-element padding); `spec Alignment`
+> overrides.
+>
+> **2026-08-13 (cast width).** `x as Bits<N>` is a width assertion: the value
+> truncates to exactly `N` bits (a `Bits<4>` can never hold 16). The reference
+> interpreter and the LLVM backend agree on this; packed stores also mask to
+> the field width defensively.
+>
+> **2026-08-13 (field modifiers).** A field may be declared `atomic`
+> (`atomic count: Int;`) in a struct or obj/type body. It is a concurrency
+> declaration, never a speed path: plain fields stay on the default
+> (non-atomic) path. The LLVM backend emits `load atomic`/`store atomic`
+> (`seq_cst`) for atomic fields, and lowers `obj.f = obj.f + c` /
+> `obj.f = obj.f - c` to `atomicrmw add/sub` (read-modify-write). The
+> reference interpreter is single-threaded check mode, so atomic fields behave
+> as plain fields there — atomicity is a target concern (the explicit
+> `AtomicLoad#`/`AtomicStore#`/`AtomicAdd#` intrinsics remain for address-based
+> access).
+>
+> **2026-08-13 (`union`).** `union Name { field: Type, … };` is an untagged
+> overlay: all fields share storage at offset 0; size is the largest aligned
+> field storage and alignment the maximum field alignment. Sub-byte `Bits<N>`
+> fields (N % 8 != 0) and zero-width padding are rejected — a bit-sliced
+> overlay is ambiguous (deferred). The LLVM backend materializes a union as a
+> byte array of its storage size with per-field loads/stores at offset 0
+> (the C header exporter already renders all layouts as opaque byte arrays, so
+> a union crosses the GLUE boundary identically). `union` is exclusive of
+> `seq`/`pack`. The reference interpreter models structs as layout-free named
+> products, so a union's fields behave as independent values there — the
+> byte-overlay reinterpretation is a target concern.
 
 Behavior for a struct is attached through an inherent `impl` in the defining module.
 
@@ -563,17 +631,48 @@ Inherent implementations may appear only in the target declaration's module. Exp
 
 `type`, `obj`, and `cell` keep their cohesive behavior in their own declarations; `impl` does not arbitrarily split those definitions.
 
+### 8.8.1 `trap`
+
+`trap;` is a hardware abort. It is a never-type: the control flow past it is
+dead, so it needs no value and unifies with any expected type. It is valid as
+a statement, as a guarded (`when`) body, and as a `match`-arm body.
+
+```briev
+defn parse(tag: Int) -> Int {
+    if tag > 4095 {
+        trap;            // protocol violation — abort the process
+    };
+    term tag;
+};
+```
+
+> **2026-08-13 (layout-keywords plan Phase 4).** The LLVM backend emits
+> `call void @llvm.trap()` followed by `unreachable` (marking subsequent
+> statements dead). The reference interpreter raises an abort diagnostic
+> (`RuntimeError::Trap`), and the reactor stops on it — matching the process
+> abort at runtime.
+
 ### 8.9 Metadata
 
-`!>` is the canonical metadata-binding operator.
+`!>` is the canonical annotation operator for non-physical metadata.
 
 ```briev
 type Int32: #Int {
-    !> bits: 32;
+    !> ctd: Int;      // annotation (e.g. cell-tag dispatch)
 };
 ```
 
 `!> observable: true` is not valid; use the `out` modifier.
+
+> **2026-08-13 (Deferred Layout).** Physical-layout metadata is declared with
+> the **`spec`** keyword, not `!>`: `spec Alignment: 2;`, `spec Bits: 12;`,
+> `spec MaxBits: 16;`, `spec Bytes: 4;`, `spec Endian: Big;` (see §8.2). `spec`
+> keys are PascalCase; values use the same grammar as `!>` values. `!>` remains
+> the annotation operator for non-physical metadata (`ctd`, `accel`, …); it no
+> longer carries physical-layout keys. `spec` and `!>` share one metadata map —
+> a physical key spelled with `!>` still parses for backward compatibility
+> (stdlib and examples migrated to `spec` in 2026-08-13), but `spec`
+> supersedes it; an unknown `spec` name is an error, never silently accepted.
 
 **Staged.** At module top level, `!>` binds metadata to the module as a whole.
 Top-level `!>` is a shortcut for attaching metadata to the script; it never
@@ -1325,7 +1424,7 @@ Compile-time reflection occurs after semantic/layout freezing. Reflection-driven
 Descriptor fields include, where applicable:
 
 - `Type`, `Ops`, `Effects`;
-- `Bytes`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
+- `Bytes`, `Bits`, `MaxBits`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
 - declaration metadata `Name`, `Params`, `Returns`, `Arity`, `Loc`, `FnSpan`, `Doc`, `Hash`, `Contracts`, `Module`, `IsPure`.
 
 `value.^^Element` is the element type of an iterable receiver, derived from

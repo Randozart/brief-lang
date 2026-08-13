@@ -1,5 +1,5 @@
 // ── C# Render Test (P/Invoke bindings) ────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briev
 // bindings <bridge> csharp` renders a .cs class with DllImport externs against
 // the bridge .so (the composite String is an IntPtr handle). No .NET runtime
 // here, so this asserts the RENDERED shape; a full round-trip runs where
@@ -21,15 +21,15 @@ fn csharp_bindings_render() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_csharp_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_csharp_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "csharp", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings csharp");
+        .output().expect("failed brievc bindings csharp");
     assert!(bindings.status.success(), "csharp bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
 
     let cs = std::fs::read_to_string(out_dir.join("boundary-bindings/bridge.cs")).unwrap();

@@ -5,7 +5,6 @@
 pub mod sexpr;
 pub mod serialize;
 pub mod deserialize;
-pub mod layout;
 pub mod pattern;
 
 pub use serialize::to_beast;

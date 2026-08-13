@@ -255,6 +255,28 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
   arrays and the bracket SIMD syntax.
 - `obj`: full-featured types with methods, contracts, type params, visibility.
 
+### Physical layout (2026-08-13, Deferred Layout)
+
+Physical layout is DECLARED, never assumed: a type carries protocol + metadata
+only, and the backend derives the representation at materialization time.
+`spec <PascalCase>` is the canonical spelling for the five physical keys
+(`spec Bits/MaxBits/Bytes/Alignment/Endian`); the legacy `!> bits:`/`!> maxbits:`
+etc. write the same lowercase keys and stay readable. Three layout modifiers on
+struct declarations:
+
+- `pack struct` — bit-contiguous, zero padding; sub-byte `Bits<N>` fields slice
+  out of a byte array (`{ [N x i8] }`), whole-byte fields use `<{ ... }>`;
+  `spec Endian: Big` couples bit order (MSB-first) to big-endian multi-byte.
+- `atomic <field>` — the field reads/writes atomically (`load atomic`/`store
+  atomic`, `obj.f = obj.f + c` → `atomicrmw add`).
+- `union Name { … }` — untagged overlay; all fields at offset 0, size = largest
+  aligned field storage.
+
+The single authority for packed offsets is `src/type_universe/packed.rs`
+(`packed_field_offsets`); the casting graph resolves every LLVM type
+(`resolve_llvm_type`), never a name match. `Bits<N>` is exactly N bits in both
+AST forms (`Type::Bits(n)` and the `Applied("Bits",[n])` alias).
+
 ### Bracket arrays / SIMD
 
 `Int[1024]` is a compile-time fixed array (`[1024 x i64]` in LLVM). Slice

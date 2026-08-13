@@ -3,15 +3,15 @@
 // so GLUE can find CastTo/CastFrom paths.
 
 type PyBytes {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Bits) = identity(#Lh);
     op CastFrom(#Bits) = identity(#Lh);
 };
 
 type PyString: #String {
-    !> maxbits: 128;
-    !> alignment: 8;
+    spec MaxBits: 128;
+    spec Alignment: 8;
     op CastTo(#String<UTF8>) = ucs4_to_utf8(#Lh);
     op CastFrom(#String<UTF8>) = utf8_to_ucs4(#Lh);
     op CastTo(#String<ASCII>) = ucs4_to_ascii(#Lh);
@@ -19,8 +19,8 @@ type PyString: #String {
 };
 
 type PyInt: #Int {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Int) = pylong_to_i64(#Lh);
     op CastFrom(#Int) = i64_to_pylong(#Lh);
 };

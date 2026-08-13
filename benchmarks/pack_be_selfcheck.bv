@@ -1,0 +1,31 @@
+// pack_be_selfcheck — big-endian sub-byte encoding self-check (Phase 2)
+//
+// `spec Endian: Big` packs MSB-first: hi (12 bits) occupies byte0 whole
+// (0xAB) plus the upper nibble of byte1 (0xC0); lo (4 bits) the lower nibble
+// (0x0F) — storage bytes [0xAB, 0xCF]. Reading the fields back must recover
+// hi=0xABC and lo=0xF exactly. Prints hi*256+lo (0xABCF = 43983) per tick,
+// driven by a runtime counter so nothing folds.
+
+let N: Int = get_env_int!("BOUND");
+
+pack struct Bp {
+    spec Endian: Big;
+    hi: Bits<12>;
+    lo: Bits<4>;
+};
+
+defn becheck(i: Int) -> Int {
+    let p: Bp = Bp { hi: (0xABC + i) as Bits<12>, lo: (0xF + i) as Bits<4> };
+    term ((p.hi as Int) << 4) + (p.lo as Int);
+};
+
+let count: Int = 0;
+let chk: Int = 0;
+node pk [count < N][count == N] {
+    chk = (chk * 31 + becheck(count)) & 0x7FFFFFFF;
+    when count % 3 == 0 {
+        println!(chk);
+    };
+    count = count + 1;
+    term;
+};

@@ -11,8 +11,18 @@ use crate::type_universe::resolve_type;
 pub fn lower_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
     match ty {
         Type::Custom(name) => lower_custom_type(name, universe),
+        // 2026-08-13 (Phase 6): `Bits<N>` parses as Applied("Bits", [Number(N)])
+        // — the exact-width alias — lower it to i{N} so a `Bits<32>` field
+        // reads/writes exactly 32 bits (a plain/union struct field, not just
+        // packed). The generic-application default (i64) silently widened it.
+        Type::Applied(name, _) if name == "Bits" => {
+            match crate::type_universe::bits_width(ty) {
+                Some(n) => format!("i{}", n),
+                None => lower_custom_type(name, universe),
+            }
+        }
         Type::Applied(name, _) => lower_custom_type(name, universe),
-        Type::Bits(n) => format!("i{}", n * 8),
+        Type::Bits(n) => format!("i{}", n),
         Type::Void => "void".into(),
         Type::Ptr(_) => "ptr".into(),
         Type::Tuple(types) => {
@@ -82,7 +92,10 @@ pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse
         }
     }
     match ty {
-        Type::Bits(n) => *n,
+        // 2026-08-13 (layout-keywords plan): Bits stores BITS; storage bytes are
+        // the rounded-up byte count (div_ceil), never the raw width. Sub-byte
+        // widths (Bits<4>) round up to one storage byte.
+        Type::Bits(n) => n.div_ceil(8),
         Type::Ptr(_) => 8,
         Type::Void => 0,
         // 2026-07-25: Fixed-size array: Int[1024] → 1024 * element_size.
@@ -101,4 +114,43 @@ pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse
 /// Get the alignment of a type in bytes.
 pub fn type_alignment(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> u64 {
     type_size(ty, universe).min(8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2026-08-13 (layout-keywords plan): Bits stores BITS. These lock the
+    /// restored thesis: `Bits<N>` lowers to `iN` and storage rounds UP via
+    /// div_ceil, so sub-byte widths (Bits<4>) keep one storage byte.
+    #[test]
+    fn sub_byte_bits_round_trip() {
+        assert_eq!(lower_type(&Type::Bits(4), None), "i4");
+        assert_eq!(type_size(&Type::Bits(4), None), 1);
+        assert_eq!(lower_type(&Type::Bits(8), None), "i8");
+        assert_eq!(type_size(&Type::Bits(8), None), 1);
+        assert_eq!(lower_type(&Type::Bits(64), None), "i64");
+        assert_eq!(type_size(&Type::Bits(64), None), 8);
+    }
+
+    /// 2026-08-13: flexible-width Bits(0) has no concrete size yet.
+    #[test]
+    fn flexible_bits_zero_preserved() {
+        assert_eq!(lower_type(&Type::Bits(0), None), "i0");
+        assert_eq!(type_size(&Type::Bits(0), None), 0);
+    }
+
+    /// 2026-08-13 (intrinsics.rs latent-bug regression guard): a byte pointer
+    /// built as `Ptr<Bits(8)>` now lowers to a REAL i8 element (8 BITS); in the
+    /// byte era `Type::bits(8)` was 8 BYTES → i64 element. The same expression
+    /// is emitted by AddressOf#/CastPtr# (intrinsics.rs:724).
+    #[test]
+    fn byte_pointer_element_is_i8() {
+        let p = Type::ptr(Type::bits(8));
+        match &p {
+            Type::Ptr(inner) => assert_eq!(lower_type(inner, None), "i8"),
+            _ => panic!("expected Ptr"),
+        }
+        assert_eq!(type_size(&p, None), 8);
+    }
 }

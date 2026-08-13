@@ -141,7 +141,7 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             },
         ),
         TopLevel::StaticStruct(s) => {
-            format_struct_into(out, level, &s.name, &s.type_params, &s.fields, s.seq);
+            format_struct_into(out, level, s);
         }
         TopLevel::Enum(e) => format_enum_into(e, out, level),
         TopLevel::TypeDef(t) => format_typedef_into(t, out, level),
@@ -303,31 +303,96 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
     }
 }
 
+/// 2026-08-13 (layout-keywords plan Phase 5): the set of field names declared
+/// `atomic`, from the structured `atomic_fields` metadata List. Shared by the
+/// struct and TypeDef formatters so the `atomic` prefix prints for both.
+fn atomic_field_set(metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) -> std::collections::HashSet<&str> {
+    match metadata.get("atomic_fields") {
+        Some(crate::ast::PropertyValue::List(entries)) => entries
+            .iter()
+            .filter_map(|e| match e {
+                crate::ast::PropertyValue::String(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect(),
+        _ => std::collections::HashSet::new(),
+    }
+}
+
 fn format_struct_into(
     out: &mut String,
     level: usize,
-    name: &str,
-    type_params: &[TypeParam],
-    fields: &[(String, Type)],
-    seq: bool,
+    def: &crate::ast::top::StructDef,
 ) {
     indent(out, level);
-    if seq {
+    if def.seq {
         out.push_str("seq ");
     }
-    let _ = write!(out, "struct {}", name);
-    if !type_params.is_empty() {
-        let params: Vec<String> = type_params.iter().map(|p| p.name.clone()).collect();
+    // 2026-08-13 (layout-keywords plan): `pack struct` — bit-contiguous.
+    // Packed layouts are order-independent of `seq`, so both may be present.
+    if def.pack {
+        out.push_str("pack ");
+    }
+    // 2026-08-13 (layout-keywords plan Phase 6): `union` is standalone —
+    // no `struct` keyword, no seq/pack prefixes.
+    if def.union {
+        let _ = write!(out, "union {}", def.name);
+    } else {
+        let _ = write!(out, "struct {}", def.name);
+    }
+    if !def.type_params.is_empty() {
+        let params: Vec<String> = def.type_params.iter().map(|p| p.name.clone()).collect();
         let _ = write!(out, "<{}>", params.join(", "));
     }
     let _ = write!(out, " {{ ");
-    for (i, (fname, fty)) in fields.iter().enumerate() {
+    let atomic = atomic_field_set(&def.metadata);
+    for (i, (fname, fty)) in def.fields.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
+        if atomic.contains(fname.as_str()) {
+            out.push_str("atomic ");
+        }
         let _ = write!(out, "{}: {};", fname, fty);
     }
+    // 2026-08-13 (layout-keywords plan): struct physical-layout metadata prints
+    // in the declared form. Deterministic: sorted keys.
+    print_metadata_clauses(out, &def.metadata);
     let _ = write!(out, " }};");
+}
+
+/// 2026-08-13 (layout-keywords plan): print a type/struct body's metadata —
+/// physical-layout keys in the declared `spec <PascalCase>` form, everything
+/// else as `!> <key>: <value>`. Deterministic: sorted keys. The internal
+/// `atomic_fields` carrier is skipped (the `atomic` field prefix encodes it).
+fn print_metadata_clauses(out: &mut String, metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) {
+    let mut meta_keys: Vec<&String> = metadata.keys().collect();
+    meta_keys.sort();
+    for key in meta_keys {
+        if key == "atomic_fields" {
+            continue;
+        }
+        out.push(' ');
+        if let Some(spec_name) = spec_display_key(key) {
+            let _ = write!(out, "spec {}: {};", spec_name, metadata[key]);
+        } else {
+            let _ = write!(out, "!> {}: {};", key, metadata[key]);
+        }
+    }
+}
+
+/// 2026-08-13 (layout-keywords plan): lowercase metadata key → PascalCase spec
+/// name (the canonical formatter's half of `spec_name_to_key` in the parser —
+/// keep in sync). Non-layout keys return None → printed as `!>`.
+fn spec_display_key(key: &str) -> Option<&'static str> {
+    match key {
+        "alignment" => Some("Alignment"),
+        "bits" => Some("Bits"),
+        "maxbits" => Some("MaxBits"),
+        "bytes" => Some("Bytes"),
+        "endian" => Some("Endian"),
+        _ => None,
+    }
 }
 
 /// 2026-08-05: format a statement-level match pattern.
@@ -635,12 +700,19 @@ fn format_typedef_into(t: &TypeDef, out: &mut String, level: usize) {
         let _ = write!(out, ": {}", protocol);
     }
     let _ = write!(out, " {{ ");
+    let atomic = atomic_field_set(&t.body.metadata);
     for (i, slot) in t.body.slots.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
+        if atomic.contains(slot.name.as_str()) {
+            out.push_str("atomic ");
+        }
         let _ = write!(out, "{}: {};", slot.name, slot.ty);
     }
+    // 2026-08-13 (layout-keywords plan): TypeDef metadata round-trips via the
+    // shared printer (spec form for physical-layout keys, `!>` otherwise).
+    print_metadata_clauses(out, &t.body.metadata);
     let _ = write!(out, " }};");
 }
 
@@ -693,6 +765,19 @@ mod tests {
         "!> accel: try_all;\n",
         "!> accel: force;\n!> target: spirv;\n",
         "!> flags: [fast, contract];\n",
+        // 2026-08-13 (layout-keywords plan): physical-layout metadata round-trips.
+        "type W8: #Int {\n  spec Bits: 8;\n};\n",
+        "struct Flags {\n  spec Bytes: 1;\n  spec Alignment: 1;\n  a: Bool;\n};\n",
+        "type Frame: #Bit {\n  spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  spec Bytes: 4;\n  spec Endian: Big;\n};\n",
+        // 2026-08-13 (layout-keywords plan): `pack struct` round-trips with the
+        // prefix preserved, alongside its spec metadata.
+        "pack struct Eth {\n  spec Endian: Big;\n  dst: Bits<48>;\n  src: Bits<48>;\n  etype: Bits<16>;\n};\n",
+        "seq pack struct Mix {\n  spec Alignment: 1;\n  a: Bits<12>;\n  b: Bits<4>;\n};\n",
+        // 2026-08-13 (layout-keywords plan Phase 5): the `atomic` field
+        // modifier round-trips through the prefix (not `!> atomic_fields`).
+        "struct Counter {\n  atomic count: Int;\n  other: Int;\n};\n",
+        // 2026-08-13 (layout-keywords plan Phase 6): `union` round-trips.
+        "union Word {\n  i: Int;\n  f: Float;\n};\n",
         // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
         "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
         "init BufferSize: [64 | lo..hi] Int = 64;\n",
@@ -712,6 +797,19 @@ mod tests {
         assert_idempotent(
             "defn nested(x: Int) -> Int [true][true] {\n  if x > 0 {\n    term x;\n  } else {\n    term 0;\n  };\n};\n",
         );
+    }
+
+    /// 2026-08-13 (layout-keywords plan): a type body containing mixed `spec`
+    /// and `!>` metadata prints both forms and round-trips.
+    #[test]
+    fn formatter_preserves_spec_and_exclaim_metadata() {
+        let src = "type W: #Int {\n  !> ctd: Add;\n  spec Bits: 8;\n  spec Endian: Little;\n};\n";
+        let items = parse(src).expect("parse");
+        let out = format_program(&items);
+        assert!(out.contains("spec Bits: 8;"), "output: {out}");
+        assert!(out.contains("spec Endian: Little;"), "output: {out}");
+        assert!(out.contains("!> ctd: Add;"), "output: {out}");
+        assert_idempotent(src);
     }
 }
 

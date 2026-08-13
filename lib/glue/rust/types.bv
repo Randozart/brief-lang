@@ -3,15 +3,15 @@
 // Types are defined for documentation and meld compatibility.
 
 type RstI64: #String {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Int) = identity(#Lh);
     op CastFrom(#Int) = identity(#Lh);
 };
 
 type RstF64: #Float {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Float<IEEE754>) = identity(#Lh);
     op CastFrom(#Float<IEEE754>) = identity(#Lh);
 };

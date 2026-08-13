@@ -70,8 +70,13 @@ generate(items)
   │     Every let var → (field_index, field_type, briev_type)
   │     Synthetic fields (cycle_count, arena_ptr) appended after
   │
-  ├─ declare_struct_types(&mut out)  — Emit %SmallString64, %StaticString, %String, %UTF8View
-  │     Also emit universe-registered struct types (skipping hardcoded names to avoid duplicates)
+  ├─ declare_struct_types(&mut out)  — Emit universe-registered struct types
+  │     (sorted, deterministic). 2026-08-13 (layout-keywords plan): a packed
+  │     whole-byte struct emits LLVM's packed aggregate `<{ i48, i48, i16 }>`;
+  │     a sub-byte packed struct or a union emits a byte array `{ [N x i8] }`;
+  │     a plain struct emits `{ i64, … }`. Zero-width `Bits<0>` padding fields
+  │     are filtered from the aggregate. The legacy SmallString64/StaticString/
+  │     UTF8View type declarations were retired with their types (2026-08-01 B4).
   │
   ├─ emit_declares(&mut out)         — Declare @llvm.* intrinsics + runtime functions
   │

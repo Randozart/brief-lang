@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
                 if !self.eat_type_close() {
                     return self.error_at_current("expected '>' or '>>' in Bits<N>");
                 }
-                return Ok(Type::from_bits(bits));
+                return Ok(Type::Bits(bits));
             }
             return Ok(Type::Bits(0)); // flexible-width Bits
         }
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(Type::ptr(inner));
             }
-            return Ok(Type::ptr(Type::bits(1)));
+            return Ok(Type::ptr(Type::bits(8)));
         }
 
         // Generic type: Foo<T, U>

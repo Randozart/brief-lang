@@ -824,6 +824,42 @@ mod tests {
     }
 
     #[test]
+    fn packed_struct_fields_round_trip_in_interpreter() {
+        // 2026-08-13 (pack): the interpreter models structs as layout-free
+        // named products — a `pack struct` program must run and return the
+        // semantic field values (the backend adds the physical bit-packing;
+        // both agree on the value domain).
+        let program = parse_program(
+            "pack struct Nib { a: Bits<12>; b: Bits<4>; c: Bits<8>; };\n\
+             defn pkmix() -> Int {\n\
+               let n: Nib = Nib { a: 0xABC as Bits<12>, b: 0xF as Bits<4>, c: 0xFF as Bits<8> };\n\
+               term (n.a as Int) + (n.b as Int) * 5 + (n.c as Int) * 11;\n\
+             };\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let v = interp.call_function("pkmix", &[]).unwrap();
+        assert_eq!(v.as_i64(), Some(0xABC + 0xF * 5 + 0xFF * 11));
+    }
+
+    #[test]
+    fn trap_statement_aborts_interpreter() {
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` raises the abort
+        // diagnostic in the reference interpreter (SPEC §8.8), mirroring the
+        // LLVM `llvm.trap` + `unreachable` sequence.
+        let program = parse_program(
+            "defn f() -> Int {\n  trap;\n  term 1;\n};\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let err = interp.call_function("f", &[]).unwrap_err();
+        assert!(
+            matches!(err, crate::errors::RuntimeError::Trap),
+            "trap; must raise RuntimeError::Trap, got {err}"
+        );
+    }
+
+    #[test]
     fn init_value_form_seeds_and_reads() {
         // Value form: the expr is evaluated once and the name resolves.
         let program = parse_program("init BufSize: Int = 64;\n");

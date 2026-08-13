@@ -1,5 +1,5 @@
 // ── Host Cancellation Round-Trip Test ──────────────────────────────────
-// 2026-08-03: a C driver spawns a thread that raises __briv_set_cancel;
+// 2026-08-03: a C driver spawns a thread that raises __briev_set_cancel;
 // the exported Briv loop polls CancelRequested#() explicitly and stops
 // early (partial result << the uncancelled full result).
 
@@ -12,50 +12,50 @@ fn has(cmd: &str) -> bool {
 }
 
 #[test]
-fn host_cancellation_stops_briv_loop() {
+fn host_cancellation_stops_briev_loop() {
     for tool in ["cc", "ar", "llc", "clang", "pkg-config"] {
         if !has(tool) && tool != "pkg-config" {
             eprintln!("SKIP: {} not available", tool);
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_cancel_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_cancel_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/cancel.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
 
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "cancel-bindings/briv_types.h"
+#include "cancel-bindings/briev_types.h"
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
 
-static BrivState* g_st;
+static BrievState* g_st;
 
 static void* canceller(void* arg) {
     (void)arg;
     usleep(20000);
-    __briv_set_cancel(g_st, 1);
+    __briev_set_cancel(g_st, 1);
     return NULL;
 }
 
 int main(void) {
-    g_st = __briv_init_state();
+    g_st = __briev_init_state();
     int64_t small = cancellable_sum(g_st, 100000);      // full, small
     int64_t mid   = cancellable_sum(g_st, 50000000);    // full, computable (~0.1s)
-    __briv_clear_cancel(g_st);
+    __briev_clear_cancel(g_st);
     pthread_t th;
     pthread_create(&th, NULL, canceller, NULL);
     int64_t partial = cancellable_sum(g_st, 2000000000LL); // stops early (~20ms)

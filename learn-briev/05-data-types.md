@@ -307,6 +307,43 @@ let p = Point { x: 10, y: 20 };
 let name = p.name;  // field access
 ```
 
+### Physical Layout Modifiers (2026-08-13, Deferred Layout)
+
+A plain struct is layout-adaptive. When the layout must be pinned, it is
+**declared** — the type never assumes a representation. `spec` spells the five
+physical keys (`Bits`, `MaxBits`, `Bytes`, `Alignment`, `Endian`), and three
+modifiers shape struct declarations:
+
+```briev
+// Bit-contiguous: fields pack with zero padding in declaration order.
+pack struct EthHeader {
+    spec Endian: Big;             // MSB-first within byte + BE multi-byte
+    dst: Bits<48>;
+    src: Bits<48>;
+    etype: Bits<16>;
+};
+
+// Untagged overlay: all fields share storage at offset 0; size is the
+// largest aligned field. Sub-byte Bits<N> fields are rejected (deferred).
+union Word {
+    u: Bits<64>;
+    bytes: Bits<32>;
+    lo: Bits<16>;
+};
+
+// Per-field concurrency: reads/writes go atomic; `c.count = c.count + 1`
+// lowers to an atomic read-modify-write.
+struct Counter {
+    atomic count: Int;
+    other: Int;
+};
+```
+
+`Bits<N>` is exactly N bits everywhere — a `Bits<48>` field reads 48 bits, not
+a rounded word. `x as Bits<N>` truncates to N bits (a `Bits<4>` never holds
+16). The reference interpreter models structs as layout-free values; the
+byte-level packing, overlay, and atomicity are what the target materializes.
+
 ### Fixed-Size Arrays: `Type[N]` and Slice Views
 
 Arrays of compile-time-known size are declared inline. Works for any type:

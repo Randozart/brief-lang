@@ -1,8 +1,8 @@
 // ── Java Round-Trip Test (JNI) ─────────────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briev
 // extension <bridge> java` renders + builds a JNI shim (lib<bridge>.so; the
 // composite String crosses via GetStringUTFChars / NewStringUTF on the
-// NUL-invariant data); `briv export <bridge> java` renders the Java class
+// NUL-invariant data); `briev export <bridge> java` renders the Java class
 // with `native` methods. Toolchain-guarded: finds javac/java on PATH or the
 // portable ~/briv-tools/jdk-* JDK.
 
@@ -49,26 +49,26 @@ fn java_roundtrip() {
         eprintln!("SKIP: JDK not found (PATH or ~/briv-tools/jdk-*)");
         return;
     };
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("briv_java_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let base = std::env::temp_dir().join("briev_java_test");
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
-    let ext = Command::new(briefc)
+    let ext = Command::new(brievc)
         .args(["extension", &bv, "java", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc extension java");
+        .output().expect("failed brievc extension java");
     assert!(ext.status.success(), "java ext failed: {}", String::from_utf8_lossy(&ext.stderr));
     assert!(base.join("libboundary.so").exists(), "libboundary.so missing");
 
-    let export = Command::new(briefc)
+    let export = Command::new(brievc)
         .args(["export", &bv, "java", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc export java");
+        .output().expect("failed brievc export java");
     assert!(export.status.success(), "java export failed: {}", String::from_utf8_lossy(&export.stderr));
 
     let src = base.join("boundary-bridge");

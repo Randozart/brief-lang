@@ -500,6 +500,35 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .and_then(|f| f.iter().find(|(n, _)| n == name))
                                 .map(|(_, ty)| (ty.clone(), ()))
                                 .unwrap_or((Type::int(), ()));
+                            // 2026-08-13 (Phase 5): an `atomic` self-slot stores
+                            // with an atomic store.
+                            if backend.is_atomic_field(self_type, name) {
+                                let salt = if matches!(slot_ty, Type::Ptr(_)) {
+                                    format!("i{}", backend.ctx.int_bits)
+                                } else {
+                                    backend.llvm_type(&slot_ty)
+                                };
+                                let sasz = crate::backend::llvm::types::type_size(
+                                    &slot_ty, backend.ctx.type_universe.as_ref(),
+                                ).max(1);
+                                let store_val = backend.ensure_typed_value(
+                                    out, indent, &salt, &val.name, Some(val.ty.clone()),
+                                    backend.ctx.type_universe.clone().as_ref(),
+                                );
+                                writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, salt, store_val, gep, sasz).ok();
+                                backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                                backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                                return TypedRegister { name: val.name, ty: Type::void() };
+                            }
+                            // 2026-08-13 (pack): a packed self-slot stores its
+                            // bit-slice (L-M-S for sub-byte, plain aligned
+                            // store for whole-byte) — skip the scalar packing.
+                            if let Some(pf) = backend.packed_field(self_type, name) {
+                                out.push_str(&backend.emit_packed_field_store(indent, &gep, &pf, &val));
+                                backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                                backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                                return TypedRegister { name: val.name, ty: Type::void() };
+                            }
                             // 2026-08-01 (D3): a Ptr-typed self-slot stores the
                             // HANDLE at i{int_bits} (the value is already
                             // ptrtoint'd) — not `ptr`, matching the self-slot
@@ -524,7 +553,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // counter's increment never moved the count; the volatile
                     // swan-song store to ptr 0 was all that remained).
                     if backend.ctx.field_index_map.contains_key(name) {
-                        backend.emit_state_store_i64(out, indent, name, &val.name);
+                        // 2026-08-13 (merge fix): adapt the value to the SLOT's
+                        // LLVM type before storing. A String/Data value is a
+                        // `ptr` that must be ptrtoint'd to the i64 slot, a Bool
+                        // value boxes to i64 but the slot is i8 (trunc), a Float
+                        // value bitcasts to the i64 slot. Struct/collection
+                        // HANDLES are already i64 and pass through unchanged
+                        // (ensure_typed_value). Previously the raw value was
+                        // stored (`store i64 %ptr`) — an LLVM type error on
+                        // String state fields (node_bridge.save, main's
+                        // flat-dotted branch).
+                        let fidx = *backend.ctx.field_index_map.get(name).unwrap();
+                        let fty = backend.ctx.field_types.get(fidx).cloned().unwrap_or_else(|| "i64".to_string());
+                        let store_val = backend.ensure_typed_value(
+                            out, indent, &fty, &val.name, Some(val.ty.clone()),
+                            backend.ctx.type_universe.clone().as_ref(),
+                        );
+                        backend.emit_state_store_i64(out, indent, name, &store_val);
                         // NOTE: do NOT insert into last_val_temps here —
                         // that map persists across txn emissions (only
                         // emit_member_body saves/restores it), so a stale
@@ -737,6 +782,56 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                     let gep = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                    // 2026-08-13 (Phase 5): an `atomic` state-field store.
+                    // `obj.f = obj.f + c` / `obj.f = obj.f - c` lower to
+                    // atomicrmw add/sub (read-modify-write); anything else is
+                    // an atomic store (SPEC §8.2).
+                    if backend.is_atomic_field(&obj_key, name) {
+                        let field_ty = backend.ctx.struct_types.get(&obj_key)
+                            .and_then(|f| f.iter().find(|(n, _)| n == name))
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or_else(|| Type::int());
+                        let alt = if matches!(field_ty, Type::Ptr(_)) {
+                            format!("i{}", backend.ctx.int_bits)
+                        } else {
+                            backend.llvm_type(&field_ty)
+                        };
+                        let asz = crate::backend::llvm::types::type_size(
+                            &field_ty, backend.ctx.type_universe.as_ref(),
+                        ).max(1);
+                        let rmw = match rhs {
+                            Expr::BinaryOp(op, l, r)
+                                if matches!(op, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Sub) =>
+                            {
+                                let same_field = matches!(l.as_ref(), Expr::Field(r2, f2) if **r2 == **obj && f2 == name);
+                                if same_field {
+                                    let cval = backend.emit_expr(out, r, indent);
+                                    let op_name = if matches!(op, crate::ast::BinaryOpKind::Add) { "add" } else { "sub" };
+                                    Some((op_name, cval.name))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        if let Some((op_name, cval)) = rmw {
+                            let old = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = atomicrmw {} ptr {}, i64 {} seq_cst", indent, old, op_name, gep, cval).ok();
+                        } else {
+                            let store_val = backend.ensure_typed_value(
+                                out, indent, &alt, &val.name, Some(val.ty.clone()),
+                                backend.ctx.type_universe.clone().as_ref(),
+                            );
+                            writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, gep, asz).ok();
+                        }
+                        return TypedRegister { name: val.name, ty: Type::void() };
+                    }
+                    // 2026-08-13 (pack): a packed state-field store writes the
+                    // bit-slice into the byte image (L-M-S for sub-byte, plain
+                    // aligned store for whole-byte).
+                    if let Some(pf) = backend.packed_field(&obj_key, name) {
+                        out.push_str(&backend.emit_packed_field_store(indent, &gep, &pf, &val));
+                    } else {
                     let field_ty = backend.ctx.struct_types.get(&obj_key)
                         .and_then(|f| f.iter().find(|(n, _)| n == name))
                         .map(|(_, ty)| ty.clone())
@@ -751,6 +846,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         backend.ctx.type_universe.clone().as_ref(),
                     );
                     writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+                    }
                 }
                 _ => {}
             }
@@ -1472,6 +1568,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort
+        // (SPEC §8.8). `@llvm.trap` is declared in emit_declares; the
+        // `unreachable` terminator marks the rest of the block dead so later
+        // statements (which LLVM verifies unreachable) are not emitted.
+        Statement::Trap => {
+            writeln!(out, "{}call void @llvm.trap()", indent).ok();
+            writeln!(out, "{}unreachable", indent).ok();
+            backend.fun.terminated = true;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         _ => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
@@ -1746,7 +1852,13 @@ fn emit_arrow_store_local(
         let store_ty = backend.llvm_type(&val.ty);
         writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
     } else if backend.ctx.field_index_map.contains_key(name) {
-        backend.emit_state_store_i64(out, indent, name, &val.name);
+        let fidx = *backend.ctx.field_index_map.get(name).unwrap();
+        let fty = backend.ctx.field_types.get(fidx).cloned().unwrap_or_else(|| "i64".to_string());
+        let store_val = backend.ensure_typed_value(
+            out, indent, &fty, &val.name, Some(val.ty.clone()),
+            backend.ctx.type_universe.clone().as_ref(),
+        );
+        backend.emit_state_store_i64(out, indent, name, &store_val);
     }
 }
 

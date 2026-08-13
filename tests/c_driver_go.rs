@@ -1,5 +1,5 @@
 // ── Go Round-Trip Test (cgo) ───────────────────────────────────────────
-// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briv
+// 2026-08-04 (plan 2026-08-04-ship-common-language-environments): `briev
 // export <bridge> go` renders a cgo Go package — the preamble includes the C
 // header, the per-export wrappers convert natively (string ↔ *C.char via the
 // composite pointer-as-int64 handle, C.GoString reads the NUL-invariant data
@@ -41,28 +41,28 @@ fn go_roundtrip() {
         eprintln!("SKIP: go not found (PATH or ~/briv-tools/go/bin/go)");
         return;
     };
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let base = std::env::temp_dir().join("briv_go_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let base = std::env::temp_dir().join("briev_go_test");
     let _ = std::fs::remove_dir_all(&base);
     let pkg = base.join("boundary");
     std::fs::create_dir_all(&pkg).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
     std::fs::copy(base.join("libboundary.a"), pkg.join("libboundary.a")).unwrap();
 
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
-    std::fs::copy(base.join("boundary-bindings/briv_types.h"), pkg.join("briv_types.h")).unwrap();
+    std::fs::copy(base.join("boundary-bindings/briev_types.h"), pkg.join("briev_types.h")).unwrap();
 
-    let export = Command::new(briefc)
+    let export = Command::new(brievc)
         .args(["export", &bv, "go", "--out", &base.to_string_lossy()])
-        .output().expect("failed briefc export go");
+        .output().expect("failed brievc export go");
     assert!(export.status.success(), "go export failed: {}", String::from_utf8_lossy(&export.stderr));
     std::fs::copy(base.join("boundary-bridge/bridge.go"), pkg.join("bridge.go")).unwrap();
 

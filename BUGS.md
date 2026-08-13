@@ -1,6 +1,42 @@
 # Bugs
 
+## Stale integration tests referenced pre-rename `briefc`/`briv_*` symbols — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found during Phase 0 of layout-keywords)
+**Status:** Fixed (integration-test rename sweep, `feat/spec-layout-keywords`).
+**Scope (actual, larger than the original "7 files" claim):** 20 test files /
+~169 references: `briefc`→`brievc` (incl. `CARGO_BIN_EXE_briefc`),
+`briv_compiler`→`briev_compiler` (lib crate), `briv_types.h`→`briev_types.h`,
+`BrivState`→`BrievState`, `__briv_*`→`__briev_*`, `briv_rt(.c/.o)`→`briev_rt`,
+`briv-compiler`→`briev-compiler`, and the cosmetic `briv_*_test` temp-dir
+names. `~/briv-tools` (a real user tool path) was deliberately left untouched.
+**Fix:** scripted rename sweep + three API-drift fixes: deleted the dead
+`tests/fallback_tests.rs` (the `Fallback` feature was removed at `5f2107bc5`
+"remove frgn fallback clause"); dropped the `Fallback` arg from
+`glue_bridge_tests.rs`; `Value::Int`→`Value::Atom(Atom::Int)` in
+`pointer_trickery_test.rs`; `glue.dbvl`→`glue.dbv` config paths;
+`term! -> X`→`endprogram X` in the three term fixtures; and
+`lib/compiler/needs_state.bv` now casts `CStr`→`String` explicitly
+(`cstr_to_briev`) after the String-param library-export codegen bug surfaced
+(`%ac0` i64-vs-ptr, logged below). `glue_integration.sh` Test 5 now checks the
+per-language `lib/glue/<lang>/glue.dbv` folders.
+**Verification:** `cargo test` fully green (lib 1828 + bin 14 + all 30
+integration-test binaries incl. the C/C++/Java/Node/Python/C#/Go/Lua drivers);
+`tests/glue_integration.sh` 11/11.
+
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
+
+**Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
+**Status:** Open. An exported defn with a `String` parameter, built via
+`brievc build --library`, emits `%ac0` typed i64 in the shim while the body
+expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
+'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
+and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
+marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
+a ptr).
+
 ## Local collection values segfault — FIXED (slice 4)
+
 
 **Date:** 2026-08-12 — **fixed** (commit `459dc980`). A local
 `let xs: List<Int> = [2,4,6]` emitted the hardcoded `[len][elem]` heap-seq
@@ -3978,6 +4014,112 @@ liveness). SRBV verification runs only under the `.s` strict profile
   per instance — `b-when` inside a component already works at the state level),
   dynamic component counts (`b-each` of components), props.
 See `docs/plans/2026-08-11-phase2b2-instance-state.md`.
+
+## `as Bits<N>` never truncated sub-byte widths (identity cast lane) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found during pack Phase 2 end-to-end)
+**Status:** Fixed in `15117133` (pack commit).
+**Root cause:** the casting graph treats `Int ↔ Bits` as a same-lane identity
+(`path.is_empty()` in `emit_cast_path`), so `16 as Bits<4>` produced an i64
+register typed `Bits<4>` holding 16 — no truncation. This surfaced via packed
+sub-byte fields (a `Bits<4>` field legitimately needs a 4-bit domain), but
+affects every `as Bits<N>` cast for N < 64.
+**Fix:** the cast path (and its no-graph fallback) truncate integer sources to
+exactly N bits; `emit_cast_steps`'s Bitcast lane zext/truncs across differing
+integer widths; the reference interpreter mirrors the truncation (rule 4);
+packed stores mask to the field width defensively.
+
+## BE sub-byte packed shift formula — FIXED 2026-08-13
+
+**Date:** 2026-08-13
+**Status:** Fixed in `15117133` (pack commit).
+**Root cause:** `packed_field_offsets` used `shift = cov*8 − bits` for
+Big-endian fields; correct is `cov*8 − within − bits` (the field's MSB sits at
+integer bit `cov*8 − 1 − within` of the covered region). The unit test had
+encoded the wrong expectation, so the bug was invisible. A low-nibble BE field
+(`within = 4`) shifted off its own bits and read the neighbor's nibble.
+**Fix:** corrected formula in `src/type_universe/packed.rs` + tests; verified
+byte-for-byte against hand-computed BE storage in `benchmarks/pack_be_selfcheck.bv`.
+
+## `Bits<N>` fields read/wrote the full word (Applied alias widened to i64) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found while verifying union overlay end-to-end)
+**Status:** Fixed in `feat/spec-layout-keywords` Phase 6.
+**Root cause:** `Bits<32>` in source parses as `Applied("Bits", [Number(32)])`.
+The casting graph's generic application resolution lowered it to i64, so a
+`Bits<32>` struct/union field read all 64 bits (the direct `Type::Bits` form
+lowered to i32 correctly). Phase 2 fixed this for the packed authority
+(`field_bits`) but the general `llvm_type` path was still widening.
+**Fix:** `llvm_type` resolves `Applied("Bits", [N])` to `i{N}` (early check,
+matching the direct `Type::Bits` arm). `lower_type` does the same.
+
+## `Ptr<Bits<8>>` was an i64 element pointer under the byte-era Bits unit — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (logged per the layout-keywords plan DoD)
+**Status:** Fixed by Phase 1 (`15117132`, Bits-unit restoration).
+**Root cause:** before the Bits-unit fix, `Type::bits(N)` stored BYTES, so
+`emit_address_of` (`src/backend/llvm/intrinsics.rs:724`) constructed
+`Ptr<Type::bits(8)>` intending a byte pointer but produced an i64 element
+type. Every `Type::bits(N)`-as-byte consumer had the same unit ambiguity.
+**Fix:** `Type::Bits(N)` is now exactly N bits; `Ptr<Bits(8)>` is a true i8
+(byte) pointer. No further action needed — logged to close the plan's DoD.
+
+## `!> IsZero:` / `!> IsOne:` stdlib metadata was dead — REMOVED 2026-08-13
+
+**Date:** 2026-08-13 (layout-keywords plan DoD audit, Phase 7)
+**Status:** Removed — audited, no consumers.
+**Audit:** `lib/std/types.bv` carried `!> IsZero: _ == 0;` and
+`!> IsOne: _ == 1;` metadata. A `grep` across `src/` (and the typechecker /
+strategy resolution) found zero readers — the metadata did not parse as any
+current metadata value and was never consulted. Removed from `types.bv` as
+truly dead (rule 14: no type-specific knowledge; if a zero/one predicate is
+needed later it belongs in stdlib as an `op`, not metadata).
+
+## Reactive nodes with struct-typed state slots fire once then stop — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found while writing pack end-to-end benchmarks)
+**Status:** Fixed (reactor fix, `feat/spec-layout-keywords`).
+**Root cause:** a node reading/writing a struct-typed `let s: S;` slot fired
+once. The struct literal's `alloca` sat inside the reactor loop body (the
+`@main` `.cm_body`), and clang `-O3` peeled the loop + emitted a bogus
+`llvm.assume(N == 1)` exit assumption — a single-iteration loop. Works at
+`-O0` (7 lines) but breaks at `-O3 -flto` (1 line). Verified by
+hand-hoisting the alloca to the function entry (fixed) and confirming the
+loop-carried pointer phi / heap allocation / guard-assume removal were NOT
+sufficient.
+**Fix:** `emit_struct_literal`/`emit_struct_array` defer their `alloca` to
+`pending_struct_allocas` while `fun.defer_struct_allocas` is set; the reactor
+loop builders (`emit_countable_main`) buffer the loop construction and flush
+the allocas into the loop PREHEADER (before `.cm_header`). `emit_definition`
+hoists defn-body struct allocas to the function entry. Verified: the struct
+node now loops correctly at `-O3 -flto` (7 lines at BOUND=20, matching the
+non-struct shape); `benchmarks/pack_struct_runtime.bv` / `pack_be_selfcheck.bv`
+output IDENTICAL to C. Packed/union/atomic structs hit the same gap — all
+fixed by the hoist.
+
+## `!range` metadata emitted untyped for i64 (malformed in LLVM 18+) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found via tests/llvm_compile_test.sh on the bounded counter fixture)
+**Status:** Fixed.
+**Root cause:** `emit_precondition_proof` (src/backend/llvm/emit_toplevel.rs:3519)
+emitted `!range !{ 0, 10 }` (untyped bounds) for i64 loads, using the legacy
+short form. clang/opt 18+ reject untyped range bounds ("expected metadata
+operand"), so any `.bv` with a bounded i64 precondition (e.g.
+`node [count < 10]`) produced IR that clang refuses to compile. The bench suite
+never hit it (no benchmark uses bounded i64 preconditions).
+**Fix:** always emit typed bounds (`!range !{ i64 0, i64 10 }`), matching the
+typed form used by `emit_range_metadata` for narrower widths.
+
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
+
+**Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
+**Status:** Open. An exported defn with a `String` parameter, built via
+`brievc build --library`, emits `%ac0` typed i64 in the shim while the body
+expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
+'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
+and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
+marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
+a ptr).
 
 ## Bare collection literal as a function ARG crashes — KNOWN (string.bv unblock)
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # GLUE Integration Tests
-# Tests the full briv link + briv export pipeline.
+# Tests the full briev link + briev export pipeline.
 # Run from the compiler project root.
 #
 # Usage: ./tests/glue_integration.sh [--keep]
@@ -26,20 +26,20 @@ fail() {
 echo "=== GLUE Integration Tests ==="
 echo ""
 
-# Verify briefc exists
-if [ ! -f "$ROOT/target/debug/briefc" ]; then
-    echo "Building briefc first..."
+# Verify brievc exists
+if [ ! -f "$ROOT/target/debug/brievc" ]; then
+    echo "Building brievc first..."
     (cd "$ROOT" && cargo build 2>/dev/null) || {
-        echo "SKIP: briefc build failed"
+        echo "SKIP: brievc build failed"
         exit 0
     }
 fi
 
-BRIV="$ROOT/target/debug/briefc"
+BRIV="$ROOT/target/debug/brievc"
 
-# ---- Test 1: briv link ----
+# ---- Test 1: briev link ----
 
-echo "--- Test 1: briv link on a C object file ---"
+echo "--- Test 1: briev link on a C object file ---"
 
 # Create a minimal C function
 cat > "$TMPDIR/math_ops.c" << 'CEOF'
@@ -56,26 +56,26 @@ gcc -c -o "$TMPDIR/math_ops.o" "$TMPDIR/math_ops.c" 2>/dev/null || {
 if [ -z "$skip_link" ]; then
     LINK_OUTPUT=$($BRIV link "$TMPDIR/math_ops.o" 2>/dev/null) && {
         if echo "$LINK_OUTPUT" | grep -q "add"; then
-            pass "briv link discovers the add symbol"
+            pass "briev link discovers the add symbol"
         else
-            fail "briv link output missing expected symbols"
+            fail "briev link output missing expected symbols"
         fi
 
-        # briv link prints the generated bridge .bv to stdout.
+        # briev link prints the generated bridge .bv to stdout.
         if echo "$LINK_OUTPUT" | grep -q "frgn add"; then
             pass "generated bridge .bv contains frgn declarations"
         else
             fail "generated bridge .bv missing frgn declarations"
         fi
     } || {
-        fail "briv link failed"
+        fail "briev link failed"
     }
 fi
 
-# ---- Test 2: briv export (rust) ----
+# ---- Test 2: briev export (rust) ----
 
 echo ""
-echo "--- Test 2: briv export (rust) ---"
+echo "--- Test 2: briev export (rust) ---"
 
 cat > "$TMPDIR/test_bridge.bv" << 'BVEOF'
 // Test bridge for GLUE export
@@ -92,7 +92,7 @@ BVEOF
 EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'" && \
        echo "$EXPORT_OUTPUT" | grep -q "2 exports"; then
-        pass "briv export rust completed (2 exports detected)"
+        pass "briev export rust completed (2 exports detected)"
 
         # Check Rust crate structure
         RUST_DIR="$TMPDIR/test_bridge-bridge"
@@ -112,20 +112,20 @@ EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" rust --out "$TMPDIR" 2>/de
             fail "rust: bridge name not interpolated"
         fi
     else
-        fail "briv export rust failed"
+        fail "briev export rust failed"
     fi
 } || {
-    fail "briv export rust error"
+    fail "briev export rust error"
 }
 
-# ---- Test 3: briv export (python) ----
+# ---- Test 3: briev export (python) ----
 
 echo ""
-echo "--- Test 3: briv export (python) ---"
+echo "--- Test 3: briev export (python) ---"
 
 EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
-        pass "briv export python completed"
+        pass "briev export python completed"
 
         PY_DIR="$TMPDIR/test_bridge-bridge"
         if [ -f "$PY_DIR/__init__.py" ]; then
@@ -141,20 +141,20 @@ EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" python --out "$TMPDIR" 2>/
             fail "python: missing __init__.py"
         fi
     else
-        fail "briv export python failed"
+        fail "briev export python failed"
     fi
 } || {
-    fail "briv export python error"
+    fail "briev export python error"
 }
 
-# ---- Test 4: briv export (node) ----
+# ---- Test 4: briev export (node) ----
 
 echo ""
-echo "--- Test 4: briv export (node) ---"
+echo "--- Test 4: briev export (node) ---"
 
 EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/dev/null) && {
     if echo "$EXPORT_OUTPUT" | grep -q "Bridge 'test_bridge'"; then
-        pass "briv export node completed"
+        pass "briev export node completed"
 
         NODE_DIR="$TMPDIR/test_bridge-bridge"
         if [ -f "$NODE_DIR/index.mjs" ]; then
@@ -163,10 +163,10 @@ EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/de
             fail "node: missing index.mjs"
         fi
     else
-        fail "briv export node failed"
+        fail "briev export node failed"
     fi
 } || {
-    fail "briv export node error"
+    fail "briev export node error"
 }
 
 # ---- Test 5: glue config (Data Briv) ----
@@ -174,19 +174,10 @@ EXPORT_OUTPUT=$($BRIV export "$TMPDIR/test_bridge.bv" node --out "$TMPDIR" 2>/de
 echo ""
 echo "--- Test 5: GLUE registry is Data Briv ---"
 
-if [ -f "$ROOT/config/glue.dbvl" ]; then
-    if grep -q "python:" "$ROOT/config/glue.dbvl" && grep -q "rust:" "$ROOT/config/glue.dbvl"; then
-        pass "config/glue.dbvl defines python + rust targets"
-    else
-        fail "config/glue.dbvl missing python/rust targets"
-    fi
-    if [ ! -f "$ROOT/lib/glue.toml" ]; then
-        pass "lib/glue.toml removed after migration"
-    else
-        fail "lib/glue.toml still present"
-    fi
+if [ -f "$ROOT/lib/glue/python/glue.dbv" ] && [ -f "$ROOT/lib/glue/rust/glue.dbv" ]; then
+    pass "per-language glue.dbv configs present (python + rust)"
 else
-    fail "config/glue.dbvl not found"
+    fail "lib/glue/<lang>/glue.dbv configs missing"
 fi
 
 # ---- Summary ----

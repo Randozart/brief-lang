@@ -1117,6 +1117,10 @@ pub enum RuntimeError {
     /// `init` — the value is set once before beginprogram and is immutable for
     /// the run. The interpreter is the reference: codegen must match.
     ImmutableInit(String),
+    /// 2026-08-13 (layout-keywords plan Phase 4): `trap;` evaluated — a
+    /// hardware abort (SPEC §8.8). The reference interpreter reports the abort
+    /// like the LLVM `llvm.trap` + `unreachable` sequence.
+    Trap,
 }
 
 impl fmt::Display for RuntimeError {
@@ -1147,6 +1151,9 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::ImmutableInit(name) => {
                 write!(f, "cannot modify '{}': an init is seeded once before beginprogram and is immutable for the run", name)
+            }
+            RuntimeError::Trap => {
+                write!(f, "trap: the program executed a hardware abort (SPEC §8.8)")
             }
         }
     }

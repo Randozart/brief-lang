@@ -2014,6 +2014,10 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` is a never-type —
+        // it aborts, so it needs no value and unifies with any expected type
+        // (SPEC §8.8).
+        Statement::Trap => Ok(()),
         Statement::Term(val) | Statement::EndProgram(val) => {
             if let Some(val) = val {
                 let vty = infer_type_only(val, ctx)?;

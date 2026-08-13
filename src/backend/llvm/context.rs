@@ -166,6 +166,21 @@ pub struct CompilerContext {
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
+    /// 2026-08-13 (layout-keywords plan): `pack struct` names. Carried on the
+    /// context (frontend-declared), NOT on ResolvedType — the type still owns
+    /// only protocol + declared metadata; codegen consults the packed layout
+    /// helper when it must materialize the representation.
+    pub packed_structs: HashSet<String>,
+    /// 2026-08-13 (layout-keywords plan Phase 5): atomic field slots, keyed
+    /// `"<type>.<field>"` (type name + field name disambiguate across
+    /// structs). Populated at registration from the parser's
+    /// `metadata["atomic_fields"]` carrier; field load/store emitters check
+    /// membership to emit `load atomic`/`store atomic` (SPEC §8.2).
+    pub atomic_fields: HashSet<String>,
+    /// 2026-08-13 (layout-keywords plan Phase 6): `union` type names — all
+    /// fields overlay at offset 0; the type materializes as a byte array of
+    /// the largest aligned field storage (SPEC §8.2).
+    pub unions: HashSet<String>,
     /// 2026-08-13 (obj value ABI): `obj` declaration names whose VALUES are
     /// boxed i64 (or i{int_bits}) handles — the pooled-instance representation
     /// used by state slots, struct literals, and field access. Distinct from
@@ -396,6 +411,9 @@ impl CompilerContext {
             constants: HashMap::new(),
             inits: HashMap::new(),
             struct_types: HashMap::new(),
+            packed_structs: HashSet::new(),
+            atomic_fields: HashSet::new(),
+            unions: HashSet::new(),
             obj_types: std::collections::HashSet::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
@@ -662,6 +680,17 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// Keyed by variable name. When &x is taken on a struct-typed let binding,
     /// this map provides the stack alloca pointer instead of the ptrtoint result.
     pub struct_literal_allocas: HashMap<String, String>,
+    /// 2026-08-13 (reactor fix): struct-literal `alloca` instructions deferred
+    /// by emit_struct_literal while `defer_struct_allocas` is set, flushed to
+    /// the function entry / loop preheader by flush_pending_struct_allocas. An
+    /// alloca left inside a reactor loop body makes clang -O3 peel the loop and
+    /// emit a bogus exit assumption — the node fires once.
+    pub pending_struct_allocas: Vec<String>,
+    /// 2026-08-13: while true, emit_struct_literal/emit_struct_array write
+    /// their alloca to `pending_struct_allocas` instead of the output. Set by
+    /// the reactor loop builders around the in-loop body emission (and by
+    /// emit_definition), so in-loop struct literals hoist to the preheader.
+    pub defer_struct_allocas: bool,
 
     /// 2026-07-31 (A5): active obj-member `self` binding — (struct type name,
     /// self pointer register). While set, a bare identifier naming a slot of
@@ -956,6 +985,8 @@ impl FunctionContext {
             boxed_scalar_regs: HashSet::new(),
             pending_consumes: Vec::new(),
             struct_literal_allocas: HashMap::new(),
+            pending_struct_allocas: Vec::new(),
+            defer_struct_allocas: false,
             self_binding: None,
             self_prefix: None,
             reg_float_cache: HashMap::new(),
@@ -1050,6 +1081,8 @@ impl FunctionContext {
         self.pending_consumes.clear();
         self.let_binding_allocas.clear();
         self.struct_literal_allocas.clear();
+        self.pending_struct_allocas.clear();
+        self.defer_struct_allocas = false;
         self.reg_float_cache.clear();
         self.reg_type_cache.clear();
     }

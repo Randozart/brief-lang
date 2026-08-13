@@ -284,6 +284,10 @@ impl Reactor {
                 interp.eval_expr(cond)?;
                 Ok(StmtResult::Continue)
             }
+            // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — the abort
+            // diagnostic stops the reactor (SPEC §8.8), mirroring the LLVM
+            // `llvm.trap` + `unreachable` sequence.
+            Statement::Trap => return Err(crate::interpreter::RuntimeError::Trap),
             Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)

@@ -1,7 +1,7 @@
 // ── Boundary-Type Round-Trip Test ──────────────────────────────────────
 // 2026-08-03 (plan 2026-08-03-protocol-driven-glue-boundary): the export
 // signature IS the boundary contract. `CStr` is a #String<C_String> sub-type
-// (ptr ABI, marshalled via the casting graph's cstr_to_briv/str_to_c
+// (ptr ABI, marshalled via the casting graph's cstr_to_briev/str_to_c
 // bindings); `CDouble` is #Float<C_Double> (double ABI — the Float fix);
 // `CStr + CStr` uses the variant's own Concat cross-op (cstring_concat).
 // Toolchain-guarded.
@@ -22,35 +22,35 @@ fn boundary_types_roundtrip() {
             return;
         }
     }
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_boundary_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_boundary_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/examples/glue-host/boundary.bv", PROJECT_ROOT);
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
 
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
 
     // The generated header must resolve the boundary types to C ABI names.
-    let header = std::fs::read_to_string(out_dir.join("boundary-bindings").join("briv_types.h")).unwrap();
+    let header = std::fs::read_to_string(out_dir.join("boundary-bindings").join("briev_types.h")).unwrap();
     assert!(header.contains("int64_t echo(int64_t name)"), "CStr → int64_t: {}", header);
     assert!(header.contains("int64_t join(int64_t a, int64_t b)"), "CStr params: {}", header);
     assert!(header.contains("double identity(double x)"), "CDouble → double: {}", header);
 
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "boundary-bindings/briv_types.h"
+#include "boundary-bindings/briev_types.h"
 #include <stdio.h>
 
 int main(void) {
-    BrivState* st = __briv_init_state();
+    BrievState* st = __briev_init_state();
     int64_t echoed = echo((int64_t)"hello");
     int64_t greeted = greet((int64_t)"hello");
     int64_t joined = join((int64_t)"foo", (int64_t)"bar");

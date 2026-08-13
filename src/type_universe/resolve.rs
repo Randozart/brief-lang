@@ -14,16 +14,21 @@ use crate::type_universe::{ResolvedType, TypeUniverse};
 pub fn resolve_type(universe: &TypeUniverse, ty: &crate::ast::Type) -> Option<ResolvedType> {
     match ty {
         crate::ast::Type::Custom(name) => universe.get(name).cloned(),
-        crate::ast::Type::Bits(n) => Some(ResolvedType {
-            name: format!("Bits({})", n),
-            base: "Bit".into(),
-            bytes: *n,
-            min_bits: *n * 8,
-            max_bits: *n * 8,
-            alignment: (*n).min(8),
-            properties: std::collections::HashMap::new(),
-            fields: vec![],
-        }),
+        crate::ast::Type::Bits(n) => {
+            // 2026-08-13 (layout-keywords plan): Bits stores bits; storage bytes
+            // round up (div_ceil) so sub-byte widths keep one storage byte.
+            let bytes = n.div_ceil(8);
+            Some(ResolvedType {
+                name: format!("Bits({})", n),
+                base: "Bit".into(),
+                bytes,
+                min_bits: *n,
+                max_bits: *n,
+                alignment: bytes.min(8),
+                properties: std::collections::HashMap::new(),
+                fields: vec![],
+            })
+        },
         crate::ast::Type::Ptr(_) => Some(ResolvedType {
             name: "Ptr".into(),
             base: "Ptr".into(),

@@ -32,10 +32,14 @@ impl<'a> Parser<'a> {
             // and/or non-vectorized array access. Recorded as a modifier
             // annotation; the backend consumes it (never a speed win — a
             // modifier-beaten default is a compiler bug).
-            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct)) => {
+            Some(Token::Pack) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
+            Some(Token::Union) => self.parse_struct_def(true).map(TopLevel::StaticStruct),
+            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack)) => {
                 // 2026-08-05 (Phase 4): `seq struct` — parse_struct_def consumes
-                // the seq modifier itself.
-                self.parse_struct_def().map(TopLevel::StaticStruct)
+                // the seq modifier itself. 2026-08-13: `pack`/`seq` prefixes are
+                // order-independent (`pack seq struct`, `seq pack struct`); the
+                // struct parser consumes whichever flags precede `struct`.
+                self.parse_struct_def(false).map(TopLevel::StaticStruct)
             }
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
                 self.pos += 1; // consume seq
@@ -190,7 +194,7 @@ impl<'a> Parser<'a> {
             Some(Token::Impl) => self.parse_impl().map(TopLevel::Impl),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
             Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
-            Some(Token::Struct) => self.parse_struct_def().map(TopLevel::StaticStruct),
+            Some(Token::Struct) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
             // 2026-07-26: Handle `render struct Name { <html> }` and `render obj Name { <html> }`
             Some(Token::Render) => self.parse_render_block(),
             // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
@@ -1749,56 +1753,24 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
+        let mut atomic_slots: Vec<String> = Vec::new();
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // !> key: value; — metadata assignment (new syntax)
-                if self.check(&Token::ExclaimArrow) {
-                    self.advance();
-                    let key = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    match key.as_str() {
-                        "ctd" => {
-                            let ctd_name = self.expect_identifier()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
-                        }
-                        "alu" => {
-                            match self.peek() {
-                                Some(Token::Identifier(_)) => {
-                                    let alu_name = self.expect_identifier()?;
-                                    metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
-                                }
-                                _ => {
-                                    let alu_str = self.expect_string()?;
-                                    metadata.insert("alu".into(), PropertyValue::String(alu_str));
-                                }
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        "layout" => {
-                            if self.check(&Token::LBrace) {
-                                let fields = self.parse_layout_struct_body()?;
-                                metadata.insert("layout_struct".into(), fields);
-                            } else {
-                                let raw = self.read_layout_body()?;
-                                metadata.insert("layout".into(), PropertyValue::String(raw));
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        _ => {
-                            let pv = self.parse_metadata_value_standalone()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert(key, pv);
-                        }
-                    }
+                // !> key: value; or spec PascalCase: value; — metadata assignment
+                if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
+                let prefixes = self.parse_field_prefixes();
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
+                }
+                if prefixes.iter().any(|a| a == "atomic") {
+                    atomic_slots.push(slot_name.clone());
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -1806,6 +1778,9 @@ impl<'a> Parser<'a> {
                 slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
             }
             self.expect(Token::RBrace)?;
+        }
+        if !atomic_slots.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_slots);
         }
         Ok(Box::new(TypeDef {
             name,
@@ -2051,24 +2026,96 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// 2026-07-16: Parse struct-format layout body: { field: Type, ... }.
-    /// Returns PropertyValue::List of [name_string, type_name_identifier] pairs.
-    fn parse_layout_struct_body(&mut self) -> Result<PropertyValue, SyntaxError> {
-        self.expect(Token::LBrace)?;
-        let mut fields = Vec::new();
-        while !self.check(&Token::RBrace) && !self.is_at_end() {
-            let name = self.expect_identifier()?;
-            self.expect(Token::Colon)?;
-            let ty = self.parse_type()?;
-            self.eat(&Token::Comma);
-            self.eat(&Token::Semicolon);
-            fields.push(PropertyValue::List(vec![
-                PropertyValue::String(name),
-                PropertyValue::Identifier(ty.to_string()),
-            ]));
+    /// 2026-08-13 (layout-keywords plan): parse one metadata clause in a type/
+    /// obj/struct body. Two spellings:
+    ///   `!> <lowercase_key>: <value>;`       — annotation form (legacy)
+    ///   `spec <PascalCase>: <value>;`         — declared-layout form (modern)
+    /// Both write the SAME lowercase metadata keys, so consumers have a single
+    /// read path. `!>` keeps the ctd/alu special cases (the `<...>` layout DSL
+    /// was removed 2026-08-13 — see the layout-keywords plan); `spec` has the
+    /// five physical-layout keys (Alignment/Bits/MaxBits/Bytes/Endian).
+    /// Invoked with the cursor AT the `!>` or `spec` token.
+    fn parse_metadata_clause(
+        &mut self,
+        metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    ) -> Result<(), SyntaxError> {
+        let is_spec = self.check(&Token::Spec);
+        self.advance();
+        let key = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+        if is_spec {
+            return self.parse_spec_value(&key, metadata);
         }
-        self.expect(Token::RBrace)?;
-        Ok(PropertyValue::List(fields))
+        match key.as_str() {
+            "ctd" => {
+                let ctd_name = self.expect_identifier()?;
+                self.eat(&Token::Semicolon);
+                metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+            }
+            "alu" => {
+                match self.peek() {
+                    Some(Token::Identifier(_)) => {
+                        let alu_name = self.expect_identifier()?;
+                        metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                    }
+                    _ => {
+                        let alu_str = self.expect_string()?;
+                        metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                    }
+                }
+                self.eat(&Token::Semicolon);
+            }
+            _ => {
+                let pv = self.parse_metadata_value_standalone()?;
+                self.eat(&Token::Semicolon);
+                metadata.insert(key, pv);
+            }
+        }
+        Ok(())
+    }
+
+    /// 2026-08-13 (layout-keywords plan): parse the value of a `spec` clause.
+    /// Key is the PascalCase spelling already lexed. The five physical-layout
+    /// keys are recognized; anything else is an error per SPEC §2.1 (no silent
+    /// unknown-spec acceptance).
+    fn parse_spec_value(
+        &mut self,
+        name: &str,
+        metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    ) -> Result<(), SyntaxError> {
+        let key = match spec_name_to_key(name) {
+            Some(k) => k,
+            None => {
+                let msg = format!(
+                    "unknown spec '{}' — known specs: Alignment, Bits, MaxBits, Bytes, Endian",
+                    name
+                );
+                return self.error_at_current(&msg);
+            }
+        };
+        match key {
+            "endian" => {
+                let id = self.expect_identifier()?;
+                if !matches!(id.as_str(), "Big" | "Little" | "Target") {
+                    let msg = format!(
+                        "invalid spec Endian value '{}' — expected Big, Little, or Target",
+                        id
+                    );
+                    return self.error_at_current(&msg);
+                }
+                metadata.insert(key.into(), PropertyValue::Identifier(id));
+            }
+            _ => {
+                let n = self.expect_integer()?;
+                if n < 0 {
+                    let msg = format!("spec {} must be a non-negative integer, got {}", name, n);
+                    return self.error_at_current(&msg);
+                }
+                metadata.insert(key.into(), PropertyValue::Int(n));
+            }
+        }
+        self.eat(&Token::Semicolon);
+        Ok(())
     }
 
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
@@ -2084,18 +2131,14 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         let mut metadata = std::collections::HashMap::new();
+        let mut atomic_slots: Vec<String> = Vec::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                if self.check(&Token::ExclaimArrow) {
-                    // !> key: value; metadata (same handling as type bodies).
-                    self.advance();
-                    let key = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    let pv = self.parse_metadata_value_standalone()?;
-                    self.eat(&Token::Semicolon);
-                    metadata.insert(key, pv);
+                // !> key: value; or spec PascalCase: value; — metadata.
+                if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
                 if self.check(&Token::Txn) {
@@ -2117,10 +2160,14 @@ impl<'a> Parser<'a> {
                     self.eat(&Token::Semicolon);
                     continue;
                 }
+                let prefixes = self.parse_field_prefixes();
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
+                }
+                if prefixes.iter().any(|a| a == "atomic") {
+                    atomic_slots.push(slot_name.clone());
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -2130,6 +2177,9 @@ impl<'a> Parser<'a> {
             self.expect(Token::RBrace)?;
         }
         self.eat(&Token::Semicolon);
+        if !atomic_slots.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_slots);
+        }
         Ok(Box::new(TypeDef {
             name, type_params, parent: None,
             protocol: None,
@@ -2141,51 +2191,185 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    /// Parse the optional field-modifier prefixes that precede a field name:
+    /// the `atomic` keyword (Phase 5) and `#` hashword markers (`#Stack`,
+    /// `#Heap`, `#Scalar`) in any order. Returns the collected markers.
+    fn parse_field_prefixes(&mut self) -> Vec<String> {
+        let mut anns = Vec::new();
+        loop {
+            match self.peek() {
+                Some(Token::Atomic) => {
+                    self.pos += 1;
+                    anns.push("atomic".to_string());
+                }
+                Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
+                    anns.push(s.clone());
+                    self.pos += 1;
+                }
+                _ => break,
+            }
+        }
+        anns
+    }
+
     /// struct Name { field: Type; } — static fixed-layout struct.
     /// Pure data, C-compatible, no methods, no contracts.
     /// 2026-07-24: Fields are space-separated, semicolon-terminated.
-    fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
+    fn parse_struct_def(&mut self, union: bool) -> Result<StructDef, SyntaxError> {
         // 2026-08-05 (Phase 4): `seq struct` preserves field order/containment.
-        let seq = self.eat(&Token::Seq);
-        self.pos += 1; // consume struct
+        // 2026-08-13 (layout-keywords plan): `pack struct` (bit-contiguous) —
+        // `pack`/`seq` are order-independent (`pack seq struct`, `seq pack
+        // struct`), so consume both flags before `struct` in a loop.
+        let mut seq = false;
+        let mut pack = false;
+        // 2026-08-13 (Phase 6): `union` is standalone — no seq/pack prefixes.
+        if !union {
+            loop {
+                match self.tokens.get(self.pos).map(|(t, _)| t) {
+                    Some(Token::Seq) => { seq = true; self.pos += 1; }
+                    Some(Token::Pack) => { pack = true; self.pos += 1; }
+                    _ => break,
+                }
+            }
+            self.expect(Token::Struct)?;
+        } else {
+            self.expect(Token::Union)?;
+        }
         let name = self.expect_identifier()?;
         // 2026-07-31: Generic struct: struct ListBuffer<T> { ... }.
         let type_params = self.parse_type_params()?;
         let mut fields = Vec::new();
         let mut annotations: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        // 2026-08-13 (layout-keywords plan Phase 5): `atomic` field names.
+        let mut atomic_fields = Vec::new();
+        // 2026-08-13 (layout-keywords plan): structs gain physical-layout
+        // metadata (`spec Bits`, `spec Align`, `spec Bytes`, `spec MaxBits`,
+        // `spec Endian`) consumed at StaticStruct registration (llvm/mod.rs).
+        let mut metadata: std::collections::HashMap<String, PropertyValue> = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // 2026-07-26: Parse optional hashword annotations (#Stack, #Heap, #Scalar)
-                let mut field_annotations = Vec::new();
-                while let Some(&Token::Identifier(ref s)) = self.peek() {
-                    if s.starts_with('#') {
-                        field_annotations.push(s.clone());
-                        self.pos += 1;
-                    } else {
-                        break;
-                    }
+                // spec PascalCase: value; — declared physical layout.
+                if self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
+                    continue;
                 }
+                // 2026-07-26 / 2026-08-13 (Phase 5): field prefixes — `#`
+                // hashword markers and the `atomic` modifier (both can mix, in
+                // any order, before the field name).
+                let field_prefixes = self.parse_field_prefixes();
                 let field_name = self.expect_identifier()?;
                 self.expect(Token::Colon)?;
                 let field_type = self.parse_type()?;
                 self.eat(&Token::Semicolon);
                 fields.push((field_name.clone(), field_type));
-                if !field_annotations.is_empty() {
-                    annotations.insert(field_name, field_annotations);
+                if field_prefixes.iter().any(|a| a == "atomic") {
+                    atomic_fields.push(field_name.clone());
+                }
+                // `atomic` is carried by the structured `atomic_fields`
+                // metadata, NOT the `#`-marker annotations string (which is a
+                // debug-format reflection value and is not round-trippable).
+                let markers: Vec<String> = field_prefixes
+                    .iter()
+                    .filter(|a| a.as_str() != "atomic")
+                    .cloned()
+                    .collect();
+                if !markers.is_empty() {
+                    annotations.insert(field_name, markers);
                 }
             }
             self.expect(Token::RBrace)?;
         }
         self.eat(&Token::Semicolon);
-        let mut metadata = std::collections::HashMap::new();
         if !annotations.is_empty() {
             metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
+        }
+        if !atomic_fields.is_empty() {
+            record_atomic_fields(&mut metadata, &atomic_fields);
+        }
+        // 2026-08-13 (layout-keywords plan): `pack struct` fields must be
+        // bit-sliceable — no array fields (bit-contiguous arrays are a
+        // contradiction) and no field wider than the 64-bit slice machinery
+        // (SPEC §2.5). Other scalar types resolve through the universe at
+        // registration; whole-byte widths stay on the aligned native path.
+        if pack {
+            for (fname, fty) in &fields {
+                match fty {
+                    Type::Vector(_, _) => {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "packed field '{}': a bit-contiguous struct cannot hold an array field; use an indirection or a sequence (seq)",
+                                fname
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                    Type::Bits(n) if *n > 64 => {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "packed field '{}': width {} exceeds the 64-bit packed slice limit; split it into whole-byte `Bits<64>` fields and combine",
+                                fname, n
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                    // 2026-08-13: `Bits<N>` parses as Applied("Bits", [Number(N)])
+                    // (the exact-width alias) — enforce the same slice limit.
+                    Type::Applied(name, args) if name == "Bits" => {
+                        if let Some(crate::ast::Type::Number(n)) = args.first() {
+                            if *n > 64 {
+                                return Err(SyntaxError::InvalidStatement {
+                                    reason: format!(
+                                        "packed field '{}': width {} exceeds the 64-bit packed slice limit; split it into whole-byte `Bits<64>` fields and combine",
+                                        fname, n
+                                    ),
+                                    span: self
+                                        .peek_with_span()
+                                        .map(|(_, s)| self.make_span(s.clone()))
+                                        .unwrap_or(crate::errors::Span::dummy()),
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // 2026-08-13 (layout-keywords plan Phase 6): a union's fields overlay
+        // at offset 0 — sub-byte `Bits<N>` fields (N % 8 != 0) and zero-width
+        // padding are deferred (explicit error), because bit-sliced access on
+        // an overlay is ambiguous. Whole-byte fields resolve at registration.
+        if union {
+            for (fname, fty) in &fields {
+                let bits = crate::type_universe::bits_width(fty);
+                if let Some(n) = bits {
+                    if n == 0 || n % 8 != 0 {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "union field '{}': width {} is sub-byte — a union overlay needs whole-byte fields (deferred; use `Bits<{}>` or split)",
+                                fname, n, n.div_ceil(8) * 8
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                }
+            }
         }
         Ok(StructDef {
             name, type_params, fields,
             metadata,
             span: None,
             seq,
+            pack,
+            union,
         })
     }
 
@@ -2443,6 +2627,33 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// 2026-08-13 (layout-keywords plan): PascalCase spec key → canonical
+/// lowercase metadata key. The reverse map (formatter) lives in canonical.rs —
+/// keep the two tables in sync.
+/// Record the `atomic` field names as a structured metadata property
+/// (PropertyValue::List of field-name Strings) — the reliable carrier the
+/// backend registration reads (no debug-string parsing).
+fn record_atomic_fields(
+    metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    atomic_fields: &[String],
+) {
+    metadata.insert(
+        "atomic_fields".to_string(),
+        PropertyValue::List(atomic_fields.iter().map(|n| PropertyValue::String(n.clone())).collect()),
+    );
+}
+
+fn spec_name_to_key(name: &str) -> Option<&'static str> {
+    match name {
+        "Alignment" => Some("alignment"),
+        "Bits" => Some("bits"),
+        "MaxBits" => Some("maxbits"),
+        "Bytes" => Some("bytes"),
+        "Endian" => Some("endian"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::lexer::tokenize;
@@ -2476,6 +2687,199 @@ mod tests {
         // "Int.c.sso" — the `Int` parses and the dotted suffix is not consumed.
         let ty = parse_type("Int.c.sso").unwrap();
         assert_eq!(ty, crate::ast::Type::int());
+    }
+
+    // ── Layout-keywords (Phase 1): spec clause parsing ────────────────
+
+    fn parse_top(src: &str) -> Result<crate::ast::TopLevel, String> {
+        let tokens = tokenize(src).map_err(|e| format!("lex: {e}"))?;
+        let mut p = Parser::new(tokens, src);
+        p.parse_program()
+            .map(|mut v| v.remove(0))
+            .map_err(|e| format!("parse: {e}"))
+    }
+
+    #[test]
+    fn test_spec_in_type_body() {
+        // 2026-08-13 (layout-keywords plan): `spec Bits: 4` maps to the
+        // lowercase metadata key `bits` (same read path as `!> bits`).
+        let tl = parse_top("type W4: #Int { spec Bits: 4; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        match td.body.metadata.get("bits") {
+            Some(crate::ast::PropertyValue::Int(4)) => {}
+            other => panic!("expected bits=4, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_spec_all_layout_keys_in_type_body() {
+        let tl = parse_top(
+            "type Frame: #Bit {\n  \
+             spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  \
+             spec Bytes: 4;\n  spec Endian: Big;\n};",
+        )
+        .unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        assert_eq!(td.body.metadata["alignment"], crate::ast::PropertyValue::Int(2));
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(12));
+        assert_eq!(td.body.metadata["maxbits"], crate::ast::PropertyValue::Int(16));
+        assert_eq!(td.body.metadata["bytes"], crate::ast::PropertyValue::Int(4));
+        assert_eq!(td.body.metadata["endian"], crate::ast::PropertyValue::Identifier("Big".into()));
+    }
+
+    #[test]
+    fn test_spec_in_struct_body() {
+        let tl = parse_top("struct Header { spec Bytes: 2; tag: Int; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert_eq!(s.metadata["bytes"], crate::ast::PropertyValue::Int(2));
+        assert_eq!(s.fields.len(), 1);
+    }
+
+    #[test]
+    fn test_pack_struct_flag() {
+        let tl = parse_top("pack struct Eth { dst: Bits<48>; src: Bits<48>; etype: Bits<16>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.pack, "pack flag must be set");
+        assert!(!s.seq, "pack alone must not set seq");
+        assert_eq!(s.fields.len(), 3);
+    }
+
+    #[test]
+    fn test_pack_seq_and_seq_pack_order_independent() {
+        // `pack`/`seq` are order-independent prefix flags (plan Phase 2).
+        let tl1 = parse_top("pack seq struct P { a: Bits<4>; };").unwrap();
+        let tl2 = parse_top("seq pack struct P { a: Bits<4>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s1) = tl1 else { panic!("expected StaticStruct") };
+        let crate::ast::TopLevel::StaticStruct(s2) = tl2 else { panic!("expected StaticStruct") };
+        assert!(s1.pack && s1.seq, "pack seq struct sets both flags");
+        assert!(s2.pack && s2.seq, "seq pack struct sets both flags");
+    }
+
+    #[test]
+    fn test_pack_rejects_vector_field() {
+        let err = parse_top("pack struct V { data: Int[4]; };").unwrap_err();
+        assert!(
+            err.contains("array") || err.contains("bit-contiguous"),
+            "packed array field must be rejected with a layout reason; got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_pack_rejects_overwide_field() {
+        let err = parse_top("pack struct W { wide: Bits<128>; };").unwrap_err();
+        assert!(
+            err.contains("64-bit"),
+            "packed field wider than 64 bits must be rejected; got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_trap_statement_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort.
+        let src = "defn f(x: Int) -> Int {\n  if x > 0 {\n    trap;\n  } else {\n    term 0;\n  };\n  term 1;\n};\n";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let crate::ast::TopLevel::Definition(def) = &items[0] else { panic!("expected defn") };
+        let has_trap = def.body.iter().any(|s| match s {
+            crate::ast::Statement::If(_, then, _) => {
+                then.iter().any(|t| matches!(t, crate::ast::Statement::Trap))
+            }
+            _ => false,
+        });
+        assert!(has_trap, "trap; in an if-body must parse to Statement::Trap");
+    }
+
+    #[test]
+    fn test_trap_in_guard_body_parses() {
+        let src = "let g: Int = 0;\nnode n [g < 3][g == 3] {\n  when g == 1 { trap; };\n  g = g + 1;\n  term;\n};\n";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        assert!(p.parse_program().is_ok(), "trap; in a when-body must parse");
+    }
+
+    #[test]
+    fn test_atomic_struct_field_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 5): `atomic x: Int;` records
+        // the field in the structured `atomic_fields` metadata carrier.
+        let tl = parse_top("struct Counter { atomic count: Int; other: Int; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        match s.metadata.get("atomic_fields") {
+            Some(crate::ast::PropertyValue::List(entries)) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("count".into()));
+            }
+            other => panic!("expected atomic_fields list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_atomic_type_slot_parses() {
+        // The `atomic` modifier also applies to obj/type body slots.
+        let tl = parse_top("type Meter: #Int { atomic ticks: Int; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        match td.body.metadata.get("atomic_fields") {
+            Some(crate::ast::PropertyValue::List(entries)) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("ticks".into()));
+            }
+            other => panic!("expected atomic_fields list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_union_declaration_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 6): `union Name { … };` is a
+        // standalone untagged overlay (no `struct` keyword).
+        let tl = parse_top("union Word { i: Int; f: Float; bytes: Bits<64>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.union, "union flag must be set");
+        assert!(!s.seq && !s.pack, "union is exclusive of seq/pack");
+        assert_eq!(s.fields.len(), 3);
+    }
+
+    #[test]
+    fn test_union_rejects_sub_byte_field() {
+        let err = parse_top("union U { nib: Bits<4>; };").unwrap_err();
+        assert!(
+            err.contains("sub-byte"),
+            "sub-byte union field must be rejected with the deferred message; got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_spec_in_obj_body() {
+        let tl = parse_top("obj Widget { spec Bits: 8; x: Int; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef (obj)") };
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(8));
+    }
+
+    #[test]
+    fn test_spec_unknown_name_rejected() {
+        // 2026-08-13: unknown spec names are hard errors — never silent.
+        let err = parse_top("type W: #Int { spec Flurb: 3; };").unwrap_err();
+        assert!(err.contains("unknown spec"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_endian_invalid_value_rejected() {
+        let err = parse_top("type W: #Int { spec Endian: Sideways; };").unwrap_err();
+        assert!(err.contains("invalid spec Endian value"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_non_integer_width_rejected() {
+        let err = parse_top("type W: #Int { spec Bits: many; };").unwrap_err();
+        assert!(err.contains("expected integer") || err.contains("integer"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_does_not_break_exclaim_arrow() {
+        // `!>` still parses alongside `spec` in the same body.
+        let tl = parse_top("type W: #Int { !> ctd: Add; spec Bits: 8; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        assert_eq!(td.body.metadata["ctd"], crate::ast::PropertyValue::Identifier("Add".into()));
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(8));
     }
 
     // ── P3: frgn declaration parsing ─────────────────────────────────

@@ -1,11 +1,11 @@
 // ── C-Driver Library Test ─────────────────────────────────────────────
 // 2026-08-03: the `--library` acceptance criterion — compile a Briv bridge
 // to a static library (.a) + generated C header, then a plain C program
-// includes the header, calls __briv_init_state() and exported functions,
+// includes the header, calls __briev_init_state() and exported functions,
 // links the archive, and gets correct results.
 //
-// Pipeline: briefc build pp-types.bv --library → libpp-types.a + pp-types.so
-//           briefc bindings pp-types.bv c → briv_types.h
+// Pipeline: brievc build pp-types.bv --library → libpp-types.a + pp-types.so
+//           brievc bindings pp-types.bv c → briev_types.h
 //           cc driver.c -L. -lpp-types → driver (toolchain-guarded)
 
 use std::path::Path;
@@ -28,33 +28,33 @@ fn cc_guard() -> Option<()> {
 }
 
 #[test]
-fn c_driver_calls_briv_library() {
+fn c_driver_calls_briev_library() {
     let Some(()) = cc_guard() else { return };
-    let briefc = env!("CARGO_BIN_EXE_briefc");
-    let out_dir = std::env::temp_dir().join("briv_c_driver_test");
+    let brievc = env!("CARGO_BIN_EXE_brievc");
+    let out_dir = std::env::temp_dir().join("briev_c_driver_test");
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).unwrap();
 
     let bv = format!("{}/pp-types.bv", PROJECT_ROOT);
 
     // 1. Build the static library + .so.
-    let build = Command::new(briefc)
+    let build = Command::new(brievc)
         .args(["build", &bv, "--library", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc build --library");
+        .output().expect("failed brievc build --library");
     assert!(build.status.success(), "build --library failed: {}", String::from_utf8_lossy(&build.stderr));
 
     // 2. Generate the C header.
-    let bindings = Command::new(briefc)
+    let bindings = Command::new(brievc)
         .args(["bindings", &bv, "c", "--out", &out_dir.to_string_lossy()])
-        .output().expect("failed briefc bindings");
+        .output().expect("failed brievc bindings");
     assert!(bindings.status.success(), "bindings failed: {}", String::from_utf8_lossy(&bindings.stderr));
-    let header = out_dir.join("pp-types-bindings").join("briv_types.h");
-    assert!(header.exists(), "briv_types.h not generated");
+    let header = out_dir.join("pp-types-bindings").join("briev_types.h");
+    assert!(header.exists(), "briev_types.h not generated");
 
     // 3. Write a C driver that includes the header and calls exports.
     let driver_c = out_dir.join("driver.c");
     std::fs::write(&driver_c, r#"
-#include "briv_types.h"
+#include "briev_types.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -67,10 +67,10 @@ static char* read_cstr(int64_t p) {
 }
 
 int main(void) {
-    BrivState* st = __briv_init_state();
-    printf("bits:%s\n", read_cstr(briv_test_type_bits(st, (int64_t)"42")));
-    printf("void:%s\n", read_cstr(briv_test_type_void(st)));
-    printf("static:%s\n", read_cstr(briv_test_bits_static()));
+    BrievState* st = __briev_init_state();
+    printf("bits:%s\n", read_cstr(briev_test_type_bits(st, (int64_t)"42")));
+    printf("void:%s\n", read_cstr(briev_test_type_void(st)));
+    printf("static:%s\n", read_cstr(briev_test_bits_static()));
     __glue_release(st);
     return 0;
 }

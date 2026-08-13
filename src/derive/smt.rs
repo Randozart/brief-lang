@@ -25,7 +25,7 @@ fn type_to_smt_sort(ty: &Type) -> String {
             "Double" | "Float64" => "(_ BitVec 64)".into(),
             _ => "(_ BitVec 64)".into(),
         },
-        Type::Bits(n) => format!("(_ BitVec {})", n * 8),
+        Type::Bits(n) => format!("(_ BitVec {})", n),
         _ => "(_ BitVec 64)".into(),
     }
 }

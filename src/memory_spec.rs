@@ -251,7 +251,10 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,
         Type::Constrained(_, BitRange::Range(start, end)) => (end - start + 1 + 7) / 8,
         // 2026-07-03: Layout-constrained pointer — value is always pointer-width (8 bytes on x86_64)
-        Type::LayoutPtr(_) | Type::Bits(_) | Type::Width(_) => 8,
+        Type::LayoutPtr(_) => 8,
+        // 2026-08-13 (layout-keywords plan): Bits stores bits; storage rounds up.
+        Type::Bits(n) => (*n as usize).div_ceil(8),
+        Type::Width(_) => 8,
         Type::Ptr(_) | Type::PtrConst(_) => 8,
         Type::Function(_, _) => 8,
     }

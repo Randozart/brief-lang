@@ -504,7 +504,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             if let Some(t) = target { collect_strings_expr(t, seen, out); }
             collect_strings_expr(value, seen, out);
         }
-        Statement::FreeHint(_) | Statement::KeepHint(_) => {}
+        Statement::FreeHint(_) | Statement::KeepHint(_) | Statement::Trap => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
         Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Term(None) | Statement::EndProgram(None) => {}
@@ -781,6 +781,24 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_unive
 ///
 /// 2026-07-31: Phase 3 (§8.4-D6) — the front-member is chosen by #Int protocol
 /// membership (the `Cast.#Int` universe property) instead of the literal type
+/// 2026-08-13 (layout-keywords plan Phase 5): read the parser's structured
+/// `atomic_fields` metadata (a PropertyValue::List of field-name Strings) and
+/// record each `<type>.<field>` slot in `ctx.atomic_fields` — the carrier the
+/// field load/store emitters consult. Plain (non-atomic) fields are untouched.
+fn register_atomic_fields(
+    ctx: &mut CompilerContext,
+    type_name: &str,
+    metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>,
+) {
+    if let Some(crate::ast::PropertyValue::List(entries)) = metadata.get("atomic_fields") {
+        for entry in entries {
+            if let crate::ast::PropertyValue::String(field) = entry {
+                ctx.atomic_fields.insert(format!("{}.{}", type_name, field));
+            }
+        }
+    }
+}
+
 /// name "Int". All three TBAA sites use this helper so the metadata
 /// declaration and the node-index lookups stay in agreement.
 fn sort_tbaa_groups(universe: Option<&crate::type_universe::TypeUniverse>, groups: &mut Vec<String>) {
@@ -2431,6 +2449,16 @@ impl LlvmBackend {
                         .map(|(n, t)| (n.clone(), t.clone()))
                         .collect();
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
+                    // 2026-08-13 (layout-keywords plan): record `pack struct`
+                    // so type emission/field access consult the packed layout.
+                    if s.pack {
+                        self.ctx.packed_structs.insert(s.name.clone());
+                    }
+                    if s.union {
+                        self.ctx.unions.insert(s.name.clone());
+                    }
+                    // 2026-08-13 (Phase 5): `atomic` field slots.
+                    register_atomic_fields(&mut self.ctx, &s.name, &s.metadata);
                     // 2026-08-12 (slice 4, wasm32 maze): register a StaticStruct's
                     // type params so the mono substitution (`ListBuffer<Int>`'s
                     // `Ptr<T>` → `Ptr<Int>`) can derive the wasm32 element width.
@@ -2442,19 +2470,12 @@ impl LlvmBackend {
                     }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
-                            let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty, Some(universe))
-                            }).sum();
-                            let rt = crate::type_universe::ResolvedType {
-                                name: s.name.clone(),
-                                base: "Bit".to_string(),
-                                bytes,
-                                min_bits: bytes * 8,
-                                max_bits: bytes * 8,
-                                alignment: 8,
-                                properties: std::collections::HashMap::new(),
-                                fields: fields.clone(),
-                            };
+                            // 2026-08-13 (layout-keywords plan): the spec-aware
+                            // sizing lives in register_types.rs (single
+                            // precedence authority, shared with tests). Only
+                            // register the struct here if the type universe
+                            // does not already have it.
+                            let rt = crate::backend::register_types::static_struct_resolved_ty(s, universe);
                             universe.types.insert(s.name.clone(), rt);
                         }
                     }
@@ -2468,6 +2489,8 @@ impl LlvmBackend {
                         .collect();
                     // 2026-07-24: Register struct type in both struct_types and universe
                     self.ctx.struct_types.insert(td.name.clone(), fields.clone());
+                    // 2026-08-13 (Phase 5): `atomic` field slots (obj/type body).
+                    register_atomic_fields(&mut self.ctx, &td.name, &td.body.metadata);
                     // 2026-07-31 (A5): register obj members for MethodCall codegen.
                     if !td.body.members.is_empty() {
                         self.ctx.obj_members.insert(td.name.clone(), td.body.members.clone());
@@ -2826,9 +2849,15 @@ impl LlvmBackend {
         // call site, so the backend declares the ABI: String = ptr to a
         // length-prefixed [len][bytes] buffer.
         writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
-        // 2026-08-13 (dynamic String slice): `s[a:b]` emits a byte-wise
-        // substring (the runtime's briev_str_substr; bounds clamp to [0,len]).
-        writeln!(out, "declare ptr @briev_str_substr(ptr, i64, i64) #1").ok();
+         // 2026-08-13 (dynamic String slice): `s[a:b]` emits a byte-wise
+         // substring (the runtime's briev_str_substr; bounds clamp to [0,len]).
+         // Skipped when a `frgn briev_str_substr` import already declares it
+         // (lib/compiler/reader.bv does) — a duplicate `declare` is an LLVM
+         // redefinition error (surfaced in the main<->layout-keywords merge,
+         // c_driver_needs_state).
+         if !self.ctx.frgn_map.contains_key("briev_str_substr") {
+             writeln!(out, "declare ptr @briev_str_substr(ptr, i64, i64) #1").ok();
+         }
         // 2026-08-01 (B1): content equality for String operands. The compiler
         // emits a call to briev_str_eq(ptr, ptr) instead of `icmp eq ptr`
         // (address comparison) when both operands are #String — see

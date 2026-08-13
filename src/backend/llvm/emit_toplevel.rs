@@ -330,18 +330,53 @@ impl LlvmBackend {
         // references them under the bits model (String is a bare #String ptr).
         let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Some(u) = &self.ctx.type_universe {
-            let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
+            let mut universe_fields: Vec<(String, Vec<String>, bool, bool)> = Vec::new();
             for rt in u.types.values() {
                 if rt.fields.is_empty() { continue; }
                 if emitted.contains(&rt.name) { continue; }
+                // 2026-08-13 (layout-keywords plan): `pack struct` emission.
+                // Whole-byte packed (every field width % 8 == 0) uses LLVM's
+                // native packed type `<{ ... }>` (no inter-element padding, GEP
+                // works as usual). Sub-byte packed collapses to a byte array
+                // `{ [N x i8] }` (N = storage bytes) with per-field bit-slices.
+                let packed = self.ctx.packed_structs.contains(&rt.name);
+                if packed {
+                    // 2026-08-13: zero-width `Bits<0>` padding fields are
+                    // filtered out of the aggregate (i0 is not a valid LLVM
+                    // element type); they occupy no storage. Element types
+                    // come from the packed authority (field_bits), so
+                    // `Bits<48>` (Applied-form in source) emits i48, not the
+                    // generic-application default i64.
+                    let field_tys: Vec<String> = rt.fields.iter()
+                        .filter(|(_, fty)| crate::type_universe::field_bits(fty, Some(u)) != 0)
+                        .map(|(_, fty)| format!("i{}", crate::type_universe::field_bits(fty, Some(u))))
+                        .collect();
+                    let whole_byte = crate::type_universe::is_whole_byte_packed(&rt.fields, Some(u));
+                    universe_fields.push((rt.name.clone(), field_tys, true, whole_byte));
+                    continue;
+                }
                 let field_tys: Vec<String> = rt.fields.iter()
                     .map(|(_, fty)| self.llvm_type(fty))
                     .collect();
-                universe_fields.push((rt.name.clone(), field_tys));
+                universe_fields.push((rt.name.clone(), field_tys, false, true));
             }
-            universe_fields.sort_by_key(|(k, _)| k.clone());
-            for (name, field_tys) in &universe_fields {
-                writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+            universe_fields.sort_by_key(|(k, _, _, _)| k.clone());
+            for (name, field_tys, packed, whole_byte) in &universe_fields {
+                // 2026-08-13 (Phase 6): a union is a byte array of its largest
+                // aligned field storage; fields overlay at offset 0.
+                if self.ctx.unions.contains(name) {
+                    let n = u.types.get(name).map(|r| r.bytes).unwrap_or(1).max(1);
+                    writeln!(out, "%{} = type {{ [{} x i8] }}", name, n).ok();
+                } else if *packed && !*whole_byte {
+                    // Sub-byte packed: hide fields behind a byte array. N is the
+                    // registered storage size (ceil(Σ bits / 8)).
+                    let n = u.types.get(name).map(|r| r.bytes).unwrap_or(1);
+                    writeln!(out, "%{} = type {{ [{} x i8] }}", name, n).ok();
+                } else if *packed {
+                    writeln!(out, "%{} = type <{{ {} }}>", name, field_tys.join(", ")).ok();
+                } else {
+                    writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+                }
                 emitted.insert(name.clone());
             }
         }
@@ -359,6 +394,9 @@ impl LlvmBackend {
             if fields.is_empty() {
                 writeln!(out, "%{} = type {{}}", name).ok();
             } else {
+                // 2026-08-13: packed structs are always declared via the
+                // universe path above; this legacy all-i64 path stays for
+                // plain structs.
                 let field_tys: Vec<&str> = fields.iter().map(|_| "i64").collect();
                 writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
             }
@@ -442,7 +480,9 @@ impl LlvmBackend {
         match ty {
             Type::Ptr(_) => "ptr",
             Type::Void => "void",
-            Type::Bits(bytes) => match bytes * 8 {
+            // 2026-08-13 (layout-keywords plan): Bits stores bits; the match
+            // arms below are already bit widths, so the byte-era `* 8` is gone.
+            Type::Bits(bits) => match bits {
                 1 => "i1",
                 8 => "i8",
                 16 => "i16",
@@ -455,6 +495,13 @@ impl LlvmBackend {
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> String {
+        // 2026-08-13 (Phase 6): `Bits<N>` (both AST forms) is exactly N bits —
+        // resolve the Applied("Bits", [Number(N)]) alias here so a `Bits<32>`
+        // struct field reads/writes i32, not the generic i64. The casting
+        // graph's generic application path widened it.
+        if let Some(n) = crate::type_universe::bits_width(ty) {
+            return format!("i{}", n);
+        }
         // 2026-07-15: Ptr<T> always maps to LLVM opaque pointer type.
         // Must be checked BEFORE the universe lookup because Ptr<T> has no
         // primitive property set (it's a compiler construct, not from bootstrap.bv).
@@ -3664,13 +3711,13 @@ fn probe_ok_checks(
                         let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-                        // LLVM range syntax: `!range !{i32 0, i32 100}` for
-                        // typed widths, `!range !{0, 100}` for i64.
-                        let range = if bits >= 64 {
-                            format!("{{ {}, {} }}", 0i64, rhi)
-                        } else {
-                            format!("{{ {} {}, {} {} }}", ty, 0i64, ty, rhi)
-                        };
+                        // LLVM range syntax requires TYPED bounds in every
+                        // width (`!range !{ i64 0, i64 100 }`). The untyped
+                        // `!{ 0, 100 }` short form for i64 was accepted by
+                        // older LLVM but is rejected by clang/opt 18+
+                        // (2026-08-13, found via tests/llvm_compile_test.sh on
+                        // the bounded-counter fixture).
+                        let range = format!("{{ {} {}, {} {} }}", ty, 0i64, ty, rhi);
                         writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{}",
                             indent, rl, ty, gep, self.align_of(&ty), tn, range).ok();
                     } else {

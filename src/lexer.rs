@@ -43,6 +43,13 @@ pub enum Token {
 
     // ── Keywords ──────────────────────────────────────────────────────
     /// Phase 15: export defn — replaces #export pragma
+    /// 2026-08-13 (layout-keywords plan): `spec` — physical-layout metadata
+    /// assignment (PascalCase key): `spec Bits: 64;` `spec Align: 8;`
+    /// `spec Bytes: 4;` `spec MaxBits: 16;` `spec Endian: Big;`. Declared layout
+    /// is the modern, disclosed spelling of the `!>` annotation form (SPEC §8.9).
+    #[token("spec")]
+    Spec,
+
     #[token("export")]
     Export,
 
@@ -69,6 +76,29 @@ pub enum Token {
     /// sequential dispatch; `seq Int[x]`/`seq foreach` disable vectorization.
     #[token("seq")]
     Seq,
+
+    /// 2026-08-13 (layout-keywords plan): `pack` — bit-contiguous, zero-padding
+    /// struct modifier (prefix, combinable with `seq` in any order).
+    #[token("pack")]
+    Pack,
+
+    /// 2026-08-13 (layout-keywords plan Phase 4): `trap` — hardware abort
+    /// (statement, guard body, match-arm value).
+    #[token("trap")]
+    Trap,
+
+    /// 2026-08-13 (layout-keywords plan Phase 5): `atomic` — field modifier
+    /// (prefix). `atomic x: Int;` marks a struct/obj/type slot as
+    /// atomically-read/written (SPEC §8.2). A concurrency declaration, never
+    /// a speed path — plain fields stay on the default (non-atomic) path.
+    #[token("atomic")]
+    Atomic,
+
+    /// 2026-08-13 (layout-keywords plan Phase 6): `union` — an untagged
+    /// overlay declaration: `union Name { field: Type, … };` — all fields
+    /// share storage at offset 0 (SPEC §8.2).
+    #[token("union")]
+    Union,
 
     /// 2026-08-01 (E): `vol` — memory-visibility modifier (prefix).
     /// `vol let x` emits volatile load/store.
@@ -505,6 +535,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Export => write!(f, "export"),
+            Token::Spec => write!(f, "spec"),
             Token::Defn => write!(f, "defn"),
             Token::Let => write!(f, "let"),
             Token::Const => write!(f, "const"),
@@ -512,6 +543,10 @@ impl std::fmt::Display for Token {
             Token::Node => write!(f, "node"),
             Token::Async => write!(f, "async"),
             Token::Seq => write!(f, "seq"),
+            Token::Pack => write!(f, "pack"),
+            Token::Trap => write!(f, "trap"),
+            Token::Atomic => write!(f, "atomic"),
+            Token::Union => write!(f, "union"),
             Token::Vol => write!(f, "vol"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),
@@ -649,7 +684,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "await", "spawn", "term", "term!", "rollback", "import",
+            "vol", "out", "spec", "pack", "trap", "atomic", "union", "await", "spawn", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

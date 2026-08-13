@@ -249,7 +249,7 @@ impl fmt::Display for UnaryOpKind {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::Bits(n) => write!(f, "Bits<{}>", n * 8),
+            Type::Bits(n) => write!(f, "Bits<{}>", n),
             Type::Void => write!(f, "void"),
             Type::Number(n) => write!(f, "{}", n),
             Type::Custom(name) => write!(f, "{}", name),
@@ -362,6 +362,7 @@ impl fmt::Display for Statement {
                     write!(f, "term;")
                 }
             }
+            Statement::Trap => write!(f, "trap;"),
             Statement::EndProgram(val) => {
                 if let Some(val) = val {
                     write!(f, "endprogram {};", val)
@@ -681,7 +682,7 @@ mod tests {
     /// Snapshot test: verify Rust Display output for all Type variants.
     #[test]
     fn test_display_type_snapshots() {
-        assert_eq!(format!("{}", Type::Bits(8)), "Bits<64>");
+        assert_eq!(format!("{}", Type::Bits(8)), "Bits<8>");
         assert_eq!(format!("{}", Type::Void), "void");
         assert_eq!(format!("{}", Type::Custom("Int".into())), "Int");
         assert_eq!(format!("{}", Type::HashWord("L".into())), "L");
