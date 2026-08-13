@@ -116,6 +116,10 @@ pub struct CompilerContext {
     /// `__view_items_<field>()` snapshot materializer for each (driving the
     /// collection's op Count/op At into a `[len][word…]` buffer the shim reads).
     pub collection_iterables: std::collections::HashSet<String>,
+    /// 2026-08-12 (slice 4): whether `@reactor_tick` was emitted — a folded
+    /// program (no live reactive nodes) omits it, so `render_frame` must not
+    /// call it (an undefined `@reactor_tick` fails llc).
+    pub has_reactor_tick: bool,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -362,6 +366,7 @@ impl CompilerContext {
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
             collection_iterables: std::collections::HashSet::new(),
+            has_reactor_tick: false,
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,

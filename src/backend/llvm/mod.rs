@@ -2404,6 +2404,15 @@ impl LlvmBackend {
                         .map(|(n, t)| (n.clone(), t.clone()))
                         .collect();
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
+                    // 2026-08-12 (slice 4, wasm32 maze): register a StaticStruct's
+                    // type params so the mono substitution (`ListBuffer<Int>`'s
+                    // `Ptr<T>` → `Ptr<Int>`) can derive the wasm32 element width.
+                    if !s.type_params.is_empty() {
+                        self.ctx.obj_type_params.insert(
+                            s.name.clone(),
+                            s.type_params.iter().map(|p| p.name.clone()).collect(),
+                        );
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let bytes: u64 = fields.iter().map(|(_, ty)| {
@@ -3658,6 +3667,7 @@ impl LlvmBackend {
                 self.emit_thread_pool_metadata(&mut out);
             } else {
         writeln!(out, "define void @reactor_tick({}) local_unnamed_addr #2 {{", self.ctx.state_ptr_param).ok();
+        self.ctx.has_reactor_tick = true;
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();
@@ -4151,7 +4161,11 @@ impl LlvmBackend {
             writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
             writeln!(out, "define void @render_frame() {{").ok();
-            writeln!(out, "  call void @reactor_tick(ptr @__web_state)").ok();
+            // 2026-08-12 (slice 4): a folded program (no live reactive nodes)
+            // omits @reactor_tick — emit a no-op frame in that case.
+            if self.ctx.has_reactor_tick {
+                writeln!(out, "  call void @reactor_tick(ptr @__web_state)").ok();
+            }
             writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
             self.emit_view_materializers(&mut out);
@@ -4729,7 +4743,6 @@ impl LlvmBackend {
             // can evaluate and store the runtime value at startup.
             } else if let TopLevel::Statement(stmt) = item {
                 if let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
-                    if name == "a" { eprintln!("DBG build_field_index sees let a ty={:?} expr={:?}", ty, expr.is_some()); }
                     let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
                     // 2026-08-07 (object instance pools): a top-level obj
                     // instance (`let st: Stack<Int, 256> = 0`) UNPACKS its

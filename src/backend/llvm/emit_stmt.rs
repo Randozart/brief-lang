@@ -1169,8 +1169,19 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         let count_reg = backend.emit_method_call(
                             out, &out_tmp, list, "Count", &[], indent,
                         );
+                        // 2026-08-12 (slice 4, wasm32 maze): the foreach's loop
+                        // counter slot is i64; the Count result on wasm32 is i32
+                        // — widen it so the header `icmp slt i64` matches.
+                        let count64 = if backend.llvm_type(&count_reg.ty) != "i64" {
+                            let w = backend.fun.gen_reg();
+                            writeln!(out, "{}{} = sext {} {} to i64", indent, w,
+                                backend.llvm_type(&count_reg.ty), count_reg.name).ok();
+                            w
+                        } else {
+                            count_reg.name.clone()
+                        };
                         IterKind::OpCollection {
-                            count: count_reg.name,
+                            count: count64,
                             list: list.as_ref().clone(),
                             element_ty,
                         }
@@ -1270,7 +1281,18 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // never a hardcoded layout.
                 IterKind::OpCollection { list, element_ty, .. } => {
                     let counter_tmp = "__foreach_cur".to_string();
-                    backend.fun.let_bindings.insert(counter_tmp.clone(), cur.clone());
+                    // 2026-08-12 (slice 4, wasm32 maze): the loop counter slot
+                    // is i64 but the At INDEX param is Int (i32 on wasm32) —
+                    // truncate before the call so the member body's i32 index
+                    // matches (a raw i64 arg typed Int produced `sext i32 <i64>`).
+                    let cur_i = if backend.ctx.int_bits == 32 {
+                        let t = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, cur).ok();
+                        t
+                    } else {
+                        cur.clone()
+                    };
+                    backend.fun.let_bindings.insert(counter_tmp.clone(), cur_i);
                     backend.fun.let_binding_types.insert(counter_tmp.clone(), Type::int());
                     backend.fun.let_original_types.insert(counter_tmp.clone(), Type::int());
                     let arg = Expr::Identifier(counter_tmp);

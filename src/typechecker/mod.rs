@@ -3425,6 +3425,14 @@ pub(crate) fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type 
                 _ => d.clone(),
             }).collect(),
         ),
+        // 2026-08-12 (slice 4, wasm32 maze): Ptr must descend — `Ptr<T>` with
+        // {T: Int} → `Ptr<Int>`. The mono substitution (ensure_mono) builds
+        // `ListBuffer<Int>`'s struct fields; without this, `inner.data`
+        // resolved to the generic `Ptr<T>` and the wasm32 element width
+        // couldn't be derived (the load stayed i64 while the member returned
+        // i32).
+        Type::Ptr(inner) => Type::Ptr(Box::new(substitute_type(inner, subst))),
+        Type::PtrConst(inner) => Type::PtrConst(Box::new(substitute_type(inner, subst))),
         Type::Tuple(elems) => Type::Tuple(elems.iter().map(|e| substitute_type(e, subst)).collect()),
         _ => ty.clone(),
     }

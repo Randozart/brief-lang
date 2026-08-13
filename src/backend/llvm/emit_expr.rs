@@ -2741,6 +2741,14 @@ impl LlvmBackend {
     /// 2026-07-24: Falls back to struct_types (registration pass) when the
     /// type universe is unavailable (common in test environments).
     fn get_struct_fields(&self, type_name: &str) -> Option<&[(String, Type)]> {
+        // 2026-08-12 (slice 4, wasm32 maze): a MONO key (`ListBuffer<Int>`)
+        // must prefer the SUBSTITUTED struct_types — the universe holds the
+        // generic base fields (`Ptr<T>`), which leak the raw type param into
+        // wasm32 width resolution (`inner.data` resolved to `Ptr<T>`, so the
+        // element width couldn't be derived and the load stayed i64).
+        if type_name.contains('<') {
+            return self.ctx.struct_types.get(type_name).map(|v| v.as_slice());
+        }
         // Try type universe first (production path, has precise types)
         if let Some(ref u) = self.ctx.type_universe {
             if let Some(info) = u.types.get(type_name) {
