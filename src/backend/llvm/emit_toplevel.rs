@@ -141,9 +141,6 @@ impl LlvmBackend {
         None
     }
 
-    /// 2026-07-20: Find an OperatorDef for InsertAt by looking up the
-    /// variable's type in the operator_defs map (populated from AST).
-    /// Returns None when the type has no InsertAt operator definition.
     pub(super) fn find_insert_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
         // 2026-08-12 (slice 2 gap 3): peel AddrOf layers — the documented push
         // form `&items <- 3` lowers the target to AddrOf(Identifier(items));
@@ -157,6 +154,55 @@ impl LlvmBackend {
         let type_name = self.lookup_strategy_type_name(var_name)?;
         self.ctx.operator_defs.get(&type_name)?
             .iter().find(|d| d.op == "InsertAt")
+    }
+
+    /// 2026-08-12 (Iterable protocol, Tier 2, SPEC §11.4): does the list
+    /// expression name a value whose type exposes `op Count` + `op At` as
+    /// op-as-member operators? If so, returns `(element type, base name)` —
+    /// the element type is the At member's return with the concrete generic
+    /// args substituted (`List<String>` At → `T` → `String`). Structural
+    /// iteration: the compiler knows only the operator surface, never a layout.
+    pub(super) fn tier2_op_collection(&self, list: &crate::ast::Expr) -> Option<(crate::ast::Type, String)> {
+        use crate::ast::TopLevel;
+        let crate::ast::Expr::Identifier(name) = list else { return None; };
+        let full_ty = if let Some(ty) = self.fun.let_original_types.get(name) {
+            ty.clone()
+        } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
+            self.ctx.field_briev_types.get(idx).cloned().unwrap_or(crate::ast::Type::int())
+        } else {
+            return None;
+        };
+        let base = match &full_ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base)?;
+        let has_count = members
+            .iter()
+            .any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "Count"));
+        let has_at = members
+            .iter()
+            .any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"));
+        if !(has_count && has_at) {
+            return None;
+        }
+        let at = members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "At" => Some(d),
+            _ => None,
+        })?;
+        let raw_elem = at.output_type
+            .as_ref()
+            .and_then(|o| o.all_types().into_iter().next())
+            .unwrap_or_else(crate::ast::Type::int);
+        let args = match &full_ty {
+            crate::ast::Type::Applied(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, crate::ast::Type> =
+            params.into_iter().zip(args.into_iter()).collect();
+        let element_ty = crate::typechecker::substitute_type(&raw_elem, &subst);
+        Some((element_ty, base))
     }
 
     /// 2026-07-20: Find an OperatorDef for ExtractFrom by looking up the

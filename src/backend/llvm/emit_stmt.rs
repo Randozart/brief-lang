@@ -170,6 +170,10 @@ enum IterKind {
     Data { ptr: String, len: String },
     /// A vector state field (`[N x i64]`).
     VectorField { gep: String, count: String },
+    /// 2026-08-12 (Iterable protocol, Tier 2): a collection iterated through
+    /// its own operator members — `op Count` for the bound, `op At(i)` per
+    /// item (SPEC §11.4). The item is the At member's return value.
+    OpCollection { count: String, list: Expr, element_ty: Type },
 }
 
 /// 2026-08-07 (Phase 7): classify an emitted collection register as a
@@ -1109,6 +1113,20 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         let count = backend.fun.gen_reg();
                         writeln!(out, "{}{} = add i64 0, {}", indent, count, n).ok();
                         IterKind::VectorField { gep, count }
+                    } else if let Some((element_ty, base)) = backend.tier2_op_collection(list) {
+                        // 2026-08-12 (Iterable protocol, Tier 2): the
+                        // collection exposes op Count + op At as members —
+                        // iterate through them (never a hardcoded layout).
+                        let _ = base;
+                        let out_tmp = backend.fun.gen_reg();
+                        let count_reg = backend.emit_method_call(
+                            out, &out_tmp, list, "Count", &[], indent,
+                        );
+                        IterKind::OpCollection {
+                            count: count_reg.name,
+                            list: list.as_ref().clone(),
+                            element_ty,
+                        }
                     } else {
                         // A non-vector state field is not iterable.
                         let lreg = backend.emit_expr(out, list, indent);
@@ -1137,6 +1155,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
                     (zero, len.clone(), "slt")
                 }
+                IterKind::OpCollection { count, .. } => {
+                    let zero = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
+                    (zero, count.clone(), "slt")
+                }
                 IterKind::VectorField { count, .. } => {
                     let zero = backend.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
@@ -1160,6 +1183,19 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // Derive the item value for this iteration.
             let item_reg = match &iter {
                 IterKind::Counter { .. } => cur.clone(),
+                // 2026-08-12 (Iterable protocol, Tier 2): the item is the
+                // collection's `op At(i)` member call — structural iteration,
+                // never a hardcoded layout.
+                IterKind::OpCollection { list, element_ty, .. } => {
+                    let counter_tmp = "__foreach_cur".to_string();
+                    backend.fun.let_bindings.insert(counter_tmp.clone(), cur.clone());
+                    backend.fun.let_binding_types.insert(counter_tmp.clone(), Type::int());
+                    backend.fun.let_original_types.insert(counter_tmp.clone(), Type::int());
+                    let arg = Expr::Identifier(counter_tmp);
+                    let out_tmp = backend.fun.gen_reg();
+                    let at = backend.emit_method_call(out, &out_tmp, list, "At", &[arg], indent);
+                    at.name
+                }
                 IterKind::List { ptr, .. } => {
                     let off = backend.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 {}, 1", indent, off, cur).ok();
@@ -1189,11 +1225,18 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 }
             };
             // Bind the loop variable so the body resolves it like a `let`.
+            // 2026-08-12 (Iterable protocol, Tier 2): the item type is the
+            // collection's ELEMENT type (the At member's return), not a forced
+            // Int — `foreach(x in strList)` binds x as String.
+            let item_ty = match &iter {
+                IterKind::OpCollection { element_ty, .. } => element_ty.clone(),
+                _ => Type::int(),
+            };
             backend.fun.last_val_temps.insert(item.clone(), item_reg.clone());
-            backend.fun.last_val_types.insert(item.clone(), Type::int());
+            backend.fun.last_val_types.insert(item.clone(), item_ty.clone());
             backend.fun.let_bindings.insert(item.clone(), item_reg.clone());
-            backend.fun.let_binding_types.insert(item.clone(), Type::int());
-            backend.fun.let_original_types.insert(item.clone(), Type::int());
+            backend.fun.let_binding_types.insert(item.clone(), item_ty.clone());
+            backend.fun.let_original_types.insert(item.clone(), item_ty);
             backend.fun.terminated = false;
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);

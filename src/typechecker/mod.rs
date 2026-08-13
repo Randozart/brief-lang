@@ -2066,8 +2066,12 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         Statement::Rollback(_) => Ok(()),
         Statement::Foreach { item, list, body } => {
             let list_ty = infer_type_only(list, ctx)?;
-            // Element type: assume List<T> has element T
-            ctx.bindings.insert(item.clone(), Type::int());
+            // 2026-08-12 (Iterable protocol, Tier 2, SPEC §11.4): the item
+            // type is the collection's ELEMENT type — the `op At` op-as-member
+            // return, substituted with the concrete generic args. Never a
+            // hardcoded Int.
+            let element_ty = foreach_item_type(ctx, &list_ty);
+            ctx.bindings.insert(item.clone(), element_ty);
             for stmt in body {
                 infer_statement(stmt, ctx)?;
             }
@@ -3297,6 +3301,30 @@ fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definiti
         TopLevel::TypeDefOperator(d) if d.name == op => Some(d),
         _ => None,
     })
+}
+
+/// 2026-08-12 (Iterable protocol, Tier 2): the ELEMENT type of a `foreach`
+/// iterable — the type's `op At` op-as-member return, substituted with the
+/// concrete generic args (`List<String>` At → `T` → `String`). Falls back to
+/// the inner type for vectors and Int for scalars/ranges — structural, never
+/// a collection name.
+fn foreach_item_type(ctx: &TypecheckContext, list_ty: &Type) -> Type {
+    let (base, args) = match list_ty {
+        Type::Custom(n) => (n.clone(), Vec::new()),
+        Type::Applied(n, a) => (n.clone(), a.clone()),
+        Type::Vector(inner, _) => return (**inner).clone(),
+        _ => return Type::int(),
+    };
+    let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
+    if let Some(at) = operator_member(&members, "At") {
+        if let Some(raw) = at.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) {
+            let params = ctx.type_params.get(&base).cloned().unwrap_or_default();
+            let subst: std::collections::HashMap<String, Type> =
+                params.into_iter().zip(args).collect();
+            return substitute_type(&raw, &subst);
+        }
+    }
+    Type::int()
 }
 
 fn member_params(m: &TopLevel) -> Vec<Type> {
