@@ -186,6 +186,49 @@ enum IterKind {
 /// boxed to an i64 handle) or a Data/String byte buffer ([len][bytes] ptr).
 /// Anything else is a hard error (no silent wrongness).
 impl LlvmBackend {
+    /// 2026-08-12 (Iterable protocol, slice 4): try to iterate a collection
+    /// through its operator surface — Tier 2 (`op Count` + `op At`) first,
+    /// then Tier 1 (the cursor ops). Returns an IterKind or None. Both the
+    /// state-field branch AND the local/non-field fallback use this, so the
+    /// hardcoded List layout only remains for a genuinely op-less List value.
+    fn try_emit_tier_iteration(
+        &mut self,
+        out: &mut String,
+        list: &Expr,
+        indent: &str,
+    ) -> Option<IterKind> {
+        if let Some((element_ty, _base)) = self.tier2_op_collection(list) {
+            let out_tmp = self.fun.gen_reg();
+            let count_reg = self.emit_method_call(out, &out_tmp, list, "Count", &[], indent);
+            // 2026-08-12 (slice 4, wasm32 maze): the foreach's loop counter
+            // slot is i64; the Count result on wasm32 is i32 — widen it so the
+            // header `icmp slt i64` matches.
+            let count64 = if self.llvm_type(&count_reg.ty) != "i64" {
+                let w = self.fun.gen_reg();
+                writeln!(out, "{}{} = sext {} {} to i64", indent, w,
+                    self.llvm_type(&count_reg.ty), count_reg.name).ok();
+                w
+            } else {
+                count_reg.name.clone()
+            };
+            return Some(IterKind::OpCollection {
+                count: count64,
+                list: list.clone(),
+                element_ty,
+            });
+        }
+        if let Some((element_ty, _base)) = self.tier1_cursor_collection(list) {
+            let out_tmp = self.fun.gen_reg();
+            let iter_reg = self.emit_method_call(out, &out_tmp, list, "Iter", &[], indent);
+            return Some(IterKind::Tier1Cursor {
+                iter_reg: iter_reg.name,
+                list: list.clone(),
+                element_ty,
+            });
+        }
+        None
+    }
+
     fn foreach_collection_kind(
         &mut self,
         out: &mut String,
@@ -1160,45 +1203,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         let count = backend.fun.gen_reg();
                         writeln!(out, "{}{} = add i64 0, {}", indent, count, n).ok();
                         IterKind::VectorField { gep, count }
-                    } else if let Some((element_ty, base)) = backend.tier2_op_collection(list) {
-                        // 2026-08-12 (Iterable protocol, Tier 2): the
-                        // collection exposes op Count + op At as members —
-                        // iterate through them (never a hardcoded layout).
-                        let _ = base;
-                        let out_tmp = backend.fun.gen_reg();
-                        let count_reg = backend.emit_method_call(
-                            out, &out_tmp, list, "Count", &[], indent,
-                        );
-                        // 2026-08-12 (slice 4, wasm32 maze): the foreach's loop
-                        // counter slot is i64; the Count result on wasm32 is i32
-                        // — widen it so the header `icmp slt i64` matches.
-                        let count64 = if backend.llvm_type(&count_reg.ty) != "i64" {
-                            let w = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = sext {} {} to i64", indent, w,
-                                backend.llvm_type(&count_reg.ty), count_reg.name).ok();
-                            w
-                        } else {
-                            count_reg.name.clone()
-                        };
-                        IterKind::OpCollection {
-                            count: count64,
-                            list: list.as_ref().clone(),
-                            element_ty,
-                        }
-                    } else if let Some((element_ty, base)) = backend.tier1_cursor_collection(list) {
-                        // 2026-08-12 (Iterable protocol, Tier 1): the
-                        // collection exposes op Iter/op Step/op IsEnd/
-                        // op Current — the external-cursor contract.
-                        let _ = base;
-                        let out_tmp = backend.fun.gen_reg();
-                        let iter_reg = backend.emit_method_call(
-                            out, &out_tmp, list, "Iter", &[], indent,
-                        );
-                        IterKind::Tier1Cursor {
-                            iter_reg: iter_reg.name,
-                            list: list.as_ref().clone(),
-                            element_ty,
-                        }
+                    } else if let Some(iter) = backend.try_emit_tier_iteration(out, list, indent) {
+                        iter
                     } else {
                         // A non-vector state field is not iterable.
                         let lreg = backend.emit_expr(out, list, indent);
@@ -1206,8 +1212,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                 }
                 _ => {
-                    let lreg = backend.emit_expr(out, list, indent);
-                    backend.foreach_collection_kind(out, &lreg, indent)
+                    // 2026-08-12 (slice 4, Iterable protocol): a LOCAL
+                    // collection (`let xs: List<Int> = ...` then `foreach x in
+                    // xs`) iterates through the op surface too — previously the
+                    // `_` fallback hardcoded the List layout.
+                    if let Some(iter) = backend.try_emit_tier_iteration(out, list, indent) {
+                        iter
+                    } else {
+                        let lreg = backend.emit_expr(out, list, indent);
+                        backend.foreach_collection_kind(out, &lreg, indent)
+                    }
                 }
             };
             let label_n = backend.fun.txn_counter;

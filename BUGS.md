@@ -1,5 +1,15 @@
 # Bugs
 
+## Local collection values (let xs: List<Int> = ...) segfault — OPEN (pre-existing)
+
+**Date:** 2026-08-12
+**Status:** Open — the arrow insert (`&xs <- 2`) + the list-literal construction
+only work for STATE FIELDS; a local `let xs: List<Int>` collection is never
+properly populated, so `foreach x in xs` reads garbage (segfault). The foreach
+itself correctly routes locals through the op surface (slice 4 refactor); the
+local's CONSTRUCTION/push is the gap. A local `Counter` obj and scalar locals
+work; only collection-typed locals are affected.
+
 ## wasm32 collection member codegen width maze — FIXED (slice 4)
 
 **Date:** 2026-08-12 — **all fixed** (commit `dd73d510`). The `b-each` over a
