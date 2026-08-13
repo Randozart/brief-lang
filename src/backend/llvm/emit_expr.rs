@@ -1019,8 +1019,17 @@ impl LlvmBackend {
                     let ptr = self.fun.gen_reg();
                     // 2026-08-11 (wasm32 obj-member fix): the Ptr/List receiver
                     // handle is i{int_bits} (i32 on wasm32) — inttoptr at that
-                    // width, not hardcoded i64.
-                    let hw = format!("i{}", self.ctx.int_bits);
+                    // width, not hardcoded i64. 2026-08-12 (slice 4): a
+                    // COLLECTION data pointer (`inner.data`, a struct Ptr field)
+                    // loads/stores at i64 (the boxed-handle ABI), so inttoptr
+                    // at i64 when the receiver value is i64; a local Ptr handle
+                    // is i{int_bits}. Match the receiver register's LLVM type.
+                    let recv_llvm = self.llvm_type(&obj_reg.ty);
+                    let hw = if matches!(recv_llvm.as_str(), "i64" | "ptr") {
+                        "i64".to_string()
+                    } else {
+                        format!("i{}", self.ctx.int_bits)
+                    };
                     writeln!(
                         out,
                         "{}{} = inttoptr {} {} to ptr",
@@ -2304,6 +2313,51 @@ impl LlvmBackend {
             ),
             _ => (Vec::new(), Vec::new()),
         };
+        // 2026-08-12 (Iterable protocol, slice 4): substitute the member's
+        // PARAM types with the collection's concrete args (`List<Int>` init's
+        // `val: T` → `val: Int`) — without it a wasm32 member body bound `val`
+        // as the raw generic `T`, so adapt_to_i64 couldn't widen the i32 value
+        // to the i64 collection slot (`store i64 <i32>` was invalid IR). The
+        // receiver type is usually a MONO key (`List<Int>`), so parse the base
+        // + args from the type name.
+        let (recv_base, recv_args) = match &recv_reg.ty {
+            crate::ast::Type::Applied(n, a) => (n.clone(), a.clone()),
+            crate::ast::Type::Custom(n) => {
+                if let Some((b, rest)) = n.split_once('<') {
+                    let inner = rest.trim_end_matches('>');
+                    let args: Vec<crate::ast::Type> = inner
+                        .split(',')
+                        .filter_map(|a| {
+                            let a = a.trim();
+                            if a == "Int" {
+                                Some(crate::ast::Type::int())
+                            } else if a == "Bool" {
+                                Some(crate::ast::Type::bool_())
+                            } else if a == "String" {
+                                Some(crate::ast::Type::string())
+                            } else if a == "Float" {
+                                Some(crate::ast::Type::float())
+                            } else if a == "Float64" {
+                                Some(crate::ast::Type::float64())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    (b.to_string(), args)
+                } else {
+                    (n.clone(), Vec::new())
+                }
+            }
+            _ => (String::new(), Vec::new()),
+        };
+        let recv_type_params = self.ctx.obj_type_params.get(&recv_base).cloned().unwrap_or_default();
+        let recv_subst: std::collections::HashMap<String, crate::ast::Type> =
+            recv_type_params.into_iter().zip(recv_args.into_iter()).collect();
+        let params: Vec<(String, crate::ast::Type)> = params
+            .into_iter()
+            .map(|(n, t)| (n.clone(), crate::typechecker::substitute_type(&t, &recv_subst)))
+            .collect();
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
             if let Some((pname, pty)) = params.get(i) {
                 // 2026-08-04 (compiler-in-Briev): a String argument (a real

@@ -4154,6 +4154,7 @@ impl LlvmBackend {
             writeln!(out, "  call void @reactor_tick(ptr @__web_state)").ok();
             writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
+            self.emit_view_materializers(&mut out);
         }
 
         // 2026-08-06 (fix): escaping closures — emit the collected closure
@@ -4161,6 +4162,91 @@ impl LlvmBackend {
         self.emit_pending_closures(&mut out);
 
         out
+    }
+
+    /// 2026-08-12 (Iterable protocol, slice 4): for each `b-each` iterable that
+    /// is a Tier-2 collection (op Count + op At as op-as-member members), emit a
+    /// `__view_items_<field>(ptr %state)` snapshot materializer. It drives the
+    /// collection's own ops to fill `@__web_view_buf` as `[len][word…]` and
+    /// returns the buffer pointer — the shim's b-each renderer reads the
+    /// snapshot instead of vector layout bytes (which cannot index a heap
+    /// collection). Structural: the compiler knows only the op surface, never a
+    /// collection layout.
+    fn emit_view_materializers(&mut self, out: &mut String) {
+        use crate::ast::TopLevel;
+        if self.ctx.collection_iterables.is_empty() {
+            return;
+        }
+        writeln!(out, "@__web_view_buf = private global [1024 x i64] zeroinitializer").ok();
+        let mut names: Vec<String> = self.ctx.collection_iterables.iter().cloned().collect();
+        names.sort_unstable();
+        for field in &names {
+            let Some(&idx) = self.ctx.field_index_map.get(field) else { continue };
+            let briev_ty = self.ctx.field_briev_types.get(idx).cloned().unwrap_or(crate::ast::Type::int());
+            let base = match &briev_ty {
+                crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+                _ => continue,
+            };
+            let members = self.ctx.obj_members.get(&base).cloned().unwrap_or_default();
+            let has = |op: &str| {
+                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
+            };
+            if !(has("Count") && has("At")) {
+                continue;
+            }
+            let fn_name = format!("__view_items_{}", field);
+            writeln!(out, "define i32 @{}(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {{", fn_name).ok();
+            let count_tmp = self.fun.gen_reg();
+            let count = self.emit_method_call(out, &count_tmp, &crate::ast::Expr::Identifier(field.clone()), "Count", &[], "  ");
+            // The Int width on wasm32 is i32; the At index + loop counter are
+            // Int, so use i32 (the count register may be i32 already or i64 —
+            // adapt).
+            let count_is_64 = self.llvm_type(&count.ty) == "i64";
+            let n_i32 = if count_is_64 {
+                let t = self.fun.gen_reg();
+                writeln!(out, "  {} = trunc i64 {} to i32", t, count.name).ok();
+                t
+            } else {
+                count.name.clone()
+            };
+            writeln!(out, "  %hdr = alloca i32").ok();
+            writeln!(out, "  store i32 0, ptr %hdr").ok();
+            writeln!(out, "  br label %hlbl").ok();
+            writeln!(out, "hlbl:").ok();
+            writeln!(out, "  %c = load i32, ptr %hdr").ok();
+            writeln!(out, "  %cmp = icmp slt i32 %c, {}", n_i32).ok();
+            writeln!(out, "  br i1 %cmp, label %blbl, label %elbl").ok();
+            writeln!(out, "blbl:").ok();
+            // word = field.At(c)
+            let cur_tmp = "__view_cur".to_string();
+            self.fun.let_bindings.insert(cur_tmp.clone(), "%c".to_string());
+            self.fun.let_binding_types.insert(cur_tmp.clone(), crate::ast::Type::int());
+            self.fun.let_original_types.insert(cur_tmp.clone(), crate::ast::Type::int());
+            let arg = crate::ast::Expr::Identifier(cur_tmp);
+            let at_tmp = self.fun.gen_reg();
+            let word = self.emit_method_call(out, &at_tmp, &crate::ast::Expr::Identifier(field.clone()), "At", &[arg], "  ");
+            let word64 = if self.llvm_type(&word.ty) == "i64" {
+                word.name.clone()
+            } else {
+                let z = self.fun.gen_reg();
+                writeln!(out, "  {} = zext i32 {} to i64", z, word.name).ok();
+                z
+            };
+            writeln!(out, "  %w32 = add i32 %c, 1").ok();
+            writeln!(out, "  %w = sext i32 %w32 to i64").ok();
+            writeln!(out, "  %p = getelementptr [1024 x i64], ptr @__web_view_buf, i64 0, i64 %w").ok();
+            writeln!(out, "  store i64 {}, ptr %p", word64).ok();
+            writeln!(out, "  %next = add i32 %c, 1").ok();
+            writeln!(out, "  store i32 %next, ptr %hdr").ok();
+            writeln!(out, "  br label %hlbl").ok();
+            writeln!(out, "elbl:").ok();
+            // buf[0] = n (the real len, at i64)
+            let n64 = self.fun.gen_reg();
+            writeln!(out, "  {} = sext i32 {} to i64", n64, n_i32).ok();
+            writeln!(out, "  store i64 {}, ptr @__web_view_buf", n64).ok();
+            writeln!(out, "  ret i32 ptrtoint ([1024 x i64]* @__web_view_buf to i32)").ok();
+            writeln!(out, "}}").ok();
+        }
     }
 
     /// 2026-08-06 (fix): emit the top-level closure functions collected during

@@ -345,6 +345,12 @@ struct CompiledView {
     /// ID-injected HTML — the dom-shim's getElementById() calls resolve
     /// against this, never the raw markup. None when the build has no view.
     modified_html: Option<String>,
+    /// 2026-08-12 (Iterable protocol, slice 4): the `b-each` iterable FIELDS
+    /// whose Briev type is a generic collection (`Applied(base, args)`) — the
+    /// backend emits a `__view_items_<field>()` snapshot materializer for
+    /// these (driving op Count/op At), and the dom-shim renders from the
+    /// snapshot instead of vector layout bytes.
+    collection_iterables: std::collections::HashSet<String>,
     warnings: Vec<String>,
 }
 
@@ -382,6 +388,7 @@ fn compile_view(
         return Ok(CompiledView {
             bindings: opts.view_bindings.clone(),
             modified_html: opts.view_html.clone(),
+            collection_iterables: std::collections::HashSet::new(),
             warnings: Vec::new(),
         });
     };
@@ -443,18 +450,30 @@ fn compile_view(
         })
         .collect();
     let mut warnings: Vec<String> = diagnostics.iter().skip(validation_count).cloned().collect();
+    let mut collection_iterables: std::collections::HashSet<String> = std::collections::HashSet::new();
     for binding in &bindings {
         if let briev_compiler::view_compiler::Directive::Each { iterable, .. } = &binding.directive {
-            let is_vector = field_types
-                .get(iterable)
-                .map(|t| matches!(t, briev_compiler::ast::Type::Vector(..)))
-                .unwrap_or(false);
+            let ty = field_types.get(iterable);
+            let is_vector = ty.map(|t| matches!(t, briev_compiler::ast::Type::Vector(..))).unwrap_or(false);
             if !is_vector {
-                warnings.push(format!(
-                    "b-each iterable '{}' is not a static vector field (Int[N]/Bool[N]); \
-                     List/collection iteration rendering is pending — the each is skipped",
-                    iterable
-                ));
+                // 2026-08-12 (Iterable protocol, slice 4): a generic collection
+                // iterable gets a snapshot materializer; the vector-only skip
+                // warning is replaced by the materializer path.
+                let is_collection = ty.map(|t| {
+                    matches!(
+                        t,
+                        briev_compiler::ast::Type::Applied(..)
+                    )
+                }).unwrap_or(false);
+                if is_collection {
+                    collection_iterables.insert(iterable.clone());
+                } else {
+                    warnings.push(format!(
+                        "b-each iterable '{}' is neither a static vector field (Int[N]/Bool[N]) \
+                         nor a collection — the each is skipped",
+                        iterable
+                    ));
+                }
             }
         }
     }
@@ -483,6 +502,7 @@ fn compile_view(
     Ok(CompiledView {
         bindings,
         modified_html: Some(modified_html),
+        collection_iterables,
         warnings,
     })
 }
@@ -1059,12 +1079,14 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         CompiledView {
             bindings: Vec::new(),
             modified_html: None,
+            collection_iterables: std::collections::HashSet::new(),
             warnings: Vec::new(),
         }
     };
     let view_warnings = compiled_view.warnings.clone();
     let view_bindings = compiled_view.bindings.clone();
     let modified_view_html = compiled_view.modified_html.clone();
+    let collection_iterables = compiled_view.collection_iterables.clone();
     let view_signals = view_root_signals(&view_bindings);
 
     // ── Code generation ───────────────────────────────────────────────
@@ -1082,7 +1104,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         Result<briev_compiler::glue::web_generator::BindRoute, String>,
     >> = None;
 
-    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &mut bind_routes, &component_initializers)?;
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts, alloc_strategies, needs_arena, resolved_frgns, enable_module_init, &mut web_layout, &view_signals, &collection_iterables, &mut bind_routes, &component_initializers)?;
 
     // BEAST/IR snapshot at Codegen stage
     emit_beast_snapshot(file_path, BeastStage::Codegen, BeastPosition::After, &items, &universe, opts)?;
@@ -1180,6 +1202,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                 .flatten()
                 .collect();
             exports.push("state_layout".to_string());
+            // 2026-08-12 (Iterable protocol, slice 4): the b-each snapshot
+            // materializers — `__view_items_<field>()` per collection iterable.
+            for field in &collection_iterables {
+                exports.push(format!("__view_items_{}", field));
+            }
             // 2026-08-12 (Iterable protocol, slice 4): the state-pointer + boot
             // + render-frame exports — the shim passes __briev_state_ptr() to
             // every txn export and ticks render_frame each frame.
@@ -1327,7 +1354,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
                     HashMap::new(),
                     frgn_decls,
                 )
-                .with_bind_routes(resolved_routes);
+                .with_bind_routes(resolved_routes)
+                .with_collection_iterables(collection_iterables.clone());
                 match web_gen.generate() {
                     Ok(output) => {
                         let mjs_path = format!("{}.mjs", binary_base);
@@ -1540,6 +1568,7 @@ fn codegen(
     enable_module_init: bool,
     web_layout: &mut Option<briev_compiler::glue::web_generator::StateLayout>,
     view_signals: &std::collections::HashSet<String>,
+    collection_iterables: &std::collections::HashSet<String>,
     bind_routes: &mut Option<std::collections::HashMap<
         String,
         Result<briev_compiler::glue::web_generator::BindRoute, String>,
@@ -1694,6 +1723,7 @@ output = b.generate(items, None);
             // 2026-08-11 (view wiring): view-bound fields are observability —
             // the DOM consumes them, so dead-field elimination must keep them.
             b.ctx.view_bound_fields = view_signals.clone();
+            b.ctx.collection_iterables = collection_iterables.clone();
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the

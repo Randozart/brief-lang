@@ -111,6 +111,11 @@ pub struct CompilerContext {
     /// pruned by dead-field elimination. Frontend-computed (ViewCompiler
     /// root signals) and copied here before generate().
     pub view_bound_fields: std::collections::HashSet<String>,
+    /// 2026-08-12 (Iterable protocol, slice 4): the `b-each` iterable fields
+    /// that are generic collections — the backend emits a
+    /// `__view_items_<field>()` snapshot materializer for each (driving the
+    /// collection's op Count/op At into a `[len][word…]` buffer the shim reads).
+    pub collection_iterables: std::collections::HashSet<String>,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -356,6 +361,7 @@ impl CompilerContext {
             observable_names: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
+            collection_iterables: std::collections::HashSet::new(),
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,
