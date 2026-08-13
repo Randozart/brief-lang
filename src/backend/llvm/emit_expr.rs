@@ -1079,6 +1079,17 @@ impl LlvmBackend {
                         let tr = self.fun.gen_reg();
                         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, tr).ok();
+                    } else if self.is_protocol_member(&index_elem_ty, "#Int") {
+                        // 2026-08-12 (slice 4, wasm32 maze): an Int element is
+                        // stored as a boxed i64 handle; on wasm32 the value is
+                        // in the low i32 — load at the ELEMENT's native width
+                        // (`llvm_type(Int)` = i32 on wasm32, i64 on x86_64) so
+                        // the member's term return + consumers match. Loading
+                        // the full i64 then returning it as i32 produced
+                        // `%t117 defined with type 'i64' but expected 'i32'`.
+                        writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
+                            if self.fun.volatile_read { "volatile " } else { "" },
+                            self.llvm_type(&index_elem_ty), gep).ok();
                     } else {
                         writeln!(out, "{}{} = load {}{}, ptr {}", indent, v,
                             if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();

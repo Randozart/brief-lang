@@ -853,6 +853,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         writeln!(out, "{}br label %{}", indent, post_label).ok();
                     }
                     backend.fun.terminated = true;
+                } else if backend.fun.member_result.is_some() {
+                    // 2026-08-04 (term-termination-diagnostics): INLINED member
+                    // body (emit_member_body -> emit_statement_sequence): this
+                    // `term <val>` is the member's return value, captured above
+                    // in member_result and taken by emit_member_body. It is NOT
+                    // a control-flow exit of the enclosing function — emitting
+                    // `ret void` here broke the countdown loop (queue_drain's
+                    // `<- queue` pop): the loop emitter keeps emitting after the
+                    // ret, producing invalid IR ("value doesn't match function
+                    // result type 'i32'"). 2026-08-12 (slice 4): check BEFORE
+                    // `fn_ret_ty != "void"` — an inlined member inside a
+                    // NON-VOID function (a `__view_items_<field>` materializer
+                    // returns i32) previously hit the standalone-ret branch and
+                    // terminated the enclosing function after the member's term.
+                    // Emit no terminator and leave `terminated` unchanged so the
+                    // enclosing body continues.
                 } else if backend.fun.fn_ret_ty != "void" {
                     // 2026-07-26: Use actual expression LLVM type, not hardcoded "i64".
                     // Frgn calls may return ptr (for String/Data in C ABI).
