@@ -2261,6 +2261,12 @@ impl LlvmBackend {
                 d.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
                 d.body.clone(),
             ),
+            // 2026-08-12 (Iterable protocol, op-as-member): an operator member
+            // emits exactly like a defn member — the body is the implementation.
+            crate::ast::TopLevel::TypeDefOperator(d) => (
+                d.parameters.iter().map(|(n, ty)| (n.clone(), ty.clone())).collect(),
+                d.body.clone(),
+            ),
             _ => (Vec::new(), Vec::new()),
         };
         for (i, (reg, rty)) in arg_regs.iter().enumerate() {
@@ -4423,6 +4429,7 @@ pub(crate) fn member_briev_name(m: &crate::ast::TopLevel) -> &str {
     match m {
         crate::ast::TopLevel::Transaction(t) => &t.name,
         crate::ast::TopLevel::Definition(d) => &d.name,
+        crate::ast::TopLevel::TypeDefOperator(d) => &d.name,
         _ => "",
     }
 }

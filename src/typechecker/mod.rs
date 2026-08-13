@@ -407,13 +407,21 @@ impl<'a> TypecheckContext<'a> {
             Type::Applied(n, a) => (n.clone(), a.clone()),
             _ => return None,
         };
+        let members = self.type_members.get(&type_name)?;
+        // 2026-08-12 (Iterable protocol, op-as-member): the operator IS the
+        // member — its first parameter is the element type, no binding
+        // indirection (`op InsertAt(v: T) { … }`).
+        if let Some(op_member) = operator_member(members, "InsertAt") {
+            let elem = op_member.parameters.first().map(|(_, ty)| ty.clone())?;
+            let params = self.type_params.get(&type_name).cloned().unwrap_or_default();
+            return Some(substitute_type_params(&elem, &params, &args));
+        }
         let bindings = self.regular_bindings.get(&type_name)?;
         let binding = bindings.iter().find(|b| b.name == "InsertAt")?;
         let fn_name = match &binding.expr {
             Expr::Call(name, _, _) => name.clone(),
             _ => return None,
         };
-        let members = self.type_members.get(&type_name)?;
         let member = members.iter().find(|m| member_name(m) == fn_name)?;
         let elem = member_params(member).into_iter().next()?;
         // 2026-08-01 (Phase 3): substitute the collection's concrete type args
@@ -440,6 +448,16 @@ impl<'a> TypecheckContext<'a> {
             Type::Applied(n, a) => (n.clone(), a.clone()),
             _ => return None,
         };
+        let members = self.type_members.get(&type_name)?;
+        // 2026-08-12 (Iterable protocol, op-as-member): the operator IS the
+        // member — its return type is the extracted element type.
+        if let Some(op_member) = operator_member(members, "ExtractFrom")
+            .or_else(|| operator_member(members, "CopyFrom"))
+        {
+            let out = op_member.output_type.as_ref().and_then(|o| o.all_types().into_iter().next())?;
+            let params = self.type_params.get(&type_name).cloned().unwrap_or_default();
+            return Some(substitute_type_params(&out, &params, &args));
+        }
         let bindings = self.regular_bindings.get(&type_name)?;
         let binding = bindings
             .iter()
@@ -448,7 +466,6 @@ impl<'a> TypecheckContext<'a> {
             Expr::Call(name, _, _) => name.clone(),
             _ => return None,
         };
-        let members = self.type_members.get(&type_name)?;
         let member = members.iter().find(|m| member_name(m) == fn_name)?;
         let out = member_output(member)?;
         // 2026-08-01 (Phase 3): substitute concrete args into the generic
@@ -2690,6 +2707,20 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                             }
                         }
                     }
+                    // 2026-08-12 (Iterable protocol, op-as-member): an operator
+                    // member typechecks exactly like a defn member — self +
+                    // slots bound, params + output in scope.
+                    TopLevel::TypeDefOperator(d) => {
+                        for (n, ty) in &d.parameters {
+                            mctx.bindings.insert(n.clone(), ty.clone());
+                        }
+                        mctx.current_output_type = d.output_type.as_ref().map(output_type_to_type);
+                        for stmt in &d.body {
+                            if let Err(e) = infer_statement(stmt, &mut mctx) {
+                                errors.push(e);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -3253,14 +3284,26 @@ fn member_name(m: &TopLevel) -> String {
     match m {
         TopLevel::Transaction(t) => t.name.clone(),
         TopLevel::Definition(d) => d.name.clone(),
+        TopLevel::TypeDefOperator(d) => d.name.clone(),
         _ => String::new(),
     }
+}
+
+/// 2026-08-12 (Iterable protocol, op-as-member): find an operator member
+/// (`op Name(...) { … }`) on a type by its operator name. The operator IS the
+/// member — no binding RHS, no bare member-name indirection (SPEC §15.2).
+fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definition> {
+    members.iter().find_map(|m| match m {
+        TopLevel::TypeDefOperator(d) if d.name == op => Some(d),
+        _ => None,
+    })
 }
 
 fn member_params(m: &TopLevel) -> Vec<Type> {
     match m {
         TopLevel::Transaction(t) => t.parameters.iter().map(|(_, ty)| ty.clone()).collect(),
         TopLevel::Definition(d) => d.parameters.iter().map(|(_, ty)| ty.clone()).collect(),
+        TopLevel::TypeDefOperator(d) => d.parameters.iter().map(|(_, ty)| ty.clone()).collect(),
         _ => Vec::new(),
     }
 }
@@ -3269,6 +3312,7 @@ fn member_output(m: &TopLevel) -> Option<Type> {
     match m {
         TopLevel::Transaction(t) => t.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
         TopLevel::Definition(d) => d.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
+        TopLevel::TypeDefOperator(d) => d.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()),
         _ => None,
     }
 }
@@ -3386,6 +3430,47 @@ mod tests {
         let mut items = p.parse_program().unwrap();
         let universe = crate::type_universe::TypeUniverse::new();
         check_program(&mut items, &universe)
+    }
+
+    /// 2026-08-12 (Iterable protocol, op-as-member): an obj with operator
+    /// members typechecks — op bodies are self-parameterized (slots bound) and
+    /// the `<-` arrow resolves the op-as-member element types.
+    #[test]
+    fn op_as_member_typechecks_and_dispatch() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    op Count() -> Int { term count; };
+    op At(i: Int) -> Int { term count; };
+    op InsertAt(v: Int) { count = v; term; };
+    op ExtractFrom() -> Int { term count; };
+};
+let c: Counter = Counter { count: 0 };
+let v: Int = 3;
+let x: Int = 0;
+txn push [v == 3][c.count == 3] {
+    &c <- v;
+    x <- c;
+};
+"#;
+        // A typecheck failure here means the op-as-member body was not
+        // self-parameterized, or the arrow did not resolve the operator member.
+        check(src).expect("op-as-member must typecheck");
+    }
+
+    /// 2026-08-12 (Iterable protocol): a non-operator member body still fails
+    /// when a slot is mis-typed (the A2 self+slots binding is intact for the
+    /// new member kind).
+    #[test]
+    fn op_as_member_slot_mistype_errors() {
+        let src = r#"
+obj Counter {
+    count: Int;
+    op Count() -> Int { term "nope"; };
+};
+"#;
+        let err = check(src).unwrap_err();
+        assert!(!err.is_empty(), "mis-typed op body must error");
     }
 
     /// `Int * Float` is a type error — no implicit numeric coercion.
