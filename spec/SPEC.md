@@ -473,6 +473,18 @@ seq struct Header {
 > as plain fields there — atomicity is a target concern (the explicit
 > `AtomicLoad#`/`AtomicStore#`/`AtomicAdd#` intrinsics remain for address-based
 > access).
+>
+> **2026-08-13 (`union`).** `union Name { field: Type, … };` is an untagged
+> overlay: all fields share storage at offset 0; size is the largest aligned
+> field storage and alignment the maximum field alignment. Sub-byte `Bits<N>`
+> fields (N % 8 != 0) and zero-width padding are rejected — a bit-sliced
+> overlay is ambiguous (deferred). The LLVM backend materializes a union as a
+> byte array of its storage size with per-field loads/stores at offset 0
+> (the C header exporter already renders all layouts as opaque byte arrays, so
+> a union crosses the GLUE boundary identically). `union` is exclusive of
+> `seq`/`pack`. The reference interpreter models structs as layout-free named
+> products, so a union's fields behave as independent values there — the
+> byte-overlay reinterpretation is a target concern.
 
 Behavior for a struct is attached through an inherent `impl` in the defining module.
 

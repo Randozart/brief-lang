@@ -11,6 +11,16 @@ use crate::type_universe::resolve_type;
 pub fn lower_type(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> String {
     match ty {
         Type::Custom(name) => lower_custom_type(name, universe),
+        // 2026-08-13 (Phase 6): `Bits<N>` parses as Applied("Bits", [Number(N)])
+        // — the exact-width alias — lower it to i{N} so a `Bits<32>` field
+        // reads/writes exactly 32 bits (a plain/union struct field, not just
+        // packed). The generic-application default (i64) silently widened it.
+        Type::Applied(name, _) if name == "Bits" => {
+            match crate::type_universe::bits_width(ty) {
+                Some(n) => format!("i{}", n),
+                None => lower_custom_type(name, universe),
+            }
+        }
         Type::Applied(name, _) => lower_custom_type(name, universe),
         Type::Bits(n) => format!("i{}", n),
         Type::Void => "void".into(),

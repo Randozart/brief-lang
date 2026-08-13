@@ -929,6 +929,10 @@ pub struct StructDef {
     /// declared `spec Endian` (Default Target = native; `packed_field_offsets`
     /// derives each field's bit offset).
     pub pack: bool,
+    /// 2026-08-13 (layout-keywords plan Phase 6): `union` — an untagged
+    /// overlay: all fields share storage at offset 0; size is the largest
+    /// aligned field storage (SPEC §8.2). Exclusive with `pack`/`seq`.
+    pub union: bool,
 }
 
 #[derive(Debug, Clone)]

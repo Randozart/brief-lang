@@ -94,6 +94,12 @@ pub enum Token {
     #[token("atomic")]
     Atomic,
 
+    /// 2026-08-13 (layout-keywords plan Phase 6): `union` — an untagged
+    /// overlay declaration: `union Name { field: Type, … };` — all fields
+    /// share storage at offset 0 (SPEC §8.2).
+    #[token("union")]
+    Union,
+
     /// 2026-08-01 (E): `vol` — memory-visibility modifier (prefix).
     /// `vol let x` emits volatile load/store.
     #[token("vol")]
@@ -540,6 +546,7 @@ impl std::fmt::Display for Token {
             Token::Pack => write!(f, "pack"),
             Token::Trap => write!(f, "trap"),
             Token::Atomic => write!(f, "atomic"),
+            Token::Union => write!(f, "union"),
             Token::Vol => write!(f, "vol"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),
@@ -677,7 +684,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "spec", "pack", "trap", "atomic", "await", "spawn", "term", "term!", "rollback", "import",
+            "vol", "out", "spec", "pack", "trap", "atomic", "union", "await", "spawn", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

@@ -4020,6 +4020,7 @@ fn test_struct_literal_field_offsets() {
             metadata: HashMap::new(),
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4077,6 +4078,7 @@ fn test_addr_of_struct_literal() {
             metadata: HashMap::new(),
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4165,6 +4167,7 @@ fn test_frgn_ptr_param_inttoptr() {
             metadata: HashMap::new(),
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4347,6 +4350,7 @@ fn test_struct_array_list_literal() {
             metadata: HashMap::new(),
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4420,6 +4424,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
             metadata: HashMap::new(),
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -6532,6 +6537,7 @@ fn packed_struct_def(
         metadata,
         seq: false,
         pack: true,
+        union: false,
         span: None,
     }
 }
@@ -6749,6 +6755,7 @@ fn test_atomic_field_load_store_rmw() {
             metadata: meta,
             seq: false,
             pack: false,
+            union: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -6795,4 +6802,38 @@ fn test_atomic_field_load_store_rmw() {
         "atomic struct-literal field store must be atomic; got:\n{ir}");
     assert!(ir.contains("load i64, ptr"),
         "plain field read stays on the default (non-atomic) path; got:\n{ir}");
+}
+
+// ── union (layout-keywords plan Phase 6) ───────────────────────────────
+
+#[test]
+fn test_union_emits_byte_array_and_offset_zero() {
+    // 2026-08-13 (Phase 6): a union materializes as a byte array of its
+    // largest aligned field storage; every field overlays at offset 0.
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let program = vec![
+        TopLevel::StaticStruct(StructDef {
+            type_params: vec![],
+            name: "Word".to_string(),
+            fields: vec![
+                ("i".to_string(), Type::int()),
+                ("b".to_string(), Type::bits(64)),
+            ],
+            metadata: HashMap::new(),
+            seq: false,
+            pack: false,
+            union: true,
+            span: None,
+        }),
+        packed_main_def(vec![
+            struct_literal_stmt("Word", "w", vec![("i", Expr::Decimal(7))]),
+            print_field("w", "b"),
+        ]),
+    ];
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%Word = type { [8 x i8] }"),
+        "union must materialize as a byte array of the largest field; got:\n{ir}");
+    assert!(ir.contains("getelementptr i8, ptr") && ir.contains("i64 0"),
+        "union field access must GEP at offset 0; got:\n{ir}");
 }

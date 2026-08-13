@@ -560,9 +560,27 @@ regression). End-to-end `benchmarks/atomic_test.bv` vs C: output IDENTICAL.
 3. **Backend**: `%T = type { [N x i8] }` + per-field `GEP 0,0` + `bitcast` +
    load/store. **GLUE export**: C union.
 4. **Interpreter**: overlay reference.
-5. **Tests**: IR overlay + field punning; size/alignment; C-export shape;
-   interpreter equality.
-6. **Docs in-commit**: SPEC §8.x new union section.
+
+**Phase 6 implementation result (2026-08-13, done):** `union` wired: lexer
+`Token::Union` + vocab; parser `parse_struct_def(union: bool)` (standalone —
+no `seq`/`pack` prefixes, no `struct` keyword) + sub-byte `Bits<N>` field
+rejection (N % 8 != 0, zero-width) with an explicit deferred message; AST
+`StructDef.union`; frontend sizing = largest aligned field storage, alignment
+= max field alignment (`static_struct_resolved_ty`); backend `ctx.unions`,
+offset-0 field access (`lookup_field_offset` + `emit_field_access` no longer
+accumulate type_size), `%T = type { [N x i8] }` emission, struct-literal
+construction via the existing offset-0 path. Canonical formatter prints the
+`union` prefix. C header exporter renders unions as opaque byte arrays (same
+path as all layouts — no separate union rendering needed).
+
+Fixing the union end-to-end surfaced a latent `Bits<N>` width bug: the
+`Applied("Bits", [Number(N)])` source form lowered to i64 through the casting
+graph, so a `Bits<32>` union/struct field read all 64 bits. Fixed in
+`llvm_type` (early `bits_width` resolution, matching the direct `Type::Bits`
+arm) — a general correctness fix for plain-struct `Bits<N>` fields. Verified
+end-to-end vs C at BOUND=1000/100000 (u64/u32/u16 overlay). Full `--runtime`
+suite: all 39 benchmarks MATCH/PASS at baseline parity (no regression from the
+width fix). `cargo test --lib` 1827 green.
 
 ### Phase 7 — stdlib migration, docs, highlighter, gates
 
@@ -642,8 +660,8 @@ MATCH/PASS exit=0.
 3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** `a3040db2`.
 4. Phase 3 (DSL removal + SPEC cleanup). **done** `7f506e3a`.
 5. Phase 4 (trap). **done** `8ef2eaee`.
-6. Phase 5 (atomic). **done** (this commit).
-7. Phase 6 (union).
+6. Phase 5 (atomic). **done** `ff5b6485`.
+7. Phase 6 (union). **done** (this commit).
 8. Phase 7 (stdlib migration + docs + highlighter + AGENTS.md fix + BUGS.md).
 
 Each commit: `cargo test --lib` green, `cargo build` warning-free, Praetor on

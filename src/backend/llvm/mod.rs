@@ -2427,6 +2427,9 @@ impl LlvmBackend {
                     if s.pack {
                         self.ctx.packed_structs.insert(s.name.clone());
                     }
+                    if s.union {
+                        self.ctx.unions.insert(s.name.clone());
+                    }
                     // 2026-08-13 (Phase 5): `atomic` field slots.
                     register_atomic_fields(&mut self.ctx, &s.name, &s.metadata);
                     if let Some(ref mut universe) = self.ctx.type_universe {

@@ -2080,7 +2080,10 @@ impl LlvmBackend {
         // 2026-08-13 (pack): packed structs take their byte offset from the
         // packed authority; otherwise the type_size walk stands.
         let packed = self.ctx.packed_structs.contains(&type_name);
-        let mut offset = if packed {
+        // 2026-08-13 (Phase 6): a union's fields all overlay at offset 0 — no
+        // type_size accumulation.
+        let is_union = self.ctx.unions.contains(&type_name);
+        let mut offset = if packed || is_union {
             self.lookup_field_offset(&type_name, name)
         } else {
             0u64
@@ -2091,7 +2094,7 @@ impl LlvmBackend {
                 field_ty = Some(fty.clone());
                 break;
             }
-            if !packed {
+            if !packed && !is_union {
                 offset += types::type_size(fty, self.ctx.type_universe.as_ref());
             }
         }
@@ -2814,6 +2817,14 @@ impl LlvmBackend {
                 );
             }
         }
+        // 2026-08-13 (Phase 6): a union's storage is its largest field.
+        if self.ctx.unions.contains(type_name) {
+            if let Some(fields) = self.ctx.struct_types.get(type_name) {
+                return fields.iter().map(|(_, ty)| {
+                    types::type_size(ty, self.ctx.type_universe.as_ref())
+                }).max().unwrap_or(0);
+            }
+        }
         self.ctx.struct_types.get(type_name)
             .map(|fields| {
                 fields.iter().map(|(_, ty)| types::type_size(ty, self.ctx.type_universe.as_ref())).sum()
@@ -2830,6 +2841,10 @@ impl LlvmBackend {
     /// covering byte region starts (`PackedField.byte`); sub-byte reads/writes
     /// slice from there.
     pub(crate) fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
+        // 2026-08-13 (Phase 6): a union's fields all overlay at offset 0.
+        if self.ctx.unions.contains(type_name) {
+            return 0;
+        }
         if self.ctx.packed_structs.contains(type_name) {
             return self
                 .packed_field(type_name, field_name)

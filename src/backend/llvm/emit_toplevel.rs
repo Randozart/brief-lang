@@ -289,7 +289,12 @@ impl LlvmBackend {
             }
             universe_fields.sort_by_key(|(k, _, _, _)| k.clone());
             for (name, field_tys, packed, whole_byte) in &universe_fields {
-                if *packed && !*whole_byte {
+                // 2026-08-13 (Phase 6): a union is a byte array of its largest
+                // aligned field storage; fields overlay at offset 0.
+                if self.ctx.unions.contains(name) {
+                    let n = u.types.get(name).map(|r| r.bytes).unwrap_or(1).max(1);
+                    writeln!(out, "%{} = type {{ [{} x i8] }}", name, n).ok();
+                } else if *packed && !*whole_byte {
                     // Sub-byte packed: hide fields behind a byte array. N is the
                     // registered storage size (ceil(Σ bits / 8)).
                     let n = u.types.get(name).map(|r| r.bytes).unwrap_or(1);
@@ -417,6 +422,13 @@ impl LlvmBackend {
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> String {
+        // 2026-08-13 (Phase 6): `Bits<N>` (both AST forms) is exactly N bits —
+        // resolve the Applied("Bits", [Number(N)]) alias here so a `Bits<32>`
+        // struct field reads/writes i32, not the generic i64. The casting
+        // graph's generic application path widened it.
+        if let Some(n) = crate::type_universe::bits_width(ty) {
+            return format!("i{}", n);
+        }
         // 2026-07-15: Ptr<T> always maps to LLVM opaque pointer type.
         // Must be checked BEFORE the universe lookup because Ptr<T> has no
         // primitive property set (it's a compiler construct, not from bootstrap.bv).

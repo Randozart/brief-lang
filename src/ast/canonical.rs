@@ -333,7 +333,13 @@ fn format_struct_into(
     if def.pack {
         out.push_str("pack ");
     }
-    let _ = write!(out, "struct {}", def.name);
+    // 2026-08-13 (layout-keywords plan Phase 6): `union` is standalone —
+    // no `struct` keyword, no seq/pack prefixes.
+    if def.union {
+        let _ = write!(out, "union {}", def.name);
+    } else {
+        let _ = write!(out, "struct {}", def.name);
+    }
     if !def.type_params.is_empty() {
         let params: Vec<String> = def.type_params.iter().map(|p| p.name.clone()).collect();
         let _ = write!(out, "<{}>", params.join(", "));
@@ -770,6 +776,8 @@ mod tests {
         // 2026-08-13 (layout-keywords plan Phase 5): the `atomic` field
         // modifier round-trips through the prefix (not `!> atomic_fields`).
         "struct Counter {\n  atomic count: Int;\n  other: Int;\n};\n",
+        // 2026-08-13 (layout-keywords plan Phase 6): `union` round-trips.
+        "union Word {\n  i: Int;\n  f: Float;\n};\n",
         // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
         "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
         "init BufferSize: [64 | lo..hi] Int = 64;\n",

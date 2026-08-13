@@ -18,6 +18,20 @@ use crate::type_universe::TypeUniverse;
 /// for static-struct sizing — llvm/mod.rs StaticStruct registration calls this
 /// instead of re-deriving bytes/alignment inline (rule 16: one precedence
 /// table). §2.1 precedence: Bytes > Bits > slot-sum; alignment defaults to 8.
+/// 2026-08-13 (layout-keywords plan Phase 6): a union's storage layout — the
+/// largest aligned field storage (bytes) and the maximum field alignment.
+/// All fields overlay at offset 0.
+fn union_field_storage(fields: &[(String, crate::ast::Type)], universe: &TypeUniverse) -> (u64, u64) {
+    let mut bytes = 0u64;
+    let mut align = 1u64;
+    for (_, ty) in fields {
+        let sz = crate::backend::llvm::types::type_size(ty, Some(universe));
+        bytes = bytes.max(sz);
+        align = align.max(sz.min(8));
+    }
+    (bytes, align)
+}
+
 pub fn static_struct_resolved_ty(
     def: &crate::ast::top::StructDef,
     universe: &TypeUniverse,
@@ -41,27 +55,45 @@ pub fn static_struct_resolved_ty(
     } else {
         None
     };
+    // 2026-08-13 (layout-keywords plan Phase 6): a union's fields overlay at
+    // offset 0 — size is the largest aligned field storage, alignment the max
+    // field alignment.
+    let union_layout = if def.union {
+        Some(union_field_storage(&fields, universe))
+    } else {
+        None
+    };
+    let slot_sum: u64 = fields.iter().map(|(_, ty)| {
+        crate::backend::llvm::types::type_size(ty, Some(universe))
+    }).sum();
+    // §2.1 precedence: spec Bytes > (pack volume | declared Bits) > union
+    // storage > slot sum.
+    let declared_bytes = if def.pack {
+        packed_bits.map(|b| b.div_ceil(8))
+    } else {
+        declared_bits.map(|b| b.div_ceil(8))
+    };
     let bytes = int_md("bytes")
-        .or_else(|| if def.pack {
-            packed_bits.map(|b| b.div_ceil(8))
-        } else {
-            declared_bits.map(|b| b.div_ceil(8))
-        })
-        .unwrap_or_else(|| {
-            fields.iter().map(|(_, ty)| {
-                crate::backend::llvm::types::type_size(ty, Some(universe))
-            }).sum()
-        });
-    let max_bits = declared_bits.unwrap_or_else(|| packed_bits.unwrap_or(bytes * 8));
+        .or(declared_bytes)
+        .or(union_layout.map(|(ubytes, _)| ubytes))
+        .unwrap_or(slot_sum);
+    let max_bits = declared_bits.or(packed_bits).unwrap_or(bytes * 8);
+    let default_align = match (def.pack, union_layout) {
+        // Packed layouts are bit-contiguous: no inter-element padding, so the
+        // default alignment is 1 (a `spec Alignment` declaration overrides).
+        // A union's alignment is the max field alignment (the overlay storage
+        // must satisfy every field).
+        (true, _) => 1,
+        (false, Some((_, ualign))) => ualign,
+        (false, None) => 8,
+    };
     ResolvedType {
         name: def.name.clone(),
         base: "Bit".to_string(),
         bytes,
         min_bits: max_bits,
         max_bits,
-        // Packed layouts are bit-contiguous: no inter-element padding, so the
-        // default alignment is 1 (a `spec Alignment` declaration overrides).
-        alignment: int_md("alignment").unwrap_or(if def.pack { 1 } else { 8 }),
+        alignment: int_md("alignment").unwrap_or(default_align),
         // All `spec` keys (incl. endian) surface via reflection (`.^^`).
         properties: def.metadata.clone(),
         fields,
@@ -357,6 +389,7 @@ mod tests {
             span: None,
             seq: false,
             pack: false,
+            union: false,
         }
     }
 

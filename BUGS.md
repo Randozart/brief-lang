@@ -4037,3 +4037,19 @@ encoded the wrong expectation, so the bug was invisible. A low-nibble BE field
 (`within = 4`) shifted off its own bits and read the neighbor's nibble.
 **Fix:** corrected formula in `src/type_universe/packed.rs` + tests; verified
 byte-for-byte against hand-computed BE storage in `benchmarks/pack_be_selfcheck.bv`.
+
+## `Bits<N>` fields read/wrote the full word (Applied alias widened to i64) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found while verifying union overlay end-to-end)
+**Status:** Fixed in `feat/spec-layout-keywords` Phase 6.
+**Root cause:** `Bits<32>` in source parses as `Applied("Bits", [Number(32)])`.
+The casting graph's generic application resolution lowered it to i64, so a
+`Bits<32>` struct/union field read all 64 bits (the direct `Type::Bits` form
+lowered to i32 correctly). Phase 2 fixed this for the packed authority
+(`field_bits`) but the general `llvm_type` path was still widening.
+**Fix:** `llvm_type` resolves `Applied("Bits", [N])` to `i{N}` (early check,
+matching the direct `Type::Bits` arm). `lower_type` does the same.
+
+## Reactive nodes with struct-typed state slots fire once then stop — OPEN (pre-existing)
+
+(reference: earlier entry; union/atomic fields hit the same reactor gap)

@@ -32,13 +32,14 @@ impl<'a> Parser<'a> {
             // and/or non-vectorized array access. Recorded as a modifier
             // annotation; the backend consumes it (never a speed win — a
             // modifier-beaten default is a compiler bug).
-            Some(Token::Pack) => self.parse_struct_def().map(TopLevel::StaticStruct),
+            Some(Token::Pack) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
+            Some(Token::Union) => self.parse_struct_def(true).map(TopLevel::StaticStruct),
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack)) => {
                 // 2026-08-05 (Phase 4): `seq struct` — parse_struct_def consumes
                 // the seq modifier itself. 2026-08-13: `pack`/`seq` prefixes are
                 // order-independent (`pack seq struct`, `seq pack struct`); the
                 // struct parser consumes whichever flags precede `struct`.
-                self.parse_struct_def().map(TopLevel::StaticStruct)
+                self.parse_struct_def(false).map(TopLevel::StaticStruct)
             }
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
                 self.pos += 1; // consume seq
@@ -193,7 +194,7 @@ impl<'a> Parser<'a> {
             Some(Token::Impl) => self.parse_impl().map(TopLevel::Impl),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
             Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
-            Some(Token::Struct) => self.parse_struct_def().map(TopLevel::StaticStruct),
+            Some(Token::Struct) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
             // 2026-07-26: Handle `render struct Name { <html> }` and `render obj Name { <html> }`
             Some(Token::Render) => self.parse_render_block(),
             // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
@@ -2214,21 +2215,26 @@ impl<'a> Parser<'a> {
     /// struct Name { field: Type; } — static fixed-layout struct.
     /// Pure data, C-compatible, no methods, no contracts.
     /// 2026-07-24: Fields are space-separated, semicolon-terminated.
-    fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
+    fn parse_struct_def(&mut self, union: bool) -> Result<StructDef, SyntaxError> {
         // 2026-08-05 (Phase 4): `seq struct` preserves field order/containment.
         // 2026-08-13 (layout-keywords plan): `pack struct` (bit-contiguous) —
         // `pack`/`seq` are order-independent (`pack seq struct`, `seq pack
         // struct`), so consume both flags before `struct` in a loop.
         let mut seq = false;
         let mut pack = false;
-        loop {
-            match self.tokens.get(self.pos).map(|(t, _)| t) {
-                Some(Token::Seq) => { seq = true; self.pos += 1; }
-                Some(Token::Pack) => { pack = true; self.pos += 1; }
-                _ => break,
+        // 2026-08-13 (Phase 6): `union` is standalone — no seq/pack prefixes.
+        if !union {
+            loop {
+                match self.tokens.get(self.pos).map(|(t, _)| t) {
+                    Some(Token::Seq) => { seq = true; self.pos += 1; }
+                    Some(Token::Pack) => { pack = true; self.pos += 1; }
+                    _ => break,
+                }
             }
+            self.expect(Token::Struct)?;
+        } else {
+            self.expect(Token::Union)?;
         }
-        self.expect(Token::Struct)?;
         let name = self.expect_identifier()?;
         // 2026-07-31: Generic struct: struct ListBuffer<T> { ... }.
         let type_params = self.parse_type_params()?;
@@ -2334,12 +2340,36 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        // 2026-08-13 (layout-keywords plan Phase 6): a union's fields overlay
+        // at offset 0 — sub-byte `Bits<N>` fields (N % 8 != 0) and zero-width
+        // padding are deferred (explicit error), because bit-sliced access on
+        // an overlay is ambiguous. Whole-byte fields resolve at registration.
+        if union {
+            for (fname, fty) in &fields {
+                let bits = crate::type_universe::bits_width(fty);
+                if let Some(n) = bits {
+                    if n == 0 || n % 8 != 0 {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "union field '{}': width {} is sub-byte — a union overlay needs whole-byte fields (deferred; use `Bits<{}>` or split)",
+                                fname, n, n.div_ceil(8) * 8
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                }
+            }
+        }
         Ok(StructDef {
             name, type_params, fields,
             metadata,
             span: None,
             seq,
             pack,
+            union,
         })
     }
 
@@ -2795,6 +2825,26 @@ mod tests {
             }
             other => panic!("expected atomic_fields list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_union_declaration_parses() {
+        // 2026-08-13 (layout-keywords plan Phase 6): `union Name { … };` is a
+        // standalone untagged overlay (no `struct` keyword).
+        let tl = parse_top("union Word { i: Int; f: Float; bytes: Bits<64>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.union, "union flag must be set");
+        assert!(!s.seq && !s.pack, "union is exclusive of seq/pack");
+        assert_eq!(s.fields.len(), 3);
+    }
+
+    #[test]
+    fn test_union_rejects_sub_byte_field() {
+        let err = parse_top("union U { nib: Bits<4>; };").unwrap_err();
+        assert!(
+            err.contains("sub-byte"),
+            "sub-byte union field must be rejected with the deferred message; got: {err}"
+        );
     }
 
     #[test]
