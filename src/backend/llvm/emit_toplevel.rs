@@ -257,18 +257,48 @@ impl LlvmBackend {
         // references them under the bits model (String is a bare #String ptr).
         let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Some(u) = &self.ctx.type_universe {
-            let mut universe_fields: Vec<(String, Vec<String>)> = Vec::new();
+            let mut universe_fields: Vec<(String, Vec<String>, bool, bool)> = Vec::new();
             for rt in u.types.values() {
                 if rt.fields.is_empty() { continue; }
                 if emitted.contains(&rt.name) { continue; }
+                // 2026-08-13 (layout-keywords plan): `pack struct` emission.
+                // Whole-byte packed (every field width % 8 == 0) uses LLVM's
+                // native packed type `<{ ... }>` (no inter-element padding, GEP
+                // works as usual). Sub-byte packed collapses to a byte array
+                // `{ [N x i8] }` (N = storage bytes) with per-field bit-slices.
+                let packed = self.ctx.packed_structs.contains(&rt.name);
+                if packed {
+                    // 2026-08-13: zero-width `Bits<0>` padding fields are
+                    // filtered out of the aggregate (i0 is not a valid LLVM
+                    // element type); they occupy no storage. Element types
+                    // come from the packed authority (field_bits), so
+                    // `Bits<48>` (Applied-form in source) emits i48, not the
+                    // generic-application default i64.
+                    let field_tys: Vec<String> = rt.fields.iter()
+                        .filter(|(_, fty)| crate::type_universe::field_bits(fty, Some(u)) != 0)
+                        .map(|(_, fty)| format!("i{}", crate::type_universe::field_bits(fty, Some(u))))
+                        .collect();
+                    let whole_byte = crate::type_universe::is_whole_byte_packed(&rt.fields, Some(u));
+                    universe_fields.push((rt.name.clone(), field_tys, true, whole_byte));
+                    continue;
+                }
                 let field_tys: Vec<String> = rt.fields.iter()
                     .map(|(_, fty)| self.llvm_type(fty))
                     .collect();
-                universe_fields.push((rt.name.clone(), field_tys));
+                universe_fields.push((rt.name.clone(), field_tys, false, true));
             }
-            universe_fields.sort_by_key(|(k, _)| k.clone());
-            for (name, field_tys) in &universe_fields {
-                writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+            universe_fields.sort_by_key(|(k, _, _, _)| k.clone());
+            for (name, field_tys, packed, whole_byte) in &universe_fields {
+                if *packed && !*whole_byte {
+                    // Sub-byte packed: hide fields behind a byte array. N is the
+                    // registered storage size (ceil(Σ bits / 8)).
+                    let n = u.types.get(name).map(|r| r.bytes).unwrap_or(1);
+                    writeln!(out, "%{} = type {{ [{} x i8] }}", name, n).ok();
+                } else if *packed {
+                    writeln!(out, "%{} = type <{{ {} }}>", name, field_tys.join(", ")).ok();
+                } else {
+                    writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+                }
                 emitted.insert(name.clone());
             }
         }
@@ -286,6 +316,9 @@ impl LlvmBackend {
             if fields.is_empty() {
                 writeln!(out, "%{} = type {{}}", name).ok();
             } else {
+                // 2026-08-13: packed structs are always declared via the
+                // universe path above; this legacy all-i64 path stays for
+                // plain structs.
                 let field_tys: Vec<&str> = fields.iter().map(|_| "i64").collect();
                 writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
             }

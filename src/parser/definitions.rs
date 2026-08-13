@@ -32,9 +32,12 @@ impl<'a> Parser<'a> {
             // and/or non-vectorized array access. Recorded as a modifier
             // annotation; the backend consumes it (never a speed win — a
             // modifier-beaten default is a compiler bug).
-            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct)) => {
+            Some(Token::Pack) => self.parse_struct_def().map(TopLevel::StaticStruct),
+            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack)) => {
                 // 2026-08-05 (Phase 4): `seq struct` — parse_struct_def consumes
-                // the seq modifier itself.
+                // the seq modifier itself. 2026-08-13: `pack`/`seq` prefixes are
+                // order-independent (`pack seq struct`, `seq pack struct`); the
+                // struct parser consumes whichever flags precede `struct`.
                 self.parse_struct_def().map(TopLevel::StaticStruct)
             }
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
@@ -2208,8 +2211,19 @@ impl<'a> Parser<'a> {
     /// 2026-07-24: Fields are space-separated, semicolon-terminated.
     fn parse_struct_def(&mut self) -> Result<StructDef, SyntaxError> {
         // 2026-08-05 (Phase 4): `seq struct` preserves field order/containment.
-        let seq = self.eat(&Token::Seq);
-        self.pos += 1; // consume struct
+        // 2026-08-13 (layout-keywords plan): `pack struct` (bit-contiguous) —
+        // `pack`/`seq` are order-independent (`pack seq struct`, `seq pack
+        // struct`), so consume both flags before `struct` in a loop.
+        let mut seq = false;
+        let mut pack = false;
+        loop {
+            match self.tokens.get(self.pos).map(|(t, _)| t) {
+                Some(Token::Seq) => { seq = true; self.pos += 1; }
+                Some(Token::Pack) => { pack = true; self.pos += 1; }
+                _ => break,
+            }
+        }
+        self.expect(Token::Struct)?;
         let name = self.expect_identifier()?;
         // 2026-07-31: Generic struct: struct ListBuffer<T> { ... }.
         let type_params = self.parse_type_params()?;
@@ -2251,11 +2265,66 @@ impl<'a> Parser<'a> {
         if !annotations.is_empty() {
             metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
         }
+        // 2026-08-13 (layout-keywords plan): `pack struct` fields must be
+        // bit-sliceable — no array fields (bit-contiguous arrays are a
+        // contradiction) and no field wider than the 64-bit slice machinery
+        // (SPEC §2.5). Other scalar types resolve through the universe at
+        // registration; whole-byte widths stay on the aligned native path.
+        if pack {
+            for (fname, fty) in &fields {
+                match fty {
+                    Type::Vector(_, _) => {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "packed field '{}': a bit-contiguous struct cannot hold an array field; use an indirection or a sequence (seq)",
+                                fname
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                    Type::Bits(n) if *n > 64 => {
+                        return Err(SyntaxError::InvalidStatement {
+                            reason: format!(
+                                "packed field '{}': width {} exceeds the 64-bit packed slice limit; split it into whole-byte `Bits<64>` fields and combine",
+                                fname, n
+                            ),
+                            span: self
+                                .peek_with_span()
+                                .map(|(_, s)| self.make_span(s.clone()))
+                                .unwrap_or(crate::errors::Span::dummy()),
+                        });
+                    }
+                    // 2026-08-13: `Bits<N>` parses as Applied("Bits", [Number(N)])
+                    // (the exact-width alias) — enforce the same slice limit.
+                    Type::Applied(name, args) if name == "Bits" => {
+                        if let Some(crate::ast::Type::Number(n)) = args.first() {
+                            if *n > 64 {
+                                return Err(SyntaxError::InvalidStatement {
+                                    reason: format!(
+                                        "packed field '{}': width {} exceeds the 64-bit packed slice limit; split it into whole-byte `Bits<64>` fields and combine",
+                                        fname, n
+                                    ),
+                                    span: self
+                                        .peek_with_span()
+                                        .map(|(_, s)| self.make_span(s.clone()))
+                                        .unwrap_or(crate::errors::Span::dummy()),
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         Ok(StructDef {
             name, type_params, fields,
             metadata,
             span: None,
             seq,
+            pack,
         })
     }
 
@@ -2606,6 +2675,44 @@ mod tests {
         let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
         assert_eq!(s.metadata["bytes"], crate::ast::PropertyValue::Int(2));
         assert_eq!(s.fields.len(), 1);
+    }
+
+    #[test]
+    fn test_pack_struct_flag() {
+        let tl = parse_top("pack struct Eth { dst: Bits<48>; src: Bits<48>; etype: Bits<16>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.pack, "pack flag must be set");
+        assert!(!s.seq, "pack alone must not set seq");
+        assert_eq!(s.fields.len(), 3);
+    }
+
+    #[test]
+    fn test_pack_seq_and_seq_pack_order_independent() {
+        // `pack`/`seq` are order-independent prefix flags (plan Phase 2).
+        let tl1 = parse_top("pack seq struct P { a: Bits<4>; };").unwrap();
+        let tl2 = parse_top("seq pack struct P { a: Bits<4>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s1) = tl1 else { panic!("expected StaticStruct") };
+        let crate::ast::TopLevel::StaticStruct(s2) = tl2 else { panic!("expected StaticStruct") };
+        assert!(s1.pack && s1.seq, "pack seq struct sets both flags");
+        assert!(s2.pack && s2.seq, "seq pack struct sets both flags");
+    }
+
+    #[test]
+    fn test_pack_rejects_vector_field() {
+        let err = parse_top("pack struct V { data: Int[4]; };").unwrap_err();
+        assert!(
+            err.contains("array") || err.contains("bit-contiguous"),
+            "packed array field must be rejected with a layout reason; got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_pack_rejects_overwide_field() {
+        let err = parse_top("pack struct W { wide: Bits<128>; };").unwrap_err();
+        assert!(
+            err.contains("64-bit"),
+            "packed field wider than 64 bits must be rejected; got: {err}"
+        );
     }
 
     #[test]

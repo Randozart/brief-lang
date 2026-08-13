@@ -4,10 +4,12 @@
 // The TypeUniverse is built during the type-checking pass.
 
 pub(crate) mod operators;
+mod packed;
 mod resolve;
 mod validate;
 
 pub use operators::*;
+pub use packed::*;
 pub use resolve::*;
 pub use validate::*;
 

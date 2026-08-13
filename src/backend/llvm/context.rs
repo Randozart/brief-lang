@@ -157,6 +157,11 @@ pub struct CompilerContext {
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
+    /// 2026-08-13 (layout-keywords plan): `pack struct` names. Carried on the
+    /// context (frontend-declared), NOT on ResolvedType — the type still owns
+    /// only protocol + declared metadata; codegen consults the packed layout
+    /// helper when it must materialize the representation.
+    pub packed_structs: HashSet<String>,
     /// 2026-07-31 (A8): obj member declarations (txn/defn/node bodies), keyed
     /// by type name. Used by MethodCall codegen to emit the member body with
     /// `self` bound to the receiver instance.
@@ -377,6 +382,7 @@ impl CompilerContext {
             constants: HashMap::new(),
             inits: HashMap::new(),
             struct_types: HashMap::new(),
+            packed_structs: HashSet::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
             enum_types: HashMap::new(),

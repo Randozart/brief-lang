@@ -32,21 +32,36 @@ pub fn static_struct_resolved_ty(
         })
     };
     let declared_bits = int_md("bits");
+    // 2026-08-13 (layout-keywords plan): `pack struct` size is bit-granular —
+    // Σ field widths (zero padding), endian-independent. An explicit `spec
+    // Bytes` still wins (§2.1 precedence), otherwise the packed volume rounds
+    // up (div_ceil) to storage bytes.
+    let packed_bits = if def.pack {
+        Some(crate::type_universe::packed_total_bits(&fields, Some(universe)))
+    } else {
+        None
+    };
     let bytes = int_md("bytes")
-        .or_else(|| declared_bits.map(|b| b.div_ceil(8)))
+        .or_else(|| if def.pack {
+            packed_bits.map(|b| b.div_ceil(8))
+        } else {
+            declared_bits.map(|b| b.div_ceil(8))
+        })
         .unwrap_or_else(|| {
             fields.iter().map(|(_, ty)| {
                 crate::backend::llvm::types::type_size(ty, Some(universe))
             }).sum()
         });
-    let max_bits = declared_bits.unwrap_or(bytes * 8);
+    let max_bits = declared_bits.unwrap_or_else(|| packed_bits.unwrap_or(bytes * 8));
     ResolvedType {
         name: def.name.clone(),
         base: "Bit".to_string(),
         bytes,
         min_bits: max_bits,
         max_bits,
-        alignment: int_md("alignment").unwrap_or(8),
+        // Packed layouts are bit-contiguous: no inter-element padding, so the
+        // default alignment is 1 (a `spec Alignment` declaration overrides).
+        alignment: int_md("alignment").unwrap_or(if def.pack { 1 } else { 8 }),
         // All `spec` keys (incl. endian) surface via reflection (`.^^`).
         properties: def.metadata.clone(),
         fields,
@@ -489,6 +504,7 @@ mod tests {
             metadata,
             span: None,
             seq: false,
+            pack: false,
         }
     }
 

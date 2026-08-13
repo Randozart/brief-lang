@@ -95,6 +95,13 @@ pub fn eval_expr(
         // fallback).
         Expr::Cast(expr, ty) => {
             let v = eval_expr(expr, heap, bindings, functions)?;
+            // 2026-08-13 (pack): `x as Bits<N>` is a width assertion — the
+            // category fallback below was identity for sub-byte widths
+            // (`16 as Bits<4>` held 16). Truncate an integer source to exactly
+            // N bits, mirroring the backend's cast path (trunc i{N}).
+            if let Some(bits) = crate::type_universe::bits_width(ty) {
+                return Ok(eval_bits_cast(v, bits));
+            }
             match target_protocol_category(ty).as_str() {
                 "Int" => match v {
                     Value::Atom(Atom::Bool(b)) => Ok(Value::Atom(Atom::Int(if b { 1 } else { 0 }))),
@@ -983,6 +990,24 @@ fn target_protocol_category(ty: &Type) -> String {
 }
 
 /// Evaluate args[0] and decode it as a string (Bits) for env-var keys.
+/// 2026-08-13 (pack): `x as Bits<N>` truncates an integer value to N bits
+/// (the cast width assertion, mirroring the backend's `trunc i{N}`). Bits<0>
+/// is a zero-width domain; Bits<64> is identity.
+fn eval_bits_cast(v: Value, bits: u64) -> Value {
+    match v {
+        Value::Atom(Atom::Int(n)) => {
+            let masked = if bits < 64 {
+                let mask = if bits == 0 { 0u64 } else { (1u64 << bits) - 1 };
+                n as u64 & mask
+            } else {
+                n as u64
+            };
+            Value::Atom(Atom::Int(masked as i64))
+        }
+        other => other,
+    }
+}
+
 fn eval_string_arg(
     args: &[Expr],
     heap: &mut VirtualHeap,
@@ -1464,6 +1489,27 @@ mod tests {
             Value::Atom(Atom::Int(0))
         );
     }
+
+    #[test]
+    fn test_cast_int_to_sub_byte_bits_truncates() {
+        // 2026-08-13 (pack): `as Bits<N>` asserts width N — the interpreter
+        // mirrors the backend's truncation, so `16 as Bits<4>` is 0 and a
+        // 12-bit cast masks to 0xFFF. Whole-word widths (Bits<64>) are
+        // identity.
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Decimal(16)), Type::bits(4))),
+            Value::Atom(Atom::Int(0))
+        );
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Decimal(0x1234)), Type::bits(12))),
+            Value::Atom(Atom::Int(0x234))
+        );
+        assert_eq!(
+            eval1(&Expr::Cast(Box::new(Expr::Decimal(0x1122334455667788)), Type::bits(64))),
+            Value::Atom(Atom::Int(0x1122334455667788))
+        );
+    }
+
 
     #[test]
     fn test_cast_char_to_int_is_code_point() {

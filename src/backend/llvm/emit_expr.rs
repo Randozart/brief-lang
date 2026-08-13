@@ -310,6 +310,14 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr, gep).ok();
                                 return TypedRegister { name: addr, ty: slot_ty };
                             }
+                            // 2026-08-13 (pack): a packed self-slot reads its
+                            // bit-slice out of the byte image (whole-byte =
+                            // plain aligned load); typed Bits(bits) — the
+                            // register's true width.
+                            if let Some(pf) = self.packed_field(self_type, name) {
+                                let pv = self.emit_packed_field_load(out, indent, &gep, &pf);
+                                return TypedRegister { name: pv, ty: Type::Bits(pf.bits) };
+                            }
                             // 2026-08-01 (D3): a Ptr-typed self-slot stores the
                             // HANDLE at i{int_bits} (ptrtoint at store) — load
                             // that width, not `ptr`, so inttoptr consumers
@@ -1147,6 +1155,14 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, src.name).ok();
                 } else if target_ll == "ptr" && src_ll == "i64" {
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, src.name).ok();
+                } else if let Some(n) = crate::type_universe::bits_width(target) {
+                    // 2026-08-13 (pack): no-graph fallback for `as Bits<N>` —
+                    // same truncation contract as the casting-graph path.
+                    let tgt = format!("i{}", n);
+                    if src_ll == tgt {
+                        return TypedRegister { name: src.name.clone(), ty: target.clone() };
+                    }
+                    writeln!(out, "{}{} = trunc {} {} to {}", indent, v, src_ll, src.name, tgt).ok();
                 } else {
                     writeln!(
                         out,
@@ -1944,6 +1960,12 @@ impl LlvmBackend {
             let offset = self.lookup_field_offset(type_name, field_name);
             let ptr_reg = self.fun.gen_reg();
             writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, ptr_reg, alloca_reg, offset).ok();
+            // 2026-08-13 (pack): a packed struct-literal field stores its
+            // bit-slice into the byte image (L-M-S for sub-byte fields).
+            if let Some(pf) = self.packed_field(type_name, field_name) {
+                out.push_str(&self.emit_packed_field_store(indent, &ptr_reg, &pf, &val));
+                continue;
+            }
             // Convert i64 to ptr if the field type expects a pointer
             if val.ty == Type::int() && self.is_ptr_field(type_name, field_name) {
                 let conv = self.fun.gen_reg();
@@ -2026,14 +2048,23 @@ impl LlvmBackend {
         let Some(fields) = self.get_struct_fields(&type_name) else {
             panic!("field access '.{}': no struct layout for '{}'", name, type_name);
         };
-        let mut offset = 0u64;
+        // 2026-08-13 (pack): packed structs take their byte offset from the
+        // packed authority; otherwise the type_size walk stands.
+        let packed = self.ctx.packed_structs.contains(&type_name);
+        let mut offset = if packed {
+            self.lookup_field_offset(&type_name, name)
+        } else {
+            0u64
+        };
         let mut field_ty: Option<Type> = None;
         for (fname, fty) in fields {
             if fname == name {
                 field_ty = Some(fty.clone());
                 break;
             }
-            offset += types::type_size(fty, self.ctx.type_universe.as_ref());
+            if !packed {
+                offset += types::type_size(fty, self.ctx.type_universe.as_ref());
+            }
         }
         let field_ty = field_ty.unwrap_or_else(|| {
             panic!("field access '.{}': no field '{}' on '{}'", name, name, type_name)
@@ -2042,6 +2073,14 @@ impl LlvmBackend {
         writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr, recv_reg.name).ok();
         let gep = self.fun.gen_reg();
         writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+        // 2026-08-13 (pack): a packed field reads its bit-slice out of the
+        // byte image (whole-byte fields = the same plain aligned load). The
+        // register is typed `Bits(bits)` — its true width — so `as Int`
+        // truncates/extends correctly downstream.
+        if let Some(pf) = self.packed_field(&type_name, name) {
+            let val = self.emit_packed_field_load(out, indent, &gep, &pf);
+            return TypedRegister { name: val, ty: Type::Bits(pf.bits) };
+        }
         // 2026-08-01 (D3): a Ptr-typed struct field stores the i64 HANDLE
         // (ptrtoint at store) — load i64, not `ptr`, so the downstream
         // inttoptr consumers (inner.data[len]) work unchanged.
@@ -2650,6 +2689,11 @@ impl LlvmBackend {
                 let ptr_reg = self.fun.gen_reg();
                 writeln!(out, "{}  {} = getelementptr i8, ptr {}, i64 {}",
                     indent, ptr_reg, alloca_reg, offset).ok();
+                // 2026-08-13 (pack): packed elements store field bit-slices.
+                if let Some(pf) = self.packed_field(type_name, field_name) {
+                    out.push_str(&self.emit_packed_field_store(indent, &ptr_reg, &pf, &val));
+                    continue;
+                }
                 if val.ty == Type::int() && self.is_ptr_field(type_name, field_name) {
                     let conv = self.fun.gen_reg();
                     writeln!(out, "{}  {} = inttoptr i64 {} to ptr",
@@ -2690,6 +2734,9 @@ impl LlvmBackend {
 
     /// Compute total byte size of a struct type from its fields.
     /// 2026-07-24: Falls back to struct_types when universe unavailable.
+    /// 2026-08-13 (pack): a packed struct is bit-granular even in the fallback
+    /// — Σ type_size over-counts sub-byte fields (Bits(12)+Bits(4) is 3 bytes
+    /// as type_sizes, 2 bytes packed).
     pub(crate) fn struct_type_size(&self, type_name: &str) -> u64 {
         // Try type universe first
         if let Some(ref u) = self.ctx.type_universe {
@@ -2700,6 +2747,14 @@ impl LlvmBackend {
             }
         }
         // Fall back: compute from struct_types fields
+        if self.ctx.packed_structs.contains(type_name) {
+            if let Some(fields) = self.ctx.struct_types.get(type_name) {
+                return crate::type_universe::packed_bytes(
+                    fields,
+                    self.ctx.type_universe.as_ref(),
+                );
+            }
+        }
         self.ctx.struct_types.get(type_name)
             .map(|fields| {
                 fields.iter().map(|(_, ty)| types::type_size(ty, self.ctx.type_universe.as_ref())).sum()
@@ -2709,7 +2764,18 @@ impl LlvmBackend {
 
     /// 2026-07-24: Computes offsets from field types using type_size (pack=1).
     /// Previously used simplified i*8 which was wrong for mixed-size fields.
+    /// 2026-08-13 (pack): a packed struct's byte offset comes from the shared
+    /// packed-layout authority (`src/type_universe/packed.rs`) — Σ type_size
+    /// over-counts sub-byte fields, while whole-byte packed fields land on
+    /// identical offsets as before. The returned byte is where the field's
+    /// covering byte region starts (`PackedField.byte`); sub-byte reads/writes
+    /// slice from there.
     pub(crate) fn lookup_field_offset(&self, type_name: &str, field_name: &str) -> u64 {
+        if self.ctx.packed_structs.contains(type_name) {
+            return self
+                .packed_field(type_name, field_name)
+                .map_or(0, |pf| pf.byte);
+        }
         if let Some(fields) = self.get_struct_fields(type_name) {
             let mut offset = 0u64;
             for (fname, ftype) in fields {
@@ -2720,6 +2786,207 @@ impl LlvmBackend {
             }
         }
         0
+    }
+
+    /// 2026-08-13 (pack, layout-keywords plan Phase 2): the packed slice for
+    /// one field, or None when the struct is not packed. The single authority
+    /// for slice derivation (`packed_field_offsets`) consumed by every field
+    /// load/store site in codegen — never recompute offsets inline.
+    pub(crate) fn packed_field(&self, type_name: &str, field_name: &str) -> Option<crate::type_universe::PackedField> {
+        if !self.ctx.packed_structs.contains(type_name) {
+            return None;
+        }
+        let fields = self.get_struct_fields(type_name)?;
+        let endian = self.struct_endian(type_name);
+        let endian = endian.as_deref();
+        crate::type_universe::packed_field_offsets(
+            fields,
+            endian,
+            self.ctx.type_universe.as_ref(),
+        )
+        .into_iter()
+        .find(|p| p.name == field_name)
+    }
+
+    /// 2026-08-13: the declared bit order (`spec Endian` metadata) surfaced
+    /// from the registered universe. Absent or `Target` → native (the packed
+    /// helper treats both as little-endian).
+    pub(crate) fn struct_endian(&self, type_name: &str) -> Option<String> {
+        self.ctx.type_universe.as_ref()?.get(type_name).and_then(|r| {
+            match r.properties.get("endian") {
+                Some(crate::ast::PropertyValue::Identifier(s)) => Some(s.clone()),
+                _ => None,
+            }
+        })
+    }
+
+    /// 2026-08-13 (pack, rule-19 validated): emit a loaded field's bit-slice
+    /// from the struct byte image — covered load (i{cov*8}, align 1) → endian
+    /// byte-reversal (BE only) → right-shift → truncate to i{bits}. Whole-byte
+    /// fields (shift 0, bits == cov*8) reduce to a plain aligned load, so
+    /// packed whole-byte structs keep the byte-offset GEP + load native path.
+    /// Returns the register holding an i{bits} value. A zero-width field is
+    /// padding; its read yields the i8 constant 0 (no legal i0 value exists).
+    pub(crate) fn emit_packed_field_load(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        base_ptr: &str,
+        pf: &crate::type_universe::PackedField,
+    ) -> String {
+        if pf.bits == 0 {
+            let r = self.fun.gen_reg();
+            writeln!(out, "{}{} = or i8 0, 0", indent, r).ok();
+            return r;
+        }
+        let w = pf.cov * 8;
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i{}, ptr {}, align 1", indent, raw, w, base_ptr).ok();
+        // Whole-byte field: the raw load IS the value.
+        if pf.shift == 0 && pf.bits == w {
+            return raw;
+        }
+        // Big-endian: bytes arrive little-endian from the address order; the
+        // field sits at the TOP of the covered region, so mirror the bytes.
+        let mut x = raw;
+        if pf.endian == crate::type_universe::EndianKind::Big && pf.cov > 1 {
+            x = self.emit_byte_reverse(out, indent, &x, pf.cov);
+        }
+        if pf.shift > 0 {
+            let s = self.fun.gen_reg();
+            writeln!(out, "{}{} = lshr i{} {}, {}", indent, s, w, x, pf.shift).ok();
+            x = s;
+        }
+        let r = self.fun.gen_reg();
+        writeln!(out, "{}{} = trunc i{} {} to i{}", indent, r, w, x, pf.bits).ok();
+        r
+    }
+
+    /// 2026-08-13 (pack): mirror the byte order of a cov-byte integer that
+    /// was loaded little-endian from address order — Big-endian fields sit at
+    /// the TOP of their covered region. cov ≤ 8; a middle byte (odd cov)
+    /// needs no move and is OR'd as-is.
+    pub(crate) fn emit_byte_reverse(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        v: &str,
+        cov: u64,
+    ) -> String {
+        let w = cov * 8;
+        let mut acc: Option<String> = None;
+        for k in 0..cov {
+            let lane = self.fun.gen_reg();
+            let lane_mask: u64 = 0xFFu64 << (8 * k as usize);
+            writeln!(out, "{}{} = and i{} {}, {}", indent, lane, w, v, lane_mask).ok();
+            let src = 8 * k as i64;
+            let dst = 8 * (cov - 1 - k) as i64;
+            let placed = if src == dst {
+                lane
+            } else {
+                let s = self.fun.gen_reg();
+                if src < dst {
+                    writeln!(out, "{}{} = shl i{} {}, {}", indent, s, w, lane, dst - src).ok();
+                } else {
+                    writeln!(out, "{}{} = lshr i{} {}, {}", indent, s, w, lane, src - dst).ok();
+                }
+                s
+            };
+            acc = Some(match acc {
+                None => placed,
+                Some(a) => {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = or i{} {}, {}", indent, r, w, a, placed).ok();
+                    r
+                }
+            });
+        }
+        acc.expect("cov >= 1")
+    }
+
+    /// 2026-08-13 (pack): bit-insert store of a field value into the packed
+    /// byte image at `base_ptr` (the field's covering region start). Covers
+    /// whole-byte fields (plain aligned store of the adapted i{bits} value)
+    /// and sub-byte fields (load-modify-store: clear the field's span in the
+    /// covered integer, insert the shifted value, write back). Zero-width
+    /// fields are padding — nothing to store. Returns the emitted IR block;
+    /// the caller appends it to its output buffer.
+    pub(crate) fn emit_packed_field_store(
+        &mut self,
+        indent: &str,
+        base_ptr: &str,
+        pf: &crate::type_universe::PackedField,
+        val: &TypedRegister,
+    ) -> String {
+        let mut out = String::new();
+        let w = pf.cov * 8;
+        // Adapt the value register to the covering width i{w}: `Bits<N>` (both
+        // AST forms) is i{N} (zext when N < w), an `Int` is i64 (trunc).
+        let src = if let Some(n) = crate::type_universe::bits_width(&val.ty) {
+            n
+        } else {
+            let lt = self.llvm_type(&val.ty);
+            lt.trim_start_matches('i')
+                .parse::<u64>()
+                .unwrap_or(self.ctx.int_bits as u64)
+        };
+        let mut v = if src == w {
+            val.name.clone()
+        } else if src < w {
+            let r = self.fun.gen_reg();
+            writeln!(out, "{}{} = zext i{} {} to i{}", indent, r, src, val.name, w).ok();
+            r
+        } else {
+            let r = self.fun.gen_reg();
+            writeln!(out, "{}{} = trunc i{} {} to i{}", indent, r, src, val.name, w).ok();
+            r
+        };
+        if pf.shift == 0 && pf.bits == w {
+            writeln!(out, "{}store i{} {}, ptr {}, align 1", indent, w, v, base_ptr).ok();
+            return out;
+        }
+        if pf.bits == 0 {
+            return out; // padding
+        }
+        // 2026-08-13: mask the value to the field's width before insertion —
+        // a packed store drops the upper bits by definition (the field's
+        // declared width is its value domain). This also compensates the
+        // casting graph's identity `Int → Bits<N>` lane, which leaves
+        // out-of-range values untruncated for sub-byte widths (BUGS.md).
+        if pf.bits < 64 {
+            let mask: u64 = (1u64 << pf.bits) - 1;
+            let m = self.fun.gen_reg();
+            writeln!(out, "{}{} = and i{} {}, {}", indent, m, w, v, mask).ok();
+            v = m;
+        }
+        let mshift: u64 = if pf.bits == 64 {
+            0u64.wrapping_sub(0) // field spans the full word — no mask holes
+        } else {
+            ((1u64 << pf.bits) - 1) << pf.shift
+        };
+        let not_mask = if w == 64 {
+            !mshift
+        } else {
+            !mshift & ((1u64 << w) - 1)
+        };
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i{}, ptr {}, align 1", indent, raw, w, base_ptr).ok();
+        let mut region = raw;
+        if pf.endian == crate::type_universe::EndianKind::Big && pf.cov > 1 {
+            region = self.emit_byte_reverse(&mut out, indent, &region, pf.cov);
+        }
+        let cleared = self.fun.gen_reg();
+        writeln!(out, "{}{} = and i{} {}, {}", indent, cleared, w, region, not_mask).ok();
+        let shifted = self.fun.gen_reg();
+        writeln!(out, "{}{} = shl i{} {}, {}", indent, shifted, w, v, pf.shift).ok();
+        let merged = self.fun.gen_reg();
+        writeln!(out, "{}{} = or i{} {}, {}", indent, merged, w, cleared, shifted).ok();
+        let mut out_val = merged;
+        if pf.endian == crate::type_universe::EndianKind::Big && pf.cov > 1 {
+            out_val = self.emit_byte_reverse(&mut out, indent, &out_val, pf.cov);
+        }
+        writeln!(out, "{}store i{} {}, ptr {}, align 1", indent, w, out_val, base_ptr).ok();
+        out
     }
 
     /// Check if a struct field has pointer type.
@@ -4203,6 +4470,21 @@ impl LlvmBackend {
         &mut self, out: &mut String, v: &str,
         src: &TypedRegister, target: &Type, indent: &str,
     ) -> Option<TypedRegister> {
+        // 2026-08-13 (pack): `x as Bits<N>` is a width assertion — the
+        // casting graph treats Int ↔ Bits as a same-lane identity (no trunc),
+        // leaving `16 as Bits<4>` holding 16 in an i64 register. Truncate the
+        // integer source to exactly N bits here, before the graph. A source
+        // that is already i{N} (a packed field read) is an identity.
+        if let Some(n) = crate::type_universe::bits_width(target) {
+            let src_ll = self.llvm_type(&src.ty);
+            let tgt = format!("i{}", n);
+            if src_ll != tgt && src_ll.starts_with('i') {
+                let reg = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc {} {} to {}", indent, reg, src_ll, src.name, tgt).ok();
+                return Some(TypedRegister { name: reg, ty: target.clone() });
+            }
+            return Some(TypedRegister { name: src.name.clone(), ty: target.clone() });
+        }
         let graph = self.ctx.casting_graph.as_ref()?;
         let universe = self.ctx.type_universe.as_ref()?;
         let (src_cat, src_var) = graph.type_to_protocol(universe, &src.ty);
@@ -4270,8 +4552,25 @@ impl LlvmBackend {
 
             match &step.lane {
                 crate::casting::graph::LaneKind::Bitcast => {
-                    writeln!(out, "{}{} = bitcast {} {} to {}",
-                        indent, dst, cur_ll, cur, dst_ll).ok();
+                    // 2026-08-13 (pack): LLVM `bitcast` requires equal-width
+                    // operands. A Bit lane between integer widths of different
+                    // size (`Bits<12> as Int`) is a zext/trunc, not a bitcast —
+                    // sub-byte packed field reads surface i12 registers.
+                    if cur_ll != dst_ll
+                        && cur_ll.starts_with('i')
+                        && dst_ll.starts_with('i')
+                    {
+                        let (cw, dw) = (cur_ll[1..].parse::<u64>().unwrap_or(64),
+                                        dst_ll[1..].parse::<u64>().unwrap_or(64));
+                        if cw < dw {
+                            writeln!(out, "{}{} = zext {} {} to {}", indent, dst, cur_ll, cur, dst_ll).ok();
+                        } else {
+                            writeln!(out, "{}{} = trunc {} {} to {}", indent, dst, cur_ll, cur, dst_ll).ok();
+                        }
+                    } else {
+                        writeln!(out, "{}{} = bitcast {} {} to {}",
+                            indent, dst, cur_ll, cur, dst_ll).ok();
+                    }
                 }
                 crate::casting::graph::LaneKind::IntToFloat => {
                     // 2026-07-31: The destination type is dst_ll (float for a

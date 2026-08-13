@@ -390,6 +390,71 @@ how existing rationale comments are preserved (rewritten, never deleted).
    alloca, interpreter equivalence.
 7. **Docs in-commit**: SPEC §8.2 (pack + bit order + endian coupling).
 
+**Phase 2 execution notes (2026-08-13):** the packed bit-offset layout is a
+**shared pure helper**, not a `ResolvedType` field. Rationale: types carry only
+protocol + declared metadata (`pack`, field widths, `spec Endian`, `spec
+Bits`); offsets are derived at the materialization site — exactly the Boxed Cat
+Typing "no canonical layout; just enough layout to make it work in the code"
+reading of SPEC §2.1. `fn packed_field_offsets(fields, endian)` computes
+declaration-order bit offsets (`Big` = MSB-first within byte 0 + BE multi-byte,
+`Little` = LSB-first, `Target`/absent = native/whole-byte-compatible) and is
+called by codegen field access, `struct_type_size`, the interpreter cast path,
+and unit tests. `packed: bool` travels on the frontend-declared struct entry
+(not on `ResolvedType`). Experiment scope: **full harness + clang -O3 -flto
+link** (AGENTS.md rule 6), verifying byte-aligned slices fold to plain loads
+before committing the emission strategy.
+
+**Rule-19 experiment result (2026-08-13, PASS):** `benchmarks/pack_eth_exp.bv`
+(simulates the sub-byte `[N x i8]`+mask emission: Ethernet header dst:48/src:48/
+etype:16 in two i64 words, per-iteration covering-word loads + shift/mask, buffer
+mutated from the runtime counter) vs `benchmarks/pack_eth_exp_c.c` (native
+`__attribute__((packed))` bitfield struct — the `<{ i48, i48, i16 }>` analog).
+Generated `.ll` shows the exact `and`/`shl`/`or` extraction over real `load
+i64` (no precompute; .text 2224B vs 1833B). Output MATCH at BOUND=5 and
+BOUND=1000000 (333334 printed lines). Interleaved `LC_ALL=C /usr/bin/time -f
+"%e"` ×5 at BOUND=500000000: C 14.72s avg, Briev 14.81s avg → **0.99x parity**.
+Conclusion: the byte-array+mask strategy folds to plain loads and matches native
+packed structs; sub-byte fields may use `[N x i8]`+mask freely, whole-byte
+packed keeps `<{ }>` native GEP (simpler, no mask). Emission strategy committed.
+
+**Phase 2 implementation result (2026-08-13, done):** `pack` fully wired
+lexer → vocab → parser → AST (`StructDef.pack`) → registration
+(`packed_structs` on the LLVM context; bit-granular sizing in
+`static_struct_resolved_ty`, alignment 1) → codegen → interpreter → tests.
+Codegen centralizes slice derivation in `packed_field` + the shared
+`packed_field_offsets` authority; all ten `lookup_field_offset` consumers keep
+their byte-offset GEPs (now packed-aware) and the read/write sites branch to
+`emit_packed_field_load`/`emit_packed_field_store`:
+whole-byte fields → plain `load/store i{bits}, align 1` (native path); sub-byte
+→ covered `i{cov*8}` load + endian shift + `trunc i{bits}` (read) and
+load-modify-store with value mask (write). Sub-byte structs declare
+`{ [N x i8] }`; whole-byte declare `<{ ... }>` (zero-width `Bits<0>` padding
+fields filtered — `i0` is not a legal LLVM element type). End-to-end
+verification `benchmarks/pack_struct_runtime.bv` + `_c.c` (Eth whole-byte BE,
+Nib LE 12/4/8, Bp native 12/4, reconstructed from the runtime counter inside a
+`defn`) and `benchmarks/pack_be_selfcheck.bv` (BE sub-byte vs hand-computed
+bytes `[0xAB, 0xCF]`): **output IDENTICAL to C at BOUND=5, 1000, 1000000**.
+
+Three correctness findings fixed in-flight:
+- **`Bits<48>` source form.** The parser produces `Applied("Bits",[Number(n)])`,
+  which `resolve_type`/`llvm_type` treated as the generic default (i64/64-bit).
+  `field_bits` (packed authority) now resolves the alias, and packed aggregate
+  element types derive from `field_bits` (`i48`, not `i64`).
+- **`as Bits<N>` truncation.** The casting graph treats Int ↔ Bits as an
+  identity lane, so `16 as Bits<4>` held 16 (an i64 register typed `Bits<4>`).
+  The cast path now truncates integer sources to exactly `N` bits, the
+  fallback does the same, `emit_cast_steps`'s Bitcast lane zext/truncs across
+  differing integer widths, the packed store masks to the field width
+  defensively, and the reference interpreter mirrors the truncation (rule 4).
+- **BE sub-byte shift.** The packed helper used `shift = cov*8 − bits`; for
+  `within > 0` the field's MSB sits at integer bit `cov*8 − 1 − within`, so the
+  correct shift is `cov*8 − within − bits` (a low-nibble BE field shifted off
+  its own bits). Corrected in `packed_field_offsets` + tests.
+
+Also documented: the reference interpreter models structs as layout-free named
+products, so `pack` programs interpret to their semantic field values — no
+interpreter byte-layout changes needed (rule 4 holds on the value domain).
+
 ### Phase 3 — `<...>` Layout DSL removal
 
 - Delete: `src/beast/layout.rs`, `src/ast/layout.rs` (+ its `mod` declaration
@@ -522,8 +587,8 @@ MATCH/PASS exit=0.
 ## 5. Commit sequence
 
 1. `docs/plans/2026-08-13-layout-keywords.md` (this file) + baseline table.
-2. Phase 1 (spec + Bits fix + consumers + canonical + SPEC §2.1/§8.9).
-3. Phase 2 (pack + emission + interpreter + SPEC §8.2).
+2. Phase 1 (spec + Bits fix + consumers + canonical + SPEC §2.1/§8.9). **done** `15117132`.
+3. Phase 2 (pack + emission + interpreter + SPEC §8.2). **done** (this commit).
 4. Phase 3 (DSL removal + SPEC cleanup).
 5. Phase 4 (trap).
 6. Phase 5 (atomic).
@@ -628,3 +693,12 @@ All 39 benchmarks: no MISMATCH, no FAIL. `bridge_glue`/`bridge_multi` build
 - Full suite green; benchmarks at parity with the §6 baseline (rule 11/11b).
 - `BUGS.md` records the Bits-unit bug, the `intrinsics.rs:724` pointer bug,
   and the `IsZero/IsOne` audit result.
+
+**Phase 1 + 2 gate status (2026-08-13):** `cargo test --lib` 1818 green (Phase 1
+added +19, Phase 2 added +13); Praetor on all changed files vs the Phase-1
+baseline copies → zero genuinely-new diagnostics (lib warnings unchanged);
+full `--runtime` suite after Phase 2 → all 39 benchmarks MATCH/PASS at parity
+with the §6 baseline table (0.52s–7.85x spread, no regression vs baseline).
+Phase-2 end-to-end pairs `benchmarks/pack_struct_runtime.bv|_c.c` and
+`benchmarks/pack_be_selfcheck.bv` output IDENTICAL to their C references at
+BOUND=5/1000/1000000 (LE + BE + whole-byte + sub-byte, incl. byte-reverse).

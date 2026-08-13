@@ -3999,3 +3999,41 @@ liveness). SRBV verification runs only under the `.s` strict profile
   per instance — `b-when` inside a component already works at the state level),
   dynamic component counts (`b-each` of components), props.
 See `docs/plans/2026-08-11-phase2b2-instance-state.md`.
+
+## `as Bits<N>` never truncated sub-byte widths (identity cast lane) — FIXED 2026-08-13
+
+**Date:** 2026-08-13 (found during pack Phase 2 end-to-end)
+**Status:** Fixed in `15117133` (pack commit).
+**Root cause:** the casting graph treats `Int ↔ Bits` as a same-lane identity
+(`path.is_empty()` in `emit_cast_path`), so `16 as Bits<4>` produced an i64
+register typed `Bits<4>` holding 16 — no truncation. This surfaced via packed
+sub-byte fields (a `Bits<4>` field legitimately needs a 4-bit domain), but
+affects every `as Bits<N>` cast for N < 64.
+**Fix:** the cast path (and its no-graph fallback) truncate integer sources to
+exactly N bits; `emit_cast_steps`'s Bitcast lane zext/truncs across differing
+integer widths; the reference interpreter mirrors the truncation (rule 4);
+packed stores mask to the field width defensively.
+
+## Reactive nodes with struct-typed state slots fire once then stop — OPEN (pre-existing)
+
+**Date:** 2026-08-13 (found while writing pack end-to-end benchmarks)
+**Status:** Open — pre-existing (reproduces with a plain non-packed `struct`
+state slot too). A node that reads/writes a struct-typed `let s: S;` slot
+(`s = S { ... }`, `s.f = v`, `s.f`) dispatches once and the reactor never
+re-queues it, so the tick loop emits a single iteration. Packed structs hit
+this identically. Workaround: construct/read packed structs inside `defn`
+locals (the benchmark pair `benchmarks/pack_struct_runtime.bv` does this). The
+reactor's per-field-phi write classification needs to recognize struct-slot
+writes as txn writes.
+
+## BE sub-byte packed shift formula — FIXED 2026-08-13
+
+**Date:** 2026-08-13
+**Status:** Fixed in `15117133` (pack commit).
+**Root cause:** `packed_field_offsets` used `shift = cov*8 − bits` for
+Big-endian fields; correct is `cov*8 − within − bits` (the field's MSB sits at
+integer bit `cov*8 − 1 − within` of the covered region). The unit test had
+encoded the wrong expectation, so the bug was invisible. A low-nibble BE field
+(`within = 4`) shifted off its own bits and read the neighbor's nibble.
+**Fix:** corrected formula in `src/type_universe/packed.rs` + tests; verified
+byte-for-byte against hand-computed BE storage in `benchmarks/pack_be_selfcheck.bv`.

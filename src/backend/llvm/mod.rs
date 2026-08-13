@@ -2404,6 +2404,11 @@ impl LlvmBackend {
                         .map(|(n, t)| (n.clone(), t.clone()))
                         .collect();
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
+                    // 2026-08-13 (layout-keywords plan): record `pack struct`
+                    // so type emission/field access consult the packed layout.
+                    if s.pack {
+                        self.ctx.packed_structs.insert(s.name.clone());
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             // 2026-08-13 (layout-keywords plan): the spec-aware

@@ -312,6 +312,11 @@ fn format_struct_into(
     if def.seq {
         out.push_str("seq ");
     }
+    // 2026-08-13 (layout-keywords plan): `pack struct` — bit-contiguous.
+    // Packed layouts are order-independent of `seq`, so both may be present.
+    if def.pack {
+        out.push_str("pack ");
+    }
     let _ = write!(out, "struct {}", def.name);
     if !def.type_params.is_empty() {
         let params: Vec<String> = def.type_params.iter().map(|p| p.name.clone()).collect();
@@ -735,6 +740,10 @@ mod tests {
         "type W8: #Int {\n  spec Bits: 8;\n};\n",
         "struct Flags {\n  spec Bytes: 1;\n  spec Alignment: 1;\n  a: Bool;\n};\n",
         "type Frame: #Bit {\n  spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  spec Bytes: 4;\n  spec Endian: Big;\n};\n",
+        // 2026-08-13 (layout-keywords plan): `pack struct` round-trips with the
+        // prefix preserved, alongside its spec metadata.
+        "pack struct Eth {\n  spec Endian: Big;\n  dst: Bits<48>;\n  src: Bits<48>;\n  etype: Bits<16>;\n};\n",
+        "seq pack struct Mix {\n  spec Alignment: 1;\n  a: Bits<12>;\n  b: Bits<4>;\n};\n",
         // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
         "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
         "init BufferSize: [64 | lo..hi] Int = 64;\n",

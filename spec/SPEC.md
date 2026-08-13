@@ -427,6 +427,42 @@ seq struct Header {
 
 `seq struct` preserves field order and containment. Target protocol/ABI configuration still determines widths, alignment, and padding unless more explicit boundary constraints apply.
 
+> **2026-08-13 (`pack struct`).** `pack struct` is bit-contiguous: fields are
+> packed with zero padding in declaration order, so the storage volume is
+> `ceil(Σ field widths / 8)` bytes. A packed field must be a scalar bit-width
+> (`Bits<N>`, `0 < N ≤ 64`); array (vector) fields are rejected. `pack` and
+> `seq` are order-independent prefix flags (`pack seq struct`, `seq pack
+> struct`).
+>
+> ```briev
+> pack struct Header {
+>     spec Endian: Big;
+>     dst: Bits<48>;
+>     src: Bits<48>;
+>     ethertype: Bits<16>;
+> };
+> ```
+>
+> Whole-byte packed fields (width % 8 == 0) lay out exactly like a
+> byte-granular struct and use LLVM's native packed aggregate (`<{ ... }>`).
+> Sub-byte fields (e.g. `Bits<12>`) occupy a bit-aligned slice of the byte
+> image and are accessed with load-shift-mask / load-modify-store; a sub-byte
+> packed struct materializes as a byte array. A zero-width `Bits<0>` field is
+> padding: it occupies no storage and reads as 0.
+>
+> Bit order is endian-coupled: default/`Target` is native (the bit at
+> position `p` is bit `p % 8` of byte `p / 8`, LSB-first), `Big` is MSB-first
+> within each byte with big-endian multi-byte fields. For a sub-byte field at
+> stream position `p` (`within = p % 8`, `cov = ceil((within + width)/8)`),
+> Big-endian reads shift the covered region by `cov*8 − within − width`.
+> Packed alignment defaults to 1 (no inter-element padding); `spec Alignment`
+> overrides.
+>
+> **2026-08-13 (cast width).** `x as Bits<N>` is a width assertion: the value
+> truncates to exactly `N` bits (a `Bits<4>` can never hold 16). The reference
+> interpreter and the LLVM backend agree on this; packed stores also mask to
+> the field width defensively.
+
 Behavior for a struct is attached through an inherent `impl` in the defining module.
 
 ### 8.3 `enum`

@@ -918,6 +918,11 @@ pub struct StructDef {
     /// 2026-08-05 (Phase 4): `seq struct` preserves field order and
     /// containment (SPEC §8.2). A plain struct is layout-adaptive.
     pub seq: bool,
+    /// 2026-08-13 (layout-keywords plan): `pack struct` — bit-contiguous,
+    /// zero-padding physical layout (SPEC §8.2). Bit order couples to the
+    /// declared `spec Endian` (Default Target = native; `packed_field_offsets`
+    /// derives each field's bit offset).
+    pub pack: bool,
 }
 
 #[derive(Debug, Clone)]

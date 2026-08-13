@@ -414,6 +414,15 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .and_then(|f| f.iter().find(|(n, _)| n == name))
                                 .map(|(_, ty)| (ty.clone(), ()))
                                 .unwrap_or((Type::int(), ()));
+                            // 2026-08-13 (pack): a packed self-slot stores its
+                            // bit-slice (L-M-S for sub-byte, plain aligned
+                            // store for whole-byte) — skip the scalar packing.
+                            if let Some(pf) = backend.packed_field(self_type, name) {
+                                out.push_str(&backend.emit_packed_field_store(indent, &gep, &pf, &val));
+                                backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
+                                backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
+                                return TypedRegister { name: val.name, ty: Type::void() };
+                            }
                             // 2026-08-01 (D3): a Ptr-typed self-slot stores the
                             // HANDLE at i{int_bits} (the value is already
                             // ptrtoint'd) — not `ptr`, matching the self-slot
@@ -634,6 +643,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                     let gep = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                    // 2026-08-13 (pack): a packed state-field store writes the
+                    // bit-slice into the byte image (L-M-S for sub-byte, plain
+                    // aligned store for whole-byte).
+                    if let Some(pf) = backend.packed_field(&obj_key, name) {
+                        out.push_str(&backend.emit_packed_field_store(indent, &gep, &pf, &val));
+                    } else {
                     let field_ty = backend.ctx.struct_types.get(&obj_key)
                         .and_then(|f| f.iter().find(|(n, _)| n == name))
                         .map(|(_, ty)| ty.clone())
@@ -648,6 +663,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         backend.ctx.type_universe.clone().as_ref(),
                     );
                     writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+                    }
                 }
                 _ => {}
             }
