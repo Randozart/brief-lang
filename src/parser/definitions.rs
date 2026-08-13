@@ -1647,7 +1647,7 @@ impl<'a> Parser<'a> {
                     functions.push(self.parse_definition()?);
                     self.eat(&Token::Semicolon);
                 } else if self.check(&Token::Op) {
-                    self.parse_op_definition(&mut op_bindings)?;
+                    self.parse_op_definition(&mut op_bindings, None)?;
                 } else {
                     let fname = self.expect_identifier()?;
                     self.expect(Token::Colon)?;
@@ -1683,7 +1683,7 @@ impl<'a> Parser<'a> {
                     functions.push(self.parse_definition()?);
                     self.eat(&Token::Semicolon);
                 } else if self.check(&Token::Op) {
-                    self.parse_op_definition(&mut op_bindings)?;
+                    self.parse_op_definition(&mut op_bindings, None)?;
                 } else {
                     return self.error_at_current("expected 'defn' or 'op' in impl block");
                 }
@@ -1750,6 +1750,7 @@ impl<'a> Parser<'a> {
         let mut metadata = std::collections::HashMap::new();
         let mut operators: Vec<OperatorDef> = Vec::new();
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
+        let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 // !> key: value; — metadata assignment (new syntax)
@@ -1796,7 +1797,7 @@ impl<'a> Parser<'a> {
                 }
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
-                    self.parse_op_definition(&mut op_bindings)?;
+                    self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
                 }
                 self.expect(Token::Colon)?;
@@ -1821,7 +1822,7 @@ impl<'a> Parser<'a> {
                 operators,
                 op_bindings,
                 constraints: vec![],
-                members: vec![],
+                members,
                 span: None,
             },
             span: None,
@@ -1844,8 +1845,44 @@ impl<'a> Parser<'a> {
     ///   op Add(#Int): int_add(#Lh, #Rh);
     ///   op Parse(Decimal, pre:"0x"): parse_hex(#Lh);
     ///   op Parse(Decimal, suf:"h"): to_f16(#Lh);
-    fn parse_op_definition(&mut self, op_bindings: &mut Vec<OperatorBinding>) -> Result<(), SyntaxError> {
+    fn parse_op_definition(&mut self, op_bindings: &mut Vec<OperatorBinding>, members: Option<&mut Vec<crate::ast::TopLevel>>) -> Result<(), SyntaxError> {
         let name = self.expect_identifier()?;
+        // 2026-08-12 (Iterable protocol, op-as-member): `op Name(params) -> Ret
+        // { body }` — the operator IS a defn-shaped member (SPEC §15.2).
+        // Distinguished from the variant/binding forms by a parameter list
+        // (`op At(i: Int)`) or an empty paren followed by `->`/`{`.
+        if self.check(&Token::LParen) {
+            let is_member_form = {
+                let saved = self.pos;
+                self.pos += 1; // past '('
+                let member_form = match self.tokens.get(self.pos).map(|(t, _)| t) {
+                    Some(Token::RParen) => {
+                        let after = self.tokens.get(self.pos + 1).map(|(t, _)| t);
+                        matches!(after, Some(Token::Arrow) | Some(Token::LBrace))
+                    }
+                    Some(Token::Identifier(_)) => {
+                        // `i: Int` parameter list → op-as-member; a bare type or
+                        // discriminator (`Decimal, pre:"0x"`) → legacy form.
+                        matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Colon))
+                    }
+                    _ => false,
+                };
+                self.pos = saved;
+                member_form
+            };
+            if is_member_form {
+                let Some(members) = members else {
+                    return Err(crate::errors::SyntaxError::UnexpectedToken {
+                        expected: "a `:` operator binding (operator members are only allowed in obj/type bodies)".into(),
+                        found: format!("`op {}(...)`", name),
+                        span: crate::errors::Span::new(0, 0, 0, 0),
+                    });
+                };
+                let op_member = self.parse_operator_member(name)?;
+                members.push(crate::ast::TopLevel::TypeDefOperator(op_member));
+                return Ok(());
+            }
+        }
         // Optional protocol variant: (#Proto) or (ConcreteType)
         let protocol_variant = if self.eat(&Token::LParen) {
             // 2026-08-01 (B2): parse the variant as a TYPE so hashwords work
@@ -1909,6 +1946,45 @@ impl<'a> Parser<'a> {
             span: None,
         });
         Ok(())
+    }
+
+    /// 2026-08-12 (Iterable protocol, op-as-member): parse the defn-shaped
+    /// operator member `op Name(params) -> Ret [contract] { body };`. The
+    /// operator name IS the member name; the body is ordinary Briev,
+    /// self-parameterized on the enclosing obj/type's slots like a defn
+    /// member. The compiler resolves operators by this member (SPEC §15.2).
+    fn parse_operator_member(&mut self, name: String) -> Result<Definition, SyntaxError> {
+        let parameters = if self.eat(&Token::LParen) {
+            let p = self.parse_parameter_list()?;
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            Vec::new()
+        };
+        let (output_type, contract) = self.parse_output_and_contract()?;
+        let body = if self.check(&Token::LBrace) {
+            self.parse_block()?
+        } else {
+            Vec::new()
+        };
+        let derivation = self.parse_derivation_block()?;
+        let metadata = self.parse_body_metadata()?;
+        self.eat(&Token::Semicolon);
+        Ok(Definition {
+            name,
+            type_params: Vec::new(),
+            parameters,
+            output_type: output_type.clone(),
+            outputs: vec![],
+            contract,
+            body,
+            metadata,
+            derivation,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: self.take_doc(),
+        })
     }
 
     /// 2026-07-27: Parse the expression part of a discriminated op binding
@@ -2043,7 +2119,7 @@ impl<'a> Parser<'a> {
                 }
                 let slot_name = self.expect_identifier()?;
                 if slot_name == "op" {
-                    self.parse_op_definition(&mut op_bindings)?;
+                    self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
                 }
                 self.expect(Token::Colon)?;
@@ -2558,6 +2634,59 @@ mod tests {
             Ok(crate::ast::TopLevel::TypeDef(td)) => td.body.op_bindings,
             _ => panic!("expected TypeDef"),
         }
+    }
+
+    /// 2026-08-12 (Iterable protocol, op-as-member): parse an obj and return
+    /// its operator members (`TopLevel::TypeDefOperator`).
+    fn parse_op_members(src: &str) -> Vec<crate::ast::Definition> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::TypeDef(td)) => td
+                .body
+                .members
+                .into_iter()
+                .filter_map(|m| match m {
+                    crate::ast::TopLevel::TypeDefOperator(d) => Some(d),
+                    _ => None,
+                })
+                .collect(),
+            other => panic!("expected TypeDef, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    #[test]
+    fn test_op_as_member_parses() {
+        let ops = parse_op_members(
+            "obj Counter { count: Int; op Count() -> Int { term count; }; };",
+        );
+        assert_eq!(ops.len(), 1, "one operator member");
+        assert_eq!(ops[0].name, "Count");
+        assert_eq!(ops[0].parameters.len(), 0);
+        assert!(ops[0].output_type.is_some(), "returns Int");
+        assert_eq!(ops[0].body.len(), 1, "body has `term count`");
+    }
+
+    #[test]
+    fn test_op_as_member_with_params_and_legacy_binding() {
+        let tokens = crate::lexer::tokenize(
+            "obj T { data: Int[4]; op At(i: Int) -> Int { term data[i]; }; \
+             op InsertAt: push(#Lh, #Rh); };",
+        )
+        .unwrap();
+        let mut p = Parser::new(tokens, "test");
+        let td = match p.parse_top_level() {
+            Ok(crate::ast::TopLevel::TypeDef(td)) => td,
+            other => panic!("expected TypeDef, got {:?}", std::mem::discriminant(&other)),
+        };
+        assert_eq!(td.body.members.len(), 1, "one op-as-member");
+        assert_eq!(td.body.op_bindings.len(), 1, "one legacy binding");
+        let crate::ast::TopLevel::TypeDefOperator(op) = &td.body.members[0] else {
+            panic!("expected TypeDefOperator");
+        };
+        assert_eq!(op.name, "At");
+        assert_eq!(op.parameters, vec![("i".to_string(), crate::ast::Type::int())]);
+        assert_eq!(td.body.op_bindings[0].name, "InsertAt");
     }
 
     #[test]

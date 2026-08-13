@@ -19,6 +19,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub enum TopLevel {
     Definition(Definition),
+    /// 2026-08-12 (Iterable protocol, op-as-member): a behavioral member whose
+    /// name IS a disclosed operator (`op Count() -> Int { … }` inside an
+    /// obj/type body). Defn-shaped: params, optional return, body. The
+    /// operator identity is the `name`; the compiler resolves operators by
+    /// this member, never by a binding RHS or a bare member-name string.
+    /// Replaces the `op X: member(#Y)` binding form (SPEC §15.2).
+    TypeDefOperator(Definition),
     Transaction(Transaction),
     Cell(CellDef),
     Import(Import),

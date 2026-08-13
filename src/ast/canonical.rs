@@ -84,6 +84,19 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
                 body: &defn.body,
             },
         ),
+        TopLevel::TypeDefOperator(defn) => format_callable(
+            out,
+            level,
+            "op",
+            &Callable {
+                name: &defn.name,
+                parameters: &defn.parameters,
+                output_type: defn.output_type.as_ref(),
+                contract: &defn.contract,
+                derivation: defn.derivation.as_ref(),
+                body: &defn.body,
+            },
+        ),
         TopLevel::CompileTimeDefn(defn) => format_callable(
             out,
             level,

@@ -2200,6 +2200,12 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
             }
             Ok(())
         }
+        TopLevel::TypeDefOperator(def) => {
+            for stmt in &mut def.body {
+                resolve_dollar_refs_in_stmt(stmt, scope)?;
+            }
+            Ok(())
+        }
         TopLevel::Transaction(txn) => {
             for stmt in &mut txn.body {
                 resolve_dollar_refs_in_stmt(stmt, scope)?;

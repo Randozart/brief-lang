@@ -23,6 +23,7 @@ fn item_key(tl: &TopLevel) -> String {
     match tl {
         Import(i) => format!("import:{}", i.path()),
         Definition(d) => format!("defn:{}", d.name),
+        TypeDefOperator(d) => format!("op:{}", d.name),
         Transaction(t) => format!("txn:{}", t.name),
         Cell(c) => format!("cell:{}", c.name),
         ForeignBinding(f) => format!("frgn:{}", f.effective_briev_name()),
@@ -63,6 +64,7 @@ pub fn item_summary(tl: &TopLevel) -> String {
     match tl {
         Import(i) => format!("import \"{}\"", i.path()),
         Definition(d) => format!("defn {}", d.name),
+        TypeDefOperator(d) => format!("op {}", d.name),
         Transaction(t) => format!("txn {}", t.name),
         Cell(c) => format!("cell {}", c.name),
         ForeignBinding(f) => format!("frgn {}", f.foreign_name),
