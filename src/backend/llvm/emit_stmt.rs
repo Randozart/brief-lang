@@ -1193,7 +1193,19 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     backend.fun.let_original_types.insert(counter_tmp.clone(), Type::int());
                     let arg = Expr::Identifier(counter_tmp);
                     let out_tmp = backend.fun.gen_reg();
-                    let at = backend.emit_method_call(out, &out_tmp, list, "At", &[arg], indent);
+                    let mut at = backend.emit_method_call(out, &out_tmp, list, "At", &[arg], indent);
+                    // 2026-08-12 (slice 2 String gap): a String/Data element is
+                    // the [len][bytes] ADDRESS stored as an i64 handle in the
+                    // collection — the item must be the ptr representation
+                    // (inttoptr) so `==`/`briev_str_eq` and string consumers
+                    // see a ptr, not the raw handle. `element_ty` is the
+                    // DECLARED element type (the At member's return after
+                    // substitution), which the load's register type may not be.
+                    if backend.is_string_operand(element_ty) || backend.is_data_operand(element_ty) {
+                        let p = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, at.name).ok();
+                        at.name = p;
+                    }
                     at.name
                 }
                 IterKind::List { ptr, .. } => {
