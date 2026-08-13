@@ -1,14 +1,14 @@
 # Bugs
 
-## Local collection values (let xs: List<Int> = ...) segfault — OPEN (pre-existing)
+## Local collection values segfault — FIXED (slice 4)
 
-**Date:** 2026-08-12
-**Status:** Open — the arrow insert (`&xs <- 2`) + the list-literal construction
-only work for STATE FIELDS; a local `let xs: List<Int>` collection is never
-properly populated, so `foreach x in xs` reads garbage (segfault). The foreach
-itself correctly routes locals through the op surface (slice 4 refactor); the
-local's CONSTRUCTION/push is the gap. A local `Counter` obj and scalar locals
-work; only collection-typed locals are affected.
+**Date:** 2026-08-12 — **fixed** (commit `459dc980`). A local
+`let xs: List<Int> = [2,4,6]` emitted the hardcoded `[len][elem]` heap-seq
+buffer, which the At/Count members (expecting the List STRUCT layout) read as
+garbage. `construct_local_collection` now builds a local collection through
+its own ops (op Init/op InsertAt / op InitEmpty); the arrow insert resolves a
+local receiver's type from the local binding. Verified: literal+At (4),
+literal+push (15), foreach+push (42).
 
 ## wasm32 collection member codegen width maze — FIXED (slice 4)
 
