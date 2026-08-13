@@ -1,6 +1,8 @@
 // Char - Unicode codepoint operations
 // Tier 2: String & Text Processing
 
+import "std/string_builder.bv";
+
 // ===== NATIVE DEFINITIONS =====
 
 // Conversion
@@ -13,9 +15,9 @@ defn int_to_char(n: Int) [n >= 0 && n <= 0x10FFFF][true] -> Char {
 };
 
 defn char_to_string(c: Char) [true][CharCount#(term) == 1] -> String {
-    let sb = new_builder();
-    sb = sb.append_char(c);
-    term sb.to_string();
+    let sb: StringBuilder = new_builder();
+    sb = append_char(sb, c);
+    term to_string(sb);
 };
 
 // Classification
@@ -80,16 +82,16 @@ defn is_lower(c: Char) [true][term == true || term == false] -> Bool {
 
 defn is_symbol(c: Char) [true][term == true || term == false] -> Bool {
     // Basic ASCII symbols
-    [(c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
-     (c >= '[' && c <= '`') || (c >= '{' && c <= '~')] {
+    when (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
+         (c >= '[' && c <= '`') || (c >= '{' && c <= '~') {
         term true;
     };
     term false;
 };
 
 defn is_punctuation(c: Char) [true][term == true || term == false] -> Bool {
-    [(c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
-     (c >= '[' && c <= '`') || (c >= '{' && c <= '~')] {
+    when (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
+         (c >= '[' && c <= '`') || (c >= '{' && c <= '~') {
         term true;
     };
     term false;

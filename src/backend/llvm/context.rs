@@ -166,6 +166,14 @@ pub struct CompilerContext {
 
     // Type info
     pub struct_types: HashMap<String, Vec<(String, Type)>>,
+    /// 2026-08-13 (obj value ABI): `obj` declaration names whose VALUES are
+    /// boxed i64 (or i{int_bits}) handles — the pooled-instance representation
+    /// used by state slots, struct literals, and field access. Distinct from
+    /// `struct_types`, which also holds StaticStruct (C-compatible) names that
+    /// are REAL pointers at the FFI boundary. `llvm_type`/params/returns use
+    /// the handle width for obj types so a defn returning an obj (new_builder)
+    /// and one taking it (append_char) share one representation.
+    pub obj_types: std::collections::HashSet<String>,
     /// 2026-07-31 (A8): obj member declarations (txn/defn/node bodies), keyed
     /// by type name. Used by MethodCall codegen to emit the member body with
     /// `self` bound to the receiver instance.
@@ -388,6 +396,7 @@ impl CompilerContext {
             constants: HashMap::new(),
             inits: HashMap::new(),
             struct_types: HashMap::new(),
+            obj_types: std::collections::HashSet::new(),
             obj_members: HashMap::new(),
             obj_type_params: HashMap::new(),
             enum_types: HashMap::new(),

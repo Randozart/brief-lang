@@ -483,6 +483,16 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
         TopLevel::Statement(stmt) => {
             collect_strings_stmt(stmt, seen, out);
         }
+        // 2026-08-13 (obj member string literals): an `obj` member body
+        // (append_bool's `"true"`/`"false"`, a member contract) holds quoted
+        // strings that the emitted member references. Without this arm the
+        // globals are referenced but undefined once the member is actually
+        // compiled (it was unreachable before the obj value ABI fix).
+        TopLevel::TypeDef(td) => {
+            for member in &td.body.members {
+                collect_strings_tl(member, seen, out);
+            }
+        }
         _ => {}
     }
 }
@@ -571,6 +581,12 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         Expr::Block(stmts) => {
             for s in stmts { collect_strings_stmt(s, seen, out); }
+        }
+        // 2026-08-13: a struct-literal field holds a quoted string
+        // (`StringBuilder { buffer: builder.buffer + "false" }`) — collect it
+        // or the @str.N global is referenced but undefined.
+        Expr::StructLiteral { fields, .. } => {
+            for (_, fexpr) in fields { collect_strings_expr(fexpr, seen, out); }
         }
         Expr::If(cond, then_b, else_b) => {
             collect_strings_expr(cond, seen, out);
@@ -2190,6 +2206,12 @@ impl LlvmBackend {
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
                     self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
+                    // 2026-08-13 (obj value ABI): a slotted `obj`/`type` VALUE
+                    // is a boxed i{int_bits} handle (struct literals box, state
+                    // slots store the handle, field access inttoprs it), NOT a
+                    // pointer. Registered alongside struct_types so llvm_type,
+                    // defn params, and defn returns all agree on the handle.
+                    self.ctx.obj_types.insert(td.name.clone());
                     if !td.type_params.is_empty() {
                         self.ctx.obj_type_params.entry(td.name.clone())
                             .or_insert_with(|| td.type_params.iter().map(|p| p.name.clone()).collect());
@@ -2377,6 +2399,11 @@ impl LlvmBackend {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
+                    // 2026-08-13 (obj value ABI): an `obj` value is a boxed
+                    // i{int_bits} handle, not an FFI pointer — register the
+                    // name separately from struct_types so llvm_type/params/
+                    // returns agree on the handle representation.
+                    self.ctx.obj_types.insert(s.name.clone());
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {

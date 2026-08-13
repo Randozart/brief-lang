@@ -134,6 +134,11 @@ fn build_supported_ops() -> HashSet<String> {
                    "AtomicAdd#", "Fence#",
                    "DlOpen#", "DlSym#", "DlClose#",
                     "Backtrace#", "WorkgroupSize#",
+                    // 2026-08-12 (Iterable protocol): `CharCount#` is the
+                    // computed UTF8 char count intrinsic (SPEC §17.1) — the
+                    // stdlib's string.text functions call it from imported
+                    // modules. Whitelisted with the other computed intrinsics.
+                    "CharCount#",
                     // 2026-08-01: The print/println macros expand to these
                     // direct runtime calls. They were previously invisible to
                     // this validator because the old PrintLn! always wrapped

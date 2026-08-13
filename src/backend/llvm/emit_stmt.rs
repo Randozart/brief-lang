@@ -254,6 +254,25 @@ impl LlvmBackend {
     }
 }
 
+// 2026-08-13 (guard on boxed Bool): a `when`/`if` condition is always
+// semantically Bool (the typechecker enforces it), but its SSA register may be
+// i8 (native Bool), i1 (comparison result), or an i64-boxed Bool (a Bool
+// parameter widened by emit_box_param). Reduce any integer condition to i1 for
+// `br` — truncating a 0/1 value of any width is exact.
+fn guard_cond_i1(backend: &mut LlvmBackend, out: &mut String, indent: &str, cond: &TypedRegister) -> String {
+    if cond.ty == Type::bool_() {
+        let b = backend.fun.gen_reg();
+        writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond.name).ok();
+        b
+    } else if cond.ty == Type::int() {
+        let b = backend.fun.gen_reg();
+        writeln!(out, "{}{} = trunc i64 {} to i1", indent, b, cond.name).ok();
+        b
+    } else {
+        cond.name.clone()
+    }
+}
+
 pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
     match stmt {
         Statement::Let { name, ty, expr, modifiers, .. } => {
@@ -1035,14 +1054,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.txn_counter += 1;
             let then_lbl = format!("guard.then{}", label_n);
             let end_lbl = format!("guard.end{}", label_n);
-            // 2026-07-14: bool cond is i8 — trunc to i1 for br instruction
-            let cond_i1 = if cond_reg.ty == Type::bool_() {
-                let b = backend.fun.gen_reg();
-                writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
-                b
-            } else {
-                cond_reg.name.clone()
-            };
+            let cond_i1 = guard_cond_i1(backend, out, indent, &cond_reg);
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, end_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
             backend.fun.terminated = false;
@@ -1078,14 +1090,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let then_lbl = format!("if.then{}", label_n);
             let else_lbl = format!("if.else{}", label_n);
             let end_lbl = format!("if.end{}", label_n);
-            // 2026-07-14: bool cond is i8 — trunc to i1 for br instruction
-            let cond_i1 = if cond_reg.ty == Type::bool_() {
-                let b = backend.fun.gen_reg();
-                writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
-                b
-            } else {
-                cond_reg.name.clone()
-            };
+            let cond_i1 = guard_cond_i1(backend, out, indent, &cond_reg);
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, else_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
             backend.fun.terminated = false;

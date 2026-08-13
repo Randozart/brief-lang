@@ -3692,8 +3692,8 @@ fn test_struct_param_uses_ptr_in_signature() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("define i64 @process(ptr noundef noalias nocapture align 8 %state, ptr %arg0"),
-        "Struct param should be 'ptr' in function signature.\nGot:\n{}", output);
+    assert!(output.contains("define i64 @process(ptr noundef noalias nocapture align 8 %state, i64 %arg0"),
+        "Struct param should be the boxed i64 handle in the function signature.\nGot:\n{}", output);
 }
 
 #[test]
@@ -3733,8 +3733,13 @@ fn test_struct_param_ptrtoint_at_entry() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("ptrtoint ptr %arg0 to i64"),
-        "Struct param should have ptrtoint at entry.\nGot:\n{}", output);
+    // 2026-08-13 (obj value ABI): a struct PARAM arrives as the boxed i64
+    // handle directly — no ptrtoint boxing at entry (the old ptr-param ABI
+    // boxed a `ptr` param to i64 for SSA). Field access inttoprs the handle.
+    assert!(!output.contains("ptrtoint ptr %arg0"),
+        "Struct param arrives boxed — no ptrtoint at entry.\nGot:\n{}", output);
+    assert!(output.contains("i64 %arg0"),
+        "Struct param is the boxed i64 handle.\nGot:\n{}", output);
 }
 
 #[test]
@@ -4138,12 +4143,14 @@ fn test_addr_of_struct_literal() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // &pt should emit ptrtoint on the struct alloca, NOT ptrtoint on a function ptr
-    // The alloca is created by emit_struct_literal: alloca i8, i64 16 (2 x i64 = 16B)
-    assert!(output.contains("alloca i8, i64 16"),
-        "Struct literal should allocate 16 bytes (2 x 8B fields).\nGot:\n{}", output);
+    // &pt should emit ptrtoint on the struct allocation, NOT ptrtoint on a
+    // function ptr. 2026-08-13 (struct value lifetime): the struct literal is
+    // HEAP-allocated (a stack alloca's handle dangles once the constructing
+    // function returns), so the assertion is malloc, not `alloca`.
+    assert!(output.contains("call ptr @malloc(i64 16)"),
+        "Struct literal should malloc 16 bytes (2 x 8B fields).\nGot:\n{}", output);
     assert!(output.contains("ptrtoint ptr %t"),
-        "Should emit ptrtoint of the struct alloca for &pt.\nGot:\n{}", output);
+        "Should emit ptrtoint of the struct allocation for &pt.\nGot:\n{}", output);
     // Should NOT reference @pt as a function symbol
     assert!(!output.contains("ptrtoint ptr @pt"),
         "Should NOT emit ptrtoint of @pt as if it were a function.\nGot:\n{}", output);

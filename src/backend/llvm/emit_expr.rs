@@ -380,9 +380,40 @@ impl LlvmBackend {
                             }
                         }
                     } else {
-                        TypedRegister {
-                            name: reg.clone(),
-                            ty: self.get_local_type(name),
+                        let ty = self.get_local_type(name);
+                        // 2026-08-13: a boxed Bool/Char param is registered in
+                        // let_binding_types as Int (emit_definition line 2066);
+                        // let_original_types keeps the true Briev type. Recover
+                        // it so the Char case can unbox below.
+                        let orig_ty = self.fun.let_original_types.get(name).cloned().unwrap_or_else(|| ty.clone());
+                        // 2026-08-13: a Float/Double param is boxed to an i64
+                        // handle at function entry (emit_box_param), with the
+                        // native float register cached in reg_float_cache. Any
+                        // read of the local must yield the NATIVE float, else a
+                        // `f as String` cast emits `call float_to_str(float %boxed_i64)`
+                        // (a type mismatch). Unbox through the cache.
+                        if (ty == Type::float() || ty == Type::float64())
+                            && let Some(cached) = self.fun.reg_float_cache.get(&reg)
+                        {
+                            TypedRegister { name: cached.clone(), ty }
+                        } else if self.is_protocol_member(&orig_ty, "#Char") {
+                            // 2026-08-13: a Char param is boxed to i64 at
+                            // entry (emit_box_param "zext.i32.to.i64#") but its
+                            // native register is i32. A comparison against a
+                            // Char literal (`c >= ' '`) emits the literal as
+                            // i32, so the read must truncate the box to i32
+                            // (an `icmp eq i64 %ac0, i32 %t7` is a mismatch).
+                            // The register keeps the CHAR type (not the boxed
+                            // Int) so downstream casts dispatch to char_to_str
+                            // and Print# routes to __print_char.
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, reg).ok();
+                            TypedRegister { name: t, ty: orig_ty }
+                        } else {
+                            TypedRegister {
+                                name: reg.clone(),
+                                ty,
+                            }
                         }
                     }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
@@ -1955,8 +1986,15 @@ impl LlvmBackend {
         let total_size = self.struct_type_size(type_name);
         let struct_ty = crate::ast::Type::Custom(type_name.to_string());
 
+        // 2026-08-13 (struct value lifetime): a struct literal must live on the
+        // HEAP, not the stack. The handle (`ptrtoint`) crosses function
+        // boundaries (`term StringBuilder { ... }` from new_builder/append_*),
+        // and a stack alloca's handle dangles once the constructing function
+        // returns — the caller then reads a dead frame (append_str("") returned
+        // a builder whose buffer read garbage). State-slot/field consumers read
+        // the handle in the same function, so heap is a strict superset.
         let alloca_reg = self.fun.gen_reg();
-        writeln!(out, "{}  {} = alloca i8, i64 {}", indent, alloca_reg, total_size).ok();
+        writeln!(out, "{}  {} = call ptr @malloc(i64 {})", indent, alloca_reg, total_size).ok();
 
         for (field_name, field_expr) in fields {
             let fr = self.fun.gen_reg();
@@ -4272,9 +4310,12 @@ impl LlvmBackend {
         let universe = self.ctx.type_universe.as_ref()?;
         let (src_cat, src_var) = graph.type_to_protocol(universe, &src.ty);
         let (dst_cat, dst_var) = graph.type_to_protocol(universe, target);
-        let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var)?;
+        let path = graph.find_path(&src_cat, &src_var, &dst_cat, &dst_var);
 
-        self.emit_cast_steps(out, v, src, target, indent, &path)
+        match &path {
+            Some(p) => self.emit_cast_steps(out, v, src, target, indent, p),
+            None => None,
+        }
     }
 
     /// Emit LLVM IR for a sequence of cast steps returned by the graph.
@@ -4357,8 +4398,18 @@ impl LlvmBackend {
                     // `#String → Int` emits `call i64 @str_to_int(...)`. The
                     // old hardcoded `i64` made int_to_str return an i64 that
                     // the String target then ptrtoint'd (a type mismatch).
+                    // 2026-08-13: a native Char source (i32, from a boxed Char
+                    // param unboxed at read) must be widened to the boxed i64
+                    // the runtime helpers expect (`char_to_str(int64_t)`).
+                    let (arg_ll, arg) = if cur_ll == "i32" && self.is_protocol_member(&src.ty, "#Char") {
+                        let w = self.fun.gen_reg();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, w, cur).ok();
+                        ("i64".to_string(), w)
+                    } else {
+                        (cur_ll.clone(), cur.clone())
+                    };
                     writeln!(out, "{}{} = call {} @{}({} {})",
-                        indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
+                        indent, dst, dst_ll, fn_name, arg_ll, arg).ok();
                 }
                 crate::casting::graph::LaneKind::ExtCallDyn(fn_name) => {
                     // 2026-08-03: proto-binding transform (owned function

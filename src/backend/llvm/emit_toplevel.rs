@@ -480,8 +480,23 @@ impl LlvmBackend {
         // "ptr" (LLVM opaque pointer). The named struct type is declared in
         // `declare_struct_types()` for the foreign caller's reference.
         if let Type::Custom(name) = ty {
+            // 2026-08-13 (obj value ABI): an `obj` VALUE is a boxed handle
+            // (i{int_bits}), NOT a pointer — state slots, struct literals, and
+            // field access all use the handle form. Checked BEFORE the
+            // struct_types "ptr" (which is the StaticStruct FFI-pointer ABI).
+            if self.ctx.obj_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
+            }
             if self.ctx.struct_types.contains_key(name) {
                 return "ptr".to_string();
+            }
+        }
+        // 2026-08-13: the mono form of an applied obj (`List<Int>`) is a
+        // boxed handle too — `llvm_type` maps the applied base through the
+        // same obj registry.
+        if let Type::Applied(name, _) = ty {
+            if self.ctx.obj_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
             }
         }
         // 2026-07-18: SVO List — return multi-slot struct type for vector-like types.
@@ -3931,6 +3946,11 @@ impl LlvmBackend {
             crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
             _ => return self.llvm_type(ty),
         };
+        // 2026-08-13 (obj value ABI): an `obj` return is the boxed i{int_bits}
+        // handle (llvm_type); a StaticStruct return keeps the legacy i64 box.
+        if self.ctx.obj_types.contains(base) {
+            return self.llvm_type(ty);
+        }
         if self.ctx.struct_types.contains_key(base) {
             "i64".to_string()
         } else {
