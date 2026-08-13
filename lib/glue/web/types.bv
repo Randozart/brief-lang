@@ -10,13 +10,13 @@ type Element: #Web {
     // Opaque handle — i32 in WASM, HTMLElement in JS.
     // No CastTo/CastFrom to #Bits — Element cannot be constructed from
     // raw bytes; it's created via frgn from #Web (create_element, etc.)
-    !> maxbits: 32;
-    !> alignment: 4;
+    spec MaxBits: 32;
+    spec Alignment: 4;
 };
 
 type CanvasContext: #Web {
     // Opaque handle — i32 in WASM, WebGLRenderingContext or GPUDevice in JS.
     // Passed from JS to WASM during initialization handoff via frgn from #Web.
-    !> maxbits: 32;
-    !> alignment: 4;
+    spec MaxBits: 32;
+    spec Alignment: 4;
 };

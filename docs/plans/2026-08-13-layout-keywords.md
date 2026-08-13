@@ -621,6 +621,24 @@ harness after; `bash benchmarks/compare_baseline.sh <name>` A/B — expect
 parity (additive paths only). Log the `Bits`-unit bug and the
 `intrinsics.rs:724` pointer-width bug in `BUGS.md`.
 
+**Phase 7 implementation result (2026-08-13, done):** stdlib migrated to the
+`spec` spelling — `lib/std/types/bootstrap.bv` (`!> bits:` → `spec Bits:`),
+`float.bv` (`!> maxbits:`/`!> alignment:` → `spec MaxBits:`/`spec Alignment:`,
+`!> tbaa` kept), all `lib/glue/*/types.bv` + `examples/eor-demo.bv` +
+glue bridges; the dead `!> IsZero:`/`!> IsOne:` metadata removed from
+`types.bv` (no consumers); `!> InsertAt:`/`!> ExtractFrom:` on
+crossword/skiplist converted to real `op InsertAt/ExtractFrom:` bindings (the
+metadata form had no consumer — the strategy resolution reads `operator_defs`).
+AGENTS.md rule 2 directive list gains `pack`/`atomic`/`union`/`trap` (rule 11b
+baseline path already correct). Syntax highlighter (briev + rbv) keywords gain
+`spec|pack|atomic|trap|union`. Docs: learn-briev/12-pragmas type-body example →
+spec spelling; iterable-protocol.md Schrödinger → Deferred Layout;
+agent-reference.md gains a "Physical layout" section (Deferred Layout, the
+three modifiers, `packed_field_offsets` authority). Final gates: `cargo test
+--lib` 1827 green; full `--runtime` suite all benchmarks MATCH/PASS at parity;
+`grep !> bits/maxbits/alignment/InsertAt/ExtractFrom/IsZero/IsOne` in
+lib/examples → zero.
+
 ## 4. Test matrix (contract-behavioral, rule 4)
 
 | concern | where |
@@ -661,8 +679,16 @@ MATCH/PASS exit=0.
 4. Phase 3 (DSL removal + SPEC cleanup). **done** `7f506e3a`.
 5. Phase 4 (trap). **done** `8ef2eaee`.
 6. Phase 5 (atomic). **done** `ff5b6485`.
-7. Phase 6 (union). **done** (this commit).
-8. Phase 7 (stdlib migration + docs + highlighter + AGENTS.md fix + BUGS.md).
+7. Phase 6 (union). **done** `92ada330`.
+8. Phase 7 (stdlib migration + docs + highlighter + AGENTS.md fix + BUGS.md). **done** (this commit).
+
+**All phases complete (2026-08-13).** The five layout keywords
+(`spec`, `pack`, `atomic`, `trap`, `union`) are wired lexer → parser → AST →
+frontend → codegen → interpreter → tests, the `<...>` Layout DSL is deleted,
+stdlib/examples/docs/highlighter use the `spec`/`op` spelling, and the full
+suite (1827) + runtime bench suite (39 MATCH/PASS at baseline parity) are
+green. BUGS.md logs the Bits-unit bug, the `as Bits<N>`/Applied-width cast
+gaps, the BE sub-byte shift fix, and the reactive struct-slot loop limitation.
 
 Each commit: `cargo test --lib` green, `cargo build` warning-free, Praetor on
 changed dirs, architecture docs in the same commit.

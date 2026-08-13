@@ -9,8 +9,8 @@
 //   cargo build                                            # build.rs llc + link
 
 type Int: #Int {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
 };
 
 obj CBuffer {

@@ -1,4 +1,4 @@
-# The Iterable Protocol — Schrödinger Iteration
+# The Iterable Protocol — Deferred Layout
 
 **2026-08-12.** The architecture reference for iteration, indexing, length,
 and `String` in Briev. Read before working on `foreach`, `b-each`, collection

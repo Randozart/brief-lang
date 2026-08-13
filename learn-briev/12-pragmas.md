@@ -180,10 +180,10 @@ item. (The old `<~` token was removed; `!>` is the sole metadata form.)
 
 ```briev
 type Foo : Bits {
-    !> bytes: 8;
-    !> alignment: 4;
-    !> storage: Native;
-    #volatile;  // shorthand for !> volatile: true
+    spec Bytes: 8;
+    spec Alignment: 4;
+    !> storage: Native;   // non-physical annotation (SPEC 8.9)
+    #volatile;            // shorthand for !> volatile: true
 };
 ```
 

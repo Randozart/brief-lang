@@ -21,8 +21,8 @@ type CrosswordArena<T> : List<T> {
     capacity: Int;
     slot_offset: Int;
     string_offset: Int;
-    !> InsertAt: crossword_push;
-    !> ExtractFrom: crossword_pop;
+    op InsertAt: crossword_push(#Lh, #Rh);
+    op ExtractFrom: crossword_pop(#Rh);
 };
 
 // Initialize with total capacity. slot_offset starts at 0

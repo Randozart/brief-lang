@@ -1,22 +1,22 @@
 // 2026-07-22: Node.js type declarations for Briev's type universe.
 
 type JsBuffer {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Bits) = identity(#Lh);
     op CastFrom(#Bits) = identity(#Lh);
 };
 
 type JsString: Bits #String {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#String<UTF8>) = jsstring_to_utf8(#Lh);
     op CastFrom(#String<UTF8>) = utf8_to_jsstring(#Lh);
 };
 
 type JsNumber: Bits #Int {
-    !> maxbits: 64;
-    !> alignment: 8;
+    spec MaxBits: 64;
+    spec Alignment: 8;
     op CastTo(#Float<IEEE754>) = jsnumber_to_f64(#Lh);
     op CastFrom(#Float<IEEE754>) = f64_to_jsnumber(#Lh);
     op CastTo(#Int) = jsnumber_to_i64(#Lh);

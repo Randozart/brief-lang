@@ -29,17 +29,17 @@ type Int: #Int {
 
 type UInt: Int;
 
-type Int8: Int { !> bits: 8; };
-type UInt8: Int { !> bits: 8; };
+type Int8: Int { spec Bits: 8; };
+type UInt8: Int { spec Bits: 8; };
 
-type Int16: Int { !> bits: 16; };
-type UInt16: Int { !> bits: 16; };
+type Int16: Int { spec Bits: 16; };
+type UInt16: Int { spec Bits: 16; };
 
-type Int32: Int { !> bits: 32; };
-type UInt32: Int { !> bits: 32; };
+type Int32: Int { spec Bits: 32; };
+type UInt32: Int { spec Bits: 32; };
 
-type Int64: Int { !> bits: 64; };
-type UInt64: Int { !> bits: 64; };
+type Int64: Int { spec Bits: 64; };
+type UInt64: Int { spec Bits: 64; };
 
 type Float: #Float {
     op Add: add(#Lh, #Rh);
@@ -55,10 +55,10 @@ type Float: #Float {
     op Ge: ge(#Lh, #Rh);
 };
 
-type Double: #Float { !> bits: 64; };
+type Double: #Float { spec Bits: 64; };
 
 type Bool: #Bool {
-    !> bits: 8;
+    spec Bits: 8;
     op Eq: eq(#Lh, #Rh);
     op Ne: ne(#Lh, #Rh);
     op And: band(#Lh, #Rh);
@@ -66,7 +66,7 @@ type Bool: #Bool {
     op Not: bnot(#Lh);
 };
 
-type Char: #Char { !> bits: 32;
+type Char: #Char { spec Bits: 32;
 };
 
 // 2026-07-30: String participates in #String protocol.
@@ -88,7 +88,7 @@ type String: #String {
 // (ptr to [len][bytes]) with no fields. Their modules (utf8view.bv,
 // small_string.bv) were deleted.
 
-type Data: Int { !> bits: 64; };
+type Data: Int { spec Bits: 64; };
 
 // 2026-07-30: Slice<T> — fat-pointer view over contiguous elements.
 // LLVM type { ptr, i64 } derived from field shapes by emit_toplevel.rs:llvm_type().
