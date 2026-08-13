@@ -1,13 +1,18 @@
 // ── Type System Definitions ─────────────────────────────────────────────
 // 2026-07-12: Phase 0.2 — New architecture type system.
 // All types are Bits(N) with metadata overlays. No built-in primitives.
+// 2026-08-13 (layout-keywords plan): Bits(N) stores a BIT count (the original
+// thesis restored). From 2026-07-12 through 2026-08-12 it stored BYTES, which
+// silently destroyed sub-byte widths (Bits<4> became 4 bytes); that era is
+// the "byte-era" referenced by the migration comments below.
 
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     /// Raw bit sequence: Bits(64) = 64 bits = 8 bytes. The sole physical primitive.
-    /// Internally stores bytes. Use `Type::from_bits(n)` to create from bits.
+    /// Stores a BIT count. Use `Type::from_bits(n)` or `Type::bits(n)` to create.
+    /// `Bits(0)` = flexible-width Bits (resolved to a concrete width later).
     Bits(u64),
     /// Void = Bits(0). Not a separate concept.
     Void,
@@ -91,19 +96,21 @@ impl Type {
     pub fn void() -> Type {
         Type::Void
     }
-    pub fn bits(bytes: u64) -> Type {
-        Type::Bits(bytes)
+    /// Bits(n) with n BITS. 2026-08-13: unit restored to bits (byte-era ctor
+    /// sites that meant bytes were migrated to `bits(n * 8)` at the same
+    /// commit — search `layout-keywords` in history for the sweep list).
+    pub fn bits(bits: u64) -> Type {
+        Type::Bits(bits)
     }
-    /// Create a Bits type from a bit count (converts bits to bytes internally).
-    /// e.g., `Type::from_bits(64)` = `Type::Bits(8)`.
+    /// Create a Bits type from a bit count. 2026-08-13: identity (the old
+    /// `div_ceil(bits, 8)` byte round is gone — sub-byte widths survive).
     pub fn from_bits(bits: u64) -> Type {
-        let bytes = bits.div_ceil(8);
-        Type::Bits(bytes)
+        Type::Bits(bits)
     }
     /// Return the bit width of this Bits type. Returns 0 for flexible-width Bits.
     pub fn bit_width(&self) -> u64 {
         match self {
-            Type::Bits(bytes) => bytes * 8,
+            Type::Bits(bits) => *bits,
             _ => 0,
         }
     }

@@ -43,6 +43,13 @@ pub enum Token {
 
     // ── Keywords ──────────────────────────────────────────────────────
     /// Phase 15: export defn — replaces #export pragma
+    /// 2026-08-13 (layout-keywords plan): `spec` — physical-layout metadata
+    /// assignment (PascalCase key): `spec Bits: 64;` `spec Align: 8;`
+    /// `spec Bytes: 4;` `spec MaxBits: 16;` `spec Endian: Big;`. Declared layout
+    /// is the modern, disclosed spelling of the `!>` annotation form (SPEC §8.9).
+    #[token("spec")]
+    Spec,
+
     #[token("export")]
     Export,
 
@@ -505,6 +512,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Export => write!(f, "export"),
+            Token::Spec => write!(f, "spec"),
             Token::Defn => write!(f, "defn"),
             Token::Let => write!(f, "let"),
             Token::Const => write!(f, "const"),
@@ -649,7 +657,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "await", "spawn", "term", "term!", "rollback", "import",
+            "vol", "out", "spec", "await", "spawn", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

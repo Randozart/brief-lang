@@ -38,6 +38,15 @@ The frontend decides meaning. LLVM, SPIR-V, CIRCT, Webstack, and future backends
 
 Every runtime value selected for a concrete target must be materializable by that target. Failure to resolve a representation is a compile-time error; there is no generic integer fallback.
 
+> **2026-08-13 (Deferred Layout).** When a type must pin its physical
+> representation — a C-exposed record, a register file, a packed bitfield —
+> the author declares that layout explicitly with the **`spec`** keyword
+> (`spec Bits: 12;`, `spec Bytes: 4;`, `spec Alignment: 2;`, `spec Endian: Big;`,
+> §8.2/§8.9) or the layout directives of §8.2. This is **deferred layout**: the
+> type's abstract semantics never assume a representation, and the physical
+> rendering is a declared, backend-compatible choice layered on top. See the
+> corresponding plan (`docs/plans/2026-08-13-layout-keywords.md`).
+
 Iteration, length, and indexed access are likewise selected from a type's
 operation surface, never from a compiler-known collection layout. The
 compiler holds no collection representation: a sequence's elements are read
@@ -574,6 +583,16 @@ type Int32: #Int {
 ```
 
 `!> observable: true` is not valid; use the `out` modifier.
+
+> **2026-08-13 (Deferred Layout).** Physical-layout metadata is declared with
+> the **`spec`** keyword, not `!>`: `spec Alignment: 2;`, `spec Bits: 12;`,
+> `spec MaxBits: 16;`, `spec Bytes: 4;`, `spec Endian: Big;` (see §8.2). `spec`
+> keys are PascalCase; values use the same grammar as `!>` values. `!>` remains
+> the annotation operator for non-physical metadata (`ctd`, `accel`, …); it no
+> longer carries physical-layout keys. `spec` and `!>` share one metadata map —
+> a physical key spelled with `!>` still parses during the migration (§7.x
+> moves stdlib to `spec`), but `spec` supersedes it; an unknown `spec` name is
+> an error, never silently accepted.
 
 **Staged.** At module top level, `!>` binds metadata to the module as a whole.
 Top-level `!>` is a shortcut for attaching metadata to the script; it never

@@ -277,7 +277,7 @@ pub fn type_to_smt_sort(ty: &Type) -> String {
             _ => "(_ BitVec 64)".into(),
         },
         Type::Bits(n) => {
-            let width = *n as u64 * 8;
+            let width = *n as u64;
             format!("(_ BitVec {})", width)
         }
         Type::Vector(inner, n) => {

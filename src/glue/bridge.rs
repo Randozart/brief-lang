@@ -45,6 +45,10 @@ pub fn emit_protocol_chain(
             TransformKind::Bitcast => {
                 let target_ty = match &step.target {
                     Type::Custom(t) => t.as_str(),
+                    // 2026-08-13 (layout-keywords plan): Bits(w) stores BITS; the
+                    // match arms below are bit widths (8=i8 … 64=i64). The byte-era
+                    // caller passed bytes, so Bits(8) mis-bitcast to i8 — a latent
+                    // bug the unit restoration fixes.
                     Type::Bits(w) => match w {
                         8 => "i8",
                         16 => "i16",

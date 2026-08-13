@@ -13,6 +13,46 @@ use crate::ast::PropertyValue;
 use crate::type_universe::ResolvedType;
 use crate::type_universe::TypeUniverse;
 
+/// 2026-08-13 (layout-keywords plan): resolve a C-compatible `struct Name`
+/// into a ResolvedType using its declared `spec` layout. THE single authority
+/// for static-struct sizing — llvm/mod.rs StaticStruct registration calls this
+/// instead of re-deriving bytes/alignment inline (rule 16: one precedence
+/// table). §2.1 precedence: Bytes > Bits > slot-sum; alignment defaults to 8.
+pub fn static_struct_resolved_ty(
+    def: &crate::ast::top::StructDef,
+    universe: &TypeUniverse,
+) -> ResolvedType {
+    let fields: Vec<(String, Type)> = def.fields.iter()
+        .map(|(n, t)| (n.clone(), t.clone()))
+        .collect();
+    let int_md = |key: &str| -> Option<u64> {
+        def.metadata.get(key).and_then(|pv| match pv {
+            PropertyValue::Int(n) if *n >= 0 => Some(*n as u64),
+            _ => None,
+        })
+    };
+    let declared_bits = int_md("bits");
+    let bytes = int_md("bytes")
+        .or_else(|| declared_bits.map(|b| b.div_ceil(8)))
+        .unwrap_or_else(|| {
+            fields.iter().map(|(_, ty)| {
+                crate::backend::llvm::types::type_size(ty, Some(universe))
+            }).sum()
+        });
+    let max_bits = declared_bits.unwrap_or(bytes * 8);
+    ResolvedType {
+        name: def.name.clone(),
+        base: "Bit".to_string(),
+        bytes,
+        min_bits: max_bits,
+        max_bits,
+        alignment: int_md("alignment").unwrap_or(8),
+        // All `spec` keys (incl. endian) surface via reflection (`.^^`).
+        properties: def.metadata.clone(),
+        fields,
+    }
+}
+
 /// 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse.
 /// Extracts byte size from layout metadata or slots, attaches field annotations,
 /// and registers each type so later validation can look it up.
@@ -34,12 +74,19 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
         // 2026-07-26: Read bits/maxbits/minbits metadata independently.
         // bits <~ N → exact (min=max=N), maxbits <~ N → ceiling (min=0, max=N),
         // minbits <~ N → floor (min=N, max=primordial). Fallback: primordial values.
-        let exact_bits = td.body.metadata.get("bits")
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
-        let ceiling = td.body.metadata.get("maxbits")
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
-        let floor = td.body.metadata.get("minbits")
-            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None });
+        let iv = |key: &str| -> Option<u64> {
+            td.body.metadata.get(key).and_then(|pv| {
+                if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+            })
+        };
+        let exact_bits = iv("bits");
+        let ceiling = iv("maxbits");
+        let floor = iv("minbits");
+        // 2026-08-13 (layout-keywords plan): `spec Bytes: N` is the AUTHORITATIVE
+        // storage size (§2.1 precedence: Bytes > Bits > slot-sum > primordial).
+        // All bits metadata here are BIT counts (spec Bits/!> bits); the byte
+        // conversion rounds UP via div_ceil so sub-byte widths keep a byte.
+        let bytes_override = iv("bytes");
         // 2026-07-31: Phase 3 (§8.6) — clone the primordial so the warning
         // closures below can borrow `universe.warnings` mutably without
         // conflicting with an outstanding immutable borrow of the universe.
@@ -63,9 +110,9 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
             let c = ceiling.unwrap_or(prim_max);
             (f.min(c), c.max(f))
         };
-        let bytes = ceiling
-            .map(|b| b / 8)
-            .or_else(|| exact_bits.map(|b| b / 8))
+        let bytes = bytes_override
+            .or_else(|| ceiling.map(|b| b.div_ceil(8)))
+            .or_else(|| exact_bits.map(|b| b.div_ceil(8)))
             .or_else(|| {
                 if td.body.slots.is_empty() { return None; }
                 // 2026-08-04 (compiler-in-Briev): sum slot sizes via
@@ -145,6 +192,11 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
                 bytes.min(8)
             }));
         let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
+        // 2026-08-13 (layout-keywords plan): `spec` keys — including
+        // `endian` (Big/Little/Target) — share the metadata map with `!>`,
+        // so they surface on `ResolvedType.properties` verbatim and are
+        // queryable from Briev via reflection (`.^^`). Phase 2 pack emission
+        // reads `endian` here (absent ⇒ Target/native).
         // 2026-08-04 (compiler-in-Briev): when re-registering a primordial (e.g.
         // `type Int: #Int { ... }` in bootstrap.bv), inherit the primordial's
         // protocol Cast.#* properties. The flexible-protocol fallbacks in
@@ -309,6 +361,18 @@ mod tests {
     use super::*;
 
     fn make_type_def(name: &str, slots: Vec<(&str, Type)>) -> TopLevel {
+        make_type_def_full(name, slots, vec![])
+    }
+
+    fn make_type_def_full(
+        name: &str,
+        slots: Vec<(&str, Type)>,
+        meta: Vec<(&str, i64)>,
+    ) -> TopLevel {
+        let mut metadata = HashMap::new();
+        for (k, v) in meta {
+            metadata.insert(k.to_string(), crate::ast::PropertyValue::Int(v));
+        }
         TopLevel::TypeDef(Box::new(TypeDef {
             name: name.to_string(),
             type_params: vec![],
@@ -320,7 +384,7 @@ mod tests {
                 slots: slots.into_iter().map(|(n, ty)| TypeDefSlot {
                     name: n.to_string(), ty, bit_range: None,
                 }).collect(),
-                metadata: HashMap::new(),
+                metadata,
                 projections: vec![],
                 bindings: vec![],
                 operators: vec![],
@@ -358,5 +422,114 @@ mod tests {
     fn test_layout_total_bits() {
         assert_eq!(compute_layout_total_bits("le:[x:8, y:8]"), Some(16));
         assert_eq!(compute_layout_total_bits("0xAA"), Some(8));
+    }
+
+    fn make_type_def_meta(name: &str, meta: Vec<(&str, i64)>) -> TopLevel {
+        make_type_def_full(name, vec![], meta)
+    }
+
+    // ── Phase 1 (layout-keywords): spec-driven size/alignment ─────────
+
+    #[test]
+    fn test_register_typedefs_spec_bits_sets_bytes_ceil() {
+        // `spec Bits: 4` → 4 bits → 1 storage byte (div_ceil). Sub-byte widths
+        // keep a byte; the old floor division (`bits / 8`) gave 0 bytes.
+        let mut u = TypeUniverse::new();
+        let items = vec![make_type_def_meta("Nibble", vec![("bits", 4)])];
+        register_typedefs(&items, &mut u, 64).unwrap();
+        let rt = u.get("Nibble").expect("registered");
+        assert_eq!(rt.bytes, 1);
+        assert_eq!(rt.min_bits, 4);
+        assert_eq!(rt.max_bits, 4);
+        assert_eq!(rt.alignment, 1);
+    }
+
+    #[test]
+    fn test_register_typedefs_spec_bytes_is_authoritative() {
+        // §2.1 precedence: Bytes > Bits. `spec Bytes: 4` overrides bits.
+        let mut u = TypeUniverse::new();
+        let items = vec![make_type_def_meta("Frame", vec![("bytes", 4), ("bits", 12)])];
+        register_typedefs(&items, &mut u, 64).unwrap();
+        let rt = u.get("Frame").expect("registered");
+        assert_eq!(rt.bytes, 4);
+        assert_eq!(rt.min_bits, 12);
+        assert_eq!(rt.max_bits, 12);
+    }
+
+    #[test]
+    fn test_register_typedefs_spec_alignment() {
+        let mut u = TypeUniverse::new();
+        let items = vec![make_type_def_meta("Packed", vec![("alignment", 1)])];
+        register_typedefs(&items, &mut u, 64).unwrap();
+        assert_eq!(u.get("Packed").expect("registered").alignment, 1);
+    }
+
+    #[test]
+    fn test_register_typedefs_byte_aligned_bits_unchanged() {
+        // `spec Bits: 64` → 8 bytes, identical to the `!> bits: 64` behavior.
+        let mut u = TypeUniverse::new();
+        let items = vec![make_type_def_meta("Wordish", vec![("bits", 64)])];
+        register_typedefs(&items, &mut u, 64).unwrap();
+        let rt = u.get("Wordish").expect("registered");
+        assert_eq!(rt.bytes, 8);
+        assert_eq!(rt.max_bits, 64);
+    }
+
+    // ── StaticStruct: spec sizing via static_struct_resolved_ty ───────
+
+    fn make_struct_def(name: &str, fields: Vec<(&str, Type)>, meta: Vec<(&str, i64)>) -> crate::ast::top::StructDef {
+        let mut metadata = HashMap::new();
+        for (k, v) in meta {
+            metadata.insert(k.to_string(), crate::ast::PropertyValue::Int(v));
+        }
+        crate::ast::top::StructDef {
+            name: name.to_string(),
+            type_params: vec![],
+            fields: fields.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+            metadata,
+            span: None,
+            seq: false,
+        }
+    }
+
+    #[test]
+    fn test_static_struct_spec_bytes_is_authoritative() {
+        // §2.1: Bytes wins over Bits. `spec Bytes: 3` overrides `spec Bits: 20`.
+        let u = TypeUniverse::new();
+        let def = make_struct_def(
+            "Packet",
+            vec![("tag", Type::int()), ("payload", Type::ptr(Type::bits(8)))],
+            vec![("bytes", 3), ("bits", 20), ("alignment", 1)],
+        );
+        let rt = static_struct_resolved_ty(&def, &u);
+        assert_eq!(rt.bytes, 3);
+        assert_eq!(rt.max_bits, 20);
+        assert_eq!(rt.alignment, 1);
+        assert_eq!(rt.fields.len(), 2);
+    }
+
+    #[test]
+    fn test_static_struct_spec_bits_ceil_no_bytes() {
+        // `spec Bits: 12` with no Bytes → 12.div_ceil(8) = 2 bytes.
+        let u = TypeUniverse::new();
+        let def = make_struct_def("SubByte", vec![("x", Type::bits(8))], vec![("bits", 12)]);
+        let rt = static_struct_resolved_ty(&def, &u);
+        assert_eq!(rt.bytes, 2);
+        assert_eq!(rt.max_bits, 12);
+    }
+
+    #[test]
+    fn test_static_struct_falls_back_to_slot_sum() {
+        // No spec → Σ slot sizes (fe(tag: Int)=8, payload ptr=8) = 16.
+        let u = TypeUniverse::new();
+        let def = make_struct_def(
+            "Legacy",
+            vec![("tag", Type::int()), ("payload", Type::ptr(Type::bits(8)))],
+            vec![],
+        );
+        let rt = static_struct_resolved_ty(&def, &u);
+        assert_eq!(rt.bytes, 16);
+        assert_eq!(rt.alignment, 8);
+        assert_eq!(rt.max_bits, 128);
     }
 }

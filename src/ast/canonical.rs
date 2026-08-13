@@ -141,7 +141,7 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             },
         ),
         TopLevel::StaticStruct(s) => {
-            format_struct_into(out, level, &s.name, &s.type_params, &s.fields, s.seq);
+            format_struct_into(out, level, s);
         }
         TopLevel::Enum(e) => format_enum_into(e, out, level),
         TopLevel::TypeDef(t) => format_typedef_into(t, out, level),
@@ -306,28 +306,53 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
 fn format_struct_into(
     out: &mut String,
     level: usize,
-    name: &str,
-    type_params: &[TypeParam],
-    fields: &[(String, Type)],
-    seq: bool,
+    def: &crate::ast::top::StructDef,
 ) {
     indent(out, level);
-    if seq {
+    if def.seq {
         out.push_str("seq ");
     }
-    let _ = write!(out, "struct {}", name);
-    if !type_params.is_empty() {
-        let params: Vec<String> = type_params.iter().map(|p| p.name.clone()).collect();
+    let _ = write!(out, "struct {}", def.name);
+    if !def.type_params.is_empty() {
+        let params: Vec<String> = def.type_params.iter().map(|p| p.name.clone()).collect();
         let _ = write!(out, "<{}>", params.join(", "));
     }
     let _ = write!(out, " {{ ");
-    for (i, (fname, fty)) in fields.iter().enumerate() {
+    for (i, (fname, fty)) in def.fields.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
         let _ = write!(out, "{}: {};", fname, fty);
     }
+    // 2026-08-13 (layout-keywords plan): struct physical-layout metadata prints
+    // in the declared form. Deterministic: sorted keys.
+    let mut meta_keys: Vec<&String> = def.metadata.keys().collect();
+    meta_keys.sort();
+    for key in meta_keys {
+        out.push(' ');
+        if let Some(spec_name) = spec_display_key(key) {
+            let _ = write!(out, "spec {}: {};", spec_name, def.metadata[key]);
+        } else {
+            // Non-layout struct metadata (e.g. `annotations` from `#` field
+            // markers) round-trips as `!>` like the TypeDef formatter.
+            let _ = write!(out, "!> {}: {};", key, def.metadata[key]);
+        }
+    }
     let _ = write!(out, " }};");
+}
+
+/// 2026-08-13 (layout-keywords plan): lowercase metadata key → PascalCase spec
+/// name (the canonical formatter's half of `spec_name_to_key` in the parser —
+/// keep in sync). Non-layout keys return None → printed as `!>`.
+fn spec_display_key(key: &str) -> Option<&'static str> {
+    match key {
+        "alignment" => Some("Alignment"),
+        "bits" => Some("Bits"),
+        "maxbits" => Some("MaxBits"),
+        "bytes" => Some("Bytes"),
+        "endian" => Some("Endian"),
+        _ => None,
+    }
 }
 
 /// 2026-08-05: format a statement-level match pattern.
@@ -641,6 +666,19 @@ fn format_typedef_into(t: &TypeDef, out: &mut String, level: usize) {
         }
         let _ = write!(out, "{}: {};", slot.name, slot.ty);
     }
+    // 2026-08-13 (layout-keywords plan): TypeDef metadata round-trips. The five
+    // physical-layout keys print in the declared form `spec <PascalCase>`; all
+    // other keys stay `!>`. Deterministic output: sorted keys (HashMap order).
+    let mut meta_keys: Vec<&String> = t.body.metadata.keys().collect();
+    meta_keys.sort();
+    for key in meta_keys {
+        out.push(' ');
+        if let Some(spec_name) = spec_display_key(key) {
+            let _ = write!(out, "spec {}: {};", spec_name, t.body.metadata[key]);
+        } else {
+            let _ = write!(out, "!> {}: {};", key, t.body.metadata[key]);
+        }
+    }
     let _ = write!(out, " }};");
 }
 
@@ -693,6 +731,10 @@ mod tests {
         "!> accel: try_all;\n",
         "!> accel: force;\n!> target: spirv;\n",
         "!> flags: [fast, contract];\n",
+        // 2026-08-13 (layout-keywords plan): physical-layout metadata round-trips.
+        "type W8: #Int {\n  spec Bits: 8;\n};\n",
+        "struct Flags {\n  spec Bytes: 1;\n  spec Alignment: 1;\n  a: Bool;\n};\n",
+        "type Frame: #Bit {\n  spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  spec Bytes: 4;\n  spec Endian: Big;\n};\n",
         // 2026-08-09 (init kind): runtime-seeded invariant round-trips.
         "init BufSize: Int = get_env_int!(\"BUFSIZE\");\n",
         "init BufferSize: [64 | lo..hi] Int = 64;\n",
@@ -712,6 +754,19 @@ mod tests {
         assert_idempotent(
             "defn nested(x: Int) -> Int [true][true] {\n  if x > 0 {\n    term x;\n  } else {\n    term 0;\n  };\n};\n",
         );
+    }
+
+    /// 2026-08-13 (layout-keywords plan): a type body containing mixed `spec`
+    /// and `!>` metadata prints both forms and round-trips.
+    #[test]
+    fn formatter_preserves_spec_and_exclaim_metadata() {
+        let src = "type W: #Int {\n  !> ctd: Add;\n  spec Bits: 8;\n  spec Endian: Little;\n};\n";
+        let items = parse(src).expect("parse");
+        let out = format_program(&items);
+        assert!(out.contains("spec Bits: 8;"), "output: {out}");
+        assert!(out.contains("spec Endian: Little;"), "output: {out}");
+        assert!(out.contains("!> ctd: Add;"), "output: {out}");
+        assert_idempotent(src);
     }
 }
 

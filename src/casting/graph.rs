@@ -754,7 +754,7 @@ impl CastingGraph {
         // Compiler constructs handled directly
         match ty {
             Type::Ptr(_) | Type::PtrConst(_) => return "ptr".to_string(),
-            Type::Bits(n) => return format!("i{}", n * 8),
+            Type::Bits(n) => return format!("i{}", n),
             Type::Void => return "void".to_string(),
             _ => {}
         }

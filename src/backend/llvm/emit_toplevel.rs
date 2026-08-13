@@ -369,7 +369,9 @@ impl LlvmBackend {
         match ty {
             Type::Ptr(_) => "ptr",
             Type::Void => "void",
-            Type::Bits(bytes) => match bytes * 8 {
+            // 2026-08-13 (layout-keywords plan): Bits stores bits; the match
+            // arms below are already bit widths, so the byte-era `* 8` is gone.
+            Type::Bits(bits) => match bits {
                 1 => "i1",
                 8 => "i8",
                 16 => "i16",

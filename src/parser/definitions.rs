@@ -1753,46 +1753,9 @@ impl<'a> Parser<'a> {
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // !> key: value; — metadata assignment (new syntax)
-                if self.check(&Token::ExclaimArrow) {
-                    self.advance();
-                    let key = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    match key.as_str() {
-                        "ctd" => {
-                            let ctd_name = self.expect_identifier()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
-                        }
-                        "alu" => {
-                            match self.peek() {
-                                Some(Token::Identifier(_)) => {
-                                    let alu_name = self.expect_identifier()?;
-                                    metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
-                                }
-                                _ => {
-                                    let alu_str = self.expect_string()?;
-                                    metadata.insert("alu".into(), PropertyValue::String(alu_str));
-                                }
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        "layout" => {
-                            if self.check(&Token::LBrace) {
-                                let fields = self.parse_layout_struct_body()?;
-                                metadata.insert("layout_struct".into(), fields);
-                            } else {
-                                let raw = self.read_layout_body()?;
-                                metadata.insert("layout".into(), PropertyValue::String(raw));
-                            }
-                            self.eat(&Token::Semicolon);
-                        }
-                        _ => {
-                            let pv = self.parse_metadata_value_standalone()?;
-                            self.eat(&Token::Semicolon);
-                            metadata.insert(key, pv);
-                        }
-                    }
+                // !> key: value; or spec PascalCase: value; — metadata assignment
+                if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
                 let slot_name = self.expect_identifier()?;
@@ -2053,6 +2016,110 @@ impl<'a> Parser<'a> {
 
     /// 2026-07-16: Parse struct-format layout body: { field: Type, ... }.
     /// Returns PropertyValue::List of [name_string, type_name_identifier] pairs.
+    /// 2026-08-13 (layout-keywords plan): parse one metadata clause in a type/
+    /// obj/struct body. Two spellings:
+    ///   `!> <lowercase_key>: <value>;`       — annotation form (legacy)
+    ///   `spec <PascalCase>: <value>;`         — declared-layout form (modern)
+    /// Both write the SAME lowercase metadata keys, so consumers have a single
+    /// read path. `!>` keeps the ctd/alu/layout special cases; `spec` has the
+    /// five physical-layout keys (Alignment/Bits/MaxBits/Bytes/Endian).
+    /// Invoked with the cursor AT the `!>` or `spec` token.
+    fn parse_metadata_clause(
+        &mut self,
+        metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    ) -> Result<(), SyntaxError> {
+        let is_spec = self.check(&Token::Spec);
+        self.advance();
+        let key = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+        if is_spec {
+            return self.parse_spec_value(&key, metadata);
+        }
+        match key.as_str() {
+            "ctd" => {
+                let ctd_name = self.expect_identifier()?;
+                self.eat(&Token::Semicolon);
+                metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+            }
+            "alu" => {
+                match self.peek() {
+                    Some(Token::Identifier(_)) => {
+                        let alu_name = self.expect_identifier()?;
+                        metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                    }
+                    _ => {
+                        let alu_str = self.expect_string()?;
+                        metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                    }
+                }
+                self.eat(&Token::Semicolon);
+            }
+            "layout" => {
+                if self.check(&Token::LBrace) {
+                    let fields = self.parse_layout_struct_body()?;
+                    metadata.insert("layout_struct".into(), fields);
+                } else {
+                    let raw = self.read_layout_body()?;
+                    metadata.insert("layout".into(), PropertyValue::String(raw));
+                }
+                self.eat(&Token::Semicolon);
+            }
+            _ => {
+                let pv = self.parse_metadata_value_standalone()?;
+                self.eat(&Token::Semicolon);
+                metadata.insert(key, pv);
+            }
+        }
+        Ok(())
+    }
+
+    /// 2026-08-13 (layout-keywords plan): parse the value of a `spec` clause.
+    /// Key is the PascalCase spelling already lexed. The five physical-layout
+    /// keys are recognized; anything else is an error per SPEC §2.1 (no silent
+    /// unknown-spec acceptance).
+    fn parse_spec_value(
+        &mut self,
+        name: &str,
+        metadata: &mut std::collections::HashMap<String, PropertyValue>,
+    ) -> Result<(), SyntaxError> {
+        let key = match spec_name_to_key(name) {
+            Some(k) => k,
+            None => {
+                let msg = format!(
+                    "unknown spec '{}' — known specs: Alignment, Bits, MaxBits, Bytes, Endian",
+                    name
+                );
+                return self.error_at_current(&msg);
+            }
+        };
+        match key {
+            "endian" => {
+                let id = self.expect_identifier()?;
+                if !matches!(id.as_str(), "Big" | "Little" | "Target") {
+                    let msg = format!(
+                        "invalid spec Endian value '{}' — expected Big, Little, or Target",
+                        id
+                    );
+                    return self.error_at_current(&msg);
+                }
+                metadata.insert(key.into(), PropertyValue::Identifier(id));
+            }
+            _ => {
+                let n = self.expect_integer()?;
+                if n < 0 {
+                    let msg = format!("spec {} must be a non-negative integer, got {}", name, n);
+                    return self.error_at_current(&msg);
+                }
+                metadata.insert(key.into(), PropertyValue::Int(n));
+            }
+        }
+        self.eat(&Token::Semicolon);
+        Ok(())
+    }
+
+    /// 2026-08-13 (layout-keywords plan): PascalCase spec key → canonical
+    /// lowercase metadata key. The reverse map lives in canonical.rs for the
+    /// formatter (keep in sync).
     fn parse_layout_struct_body(&mut self) -> Result<PropertyValue, SyntaxError> {
         self.expect(Token::LBrace)?;
         let mut fields = Vec::new();
@@ -2088,14 +2155,9 @@ impl<'a> Parser<'a> {
         let mut op_bindings: Vec<OperatorBinding> = Vec::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                if self.check(&Token::ExclaimArrow) {
-                    // !> key: value; metadata (same handling as type bodies).
-                    self.advance();
-                    let key = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    let pv = self.parse_metadata_value_standalone()?;
-                    self.eat(&Token::Semicolon);
-                    metadata.insert(key, pv);
+                // !> key: value; or spec PascalCase: value; — metadata.
+                if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
                     continue;
                 }
                 if self.check(&Token::Txn) {
@@ -2153,8 +2215,17 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_type_params()?;
         let mut fields = Vec::new();
         let mut annotations: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        // 2026-08-13 (layout-keywords plan): structs gain physical-layout
+        // metadata (`spec Bits`, `spec Align`, `spec Bytes`, `spec MaxBits`,
+        // `spec Endian`) consumed at StaticStruct registration (llvm/mod.rs).
+        let mut metadata: std::collections::HashMap<String, PropertyValue> = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
+                // spec PascalCase: value; — declared physical layout.
+                if self.check(&Token::Spec) {
+                    self.parse_metadata_clause(&mut metadata)?;
+                    continue;
+                }
                 // 2026-07-26: Parse optional hashword annotations (#Stack, #Heap, #Scalar)
                 let mut field_annotations = Vec::new();
                 while let Some(&Token::Identifier(ref s)) = self.peek() {
@@ -2177,7 +2248,6 @@ impl<'a> Parser<'a> {
             self.expect(Token::RBrace)?;
         }
         self.eat(&Token::Semicolon);
-        let mut metadata = std::collections::HashMap::new();
         if !annotations.is_empty() {
             metadata.insert("annotations".to_string(), crate::ast::PropertyValue::String(format!("{:?}", annotations)));
         }
@@ -2443,6 +2513,20 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// 2026-08-13 (layout-keywords plan): PascalCase spec key → canonical
+/// lowercase metadata key. The reverse map (formatter) lives in canonical.rs —
+/// keep the two tables in sync.
+fn spec_name_to_key(name: &str) -> Option<&'static str> {
+    match name {
+        "Alignment" => Some("alignment"),
+        "Bits" => Some("bits"),
+        "MaxBits" => Some("maxbits"),
+        "Bytes" => Some("bytes"),
+        "Endian" => Some("endian"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::lexer::tokenize;
@@ -2476,6 +2560,87 @@ mod tests {
         // "Int.c.sso" — the `Int` parses and the dotted suffix is not consumed.
         let ty = parse_type("Int.c.sso").unwrap();
         assert_eq!(ty, crate::ast::Type::int());
+    }
+
+    // ── Layout-keywords (Phase 1): spec clause parsing ────────────────
+
+    fn parse_top(src: &str) -> Result<crate::ast::TopLevel, String> {
+        let tokens = tokenize(src).map_err(|e| format!("lex: {e}"))?;
+        let mut p = Parser::new(tokens, src);
+        p.parse_program()
+            .map(|mut v| v.remove(0))
+            .map_err(|e| format!("parse: {e}"))
+    }
+
+    #[test]
+    fn test_spec_in_type_body() {
+        // 2026-08-13 (layout-keywords plan): `spec Bits: 4` maps to the
+        // lowercase metadata key `bits` (same read path as `!> bits`).
+        let tl = parse_top("type W4: #Int { spec Bits: 4; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        match td.body.metadata.get("bits") {
+            Some(crate::ast::PropertyValue::Int(4)) => {}
+            other => panic!("expected bits=4, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_spec_all_layout_keys_in_type_body() {
+        let tl = parse_top(
+            "type Frame: #Bit {\n  \
+             spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  \
+             spec Bytes: 4;\n  spec Endian: Big;\n};",
+        )
+        .unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        assert_eq!(td.body.metadata["alignment"], crate::ast::PropertyValue::Int(2));
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(12));
+        assert_eq!(td.body.metadata["maxbits"], crate::ast::PropertyValue::Int(16));
+        assert_eq!(td.body.metadata["bytes"], crate::ast::PropertyValue::Int(4));
+        assert_eq!(td.body.metadata["endian"], crate::ast::PropertyValue::Identifier("Big".into()));
+    }
+
+    #[test]
+    fn test_spec_in_struct_body() {
+        let tl = parse_top("struct Header { spec Bytes: 2; tag: Int; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert_eq!(s.metadata["bytes"], crate::ast::PropertyValue::Int(2));
+        assert_eq!(s.fields.len(), 1);
+    }
+
+    #[test]
+    fn test_spec_in_obj_body() {
+        let tl = parse_top("obj Widget { spec Bits: 8; x: Int; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef (obj)") };
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(8));
+    }
+
+    #[test]
+    fn test_spec_unknown_name_rejected() {
+        // 2026-08-13: unknown spec names are hard errors — never silent.
+        let err = parse_top("type W: #Int { spec Flurb: 3; };").unwrap_err();
+        assert!(err.contains("unknown spec"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_endian_invalid_value_rejected() {
+        let err = parse_top("type W: #Int { spec Endian: Sideways; };").unwrap_err();
+        assert!(err.contains("invalid spec Endian value"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_non_integer_width_rejected() {
+        let err = parse_top("type W: #Int { spec Bits: many; };").unwrap_err();
+        assert!(err.contains("expected integer") || err.contains("integer"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_does_not_break_exclaim_arrow() {
+        // `!>` still parses alongside `spec` in the same body.
+        let tl = parse_top("type W: #Int { !> ctd: Add; spec Bits: 8; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        assert_eq!(td.body.metadata["ctd"], crate::ast::PropertyValue::Identifier("Add".into()));
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(8));
     }
 
     // ── P3: frgn declaration parsing ─────────────────────────────────

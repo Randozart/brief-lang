@@ -73,7 +73,7 @@ impl TypeCache {
                     ]);
                 } else {
                     self.push_type(spirv::Op::TypeInt, id, vec![
-                        Operand::LiteralBit32(*bytes as u32 * 8),
+                        Operand::LiteralBit32(*bytes as u32),
                         Operand::LiteralBit32(0), // unsigned
                     ]);
                 }

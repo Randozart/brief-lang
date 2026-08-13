@@ -2406,19 +2406,12 @@ impl LlvmBackend {
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
-                            let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty, Some(universe))
-                            }).sum();
-                            let rt = crate::type_universe::ResolvedType {
-                                name: s.name.clone(),
-                                base: "Bit".to_string(),
-                                bytes,
-                                min_bits: bytes * 8,
-                                max_bits: bytes * 8,
-                                alignment: 8,
-                                properties: std::collections::HashMap::new(),
-                                fields: fields.clone(),
-                            };
+                            // 2026-08-13 (layout-keywords plan): the spec-aware
+                            // sizing lives in register_types.rs (single
+                            // precedence authority, shared with tests). Only
+                            // register the struct here if the type universe
+                            // does not already have it.
+                            let rt = crate::backend::register_types::static_struct_resolved_ty(s, universe);
                             universe.types.insert(s.name.clone(), rt);
                         }
                     }

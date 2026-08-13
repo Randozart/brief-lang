@@ -502,6 +502,23 @@ parity (additive paths only). Log the `Bits`-unit bug and the
 | union: overlay size/align; field punning IR; C export; interpreter | backend+glue+interpreter |
 | stdlib migration: full suite green, all benchmarks compile | suite + harness |
 
+**Phase 1 status (2026-08-13):** implemented + committed. Lexer `Token::Spec`,
+`spec` vocab entry, `Type::Bits(u64)` = bit count (sub-byte preserved), spec
+parsing via `parse_metadata_clause`/`parse_spec_value`/`spec_name_to_key`
+(type/obj/struct bodies; unknown spec + invalid Endian = errors), width-sweep
+of all Bits sites to bit units (`i{n}`, `div_ceil(8)` at storage), pointer
+element width fix (byte pointers are now i8; latent byte-era bitcast bug in
+`glue/bridge.rs`), register_types `bytes` override (authoritative) + endian
+surfaced on `properties`, `static_struct_resolved_ty` shared sizing helper
+(Single authority; llvm/mod.rs StaticStruct arm delegates), canonical
+`spec`/`!>` printers, SPEC §2.1 (Deferred Layout) + §8.9 (spec supersedes
+physical `!>` keys). Tests: 19 new (parser spec forms/errors, canonical
+round-trip + fixtures, register-types sizing TypeDef+StaticStruct, `Bits<4>`
+sub-byte + `Bits<0>` flexible + byte-pointer i8). `cargo test --lib` 1803
+green, build warnings unchanged (5 pre-existing), Praetor zero new diagnostics
+(register_typedefs complexity actually reduced 37→33), full runtime suite 39
+MATCH/PASS exit=0.
+
 ## 5. Commit sequence
 
 1. `docs/plans/2026-08-13-layout-keywords.md` (this file) + baseline table.

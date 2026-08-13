@@ -121,6 +121,10 @@ impl LanguageVocab {
                 kw("proto", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("struct", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("seq", VocabStatus::Canonical, KeywordContext::Modifier),
+                // 2026-08-13 (layout-keywords plan): `spec` — physical-layout
+                // metadata statement (`spec Bits: 64;`). Declared layout, the
+                // disclosed sibling of the `!>` annotation form.
+                kw("spec", VocabStatus::Canonical, KeywordContext::Modifier),
                 kw("enum", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("impl", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("obj", VocabStatus::Canonical, KeywordContext::Declaration),
