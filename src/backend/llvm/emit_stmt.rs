@@ -594,6 +594,33 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 // i64 handle. Previously this fell to `_ => {}` and the store
                 // was silently dropped (List's `inner.data = Malloc#(...)`).
                 Expr::Field(obj, name) => {
+                    // 2026-08-12 (Iterable protocol, slice 2 gap 2): a POOLED
+                    // instance target (`c.count = 5`) stores into the
+                    // `{base}.{name}` column at row 0 — emitting the receiver
+                    // as a box handle produces an undefined `@c` global.
+                    if let Expr::Identifier(rname) = obj.as_ref() {
+                        if let Some((base, row_reg)) = backend.instance_prefix_for(rname) {
+                            let slot = format!("{}.{}", base, name);
+                            if let Some(&idx) = backend.ctx.field_index_map.get(&slot) {
+                                let col_ty = backend.ctx.field_types[idx].clone();
+                                let base_gep = backend.emit_state_gep(out, indent, "m", "%state", idx);
+                                let gep = backend.fun.gen_reg();
+                                writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, gep, col_ty, base_gep, row_reg).ok();
+                                let field_ty = backend.ctx.field_briev_types[idx].clone();
+                                let llvm_ty = if matches!(field_ty, Type::Ptr(_)) {
+                                    "i64".to_string()
+                                } else {
+                                    backend.llvm_type(&field_ty)
+                                };
+                                let store_val = backend.ensure_typed_value(
+                                    out, indent, &llvm_ty, &val.name, Some(val.ty.clone()),
+                                    backend.ctx.type_universe.clone().as_ref(),
+                                );
+                                writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+                                return TypedRegister { name: val.name, ty: Type::void() };
+                            }
+                        }
+                    }
                     let obj_reg = backend.emit_expr(out, obj, indent);
                     let Some(obj_key) = backend.resolve_obj_key(&obj_reg.ty) else {
                         return TypedRegister { name: val.name, ty: Type::void() };

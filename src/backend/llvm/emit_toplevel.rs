@@ -883,6 +883,34 @@ impl LlvmBackend {
         init: &(String, String, Expr),
     ) {
         let (name, base, init_expr) = init;
+        // 2026-08-12 (Iterable protocol, slice 2 gap 1): a StructLiteral
+        // (`Counter { count: 5 }`) seeds the pooled instance's SLOTS directly —
+        // no `op Init` member needed. The literal's field values are the slot
+        // initial values (SPEC §16.3 type-directed construction for plain objs).
+        if let crate::ast::Expr::StructLiteral { fields, .. } = init_expr {
+            for (mname, value) in fields {
+                let slot = format!("{}.{}", base, mname);
+                let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue };
+                let col_ty = self.ctx.field_types[idx].clone();
+                let base_gep = self.emit_state_gep(out, indent, "si", "%state", idx);
+                let gep = self.fun.gen_reg();
+                writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 0", indent, gep, col_ty, base_gep).ok();
+                let val_tmp = self.fun.gen_reg();
+                let val = self.emit_expr_inner(out, &val_tmp, value, indent);
+                let field_ty = self.ctx.field_briev_types[idx].clone();
+                let llvm_ty = if matches!(field_ty, Type::Ptr(_)) {
+                    "i64".to_string()
+                } else {
+                    self.llvm_type(&field_ty)
+                };
+                let store_val = self.ensure_typed_value(
+                    out, indent, &llvm_ty, &val.name, Some(val.ty.clone()),
+                    self.ctx.type_universe.clone().as_ref(),
+                );
+                writeln!(out, "{}store {} {}, ptr {}", indent, llvm_ty, store_val, gep).ok();
+            }
+            return;
+        }
         let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),

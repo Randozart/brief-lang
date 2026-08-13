@@ -1978,6 +1978,41 @@ impl LlvmBackend {
         name: &str,
         indent: &str,
     ) -> TypedRegister {
+        // 2026-08-12 (Iterable protocol, slice 2 gap 2): a POOLED instance
+        // receiver (`c.count` on a top-level `let c: Counter` whose members
+        // unpack into `{base}.{member}` columns) must route to the column at
+        // row 0 — emitting the receiver as a box handle produces an undefined
+        // `@c` global. Mirrors the member-call receiver prefix path.
+        if let Expr::Identifier(rname) = recv {
+            if let Some((base, row_reg)) = self.instance_prefix_for(rname) {
+                let slot = format!("{}.{}", base, name);
+                if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                    let (row, row_ty, load_ty) =
+                        self.emit_instance_column_row(out, indent, idx, &row_reg);
+                    let loaded = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, load_ty, row).ok();
+                    return TypedRegister { name: loaded, ty: row_ty };
+                }
+                // Boxed instance (per-heap block): inttoptr the handle + GEP
+                // the member byte offset.
+                if let Some(offsets) = self.ctx.boxed_offsets.get(base.as_str()) {
+                    if let Some((off, mty)) = offsets.get(name) {
+                        let ptr = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, row_reg).ok();
+                        let gep = self.fun.gen_reg();
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, ptr, off).ok();
+                        let llvm_ty = if matches!(mty, Type::Ptr(_)) {
+                            "i64".to_string()
+                        } else {
+                            self.llvm_type(mty)
+                        };
+                        let loaded = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load {}, ptr {}", indent, loaded, llvm_ty, gep).ok();
+                        return TypedRegister { name: loaded, ty: mty.clone() };
+                    }
+                }
+            }
+        }
         let _ = v;
         let recv_tmp = self.fun.gen_reg();
         let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
