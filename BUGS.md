@@ -1,18 +1,27 @@
 # Bugs
 
-## String state-field liveness + String-element foreach — FIXED (slice 2)
+## wasm32 collection member codegen width maze — OPEN (blocks web b-each over collections)
 
-**Date:** 2026-08-12 — **both fixed** (commit `77d934ae`).
+**Date:** 2026-08-12 (found while building the b-each snapshot materializer)
+**Status:** Open — pre-existing; the native (x86_64) path is unaffected; the
+materializer infrastructure is committed (`2af49167`) and activates once this
+is fixed.
 
-1. The field-liveness scanner had no `Statement::If` arm — a field read only
-   inside an `if` (`if a == "hi"`) was never marked referenced, pruned as
-   `Never`, and the body emitted an undefined `@a` global. Added the If/Block/
-   Gate arms to `scan_for_state_identifiers`.
-2. The `foreach` item over a `List<String>` bound the i64 collection handle
-   instead of the ptr representation — `briev_str_eq` failed ("defined with
-   type 'i64' but expected 'ptr'"). The OpCollection item derivation now
-   inttoptrs String/Data elements. `foreach n in names` with `n == "Bob"`
-   works end-to-end.
+The web (wasm32) build of collection member bodies fails llc with multiple
+width mismatches:
+
+1. **The member term emits a standalone `ret`** in inlined member calls — the
+   Count member's `term len` emitted `ret i32 <len>` inside the materializer,
+   terminating the enclosing function early. The `member_result`-skip (line
+   889) wasn't reached, so the term fell through to the standalone-ret.
+2. **Collection data `Ptr` fields load/store at i64 while consumers inttoptr
+   at `int_bits` (i32)** — `inner.data` loads i64, the Ptr-index inttoptrs i32.
+3. **Elements load at i64 but the member returns them at i32** — `term
+   inner.data[i]` loads i64, `ret i32` expects i32.
+
+The `foreach` over a `List<Int>` on the web also fails (same maze), so the
+whole wasm32 collection path needs a width-consistency pass (boxed-handle i64
+ABI everywhere in collection member codegen).
 
 ## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
 
