@@ -1,27 +1,17 @@
 # Bugs
 
-## wasm32 collection member codegen width maze — OPEN (blocks web b-each over collections)
+## wasm32 collection member codegen width maze — FIXED (slice 4)
 
-**Date:** 2026-08-12 (found while building the b-each snapshot materializer)
-**Status:** Open — pre-existing; the native (x86_64) path is unaffected; the
-materializer infrastructure is committed (`2af49167`) and activates once this
-is fixed.
+**Date:** 2026-08-12 — **all fixed** (commit `dd73d510`). The `b-each` over a
+`List<Int>` now compiles to wasm and the `__view_items_items` materializer
+returns `[3][3,5,7]` (Node-verified).
 
-The web (wasm32) build of collection member bodies fails llc with multiple
-width mismatches:
-
-1. **The member term emits a standalone `ret`** in inlined member calls — the
-   Count member's `term len` emitted `ret i32 <len>` inside the materializer,
-   terminating the enclosing function early. The `member_result`-skip (line
-   889) wasn't reached, so the term fell through to the standalone-ret.
-2. **Collection data `Ptr` fields load/store at i64 while consumers inttoptr
-   at `int_bits` (i32)** — `inner.data` loads i64, the Ptr-index inttoptrs i32.
-3. **Elements load at i64 but the member returns them at i32** — `term
-   inner.data[i]` loads i64, `ret i32` expects i32.
-
-The `foreach` over a `List<Int>` on the web also fails (same maze), so the
-whole wasm32 collection path needs a width-consistency pass (boxed-handle i64
-ABI everywhere in collection member codegen).
+1. `substitute_type` did not descend into `Type::Ptr` — the mono
+   `ListBuffer<Int>` struct fields stayed generic `Ptr<T>`.
+2. `StaticStruct` type params weren't registered, so the mono substitution had
+   no key.
+3. The foreach's i64 counter vs the Count's i32 result + the At index width.
+4. `render_frame` called `@reactor_tick` even when a folded program omitted it.
 
 ## Component lifecycle reset never flushed + prop seeding was Rust-invented — FIXED (2b3)
 
