@@ -4,6 +4,11 @@
 // Functions with 'defn' are implemented natively in Briev.
 // Functions with name# syntax are intrinsics (compiler-known).
 
+// 2026-08-13: `StringError` was referenced by every frgn in this file (and by
+// string.bv's `bytes`) but never DEFINED — a latent undefined-type error. A
+// bare error carrier: the Ok/Err Result construction only needs the type name.
+type StringError: Int { };
+
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Case conversion

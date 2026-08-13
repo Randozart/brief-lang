@@ -840,6 +840,34 @@ impl LlvmBackend {
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-13 (c[i] dispatches op At): a Tier-2 collection
+                // (`op Count` + `op At`) index must inline the At member body —
+                // the legacy struct/heap-seq paths below read a List value's
+                // fields directly (`b[0]` read the `inner` slot, then fed the
+                // buffer pointer to briev_char_len → garbage/crash). Same
+                // dispatch foreach uses. tier2_op_collection handles identifier
+                // receivers; a call-result receiver (`bytes("abc")[0]`) is
+                // dispatched by its register's type.
+                let recv_is_tier2 = self.tier2_op_collection(obj).is_some()
+                    || {
+                        let base = match &obj_reg.ty {
+                            Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
+                            _ => None,
+                        };
+                        base.map_or(false, |b| {
+                            self.ctx.obj_members.get(&b).map_or(false, |members| {
+                                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"))
+                            })
+                        })
+                    };
+                if recv_is_tier2 {
+                    // 2026-08-13: inline the At member body. The member's
+                    // `term inner.data[i]` already unboxes String/Data elements
+                    // (the Index arm's String-element path inttoprts), so no
+                    // extra conversion here.
+                    let out_tmp = self.fun.gen_reg();
+                    return self.emit_method_call(out, &out_tmp, obj, "At", &[(**index).clone()], indent);
+                }
                 // 2026-08-10: clone so gep_index can take &mut self while the
                 // struct_types borrow for self-array slots is live below.
                 let idx_clone = idx_reg.clone();
@@ -1044,8 +1072,14 @@ impl LlvmBackend {
                         };
                     }
                 }
+                // 2026-08-13: a bare `[99]`/`(1,2)` seq literal now carries the
+                // boxed i64 handle type (Type::int) — recognize it by its AST
+                // form so the 2-slot heap path still applies (it is a heap seq
+                // with a length header, exactly like an Applied List value).
+                let is_seq_literal = matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_));
                 if matches!(obj_reg.ty, Type::Ptr(_))
                     || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
+                    || is_seq_literal
                 {
                     let ptr = self.fun.gen_reg();
                     // 2026-08-11 (wasm32 obj-member fix): the Ptr/List receiver
@@ -1075,7 +1109,8 @@ impl LlvmBackend {
                     // list identifiers also need the +1 offset.
                     // 2026-07-21: Only List types have a length header at slot 0.
                     // Raw Ptr<T> from Malloc# has no header — offset is the index.
-                    let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List");
+                    let is_list_type = matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
+                        || is_seq_literal;
                     let gep_idx = self.gep_index(out, indent, &idx_clone);
                     if is_list_type {
                         writeln!(out, "{}{} = add i64 {}, 1", indent, offset, gep_idx).ok();
@@ -1382,6 +1417,43 @@ impl LlvmBackend {
                 // The narrowing pass converts constant-bounds slices to Vector<T,N>
                 // before codegen; this arm handles dynamic slices.
                 let array_reg = self.emit_expr(out, array, indent);
+                // 2026-08-13 (dynamic String slice): `s[a:b]` on a String was a
+                // STUB that returned the whole array — every string.bv function
+                // using a dynamic slice (replace, trim, substr, split, ...)
+                // silently produced the full string (documented in BUGS.md).
+                // The runtime half (briev_str_substr) has always existed; wire
+                // it here. Vector slices stay on the narrowing-pass path.
+                let arr_is_str = self.is_string_operand(&array_reg.ty)
+                    || match array.as_ref() {
+                        Expr::Identifier(nm) => self.is_string_operand(
+                            &self.fun.let_original_types.get(nm).cloned().unwrap_or(Type::int())
+                        ),
+                        _ => false,
+                    };
+                if arr_is_str {
+                    let sp = self.string_ptr(out, indent, &array_reg);
+                    let lo = match start {
+                        Some(s) => self.emit_expr(out, s, indent),
+                        None => {
+                            let z = self.fun.gen_reg();
+                            writeln!(out, "{}{} = add i64 0, 0", indent, z).ok();
+                            TypedRegister { name: z, ty: Type::int() }
+                        }
+                    };
+                    let hi = match end {
+                        Some(e) => self.emit_expr(out, e, indent),
+                        None => {
+                            let n = self.fun.gen_reg();
+                            writeln!(out, "{}{} = add i64 0, 0", indent, n).ok();
+                            TypedRegister { name: n, ty: Type::int() }
+                        }
+                    };
+                    let _ = stride;
+                    let sub = self.fun.gen_reg();
+                    writeln!(out, "{}{} = call ptr @briev_str_substr(ptr {}, i64 {}, i64 {})",
+                        indent, sub, sp, lo.name, hi.name).ok();
+                    return TypedRegister { name: sub, ty: crate::ast::Type::Custom("String".to_string()) };
+                }
                 if let Some(s) = start { self.emit_expr(out, s, indent); }
                 if let Some(e) = end { self.emit_expr(out, e, indent); }
                 if let Some(s) = stride { self.emit_expr(out, s, indent); }
@@ -1658,9 +1730,14 @@ impl LlvmBackend {
             }
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, hdr).ok();
         }
+        // 2026-08-13 (obj value ABI): the seq value is a BOXED i64 handle
+        // (ptrtoint'd above), so its register type is Int — NOT Ptr. A Ptr
+        // type made the defn-call arg coercion (`param i64, reg ptr`) re-ptrtoint
+        // the boxed handle, double-boxing the empty-list sentinel passed to a
+        // List param.
         TypedRegister {
             name: v.to_string(),
-            ty: Type::ptr(Type::int()),
+            ty: Type::int(),
         }
     }
 
@@ -2306,6 +2383,14 @@ impl LlvmBackend {
         // GEP a fake boxed self instead of the pool column) — fail loudly.
         let saved_prefix = self.fun.self_prefix.clone();
         let saved = self.fun.self_binding.clone();
+        // 2026-08-13: clear the enclosing callable-txn convergence state while
+        // the member body runs (see the restore below).
+        let saved_ctr = self.fun.callable_txn_result.clone();
+        let saved_ctpl = self.fun.callable_txn_post_label.clone();
+        let saved_terminated = self.fun.terminated;
+        self.fun.callable_txn_result = None;
+        self.fun.callable_txn_post_label = None;
+        self.fun.terminated = false;
         if let Some((prefix, row_reg)) = &self_prefix {
             self.fun.self_prefix = Some((prefix.clone(), row_reg.clone()));
             self.fun.self_binding = None;
@@ -2429,6 +2514,14 @@ impl LlvmBackend {
         self.fun.let_original_types = saved_orig;
         self.fun.last_val_temps = saved_lvt;
         self.fun.last_val_types = saved_lvt_types;
+        // 2026-08-13 (member term inside a callable txn): the member body's
+        // `term X` must record member_result, NOT terminate the ENCLOSING txn.
+        // With callable_txn_result left set, an inlined `op At` body (`term
+        // inner.data[i]`) inside join_loop stored to %result + br post +
+        // terminated=true, silently dropping join_loop's own `term result`.
+        self.fun.callable_txn_result = saved_ctr;
+        self.fun.callable_txn_post_label = saved_ctpl;
+        self.fun.terminated = saved_terminated;
         let _ = v;
         // 2026-08-01 (D3): a defn member's `term` value is the call's result —
         // return it (the caller binds it). Otherwise fall back to a fresh

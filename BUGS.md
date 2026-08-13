@@ -3978,3 +3978,28 @@ liveness). SRBV verification runs only under the `.s` strict profile
   per instance — `b-when` inside a component already works at the state level),
   dynamic component counts (`b-each` of components), props.
 See `docs/plans/2026-08-11-phase2b2-instance-state.md`.
+
+## Bare collection literal as a function ARG crashes — KNOWN (string.bv unblock)
+
+**Date:** 2026-08-13 — **known gap, workaround: bind the literal to a `let` first.**
+
+`join(["a", "b"], "-")` — a bare `[elem…]` literal in ARGUMENT position —
+still lowers through the generic `emit_heap_seq` 2-slot buffer
+(`[len][elem…]`), which `op At`/`op Count` (expecting the List STRUCT layout
+`{ inner, cap, len }`) read as garbage → segfault. The `let`-bound form
+(`let items: List<String> = ["a","b"]; join(items, "-")`) constructs a proper
+instance via `op Init`/`op InsertAt` and works. Routing argument-position
+literals through the type-directed construction is the fix (the arg's expected
+type is known at the call site).
+
+## string.bv was uninstantiable — FIXED (commits d6107022, and the 2026-08-13 slice)
+
+**Date:** 2026-08-13 — **fixed.** `import "std/string"` previously failed to
+typecheck/compile (the file was never reachable — `bytes()` called the
+unregistered `StrBytes#` intrinsic; classification/case/trim loops used
+method-call syntax against free functions; the StringBuilder chain hit five
+backend ABI bugs). All fixed; `<std/string>` now compiles and the scalar
+functions (len/concat/trim/case/reverse/capitalize/count_char/starts/ends/
+find/replace/substr/truncate/ensure/remove-prefix) plus bytes/split/join
+verified correct. `StringError` was referenced but never defined — added to
+`std/ffi/string.bv`.

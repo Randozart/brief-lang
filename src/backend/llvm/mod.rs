@@ -2826,6 +2826,9 @@ impl LlvmBackend {
         // call site, so the backend declares the ABI: String = ptr to a
         // length-prefixed [len][bytes] buffer.
         writeln!(out, "declare i64 @__print_str(ptr) #1").ok();
+        // 2026-08-13 (dynamic String slice): `s[a:b]` emits a byte-wise
+        // substring (the runtime's briev_str_substr; bounds clamp to [0,len]).
+        writeln!(out, "declare ptr @briev_str_substr(ptr, i64, i64) #1").ok();
         // 2026-08-01 (B1): content equality for String operands. The compiler
         // emits a call to briev_str_eq(ptr, ptr) instead of `icmp eq ptr`
         // (address comparison) when both operands are #String — see

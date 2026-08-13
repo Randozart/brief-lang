@@ -1137,7 +1137,12 @@ impl LlvmBackend {
         let defs = self.ctx.operator_defs.get(&base).cloned().unwrap_or_default();
         let size = self.struct_type_size(&type_key);
         let inst = self.fun.gen_reg();
-        writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
+        // 2026-08-13 (collection value lifetime): a LOCAL collection lives on
+        // the HEAP, not the stack. A `let result: List<Int> = []` in a defn
+        // returned its stack-alloca handle — the caller read a dead frame
+        // (bytes()/split()/join() returned garbage). Same fix as struct
+        // literals: the handle must survive the constructing function's return.
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, inst, size).ok();
         let hw = format!("i{}", self.ctx.int_bits);
         let addr = self.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
