@@ -117,15 +117,28 @@ The current `.^Absolute` reflection likewise gives way to `Abs#` (§17.3).
 ## 7. Element type
 
 Derived from the generic args: `List<String>` → `String`; `Stack<T,N>` → `T`
-(width args skipped); `HashMap<K,V>` → `V`; `String` → `Char`. Cross-checked
-against the read op's return type. Drives the `foreach` item binding and the
-web element decode.
+(width args skipped); `HashMap<K,V>` → `V`; `String` → `Char` (a frozen
+`#String` protocol fact). Single-source proof form: for op-bearing types the
+element type IS the read op's return (never a second derivation to drift); a
+`#String` operand is `Char` by protocol. Drives the `foreach` item binding and
+the web element decode.
 
 ## 8. String unification
 
 `type String: #String { };` is a bare protocol member; the value is a
 `[len][bytes]` pointer, layout/encoding derived by the casting graph. `String`
-is `Iterable<Char>` with `#String<UTF8>/<UTF16>/<ASCII>` encoding variants:
+is `Iterable<Char>`.
+
+**2026-08-14 (current mechanism):** a `#String` operand iterates `Char`
+through a **protocol-keyed char-decode lane** — the loop bound is the stored
+byte length (`.^Length` header) and each iteration calls `briev_str_next_char`
+(UTF8 decode + advance) producing one `Char`. The compiler holds no String
+layout and no name match; `#String` membership is the sole key
+(`is_string_operand`, a casting-graph protocol check). `#Data` keeps its byte
+iteration (element `Int`). `foreach c in str` binds `c` as `Char` (SPEC §17.2
+`String` → `Char`).
+
+Encoding-selective tiers are the future specialization:
 
 - **Fixed-width** (ASCII): Tier 2 — `op Count` = char count = byte count,
   `op At(i)` = O(1) byte load.

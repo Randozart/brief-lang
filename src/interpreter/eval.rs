@@ -1411,11 +1411,32 @@ pub fn eval_statement(
                     }
                 }
                 Value::Bits(bytes) => {
-                    for b in &bytes {
-                        bindings.insert(item.clone(), Value::bits(vec![*b]));
+                    // 2026-08-14 (String unification): a `#String` operand
+                    // iterates CHARs — decode UTF8 codepoints, one per
+                    // iteration, matching the codegen's `briev_str_next_char`
+                    // lane (SPEC §17.2 String → Char). Data (raw bytes) has no
+                    // distinct value representation in the interpreter (both
+                    // are `Value::Bits`); the Quoted-literal path types as
+                    // String, so char decode is the reference semantics.
+                    let mut i = 0usize;
+                    while i < bytes.len() {
+                        let b0 = bytes[i];
+                        let (cp, width) = if b0 < 0x80 {
+                            (b0 as u32, 1)
+                        } else if b0 & 0xE0 == 0xC0 && i + 1 < bytes.len() {
+                            (((b0 & 0x1F) as u32) << 6 | (bytes[i + 1] & 0x3F) as u32, 2)
+                        } else if b0 & 0xF0 == 0xE0 && i + 2 < bytes.len() {
+                            (((b0 & 0x0F) as u32) << 12 | ((bytes[i + 1] & 0x3F) as u32) << 6 | (bytes[i + 2] & 0x3F) as u32, 3)
+                        } else if b0 & 0xF8 == 0xF0 && i + 3 < bytes.len() {
+                            (((b0 & 0x07) as u32) << 18 | ((bytes[i + 1] & 0x3F) as u32) << 12 | ((bytes[i + 2] & 0x3F) as u32) << 6 | (bytes[i + 3] & 0x3F) as u32, 4)
+                        } else {
+                            (b0 as u32, 1)
+                        };
+                        bindings.insert(item.clone(), Value::Atom(Atom::Char(char::from_u32(cp).unwrap_or('?'))));
                         for stmt in body {
                             result = eval_statement(stmt, heap, bindings, functions)?;
                         }
+                        i += width;
                     }
                 }
                 other => {
@@ -1713,6 +1734,53 @@ mod tests {
         };
         eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(6));
+    }
+
+    #[test]
+    fn test_foreach_over_string_iterates_chars() {
+        // 2026-08-14 (String unification): `foreach c in str` on a `#String`
+        // operand iterates UTF8 CODEPOINTS as Char values, not raw bytes
+        // (SPEC §17.2 String → Char). Multibyte: "hé" is 0x68 0xC3 0xA9 0x65
+        // (3 bytes, 2 chars).
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        let foreach = Statement::Foreach {
+            item: "c".to_string(),
+            list: Box::new(Expr::Quoted("hé".as_bytes().to_vec())),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("acc".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(2));
+    }
+
+    #[test]
+    fn test_foreach_over_string_accumulates_codepoints() {
+        // The item is a Char carrying the codepoint value, not the byte.
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        let foreach = Statement::Foreach {
+            item: "c".to_string(),
+            list: Box::new(Expr::Quoted("é".as_bytes().to_vec())),
+            body: vec![Statement::Assign(
+                Expr::Identifier("acc".to_string()),
+                Expr::BinaryOp(
+                    BinaryOpKind::Add,
+                    Box::new(Expr::Identifier("acc".to_string())),
+                    Box::new(Expr::Cast(Box::new(Expr::Identifier("c".to_string())), crate::ast::Type::int())),
+                ),
+            )],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(0xE9));
     }
 
     #[test]

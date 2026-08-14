@@ -1007,7 +1007,12 @@ reflection and is not the collection-length mechanism. Transfer `c <- x` /
 (§16.2); its layout and encoding are derived by the casting graph. It
 satisfies the iteration contract structurally as a sequence of `Char` with
 encoding variants (`#String<UTF8>`, `#String<UTF16>`, `#String<ASCII>`),
-selecting tiers by encoding:
+selecting tiers by encoding. **2026-08-14 (current): a `#String` operand
+iterates `Char` through a protocol-keyed char-decode lane** — the loop bound
+is the stored byte length (`.^Length` header) and each iteration decodes one
+UTF8 codepoint (`Char`); the compiler holds no String layout. `foreach c in
+str` binds `c` as `Char` (SPEC §17.2 `String` → `Char`), never a raw byte.
+Encoding-selective tiers are the future specialization:
 
 - **Fixed-width encodings** (e.g. `ASCII`): Tier 2 — `op Count` = char count
   (equal to byte count), `op At(i)` is an O(1) byte load.

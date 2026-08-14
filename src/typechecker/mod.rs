@@ -3329,7 +3329,9 @@ fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definiti
 /// iterable — the type's `op At` op-as-member return, substituted with the
 /// concrete generic args (`List<String>` At → `T` → `String`). Falls back to
 /// the inner type for vectors and Int for scalars/ranges — structural, never
-/// a collection name.
+/// a collection name. 2026-08-14 (String unification): a `#String` protocol
+/// operand is `Iterable<Char>` — Char is the observed element type (SPEC
+/// §17.2), a frozen protocol fact, never a name match.
 fn foreach_item_type(ctx: &TypecheckContext, list_ty: &Type) -> Type {
     let (base, args) = match list_ty {
         Type::Custom(n) => (n.clone(), Vec::new()),
@@ -3337,6 +3339,9 @@ fn foreach_item_type(ctx: &TypecheckContext, list_ty: &Type) -> Type {
         Type::Vector(inner, _) => return (**inner).clone(),
         _ => return Type::int(),
     };
+    if ctx.operand_implements_protocol(list_ty, "#String") {
+        return Type::Custom("Char".to_string());
+    }
     let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
     // Tier 2 first (op At), then Tier 1 (op Current) — the element type is the
     // read op's return with the concrete args substituted.

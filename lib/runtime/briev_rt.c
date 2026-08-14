@@ -152,6 +152,38 @@ char* briev_str_substr(const char* s, int64_t a, int64_t b) {
     return buf;
 }
 
+// 2026-08-14 (String unification): decode the UTF8 codepoint at byte offset
+// `*off` of a Briev String ([len][bytes]), advance `*off` past it, and return
+// the codepoint as i64. This is the per-iteration lane for `foreach c in str`
+// (a `#String` operand iterates CHARs, not bytes — SPEC §17.2). The loop bound
+// is the stored byte length (`.^Length` header); each iteration advances by
+// the codepoint's 1-4 byte width, so the loop naturally stops at the last char.
+// Invalid sequences fall back to a raw byte (matching str_first_char).
+int64_t briev_str_next_char(const char* s, int64_t* off) {
+    if (!s || !off) return 0;
+    int64_t len = *(const int64_t*)s;
+    if (len < 0) return 0;
+    int64_t i = *off;
+    if (i < 0 || i >= len) return 0;
+    const unsigned char* p = (const unsigned char*)(s + 8);
+    unsigned char b0 = p[i];
+    if (b0 < 0x80) { *off = i + 1; return (int64_t)b0; }
+    int64_t cp = 0;
+    int64_t width = 0;
+    if ((b0 & 0xE0) == 0xC0)      { cp = b0 & 0x1F; width = 2; }
+    else if ((b0 & 0xF0) == 0xE0) { cp = b0 & 0x0F; width = 3; }
+    else if ((b0 & 0xF8) == 0xF0) { cp = b0 & 0x07; width = 4; }
+    else                          { *off = i + 1; return (int64_t)b0; }
+    int64_t j;
+    for (j = 1; j < width && i + j < len; j++) {
+        unsigned char b = p[i + j];
+        if ((b & 0xC0) != 0x80) break;
+        cp = (cp << 6) | (b & 0x3F);
+    }
+    *off = i + j;
+    return cp;
+}
+
 // 2026-08-04 (compiler-in-Briev): the i-th BYTE of a Briev String as an Int
 // (0 if out of range, 255 if the length header is invalid). Character scans in
 // the pass (newline/space/colon comparisons) use this INSTEAD of a per-char

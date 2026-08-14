@@ -2879,6 +2879,11 @@ impl LlvmBackend {
         // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
         // default (the O(1) byte-length header read is the `Bytes` prop).
         writeln!(out, "declare i64 @briev_char_len(ptr) #1").ok();
+        // 2026-08-14 (String unification): decode the UTF8 codepoint at a byte
+        // offset of a Briev String and advance the offset — the per-iteration
+        // lane of `foreach c in str` (a #String operand iterates CHARs, SPEC
+        // §17.2). Takes the [len][bytes] handle and the byte-offset slot.
+        writeln!(out, "declare i64 @briev_str_next_char(ptr, ptr) #1").ok();
         // 2026-08-07 (Phase 7): boolean mask select over a Data buffer —
         // `data[mask]` returns a new [len][bytes] buffer (SPEC §16.5).
         writeln!(out, "declare ptr @briev_mask_select(ptr, ptr, i64) #1").ok();

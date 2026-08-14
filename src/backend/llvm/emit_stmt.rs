@@ -168,6 +168,13 @@ enum IterKind {
     List { ptr: String, len: String },
     /// A Data/String byte buffer ([len][bytes] ptr handle).
     Data { ptr: String, len: String },
+    /// 2026-08-14 (String unification): a `#String` operand iterates CHARs —
+    /// a protocol-keyed char decode lane (`briev_str_next_char`), never a
+    /// hardcoded byte walk. `ptr` is the [len][bytes] handle; `len` is the
+    /// stored byte length (`.^Length` header) that bounds the loop; the loop
+    /// counter is the BYTE offset, advanced in-place by the lane. The item is
+    /// the decoded codepoint as Char (SPEC §17.2 `String` → `Char`).
+    String { ptr: String, len: String },
     /// A vector state field (`[N x i64]`).
     VectorField { gep: String, count: String },
     /// 2026-08-12 (Iterable protocol, Tier 2): a collection iterated through
@@ -241,7 +248,15 @@ impl LlvmBackend {
             let len = self.fun.gen_reg();
             writeln!(out, "{}{} = load i64, ptr {}", indent, len, p).ok();
             IterKind::List { ptr: p, len }
-        } else if self.is_string_operand(&lreg.ty) || self.is_data_operand(&lreg.ty) {
+        } else if self.is_string_operand(&lreg.ty) {
+            // 2026-08-14 (String unification): a `#String` operand iterates
+            // CHARs via the decode lane — NOT bytes. `lreg.name` is the
+            // [len][bytes] handle (ptr); the loop bound is the stored byte
+            // length in the header.
+            let len = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len, lreg.name).ok();
+            IterKind::String { ptr: lreg.name.clone(), len }
+        } else if self.is_data_operand(&lreg.ty) {
             let len = self.fun.gen_reg();
             writeln!(out, "{}{} = load i64, ptr {}", indent, len, lreg.name).ok();
             IterKind::Data { ptr: lreg.name.clone(), len }
@@ -1358,7 +1373,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 IterKind::Counter { init, bound, inclusive } => {
                     (init.clone(), bound.clone(), if *inclusive { "sle" } else { "slt" })
                 }
-                IterKind::List { len, .. } | IterKind::Data { len, .. } => {
+                IterKind::List { len, .. } | IterKind::Data { len, .. } | IterKind::String { len, .. } => {
                     let zero = backend.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
                     (zero, len.clone(), "slt")
@@ -1483,6 +1498,18 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = zext i8 {} to i64", indent, elem, raw).ok();
                     elem
                 }
+                // 2026-08-14 (String unification): `#String` iterates CHARs.
+                // The loop counter slot holds the BYTE offset; the decode lane
+                // reads the codepoint at that offset and advances the slot in
+                // place (no separate increment — see the loop step below). The
+                // item is the codepoint, truncated to Char's native i32.
+                IterKind::String { ptr, .. } => {
+                    let cp = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = call i64 @briev_str_next_char(ptr {}, ptr {})", indent, cp, ptr, slot).ok();
+                    let ch = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, ch, cp).ok();
+                    ch
+                }
                 IterKind::VectorField { gep, .. } => {
                     let elem_p = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, elem_p, gep, cur).ok();
@@ -1498,6 +1525,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let item_ty = match &iter {
                 IterKind::OpCollection { element_ty, .. } => element_ty.clone(),
                 IterKind::Tier1Cursor { element_ty, .. } => element_ty.clone(),
+                // 2026-08-14 (String unification): a `#String` foreach item is
+                // a Char (the decode lane's codepoint), matching the
+                // typechecker's `foreach_item_type` derivation.
+                IterKind::String { .. } => Type::char_(),
                 _ => Type::int(),
             };
             backend.fun.last_val_temps.insert(item.clone(), item_reg.clone());
@@ -1510,6 +1541,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 emit_statement(backend, out, stmt, indent);
             }
             if !backend.fun.terminated {
+                // 2026-08-14 (String unification): the `#String` decode lane
+                // advanced the byte-offset slot IN PLACE — re-storing `cur + 1`
+                // would clobber the advance (and re-loop forever). Skip the
+                // store and branch straight back.
+                if matches!(iter, IterKind::String { .. }) {
+                    writeln!(out, "{}br label %{}", indent, header).ok();
+                    writeln!(out, "{}{}:", indent, end_lbl).ok();
+                    backend.fun.terminated = false;
+                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                }
                 let next = if let IterKind::Tier1Cursor { list, .. } = &iter {
                     // 2026-08-12 (Iterable protocol, Tier 1): advance the
                     // cursor via the collection's `op Step(cur)` member.
