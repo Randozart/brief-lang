@@ -30,6 +30,15 @@
 >   Typechecker/codegen/interpreter arms removed; stale `.smoke`/`string.ebv`
 >   fixtures migrated to `Abs#`/`.^Length`.
 
+> **2026-08-14 UOL addendum.** §6b (the Universal Operation Language — every op
+> has a symbol, an intrinsic `OpName#`, and a UFCS method form `a.OpName#(b)`)
+> supersedes the earlier §6a direction: the runtime `.^Size` `len` heuristic is
+> DELETED (tri-partite rule: element count is an operation, so its home is the
+> `Count#` intrinsic, not reflection), not routed through `op Count`. The
+> generative `OpName#` dispatch + UFCS fallback is the mechanism that makes
+> `Count#`/`At#` uniform. This is plan-driven work yet to execute (§7 commits
+> 6-7).
+
 > **2026-08-14 completion addendum.** All commits in §7 landed (green):
 > `74d13f19` (docs), `b88f6ee6` (String unification), `54136420` (`.^^Element`),
 > `ca9120f2` (Abs# + bit intrinsics), `0ea07424` (slice-5 diagnostic),
@@ -172,6 +181,93 @@ interpreter arms.
 - `foreach_collection_kind` `"List"` arm (`emit_stmt.rs:238`) → dead once tier
   iteration covers all op-bearing collections — verify, then remove.
 
+## 6a. `.^Size` deleted; element count is the `Count#` intrinsic
+
+**2026-08-14 (Boxed Cat principle, iterable-protocol §10.4 row 4, tri-partite
+rule).** The runtime `.^Size` codegen arm (`emit_reflection`,
+`emit_expr.rs:2705-2736`) reads the count by matching a `len` SLOT NAME — the
+pre-iterable heuristic the plan's deletion table names. This guesses structure
+the collection never declared (Boxed Cat violation): `RingBuffer` has
+`read`/`write`, no `len`, and no `op Count`. Per the tri-partite rule (fields =
+user-declared; reflection = compiler-known non-operational metadata; intrinsics
+= operations), the element count of a collection is an OPERATION — its home is
+the `Count#` intrinsic (which dispatches to the type's declared `op Count`),
+not a reflection target. **`.^Size` (runtime) on a collection is deleted** (per
+§10.4); `.^^Size` (compile-time) keeps the vector shape. Uses migrate to
+`Count#(...)`. This supersedes the earlier "route `.^Size` through `op Count`"
+sketch (the previous version of this section) — `Count#` is the uniform form
+(§6b).
+
+The deletion-table row `runtime `.^Size` `name == "len"` slot heuristic`
+(`docs/architecture/iterable-protocol.md:239`) is resolved by this section.
+
+## 6b. The Universal Operation Language — every op has a symbol, an intrinsic, and a UFCS method form
+
+**2026-08-14 (user decision: unify the op/intrinsic system).** An operation is
+declared ONCE as an op member. It has three invocation surfaces, all resolving
+the same dispatch:
+
+1. **Symbol** (optional): `a + b`, `c[i]`, `c <- x`, `foreach x in c`.
+2. **Intrinsic** (always): `OpName#(a, b)` — the uniform, non-symbolic spelling.
+3. **UFCS method form** (always): `a.OpName#(b)` — Uniform Function Call Syntax,
+   documented at `learn-briev/00a-base-design.md:149` but only partially
+   implemented today.
+
+> **The rule:** `OpName#` is recognized for ANY disclosed operation identity
+> (the `operation_identities` vocab, `vocab.rs:263-267`). `a.OpName#(b)`
+> desugars to `OpName#(a, b)` when no member literally named `OpName#` exists
+> (member wins, then UFCS). Symbols are sugar over the same dispatch. Metadata
+> that is compiler-known but non-operational is reflection.
+
+**Precedent already in the tree:** `Add#`/`Sub#`/`Eq#`/`BitAnd#` are the
+intrinsic forms of the symbolic ops (`intrinsic_signatures.rs:44-66`); the
+interpreter already routes `a.Add#(b)` → `execute_intrinsic` (`eval.rs:531`).
+The gaps: the collection ops have op members but no `Op#` forms; the
+typechecker (`resolve_method_call`, `mod.rs:3319`) and codegen
+(`emit_method_call`, `emit_expr.rs:2367`) do not strip `#` in member lookup and
+have no UFCS fallback to plain functions.
+
+### Work items
+
+1. **Typechecker `resolve_method_call` (mod.rs:3295): full UFCS priority.** Strip
+   `#` in member lookup; if no member, fall back to the op identity / plain
+   function (`fn_return_types`) with the receiver prepended as arg[0]. Member
+   wins, then UFCS.
+2. **Typechecker `infer_call` (mod.rs:1250): generative `OpName#(a, b)`.** Unknown
+   `PascalCase#`: strip `#`, check `operation_identities`; if a disclosed op,
+   validate arg[0]'s type declares it, infer return from the op member
+   (reuse `resolve_element_type` substitution). Clean error otherwise.
+3. **Codegen `emit_method_call` (emit_expr.rs:2367): UFCS fallback.** `#`-strip in
+   member lookup; if no member, emit the top-level function (or op dispatch)
+   with the receiver as arg[0].
+4. **Codegen `emit_intrinsic_call` (intrinsics.rs:134): generative op dispatch.**
+   After `template_for_op` misses: bare name in `operation_identities` →
+   `emit_method_call(arg0, op_name, rest)`. Makes `At#`, `Count#`, `InsertAt#`,
+   `Iter#`… work automatically.
+5. **Vocab (vocab.rs:263-267): add the missing iterable ops** `Count`, `Iter`,
+   `Step`, `IsEnd`, `Current` (absent today — a vocab gap).
+6. **Signatures (intrinsic_signatures.rs):** explicit for the load-bearing forms
+   (`At#`, `Count#`, `Slice#`, `InsertAt#`, `ExtractFrom#`) for precise arity
+   errors; the rest ride the generative path.
+7. **Interpreter parity:** the method form works (`eval.rs:531`); add the prefix
+   `OpName#` dispatch for the new ops.
+8. **Stdlib migration:** `.Count()`/`.At()` → `Count#(...)`/`At#(...)` so shipped
+   code models the rule (`hashmap.bv`, `hashset.bv`, `iterator.bv`,
+   `skiplist.bv`). `c[i]`/`foreach` sugar stays.
+9. **`.^Size` cleanup** (§6a): `Count#` is the count intrinsic; delete the
+   runtime `len` heuristic.
+10. **Docs:** SPEC §11.4/§15.2 three-surface rule; `learn-briev` UFCS claim made
+    real; arch `iterable-protocol.md` surface table gains intrinsic + method
+    columns; plan §2/§16 addendum amending "no collection intrinsics" (the
+    ruling targeted engine/layout intrinsics like `RingPush#`; protocol-
+    dispatched `OpName#` calling the type's own declared ops is the intended
+    uniform surface — same governance as `Add#`/`CharCount#`).
+
+**Design decisions:** `c[i]` stays the idiomatic indexed-read sugar (`At#` is
+the explicit form). Arithmetic `Op#` signatures stay (they work). UFCS member
+wins over top-level function. This is a superset of §6a's `Count#` need — §6a
+deletes `.^Size`, §6b provides `Count#` as its replacement.
+
 ## 7. Commit sequence
 
 1. **docs**: Boxed Cat disambiguation + docs-reconciliation (all §5) — commit.
@@ -179,6 +275,12 @@ interpreter arms.
 3. **`.^^Element`** (§3) — commit.
 4. **Boundary: `Abs#` + bit intrinsics** (§4) — commit.
 5. **Slice 5 remainder + scoped slice 6** (§6) — commit.
+6. **Universal Operation Language** (§6b): typechecker UFCS + generative
+   `OpName#` (items 1-2), codegen UFCS + generative dispatch (items 3-4), vocab
+   (item 5), signatures (item 6), interpreter parity (item 7) — commit.
+7. **Stdlib migration + `.^Size` deletion** (§6b item 8, §6a): stdlib
+   `.Count()`/`.At()` → `Count#`/`At#`; runtime `.^Size` `len` heuristic
+   deleted — commit.
 
 Each: `cargo test --lib` green, `cargo build` no new warnings, Praetor on
 changed dirs, docs in the same commit (rules 8, 3, 12).
@@ -188,3 +290,6 @@ changed dirs, docs in the same commit (rules 8, 3, 12).
 - Ringbuf A/B rebuild under Performance Recovery Protocol with a full baseline
   table (rule 11); `queue_drain_idio`/`float_math` gates.
 - `.^Absolute` unknown-target error after the deprecation release.
+- Generic `defn f<T>` dispatch (the generic-function layer) — now that
+  `Count#`/`At#`/`OpName#` are the uniform surface, generic functions over any
+  collection become expressible; separate plan.
