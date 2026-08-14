@@ -155,6 +155,28 @@ non-matching arg is a clean type error. 1850 tests green.
   The plan §4 note stands — op-bearing non-List types need attention.
 - These are follow-ups; the core args-driven generic dispatch is complete.
 
+**Commit `5ce9aa8c` (closure-typed generics + generic txns):** the closure-
+typing and generic-txn blockers are resolved:
+- **Generic txns parse** — `parse_transaction` reads type params
+  (`txn iter_map_loop<T, U>`); the stdlib iterator adapters were generic txns
+  that failed to parse.
+- **Function-typed params parse** — `parse_parameter_list` handles `f: T -> U`
+  and `f: (U, T) -> U` (a param LIST, not a tuple, matching the stdlib).
+- **Multi-param lambdas** — `(a, b) -> body` (parse_grouping lambda detection);
+  the single-param `x -> body` form was already the canonical SPEC §9.2
+  syntax. The stdlib's `|acc, x|` pipe-lambdas migrated to `(acc, x) ->`.
+- **`unify_defn_type` + `substitute_type_params` handle `Type::Function`** — a
+  closure-typed generic param (`iter_map(items, f)` with `f: T -> U`) infers
+  `T`/`U` from the closure shape.
+- `iterator.bv`'s `result.append(x)` migrated to `result <- x` (op InsertAt).
+- Verified: `iter_map`/`iter_map_loop` inference succeeds end-to-end; 1855
+  tests green; benchmarks MATCH.
+- **Remaining** (documented in BUGS.md): other iterator.bv functions
+  (`iter_fold`/`zip`/`enumerate`/`find`/`max`) have free-`T`-body and
+  `Option`/`Some`/`None` constructor issues; hashmap.bv's `new_map<K,V>()`
+  nullary construction is unverified. These are a stdlib-cleanup pass
+  (separate from the dispatch core).
+
 **Additional commit `7972e4d2` (`term` canonical result placeholder):** a
 follow-up that came up during generic-contract testing. `term` in a defn/txn
 POST-condition is now bound to the declared output type during elaboration

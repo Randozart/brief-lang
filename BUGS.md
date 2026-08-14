@@ -1,5 +1,33 @@
 # Bugs
 
+## stdlib iterator.bv / hashmap.bv written aspirationally — never compiled — OPEN
+
+**Date:** 2026-08-14 (found while verifying generic `defn f<T>` dispatch)
+**Status:** Open — documented. Generic dispatch is verified working; these
+stdlib files have their own latent issues that surface once generic txns
+parse (`5ce9aa8c` made them parseable):
+
+- **iterator.bv**: `iter_fold`/`iter_zip`/`iter_enumerate`/`iter_find`/
+  `iter_max` fail to typecheck their bodies with free `T`/`U` (the
+  body-with-free-T limitation) and use `Option<T>`/`Some(...)`/`None`
+  constructors (`Option` defined in `option.bv`, but `Some`/`None` don't
+  typecheck). `iter_map`/`iter_filter` compile now (their `result.append(x)`
+  was migrated to `result <- x`). Also `''+'' on List<T>` (some function does
+  `a + b` on lists) and `iter_enumerate_loop` tuple mismatches.
+- **hashmap.bv**: `new_map<K,V>()` (returns `term {}`) isn't dispatching
+  generically — the `let m: HashMap<String, Int> = new_map()` call returns Int
+  (nullary generic binding via expected-type doesn't reach hashmap.bv's defns
+  at import; the two-param `HashMap<K,V>` construction path is unverified).
+- The typechecker stdlib-op visibility: `List`'s `op Count`/`op At` ARE
+  visible via `import "std/collections.bv"` (verified). `Stack`/`RingBuffer`
+  genuinely lack `op Count` (not a visibility bug — their count is `size()`
+  defn); `HashMap`'s Tier-1 cursor ops are unverified.
+
+**Path:** a stdlib-cleanup pass that (a) fixes the free-`T`-body limitation
+(body literals/ops adopting the declared return type), (b) typechecks
+`Some`/`None` Option constructors, (c) verifies/fixes the nullary generic
+construction. Separate from the generic-dispatch core, which is complete.
+
 ## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
 
 **Date:** 2026-08-14 (found while executing slice 6, leak cleanup)
