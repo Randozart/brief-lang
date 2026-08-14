@@ -155,3 +155,13 @@ non-matching arg is a clean type error. 1850 tests green.
   The plan §4 note stands — op-bearing non-List types need attention.
 - These are follow-ups; the core args-driven generic dispatch is complete.
 
+**Additional commit `7972e4d2` (`term` canonical result placeholder):** a
+follow-up that came up during generic-contract testing. `term` in a defn/txn
+POST-condition is now bound to the declared output type during elaboration
+(previously the `elaborate_expr` `unwrap_or(Type::int())` fallback made it
+typecheck by accident). Post-condition `term` type mismatches are now REAL
+errors. SPEC's four `#R`-as-result examples (lines 696/873/1260/1611) migrated
+to `term`; the op-binding runes (`#Lh`/`#Rh`) are untouched. This makes
+`[term == true]`, `[term.Count#() == n]`, `[term == []]` type-correct, which
+generic contracts depend on. 1853 tests green; runtime benchmarks MATCH.
+
