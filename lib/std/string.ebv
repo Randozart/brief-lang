@@ -30,7 +30,7 @@ defn digit_to_str(d: Int) [d >= 0 && d <= 9][term .^Len == 1] -> String {
 // casting graph, not from Briev code).
 out defn int_to_str(n: Int) [true][term .^Len >= 0] -> String {
     when n < 0 {
-        let abs: Int = n .^Absolute;
+        let abs: Int = Abs#(n);
         term "-" + int_to_str(abs);
     };
     when n < 10 {

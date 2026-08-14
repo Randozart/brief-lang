@@ -693,11 +693,6 @@ fn eval_reflect(
             }
             _ => Ok(Value::Void),
         },
-        ("Absolute", false) => match val {
-            Value::Atom(Atom::Int(n)) => Ok(Value::int(n.wrapping_abs())),
-            Value::Atom(Atom::Float(f)) => Ok(Value::float(f.abs())),
-            _ => Ok(Value::Void),
-        },
         ("Size", true) | ("Bytes", true) => match val {
             Value::Bits(bytes) => Ok(Value::int(bytes.len() as i64)),
             (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
@@ -2478,13 +2473,16 @@ mod tests {
     }
 
     #[test]
-    fn test_reflect_absolute_on_int() {
+    fn test_reflect_absolute_is_removed() {
+        // 2026-08-14 (boundary plan, SPEC §17.3): `.^Absolute` was removed —
+        // abs is the `Abs#` intrinsic, not a reflection target. At the eval
+        // level (no typechecker), the unhandled target returns Void.
         let r = Expr::Reflect(
             Box::new(Expr::Decimal(-7)),
             "Absolute".into(),
             ReflectKind::Runtime,
         );
-        assert_eq!(eval1(&r).as_i64(), Some(7));
+        assert_eq!(eval1(&r), Value::Void);
     }
 
     #[test]

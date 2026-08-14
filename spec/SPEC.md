@@ -1453,9 +1453,9 @@ Declaration/source metadata is compile-time-only unless explicitly materialized.
 `TrailingZeros#` (SPEC §18 intrinsics, dispatch to `llvm.abs`/`llvm.bitreverse`/
 `llvm.ctpop`/`llvm.ctlz`/`llvm.cttz`) — not universal projection names and not
 reflection targets. A computed truth is an intrinsic; reflection only observes
-stored/frozen facts. **2026-08-14:** the reflection target `.^Absolute` is a
-deprecated alias for `Abs#` (same `llvm.abs` emission) for one release, then a
-compile error.
+stored/frozen facts. **2026-08-14:** the reflection target `.^Absolute` was
+removed after a one-release deprecated alias — it is now an unknown-target
+error directing to `Abs#`.
 
 `Values` and `Elements` are ordinary logical fields when declared. `AsStack` and `AsQueue` are type-defined conversions.
 

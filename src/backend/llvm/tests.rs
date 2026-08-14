@@ -721,30 +721,6 @@ node report [a < 0][true] {
     assert!(ir.contains("llvm.abs"), "Abs# must emit llvm.abs; got:\n{ir}");
 }
 
-/// 2026-08-14 (boundary plan): `x.^Absolute` still compiles (deprecated
-/// alias) but surfaces a deprecation warning directing to `Abs#`.
-#[test]
-fn test_absolute_reflection_deprecation_warns() {
-    let src = r#"
-let a: Int = -7;
-node report [a < 0][true] {
-    let b: Int = a.^Absolute;
-    term;
-};
-"#;
-    let tokens = crate::lexer::tokenize(src).unwrap();
-    let mut p = crate::parser::Parser::new(tokens, src);
-    let items = p.parse_program().unwrap();
-    let mut backend = LlvmBackend::new();
-    let ir = backend.generate(&items, None);
-    assert!(ir.contains("llvm.abs"), ".^Absolute must still emit llvm.abs (deprecated alias); got:\n{ir}");
-    assert!(
-        backend.warnings.iter().any(|w| w.contains(".^Absolute") && w.contains("Abs#")),
-        "the deprecated `.^Absolute` must surface a warning directing to Abs#; got: {:?}",
-        backend.warnings
-    );
-}
-
 /// A program with a `Int[2][3]` state field written and read at `[1][2]` —
 /// exercises the multi-dim array layout + row-view GEPs (2026-08-07, Phase 7).
 fn multidim_program() -> Vec<TopLevel> {

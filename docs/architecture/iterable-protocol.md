@@ -112,9 +112,8 @@ materializer copies only at the boundary (per flush, via `At`).
 
 `.^Length` never routes to an intrinsic. A `List`/`HashMap`/custom `.^Length`
 is a compile error — that length is member-managed or computed, not intrinsic.
-**2026-08-14:** `.^Absolute` is a DEPRECATED alias for `Abs#` (same `llvm.abs`
-emission, surfaces a deprecation warning) for one release, then a compile
-error — abs is a computed truth, so its home is the intrinsic, not a
+**2026-08-14:** `.^Absolute` was REMOVED (after a one-release deprecated alias)
+— abs is a computed truth, so its home is the `Abs#` intrinsic, not a
 reflection target (SPEC §17.3). The bit transformations are intrinsics too:
 `BitReverse#`/`Popcount#`/`LeadingZeros#`/`TrailingZeros#`. `Bytes#` is not
 added — byte length is stored, `.^Length` reads it.

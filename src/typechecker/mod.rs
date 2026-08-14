@@ -3236,13 +3236,11 @@ fn resolve_reflect(
             }
             Ok(Type::ptr(receiver.clone()))
         }
-        "Absolute" => {
-            // 2026-08-04: `x.^Absolute` — absolute value. Valid on Int/Float.
-            if is_compile_time {
-                return Err(wrong_kind("runtime"));
-            }
-            Ok(receiver.clone())
-        }
+        // 2026-08-14 (boundary plan, SPEC §17.3): `.^Absolute` is REMOVED —
+        // abs is a computed truth, so its home is the `Abs#` intrinsic, not a
+        // reflection target. The deprecated alias release has passed; it is
+        // now an unknown-target error (the catch-all below), directing to
+        // `Abs#`. (Was: `x.^Absolute` → the receiver's type, 2026-08-04.)
         "Size" => {
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
@@ -3269,10 +3267,22 @@ fn resolve_reflect(
             // protocol category code, an i64 (matching interpreter + codegen).
             Ok(Type::int())
         }
-        _ => Err(TypeError::InvalidOperation {
-            operation: format!("reflection target '{}'", target),
-            type_name: "unknown reflection target — expected Length, Ptr, Absolute, Size, Bytes, Alignment, or Type".into(),
-        }),
+        _ => {
+            // 2026-08-14 (boundary plan, SPEC §17.3): the removed `.^Absolute`
+            // gets a targeted hint directing to `Abs#`.
+            let hint = if target == "Absolute" {
+                " — `.^Absolute` was removed; abs is a computed truth, use the `Abs#` intrinsic"
+            } else {
+                ""
+            };
+            Err(TypeError::InvalidOperation {
+                operation: format!("reflection target '{}'", target),
+                type_name: format!(
+                    "unknown reflection target — expected Length, Ptr, Size, Bytes, Alignment, or Type{}",
+                    hint
+                ),
+            })
+        }
     }
 }
 
@@ -4346,6 +4356,32 @@ node probe [true][true] {
             "expected non-iterable `.^^Element` to error, got: {:?}",
             e
         );
+    }
+
+    #[test]
+    fn absolute_reflection_removed_directs_to_abs_intrinsic() {
+        // 2026-08-14 (boundary plan, SPEC §17.3): `.^Absolute` was removed —
+        // abs is a computed truth, so the `Abs#` intrinsic is its home. The
+        // error must direct the user to `Abs#`.
+        let src = r#"
+let a: Int = -7;
+node probe [a < 0][true] {
+    let b: Int = a.^Absolute;
+    term;
+};
+"#;
+        let e = check(src);
+        match e {
+            Err(errs) => {
+                let msg = format!("{:?}", errs);
+                assert!(
+                    msg.contains("Abs#"),
+                    "the removed `.^Absolute` must direct to Abs#; got: {}",
+                    msg
+                );
+            }
+            Ok(()) => panic!("expected `.^Absolute` to be rejected"),
+        }
     }
 
     #[test]
