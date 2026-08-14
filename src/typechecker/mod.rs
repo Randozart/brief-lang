@@ -1796,6 +1796,22 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 Some(e) => infer_type_only(e, ctx)?,
                 None => ty.clone().unwrap_or(Type::int()),
             };
+            // 2026-08-14 (Iterable protocol, slice 5, SPEC §16.3): a list
+            // literal in a BINDING must carry a collection type annotation —
+            // `let xs: List<Int> = [1, 2, 3]` (the type-directed literal →
+            // `op Init`/`op InsertAt`). An unconstrained `let xs = [1, 2, 3]`
+            // has no ops to construct through (the compiler holds no List
+            // layout); it is a compile error, never a silent fallback.
+            if ty.is_none() && matches!(expr, Some(Expr::List(_))) {
+                return Err(TypeError::InvalidOperation {
+                    operation: "list literal in a `let` binding".into(),
+                    type_name: format!(
+                        "unconstrained list literal requires a collection type annotation \
+                         (e.g. `let xs: List<Int> = [...]`) so it can construct through the \
+                         collection's own ops"
+                    ),
+                });
+            }
             // 2026-07-31 (Phase 2): A declared type must match the inferred
             // initializer type — no implicit coercion. Literal Parse-ops
             // (`let f: Float = 5`) remain the one sanctioned path.
@@ -4330,6 +4346,40 @@ node probe [true][true] {
             "expected non-iterable `.^^Element` to error, got: {:?}",
             e
         );
+    }
+
+    #[test]
+    fn unconstrained_list_literal_requires_annotation() {
+        // 2026-08-14 (Iterable protocol, slice 5, SPEC §16.3): an
+        // unconstrained `let xs = [1, 2, 3]` cannot construct through ops
+        // (the compiler holds no List layout) — a compile error directing to
+        // the type-directed literal form.
+        let src = r#"
+node probe [true][true] {
+    let xs = [1, 2, 3];
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(
+            e.is_err(),
+            "expected unconstrained list literal to error, got: {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn annotated_list_literal_accepts() {
+        // The type-directed literal form stays valid.
+        let src = r#"
+let xs: List<Int> = [1, 2, 3];
+node probe [xs.^^Element == 0][true] {
+    let ys: List<Int> = [4, 5];
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
     }
     #[test]
     fn method_call_arg_mismatch_errors() {
