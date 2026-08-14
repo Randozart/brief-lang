@@ -1432,10 +1432,15 @@ Descriptor fields include, where applicable:
 - `Bytes`, `Bits`, `MaxBits`, `Alignment`, `Endian`, `StorageClass`, `AddressSpace`, `Addressable`;
 - declaration metadata `Name`, `Params`, `Returns`, `Arity`, `Loc`, `FnSpan`, `Doc`, `Hash`, `Contracts`, `Module`, `IsPure`.
 
-`value.^^Element` is the element type of an iterable receiver, derived from
-the receiver type's generic arguments (`List<String>` → `String`,
-`HashMap<K,V>` → `V`, `String` → `Char`). Iteration capability is inspected
-via `value.^^Ops` (the type's operator surface, §15.2).
+`value.^^Element` is the element type of an iterable receiver. **2026-08-14:
+single-source proof form** — the element type IS the read op's return type
+(`op At` Tier 2 / `op Current` Tier 1, §11.4) substituted with the concrete
+generic args (`List<String>` → `String`, `HashMap<K,V>` → `V`), or the frozen
+`#String` → `Char` protocol fact. There is no second derivation to drift
+against; a non-iterable receiver is a compile error, never a silent `Int`.
+The descriptor folds to the element type's category code at compile time.
+Iteration capability is inspected via `value.^^Ops` (the type's operator
+surface, §15.2).
 
 Declaration/source metadata is compile-time-only unless explicitly materialized.
 

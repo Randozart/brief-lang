@@ -708,6 +708,11 @@ fn eval_reflect(
         // `Type` (compile-time) is a frozen descriptor: the protocol category
         // code (must match the codegen's type_category_code, rule #4).
         ("Type", true) => Ok(Value::int(reflect_type_code(&val))),
+        // 2026-08-14 (boundary plan): `Element` (compile-time) = the ELEMENT
+        // type's category code of an iterable value — a `#String` operand's
+        // chars (`Char`), a Product's field sequence, a Range's counter
+        // (`Int`). Matches the codegen's `.^^Element` fold (rule #4 parity).
+        ("Element", true) => Ok(Value::int(reflect_element_code(&val))),
         _ => Ok(Value::Void),
     }
 }
@@ -729,6 +734,25 @@ fn reflect_type_code(v: &Value) -> i64 {
         Value::Closure { .. } => 8,
         Value::Range { .. } => 10,
         Value::Void => 9,
+    }
+}
+
+/// 2026-08-14 (boundary plan): the ELEMENT type's category code of an iterable
+/// value, for `x.^^Element`. A `#String` operand iterates `Char` (SPEC §17.2);
+/// a Product's element is the category of its first field (the field sequence
+/// is the element sequence); a Range iterates `Int` counters. Must agree with
+/// the codegen's fold of the receiver's static element type (rule #4 parity) —
+/// the typechecker is the authority on validity; this is the value computation.
+fn reflect_element_code(v: &Value) -> i64 {
+    match v {
+        Value::Bits(_) => 3, // Char — a `#String` operand iterates codepoints
+        Value::Product { fields, .. } => fields
+            .first()
+            .map(reflect_type_code)
+            .unwrap_or(5), // empty product → its own category (Product)
+        Value::Range { .. } => 0, // Int counter
+        Value::Sum { .. } => 6,
+        other => reflect_type_code(other),
     }
 }
 
@@ -2424,6 +2448,33 @@ mod tests {
             ReflectKind::CompileTime,
         );
         assert_eq!(eval1(&r).as_i64(), Some(3));
+    }
+
+    #[test]
+    fn test_reflect_element_on_string_is_char_category() {
+        // 2026-08-14 (String unification): `s.^^Element` on a String value is
+        // the Char category code (3) — a `#String` operand iterates chars.
+        let r = Expr::Reflect(
+            Box::new(Expr::Quoted("hi".as_bytes().to_vec())),
+            "Element".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(3));
+    }
+
+    #[test]
+    fn test_reflect_element_on_range_is_int_category() {
+        // A Range iterates Int counters — `Element` folds to 0 (Int).
+        let r = Expr::Reflect(
+            Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(0)),
+                end: Box::new(Expr::Decimal(3)),
+                inclusive: false,
+            }),
+            "Element".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&r).as_i64(), Some(0));
     }
 
     #[test]

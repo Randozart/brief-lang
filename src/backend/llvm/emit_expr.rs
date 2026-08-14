@@ -2820,6 +2820,18 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, code).ok();
                 TypedRegister { name: r, ty: Type::int() }
             }
+            // 2026-08-14 (boundary plan): `x.^^Element` — a frozen descriptor =
+            // the ELEMENT type's category code, folded exactly like `.^^Type`
+            // (the typechecker already proved iterability + derived the element
+            // single-source; this only materializes the code). A constant, no
+            // globals, no runtime code.
+            ("Element", ReflectKind::CompileTime) => {
+                let elem_ty = self.reflect_element_type(&recv_reg.ty);
+                let code = self.type_category_code(&elem_ty);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, r, code).ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
             _ => panic!(
                 "reflection '{}' with kind '{:?}' reached codegen without emission",
                 target, kind
@@ -2855,6 +2867,48 @@ impl LlvmBackend {
             Type::Custom(n) if self.ctx.struct_types.contains_key(n) => 5,
             _ => 0,
         }
+    }
+
+    /// 2026-08-14 (boundary plan): the ELEMENT type of a `x.^^Element` receiver,
+    /// folded from the receiver's static type. Mirrors the typechecker's
+    /// `resolve_element_type` (single-source proof form, rule #4 parity): a
+    /// `#String` operand → `Char` (frozen protocol fact), a Tier-2/1 type → the
+    /// read op's return substituted with the concrete generic args, a vector →
+    /// the inner type. The typechecker already validated iterability before
+    /// codegen, so a None here is an internal inconsistency, not a user error.
+    fn reflect_element_type(&self, ty: &Type) -> Type {
+        use crate::ast::TopLevel;
+        if self.is_string_operand(ty) {
+            return Type::Custom("Char".to_string());
+        }
+        if let Type::Vector(inner, _) = ty {
+            return (**inner).clone();
+        }
+        let base = match ty {
+            Type::Custom(n) | Type::Applied(n, _) => n.clone(),
+            _ => return Type::int(),
+        };
+        let members = self.ctx.obj_members.get(&base).cloned().unwrap_or_default();
+        let at = members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "At" => Some(d),
+            _ => None,
+        });
+        let current = at.or_else(|| members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "Current" => Some(d),
+            _ => None,
+        }));
+        let Some(read) = current else { return Type::int(); };
+        let Some(raw) = read.output_type.as_ref().and_then(|o| o.all_types().into_iter().next()) else {
+            return Type::int();
+        };
+        let args = match ty {
+            Type::Applied(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, Type> =
+            params.into_iter().zip(args).collect();
+        crate::typechecker::substitute_type(&raw, &subst)
     }
 
     /// 2026-07-31: Alignment of a type in bytes (compile-time reflection).

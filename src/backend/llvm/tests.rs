@@ -648,6 +648,34 @@ fn test_foreach_list_emits_index_loop() {
         "a collection iteration compares the counter against the length");
 }
 
+/// 2026-08-14 (String unification): `foreach c in s` on a `#String` operand
+/// iterates CHARs via the decode lane — the bound is the stored byte length
+/// (`.^Length` header) and each item is a decoded codepoint (Char), never a
+/// raw byte walk.
+#[test]
+fn test_foreach_string_emits_char_decode_lane() {
+    let src = r#"
+        let s: String = "hé";
+        node report [true][true] {
+            foreach c in s {
+                term;
+            };
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let output = backend.generate(&items, None);
+    assert!(output.contains("briev_str_next_char"),
+        "a #String foreach must call the char decode lane; got:\n{output}");
+    assert!(output.contains("trunc i64"),
+        "the decoded codepoint must be truncated to Char's native i32; got:\n{output}");
+}
+
 /// A program with a `Int[2][3]` state field written and read at `[1][2]` —
 /// exercises the multi-dim array layout + row-view GEPs (2026-08-07, Phase 7).
 fn multidim_program() -> Vec<TopLevel> {
@@ -5924,6 +5952,55 @@ fn test_reflect_type_emits_category_constant() {
     assert!(
         ir.contains("add i64 0, 1"),
         "Float ^^Type must fold to category code 1; got:\n{ir}"
+    );
+}
+
+/// 2026-08-14 (boundary plan): `s.^^Element` on a `#String` operand folds to
+/// the Char category code (3) — a frozen descriptor, single constant.
+#[test]
+fn test_reflect_element_on_string_folds_char_code() {
+    let src = r#"
+        let s: String = "hello";
+        node report [true][true] {
+            let e: Int = s.^^Element;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("add i64 0, 3"),
+        "String ^^Element must fold to the Char category code (3); got:\n{ir}"
+    );
+}
+
+/// 2026-08-14 (boundary plan): `xs.^^Element` on a `List<String>` folds to the
+/// String element's category code — the read-op return substituted, single
+/// source.
+#[test]
+fn test_reflect_element_on_list_folds_element_code() {
+    let src = r#"
+        let xs: List<Int> = [1, 2, 3];
+        node report [true][true] {
+            let e: Int = xs.^^Element;
+            term;
+        };
+    "#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("add i64 0, 0"),
+        "List<Int> ^^Element must fold to the Int category code (0); got:\n{ir}"
     );
 }
 

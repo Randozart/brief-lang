@@ -1056,6 +1056,26 @@ pub fn infer_expression(
                 }
                 return Ok((Type::bool_(), Provenance::Unknown));
             }
+            // 2026-08-14 (boundary plan): `value.^^Element` — the ELEMENT type
+            // of an iterable receiver as a frozen descriptor (SPEC §17.2:1430-1433).
+            // Compile-time only, single-source proof form: the element type IS
+            // the read op's return (`op At` Tier 2 / `op Current` Tier 1) or the
+            // frozen `#String` → `Char` protocol fact — never a second derivation
+            // that could drift. The expression type is Int (the folded category
+            // code, exactly like `.^^Type`); the VALUE is folded at codegen.
+            if target == "Element" && matches!(kind, ReflectKind::CompileTime) {
+                let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
+                if resolve_element_type(ctx, &recv_ty).is_none() {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "reflection target 'Element'".into(),
+                        type_name: format!(
+                            "`^^Element` is valid only on an iterable receiver (a Tier-2/1 \
+                             collection or a #String operand); `{recv_ty}` has no element type"
+                        ),
+                    });
+                }
+                return Ok((Type::int(), recv_prov));
+            }
             let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
             let result_ty = resolve_reflect(&recv_ty, target, *kind)?;
             Ok((result_ty, recv_prov))
@@ -3325,6 +3345,32 @@ fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definiti
     })
 }
 
+/// 2026-08-14 (boundary plan, SPEC §17.2): the ELEMENT type of an iterable
+/// receiver, single-source proof form. `Some(ty)` only for genuine iterables:
+/// a `#String` operand → `Char` (frozen protocol fact), a Tier-2/1 type → the
+/// read op's return substituted with the concrete generic args, a vector → the
+/// inner type. `None` for everything else — a non-iterable `.^^Element` is a
+/// compile error, never a silent Int. This is the SAME evidence `foreach_item_type`
+/// reads for the foreach binding, so `.^^Element` and `foreach` cannot drift.
+fn resolve_element_type(ctx: &TypecheckContext, ty: &Type) -> Option<Type> {
+    if ctx.operand_implements_protocol(ty, "#String") {
+        return Some(Type::Custom("Char".to_string()));
+    }
+    let (base, args) = match ty {
+        Type::Custom(n) => (n.clone(), Vec::new()),
+        Type::Applied(n, a) => (n.clone(), a.clone()),
+        Type::Vector(inner, _) => return Some((**inner).clone()),
+        _ => return None,
+    };
+    let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
+    let read = operator_member(&members, "At").or_else(|| operator_member(&members, "Current"));
+    let read = read?;
+    let raw = read.output_type.as_ref()?.all_types().into_iter().next()?;
+    let params = ctx.type_params.get(&base).cloned().unwrap_or_default();
+    let subst: std::collections::HashMap<String, Type> = params.into_iter().zip(args).collect();
+    Some(substitute_type(&raw, &subst))
+}
+
 /// 2026-08-12 (Iterable protocol, Tier 2): the ELEMENT type of a `foreach`
 /// iterable — the type's `op At` op-as-member return, substituted with the
 /// concrete generic args (`List<String>` At → `T` → `String`). Falls back to
@@ -4241,6 +4287,49 @@ node probe [items.^^Size > 0][true] {
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn reflect_element_on_iterable_resolves() {
+        // 2026-08-14 (boundary plan): `.^^Element` is a compile-time frozen
+        // descriptor on an iterable receiver — resolves to Int (the folded
+        // category code), never an error. The iterable is declared inline
+        // (stdlib `List` isn't in the test universe).
+        let src = r#"
+obj Items {
+    data: Int[4];
+    op Count() -> Int { term 4; };
+    op At(i: Int) -> Int { term data[i]; };
+};
+let xs: Items;
+let s: String = "hi";
+node probe [xs.^^Element == 0][true] {
+    let a: Int = xs.^^Element;
+    let b: Int = s.^^Element;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn reflect_element_on_non_iterable_errors() {
+        // A scalar has no element type — `.^^Element` is a compile error,
+        // never a silent Int.
+        let src = r#"
+let x: Int = 5;
+node probe [true][true] {
+    let e: Int = x.^^Element;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(
+            e.is_err(),
+            "expected non-iterable `.^^Element` to error, got: {:?}",
+            e
+        );
     }
     #[test]
     fn method_call_arg_mismatch_errors() {
