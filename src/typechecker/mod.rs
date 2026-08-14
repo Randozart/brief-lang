@@ -3737,7 +3737,10 @@ fn infer_defn_type_args(
             None => {
                 if let Some(expected) = &ctx.expected_call_type {
                     if let Some(ret) = ctx.fn_return_types.get(name).cloned() {
-                        let mut eb = std::collections::HashMap::new();
+                        // Seed the expected-type bindings with the defn's
+                        // params so `K`/`V` are recognized as type params.
+                        let mut eb: std::collections::HashMap<String, Option<Type>> =
+                            params.iter().map(|p| (p.clone(), None)).collect();
                         if unify_defn_type(&ret, expected, &mut eb) {
                             if let Some(t) = eb.get(p).cloned().unwrap_or(None) {
                                 concrete.push(t);
@@ -4085,6 +4088,25 @@ node probe [v == 0][v == 1] {
 };
 "#;
         check(src).expect("a generic txn must parse and dispatch");
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): a nullary two-param generic
+    /// binds BOTH params from the `let` annotation's expected type. (List is
+    /// used as the target — its `[]` literal works; HashMap's `{}` empty-literal
+    /// construction is a separate stdlib gap.)
+    #[test]
+    fn generic_defn_nullary_two_params_bind_from_expected() {
+        let src = r#"
+defn pair_list<K, V>() -> List<K> [true][term == []] {
+    term [];
+};
+let m: List<String> = pair_list();
+let v: Int = 0;
+node probe [v == 0][v == 1] {
+    term;
+};
+"#;
+        check(src).expect("a nullary two-param generic must bind both params from the annotation");
     }
 
     /// 2026-08-12 (Iterable protocol): a non-operator member body still fails
