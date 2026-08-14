@@ -704,6 +704,10 @@ impl<'a> Parser<'a> {
     ) -> Result<Transaction, SyntaxError> {
         self.pos += 1; // consume 'txn'
         let name = self.expect_identifier()?;
+        // 2026-08-14 (generic `defn f<T>` dispatch): transactions support type
+        // params too — `txn iter_map_loop<T, U>(...)`. The stdlib's iterator
+        // adapters are generic txns; without this they failed to parse.
+        let type_params = self.parse_type_params()?;
         let parameters = if self.eat(&Token::LParen) {
             let p = self.parse_parameter_list()?;
             self.expect(Token::RParen)?;
@@ -726,7 +730,7 @@ impl<'a> Parser<'a> {
             name,
             is_reactive,
             is_async,
-            type_params: vec![],
+            type_params,
             parameters,
             output_type,
             outputs: Vec::new(),
@@ -1126,7 +1130,22 @@ impl<'a> Parser<'a> {
         if !self.check(&Token::RParen) {
             loop {
                 let name = self.expect_identifier()?;
-                let ty = self.parse_optional_type()?.unwrap_or(Type::int());
+                let mut ty = self.parse_optional_type()?.unwrap_or(Type::int());
+                // 2026-08-14 (generic `defn f<T>` dispatch): a function-typed
+                // parameter — `f: T -> U` or `f: (U, T) -> U` — parses the base
+                // type(s), then a trailing `->` return. A parenthesized param
+                // type `(U, T)` is a PARAM LIST (not a tuple), matching the
+                // multi-param lambda `(acc, x) -> body`. The stdlib's iterator
+                // adapters use both forms (`f: T -> U`, `f: (U, T) -> U`).
+                if self.check(&Token::Arrow) {
+                    self.pos += 1; // consume '->'
+                    let ret = self.parse_type()?;
+                    let params_tys = match ty {
+                        Type::Tuple(elems) => elems,
+                        other => vec![other],
+                    };
+                    ty = Type::Function(params_tys, Box::new(ret));
+                }
                 params.push((name, ty));
                 if !self.eat(&Token::Comma) {
                     break;

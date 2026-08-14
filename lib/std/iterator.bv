@@ -12,7 +12,7 @@
 txn iter_map_loop<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list.Count#()][i == list.Count#()] -> List<U>
 {
-    result = result.append(f(list[i]));
+    result <- f(list[i]);
     i = i + 1;
     term result;
 };
@@ -26,7 +26,7 @@ txn iter_filter_loop<T>(list: List<T>, pred: T -> Bool, result: List<T>, i: Int)
     [i < list.Count#()][i == list.Count#()] -> List<T>
 {
     when pred(list[i]) {
-        result = result.append(list[i]);
+        result <- list[i];
     };
     i = i + 1;
     term result;
@@ -53,7 +53,7 @@ defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null]
 txn iter_take_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
     [i < n && i < list.Count#()][i == n || i == list.Count#()] -> List<T>
 {
-    result = result.append(list[i]);
+    result <- list[i];
     i = i + 1;
     term result;
 };
@@ -66,7 +66,7 @@ defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.Count#() == n.
 txn iter_skip_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
     [i < list.Count#()][i == list.Count#()] -> List<T>
 {
-    result = result.append(list[i]);
+    result <- list[i];
     i = i + 1;
     term result;
 };
@@ -79,7 +79,7 @@ defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.Count#() == (l
 txn iter_enumerate_loop<T>(list: List<T>, result: List<(Int, T)>, i: Int)
     [i < list.Count#()][i == list.Count#()] -> List<(Int, T)>
 {
-    result = result.append((i, list[i]));
+    result <- (i, list[i]);
     i = i + 1;
     term result;
 };
@@ -149,7 +149,7 @@ txn iter_flatmap_loop<T, U>(list: List<T>, f: T -> List<U>, result: List<U>, i: 
 {
     let mapped = f(list[i]);
     when j < mapped.Count#() {
-        result = result.append(mapped[j]);
+        result <- mapped[j];
         j = j + 1;
     };
     i = i + 1;
@@ -165,10 +165,10 @@ txn iter_partition_loop<T>(list: List<T>, pred: T -> Bool, trues: List<T>, false
     [i < list.Count#()][i == list.Count#()] -> (List<T>, List<T>)
 {
     when pred(list[i]) {
-        trues = trues.append(list[i]);
+        trues <- list[i];
     };
     when !pred(list[i]) {
-        falses = falses.append(list[i]);
+        falses <- list[i];
     };
     i = i + 1;
     term (trues, falses);
@@ -182,7 +182,7 @@ defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pr
 txn iter_zip_loop<T, U>(a: List<T>, b: List<U>, result: List<(T, U)>, i: Int)
     [i < a.Count#() && i < b.Count#()][i == a.Count#() || i == b.Count#()] -> List<(T, U)>
 {
-    result = result.append((a[i], b[i]));
+    result <- (a[i], b[i]);
     i = i + 1;
     term result;
 };
@@ -193,12 +193,12 @@ defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term.Count#()
 
 // Sum of numeric list (pure defn, delegates to fold)
 defn iter_sum(list: List<Int>) -> Int [true][term >= 0] {
-    term iter_fold_loop(list, |acc, x| acc + x, 0, 0);
+    term iter_fold_loop(list, (acc, x) -> acc + x, 0, 0);
 };
 
 // Product of numeric list (pure defn, delegates to fold)
 defn iter_product(list: List<Int>) -> Int [true][term >= 0] {
-    term iter_fold_loop(list, |acc, x| acc * x, 1, 0);
+    term iter_fold_loop(list, (acc, x) -> acc * x, 1, 0);
 };
 
 // Maximum element

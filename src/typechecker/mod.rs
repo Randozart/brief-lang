@@ -2671,6 +2671,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         .filter_map(|item| {
             let name = match item {
                 TopLevel::Definition(d) => &d.name,
+                TopLevel::Transaction(t) => &t.name,
                 TopLevel::Export(e) => match &*e.inner {
                     TopLevel::Definition(d) => &d.name,
                     _ => return None,
@@ -2679,6 +2680,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             };
             let params: Vec<String> = match item {
                 TopLevel::Definition(d) => d.type_params.iter().map(|p| p.name.clone()).collect(),
+                TopLevel::Transaction(t) => t.type_params.iter().map(|p| p.name.clone()).collect(),
                 TopLevel::Export(e) => match &*e.inner {
                     TopLevel::Definition(d) => d.type_params.iter().map(|p| p.name.clone()).collect(),
                     _ => vec![],
@@ -3783,6 +3785,15 @@ fn unify_defn_type(param: &Type, arg: &Type, bindings: &mut std::collections::Ha
         (Type::Tuple(p), Type::Tuple(a)) => {
             p.len() == a.len() && p.iter().zip(a).all(|(p, a)| unify_defn_type(p, a, bindings))
         }
+        // 2026-08-14 (closure-typed generics): a function-typed param (`f: T
+        // -> U`) unifies against a closure's inferred `Type::Function` — the
+        // param type(s) and return type each unify, binding the generic params
+        // (`T -> U` vs `(Int) -> Int` → `T = Int`, `U = Int`).
+        (Type::Function(pp, pr), Type::Function(ap, ar)) => {
+            pp.len() == ap.len()
+                && pp.iter().zip(ap).all(|(p, a)| unify_defn_type(p, a, bindings))
+                && unify_defn_type(pr, ar, bindings)
+        }
         _ => param == arg,
     }
 }
@@ -3821,6 +3832,13 @@ fn substitute_type_params(ty: &Type, params: &[String], args: &[Type]) -> Type {
         ),
         Type::Union(members) => Type::Union(
             members.iter().map(|m| substitute_type_params(m, params, args)).collect(),
+        ),
+        // 2026-08-14 (closure-typed generics): a function-typed param (`f: T
+        // -> U`) substitutes its param and return types — `(T) -> U` with
+        // `T=Int, U=Int` becomes `(Int) -> Int`.
+        Type::Function(p_params, ret) => Type::Function(
+            p_params.iter().map(|p| substitute_type_params(p, params, args)).collect(),
+            Box::new(substitute_type_params(ret, params, args)),
         ),
         _ => ty.clone(),
     }
@@ -4032,6 +4050,41 @@ node probe [true][true] {
 "#;
         let e = check(src);
         assert!(e.is_err(), "a post-condition comparing Int `term` to Bool must error, got: {:?}", e);
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): a generic defn with a
+    /// closure-typed parameter — `f: T -> T` — parses and the call site
+    /// infers `T` from the argument. (A generic body that RETURNS a free-`U`
+    /// closure call is the documented body-with-free-T follow-up; here the
+    /// body returns the `T` param, which is Int after call-site substitution.)
+    #[test]
+    fn generic_defn_closure_typed_param() {
+        let src = r#"
+defn apply<T>(x: T, f: T -> T) -> T [true][term == x] {
+    term x;
+};
+let v: Int = 0;
+node probe [v == 0][v == 1] {
+    term;
+};
+"#;
+        check(src).expect("a closure-typed generic param must parse and infer at the call site");
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): a generic TRANSACTION
+    /// (`txn loop_t<T>`) parses and dispatches like a generic defn.
+    #[test]
+    fn generic_txn_type_params_parse() {
+        let src = r#"
+txn loop_t<T>(x: T, i: Int) [i < 10][i >= 10] -> Int {
+    term i;
+};
+let v: Int = 0;
+node probe [v == 0][v == 1] {
+    term;
+};
+"#;
+        check(src).expect("a generic txn must parse and dispatch");
     }
 
     /// 2026-08-12 (Iterable protocol): a non-operator member body still fails

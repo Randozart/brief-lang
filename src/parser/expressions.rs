@@ -582,6 +582,26 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(Token::RParen)?;
+        // 2026-08-14 (generic `defn f<T>` dispatch): a MULTI-PARAM lambda —
+        // `(a, b) -> body`. Each element must be a bare identifier; the
+        // `->` after the `)` marks the lambda (the stdlib's `iter_fold`
+        // closures use `(acc, x) -> ...`; the single-param `x -> body` form
+        // is handled in parse_identifier_or_special).
+        if self.eat(&Token::Arrow) && exprs.len() > 1 {
+            let mut params = Vec::with_capacity(exprs.len());
+            for e in &exprs {
+                match e {
+                    Expr::Identifier(n) => params.push(n.clone()),
+                    _ => {
+                        return self.error_at_current(
+                            "lambda parameters must be bare identifiers — `(a, b) -> body`",
+                        );
+                    }
+                }
+            }
+            let body = self.parse_expression()?;
+            return Ok(Expr::Lambda(params, Box::new(body)));
+        }
         if exprs.len() == 1 {
             Ok(exprs.into_iter().next().unwrap())
         } else {
