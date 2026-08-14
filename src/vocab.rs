@@ -261,9 +261,12 @@ impl LanguageVocab {
                 "SysCall#", "Malloc#", "Free#", "Print#", "Sqrt#",
             ]),
             operation_identities: ss(&[
-                "Add", "Sub", "Mul", "Div", "Mod", "Eq", "Ne", "Lt", "Le", "Gt", "Ge",
+                "Add", "Sub", "Mul", "Div", "Rem", "Eq", "Neq", "Lt", "Le", "Gt", "Ge",
                 "And", "Or", "Not", "BitAnd", "BitOr", "BitXor", "BitNot", "Shl", "Shr",
                 "At", "Slice", "InsertAt", "ExtractFrom", "CopyFrom", "Append", "Prepend",
+                // 2026-08-14 (UOL §6b): the iterable cursor ops were missing —
+                // a vocab gap the generative OpName# dispatch needs filled.
+                "Count", "Iter", "Step", "IsEnd", "Current",
             ]),
             stages: ss(&[
                 "PreLex", "Parsed", "Resolved", "Typed", "Normalized", "Verified",

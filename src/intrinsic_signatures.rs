@@ -121,6 +121,19 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // ── Collection ───────────────────────────────────────────────
         "Get#"    => Some(Signature { name: "Get#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Insert#" => Some(Signature { name: "Insert#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        // 2026-08-14 (UOL §6b): the intrinsic forms of the disclosed collection
+        // ops — `Count#`/`At#`/`Slice#`/`InsertAt#`/`ExtractFrom#`/`CopyFrom#`
+        // dispatch to the type's declared op members (generative rule, §6b.2).
+        // Signatures give precise arity errors; the typechecker infers the
+        // receiver/return from the op member. `observable` marks the mutating
+        // forms (DCE guard, §6b.3). (The legacy `Get#`/`Insert#` are
+        // reconciled with the op surface by the §11 intrinsic audit.)
+        "Count#"      => Some(Signature { name: "Count#",      parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "At#"         => Some(Signature { name: "At#",         parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Slice#"      => Some(Signature { name: "Slice#",      parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "InsertAt#"   => Some(Signature { name: "InsertAt#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        "ExtractFrom#" => Some(Signature { name: "ExtractFrom#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: true, variadic: false }),
+        "CopyFrom#"   => Some(Signature { name: "CopyFrom#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: true, variadic: false }),
 
         // ── GPU ───────────────────────────────────────────────────────
         "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
@@ -341,6 +354,8 @@ mod tests {
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "CharCount#",
             "Get#", "Insert#",
+            // 2026-08-14 (UOL §6b): the collection-op intrinsic forms.
+            "Count#", "At#", "Slice#", "InsertAt#", "ExtractFrom#", "CopyFrom#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
             "GetGroupId#", "GetNumGroups#", "Dims#",
             "AddressOf#", "SysCall#", "SysConf#",
