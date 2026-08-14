@@ -73,7 +73,7 @@ Patches are unacceptable. There is no "go fast and break things."
     table of ALL benchmark results at the current commit BEFORE changes, and the
     new results AFTER. Baseline from a clean `cargo build --release` +
     `bash benchmarks/build_and_bench.sh --runtime`.
-11b. **PERSISTENT BASELINE WORKTREE**: `../briev-compiler-baseline` holds the
+11b. **PERSISTENT BASELINE WORKTREE**: `../briv-compiler-baseline` holds the
     baseline commit for controlled A/B regression detection
     (`bash benchmarks/compare_baseline.sh <name>`). Never excuse a regression as
     "noise" without this experiment.

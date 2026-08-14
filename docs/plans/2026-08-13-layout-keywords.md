@@ -1,7 +1,15 @@
 # Plan: Deferred Layout — physical-layout keywords (spec, pack, atomic, trap, union) + Bits-unit restoration
 
+> **2026-08-14 addendum (docs-reconciliation).** `spec Align` → `spec
+> Alignment` throughout (the parser and stdlib accept only `Alignment`;
+> `Align` is a stale spelling in the tables/text at :125/134/146/155/169/365/
+> 388/393). Frozen descriptors are §17.2, not §19.7 (the §17.2 reflection
+> section supersedes the older §19.7 numbering at :4-5). Boxed Cat Typing is a
+> Schrödinger's-cat pun, not literal i64 boxing (disambiguation note at the
+> Naming decision, :17-18).
+
 **2026-08-13.** Implements the normative SPEC §2.1 (types have no canonical
-layout), §8.1/§8.2 (structs, `seq`), §8.9 (metadata), §19.7 (frozen
+layout), §8.1/§8.2 (structs, `seq`), §8.9 (metadata), §17.2 (frozen
 descriptors `Bytes`/`Alignment`/`Endian`) as **first-class physical-contract
 keywords**: `spec` (per-type physical facts), `pack` (bit-contiguous
 struct modifier), `atomic` (lock-free field modifier over the existing
@@ -15,7 +23,11 @@ Design decisions locked 2026-08-13:
 - **Naming.** Formal term: **Deferred Layout** — "a type has no canonical
   representation until a backend *collapses* it (materialization) or
   `pack`/`seq`/`spec` *pins* it." Brand/story term: **Boxed Cat Typing**
-  (docs-intro, tutorial, talk-track — same family as Duck Typing). SPEC
+  (docs-intro, tutorial, talk-track — same family as Duck Typing). **2026-08-14:
+  the term is a Schrödinger's cat pun, NOT literal i64 boxing** — the type is
+  "in the box," neither `Bits(N)` nor a laid-out struct until a codegen site
+  observes (materializes) it or a modifier pins it; the i64 registers in
+  `backend-strategy.md` are coincidental, not the meaning. SPEC
   predicate stays "layout-adaptive" (SPEC §8.1). The word "Schrödinger" is
   renamed **only in current guidance** (`docs/architecture/iterable-protocol.md`,
   1 occurrence); the historical plan `docs/plans/2026-08-12-iterable-protocol.md`

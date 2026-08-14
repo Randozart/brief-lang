@@ -1,5 +1,8 @@
 # Frontend-Driven Dispatch — Replacing LLVM Backend Heuristics
 
+> **2026-08-14 addendum (docs-reconciliation).** `config/targets.toml` /
+> `config/ir-lowering.toml` are `.dbvl` on disk (TOML content).
+
 **Date:** 2026-07-31
 **Status:** Implemented (2026-08-06) — phases 1a–3b + final delivered; benchmarks at/above parity per `benchmarks/results/` and the runtime MATCH table
 **Branch:** `feat/frontend-driven-dispatch`

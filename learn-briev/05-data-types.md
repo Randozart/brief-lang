@@ -309,6 +309,10 @@ let name = p.name;  // field access
 
 ### Physical Layout Modifiers (2026-08-13, Deferred Layout)
 
+The story term is **Boxed Cat Typing** — a Schrödinger's cat pun: a type's
+representation is indeterminate ("in the box") until code observes it or a
+modifier pins it. Not literal boxing of values.
+
 A plain struct is layout-adaptive. When the layout must be pinned, it is
 **declared** — the type never assumes a representation. `spec` spells the five
 physical keys (`Bits`, `MaxBits`, `Bytes`, `Alignment`, `Endian`), and three

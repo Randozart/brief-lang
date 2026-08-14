@@ -1,5 +1,8 @@
 # Implement the 2026-08-05 Normative Briev Language Specification
 
+> **2026-08-14 addendum (docs-reconciliation).** `exit program` → `endprogram`
+> at :145/:295/:586 (the keyword shipped in the endprogram plan).
+
 **Date:** 2026-08-05  
 **Status:** Planned — implementation not started  
 **Normative source:** `spec/SPEC.md`  

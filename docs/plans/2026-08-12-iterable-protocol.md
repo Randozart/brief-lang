@@ -1,5 +1,12 @@
 # Plan: The Iterable Protocol — Schrödinger iteration (op-as-member, two-tier, structural satisfaction)
 
+> **2026-08-14 addendum (docs-reconciliation).** The §11.1 citation at :97 →
+> §11.4.1 (the iteration/operator contract section). The Tier-1 row at :103-104
+> is superseded by the 4-op cursor contract (`op Iter`+`op Step`+`op IsEnd`+
+> `op Current`), which the arch doc now specifies. String unification (§9) is
+> real: `#String` is `Iterable<Char>` via a protocol-keyed char decode lane
+> (see `docs/plans/2026-08-14-string-unification-and-boundary.md`).
+
 **2026-08-12.** Implements the normative SPEC §2.1 (types have no canonical
 layout), §11.4 (iteration), §15.2/§15.3 (operators/arrows), §16.3
 (type-directed literals), §17.1/§17.2 (reflection), and §21.4 (`b-each`) for a

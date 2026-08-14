@@ -1671,7 +1671,8 @@ Canonical directives include:
 Dynamic repetition requires a stable `b-key` whenever children may be inserted, removed, or reordered.
 
 `b-each` renders over **any structurally iterable** value (§11.4): a type that
-provides the iteration operations (`op Count`+`op At`, or `op Iter`+`op Step`)
+provides the iteration operations — Tier 2 (`op Count`+`op At`), Tier 1
+(`op Iter`+`op Step`+`op IsEnd`+`op Current`), or a `#String` operand (chars)
 — `List<T>`, `Stack<T>`, `HashMap<K,V>`, `String` (chars), vectors, or a
 user-declared collection. It never depends on a compiler-known collection
 type. The web backend materializes the iterable into an array by driving the

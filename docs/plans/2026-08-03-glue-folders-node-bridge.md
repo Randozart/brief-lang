@@ -1,5 +1,8 @@
 # Per-language GLUE folders + the Node probe (Python ↔ Node bridge)
 
+> **2026-08-14 addendum (docs-reconciliation).** The `as` alias and `fallback`
+> clause were removed (SPEC §19.1/§19.3); `glue.dbvl` → `glue.dbv`.
+
 **Date:** 2026-08-03
 **Status:** Active plan
 **Branch:** `glue-host-callable` (worktree `../briev-compiler-glue-host`)

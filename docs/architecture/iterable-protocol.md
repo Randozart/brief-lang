@@ -141,7 +141,7 @@ dispatch.
 
 | Syntax | Resolves via |
 |---|---|
-| `foreach(item in c)` | tier pick → `op Count`+`op At` counted loop or `op Iter`+`op Step` cursor loop (ops internally, never `.^Length`) |
+| `foreach(item in c)` | tier pick → Tier 2 (`op Count`+`op At`) counted loop, Tier 1 (`op Iter`+`op Step`+`op IsEnd`+`op Current`) cursor loop, or `#String` char decode lane (ops internally, never `.^Length`) |
 | `b-each:item="c"` | web snapshot materializer driving the same ops |
 | `c[i]` | `op At` (indexed borrow) |
 | `c.^Length` | stored-length reflection (Data/String-byte/Vector); error elsewhere |

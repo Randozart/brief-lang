@@ -257,6 +257,11 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
 
 ### Physical layout (2026-08-13, Deferred Layout)
 
+Deferred Layout's story term is **Boxed Cat Typing** — a Schrödinger's cat pun:
+a type's representation is indeterminate ("in the box") until a backend
+materializes it or `pack`/`seq`/`spec` pins it. It is NOT literal i64 boxing;
+the register boxes in `backend-strategy.md` are coincidental.
+
 Physical layout is DECLARED, never assumed: a type carries protocol + metadata
 only, and the backend derives the representation at materialization time.
 `spec <PascalCase>` is the canonical spelling for the five physical keys
