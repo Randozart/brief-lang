@@ -60,6 +60,15 @@ pub struct TypecheckContext<'a> {
     /// 2026-07-25: Function return types for user-defined functions.
     /// Populated by check_program before type-checking bodies.
     fn_return_types: HashMap<String, Type>,
+    /// 2026-08-14 (generic `defn f<T>` dispatch): a defn's declared type
+    /// params (e.g. `["T"]` for `defn first<T>`), so call sites can infer and
+    /// substitute concrete args. Populated alongside fn_return_types.
+    fn_type_params: HashMap<String, Vec<String>>,
+    /// 2026-08-14 (generic `defn f<T>` dispatch): the expected type of the
+    /// enclosing `let` initializer, consulted when a nullary generic
+    /// (`new_stack<T>()` with no type-constraining args) needs its param bound
+    /// from the annotation. Transient — set by the Let binding, cleared after.
+    expected_call_type: Option<Type>,
     /// 2026-08-09 (Phase 12, SPEC §19.3): names of `optional frgn` bindings.
     /// `feature.^^Available` (a compile-time descriptor reflect) is a Bool
     /// only for these — non-optional frgns are always available.
@@ -118,6 +127,8 @@ impl<'a> TypecheckContext<'a> {
             parse_ops: HashMap::new(),
             type_parents: HashMap::new(),
             fn_return_types: HashMap::new(),
+            fn_type_params: HashMap::new(),
+            expected_call_type: None,
             optional_frgns: std::collections::HashSet::new(),
             regular_ops: HashMap::new(),
             regular_bindings: HashMap::new(),
@@ -1306,6 +1317,30 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
     // User function call — validate args against param types, then return type.
     // 2026-07-31 (Phase 2): call arguments must match the callee's parameter
     // types — no implicit coercion (literal Parse-ops excepted).
+    // 2026-08-14 (generic `defn f<T>` dispatch): a generic defn's params are
+    // inferred at the call site and validated against the SUBSTITUTED types.
+    if let Some(params) = ctx.fn_type_params.get(name).cloned() {
+        if !params.is_empty() {
+            if let Some(args_conc) = infer_defn_type_args(name, &params, args, ctx)? {
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_ty = infer_type_only(arg, ctx)?;
+                    if let Some(param_ty) = ctx.fn_param_types.get(name).and_then(|p| p.get(i)) {
+                        let subst_ty = substitute_type_params(param_ty, &params, &args_conc);
+                        if arg_ty != subst_ty && !try_coerce_via_parse(arg, &arg_ty, &subst_ty, ctx) {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", subst_ty),
+                                found: format!("{}", arg_ty),
+                                context: format!("argument {} of '{}'", i, name),
+                            });
+                        }
+                    }
+                }
+                if let Some(ret) = ctx.fn_return_types.get(name).cloned() {
+                    return Ok(substitute_type_params(&ret, &params, &args_conc));
+                }
+            }
+        }
+    }
     let param_types = ctx.fn_param_types.get(name).cloned().unwrap_or_default();
     for (i, arg) in args.iter().enumerate() {
         let arg_ty = infer_type_only(arg, ctx)?;
@@ -1815,7 +1850,17 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 ctx.consumed_locals.remove(&names[0]);
             }
             let inferred = match expr {
-                Some(e) => infer_type_only(e, ctx)?,
+                Some(e) => {
+                    // 2026-08-14 (generic `defn f<T>`): a nullary generic
+                    // (`new_stack<T>()`) with no type-constraining args binds
+                    // its param from the let annotation (`let s: Stack<Int> =
+                    // new_stack()`). Seed the expected type transiently.
+                    let saved = ctx.expected_call_type.take();
+                    ctx.expected_call_type = ty.clone();
+                    let r = infer_type_only(e, ctx);
+                    ctx.expected_call_type = saved;
+                    r?
+                }
                 None => ty.clone().unwrap_or(Type::int()),
             };
             // 2026-08-14 (Iterable protocol, slice 5, SPEC §16.3): a list
@@ -2584,6 +2629,35 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         })
         .collect();
 
+    // 2026-08-14 (generic `defn f<T>` dispatch): a defn's declared type params
+    // (e.g. `["T"]` for `defn first<T>`), for call-site inference + substitution.
+    let fn_type_params: HashMap<String, Vec<String>> = items
+        .iter()
+        .filter_map(|item| {
+            let name = match item {
+                TopLevel::Definition(d) => &d.name,
+                TopLevel::Export(e) => match &*e.inner {
+                    TopLevel::Definition(d) => &d.name,
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            let params: Vec<String> = match item {
+                TopLevel::Definition(d) => d.type_params.iter().map(|p| p.name.clone()).collect(),
+                TopLevel::Export(e) => match &*e.inner {
+                    TopLevel::Definition(d) => d.type_params.iter().map(|p| p.name.clone()).collect(),
+                    _ => vec![],
+                },
+                _ => vec![],
+            };
+            if params.is_empty() {
+                None
+            } else {
+                Some((name.clone(), params))
+            }
+        })
+        .collect();
+
     // 2026-08-09 (Phase 12, SPEC §18.2): the meld declaration collection is
     // removed — foreign shapes adapt through EXPLICIT protocol cast edges,
     // not an implicit meld admission; `meld_coercible` was removed.
@@ -2692,6 +2766,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         fn_return_types: &fn_return_types,
         optional_frgns: &optional_frgns,
         fn_param_types: &fn_param_types,
+        fn_type_params: &fn_type_params,
         all_parse_bindings: &all_parse_bindings,
         all_type_parents: &all_type_parents,
         all_regular_ops: &all_regular_ops,
@@ -3031,6 +3106,8 @@ struct CheckEnv<'a> {
     fn_return_types: &'a HashMap<String, Type>,
     optional_frgns: &'a std::collections::HashSet<String>,
     fn_param_types: &'a HashMap<String, Vec<Type>>,
+    /// 2026-08-14 (generic `defn f<T>`): declared type params per defn.
+    fn_type_params: &'a HashMap<String, Vec<String>>,
     all_parse_bindings: &'a HashMap<String, Vec<OperatorBinding>>,
     all_type_parents: &'a HashMap<String, String>,
     all_regular_ops: &'a HashMap<String, Vec<crate::ast::top::OperatorDef>>,
@@ -3061,6 +3138,7 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.type_members = env.all_type_members.clone();
     ctx.type_params = env.all_type_params.clone();
     ctx.fn_param_types = env.fn_param_types.clone();
+    ctx.fn_type_params = env.fn_type_params.clone();
     ctx.type_protocols = env.all_type_protocols.clone();
     ctx.variant_cross_ops = env.all_cross_ops.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
@@ -3580,6 +3658,100 @@ fn is_stream_symbol(name: &str) -> bool {
     matches!(name, "#StdOut" | "#StdErr" | "#StdIn")
 }
 
+/// 2026-08-14 (generic `defn f<T>` dispatch): infer the concrete type args of
+/// a generic defn from its call-site arguments. Each parameter type is
+/// unified against the corresponding argument type, binding the defn's type
+/// params (`List<T>` vs `List<Int>` → `T = Int`). Returns the concrete types
+/// in the defn's declared param order, or `Ok(None)` if inference is
+/// inconclusive (defers to the raw-type fallback). A mismatch that is NOT a
+/// type-param variance is a normal type error.
+fn infer_defn_type_args(
+    name: &str,
+    params: &[String],
+    args: &[Expr],
+    ctx: &mut TypecheckContext,
+) -> Result<Option<Vec<Type>>, TypeError> {
+    let param_tys = ctx.fn_param_types.get(name).cloned().unwrap_or_default();
+    if param_tys.len() != args.len() {
+        return Ok(None);
+    }
+    let mut bindings: std::collections::HashMap<String, Option<Type>> =
+        params.iter().map(|p| (p.clone(), None)).collect();
+    for (i, arg) in args.iter().enumerate() {
+        let arg_ty = infer_type_only(arg, ctx)?;
+        let param_ty = &param_tys[i];
+        if !unify_defn_type(param_ty, &arg_ty, &mut bindings) {
+            return Err(TypeError::TypeMismatch {
+                expected: format!("{}", param_ty),
+                found: format!("{}", arg_ty),
+                context: format!("argument {} of '{}'", i, name),
+            });
+        }
+    }
+    // The inferred concrete types in the defn's declared param order. If any
+    // param went unbound (not constrained by the args), try the enclosing
+    // `let` annotation's expected type — a nullary generic (`new_stack<T>()`)
+    // binds its param from `let s: Stack<Int> = new_stack()`.
+    let mut concrete: Vec<Type> = Vec::with_capacity(params.len());
+    let mut all_bound = true;
+    for p in params {
+        match bindings.get(p).cloned().unwrap_or(None) {
+            Some(t) => concrete.push(t),
+            None => {
+                if let Some(expected) = &ctx.expected_call_type {
+                    if let Some(ret) = ctx.fn_return_types.get(name).cloned() {
+                        let mut eb = std::collections::HashMap::new();
+                        if unify_defn_type(&ret, expected, &mut eb) {
+                            if let Some(t) = eb.get(p).cloned().unwrap_or(None) {
+                                concrete.push(t);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                all_bound = false;
+                concrete.push(Type::int());
+            }
+        }
+    }
+    if all_bound {
+        Ok(Some(concrete))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Unify a defn parameter type against a concrete argument type, binding the
+/// defn's type params. A param that IS a type param binds to the arg; a
+/// structured param (`List<T>`) recurses; a concrete-vs-concrete equality is
+/// fine; anything else is a mismatch (returns false).
+fn unify_defn_type(param: &Type, arg: &Type, bindings: &mut std::collections::HashMap<String, Option<Type>>) -> bool {
+    // A bare type param: `T` unifies with any concrete arg type.
+    if let Type::Custom(name) = param {
+        if bindings.contains_key(name) {
+            let existing = bindings.get(name).cloned().unwrap_or(None);
+            if existing.is_none() {
+                bindings.insert(name.clone(), Some(arg.clone()));
+            }
+            return true;
+        }
+    }
+    match (param, arg) {
+        (Type::Custom(p), Type::Custom(a)) => p == a,
+        (Type::Applied(pn, p_args), Type::Applied(an, a_args)) => {
+            pn == an && p_args.len() == a_args.len()
+                && p_args.iter().zip(a_args).all(|(p, a)| unify_defn_type(p, a, bindings))
+        }
+        (Type::Ptr(p), Type::Ptr(a)) => unify_defn_type(p, a, bindings),
+        (Type::PtrConst(p), Type::PtrConst(a)) => unify_defn_type(p, a, bindings),
+        (Type::Vector(p, _), Type::Vector(a, _)) => unify_defn_type(p, a, bindings),
+        (Type::Tuple(p), Type::Tuple(a)) => {
+            p.len() == a.len() && p.iter().zip(a).all(|(p, a)| unify_defn_type(p, a, bindings))
+        }
+        _ => param == arg,
+    }
+}
+
 /// Resolve a stream symbol's type — a system pointer handle (`#StdIn`), or
 /// void for the write-only streams (`#StdOut`/`#StdErr` are only valid as
 /// arrow targets, never read as values).
@@ -3720,6 +3892,59 @@ txn push [v == 3][c.count == 3] {
         // A typecheck failure here means the op-as-member body was not
         // self-parameterized, or the arrow did not resolve the operator member.
         check(src).expect("op-as-member must typecheck");
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): a call to a generic defn
+    /// infers the type param from the argument and substitutes it into the
+    /// return type — `id(5)` returns Int, `id(1.5)` returns Float, not the
+    /// free `T`. (Collection-op generics are verified end-to-end; the unit
+    /// `check()` has no stdlib, so `List` isn't in type_members here.)
+    #[test]
+    fn generic_defn_call_infers_type_param() {
+        let src = r#"
+defn id<T>(x: T) -> T [true][x == x] {
+    term x;
+};
+node probe [true][x == x] {
+    let a: Int = id(5);
+    term;
+};
+"#;
+        check(src).expect("generic defn call must infer the type param");
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): two type params infer from
+    /// two distinct arguments.
+    #[test]
+    fn generic_defn_two_type_params() {
+        let src = r#"
+defn id<T>(x: T) -> T [true][x == x] {
+    term x;
+};
+node probe [true][x == x] {
+    let a: Int = id(5);
+    let b: Float = id(1.5);
+    term;
+};
+"#;
+        check(src).expect("two-param generic defn calls must infer");
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): an argument that does not
+    /// match the generic param shape is a clean type error, not a fallback.
+    #[test]
+    fn generic_defn_call_mismatch_errors() {
+        let src = r#"
+defn only_int<T>(x: List<T>) -> T [true][x == x] {
+    term At#(x, 0);
+};
+node probe [true][x == x] {
+    let v: Int = only_int(5);
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected a type error for a non-List generic arg, got: {:?}", e);
     }
 
     /// 2026-08-12 (Iterable protocol): a non-operator member body still fails
