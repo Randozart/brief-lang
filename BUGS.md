@@ -17,10 +17,27 @@ genuine live paths, verified in the compiled IR:
    `try_emit_tier_iteration` → `tier2_op_collection` does NOT fire for `List`
    in a real typecheck: the emitted IR for `foreach x in items` over a
    `List<Int>` state field or local contains `inttoptr` + `load i64, ptr`
-   (the hardcoded `[len]` header), and no `Count`/`At` calls. Root cause not
-   yet isolated (suspect: `obj_members` population for stdlib `obj List`, or
-   the field's stored type diverging from `Applied("List", …)` after
-   monomorphization). Deleting the arm now would break all List iteration.
+   (the hardcoded `[len]` header), and no `Count`/`At` calls. Deleting the
+   arm now would break all List iteration.
+
+   **ROOT CAUSE ISOLATED (2026-08-14):** `tier2_op_collection` returns None
+   because `ctx.obj_members` has no `"List"` entry in a default build —
+   `lib/std/collections.bv` (where `obj List<T>` declares `op Count`/`op At`)
+   is **never imported** by the prelude plugin (`plugins/parsed/prelude.bv`
+   imports `std/types/bootstrap.bv`, `std/protocols.bv`, `std/os/*`,
+   `std/env.bv`, `std/io.bv` — NOT `std/collections.bv`), and the documented
+   auto-core scan (`docs/architecture/prelude-and-import-magic.md` §auto-core
+   expects `{STDLIB}/std/core/collections.bv`) finds nothing because the
+   layout has `collections.bv` directly under `lib/std/` with no `std/core/`
+   directory. The typechecker's name-based `List` fallback
+   (`typechecker/mod.rs:816/1180`) lets `List<T>` typecheck, masking the gap,
+   and the backend silently falls back to the hardcoded layout.
+
+   **Verified:** an explicit `import "std/collections.bv"` makes
+   `tier2_op_collection` fire (`members_present=true`) and the IR emit
+   `Count`/`At` calls. Fix options (separate plan): add `std/collections.bv`
+   to the prelude imports, or restore the `std/core/` auto-core layout the
+   doc describes. Either makes the hardcoded List arm genuinely dead.
 3. `ringbuf_inline` is deliberately KEPT — a performance mechanism
    (`queue_drain_idio`/`float_math` were its bent gates), not legacy layout.
 4. Already done by prior work: `.^Length` collection error
