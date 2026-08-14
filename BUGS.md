@@ -35,9 +35,12 @@ genuine live paths, verified in the compiled IR:
 
    **Verified:** an explicit `import "std/collections.bv"` makes
    `tier2_op_collection` fire (`members_present=true`) and the IR emit
-   `Count`/`At` calls. Fix options (separate plan): add `std/collections.bv`
-   to the prelude imports, or restore the `std/core/` auto-core layout the
-   doc describes. Either makes the hardcoded List arm genuinely dead.
+   `Count`/`At` calls. **FIXED (commit `a53c7f90`):** the prelude plugin now
+   imports `std/collections.bv` (both branches), so `obj_members` always has
+   `List` and `foreach x in list` iterates through `op Count`/`op At` — the
+   hardcoded List arm is now production-dead (reached only by stdlib-free
+   unit tests like `foreach_list_program`). Full runtime suite MATCH, no
+   regression.
 3. `ringbuf_inline` is deliberately KEPT — a performance mechanism
    (`queue_drain_idio`/`float_math` were its bent gates), not legacy layout.
 4. Already done by prior work: `.^Length` collection error
