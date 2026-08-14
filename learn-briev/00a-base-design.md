@@ -146,11 +146,12 @@ list.len()           // UFCS: desugars to len(list)
 result.value         // Result unwrapping
 ```
 
-**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list .^Len`.
+**UFCS (Uniform Function Call Syntax):** `subject.method(args)` resolves to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list.^Length`. **2026-08-14 (Universal Operation Language):** every operation has three surfaces — a symbol (`+`, `c[i]`, `<-`), an intrinsic (`OpName#(a, b)`), and the UFCS method form (`a.OpName#(b)`). `a.OpName#(b)` resolves through the intrinsic/op identity when no literal member exists.
 
 **Priority hierarchy:**
 1. **Internal struct field/defn** — if `subject` has a field or internal `defn` defined in its struct body, it compiles as a direct access
-2. **UFCS fallback** — otherwise desugars to `method(subject, args)`
+2. **Operation/intrinsic (`OpName#`)** — `subject.OpName#(args)` resolves to `OpName#(subject, args)` (the op member or registered intrinsic)
+3. **UFCS fallback** — otherwise resolves to `method(subject, args)`
 
 **What this means**: Briev is transparent. If you see `something.field`, that struct exists somewhere in the standard library. Nothing is hidden magic.
 

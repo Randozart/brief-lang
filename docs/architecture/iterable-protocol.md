@@ -107,8 +107,20 @@ materializer copies only at the boundary (per flush, via `At`).
 | `CharCount#` | **computed** char count (operation intrinsic, protocol-dispatched) | `CharCount#(str)` |
 | `Abs#` | **computed** absolute value (intrinsic; SPEC §17.3) | `Abs#(-5)` |
 | `op Count` | **element count** (iteration contract) | `foreach`/`b-each` lowering |
+| `Count#` | **element count** — the intrinsic form of `op Count` (UOL §6b) | `Count#(c)` / `c.Count#()` |
+| `At#` | **element at index** — the intrinsic form of `op At` | `At#(c, i)` / `c.At#(i)` / `c[i]` |
 | `.^^Element` | element type — **implemented** (single-source proof form, §7) | `List<String>` → `String` |
 | `.^^Ops` | the type's operator surface (descriptor read) | iteration capability |
+
+**2026-08-14 (Universal Operation Language, §6b):** every operation has three
+invocation surfaces — a symbol (`+`, `c[i]`, `<-`, `foreach`), an intrinsic
+(`OpName#(a, b)`), and the UFCS method form (`a.OpName#(b)`). `OpName#` is
+recognized for any disclosed operation identity (the `operation_identities`
+vocab); `a.OpName#(b)` desugars to `OpName#(a, b)` when no literal member
+exists (member wins, then UFCS). Symbols are sugar over the same dispatch.
+Metadata that is compiler-known but non-operational is reflection. Runtime
+`.^Size` is DELETED — the element count of a collection is an operation, so
+its home is the `Count#` intrinsic, not a reflection target (§6a).
 
 `.^Length` never routes to an intrinsic. A `List`/`HashMap`/custom `.^Length`
 is a compile error — that length is member-managed or computed, not intrinsic.

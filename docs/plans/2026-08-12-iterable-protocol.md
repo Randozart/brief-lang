@@ -1,5 +1,16 @@
 # Plan: The Iterable Protocol — Schrödinger iteration (op-as-member, two-tier, structural satisfaction)
 
+> **2026-08-14 addendum (UOL §6b.6).** The §2/§16 "no collection intrinsics"
+> ruling is AMENDED. The ruling targeted engine/layout intrinsics (`RingPush#`
+> hardcodes a ring layout, `HeapSeqAppend#` a heap sequence). Protocol-
+> dispatched `OpName#` forms that call the type's OWN declared op members
+> (`Count#` → `op Count`, `At#` → `op At`, `InsertAt#` → `op InsertAt`, …) are
+> the intended uniform surface — the same governance `Add#`/`CharCount#`
+> already use, and the mechanism that makes generic functions over any
+> collection expressible. See `docs/plans/2026-08-14-string-unification-and-
+> boundary.md` §6b (the Universal Operation Language: every op has a symbol,
+> an intrinsic `OpName#`, and a UFCS method form `a.OpName#(b)`).
+
 > **2026-08-14 addendum (docs-reconciliation).** The §11.1 citation at :97 →
 > §11.4.1 (the iteration/operator contract section). The Tier-1 row at :103-104
 > is superseded by the 4-op cursor contract (`op Iter`+`op Step`+`op IsEnd`+

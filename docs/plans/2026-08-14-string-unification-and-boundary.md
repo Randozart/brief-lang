@@ -42,6 +42,26 @@
 > `Index#`/`At#`, web surface, and SPEC/doc updates; §6b.7 is the ordered work
 > list.
 
+> **2026-08-14 UOL execution addendum.** §7 commits 6-12 landed (green):
+> `dc870266` (vocab + signatures), `89036a14` (generative dispatch + UFCS
+> codegen/typechecker), `7005f206` (interpreter parity + Size/Bytes split),
+> `a223c37d` (`.^Size` deletion), `5e6f2006` (stdlib `.Count()` → `Count#()`).
+> Deviations, verified:
+> - The generative op-return inference runs FIRST for the element-bearing ops
+>   (`At#`/`Slice#`/`ExtractFrom#`/`CopyFrom#`/`Count#`/cursor ops) — the
+>   generic `Inferred` "first-arg type" rule would return the receiver for
+>   `At#`. Arithmetic/bitwise ops keep their exact signatures.
+> - `a.Add#(b)` must keep the `#` in the UFCS fallback (dispatch through the
+>   intrinsic signature), else it becomes a bare `@Add` call.
+> - The normalizer whitelist (`build_supported_ops`) needed the new `OpName#`
+>   forms, or it rejected them before codegen.
+> - The `.^Size` precondition bypass (elaborate_expr) reaches codegen — the
+>   deleted arm is a clean error directing to `Count#`, not a silent fallback.
+> - The generic `defn f<T>` dispatch gap (e.g. `new_stack<T>` return type not
+>   substituted) remains a follow-up (plan §8) — stdlib migration is sound for
+>   directly-typed collections; generic helpers over them still need the
+>   generic-function layer.
+
 > **2026-08-14 completion addendum.** All commits in §7 landed (green):
 > `74d13f19` (docs), `b88f6ee6` (String unification), `54136420` (`.^^Element`),
 > `ca9120f2` (Abs# + bit intrinsics), `0ea07424` (slice-5 diagnostic),

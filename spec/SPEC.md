@@ -996,10 +996,17 @@ elements.
 
 Indexed read `c[i]` resolves `op At` (Tier 2). `foreach` lowering uses the
 iteration operations internally; it never consults the reflection surface.
-A collection's logical length is the type's own member surface (`list.len`,
-`map.size()`); the reflection target `.^Length` (§17.1) is stored-length
-reflection and is not the collection-length mechanism. Transfer `c <- x` /
-`x <- c` resolves the mutation operators (§15.3).
+A collection's logical length is its element count, expressed by the
+`Count#` intrinsic (which dispatches to the type's declared `op Count`); the
+reflection target `.^Length` (§17.1) is stored-length reflection and is not
+the collection-length mechanism. **2026-08-14 (Universal Operation Language,
+§6b):** every operation has three invocation surfaces — a symbol (`+`, `c[i]`,
+`<-`, `foreach`), an intrinsic (`OpName#(a, b)`), and the UFCS method form
+(`a.OpName#(b)`). `OpName#` is recognized for any disclosed operation
+identity; `a.OpName#(b)` desugars to `OpName#(a, b)` when no literal member
+exists (member wins, then UFCS). Symbols are sugar over the same dispatch.
+Metadata that is compiler-known but non-operational is reflection. Transfer
+`c <- x` / `x <- c` resolves the mutation operators (§15.3).
 
 #### 11.4.2 `String` is `Iterable<Char>`
 
