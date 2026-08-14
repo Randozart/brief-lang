@@ -1,5 +1,24 @@
 # Plan: String unification, `.^^Element`, and the op/reflection/intrinsic boundary
 
+> **2026-08-14 completion addendum.** All commits in §7 landed (green):
+> `74d13f19` (docs), `b88f6ee6` (String unification), `54136420` (`.^^Element`),
+> `ca9120f2` (Abs# + bit intrinsics), `0ea07424` (slice-5 diagnostic),
+> `41a06055` (slice-6 blockers recorded). Deviations from the plan, all
+> verified:
+> - `Abs#` was **already** dispatched via `template_for_op` (the plan's "no
+>   dispatch" claim was stale) — the migration was registration + deprecation.
+> - The `Abs#` "arity-broken" claim was wrong: `parameters: vec![]` is the
+>   inferred-arity convention shared by Add#/Neg#/etc. — unchanged.
+> - Slice-6 deletions 1-3 are BLOCKED on live paths (see `BUGS.md`
+>   "Iterable-protocol slice-6 deletions blocked"): `emit_heap_seq` serves
+>   `Expr::Tuple` + expression-position literals; the hardcoded `List` foreach
+>   arm is the live path because `tier2_op_collection` doesn't fire for `List`
+>   in real typechecks. §10.4/6/7 were already done. `ringbuf_inline` kept.
+> - **Follow-ups (separate):** (a) isolate why `tier2_op_collection` misses
+>   `List` — unblocks the slice-6 deletions; (b) ringbuf A/B rebuild under the
+>   Performance Recovery Protocol with a baseline table; (c) `.^Absolute` →
+>   unknown-target error after the deprecation release.
+
 **2026-08-14.** Consolidates the remaining work from two working drafts
 (`.opencode/plans/2026-08-14-docs-reconciliation.md`,
 `.opencode/plans/2026-08-14-op-vs-reflection-boundary.md`) with the String

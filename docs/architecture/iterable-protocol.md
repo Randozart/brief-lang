@@ -105,14 +105,19 @@ materializer copies only at the boundary (per flush, via `At`).
 |---|---|---|
 | `.^Length` | **stored** length: `Data` byte header, `String` byte header, `Vector` descriptor count | `str.^Length` → byte count |
 | `CharCount#` | **computed** char count (operation intrinsic, protocol-dispatched) | `CharCount#(str)` |
+| `Abs#` | **computed** absolute value (intrinsic; SPEC §17.3) | `Abs#(-5)` |
 | `op Count` | **element count** (iteration contract) | `foreach`/`b-each` lowering |
-| `.^^Element` | element type from the generic args (descriptor read) | `List<String>` → `String` |
+| `.^^Element` | element type — **implemented** (single-source proof form, §7) | `List<String>` → `String` |
 | `.^^Ops` | the type's operator surface (descriptor read) | iteration capability |
 
 `.^Length` never routes to an intrinsic. A `List`/`HashMap`/custom `.^Length`
 is a compile error — that length is member-managed or computed, not intrinsic.
-The current `.^Absolute` reflection likewise gives way to `Abs#` (§17.3).
-`Bytes#` is not added — byte length is stored, `.^Length` reads it.
+**2026-08-14:** `.^Absolute` is a DEPRECATED alias for `Abs#` (same `llvm.abs`
+emission, surfaces a deprecation warning) for one release, then a compile
+error — abs is a computed truth, so its home is the intrinsic, not a
+reflection target (SPEC §17.3). The bit transformations are intrinsics too:
+`BitReverse#`/`Popcount#`/`LeadingZeros#`/`TrailingZeros#`. `Bytes#` is not
+added — byte length is stored, `.^Length` reads it.
 
 ## 7. Element type
 
