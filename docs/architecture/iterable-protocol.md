@@ -248,7 +248,7 @@ Briev already covers most of the platform-agnostic intrinsic surface (atomics
 GPU workgroup, pointer/index `Ptr#`/`Index#`/`Deref#`). The audit adds, with
 stdlib wrappers and software fallbacks per target:
 
-- Bit manipulation: `Clz#`, `Ctz#`, `PopCount#`, `Bswap#`, `Rotl#`, `Rotr#`,
+- Bit manipulation: `Clz#`, `Ctz#`, `Popcount#`, `Bswap#`, `Rotl#`, `Rotr#`,
   `BitReverse#`.
 - Overflow-checked / wide arithmetic: `AddOverflow#`, `SubOverflow#`,
   `MulOverflow#`, `MulWide#`, `CarryingAdd#`.

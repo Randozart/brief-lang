@@ -676,6 +676,75 @@ fn test_foreach_string_emits_char_decode_lane() {
         "the decoded codepoint must be truncated to Char's native i32; got:\n{output}");
 }
 
+/// 2026-08-14 (boundary plan, SPEC §17.3): the four bit intrinsics dispatch
+/// to their LLVM lanes — `Popcount#` → ctpop, `LeadingZeros#` → ctlz,
+/// `TrailingZeros#` → cttz, `BitReverse#` → bitreverse.
+#[test]
+fn test_bit_intrinsics_emit_llvm_lanes() {
+    let src = r#"
+let a: Int = 5;
+node report [a > 0][true] {
+    let p: Int = Popcount#(a);
+    let l: Int = LeadingZeros#(a);
+    let t: Int = TrailingZeros#(a);
+    let b: Int = BitReverse#(a);
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("llvm.ctpop"), "Popcount# must emit llvm.ctpop; got:\n{ir}");
+    assert!(ir.contains("llvm.ctlz"), "LeadingZeros# must emit llvm.ctlz; got:\n{ir}");
+    assert!(ir.contains("llvm.cttz"), "TrailingZeros# must emit llvm.cttz; got:\n{ir}");
+    assert!(ir.contains("llvm.bitreverse"), "BitReverse# must emit llvm.bitreverse; got:\n{ir}");
+}
+
+/// 2026-08-14 (boundary plan): `Abs#` emits `llvm.abs` (int path) — the
+/// intrinsic's home for a computed truth (SPEC §17.3).
+#[test]
+fn test_abs_intrinsic_emits_llvm_abs() {
+    let src = r#"
+let a: Int = -7;
+node report [a < 0][true] {
+    let b: Int = Abs#(a);
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("llvm.abs"), "Abs# must emit llvm.abs; got:\n{ir}");
+}
+
+/// 2026-08-14 (boundary plan): `x.^Absolute` still compiles (deprecated
+/// alias) but surfaces a deprecation warning directing to `Abs#`.
+#[test]
+fn test_absolute_reflection_deprecation_warns() {
+    let src = r#"
+let a: Int = -7;
+node report [a < 0][true] {
+    let b: Int = a.^Absolute;
+    term;
+};
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut backend = LlvmBackend::new();
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("llvm.abs"), ".^Absolute must still emit llvm.abs (deprecated alias); got:\n{ir}");
+    assert!(
+        backend.warnings.iter().any(|w| w.contains(".^Absolute") && w.contains("Abs#")),
+        "the deprecated `.^Absolute` must surface a warning directing to Abs#; got: {:?}",
+        backend.warnings
+    );
+}
+
 /// A program with a `Int[2][3]` state field written and read at `[1][2]` —
 /// exercises the multi-dim array layout + row-view GEPs (2026-08-07, Phase 7).
 fn multidim_program() -> Vec<TopLevel> {

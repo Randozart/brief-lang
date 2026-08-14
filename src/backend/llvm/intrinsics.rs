@@ -195,6 +195,14 @@ pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Optio
         ("Ge", false) => Some(format!("%v = icmp sge {} %a, %b", int_llvm)),
         ("Neg", false) => Some(format!("%v = sub nsw {} 0, %a", int_llvm)),
         ("Abs", false) => Some(format!("%v = call {} @llvm.abs.{}({} %a, i1 false)", int_llvm, int_llvm, int_llvm)),
+        // 2026-08-14 (boundary plan, SPEC §17.3): the four bit intrinsics —
+        // declared at emit_toplevel.rs, now dispatched here. All integer
+        // unary; ctlz/cttz take the poison-on-zero flag (false = return the
+        // bit width for an all-zero input, matching C semantics).
+        ("BitReverse", false) => Some(format!("%v = call {} @llvm.bitreverse.{}({} %a)", int_llvm, int_llvm, int_llvm)),
+        ("Popcount", false) => Some(format!("%v = call {} @llvm.ctpop.{}({} %a)", int_llvm, int_llvm, int_llvm)),
+        ("LeadingZeros", false) => Some(format!("%v = call {} @llvm.ctlz.{}({} %a, i1 false)", int_llvm, int_llvm, int_llvm)),
+        ("TrailingZeros", false) => Some(format!("%v = call {} @llvm.cttz.{}({} %a, i1 false)", int_llvm, int_llvm, int_llvm)),
 
         ("BitAnd", false) => Some(format!("%v = and {} %a, %b", int_llvm)),
         ("BitOr", false) => Some(format!("%v = or {} %a, %b", int_llvm)),

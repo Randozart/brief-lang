@@ -64,6 +64,12 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Shl#" => Some(Signature { name: "Shl#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Shr#" => Some(Signature { name: "Shr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "BitNot#" => Some(Signature { name: "BitNot#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        // ── Bit manipulation (SPEC §17.3; vocab:260 lists the names, the
+        //   signatures were the gap) ───────────────────────────────────────
+        "BitReverse#" => Some(Signature { name: "BitReverse#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "Popcount#" => Some(Signature { name: "Popcount#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "LeadingZeros#" => Some(Signature { name: "LeadingZeros#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "TrailingZeros#" => Some(Signature { name: "TrailingZeros#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         // ── Logical (unary, no short-circuit) ────────────────────────────
         "Not#" => Some(Signature { name: "Not#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         // ── Pointer operations ─────────────────────────────────────────
@@ -328,6 +334,7 @@ mod tests {
     fn test_all_intrinsics_have_signatures() {
         let intrinsics = [
             "Add#", "Sub#", "Mul#", "Div#", "Rem#", "Neg#", "Abs#",
+            "BitReverse#", "Popcount#", "LeadingZeros#", "TrailingZeros#",
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
             "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",

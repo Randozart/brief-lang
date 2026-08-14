@@ -70,6 +70,25 @@ pub fn execute_intrinsic(
             let a = arg_as_i64(args, 0)?;
             Ok(i64_to_bits(a.wrapping_abs()))
         }
+        // 2026-08-14 (boundary plan, SPEC §17.3): the four bit intrinsics —
+        // interpreter parity with the LLVM llvm.bitreverse/ctpop/ctlz/cttz
+        // lanes (rule #4). All operate on the i64 word.
+        "BitReverse#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(a.reverse_bits()))
+        }
+        "Popcount#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(a.count_ones() as i64))
+        }
+        "LeadingZeros#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(a.leading_zeros() as i64))
+        }
+        "TrailingZeros#" => {
+            let a = arg_as_i64(args, 0)?;
+            Ok(i64_to_bits(a.trailing_zeros() as i64))
+        }
 
         // ── Comparison (type-polymorphic) ───────────────────────────
         "Eq#"  => exec_cmp(args, |a, b| a == b, |a, b| (a - b).abs() < 1e-10),
@@ -848,6 +867,31 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("NonExistent#", &[], &mut heap);
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_bit_intrinsics_parity() {
+        // 2026-08-14 (boundary plan, SPEC §17.3): interpreter parity with the
+        // LLVM llvm.ctpop/ctlz/cttz/bitreverse lanes (rule #4). Value 0b0110
+        // (= 6): 2 set bits, 61 leading zeros, 1 trailing zero; bit-reversed
+        // = 0x6000000000000000.
+        let mut heap = VirtualHeap::new();
+        assert_eq!(
+            execute_intrinsic("Popcount#", &[i64_to_bits(6)], &mut heap).unwrap().as_i64(),
+            Some(2)
+        );
+        assert_eq!(
+            execute_intrinsic("LeadingZeros#", &[i64_to_bits(6)], &mut heap).unwrap().as_i64(),
+            Some(61)
+        );
+        assert_eq!(
+            execute_intrinsic("TrailingZeros#", &[i64_to_bits(6)], &mut heap).unwrap().as_i64(),
+            Some(1)
+        );
+        assert_eq!(
+            execute_intrinsic("BitReverse#", &[i64_to_bits(6)], &mut heap).unwrap().as_i64(),
+            Some(0x6000000000000000i64)
+        );
     }
 
     #[test]

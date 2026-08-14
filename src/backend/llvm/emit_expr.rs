@@ -2805,6 +2805,13 @@ impl LlvmBackend {
             },
             ("Absolute", ReflectKind::Runtime) => {
                 // 2026-08-04: `x.^Absolute` — emit `llvm.abs.i64`.
+                // 2026-08-14 (boundary plan, SPEC §17.3): DEPRECATED — abs is a
+                // computed truth, so its home is the `Abs#` intrinsic, not a
+                // reflection target. Kept as an alias for one release (same
+                // emission); a follow-up makes it an unknown-target error.
+                self.warnings.push(format!(
+                    "warning: `x.^Absolute` is deprecated — use the `Abs#` intrinsic"
+                ));
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, r, recv_reg.name).ok();
                 TypedRegister { name: r, ty: Type::int() }
