@@ -743,6 +743,23 @@ pub fn infer_expression(
                     Provenance::Unknown,
                 ))
             } else {
+                // 2026-08-14 (generic `defn f<T>`): an EMPTY list in a generic
+                // body adopts the declared return's element type when it is a
+                // free type param — `defn empty_list<T>() -> List<T> { term
+                // []; }` must be `List<T>`, not the `List<Int>` default.
+                let declared = ctx.current_output_type.clone();
+                if let Some(Type::Applied(base, args)) = declared {
+                    if base == "List" {
+                        if let Some(elem) = args.first() {
+                            if matches!(elem, Type::Custom(_)) {
+                                return Ok((
+                                    Type::Applied("List".into(), vec![elem.clone()]),
+                                    Provenance::Unknown,
+                                ));
+                            }
+                        }
+                    }
+                }
                 Ok((
                     Type::Applied("List".into(), vec![Type::int()]),
                     Provenance::Unknown,
@@ -1492,7 +1509,18 @@ pub fn elaborate_ops(items: &mut [TopLevel], universe: &TypeUniverse, env: &Chec
                 }
                 elaborate_stmts(&mut d.body, &mut ctx, &mut errors);
                 elaborate_expr(&mut d.contract.pre_condition, &mut ctx, &mut errors);
+                // 2026-08-14 (`term` canonical result placeholder): bind
+                // `term` to the declared output type while elaborating the
+                // POST-condition — `[term == true]`, `[term.Count#() == n]`
+                // typecheck with the real return type, not the Int fallback.
+                let term_ty = d.output_type.as_ref().map(output_type_to_type);
+                let saved = ctx.bindings.insert("term".to_string(), term_ty.unwrap_or(Type::void()));
                 elaborate_expr(&mut d.contract.post_condition, &mut ctx, &mut errors);
+                if let Some(prev) = saved {
+                    ctx.bindings.insert("term".to_string(), prev);
+                } else {
+                    ctx.bindings.remove("term");
+                }
             }
             TopLevel::Transaction(t) => {
                 for (name, ty) in &t.parameters {
@@ -1500,7 +1528,14 @@ pub fn elaborate_ops(items: &mut [TopLevel], universe: &TypeUniverse, env: &Chec
                 }
                 elaborate_stmts(&mut t.body, &mut ctx, &mut errors);
                 elaborate_expr(&mut t.contract.pre_condition, &mut ctx, &mut errors);
+                let term_ty = t.output_type.as_ref().map(output_type_to_type);
+                let saved = ctx.bindings.insert("term".to_string(), term_ty.unwrap_or(Type::void()));
                 elaborate_expr(&mut t.contract.post_condition, &mut ctx, &mut errors);
+                if let Some(prev) = saved {
+                    ctx.bindings.insert("term".to_string(), prev);
+                } else {
+                    ctx.bindings.remove("term");
+                }
             }
             TopLevel::Statement(stmt) => elaborate_stmt(stmt, &mut ctx, &mut errors),
             TopLevel::Constant(c) => elaborate_expr(&mut c.expr, &mut ctx, &mut errors),
@@ -3945,6 +3980,58 @@ node probe [true][x == x] {
 "#;
         let e = check(src);
         assert!(e.is_err(), "expected a type error for a non-List generic arg, got: {:?}", e);
+    }
+
+    /// 2026-08-14 (generic `defn f<T>` dispatch): an EMPTY list literal in a
+    /// generic body adopts the declared return's element type param — `term
+    /// []` in `defn empty<T>() -> List<T>` is `List<T>`, not `List<Int>`.
+    #[test]
+    fn generic_defn_empty_list_adopts_return_param() {
+        let src = r#"
+defn empty<T>() -> List<T> [true][term == []] {
+    term [];
+};
+let a: List<Int> = [];
+node probe [a == []][true] {
+    term;
+};
+"#;
+        check(src).expect("an empty list in a generic body must adopt the declared return's type param");
+    }
+
+    /// 2026-08-14 (`term` canonical result placeholder): `term` in a defn's
+    /// POST-condition is bound to the declared return type — `[term == true]`
+    /// on a Bool-returning defn typechecks, and a type mismatch errors.
+    #[test]
+    fn term_result_placeholder_binds_to_return_type() {
+        let src = r#"
+defn is_odd(x: Int) -> Bool [true][term == true || term == false] {
+    term x % 2 == 1;
+};
+let b: Bool = false;
+node probe [b == false][b == true] {
+    term;
+};
+"#;
+        check(src).expect("`term` in a post-condition must bind to the declared return type");
+    }
+
+    /// 2026-08-14 (`term` canonical result placeholder): a post-condition that
+    /// compares `term` against a mismatched type is now a REAL error (the old
+    /// `elaborate_expr` swallowed it as an Int fallback).
+    #[test]
+    fn term_result_placeholder_type_mismatch_errors() {
+        let src = r#"
+defn bad(x: Int) -> Int [true][term == true] {
+    term x;
+};
+node probe [true][true] {
+    let a: Int = bad(1);
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "a post-condition comparing Int `term` to Bool must error, got: {:?}", e);
     }
 
     /// 2026-08-12 (Iterable protocol): a non-operator member body still fails

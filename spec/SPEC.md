@@ -693,7 +693,7 @@ the metadata vocabulary.
 ### 9.1 Functions
 
 ```briev
-defn add(left: Int, right: Int) -> Int [true][#R == left + right] {
+defn add(left: Int, right: Int) -> Int [true][term == left + right] {
     term left + right;
 };
 ```
@@ -870,7 +870,7 @@ verification pipeline.
 Callable and transition contracts use precondition/postcondition brackets:
 
 ```briev
-defn divide(a: Int, b: Int) -> Int [b != 0][#R * b == a] {
+defn divide(a: Int, b: Int) -> Int [b != 0][term * b == a] {
     term a / b;
 };
 ```
@@ -1257,7 +1257,7 @@ Compiler-known operand hashwords include:
 
 - `#Lh`: left operand;
 - `#Rh`: right operand;
-- `#R`: result position in operation contracts (per operation signature);
+- `term`: result placeholder in post-conditions (`[term == left + right]`);
 - `#T`: type parameter;
 - `#Self`: semantic self-reference.
 
@@ -1608,7 +1608,7 @@ export defn add(left: Int, right: Int) -> Int {
 
 ```briev
 asm<x86_64> add_words(left: Int, right: Int) -> Int
-    [true][#R == left + right]
+    [true][term == left + right]
     !> effects: [read, pure]
 {
     "add ...";
