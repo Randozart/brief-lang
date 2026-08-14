@@ -10,6 +10,12 @@ $(Parsed @ highest) {
         anchor.Before$().Insert$(
             Import$("std/types/bootstrap.bv"),
             Import$("std/protocols.bv"),
+            // 2026-08-14 (slice-6 unblock): collections.bv declares the
+            // iteration ops (`obj List<T>` op Count/op At). Without it the
+            // typechecker's name-fallback lets `List<T>` typecheck but the
+            // backend has no obj_members → tier2 iteration never fires and
+            // foreach silently falls back to the hardcoded List layout.
+            Import$("std/collections.bv"),
             Import$("std/os/fs.bv"),
             Import$("std/os/net.bv"),
             Import$("std/os/signal.bv"),
@@ -30,6 +36,8 @@ $(Parsed @ highest) {
             txn_anchor.Before$().Insert$(
                 Import$("std/types/bootstrap.bv"),
                 Import$("std/protocols.bv"),
+                // 2026-08-14 (slice-6 unblock): see the anchor branch note.
+                Import$("std/collections.bv"),
                 Import$("std/os/fs.bv"),
                 Import$("std/os/net.bv"),
                 Import$("std/os/signal.bv"),
