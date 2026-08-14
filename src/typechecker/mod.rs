@@ -1086,7 +1086,7 @@ pub fn infer_expression(
         // parameter list.
         Expr::MethodCall(recv, name, args, _) => {
             let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
-            let result_ty = resolve_method_call(&recv_ty, name, args, ctx)?;
+            let result_ty = resolve_method_call(recv, &recv_ty, name, args, ctx)?;
             Ok((result_ty, recv_prov))
         }
         Expr::FormattingAnnotation(_) => Ok((Type::void(), Provenance::Unknown)),
@@ -1250,6 +1250,28 @@ pub fn infer_type_only(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type, 
 fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<Type, TypeError> {
     // Intrinsic call (ends with #): look up signature
     if name.ends_with('#') {
+        let op_name = name.trim_end_matches('#');
+        // 2026-08-14 (UOL §6b.2): generative op-identity dispatch — an
+        // `OpName#` that names a disclosed OPERATION dispatches to the type's
+        // declared op member on arg[0]. For the element-bearing collection ops
+        // (`At#`/`Slice#`/`ExtractFrom#`/`CopyFrom#`) the return IS the op
+        // member's output — NOT the generic "first-arg type" rule (`At#` on
+        // `List<Int>` must be `Int`, the `op At` return, not `List<Int>`), so
+        // this path runs FIRST for them. Arithmetic/bitwise ops (`Add#`,
+        // `Eq#`, …) keep their exact signatures + template dispatch — their
+        // receivers are scalars with no op members, and the generative path
+        // would wrongly error. `Count#`/`InsertAt#` ride the signature path
+        // (Native Int / Exact Void are already correct); `Count#` on a
+        // `#String` is handled inside infer_generative_op_call via the
+        // signature-free fallthrough below.
+        let op_inferred = matches!(op_name,
+            "At" | "Slice" | "ExtractFrom" | "CopyFrom"
+            | "Count" | "Iter" | "Step" | "IsEnd" | "Current");
+        if op_inferred && is_operation_identity(op_name) {
+            if let Some(ty) = infer_generative_op_call(op_name, args, ctx)? {
+                return Ok(ty);
+            }
+        }
         let sig = get_intrinsic_signature(name).ok_or_else(|| {
             // 2026-08-06 (diagnostics): the PascalCase intrinsic forms of the
             // env macros were renamed to lowercase macros — direct the user
@@ -3178,8 +3200,10 @@ fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> O
 
 /// 2026-07-31: Reflection table (D1). `^` = runtime, `^^` = compile-time.
 /// A target used with the wrong kind is an error; an unknown target is an
-/// error. `Len`/`Ptr` are runtime; `Size`/`Bytes`/`Alignment`/`Type` are
-/// compile-time (foldable).
+/// error. `Len`/`Ptr`/`Size` (runtime) are element/stored reads; `Bytes`/
+/// `Alignment`/`Type`/`Element` and `Size` (compile-time) are foldable
+/// descriptors. `.^Size` runtime = element count via `op Count`/`CharCount#`
+/// (2026-08-14, Boxed Cat — never a `len` slot-name guess).
 fn resolve_reflect(
     receiver: &Type,
     target: &str,
@@ -3241,12 +3265,12 @@ fn resolve_reflect(
         // reflection target. The deprecated alias release has passed; it is
         // now an unknown-target error (the catch-all below), directing to
         // `Abs#`. (Was: `x.^Absolute` → the receiver's type, 2026-08-04.)
-        "Size" => {
-            if !is_compile_time {
-                return Err(wrong_kind("compile-time"));
-            }
-            Ok(Type::int())
-        }
+        // 2026-08-14 (Boxed Cat, iterable-protocol §10.4): `.^Size` (runtime)
+        // on a collection is the ELEMENT COUNT, resolved through the type's
+        // declared `op Count` at codegen (never a `len` slot-name guess); on a
+        // `#String` it is `CharCount#`; on a vector, the shape count. `.^^Size`
+        // (compile-time) folds the vector shape. Both resolve to Int.
+        "Size" => Ok(Type::int()),
         "Bytes" => {
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
@@ -3290,7 +3314,12 @@ fn resolve_reflect(
 /// type, substitute the receiver's type arguments for the obj's type
 /// parameters, validate each arg against the substituted parameter types, and
 /// return the member's (substituted) result type.
+/// 2026-08-14 (UOL §6b.2): UFCS priority — literal member wins, then a
+/// generative op (`a.At#(i)` → `At#(a, i)`), then a plain top-level function
+/// with the receiver prepended (`a.f(x)` → `f(a, x)`). A trailing `#` is
+/// stripped for the member lookup.
 fn resolve_method_call(
+    recv: &Expr,
     receiver: &Type,
     name: &str,
     args: &[Expr],
@@ -3306,19 +3335,32 @@ fn resolve_method_call(
             });
         }
     };
-    let members = ctx.type_members.get(type_name).ok_or_else(|| {
-        TypeError::InvalidOperation {
-            operation: format!("method call '.{}()'", name),
-            type_name: format!("type '{}' has no obj members", type_name),
+    let lookup_name = name.trim_end_matches('#');
+    let members = ctx.type_members.get(type_name).cloned().unwrap_or_default();
+    let member = members.iter().find(|m| member_name(m) == lookup_name).cloned();
+    let member = match member {
+        Some(m) => m,
+        // 2026-08-14 (UOL §6b.2): UFCS fallback — `a.OpName#(b)` → `OpName#(a, b)`
+        // (generative op or registered intrinsic), or `a.f(b)` → `f(a, b)` for a
+        // plain top-level function.
+        None => {
+            let mut all = vec![(*recv).clone()];
+            all.extend(args.iter().cloned());
+            if name.ends_with('#') {
+                // 2026-08-14 (UOL §6b): keep the `#` — `a.Add#(b)` resolves via
+                // the intrinsic signature / generative op identity, never a
+                // bare top-level function.
+                return infer_call(name, &all, ctx);
+            }
+            if ctx.fn_return_types.contains_key(name) {
+                return infer_call(name, &all, ctx);
+            }
+            return Err(TypeError::InvalidOperation {
+                operation: format!("method call '.{}()'", name),
+                type_name: format!("type '{}' has no member '{}'", type_name, name),
+            });
         }
-    })?;
-    let member = members
-        .iter()
-        .find(|m| member_name(m) == name)
-        .ok_or_else(|| TypeError::InvalidOperation {
-            operation: format!("method call '.{}()'", name),
-            type_name: format!("type '{}' has no member '{}'", type_name, name),
-        })?;
+    };
     // Build the type-argument substitution: obj's declared type params → the
     // receiver's concrete type args.
     let subst = match receiver {
@@ -3332,8 +3374,8 @@ fn resolve_method_call(
         }
         _ => HashMap::new(),
     };
-    let params = member_params(member);
-    let out = member_output(member);
+    let params = member_params(&member);
+    let out = member_output(&member);
     for (i, arg) in args.iter().enumerate() {
         let arg_ty = infer_type_only(arg, ctx)?;
         let param_ty = params
@@ -3364,6 +3406,83 @@ fn member_name(m: &TopLevel) -> String {
 /// 2026-08-12 (Iterable protocol, op-as-member): find an operator member
 /// (`op Name(...) { … }`) on a type by its operator name. The operator IS the
 /// member — no binding RHS, no bare member-name indirection (SPEC §15.2).
+/// 2026-08-14 (UOL §6b.1): the disclosed operation identities — the intrinsic
+/// forms (`OpName#`) of every operation. Mirrors `operation_identities` in
+/// `src/vocab.rs` and `is_operation_identity` in `src/backend/llvm/intrinsics.rs`;
+/// kept in lockstep with both.
+fn is_operation_identity(name: &str) -> bool {
+    matches!(name,
+        "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Abs"
+        | "Eq" | "Neq" | "Lt" | "Le" | "Gt" | "Ge"
+        | "And" | "Or" | "Not"
+        | "BitAnd" | "BitOr" | "BitXor" | "BitNot" | "Shl" | "Shr"
+        | "At" | "Slice" | "InsertAt" | "ExtractFrom" | "CopyFrom"
+        | "Append" | "Prepend"
+        | "Count" | "Iter" | "Step" | "IsEnd" | "Current")
+}
+
+/// 2026-08-14 (UOL §6b.2): a generative `OpName#(recv, args…)` call — the
+/// receiver type must declare the op member (`op At`, `op Count`, …); the
+/// return type is the op member's output substituted with the concrete
+/// generic args. `Some(ty)` when the op is declared; `Ok(None)` when the
+/// receiver is a `#String` and the op is `Count` (its element count is the
+/// `CharCount#` scan, `Native("Int")`); `Err` when the op is undeclared.
+fn infer_generative_op_call(
+    op_name: &str,
+    args: &[Expr],
+    ctx: &mut TypecheckContext,
+) -> Result<Option<Type>, TypeError> {
+    let recv = args.first();
+    let Some(recv) = recv else {
+        return Ok(None);
+    };
+    let recv_ty = infer_type_only(recv, ctx)?;
+    // A `#String` operand has no `op Count` — its element count is the char
+    // scan (CharCount#), so `Count#` on it is Int.
+    if op_name == "Count" && ctx.operand_implements_protocol(&recv_ty, "#String") {
+        return Ok(Some(Type::int()));
+    }
+    let base = match &recv_ty {
+        Type::Custom(n) => n.clone(),
+        Type::Applied(n, _) => n.clone(),
+        _ => {
+            return Err(TypeError::InvalidOperation {
+                operation: format!("call to '{}#',", op_name),
+                type_name: format!(
+                    "receiver type '{}' has no operator members",
+                    recv_ty
+                ),
+            });
+        }
+    };
+    let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
+    let member = operator_member(&members, op_name).ok_or_else(|| {
+        TypeError::InvalidOperation {
+            operation: format!("call to '{}#',", op_name),
+            type_name: format!(
+                "`{}#` requires the receiver type '{}' to declare `op {}`",
+                op_name, recv_ty, op_name
+            ),
+        }
+    })?;
+    // Infer the return from the op member's output, substituted with the
+    // receiver's concrete generic args (same evidence as resolve_element_type).
+    let args_of_recv = match &recv_ty {
+        Type::Applied(_, a) => a.clone(),
+        _ => Vec::new(),
+    };
+    let params = ctx.type_params.get(&base).cloned().unwrap_or_default();
+    let subst: std::collections::HashMap<String, Type> =
+        params.into_iter().zip(args_of_recv).collect();
+    let ret = member
+        .output_type
+        .as_ref()
+        .and_then(|o| o.all_types().into_iter().next())
+        .map(|t| substitute_type(&t, &subst))
+        .unwrap_or_else(Type::void);
+    Ok(Some(ret))
+}
+
 fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definition> {
     members.iter().find_map(|m| match m {
         TopLevel::TypeDefOperator(d) if d.name == op => Some(d),
@@ -4291,15 +4410,34 @@ node probe [done == false][done == true] { done = true; term; };
 
     #[test]
     fn reflect_kind_mismatch_errors() {
+        // `Bytes` is compile-time-only — runtime `.^Bytes` is a kind error.
         let src = r#"
 let x: Int = 5;
 node probe [true][true] {
-    let s: Int = x.^Size;
+    let s: Int = x.^Bytes;
     term;
 };
 "#;
         let e = check(src);
         assert!(e.is_err(), "expected reflection kind-mismatch error, got: {:?}", e);
+    }
+
+    #[test]
+    fn reflect_size_runtime_resolves_for_collections() {
+        // 2026-08-14 (Boxed Cat): `.^Size` (runtime) on an iterable is the
+        // ELEMENT COUNT — resolved via `op Count`/`CharCount#` at codegen, never
+        // a `len` slot-name guess. The typechecker allows it (Int result); the
+        // strict-body path now accepts it like `Length` does.
+        let src = r#"
+let s: String = "hi";
+let n: Int = 0;
+node probe [n < 10][n >= 2] {
+    n = s.^Size;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_ok(), "expected `.^Size` on String to resolve, got: {:?}", e);
     }
 
     #[test]

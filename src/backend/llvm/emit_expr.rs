@@ -2364,8 +2364,30 @@ impl LlvmBackend {
             }
         }
         let members = self.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
-        let member = members.iter().find(|m| member_briev_name(m) == name).cloned();
+        // 2026-08-14 (UOL §6b.2): `a.OpName#(b)` — UFCS method form. Strip a
+        // trailing `#` so the member lookup matches the op member (`op At`,
+        // not a literal member named `At#`).
+        let lookup_name = name.trim_end_matches('#');
+        let member = members.iter().find(|m| member_briev_name(m) == lookup_name).cloned();
         let Some(member) = member else {
+            // 2026-08-14 (UOL §6b): UFCS fallback — `a.f(b)` desugars to
+            // `f(a, b)` when no member matches (learn-briev/00a §UFCS). For a
+            // `#`-suffixed name, strip `#` and dispatch as a call (reaching the
+            // generative op dispatch or a registered intrinsic); for a plain
+            // name, call the top-level function with the receiver prepended.
+            if name.ends_with('#') {
+                // 2026-08-14 (UOL §6b): keep the `#` — `a.Add#(b)` dispatches
+                // through the intrinsic signature (`Add#`) or generative op
+                // identity, NOT a bare top-level function named `Add`.
+                let mut all = vec![(*recv).clone()];
+                all.extend(args.iter().cloned());
+                return self.emit_expr_inner(out, v, &Expr::Call(name.to_string(), all, None), indent);
+            }
+            if self.ctx.defn_params.contains_key(name) {
+                let mut all = vec![(*recv).clone()];
+                all.extend(args.iter().cloned());
+                return self.emit_user_call(out, v, name, &all, indent);
+            }
             panic!("method call '.{}()': no member '{}' on '{}'", name, name, type_name);
         };
         let arg_regs: Vec<(String, Type)> = args.iter().map(|a| {
@@ -2696,42 +2718,57 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                 TypedRegister { name: r, ty: Type::int() }
             }
-            // 2026-08-11 (housekeeping 1b fix): `x.^Size` on a collection
-            // (`List<String>` state field) — the receiver is an i64 handle to
-            // the heap obj; the element count is its `len` field (collections.bv
-            // `obj List<T> { inner: ListBuffer<T>; len: Int }`). GEP-by-offset
-            // and load, mirroring the obj-member access path. Only fires when
-            // the struct genuinely has a `len` slot.
+            // 2026-08-14 (Boxed Cat, iterable-protocol §10.4 row 4): `x.^Size`
+            // runtime on a COLLECTION is the ELEMENT COUNT, resolved through
+            // the collection's declared `op Count` behavior — never a `len`
+            // slot-name guess. The old heuristic (`name == "len"` in
+            // struct_types) violated the principle: RingBuffer has read/write
+            // (no `len`) and no `op Count`, so its count (`write - read`) is
+            // undeclarable by name. `op Count` asks the collection; no op →
+            // clean error directing to the iterable contract. `#String` is
+            // `Iterable<Char>`, so its element count is `CharCount#`. Vectors
+            // use the compile-time shape. `.^Size` always means "element count,
+            // however the type counts it."
             ("Size", ReflectKind::Runtime) => {
-                let obj_type = match &recv_reg.ty {
-                    Type::Custom(n) => Some(n.clone()),
-                    Type::Applied(n, _) => Some(n.clone()),
-                    _ => None,
-                };
-                let has_len = obj_type.as_ref().map_or(false, |n| {
-                    self.ctx.struct_types.get(n).map_or(false, |f| {
-                        f.iter().any(|(name, _)| name == "len")
-                    })
-                });
-                if has_len {
-                    let obj_type = obj_type.unwrap();
-                    let offset = self.lookup_field_offset(&obj_type, "len");
-                    // Width-aware: the List handle slot and its `len` field are
-                    // `i{int_bits}` (i32 on wasm32, i64 on x86_64) — never
-                    // hardcode i64.
-                    let iw = format!("i{}", self.ctx.int_bits);
-                    let base = self.fun.gen_reg();
-                    writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, base, iw, recv_reg.name).ok();
-                    let gep = self.fun.gen_reg();
-                    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, base, offset).ok();
-                    let r = self.fun.gen_reg();
-                    writeln!(out, "{}{} = load {}, ptr {}", indent, r, iw, gep).ok();
-                    TypedRegister { name: r, ty: Type::int() }
-                } else {
-                    panic!(
-                        "runtime reflection 'Size' on '{:?}' (no `len` slot in struct layout) has no codegen yet",
-                        recv_reg.ty
-                    );
+                match &recv_reg.ty {
+                    Type::Vector(_, _) => {
+                        let count = self.vector_element_count(&recv_reg.ty);
+                        let r = self.fun.gen_reg();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
+                        TypedRegister { name: r, ty: Type::int() }
+                    }
+                    ty if self.is_string_operand(ty) => {
+                        // Element count of `Iterable<Char>` = the char scan.
+                        let p = self.string_ptr(out, indent, &recv_reg);
+                        let r = self.fun.gen_reg();
+                        writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, p).ok();
+                        TypedRegister { name: r, ty: Type::int() }
+                    }
+                    _ => {
+                        if self.tier2_op_collection(recv).is_some() {
+                            let out_tmp = self.fun.gen_reg();
+                            let count = self.emit_method_call(out, &out_tmp, recv, "Count", &[], indent);
+                            // wasm32 parity: the Count result may be i32; the
+                            // consuming code expects i64 (mirrors the foreach
+                            // header widening, emit_stmt.rs).
+                            let widened = if self.llvm_type(&count.ty) != "i64" {
+                                let w = self.fun.gen_reg();
+                                writeln!(out, "{}{} = sext {} {} to i64", indent, w,
+                                    self.llvm_type(&count.ty), count.name).ok();
+                                w
+                            } else {
+                                count.name.clone()
+                            };
+                            TypedRegister { name: widened, ty: Type::int() }
+                        } else {
+                            panic!(
+                                "runtime reflection 'Size' on '{:?}' has no element count — \
+                                 declare `op Count()` (the iterable contract) on the type, or \
+                                 use `.^Length` (stored bytes) / `CharCount#` (characters)",
+                                recv_reg.ty
+                            );
+                        }
+                    }
                 }
             }
             ("Bytes", ReflectKind::CompileTime) => {

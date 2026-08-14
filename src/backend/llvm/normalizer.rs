@@ -144,7 +144,15 @@ fn build_supported_ops() -> HashSet<String> {
                     // this validator because the old PrintLn! always wrapped
                     // them in an Expr::Block, which the validator does not
                     // descend into; the bare println!() form exposes them.
-                    "Print#"] {
+                    "Print#",
+                    // 2026-08-14 (UOL §6b): the generative collection-op
+                    // intrinsic forms (`OpName#` → op-member dispatch). The
+                    // normalizer must accept them so the generative codegen
+                    // path is reachable; the typechecker validates the op is
+                    // actually declared on the receiver.
+                    "At#", "Slice#", "InsertAt#", "ExtractFrom#", "CopyFrom#",
+                    "Append#", "Prepend#", "Count#", "Iter#", "Step#",
+                    "IsEnd#", "Current#"] {
         set.insert(name.to_string());
     }
     set

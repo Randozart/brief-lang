@@ -146,8 +146,49 @@ pub fn emit_intrinsic_call(
         return BTypedRegister { name: v.to_string(), ty: ret_ty };
     }
 
+    // Fallback: generative op-identity dispatch (2026-08-14, UOL §6b.2 step 3).
+    // `OpName#` for ANY disclosed operation identity → dispatch to the op
+    // member on arg[0]. This is how `At#(c, i)`, `Count#(c)`, `InsertAt#(c, x)`,
+    // `Iter#(c)`, etc. work uniformly with the arithmetic `Op#` forms. The
+    // identity set mirrors `operation_identities` in src/vocab.rs; `#String`
+    // has no `op Count`, so `Count#` on it routes to the char scan
+    // (`CharCount#`). A name in the set but not declared on the receiver
+    // reaches emit_method_call, which reports the missing member.
+    if is_operation_identity(op_name) {
+        if op_name == "Count" && backend.is_string_operand(&arg_regs[0].ty) {
+            // `Count#` on a #String operand = its CHAR count (the element
+            // count of Iterable<Char>), not a declared `op Count`.
+            let p = backend.string_ptr(out, indent, &arg_regs[0]);
+            writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, v, p).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        if !args.is_empty() {
+            let recv = &args[0];
+            let rest: Vec<Expr> = args.iter().skip(1).cloned().collect();
+            let out_tmp = backend.fun.gen_reg();
+            return backend.emit_method_call(out, &out_tmp, recv, op_name, &rest, indent);
+        }
+    }
+
     // Fallback: emit as external call
     emit_external_call(backend, out, v, name, args, indent)
+}
+
+/// 2026-08-14 (UOL §6b.1): the disclosed operation identities — the intrinsic
+/// forms (`OpName#`) of every operation. Mirrors `operation_identities` in
+/// `src/vocab.rs`; kept as a runtime const here so codegen needs no vocab
+/// dependency. The arithmetic set (`Add`..`Shr`) is covered by registered
+/// signatures + `template_for_op`; the collection/cursor set below is what
+/// the generative dispatch reaches.
+fn is_operation_identity(name: &str) -> bool {
+    matches!(name,
+        "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Abs"
+        | "Eq" | "Neq" | "Lt" | "Le" | "Gt" | "Ge"
+        | "And" | "Or" | "Not"
+        | "BitAnd" | "BitOr" | "BitXor" | "BitNot" | "Shl" | "Shr"
+        | "At" | "Slice" | "InsertAt" | "ExtractFrom" | "CopyFrom"
+        | "Append" | "Prepend"
+        | "Count" | "Iter" | "Step" | "IsEnd" | "Current")
 }
 
 /// 2026-07-20: Simple IR template dispatch, replacing the old TOML config lookup.
