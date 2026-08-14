@@ -7,6 +7,14 @@
 > real: `#String` is `Iterable<Char>` via a protocol-keyed char decode lane
 > (see `docs/plans/2026-08-14-string-unification-and-boundary.md`).
 
+> **2026-08-14 addendum (slice-6 execution).** Slice 5's unconstrained-literal
+> diagnostic landed. §10 deletions 1 (ringbuf_inline), 2 (emit_heap_seq/SVO),
+> and 3 (hardcoded List foreach arm) are BLOCKED on live paths — documented in
+> `BUGS.md` ("Iterable-protocol slice-6 deletions blocked"). The hardcoded
+> `List` foreach arm is the live path (tier2 doesn't fire for `List`); `emit_heap_seq`
+> serves `Expr::Tuple` + expression-position literals. §10.4/6/7 were already
+> done by prior slices.
+
 **2026-08-12.** Implements the normative SPEC §2.1 (types have no canonical
 layout), §11.4 (iteration), §15.2/§15.3 (operators/arrows), §16.3
 (type-directed literals), §17.1/§17.2 (reflection), and §21.4 (`b-each`) for a

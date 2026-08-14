@@ -1,5 +1,40 @@
 # Bugs
 
+## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
+
+**Date:** 2026-08-14 (found while executing slice 6, leak cleanup)
+**Status:** Open — documented, not force-deleted. Two of the plan's
+`docs/plans/2026-08-12-iterable-protocol.md` §10 deletions are blocked on
+genuine live paths, verified in the compiled IR:
+
+1. **`emit_heap_seq` is the live path for `Expr::Tuple` (`emit_expr.rs:746`)
+   and expression-position list literals (`f([1,2])`).** Only *typed-local*
+   list literals route through ops (`construct_local_collection`,
+   `emit_stmt.rs:353`). Deleting it needs a tuple replacement first — a
+   separate refactor, not a deletion.
+2. **The hardcoded `List` foreach arm (`foreach_collection_kind`,
+   `emit_stmt.rs:245`) is the LIVE path for `foreach x in list`, not dead.**
+   `try_emit_tier_iteration` → `tier2_op_collection` does NOT fire for `List`
+   in a real typecheck: the emitted IR for `foreach x in items` over a
+   `List<Int>` state field or local contains `inttoptr` + `load i64, ptr`
+   (the hardcoded `[len]` header), and no `Count`/`At` calls. Root cause not
+   yet isolated (suspect: `obj_members` population for stdlib `obj List`, or
+   the field's stored type diverging from `Applied("List", …)` after
+   monomorphization). Deleting the arm now would break all List iteration.
+3. `ringbuf_inline` is deliberately KEPT — a performance mechanism
+   (`queue_drain_idio`/`float_math` were its bent gates), not legacy layout.
+4. Already done by prior work: `.^Length` collection error
+   (`typechecker/mod.rs:3216`), `.^Len` → `.^Length` rename, `is_string_operand`
+   iteration special-casing (subsumed by `IterKind::String`).
+
+**What landed (slice 5, same pass):** the unconstrained-literal diagnostic —
+`let xs = [1,2,3]` (no annotation) is a compile error directing to the
+type-directed form; annotated literals unchanged.
+
+**Path to unblock:** investigate why `tier2_op_collection` returns None for a
+real `List` (item 2) — if tier iteration fires, the hardcoded `List` arm dies
+naturally and the tuple `emit_heap_seq` split can be scoped separately.
+
 ## Stale integration tests referenced pre-rename `briefc`/`briv_*` symbols — FIXED 2026-08-13
 
 **Date:** 2026-08-13 (found during Phase 0 of layout-keywords)
