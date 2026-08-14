@@ -1750,9 +1750,9 @@ impl LlvmBackend {
                 continue;
             }
             // 2026-07-31: Phase 3 (§8.5-E4) — the ringbuf-init detection branch
-            // (always-false stub after insert_at removal) is deleted. RingBuffer
-            // state fields are expanded inline via ringbuf_inline; a bracket-list
-            // initializer falls through to emit_field_init_value as before.
+            // (always-false stub after insert_at removal) is deleted. A
+            // bracket-list initializer falls through to emit_field_init_value
+            // as before.
             self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx);
         }
         // 2026-08-07 (object instance pools): run the unpacked instances'

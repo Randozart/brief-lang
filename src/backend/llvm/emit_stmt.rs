@@ -968,10 +968,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             // Plain copy — the arrow as a normal assignment, emitted only when
             // the target is a resolvable local/state field. When nothing
-            // resolves (e.g. a ringbuf-inline collection registered only in
-            // `ringbuf_inline`, not `field_index_map`), the statement is a
-            // no-op — matching the pre-Phase-3 behavior where the unresolvable
-            // `<-` fell through silently.
+            // resolves, the statement is a no-op — matching the pre-Phase-3
+            // behavior where the unresolvable `<-` fell through silently.
             if let Some(t) = target.as_ref() {
                 if let Expr::Identifier(name) = t.as_ref() {
                     let resolvable = backend.fun.let_bindings.contains_key(name)
@@ -1786,9 +1784,9 @@ pub(super) fn emit_strategy_member_call(
 /// compute the handle (pointer to the collection storage), and emit a
 /// generic call @fn_name(arg1, arg2, ...) where args are resolved from markers.
 /// 2026-07-18: Generic dispatch — no hardcoded function names.
-/// 2026-07-20: Handle both ringbuf-inline types (via ringbuf_inline data_idx) and
-///   non-ringbuf types (via field_index_map or let_binding slot). Any type declaring
-///   InsertAt/ExtractFrom in operator_defs gets the same <- behavior.
+/// 2026-07-20: Handle both generic state-field types (via field_index_map) and
+///   let-binding slots. Any type declaring InsertAt/ExtractFrom in operator_defs
+///   gets the same <- behavior.
 /// Supports: PropertyValue::Identifier("ring_push") for convention-based dispatch,
 ///   and PropertyValue::List([Identifier("ring_push"), HashL, HashR]) for
 ///   explicit marker-based dispatch like InsertAt <~ ring_push(#Lh, #Rh).
@@ -1812,14 +1810,10 @@ pub(super) fn emit_strategy_fn_call(backend: &mut LlvmBackend, out: &mut String,
     let var_name = target.as_var_name()?;
 
     // 2026-07-20: Compute handle as ptrtoint of the variable's storage location.
-    // For RingBuf-inline types, use the data buffer field. For all other types,
-    // derive the handle from the state field or let-binding alloca.
-    let handle = if let Some(rbi) = backend.ctx.ringbuf_inline.get(var_name) {
-        let gep = backend.emit_state_gep(out, indent, "hnd", "%state", rbi.data_idx);
-        let h = backend.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
-        h
-    } else if let Some(&idx) = backend.ctx.field_index_map.get(var_name) {
+    // Derive the handle from the state field or let-binding alloca.
+    // 2026-08-14 (ringbuf_inline removed): the inline `_data`-field special case
+    // is gone — collection state fields carry the struct handle directly.
+    let handle = if let Some(&idx) = backend.ctx.field_index_map.get(var_name) {
         let gep = backend.emit_state_gep(out, indent, "hnd", "%state", idx);
         let h = backend.fun.gen_reg();
         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, h, gep).ok();
@@ -1906,8 +1900,7 @@ fn emit_arrow_store_local(
 /// 2026-08-01 (Phase 3): destroy a consumed operand's backing storage. The
 /// value is emitted once (its register is the collection's handle) and freed
 /// via the allocation-strategy-aware `emit_destroy_register`. A value whose
-/// identifier is not resolvable (a ringbuf-inline collection registered only in
-/// `ringbuf_inline`) is a no-op — inline backings need no free anyway.
+/// identifier is not resolvable is a no-op — no backing to free anyway.
 fn emit_destroy_consumed(
     backend: &mut LlvmBackend,
     out: &mut String,

@@ -4758,43 +4758,6 @@ impl LlvmBackend {
                         .insert(s.name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&s.ty);
                     self.ctx.field_initializers.insert(s.name.clone(), None);
-                    // 2026-07-20: Check operator_defs for InsertAt strategy.
-                    // Any type with op InsertAt(...) gets inline ring buffer fields.
-                    let has_insert_strategy = {
-                        let type_name = match &s.ty {
-                            crate::ast::Type::Custom(n) => n.as_str(),
-                            crate::ast::Type::Applied(n, _) => n.as_str(),
-                            _ => "",
-                        };
-                        self.ctx.operator_defs.get(type_name)
-                            .map_or(false, |defs| defs.iter().any(|d| d.op == "InsertAt"))
-                    };
-                    if has_insert_strategy {
-                        let data_idx = self.ctx.field_types.len();
-                        self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
-                        self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_briev_types.push(Type::int());
-                        self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
-                        let head_idx = self.ctx.field_types.len();
-                        self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
-                        self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_briev_types.push(Type::int());
-                        self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
-                        let tail_idx = self.ctx.field_types.len();
-                        self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
-                        self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_briev_types.push(Type::int());
-                        self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
-                        let mask_idx = self.ctx.field_types.len();
-                        self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
-                        self.ctx.field_types.push("i64".to_string());
-                        self.ctx.field_briev_types.push(Type::int());
-                        self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
-                        self.ctx.ringbuf_inline.insert(s.name.clone(),
-                            crate::backend::llvm::context::RingbufInlineFields {
-                                data_idx, head_idx, tail_idx, mask_idx,
-                            });
-                    }
                 }
             } else if let TopLevel::Trigger(trg) = item {
                 // 2026-07-14: Trigger.ty removed - use string as default type.
@@ -5051,19 +5014,6 @@ impl LlvmBackend {
                 self.ctx.field_modes.insert(arena_name.to_string(), crate::analysis::FieldMode::Always);
             }
         }
-        // 2026-07-02: RingBuffer inline fields must never be eliminated.
-        // Even though they appear dead (not in exit condition), they're used
-        // by the arrow dispatch (emit_arrow_push/discard) for inline RingBuffer
-        // operations. Without them, LLVM can't SROA the RingBuf struct into
-        // registers, and the inttoptr bottleneck remains.
-        for (base, rbf) in &self.ctx.ringbuf_inline {
-            for (suffix, idx) in &[("_data", rbf.data_idx), ("_head", rbf.head_idx),
-                ("_tail", rbf.tail_idx), ("_mask", rbf.mask_idx)]
-            {
-                let name = format!("{}{}", base, suffix);
-                self.ctx.field_modes.insert(name, crate::analysis::FieldMode::Always);
-            }
-        }
         self.ctx.cache_slots.clear();
 
         // Phase 1: Remove Never fields from field_index_map and field_types.
@@ -5116,16 +5066,6 @@ impl LlvmBackend {
         self.arena_ptr_idx = self.ctx.field_index_map.get("__arena_ptr").copied();
         self.arena_end_idx = self.ctx.field_index_map.get("__arena_end").copied();
         self.arena_base_idx = self.ctx.field_index_map.get("__arena_base").copied();
-        for (_base, rbf) in &mut self.ctx.ringbuf_inline {
-            rbf.data_idx = self.ctx.field_index_map
-                .get(&format!("{}_data", _base)).copied().unwrap_or(rbf.data_idx);
-            rbf.head_idx = self.ctx.field_index_map
-                .get(&format!("{}_head", _base)).copied().unwrap_or(rbf.head_idx);
-            rbf.tail_idx = self.ctx.field_index_map
-                .get(&format!("{}_tail", _base)).copied().unwrap_or(rbf.tail_idx);
-            rbf.mask_idx = self.ctx.field_index_map
-                .get(&format!("{}_mask", _base)).copied().unwrap_or(rbf.mask_idx);
-        }
 
         // Phase 2: Append cache slots — one per (field, projection_target) pair.
         for (name, mode) in &self.ctx.field_modes {

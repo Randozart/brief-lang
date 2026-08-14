@@ -1,5 +1,35 @@
 # Plan: String unification, `.^^Element`, and the op/reflection/intrinsic boundary
 
+> **2026-08-14 follow-up addendum (all three follow-ups done).**
+> - **(a) `tier2_op_collection` misses `List` — FIXED.** Root cause:
+>   `lib/std/collections.bv` (where `obj List<T>` declares `op Count`/`op At`)
+>   was never prelude-imported, so `obj_members` had no `List` in default
+>   builds and `foreach` silently fell back to the hardcoded List layout.
+>   Fix (`a53c7f90`): the prelude plugin now imports `std/collections.bv`
+>   (both branches). Verified: `foreach x in list` emits the Count/At member
+>   bodies inlined. Full runtime suite MATCH, no regression. The hardcoded
+>   `List` foreach arm is now production-dead (reached only by stdlib-free
+>   unit tests); the `emit_heap_seq`/tuple blocker remains (separate refactor).
+> - **(b) `ringbuf_inline` removed — no regression.** Performance Recovery
+>   Protocol experiment (rule 19): gated the `has_insert_strategy` registration
+>   OFF and benchmarked the three InsertAt benchmarks. Results (Briev seconds):
+>
+>   | benchmark | with ringbuf_inline | without | delta |
+>   |---|---|---|---|
+>   | queue_drain_idio | .0356s | .0348s | −0.2% |
+>   | stack_push_pop | .0345s | .0341s | −0.1% |
+>   | queue_drain | .0331s | .0343s | +0.4% |
+>
+>   All MATCH, no regression — the SROA claim (comment at the removed site)
+>   does not hold on the current op-surface architecture. Deleted the
+>   mechanism (registration, field-modes loop, init pass, handle-derivation
+>   special case, `RingbufInlineFields` struct + field). Full runtime suite
+>   after deletion: all MATCH. This resolves plan §10.1 (`ringbuf_inline`).
+> - **(c) `.^Absolute` removed** (`a44ee863`): after the one-release deprecated
+>   alias, it is now an unknown-target error directing to `Abs#` (SPEC §17.3).
+>   Typechecker/codegen/interpreter arms removed; stale `.smoke`/`string.ebv`
+>   fixtures migrated to `Abs#`/`.^Length`.
+
 > **2026-08-14 completion addendum.** All commits in §7 landed (green):
 > `74d13f19` (docs), `b88f6ee6` (String unification), `54136420` (`.^^Element`),
 > `ca9120f2` (Abs# + bit intrinsics), `0ea07424` (slice-5 diagnostic),

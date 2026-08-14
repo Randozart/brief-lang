@@ -31,18 +31,6 @@ use crate::target_spec::TargetSpec;
 use crate::type_universe::TypeUniverse;
 use std::collections::{HashMap, HashSet};
 
-/// 2026-07-02: Indices of the 4 inline RingBuffer fields in %State.
-/// Used by emit_arrow_push/emit_arrow_discard to access RingBuf fields
-/// directly via GEP instead of inttoptr on an opaque handle. This lets
-/// LLVM's SROA promote the fields to SSA registers.
-#[derive(Debug, Clone)]
-pub struct RingbufInlineFields {
-    pub data_idx: usize,
-    pub head_idx: usize,
-    pub tail_idx: usize,
-    pub mask_idx: usize,
-}
-
 // ── CompilerContext ───────────────────────────────────────────────────
 //
 // Global compilation context — immutable once code generation begins.
@@ -72,10 +60,6 @@ pub struct CompilerContext {
     /// Briev-side seeds (`c1.count` → 5). build_field_index merges them into
     /// field_initializers after the StateDecl registration.
     pub component_initializers: HashMap<String, Expr>,
-    pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
-    /// 2026-07-02: Tracks RingBuffer variables whose fields are stored inline
-    /// in %State (data_ptr, head, tail, mask) instead of via an opaque handle.
-    /// Maps base name → indices of the 4 inline fields.
     pub field_modes: HashMap<String, FieldMode>,
     pub cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
     pub range_bounds: HashMap<String, (i64, i64)>,
@@ -378,7 +362,6 @@ impl CompilerContext {
             field_briev_types: Vec::new(),
             field_initializers: HashMap::new(),
             component_initializers: HashMap::new(),
-            ringbuf_inline: HashMap::new(),
             field_modes: HashMap::new(),
             cache_slots: HashMap::new(),
             range_bounds: HashMap::new(),
