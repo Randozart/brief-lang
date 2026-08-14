@@ -1657,8 +1657,12 @@ pub fn condition_root_signal<'a>(expr: &'a str) -> (&'a str, Vec<&'a str>) {
 }
 
 /// Split a view signal into its root field name and any `.^X` reflection
-/// projection suffixes. `count` → (`count`, []); `items.^Size` →
-/// (`items`, ["Size"]); `a.^Size.^Length` → (`a`, ["Size", "Len"]).
+/// projection suffixes. `count` → (`count`, []); `items.^Length` →
+/// (`items`, ["Length"]); `a.^Length.^Bytes` → (`a`, ["Length", "Bytes"]).
+///
+/// 2026-08-14 (§6b.5): a view expressing an element count uses the `Count#`
+/// intrinsic — `Count#(items)` → (`items`, ["Count"]), and the web generator
+/// maps the `Count` projection to the materialized array's `.length`.
 ///
 /// 2026-08-11: single definition — reused by the web generator's
 /// `field_handle_for_signal` (handle lookup binds the root field), by
@@ -1667,6 +1671,16 @@ pub fn condition_root_signal<'a>(expr: &'a str) -> (&'a str, Vec<&'a str>) {
 /// elimination). The `.^X` suffix is a projection on top of the field's
 /// value, never a separate signal.
 pub fn root_signal<'a>(signal: &'a str) -> (&'a str, Vec<&'a str>) {    let signal = signal.trim();
+    // 2026-08-14 (§6b.5): `Count#(field)` binds the field, projecting its
+    // element count (the web generator maps it to `.length`).
+    if let Some(rest) = signal.strip_prefix("Count#(") {
+        if let Some(field) = rest.strip_suffix(')') {
+            let field = field.trim();
+            if field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return (field, vec!["Count"]);
+            }
+        }
+    }
     let mut proj: Vec<&str> = Vec::new();
     let mut head = signal;
     loop {

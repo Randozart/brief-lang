@@ -2718,58 +2718,21 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
                 TypedRegister { name: r, ty: Type::int() }
             }
-            // 2026-08-14 (Boxed Cat, iterable-protocol §10.4 row 4): `x.^Size`
-            // runtime on a COLLECTION is the ELEMENT COUNT, resolved through
-            // the collection's declared `op Count` behavior — never a `len`
-            // slot-name guess. The old heuristic (`name == "len"` in
-            // struct_types) violated the principle: RingBuffer has read/write
-            // (no `len`) and no `op Count`, so its count (`write - read`) is
-            // undeclarable by name. `op Count` asks the collection; no op →
-            // clean error directing to the iterable contract. `#String` is
-            // `Iterable<Char>`, so its element count is `CharCount#`. Vectors
-            // use the compile-time shape. `.^Size` always means "element count,
-            // however the type counts it."
+            // 2026-08-14 (Boxed Cat, iterable-protocol §10.4, tri-partite rule):
+            // runtime `.^Size` is DELETED — the element count of a collection
+            // is an operation, so its home is the `Count#` intrinsic, not a
+            // reflection target (§6a of the 2026-08-14 plan). The typechecker
+            // rejects runtime `.^Size` as a kind error, but a precondition
+            // (elaborate_expr bypass) can still reach codegen — emit a clean
+            // compile error directing to `Count#`, never the old `len`-slot
+            // heuristic and never a silent fallback. `.^^Size` (compile-time,
+            // above) keeps the vector shape.
             ("Size", ReflectKind::Runtime) => {
-                match &recv_reg.ty {
-                    Type::Vector(_, _) => {
-                        let count = self.vector_element_count(&recv_reg.ty);
-                        let r = self.fun.gen_reg();
-                        writeln!(out, "{}{} = add i64 0, {}", indent, r, count).ok();
-                        TypedRegister { name: r, ty: Type::int() }
-                    }
-                    ty if self.is_string_operand(ty) => {
-                        // Element count of `Iterable<Char>` = the char scan.
-                        let p = self.string_ptr(out, indent, &recv_reg);
-                        let r = self.fun.gen_reg();
-                        writeln!(out, "{}{} = call i64 @briev_char_len(ptr {})", indent, r, p).ok();
-                        TypedRegister { name: r, ty: Type::int() }
-                    }
-                    _ => {
-                        if self.tier2_op_collection(recv).is_some() {
-                            let out_tmp = self.fun.gen_reg();
-                            let count = self.emit_method_call(out, &out_tmp, recv, "Count", &[], indent);
-                            // wasm32 parity: the Count result may be i32; the
-                            // consuming code expects i64 (mirrors the foreach
-                            // header widening, emit_stmt.rs).
-                            let widened = if self.llvm_type(&count.ty) != "i64" {
-                                let w = self.fun.gen_reg();
-                                writeln!(out, "{}{} = sext {} {} to i64", indent, w,
-                                    self.llvm_type(&count.ty), count.name).ok();
-                                w
-                            } else {
-                                count.name.clone()
-                            };
-                            TypedRegister { name: widened, ty: Type::int() }
-                        } else {
-                            panic!(
-                                "runtime reflection 'Size' on '{:?}' has no element count — \
-                                 declare `op Count()` (the iterable contract) on the type, or \
-                                 use `.^Length` (stored bytes) / `CharCount#` (characters)",
-                                recv_reg.ty
-                            );
-                        }
-                    }
-                }
+                panic!(
+                    "runtime reflection 'Size' is deleted — the element count of a collection \
+                     is the `Count#` intrinsic (e.g. `Count#(items)`), not a reflection target \
+                     (2026-08-14 §6a)"
+                )
             }
             ("Bytes", ReflectKind::CompileTime) => {
                 // 2026-08-01 (B3): `x.^^Bytes` on a #String → the `Bytes` prop

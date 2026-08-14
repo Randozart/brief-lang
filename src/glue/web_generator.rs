@@ -728,12 +728,14 @@ export async function createApp(wasmBytes) {{
                     return String::new();
                 };
                 // 2026-08-11: apply `.^X` reflection projections inline in JS.
-                // `.^Size`/`.^Length` on a string/collection → `.length`; other
-                // reflections pass through as a property access.
+                // `.^Length` on a string/collection → `.length`; other
+                // reflections pass through as a property access. 2026-08-14
+                // (§6b.5): a `Count#(field)` view signal projects `Count` →
+                // the materialized array's `.length`. `.^Size` is deleted.
                 let mut apply_value = "value".to_string();
                 for p in &proj {
                     match *p {
-                        "Size" | "Length" => apply_value.push_str(".length"),
+                        "Length" | "Count" => apply_value.push_str(".length"),
                         other => {
                             apply_value.push('.');
                             apply_value.push_str(other);

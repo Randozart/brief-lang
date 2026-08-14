@@ -236,7 +236,7 @@ global; every `_txn` export takes `%state` first and the shim passes
 |---|---|---|
 | `foreach` `List` layout `[len][elem…]` i64, item forced `Int`, `panic!` | `emit_stmt.rs:186,1136,1166,197` | structural `op Count`+`op At`/`op Iter`+`op Step` loop, borrow-typed item |
 | `[]` `List` layout read | `emit_expr.rs:1017` | `op At` dispatch (inline member call) |
-| `.^Len` collection panic; runtime `.^Size` `name == "len"` slot heuristic | `emit_expr.rs:2477,2383-2393` | `.^Length` stored-length reflection; `CharCount#`; error elsewhere |
+| `.^Len` collection panic; runtime `.^Size` `name == "len"` slot heuristic | `emit_expr.rs:2477,2383-2393` | `.^Length` stored-length reflection; `CharCount#`; **2026-08-14 (§6a): runtime `.^Size` DELETED — the element count is the `Count#` intrinsic (element-bearing op return), never a `len` slot-name guess. `.^^Size` (compile-time) keeps the vector shape** |
 | `ringbuf_inline` ("any `op InsertAt` type is a 4-slot ring") | `context.rs:75`, `mod.rs:4601/4867`, `emit_stmt.rs:1402` | deleted after generic layout-on-observation |
 | `emit_heap_seq` / `emit_svo_list` / `emit_svo_index` | `emit_expr.rs:1573/1627/1686` | type-directed literals via `op Init`+`op InsertAt`; generic indexing |
 | `is_string_operand` special-casing | throughout | String's Iterable surface |

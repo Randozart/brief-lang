@@ -3200,10 +3200,12 @@ fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> O
 
 /// 2026-07-31: Reflection table (D1). `^` = runtime, `^^` = compile-time.
 /// A target used with the wrong kind is an error; an unknown target is an
-/// error. `Len`/`Ptr`/`Size` (runtime) are element/stored reads; `Bytes`/
-/// `Alignment`/`Type`/`Element` and `Size` (compile-time) are foldable
-/// descriptors. `.^Size` runtime = element count via `op Count`/`CharCount#`
-/// (2026-08-14, Boxed Cat — never a `len` slot-name guess).
+/// error. `Len`/`Ptr` are runtime reads; `Size`/`Bytes`/`Alignment`/`Type`/
+/// `Element` are compile-time foldable descriptors. 2026-08-14 (Boxed Cat,
+/// tri-partite rule): runtime `.^Size` is DELETED — the element count of a
+/// collection is an operation, so its home is the `Count#` intrinsic, not a
+/// reflection target (§6a/§6b of the 2026-08-14 plan). `.^^Size` (compile
+/// time) keeps the vector shape.
 fn resolve_reflect(
     receiver: &Type,
     target: &str,
@@ -3265,12 +3267,17 @@ fn resolve_reflect(
         // reflection target. The deprecated alias release has passed; it is
         // now an unknown-target error (the catch-all below), directing to
         // `Abs#`. (Was: `x.^Absolute` → the receiver's type, 2026-08-04.)
-        // 2026-08-14 (Boxed Cat, iterable-protocol §10.4): `.^Size` (runtime)
-        // on a collection is the ELEMENT COUNT, resolved through the type's
-        // declared `op Count` at codegen (never a `len` slot-name guess); on a
-        // `#String` it is `CharCount#`; on a vector, the shape count. `.^^Size`
-        // (compile-time) folds the vector shape. Both resolve to Int.
-        "Size" => Ok(Type::int()),
+        // 2026-08-14 (Boxed Cat, iterable-protocol §10.4, tri-partite rule):
+        // `.^Size` (runtime) is DELETED — the element count of a collection is
+        // an OPERATION, so its home is the `Count#` intrinsic, not a reflection
+        // target. `.^^Size` (compile-time) keeps the vector shape and stays
+        // Int. Runtime `.^Size` is a kind error, exactly like `Bytes`.
+        "Size" => {
+            if !is_compile_time {
+                return Err(wrong_kind("compile-time"));
+            }
+            Ok(Type::int())
+        }
         "Bytes" => {
             if !is_compile_time {
                 return Err(wrong_kind("compile-time"));
@@ -4410,34 +4417,19 @@ node probe [done == false][done == true] { done = true; term; };
 
     #[test]
     fn reflect_kind_mismatch_errors() {
-        // `Bytes` is compile-time-only — runtime `.^Bytes` is a kind error.
+        // `Bytes` and `Size` are compile-time-only — runtime `.^Bytes`/`.^Size`
+        // are kind errors (2026-08-14 §6a: `.^Size` runtime deleted — element
+        // count is the `Count#` intrinsic).
         let src = r#"
 let x: Int = 5;
 node probe [true][true] {
     let s: Int = x.^Bytes;
+    let n: Int = x.^Size;
     term;
 };
 "#;
         let e = check(src);
         assert!(e.is_err(), "expected reflection kind-mismatch error, got: {:?}", e);
-    }
-
-    #[test]
-    fn reflect_size_runtime_resolves_for_collections() {
-        // 2026-08-14 (Boxed Cat): `.^Size` (runtime) on an iterable is the
-        // ELEMENT COUNT — resolved via `op Count`/`CharCount#` at codegen, never
-        // a `len` slot-name guess. The typechecker allows it (Int result); the
-        // strict-body path now accepts it like `Length` does.
-        let src = r#"
-let s: String = "hi";
-let n: Int = 0;
-node probe [n < 10][n >= 2] {
-    n = s.^Size;
-    term;
-};
-"#;
-        let e = check(src);
-        assert!(e.is_ok(), "expected `.^Size` on String to resolve, got: {:?}", e);
     }
 
     #[test]

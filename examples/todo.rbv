@@ -5,12 +5,12 @@ import <std/collections>;
 
 let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
 
-txn add_item [items.^Size < 100][true] {
+txn add_item [Count#(items) < 100][true] {
   items.push("New task");
   term;
 };
 
-txn clear_all [items.^Size > 0][items.^Size == 0] {
+txn clear_all [Count#(items) > 0][Count#(items) == 0] {
   items = [];
   term;
 };
@@ -30,7 +30,7 @@ txn clear_all [items.^Size > 0][items.^Size == 0] {
     </div>
     
     <div class="footer">
-      <span><span b-text="items.^Size"></span> tasks</span>
+      <span><span b-text="Count#(items)"></span> tasks</span>
       <button id="clear-btn" b-trigger:click="clear_all">Clear All</button>
     </div>
   </div>
