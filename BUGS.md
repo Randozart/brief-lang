@@ -55,6 +55,33 @@ type-directed form; annotated literals unchanged.
 real `List` (item 2) — if tier iteration fires, the hardcoded `List` arm dies
 naturally and the tuple `emit_heap_seq` split can be scoped separately.
 
+## Runtime `.^Size` matched a `len` slot name — FIXED 2026-08-14
+
+**Date:** 2026-08-14 (found while removing the iterable-protocol §10.4
+magic-name heuristics)
+**Status:** Fixed (see `docs/plans/2026-08-14-string-unification-and-boundary.md`
+§6a).
+
+The runtime `.^Size` codegen arm (`emit_reflection`, `emit_expr.rs`) read a
+collection's element count by matching a `len` **slot name** in `struct_types`
+and GEPing it. Boxed Cat violation: it guessed structure the collection never
+declared. `RingBuffer` has `read`/`write` (no `len`) and no `op Count` — its
+count (`write - read`) is undeclarable by name; the magic would panic.
+Reachability: preconditions (`elaborate_expr`) bypass the typechecker's
+compile-time-only `Size` check, so `items.^Size` in a precondition reached the
+arm (`examples/todo.rbv:8,13`).
+
+**Fix (final, UOL §6a/§6b):** runtime `.^Size` is DELETED — per the tri-partite
+rule (fields = user-declared; reflection = compiler-known non-operational
+metadata; intrinsics = operations), the element count of a collection is an
+OPERATION, so its home is the `Count#` intrinsic (which dispatches to the
+type's declared `op Count`), not a reflection target. The typechecker's `Size`
+arm is compile-time-only (`.^^Size` = vector shape); a runtime `.^Size`
+reaching codegen (precondition bypass) is a clean error directing to `Count#`.
+The old `lookup_field_offset`-for-`len` heuristic is gone. `examples/todo.rbv`
+migrated to `Count#(items)`. (An intermediate sketch routed `.^Size` through
+`op Count`; it was superseded — see the 2026-08-14 plan §6a/§6b.)
+
 ## Stale integration tests referenced pre-rename `briefc`/`briv_*` symbols — FIXED 2026-08-13
 
 **Date:** 2026-08-13 (found during Phase 0 of layout-keywords)
