@@ -1,7 +1,7 @@
-defn new_map<K,V>() -> HashMap<K,V> [true][term.Count() == 0] {
+defn new_map<K,V>() -> HashMap<K,V> [true][term.Count#() == 0] {
     term {};
 };
-defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> [capacity > 0][term.Count() == 0] {
+defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> [capacity > 0][term.Count#() == 0] {
     term {};
 };
 defn insert<K,V>(map: HashMap<K,V>, key: K, value: V)
@@ -25,10 +25,10 @@ defn remove<K,V>(map: HashMap<K,V>, key: K)
     term (v, map);
 };
 defn len<K,V>(map: HashMap<K,V>) -> Int {
-    term map.Count();
+    term map.Count#();
 };
 defn is_empty<K,V>(map: HashMap<K,V>) -> Bool {
-    term (map.Count()) == 0;
+    term (map.Count#()) == 0;
 };
 defn keys<K,V>(map: HashMap<K,V>) -> List<K> {
     term map :> Keys;
@@ -40,7 +40,7 @@ defn clear<K,V>(map: HashMap<K,V>) -> HashMap<K,V> {
     term {};
 };
 txn iter_loop<K,V>(ks: List<K>, vs: List<V>, result: List<(K,V)>, i: Int)
-    [i < ks.Count()][i == ks.Count()] -> List<(K,V)>
+    [i < ks.Count#()][i == ks.Count#()] -> List<(K,V)>
 {
     result = result + [(ks[i], vs[i])];
     i = i + 1;
@@ -50,7 +50,7 @@ defn iter<K,V>(map: HashMap<K,V>) -> List<(K,V)> {
     term iter_loop(map.keys(), map.values(), [], 0);
 };
 txn merge_loop<K,V>(bk: List<K>, bv: List<V>, result: HashMap<K,V>, i: Int)
-    [i < bk.Count()][i == bk.Count()] -> HashMap<K,V>
+    [i < bk.Count#()][i == bk.Count#()] -> HashMap<K,V>
 {
     result <- (bk[i], bv[i]);
     i = i + 1;
@@ -60,7 +60,7 @@ defn merge<K,V>(a: HashMap<K,V>, b: HashMap<K,V>) -> HashMap<K,V> {
     term merge_loop(b.keys(), b.values(), a, 0);
 };
 txn filter_loop<K,V>(mk: List<K>, mv: List<V>, pred: (K, V) -> Bool, result: HashMap<K,V>, i: Int)
-    [i < mk.Count()][i == mk.Count()] -> HashMap<K,V>
+    [i < mk.Count#()][i == mk.Count#()] -> HashMap<K,V>
 {
     when pred(mk[i], mv[i]) {
         &result <- (mk[i], mv[i]);

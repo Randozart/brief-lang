@@ -1,4 +1,4 @@
-defn new_set<T>() -> HashSet<T> [true][term.Count() == 0] {
+defn new_set<T>() -> HashSet<T> [true][term.Count#() == 0] {
     term {};
 };
 defn insert<T>(set: HashSet<T>, item: T) -> HashSet<T> {
@@ -14,10 +14,10 @@ defn contains<T>(set: HashSet<T>, item: T) -> Bool {
     term set :> Contains(item);
 };
 defn len<T>(set: HashSet<T>) -> Int {
-    term set.Count();
+    term set.Count#();
 };
 defn is_empty<T>(set: HashSet<T>) -> Bool {
-    term (set.Count()) == 0;
+    term (set.Count#()) == 0;
 };
 defn to_list<T>(set: HashSet<T>) -> List<T> {
     term set :> Elements;
@@ -29,7 +29,7 @@ defn clear<T>(set: HashSet<T>) -> HashSet<T> {
     term {};
 };
 txn union_loop<T>(other_list: List<T>, result: HashSet<T>, i: Int)
-    [i < other_list.Count()][i == other_list.Count()] -> HashSet<T>
+    [i < other_list.Count#()][i == other_list.Count#()] -> HashSet<T>
 {
     &result <- other_list[i];
     i = i + 1;
@@ -39,7 +39,7 @@ defn union<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term union_loop(b.to_list(), a, 0);
 };
 txn intersection_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: Int)
-    [i < a_list.Count()][i == a_list.Count()] -> HashSet<T>
+    [i < a_list.Count#()][i == a_list.Count#()] -> HashSet<T>
 {
     when b :> Contains(a_list[i]) {
         &result <- a_list[i];
@@ -51,7 +51,7 @@ defn intersection<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term intersection_loop(a.to_list(), b, new_set(), 0);
 };
 txn difference_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: Int)
-    [i < a_list.Count()][i == a_list.Count()] -> HashSet<T>
+    [i < a_list.Count#()][i == a_list.Count#()] -> HashSet<T>
 {
     when !b :> Contains(a_list[i]) {
         &result <- a_list[i];
@@ -63,7 +63,7 @@ defn difference<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term difference_loop(a.to_list(), b, new_set(), 0);
 };
 txn from_list_loop<T>(items: List<T>, result: HashSet<T>, i: Int)
-    [i < items.Count()][i == items.Count()] -> HashSet<T>
+    [i < items.Count#()][i == items.Count#()] -> HashSet<T>
 {
     &result <- items[i];
     i = i + 1;

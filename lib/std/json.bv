@@ -57,7 +57,7 @@ defn json_is_array(v: JsonValue) -> Result<Bool, String> {
 };
 
 defn json_length(v: JsonValue) -> Result<Int, String> {
-    uni v(Array(list)) -> { term Ok(list.Count()); };
+    uni v(Array(list)) -> { term Ok(list.Count#()); };
     term err_int(e_utoken());
 };
 
@@ -73,14 +73,14 @@ defn json_get(v: JsonValue, key: String) -> Result<String, String> {
 };
 
 txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
-    [i < pairs.Count()][i >= pairs.Count() || pairs[i][0] == key]
+    [i < pairs.Count#()][i >= pairs.Count#() || pairs[i][0] == key]
     -> Result<JsonValue, String>
 {
     when pairs[i][0] == key {
         term ok_value(pairs[i][1]);
     };
     i = i + 1;
-    when i >= pairs.Count() {
+    when i >= pairs.Count#() {
         term err_value(e_utoken());
     };
     term err_value(e_utoken());
@@ -88,7 +88,7 @@ txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
 
 defn json_get_by_index(v: JsonValue, i: Int) -> Result<JsonValue, String> {
     uni v(Array(list)) -> {
-        when i >= 0 && i < list.Count() {
+        when i >= 0 && i < list.Count#() {
             term ok_value(list[i]);
         };
         term err_value(e_utoken());

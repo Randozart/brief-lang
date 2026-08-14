@@ -186,7 +186,7 @@ defn lines(s: String) [true][CharCount#(term) >= 0] -> List<String> {
 
 // Join
 // 2026-08-13: the count is hoisted out of the loop guard (`n`) — an
-// op-as-member call (`list.Count()`) inside a txn contract guard mis-emits
+// op-as-member call (`list.Count#()`) inside a txn contract guard mis-emits
 // (the member result collides with the function result slot; see BUGS.md).
 txn join_loop(list: List<String>, n: Int, delim: String, result: String, i: Int)
     [i < n][i == n] -> String
@@ -197,10 +197,10 @@ txn join_loop(list: List<String>, n: Int, delim: String, result: String, i: Int)
 };
 
 defn join(list: List<String>, delim: String) [true][CharCount#(term) >= 0] -> String {
-  when list.Count() == 0 {
+  when list.Count#() == 0 {
     term "";
   };
-  term join_loop(list, list.Count(), delim, list[0], 1);
+  term join_loop(list, list.Count#(), delim, list[0], 1);
 };
 
 // Padding (basic)
