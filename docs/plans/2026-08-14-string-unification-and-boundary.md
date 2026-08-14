@@ -514,7 +514,11 @@ changed dirs, docs in the same commit (rules 8, 3, 12).
 - `.^Absolute` unknown-target error after the deprecation release.
 - Generic `defn f<T>` dispatch (the generic-function layer) — now that
   `Count#`/`At#`/`OpName#` are the uniform surface, generic functions over any
-  collection become expressible; separate plan.
+  collection become expressible; separate plan. **2026-08-14: DONE (`c0adc6f1`)
+  — call-site type-param inference + substitution, type-erased codegen
+  (see `docs/plans/2026-08-14-generic-defn-dispatch.md`). Follow-ups from
+  execution: body literals with free `T`, closure-typed generics
+  (`iter_map`), typechecker stdlib-op visibility for Tier-1 types.**
 - **Benchmark verification** (rule 11) after the UOL lands: the generative
   dispatch changes no arithmetic IR (those signatures stay); the collection
   `OpName#` forms call the same op members `foreach`/`[]` already inline, so IR

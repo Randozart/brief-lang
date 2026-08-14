@@ -201,6 +201,22 @@ defn first<T, U>(pair: (T, U)) -> T {
 // The `[[post]` and `[pre]]` sugar fill the omitted side as `[true]`.
 ```
 
+**2026-08-14:** at each call site the compiler infers the type params from
+the arguments — `identity(5)` binds `T = Int`, `identity("hi")` binds
+`T = String` — and substitutes them into the parameter and return types.
+Codegen is type-erased: the body is emitted once, and a `T`-typed value is a
+boxed i64. A nullary generic (`new_map<T, U>()`) binds its params from the
+enclosing binding's annotation when the arguments don't constrain them. An
+argument that can't unify with the parameter shape is a type error.
+
+```briev
+defn first_of<T>(xs: List<T>) -> T [Count#(xs) > 0][true] {
+    term At#(xs, 0);
+};
+let items: List<Int> = [1, 2, 3];
+let n: Int = first_of(items);   // T = Int, n is Int
+```
+
 ## 9. Derivation Blocks — Synthesis by Example
 
 Functions can be defined by examples rather than by hand-writing a body.

@@ -702,6 +702,17 @@ defn add(left: Int, right: Int) -> Int [true][#R == left + right] {
 
 A body-less internal signature uses `defn` with its contracts/effects and is staged until an implementation is supplied. There is no `sig` declaration.
 
+**2026-08-14 (generic `defn f<T>`):** a definition may declare type
+parameters — `defn first<T>(xs: List<T>) -> T`. At each call site the
+compiler infers the type params from the arguments (`first(items)` where
+`items: List<Int>` binds `T = Int`) and substitutes them into the parameter
+and return types. Codegen is **type-erased**: the body is emitted once, and
+a `T`-typed value is a boxed i64 (matching the boxed ABI); there is no
+per-instantiation code duplication. A nullary generic (`new_stack<T>()`)
+binds its type param from the enclosing binding's annotation when the
+arguments do not constrain it. An argument that cannot unify with the
+generic parameter shape is a type error.
+
 ### 9.2 Callable types and closures
 
 Callable types use signature shape directly:

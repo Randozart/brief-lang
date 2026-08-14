@@ -129,3 +129,29 @@ The motivating cases become usable:
 2. **Tests + interpreter parity + docs** — commit.
 3. **Stdlib verification** — compile `new_map`/`new_stack`/`iter_map` paths;
    benchmark MATCH — commit (if any stdlib change is needed).
+
+## 6. Execution addendum (2026-08-14)
+
+**Commit `c0adc6f1` landed the core** (§3.1-3.2): `fn_type_params` registry,
+call-site inference (`infer_defn_type_args` + `unify_defn_type`), substitution
+into param validation + return type, and expected-type binding for nullary
+generics (`let s: Stack<Int> = new_stack()` seeds `ctx.expected_call_type`).
+Verified end-to-end: `defn first<T>(xs: List<T>) -> T` over `List<Int>` and
+`List<String>` (one `@first`, i64 ABI); `defn count_of<T>(xs: List<T>) -> Int`
+calling `Count#` in the body; two type params infer independently; a
+non-matching arg is a clean type error. 1850 tests green.
+
+**Remaining blockers for the §3.5 stdlib goal (documented, not yet fixed):**
+- **Body literals with free `T`**: a generic body's `[]`/`{}` literal defaults
+  to `List<Int>`/concrete, not `List<T>` (`empty_list<T>` returns `[]` →
+  mismatch against `List<T>`). Needs literal inference to consult the declared
+  return type (`current_output_type`).
+- **Closure-typed generics** (`iter_map<T,U>(list, f: T -> U)`): the closure
+  `x -> x` has no typecheck case (infers `Int`), so `T -> U` unification can't
+  bind. Pre-existing closure-typing gap.
+- **Typechecker stdlib-op visibility**: `List`'s ops are visible via
+  `import "std/collections.bv"`; `HashMap`'s Tier-1 ops and the `Count#`-on-a-
+  Tier-1-type mismatch are stdlib-design issues (HashMap has no `op Count`).
+  The plan §4 note stands — op-bearing non-List types need attention.
+- These are follow-ups; the core args-driven generic dispatch is complete.
+
