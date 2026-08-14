@@ -693,7 +693,19 @@ fn eval_reflect(
             }
             _ => Ok(Value::Void),
         },
-        ("Size", true) | ("Bytes", true) => match val {
+        // 2026-08-14 (§6a.1 item 8): `.^^Size` and `.^^Bytes` are SPLIT —
+        // `.^^Size` is the compile-time shape (a vector's element count; a
+        // Product/Sum's field count; 1 for a scalar), matching the codegen's
+        // vector_element_count; `.^^Bytes` is the stored BYTE length of a
+        // Bits value. They were wrongly grouped before (Size returned byte
+        // length).
+        ("Size", true) => match val {
+            (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
+                Ok(Value::int(fields.len() as i64))
+            }
+            _ => Ok(Value::int(1)),
+        },
+        ("Bytes", true) => match val {
             Value::Bits(bytes) => Ok(Value::int(bytes.len() as i64)),
             (Value::Product { fields, .. } | Value::Sum { payload: fields, .. }) => {
                 Ok(Value::int(fields.len() as i64))
@@ -2433,6 +2445,25 @@ mod tests {
             ReflectKind::CompileTime,
         );
         assert_eq!(eval1(&r).as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_reflect_size_vs_bytes_split() {
+        // 2026-08-14 (§6a.1 item 8): `.^^Size` on a scalar is the shape (1),
+        // `.^^Bytes` on a Bits value is the byte length — they were wrongly
+        // grouped before.
+        let size_r = Expr::Reflect(
+            Box::new(Expr::Quoted(b"abc".to_vec())),
+            "Size".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&size_r).as_i64(), Some(1), ".^^Size on a scalar is its shape (1)");
+        let bytes_r = Expr::Reflect(
+            Box::new(Expr::Quoted(b"abc".to_vec())),
+            "Bytes".into(),
+            ReflectKind::CompileTime,
+        );
+        assert_eq!(eval1(&bytes_r).as_i64(), Some(3), ".^^Bytes on a Bits value is its byte length");
     }
 
     #[test]

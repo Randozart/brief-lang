@@ -56,6 +56,75 @@ pub fn execute_intrinsic(
             let chars = bytes.iter().filter(|b| (**b & 0xC0) != 0x80).count();
             Ok(Value::int(chars as i64))
         }
+        // 2026-08-14 (UOL §6b): the collection-op intrinsic forms — value
+        // parity with the codegen's op-member dispatch. A collection is a
+        // `Value::Product` (fields = the element sequence or the collection's
+        // slots); `Count#` is its field count, `At#` the field at an index,
+        // `Slice#` a positional sub-product, and the mutation ops read/write
+        // the field list. `Count#` on a String value is the char count (the
+        // `#String` case the codegen routes to `CharCount#`).
+        "Count#" => {
+            let v = args.first().ok_or_else(|| crate::errors::RuntimeError::HeapError(
+                "Count# takes one argument".into(),
+            ))?;
+            match v {
+                Value::Product { fields, .. } => Ok(Value::int(fields.len() as i64)),
+                Value::Bits(bytes) => {
+                    let chars = bytes.iter().filter(|b| (**b & 0xC0) != 0x80).count();
+                    Ok(Value::int(chars as i64))
+                }
+                _ => Ok(Value::int(0)),
+            }
+        }
+        "At#" => {
+            if args.len() < 2 {
+                return Err(RuntimeError::HeapError("At# takes (collection, index)".into()));
+            }
+            match &args[0] {
+                Value::Product { fields, .. } => {
+                    let i = args[1].as_i64().ok_or_else(|| RuntimeError::HeapError("At# index must be Int".into()))?;
+                    fields.get(i as usize).cloned().ok_or_else(|| RuntimeError::HeapError("At# index out of range".into()))
+                }
+                _ => Err(RuntimeError::HeapError("At# receiver must be a collection".into())),
+            }
+        }
+        "Slice#" => {
+            if args.len() < 3 {
+                return Err(RuntimeError::HeapError("Slice# takes (collection, lo, hi)".into()));
+            }
+            match &args[0] {
+                Value::Product { fields, .. } => {
+                    let lo = args[1].as_i64().unwrap_or(0) as usize;
+                    let hi = args[2].as_i64().unwrap_or(fields.len() as i64) as usize;
+                    Ok(Value::Product {
+                        fields: fields[lo.min(fields.len())..hi.min(fields.len())].to_vec(),
+                        names: None,
+                    })
+                }
+                _ => Err(RuntimeError::HeapError("Slice# receiver must be a collection".into())),
+            }
+        }
+        "InsertAt#" => {
+            // 2026-08-14 (UOL §6b): value-based interpreter — the receiver is
+            // immutable (`&[Value]`), so an in-place push is unrepresentable.
+            // Return Void (the caller's rebind in real codegen mutates state);
+            // the collection-op VALUE parity for reads is what the interpreter
+            // exercises (Count#/At#/Slice#).
+            if args.len() < 2 {
+                return Err(RuntimeError::HeapError("InsertAt# takes (collection, value)".into()));
+            }
+            Ok(Value::Void)
+        }
+        "ExtractFrom#" | "CopyFrom#" => {
+            let v = args.first().ok_or_else(|| RuntimeError::HeapError("ExtractFrom# takes a collection".into()))?;
+            match v {
+                Value::Product { fields, .. } => {
+                    let last = fields.last().cloned().ok_or_else(|| RuntimeError::HeapError("extract from empty collection".into()))?;
+                    Ok(last)
+                }
+                _ => Err(RuntimeError::HeapError("ExtractFrom# receiver must be a collection".into())),
+            }
+        }
         // ── Arithmetic (type-polymorphic) ───────────────────────────
         "Add#" => exec_binop(args, |a, b| a + b, |a, b| a + b),
         "Sub#" => exec_binop(args, |a, b| a - b, |a, b| a - b),
@@ -867,6 +936,27 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("NonExistent#", &[], &mut heap);
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_collection_op_intrinsics_parity() {
+        // 2026-08-14 (UOL §6b): `Count#`/`At#`/`Slice#` value parity with the
+        // codegen's op-member dispatch. A collection is a Product of elements.
+        let mut heap = VirtualHeap::new();
+        let coll = Value::Product {
+            fields: vec![Value::int(10), Value::int(20), Value::int(30)],
+            names: None,
+        };
+        assert_eq!(
+            execute_intrinsic("Count#", &[coll.clone()], &mut heap).unwrap().as_i64(),
+            Some(3)
+        );
+        assert_eq!(
+            execute_intrinsic("At#", &[coll.clone(), Value::int(1)], &mut heap).unwrap().as_i64(),
+            Some(20)
+        );
+        let sliced = execute_intrinsic("Slice#", &[coll.clone(), Value::int(0), Value::int(2)], &mut heap).unwrap();
+        assert_eq!(execute_intrinsic("Count#", &[sliced], &mut heap).unwrap().as_i64(), Some(2));
     }
 
     #[test]
