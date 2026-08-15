@@ -749,3 +749,30 @@ untyped expression-position literals; a follow-up can route those through
 the coll ops or migrate the tests. `grow`-on-full auto-trigger (plan §3.6)
 is a future slice — the scaffold's `push` allocates the default cap (16) but
 does not yet auto-grow past it.
+
+## 12. Implementation status (2026-08-15, final)
+
+- `4f4211bd` §3.3 #4 + §3.4.6 — `@ll_empty_list` DELETED (a shared sentinel
+  aliased across every `[]` user; empty sequences now malloc a fresh block);
+  `.^Length` on a `coll obj` reads the hidden `len` slot (offset 16), on a
+  `coll struct` returns the fixed T[N] count N. `resolve_reflect` admits
+  coll types.
+- `c26ffd8b` §3.3 — `coll struct` registers `CollStorage::InlineFixed`
+  (storage classification, `.^Length`, instance-prefix). Note: coll struct
+  construction with a literal array field is blocked by a PRE-EXISTING gap
+  (list literal types as `List<Int>`, not `Int[4]`; no List→Vector
+  coercion) — the `.^Length` codegen is correct, construction is a
+  documented follow-up.
+- `6a8a0653` §3.2 — `op Grow`/`op Shrink` bindings are handle-only
+  (`#Lh`); a two-arg form is a compile error.
+
+**Final verification:** 1865 lib tests green; 37/37 benchmarks MATCH.
+Interpreter `.^Length` on a Product (the coll representation) returns the
+field count = element count, matching the codegen's hidden len slot.
+
+**Remaining deferred (all documented):** the `grow`-on-full auto-trigger
+(plan §3.6 — the guard-branch data reassignment needs a phi merge the
+member-body self-slot path lacks; explicit growth works via
+`Resize#`/`EnsureCap#`); `IterKind::List`/`Expr::List → emit_heap_seq` for
+stdlib-free unit tests; coll struct array-field construction; a HashMap-
+style custom Grow that rehashes (requires the auto-trigger).
