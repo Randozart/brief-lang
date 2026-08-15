@@ -155,6 +155,11 @@ pub struct CompilerContext {
     /// only protocol + declared metadata; codegen consults the packed layout
     /// helper when it must materialize the representation.
     pub packed_structs: HashSet<String>,
+    /// 2026-08-15 (coll plan): `coll obj`/`coll struct` storage modes — the
+    /// compiler picks the most effective representation per shape (SPEC §8.10,
+    /// "storage is the compiler's choice"). `seq coll` forces the contiguous
+    /// element block.
+    pub coll_storage: HashMap<String, crate::backend::llvm::coll_scaffold::CollStorage>,
     /// 2026-08-13 (layout-keywords plan Phase 5): atomic field slots, keyed
     /// `"<type>.<field>"` (type name + field name disambiguate across
     /// structs). Populated at registration from the parser's
@@ -395,6 +400,7 @@ impl CompilerContext {
             inits: HashMap::new(),
             struct_types: HashMap::new(),
             packed_structs: HashSet::new(),
+            coll_storage: HashMap::new(),
             atomic_fields: HashSet::new(),
             unions: HashSet::new(),
             obj_types: std::collections::HashSet::new(),

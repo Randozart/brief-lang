@@ -1603,11 +1603,54 @@ fn codegen(
     for item in items.iter() {
         if let briev_compiler::ast::TopLevel::TypeDef(td) = item {
             let mut all_ops = td.body.operators.clone();
+            // 2026-08-15 (coll plan §3.4): a `coll` type gets the default
+            // construction/mutation op bindings synthesized — `op InitEmpty`/
+            // `op Init` (literal + `let` construction), `op InsertAt` (`<-`
+            // push), `op ExtractFrom`/`op CopyFrom` (pop/read). The member
+            // bodies are synthesized into obj_members by the LLVM backend
+            // (coll_scaffold); here we wire the bindings the dispatch paths
+            // consult. Only added when the type doesn't declare its own
+            // binding for the same op (a user override wins).
+            let mut coll_bindings: Vec<briev_compiler::ast::top::OperatorBinding> = Vec::new();
+            if td.coll {
+                for (op, impl_name, arg_form) in [
+                    ("InitEmpty", "init_empty", "Lh"),
+                    ("Init", "init", "Lh,Rh"),
+                    ("InsertAt", "push", "Lh,Rh"),
+                    ("ExtractFrom", "pop", "Rh"),
+                    ("CopyFrom", "get", "Rh"),
+                ] {
+                    let already = td.body.op_bindings.iter().any(|b| b.name == op);
+                    if already {
+                        continue;
+                    }
+                    let args: Vec<briev_compiler::ast::Expr> = arg_form
+                        .split(',')
+                        .map(|h| {
+                            briev_compiler::ast::Expr::Identifier(format!("#{}", h))
+                        })
+                        .collect();
+                    coll_bindings.push(briev_compiler::ast::top::OperatorBinding {
+                        name: op.to_string(),
+                        protocol_variant: None,
+                        pre: None,
+                        suf: None,
+                        reg: None,
+                        expr: briev_compiler::ast::Expr::Call(
+                            impl_name.to_string(),
+                            args,
+                            None,
+                        ),
+                        span: None,
+                    });
+                }
+            }
+            let bindings_iter = td.body.op_bindings.iter().chain(coll_bindings.iter());
             // 2026-07-30: Convert op_bindings (new-style) to OperatorDef format.
             // CastFrom(#Bit) goes to the casting graph (sole user-extensible cast edge).
             // CastTo(#Bit) is banned (hardcoded representation guarantee).
             // Other CastTo/CastFrom remain in operator_defs as type-level lane overrides.
-            for b in &td.body.op_bindings {
+            for b in bindings_iter {
                 let pv = b.protocol_variant.as_deref().unwrap_or("");
                 let is_bit_target = pv == "#Bit" || pv == "Bit";
 

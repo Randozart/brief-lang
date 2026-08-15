@@ -756,6 +756,15 @@ coll struct Fixed<T, N> {
 - **`coll struct`** — fixed `T[N]` only (this slice): length == capacity
   == N, no hidden slots, C ABI preserved. `Ptr<T>`-backed structs are a
   documented follow-up.
+- **Storage is the compiler's choice** (2026-08-15): the compiler picks the
+  most effective representation for each coll from its shape and use — heap
+  block (growable `Ptr<T>`), inline array (fixed `T[N]`), or pooled columns
+  (fixed `T[N]` named instance). A `coll` is a promise the compiler
+  optimizes, not a fixed layout. **`seq coll` adds one hard constraint: the
+  elements sit in a single contiguous memory block** — for a `Ptr<T>` coll
+  the data buffer IS one block (a hard guarantee of what the shape already
+  gives); for a fixed `T[N]` coll `seq` forbids the columnar/pooled layout
+  (inline array only).
 - **`op Grow`/`op Shrink` are overridable strategy bindings** (handle-only,
   `op Grow: grow(#Lh)`); a binding replaces the compiler's default doubling
   policy. This is the same binding machinery as `op InsertAt`/`op ExtractFrom`

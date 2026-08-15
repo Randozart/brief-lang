@@ -454,7 +454,16 @@ and are not overloadable (`op` is for user types). The hierarchy:
   `Void`** — the numeric/scalar fundamentals. `Double` is `type Double:
   Float` (just Float with more bits).
 - **`struct`** — passive fixed record, C-compatible, no behavior.
-- **`obj`** (with `coll` for collections) — state + behavior + lifecycle.
+- **`coll obj` / `coll struct`** — the native strategy keyword for
+  collections: declare the one sequence member (the storage shape) and the
+  compiler owns the rest — hidden `cap`/`len`, scaffolded `op Count`/`op At`/
+  construction/iteration, `.^Length`, `Count#`, and default `op Grow`/
+  `op Shrink`. **The compiler picks the most effective storage** (heap block
+  for growable `Ptr<T>`, inline array for fixed `T[N]`, pooled columns for a
+  fixed named instance). **`seq coll`** forces the elements into one
+  contiguous memory block — for a `Ptr<T>` coll the data buffer already IS
+  one block; for a fixed `T[N]` coll it forbids the columnar layout.
+- **`obj`** — state + behavior + lifecycle.
 
 | You want to… | Use |
 |---|---|

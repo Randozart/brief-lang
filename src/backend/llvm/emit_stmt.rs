@@ -365,10 +365,15 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // collection's own ops (op Init/op InsertAt) — never the
                     // hardcoded [len][elem] heap-seq layout the members can't
                     // read. The binding below resolves the value.
+                    // 2026-08-15 (coll plan): a `coll obj` let has a Custom
+                    // type (`MyQueue`), so a coll-typed binding is a collection
+                    // too — construct it through the scaffolded ops.
                     let constructed = {
-                        let is_coll = ty.as_ref().map(|t| matches!(
-                            t, crate::ast::Type::Applied(..)
-                        )).unwrap_or(false);
+                        let is_coll = ty.as_ref().map(|t| match t {
+                            crate::ast::Type::Applied(..) => true,
+                            crate::ast::Type::Custom(n) => backend.ctx.coll_storage.contains_key(n),
+                            _ => false,
+                        }).unwrap_or(false);
                         if is_coll && matches!(e, crate::ast::Expr::List(_)) {
                             let briev = ty.clone().unwrap_or(crate::ast::Type::int());
                             backend.construct_local_collection(out, indent, &briev, e)

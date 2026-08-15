@@ -146,12 +146,49 @@ These were settled in design review with the requester:
     control knob for Grow/Shrink). Reflection is "observes and never
     computes" for non-operational metadata (§4); capacity is not that. One
     surface: `Capacity#` intrinsic. (General reflection rule, §4.)
-11. **Auto-trigger** — the scaffolded `op InsertAt` calls Grow when
-    `len == cap` (before the write); the scaffolded `op ExtractFrom` calls
-    Shrink when `len < cap / 2` (after the read). Same triggers as today's
-    `push`/`pop` preconditions. **`coll obj` only** — a `coll struct`
-    (fixed `T[N]`) has no Grow/Shrink; InsertAt past N is a precondition
-    error (ambiguity #3).
+ 11. **Auto-trigger** — the scaffolded `op InsertAt` calls Grow when
+     `len == cap` (before the write); the scaffolded `op ExtractFrom` calls
+     Shrink when `len < cap / 2` (after the read). Same triggers as today's
+     `push`/`pop` preconditions. **`coll obj` only** — a `coll struct`
+     (fixed `T[N]`) has no Grow/Shrink; InsertAt past N is a precondition
+     error (ambiguity #3).
+
+> **2026-08-15 addendum (storage is the compiler's choice; `seq coll`
+> guarantees contiguity).** "Data should be handled in the most effective
+> way possible" — a `coll` declaration is a promise the compiler optimizes,
+> not a fixed storage strategy. The compiler picks the most effective
+> representation for each coll from its shape and use; **`seq coll` adds one
+> hard constraint: the elements sit in a single contiguous memory block.**
+> Decisions locked in review:
+> 1. **`seq coll`** = the collection's ELEMENTS live in one contiguous block
+>    (the element store is one allocation; the `[data, cap, len]` header may
+>    be separate). For a `Ptr<T>` coll the data buffer IS one block, so `seq`
+>    is a hard guarantee of what the shape already gives; for a fixed `T[N]`
+>    coll `seq` forbids the columnar/pooled layout (inline array only).
+> 2. **Plain `coll`** = full compiler choice: heap block, pooled columns, or
+>    inline array, per shape and use (the "most effective way").
+> 3. **Pooling rule** — a coll may use the instance-pool representation
+>    (unpacked `base.member` columns) ONLY when it is fixed-size (`T[N]`) AND
+>    zero/literal-initialized as a named instance. Growable `Ptr<T>` colls
+>    always heap (mirrors the existing List-vs-Stack split, mod.rs:4852-4882;
+>    the value must outlive the creating scope — emit_toplevel.rs:1215).
+>
+> **Storage matrix (what the compiler chooses):**
+>
+> | coll form | Element store | Default best | `seq` adds |
+> |---|---|---|---|
+> | `coll obj` + `Ptr<T>` | one malloc'd block | heap `[data,cap,len]` | hard guarantee (already contiguous) |
+> | `coll obj` + `T[N]` | inline array | inline OR pooled columns (fixed) | force inline, forbid columns |
+> | `coll struct` + `T[N]` | inline array | inline (C ABI) | already satisfied — no-op guarantee |
+>
+> **Implementation consequence:** the blunt `coll_types: HashSet<String>`
+> exclusion (all colls never pool) is replaced by a shape-aware
+> `coll_storage: HashMap<String, CollStorage>` with
+> `CollStorage ∈ { HeapGrowable, InlineFixed, Poolable }`, derived from the
+> sequence member at registration. `instance_prefix_for` and
+> `build_field_index` consult it: `T[N]` colls may unpack (Stack shape);
+> `Ptr<T>` colls never do. `seq` on a fixed coll forces inline (skips pool
+> columns). `seq coll obj` parses (TypeDef gains a `seq` flag).
 
 ## 3. Work items (implementation order)
 
@@ -161,18 +198,22 @@ These were settled in design review with the requester:
    (`src/lexer.rs:77-104`); add to the display match and the reserved-keyword
    list (`:686-689`).
 2. **Parser** — in `parse_top_level` (`src/parser/definitions.rs:16-43`),
-   accept `Some(Token::Coll)` followed by `obj`/`struct`:
-   - `coll obj` → `parse_obj_like` with a `coll` flag;
-   - `coll struct` → `parse_struct_def` with a `coll` flag.
-   Mirror the `pack`/`seq` prefix loop already used for structs
-   (`:2242-2256`); `coll` is order-independent with `pack`/`seq`
-   (`coll pack struct`, `pack coll struct` both valid).
+    accept `Some(Token::Coll)` followed by `obj`/`struct`:
+    - `coll obj` → `parse_obj_like` with a `coll` flag;
+    - `coll struct` → `parse_struct_def` with a `coll` flag;
+    - `seq coll obj` / `coll seq obj` → `parse_obj_like` with `coll` + `seq`
+      flags (2026-08-15 addendum: `seq coll` forces the contiguous element
+      block).
+    Mirror the `pack`/`seq` prefix loop already used for structs
+    (`:2242-2256`); `coll` is order-independent with `pack`/`seq`
+    (`coll pack struct`, `pack coll struct` both valid).
 3. **AST** —
-   - `TypeDef` (`src/ast/top.rs:975`) gains `pub coll: bool`;
-   - `StructDef` (`src/ast/top.rs:927-935`) gains `pub coll: bool` beside
-     `pack`/`union`;
-   - `TypeDefBody` unchanged (the scaffolded ops are synthesized at
-     registration, not parsed).
+    - `TypeDef` (`src/ast/top.rs:975`) gains `pub coll: bool` and
+      `pub seq: bool` (2026-08-15 addendum);
+    - `StructDef` (`src/ast/top.rs:927-935`) gains `pub coll: bool` beside
+      `pack`/`union`;
+    - `TypeDefBody` unchanged (the scaffolded ops are synthesized at
+      registration, not parsed).
 4. **Syntax highlighter / grammar** — `vocab.rs` keywords list
    (`src/vocab.rs:686-689` region) and the SPEC grammar (§2/§8).
 
@@ -216,11 +257,18 @@ declared slots, never from a name:
 1. **`coll obj`** — when registering the struct key (`ensure_mono`,
    `emit_toplevel.rs:1511`; `build_field_index`, `mod.rs` obj/struct
    registration), append **two synthetic trailing slots** to
-   `struct_types`: `("<cap>", Type::int())` then `("<len>", Type::int())`.
-   For `List` this reproduces the current canonical layout
+   `struct_types`: `cap` then `len` (plain names — the synthesized member
+   bodies `term len` / `data[len]` resolve them through the boxed-self GEP;
+   §3.2 rejects user-declared `cap`/`len` fields). For `List` this
+   reproduces the current canonical layout
    `[inner.data@0, inner.cap@1, len@2]` byte-for-byte — zero migration,
    O(1) length + capacity. `struct_type_size` (`emit_expr.rs:3106`) and the
    universe registration pick it up automatically.
+   **Storage mode** (2026-08-15 addendum): a `Ptr<T>`-backed `coll obj` is
+   `HeapGrowable` (never pooled; the value must outlive the creating scope);
+   a `T[N]`-backed `coll obj` is `InlineFixed`/`Poolable` by initializer.
+   `seq coll obj` forces the contiguous element block (which `Ptr<T>` already
+   gives; for `T[N]` it forbids the columnar layout).
 2. **`coll struct`** — no append; **fixed `T[N]` only in this slice.** The
    declared data member is a `T[N]` array; length == capacity == N, a
    compile-time constant. **A `Ptr<T>`-backed `coll struct` is out of scope**
@@ -228,6 +276,8 @@ declared slots, never from a name:
    defining a length-prefixed buffer convention (`[len][elems]` or
    `[cap][len][elems]`) is a separate follow-up. C ABI preserved: a
    `coll struct` is exactly its declared `T[N]` field, nothing appended.
+   `seq coll struct` is a no-op guarantee (the inline `T[N]` field is already
+   contiguous).
 3. **Hidden slots in state/init** — the appended slots are zero-initialized
    like any other; the scaffolded `op InitEmpty`/`op Init` write them.
 4. **`@ll_empty_list` is DELETED, not resized** (ambiguity #4). The 2-slot

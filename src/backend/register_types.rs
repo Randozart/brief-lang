@@ -243,8 +243,8 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
         // slots are part of the ResolvedType fields so the IR type and the
         // universe's `bytes` both include them.
         if td.coll {
-            fields.push(("<cap>".to_string(), Type::int()));
-            fields.push(("<len>".to_string(), Type::int()));
+            fields.push(("cap".to_string(), Type::int()));
+            fields.push(("len".to_string(), Type::int()));
         }
         let mut rt = ResolvedType {
             name: td.name.clone(),

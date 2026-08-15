@@ -44,6 +44,10 @@ pub struct TypecheckContext<'a> {
     /// src`, `~<- src;`). Reading a consumed local afterward is a use-after-move
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
     pub consumed_locals: std::collections::HashSet<String>,
+    /// 2026-08-15 (coll plan §3.2): the `coll obj`/`coll struct` type names —
+    /// they accept empty list literals (`[]`), and their op surface is
+    /// scaffolded by the compiler.
+    pub coll_types: std::collections::HashSet<String>,
     pub universe: &'a TypeUniverse,
     /// 2026-08-05 (Phase 5): the seeded protocol-casting graph, used to enforce
     /// the SPEC §8.7 rule that one written `as` traverses at most one
@@ -122,6 +126,7 @@ impl<'a> TypecheckContext<'a> {
             init_names: std::collections::HashSet::new(),
             defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
+            coll_types: std::collections::HashSet::new(),
             universe,
             casting_graph: crate::casting::graph::CastingGraph::new(),
             parse_ops: HashMap::new(),
@@ -1217,10 +1222,23 @@ fn try_coerce_via_parse(
     // for every element type. (The Parse-op machinery below has no form for a
     // bare `[]`.)
     if let Expr::List(elems) = expr {
-        if elems.is_empty() {
-            if let Type::Applied(n, _) = target_ty {
-                return n == "List";
+        // 2026-08-15 (coll plan): any `coll` type accepts a list literal
+        // (`[]` or `[1,2,3]`) — the compiler scaffolds `op InitEmpty`/
+        // `op Init`+`op InsertAt`, so the literal constructs through the
+        // collection's own ops. `List` stays a built-in accepted target for
+        // compatibility. Matches both the Custom (`MyQueue`) and Applied
+        // (`List<Int>`) target forms.
+        let target_base = match target_ty {
+            Type::Custom(n) => Some(n.as_str()),
+            Type::Applied(n, _) => Some(n.as_str()),
+            _ => None,
+        };
+        if let Some(n) = target_base {
+            if n == "List" || ctx.coll_types.contains(n) {
+                return true;
             }
+        }
+        if elems.is_empty() {
             return false;
         }
     }
@@ -2860,6 +2878,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     let mut all_type_slots: HashMap<String, Vec<crate::ast::top::TypeDefSlot>> = HashMap::new();
     let mut all_type_members: HashMap<String, Vec<TopLevel>> = HashMap::new();
     let mut all_type_params: HashMap<String, Vec<String>> = HashMap::new();
+    // 2026-08-15 (coll plan): `coll obj`/`coll struct` type names — they
+    // accept empty list literals and have a compiler-scaffolded op surface.
+    let mut all_coll_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut all_type_protocols: HashMap<String, String> = HashMap::new();
     // 2026-08-03 (P1.4): cross-variant op overrides from proto declarations —
     // variant name → op name → binding fn (e.g. C_String → Concat →
@@ -2877,6 +2898,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             }
         }
         if let TopLevel::TypeDef(td) = item {
+            if td.coll {
+                all_coll_types.insert(td.name.clone());
+            }
             if !td.body.operators.is_empty() {
                 all_regular_ops.insert(td.name.clone(), td.body.operators.clone());
             }
@@ -2886,7 +2910,25 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             if !td.body.slots.is_empty() {
                 all_type_slots.insert(td.name.clone(), td.body.slots.clone());
             }
-            if !td.body.members.is_empty() {
+            if td.coll {
+                // 2026-08-15 (coll plan §3.4): the typechecker must see the
+                // scaffolded op surface too (push_element_type, foreach, and
+                // the op-members all consult type_members). Synthesize the
+                // same members the backend scaffolds, so the two never
+                // disagree about which ops exist.
+                let synth = crate::backend::llvm::coll_scaffold::synthesize_members_for_check(td);
+                let mut merged = td.body.members.clone();
+                for m in synth {
+                    let m_name = crate::backend::llvm::emit_expr::member_briev_name(&m);
+                    let dup = merged.iter().any(|ex| {
+                        crate::backend::llvm::emit_expr::member_briev_name(ex) == m_name
+                    });
+                    if !dup {
+                        merged.push(m);
+                    }
+                }
+                all_type_members.insert(td.name.clone(), merged);
+            } else if !td.body.members.is_empty() {
                 all_type_members.insert(td.name.clone(), td.body.members.clone());
             }
             if !td.type_params.is_empty() {
@@ -2903,6 +2945,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         // slots too — `inner.data` on a ListBuffer<T> field must resolve. Its
         // fields become TypeDefSlots so field access + monomorphization work.
         if let TopLevel::StaticStruct(sd) = item {
+            if sd.coll {
+                all_coll_types.insert(sd.name.clone());
+            }
             let slots: Vec<crate::ast::top::TypeDefSlot> = sd.fields
                 .iter()
                 .map(|(n, ty)| crate::ast::top::TypeDefSlot {
@@ -2948,6 +2993,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_type_params: &all_type_params,
         all_type_protocols: &all_type_protocols,
         all_cross_ops: &all_cross_ops,
+        all_coll_types: &all_coll_types,
         defined_fns: &defined_fns,
     };
 
@@ -3289,6 +3335,8 @@ struct CheckEnv<'a> {
     all_type_params: &'a HashMap<String, Vec<String>>,
     all_type_protocols: &'a HashMap<String, String>,
     all_cross_ops: &'a HashMap<String, HashMap<String, String>>,
+    /// 2026-08-15 (coll plan): `coll obj`/`coll struct` type names.
+    all_coll_types: &'a std::collections::HashSet<String>,
     /// 2026-08-06 (diagnostics): every defined function/transaction name.
     defined_fns: &'a std::collections::HashSet<String>,
 }
@@ -3313,6 +3361,9 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.fn_type_params = env.fn_type_params.clone();
     ctx.type_protocols = env.all_type_protocols.clone();
     ctx.variant_cross_ops = env.all_cross_ops.clone();
+    // 2026-08-15 (coll plan): coll types accept `[]` and have a scaffolded
+    // op surface.
+    ctx.coll_types = env.all_coll_types.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
     for (name, ty) in env.state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
@@ -5753,5 +5804,35 @@ node start [true][false] { term; };
         check(has_cap).is_err(),
         "coll declaring a cap field must error (compiler-owned)"
     );
+}
+
+/// 2026-08-15 (coll plan §3.4): a `coll obj` accepts empty AND non-empty list
+/// literals, `<-` push, indexing, and `foreach` — the scaffolded op surface.
+#[test]
+fn coll_obj_lifecycle_typechecks() {
+    let ok = r#"
+coll obj MyQueue { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: MyQueue = [];
+    q <- 10;
+    q <- 20;
+    let n: Int = q.Count#();
+    let f: Int = q[0];
+    term;
+};
+"#;
+    assert!(check(ok).is_ok(), "coll obj empty-init + push + Count# + index must type");
+    let lit = r#"
+coll obj MyQueue { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: MyQueue = [5, 6];
+    let sum: Int = 0;
+    foreach x in q { sum = sum + x; }
+    term;
+};
+"#;
+    assert!(check(lit).is_ok(), "coll obj literal-init + foreach must type");
 }
 }

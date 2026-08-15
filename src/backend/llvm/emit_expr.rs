@@ -284,6 +284,9 @@ impl LlvmBackend {
                 if let Some((self_type, self_ptr)) = &self_binding {
                     let is_self_slot = self.ctx.struct_types.get(self_type)
                         .map_or(false, |f| f.iter().any(|(n, _)| n == name));
+                    if name == "len" {
+                        eprintln!("DEBUG self-binding type={} name={} is_self_slot={}", self_type, name, is_self_slot);
+                    }
                     if is_self_slot {
                         let (slot_ty, _) = self.ctx.struct_types.get(self_type)
                             .and_then(|f| f.iter().find(|(n, _)| n == name))
@@ -2338,7 +2341,21 @@ impl LlvmBackend {
         }
         let reg = self.get_local(name)?;
         let base = self.fun.let_binding_types.get(name).and_then(|t| match t {
-            Type::Custom(b) if self.ctx.obj_members.contains_key(b) => Some(b.clone()),
+            Type::Custom(b) if self.ctx.obj_members.contains_key(b) => {
+                // 2026-08-15 (coll plan): a GROWABLE `coll obj` (`Ptr<T>`
+                // sequence) is a BOXED heap handle — never a pooled instance.
+                // Its members are the scaffolded op surface, resolved through
+                // the boxed self, not unpacked top-level columns. A FIXED
+                // `T[N]` coll may pool (the Stack shape). This mirrors the
+                // List-vs-Stack split (mod.rs build_field_index).
+                if matches!(
+                    self.ctx.coll_storage.get(b),
+                    Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
+                ) {
+                    return None;
+                }
+                Some(b.clone())
+            }
             _ => None,
         })?;
         Some((base, reg))

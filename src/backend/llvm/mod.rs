@@ -1,5 +1,6 @@
 pub mod abi;
 pub mod builder;
+pub(crate) mod coll_scaffold;
 pub mod context;
 pub mod directive;
 pub mod dispatch;
@@ -2232,8 +2233,8 @@ impl LlvmBackend {
                     // `inner.data: Ptr<T>`) this reproduces the canonical
                     // `[inner.data, cap, len]` layout byte-for-byte.
                     if td.coll {
-                        fields.push(("<cap>".to_string(), Type::int()));
-                        fields.push(("<len>".to_string(), Type::int()));
+                        fields.push(("cap".to_string(), Type::int()));
+                        fields.push(("len".to_string(), Type::int()));
                     }
                     self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
                     // 2026-08-13 (obj value ABI): a slotted `obj`/`type` VALUE
@@ -2503,17 +2504,57 @@ impl LlvmBackend {
                     // hidden trailing slots here too, so the universe's `bytes`
                     // and layout agree with the field registration above.
                     if td.coll {
-                        fields.push(("<cap>".to_string(), Type::int()));
-                        fields.push(("<len>".to_string(), Type::int()));
+                        fields.push(("cap".to_string(), Type::int()));
+                        fields.push(("len".to_string(), Type::int()));
                     }
                     // 2026-07-24: Register struct type in both struct_types and universe
                     self.ctx.struct_types.insert(td.name.clone(), fields.clone());
                     // 2026-08-13 (Phase 5): `atomic` field slots (obj/type body).
                     register_atomic_fields(&mut self.ctx, &td.name, &td.body.metadata);
-                    // 2026-07-31 (A5): register obj members for MethodCall codegen.
-                    if !td.body.members.is_empty() {
-                        self.ctx.obj_members.insert(td.name.clone(), td.body.members.clone());
+                    // 2026-08-15 (coll plan): classify the coll's storage from
+                    // its sequence member shape — HeapGrowable (Ptr<T>, never
+                    // pooled) vs InlineFixed (T[N], may pool). This drives
+                    // instance_prefix_for and build_field_index.
+                    if td.coll {
+                        if let Some(mode) = crate::backend::llvm::coll_scaffold::coll_storage_mode(
+                            &td.body.slots,
+                            &self.ctx.struct_types,
+                        ) {
+                            self.ctx.coll_storage.insert(td.name.clone(), mode);
+                        }
                     }
+                    // 2026-07-31 (A5): register obj members for MethodCall codegen.
+                    // 2026-08-15 (coll plan §3.4): a `coll obj` gets the
+                    // synthesized collection surface appended — `op Count`/
+                    // `op At` (iteration), `op Init`/`op InsertAt`/
+                    // `op ExtractFrom`/`op CopyFrom` construction/mutation
+                    // members. These make the existing structural probes
+                    // (`tier2_op_collection`, `construct_local_collection`,
+                    // `foreach`, `Count#`, `<-`) fire for any coll type.
+                    let mut coll_members = td.body.members.clone();
+                    if td.coll {
+                        if let Some((seq_expr, elem_ty)) = crate::backend::llvm::coll_scaffold::derive_sequence_member(
+                            &td.body.slots,
+                            &self.ctx.struct_types,
+                        ) {
+                            let synth = crate::backend::llvm::coll_scaffold::synthesize_members(
+                                td, &seq_expr, elem_ty,
+                            );
+                            // Keep user-declared members; only add a synthesized
+                            // one whose member name isn't already declared.
+                            for m in synth {
+                                let m_name = crate::backend::llvm::emit_expr::member_briev_name(&m);
+                                let dup = coll_members.iter().any(|ex| {
+                                    crate::backend::llvm::emit_expr::member_briev_name(ex) == m_name
+                                });
+                                if !dup {
+                                    coll_members.push(m);
+                                }
+                            }
+                        }
+                    }
+                    self.ctx.obj_members.entry(td.name.clone())
+                        .or_insert_with(|| coll_members.clone());
                     // 2026-07-31 (A8): register obj type parameters for
                     // monomorphization (`Stack<T, N>` → ["T", "N"]).
                     if !td.type_params.is_empty() {
@@ -4821,8 +4862,13 @@ impl LlvmBackend {
                         // A LIST-LITERAL initializer (`let q: List<Int> =
                         // [0]`) constructs a heap collection VALUE, not an
                         // instance pool.
+                        // 2026-08-15 (coll plan): a GROWABLE coll (`Ptr<T>`
+                        // sequence) is a heap value — never unpacked. A FIXED
+                        // `T[N]` coll may unpack (the Stack shape). `seq` on a
+                        // fixed coll forces inline (no pool columns).
                         Type::Applied(base, args)
                             if self.ctx.obj_members.contains_key(base)
+                                && !self.is_heap_coll(base)
                                 && !matches!(expr, Some(Expr::List(_)) | Some(Expr::Tuple(_))) =>
                         {
                             let params = self.ctx.obj_type_params.get(base).cloned().unwrap_or_default();
@@ -4838,7 +4884,7 @@ impl LlvmBackend {
                         }
                         // 2026-08-07: a non-generic obj (`let c: Counter = 0`)
                         // — no const args to substitute.
-                        Type::Custom(base) if self.ctx.obj_members.contains_key(base) => {
+                        Type::Custom(base) if self.ctx.obj_members.contains_key(base) && !self.is_heap_coll(base) => {
                             Some(
                                 self.ctx.struct_types.get(base).unwrap().iter()
                                     .map(|(mname, mty)| (mname.clone(), mty.clone()))
@@ -5145,6 +5191,11 @@ impl LlvmBackend {
             if !self.ctx.obj_members.contains_key(base) {
                 continue;
             }
+            // 2026-08-15 (coll plan): a growable coll (Ptr<T>) is a heap
+            // value — it never gets pool columns (SPAWN-only or not).
+            if self.is_heap_coll(base) {
+                continue;
+            }
             let slots: Vec<(String, Type)> = self.ctx.struct_types.get(base)
                 .cloned()
                 .unwrap_or_default();
@@ -5192,6 +5243,16 @@ impl LlvmBackend {
     /// (SPEC §16.6). Row 0 is the static instance (or the first spawned row for
     /// spawn-only bases); the pool is provably inexhaustible. Idempotent — the
     /// counter check skips bases already registered via a top-level instance.
+    /// 2026-08-15 (coll plan): is `base` a growable (heap-backed) coll? A
+    /// `Ptr<T>`-sequenced coll value must outlive the creating scope, so it is
+    /// never unpacked to pool columns (SPEC §8.10 storage matrix).
+    fn is_heap_coll(&self, base: &str) -> bool {
+        matches!(
+            self.ctx.coll_storage.get(base),
+            Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
+        )
+    }
+
     fn register_pool_columns(&mut self, base: &str, slots: &[(String, Type)]) {
         let counter_name = format!("__spawn_next_{}", base);
         if !self.ctx.field_index_map.contains_key(&counter_name) {

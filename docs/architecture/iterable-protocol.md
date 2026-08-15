@@ -47,6 +47,12 @@ stdlib; new collections are user code; neither needs compiler knowledge.
 The fundamental types (`Data`, `Int`, `String`, `Blob`, …) are layer 1.5:
 compiler-native primordials, iterable through the same structural op surface
 (2026-08-15).
+A `coll` declaration (`coll obj`/`coll struct`, SPEC §8.10) is the native
+strategy keyword: the author writes the ONE sequence member, the compiler
+scaffolds the op surface and picks the most effective storage (heap block /
+inline array / pooled columns). **`seq coll`** forces the elements into one
+contiguous memory block — for a growable `Ptr<T>` coll the data buffer IS
+one block; for a fixed `T[N]` coll it forbids the columnar layout.
 
 ## 3. Op-as-member
 
