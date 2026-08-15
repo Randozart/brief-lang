@@ -933,6 +933,12 @@ pub struct StructDef {
     /// overlay: all fields share storage at offset 0; size is the largest
     /// aligned field storage (SPEC §8.2). Exclusive with `pack`/`seq`.
     pub union: bool,
+    /// 2026-08-15 (coll plan): `coll struct` — the native strategy keyword
+    /// for declaring collections. Compiler-owned Length semantics: this
+    /// slice is fixed `T[N]` only (length == capacity == N, compile-time
+    /// constant, C ABI preserved). The compiler scaffolds the op surface
+    /// (`op Count`/`op At`/construction) from the one sequence member.
+    pub coll: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -987,6 +993,12 @@ pub struct TypeDef {
     pub bit_range: Option<BitRange>,
     pub body: TypeDefBody,
     pub span: Option<Span>,
+    /// 2026-08-15 (coll plan): `coll obj` — the native strategy keyword for
+    /// declaring collections. Compiler-owned Length semantics: the compiler
+    /// appends hidden `cap`/`len` slots and scaffolds the op surface
+    /// (`op Count`/`op At`/`op Init`/`op InsertAt`/`op ExtractFrom` and the
+    /// default `op Grow`/`op Shrink` strategies) from the one sequence member.
+    pub coll: bool,
 }
 
 /// 2026-08-05 (Phase 4): `trait Name<T> { ... }` — reusable behavioral

@@ -135,6 +135,10 @@ impl LanguageVocab {
                 // 2026-08-13 (layout-keywords plan Phase 6): `union` — untagged
                 // overlay declaration (fields share storage at offset 0).
                 kw("union", VocabStatus::Canonical, KeywordContext::Declaration),
+                // 2026-08-15 (coll plan): `coll` — the native strategy keyword
+                // for declaring collections. Prefix on `obj`/`struct`:
+                // compiler-owned Length semantics, scaffolded op surface.
+                kw("coll", VocabStatus::Canonical, KeywordContext::Declaration),
                 // 2026-08-13 (layout-keywords plan): `spec` — physical-layout
                 // metadata statement (`spec Bits: 64;`). Declared layout, the
                 // disclosed sibling of the `!>` annotation form.

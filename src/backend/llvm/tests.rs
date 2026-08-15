@@ -797,6 +797,7 @@ fn unpacked_instance_program() -> Vec<TopLevel> {
         protocol: None,
         traits: vec![],
         bit_range: None,
+            coll: false,
         body: crate::ast::top::TypeDefBody {
             slots: vec![
                 crate::ast::top::TypeDefSlot { name: "data".to_string(), ty: Type::Vector(
@@ -911,6 +912,7 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
         protocol: None,
         traits: vec![],
         bit_range: None,
+            coll: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -1103,6 +1105,7 @@ fn spawn_pool_countdown_program_storage(
         protocol: None,
         traits: vec![],
         bit_range: None,
+            coll: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -1332,6 +1335,7 @@ fn test_spawn_only_base_registers_pool() {
         protocol: None,
         traits: vec![],
         bit_range: None,
+            coll: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -2371,6 +2375,7 @@ fn test_type_with_slots_populates_struct_types() {
             protocol: None,
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots: vec![
                     TypeDefSlot { name: "ptr".to_string(), ty: Type::Applied("Ptr".to_string(), vec![Type::Custom("UInt8".to_string())]), bit_range: None },
@@ -4101,6 +4106,7 @@ fn test_struct_literal_field_offsets() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4159,6 +4165,7 @@ fn test_addr_of_struct_literal() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4250,6 +4257,7 @@ fn test_frgn_ptr_param_inttoptr() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -4433,6 +4441,7 @@ fn test_struct_array_list_literal() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -4507,6 +4516,7 @@ fn test_struct_array_addr_of_and_frgn_call() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::ForeignBinding(ForeignBinding {
@@ -6674,6 +6684,7 @@ fn packed_struct_def(
         pack: true,
         union: false,
         span: None,
+        coll: false,
     }
 }
 
@@ -6891,6 +6902,7 @@ fn test_atomic_field_load_store_rmw() {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
             span: None,
         }),
         TopLevel::Definition(Definition {
@@ -6959,6 +6971,7 @@ fn test_union_emits_byte_array_and_offset_zero() {
             seq: false,
             pack: false,
             union: true,
+            coll: false,
             span: None,
         }),
         packed_main_def(vec![

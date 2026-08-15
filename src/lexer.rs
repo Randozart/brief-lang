@@ -105,6 +105,13 @@ pub enum Token {
     #[token("vol")]
     Vol,
 
+    /// 2026-08-15 (coll plan): `coll` — the native strategy keyword for
+    /// declaring collections. Prefix on `obj`/`struct`: compiler-owned Length
+    /// semantics (hidden cap/len slots), scaffolded op surface. See
+    /// docs/plans/2026-08-15-coll-length-semantics.md.
+    #[token("coll")]
+    Coll,
+
     /// 2026-08-04 (out-observability plan): `out` — observability modifier
     /// (prefix). `out defn`/`out node`/`out txn` mark the callable's calls as
     /// liveness roots (the compiler must not eliminate them); `out let` marks
@@ -547,6 +554,7 @@ impl std::fmt::Display for Token {
             Token::Trap => write!(f, "trap"),
             Token::Atomic => write!(f, "atomic"),
             Token::Union => write!(f, "union"),
+            Token::Coll => write!(f, "coll"),
             Token::Vol => write!(f, "vol"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),
@@ -684,7 +692,7 @@ mod tests {
         // vocab (removing Removed/Reserved tokens that are not canonical).
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
-            "vol", "out", "spec", "pack", "trap", "atomic", "union", "await", "spawn", "term", "term!", "rollback", "import",
+            "vol", "out", "spec", "pack", "trap", "atomic", "union", "coll", "await", "spawn", "term", "term!", "rollback", "import",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

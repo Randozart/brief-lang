@@ -456,6 +456,7 @@ mod tests {
             parent: None,
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: crate::ast::top::TypeDefBody {
                 slots: vec![],
                 metadata: std::collections::HashMap::new(),

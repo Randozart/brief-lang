@@ -403,6 +403,7 @@ mod tests {
             protocol: None,
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots: vec![],
                 metadata,

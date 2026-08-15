@@ -32,14 +32,25 @@ impl<'a> Parser<'a> {
             // and/or non-vectorized array access. Recorded as a modifier
             // annotation; the backend consumes it (never a speed win — a
             // modifier-beaten default is a compiler bug).
-            Some(Token::Pack) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
-            Some(Token::Union) => self.parse_struct_def(true).map(TopLevel::StaticStruct),
+            Some(Token::Pack) => self.parse_struct_def(false, false).map(TopLevel::StaticStruct),
+            Some(Token::Union) => self.parse_struct_def(true, false).map(TopLevel::StaticStruct),
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack)) => {
                 // 2026-08-05 (Phase 4): `seq struct` — parse_struct_def consumes
                 // the seq modifier itself. 2026-08-13: `pack`/`seq` prefixes are
                 // order-independent (`pack seq struct`, `seq pack struct`); the
                 // struct parser consumes whichever flags precede `struct`.
-                self.parse_struct_def(false).map(TopLevel::StaticStruct)
+                self.parse_struct_def(false, false).map(TopLevel::StaticStruct)
+            }
+            // 2026-08-15 (coll plan): `coll` prefix on obj/struct — the native
+            // strategy keyword for collections. Order-independent with pack/seq
+            // for structs (`coll pack struct`, `pack coll struct`).
+            Some(Token::Coll) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Obj)) => {
+                self.pos += 1; // consume coll
+                self.parse_obj_like(true).map(TopLevel::TypeDef)
+            }
+            Some(Token::Coll) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack) | Some(Token::Seq)) => {
+                self.pos += 1; // consume coll
+                self.parse_struct_def(false, true).map(TopLevel::StaticStruct)
             }
             Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Node) | Some(Token::Txn)) => {
                 self.pos += 1; // consume seq
@@ -193,8 +204,8 @@ impl<'a> Parser<'a> {
             Some(Token::Trait) => self.parse_trait().map(TopLevel::Trait),
             Some(Token::Impl) => self.parse_impl().map(TopLevel::Impl),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
-            Some(Token::Obj) => self.parse_obj_like().map(TopLevel::TypeDef),
-            Some(Token::Struct) => self.parse_struct_def(false).map(TopLevel::StaticStruct),
+            Some(Token::Obj) => self.parse_obj_like(false).map(TopLevel::TypeDef),
+            Some(Token::Struct) => self.parse_struct_def(false, false).map(TopLevel::StaticStruct),
             // 2026-07-26: Handle `render struct Name { <html> }` and `render obj Name { <html> }`
             Some(Token::Render) => self.parse_render_block(),
             // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
@@ -1808,6 +1819,7 @@ impl<'a> Parser<'a> {
             protocol,
             traits,
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots,
                 metadata,
@@ -2140,10 +2152,11 @@ impl<'a> Parser<'a> {
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
     /// Consumes the `struct` keyword, then delegates to parse_type_definition
     /// obj name { fields } — dynamic object definition.
-    fn parse_obj_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
+    fn parse_obj_like(&mut self, coll: bool) -> Result<Box<TypeDef>, SyntaxError> {
         // 2026-07-31: obj Name<Params> { slot: Type; op …; txn member(…); defn member(…) }
         // Type params, operator bindings, and self-parameterized members are
         // collected into the TypeDef body.
+        // 2026-08-15 (coll plan): `coll obj` — compiler-owned Length semantics.
         self.pos += 1; // consume obj
         let name = self.expect_identifier()?;
         let type_params = self.parse_type_params()?;
@@ -2203,7 +2216,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
-            bit_range: None, span: None,
+            bit_range: None, span: None, coll,
             body: TypeDefBody {
                 slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, constraints: vec![], members, span: None,
             },
@@ -2234,11 +2247,13 @@ impl<'a> Parser<'a> {
     /// struct Name { field: Type; } — static fixed-layout struct.
     /// Pure data, C-compatible, no methods, no contracts.
     /// 2026-07-24: Fields are space-separated, semicolon-terminated.
-    fn parse_struct_def(&mut self, union: bool) -> Result<StructDef, SyntaxError> {
+    fn parse_struct_def(&mut self, union: bool, coll: bool) -> Result<StructDef, SyntaxError> {
         // 2026-08-05 (Phase 4): `seq struct` preserves field order/containment.
         // 2026-08-13 (layout-keywords plan): `pack struct` (bit-contiguous) —
         // `pack`/`seq` are order-independent (`pack seq struct`, `seq pack
         // struct`), so consume both flags before `struct` in a loop.
+        // 2026-08-15 (coll plan): `coll struct` — order-independent with
+        // `pack`/`seq` (`coll pack struct`, `pack coll struct`).
         let mut seq = false;
         let mut pack = false;
         // 2026-08-13 (Phase 6): `union` is standalone — no seq/pack prefixes.
@@ -2389,6 +2404,7 @@ impl<'a> Parser<'a> {
             seq,
             pack,
             union,
+            coll,
         })
     }
 
@@ -2421,7 +2437,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
-            bit_range: None, span: None,
+            bit_range: None, span: None, coll: false,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
                 projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], constraints: vec![], members: vec![], span: None,

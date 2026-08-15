@@ -285,6 +285,7 @@ mod tests {
             protocol: Some("#Bit".to_string()),
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots: slots.into_iter().map(|(n, ty)| TypeDefSlot {
                     name: n.to_string(), ty, bit_range: None,
@@ -390,6 +391,7 @@ mod tests {
             seq: false,
             pack: false,
             union: false,
+            coll: false,
         }
     }
 

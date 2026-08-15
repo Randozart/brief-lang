@@ -32,6 +32,7 @@ mod tests {
             protocol: Some("#Bit".to_string()),
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots: vec![
                     TypeDefSlot { name: "x".to_string(), ty: Type::int(), bit_range: None },

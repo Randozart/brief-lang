@@ -123,6 +123,7 @@ mod tests {
             protocol: protocol.map(|p| p.to_string()),
             traits: vec![],
             bit_range: None,
+            coll: false,
             body: TypeDefBody {
                 slots: slots.into_iter().map(|(n, ty)| TypeDefSlot {
                     name: n.to_string(), ty, bit_range: None,
