@@ -747,16 +747,18 @@ pub fn infer_expression(
                 // body adopts the declared return's element type when it is a
                 // free type param — `defn empty_list<T>() -> List<T> { term
                 // []; }` must be `List<T>`, not the `List<Int>` default.
+                // 2026-08-14 (stdlib-cleanup): the element may be ANY shape the
+                // declared return references — `List<(Int, T)>` for
+                // `iter_enumerate`'s empty accumulator must be `List<(Int, T)>`,
+                // not the `List<Int>` default.
                 let declared = ctx.current_output_type.clone();
                 if let Some(Type::Applied(base, args)) = declared {
                     if base == "List" {
                         if let Some(elem) = args.first() {
-                            if matches!(elem, Type::Custom(_)) {
-                                return Ok((
-                                    Type::Applied("List".into(), vec![elem.clone()]),
-                                    Provenance::Unknown,
-                                ));
-                            }
+                            return Ok((
+                                Type::Applied("List".into(), vec![elem.clone()]),
+                                Provenance::Unknown,
+                            ));
                         }
                     }
                 }
@@ -1331,8 +1333,35 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         return infer_intrinsic_call(&sig, args, ctx);
     }
 
-    // User function call — validate args against param types, then return type.
-    // 2026-07-31 (Phase 2): call arguments must match the callee's parameter
+    // 2026-08-14 (stdlib-cleanup): a call to a BOUND FUNCTION value — a defn/
+    // txn parameter or local whose type is `Type::Function` (e.g. `f: T -> U`
+    // in a generic adapter). `infer_call` never looked at `ctx.bindings`, so
+    // `f(x)` in a generic body returned the `Type::int()` fallback. Validate
+    // each arg against the function's param types and return its return type.
+    // The params may be free generic refs (`Custom("T")`) inside a generic
+    // defn body — equality with the arg's identical free ref holds.
+    if let Some(Type::Function(f_params, f_ret)) = ctx.bindings.get(name).cloned() {
+        for (i, arg) in args.iter().enumerate() {
+            let arg_ty = infer_type_only(arg, ctx)?;
+            if let Some(param_ty) = f_params.get(i) {
+                if arg_ty != *param_ty && !try_coerce_via_parse(arg, &arg_ty, param_ty, ctx) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: format!("{}", param_ty),
+                        found: format!("{}", arg_ty),
+                        context: format!(
+                            "argument {} of function value '{}' (declared {})",
+                            i,
+                            name,
+                            ctx.bindings.get(name).map(|t| format!("{}", t)).unwrap_or_default()
+                        ),
+                    });
+                }
+            }
+        }
+        return Ok(*f_ret);
+    }
+
+    // User function call — validate args against param types, then return type.    // 2026-07-31 (Phase 2): call arguments must match the callee's parameter
     // types — no implicit coercion (literal Parse-ops excepted).
     // 2026-08-14 (generic `defn f<T>` dispatch): a generic defn's params are
     // inferred at the call site and validated against the SUBSTITUTED types.
@@ -4107,6 +4136,42 @@ node probe [v == 0][v == 1] {
 };
 "#;
         check(src).expect("a nullary two-param generic must bind both params from the annotation");
+    }
+
+    /// 2026-08-14 (stdlib-cleanup): a generic defn body may CALL a bound
+    /// function-typed parameter — `defn apply<T,U>(x: T, f: T -> U) -> U {
+    /// term f(x); }` must return the free `U` (the declared `U`), not the
+    /// `Type::int()` fallback. The f-call resolves via `ctx.bindings`.
+    #[test]
+    fn generic_defn_body_calls_bound_function_param() {
+        let src = r#"
+defn apply<T, U>(x: T, f: T -> U) -> U [true][term == term] {
+    term f(x);
+};
+let v: Int = 0;
+node probe [v == 0][v == 1] {
+    term;
+};
+"#;
+        check(src).expect("a generic body must return the bound function param's free-U return type");
+    }
+
+    /// 2026-08-14 (stdlib-cleanup): the empty-list element adoption widens
+    /// beyond a bare `Custom` — `List<(Int, T)>` elements (iter_enumerate's
+    /// accumulator) adopt the tuple shape, not the `List<Int>` default.
+    #[test]
+    fn generic_defn_empty_list_adopts_tuple_element() {
+        let src = r#"
+defn enumerate_of<T>(xs: List<T>) -> List<(Int, T)> [true][term.Count#() == xs.Count#()] {
+    term [];
+};
+let xs: List<Int> = [1, 2];
+let v: Int = 0;
+node probe [v == 0][v == 1] {
+    term;
+};
+"#;
+        check(src).expect("an empty list in a generic body must adopt a tuple element from the declared return");
     }
 
     /// 2026-08-12 (Iterable protocol): a non-operator member body still fails

@@ -205,6 +205,34 @@ impl LlvmBackend {
         Some((element_ty, base))
     }
 
+    /// 2026-08-14 (Iterable protocol, slice-6 literal TYPES): does a Briev
+    /// TYPE expose the Tier-2 `op Count`/`op At` surface? Used by call-site
+    /// literal marshaling (`emit_user_call`): a `[1,2,3]` literal argument to
+    /// a param declared `List<T>` constructs through the collection's OWN ops
+    /// (`op Init`/`op InsertAt`) — never the stale `[len][elems]` heap-seq
+    /// layout the members can't read. The layout tag lives in the type's
+    /// member surface, not in a hardcoded name.
+    pub(super) fn tier2_collection_type(&self, ty: &crate::ast::Type) -> bool {
+        use crate::ast::TopLevel;
+        let base = match ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+            _ => return false,
+        };
+        let members = self.ctx.obj_members.get(&base);
+        match members {
+            Some(members) => {
+                let has_count = members
+                    .iter()
+                    .any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "Count"));
+                let has_at = members
+                    .iter()
+                    .any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"));
+                has_count && has_at
+            }
+            None => false,
+        }
+    }
+
     /// 2026-08-12 (Iterable protocol, Tier 1, SPEC §11.4.1): does the list
     /// expression name a value whose type exposes `op Iter`/`op Step`/
     /// `op IsEnd`/`op Current` as op-as-member operators (and NOT Tier 2's

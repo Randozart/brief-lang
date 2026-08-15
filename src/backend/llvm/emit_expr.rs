@@ -1297,9 +1297,47 @@ impl LlvmBackend {
             }
 
             // ── Lambda ───────────────────────────────────────────────
+            // 2026-08-14 (stdlib-cleanup): a lambda in expression position
+            // (a call ARGUMENT — `iter_map(list, x -> x * 2)`) is a real
+            // first-class closure value, NOT an inlined body evaluation. It
+            // lowers to a heap env block `[fn_ptr, cap1..capN]` whose address
+            // is the value, with the closure body emitted as a
+            // `briev_closure_N` function — the same representation a `let`
+            // binds (emit_stmt Statement::Let lambda arm). The address flows as
+            // an i64 handle like other boxed values; the defn-call path
+            // inttoptrs it when the callee's param is `Type::Function` (ptr).
             Expr::Lambda(params, body) => {
-                let _params = params;
-                self.emit_expr(out, body, indent)
+                let free_vars = crate::backend::llvm::context::collect_free_vars(body, params);
+                let symbol = format!("briev_closure_{}", self.ctx.pending_closures.len());
+                self.ctx.pending_closures.push(
+                    crate::backend::llvm::context::PendingClosure {
+                        symbol: symbol.clone(),
+                        params: params.clone(),
+                        body: (**body).clone(),
+                        free_vars: free_vars.clone(),
+                    },
+                );
+                let env_size = 8 * (1 + free_vars.len());
+                let alloc = self.fun.gen_reg();
+                writeln!(out, "{}{}_p = call ptr @malloc(i64 {})", indent, alloc, env_size).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {}_p to i64", indent, alloc, alloc).ok();
+                let env_p = self.fun.gen_reg();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, env_p, alloc).ok();
+                let fn_reg = self.fun.gen_reg();
+                writeln!(out, "{}{} = ptrtoint ptr @{} to i64", indent, fn_reg, symbol).ok();
+                writeln!(out, "{}store i64 {}, ptr {}", indent, fn_reg, env_p).ok();
+                for (j, var) in free_vars.iter().enumerate() {
+                    let cap = self.emit_expr(out, &Expr::Identifier(var.clone()), indent);
+                    let slot = self.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = getelementptr i64, ptr {}, i64 {}",
+                        indent, slot, env_p, 1 + j
+                    )
+                    .ok();
+                    writeln!(out, "{}store i64 {}, ptr {}", indent, cap.name, slot).ok();
+                }
+                TypedRegister { name: alloc, ty: Type::int() }
             }
 
             // ── Address-of ────────────────────────────────────────────
@@ -3749,7 +3787,22 @@ impl LlvmBackend {
         // with the env as the first (hidden) parameter. This makes the closure
         // a real first-class value (it can be passed around), replacing the
         // inline-at-call-site lowering.
+        // 2026-08-14 (stdlib-cleanup): a FUNCTION-TYPED PARAM (`f: T -> U`) is
+        // a closure value received from the callee — its slot holds the env
+        // block address, so calls to it go indirect too. Previously a bare
+        // `call @f(...)` referenced an undefined symbol (broken IR) and
+        // flattened the result to Int.
         if self.fun.closure_lets.contains_key(name) {
+            return self.emit_closure_indirect_call(out, name, args, indent);
+        }
+        let is_fn_param = self
+            .fun
+            .let_original_types
+            .get(name)
+            .or_else(|| self.fun.let_binding_types.get(name))
+            .map(|t| matches!(t, Type::Function(_, _)))
+            .unwrap_or(false);
+        if is_fn_param {
             return self.emit_closure_indirect_call(out, name, args, indent);
         }
         // 2026-07-16: P5 — Check if this is a foreign function; if so, use emit_frgn_call
@@ -3759,17 +3812,43 @@ impl LlvmBackend {
             return self.emit_frgn_call(out, v, &sig, args, indent);
         }
         // 2026-07-14: collect typed registers so call includes argument types
-        let arg_regs: Vec<TypedRegister> = args
-            .iter()
-            .map(|a| self.emit_expr(out, a, indent))
-            .collect();
+        // 2026-08-14 (Iterable protocol, slice-6 literal args): a List-literal
+        // argument (`iter_map([1,2,3], f)`) whose declared param type is a
+        // Tier-2 collection MUST construct through the collection's own ops
+        // (`op Init`/`op InsertAt`) — never the stale `[len][elems]` heap-seq
+        // layout from emit_heap_seq. The adapter reads it back via `op Count`/
+        // `op At`, which expect `[data@0, cap@1, len@2]`; a heap-seq literal
+        // segfaulted in iter_map_loop (length read from slot 0 = data ptr).
+        // Mirrors the typed-local-let path (emit_stmt.rs:363-377).
+        let arg_regs: Vec<TypedRegister> = {
+            let fn_params = self.ctx.defn_params.get(name).cloned();
+            args.iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    if let Some(param_tys) = &fn_params {
+                        if let Some(pt) = param_tys.get(i) {
+                            if matches!(a, crate::ast::Expr::List(_))
+                                && self.tier2_collection_type(pt)
+                            {
+                                if let Some(reg) = self.construct_local_collection(
+                                    out, indent, pt, a,
+                                ) {
+                                    return reg;
+                                }
+                            }
+                        }
+                    }
+                    self.emit_expr(out, a, indent)
+                })
+                .collect()
+        };
         // 2026-07-17: Look up defn parameter types for type adaptation.
-        let defn_param_tys = self.ctx.defn_params.get(name);
+        let defn_param_tys = self.ctx.defn_params.get(name).cloned();
         let is_defn = defn_param_tys.is_some();
         let mut call_args: Vec<String> = Vec::new();
         if is_defn {
             call_args.push("ptr %state".to_string());
-            let param_tys = defn_param_tys.unwrap();
+            let param_tys = defn_param_tys.as_ref().unwrap();
             for (i, reg) in arg_regs.iter().enumerate() {
                 let reg_llvm_ty = self.llvm_type(&reg.ty);
                 // 2026-07-17: Get the function's expected parameter type.
@@ -3782,7 +3861,16 @@ impl LlvmBackend {
                 // 2026-07-30: Ptr values are stored as i64 internally (ptrtoint at
                 // function entry). Convert back to LLVM ptr when the function expects
                 // ptr but the register's Briev type is Ptr (meaning it's an i64 handle).
-                if param_llvm_ty == "ptr" && (reg_llvm_ty == "i64" || matches!(reg.ty, Type::Ptr(_))) {
+                // 2026-08-14 (stdlib-cleanup): Type::Function is the same storage
+                // convention — a closure VALUE is an i64 env-block handle, and a
+                // fn-typed param is ptrtoint'd to i64 at defn entry, so marshaling
+                // it into a later fn-typed param must inttoptr again (the 2026-08-03
+                // host-callback ABI kept llvm_type(Function)="ptr").
+                if param_llvm_ty == "ptr"
+                    && (reg_llvm_ty == "i64"
+                        || matches!(reg.ty, Type::Ptr(_))
+                        || matches!(reg.ty, Type::Function(_, _)))
+                {
                     let conv = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, conv, reg.name).ok();
                     call_args.push(format!("ptr {}", conv));
@@ -3845,6 +3933,15 @@ impl LlvmBackend {
     /// address), then the fn_ptr from slot 0, and calls it indirectly with the
     /// env as the hidden first parameter. Uniform for every closure value —
     /// whether called by name or passed around and called through a parameter.
+    /// 2026-08-14 (stdlib-cleanup): a FUNCTION-TYPED PARAM (`f: T -> U` in a
+    /// defn/txn) is a closure value too — its binding is a param slot holding
+    /// the env-block address, which must be LOADED from the slot (identifiers
+    /// already do this; a bare binding register is only a let-bound closure's
+    /// direct env address). The returned register carries the closure's
+    /// DECLARED return type from the binding (`Type::Function(_, ret)`), so a
+    /// downstream `.Count#()` on `f(x)` dispatches (e.g. `iter_flatmap_loop`'s
+    /// `mapped.Count#()`); previously the result was flattened to Int and
+    /// method dispatch panicked with "no member on ''".
     fn emit_closure_indirect_call(
         &mut self,
         out: &mut String,
@@ -3852,7 +3949,19 @@ impl LlvmBackend {
         args: &[Expr],
         indent: &str,
     ) -> TypedRegister {
-        let env_val = self.resolve_name_register(name);
+        let env_val = if let Some(reg) = self.fun.let_bindings.get(name).cloned() {
+            if self.fun.param_slots.values().any(|s| s == &reg)
+                || self.fun.let_binding_allocas.contains(&reg)
+            {
+                let loaded = self.fun.gen_reg();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, loaded, reg).ok();
+                loaded
+            } else {
+                reg
+            }
+        } else {
+            self.resolve_name_register(name)
+        };
         let env_p = self.fun.gen_reg();
         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, env_p, env_val).ok();
         let fp = self.fun.gen_reg();
@@ -3877,7 +3986,29 @@ impl LlvmBackend {
             arg_regs.join(", ")
         )
         .ok();
-        TypedRegister { name: result, ty: Type::int() }
+        let ret_ty = self
+            .fun
+            .let_original_types
+            .get(name)
+            .or_else(|| self.fun.let_binding_types.get(name))
+            .and_then(|t| match t {
+                Type::Function(_, ret) => Some((**ret).clone()),
+                _ => None,
+            })
+            .unwrap_or(Type::int());
+        // 2026-08-14 (stdlib-cleanup): the closure ABI boxes EVERY return to
+        // i64. A Bool-returning closure (`T -> Bool`, e.g. iter_filter's pred)
+        // therefore holds a 0/1 in an i64 register — narrow to i8 so guards
+        // (`trunc i8 ... to i1`) and `when` conditions type-check instead of
+        // truncating an i64 (clang error). Mirrors the i64→i8→i64 boxing of a
+        // Bool PARAMETER at function entry.
+        if ret_ty == Type::bool_() {
+            let narrowed = self.fun.gen_reg();
+            writeln!(out, "{}{} = trunc i64 {} to i8", indent, narrowed, result).ok();
+            TypedRegister { name: narrowed, ty: ret_ty }
+        } else {
+            TypedRegister { name: result, ty: ret_ty }
+        }
     }
 
         /// 2026-08-06 (Phase 7): lower a match expression. The scrutinee is

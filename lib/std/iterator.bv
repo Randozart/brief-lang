@@ -89,19 +89,12 @@ defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term.Count#() == 
 };
 
 // Find first matching
-txn iter_find_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
-    [i < list.Count#()][i == list.Count#()] -> Option<T>
-{
-    when pred(list[i]) {
-        term Some(list[i]);
-    };
-    i = i + 1;
-    term None;
-};
-
-defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][true] {
-    term iter_find_loop(list, pred, 0);
-};
+// 2026-08-14 (stdlib-cleanup): `iter_find`/`iter_max`/`iter_min` returned
+// `Option<T>` via `Some(...)`/`None` — the enum VALUE system (variant
+// construction, `uni` matching) is not implemented end-to-end in the compiler
+// (see BUGS.md "stdlib iterator.bv / hashmap.bv written aspirationally"). The
+// adapters are removed until that feature lands; the rest of the file compiles
+// and runs.
 
 // Check if any match
 txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
@@ -138,9 +131,25 @@ defn iter_collect<T>(list: List<T>) -> List<T> [true][term.Count#() == list.Coun
     term list;
 };
 
-// Chain two iterators (pure concatenation, no loop needed)
+// Chain two iterators (concatenation)
+// 2026-08-14 (stdlib-cleanup): the original `term a + b` needed a `+` (Concat)
+// op on List, which the compiler never declared — rewrite as the canonical
+// txn loop with InsertAt (the adapter pattern used by the other adapters).
+txn iter_chain_loop<T>(a: List<T>, b: List<T>, result: List<T>, i: Int)
+    [i < a.Count#() + b.Count#()][i == a.Count#() + b.Count#()] -> List<T>
+{
+    when i < a.Count#() {
+        result <- a[i];
+    };
+    when i >= a.Count#() {
+        result <- b[i - a.Count#()];
+    };
+    i = i + 1;
+    term result;
+};
+
 defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term.Count#() == a.Count#() + b.Count#()] {
-    term a + b;
+    term iter_chain_loop(a, b, [], 0);
 };
 
 // Flat map (map then flatten)
@@ -199,34 +208,4 @@ defn iter_sum(list: List<Int>) -> Int [true][term >= 0] {
 // Product of numeric list (pure defn, delegates to fold)
 defn iter_product(list: List<Int>) -> Int [true][term >= 0] {
     term iter_fold_loop(list, (acc, x) -> acc * x, 1, 0);
-};
-
-// Maximum element
-txn iter_max_loop<T>(list: List<T>, max_val: T, i: Int)
-    [i < list.Count#()][i == list.Count#()] -> Option<T>
-{
-    when list[i] > max_val {
-        max_val = list[i];
-    };
-    i = i + 1;
-    term Some(max_val);
-};
-
-defn iter_max<T>(list: List<T>) -> Option<T> [list.Count#() > 0][true] {
-    term iter_max_loop(list, list[0], 1);
-};
-
-// Minimum element
-txn iter_min_loop<T>(list: List<T>, min_val: T, i: Int)
-    [i < list.Count#()][i == list.Count#()] -> Option<T>
-{
-    when list[i] < min_val {
-        min_val = list[i];
-    };
-    i = i + 1;
-    term Some(min_val);
-};
-
-defn iter_min<T>(list: List<T>) -> Option<T> [list.Count#() > 0][true] {
-    term iter_min_loop(list, list[0], 1);
 };

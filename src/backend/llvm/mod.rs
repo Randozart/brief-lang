@@ -4382,7 +4382,18 @@ impl LlvmBackend {
             self.fun.let_original_types.insert(v.clone(), Type::int());
         }
         let result = self.emit_expr(out, &c.body, "  ");
-        writeln!(out, "  ret i64 {}", result.name).ok();
+        // 2026-08-14 (stdlib-cleanup): the closure ABI boxes every return to
+        // i64 (params/env slots are i64 too). A Bool predicate body emits an
+        // i8 register (`x % 2 == 0`) — zext it to i64 so `ret i64` stays valid.
+        // The indirect-call site truncs back to i8. This keeps the whole
+        // closure ABI uniform i64 (a Bool is as boxed as a Ptr/List handle).
+        if crate::backend::llvm::types::lower_type(&result.ty, None) == "i8" {
+            let boxed = self.fun.gen_reg();
+            writeln!(out, "  {} = zext i8 {} to i64", boxed, result.name).ok();
+            writeln!(out, "  ret i64 {}", boxed).ok();
+        } else {
+            writeln!(out, "  ret i64 {}", result.name).ok();
+        }
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
