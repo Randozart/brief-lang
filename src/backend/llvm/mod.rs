@@ -4449,7 +4449,9 @@ impl LlvmBackend {
         // i8 register (`x % 2 == 0`) — zext it to i64 so `ret i64` stays valid.
         // The indirect-call site truncs back to i8. This keeps the whole
         // closure ABI uniform i64 (a Bool is as boxed as a Ptr/List handle).
-        if crate::backend::llvm::types::lower_type(&result.ty, None) == "i8" {
+        // 2026-08-15: check the Briev type directly — `lower_type(Bool, None)`
+        // returns "i64" (no universe), so a type-based check was dead.
+        if result.ty == crate::ast::Type::bool_() {
             let boxed = self.fun.gen_reg();
             writeln!(out, "  {} = zext i8 {} to i64", boxed, result.name).ok();
             writeln!(out, "  ret i64 {}", boxed).ok();
