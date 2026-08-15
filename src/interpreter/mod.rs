@@ -967,4 +967,35 @@ mod tests {
         let awaited = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t".to_string())))).unwrap();
         assert_eq!(awaited.as_i64(), Some(42), "await must yield the task result");
     }
+
+    // ── 2026-08-15 (coll grow-on-full): reference value parity ────────
+
+    #[test]
+    fn coll_count_and_capacity_intrinsic_parity() {
+        // The interpreter's coll value is a Product with no capacity concept
+        // (SPEC §8.10, §3.6): a 21-element coll holds 21 fields exactly. The
+        // backend grows past the default cap (16) and must hold the same 21
+        // elements — `Count#` agrees on both, and `Capacity#(product)` is its
+        // field count (a Vec is exact-fit). The >16 count is the grow-on-full
+        // parity anchor: pre-fix the backend wrote OOB past the 16-slot buffer.
+        let program = parse_program(
+            "coll obj MyQueue { data: Ptr<Int>; };\n\
+             defn fill() -> Int {\n\
+               let q: MyQueue = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];\n\
+               let n: Int = q.Count#();\n\
+               let cap: Int = Capacity#(q);\n\
+               let sum: Int = 0;\n\
+               foreach x in q { sum = sum + x; };\n\
+               term n + cap + sum;\n\
+             };\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let v = interp.call_function("fill", &[]).unwrap();
+        assert_eq!(
+            v.as_i64(),
+            Some(21 + 21 + 210),
+            "Count# 21 + Capacity# 21 (exact-fit) + sum 0..=20 = 210"
+        );
+    }
 }

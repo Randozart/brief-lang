@@ -2522,8 +2522,11 @@ impl LlvmBackend {
                             &td.body.slots,
                             &self.ctx.struct_types,
                         ) {
+                            let storage = self.ctx.coll_storage.get(&td.name)
+                                .copied()
+                                .unwrap_or(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed);
                             let synth = crate::backend::llvm::coll_scaffold::synthesize_members(
-                                td, &seq_expr, elem_ty,
+                                td, &seq_expr, elem_ty, storage,
                             );
                             // Keep user-declared members; only add a synthesized
                             // one whose member name isn't already declared.

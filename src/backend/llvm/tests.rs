@@ -5821,6 +5821,77 @@ fn test_arrow_only_collection_is_kept_in_state() {
     );
 }
 
+// ── Coll grow-on-full (2026-08-15) ────────────────────────────────────
+
+/// A `coll obj` push past the default cap (16) must emit the grow-on-full
+/// guard: `if len == cap { __briev_coll_resize(h, cap * 2) }` BEFORE the
+/// store, and re-read `data` from the slot after the join (the runtime
+/// mutates the `[data, cap, len]` block in place — no register merge).
+/// Pre-fix the scaffolded push had no guard and wrote OOB past the 16-slot
+/// buffer (SPEC §8.10 grow-on-full).
+#[test]
+fn test_coll_grow_on_full_guard_emits() {
+    let src = r#"
+coll obj MyQueue { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: MyQueue = [];
+    foreach x in 0..21 {
+        q.push(x);
+    };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__briev_coll_resize"),
+        "the grow guard must call the runtime realloc-or-copy resize; got:\n{ir}"
+    );
+}
+
+/// A declared handle-only `op Grow: triple(#Lh)` wins over the default
+/// doubling — the synthesized push guard calls the bound function with the
+/// receiver handle (`#Self`), never the default `Resize#` doubling.
+#[test]
+fn test_coll_grow_override_binding_wins() {
+    let src = r#"
+coll obj GeometricQueue {
+    data: Ptr<Int>;
+    op Grow: triple(#Lh);
+};
+defn triple(q: GeometricQueue) {
+    Resize#(q, Capacity#(q) * 3);
+};
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: GeometricQueue = [];
+    foreach x in 0..17 {
+        q.push(x);
+    };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @triple("),
+        "the grow guard must dispatch to the bound override; got:\n{ir}"
+    );
+}
+
 /// `(n as String)` routes through the `Int → #String` casting-graph lane
 /// (`ExtCall int_to_str`), which must emit `call ptr @int_to_str(i64)` — the
 /// String IS a ptr to [len][bytes]. Regression: the ExtCall hardcoded `i64`

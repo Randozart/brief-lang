@@ -171,6 +171,19 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
+                // 2026-08-15 (coll grow-on-full): `#Self` in a member body is
+                // the receiver HANDLE (the boxed-self pointer re-boxed to the
+                // target's integer width). The scaffolded push/pop grow guards
+                // pass it to the capacity intrinsics (`Resize#(#Self, cap*2)`)
+                // and the Grow/Shrink strategy bindings. §15.1 hashword.
+                if name == "#Self" {
+                    if let Some((_, self_ptr)) = self.fun.self_binding.clone() {
+                        let iw = format!("i{}", self.ctx.int_bits);
+                        let h = self.fun.gen_reg();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, h, self_ptr, iw).ok();
+                        return TypedRegister { name: h, ty: Type::int() };
+                    }
+                }
                 // 2026-08-07 (object instance pools): a bare member name in an
                 // UNPACKED member body resolves to the instance's top-level
                 // slot — `data` inside `st`'s push → the `st.data` field.

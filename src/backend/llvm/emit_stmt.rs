@@ -1194,6 +1194,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // Reset so the false-path (guard condition not met) continues
             // emitting the rest of the body after guard.endN.
             backend.fun.terminated = false;
+            // 2026-08-15 (coll grow-on-full): record the block the emitter is
+            // now writing into. The countdown loop's latch phis key their body
+            // predecessor on `fun.cur_block` (the FINAL block of the emitted
+            // body) — a `when`-ended body must report its merge label, not the
+            // loop body block, or the phi's predecessor list mismatches the
+            // CFG (invalid IR; clang's LoopDeletionPass then crashes). The
+            // countdown engine's own If/Guarded handlers already do this.
+            backend.fun.cur_block = Some(end_lbl.clone());
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::If(cond, then, else_) => {
@@ -1225,6 +1233,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}br label %{}", indent, end_lbl).ok();
             }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
+            // 2026-08-15 (coll grow-on-full): record the merge block as the
+            // live block — see the Guarded arm above (countdown latch phis).
+            backend.fun.cur_block = Some(end_lbl.clone());
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::Block(stmts) => {

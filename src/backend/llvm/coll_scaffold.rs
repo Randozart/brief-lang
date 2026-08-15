@@ -161,14 +161,60 @@ fn synth_init_empty(
     }
 }
 
+/// The default `op Grow` action: `Resize#(#Self, cap * 2)` — doubling.
+/// Routes through the runtime realloc-or-copy (`__briev_coll_resize`), which
+/// mutates the `[data, cap, len]` block in place.
+fn default_grow_action() -> Expr {
+    Expr::Call(
+        "Resize#".to_string(),
+        vec![
+            Expr::Identifier("#Self".to_string()),
+            Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Mul,
+                Box::new(Expr::Identifier("cap".to_string())),
+                Box::new(Expr::Decimal(2)),
+            ),
+        ],
+        None,
+    )
+}
+
+/// Resolve a coll's growth strategy action. A declared handle-only binding
+/// (`op Grow: grow(#Lh)`, §15.2) wins over the compiler default — the action
+/// calls the bound function with the receiver handle (`#Self`). The default
+/// doubling is used when no override is declared.
+///
+/// 2026-08-15 (drain fix): there is NO auto-shrink. Auto-shrink-when-sparse
+/// resizes on every pop in a drain pattern (`<- q; q <- x` keeps len ≤ 1 <
+/// cap/2, so the shrink fires each iteration — an allocate/copy/free per
+/// iteration that regressed queue_drain_idio badly and crashed clang's
+/// LoopDeletionPass on the opaque in-loop call). Shrink stays explicit:
+/// `TrimCap#` and a declared `op Shrink` binding (the handle-only binding is
+/// validated; nothing auto-invokes it). SPEC §8.10 mandates grow-on-full
+/// only.
+fn strategy_action(td: &TypeDef, op: &str, default: Expr) -> Expr {
+    for b in &td.body.op_bindings {
+        if b.name == op {
+            if let Expr::Call(fn_name, _, _) = &b.expr {
+                return Expr::Call(
+                    fn_name.clone(),
+                    vec![Expr::Identifier("#Self".to_string())],
+                    None,
+                );
+            }
+        }
+    }
+    default
+}
+
 /// A synthesized `txn push(val: T) { data[len] = val; len = len + 1; }`
-/// member — InsertAt. 2026-08-15: grow-on-full is a FUTURE slice (the
-/// §3.6 auto-trigger); this slice allocates the default cap (16) in
-/// InitEmpty/Init and relies on the capacity intrinsics
-/// (`Resize#`/`EnsureCap#`) for explicit growth. A grow guard needs a phi
-/// merge of the old/new data pointer across the guard branch, which the
-/// member-body self-slot write path doesn't provide yet.
-fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
+/// member — InsertAt. For a `HeapGrowable` coll obj, the body opens with the
+/// grow-on-full guard: `if len == cap { <grow>; }` — the default `op Grow`
+/// doubles the capacity before the store, so an insert past capacity is never
+/// an out-of-bounds write (SPEC §8.10). The runtime resize mutates the block
+/// in place, so the post-guard `data` read reloads the possibly-new pointer
+/// from the slot — no register merge across the guard branch is required.
+fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type, grow_action: Option<Expr>) -> Definition {
     let data_write = Statement::Assign(
         Expr::Index(
             Box::new(seq_access(seq_expr)),
@@ -184,6 +230,20 @@ fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
             Box::new(Expr::Decimal(1)),
         ),
     );
+    let mut body = Vec::new();
+    if let Some(grow) = grow_action {
+        body.push(Statement::If(
+            Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("len".to_string())),
+                Box::new(Expr::Identifier("cap".to_string())),
+            ),
+            vec![Statement::Expression(grow)],
+            vec![],
+        ));
+    }
+    body.push(data_write);
+    body.push(len_inc);
     Definition {
         name: "push".to_string(),
         type_params: vec![],
@@ -191,7 +251,7 @@ fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
         output_type: None,
         outputs: vec![],
         contract: default_coll_contract(),
-        body: vec![data_write, len_inc],
+        body,
         metadata: Default::default(),
         derivation: None,
         modifiers: vec![],
@@ -267,6 +327,9 @@ fn synth_init(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
 }
 
 /// A synthesized `defn pop() -> T { term data[len-1]; }` member — ExtractFrom.
+/// No auto-shrink (2026-08-15 drain fix): a shrink-when-sparse guard resizes
+/// on every pop in a drain pattern — see `strategy_action`. Shrink stays
+/// explicit (`TrimCap#`, a declared `op Shrink` binding).
 fn synth_pop(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
     Definition {
         name: "pop".to_string(),
@@ -364,18 +427,29 @@ pub(crate) fn derive_sequence_member(
 /// iteration ops, the construction/mutation members, and (for coll obj) the
 /// default Grow/Shrink strategy entries appended to `operator_defs` by the
 /// caller. Returns the members to store in `obj_members`.
+///
+/// The grow guard is wired only for `HeapGrowable` colls (a fixed `T[N]`
+/// coll struct never grows — SPEC §8.10); a declared handle-only
+/// `op Grow` binding wins over the default doubling. Shrink stays explicit
+/// (`TrimCap#` / a declared `op Shrink` binding) — see `strategy_action`.
 pub(crate) fn synthesize_members(
     td: &TypeDef,
     seq_expr: &str,
     elem_ty: crate::ast::Type,
+    storage: CollStorage,
 ) -> Vec<TopLevel> {
     let mut members = Vec::new();
+    let growable = storage == CollStorage::HeapGrowable;
     members.push(TopLevel::TypeDefOperator(synth_op_count()));
     members.push(TopLevel::TypeDefOperator(synth_op_at(seq_expr, elem_ty.clone())));
     members.push(TopLevel::Definition(synth_init_empty(
         seq_expr, elem_ty.clone(), elem_ty.clone(),
     )));
-    members.push(TopLevel::Definition(synth_push(seq_expr, elem_ty.clone())));
+    members.push(TopLevel::Definition(synth_push(
+        seq_expr,
+        elem_ty.clone(),
+        if growable { Some(strategy_action(td, "Grow", default_grow_action())) } else { None },
+    )));
     members.push(TopLevel::Definition(synth_get(seq_expr, elem_ty.clone())));
     members.push(TopLevel::Definition(synth_pop(seq_expr, elem_ty.clone())));
     members.push(TopLevel::Definition(synth_init(seq_expr, elem_ty)));
@@ -405,9 +479,11 @@ pub(crate) fn coll_body_with_members(
     struct_types: &std::collections::HashMap<String, Vec<(String, crate::ast::Type)>>,
 ) -> TypeDefBody {
     let seq = derive_sequence_member(&original.slots, struct_types);
+    let storage = coll_storage_mode(&original.slots, struct_types)
+        .unwrap_or(CollStorage::InlineFixed);
     let mut body = original;
     if let Some((seq_expr, elem_ty)) = seq {
-        let members = synthesize_members(td, &seq_expr, elem_ty);
+        let members = synthesize_members(td, &seq_expr, elem_ty, storage);
         body.members.extend(members);
     }
     body

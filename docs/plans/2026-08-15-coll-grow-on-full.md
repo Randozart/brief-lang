@@ -204,6 +204,10 @@ non-MATCH ratio: `bash benchmarks/compare_baseline.sh <name>`.
 
 ## 7. Roadmap (subsequent legs, in order)
 
+0. **Frontend grow-guard pass (the queue_drain_idio regression fix)** — see
+   §8. Hoist the inlined grow call to the batch-loop's cold guard block or
+   eliminate it when the frontend proves the coll's length stays below
+   capacity across the loop.
 1. **Coll-struct construction** — list-literal→`Int[N]` coercion so
    `coll struct` constructs from literals (prerequisite for const generics;
    unblocks the SPEC §8.10 example end-to-end).
@@ -212,3 +216,47 @@ non-MATCH ratio: `bash benchmarks/compare_baseline.sh <name>`.
 3. OPEN BUGS.md: stdlib `iterator.bv`/`hashmap.bv` never compile; iterable
    slice-6 deletions.
 4. Fundamentals-as-types with `Data` as reflective floor (decision recorded).
+
+## 8. Implementation results (2026-08-15)
+
+**Implemented (verified end-to-end):**
+- Grow-on-full: a 21-push coll obj produces count 21, capacity 32 (doubled),
+  sum 210 (0..=20, no element loss, no OOB) — the pre-fix code wrote past the
+  16-slot buffer.
+- The grow guard is `if len == cap { Resize#(#Self, cap*2) }` BEFORE the
+  store; the runtime `__briev_coll_resize` (malloc + copy `min(len, cap)` +
+  free + in-place slot update) mutates the block in place, so the post-guard
+  `data` read reloads the possibly-new pointer from the slot — **no register
+  merge across the guard branch**, sidestepping the coll plan §3.6 phi-merge
+  blocker.
+- `Resize#` now routes through the runtime `__briev_coll_resize` — the old
+  inline emission malloc'd fresh WITHOUT copying or freeing (latent data-loss
+  bug for explicit `Resize#` calls). `EnsureCap#`/`TrimCap#` already did.
+- `#Self` resolves in member bodies to the boxed-self handle (§15.1).
+- **Phi bug fix:** the generic `Statement::If`/`Guarded` emitters now record
+  their merge label in `fun.cur_block`. The countdown loop's latch phis key
+  their body predecessor on `cur_block`; a guard `if` inside an inlined member
+  body split the loop body, leaving the phi's predecessor list mismatched with
+  the CFG (invalid IR that crashed clang's LoopDeletionPass). Pre-existing
+  latent bug — the grow guard was the first `if` in a countdown body.
+  `opt -verify` now passes.
+
+**Auto-shrink removed (drain fix).** Auto-shrink-when-sparse resizes on EVERY
+pop in a drain pattern (`<- q; q <- x` keeps len ≤ 1 < cap/2, so the shrink
+fires each iteration — an allocate/copy/free per iteration). It regressed
+queue_drain_idio catastrophically and its opaque in-loop call triggered the
+clang crash. Shrink stays explicit: `TrimCap#` + a declared `op Shrink` binding
+(handle-only validation kept; nothing auto-invokes it). SPEC §8.10 mandates
+grow-on-full only.
+
+**Known regression: queue_drain_idio 0.58x → 4.00x.** The opaque resize call
+in a coll-push hot loop blocks LLVM's loop optimization (the batch-loop inner
+loop can no longer be if-converted; the call is a `memory(readwrite)` barrier).
+Tested structural alternatives — `cold` declare (0.53s), helper function
+(0.52s), `memory(argmem)` ptr declare (0.52s), sibling cold-block with
+duplicated store (0.75s), `llvm.expect` cold marking (crash) — none restore
+the baseline 0.0351s; the branch alone (no call) is free (0.03s), so ANY call
+in the loop CFG is the cost. queue_drain_idio still MATCHES (correctness); all
+C-comparable benchmarks (queue_drain, queue_drain_sym, stack_push_pop — fixed
+RingBuffer/Stack, not coll) are unchanged at 0.55-0.61x. The principled fix is
+roadmap item 0.

@@ -723,42 +723,26 @@ fn emit_capacity(
 }
 
 /// 2026-08-15 (coll plan §3.6): `Resize#(h, cap)` — set the data buffer to
-/// exactly `cap` elements (realloc-or-copy), store the new cap. This slice:
-/// realloc if the data pointer is non-null, else malloc. The element size is
-/// 8 (word elements) — the coll storage contract this slice.
+/// exactly `cap` elements (realloc-or-copy), store the new cap.
+///
+/// 2026-08-15 (grow-on-full): routes through the runtime `__briev_coll_resize`
+/// — malloc a fresh buffer of `cap * 8`, copy `min(len, cap)` elements, free
+/// the old buffer, store the new data + cap. The previous inline emission
+/// malloc'd fresh WITHOUT copying or freeing (data loss + leak); the runtime
+/// is the single source of resize truth (EnsureCap#/TrimCap# already route
+/// through it) and mutates the `[data, cap, len]` block in place — a grow
+/// guard in a member body never needs to reassign the data slot, so no
+/// register merge is required across the guard branch.
 fn emit_resize(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let h = emit_arg(backend, out, &args[0], indent);
     let cap = emit_arg(backend, out, &args[1], indent);
-    let elem_size: i64 = 8;
-    let p = backend.fun.gen_reg();
-    let dptr_gep = backend.fun.gen_reg();
-    let old_data = backend.fun.gen_reg();
-    let bytes = backend.fun.gen_reg();
-    let mul = backend.fun.gen_reg();
-    let new_data = backend.fun.gen_reg();
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, h).ok();
-    // data = load i64, ptr [p + 0]
-    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, dptr_gep, p).ok();
-    writeln!(out, "{}{} = load i64, ptr {}", indent, old_data, dptr_gep).ok();
-    // bytes = cap * 8
-    writeln!(out, "{}{} = mul i64 {}, {}", indent, mul, cap, elem_size).ok();
-    writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, bytes, mul).ok();
-    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, new_data, bytes).ok();
-    // store new data pointer at [p + 0], new cap at [p + 8]
-    let store_data = backend.fun.gen_reg();
-    let cap_gep = backend.fun.gen_reg();
-    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, store_data, p).ok();
-    writeln!(out, "{}store i64 {}, ptr {}", indent, new_data, store_data).ok();
-    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, cap_gep, p).ok();
-    writeln!(out, "{}store i64 {}, ptr {}", indent, cap, cap_gep).ok();
-    // NOTE: this slice does not copy old elements (the default Grow/Shrink
-    // bodies rebuild; a future slice wires a Copy# under len). Length is
-    // preserved.
+    let call = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call i64 @__briev_coll_resize(i64 {}, i64 {})", indent, call, h, cap).ok();
+    let _ = call;
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-    let _ = old_data;
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
 
