@@ -284,9 +284,6 @@ impl LlvmBackend {
                 if let Some((self_type, self_ptr)) = &self_binding {
                     let is_self_slot = self.ctx.struct_types.get(self_type)
                         .map_or(false, |f| f.iter().any(|(n, _)| n == name));
-                    if name == "len" {
-                        eprintln!("DEBUG self-binding type={} name={} is_self_slot={}", self_type, name, is_self_slot);
-                    }
                     if is_self_slot {
                         let (slot_ty, _) = self.ctx.struct_types.get(self_type)
                             .and_then(|f| f.iter().find(|(n, _)| n == name))
@@ -1749,7 +1746,9 @@ impl LlvmBackend {
 
     /// 2026-07-14: Emit a heap-allocated sequence (list/tuple) with 2-slot header.
     /// Protocol: slot 0 = length (i64), slots 1..N = elements.
-    /// Empty seq → @ll_empty_list global sentinel.
+    /// Empty seq → a fresh 2-slot heap block (2026-08-15, coll plan §3.3 #4:
+    /// @ll_empty_list DELETED — a shared sentinel aliases across users; a `[]`
+    /// coll constructs via `op InitEmpty`, an empty tuple gets its own block).
     /// Non-empty → malloc((2+N)*8), bitcast, store N, store elements, ptrtoint.
     fn emit_heap_seq(
         &mut self,
@@ -1760,7 +1759,12 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let count = exprs.len();
         if count == 0 {
-            writeln!(out, "{}{} = ptrtoint ptr @ll_empty_list to i64", indent, v).ok();
+            let raw = self.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @malloc(i64 16)", indent, raw).ok();
+            let hdr = self.fun.gen_reg();
+            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hdr, raw).ok();
+            writeln!(out, "{}store i64 0, ptr {}", indent, hdr).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, hdr).ok();
         } else {
             let total = (2 + count) * 8;
             let raw = self.fun.gen_reg();
@@ -2650,6 +2654,21 @@ impl LlvmBackend {
                      let p = self.string_ptr(out, indent, &recv_reg);
                      let r = self.fun.gen_reg();
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, p).ok();
+                     TypedRegister { name: r, ty: Type::int() }
+                 }
+                 // 2026-08-15 (coll plan §3.4.6): `x.^Length` on a `coll` type
+                 // is the hidden `len` slot (offset 16 of [data, cap, len]) —
+                 // O(1), the stored element count. The compiler owns the slot;
+                 // this is stored-length reflection (SPEC §17.1), distinct
+                 // from the `Count#` intrinsic (same value for word-element
+                 // colls).
+                 other if self.is_coll_type(&recv_reg.ty) => {
+                     let p = self.fun.gen_reg();
+                     let gep = self.fun.gen_reg();
+                     let r = self.fun.gen_reg();
+                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, recv_reg.name).ok();
+                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, gep, p).ok();
+                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, gep).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
                 other => panic!(

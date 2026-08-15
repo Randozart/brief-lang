@@ -1124,7 +1124,7 @@ pub fn infer_expression(
                 return Ok((Type::int(), recv_prov));
             }
             let (recv_ty, recv_prov) = infer_expression(recv, ctx)?;
-            let result_ty = resolve_reflect(&recv_ty, target, *kind)?;
+            let result_ty = resolve_reflect(&recv_ty, target, *kind, ctx)?;
             Ok((result_ty, recv_prov))
         }
         // 2026-07-31: Method call: a.m(args) — resolves the member on the
@@ -3577,6 +3577,7 @@ fn resolve_reflect(
     receiver: &Type,
     target: &str,
     kind: ReflectKind,
+    ctx: &TypecheckContext,
 ) -> Result<Type, TypeError> {
     let is_compile_time = matches!(kind, ReflectKind::CompileTime);
     let wrong_kind = |expected: &str| {
@@ -3603,6 +3604,12 @@ fn resolve_reflect(
             match receiver {
                 Type::Custom(n) if n == "String" || n == "Blob" => Ok(Type::int()),
                 Type::Vector(..) => Ok(Type::int()),
+                // 2026-08-15 (coll plan §3.4.6): a `coll` type's `.^Length` is
+                // the hidden `len` slot (compiler-owned stored length) — O(1),
+                // distinct from the member-managed `op Count` of a hand-written
+                // collection.
+                Type::Custom(n) if ctx.coll_types.contains(n) => Ok(Type::int()),
+                Type::Applied(n, _) if ctx.coll_types.contains(n) => Ok(Type::int()),
                 Type::Applied(..) => Err(TypeError::InvalidOperation {
                     operation: "reflection target 'Length'".into(),
                     type_name: format!(
@@ -5924,6 +5931,40 @@ node go [done == 0][done == 1] {
     assert!(
         check(ok).is_ok(),
         "nested-buffer coll obj must type (List shape: literal + push + Count + index + foreach)"
+    );
+}
+
+/// 2026-08-15 (coll plan §3.4.6): `.^Length` on a `coll` type is stored-length
+/// reflection (the hidden `len` slot) — it types as Int, like `Count#`.
+#[test]
+fn coll_length_reflection_typechecks() {
+    let ok = r#"
+struct Buf<T> { data: Ptr<T>; };
+coll obj MyList<T> { inner: Buf<T>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let xs: MyList<Int> = [5, 6, 7];
+    let len: Int = xs.^Length;
+    let n: Int = xs.Count#();
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "coll .^Length must type as Int (stored hidden len slot)"
+    );
+    let non_coll = r#"
+obj Plain { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let p: Plain = Plain { data: Malloc#(64) as Ptr<Int> };
+    let len: Int = p.^Length;
+    term;
+};
+"#;
+    assert!(
+        check(non_coll).is_err(),
+        "non-coll obj .^Length must error (no compiler-owned length)"
     );
 }
 }

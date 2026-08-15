@@ -3321,9 +3321,12 @@ fn test_empty_list_global_sentinel() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("@ll_empty_list"), "Empty list should reference global sentinel. Got: {}", output);
+    // 2026-08-15 (coll plan §3.3 #4): @ll_empty_list DELETED — a shared
+    // sentinel aliases across every `[]` user. An empty sequence now
+    // allocates a fresh 2-slot heap block (malloc 16).
+    assert!(!output.contains("@ll_empty_list"), "Empty list should NOT reference the deleted shared sentinel. Got: {}", output);
     assert!(!output.contains("alloca i64, i64 2"), "Empty list should NOT alloca 2 slots. Got: {}", output);
-    assert!(!output.contains("call ptr @malloc(i64 16"), "Empty list should NOT call 16-byte malloc. Got: {}", output);
+    assert!(output.contains("call ptr @malloc(i64 16)"), "Empty list should malloc a fresh 16-byte block. Got: {}", output);
 }
 
 #[test]

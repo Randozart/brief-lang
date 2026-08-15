@@ -162,8 +162,12 @@ fn synth_init_empty(
 }
 
 /// A synthesized `txn push(val: T) { data[len] = val; len = len + 1; }`
-/// member — InsertAt. This slice: no grow-on-full (a precondition error at
-/// cap; the default Grow policy is a follow-up).
+/// member — InsertAt. 2026-08-15: grow-on-full is a FUTURE slice (the
+/// §3.6 auto-trigger); this slice allocates the default cap (16) in
+/// InitEmpty/Init and relies on the capacity intrinsics
+/// (`Resize#`/`EnsureCap#`) for explicit growth. A grow guard needs a phi
+/// merge of the old/new data pointer across the guard branch, which the
+/// member-body self-slot write path doesn't provide yet.
 fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
     let data_write = Statement::Assign(
         Expr::Index(

@@ -3131,12 +3131,10 @@ impl LlvmBackend {
         }
         if !self.ctx.mask_constants.is_empty() { writeln!(out).ok(); }
 
-        // 2026-06-29: Global sentinel for all empty list literals `[]`.
-        // LLVM eliminates stack-allocated empty lists (dead alloca elimination)
-        // because ptrtoint/inttoptr round-trip is invisible to SROA. A single
-        // rodata constant { data_ptr=0, length=0 } handles all [] instances
-        // with zero runtime cost and zero allocation. See docs/plans/2026-06-29-list-allocation-fix.md.
-        writeln!(out, "@ll_empty_list = private unnamed_addr constant {{ i64, i64 }} {{ i64 0, i64 0 }}").ok();
+        // 2026-08-15 (coll plan §3.3 #4): @ll_empty_list DELETED — a shared
+        // sentinel aliases across every `[]` user (a `<-` push on one list
+        // would corrupt the shared block). Every empty sequence constructs a
+        // fresh heap block (emit_heap_seq) or `op InitEmpty` (coll).
         writeln!(out).ok();
 
         // 2026-07-28: Populate iter_bounds for !prof computation (txns is now in scope).
@@ -5234,6 +5232,17 @@ impl LlvmBackend {
             self.ctx.coll_storage.get(base),
             Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
         )
+    }
+
+    /// 2026-08-15 (coll plan §3.4.6): is `ty` a `coll` type (compiler-owned
+    /// Length)? Checks the base's storage classification — any coll, growable
+    /// or fixed.
+    fn is_coll_type(&self, ty: &crate::ast::Type) -> bool {
+        let base = match ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+            _ => return false,
+        };
+        self.ctx.coll_storage.contains_key(base)
     }
 
     fn register_pool_columns(&mut self, base: &str, slots: &[(String, Type)]) {
