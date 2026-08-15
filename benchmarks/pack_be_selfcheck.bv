@@ -10,12 +10,12 @@ let N: Int = get_env_int!("BOUND");
 
 pack struct Bp {
     spec Endian: Big;
-    hi: Bits<12>;
-    lo: Bits<4>;
+    hi: Bit<12>;
+    lo: Bit<4>;
 };
 
 defn becheck(i: Int) -> Int {
-    let p: Bp = Bp { hi: (0xABC + i) as Bits<12>, lo: (0xF + i) as Bits<4> };
+    let p: Bp = Bp { hi: (0xABC + i) as Bit<12>, lo: (0xF + i) as Bit<4> };
     term ((p.hi as Int) << 4) + (p.lo as Int);
 };
 

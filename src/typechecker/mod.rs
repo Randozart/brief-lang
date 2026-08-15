@@ -638,6 +638,16 @@ fn validate_cast_protocol_crossing(
     src_ty: &Type,
     target_ty: &Type,
 ) -> Result<(), TypeError> {
+    // 2026-08-15 (fundamentals): `x as Bit<N>` / `Bit<N> as T` are WIDTH
+    // ASSERTIONS, not category crossings — the value truncates/extends to
+    // exactly N bits within its own category (SPEC §8.2, the cast-width
+    // rule). Codegen's `emit_cast_path` already short-circuits on
+    // `bits_width`, so the typechecker must not treat the Data-hub path as a
+    // 2-category crossing. The Applied("Bits", [n]) alias (pre-2026-08-15
+    // spelling) is covered too.
+    if matches!(target_ty, Type::Bits(_)) || matches!(src_ty, Type::Bits(_)) {
+        return Ok(());
+    }
     let graph = &ctx.casting_graph;
     let (src_cat, src_var) = graph.type_to_protocol(ctx.universe, src_ty);
     let (dst_cat, dst_var) = graph.type_to_protocol(ctx.universe, target_ty);

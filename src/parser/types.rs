@@ -123,22 +123,26 @@ impl<'a> Parser<'a> {
 
     /// Parse a named type, possibly with generic parameters or pointer prefix.
     fn parse_named_type_body(&mut self, name: &str) -> Result<Type, SyntaxError> {
-        // Bits<N> — numeric bit width, no annotation = flexible
-        if name == "Bit" || name == "bits" {
+        // Bit<N> — numeric bit width, no annotation = flexible.
+        // 2026-08-15 (fundamentals): `Bit<N>` is the canonical spelling (the
+        // unified bit type); `Bits<N>` and `bits<N>` are accepted aliases so
+        // pre-2026-08-15 code keeps parsing. All three normalize to
+        // `Type::Bits(N)`.
+        if name == "Bit" || name == "Bits" || name == "bits" {
             if self.eat(&Token::Lt) {
                 let bits = match self.peek() {
                     Some(&Token::Integer(n)) => {
                         self.pos += 1;
                         n as u64
                     }
-                    _ => return self.error_at_current("expected bit count (integer) in Bits<N>"),
+                    _ => return self.error_at_current("expected bit count (integer) in Bit<N>"),
                 };
                 if !self.eat_type_close() {
-                    return self.error_at_current("expected '>' or '>>' in Bits<N>");
+                    return self.error_at_current("expected '>' or '>>' in Bit<N>");
                 }
                 return Ok(Type::Bits(bits));
             }
-            return Ok(Type::Bits(0)); // flexible-width Bits
+            return Ok(Type::Bits(0)); // flexible-width Bit
         }
 
         // Ptr<T> handling

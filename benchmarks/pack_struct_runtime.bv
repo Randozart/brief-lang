@@ -18,26 +18,26 @@ let N: Int = get_env_int!("BOUND");
 
 pack struct Eth {
     spec Endian: Big;
-    dst: Bits<48>;
-    src: Bits<48>;
-    etype: Bits<16>;
+    dst: Bit<48>;
+    src: Bit<48>;
+    etype: Bit<16>;
 };
 
 pack struct Nib {
-    a: Bits<12>;
-    b: Bits<4>;
-    c: Bits<8>;
+    a: Bit<12>;
+    b: Bit<4>;
+    c: Bit<8>;
 };
 
 pack struct Bp {
-    hi: Bits<12>;
-    lo: Bits<4>;
+    hi: Bit<12>;
+    lo: Bit<4>;
 };
 
 defn packmix(i: Int) -> Int {
-    let e: Eth = Eth { dst: (0x00608000AABB + i) as Bits<48>, src: 0x00204000CCDD as Bits<48>, etype: 0x0800 as Bits<16> };
-    let n: Nib = Nib { a: (0xABC + i) as Bits<12>, b: (0xF + i) as Bits<4>, c: 0xFF as Bits<8> };
-    let p: Bp = Bp { hi: (0xABC + i) as Bits<12>, lo: (0xF + i) as Bits<4> };
+    let e: Eth = Eth { dst: (0x00608000AABB + i) as Bit<48>, src: 0x00204000CCDD as Bit<48>, etype: 0x0800 as Bit<16> };
+    let n: Nib = Nib { a: (0xABC + i) as Bit<12>, b: (0xF + i) as Bit<4>, c: 0xFF as Bit<8> };
+    let p: Bp = Bp { hi: (0xABC + i) as Bit<12>, lo: (0xF + i) as Bit<4> };
     term (e.dst as Int) + (e.src as Int) * 3 + (e.etype as Int) * 7 + (n.a as Int) + (n.b as Int) * 5 + (n.c as Int) * 11 + (p.hi as Int) + (p.lo as Int) * 13;
 };
 

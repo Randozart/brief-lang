@@ -771,8 +771,8 @@ mod tests {
         "type Frame: #Bit {\n  spec Alignment: 2;\n  spec Bits: 12;\n  spec MaxBits: 16;\n  spec Bytes: 4;\n  spec Endian: Big;\n};\n",
         // 2026-08-13 (layout-keywords plan): `pack struct` round-trips with the
         // prefix preserved, alongside its spec metadata.
-        "pack struct Eth {\n  spec Endian: Big;\n  dst: Bits<48>;\n  src: Bits<48>;\n  etype: Bits<16>;\n};\n",
-        "seq pack struct Mix {\n  spec Alignment: 1;\n  a: Bits<12>;\n  b: Bits<4>;\n};\n",
+        "pack struct Eth {\n  spec Endian: Big;\n  dst: Bit<48>;\n  src: Bit<48>;\n  etype: Bit<16>;\n};\n",
+        "seq pack struct Mix {\n  spec Alignment: 1;\n  a: Bit<12>;\n  b: Bit<4>;\n};\n",
         // 2026-08-13 (layout-keywords plan Phase 5): the `atomic` field
         // modifier round-trips through the prefix (not `!> atomic_fields`).
         "struct Counter {\n  atomic count: Int;\n  other: Int;\n};\n",

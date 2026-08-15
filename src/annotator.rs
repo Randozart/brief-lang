@@ -259,7 +259,7 @@ impl Annotator {
             Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
             Type::Custom(__t) if __t == "Char" => "Char".to_string(),
             Type::Void => "Void".to_string(),
-            Type::Bits(width) => format!("Bits<{}>", width),
+            Type::Bits(width) => format!("Bit<{}>", width),
             Type::Width(n) => format!("Width({})", n),
             Type::Custom(name) => name.clone(),
             Type::HashWord(name) | Type::HashWordVariant(name, _) => name.clone(),

@@ -161,7 +161,7 @@ fn format_type(ty: &Type) -> String {
         Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
         Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
         Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
-        Type::Bits(width) => format!("Bits<{}>", width),
+        Type::Bits(width) => format!("Bit<{}>", width),
         Type::Width(n) => format!("Width({})", n),
         Type::Custom(__t) if __t == "Float" => "Float".to_string(),
         Type::Custom(__t) if __t == "Float64" => "Float64".to_string(),
