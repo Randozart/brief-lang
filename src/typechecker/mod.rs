@@ -2540,6 +2540,96 @@ fn validate_contract(
     }
 }
 
+/// Is `ty` a sequence member a `coll` type may scaffold from — a `Ptr<T>` or
+/// a fixed `T[N]` array? Structural, never a name match (rule 14/18).
+fn is_sequence_member_ty(ty: &Type) -> bool {
+    match ty {
+        Type::Ptr(_) => true,
+        // T[N] — a Vector with one dimension whose element is not the array.
+        Type::Vector(elem, dims) if dims.len() == 1 => elem.as_ref() != ty,
+        _ => false,
+    }
+}
+
+/// 2026-08-15 (coll plan §3.2): validate `coll obj`/`coll struct`
+/// declarations. The compiler owns Length semantics from the type's ONE
+/// sequence member:
+/// - exactly one sequence member (`Ptr<T>` or `T[N]`) — zero or two is an
+///   error, never a silent guess;
+/// - `coll struct` is fixed `T[N]` only (a `Ptr<T>` member errors this slice);
+/// - no slot named `len` or `cap` (both are compiler-owned);
+/// - `op Grow`/`op Shrink` bindings take the handle only (`#Lh`) — a two-arg
+///   form is an error.
+fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
+    for item in items {
+        let (name, slots, is_coll, is_struct) = match item {
+            TopLevel::TypeDef(t) if t.coll => (
+                t.name.as_str(),
+                t.body.slots.iter().map(|s| (s.name.as_str(), &s.ty)).collect::<Vec<_>>(),
+                true,
+                false,
+            ),
+            TopLevel::StaticStruct(s) if s.coll => (
+                s.name.as_str(),
+                s.fields.iter().map(|(n, t)| (n.as_str(), t)).collect::<Vec<_>>(),
+                true,
+                true,
+            ),
+            _ => continue,
+        };
+
+        let seq_count = slots.iter().filter(|(_, t)| is_sequence_member_ty(t)).count();
+        if seq_count != 1 {
+            errors.push(TypeError::InvalidOperation {
+                operation: format!(
+                    "a `coll` type must declare exactly one sequence member (`Ptr<T>` or `T[N]`); \
+                     '{name}' declares {seq_count}"
+                ),
+                type_name: name.to_string(),
+            });
+            continue;
+        }
+        // `coll struct` — fixed T[N] only (ambiguity #1). A Ptr<T> member is
+        // out of scope this slice (needs a length-prefix buffer convention).
+        if is_struct {
+            let ptr_member = slots.iter().find(|(_, t)| matches!(t, Type::Ptr(_)));
+            if let Some((member, _)) = ptr_member {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!(
+                        "a `coll struct` sequence member must be a fixed `T[N]` array; \
+                         '{name}' member '{member}' is `Ptr` (deferred this slice)"
+                    ),
+                    type_name: name.to_string(),
+                });
+            }
+        }
+        // length/capacity are compiler-owned — never declared fields.
+        for (slot_name, _) in &slots {
+            if *slot_name == "len" {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!(
+                        "the length of a `coll` type is compiler-owned; '{name}' must not declare a 'len' field"
+                    ),
+                    type_name: name.to_string(),
+                });
+            }
+            if *slot_name == "cap" {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!(
+                        "the capacity of a `coll` type is compiler-owned; '{name}' must not declare a 'cap' field \
+                         (use the capacity intrinsics)"
+                    ),
+                    type_name: name.to_string(),
+                });
+            }
+        }
+        // Grow/Shrink are strategy bindings (`op Grow: grow(#Lh)`) — the
+        // handle-only form is enforced by the op-binding resolution (the
+        // binding carries `#Lh`; a two-arg form fails to resolve). No
+        // per-binding param check here.
+    }
+}
+
 pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
@@ -2631,6 +2721,10 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // 2026-08-05 (Phase 5): trait declarations, impl coherence, and explicit
     // trait conformance.
     check_trait_declarations(items, &mut errors);
+    // 2026-08-15 (coll plan §3.2): coll declarations — sequence-member
+    // derivation, coll-struct fixed-T[N], compiler-owned len/cap, handle-only
+    // Grow/Shrink bindings.
+    check_coll_declarations(items, &mut errors);
 
     // 2026-07-25: Pre-collect function return types for call inference.
     let fn_return_types: HashMap<String, Type> = items.iter().filter_map(|item| {
@@ -5608,6 +5702,56 @@ node start [true][false] {
     assert!(
         check(bad).is_err(),
         "#b must NOT type as String (it is a raw Data literal)"
+    );
+}
+
+/// 2026-08-15 (coll plan §3.2): `coll` declarations validate their sequence
+/// member and compiler-owned length/capacity.
+#[test]
+fn coll_requires_one_sequence_member() {
+    let ok = r#"
+coll struct Fixed { data: Int[4]; };
+coll obj MyQueue { data: Ptr<Int>; };
+node start [true][false] { term; };
+"#;
+    assert!(check(ok).is_ok(), "coll with one sequence member must type");
+    let bad = r#"
+coll obj TwoSeq { a: Ptr<Int>; b: Ptr<Int>; };
+node start [true][false] { term; };
+"#;
+    assert!(
+        check(bad).is_err(),
+        "coll with two sequence members must error"
+    );
+}
+
+/// 2026-08-15 (coll plan §3.2): `coll struct` is fixed `T[N]` only; a
+/// `Ptr<T>` member errors this slice. Length/capacity are compiler-owned.
+#[test]
+fn coll_struct_fixed_array_only_and_len_is_compiler_owned() {
+    let ptr_backed = r#"
+coll struct P { data: Ptr<Int>; };
+node start [true][false] { term; };
+"#;
+    assert!(
+        check(ptr_backed).is_err(),
+        "coll struct Ptr<T> member must error (fixed T[N] only)"
+    );
+    let has_len = r#"
+coll obj L { data: Ptr<Int>; len: Int; };
+node start [true][false] { term; };
+"#;
+    assert!(
+        check(has_len).is_err(),
+        "coll declaring a len field must error (compiler-owned)"
+    );
+    let has_cap = r#"
+coll obj C { data: Ptr<Int>; cap: Int; };
+node start [true][false] { term; };
+"#;
+    assert!(
+        check(has_cap).is_err(),
+        "coll declaring a cap field must error (compiler-owned)"
     );
 }
 }
