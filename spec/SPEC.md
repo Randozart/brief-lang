@@ -701,7 +701,7 @@ type Int32: Int {
 > (stdlib and examples migrated to `spec` in 2026-08-13), but `spec`
 > supersedes it; an unknown `spec` name is an error, never silently accepted.
 
-**Staged.** At module top level, `!>` binds metadata to the module as a whole.
+At module top level, `!>` binds metadata to the module as a whole.
 Top-level `!>` is a shortcut for attaching metadata to the script; it never
 attaches to the following declaration.
 
@@ -883,7 +883,7 @@ cell Timer(period: Duration) -> tick: Event {
 
 ### 9.7 Acceleration (`accel`)
 
-**Staged.** `accel` is a keyword that may prefix a `node` or `txn` declaration.
+`accel` is a keyword that may prefix a `node` or `txn` declaration.
 It marks a native counted loop as a *parallel map over work-items*: the work
 is expressed as an ordinary loop over a real counter, and the compiler may
 coalesce the loop into one GPU dispatch of N work-items.
