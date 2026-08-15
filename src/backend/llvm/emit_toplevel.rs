@@ -574,18 +574,9 @@ impl LlvmBackend {
                 return format!("i{}", self.ctx.int_bits);
             }
         }
-        // 2026-07-18: SVO List — return multi-slot struct type for vector-like types.
-        if self.feature_svo {
-            if self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty)) {
-                let cap = self.ctx.type_universe.as_ref()
-                    .map(|u| u.svo_capacity(ty)).unwrap_or(0);
-                if cap > 0 {
-                    let slots = cap + 1; // N data slots + 1 len+cap slot
-                    return format!("{{ {} }}", std::iter::repeat("i64").take(slots)
-                        .collect::<Vec<_>>().join(", "));
-                }
-            }
-        }
+        // 2026-08-15 (coll plan §3.5): SVO List multi-slot struct type REMOVED
+        // — feature_svo was never enabled in production.
+        // (fall through to the normal llvm_type path)
         // 2026-07-22: Strings use ptr (opaque pointer) — a Briev String value
         // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
         // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Blob membership instead

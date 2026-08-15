@@ -54,9 +54,9 @@ pub(crate) struct MemberInvocation<'a> {
 /// The previous packing `(len << 32) | (cap << 32) | 1` shifted both fields
 /// by 32, so `cap` and `len` OR'd into the SAME bits and were unrecoverable.
 /// The disjoint layout lets a reader round-trip len/cap/tag from the header.
-pub fn pack_svo_header(len: usize, cap: usize) -> u64 {
-    ((len as u64) << 32) | ((cap as u64) << 1) | 1u64
-}
+// 2026-08-15 (coll plan §3.5): pack_svo_header REMOVED — SVO (Small Vector
+// Optimization) was never enabled in production; lists construct via the
+// coll scaffolded ops.
 
 use crate::backend::llvm::intrinsics::{
     emit_intrinsic_call, template_for_op,
@@ -757,16 +757,11 @@ impl LlvmBackend {
                 if let Some(elem_ty) = self.detect_struct_list(exprs) {
                     return self.emit_struct_array(out, v, exprs, &elem_ty, indent);
                 }
-                // 2026-07-18: SVO — emit inline handle for small lists
-                // when feature_svo is ON and the type is vector-like.
-                // 2026-07-31: Phase 3 (§8.2) — element cap from
-                // config/ir-lowering.toml `svo_max_elements`.
-                if self.feature_svo && exprs.len() <= crate::config_tuning::ir_lowering().svo_max_elements {
-                    // Check if the expression type is List<T> (vector-like)
-                    // by inspecting the iteration variable's type context.
-                    // For now, always emit inline for lists ≤3 elements.
-                    return self.emit_svo_list(out, v, exprs, indent);
-                }
+                // 2026-08-15 (coll plan §3.5): SVO removed (feature_svo was
+                // never enabled in production — the coll scaffold constructs
+                // lists through the collection ops). A bare list literal in
+                // expression position falls to the heap-seq layout (tuples
+                // and untyped products keep it).
                 self.emit_heap_seq(out, v, exprs, indent)
             }
 
@@ -936,19 +931,12 @@ impl LlvmBackend {
                     Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
                     _ => Type::int(),
                 };
-                // 2026-07-18: SVO List indexing — extract inline element.
-                if self.feature_svo
-                    && self
-                        .ctx
-                        .type_universe
-                        .as_ref()
-                        .map_or(false, |u| u.is_vector_like(&obj_reg.ty))
-                {
-                    return self.emit_svo_index(out, v, &obj_reg, &idx_reg, indent);
-                }
-                 // 2026-07-31 (A5): obj member `self` ARRAY slot indexing —
-                 // `data[i]` in a member body. GEP self + slot offset + elem.
-                 if let Some((self_type, self_ptr)) = self.fun.self_binding.clone() {
+                // 2026-07-18: SVO List indexing — removed (2026-08-15, coll
+                // plan §3.5: feature_svo never enabled; coll indexes via
+                // `op At`).
+                // 2026-07-31 (A5): obj member `self` ARRAY slot indexing —
+                // `data[i]` in a member body. GEP self + slot offset + elem.
+                if let Some((self_type, self_ptr)) = self.fun.self_binding.clone() {
                      if let Expr::Identifier(sname) = obj.as_ref() {
                          // 2026-08-10: clone inner/dims so the struct_types
                          // borrow is released before gep_index (which takes
@@ -1807,195 +1795,6 @@ impl LlvmBackend {
         // List param.
         TypedRegister {
             name: v.to_string(),
-            ty: Type::int(),
-        }
-    }
-
-    // 2026-07-18: SVO list literal — emit inline handle for ≤3 elements.
-    // Handle format (N data slots + 1 len+cap+tag slot):
-    //   slot[0..N-1] = element values as i64
-    //   slot[N]      = pack_svo_header(len, cap):
-    //                  bit 0 = inline tag (1 = inline, 0 = heap)
-    //                  bits 1..32 = cap
-    //                  bits 32..64 = len
-    // 2026-07-31: Phase 3 (§8.5-E2) — len and cap previously both shifted by
-    // 32, so they OVERLAPPED (OR'd into the same bits). The header is now
-    // packed disjointly via pack_svo_header; a round-trip test asserts the
-    // layout (emit_expr.rs tests).
-    fn emit_svo_list(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        exprs: &[Expr],
-        indent: &str,
-    ) -> TypedRegister {
-        // 2026-07-31: Phase 3 (§8.2) — slot count from config svo_max_elements
-        // (was a hardcoded 3 that could diverge from the emit gate).
-        let cap = crate::config_tuning::ir_lowering().svo_max_elements;
-        let len = exprs.len();
-        // Build the struct via insertvalue
-        let mut reg = format!("%svo_{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        let struct_ty = format!(
-            "{{ {} }}",
-            std::iter::repeat("i64")
-                .take(cap + 1)
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        writeln!(
-            out,
-            "{}{} = insertvalue {} undef, i64 0, 0",
-            indent, reg, struct_ty
-        )
-        .ok();
-        for (i, expr) in exprs.iter().enumerate() {
-            let elem = self.emit_expr(out, expr, indent);
-            let next = self.fun.gen_reg();
-            writeln!(
-                out,
-                "{}{} = insertvalue {} %{}, i64 {}, {}",
-                indent, next, struct_ty, reg, elem.name, i
-            )
-            .ok();
-            reg = next;
-        }
-        // Pack len+cap+tag into the last slot
-        let last_idx = cap;
-        let packed = pack_svo_header(len, cap);
-        let tag_reg = self.fun.gen_reg();
-        writeln!(out, "{}{} = add i64 0, {}", indent, tag_reg, packed).ok();
-        let final_reg = self.fun.gen_reg();
-        writeln!(
-            out,
-            "{}{} = insertvalue {} %{}, i64 {}, {}",
-            indent, final_reg, struct_ty, reg, tag_reg, last_idx
-        )
-        .ok();
-        TypedRegister {
-            name: final_reg,
-            ty: Type::int(),
-        }
-    }
-
-    // 2026-07-18: SVO List indexing — extract element from inline storage
-    // or heap. Uses stack-allocated array + GEP for dynamic inline indexing
-    // (extractvalue requires constant indices, but the index is runtime).
-    fn emit_svo_index(
-        &mut self,
-        out: &mut String,
-        v: &str,
-        obj: &TypedRegister,
-        idx: &TypedRegister,
-        indent: &str,
-    ) -> TypedRegister {
-        let cap = self
-            .ctx
-            .type_universe
-            .as_ref()
-            .map(|u| u.svo_capacity(&obj.ty))
-            .unwrap_or(0);
-        let n_slots = cap + 1;
-        let struct_ty = format!(
-            "{{ {} }}",
-            std::iter::repeat("i64")
-                .take(n_slots)
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let counter = self.fun.txn_counter;
-        self.fun.txn_counter += 1;
-        let arr = format!("%svo_arr_{}", counter);
-        writeln!(out, "{}{} = alloca [{} x i64], align 8", indent, arr, cap).ok();
-        // Store each data slot into the stack array
-        for i in 0..cap {
-            let slot = format!("%svo_sl_{}_{}", counter, i);
-            let gep = format!("%svo_gep_{}_{}", counter, i);
-            writeln!(
-                out,
-                "{}{} = extractvalue {} {}, {}",
-                indent, slot, struct_ty, obj.name, i
-            )
-            .ok();
-            writeln!(
-                out,
-                "{}{} = getelementptr [{} x i64], ptr {}, i64 0, i64 {}",
-                indent, gep, cap, arr, i
-            )
-            .ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, slot, gep).ok();
-        }
-        // Extract tag+len from last slot
-        let tag_slot = format!("%svo_tag_{}", counter);
-        writeln!(
-            out,
-            "{}{} = extractvalue {} {}, {}",
-            indent, tag_slot, struct_ty, obj.name, cap
-        )
-        .ok();
-        let is_inline = format!("%svo_inl_{}", counter);
-        writeln!(out, "{}{} = and i64 {}, 1", indent, is_inline, tag_slot).ok();
-        let inline_l = format!(".svo_idx_inl_{}", counter);
-        let heap_l = format!(".svo_idx_heap_{}", counter);
-        let done_l = format!(".svo_idx_done_{}", counter);
-        writeln!(
-            out,
-            "{}br i1 %{}, label %{}, label %{}",
-            indent, is_inline, inline_l, heap_l
-        )
-        .ok();
-        // Inline path: GEP + load from stack array
-        writeln!(out, "{}{}:", indent, inline_l).ok();
-        let inl_gep = format!("%svo_ig_{}", counter);
-        writeln!(
-            out,
-            "{}{} = getelementptr [{} x i64], ptr {}, i64 0, i64 {}",
-            indent, inl_gep, cap, arr, idx.name
-        )
-        .ok();
-        let inl_val = format!("%svo_iv_{}", counter);
-        writeln!(out, "{}{} = load i64, ptr {}", indent, inl_val, inl_gep).ok();
-        writeln!(out, "{}br label %{}", indent, done_l).ok();
-        // Heap path: extract ptr from slot 0 (first data slot holds ptrtoint
-        // when tag bit 0 is clear), then inttoptr + GEP + load.
-        writeln!(out, "{}{}:", indent, heap_l).ok();
-        let heap_slot0 = format!("%svo_hs{}", counter);
-        writeln!(
-            out,
-            "{}{} = extractvalue {} {}, 0",
-            indent, heap_slot0, struct_ty, obj.name
-        )
-        .ok();
-        let heap_ptr = format!("%svo_hp_{}", counter);
-        writeln!(
-            out,
-            "{}{} = inttoptr i64 {} to ptr",
-            indent, heap_ptr, heap_slot0
-        )
-        .ok();
-        let heap_off = format!("%svo_ho_{}", counter);
-        writeln!(out, "{}{} = add i64 {}, 1", indent, heap_off, idx.name).ok();
-        let heap_gep = format!("%svo_hg_{}", counter);
-        writeln!(
-            out,
-            "{}{} = getelementptr i64, ptr {}, i64 {}",
-            indent, heap_gep, heap_ptr, heap_off
-        )
-        .ok();
-        let heap_val = format!("%svo_hv_{}", counter);
-        writeln!(out, "{}{} = load i64, ptr {}", indent, heap_val, heap_gep).ok();
-        writeln!(out, "{}br label %{}", indent, done_l).ok();
-        // Merge
-        writeln!(out, "{}{}:", indent, done_l).ok();
-        let phi = format!("%svo_ph_{}", counter);
-        writeln!(
-            out,
-            "{}{} = phi i64 [ %{}, %{} ], [ %{}, %{} ]",
-            indent, phi, inl_val, inline_l, heap_val, heap_l
-        )
-        .ok();
-        TypedRegister {
-            name: phi,
             ty: Type::int(),
         }
     }
@@ -5241,40 +5040,6 @@ impl LlvmBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Phase 3 (§8.5-E2): the SVO header must round-trip len/cap/tag from a
-    /// single packed i64 — the previous `(len << 32) | (cap << 32)` packing
-    /// OR'd both fields into the same bits.
-    #[test]
-    fn svo_header_round_trips() {
-        for len in 0..=3usize {
-            for cap in 0..=8usize {
-                if len > cap {
-                    continue;
-                }
-                let packed = pack_svo_header(len, cap);
-                assert_eq!(packed & 1, 1, "inline tag bit must be set");
-                // cap lives in bits 1..32, len in bits 32..64. Mask out the
-                // len bits BEFORE the right-shift so they don't spill into the
-                // cap field (mask-then-shift, not shift-then-mask).
-                let cap_bits = (packed & 0xFFFF_FFFF) >> 1;
-                let len_bits = packed >> 32;
-                assert_eq!(cap_bits, cap as u64, "cap must round-trip (len={}, cap={})", len, cap);
-                assert_eq!(len_bits, len as u64, "len must round-trip (len={}, cap={})", len, cap);
-            }
-        }
-    }
-
-    /// The disjoint layout must NOT collapse distinct (len, cap) pairs.
-    #[test]
-    fn svo_header_is_injective() {
-        assert_ne!(pack_svo_header(1, 2), pack_svo_header(2, 2),
-            "different lens with the same cap must differ");
-        assert_ne!(pack_svo_header(1, 1), pack_svo_header(1, 2),
-            "different caps with the same len must differ");
-    }
-
-
 }
 
 /// 2026-07-31 (A5): the briev name of a member declaration (txn/defn/node).

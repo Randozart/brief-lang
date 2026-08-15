@@ -1068,10 +1068,8 @@ pub struct LlvmBackend {
     pub analysis_alloc_strategies: Option<std::collections::HashMap<usize, AllocStrategy>>,
 
     // ── SVO List Optimization ────────────────────────────────
-    // 2026-07-18: Small Vector Optimization — List<T> becomes a
-    // multi-slot struct with inline storage for ≤N elements (N from
-    // svo <~ metadata). Tag bit 0 distinguishes inline vs heap.
-    pub feature_svo: bool,
+    // 2026-08-15 (coll plan §3.5): SVO (feature_svo) REMOVED — never enabled
+    // in production; lists construct via the coll scaffolded ops.
 
     // ── Frgn Dispatch Resolution ──────────────────────────────
     // 2026-07-22: Pre-resolved frgn dispatch strategies computed
@@ -1172,7 +1170,6 @@ impl LlvmBackend {
             arena_end_idx: None,
             arena_base_idx: None,
             analysis_alloc_strategies: None,
-            feature_svo: false,
             resolved_frgns: None,
         }
     }
@@ -1187,12 +1184,6 @@ impl LlvmBackend {
     /// in %State and all arena init/fini calls are skipped.
     pub fn with_needs_arena(mut self, needs_arena: std::collections::HashSet<String>) -> Self {
         self.ctx.needs_arena = needs_arena;
-        self
-    }
-
-    // 2026-07-18: Enable SVO (Small Vector Optimization) for List types.
-    pub fn with_svo(mut self, enabled: bool) -> Self {
-        self.feature_svo = enabled;
         self
     }
 
@@ -1238,20 +1229,8 @@ impl LlvmBackend {
         // (the address) via the generic protocol-derived path below — the old
         // 2-slot SSO claim and the is_string_like (2-field structural) check
         // no longer apply (String has no fields under B0).
-        // 2026-07-18: SVO List — push N+1 slots (N inline data + 1 len+cap).
-        if self.feature_svo
-            && self.ctx.type_universe.as_ref().map_or(false, |u| u.is_vector_like(ty))
-        {
-            let cap = self.ctx.type_universe.as_ref()
-                .map(|u| u.svo_capacity(ty)).unwrap_or(0);
-            if cap > 0 {
-                for _ in 0..=cap {  // cap + 1 slots
-                    self.ctx.field_types.push("i64".to_string());
-                    self.ctx.field_briev_types.push(ty.clone());
-                }
-                return;
-            }
-        }
+        // 2026-08-15 (coll plan §3.5): SVO List field slots REMOVED —
+        // feature_svo was never enabled in production.
         // 2026-07-25: Fixed-size array: Int[1024] → [1024 x i64].
         // Emitted as a single LLVM array field. Index accesses become GEPs.
         // 2026-08-06: const-sized `Float[MAXB]` yields Dimension::Named(name,

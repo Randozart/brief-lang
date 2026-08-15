@@ -154,7 +154,6 @@ pub struct BuildOptions {
     pub library_mode: bool,
     /// 2026-07-18: SVO (Small Vector Optimization) — inline storage for
     /// small List<T> elements (≤ N where N is from svo <~ N metadata).
-    pub feature_svo: bool,
     /// 2026-07-22: Override path for the GLUE config (config/glue.dbv). None = use compiler-shipped default.
     pub glue_config: Option<String>,
     /// 2026-07-18: Maximum size in bytes for stack allocation (alloca).
@@ -1453,7 +1452,6 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         shared: false,
         library_mode: false,
         int_bits: 64,
-        feature_svo: false,
         glue_config: None,
         stack_threshold: 4096,
         allow_read: false,
@@ -1711,7 +1709,6 @@ fn codegen(
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
                 .with_needs_arena(needs_arena.clone())
-                .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
@@ -1835,7 +1832,6 @@ output = b.generate(items, None);
             let mut b = LlvmBackend::new()
                 .with_int_bits(opts.int_bits)
                 .with_alloc_strategies(alloc_strategies)
-                .with_svo(opts.feature_svo)
                 .with_shared_lib(opts.shared)
                 .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
@@ -2524,7 +2520,6 @@ mod tests {
             shared: false,
             library_mode: false,
             int_bits: 32,
-            feature_svo: false,
             glue_config: None,
             stack_threshold: 4096,
             allow_read: false,

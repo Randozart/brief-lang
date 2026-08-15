@@ -52,7 +52,6 @@ pub struct IrLoweringSettings {
     /// SSO small-string inline payload cap (derived: align 8 − 2 tag bits).
     pub sso_max_bytes: usize,
     /// SVO small-vector inline element cap.
-    pub svo_max_elements: usize,
     /// Weighted body-cost threshold for callable-txn auto-inline.
     pub callable_inline_weight_threshold: u32,
     /// Accel auto-tuning probe: full-map runs per lane (Phase 7).
@@ -77,7 +76,6 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     stack_threshold: 4096,
     max_fields_per_alloca: 15,
     sso_max_bytes: 6,
-    svo_max_elements: 3,
     callable_inline_weight_threshold: 40,
     accel_probe_k: 2,
     accel_probe_tolerance: 0.0001,
@@ -185,9 +183,6 @@ fn load_ir_lowering() -> IrLoweringSettings {
         sso_max_bytes: db
             .field_int("sso_max_bytes", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.sso_max_bytes as i64) as usize,
-        svo_max_elements: db
-            .field_int("svo_max_elements", 0)
-            .unwrap_or(DEFAULT_IR_LOWERING.svo_max_elements as i64) as usize,
         callable_inline_weight_threshold: db
             .field_int("callable_inline_weight_threshold", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.callable_inline_weight_threshold as i64) as u32,
@@ -268,7 +263,6 @@ vector_min_width = 4
         assert_eq!(s.stack_threshold, 4096);
         assert_eq!(s.max_fields_per_alloca, 15);
         assert_eq!(s.sso_max_bytes, 6);
-        assert_eq!(s.svo_max_elements, 3);
         assert_eq!(s.callable_inline_weight_threshold, 40);
     }
 
@@ -286,7 +280,6 @@ vector_min_width = 4
         assert_eq!(s.stack_threshold as i64, i64_of("stack_threshold"));
         assert_eq!(s.max_fields_per_alloca as i64, i64_of("max_fields_per_alloca"));
         assert_eq!(s.sso_max_bytes as i64, i64_of("sso_max_bytes"));
-        assert_eq!(s.svo_max_elements as i64, i64_of("svo_max_elements"));
         assert_eq!(s.callable_inline_weight_threshold as i64, i64_of("callable_inline_weight_threshold"));
     }
 

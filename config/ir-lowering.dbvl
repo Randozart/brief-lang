@@ -30,7 +30,6 @@ max_fields_per_alloca: 15;
 sso_max_bytes: 6;
 
 // SVO small-vector/list inline element cap.
-svo_max_elements: 3;
 
 // Weighted body-cost threshold for callable-txn auto-inline (analysis/inline_cost.rs).
 callable_inline_weight_threshold: 40;
