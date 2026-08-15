@@ -2657,19 +2657,33 @@ impl LlvmBackend {
                      TypedRegister { name: r, ty: Type::int() }
                  }
                  // 2026-08-15 (coll plan §3.4.6): `x.^Length` on a `coll` type
-                 // is the hidden `len` slot (offset 16 of [data, cap, len]) —
-                 // O(1), the stored element count. The compiler owns the slot;
-                 // this is stored-length reflection (SPEC §17.1), distinct
-                 // from the `Count#` intrinsic (same value for word-element
-                 // colls).
+                 // is the compiler-owned stored length. `coll obj`: the hidden
+                 // `len` slot (offset 16 of [data, cap, len]). `coll struct`
+                 // (fixed T[N]): the array element count N (a compile-time
+                 // constant). O(1), SPEC §17.1.
                  other if self.is_coll_type(&recv_reg.ty) => {
-                     let p = self.fun.gen_reg();
-                     let gep = self.fun.gen_reg();
-                     let r = self.fun.gen_reg();
-                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, recv_reg.name).ok();
-                     writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, gep, p).ok();
-                     writeln!(out, "{}{} = load i64, ptr {}", indent, r, gep).ok();
-                     TypedRegister { name: r, ty: Type::int() }
+                     let coll_base = match &recv_reg.ty {
+                         Type::Custom(n) | Type::Applied(n, _) => n.as_str(),
+                         _ => "",
+                     };
+                     match self.ctx.coll_storage.get(coll_base) {
+                         Some(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed) => {
+                             // N from the T[N] sequence member's dim.
+                             let n = self.coll_fixed_length(&recv_reg.ty);
+                             let r = self.fun.gen_reg();
+                             writeln!(out, "{}{} = add i64 0, {}", indent, r, n).ok();
+                             TypedRegister { name: r, ty: Type::int() }
+                         }
+                         _ => {
+                             let p = self.fun.gen_reg();
+                             let gep = self.fun.gen_reg();
+                             let r = self.fun.gen_reg();
+                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, recv_reg.name).ok();
+                             writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, gep, p).ok();
+                             writeln!(out, "{}{} = load i64, ptr {}", indent, r, gep).ok();
+                             TypedRegister { name: r, ty: Type::int() }
+                         }
+                     }
                  }
                 other => panic!(
                     "runtime reflection target 'Len' on '{:?}' (reg ty {:?}) has no codegen yet (Phase-1b boundary)",

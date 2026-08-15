@@ -2199,7 +2199,13 @@ impl LlvmBackend {
                         .collect();
                     // 2026-08-15 (coll plan §3.3): a `coll struct` is fixed
                     // `T[N]` — length == capacity == N, no hidden slots, C ABI
-                    // preserved. No append here.
+                    // preserved. No append here; register InlineFixed storage.
+                    if s.coll {
+                        self.ctx.coll_storage.insert(
+                            s.name.clone(),
+                            crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed,
+                        );
+                    }
                     self.ctx.struct_types.entry(s.name.clone()).or_insert(fields);
                 }
                 TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
@@ -5243,6 +5249,25 @@ impl LlvmBackend {
             _ => return false,
         };
         self.ctx.coll_storage.contains_key(base)
+    }
+
+    /// 2026-08-15 (coll plan §3.4.6): the fixed length N of a `coll struct`
+    /// (fixed T[N]) — from its one sequence member's array dimension.
+    /// Returns 0 if not determinable.
+    fn coll_fixed_length(&self, ty: &crate::ast::Type) -> i64 {
+        let base = match ty {
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+            _ => return 0,
+        };
+        let fields = self.ctx.struct_types.get(base).cloned().unwrap_or_default();
+        for (_, fty) in &fields {
+            if let crate::ast::Type::Vector(_, dims) = fty {
+                if let Some(crate::ast::Dimension::Anonymous(n)) = dims.first() {
+                    return *n as i64;
+                }
+            }
+        }
+        0
     }
 
     fn register_pool_columns(&mut self, base: &str, slots: &[(String, Type)]) {
