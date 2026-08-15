@@ -20,7 +20,8 @@ primordials — they appear directly in op signatures (`op Add(Int)`) and
 carry no `#`. Parameterized protocol variants (`#String<UTF8>`,
 `#Float<IEEE754>`) keep their `#` and select representations; `#Link<name>`
 emits `-l<name>`; `#System` is the sole bare protocol hashword. `Data` is
-the universal parent (every type IS data); `Bit<N>` is the unified bit type
+the universal reflective floor (every value observable as raw storage — not
+a supertype, no universal inheritance edge); `Bit<N>` is the unified bit type
 at any declared width (`Bit` bare = flexible); `Blob` is the `[len][bytes]`
 byte buffer. See `docs/plans/2026-08-15-fundamentals-as-types.md`.
 

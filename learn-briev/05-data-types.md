@@ -441,8 +441,10 @@ vectorizes the load-apply-store loop without compiler magic.
 The fundamental types are compiler-native — they need no `type` declaration
 and are not overloadable (`op` is for user types). The hierarchy:
 
-- **`Data`** — the universal parent. Every type IS data (raw storage). Use
-  it as a generic bound for "any value": `<T: Data>`.
+- **`Data`** — the universal reflective floor. Every value can be observed
+  and reflected as its raw storage (the treat-as-bits view); it is not a
+  supertype — no universal inheritance edge. Use it as a generic bound for
+  "any value": `<T: Data>`.
 - **`Bit<N>`** — the bit type at any width. Touch individual bits / exact
   widths. `Bit` bare = flexible (resolved later); `Bit<N>` = exact N.
   There is no separate `Bits` type.
@@ -541,9 +543,11 @@ defn geometric_grow(q: GeometricQueue) {
 };
 ```
 
-(The `grow`-on-full auto-trigger — the compiler calling `op Grow` when
-`len == cap` — is a documented future slice; explicit growth works today
-via `Resize#`/`EnsureCap#`.)
+Grow-on-full is the default: when an insertion would exceed capacity
+(`len == cap`), the compiler doubles the capacity before the store — an
+insert past capacity is never an out-of-bounds write. A type overrides the
+policy with its own `op Grow` binding; `Resize#`/`EnsureCap#` remain the
+explicit-control intrinsics.
 
 **Capacity control.** The four capacity intrinsics are the interface to the
 compiler-owned capacity: `Capacity#(h)` reads it, `Resize#(h, cap)` sets it,

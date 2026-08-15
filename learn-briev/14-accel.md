@@ -70,7 +70,10 @@ accel node force [i < nb][i == nb] {
 
 - `[i < N]` is the loop bound; `[i == N]` is the goal ("loop until true").
 - The compiler **proves** the map (disjoint per-`i` writes, counter advance,
-  pure, flat types). If the proof fails, the body runs on CPU with a remark.
+  pure, flat types). If the proof fails or the speedup is unverified, a
+  keyword-marked body stays on the CPU path and always emits a one-line
+  compile-time remark naming the reason — never silent. `!> accel_report:
+  verbose;` adds full per-analysis detail.
 - On a GPU it launches N work-items once and fast-forwards the counter; on
   CPU the counted loop runs natively (each firing = one work-item).
 - **Verifiable speedup only**: in `try` mode the compiler verifies the GPU

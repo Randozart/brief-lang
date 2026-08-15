@@ -39,10 +39,12 @@ and `docs/plans/2026-07-20-extensible-number-types-final.md` for the full
 architecture.
 
 > **2026-08-15 (Fundamentals addendum).** The hierarchy above is updated:
-> `Data` is now the universal parent (raw-storage root) and `Bit<N>` is the
-> unified bit type at any declared width (`Bit` bare = flexible, resolved
-> later; `Bit<N>` = exact N). There is no separate `Bits` type — multiple
-> bits is just `Bit<N>`. The byte-buffer type (formerly `Data`) is renamed
+> `Data` is now the universal reflective floor (every value observable as raw
+> storage via the treat-as-bits view — **NOT a supertype**; no universal
+> inheritance edge) and `Bit<N>` is the unified bit type at any declared
+> width (`Bit` bare = flexible, resolved later; `Bit<N>` = exact N). There is
+> no separate `Bits` type — multiple bits is just `Bit<N>`. The byte-buffer
+> type (formerly `Data`) is renamed
 > `Blob` (a `[len][bytes]` buffer, a `Data` member like `String` but with no
 > encoding interpretation). Category hashwords lose their `#` in fundamental
 > positions (`#Int`→`Int`, `#Bit`→`Bit`, `#Data`→`Data`); protocol variants
@@ -109,16 +111,18 @@ non-cast operators (`InsertAt`, `ExtractFrom`).
 
 ### Four-Layer Protocol Hierarchy
 
-> **2026-08-15 (Fundamentals as Types).** `Data` is now the universal parent
-> (raw-storage root); `Bit<N>` is the unified bit type at any declared width
-> (`Bit` bare = flexible); the byte-buffer type is renamed `Blob`. The
-> category hashwords `#Int`/`#Float`/`#String`/`#Bit`/`#Data` lose their
-> `#` in fundamental positions; protocol variants (`#String<UTF8>`) keep
-> theirs. See `docs/plans/2026-08-15-fundamentals-as-types.md`.
+> **2026-08-15 (Fundamentals as Types).** `Data` is now the universal
+> reflective floor (every value observable as raw storage — NOT a supertype;
+> no universal inheritance edge); `Bit<N>` is the unified bit type at any
+> declared width (`Bit` bare = flexible); the byte-buffer type is renamed
+> `Blob`. The category hashwords `#Int`/`#Float`/`#String`/`#Bit`/`#Data`
+> lose their `#` in fundamental positions; protocol variants
+> (`#String<UTF8>`) keep theirs. See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 ```
-Layer 1: Data (root protocol / universal parent); Blob (the [len][bytes] byte buffer)
-  Cast TO   Data = raw storage (hardcoded, never overridable)
+Layer 1: Data (universal reflective floor); Blob (the [len][bytes] byte buffer)
+  Observe TO  Data = raw storage view (the treat-as-bits material view, never a supertype edge)
   Cast FROM Data = interpret raw bytes as target protocol semantics
   Bit<N> = the unified bit type — every type is composed of bits;
            Bit bare = flexible width (resolved later), Bit<N> = exact N.
@@ -160,9 +164,10 @@ unchanged — available for any other `#String` type that doesn't override it.
 | **Overrideable?** | No — error if any stdlib or user code declares `type Data` / `type Bit` | Yes — bootstrap.bv or user `.bv` files replace the seeded entry silently |
 | **Why** | Axiomatic anchors — the whole system rests on them | Useful defaults — stdlib can specialize them |
 
-`Data` is the universal parent: the compiler's root axiom, non-negotiable,
-unoverridable. `Bit<N>` is the bit type at any width — the direct
-representation of N bits. Any attempt to declare `type Data` or `type Bit`
+`Data` is the universal reflective floor: the compiler's root axiom,
+non-negotiable, unoverridable — every value can be observed as its raw
+storage, but it is NOT a supertype and adds no universal inheritance edge.
+`Bit<N>` is the bit type at any width — the direct representation of N bits. Any attempt to declare `type Data` or `type Bit`
 in stdlib or user code produces a compiler error. Everything else — `Int`,
 `Float`, `String`, `Blob` — is a primordial: a useful default that stdlib or
 user code can refine or replace. If bootstrap.bv declares `type Int: Int {
@@ -259,25 +264,27 @@ The entire Briev language is built from exactly three hardcoded assumptions.
 Everything else — every type, every operation, every data structure — follows
 from these axioms and is defined in the standard library prelude.
 
-### Axiom 1: `Data` Is the Universal Parent; `Bit<N>` Is the Bit Type
+### Axiom 1: `Data` Is the Universal Reflective Floor; `Bit<N>` Is the Bit Type
 
 > **2026-08-15.** Originally `#Bit` was the root protocol. Under
-> Fundamentals-as-Types, `Data` is the universal parent (every type IS data
-> — raw storage); `Bit<N>` is the unified bit type at any declared width
+> Fundamentals-as-Types, `Data` is the universal reflective floor (every
+> value observable as its raw storage — NOT a supertype, no universal
+> inheritance edge); `Bit<N>` is the unified bit type at any declared width
 > (every type is composed of bits, and `Bit<N>` names a run directly). The
-> treat-as-bits membership lives on `Bit`/`Bit<N>`; the storage parent lives
-> on `Data`. The byte-buffer is `Blob`. See
+> universal treat-as-bits material membership lives on `Bit`/`Bit<N>`;
+> `Data` is the reflective raw-storage floor. The byte-buffer is `Blob`. See
 > `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
-`Data` is the universal parent — every type IS data. `Bit<N>` is a
-contiguous sequence of N uninterpreted bits (`Bit` bare = flexible width,
-resolved later). `Data` and `Bit<N>` are the only types the compiler knows
-about axiomatically. Every other type and protocol derives its physical
-representation from `Data` through the casting graph.
+`Data` is the universal reflective floor — every value can be observed as
+its raw storage, but it is not a supertype: no implicit `Data` edge is added
+to the casting graph. `Bit<N>` is a contiguous sequence of N uninterpreted
+bits (`Bit` bare = flexible width, resolved later). `Data` and `Bit<N>` are
+the only types the compiler knows about axiomatically. Every other type and
+protocol is observable as raw storage through the reflective floor.
 
 ```
-Data — universal parent, hardcoded in compiler
-  Cast TO   Data = raw storage (bitcast/extractvalue/ptrtoint, never overridable)
+Data — universal reflective floor, hardcoded in compiler
+  Observe  Data = raw storage view (treat-as-bits material view, never a supertype edge)
   Cast FROM Data = interpret raw bytes as target semantics (overridable via op CastFrom(Data))
 Bit<N> — the bit type at any width; every type is composed of bits
   Bit bare = flexible width (resolved later); Bit<N> = exact N bits

@@ -78,8 +78,10 @@ name or an explicit conformance marker.
 > primordials, not stdlib redeclarations: `Data`, `Bit<N>`, `Int`, `UInt`,
 > `Float`, `Bool`, `Char`, `String`, `Blob`, `Ptr`, `Void`. They need no
 > stdlib entry and carry no overloadable ops (`op` is for user types).
-> **`Data` is the universal parent** — every type IS data (raw storage) and
-> refines through it. **`Bit<N>` is the unified bit type** at any declared
+> **`Data` is the universal reflective floor** — every value can be observed
+> and reflected as its raw storage (the treat-as-bits view); "parent" is a
+> reflective category, never an inheritance edge in the casting graph.
+> **`Bit<N>` is the unified bit type** at any declared
 > width (`Bit` bare = flexible, resolved later); every type is composed of
 > bits, and `Bit<N>` names a run of bits directly — there is no separate
 > `Bits` type. **`Blob`** is the `[len][bytes]` byte buffer (a `Data` member
@@ -554,8 +556,9 @@ type UserId: Int, Comparable<UserId>, Int {
 > `Int`, `UInt`, `Float`, `Bool`, `Char`, `String`, `Blob`, `Ptr`, `Void`)
 > are compiler-native primordials — they need **no** `type` declaration and
 > carry no overloadable `op` (they are not overloaded; `op` is for user
-> types). `Data` is the universal parent every type refines through.
-> `Bit<N>` is the unified bit type; `Blob` is the `[len][bytes]` byte buffer.
+> types). `Data` is the universal reflective floor — every value can be
+> observed as its raw storage; it is not a supertype. `Bit<N>` is the unified
+> bit type; `Blob` is the `[len][bytes]` byte buffer.
 > See `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 The relationship list after `:` may contain:
@@ -719,8 +722,8 @@ the metadata vocabulary.
 
 > **2026-08-15 (`coll`).** The **native strategy keyword for declaring
 > collections** (prefix on `obj` and `struct` declarations, order-independent
-> with `pack`/`seq`). A `coll` type refines through `Data` like every other
-> type — the `Data` root gives it the raw-storage floor. Declaring a
+> with `pack`/`seq`). A `coll` type is observable as raw storage through the
+> `Data` reflective floor like every other type. Declaring a
 > collection is convenient — the author writes the storage shape (the one
 > sequence member) and the compiler owns
 > the rest: **compiler-owned Length semantics** (length and capacity are
@@ -753,6 +756,12 @@ coll struct Fixed<T, N> {
 - **`coll obj`** — the compiler appends hidden `cap` and `len` slots and
   scaffolds `op Count`, `op At`, `op Init`/`op InitEmpty`/`op InsertAt`/
   `op ExtractFrom`, plus the default `op Grow`/`op Shrink` growth strategies.
+- **Grow-on-full is the default behavior (2026-08-15):** when an insertion
+  would exceed capacity (`len == cap`), the compiler's default `op Grow`
+  doubles the capacity before the element is stored — an insert past capacity
+  is never an out-of-bounds write and never requires the author to call
+  `Resize#`/`EnsureCap#` first. A type overrides the policy with its own
+  `op Grow` handle-only binding (§15.2).
 - **`coll struct`** — fixed `T[N]` only (this slice): length == capacity
   == N, no hidden slots, C ABI preserved. `.^Length` and `Capacity#` both
   return N (a compile-time constant; §17.1). `Ptr<T>`-backed structs are a
@@ -928,8 +937,11 @@ write disjointness, flat value types, purity) and then either
   the faster path.
 
 If eligibility cannot be proven or the speedup is not verified, execution
-silently uses the CPU path. An ineligible or unverified `accel` body is never
-an error by itself.
+uses the CPU path. An ineligible or unverified `accel` body is never an error
+by itself, but a **keyword-marked** body that stays on the CPU path always
+emits a default compile-time remark (one line naming the body and the reason —
+proof failure or unverified speedup). `!> accel_report: verbose;` adds the
+full per-analysis detail; the one-line remark is not opt-outable.
 
 **Force mode.** Under `!> accel: force;` or `!> accel: try_all_force;`, an
 `accel`-keyword-marked body must offload: eligibility must be provable or the
@@ -1390,9 +1402,11 @@ key. The iteration operators are:
 - `op Grow`, `op Shrink` — **capacity strategy bindings** (handle-only,
   `op Grow: grow(#Lh)`); a `coll` type may override the compiler's default
   growth policy with these. They are strategy entries like `InsertAt`, not
-  member bodies. The capacity control intrinsics are `Capacity#(h)`,
-  `Resize#(h, cap)`, `EnsureCap#(h, n)`, `TrimCap#(h)` (compiler-owned
-  capacity; §8.10).
+  member bodies. The default growth policy fires **automatically** when an
+  insertion would exceed capacity — the capacity doubles before the store
+  (grow-on-full, §8.10); an override's binding is called in its place. The
+  capacity control intrinsics are `Capacity#(h)`, `Resize#(h, cap)`,
+  `EnsureCap#(h, n)`, `TrimCap#(h)` (compiler-owned capacity; §8.10).
 
 The indexing family distinguishes read from extract: bracket read `[]`
 resolves `op At` (a borrow); the transfer arrow `<-` resolves the extraction
@@ -1550,8 +1564,10 @@ explicitly, not a reflection target (§17.3).
 > `Capacity#`/`Resize#`/`EnsureCap#`/`TrimCap#` — **no `.^Capacity`
 > reflection exists.**
 
-> **2026-08-15 (the hierarchy).** `Data` is the universal parent — every type
-> IS data (raw storage) and reflects through it. `Bit<N>` is the unified bit
+> **2026-08-15 (the hierarchy).** `Data` is the universal reflective floor —
+> every value can be observed and reflected as its raw storage (the
+> treat-as-bits view); "parent" is a reflective category, never a supertype
+> edge in the casting graph. `Bit<N>` is the unified bit
 > type at any declared width (every type is composed of bits; `Bit<N>` names
 > a run directly — there is no separate `Bits`). `Blob` is the
 > `[len][bytes]` byte buffer, a `Data` member like `String` but with no
@@ -1976,7 +1992,20 @@ Excluded legacy material belongs under `archive/`.
 
 ## 24. Standard-library boundary
 
-The compiler knows bootstrap primitives, semantic operation identities, hashwords, intrinsics, and grammar. Collection organizations, regex APIs, formatting APIs, options/results, platform handles, and host-language types belong to stdlib, plugins, or configuration.
+The compiler knows bootstrap primitives, semantic operation identities,
+hashwords, intrinsics, grammar, and the `coll` scaffolding surface (§8.10).
+Everything else — regex, formatting, options/results, platform handles,
+host-language types, and collection *policy* — belongs to stdlib, plugins, or
+configuration.
+
+The dividing line is **what the compiler matches**: the compiler never matches
+on collection *type names*. `coll` is the one sanctioned compiler-owned
+collection scaffold (keyword-based, §8.10): the compiler owns sequence
+scaffolding — hidden length/capacity, `op Count`/`op At`, construction, and
+the grow-on-full capacity strategy. Collection *policy* — hashing, load
+factors, rehashing, occupancy — is type-specific and stays in stdlib; the
+`coll` surface hands the author the `op Grow`/`op Shrink` hooks and the
+capacity intrinsics, never a hash-aware default.
 
 Examples:
 
@@ -1984,6 +2013,9 @@ Examples:
 - Associative literals are type-directed and do not imply `HashMap`.
 - Stack/queue conversions are type-defined.
 - DOM handles and host ABI categories are GLUE configuration, not Rust type-name matches.
+- A HashMap's load factor, occupancy, and rehash policy are stdlib logic, not
+  compiler behavior; the compiler provides the `op Grow`/`op Shrink` hooks and
+  `Capacity#`/`Resize#`/`EnsureCap#`/`TrimCap#`, never a hash-aware default.
 
 ## 25. Implementation staging
 

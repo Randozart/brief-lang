@@ -9,8 +9,9 @@ They are lexed as distinct tokens, never as identifiers.
 > (`Data`, `Bit<N>`, `Int`, `UInt`, `Float`, `String`, `Bool`, `Char`,
 > `Blob`, `Ptr`, `Void`) are now compiler-native primordials and appear in
 > op signatures **without** the `#` — `op Add(Int)`, not `op Add(#Int)`.
-> `Data` is the universal parent; `Bit<N>` is the unified bit type (`Bit`
-> bare = flexible width); `Blob` is the `[len][bytes]` byte buffer.
+> `Data` is the universal reflective floor (observable raw storage — not a
+> supertype); `Bit<N>` is the unified bit type (`Bit` bare = flexible
+> width); `Blob` is the `[len][bytes]` byte buffer.
 > Parameterized protocol **variants** (`#String<UTF8>`, `#Float<IEEE754>`)
 > keep their `#`. Non-category `#` roles below (`#Lh`/`#Rh`/`#T`, `#Link`,
 > `#System`) are unchanged. See

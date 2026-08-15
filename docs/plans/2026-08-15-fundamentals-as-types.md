@@ -7,7 +7,9 @@ docs land before code).
 **Design decisions locked in review with the requester (2026-08-15):**
 - Fundamentals are compiler-native **primordials** — no stdlib
   redeclaration, no overloadable ops.
-- `Data` is the **universal parent** (raw storage root).
+- `Data` is the **universal reflective floor** — every value can be observed
+  as its raw storage (the treat-as-bits view); it is **NOT a supertype** and
+  adds no universal inheritance edge to the casting graph.
 - `Bit<N>` is the unified bit type at any declared width (`Bit` bare =
   flexible width; `Bit<N>` = exact N). No separate `Bits` concept.
 - The byte-buffer type (today `Data`) is renamed **`Blob`**.
@@ -36,7 +38,9 @@ docs land before code).
 ## 1. The hierarchy (the model this plan installs)
 
 ```
-Data  — universal parent. Every type IS data (raw storage). The root.
+Data  — the universal reflective floor. Every value is observable as its
+        raw storage (the treat-as-bits view); NOT a supertype — "parent" is
+        a reflective category, never an inheritance edge.
   │
   ├─ Bit<N>  — the bit representation at any width. Bit bare = flexible
   │            (resolved later); Bit<N> = exact N bits. Every type is
@@ -47,8 +51,15 @@ Data  — universal parent. Every type IS data (raw storage). The root.
   ├─ String  — [len][bytes] interpreted as UTF-8. Iterable<Char>.
   ├─ Int / UInt / Float / Bool / Char / Ptr / Void  — the numeric/scalar
   │            fundamentals.
-  └─ <user types> — everything else refines through Data.
+  └─ <user types> — everything else is observable as raw storage through the
+                    reflective floor; no implicit `Data` edge.
 ```
+
+**Reflective floor, not a supertype (2026-08-15 decision).** The tree above
+is a *conceptual* floor: every value can be observed/reflected as its raw
+storage (the universal treat-as-bits material view). It is **not** an
+inheritance hierarchy — no universal `Data` edge is added to the casting
+graph, and "parent" is a reflective category, never a supertype relationship.
 
 **Bit ≠ Bits clarified.** "Everything is bits" (lowercase) = every type can
 be treated as its constituent bits (the universal `Cast.Bit` membership).
@@ -57,10 +68,11 @@ be treated as its constituent bits (the universal `Cast.Bit` membership).
 width, resolved later) — this plan keeps the current `Bits(0)` semantics
 under the name `Bit` (decision: option a).
 
-**Data ≠ Blob.** `Data` is the abstract universal parent (raw storage,
-width-free). `Blob` is a *concrete* `[len][bytes]` buffer, a `Data` member
-like String. A Blob is always length-carrying and safe; it is never absence
-(absence is `Option::None`, spec §16.3).
+**Data ≠ Blob.** `Data` is the abstract universal reflective floor (raw
+storage, width-free) — a reflective category, not a supertype. `Blob` is a
+*concrete* `[len][bytes]` buffer, a `Data` member like String. A Blob is
+always length-carrying and safe; it is never absence (absence is
+`Option::None`, spec §16.3).
 
 **Blob is the safe universal byte-carrier, NOT a null pointer.** Its
 defining property is the always-present length; an empty Blob is `len == 0`,
@@ -103,20 +115,28 @@ null semantics.
 
 ## 3. Work items
 
-### 3.1 `Data` replaces `Bit` as the universal root
+### 3.1 `Data` becomes the universal reflective floor (NOT a graph root)
 
-1. **Casting graph** — root lanes `set_lane("Bit", …)` →
-   `set_lane("Data", …)` (graph.rs:153-180, 7+ lanes). The universal raw-byte
-   membership `Cast.Bit` → `Cast.Data`.
-2. **Universe base** — every primordial's `base: "Bit"` → `base: "Data"`
-   (type_universe/mod.rs:99, 169, 202).
+2026-08-15 (decision): `Data` is a **reflective floor**, not a supertype.
+Every value can be observed/reflected as its raw storage, but **no universal
+inheritance or cast edge is added to the casting graph**. "Parent" is a
+reflective category, never an inheritance relationship.
+
+1. **No universal `Data` edge.** The casting graph gets no implicit
+   every-type→`Data` lane. The universal raw-storage view is the
+   **treat-as-bits material view** (`Cast.Bit` stays the universal material
+   membership, typechecker/mod.rs:358-361); it is a material property, not a
+   supertype edge.
+2. **Universe `base`** — primordials keep their own base relationships; there
+   is **no** blanket `base: "Data"` rewrite for every type. Only genuinely
+   storage-rooted types declare explicit edges (`type Blob: Data`,
+   `type String: Data`).
 3. **`Bit` becomes the flexible-width `Bit<N>` family** — the "axiomatic
-   anchor, no width" (mod.rs:94-97) folds into `Bit<0>`/`Bit<N>`. It is no
-   longer the graph root, but keeps its constant, non-overloadable status.
-4. **`Cast.Bit` stays as the treat-as-bits view** — distinct from
-   `Cast.Data` storage membership. Every type is Data (storage) AND treats-as
-   bits (material). `param_covers`'s `#Bit` universal special-case
-   (typechecker/mod.rs:358-361) maps to the stripped `Bit` form.
+   anchor, no width" (mod.rs:94-97) folds into `Bit<0>`/`Bit<N>`. It keeps
+   its constant, non-overloadable status.
+4. **`Cast.Bit` stays the universal treat-as-bits view** — the material
+   floor. Reflective raw-storage observation rides this view; it is not an
+   inheritance edge.
 
 ### 3.2 Delete the fundamental redeclarations (bootstrap.bv)
 
@@ -136,7 +156,7 @@ null semantics.
 
 ### 3.4 Rename byte-buffer `Data` → `Blob`
 
-Frees `Data` for the universal root. Sweeps:
+Frees `Data` for the universal reflective floor. Sweeps:
 - `#Data` protocol → `Blob` protocol; `is_data_operand` → `is_blob_operand`
   (helpers.rs:1307-1312); `Cast.#Data` → `Cast.Blob`.
 - `#b"..."` literal type (emit_expr.rs:2047-2060, mod.rs:200/549/3073).
@@ -152,7 +172,7 @@ Frees `Data` for the universal root. Sweeps:
 |---|---|---|
 | `Blob ⇄ String` | Unchecked zero-copy lens — both `ptr` to `[len][bytes]`; invalid UTF-8 decodes as replacement chars at iteration. | `bitcast ptr to ptr` |
 | `Blob ⇄ Bit<N>` | Byte↔bit view (the raw-bytes universal fallback, casting-protocol.md:183). A Blob of length L IS `Bit<8L>`. | construct/view buffer |
-| `Blob → Data` | Upcast — Blob IS Data (universal parent). | no-op |
+| `Blob → Data` | View — Blob is an explicitly Data-rooted type (declared edge; Data is the reflective floor, not a universal parent). | no-op |
 | `Data → Blob` | Checked downcast — the Data value must be buffer-shaped. | shape check |
 | `Blob ⇄ Bit` (bare) | The flexible-width form; treated as `Bit<8L>` view or explicit-width checked cast. | view/check |
 | `Blob ⇄ Int/Float/Bool/Char` | **NO implicit cast.** Explicit stdlib fns: `blob_to_int`, `int_to_blob`, `blob_to_float`, etc. (little-endian, length-checked). | explicit fn call |
@@ -242,8 +262,10 @@ moves between them with zero ceremony.
 2. No `type Int: #Int` / `type Float: #Float` / `type String: #String` /
    `type Bool: #Bool` / `type Char: #Char` remains in stdlib.
 3. `Double` is `type Double: Float` (parent).
-4. `Data` is the universal parent (casting-graph root, `base: "Data"`);
-   `Bit<N>` is the unified bit type; no separate `Bits` type.
+4. `Data` is the universal reflective floor — every value observable as raw
+   storage via the treat-as-bits view; **no universal inheritance/cast edge**
+   (`base: "Data"` only on explicitly-rooted types); `Bit<N>` is the unified
+   bit type; no separate `Bits` type.
 5. `Blob` is the renamed byte-buffer with the casting table in §3.5; no
    stale `Data` byte-buffer lanes remain.
 6. `op Add(Int)` user overloads still work; `Int + Int` still intrinsic.
