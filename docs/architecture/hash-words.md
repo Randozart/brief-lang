@@ -5,31 +5,41 @@ They are lexed as distinct tokens, never as identifiers.
 
 ## 2026-07-20: Hashword Categories (`#Int`, `#Float`, `#String`, etc.)
 
-Hashwords now serve an additional role as **backend category directives** in
-op signatures:
+> **2026-08-15 (Fundamentals as Types).** The fundamental types
+> (`Data`, `Bit<N>`, `Int`, `UInt`, `Float`, `String`, `Bool`, `Char`,
+> `Blob`, `Ptr`, `Void`) are now compiler-native primordials and appear in
+> op signatures **without** the `#` — `op Add(Int)`, not `op Add(#Int)`.
+> `Data` is the universal parent; `Bit<N>` is the unified bit type (`Bit`
+> bare = flexible width); `Blob` is the `[len][bytes]` byte buffer.
+> Parameterized protocol **variants** (`#String<UTF8>`, `#Float<IEEE754>`)
+> keep their `#`. Non-category `#` roles below (`#Lh`/`#Rh`/`#T`, `#Link`,
+> `#System`) are unchanged. See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
+
+The fundamental types in op signatures are **backend category directives**:
 
 ```briev
 type Int : Bits {
-    op Add(#Int, #Int);       // "backend, emit whatever i64 add means to you"
-    op Sub(#Int, #Int);
-    op Mul(#Int, #Int);
+    op Add(Int);       // "backend, emit whatever i64 add means to you"
+    op Sub(Int);
+    op Mul(Int);
 };
 
-type Bfloat16 { data: Bits<16>;
-    op Add(#Float, #Float) = bfloat_add(#Lh, #Rh);  // override with custom fn
+type Bfloat16 { data: Bit<16>;
+    op Add(Float) = bfloat_add(#Lh, #Rh);  // override with custom fn
 };
 ```
 
-A hashword in an op signature tells the backend: **handle this operation
-using your intrinsic knowledge of the `#Category` protocol.** The backend
-decides what `#Int` addition means in its own terms (LLVM → `add i64`,
+A fundamental in an op signature tells the backend: **handle this operation
+using your intrinsic knowledge of that category's protocol.** The backend
+decides what `Int` addition means in its own terms (LLVM → `add i64`,
 CIRCT → hardware adder, SPIR-V → `OpIAdd`).
 
-**Protocol variants** parameterize hashwords: `#String<UTF8>`, `#String<ASCII>`,
-`#Float<IEEE754>`. The file extension determines the default (`.bv` → UTF8,
-`.ebv` → ASCII). Cross-variant calls require explicit protocol disambiguation
-— the compiler errors if a `.bv` file calls a `.ebv` function using `#String`
-without specifying the variant:
+**Protocol variants** parameterize the fundamentals: `#String<UTF8>`,
+`#String<ASCII>`, `#Float<IEEE754>`. The file extension determines the
+default (`.bv` → UTF8, `.ebv` → ASCII). Cross-variant calls require explicit
+protocol disambiguation — the compiler errors if a `.bv` file calls an
+`.ebv` function using `String` without specifying the variant:
 
 ```briev
 fn cross(a: #String<UTF8>, b: #String<ASCII>) { ... };
@@ -46,33 +56,33 @@ which runs the resolution pipeline:
 
 1. `meld Source <-> Target` — structural equivalence
 2. `op Cast(Target)` on Source — direct type-to-type
-3. `CastTo(#Category)` → `CastFrom(#Category)` — protocol path
-4. Implicit `CastTo(#Bits)` + `CastFrom(#Bits)` — raw bytes (always)
+3. `CastTo(Fundamental)` → `CastFrom(Fundamental)` — parent/protocol path
+4. Implicit `CastTo(Bit<N>)` + `CastFrom(Bit<N>)` — raw bytes (always)
 
-User-declarable ops: `CastTo(#Category)`, `CastFrom(#Category)`, and
+User-declarable ops: `CastTo(Fundamental)`, `CastFrom(Fundamental)`, and
 `Cast(ConcreteType)`. See `docs/architecture/casting-protocol.md`.
 
 See `docs/architecture/casting-protocol.md` for the full protocol system.
 
-### `op Parse(#Category)` — Compile-time identity parse
+### `op Parse(Fundamental)` — Compile-time identity parse
 
-`op Parse(#Category)` uses the same hashword mechanism as `op Add(#Int)`:
+`op Parse(Fundamental)` uses the same mechanism as `op Add(Int)`:
 
-| `#Category` | Tells the compiler |
+| Fundamental | Tells the compiler |
 |---|---|
-| `#Int` | Parse literals as native integer — no conversion needed |
-| `#String` | Parse quoted literals as UTF-8 — no conversion needed |
-| `#Float` | Parse numeric literals as IEEE 754 float |
+| `Int` | Parse literals as native integer — no conversion needed |
+| `String` | Parse quoted literals as UTF-8 — no conversion needed |
+| `Float` | Parse numeric literals as IEEE 754 float |
 
 `op Parse(Bare)`, `op Parse(Decimal)`, and `op Parse(Quoted)` are NOT
-hashword ops — they are concrete-form ops that always require a conversion
-function. Only `op Parse(#Category)` is a hashword op.
+fundamental ops — they are concrete-form ops that always require a conversion
+function. Only `op Parse(Fundamental)` is an identity parse.
 
 ```briev
 type Int {
-    op Add(#Int, #Int);       // backend directive: integer add
-    op Parse(#Int);            // identity parse: literal IS an Int
-    op Parse(Decimal);         // concrete form: numeric literal → conversion fn
+    op Add(Int);              // backend directive: integer add
+    op Parse(Int);            // identity parse: literal IS an Int
+    op Parse(Decimal);        // concrete form: numeric literal → conversion fn
 };
 ```
 

@@ -322,17 +322,17 @@ modifiers shape struct declarations:
 // Bit-contiguous: fields pack with zero padding in declaration order.
 pack struct EthHeader {
     spec Endian: Big;             // MSB-first within byte + BE multi-byte
-    dst: Bits<48>;
-    src: Bits<48>;
-    etype: Bits<16>;
+    dst: Bit<48>;
+    src: Bit<48>;
+    etype: Bit<16>;
 };
 
 // Untagged overlay: all fields share storage at offset 0; size is the
-// largest aligned field. Sub-byte Bits<N> fields are rejected (deferred).
+// largest aligned field. Sub-byte Bit<N> fields are rejected (deferred).
 union Word {
-    u: Bits<64>;
-    bytes: Bits<32>;
-    lo: Bits<16>;
+    u: Bit<64>;
+    bytes: Bit<32>;
+    lo: Bit<16>;
 };
 
 // Per-field concurrency: reads/writes go atomic; `c.count = c.count + 1`
@@ -343,9 +343,11 @@ struct Counter {
 };
 ```
 
-`Bits<N>` is exactly N bits everywhere — a `Bits<48>` field reads 48 bits, not
-a rounded word. `x as Bits<N>` truncates to N bits (a `Bits<4>` never holds
-16). The reference interpreter models structs as layout-free values; the
+`Bit<N>` is exactly N bits everywhere — a `Bit<48>` field reads 48 bits, not
+a rounded word. `x as Bit<N>` truncates to N bits (a `Bit<4>` never holds
+16). `Bit` bare is flexible width (resolved later); `Bit<N>` is exact.
+There is no separate `Bits` type — multiple bits is just `Bit<N>`. The
+reference interpreter models structs as layout-free values; the
 byte-level packing, overlay, and atomicity are what the target materializes.
 
 ### Fixed-Size Arrays: `Type[N]` and Slice Views
@@ -428,11 +430,45 @@ vectorizes the load-apply-store loop without compiler magic.
 
 | Keyword | Purpose | Example |
 |---------|---------|---------|
-| `type` | Protocols, operator bindings, type system extensibility | `type Int: #Int { op Add(#Int); };` |
+| `type` | Protocols, operator bindings, type system extensibility | `type MyInt: Int { spec Bits: 32; };` |
 | `struct` | Pure data, fixed layout, C-compatible, no methods | `struct Point { x: Int; y: Int; };` |
 | `obj` | Full-featured types with methods, contracts, generics | `obj Channel<T> { ... };` |
 
 `type { field: T }` patterns are being migrated to `struct { field: T }`.
+
+### The Fundamentals (2026-08-15)
+
+The fundamental types are compiler-native — they need no `type` declaration
+and are not overloadable (`op` is for user types). The hierarchy:
+
+- **`Data`** — the universal parent. Every type IS data (raw storage). Use
+  it as a generic bound for "any value": `<T: Data>`.
+- **`Bit<N>`** — the bit type at any width. Touch individual bits / exact
+  widths. `Bit` bare = flexible (resolved later); `Bit<N>` = exact N.
+  There is no separate `Bits` type.
+- **`Blob`** — the `[len][bytes]` byte buffer. Hold raw bytes, interpret
+  later. Safe, never null (it always carries its length). Cast to `String`
+  (lens) or `Bit<N>` (bit view); scalars convert via explicit stdlib fns
+  (`blob_to_int`, `int_to_blob`, …).
+- **`Int` / `UInt` / `Float` / `Bool` / `Char` / `String` / `Ptr` /
+  `Void`** — the numeric/scalar fundamentals. `Double` is `type Double:
+  Float` (just Float with more bits).
+- **`struct`** — passive fixed record, C-compatible, no behavior.
+- **`obj`** (with `coll` for collections) — state + behavior + lifecycle.
+
+| You want to… | Use |
+|---|---|
+| touch individual bits / exact width | `Bit<N>` |
+| hold raw bytes, interpret later | `Blob` |
+| accept *any* value | `<T: Data>` (the root) |
+| passive fixed record | `struct` |
+| state + behavior + lifecycle | `obj` |
+
+The overlaps are the design: `Blob` and `Bit<N>` both are bytes, differ in
+intent (buffer vs pattern); `struct` and `obj` both carry fields, differ in
+behavior (passive vs active); `Data` underlies all four; the casting graph
+moves between them with zero ceremony. Absence is `Option::None` — Blob is
+never null.
 
 ## 8. Complete Example: Contact Manager
 

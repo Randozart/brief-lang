@@ -55,9 +55,36 @@ also holds no collection or element type names as semantic keys — a type is
 iterable because it provides the iteration operations, not because of its
 name or an explicit conformance marker.
 
+> **2026-08-15 (`coll`).** The **`coll`** keyword (on `obj`/`struct`
+> declarations, §8.10) is the **native strategy keyword for declaring
+> collections**, not a trait or conformance marker: it declares that the type
+> has **compiler-owned Length semantics** (length and capacity live in hidden
+> slots the compiler maintains, never declared fields) and instructs the
+> compiler to **scaffold the operation surface** (`op Count`, `op At`,
+> `op Init`/`op InsertAt`/`op ExtractFrom`, and the default `op Grow`/
+> `op Shrink` strategies). The rule above still holds: the scaffolded
+> operations ARE the operation surface — `coll` does not grant iterability by
+> name, it *synthesizes* the operations a structural probe then resolves.
+> `coll obj MyQueue<T>` is treated identically to any other `coll` type; no
+> collection name is a semantic key. A `coll` collection is as fast as the
+> compiler can make it — the scaffolded ops fold to hand-written-equivalent
+> code. See `docs/plans/2026-08-15-coll-length-semantics.md`.
+
 > **2026-08-12 (Iterable protocol):** `String`, `List<T>`, `Stack<T>`, and a
 > user-declared collection are all ordinary types whose iteration resolves
 > structurally (§11.4). No collection or string is a compiler special case.
+
+> **2026-08-15 (Fundamentals).** The fundamental types are compiler-native
+> primordials, not stdlib redeclarations: `Data`, `Bit<N>`, `Int`, `UInt`,
+> `Float`, `Bool`, `Char`, `String`, `Blob`, `Ptr`, `Void`. They need no
+> stdlib entry and carry no overloadable ops (`op` is for user types).
+> **`Data` is the universal parent** — every type IS data (raw storage) and
+> refines through it. **`Bit<N>` is the unified bit type** at any declared
+> width (`Bit` bare = flexible, resolved later); every type is composed of
+> bits, and `Bit<N>` names a run of bits directly — there is no separate
+> `Bits` type. **`Blob`** is the `[len][bytes]` byte buffer (a `Data` member
+> like `String`, but with no encoding interpretation). See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 ### 2.2 Semantic values and materialization
 
@@ -369,7 +396,9 @@ needs your input (it warns and asks for a keyword). Rules:
 - They **never make code faster**: the default is the efficient path, and a
   keyword-beaten default is a compiler bug (`seq`, `vol`, `async`, `box`,
   `spill`, `storage` all follow this).
-- One shape, `category<mechanism>`: the *category* keyword is
+- **Disclosed compiler ownership** (`coll`, §8.10): the keyword reveals that
+  the compiler owns a property (Length semantics) it would otherwise derive
+  structurally — never a speed win, always disclosed.- One shape, `category<mechanism>`: the *category* keyword is
   program-independent (`borrow`, `storage`, `delivery`); the *mechanism* rides
   inside `<>` and is either a compiler-known intrinsic class or a config row
   (`borrowed<source>`, `sync<group>`, `#Link<name>`, `#String<UTF8>`,
@@ -415,13 +444,8 @@ struct Point<T> {
 A plain struct is layout-adaptive: a backend may reorder, split, scalarize, or eliminate fields when semantics permit.
 
 ```briev
-type Length32: #Int {
+type Length32: Int {
     spec Bits: 32;
-};
-
-seq struct Header {
-    tag: Byte;
-    length: Length32;
 };
 ```
 
@@ -430,24 +454,24 @@ seq struct Header {
 > **2026-08-13 (`pack struct`).** `pack struct` is bit-contiguous: fields are
 > packed with zero padding in declaration order, so the storage volume is
 > `ceil(Σ field widths / 8)` bytes. A packed field must be a scalar bit-width
-> (`Bits<N>`, `0 < N ≤ 64`); array (vector) fields are rejected. `pack` and
+> (`Bit<N>`, `0 < N ≤ 64`); array (vector) fields are rejected. `pack` and
 > `seq` are order-independent prefix flags (`pack seq struct`, `seq pack
 > struct`).
 >
 > ```briev
 > pack struct Header {
 >     spec Endian: Big;
->     dst: Bits<48>;
->     src: Bits<48>;
->     ethertype: Bits<16>;
+>     dst: Bit<48>;
+>     src: Bit<48>;
+>     ethertype: Bit<16>;
 > };
 > ```
 >
 > Whole-byte packed fields (width % 8 == 0) lay out exactly like a
 > byte-granular struct and use LLVM's native packed aggregate (`<{ ... }>`).
-> Sub-byte fields (e.g. `Bits<12>`) occupy a bit-aligned slice of the byte
+> Sub-byte fields (e.g. `Bit<12>`) occupy a bit-aligned slice of the byte
 > image and are accessed with load-shift-mask / load-modify-store; a sub-byte
-> packed struct materializes as a byte array. A zero-width `Bits<0>` field is
+> packed struct materializes as a byte array. A zero-width `Bit<0>` field is
 > padding: it occupies no storage and reads as 0.
 >
 > Bit order is endian-coupled: default/`Target` is native (the bit at
@@ -458,8 +482,8 @@ seq struct Header {
 > Packed alignment defaults to 1 (no inter-element padding); `spec Alignment`
 > overrides.
 >
-> **2026-08-13 (cast width).** `x as Bits<N>` is a width assertion: the value
-> truncates to exactly `N` bits (a `Bits<4>` can never hold 16). The reference
+> **2026-08-13 (cast width).** `x as Bit<N>` is a width assertion: the value
+> truncates to exactly `N` bits (a `Bit<4>` can never hold 16). The reference
 > interpreter and the LLVM backend agree on this; packed stores also mask to
 > the field width defensively.
 >
@@ -476,7 +500,7 @@ seq struct Header {
 >
 > **2026-08-13 (`union`).** `union Name { field: Type, … };` is an untagged
 > overlay: all fields share storage at offset 0; size is the largest aligned
-> field storage and alignment the maximum field alignment. Sub-byte `Bits<N>`
+> field storage and alignment the maximum field alignment. Sub-byte `Bit<N>`
 > fields (N % 8 != 0) and zero-width padding are rejected — a bit-sliced
 > overlay is ambiguous (deferred). The LLVM backend materializes a union as a
 > byte array of its storage size with per-field loads/stores at offset 0
@@ -521,15 +545,18 @@ match value {
 A type declares semantic identity, logical fields, invariants, metadata/layout hints, functions, and operation bindings.
 
 ```briev
-type UserId: Int, Comparable<UserId>, #Int {
+type UserId: Int, Comparable<UserId>, Int {
     value: Int;
     [value >= 0]
-
-    defn display(self: UserId) -> String {
-        term self.value as String;
-    };
-};
 ```
+
+> **2026-08-15 (Fundamentals).** The fundamental types (`Data`, `Bit<N>`,
+> `Int`, `UInt`, `Float`, `Bool`, `Char`, `String`, `Blob`, `Ptr`, `Void`)
+> are compiler-native primordials — they need **no** `type` declaration and
+> carry no overloadable `op` (they are not overloaded; `op` is for user
+> types). `Data` is the universal parent every type refines through.
+> `Bit<N>` is the unified bit type; `Blob` is the `[len][bytes]` byte buffer.
+> See `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 The relationship list after `:` may contain:
 
@@ -611,8 +638,8 @@ Each written `as` may traverse:
 Crossing multiple semantic protocol categories requires multiple written casts.
 
 ```briev
-let bits = text as #Bit;
-let number = text as #String as #Int;
+let bits = text as Bit;
+let number = text as String as Int;
 ```
 
 Missing proof evidence is an error unless the edge is visibly declared as a trusted foreign/intrinsic axiom.
@@ -657,7 +684,7 @@ defn parse(tag: Int) -> Int {
 `!>` is the canonical annotation operator for non-physical metadata.
 
 ```briev
-type Int32: #Int {
+type Int32: Int {
     !> ctd: Int;      // annotation (e.g. cell-tag dispatch)
 };
 ```
@@ -687,6 +714,56 @@ into one module metadata map (last binding wins per key). Values use the same
 grammar as declaration metadata (identifier, integer, boolean, string, or
 list). Module metadata is available to any backend or plugin that consults
 the metadata vocabulary.
+
+### 8.10 `coll` — compiler-owned Length semantics
+
+> **2026-08-15 (`coll`).** The **native strategy keyword for declaring
+> collections** (prefix on `obj` and `struct` declarations, order-independent
+> with `pack`/`seq`). A `coll` type refines through `Data` like every other
+> type — the `Data` root gives it the raw-storage floor. Declaring a
+> collection is convenient — the author writes the storage shape (the one
+> sequence member) and the compiler owns
+> the rest: **compiler-owned Length semantics** (length and capacity are
+> hidden compiler-managed slots, never declared fields) and a **scaffolded
+> operation surface** (§11.4/§15.2) — `op Count`, `op At`,
+> `op Init`/`op InsertAt`/`op ExtractFrom`, literal construction, `foreach`,
+> `.^Length`, `Count#`, and the default `op Grow`/`op Shrink` growth
+> strategies. Iterability is still resolved through the operation surface;
+> `coll` synthesizes those operations. A `coll` collection is **as fast as
+> the compiler can make it**: the scaffolded ops fold to the same code a
+> hand-written collection emits (the default is always the efficient path —
+> a `coll`-beaten default is a compiler bug). See
+> `docs/plans/2026-08-15-coll-length-semantics.md`.
+
+```briev
+coll obj List<T> {
+    inner: ListBuffer<T>;   // data: Ptr<T> — the sequence member; cap is compiler-owned
+};
+
+coll struct Fixed<T, N> {
+    data: T[N];             // fixed T[N] only — length == capacity == N
+};
+```
+
+- **Length and capacity are compiler properties** — exposed only through
+  `.^Length` (stored length, §17.1), `Count#` (element count), and the
+  capacity intrinsics `Capacity#`/`Resize#`/`EnsureCap#`/`TrimCap#` (§15.2).
+  They are not declared fields; a `coll` type declaring a `len` or `cap`
+  slot is an error.
+- **`coll obj`** — the compiler appends hidden `cap` and `len` slots and
+  scaffolds `op Count`, `op At`, `op Init`/`op InitEmpty`/`op InsertAt`/
+  `op ExtractFrom`, plus the default `op Grow`/`op Shrink` growth strategies.
+- **`coll struct`** — fixed `T[N]` only (this slice): length == capacity
+  == N, no hidden slots, C ABI preserved. `Ptr<T>`-backed structs are a
+  documented follow-up.
+- **`op Grow`/`op Shrink` are overridable strategy bindings** (handle-only,
+  `op Grow: grow(#Lh)`); a binding replaces the compiler's default doubling
+  policy. This is the same binding machinery as `op InsertAt`/`op ExtractFrom`
+  (§15.3) — a custom Grow/Shrink may rehash-and-expand (e.g. a hash map)
+  without the compiler knowing anything about hashing.
+- **No `.^Capacity` reflection** — capacity is operational (the Grow/Shrink
+  control knob), so it is an intrinsic (`Capacity#`), never a reflection
+  target (§17 boundary rule).
 
 ## 9. Functions, transactions, nodes, objects, and cells
 
@@ -976,6 +1053,12 @@ conformance marker, and no compiler-known collection type. A type that
 provides the operations is iterable; one that does not is rejected with a
 compile-time error, never a panic and never a silently skipped loop.
 
+> **2026-08-15 (`coll`).** A `coll` declaration (§8.10) does not grant
+> iterability by conformance — it instructs the compiler to *synthesize* the
+> iteration operations (`op Count`/`op At`), after which the same structural
+> probe resolves. A `coll` type is iterable because it provides the
+> operations, exactly like a hand-written one.
+
 Iteration operations are declared **op-as-member**: the operator name is the
 member name (`op Count() -> Int { … }`), disclosed by the `op` keyword, and no
 bare member name is resolved by the compiler.
@@ -1021,22 +1104,23 @@ Metadata that is compiler-known but non-operational is reflection. Transfer
 
 #### 11.4.2 `String` is `Iterable<Char>`
 
-`String` is a bare `#String` protocol member with no declared fields
-(§16.2); its layout and encoding are derived by the casting graph. It
-satisfies the iteration contract structurally as a sequence of `Char` with
-encoding variants (`#String<UTF8>`, `#String<UTF16>`, `#String<ASCII>`),
-selecting tiers by encoding. **2026-08-14 (current): a `#String` operand
-iterates `Char` through a protocol-keyed char-decode lane** — the loop bound
-is the stored byte length (`.^Length` header) and each iteration decodes one
-UTF8 codepoint (`Char`); the compiler holds no String layout. `foreach c in
-str` binds `c` as `Char` (SPEC §17.2 `String` → `Char`), never a raw byte.
+`String` is a fundamental (`Data`-refining) type — a `[len][bytes]` buffer
+interpreted as UTF-8, with no declared fields (§16.2); its layout and
+encoding are derived by the casting graph. It satisfies the iteration
+contract structurally as a sequence of `Char` with encoding variants
+(`String<UTF8>`, `String<UTF16>`, `String<ASCII>`), selecting tiers by
+encoding. **2026-08-14 (current): a `String` operand iterates `Char` through
+a protocol-keyed char-decode lane** — the loop bound is the stored byte
+length (`.^Length` header) and each iteration decodes one UTF8 codepoint
+(`Char`); the compiler holds no String layout. `foreach c in str` binds `c`
+as `Char` (SPEC §17.2 `String` → `Char`), never a raw byte.
 Encoding-selective tiers are the future specialization:
 
 - **Fixed-width encodings** (e.g. `ASCII`): Tier 2 — `op Count` = char count
   (equal to byte count), `op At(i)` is an O(1) byte load.
 - **Variable-width encodings** (e.g. `UTF8`): Tier 1 for characters — the
   cursor ops (`op Iter`/`op Step`/`op IsEnd`/`op Current`) decode 1–4-byte
-  `Char`s; Tier 2 is available on the byte view (`.Bytes`, a `Slice<U8>`/`Data`
+  `Char`s; Tier 2 is available on the byte view (`.Bytes`, a `Slice<U8>`/`Blob`
   over the underlying buffer). Character random access by index on a
   variable-width encoding is a compile error, never a silent O(N) surprise.
 
@@ -1248,7 +1332,7 @@ Traits and contracts may constrain effects. Compile-time reflection exposes `.^^
 Syntax maps to operation identities, which types bind to functions.
 
 ```briev
-type Number: #Int {
+type Number: Int {
     op Add(Number): add(#Lh, #Rh);
 };
 ```
@@ -1292,7 +1376,13 @@ key. The iteration operators are:
 - `op Current(cur) -> &T` — Tier-1 element at the cursor;
 - `op InsertAt(v: T)`, `op ExtractFrom() -> T`, `op CopyFrom() -> T` —
   mutation and value-out (see §15.3);
-- `op Init(v: T)` — type-directed construction (§16.3).
+- `op Init(v: T)` — type-directed construction (§16.3);
+- `op Grow`, `op Shrink` — **capacity strategy bindings** (handle-only,
+  `op Grow: grow(#Lh)`); a `coll` type may override the compiler's default
+  growth policy with these. They are strategy entries like `InsertAt`, not
+  member bodies. The capacity control intrinsics are `Capacity#(h)`,
+  `Resize#(h, cap)`, `EnsureCap#(h, n)`, `TrimCap#(h)` (compiler-owned
+  capacity; §8.10).
 
 The indexing family distinguishes read from extract: bracket read `[]`
 resolves `op At` (a borrow); the transfer arrow `<-` resolves the extraction
@@ -1375,12 +1465,18 @@ let x: Stack<Int> = [1, 2, 3];
 // lowers to: op Init(1); op InsertAt(2); op InsertAt(3);
 ```
 
+> **2026-08-15 (`coll`).** For a `coll` type the `op Init`/`op InsertAt`
+> ops are scaffolded (§8.10), so `let xs: List<Int> = [1,2,3]` constructs
+> through the scaffolded ops — the compiler owns the produced layout. Every
+> `[]` literal constructs a fresh value via `op InitEmpty` (pre-allocated
+> capacity); there is no shared empty sentinel.
+
 An associative literal lowers through the expected type's construction and
 insertion bindings. A literal with no observable expected type
 (`let x = [1, 2, 3]` with `x` unannotated) is a compile error — type
 annotation required for an unconstrained collection literal.
 
-There is no universal `null` or `nil`. Absence uses an ordinary sum variant such as `Option::None`.
+There is no universal `null` or `nil`. Absence uses an ordinary sum variant such as `Option::None`. The `Blob` byte buffer is never null: it always carries its `[len]`, so an empty Blob is a valid empty value, not a null pointer. `Blob` is the safe universal byte-carrier — it holds raw bytes with no interpretation; it does not signify absence.
 
 ### 16.4 Ranges
 
@@ -1422,13 +1518,36 @@ Runtime reflection reads a declared/materialized logical field. Missing fields a
 
 `value.^Length` is **stored-length reflection**: it reads a length that is an
 intrinsic property of the value's representation and unreachable through the
-declared member surface — the `Data` byte header, the `String` byte header, or
-the `Vector` descriptor count. It is valid only for those value kinds; on any
-other receiver (a `List`, a `HashMap`, a custom collection) it is a
-compile-time error, because that length is member-managed or computed, not
-intrinsic. **Reflection never routes to an operation:** a length that must be
-computed (for example a UTF8 character count) is an intrinsic — `CharCount#` —
-called explicitly, not a reflection target (§17.3).
+declared member surface — the `Blob` byte header, the `String` byte header,
+the `Vector` descriptor count, or a `coll` type's hidden length slot
+(§8.10). It is valid only for those value kinds; on any other receiver (a
+hand-written `List`, a `HashMap`, a custom collection) it is a compile-time
+error, because that length is member-managed or computed, not intrinsic.
+**Reflection never routes to an operation:** a length that must be computed
+(for example a UTF8 character count) is an intrinsic — `CharCount#` — called
+explicitly, not a reflection target (§17.3).
+
+> **2026-08-15 (`coll`).** A `coll obj`'s `.^Length` is its hidden length
+> slot (O(1) header read); a `coll struct`'s is its fixed constant `N`
+> (folded at compile time). The element count is the `Count#` intrinsic,
+> never `.^Length` — the two coincide when the stored unit is the element and
+> diverge otherwise, exactly like String's stored bytes vs `CharCount#`.
+
+> **2026-08-15 (boundary rule).** **Reflection (`.^`) = stored/frozen facts
+> that "observe and never compute"; intrinsics (`X#`) = operations.** A value
+> with one notion that is operational is an intrinsic, not reflection.
+> Capacity is that case: it is the Grow/Shrink control knob, so it is
+> `Capacity#`/`Resize#`/`EnsureCap#`/`TrimCap#` — **no `.^Capacity`
+> reflection exists.**
+
+> **2026-08-15 (the hierarchy).** `Data` is the universal parent — every type
+> IS data (raw storage) and reflects through it. `Bit<N>` is the unified bit
+> type at any declared width (every type is composed of bits; `Bit<N>` names
+> a run directly — there is no separate `Bits`). `Blob` is the
+> `[len][bytes]` byte buffer, a `Data` member like `String` but with no
+> encoding interpretation. Absence is `Option::None` (§16.3); Blob is never
+> null — it always carries its length. See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 `value[i]` resolves the receiver type's `op At` (an indexed borrow, §15.2).
 
@@ -1454,7 +1573,7 @@ Descriptor fields include, where applicable:
 single-source proof form** — the element type IS the read op's return type
 (`op At` Tier 2 / `op Current` Tier 1, §11.4) substituted with the concrete
 generic args (`List<String>` → `String`, `HashMap<K,V>` → `V`), or the frozen
-`#String` → `Char` protocol fact. There is no second derivation to drift
+`String` → `Char` fundamental fact. There is no second derivation to drift
 against; a non-iterable receiver is a compile error, never a silent `Int`.
 The descriptor folds to the element type's category code at compile time.
 Iteration capability is inspected via `value.^^Ops` (the type's operator
@@ -1707,7 +1826,7 @@ Dynamic repetition requires a stable `b-key` whenever children may be inserted, 
 
 `b-each` renders over **any structurally iterable** value (§11.4): a type that
 provides the iteration operations — Tier 2 (`op Count`+`op At`), Tier 1
-(`op Iter`+`op Step`+`op IsEnd`+`op Current`), or a `#String` operand (chars)
+(`op Iter`+`op Step`+`op IsEnd`+`op Current`), or a `String` operand (chars)
 — `List<T>`, `Stack<T>`, `HashMap<K,V>`, `String` (chars), vectors, or a
 user-declared collection. It never depends on a compiler-known collection
 type. The web backend materializes the iterable into an array by driving the

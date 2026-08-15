@@ -38,12 +38,15 @@ are all ordinary types — none is a compiler special case.
 ├─────────────────────────────────────────────────────────────────────────┤
 │ 3. Stdlib Definitions (pure Briev)                                      │
 │    obj List<T>, obj Stack<T>, obj RingBuffer<T>, obj HashMap<K,V>,      │
-│    type String: #String                                                 │
+│    String (fundamental, Data-refining)                                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 The compiler knows layers 1–2. It knows nothing in layer 3. Collections are
 stdlib; new collections are user code; neither needs compiler knowledge.
+The fundamental types (`Data`, `Int`, `String`, `Blob`, …) are layer 1.5:
+compiler-native primordials, iterable through the same structural op surface
+(2026-08-15).
 
 ## 3. Op-as-member
 
@@ -134,32 +137,33 @@ added — byte length is stored, `.^Length` reads it.
 
 Derived from the generic args: `List<String>` → `String`; `Stack<T,N>` → `T`
 (width args skipped); `HashMap<K,V>` → `V`; `String` → `Char` (a frozen
-`#String` protocol fact). Single-source proof form: for op-bearing types the
+`String` fundamental fact). Single-source proof form: for op-bearing types the
 element type IS the read op's return (never a second derivation to drift); a
-`#String` operand is `Char` by protocol. Drives the `foreach` item binding and
+`String` operand is `Char` by fundamental. Drives the `foreach` item binding and
 the web element decode.
 
 ## 8. String unification
 
-`type String: #String { };` is a bare protocol member; the value is a
+`String` is a fundamental (`Data`-refining) type: the value is a
 `[len][bytes]` pointer, layout/encoding derived by the casting graph. `String`
-is `Iterable<Char>`.
+is `Iterable<Char>`. (2026-08-15: category `#` removed from fundamentals —
+`String` not `#String`; protocol variants `#String<UTF8>` keep theirs.)
 
-**2026-08-14 (current mechanism):** a `#String` operand iterates `Char`
+**2026-08-14 (current mechanism):** a `String` operand iterates `Char`
 through a **protocol-keyed char-decode lane** — the loop bound is the stored
 byte length (`.^Length` header) and each iteration calls `briev_str_next_char`
 (UTF8 decode + advance) producing one `Char`. The compiler holds no String
-layout and no name match; `#String` membership is the sole key
-(`is_string_operand`, a casting-graph protocol check). `#Data` keeps its byte
-iteration (element `Int`). `foreach c in str` binds `c` as `Char` (SPEC §17.2
-`String` → `Char`).
+layout and no name match; `String` membership is the sole key
+(`is_string_operand`, a casting-graph protocol check). `Blob` (the renamed
+byte buffer, formerly `Data`) keeps its byte iteration (element `Int`).
+`foreach c in str` binds `c` as `Char` (SPEC §17.2 `String` → `Char`).
 
 Encoding-selective tiers are the future specialization:
 
 - **Fixed-width** (ASCII): Tier 2 — `op Count` = char count = byte count,
   `op At(i)` = O(1) byte load.
 - **Variable-width** (UTF8): Tier 1 for chars (`op Step` = the 1–4-byte
-  decoder → `Char`); Tier 2 on the byte view (`.Bytes`, a `Slice<U8>`/`Data`).
+  decoder → `Char`); Tier 2 on the byte view (`.Bytes`, a `Slice<U8>`/`Blob`).
   Character random access by index on UTF8 is a compile error.
 
 `.^Length` on `String` = stored byte count. `CharCount#` = char count. The
@@ -170,7 +174,7 @@ dispatch.
 
 | Syntax | Resolves via |
 |---|---|
-| `foreach(item in c)` | tier pick → Tier 2 (`op Count`+`op At`) counted loop, Tier 1 (`op Iter`+`op Step`+`op IsEnd`+`op Current`) cursor loop, or `#String` char decode lane (ops internally, never `.^Length`) |
+| `foreach(item in c)` | tier pick → Tier 2 (`op Count`+`op At`) counted loop, Tier 1 (`op Iter`+`op Step`+`op IsEnd`+`op Current`) cursor loop, or `String` char decode lane (ops internally, never `.^Length`) |
 | `b-each:item="c"` | web snapshot materializer driving the same ops |
 | `c[i]` | `op At` (indexed borrow) |
 | `c.^Length` | stored-length reflection (Data/String-byte/Vector); error elsewhere |

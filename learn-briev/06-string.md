@@ -9,17 +9,19 @@ Three literal forms (SPEC §16.1/16.2):
 ```briev
 let s: String = "escaped\n";     // escapes ARE interpreted: \n \t \\ \" \xHH
 let r: String = #r"raw \ text";  // raw string: escapes NOT interpreted
-let b: Data   = #b"\x89PNG\r\n"; // byte literal: raw bytes (exact \xHH content)
+let b: Blob   = #b"\x89PNG\r\n"; // byte literal: raw bytes (exact \xHH content)
 ```
 
 - `#r"..."` is a raw string — backslashes are kept literally (useful for regex
   and Windows paths).
-- `#b"..."` is a Data byte literal — `\xHH` yields the exact byte, and the
-  result is typed `Data`, not `String`. `x.^Len` on a Data value is the byte
-  length (O(1), reads the `[len]` header).
+- `#b"..."` is a Blob byte literal — `\xHH` yields the exact byte, and the
+  result is typed `Blob`, not `String`. `x.^Len` on a Blob value is the byte
+  length (O(1), reads the `[len]` header). `Blob` is the `[len][bytes]` byte
+  buffer — raw bytes with no encoding interpretation; `String` is the same
+  buffer interpreted as UTF-8. `blob as String` is an unchecked lens.
 
 ```briev
-let bytes: Data = #b"\x00\xff";
+let bytes: Blob = #b"\x00\xff";
 let n: Int = bytes.^Len;  // 2
 ```
 

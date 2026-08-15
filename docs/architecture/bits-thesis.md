@@ -1,7 +1,7 @@
 # The Bits Thesis
 
 **Date:** 2026-07-11  
-**Updated:** 2026-07-30 (casting graph, `!>` syntax, `→#Bit` ban)  
+**Updated:** 2026-08-15 (Fundamentals: `Data` root, `Bit<N>` unified, `Blob`)  
 **Status:** Foundational  
 **Applies to:** Briev compiler core architecture, interpreter, type system, backends
 
@@ -37,6 +37,18 @@ changes is how types express their semantics: through ops with hashword
 signatures, not through metadata tags. See `docs/architecture/casting-protocol.md`
 and `docs/plans/2026-07-20-extensible-number-types-final.md` for the full
 architecture.
+
+> **2026-08-15 (Fundamentals addendum).** The hierarchy above is updated:
+> `Data` is now the universal parent (raw-storage root) and `Bit<N>` is the
+> unified bit type at any declared width (`Bit` bare = flexible, resolved
+> later; `Bit<N>` = exact N). There is no separate `Bits` type — multiple
+> bits is just `Bit<N>`. The byte-buffer type (formerly `Data`) is renamed
+> `Blob` (a `[len][bytes]` buffer, a `Data` member like `String` but with no
+> encoding interpretation). Category hashwords lose their `#` in fundamental
+> positions (`#Int`→`Int`, `#Bit`→`Bit`, `#Data`→`Data`); protocol variants
+> (`#String<UTF8>`) keep theirs. The bit-thesis core survives: every type is
+> composed of bits, and `Bit<N>` is the most direct representation. See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
 ## 2026-07-24 Update: Protocol-First Types
 
@@ -97,26 +109,35 @@ non-cast operators (`InsertAt`, `ExtractFrom`).
 
 ### Four-Layer Protocol Hierarchy
 
+> **2026-08-15 (Fundamentals as Types).** `Data` is now the universal parent
+> (raw-storage root); `Bit<N>` is the unified bit type at any declared width
+> (`Bit` bare = flexible); the byte-buffer type is renamed `Blob`. The
+> category hashwords `#Int`/`#Float`/`#String`/`#Bit`/`#Data` lose their
+> `#` in fundamental positions; protocol variants (`#String<UTF8>`) keep
+> theirs. See `docs/plans/2026-08-15-fundamentals-as-types.md`.
+
 ```
-Layer 1: #Bit (root protocol); Bit (sole primitive type, hardcoded anchor — not a primordial)
-  Cast TO   #Bit = LLVM bitcast of raw memory (hardcoded, never overridable)
-  Cast FROM #Bit = interpret N raw bits as target protocol semantics
+Layer 1: Data (root protocol / universal parent); Blob (the [len][bytes] byte buffer)
+  Cast TO   Data = raw storage (hardcoded, never overridable)
+  Cast FROM Data = interpret raw bytes as target protocol semantics
+  Bit<N> = the unified bit type — every type is composed of bits;
+           Bit bare = flexible width (resolved later), Bit<N> = exact N.
 
 Layer 2: Base protocols (hardcoded in compiler)
-  #Int, #UInt, #Float, #String, #Bool, #Char, #Data
+  Int, UInt, Float, String, Bool, Char, Data, Blob
   Each has a hardcoded direct lane to every other base protocol.
   Each knows its LLVM type representation.
   Each knows its operations (Add, Sub, Mul, etc.).
 
 Layer 3: Sub-protocols / variants (stdlib proto declarations)
-  proto ASCII: #String { CastTo(#String): ascii_to_utf8(#L); };
-  proto UTF16: #String { CastFrom(#String): utf16_from_utf8(#L); };
+  proto ASCII: String { CastTo(String): ascii_to_utf8(#L); };
+  proto UTF16: String { CastFrom(String): utf16_from_utf8(#L); };
   Normalizer reads these, feeds edges into the casting graph.
 
 Layer 4: User types (stdlib type declarations)
-  type String: #String;
-  type Int32: #Int { !> bits: 32; };
-  All behavior inherited from protocol. No body needed.
+  type String: Data;   // fundamentals refine through Data
+  type Int32: Int { spec Bits: 32; };
+  All behavior inherited from parent/protocol. No body needed.
 ```
 
 ### Core Principle: Protocols are Guarantees, Types are Overlays
@@ -134,66 +155,67 @@ unchanged — available for any other `#String` type that doesn't override it.
 
 | | Primitive | Primordial |
 |---|---|---|
-| **Examples** | `Bit` | `Int`, `Float`, `Bool`, `Char`, `Data`, `Void` |
+| **Examples** | `Data`, `Bit<N>` | `Int`, `Float`, `Bool`, `Char`, `Blob`, `Void` |
 | **Where defined** | Hardcoded in compiler (`seed_primordial_types`, before the PRIMORDIALS loop) | Seeded by compiler in PRIMORDIALS loop |
-| **Overrideable?** | No — error if any stdlib or user code declares `type Bit` | Yes — bootstrap.bv or user `.bv` files replace the seeded entry silently |
-| **Why** | Axiomatic anchor — the whole system rests on it | Useful defaults — stdlib can specialize them |
+| **Overrideable?** | No — error if any stdlib or user code declares `type Data` / `type Bit` | Yes — bootstrap.bv or user `.bv` files replace the seeded entry silently |
+| **Why** | Axiomatic anchors — the whole system rests on them | Useful defaults — stdlib can specialize them |
 
-`Bit` is the one true primitive: the compiler's axiom, non-negotiable,
-unoverridable. Any attempt to declare `type Bit` in stdlib or user code
-produces a compiler error. Everything else — `Int`, `Float`, `String` — is
-a primordial: a useful default that stdlib or user code can refine or
-replace. If bootstrap.bv declares `type Int: #Int { !> bits: 32; }`, that
-replaces the primordial `Int` entry.
+`Data` is the universal parent: the compiler's root axiom, non-negotiable,
+unoverridable. `Bit<N>` is the bit type at any width — the direct
+representation of N bits. Any attempt to declare `type Data` or `type Bit`
+in stdlib or user code produces a compiler error. Everything else — `Int`,
+`Float`, `String`, `Blob` — is a primordial: a useful default that stdlib or
+user code can refine or replace. If bootstrap.bv declares `type Int: Int {
+spec Bits: 32; }`, that replaces the primordial `Int` entry.
 
-The `#Bit` **protocol** is similarly hardcoded in the casting graph — its lanes
-to every other protocol are compiler guarantees. But protocols are not types:
-a type participates in a protocol (`type Int: #Int`), and that protocol
-membership can be set freely by the standard library.
+The **`Data` protocol** is similarly hardcoded in the casting graph — its
+lanes to every other protocol are compiler guarantees. But protocols are not
+types: a type participates in a protocol (`type Int32: Int`), and that
+protocol membership can be set freely by the standard library.
 
-**Using `#Bit` as a protocol is fully legitimate.** You can create new types
+**Using `Data` as a protocol is fully legitimate.** You can create new types
 that participate in it:
 
 ```briev
-type ReorganisedBit: #Bit {
-    !> bits: 42;
-    op CastTo(#String): my_custom_encode(#L);
-    op CastFrom(#String): my_custom_decode(#L);
+type ReorganisedBit: Bit {
+    spec Bits: 42;
+    op CastTo(String): my_custom_encode(#L);
+    op CastFrom(String): my_custom_decode(#L);
 };
 ```
 
-This declares a 42-bit type that uses `#Bit` protocol semantics (raw bits,
+This declares a 42-bit type that uses `Bit` protocol semantics (raw bits,
 bitwise operations) but with custom encoding/decoding to strings. What you
-cannot do is touch `type Bit: #Bit` itself — that concrete type is the
-compiler's axiom. But using `#Bit` protocol membership for your own types
+cannot do is touch `type Bit` itself — that concrete type is the
+compiler's axiom. But using `Bit` protocol membership for your own types
 is exactly what the system is designed for.
 
-### The `→ #Bit` Ban and the `← #Bit` Door
+### The `→ Bit` Ban and the `← Bit` Door
 
-`#Bit` is where all protocols meet as equals:
+`Bit` is where all protocols meet as equals:
 
-- **`op CastTo(#Bit)` is banned at declaration time.** `"CastTo(#Bit) is
+- **`op CastTo(Bit)` is banned at declaration time.** `"CastTo(Bit) is
   hardcoded — use x as Bit or Cast#(x, target) for bitcasts."` Casting TO
-  `#Bit` is a **representation guarantee**: the compiler always does the
+  `Bit` is a **representation guarantee**: the compiler always does the
   mechanical job (bitcast, extractvalue, ptrtoint) with zero semantic
   transformation. No type overrides this.
 
-- **`op CastFrom(#Bit)` is the sole user-extensible cast edge.** It is the
+- **`op CastFrom(Bit)` is the sole user-extensible cast edge.** It is the
   **interpretation door** — a type declares how to construct itself from raw
-  memory bits. This is the one place where user code gives meaning to `#Bit`.
+  memory bits. This is the one place where user code gives meaning to `Bit`.
 
-- **`op CastTo/CastFrom(#Category)` for non-`#Bit` categories** remains
-  allowed. `type AutoString: #String { op CastTo(#Int): my_parse(#L); };`
+- **`op CastTo/CastFrom(Category)` for non-`Bit` categories** remains
+  allowed. `type AutoString: String { op CastTo(Int): my_parse(#L); };`
   registers a type-level lane override. The graph always prefers a type-level
   override over the protocol default.
 
 Three-way priority in the casting graph's `emit_cast()`:
 1. **Type-level override** — if the specific src→dst pair has one
 2. **Protocol default** — the hardcoded lane between the two base protocols
-3. **`CastFrom(#Bit)` constructor** — if the target type declares it and the
-   path passes through `#Bit`
+3. **`CastFrom(Bit)` constructor** — if the target type declares it and the
+   path passes through `Bit`
 
-Step 3 never applies when the target IS `#Bit`.
+Step 3 never applies when the target IS `Bit`.
 
 ### How the Casting Graph Resolves `x as Target`
 
@@ -237,30 +259,42 @@ The entire Briev language is built from exactly three hardcoded assumptions.
 Everything else — every type, every operation, every data structure — follows
 from these axioms and is defined in the standard library prelude.
 
-### Axiom 1: `#Bit` Is the Sole Primitive
+### Axiom 1: `Data` Is the Universal Parent; `Bit<N>` Is the Bit Type
 
-`#Bit` is a built-in protocol representing a contiguous sequence of N
-uninterpreted bytes. It is the only protocol the compiler knows about
-axiomatically. Every other protocol and type derives its physical
-representation from `#Bit` through the casting graph.
+> **2026-08-15.** Originally `#Bit` was the root protocol. Under
+> Fundamentals-as-Types, `Data` is the universal parent (every type IS data
+> — raw storage); `Bit<N>` is the unified bit type at any declared width
+> (every type is composed of bits, and `Bit<N>` names a run directly). The
+> treat-as-bits membership lives on `Bit`/`Bit<N>`; the storage parent lives
+> on `Data`. The byte-buffer is `Blob`. See
+> `docs/plans/2026-08-15-fundamentals-as-types.md`.
+
+`Data` is the universal parent — every type IS data. `Bit<N>` is a
+contiguous sequence of N uninterpreted bits (`Bit` bare = flexible width,
+resolved later). `Data` and `Bit<N>` are the only types the compiler knows
+about axiomatically. Every other type and protocol derives its physical
+representation from `Data` through the casting graph.
 
 ```
-#Bit — root protocol, hardcoded in compiler
-  Cast TO   #Bit = bitcast/extractvalue/ptrtoint (never overridable)
-  Cast FROM #Bit = interpret raw bits as target semantics (overridable via op CastFrom(#Bit))
+Data — universal parent, hardcoded in compiler
+  Cast TO   Data = raw storage (bitcast/extractvalue/ptrtoint, never overridable)
+  Cast FROM Data = interpret raw bytes as target semantics (overridable via op CastFrom(Data))
+Bit<N> — the bit type at any width; every type is composed of bits
+  Bit bare = flexible width (resolved later); Bit<N> = exact N bits
 ```
 
-`#Bit` is special-cased in the casting graph: it has no base protocol because
-it *is* the base. Every other protocol has a direct lane to `#Bit` and a
-direct lane from `#Bit`:
+`Data` is special-cased in the casting graph: it has no base parent because
+it *is* the base. Every other protocol has a direct lane to `Data` and a
+direct lane from `Data`:
 
 ```
-type Int:     #Int;       // Int participates in #Int protocol → i64 LLVM type
-type Float:   #Float;     // Float participates in #Float protocol → double
-type Bool:    #Bool;      // Bool participates in #Bool protocol → i8
-type Char:    #Char;      // Char participates in #Char protocol → i32
-type String:  #String;    // String participates in #String protocol → {i64, i64}
-type Void:    (no protocol) → void  // zero-width, no bits
+type Int:     Data;       // Int is-a Data → i64 LLVM type
+type Float:   Data;       // Float is-a Data → double
+type Bool:    Data;       // Bool is-a Data → i8
+type Char:    Data;       // Char is-a Data → i32
+type String:  Data;       // String is-a Data → ptr to [len][bytes]
+type Blob:    Data;       // Blob is-a Data → ptr to [len][bytes] (no encoding)
+type Void:    (no width)  // zero-width, no bits
 ```
 
 The only property the frontend hardcodes at the protocol level is the LLVM

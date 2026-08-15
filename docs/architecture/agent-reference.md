@@ -14,15 +14,21 @@ backend architecture rules.
 
 `#Lh`, `#Rh`, `#T` are compiler-internal positional markers for op bindings —
 lexed as distinct tokens and resolved at codegen time to concrete registers.
-`#Category` hashwords (`#Int`, `#Float`, `#String`, `#Bool`, `#Char`, `#Bits`)
-are backend directives in op signatures; parameterized variants
-(`#String<UTF8>`, `#Float<IEEE754>`) select representations; `#Link<name>`
-emits `-l<name>`; `#System` is the sole bare protocol hashword.
+The **fundamental types** (`Data`, `Bit<N>`, `Int`, `UInt`, `Float`,
+`String`, `Bool`, `Char`, `Blob`, `Ptr`, `Void`) are compiler-native
+primordials — they appear directly in op signatures (`op Add(Int)`) and
+carry no `#`. Parameterized protocol variants (`#String<UTF8>`,
+`#Float<IEEE754>`) keep their `#` and select representations; `#Link<name>`
+emits `-l<name>`; `#System` is the sole bare protocol hashword. `Data` is
+the universal parent (every type IS data); `Bit<N>` is the unified bit type
+at any declared width (`Bit` bare = flexible); `Blob` is the `[len][bytes]`
+byte buffer. See `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
-**Width resolution** (for `WidthParametric` protocols `#Int`, `#UInt`, `#Bit`):
-`!> bits: N` (exact) → `!> maxbits: N` (upper bound) → `!> minbits: N` (lower
-bound) → `int_bits` (target default). `!> bits: 32` asserts the type is exactly
-32 bits on every target — a hard contract, not a hint.
+**Width resolution** (for `WidthParametric` fundamentals `Int`, `UInt`,
+`Bit<N>`): `!> bits: N` (exact) → `!> maxbits: N` (upper bound) →
+`!> minbits: N` (lower bound) → `int_bits` (target default). `!> bits: 32`
+asserts the type is exactly 32 bits on every target — a hard contract, not
+a hint.
 
 Well-known sub-protocols are hardcoded in the casting graph with known LLVM types
 (these remove the old `disamb` metadata hack):
@@ -45,13 +51,13 @@ variant — never a metadata key that codegen must check.
 
 ### 1.1 Naming convention
 
-- **PascalCase**: protocol identifiers, hashwords, intrinsics
-  (`#String<UTF8>`, `#Float<IEEE754>`, `Sqrt#`, `Print#`, `#Int`, `#Bits`,
-  `Posit32`, `CastTo(#String<UTF8>)`).
+- **PascalCase**: fundamental types, protocol identifiers, intrinsics
+  (`String`, `Float`, `Bit<N>`, `#String<UTF8>`, `#Float<IEEE754>`, `Sqrt#`,
+  `Print#`, `Posit32`, `CastTo(#String<UTF8>)`).
 - **snake_case**: user functions in `.bv` files and Rust stdlib calls
   (`ascii_to_utf8()`, `from_utf8_lossy()`, `array_map()`).
 - The dividing line: if the compiler MUST know the name to function (intrinsic
-  registry, protocol hashwords) it is PascalCase; if a user could rename it and
+  registry, fundamental types) it is PascalCase; if a user could rename it and
   the compiler still works it is snake_case.
 
 ### 1.2 `<-` arrow operator (2026-08-01, Phase 3)
@@ -140,8 +146,9 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 
 ### 1.6 Import / narrowing
 
-- `Int` narrowing is protocol-based (`#Int`/`#UInt` membership, never type
-  names). Fixed-width types (`Int8`…`Int64`) cap the floor via `!> bits: N`.
+- `Int` narrowing is fundamental-based (`Int`/`UInt` membership via the
+  parent chain, never type names). Fixed-width types (`Int8`…`Int64`) cap
+  the floor via `!> bits: N`.
 
 ### 1.7 Types
 
@@ -187,23 +194,23 @@ frgn XXH64(data_ptr: Int, len: Int, seed: Int) -> Int as frgn__xxh64 from "link/
 ### The `Print#` convenience intrinsic and the `println!` macro (2026-08-01)
 
 `Print#` is a single generic intrinsic that dispatches the emission by the
-argument's **protocol category** (resolved via `type_to_protocol`, the `Cast.#`
-universe properties — never type names): `#String` → `__print_str(ptr)`,
-`#Float` → `__print_float`/`__print_float64`, `#Char` → `__print_char`,
-`#Bool` → `__print_bool` (prints `true`/`false` — a Bool's natural
-representation; an explicit `(b as Int)` cast yields `1`/`0`), else
-`__print_int`. It replaces the four special-cased `PrintInt#`/`PrintFloat#`/
-`PrintStr#`/`PrintChar#` intrinsics.
+argument's **fundamental category** (resolved via `type_to_protocol`, the
+`Cast.*` universe properties — never type names): `String` →
+`__print_str(ptr)`, `Float` → `__print_float`/`__print_float64`,
+`Char` → `__print_char`, `Bool` → `__print_bool` (prints `true`/`false` — a
+Bool's natural representation; an explicit `(b as Int)` cast yields
+`1`/`0`), else `__print_int`. It replaces the four special-cased
+`PrintInt#`/`PrintFloat#`/`PrintStr#`/`PrintChar#` intrinsics.
 
 `print!`/`println!` are **macros** (`print_plugin.rs`): their added value is
 format-string argument insertion and (for `println!`) line termination, not
 printing. The newline is a Char literal `Print#('\n')`. `PrintChar#` was folded
 away.
 
-`#Char` is a first-class protocol (`Cast.#Char`): char literals are a distinct
+`Char` is a first-class fundamental (`Cast.Char`): char literals are a distinct
 `Expr::Char`, typed `Char`, emitted at their native i32 width (state fields
 and cast results match); the interpreter carries `Value::Char`/`Value::Bool`.
-`#Bool` values are `Value::Bool` in the interpreter (comparisons and `Expr::Bool`
+`Bool` values are `Value::Bool` in the interpreter (comparisons and `Expr::Bool`
 produce them) so `Print#(a < b)` prints `true`, matching the backend.
 
 
@@ -249,7 +256,7 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
 ### `type` vs `struct` vs `obj`
 
 - `type`: protocols, operator bindings, type extensibility
-  (`type Int: #Int { op Add(#Int); };`).
+  (`type MyInt: Int { op Add(Int); };`).
 - `struct`: pure data, fixed layout, C-compatible, no methods/contracts
   (`struct VMStack { data: Int[1024]; len: Int; };`). Receives fixed-size
   arrays and the bracket SIMD syntax.
@@ -269,7 +276,7 @@ only, and the backend derives the representation at materialization time.
 etc. write the same lowercase keys and stay readable. Three layout modifiers on
 struct declarations:
 
-- `pack struct` — bit-contiguous, zero padding; sub-byte `Bits<N>` fields slice
+- `pack struct` — bit-contiguous, zero padding; sub-byte `Bit<N>` fields slice
   out of a byte array (`{ [N x i8] }`), whole-byte fields use `<{ ... }>`;
   `spec Endian: Big` couples bit order (MSB-first) to big-endian multi-byte.
 - `atomic <field>` — the field reads/writes atomically (`load atomic`/`store
@@ -279,8 +286,9 @@ struct declarations:
 
 The single authority for packed offsets is `src/type_universe/packed.rs`
 (`packed_field_offsets`); the casting graph resolves every LLVM type
-(`resolve_llvm_type`), never a name match. `Bits<N>` is exactly N bits in both
-AST forms (`Type::Bits(n)` and the `Applied("Bits",[n])` alias).
+(`resolve_llvm_type`), never a name match. `Bit<N>` is exactly N bits in both
+AST forms (`Type::Bits(n)` and the `Applied("Bit",[n])` alias). `Bit` bare is
+flexible width (resolved later); there is no separate `Bits` type.
 
 ### Bracket arrays / SIMD
 
@@ -364,7 +372,7 @@ Pass only the data a function needs, not large context structs.
 - Strings in LLVM: `[i64 length][data\0]`; globals use `<{ i64, [N x i8] }>`;
   `emit_load_length` reads `handle[0]`; `briev_str_to_c` strips tag bits `& ~3`.
 - Protocol paths via BFS (`find_cast_path()` from `layout_optimizer.rs`);
-  fall back to `Cast(#Bits)`; `emit_protocol_chain()` emits real IR.
+  fall back to `Cast(Bit<N>)`; `emit_protocol_chain()` emits real IR.
 
 ### HashMap iteration determinism
 
