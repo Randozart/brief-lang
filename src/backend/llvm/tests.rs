@@ -798,6 +798,7 @@ fn unpacked_instance_program() -> Vec<TopLevel> {
         traits: vec![],
         bit_range: None,
             coll: false,
+            seq: false,
         body: crate::ast::top::TypeDefBody {
             slots: vec![
                 crate::ast::top::TypeDefSlot { name: "data".to_string(), ty: Type::Vector(
@@ -913,6 +914,7 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
         traits: vec![],
         bit_range: None,
             coll: false,
+            seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -1106,6 +1108,7 @@ fn spawn_pool_countdown_program_storage(
         traits: vec![],
         bit_range: None,
             coll: false,
+            seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -1336,6 +1339,7 @@ fn test_spawn_only_base_registers_pool() {
         traits: vec![],
         bit_range: None,
             coll: false,
+            seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
             metadata: HashMap::new(),
@@ -2376,6 +2380,7 @@ fn test_type_with_slots_populates_struct_types() {
             traits: vec![],
             bit_range: None,
             coll: false,
+            seq: false,
             body: TypeDefBody {
                 slots: vec![
                     TypeDefSlot { name: "ptr".to_string(), ty: Type::Applied("Ptr".to_string(), vec![Type::Custom("UInt8".to_string())]), bit_range: None },

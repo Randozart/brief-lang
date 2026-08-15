@@ -999,6 +999,11 @@ pub struct TypeDef {
     /// (`op Count`/`op At`/`op Init`/`op InsertAt`/`op ExtractFrom` and the
     /// default `op Grow`/`op Shrink` strategies) from the one sequence member.
     pub coll: bool,
+    /// 2026-08-15 (coll plan addendum): `seq coll obj` — the compiler chooses
+    /// storage but MUST keep the elements in one contiguous memory block. For
+    /// a growable `Ptr<T>` coll the data buffer already IS one block; for a
+    /// fixed `T[N]` coll it forbids the columnar/pooled layout.
+    pub seq: bool,
 }
 
 /// 2026-08-05 (Phase 4): `trait Name<T> { ... }` — reusable behavioral

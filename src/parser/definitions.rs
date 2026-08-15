@@ -46,7 +46,21 @@ impl<'a> Parser<'a> {
             // for structs (`coll pack struct`, `pack coll struct`).
             Some(Token::Coll) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Obj)) => {
                 self.pos += 1; // consume coll
-                self.parse_obj_like(true).map(TopLevel::TypeDef)
+                self.parse_obj_like(true, false).map(TopLevel::TypeDef)
+            }
+            // 2026-08-15 (coll plan addendum): `seq coll obj` / `coll seq obj` —
+            // seq forces the contiguous element block.
+            Some(Token::Coll) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Seq))
+                && matches!(self.tokens.get(self.pos + 2).map(|(t, _)| t), Some(Token::Obj)) =>
+            {
+                self.pos += 2; // consume coll seq
+                self.parse_obj_like(true, true).map(TopLevel::TypeDef)
+            }
+            Some(Token::Seq) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Coll))
+                && matches!(self.tokens.get(self.pos + 2).map(|(t, _)| t), Some(Token::Obj)) =>
+            {
+                self.pos += 2; // consume seq coll
+                self.parse_obj_like(true, true).map(TopLevel::TypeDef)
             }
             Some(Token::Coll) if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Struct) | Some(Token::Pack) | Some(Token::Seq)) => {
                 self.pos += 1; // consume coll
@@ -204,7 +218,7 @@ impl<'a> Parser<'a> {
             Some(Token::Trait) => self.parse_trait().map(TopLevel::Trait),
             Some(Token::Impl) => self.parse_impl().map(TopLevel::Impl),
             // 2026-07-14: Handle `struct Name { fields }` as TypeDef
-            Some(Token::Obj) => self.parse_obj_like(false).map(TopLevel::TypeDef),
+            Some(Token::Obj) => self.parse_obj_like(false, false).map(TopLevel::TypeDef),
             Some(Token::Struct) => self.parse_struct_def(false, false).map(TopLevel::StaticStruct),
             // 2026-07-26: Handle `render struct Name { <html> }` and `render obj Name { <html> }`
             Some(Token::Render) => self.parse_render_block(),
@@ -1820,6 +1834,7 @@ impl<'a> Parser<'a> {
             traits,
             bit_range: None,
             coll: false,
+            seq: false,
             body: TypeDefBody {
                 slots,
                 metadata,
@@ -2152,7 +2167,7 @@ impl<'a> Parser<'a> {
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
     /// Consumes the `struct` keyword, then delegates to parse_type_definition
     /// obj name { fields } — dynamic object definition.
-    fn parse_obj_like(&mut self, coll: bool) -> Result<Box<TypeDef>, SyntaxError> {
+    fn parse_obj_like(&mut self, coll: bool, seq: bool) -> Result<Box<TypeDef>, SyntaxError> {
         // 2026-07-31: obj Name<Params> { slot: Type; op …; txn member(…); defn member(…) }
         // Type params, operator bindings, and self-parameterized members are
         // collected into the TypeDef body.
@@ -2216,7 +2231,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
-            bit_range: None, span: None, coll,
+            bit_range: None, span: None, coll, seq,
             body: TypeDefBody {
                 slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, constraints: vec![], members, span: None,
             },
@@ -2441,7 +2456,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
-            bit_range: None, span: None, coll: false,
+            bit_range: None, span: None, coll: false, seq: false,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),
                 projections: vec![], bindings: vec![], operators: vec![], op_bindings: vec![], constraints: vec![], members: vec![], span: None,
@@ -2898,6 +2913,19 @@ mod tests {
         let tl = parse_top("pack coll struct Q { a: Bit<4>; };").unwrap();
         let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
         assert!(s.coll && s.pack, "pack coll struct must set both flags");
+    }
+
+    #[test]
+    fn test_seq_coll_obj_parses() {
+        // 2026-08-15 (coll plan addendum): `seq coll obj` / `coll seq obj`
+        // set both flags — seq forces the contiguous element block.
+        let tl = parse_top("seq coll obj Q { data: Ptr<Int>; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(t) = tl else { panic!("expected TypeDef") };
+        assert!(t.coll && t.seq, "seq coll obj must set both flags");
+
+        let tl = parse_top("coll seq obj R { data: Ptr<Int>; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(t) = tl else { panic!("expected TypeDef") };
+        assert!(t.coll && t.seq, "coll seq obj must set both flags");
     }
 
     #[test]
