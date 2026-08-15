@@ -89,7 +89,7 @@ pub fn eval_expr(
         // point, Int→Char builds a character), so the interpreter must convert
         // the VALUE, not just reinterpret bits — otherwise `Print#((b as Int))`
         // would print "true" here but "1" in the backend. The target category
-        // is resolved through the casting graph (Cast.# universe properties,
+        // is resolved through the casting graph (Cast. universe properties,
         // the same source as codegen) — never by type name. Custom types
         // resolve to "Bit" (identity reinterpretation, matching codegen's
         // fallback).
@@ -998,7 +998,7 @@ fn print_value(value: &Value, heap: &mut VirtualHeap) -> Result<(), RuntimeError
 }
 
 /// Resolve a cast target type's protocol category through the casting graph
-/// (Cast.# universe properties) — the same source the LLVM backend uses, so
+/// (Cast. universe properties) — the same source the LLVM backend uses, so
 /// the interpreter's value conversion matches codegen. Never type-name
 /// matching. The lazily-built default universe covers the bootstrap
 /// primitives; custom types resolve to "Bit" (identity reinterpretation).

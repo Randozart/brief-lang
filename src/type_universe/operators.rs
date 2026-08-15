@@ -11,7 +11,7 @@
 // table keys always were. Matching a custom type's NAME against those keys
 // (the old `type_name_str` lookup) made `MyNum : #Int` + `MyNum` fail even
 // though MyNum is a #Int member and should inherit #Int's Add → AddI64#.
-// The protocol category is derived from the universe (Cast.# properties /
+// The protocol category is derived from the universe (Cast. properties /
 // base chain), mirroring casting::graph::type_to_protocol — no name matching
 // (rules 14/18). Custom types not registered in a given universe resolve
 // their category through the typechecker's own type_protocols/type_parents.
@@ -114,7 +114,7 @@ pub fn protocol_binding(category: &str, op_name: &str) -> Option<OpBinding> {
 
 /// Resolve a type's PROTOCOL CATEGORY (bare name: "Int", "Float", "String",
 /// ...) from the universe. Mirrors casting::graph::type_to_protocol's
-/// universe path — Cast.#<Category> properties first, then the `base` chain.
+/// universe path — Cast.<Category> properties first, then the `base` chain.
 /// Never matches type names (rules 14/18). Returns None for types with no
 /// registered universe entry (custom types in a fresh universe); the
 /// typechecker resolves those via its own type_protocols/type_parents.
@@ -130,23 +130,23 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     }
     let key = ty.universe_key()?;
     let rt = universe.get(key)?;
-    // Cast.# properties (primordial seeding) — checking order mirrors the
+    // Cast. properties (primordial seeding) — checking order mirrors the
     // casting graph: Float → UInt → Int → String → Bool → Char → Blob.
     let props = &rt.properties;
     for (prop, cat) in [
-        ("Cast.#Float", "Float"),
-        ("Cast.#UInt", "UInt"),
-        ("Cast.#Int", "Int"),
-        ("Cast.#String", "String"),
-        ("Cast.#Bool", "Bool"),
-        ("Cast.#Char", "Char"),
-        ("Cast.#Blob", "Blob"),
+        ("Cast.Float", "Float"),
+        ("Cast.UInt", "UInt"),
+        ("Cast.Int", "Int"),
+        ("Cast.String", "String"),
+        ("Cast.Bool", "Bool"),
+        ("Cast.Char", "Char"),
+        ("Cast.Blob", "Blob"),
     ] {
         if props.contains_key(prop) {
             return Some(cat.to_string());
         }
     }
-    // base-chain fallback (the normalizer no longer injects Cast.# for
+    // base-chain fallback (the normalizer no longer injects Cast. for
     // subtypes) — `type Latin1String: #String` ⇒ base "String".
     let base = rt.base.trim_start_matches('#');
     match base {
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn test_universe_lookup_empty() {
         let uni = empty_universe();
-        // Int is a seeded primordial with Cast.#Int — resolves via category.
+        // Int is a seeded primordial with Cast.Int — resolves via category.
         let result = get_operator_intrinsic(&uni, "+", &Type::int());
         assert_eq!(result, Some(OpBinding::Intrinsic("AddI64#".into())));
     }

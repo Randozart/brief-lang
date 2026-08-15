@@ -168,7 +168,7 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
                 // rt.bytes directly collapsed `ListBuffer<T> { data: Ptr<T>,
                 // cap: Int }` to 8 bytes (Ptr=8 + Int=0) and List<T>.len
                 // collided with inner.cap at offset 8. type_size resolves the
-                // flexible protocols (Cast.#Int → 8, Cast.#String → 8) and
+                // flexible protocols (Cast.Int → 8, Cast.String → 8) and
                 // fixes Ptr at one word.
                 let total: u64 = td.body.slots.iter().map(|slot| {
                     crate::backend::llvm::types::type_size(&slot.ty, Some(universe))
@@ -208,8 +208,8 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
         // reads `endian` here (absent ⇒ Target/native).
         // 2026-08-04 (compiler-in-Briev): when re-registering a primordial (e.g.
         // `type Int: #Int { ... }` in bootstrap.bv), inherit the primordial's
-        // protocol Cast.#* properties. The flexible-protocol fallbacks in
-        // type_size (types.rs) key on Cast.#Int/#String/#Float/#Bool — without
+        // protocol Cast.* properties. The flexible-protocol fallbacks in
+        // type_size (types.rs) key on Cast.Int/#String/#Float/#Bool — without
         // them, `type Int: #Int` (empty metadata) registers bytes=0 and
         // `type_size(Int)` returns 0, collapsing any struct containing an Int
         // slot (ListBuffer.cap → 0 → List<T>.len collides with inner.cap).
@@ -248,12 +248,12 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
         universe.register(rt);
     }
 
-    // 2026-07-30: Cast.# properties are no longer injected by the normalizer.
+    // 2026-07-30: Cast. properties are no longer injected by the normalizer.
     // Protocol membership is determined by the casting graph via type_to_protocol()
     // and is_protocol_member(). The casting graph hardcodes base protocol lanes
     // and receives proto declarations via register_protocol_def().
     //
-    // Cast.# properties from primordial seeding are retained for backward compat
+    // Cast. properties from primordial seeding are retained for backward compat
     // during migration. They will be removed in a future cleanup pass after
     // is_protocol_member() fully transitions to the casting graph.
     Ok(())

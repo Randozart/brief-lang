@@ -1253,7 +1253,7 @@ fn emit_external_call(
 
 /// 2026-08-01 (audit): the generic `Print#` convenience intrinsic — dispatch
 /// the emission by the argument's protocol category, resolved via the casting
-/// graph's type_to_protocol (Cast.# universe properties, never type names).
+/// graph's type_to_protocol (Cast. universe properties, never type names).
 /// `#String` → `__print_str(ptr)`, `#Char` → `__print_char`, `#Bool` →
 /// `__print_bool` (true/false — an explicit cast to Int is what yields 1/0),
 /// `#Float` → `__print_float`/`__print_float64`, else `__print_int`.

@@ -9,7 +9,7 @@ use crate::type_universe::TypeUniverse;
 /// Marshal a C parameter value into a Briev internal value.
 /// Bool: trunc i8 to i1
 ///
-/// 2026-07-31: Phase 3 (§8.4-D9) — Bool detection via the `Cast.#Bool`
+/// 2026-07-31: Phase 3 (§8.4-D9) — Bool detection via the `Cast.Bool`
 /// protocol property (universe) instead of the type name.
 pub fn marshal_param_to_briev(
     param_ty: &Type,
@@ -92,11 +92,11 @@ pub fn marshal_export_wrapper(
 
 /// Check if a type is Bool (i1 in LLVM, i8 in C ABI).
 ///
-/// 2026-07-31: Phase 3 (§8.4-D9) — protocol membership via the `Cast.#Bool`
+/// 2026-07-31: Phase 3 (§8.4-D9) — protocol membership via the `Cast.Bool`
 /// property instead of matching the type name. Mirrors the casting graph's
-/// category resolution (Bool primordial seeds Cast.#Bool).
+/// category resolution (Bool primordial seeds Cast.Bool).
 fn is_bool_type(ty: &Type, universe: &Option<TypeUniverse>) -> bool {
     ty.universe_key()
         .and_then(|k| universe.as_ref().and_then(|u| u.get(k)))
-        .map_or(false, |rt| rt.properties.contains_key("Cast.#Bool"))
+        .map_or(false, |rt| rt.properties.contains_key("Cast.Bool"))
 }

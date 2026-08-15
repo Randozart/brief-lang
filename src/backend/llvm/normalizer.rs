@@ -27,7 +27,7 @@ use std::collections::HashSet;
 /// - Flexible types (Int, UInt, Bit) have no baked-in width — resolved per-target.
 /// - Fixed-width types (Int32, Float) carry explicit !> bits metadata.
 /// - Struct types derive LLVM type from field shapes at codegen time.
-/// - Protocol (Cast.#) properties are retained for graph-based membership checks.
+/// - Protocol (Cast.) properties are retained for graph-based membership checks.
 /// - Explicit user `llvm <~` is validated against known LLVM type strings.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bits: u64) -> Result<(), String> {
     // ── Register all TopLevel::TypeDef items into the TypeUniverse ─────────
@@ -77,7 +77,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
     }
 
     // Strip metadata LLVM doesn't use
-        // 2026-07-30: Keep Cast.# properties for protocol membership,
+        // 2026-07-30: Keep Cast. properties for protocol membership,
         // plus width metadata (bits, maxbits, minbits) for resolve_llvm_type(),
         // and alignment for align_of().
         for rt in universe.types.values_mut() {

@@ -779,7 +779,7 @@ mod tests {
     }
 
     fn universe() -> TypeUniverse {
-        // Primordials (Int/Float/Bool/Char/...) carry Cast.#<Category> props,
+        // Primordials (Int/Float/Bool/Char/...) carry Cast.<Category> props,
         // so protocol_category resolves flatness without stdlib.
         TypeUniverse::new()
     }

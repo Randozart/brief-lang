@@ -53,7 +53,7 @@ fn lower_custom_type(name: &str, universe: Option<&crate::type_universe::TypeUni
 pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse>) -> u64 {
     // 2026-08-04 (compiler-in-Briev): a Ptr is ALWAYS one machine word. The
     // universe path below would return 0 for an unsubstituted generic
-    // `Ptr<T>` (bytes=0, no Cast.# property) and silently collapse struct
+    // `Ptr<T>` (bytes=0, no Cast. property) and silently collapse struct
     // layouts containing such fields (List<String>.len collided with
     // inner.cap at offset 8). Pointer width is target-invariant here (8).
     if matches!(ty, Type::Ptr(_)) {
@@ -69,23 +69,23 @@ pub fn type_size(ty: &Type, universe: Option<&crate::type_universe::TypeUniverse
             // 2026-07-29: Flexible protocol type with no baked-in bytes.
             // Compute from protocol membership with conservative defaults.
             // After normalizer runs, rt.bytes is set from int_bits + protocol.
-            if rt.properties.contains_key("Cast.#Int") || rt.properties.contains_key("Cast.#UInt") {
+            if rt.properties.contains_key("Cast.Int") || rt.properties.contains_key("Cast.UInt") {
                 return 8; // conservative default for Int/UInt
             }
             // 2026-08-01: Bits model (B0) — String is a flexible-width primordial
             // (bytes=0) whose LLVM type is a pointer; it is one machine word on
             // every target, so the conservative default is the pointer word (8).
             // Mirrors the Int/UInt flexible fallback above.
-            if rt.properties.contains_key("Cast.#String") {
+            if rt.properties.contains_key("Cast.String") {
                 return 8;
             }
-            if rt.properties.contains_key("Cast.#Float") {
+            if rt.properties.contains_key("Cast.Float") {
                 if let Some(crate::ast::PropertyValue::Int(bits)) = rt.properties.get("bits") {
                     return (*bits as u64) / 8;
                 }
                 return 4; // default float size
             }
-            if rt.properties.contains_key("Cast.#Bool") || rt.properties.contains_key("Cast.#Bit") {
+            if rt.properties.contains_key("Cast.Bool") || rt.properties.contains_key("Cast.Bit") {
                 return 1;
             }
             return 0;

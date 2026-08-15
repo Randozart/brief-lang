@@ -3,9 +3,9 @@
 // 2026-08-10: Rewritten as a first-class pass. Registers user typedefs via
 // the shared backend::register_types::register_typedefs (wasm32/32-bit so
 // flexible types fall back to 32-bit pointers), then derives each type's
-// js_type from its PROTOCOL CATEGORY (Cast.# properties — rules 14/18:
+// js_type from its PROTOCOL CATEGORY (Cast. properties — rules 14/18:
 // never matches type names). Strips metadata the webstack shim and generator
-// don't consume (keeps Cast.# + js_type + width metadata).
+// don't consume (keeps Cast. + js_type + width metadata).
 
 use std::collections::HashSet;
 use crate::ast::*;
@@ -16,7 +16,7 @@ use crate::type_universe::protocol_category;
 
 /// 2026-07-14: Normalize the AST for the Webstack (WASM + JS) backend.
 /// 1. Register all user typedefs (shared pass) — wasm32 ⇒ int_bits = 32.
-/// 2. Derive js_type from protocol category (Cast.#).
+/// 2. Derive js_type from protocol category (Cast.).
 /// 3. Validate intrinsics against the WASM supported set.
 /// 4. Retain only the metadata the webstack backend consumes.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bits: u64) -> Result<(), String> {
@@ -26,7 +26,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bi
     register_typedefs(items, universe, 32)?;
 
     // 2026-08-10: derive js_type from protocol category, never type names.
-    // A custom struct (no Cast.# protocol) collapses to "object"; collection
+    // A custom struct (no Cast. protocol) collapses to "object"; collection
     // metadata (e.g. `type List<T>: #Collection`) also maps to "object".
     // Protocol lookup reads the universe, so collect the mapping first and
     // apply it after the mutable iteration ends (mirrors the LLVM normalizer's

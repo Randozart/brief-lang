@@ -67,7 +67,7 @@ pub enum TypeTag {
 
 impl TypeTag {
     /// 2026-08-10: Derive the JS type tag from a Briev TYPE via its protocol
-    /// category (Cast.# lanes) — never by matching type names (rule 18).
+    /// category (Cast. lanes) — never by matching type names (rule 18).
     /// Matches the webstack normalizer's js_type mapping: Int/UInt/Float →
     /// number, Bool → boolean, String/Char/Data → string, everything else
     /// (structs, collections, Ptr, ...) → Int (the shim's raw-word default).

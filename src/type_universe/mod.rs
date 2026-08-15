@@ -103,7 +103,7 @@ impl TypeUniverse {
             alignment: 0,
             properties: {
                 let mut p = std::collections::HashMap::new();
-                p.insert("Cast.#Bit".into(), crate::ast::PropertyValue::Bool(true));
+                p.insert("Cast.Bit".into(), crate::ast::PropertyValue::Bool(true));
                 p
             },
             fields: vec![],
@@ -120,37 +120,37 @@ impl TypeUniverse {
         const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &[(&str, &str)])] = &[
             // 2026-07-29: Flexible protocol types — all fields resolved by normalizer from int_bits.
             // No baked-in width, alignment, or bytes. Every value is 0 = "not yet resolved."
-            ("Int",    0, 0, 0,  0, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt",   0, 0, 0,  0, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int",    0, 0, 0,  0, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt",   0, 0, 0,  0, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
             // Fixed-width integer types — exact bit width is absolute
-            ("Int8",   1, 8, 8,  1, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt8",  1, 8, 8,  1, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int16",  2, 16, 16, 2, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt16", 2, 16, 16, 2, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int32",  4, 32, 32, 4, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt32", 4, 32, 32, 4, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int64",  8, 64, 64, 8, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt64", 8, 64, 64, 8, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
-            ("Int128", 16, 128, 128, 16, &[("Cast.#Int", "true"), ("Cast.#Bit", "true")]),
-            ("UInt128",16, 128, 128, 16, &[("Cast.#UInt", "true"), ("Cast.#Bit", "true")]),
+            ("Int8",   1, 8, 8,  1, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt8",  1, 8, 8,  1, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int16",  2, 16, 16, 2, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt16", 2, 16, 16, 2, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int32",  4, 32, 32, 4, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt32", 4, 32, 32, 4, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int64",  8, 64, 64, 8, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt64", 8, 64, 64, 8, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int128", 16, 128, 128, 16, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
+            ("UInt128",16, 128, 128, 16, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
             // Floating-point types — bit-width is accuracy, not maximum storage.
             // Each float type carries an explicit bits property for the normalizer.
-            ("Half",   2, 16, 16, 2, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
-            ("BFloat", 2, 16, 16, 2, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "16")]),
-            ("Float",  4, 32, 32, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
-            ("Float32",4, 32, 32, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "32")]),
-            ("Float64",8, 64, 64, 8, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
-            ("Double", 8, 64, 64, 8, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "64")]),
-            ("X86_FP80",10, 80, 80, 4, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "80")]),
-            ("FP128",  16, 128, 128, 16, &[("Cast.#Float", "true"), ("Cast.#Bit", "true"), ("bits", "128")]),
+            ("Half",   2, 16, 16, 2, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "16")]),
+            ("BFloat", 2, 16, 16, 2, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "16")]),
+            ("Float",  4, 32, 32, 4, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "32")]),
+            ("Float32",4, 32, 32, 4, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "32")]),
+            ("Float64",8, 64, 64, 8, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "64")]),
+            ("Double", 8, 64, 64, 8, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "64")]),
+            ("X86_FP80",10, 80, 80, 4, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "80")]),
+            ("FP128",  16, 128, 128, 16, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "128")]),
             // Other
-            ("Bool",   1, 8, 8,  1, &[("Cast.#Bool", "true"), ("Cast.#Bit", "true")]),
-            // 2026-07-31: Phase 3 (§8.4) — Char gains Cast.#Char so the casting
+            ("Bool",   1, 8, 8,  1, &[("Cast.Bool", "true"), ("Cast.Bit", "true")]),
+            // 2026-07-31: Phase 3 (§8.4) — Char gains Cast.Char so the casting
             // graph resolves Char → category "Char" → Fixed("i32") instead of
             // the generic "Bit" fallback (which produced i64). The graph already
             // had a Char lane (Fixed("i32")).
-            ("Char",   4, 32, 32, 4, &[("Cast.#Char", "true"), ("Cast.#Bit", "true")]),
-            ("Blob",   8, 64, 64, 8, &[("Cast.#Blob", "true"), ("Cast.#Bit", "true")]),
+            ("Char",   4, 32, 32, 4, &[("Cast.Char", "true"), ("Cast.Bit", "true")]),
+            ("Blob",   8, 64, 64, 8, &[("Cast.Blob", "true"), ("Cast.Bit", "true")]),
             ("Void",   0, 0,  0,  0, &[]),
         ];
         for &(name, bytes, min_bits, max_bits, alignment, extras) in PRIMORDIALS {
@@ -178,7 +178,7 @@ impl TypeUniverse {
         // 2026-07-18: String primordial — 2-field struct (data: Int, len: Int)
         // The casting graph resolves String's LLVM type as Fixed("{ i64, i64 }")
         // from #String protocol membership. No llvm_type property needed.
-        // 2026-07-31: Phase 3 (§8.4) — Cast.#String seeded so the casting
+        // 2026-07-31: Phase 3 (§8.4) — Cast.String seeded so the casting
         // graph resolves String → category "String" → Fixed("{ i64, i64 }").
         // Previously the property was absent, so a bare primordial universe
         // resolved String → "Bit" → i64 (wrong).
@@ -196,7 +196,7 @@ impl TypeUniverse {
         {
             let mut p = std::collections::HashMap::new();
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
-            p.insert("Cast.#String".into(), crate::ast::PropertyValue::String("true".into()));
+            p.insert("Cast.String".into(), crate::ast::PropertyValue::String("true".into()));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
                 base: "Bit".to_string(),

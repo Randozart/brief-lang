@@ -537,14 +537,14 @@ impl TypeConverter {
         universe: Option<&TypeUniverse>,
     ) -> String {
         // 2026-08-01: resolve the #String/#Blob protocol membership from the
-        // universe (Cast.# properties — never type names) and box a pointer
+        // universe (Cast. properties — never type names) and box a pointer
         // value via ptrtoint. Falls back to the constructor-based fallback
         // only when no universe is available (builder tests).
         if let Some(u) = universe {
             if let Some(key) = ty.universe_key() {
                 if let Some(rt) = u.get(key) {
-                    if rt.properties.contains_key("Cast.#String")
-                        || rt.properties.contains_key("Cast.#Blob")
+                    if rt.properties.contains_key("Cast.String")
+                        || rt.properties.contains_key("Cast.Blob")
                     {
                         return builder.emit_ptrtoint(val, LlvmType::I64);
                     }
@@ -556,7 +556,7 @@ impl TypeConverter {
 
     /// Fallback boxing when universe is not available (builder tests only).
     /// The real path is `box_to_i64` (above), which resolves #String/#Blob by
-    /// their Cast.# universe properties. 2026-06-29: Will be removed once all
+    /// their Cast. universe properties. 2026-06-29: Will be removed once all
     /// tests go through the full pipeline. 2026-07-31: Phase 3 (§8.4-D2) —
     /// arms matched against the canonical bootstrap Type constructors
     /// (bool_/string()/float()/...) instead of type-name strings.

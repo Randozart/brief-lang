@@ -1134,7 +1134,7 @@ impl LlvmBackend {
         let is_like = |t: &Type| -> bool {
             let is_data = self.ctx.type_universe.as_ref()
                 .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
-                .map(|rt| rt.properties.contains_key("Cast.#Blob"))
+                .map(|rt| rt.properties.contains_key("Cast.Blob"))
                 .unwrap_or(false);
             self.is_protocol_member(t, "#String")
                 || is_data
@@ -1276,12 +1276,10 @@ impl LlvmBackend {
                 }
             }
         }
-        // Fallback: check Cast.# universe properties (primordial backward compat)
-        let prop_key = if protocol.starts_with('#') {
-            format!("Cast.{}", protocol)
-        } else {
-            format!("Cast.#{}", protocol)
-        };
+        // Fallback: check Cast.* universe properties (primordial backward compat)
+        // 2026-08-15 (fundamentals): property keys are `Cast.<Cat>` — strip the
+        // `#` so a `#Float` hashword matches the `Cast.Float` key.
+        let prop_key = format!("Cast.{}", protocol.trim_start_matches('#'));
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(|rt| rt.properties.contains_key(&prop_key))

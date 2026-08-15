@@ -670,7 +670,7 @@ impl CastingGraph {
         }
 
         // Resolve protocol category from universe properties.
-        // 2026-07-30: Queries Cast.#<Category> properties instead of matching type names.
+        // 2026-07-30: Queries Cast.<Category> properties instead of matching type names.
         // Checking order: Float → UInt → Int → String → Bool → Char → Data → Bit (universal fallback).
         let key = ty.universe_key().and_then(|k| universe.get(k));
         let rt = match key {
@@ -678,26 +678,26 @@ impl CastingGraph {
             None => return ("Bit".to_string(), String::new()),
         };
 
-        if rt.properties.contains_key("Cast.#Float") {
+        if rt.properties.contains_key("Cast.Float") {
             // 2026-08-03: the Float CATEGORY is width-parametric — the LLVM
             // type is derived from the type's `bits` metadata by the
             // FloatWidth resolver (protocol-owned width semantics). No variant
             // is named here, and no type names are matched.
             ("Float".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#UInt") {
+        } else if rt.properties.contains_key("Cast.UInt") {
             ("UInt".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#Int") {
+        } else if rt.properties.contains_key("Cast.Int") {
             ("Int".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#String") {
+        } else if rt.properties.contains_key("Cast.String") {
             ("String".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#Bool") {
+        } else if rt.properties.contains_key("Cast.Bool") {
             ("Bool".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#Char") {
+        } else if rt.properties.contains_key("Cast.Char") {
             ("Char".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#Blob") {
+        } else if rt.properties.contains_key("Cast.Blob") {
             ("Blob".to_string(), String::new())
         } else {
-            // 2026-08-01 (B2): no Cast.# property (the normalizer no longer
+            // 2026-08-01 (B2): no Cast. property (the normalizer no longer
             // injects them) — follow the type's declared `base` parent
             // (`type Latin1String: #String` ⇒ base "String"). This makes
             // subtypes resolve to their protocol category so the casting
@@ -980,7 +980,7 @@ mod tests {
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Float".to_string())), ("Float".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Bool".to_string())), ("Bool".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Blob".to_string())), ("Blob".to_string(), String::new()));
-        // Fallback — no Cast.# properties for unknown types → Bit
+        // Fallback — no Cast. properties for unknown types → Bit
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("UnknownType".to_string())), ("Bit".to_string(), String::new()));
     }
 

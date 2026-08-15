@@ -103,7 +103,7 @@ struct PendingPromise {
 
 /// 2026-08-09 (Phase 14, SPEC 21.6): derive a state field's web signal type
 /// from its PROTOCOL category via the universe — never by matching Briev type
-/// names (rule 18). `protocol_category` resolves Cast.# properties (and the
+/// names (rule 18). `protocol_category` resolves Cast. properties (and the
 /// base chain) exactly like the casting graph; a type with no protocol lane
 /// falls back to Struct/Int (the target capability validator rejects
 /// unsupported values — SPEC 21.6).
@@ -135,7 +135,7 @@ fn signal_type_for(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> 
         other => other,
     };
     // Resolve protocol category. HashWord/HashWordVariant/Bits/Void resolve
-    // directly; Custom/Generic resolve through the universe's Cast.# lanes.
+    // directly; Custom/Generic resolve through the universe's Cast. lanes.
     match protocol_category(universe, inner) {
         Some(cat) => match cat.as_str() {
             "Int" | "UInt" => SignalType::Int,

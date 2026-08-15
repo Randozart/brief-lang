@@ -312,7 +312,7 @@ fn resolve_category(
     match ty {
         Type::Custom(name) => {
             // Declared boundary types resolve via their protocol string; the
-            // bootstrap String/Data resolve via the graph's Cast.# property.
+            // bootstrap String/Data resolve via the graph's Cast. property.
             // No type names are matched (rule 18).
             if let Some(proto) = type_protocols.get(name) {
                 if let Some((cat, var)) = CastingGraph::parse_protocol_base(proto) {

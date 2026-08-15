@@ -676,14 +676,14 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
         return "ptr".to_string();
     }
     // 2026-07-30: String uses the ptr representation (bits model).
-    // 2026-07-31: Phase 3 (§8.4-D7) — String detection via the Cast.#String
+    // 2026-07-31: Phase 3 (§8.4-D7) — String detection via the Cast.String
     // protocol property.
     // 2026-08-01 (B4): the structural is_string_like (2-int-field) check was
     // retired — protocol membership is the sole String test (rule #18; a
     // String has no fields under B0, so the structural check was false anyway).
     let is_string_protocol = universe
         .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-        .map_or(false, |rt| rt.properties.contains_key("Cast.#String"));
+        .map_or(false, |rt| rt.properties.contains_key("Cast.String"));
     if is_string_protocol {
         // 2026-08-01 (B0): A String value is a ptr to a length-prefixed
         // [len][bytes] buffer. protocol_llvm_type previously claimed
@@ -696,7 +696,7 @@ pub fn protocol_llvm_type(ty: &Type, universe: Option<&crate::type_universe::Typ
     if let Some(ref u) = universe {
         if let Some(rt) = ty.universe_key().and_then(|k| u.get(k)) {
             // Check protocol membership first — float types get native float/double
-            if rt.properties.contains_key("Cast.#Float") {
+            if rt.properties.contains_key("Cast.Float") {
                 return if rt.max_bits <= 32 { "float".to_string() }
                        else if rt.max_bits <= 64 { "double".to_string() }
                        else { "i64".to_string() };
@@ -780,7 +780,7 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_unive
 /// protocol member moved to the front (the fallback for unmatched types).
 ///
 /// 2026-07-31: Phase 3 (§8.4-D6) — the front-member is chosen by #Int protocol
-/// membership (the `Cast.#Int` universe property) instead of the literal type
+/// membership (the `Cast.Int` universe property) instead of the literal type
 /// 2026-08-13 (layout-keywords plan Phase 5): read the parser's structured
 /// `atomic_fields` metadata (a PropertyValue::List of field-name Strings) and
 /// record each `<type>.<field>` slot in `ctx.atomic_fields` — the carrier the
@@ -806,7 +806,7 @@ fn sort_tbaa_groups(universe: Option<&crate::type_universe::TypeUniverse>, group
     let is_int_protocol = |name: &str| {
         universe
             .and_then(|u| u.types.get(name))
-            .map_or(false, |rt| rt.properties.contains_key("Cast.#Int"))
+            .map_or(false, |rt| rt.properties.contains_key("Cast.Int"))
     };
     if let Some(pos) = groups.iter().position(|g| is_int_protocol(g)) {
         groups.swap(0, pos);
@@ -1274,7 +1274,7 @@ impl LlvmBackend {
         // stores as i64 — adapt_to_i64/ensure_typed_value handle conversion.
         let llvm_ty = if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
-                let is_float = rt.properties.contains_key("Cast.#Float");
+                let is_float = rt.properties.contains_key("Cast.Float");
                 if is_float {
                     if rt.max_bits <= 32 { "float".to_string() }
                     else if rt.max_bits <= 64 { "double".to_string() }
@@ -1287,10 +1287,10 @@ impl LlvmBackend {
                         else if rt.max_bits <= 64 { 64 }
                         else { 128 };
                     format!("i{}", bits)
-                } else if rt.properties.contains_key("Cast.#Bool")
-                    || rt.properties.contains_key("Cast.#String")
-                    || rt.properties.contains_key("Cast.#Blob")
-                    || rt.properties.contains_key("Cast.#Char")
+                } else if rt.properties.contains_key("Cast.Bool")
+                    || rt.properties.contains_key("Cast.String")
+                    || rt.properties.contains_key("Cast.Blob")
+                    || rt.properties.contains_key("Cast.Char")
                 {
                     // 2026-08-10: boxed scalar/pointer types stay i64 —
                     // Bool/Char store as boxed i64, String/Data store the
@@ -1939,7 +1939,7 @@ impl LlvmBackend {
         }
         ty.universe_key()
             .and_then(|k| self.ctx.type_universe.as_ref().and_then(|u| u.get(k)))
-            .map(|rt| rt.properties.contains_key("Cast.#HeapAllocated"))
+            .map(|rt| rt.properties.contains_key("Cast.HeapAllocated"))
             .unwrap_or(false)
     }
 

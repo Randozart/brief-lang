@@ -356,7 +356,7 @@ impl<'a> TypecheckContext<'a> {
             return false;
         };
         if hw == "#Bit" {
-            // Universal — every type is a member of #Bit via Cast.#Bit.
+            // Universal — every type is a member of #Bit via Cast.Bit.
             return operand.universe_key().is_some();
         }
         self.operand_implements_protocol(operand, hw)
@@ -378,13 +378,15 @@ impl<'a> TypecheckContext<'a> {
     }
 
     /// Does `operand` implement protocol `hw` (e.g. `#Int`)? Checks the
-    /// universe's `Cast.#` properties (primordials) AND the typechecker's own
+    /// universe's `Cast.` properties (primordials) AND the typechecker's own
     /// `type_protocols`/`type_parents` records (custom types — `MyNum : #Int`
     /// is not in the typechecker's fresh universe). 2026-08-03: protocol
     /// membership, never type-name matching.
     fn operand_implements_protocol(&self, operand: &Type, hw: &str) -> bool {
         // Universe membership (registered primordials + registered types).
-        let prop = format!("Cast.{}", hw);
+        // 2026-08-15 (fundamentals): property keys are `Cast.<Cat>` — strip a
+        // `#` from the hashword so `#Int` matches `Cast.Int`.
+        let prop = format!("Cast.{}", hw.trim_start_matches('#'));
         if operand
             .universe_key()
             .and_then(|k| self.universe.get(k))
@@ -1251,10 +1253,10 @@ fn try_coerce_via_parse(
     }
     // 2026-07-31 (Phase 2): Numeric-protocol members construct from numeric
     // literals even without an explicit Parse op (`let v: MyNum = 0` where
-    // `type MyNum : #Int`). A type is numeric if it carries Cast.#Int,
-    // Cast.#UInt, or Cast.#Float.
+    // `type MyNum : #Int`). A type is numeric if it carries Cast.Int,
+    // Cast.UInt, or Cast.Float.
     if matches!(form, "Decimal") {
-        let numeric = ["Cast.#Int", "Cast.#UInt", "Cast.#Float"];
+        let numeric = ["Cast.Int", "Cast.UInt", "Cast.Float"];
         let is_numeric = target_ty
             .universe_key()
             .and_then(|k| ctx.universe.get(k))

@@ -127,15 +127,15 @@ fn expr_is_string(
 }
 
 /// Is a type a #String/#Blob-category value? Mirrors the casting graph's
-/// base-chain walk (no graph needed — checks the universe's Cast.# properties
+/// base-chain walk (no graph needed — checks the universe's Cast. properties
 /// and the declared base). The bootstrap String/Data entries carry
-/// Cast.#String/Cast.#Blob, so no type names are matched (rule 18).
+/// Cast.String/Cast.Blob, so no type names are matched (rule 18).
 pub fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
     match ty {
         Type::Custom(name) => {
             universe.get(name).map(|rt| {
-                rt.properties.contains_key("Cast.#String")
-                    || rt.properties.contains_key("Cast.#Blob")
+                rt.properties.contains_key("Cast.String")
+                    || rt.properties.contains_key("Cast.Blob")
                     || rt.base.starts_with("#String")
                     || rt.base.starts_with("#Blob")
             }).unwrap_or(false)

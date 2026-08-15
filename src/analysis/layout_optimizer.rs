@@ -182,11 +182,11 @@ fn get_type_layout(universe: &TypeUniverse, type_name: &str) -> Option<(u64, u64
 }
 
 /// Find the protocol category a Briev type participates in via its CastTo properties.
-/// Returns the category name (e.g., "String" for Cast.#String) or None.
+/// Returns the category name (e.g., "String" for Cast.String) or None.
 fn find_protocol_category(universe: &TypeUniverse, type_name: &str) -> Option<String> {
     let rt = universe.get(type_name)?;
     for prop_key in rt.properties.keys() {
-        if let Some(cat) = prop_key.strip_prefix("Cast.#") {
+        if let Some(cat) = prop_key.strip_prefix("Cast.") {
             return Some(cat.to_string());
         }
     }
@@ -259,12 +259,12 @@ fn has_safe_cast_path(universe: &TypeUniverse, foreign_type: &str, original_type
 ///
 /// 2026-07-22: Finds a sequence of Cast ops from source_type to target_type.
 /// Uses the type universe's property map, scanning for keys with the "Cast."
-/// prefix (e.g., "Cast.#Int", "Cast.#String"). #Bits is always reachable
+/// prefix (e.g., "Cast.Int", "Cast.String"). #Bits is always reachable
 /// from every type (implicit Cast(#Bits)).
 ///
 /// 2026-07-30: ProtocolGraph parameter removed — variant-aware edges are
 /// handled by CastingGraph (src/casting/graph.rs). This function uses
-/// the universe's Cast.# properties for backward compat during migration.
+/// the universe's Cast. properties for backward compat during migration.
 pub(crate) fn find_cast_path(
     universe: &TypeUniverse,
     source_type: &str,
@@ -575,9 +575,9 @@ mod tests {
     #[test]
     fn test_find_cast_path_direct() {
         let mut universe = make_universe_with_types(&[("A", 8, 8), ("B", 8, 8)]);
-        // Add Cast.#B to A
+        // Add Cast.B to A
         if let Some(ref mut rt) = universe.types.get_mut("A") {
-            rt.properties.insert("Cast.#B".to_string(), PropertyValue::Bool(true));
+            rt.properties.insert("Cast.B".to_string(), PropertyValue::Bool(true));
         }
         let path = find_cast_path(&universe, "A", "B");
 

@@ -286,7 +286,7 @@ fn lookup_foreign_type(
             if let Some(rt) = u.get(key) {
                 // Look for a CastTo property that points to a protocol category
                 for prop_key in rt.properties.keys() {
-                    if let Some(cat) = prop_key.strip_prefix("Cast.#") {
+                    if let Some(cat) = prop_key.strip_prefix("Cast.") {
                         let protocol_key = format!("#{}", cat);
                         if protocols.contains_key(&protocol_key) {
                             return crate::ast::Type::HashWord(cat.to_string());
