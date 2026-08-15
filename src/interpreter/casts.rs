@@ -21,7 +21,7 @@ pub fn eval_is_type(val: &Value, target: &Type) -> Result<Value, RuntimeError> {
             "Float" | "Float64" | "Float32" | "Double" => matches!(val, Value::Atom(Atom::Float(_))),
             "Bool" => matches!(val, Value::Atom(Atom::Bool(_))),
             "Char" => matches!(val, Value::Atom(Atom::Char(_))),
-            "String" | "Data" => matches!(val, Value::Bits(_)),
+            "String" | "Blob" => matches!(val, Value::Bits(_)),
             _ => false,
         },
         Type::Bits(_) => matches!(val, Value::Bits(_)),

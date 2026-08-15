@@ -588,11 +588,11 @@ impl LlvmBackend {
         }
         // 2026-07-22: Strings use ptr (opaque pointer) — a Briev String value
         // is a ptr to a length-prefixed [len][bytes] buffer (B0 bits model).
-        // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Data membership instead
+        // 2026-07-31: Phase 3 (§8.4-D7) — #String/#Blob membership instead
         // of the type-name match.
         // 2026-08-01 (B4): the SSO `{ i64, i64 }` branches were retired — a
         // String is never a fat pointer under the bits model.
-        if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+        if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Blob") {
             return "ptr".to_string();
         }
         // 2026-07-30: Struct-like types derive LLVM type from field shapes.
@@ -633,7 +633,7 @@ impl LlvmBackend {
         if self.is_protocol_member(ty, "#Bool")
             || self.is_protocol_member(ty, "#Char")
             || self.is_protocol_member(ty, "#String")
-            || self.is_protocol_member(ty, "#Data")
+            || self.is_protocol_member(ty, "#Blob")
         {
             return true;
         }
@@ -654,7 +654,7 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#Bool")
             || self.is_protocol_member(ty, "#Char")
             || self.is_protocol_member(ty, "#String")
-            || self.is_protocol_member(ty, "#Data")
+            || self.is_protocol_member(ty, "#Blob")
     }
 
     /// Box a value of a boxed type to its i64 representation.
@@ -676,7 +676,7 @@ impl LlvmBackend {
             writeln!(out, "{}{} = zext i8 {} to i64", indent, conv, raw).ok();
         } else if self.is_protocol_member(ty, "#Char") {
             writeln!(out, "{}{} = zext i32 {} to i64", indent, conv, raw).ok();
-        } else if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Data") {
+        } else if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Blob") {
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, conv, raw).ok();
         } else if self.is_protocol_member(ty, "#Float") {
             writeln!(out, "{}{} = bitcast float {} to i32", indent, float_tmp, raw).ok();
@@ -915,7 +915,7 @@ impl LlvmBackend {
             writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
         } else if self.is_protocol_member(trg_ty, "#Char") {
             writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
-        } else if self.is_protocol_member(trg_ty, "#String") || self.is_protocol_member(trg_ty, "#Data") {
+        } else if self.is_protocol_member(trg_ty, "#String") || self.is_protocol_member(trg_ty, "#Blob") {
             writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, raw).ok();
         } else {
             writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();

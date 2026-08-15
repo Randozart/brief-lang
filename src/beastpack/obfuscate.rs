@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 const RESERVED_NAMES: &[&str] = &[
     "Int", "UInt", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32",
     "Int64", "UInt64", "Float", "Float32", "Float64", "Double",
-    "Bool", "Void", "Char", "String", "Data", "Ptr",
+    "Bool", "Void", "Char", "String", "Blob", "Ptr",
 ];
 
 /// Obfuscate internal identifiers in a typed program.

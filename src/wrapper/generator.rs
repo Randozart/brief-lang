@@ -333,7 +333,7 @@ fn type_size(ty: &str) -> u64 {
         "Int16" | "int16_t" | "UInt16" | "uint16_t" => 2,
         "Int" | "int" | "int32_t" | "UInt" | "uint32_t" | "Float" | "float" => 4,
         "Int64" | "int64_t" | "UInt64" | "uint64_t" | "Double" | "double" | "Float64" => 8,
-        "String" | "string" | "Data" => 256,
+        "String" | "string" | "Blob" => 256,
         "Void" | "void" => 0,
         _ => 8,
     }

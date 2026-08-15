@@ -175,7 +175,7 @@ impl ProgramInfo {
 }
 
 /// Flat scalar protocol categories: `#Int`, `#UInt`, `#Float`, `#Bool`,
-/// `#Char`. `#String`/`#Data` and pointers are not flat and reject the kernel.
+/// `#Char`. `#String`/`#Blob` and pointers are not flat and reject the kernel.
 /// Resolved through the TypeUniverse (`protocol_category`), never by matching
 /// type names (rules 14/18). `Bits(n)` is the sole physical primitive.
 fn is_flat_scalar(universe: &TypeUniverse, ty: &Type) -> bool {

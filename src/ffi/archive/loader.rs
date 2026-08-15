@@ -254,7 +254,7 @@ fn calculate_auto_layout(fields: &[(String, Type)], endian: Endian) -> MemoryLay
     for (name, ty) in fields {
         let size = match ty {
             Type::Custom(__t) if __t == "Bool" => 1,
-            Type::Custom(__t) if __t == "Int" || __t == "Float" || __t == "String" || __t == "Data" => 8,
+            Type::Custom(__t) if __t == "Int" || __t == "Float" || __t == "String" || __t == "Blob" => 8,
             Type::Custom(_) => 8,
             Type::Void => 0,
             _ => 8,
@@ -372,12 +372,12 @@ fn parse_type_string(type_str: &str) -> Result<Type, FfiError> {
         "Float" => Ok(Type::float()),
         "Bool" => Ok(Type::bool_()),
         "void" => Ok(Type::Void),
-        "Data" => Ok(Type::data()),
+        "Blob" => Ok(Type::blob()),
         s if s.starts_with('[') && s.ends_with(']') => {
             let inner_str = &s[1..s.len() - 1];
             let inner_type = parse_type_string(inner_str)?;
             // Represent arrays as Data for now
-            Ok(Type::data())
+            Ok(Type::blob())
         }
         s => {
             // Custom type

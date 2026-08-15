@@ -41,8 +41,8 @@ frgn frgn__sha512(s: String) -> Result<String, EncodingError> : __sha512 from "l
 frgn frgn__uuid_v4() -> Result<String, EncodingError> : __uuid_v4 from "lib/runtime/briev_rt.c";
 frgn frgn__is_uuid(s: String) -> Result<Bool, EncodingError> : __is_uuid from "lib/runtime/briev_rt.c";
 // URI Components
-frgn frgn__uri_parse(s: String) -> Result<Data, EncodingError> : __uri_parse from "lib/runtime/briev_rt.c";
-frgn frgn__uri_build(data: Data) -> Result<String, EncodingError> : __uri_build from "lib/runtime/briev_rt.c";
+frgn frgn__uri_parse(s: String) -> Result<Blob, EncodingError> : __uri_parse from "lib/runtime/briev_rt.c";
+frgn frgn__uri_build(data: Blob) -> Result<String, EncodingError> : __uri_build from "lib/runtime/briev_rt.c";
 frgn frgn__uri_get_param(url: String, key: String) -> Result<String, EncodingError> : __uri_get_param from "lib/runtime/briev_rt.c";
 // ===== NATIVE DEFINITIONS =====
 

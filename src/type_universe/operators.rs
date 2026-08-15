@@ -131,7 +131,7 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     let key = ty.universe_key()?;
     let rt = universe.get(key)?;
     // Cast.# properties (primordial seeding) — checking order mirrors the
-    // casting graph: Float → UInt → Int → String → Bool → Char → Data.
+    // casting graph: Float → UInt → Int → String → Bool → Char → Blob.
     let props = &rt.properties;
     for (prop, cat) in [
         ("Cast.#Float", "Float"),
@@ -140,7 +140,7 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
         ("Cast.#String", "String"),
         ("Cast.#Bool", "Bool"),
         ("Cast.#Char", "Char"),
-        ("Cast.#Data", "Data"),
+        ("Cast.#Blob", "Blob"),
     ] {
         if props.contains_key(prop) {
             return Some(cat.to_string());
@@ -150,7 +150,7 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     // subtypes) — `type Latin1String: #String` ⇒ base "String".
     let base = rt.base.trim_start_matches('#');
     match base {
-        "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Data" => {
+        "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob" => {
             Some(base.to_string())
         }
         _ => None,

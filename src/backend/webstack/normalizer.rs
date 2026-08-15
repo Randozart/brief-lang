@@ -38,7 +38,7 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, _int_bi
         let js_type = match cat.as_deref() {
             Some("Int" | "UInt" | "Float") => "number",
             Some("Bool") => "boolean",
-            Some("String" | "Char" | "Data") => "string",
+            Some("String" | "Char" | "Blob") => "string",
             // 2026-07-26: TS legacy wire format — a two-slot String-like
             // (data/len) is the bare `String` shim; everything else is object.
             _ => "object",

@@ -497,11 +497,11 @@ pub fn js_type_to_briev(js_type: &str) -> String {
             "any" | "unknown" => "Value".to_string(),
 
             // Object types
-            "object" | "Object" | "{}" => "Data".to_string(),
+            "object" | "Object" | "{}" => "Blob".to_string(),
             "Array" | "array" => "List<Value>".to_string(),
-            "Map" | "Set" | "WeakMap" | "WeakSet" => "Data".to_string(),
+            "Map" | "Set" | "WeakMap" | "WeakSet" => "Blob".to_string(),
             "Promise" | "AsyncIterator" => "Void".to_string(), // Async - simplified
-            "Buffer" | "ArrayBuffer" | "TypedArray" | "DataView" => "Data".to_string(),
+            "Buffer" | "ArrayBuffer" | "TypedArray" | "DataView" => "Blob".to_string(),
 
             // Date/Time
             "Date" => "Custom(Date)".to_string(),
@@ -532,7 +532,7 @@ pub fn js_type_to_briev(js_type: &str) -> String {
                 }
                 // Handle Map<K, V> -> Data
                 if other.starts_with("Map<") || other.starts_with("Set<") {
-                    return "Data".to_string();
+                    return "Blob".to_string();
                 }
                 // Handle Promise<T>
                 if other.starts_with("Promise<") {

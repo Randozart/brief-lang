@@ -301,7 +301,7 @@ fn mask_index_program() -> Vec<TopLevel> {
     let data_state = TopLevel::Statement(Box::new(Statement::Let {
         name: "data".to_string(),
         names: vec![],
-        ty: Some(Type::Custom("Data".to_string())),
+        ty: Some(Type::Custom("Blob".to_string())),
         expr: Some(Expr::TaggedQuotedLiteral(vec![1, 2, 3, 4, 5], "b".to_string())),
         modifiers: vec![],
     }));
@@ -324,7 +324,7 @@ fn mask_index_program() -> Vec<TopLevel> {
             Statement::Let {
                 name: "masked".to_string(),
                 names: vec![],
-                ty: Some(Type::Custom("Data".to_string())),
+                ty: Some(Type::Custom("Blob".to_string())),
                 expr: Some(Expr::Index(
                     Box::new(Expr::Identifier("data".to_string())),
                     Box::new(Expr::List(vec![
@@ -6218,15 +6218,15 @@ node start [true][false] {
     );
 }
 
-// ── Phase 7 (2026-08-06): `#b` raw-bytes Data literal ───────────────
+// ── Phase 7 (2026-08-06): `#b` raw-bytes Blob literal ───────────────
 
 #[test]
 fn test_byte_literal_emits_raw_bstr_constant() {
     // `#b"\x89PNG"` emits an @bstr.N constant with the EXACT bytes and a
-    // Data-typed value; `^Len` reads the [len] header (byte count).
+    // Blob-typed value; `^Len` reads the [len] header (byte count).
     let src = r#"
 node start [true][false] {
-    let b: Data = #b"\x89PNG";
+    let b: Blob = #b"\x89PNG";
     let c: Int = b.^Length;
     term Print#(c);
 };
@@ -6242,7 +6242,7 @@ node start [true][false] {
     );
     assert!(
         ir.contains("load i64, ptr %"),
-        "Data ^Len must load the [len] header; got:\n{ir}"
+        "Blob ^Len must load the [len] header; got:\n{ir}"
     );
 }
 

@@ -388,7 +388,7 @@ fn is_reserved_keyword(s: &str) -> bool {
         s,
         "txn" | "defn" | "let" | "term" | "true" | "false"
             | "Int" | "UInt" | "Float"
-            | "Bool" | "String" | "void" | "Data" | "Char"
+            | "Bool" | "String" | "void" | "Blob" | "Char"
             | "frgn" | "import" | "from" | "as" | "struct"
             | "enum" | "trg" | "node" | "async"
             | "match"
@@ -412,7 +412,7 @@ pub fn arb_type() -> impl Strategy<Value = Type> {
         Just(Type::bool_()),
         Just(Type::string()),
         Just(Type::Void),
-        Just(Type::data()),
+        Just(Type::blob()),
         Just(Type::char_()),
         arb_identifier().prop_map(Type::Custom),
         // Constrained types (sized integers)
@@ -433,7 +433,7 @@ fn arb_simple_type() -> impl Strategy<Value = Type> {
         Just(Type::bool_()),
         Just(Type::string()),
         Just(Type::Void),
-        Just(Type::data()),
+        Just(Type::blob()),
         Just(Type::char_()),
     ]
 }

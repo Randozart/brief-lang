@@ -252,7 +252,7 @@ impl Annotator {
             Type::Custom(__t) if __t == "Float64" => "Float64".to_string(),
             Type::Custom(__t) if __t == "String" => "String".to_string(),
             Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
-            Type::Custom(__t) if __t == "Data" => "Data".to_string(),
+            Type::Custom(__t) if __t == "Blob" => "Blob".to_string(),
             Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
             Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
             Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),

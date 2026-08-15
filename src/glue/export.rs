@@ -1047,13 +1047,13 @@ mod tests {
             name: "write_file".to_string(),
             params: vec![
                 ("path".to_string(), "String".to_string()),
-                ("data".to_string(), "Data".to_string()),
+                ("data".to_string(), "Blob".to_string()),
             ],
             return_type: "Int".to_string(),
             needs_state: true,
         }];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,write_file,String|Data,Int,state");
+        assert_eq!(result, "export,write_file,String|Blob,Int,state");
     }
 
     #[test]

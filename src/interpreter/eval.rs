@@ -1065,7 +1065,7 @@ fn eval_binary_op(
 
     match kind {
         BinaryOpKind::Add => {
-            // 2026-08-03: `+` is string concat for #String/#Data operands (the
+            // 2026-08-03: `+` is string concat for #String/#Blob operands (the
             // Concat op). The backend routes +-on-strings to concat via the
             // string_concat rewrite; the interpreter must match (rule 4).
             if let (Some(a), Some(b)) = (lv.string_bytes(heap), rv.string_bytes(heap)) {

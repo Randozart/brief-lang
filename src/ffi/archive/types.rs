@@ -222,7 +222,7 @@ pub fn ffi_type_to_briev(t: &FfiType) -> Type {
         FfiType::Void => Type::Void,
         FfiType::Struct(name, _) => Type::Custom(name.clone()),
         FfiType::Generic(name, _) => Type::Custom(name.clone()),
-        FfiType::Array(_) => Type::data(), // Use Data as generic array type
+        FfiType::Array(_) => Type::blob(), // Use Data as generic array type
     }
 }
 

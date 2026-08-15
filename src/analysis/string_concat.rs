@@ -1,6 +1,6 @@
-// ── String Concat Resolution (`+` is concat for #String/#Data) ─────────
+// ── String Concat Resolution (`+` is concat for #String/#Blob) ─────────
 // 2026-08-03: `+` reads naturally as string concatenation, so `"a" + "b"` and
-// `a + b` on #String/#Data operands mean the same thing as the `++`/Concat
+// `a + b` on #String/#Blob operands mean the same thing as the `++`/Concat
 // operator. The typechecker resolves the Concat binding for `+` on strings
 // (operators.rs protocol_binding), and THIS pass rewrites the AST kind
 // Add → Concat so the backend dispatches the concat emitter. The backend
@@ -14,7 +14,7 @@ use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::type_universe::TypeUniverse;
 
 /// Rewrite `BinaryOp(Add, …)` → `BinaryOp(Concat, …)` when an operand is a
-/// #String/#Data value. Runs after typechecking, before codegen.
+/// #String/#Blob value. Runs after typechecking, before codegen.
 pub fn rewrite_plus_concat(items: &mut [TopLevel], universe: &TypeUniverse) {
     for item in items {
         match item {
@@ -104,7 +104,7 @@ fn rewrite_expr(
     }
 }
 
-/// Conservative "is this expression a #String/#Data value?" — literal, cast,
+/// Conservative "is this expression a #String/#Blob value?" — literal, cast,
 /// bound identifier, or the result of a string-producing binary op.
 fn expr_is_string(
     expr: &Expr,
@@ -126,21 +126,21 @@ fn expr_is_string(
     }
 }
 
-/// Is a type a #String/#Data-category value? Mirrors the casting graph's
+/// Is a type a #String/#Blob-category value? Mirrors the casting graph's
 /// base-chain walk (no graph needed — checks the universe's Cast.# properties
 /// and the declared base). The bootstrap String/Data entries carry
-/// Cast.#String/Cast.#Data, so no type names are matched (rule 18).
+/// Cast.#String/Cast.#Blob, so no type names are matched (rule 18).
 pub fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
     match ty {
         Type::Custom(name) => {
             universe.get(name).map(|rt| {
                 rt.properties.contains_key("Cast.#String")
-                    || rt.properties.contains_key("Cast.#Data")
+                    || rt.properties.contains_key("Cast.#Blob")
                     || rt.base.starts_with("#String")
-                    || rt.base.starts_with("#Data")
+                    || rt.base.starts_with("#Blob")
             }).unwrap_or(false)
         }
-        Type::HashWordVariant(name, _) => name == "#String" || name == "#Data",
+        Type::HashWordVariant(name, _) => name == "#String" || name == "#Blob",
         _ => false,
     }
 }

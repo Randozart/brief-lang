@@ -536,7 +536,7 @@ impl TypeConverter {
         ty: &BrievType,
         universe: Option<&TypeUniverse>,
     ) -> String {
-        // 2026-08-01: resolve the #String/#Data protocol membership from the
+        // 2026-08-01: resolve the #String/#Blob protocol membership from the
         // universe (Cast.# properties — never type names) and box a pointer
         // value via ptrtoint. Falls back to the constructor-based fallback
         // only when no universe is available (builder tests).
@@ -544,7 +544,7 @@ impl TypeConverter {
             if let Some(key) = ty.universe_key() {
                 if let Some(rt) = u.get(key) {
                     if rt.properties.contains_key("Cast.#String")
-                        || rt.properties.contains_key("Cast.#Data")
+                        || rt.properties.contains_key("Cast.#Blob")
                     {
                         return builder.emit_ptrtoint(val, LlvmType::I64);
                     }
@@ -555,7 +555,7 @@ impl TypeConverter {
     }
 
     /// Fallback boxing when universe is not available (builder tests only).
-    /// The real path is `box_to_i64` (above), which resolves #String/#Data by
+    /// The real path is `box_to_i64` (above), which resolves #String/#Blob by
     /// their Cast.# universe properties. 2026-06-29: Will be removed once all
     /// tests go through the full pipeline. 2026-07-31: Phase 3 (§8.4-D2) —
     /// arms matched against the canonical bootstrap Type constructors
@@ -563,7 +563,7 @@ impl TypeConverter {
     fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BrievType) -> String {
         if *ty == BrievType::bool_() {
             builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
-        } else if *ty == BrievType::string() || *ty == BrievType::data() {
+        } else if *ty == BrievType::string() || *ty == BrievType::blob() {
             builder.emit_ptrtoint(val, LlvmType::I64)
         } else if *ty == BrievType::float() {
             let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
@@ -607,7 +607,7 @@ impl TypeConverter {
     ) -> String {
         if *target_ty == BrievType::bool_() {
             builder.emit_trunc(LlvmType::I64, LlvmType::I1, val)
-        } else if *target_ty == BrievType::string() || *target_ty == BrievType::data() {
+        } else if *target_ty == BrievType::string() || *target_ty == BrievType::blob() {
             builder.emit_inttoptr(val, LlvmType::I64)
         } else if *target_ty == BrievType::float() {
             let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);

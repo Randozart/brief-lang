@@ -168,7 +168,7 @@ fn format_type(ty: &Type) -> String {
         Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
         Type::Custom(__t) if __t == "String" => "String".to_string(),
         Type::Void => "void".to_string(),
-        Type::Custom(__t) if __t == "Data" => "Data".to_string(),
+        Type::Custom(__t) if __t == "Blob" => "Blob".to_string(),
         Type::Custom(__t) if __t == "Char" => "Char".to_string(),
         Type::Custom(name) => name.clone(),
         Type::HashWord(name) | Type::HashWordVariant(name, _) => name.clone(),
@@ -231,7 +231,7 @@ fn estimate_type_size(ty: &Type) -> usize {
         // 2026-07-18: String is 16 bytes (2 × i64 struct). Data stays rough.
         Type::Custom(__t) if __t == "String" => 16,
         Type::Void => 0,
-        Type::Custom(__t) if __t == "Data" => 16,
+        Type::Custom(__t) if __t == "Blob" => 16,
         Type::Custom(__t) if __t == "Char" => 4,
         Type::Custom(_) => 8,
         Type::HashWord(_) | Type::HashWordVariant(_, _) => 0, // compile-time directive, no runtime size

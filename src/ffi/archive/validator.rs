@@ -68,7 +68,7 @@ pub fn validate_frgn_against_binding(
 /// Check if a type is valid for FFI (conservative check)
 pub fn is_valid_ffi_type(ty: &Type) -> bool {
     match ty {
-        Type::Custom(__t) if __t == "String" || __t == "Int" || __t == "Float" || __t == "Bool" || __t == "Data" => true,
+        Type::Custom(__t) if __t == "String" || __t == "Int" || __t == "Float" || __t == "Bool" || __t == "Blob" => true,
         Type::Void => true,
         Type::Custom(_) => true, // Custom types are structs
         _ => false,

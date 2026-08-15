@@ -75,7 +75,7 @@ impl TypeTag {
         match cat {
             Some("Int" | "UInt" | "Float") => TypeTag::Int,
             Some("Bool") => TypeTag::Bool,
-            Some("String" | "Char" | "Data") => TypeTag::String,
+            Some("String" | "Char" | "Blob") => TypeTag::String,
             _ => TypeTag::Int,
         }
     }

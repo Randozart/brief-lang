@@ -322,10 +322,10 @@ impl<'a> TypecheckContext<'a> {
             _ => return None,
         };
         let proto = self.declared_protocol_of(name)?;
-        // 2026-08-03: `+` is string concat for #String/#Data operands — resolve
+        // 2026-08-03: `+` is string concat for #String/#Blob operands — resolve
         // the Concat binding (and the variant's Concat cross-op) for "+".
         let category = Self::protocol_category_of(proto);
-        let effective_op = if op_name == "Add" && (category == "String" || category == "Data") {
+        let effective_op = if op_name == "Add" && (category == "String" || category == "Blob") {
             "Concat"
         } else {
             op_name
@@ -825,13 +825,13 @@ pub fn infer_expression(
                 let obj_is_byte_buffer = matches!(obj_ty, Type::Bits(_))
                     || crate::type_universe::operators::protocol_category(ctx.universe, &obj_ty)
                         .as_deref()
-                        == Some("Data")
+                        == Some("Blob")
                     || crate::type_universe::operators::protocol_category(ctx.universe, &obj_ty)
                         .as_deref()
                         == Some("String");
                 if obj_is_byte_buffer {
                     return Ok((
-                        Type::data(),
+                        Type::blob(),
                         Provenance::Index {
                             base: Box::new(obj_prov),
                             index: Box::new(idx_prov),
@@ -1496,7 +1496,7 @@ fn infer_intrinsic_call(
 /// "b") is a Data byte literal; other tags are Strings.
 fn quoted_literal_type(prefix: &str) -> Type {
     if prefix == "b" {
-        Type::Custom("Data".into())
+        Type::Custom("Blob".into())
     } else {
         Type::string()
     }
@@ -3378,7 +3378,7 @@ fn resolve_reflect(
             // UTF8 chars) is an intrinsic (`CharCount#`) — neither is
             // `.^Length`, so both are compile errors, never silent.
             match receiver {
-                Type::Custom(n) if n == "String" || n == "Data" => Ok(Type::int()),
+                Type::Custom(n) if n == "String" || n == "Blob" => Ok(Type::int()),
                 Type::Vector(..) => Ok(Type::int()),
                 Type::Applied(..) => Err(TypeError::InvalidOperation {
                     operation: "reflection target 'Length'".into(),
@@ -4315,13 +4315,13 @@ txn t [items.^Size > 0][items.^Size == 0] {
     }
 
     #[test]
-    fn mask_index_on_data_types_to_data() {
-        // 2026-08-07 (Phase 7): `data[mask]` on a #Data buffer types to Data
+    fn mask_index_on_blob_types_to_blob() {
+        // 2026-08-07 (Phase 7): `data[mask]` on a #Blob buffer types to Data
         // (the byte-buffer container kind), not the scalar element type.
         let src = r#"
-let data: Data = #b"\x01\x02\x03";
+let data: Blob = #b"\x01\x02\x03";
 node t [true][false] {
-    let masked: Data = data[[true, false, true]];
+    let masked: Blob = data[[true, false, true]];
     term;
 };
 "#;
@@ -5578,10 +5578,10 @@ mod phase5_tests {
 
 /// 2026-08-06 (Phase 7): `#b"..."` is a Data byte literal; `#r"..."` a String.
 #[test]
-fn byte_literal_is_data_raw_string_is_string() {
+fn byte_literal_is_blob_raw_string_is_string() {
     let ok = r#"
 node start [true][false] {
-    let b: Data = #b"\x89PNG";
+    let b: Blob = #b"\x89PNG";
     let r: String = #r"a\tb";
     term;
 };

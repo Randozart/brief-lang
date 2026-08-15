@@ -162,7 +162,7 @@ fn rust_type_to_briev(rust_type: &str) -> String {
         "f32" | "f64" => "Float".to_string(),
         "bool" => "Bool".to_string(),
         "String" | "&str" => "String".to_string(),
-        "Vec<u8>" | "&[u8]" => "Data".to_string(),
+        "Vec<u8>" | "&[u8]" => "Blob".to_string(),
         "Vec<String>" => "List<String>".to_string(),
         _ => {
             if t.starts_with("Vec<") {

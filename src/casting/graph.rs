@@ -182,8 +182,8 @@ impl CastingGraph {
         self.set_lane("Bit", "Char", LaneKind::Trunc);    // i64 → i32
         self.set_lane("Char", "Bit", LaneKind::ZExt);     // i32 → i64
         // ── Bit ⇄ Data ──────────────────────────────────────────────
-        self.set_lane("Bit", "Data", LaneKind::IntToPtr); // i64 → ptr
-        self.set_lane("Data", "Bit", LaneKind::PtrToInt); // ptr → i64
+        self.set_lane("Bit", "Blob", LaneKind::IntToPtr); // i64 → ptr
+        self.set_lane("Blob", "Bit", LaneKind::PtrToInt); // ptr → i64
 
         // ── Int ⇄ UInt ────────────────────────────────────────────
         self.set_lane("Int", "UInt", LaneKind::Bitcast); // same representation
@@ -201,8 +201,8 @@ impl CastingGraph {
         self.set_lane("Int", "Char", LaneKind::Trunc);   // i64 → i32
         self.set_lane("Char", "Int", LaneKind::ZExt);    // i32 → i64
         // ── Int ⇄ Data ────────────────────────────────────────────
-        self.set_lane("Int", "Data", LaneKind::IntToPtr); // i64 → ptr
-        self.set_lane("Data", "Int", LaneKind::PtrToInt); // ptr → i64
+        self.set_lane("Int", "Blob", LaneKind::IntToPtr); // i64 → ptr
+        self.set_lane("Blob", "Int", LaneKind::PtrToInt); // ptr → i64
 
         // ── UInt ⇄ Float ───────────────────────────────────────────
         self.set_lane("UInt", "Float", LaneKind::IntToFloat);
@@ -217,8 +217,8 @@ impl CastingGraph {
         self.set_lane("UInt", "Char", LaneKind::Trunc);
         self.set_lane("Char", "UInt", LaneKind::ZExt);
         // ── UInt ⇄ Data ───────────────────────────────────────────
-        self.set_lane("UInt", "Data", LaneKind::IntToPtr);
-        self.set_lane("Data", "UInt", LaneKind::PtrToInt);
+        self.set_lane("UInt", "Blob", LaneKind::IntToPtr);
+        self.set_lane("Blob", "UInt", LaneKind::PtrToInt);
 
         // ── Float ⇄ String ────────────────────────────────────────
         self.set_lane("Float", "String", LaneKind::ExtCall("float_to_str"));
@@ -237,11 +237,11 @@ impl CastingGraph {
         self.set_lane("Float", "Char", LaneKind::FloatToInt);
         self.set_lane("Char", "Float", LaneKind::IntToFloat);
         // ── Float ⇄ Data ──────────────────────────────────────────
-        self.set_lane("Float", "Data", LaneKind::Chain(
+        self.set_lane("Float", "Blob", LaneKind::Chain(
             Box::new(LaneKind::FloatToInt),
             Box::new(LaneKind::IntToPtr),
         ));
-        self.set_lane("Data", "Float", LaneKind::Chain(
+        self.set_lane("Blob", "Float", LaneKind::Chain(
             Box::new(LaneKind::PtrToInt),
             Box::new(LaneKind::IntToFloat),
         ));
@@ -253,11 +253,11 @@ impl CastingGraph {
         self.set_lane("String", "Char", LaneKind::ExtCall("str_first_char"));
         self.set_lane("Char", "String", LaneKind::ExtCall("char_to_str"));
         // ── String ⇄ Data ─────────────────────────────────────────
-        self.set_lane("String", "Data", LaneKind::Chain(
+        self.set_lane("String", "Blob", LaneKind::Chain(
             Box::new(LaneKind::ExtractData),
             Box::new(LaneKind::IntToPtr),
         ));
-        self.set_lane("Data", "String", LaneKind::Chain(
+        self.set_lane("Blob", "String", LaneKind::Chain(
             Box::new(LaneKind::PtrToInt),
             Box::new(LaneKind::Bitcast), // bitcast i64 to {i64,i64}
         ));
@@ -266,21 +266,21 @@ impl CastingGraph {
         self.set_lane("Bool", "Char", LaneKind::ZExt);
         self.set_lane("Char", "Bool", LaneKind::Trunc);
         // ── Bool ⇄ Data ──────────────────────────────────────────
-        self.set_lane("Bool", "Data", LaneKind::Chain(
+        self.set_lane("Bool", "Blob", LaneKind::Chain(
             Box::new(LaneKind::ZExt),
             Box::new(LaneKind::IntToPtr),
         ));
-        self.set_lane("Data", "Bool", LaneKind::Chain(
+        self.set_lane("Blob", "Bool", LaneKind::Chain(
             Box::new(LaneKind::PtrToInt),
             Box::new(LaneKind::Trunc),
         ));
 
         // ── Char ⇄ Data ──────────────────────────────────────────
-        self.set_lane("Char", "Data", LaneKind::Chain(
+        self.set_lane("Char", "Blob", LaneKind::Chain(
             Box::new(LaneKind::ZExt),
             Box::new(LaneKind::IntToPtr),
         ));
-        self.set_lane("Data", "Char", LaneKind::Chain(
+        self.set_lane("Blob", "Char", LaneKind::Chain(
             Box::new(LaneKind::PtrToInt),
             Box::new(LaneKind::Trunc),
         ));
@@ -310,7 +310,7 @@ impl CastingGraph {
         // representation split-brain (ptr vs i64 vs {i64,i64} vs i128). The
         // casting graph is the single source of truth, so it now says ptr.
         self.set_llvm_type("String", "", LlvmTypeResolver::Fixed("ptr"));
-        self.set_llvm_type("Data", "",   LlvmTypeResolver::Fixed("ptr"));
+        self.set_llvm_type("Blob", "",   LlvmTypeResolver::Fixed("ptr"));
 
         // Float protocol variants (hardcoded — no disamb hack)
         self.set_llvm_type("Float", "IEEE754",  LlvmTypeResolver::Fixed("float"));
@@ -643,12 +643,12 @@ impl CastingGraph {
             // Compiler constructs (not in universe) — permitted direct handling per Rule 18a.
             Type::Bits(_) => return ("Bit".to_string(), String::new()),
             Type::Void => return ("Bit".to_string(), String::new()),
-            // 2026-07-30: Ptr<T> deliberately NOT mapped to "Data" here.
-            // Mapping Ptr→Data would cause is_protocol_member(Ptr, "#Data")
+            // 2026-07-30: Ptr<T> deliberately NOT mapped to "Blob" here.
+            // Mapping Ptr→Data would cause is_protocol_member(Ptr, "#Blob")
             // to return true, breaking adapt_to_i64 which expects Ptr fields
             // (stored as i64 in %State) to NOT undergo ptrtoint conversion.
             // resolve_llvm_type() handles Ptr directly before calling this.
-            // Type::Ptr(_) => ("Data", ...) moved to resolve_llvm_type only.
+            // Type::Ptr(_) => ("Blob", ...) moved to resolve_llvm_type only.
             Type::HashWord(name) => {
                 // 2026-08-01 (B2): strip the `#` prefix so the category key
                 // matches the graph's bare base-lane keys ("Bit", "String").
@@ -694,8 +694,8 @@ impl CastingGraph {
             ("Bool".to_string(), String::new())
         } else if rt.properties.contains_key("Cast.#Char") {
             ("Char".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.#Data") {
-            ("Data".to_string(), String::new())
+        } else if rt.properties.contains_key("Cast.#Blob") {
+            ("Blob".to_string(), String::new())
         } else {
             // 2026-08-01 (B2): no Cast.# property (the normalizer no longer
             // injects them) — follow the type's declared `base` parent
@@ -709,7 +709,7 @@ impl CastingGraph {
             // previously the variant form fell through to (Bit, "").
             if let Some((cat, var)) = Self::parse_protocol_base(&rt.base) {
                 match cat.as_str() {
-                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Data" => {
+                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob" => {
                         return (cat, var);
                     }
                     _ => return ("Bit".to_string(), String::new()),
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     fn test_all_base_pairs_have_lanes() {
         let graph = CastingGraph::new();
-        let protocols = &["Bit", "Int", "UInt", "Float", "String", "Bool", "Char", "Data"];
+        let protocols = &["Bit", "Int", "UInt", "Float", "String", "Bool", "Char", "Blob"];
         for src in protocols {
             for dst in protocols {
                 if src == dst {
@@ -979,7 +979,7 @@ mod tests {
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Int".to_string())), ("Int".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Float".to_string())), ("Float".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Bool".to_string())), ("Bool".to_string(), String::new()));
-        assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Data".to_string())), ("Data".to_string(), String::new()));
+        assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Blob".to_string())), ("Blob".to_string(), String::new()));
         // Fallback — no Cast.# properties for unknown types → Bit
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("UnknownType".to_string())), ("Bit".to_string(), String::new()));
     }

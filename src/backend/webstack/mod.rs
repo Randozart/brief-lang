@@ -141,7 +141,7 @@ fn signal_type_for(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> 
             "Int" | "UInt" => SignalType::Int,
             "Float" => SignalType::Float,
             "Bool" => SignalType::Bool,
-            "String" | "Char" | "Data" => SignalType::String,
+            "String" | "Char" | "Blob" => SignalType::String,
             _ => SignalType::Struct,
         },
         // Unregistered type (fresh universe) — conservative Int; the target

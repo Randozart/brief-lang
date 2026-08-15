@@ -2930,7 +2930,7 @@ mod tests {
 
     #[test]
     fn test_parse_frgn_compiler_path() {
-        let fb = parse_frgn(r#"frgn hash(data: Data) -> Int from <xxhash.c>;"#).unwrap();
+        let fb = parse_frgn(r#"frgn hash(data: Blob) -> Int from <xxhash.c>;"#).unwrap();
         assert_eq!(fb.foreign_name, "hash");
         assert_eq!(fb.inputs.len(), 1);
         match &fb.from {

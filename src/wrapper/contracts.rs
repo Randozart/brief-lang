@@ -302,7 +302,7 @@ mod tests {
             name: "read".to_string(),
             return_type: "Int".to_string(),
             parameters: vec![
-                ("buf".to_string(), "Data".to_string()),
+                ("buf".to_string(), "Blob".to_string()),
                 ("len".to_string(), "Int".to_string()),
             ],
             is_variadic: false,

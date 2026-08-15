@@ -314,9 +314,9 @@ fn parse_py_single_param(
     if param.starts_with("**") {
         let name = param.strip_prefix("**").unwrap_or(param).trim();
         if name.is_empty() {
-            return Some(("kwargs".to_string(), "Data".to_string()));
+            return Some(("kwargs".to_string(), "Blob".to_string()));
         }
-        return Some((name.to_string(), "Data".to_string()));
+        return Some((name.to_string(), "Blob".to_string()));
     }
 
     if param.starts_with("*") {
@@ -368,8 +368,8 @@ pub fn py_type_to_briev(py_type: &str) -> String {
         "int" | "Int" | "Integer" => "Int".to_string(),
         "float" | "Float" => "Float".to_string(),
         "str" | "Str" | "String" => "String".to_string(),
-        "bytes" | "Bytes" => "Data".to_string(),
-        "bytearray" => "Data".to_string(),
+        "bytes" | "Bytes" => "Blob".to_string(),
+        "bytearray" => "Blob".to_string(),
         "bool" | "Bool" | "Boolean" => "Bool".to_string(),
         "complex" => "Custom(Complex)".to_string(),
         "object" | "Object" => "Value".to_string(),
@@ -377,8 +377,8 @@ pub fn py_type_to_briev(py_type: &str) -> String {
 
         // Collection types
         "list" | "List" | "tuple" | "Tuple" => "List<Value>".to_string(),
-        "dict" | "Dict" | "Dictionary" | "Mapping" | "MutableMapping" => "Data".to_string(),
-        "set" | "Set" | "FrozenSet" | "MutableSet" => "Data".to_string(),
+        "dict" | "Dict" | "Dictionary" | "Mapping" | "MutableMapping" => "Blob".to_string(),
+        "set" | "Set" | "FrozenSet" | "MutableSet" => "Blob".to_string(),
 
         // Optional types
         "optional" | "Optional" => "Value".to_string(), // Optional[X] needs special handling
@@ -434,11 +434,11 @@ pub fn py_type_to_briev(py_type: &str) -> String {
                 || t.starts_with("Mapping[")
                 || t.starts_with("mapping[")
             {
-                "Data".to_string()
+                "Blob".to_string()
             } else if t.starts_with("Tuple[") || t.starts_with("tuple[") {
                 "List<Value>".to_string()
             } else if t.starts_with("Set[") || t.starts_with("set[") {
-                "Data".to_string()
+                "Blob".to_string()
             } else if t.starts_with("Callable[") || t.starts_with("Callable(") {
                 "Value".to_string()
             } else if t.starts_with("Generator[") || t.starts_with("generator[") {

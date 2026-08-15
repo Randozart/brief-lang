@@ -626,7 +626,7 @@ impl LlvmBackend {
         reg: &TypedRegister,
     ) -> String {
         if self.is_protocol_member(&reg.ty, "#String")
-            || self.is_protocol_member(&reg.ty, "#Data")
+            || self.is_protocol_member(&reg.ty, "#Blob")
         {
             let p = self.next_reg_with_prefix("ptri");
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
@@ -699,9 +699,9 @@ impl LlvmBackend {
         };
         // 2026-08-01 (B4): is_string_like (the 2-field structural heuristic)
         // retired — protocol membership only. A trigger whose type is a
-        // #String or #Data member carries a pointer-typed payload.
+        // #String or #Blob member carries a pointer-typed payload.
         self.is_protocol_member(&trg.ty, "#String")
-            || self.is_protocol_member(&trg.ty, "#Data")
+            || self.is_protocol_member(&trg.ty, "#Blob")
     }
 
     /// Emit a cached projection: load valid flag, branch on hit/miss.
@@ -1134,7 +1134,7 @@ impl LlvmBackend {
         let is_like = |t: &Type| -> bool {
             let is_data = self.ctx.type_universe.as_ref()
                 .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
-                .map(|rt| rt.properties.contains_key("Cast.#Data"))
+                .map(|rt| rt.properties.contains_key("Cast.#Blob"))
                 .unwrap_or(false);
             self.is_protocol_member(t, "#String")
                 || is_data
@@ -1304,11 +1304,11 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#String")
     }
 
-    /// 2026-08-07 (Phase 7): is `ty` a #Data operand (the [len][bytes]
+    /// 2026-08-07 (Phase 7): is `ty` a Blob operand (the [len][bytes]
     /// byte-buffer protocol)? Resolved via the casting graph — never by type
-    /// name (rules 14/18).
-    pub(super) fn is_data_operand(&self, ty: &Type) -> bool {
-        self.is_protocol_member(ty, "#Data")
+    /// name (rules 14/18). 2026-08-15 (fundamentals): `#Blob` → `Blob`.
+    pub(super) fn is_blob_operand(&self, ty: &Type) -> bool {
+        self.is_protocol_member(ty, "#Blob")
     }
 
     /// 2026-08-04 (compiler-in-Briev): is the receiver of a String operation
@@ -2130,11 +2130,11 @@ impl LlvmBackend {
             writeln!(out, "{}{} = zext i32 {} to i64", indent, tr, reg.name).ok();
             return tr;
         }
-        // #String / #Data protocol: a String is a ptr to [len][bytes] (B0),
+        // #String / #Blob protocol: a String is a ptr to [len][bytes] (B0),
         // so adapting to i64 is a ptrtoint. The SSO handle-extraction branch
         // was retired in B4.
         let is_string = self.is_protocol_member(ty, "#String");
-        let is_data = self.is_protocol_member(ty, "#Data");
+        let is_data = self.is_protocol_member(ty, "#Blob");
         if is_string || is_data {
             let tr = self.fun.gen_reg();
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tr, reg.name).ok();

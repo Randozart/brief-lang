@@ -373,7 +373,7 @@ impl LlvmBackend {
                         // value's SSA type matches its register. Previously the
                         // param was typed `int()`, which on wasm32 is i32, so a
                         // String param was re-widened (`sext i32`) on store.
-                        if self.is_string_operand(&ty) || self.is_data_operand(&ty) {
+                        if self.is_string_operand(&ty) || self.is_blob_operand(&ty) {
                             let p = self.fun.gen_reg();
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, loaded).ok();
                             TypedRegister { name: p, ty }
@@ -515,7 +515,7 @@ impl LlvmBackend {
                             name: fl,
                             ty: Type::float(),
                         }
-                    } else if self.is_string_operand(&briev_ty) || self.is_data_operand(&briev_ty) {
+                    } else if self.is_string_operand(&briev_ty) || self.is_blob_operand(&briev_ty) {
                         // 2026-08-01 (B0): A Briev String value is a ptr to a
                         // length-prefixed [len][bytes] buffer. State slots hold
                         // the address as an i64 machine word (uniform %State
@@ -524,7 +524,7 @@ impl LlvmBackend {
                         // mirroring the float unboxing branches above and the
                         // Ptr<T> state-adapter pattern.
                         // 2026-08-07 (Phase 7): Data shares the [len][bytes]
-                        // representation (#Data protocol) — its state slots
+                        // representation (#Blob protocol) — its state slots
                         // must inttoptr the same way.
                         let str_p = self.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_p, loaded).ok();
@@ -1620,7 +1620,7 @@ impl LlvmBackend {
             }
         };
         // Byte-buffer object → the byte gather; result is a ptr-typed Data.
-        if self.is_string_operand(&op.obj_reg.ty) || self.is_data_operand(&op.obj_reg.ty) {
+        if self.is_string_operand(&op.obj_reg.ty) || self.is_blob_operand(&op.obj_reg.ty) {
             let data_ptr = op.obj_reg.name.clone();
             let r = self.fun.gen_reg();
             writeln!(
@@ -1631,7 +1631,7 @@ impl LlvmBackend {
             .ok();
             return TypedRegister {
                 name: r,
-                ty: Type::Custom("Data".into()),
+                ty: Type::Custom("Blob".into()),
             };
         }
         if matches!(&op.obj_reg.ty, Type::Bits(_)) {
@@ -1649,7 +1649,7 @@ impl LlvmBackend {
             .ok();
             return TypedRegister {
                 name: r,
-                ty: Type::Custom("Data".into()),
+                ty: Type::Custom("Blob".into()),
             };
         }
         // Heap List value (`List<Int>` — a `[len, e0, e1, …]` i64 buffer
@@ -2067,7 +2067,7 @@ impl LlvmBackend {
         let str_p = self.fun.gen_reg();
         writeln!(out, "{}{} = bitcast <{{ i64, [{} x i8] }}>* {} to ptr",
             indent, str_p, bytes.len(), g).ok();
-        TypedRegister { name: str_p, ty: Type::Custom("Data".into()) }
+        TypedRegister { name: str_p, ty: Type::Custom("Blob".into()) }
     }
 
     // 2026-07-22: Legacy string literal emission (SSO OFF).
@@ -2815,10 +2815,10 @@ impl LlvmBackend {
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
                  }
-                 // 2026-08-06 (Phase 7): `x.^Length` on a #Data — the byte length
+                 // 2026-08-06 (Phase 7): `x.^Length` on a #Blob — the byte length
                  // is the [len] header of the [len][bytes] handle (O(1), no
                  // codepoint scan). Data values are ptr handles like Strings.
-                 ty if matches!(ty, Type::Custom(n) if n == "Data") => {
+                 ty if matches!(ty, Type::Custom(n) if n == "Blob") => {
                      let r = self.fun.gen_reg();
                      writeln!(out, "{}{} = load i64, ptr {}", indent, r, recv_reg.name).ok();
                      TypedRegister { name: r, ty: Type::int() }
@@ -3603,7 +3603,7 @@ impl LlvmBackend {
             .map(|(arg, (_, param_ty))| {
                 let param_is_ptr = matches!(param_ty, Type::Ptr(_))
                     || self.is_string_operand(param_ty)
-                    || self.is_data_operand(param_ty);
+                    || self.is_blob_operand(param_ty);
                 if param_is_ptr && arg.ty == Type::int() {
                     let ptr_reg = self.fun.gen_reg();
                     writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
@@ -4362,7 +4362,7 @@ impl LlvmBackend {
         }
         match kind {
             crate::ast::BinaryOpKind::Add => {
-                // 2026-08-03: `+` is string concat for #String/#Data operands
+                // 2026-08-03: `+` is string concat for #String/#Blob operands
                 // (the `++`/Concat operation; + reads naturally and resolves
                 // to the same concat binding in the typechecker).
                 if self.is_string_operand(&l.ty) || self.is_string_operand(&r.ty) {

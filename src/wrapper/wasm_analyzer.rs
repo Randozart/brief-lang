@@ -179,7 +179,7 @@ fn wat_type_to_briev(wat_type: &str) -> String {
     match wat_type.trim() {
         "i32" | "i64" => "Int".to_string(),
         "f32" | "f64" => "Float".to_string(),
-        "v128" => "Data".to_string(),
+        "v128" => "Blob".to_string(),
         _ => "Int".to_string(),
     }
 }

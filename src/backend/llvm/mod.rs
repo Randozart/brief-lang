@@ -1289,7 +1289,7 @@ impl LlvmBackend {
                     format!("i{}", bits)
                 } else if rt.properties.contains_key("Cast.#Bool")
                     || rt.properties.contains_key("Cast.#String")
-                    || rt.properties.contains_key("Cast.#Data")
+                    || rt.properties.contains_key("Cast.#Blob")
                     || rt.properties.contains_key("Cast.#Char")
                 {
                     // 2026-08-10: boxed scalar/pointer types stay i64 —
@@ -1879,7 +1879,7 @@ impl LlvmBackend {
 
     /// Scan the typed program for constructs that are forbidden in embedded mode.
     ///
-    /// 2026-08-04 (Phase 4, .ebv heap reframe): heap types (#String/#Data/List/
+    /// 2026-08-04 (Phase 4, .ebv heap reframe): heap types (#String/#Blob/List/
     /// HashMap/…) are now LEGAL on the embedded target — the static bump arena
     /// (@embedded_heap) provides a heap without @malloc/briev_rt.c. The old
     /// hard rejection was a vestige of the pre-split .ebv/.cbv entanglement
@@ -1929,12 +1929,12 @@ impl LlvmBackend {
         // 2026-08-01 (B4): is_string_like (2-field structural) retired —
         // protocol membership only. A #String value is a ptr to a
         // heap-allocated [len][bytes] buffer (allocated at init/FFI time).
-        // #Data values are also pointers. UTF8View/StaticString/SmallString64
+        // #Blob values are also pointers. UTF8View/StaticString/SmallString64
         // (legacy stack types) are retired.
         if self.is_protocol_member(ty, "#String") {
             return true;
         }
-        if self.is_protocol_member(ty, "#Data") {
+        if self.is_protocol_member(ty, "#Blob") {
             return true;
         }
         ty.universe_key()
@@ -4309,7 +4309,7 @@ impl LlvmBackend {
             // from i32 on wasm32.
             let word64 = if self.llvm_type(&word.ty) == "i64" {
                 word.name.clone()
-            } else if self.is_string_operand(&word.ty) || self.is_data_operand(&word.ty) {
+            } else if self.is_string_operand(&word.ty) || self.is_blob_operand(&word.ty) {
                 let p = self.fun.gen_reg();
                 writeln!(out, "  {} = ptrtoint {} {} to i64", p, self.llvm_type(&word.ty), word.name).ok();
                 p

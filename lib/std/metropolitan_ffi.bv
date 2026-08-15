@@ -76,19 +76,19 @@ defn map_ffi_to_memory(
 // ===== DATA MARSHALLING =====
 
 // Write data to shared memory
-defn write_to_shared(region: SharedRegion, offset: Int, data: Data) -> Result<Void, String> {
+defn write_to_shared(region: SharedRegion, offset: Int, data: Blob) -> Result<Void, String> {
     when offset + data .^Length <= region.size {
         // Write data to shared memory at offset
         term Ok();
     };
-    term Err("Data exceeds region bounds");
+    term Err("Blob exceeds region bounds");
 }
 
 // Read data from shared memory
-defn read_from_shared(region: SharedRegion, offset: Int, size: Int) -> Result<Data, String> {
+defn read_from_shared(region: SharedRegion, offset: Int, size: Int) -> Result<Blob, String> {
     when offset + size <= region.size {
         // Read data from shared memory at offset
-        term Ok(Data::from_size(size));
+        term Ok(Blob::from_size(size));
     };
     term Err("Read exceeds region bounds");
 }
@@ -196,7 +196,7 @@ defn create_metropolitan_channel(
 }
 
 // Send a request through Metropolitan channel
-defn metropolitan_send(channel: MetropolitanChannel, request: Data) -> Result<Void, String> {
+defn metropolitan_send(channel: MetropolitanChannel, request: Blob) -> Result<Void, String> {
     // Write request to request_region
     write_to_shared(channel.request_region, 0, request)?;
     
@@ -209,7 +209,7 @@ defn metropolitan_send(channel: MetropolitanChannel, request: Data) -> Result<Vo
 }
 
 // Receive a response from Metropolitan channel
-defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Result<Data, String> {
+defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Result<Blob, String> {
     let start_time: Int = 0;  // Would use time.now()
     
     when time.now() - start_time < timeout_ms {
@@ -239,9 +239,9 @@ defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Resu
 // Example: Call a foreign function through Metropolitan FFI
 defn call_foreign_function(
     channel: MetropolitanChannel,
-    input: Data,
+    input: Blob,
     timeout_ms: Int
-) -> Result<Data, String> {
+) -> Result<Blob, String> {
     // Send request
     metropolitan_send(channel, input)?;
     

@@ -256,7 +256,7 @@ impl LlvmBackend {
             let len = self.fun.gen_reg();
             writeln!(out, "{}{} = load i64, ptr {}", indent, len, lreg.name).ok();
             IterKind::String { ptr: lreg.name.clone(), len }
-        } else if self.is_data_operand(&lreg.ty) {
+        } else if self.is_blob_operand(&lreg.ty) {
             let len = self.fun.gen_reg();
             writeln!(out, "{}{} = load i64, ptr {}", indent, len, lreg.name).ok();
             IterKind::Data { ptr: lreg.name.clone(), len }
@@ -1452,7 +1452,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // see a ptr, not the raw handle. `element_ty` is the
                     // DECLARED element type (the At member's return after
                     // substitution), which the load's register type may not be.
-                    if backend.is_string_operand(element_ty) || backend.is_data_operand(element_ty) {
+                    if backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty) {
                         let p = backend.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, at.name).ok();
                         at.name = p;
@@ -1469,7 +1469,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let arg = Expr::Identifier(cur_tmp);
                     let out_tmp = backend.fun.gen_reg();
                     let mut item = backend.emit_method_call(out, &out_tmp, list, "Current", &[arg], indent);
-                    if backend.is_string_operand(element_ty) || backend.is_data_operand(element_ty) {
+                    if backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty) {
                         let p = backend.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, item.name).ok();
                         item.name = p;

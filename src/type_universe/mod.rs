@@ -150,7 +150,7 @@ impl TypeUniverse {
             // the generic "Bit" fallback (which produced i64). The graph already
             // had a Char lane (Fixed("i32")).
             ("Char",   4, 32, 32, 4, &[("Cast.#Char", "true"), ("Cast.#Bit", "true")]),
-            ("Data",   8, 64, 64, 8, &[("Cast.#Data", "true"), ("Cast.#Bit", "true")]),
+            ("Blob",   8, 64, 64, 8, &[("Cast.#Blob", "true"), ("Cast.#Bit", "true")]),
             ("Void",   0, 0,  0,  0, &[]),
         ];
         for &(name, bytes, min_bits, max_bits, alignment, extras) in PRIMORDIALS {

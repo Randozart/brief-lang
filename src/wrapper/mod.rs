@@ -161,7 +161,7 @@ pub fn c_type_to_briev(c_type: &str) -> String {
         "float" | "double" | "float32" | "float64" => "Float".to_string(),
         "char*" | "const char*" | "char []" => "String".to_string(),
         "bool" | "_Bool" => "Bool".to_string(),
-        "void*" | "void *" | "int*" | "float*" => "Data".to_string(),
+        "void*" | "void *" | "int*" | "float*" => "Blob".to_string(),
         _ => format!("Custom({})", c_type),
     }
 }

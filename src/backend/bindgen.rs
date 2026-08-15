@@ -115,7 +115,7 @@ fn type_to_rust(ty: &crate::ast::Type, universe: &TypeUniverse) -> String {
         crate::ast::Type::Custom(__t) if __t == "Float" => "f32".to_string(),
         crate::ast::Type::Custom(__t) if __t == "Bool" => "u8".to_string(),
         crate::ast::Type::Custom(__t) if __t == "Char" => "u32".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "*const u8".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Blob" => "*const u8".to_string(),
         crate::ast::Type::Void => "()".to_string(),
         crate::ast::Type::Custom(name) | crate::ast::Type::Applied(name, _) => {
             if universe.types.contains_key(name) {
@@ -135,7 +135,7 @@ fn type_to_python(ty: &crate::ast::Type, universe: &TypeUniverse) -> &'static st
         crate::ast::Type::Custom(__t) if __t == "Float" => "ctypes.c_float",
         crate::ast::Type::Custom(__t) if __t == "Bool" => "ctypes.c_uint8",
         crate::ast::Type::Custom(__t) if __t == "Char" => "ctypes.c_uint32",
-        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "ctypes.c_char_p",
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Blob" => "ctypes.c_char_p",
         crate::ast::Type::Void => "None",
         crate::ast::Type::Custom(name) | crate::ast::Type::Applied(name, _) => {
             if universe.types.contains_key(name) {
@@ -155,7 +155,7 @@ fn type_to_c(ty: &crate::ast::Type, universe: &TypeUniverse) -> String {
         crate::ast::Type::Custom(__t) if __t == "Float" => "float".to_string(),
         crate::ast::Type::Custom(__t) if __t == "Bool" => "uint8_t".to_string(),
         crate::ast::Type::Custom(__t) if __t == "Char" => "uint32_t".to_string(),
-        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "struct BrievString".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Blob" => "struct BrievString".to_string(),
         crate::ast::Type::Void => "void".to_string(),
         crate::ast::Type::Custom(name) => {
             if universe.types.contains_key(name) {
@@ -251,7 +251,7 @@ fn type_name_to_rust(type_name: &str, universe: &TypeUniverse) -> String {
         "Float" => "f32".to_string(),
         "Bool" => "u8".to_string(),
         "Char" => "u32".to_string(),
-        "String" | "Data" => "*const u8".to_string(),
+        "String" | "Blob" => "*const u8".to_string(),
         "Void" => "()".to_string(),
         _ => {
             if universe.types.contains_key(type_name) {

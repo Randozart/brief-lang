@@ -48,7 +48,7 @@ impl<'a> Parser<'a> {
     fn prescan_known_types(&mut self) {
         for name in [
             "Int", "UInt", "Float", "Float32", "F32", "Float64", "F64", "Double",
-            "String", "Bool", "Void", "Char", "Data", "Bit", "bits", "Ptr",
+            "String", "Bool", "Void", "Char", "Blob", "Bit", "bits", "Ptr",
         ] {
             self.known_types.insert(name.to_string());
         }

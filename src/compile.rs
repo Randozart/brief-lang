@@ -792,7 +792,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             ));
         }
     }
-    // 2026-08-03: `+` is string concat for #String/#Data operands — rewrite
+    // 2026-08-03: `+` is string concat for #String/#Blob operands — rewrite
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).
     briev_compiler::analysis::string_concat::rewrite_plus_concat(&mut items, &universe);

@@ -90,8 +90,8 @@ impl Type {
     pub fn char_() -> Type {
         Type::Custom("Char".to_string())
     }
-    pub fn data() -> Type {
-        Type::Custom("Data".to_string())
+    pub fn blob() -> Type {
+        Type::Custom("Blob".to_string())
     }
     pub fn void() -> Type {
         Type::Void

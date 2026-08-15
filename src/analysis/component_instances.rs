@@ -1460,7 +1460,7 @@ render Root {
         let src = r#"
 obj Counter {
     count: Int;
-    buf: Data;
+    buf: Blob;
 };
 render Counter {
     <span b-text="count">0</span>

@@ -456,7 +456,7 @@ impl<'a> Parser<'a> {
             Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::RawString(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::ByteString(s), _)) => {
-                // 2026-08-06 (Phase 7): `#b"..."` is a Data byte literal (SPEC
+                // 2026-08-06 (Phase 7): `#b"..."` is a Blob byte literal (SPEC
                 // 16.2). Tagged with prefix "b" so the typechecker types it as
                 // Data, not String.
                 Ok(Expr::TaggedQuotedLiteral(s, "b".to_string()))
@@ -653,7 +653,7 @@ impl<'a> Parser<'a> {
             "Bool" => crate::ast::Type::bool_(),
             "Void" => crate::ast::Type::void(),
             "Char" => crate::ast::Type::char_(),
-            "Data" => crate::ast::Type::data(),
+            "Blob" => crate::ast::Type::blob(),
             "Bit" | "bits" => crate::ast::Type::Bits(0),
             other if other.starts_with('#') => {
                 // Bare hashwords resolve to their default variant (mirrors

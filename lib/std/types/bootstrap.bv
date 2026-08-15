@@ -88,7 +88,10 @@ type String: #String {
 // (ptr to [len][bytes]) with no fields. Their modules (utf8view.bv,
 // small_string.bv) were deleted.
 
-type Data: Int { spec Bits: 64; };
+// 2026-08-15 (fundamentals-as-types): the byte-buffer type is `Blob` (the
+// [len][bytes] buffer with no encoding interpretation); `Data` is reserved
+// for the universal parent (root). `#b"..."` literals are Blob-typed.
+type Blob: Int { spec Bits: 64; };
 
 // 2026-07-30: Slice<T> — fat-pointer view over contiguous elements.
 // LLVM type { ptr, i64 } derived from field shapes by emit_toplevel.rs:llvm_type().

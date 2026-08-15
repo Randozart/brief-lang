@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
                     "Bool" => ("Bool", Type::bool_()),
                     "Void" => return Ok(Type::void()),
                     "Char" => ("Char", Type::char_()),
-                    "Data" => ("Data", Type::data()),
+                    "Blob" => ("Blob", Type::blob()),
                     // 2026-08-03: callback/function-pointer type annotation:
                     //   fn(Int) -> Int  /  fn(Int)  (void return)
                     // Crosses an FFI boundary as an opaque function pointer.

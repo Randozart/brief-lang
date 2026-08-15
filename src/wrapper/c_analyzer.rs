@@ -193,6 +193,6 @@ mod tests {
         assert_eq!(c_type_to_briev("int"), "Int");
         assert_eq!(c_type_to_briev("float"), "Float");
         assert_eq!(c_type_to_briev("char*"), "String");
-        assert_eq!(c_type_to_briev("void*"), "Data");
+        assert_eq!(c_type_to_briev("void*"), "Blob");
     }
 }

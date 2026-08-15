@@ -192,7 +192,7 @@ mod tests {
     fn init_bound_pool_is_sealed() {
         let items = parse_program(
             "init PoolCap: Int = 64;\n\
-             let pool: Data = Malloc#(PoolCap);\n\
+             let pool: Blob = Malloc#(PoolCap);\n\
              node go [true][true] { term; };\n",
         );
         let report = run_memcheck(&items);
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn non_init_heap_field_is_not_sealed() {
         let items = parse_program(
-            "let pool: Data = Malloc#(100);\n\
+            "let pool: Blob = Malloc#(100);\n\
              node go [true][true] { term; };\n",
         );
         let report = run_memcheck(&items);
