@@ -2671,9 +2671,27 @@ fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
             }
         }
         // Grow/Shrink are strategy bindings (`op Grow: grow(#Lh)`) — the
-        // handle-only form is enforced by the op-binding resolution (the
-        // binding carries `#Lh`; a two-arg form fails to resolve). No
-        // per-binding param check here.
+        // handle-only form (ambiguity #2): a two-arg binding is an error.
+        if let TopLevel::TypeDef(t) = item {
+            for b in &t.body.op_bindings {
+                if matches!(b.name.as_str(), "Grow" | "Shrink") {
+                    let arg_count = match &b.expr {
+                        Expr::Call(_, args, _) => args.len(),
+                        _ => 0,
+                    };
+                    if arg_count > 1 {
+                        errors.push(TypeError::InvalidOperation {
+                            operation: format!(
+                                "`op {}` on a `coll` type takes the collection handle only (`#Lh`); \
+                                 found {arg_count} args",
+                                b.name
+                            ),
+                            type_name: name.to_string(),
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -5965,6 +5983,31 @@ node go [done == 0][done == 1] {
     assert!(
         check(non_coll).is_err(),
         "non-coll obj .^Length must error (no compiler-owned length)"
+    );
+}
+
+/// 2026-08-15 (coll plan §3.2, ambiguity #2): `op Grow`/`op Shrink` bindings
+/// take the collection handle only (`#Lh`); a two-arg form is an error.
+#[test]
+fn coll_grow_binding_is_handle_only() {
+    let ok = r#"
+coll obj MyQueue {
+    data: Ptr<Int>;
+    op Grow: grow(#Lh);
+};
+node start [true][false] { term; };
+"#;
+    assert!(check(ok).is_ok(), "handle-only op Grow must type");
+    let bad = r#"
+coll obj MyQueue {
+    data: Ptr<Int>;
+    op Grow: grow(#Lh, #Rh);
+};
+node start [true][false] { term; };
+"#;
+    assert!(
+        check(bad).is_err(),
+        "two-arg op Grow must error (handle-only)"
     );
 }
 }
