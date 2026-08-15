@@ -177,6 +177,10 @@ typing and generic-txn blockers are resolved:
   nullary construction is unverified. These are a stdlib-cleanup pass
   (separate from the dispatch core).
 
+> **2026-08-14 handoff:** the stdlib-cleanup pass is now its own plan —
+> `docs/plans/2026-08-14-stdlib-cleanup.md`. See it for the free-`T`-body
+> (`Type::Generic`), `Option` constructor, and `new_map` work items.
+
 **Additional commit `7972e4d2` (`term` canonical result placeholder):** a
 follow-up that came up during generic-contract testing. `term` in a defn/txn
 POST-condition is now bound to the declared output type during elaboration
