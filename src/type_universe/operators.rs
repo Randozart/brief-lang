@@ -148,9 +148,12 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     }
     // base-chain fallback (the normalizer no longer injects Cast. for
     // subtypes) — `type Latin1String: #String` ⇒ base "String".
+    // 2026-08-15 (fundamentals): Data is the universal parent — a type whose
+    // base is Data resolves to Data; Bit is the leaf bit type.
     let base = rt.base.trim_start_matches('#');
     match base {
-        "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob" => {
+        "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob"
+        | "Data" | "Bit" => {
             Some(base.to_string())
         }
         _ => None,

@@ -380,7 +380,7 @@ mod tests {
         for &(name, bytes, alignment) in pairs {
             u.types.insert(name.to_string(), crate::type_universe::ResolvedType {
                 name: name.to_string(),
-                base: "Bit".to_string(),
+                base: "Data".to_string(),
                 bytes,
                 min_bits: bytes * 8,
                 max_bits: bytes * 8,

@@ -91,12 +91,29 @@ impl TypeUniverse {
     /// from bytes) doesn't re-derive well-known types as raw integers.
     /// Hashword op signatures are the new dispatch mechanism.
     fn seed_primordial_types(&mut self) {
-        // 2026-07-30: Bit is the axiomatic anchor — NOT a primordial.
+        // 2026-07-30: Data is the universal parent — NOT a primordial.
         // It cannot be overloaded or redeclared. Primordials are
-        // overrideable; Bit is the compiler's sole hardcoded constant.
+        // overrideable; Data is the compiler's sole hardcoded constant.
+        // 2026-08-15 (fundamentals): Bit was the axiomatic anchor; Data
+        // replaces it as the universal parent (raw storage root). Bit<N>
+        // is the bit type, still composed of Cast.Bit (treat-as-bits).
+        self.types.insert("Data".to_string(), ResolvedType {
+            name: "Data".to_string(),
+            base: "Data".to_string(),
+            bytes: 0,
+            min_bits: 0,
+            max_bits: 0,
+            alignment: 0,
+            properties: {
+                let mut p = std::collections::HashMap::new();
+                p.insert("Cast.Data".into(), crate::ast::PropertyValue::Bool(true));
+                p
+            },
+            fields: vec![],
+        });
         self.types.insert("Bit".to_string(), ResolvedType {
             name: "Bit".to_string(),
-            base: "Bit".to_string(),
+            base: "Data".to_string(),
             bytes: 0,
             min_bits: 0,
             max_bits: 0,
@@ -120,19 +137,19 @@ impl TypeUniverse {
         const PRIMORDIALS: &[(&str, u64, u64, u64, u64, &[(&str, &str)])] = &[
             // 2026-07-29: Flexible protocol types — all fields resolved by normalizer from int_bits.
             // No baked-in width, alignment, or bytes. Every value is 0 = "not yet resolved."
-            ("Int",    0, 0, 0,  0, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt",   0, 0, 0,  0, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int",    0, 0, 0,  0, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt",   0, 0, 0,  0, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
             // Fixed-width integer types — exact bit width is absolute
-            ("Int8",   1, 8, 8,  1, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt8",  1, 8, 8,  1, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
-            ("Int16",  2, 16, 16, 2, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt16", 2, 16, 16, 2, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
-            ("Int32",  4, 32, 32, 4, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt32", 4, 32, 32, 4, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
-            ("Int64",  8, 64, 64, 8, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt64", 8, 64, 64, 8, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
-            ("Int128", 16, 128, 128, 16, &[("Cast.Int", "true"), ("Cast.Bit", "true")]),
-            ("UInt128",16, 128, 128, 16, &[("Cast.UInt", "true"), ("Cast.Bit", "true")]),
+            ("Int8",   1, 8, 8,  1, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt8",  1, 8, 8,  1, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("Int16",  2, 16, 16, 2, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt16", 2, 16, 16, 2, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("Int32",  4, 32, 32, 4, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt32", 4, 32, 32, 4, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("Int64",  8, 64, 64, 8, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt64", 8, 64, 64, 8, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("Int128", 16, 128, 128, 16, &[("Cast.Int", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("UInt128",16, 128, 128, 16, &[("Cast.UInt", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
             // Floating-point types — bit-width is accuracy, not maximum storage.
             // Each float type carries an explicit bits property for the normalizer.
             ("Half",   2, 16, 16, 2, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "16")]),
@@ -144,13 +161,13 @@ impl TypeUniverse {
             ("X86_FP80",10, 80, 80, 4, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "80")]),
             ("FP128",  16, 128, 128, 16, &[("Cast.Float", "true"), ("Cast.Bit", "true"), ("bits", "128")]),
             // Other
-            ("Bool",   1, 8, 8,  1, &[("Cast.Bool", "true"), ("Cast.Bit", "true")]),
+            ("Bool",   1, 8, 8,  1, &[("Cast.Bool", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
             // 2026-07-31: Phase 3 (§8.4) — Char gains Cast.Char so the casting
             // graph resolves Char → category "Char" → Fixed("i32") instead of
             // the generic "Bit" fallback (which produced i64). The graph already
             // had a Char lane (Fixed("i32")).
-            ("Char",   4, 32, 32, 4, &[("Cast.Char", "true"), ("Cast.Bit", "true")]),
-            ("Blob",   8, 64, 64, 8, &[("Cast.Blob", "true"), ("Cast.Bit", "true")]),
+            ("Char",   4, 32, 32, 4, &[("Cast.Char", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
+            ("Blob",   8, 64, 64, 8, &[("Cast.Blob", "true"), ("Cast.Data", "true"), ("Cast.Bit", "true")]),
             ("Void",   0, 0,  0,  0, &[]),
         ];
         for &(name, bytes, min_bits, max_bits, alignment, extras) in PRIMORDIALS {
@@ -166,7 +183,9 @@ impl TypeUniverse {
             }
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
-                base: "Bit".to_string(),
+                // 2026-08-15 (fundamentals): every type refines through Data
+                // (the universal parent / raw storage root).
+                base: "Data".to_string(),
                 bytes,
                 min_bits,
                 max_bits,
@@ -199,7 +218,7 @@ impl TypeUniverse {
             p.insert("Cast.String".into(), crate::ast::PropertyValue::String("true".into()));
             self.types.insert("String".to_string(), ResolvedType {
                 name: "String".to_string(),
-                base: "Bit".to_string(),
+                base: "Data".to_string(),
                 bytes: 0,
                 min_bits: 0,
                 max_bits: 0,

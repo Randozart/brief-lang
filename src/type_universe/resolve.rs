@@ -20,7 +20,7 @@ pub fn resolve_type(universe: &TypeUniverse, ty: &crate::ast::Type) -> Option<Re
             let bytes = n.div_ceil(8);
             Some(ResolvedType {
                 name: format!("Bits({})", n),
-                base: "Bit".into(),
+                base: "Data".into(),
                 bytes,
                 min_bits: *n,
                 max_bits: *n,
@@ -41,7 +41,7 @@ pub fn resolve_type(universe: &TypeUniverse, ty: &crate::ast::Type) -> Option<Re
         }),
         crate::ast::Type::Void => Some(ResolvedType {
             name: "Void".into(),
-            base: "Bit".into(),
+            base: "Data".into(),
             bytes: 0,
             min_bits: 0,
             max_bits: 0,

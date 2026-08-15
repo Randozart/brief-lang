@@ -150,40 +150,49 @@ impl CastingGraph {
     /// Seed all 64 base protocol → base protocol lanes.
     fn seed_base_lanes(&mut self) {
         // All 8 base protocol categories.
-        // "Bit" is the root — every other protocol has a direct lane to/from Bit.
+        // "Data" is the root — every other protocol has a direct lane to/from Data.
+        // 2026-08-15 (fundamentals): Data (raw storage, the universal parent)
+        // replaces Bit as the graph root. Bit<N> remains the bit type; its
+        // treat-as-bits membership (Cast.Bit) is distinct from the Cast.Data
+        // storage membership every type carries.
         //
         // Convention: we populate both directions for clarity. The graph is
         // symmetric: (A,B) means A→B lane, (B,A) means B→A lane.
 
-        // ── Bit ⇄ Int ──────────────────────────────────────────────
-        self.set_lane("Bit", "Int", LaneKind::Bitcast);
-        self.set_lane("Int", "Bit", LaneKind::Bitcast);
-        // ── Bit ⇄ UInt ─────────────────────────────────────────────
-        self.set_lane("Bit", "UInt", LaneKind::Bitcast);
-        self.set_lane("UInt", "Bit", LaneKind::Bitcast);
-        // ── Bit ⇄ Float ────────────────────────────────────────────
-        self.set_lane("Bit", "Float", LaneKind::Bitcast);
-        self.set_lane("Float", "Bit", LaneKind::Bitcast);
-        // ── Bit ⇄ String ───────────────────────────────────────────
-        // 2026-08-01 (B2): #Bit→#String is the ENCODING DOOR — a CastFrom(#Bit)
+        // ── Data ⇄ Int ─────────────────────────────────────────────
+        self.set_lane("Data", "Int", LaneKind::Bitcast);
+        self.set_lane("Int", "Data", LaneKind::Bitcast);
+        // ── Data ⇄ UInt ────────────────────────────────────────────
+        self.set_lane("Data", "UInt", LaneKind::Bitcast);
+        self.set_lane("UInt", "Data", LaneKind::Bitcast);
+        // ── Data ⇄ Float ───────────────────────────────────────────
+        self.set_lane("Data", "Float", LaneKind::Bitcast);
+        self.set_lane("Float", "Data", LaneKind::Bitcast);
+        // ── Data ⇄ String ──────────────────────────────────────────
+        // 2026-08-01 (B2): Data→String is the ENCODING DOOR — a CastFrom(Data)
         // callback (UTF8 wrap default, materializing the [len][bytes] header by
-        // construction; sub-protocols override via register_cast_from_bit). It
+        // construction; sub-protocols override via register_cast_from_data). It
         // is NOT a bitcast: wrapping must produce a header-prefixed buffer.
-        self.set_lane("Bit", "String", LaneKind::CastFromBitCallback);
-        // #String→#Bit: the CONTENT VIEW — a String value IS a ptr to
+        self.set_lane("Data", "String", LaneKind::CastFromBitCallback);
+        // String→Data: the CONTENT VIEW — a String value IS a ptr to
         // [len][bytes], so the cast yields the buffer address (ptrtoint, one
         // instruction). Zero-length/identity at the register level; never
         // overridable (the representation is compiler-guaranteed).
-        self.set_lane("String", "Bit", LaneKind::PtrToInt);
-        // ── Bit ⇄ Bool ─────────────────────────────────────────────
-        self.set_lane("Bit", "Bool", LaneKind::Trunc);    // i64 → i8
-        self.set_lane("Bool", "Bit", LaneKind::ZExt);     // i8 → i64
-        // ── Bit ⇄ Char ─────────────────────────────────────────────
-        self.set_lane("Bit", "Char", LaneKind::Trunc);    // i64 → i32
-        self.set_lane("Char", "Bit", LaneKind::ZExt);     // i32 → i64
-        // ── Bit ⇄ Data ──────────────────────────────────────────────
-        self.set_lane("Bit", "Blob", LaneKind::IntToPtr); // i64 → ptr
-        self.set_lane("Blob", "Bit", LaneKind::PtrToInt); // ptr → i64
+        self.set_lane("String", "Data", LaneKind::PtrToInt);
+        // ── Data ⇄ Bool ────────────────────────────────────────────
+        self.set_lane("Data", "Bool", LaneKind::Trunc);    // i64 → i8
+        self.set_lane("Bool", "Data", LaneKind::ZExt);     // i8 → i64
+        // ── Data ⇄ Char ────────────────────────────────────────────
+        self.set_lane("Data", "Char", LaneKind::Trunc);    // i64 → i32
+        self.set_lane("Char", "Data", LaneKind::ZExt);     // i32 → i64
+        // ── Data ⇄ Blob ────────────────────────────────────────────
+        self.set_lane("Data", "Blob", LaneKind::IntToPtr); // i64 → ptr
+        self.set_lane("Blob", "Data", LaneKind::PtrToInt); // ptr → i64
+        // ── Data ⇄ Bit ─────────────────────────────────────────────
+        // Bit<N> is the bit type (a Data member). The treat-as-bits view is
+        // raw storage reinterpretation.
+        self.set_lane("Data", "Bit", LaneKind::Bitcast);
+        self.set_lane("Bit", "Data", LaneKind::Bitcast);
 
         // ── Int ⇄ UInt ────────────────────────────────────────────
         self.set_lane("Int", "UInt", LaneKind::Bitcast); // same representation
@@ -542,14 +551,41 @@ impl CastingGraph {
         if src_cat == dst_cat {
             return Some(vec![]); // identity
         }
-        let lane = self.get_lane(src_cat, dst_cat)?;
-        Some(vec![CastStep {
-            lane: lane.clone(),
-            src_category: src_cat.to_string(),
-            src_variant: String::new(),
-            dst_category: dst_cat.to_string(),
-            dst_variant: String::new(),
-        }])
+        if let Some(lane) = self.get_lane(src_cat, dst_cat) {
+            return Some(vec![CastStep {
+                lane: lane.clone(),
+                src_category: src_cat.to_string(),
+                src_variant: String::new(),
+                dst_category: dst_cat.to_string(),
+                dst_variant: String::new(),
+            }]);
+        }
+        // 2026-08-15 (fundamentals): Data is the universal root — a pair with
+        // no direct lane routes through Data (src → Data → dst). Every base
+        // protocol has a direct lane to/from Data, so the two-hop path always
+        // exists. This is what makes Data the hub without naming it at every
+        // cross-pair.
+        if src_cat != "Data" && dst_cat != "Data" {
+            if let (Some(l1), Some(l2)) = (self.get_lane(src_cat, "Data"), self.get_lane("Data", dst_cat)) {
+                return Some(vec![
+                    CastStep {
+                        lane: l1.clone(),
+                        src_category: src_cat.to_string(),
+                        src_variant: String::new(),
+                        dst_category: "Data".to_string(),
+                        dst_variant: String::new(),
+                    },
+                    CastStep {
+                        lane: l2.clone(),
+                        src_category: "Data".to_string(),
+                        src_variant: String::new(),
+                        dst_category: dst_cat.to_string(),
+                        dst_variant: String::new(),
+                    },
+                ]);
+            }
+        }
+        None
     }
 
     /// BFS through variant edges + base lane fallback for the last hop.
@@ -666,7 +702,9 @@ impl CastingGraph {
                 return (bare.to_string(), variant.clone());
             }
             Type::Custom(..) | Type::Applied(..) => {} // fall through to universe lookup
-            _ => return ("Bit".to_string(), String::new()),
+            // 2026-08-15 (fundamentals): unknown types fall back to Data (the
+            // universal parent), not Bit (which is now the leaf bit type).
+            _ => return ("Data".to_string(), String::new()),
         }
 
         // Resolve protocol category from universe properties.
@@ -675,7 +713,7 @@ impl CastingGraph {
         let key = ty.universe_key().and_then(|k| universe.get(k));
         let rt = match key {
             Some(rt) => rt,
-            None => return ("Bit".to_string(), String::new()),
+            None => return ("Data".to_string(), String::new()),
         };
 
         if rt.properties.contains_key("Cast.Float") {
@@ -709,13 +747,17 @@ impl CastingGraph {
             // previously the variant form fell through to (Bit, "").
             if let Some((cat, var)) = Self::parse_protocol_base(&rt.base) {
                 match cat.as_str() {
-                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob" => {
+                    // 2026-08-15 (fundamentals): Data and Bit are base
+                    // categories too. A type whose base is Data resolves to
+                    // Data (the universal parent).
+                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob"
+                    | "Data" | "Bit" => {
                         return (cat, var);
                     }
-                    _ => return ("Bit".to_string(), String::new()),
+                    _ => return ("Data".to_string(), String::new()),
                 }
             }
-            ("Bit".to_string(), String::new())
+            ("Data".to_string(), String::new())
         }
     }
 
@@ -854,7 +896,9 @@ mod tests {
     #[test]
     fn test_all_base_pairs_have_lanes() {
         let graph = CastingGraph::new();
-        let protocols = &["Bit", "Int", "UInt", "Float", "String", "Bool", "Char", "Blob"];
+        // 2026-08-15 (fundamentals): Data is the root; Bit<N> is the bit type
+        // (a Data member). Both are in the base-pair mesh.
+        let protocols = &["Data", "Bit", "Int", "UInt", "Float", "String", "Bool", "Char", "Blob"];
         for src in protocols {
             for dst in protocols {
                 if src == dst {
@@ -889,9 +933,10 @@ mod tests {
 
     #[test]
     fn test_string_to_bit() {
-        // 2026-08-01 (B2): #String → #Bit is the CONTENT VIEW — a String value
-        // is a ptr to [len][bytes], so the cast yields the buffer address
-        // (PtrToInt). Never overridable.
+        // 2026-08-01 (B2): String → Bit (the CONTENT VIEW) now routes through
+        // Data: String→Data is PtrToInt (a String IS a ptr to [len][bytes]),
+        // then Data→Bit is a bitcast (treat-as-bits). 2026-08-15 (fundamentals):
+        // Data replaced Bit as the root.
         let graph = CastingGraph::new();
         let path = graph.find_path("String", "", "Bit", "");
         assert!(path.is_some());
@@ -900,13 +945,15 @@ mod tests {
 
     #[test]
     fn test_bit_to_string() {
-        // 2026-08-01 (B2): #Bit → #String is the ENCODING DOOR — a
-        // CastFrom(#Bit) callback (UTF8 wrap default materializing the
-        // [len][bytes] header by construction). Not a bitcast.
+        // 2026-08-01 (B2): Bit → String (the ENCODING DOOR) now routes through
+        // Data: Bit→Data is a bitcast, then Data→String is the CastFrom(Data)
+        // callback (UTF8 wrap default materializing the [len][bytes] header).
         let graph = CastingGraph::new();
         let path = graph.find_path("Bit", "", "String", "");
         assert!(path.is_some());
-        assert_eq!(path.unwrap()[0].lane, LaneKind::CastFromBitCallback);
+        // The last hop is the encoding door.
+        let last = path.unwrap().last().unwrap().lane.clone();
+        assert_eq!(last, LaneKind::CastFromBitCallback);
     }
 
     #[test]
@@ -921,7 +968,8 @@ mod tests {
         let (cat, var) = graph.type_to_protocol(&u, &b_ty);
         assert_eq!(cat, "Bit");
         assert_eq!(var, "");
-        // And the String → Bit path (via hashword target) resolves to PtrToInt.
+        // And the String → Bit path (via hashword target) resolves: the first
+        // hop is String→Data PtrToInt.
         let path = graph.find_path("String", "", &cat, &var);
         assert!(path.is_some());
         assert_eq!(path.unwrap()[0].lane, LaneKind::PtrToInt);
@@ -980,8 +1028,9 @@ mod tests {
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Float".to_string())), ("Float".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Bool".to_string())), ("Bool".to_string(), String::new()));
         assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("Blob".to_string())), ("Blob".to_string(), String::new()));
-        // Fallback — no Cast. properties for unknown types → Bit
-        assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("UnknownType".to_string())), ("Bit".to_string(), String::new()));
+        // Fallback — no Cast. properties for unknown types → Data (the
+        // universal parent; Bit is now the leaf bit type).
+        assert_eq!(graph.type_to_protocol(&universe, &Type::Custom("UnknownType".to_string())), ("Data".to_string(), String::new()));
     }
 
     #[test]

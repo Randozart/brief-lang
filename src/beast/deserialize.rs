@@ -99,7 +99,7 @@ fn parse_universe(parts: &[SExpr]) -> Result<ResolvedType, String> {
     let name = tag(parts, 1)?.to_string();
     let mut rt = ResolvedType {
         name: name.clone(),
-        base: "Bit".into(),
+        base: "Data".into(),
         bytes: 8,
         min_bits: 0,
         max_bits: 0,

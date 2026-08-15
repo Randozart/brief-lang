@@ -89,7 +89,7 @@ pub fn static_struct_resolved_ty(
     };
     ResolvedType {
         name: def.name.clone(),
-        base: "Bit".to_string(),
+        base: "Data".to_string(),
         bytes,
         min_bits: max_bits,
         max_bits,

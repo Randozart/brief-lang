@@ -2422,7 +2422,9 @@ fn test_struct_auto_registered_in_type_universe() {
             "Struct 'Point' should be auto-registered in TypeUniverse");
         let rt = universe.types.get("Point").unwrap();
         assert_eq!(rt.bytes, 16);
-        assert_eq!(rt.base, "Bit");
+        // 2026-08-15 (fundamentals): every type's base is Data (the universal
+        // parent); Bit is the leaf bit type.
+        assert_eq!(rt.base, "Data");
     } else {
         panic!("TypeUniverse should exist after generate");
     }
