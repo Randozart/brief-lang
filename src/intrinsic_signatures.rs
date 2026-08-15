@@ -76,6 +76,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        // ── Capacity (coll plan §3.6; compiler-owned coll capacity) ─────
+        // Capacity#(h) -> Int — read the hidden cap slot.
+        "Capacity#" => Some(Signature { name: "Capacity#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        // Resize#(h, cap), EnsureCap#(h, n), TrimCap#(h) — capacity writes
+        // (return void; the coll handle is mutated in place).
+        "Resize#" => Some(Signature { name: "Resize#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: false, variadic: false }),
+        "EnsureCap#" => Some(Signature { name: "EnsureCap#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: false, variadic: false }),
+        "TrimCap#" => Some(Signature { name: "TrimCap#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: false, variadic: false }),
 
         // ── Float math (returns native Float) ─────────────────────────
         "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),

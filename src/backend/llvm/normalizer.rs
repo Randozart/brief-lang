@@ -152,7 +152,11 @@ fn build_supported_ops() -> HashSet<String> {
                     // actually declared on the receiver.
                     "At#", "Slice#", "InsertAt#", "ExtractFrom#", "CopyFrom#",
                     "Append#", "Prepend#", "Count#", "Iter#", "Step#",
-                    "IsEnd#", "Current#"] {
+                    "IsEnd#", "Current#",
+                    // 2026-08-15 (coll plan §3.6): the capacity intrinsics —
+                    // compiler-owned coll capacity control (`Capacity#`,
+                    // `Resize#`, `EnsureCap#`, `TrimCap#`).
+                    "Capacity#", "Resize#", "EnsureCap#", "TrimCap#"] {
         set.insert(name.to_string());
     }
     set

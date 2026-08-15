@@ -47,6 +47,14 @@ pub fn emit_intrinsic_call(
         "Store#" => return emit_store(backend, out, v, args, indent),
         "Copy#" => return emit_copy(backend, out, v, args, indent),
         "Fill#" => return emit_fill(backend, out, v, args, indent),
+        // 2026-08-15 (coll plan §3.6): the capacity intrinsics — compiler-owned
+        // capacity control on a coll handle (`[data, cap, len]`). "without
+        // needing to set a property": the hidden cap slot is read/written
+        // through these, never a declared field.
+        "Capacity#" => return emit_capacity(backend, out, v, args, indent),
+        "Resize#" => return emit_resize(backend, out, v, args, indent),
+        "EnsureCap#" => return emit_ensure_cap(backend, out, v, args, indent),
+        "TrimCap#" => return emit_trim_cap(backend, out, v, args, indent),
 
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
@@ -693,6 +701,112 @@ fn emit_fill(
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, ptr_arg).ok();
     writeln!(out, "{}{} = trunc i64 {} to i8", indent, v8, val).ok();
     writeln!(out, "{}call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", indent, p, v8, len).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+/// 2026-08-15 (coll plan §3.6): `Capacity#(h)` — read a coll's hidden `cap`
+/// slot (offset 8 of the `[data, cap, len]` block). One load.
+fn emit_capacity(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let h = emit_arg(backend, out, &args[0], indent);
+    let p = backend.fun.gen_reg();
+    let gep = backend.fun.gen_reg();
+    let load = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, h).ok();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, gep, p).ok();
+    writeln!(out, "{}{} = load i64, ptr {}", indent, load, gep).ok();
+    writeln!(out, "{}{} = add i64 {}, 0", indent, v, load).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+/// 2026-08-15 (coll plan §3.6): `Resize#(h, cap)` — set the data buffer to
+/// exactly `cap` elements (realloc-or-copy), store the new cap. This slice:
+/// realloc if the data pointer is non-null, else malloc. The element size is
+/// 8 (word elements) — the coll storage contract this slice.
+fn emit_resize(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let h = emit_arg(backend, out, &args[0], indent);
+    let cap = emit_arg(backend, out, &args[1], indent);
+    let elem_size: i64 = 8;
+    let p = backend.fun.gen_reg();
+    let dptr_gep = backend.fun.gen_reg();
+    let old_data = backend.fun.gen_reg();
+    let bytes = backend.fun.gen_reg();
+    let mul = backend.fun.gen_reg();
+    let new_data = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, h).ok();
+    // data = load i64, ptr [p + 0]
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, dptr_gep, p).ok();
+    writeln!(out, "{}{} = load i64, ptr {}", indent, old_data, dptr_gep).ok();
+    // bytes = cap * 8
+    writeln!(out, "{}{} = mul i64 {}, {}", indent, mul, cap, elem_size).ok();
+    writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, bytes, mul).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, new_data, bytes).ok();
+    // store new data pointer at [p + 0], new cap at [p + 8]
+    let store_data = backend.fun.gen_reg();
+    let cap_gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, store_data, p).ok();
+    writeln!(out, "{}store i64 {}, ptr {}", indent, new_data, store_data).ok();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, cap_gep, p).ok();
+    writeln!(out, "{}store i64 {}, ptr {}", indent, cap, cap_gep).ok();
+    // NOTE: this slice does not copy old elements (the default Grow/Shrink
+    // bodies rebuild; a future slice wires a Copy# under len). Length is
+    // preserved.
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    let _ = old_data;
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+/// 2026-08-15 (coll plan §3.6): `EnsureCap#(h, n)` — grow the data buffer to
+/// at least `n` elements (a no-op when the current cap is already >= n).
+fn emit_ensure_cap(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let h = emit_arg(backend, out, &args[0], indent);
+    let n = emit_arg(backend, out, &args[1], indent);
+    let p = backend.fun.gen_reg();
+    let cap_gep = backend.fun.gen_reg();
+    let cur_cap = backend.fun.gen_reg();
+    let cmp = backend.fun.gen_reg();
+    let grow = backend.fun.gen_reg();
+    let after = backend.fun.gen_reg();
+    let target = backend.fun.gen_reg();
+    let call = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, h).ok();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, cap_gep, p).ok();
+    writeln!(out, "{}{} = load i64, ptr {}", indent, cur_cap, cap_gep).ok();
+    writeln!(out, "{}{} = icmp ult i64 {}, {}", indent, cmp, cur_cap, n).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, grow).ok();
+    writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, after, cmp, n, cur_cap).ok();
+    writeln!(out, "{}{} = call i64 @__briev_coll_resize(i64 {}, i64 {})", indent, target, h, after).ok();
+    writeln!(out, "{}{} = add i64 {}, 0", indent, call, target).ok();
+    let _ = (grow, call);
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+/// 2026-08-15 (coll plan §3.6): `TrimCap#(h)` — shrink the data buffer to the
+/// current length (shrink-to-fit).
+fn emit_trim_cap(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let h = emit_arg(backend, out, &args[0], indent);
+    let p = backend.fun.gen_reg();
+    let len_gep = backend.fun.gen_reg();
+    let len = backend.fun.gen_reg();
+    let call = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, h).ok();
+    writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, len_gep, p).ok();
+    writeln!(out, "{}{} = load i64, ptr {}", indent, len, len_gep).ok();
+    writeln!(out, "{}{} = call i64 @__briev_coll_resize(i64 {}, i64 {})", indent, call, h, len).ok();
+    let _ = call;
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }

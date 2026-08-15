@@ -1012,3 +1012,31 @@ int64_t* briev_mask_select_f32(const float* data, int64_t data_len,
     }
     return out;
 }
+
+/// 2026-08-15 (coll plan §3.6): resize a coll's data buffer to `new_cap`
+/// word-elements. The coll handle is a ptr to `[data, cap, len]`. Returns 0
+/// on success. This slice: malloc a fresh buffer of new_cap*8, copy min(old
+/// cap, new_cap) elements, free the old buffer, store the new data + cap.
+int64_t __briev_coll_resize(int64_t handle, int64_t new_cap) {
+    if (!handle || new_cap < 0) return 1;
+    int64_t* block = (int64_t*)handle;
+    int64_t old_data = block[0];
+    int64_t old_cap = block[1];
+    int64_t len = block[2];
+    if (new_cap == 0) {
+        if (old_data) free((void*)old_data);
+        block[0] = 0;
+        block[1] = 0;
+        return 0;
+    }
+    int64_t* new_data = (int64_t*)malloc((size_t)(new_cap * 8));
+    if (!new_data) return 1;
+    int64_t copy_n = len < new_cap ? len : new_cap;
+    if (old_data && copy_n > 0) {
+        memcpy(new_data, (void*)old_data, (size_t)(copy_n * 8));
+    }
+    if (old_data) free((void*)old_data);
+    block[0] = (int64_t)new_data;
+    block[1] = new_cap;
+    return 0;
+}

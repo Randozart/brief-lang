@@ -76,6 +76,27 @@ pub fn execute_intrinsic(
                 _ => Ok(Value::int(0)),
             }
         }
+        // 2026-08-15 (coll plan §3.6, ambiguity #6): the capacity intrinsics.
+        // The interpreter's collection value is a Product (a Vec) with no
+        // capacity concept — `Capacity#(product)` is its field count (a Vec is
+        // exact-fit); the write forms are NO-OPs (a Vec grows freely, capacity
+        // is not observable). Parity with the codegen's hidden cap slot.
+        "Capacity#" => {
+            let v = args.first().ok_or_else(|| crate::errors::RuntimeError::HeapError(
+                "Capacity# takes one argument".into(),
+            ))?;
+            match v {
+                Value::Product { fields, .. } => Ok(Value::int(fields.len() as i64)),
+                _ => Ok(Value::int(0)),
+            }
+        }
+        "Resize#" | "EnsureCap#" | "TrimCap#" => {
+            // No-op: capacity is not observable in the interpreter's exact-fit
+            // Product representation (a Vec grows freely). Returns Void,
+            // matching the codegen's void return kind.
+            let _ = args.first();
+            Ok(Value::Void)
+        }
         "At#" => {
             if args.len() < 2 {
                 return Err(RuntimeError::HeapError("At# takes (collection, index)".into()));
@@ -1046,5 +1067,27 @@ mod tests {
         );
         let bytes = eval_expr(&bytes_expr, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(bytes.as_i64(), Some(6), "héllo is 6 bytes");
+    }
+
+    /// 2026-08-15 (coll plan §3.6, ambiguity #6): the capacity intrinsics on
+    /// a Product value — `Capacity#` = field count (a Vec is exact-fit); the
+    /// write forms are no-ops (capacity not observable).
+    #[test]
+    fn capacity_intrinsics_on_product() {
+        let mut heap = VirtualHeap::new();
+        let coll = Value::Product {
+            fields: vec![Value::int(10), Value::int(20), Value::int(30)],
+            names: None,
+        };
+        let cap = execute_intrinsic("Capacity#", &[coll.clone()], &mut heap).unwrap();
+        assert_eq!(cap.as_i64(), Some(3), "Capacity# on a 3-field product = 3");
+        let resized = execute_intrinsic(
+            "Resize#",
+            &[coll.clone(), Value::int(64)],
+            &mut heap,
+        ).unwrap();
+        assert!(matches!(resized, Value::Void), "Resize# is a no-op on a product");
+        let trimmed = execute_intrinsic("TrimCap#", &[coll], &mut heap).unwrap();
+        assert!(matches!(trimmed, Value::Void), "TrimCap# is a no-op on a product");
     }
 }

@@ -2840,6 +2840,8 @@ impl LlvmBackend {
         // 2026-07-08: Phase 3 — briev_rt.c wrapper function declarations
         // These are called by inop declarations in lib/std/os/*.bv.
         // All take/return i64 (boxed value) matching Briev's ABI.
+        // 2026-08-15 (coll plan §3.6): the coll capacity resize helper.
+        writeln!(out, "declare i64 @__briev_coll_resize(i64, i64) #1").ok();
         writeln!(out, "declare i64 @briev_open(i64, i64, i64) #1").ok();
         writeln!(out, "declare i64 @briev_close(i64) #1").ok();
         writeln!(out, "declare i64 @briev_read(i64, i64, i64) #1").ok();

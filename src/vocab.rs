@@ -271,6 +271,8 @@ impl LanguageVocab {
                 // 2026-08-14 (UOL §6b): the iterable cursor ops were missing —
                 // a vocab gap the generative OpName# dispatch needs filled.
                 "Count", "Iter", "Step", "IsEnd", "Current",
+                // 2026-08-15 (coll plan §3.6): the capacity intrinsics.
+                "Capacity", "Resize", "EnsureCap", "TrimCap",
             ]),
             stages: ss(&[
                 "PreLex", "Parsed", "Resolved", "Typed", "Normalized", "Verified",
