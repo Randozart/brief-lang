@@ -2558,13 +2558,27 @@ fn validate_contract(
     }
 }
 
-/// Is `ty` a sequence member a `coll` type may scaffold from — a `Ptr<T>` or
-/// a fixed `T[N]` array? Structural, never a name match (rule 14/18).
-fn is_sequence_member_ty(ty: &Type) -> bool {
+/// Is `ty` a sequence member a `coll` type may scaffold from — a `Ptr<T>`, a
+/// fixed `T[N]` array, or a nested buffer struct (`inner: ListBuffer<T>`
+/// whose slots contain a `Ptr`/array)? Structural, never a name match
+/// (rule 14/18). `slot_lookup` resolves a nested struct's slots (one level).
+fn is_sequence_member_ty(
+    ty: &Type,
+    slot_lookup: &dyn Fn(&str) -> Option<Vec<(String, Type)>>,
+) -> bool {
     match ty {
         Type::Ptr(_) => true,
         // T[N] — a Vector with one dimension whose element is not the array.
         Type::Vector(elem, dims) if dims.len() == 1 => elem.as_ref() != ty,
+        // Nested buffer (`inner: ListBuffer<T>`) — resolve its slots.
+        Type::Custom(n) | Type::Applied(n, _) => {
+            slot_lookup(n).map_or(false, |slots| {
+                slots.iter().any(|(_, t)| {
+                    matches!(t, Type::Ptr(_))
+                        || matches!(t, Type::Vector(_, dims) if dims.len() == 1)
+                })
+            })
+        }
         _ => false,
     }
 }
@@ -2579,6 +2593,21 @@ fn is_sequence_member_ty(ty: &Type) -> bool {
 /// - `op Grow`/`op Shrink` bindings take the handle only (`#Lh`) — a two-arg
 ///   form is an error.
 fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
+    // 2026-08-15 (coll plan §3.2, nested buffers): resolve a nested buffer
+    // struct's slots (`ListBuffer<T>` → [data]) so `inner: ListBuffer<T>` is
+    // recognized as a sequence member.
+    let slot_map: std::collections::HashMap<String, Vec<(String, Type)>> = items.iter()
+        .filter_map(|item| match item {
+            TopLevel::TypeDef(t) if !t.body.slots.is_empty() => {
+                Some((t.name.clone(), t.body.slots.iter().map(|s| (s.name.clone(), s.ty.clone())).collect()))
+            }
+            TopLevel::StaticStruct(s) if !s.fields.is_empty() => {
+                Some((s.name.clone(), s.fields.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let slot_lookup = |n: &str| slot_map.get(n).cloned();
     for item in items {
         let (name, slots, is_coll, is_struct) = match item {
             TopLevel::TypeDef(t) if t.coll => (
@@ -2596,7 +2625,7 @@ fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
             _ => continue,
         };
 
-        let seq_count = slots.iter().filter(|(_, t)| is_sequence_member_ty(t)).count();
+        let seq_count = slots.iter().filter(|(_, t)| is_sequence_member_ty(t, &slot_lookup)).count();
         if seq_count != 1 {
             errors.push(TypeError::InvalidOperation {
                 operation: format!(
@@ -2908,7 +2937,23 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 all_regular_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
             }
             if !td.body.slots.is_empty() {
-                all_type_slots.insert(td.name.clone(), td.body.slots.clone());
+                // 2026-08-15 (coll plan §3.3): a `coll obj` appends two hidden
+                // trailing slots (`cap`, `len`) — the typechecker must see them
+                // so member bodies and field access referencing them typecheck.
+                let mut slots = td.body.slots.clone();
+                if td.coll {
+                    slots.push(crate::ast::top::TypeDefSlot {
+                        name: "cap".to_string(),
+                        ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                    slots.push(crate::ast::top::TypeDefSlot {
+                        name: "len".to_string(),
+                        ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                }
+                all_type_slots.insert(td.name.clone(), slots);
             }
             if td.coll {
                 // 2026-08-15 (coll plan §3.4): the typechecker must see the
@@ -2916,7 +2961,12 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 // the op-members all consult type_members). Synthesize the
                 // same members the backend scaffolds, so the two never
                 // disagree about which ops exist.
-                let synth = crate::backend::llvm::coll_scaffold::synthesize_members_for_check(td);
+                let slot_map: std::collections::HashMap<String, Vec<(String, crate::ast::Type)>> =
+                    all_type_slots.iter().map(|(k, v)| (
+                        k.clone(),
+                        v.iter().map(|s| (s.name.clone(), s.ty.clone())).collect(),
+                    )).collect();
+                let synth = crate::backend::llvm::coll_scaffold::synthesize_members_for_check(td, &slot_map);
                 let mut merged = td.body.members.clone();
                 for m in synth {
                     let m_name = crate::backend::llvm::emit_expr::member_briev_name(&m);
@@ -3039,7 +3089,23 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     mctx.state_keys.insert(name.clone());
                 }
                 mctx.bindings.insert("self".into(), self_ty.clone());
-                for slot in &td.body.slots {
+                // 2026-08-15 (coll plan §3.3): a `coll obj`'s hidden `cap`/
+                // `len` slots are bound too — the synthesized member bodies
+                // (`init_empty`/`init`/`push`) reference them as bare names.
+                let mut member_slots = td.body.slots.clone();
+                if td.coll {
+                    member_slots.push(crate::ast::top::TypeDefSlot {
+                        name: "cap".to_string(),
+                        ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                    member_slots.push(crate::ast::top::TypeDefSlot {
+                        name: "len".to_string(),
+                        ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                }
+                for slot in &member_slots {
                     mctx.bindings.insert(slot.name.clone(), slot.ty.clone());
                     mctx.state_keys.insert(slot.name.clone());
                 }
@@ -5834,5 +5900,30 @@ node go [done == 0][done == 1] {
 };
 "#;
     assert!(check(lit).is_ok(), "coll obj literal-init + foreach must type");
+}
+
+/// 2026-08-15 (coll plan §3.7): a coll obj with a NESTED buffer sequence
+/// member (`inner: ListBuffer<T>`) — the List shape. The element type is
+/// derived through the buffer's Ptr slot; `<-` push and foreach work.
+#[test]
+fn coll_obj_nested_buffer_lifecycle_typechecks() {
+    let ok = r#"
+struct Buf<T> { data: Ptr<T>; };
+coll obj MyList<T> { inner: Buf<T>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let xs: MyList<Int> = [10, 20, 30];
+    xs <- 40;
+    let n: Int = xs.Count#();
+    let first: Int = xs[0];
+    let sum: Int = 0;
+    foreach x in xs { sum = sum + x; }
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "nested-buffer coll obj must type (List shape: literal + push + Count + index + foreach)"
+    );
 }
 }

@@ -63,6 +63,16 @@ pub(crate) fn coll_storage_mode(
     None
 }
 
+/// Build the sequence-member access expression from its path: `data` → a
+/// plain identifier; `inner.data` → `Field(Identifier("inner"), "data")`.
+fn seq_access(path: &str) -> Expr {
+    if let Some((base, field)) = path.split_once('.') {
+        Expr::Field(Box::new(Expr::Identifier(base.to_string())), field.to_string())
+    } else {
+        Expr::Identifier(path.to_string())
+    }
+}
+
 /// A synthesized `op Count() -> Int { term len; }` member. Reads the hidden
 /// `len` slot through the boxed-self GEP (the same path a hand-written
 /// `op Count { term len; }` uses).
@@ -96,7 +106,7 @@ fn synth_op_at(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
         outputs: vec![elem_ty.clone()],
         contract: default_coll_contract(),
         body: vec![Statement::Term(Some(Expr::Index(
-            Box::new(Expr::Identifier(seq_expr.to_string())),
+            Box::new(seq_access(seq_expr)),
             Box::new(Expr::Identifier("i".to_string())),
         )))],
         metadata: Default::default(),
@@ -123,7 +133,7 @@ fn synth_init_empty(
     let elem_size: i64 = 8; // this slice: word elements
     let alloc = Expr::Call("Malloc#".to_string(), vec![Expr::Decimal(default_cap * elem_size)], None);
     let data_assign = Statement::Assign(
-        Expr::Identifier(seq_expr.to_string()),
+        seq_access(seq_expr),
         Expr::Cast(Box::new(alloc), Type::Ptr(Box::new(elem_ty))),
     );
     let len_zero = Statement::Assign(
@@ -157,7 +167,7 @@ fn synth_init_empty(
 fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
     let data_write = Statement::Assign(
         Expr::Index(
-            Box::new(Expr::Identifier(seq_expr.to_string())),
+            Box::new(seq_access(seq_expr)),
             Box::new(Expr::Identifier("len".to_string())),
         ),
         Expr::Identifier("val".to_string()),
@@ -197,7 +207,7 @@ fn synth_get(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
         outputs: vec![elem_ty.clone()],
         contract: default_coll_contract(),
         body: vec![Statement::Term(Some(Expr::Index(
-            Box::new(Expr::Identifier(seq_expr.to_string())),
+            Box::new(seq_access(seq_expr)),
             Box::new(Expr::Identifier("i".to_string())),
         )))],
         metadata: Default::default(),
@@ -217,7 +227,7 @@ fn synth_init(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
     let elem_size: i64 = 8; // this slice: word elements
     let alloc = Expr::Call("Malloc#".to_string(), vec![Expr::Decimal(default_cap * elem_size)], None);
     let data_assign = Statement::Assign(
-        Expr::Identifier(seq_expr.to_string()),
+        seq_access(seq_expr),
         Expr::Cast(Box::new(alloc), Type::Ptr(Box::new(elem_ty.clone()))),
     );
     let cap_set = Statement::Assign(
@@ -226,7 +236,7 @@ fn synth_init(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
     );
     let data_write = Statement::Assign(
         Expr::Index(
-            Box::new(Expr::Identifier(seq_expr.to_string())),
+            Box::new(seq_access(seq_expr)),
             Box::new(Expr::Decimal(0)),
         ),
         Expr::Identifier("val".to_string()),
@@ -262,7 +272,7 @@ fn synth_pop(seq_expr: &str, elem_ty: crate::ast::Type) -> Definition {
         outputs: vec![elem_ty.clone()],
         contract: default_coll_contract(),
         body: vec![Statement::Term(Some(Expr::Index(
-            Box::new(Expr::Identifier(seq_expr.to_string())),
+            Box::new(seq_access(seq_expr)),
             Box::new(Expr::BinaryOp(
                 crate::ast::BinaryOpKind::Sub,
                 Box::new(Expr::Identifier("len".to_string())),
@@ -407,11 +417,22 @@ pub(crate) fn coll_body_with_members(
 /// the two never disagree. Element type comes from the sequence member; a
 /// coll struct's fixed `T[N]` member has no element slot, so it gets Count
 /// only (length is the constant N).
-pub fn synthesize_members_for_check(td: &TypeDef) -> Vec<TopLevel> {
-    // The typechecker has no struct_types map here; derive the element type
-    // from a direct Ptr<T> sequence member only (the common coll obj shape).
+pub fn synthesize_members_for_check(
+    td: &TypeDef,
+    struct_slots: &std::collections::HashMap<String, Vec<(String, crate::ast::Type)>>,
+) -> Vec<TopLevel> {
+    // Derive the element type from the sequence member: a direct `Ptr<T>`
+    // OR a nested buffer (`inner: ListBuffer<T>` whose slots contain a Ptr).
     let seq_ty = td.body.slots.iter().find_map(|s| match &s.ty {
         Type::Ptr(inner) => Some((s.name.clone(), (**inner).clone())),
+        Type::Custom(n) | Type::Applied(n, _) => {
+            struct_slots.get(n).and_then(|fields| {
+                fields.iter().find_map(|(f, t)| match t {
+                    Type::Ptr(inner) => Some((format!("{}.{}", s.name, f), (**inner).clone())),
+                    _ => None,
+                })
+            })
+        }
         _ => None,
     });
     let mut members = Vec::new();
