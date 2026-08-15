@@ -754,7 +754,8 @@ coll struct Fixed<T, N> {
   scaffolds `op Count`, `op At`, `op Init`/`op InitEmpty`/`op InsertAt`/
   `op ExtractFrom`, plus the default `op Grow`/`op Shrink` growth strategies.
 - **`coll struct`** — fixed `T[N]` only (this slice): length == capacity
-  == N, no hidden slots, C ABI preserved. `Ptr<T>`-backed structs are a
+  == N, no hidden slots, C ABI preserved. `.^Length` and `Capacity#` both
+  return N (a compile-time constant; §17.1). `Ptr<T>`-backed structs are a
   documented follow-up.
 - **Storage is the compiler's choice** (2026-08-15): the compiler picks the
   most effective representation for each coll from its shape and use — heap

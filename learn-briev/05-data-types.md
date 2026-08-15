@@ -479,6 +479,78 @@ behavior (passive vs active); `Data` underlies all four; the casting graph
 moves between them with zero ceremony. Absence is `Option::None` — Blob is
 never null.
 
+### Collections with `coll` (a worked example)
+
+`coll` is the native strategy keyword for declaring collections. You write
+the one sequence member (the storage shape); the compiler owns the length,
+capacity, and the op surface.
+
+```briev
+// MyQueue — a growable queue backed by a heap buffer.
+// `data: Ptr<Int>` is the one sequence member; `cap` and `len` are
+// compiler-owned hidden slots (the compiler appends them).
+coll obj MyQueue {
+    data: Ptr<Int>;
+};
+
+// `seq coll` — the same shape, but the compiler must keep the elements in
+// one contiguous memory block (for a Ptr<T> coll the data buffer already
+// is one block, so this is a hard guarantee of what the shape gives).
+seq coll obj RingQueue {
+    data: Ptr<Int>;
+};
+
+// A fixed-size collection: `coll struct` is `T[N]` only this slice —
+// length == capacity == N, no hidden slots, C ABI preserved.
+coll struct Fixed {
+    data: Int[4];
+};
+
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: MyQueue = [5, 6, 7];   // literal → op Init + op InsertAt
+    q <- 8;                        // push → op InsertAt (default cap 16)
+    let n: Int = q.Count#();       // 4 — element count
+    let len: Int = q.^Length;      // 4 — stored length (the hidden len slot)
+    let cap: Int = Capacity#(q);   // 16 — the hidden capacity
+    let first: Int = q[0];         // 5 — op At
+    let sum: Int = 0;
+    foreach x in q { sum = sum + x; }  // 5+6+7+8 = 26
+    println!(sum);
+    done = 1;
+    term;
+};
+```
+
+**Custom growth with `op Grow`/`op Shrink`.** The compiler's default growth
+policy doubles capacity when full. A type may override it with a strategy
+binding that takes the collection handle only (`#Lh`):
+
+```briev
+coll obj GeometricQueue {
+    data: Ptr<Int>;
+    op Grow: geometric_grow(#Lh);   // override the default doubling
+    op Shrink: geometric_shrink(#Lh);
+};
+
+// A custom grow can read/write capacity through the capacity intrinsics
+// without touching a property — "set capacity without setting a property".
+defn geometric_grow(q: GeometricQueue) {
+    let cur: Int = Capacity#(q);
+    Resize#(q, cur * 3);            // triple, not double
+};
+```
+
+(The `grow`-on-full auto-trigger — the compiler calling `op Grow` when
+`len == cap` — is a documented future slice; explicit growth works today
+via `Resize#`/`EnsureCap#`.)
+
+**Capacity control.** The four capacity intrinsics are the interface to the
+compiler-owned capacity: `Capacity#(h)` reads it, `Resize#(h, cap)` sets it,
+`EnsureCap#(h, n)` grows to at least `n`, `TrimCap#(h)` shrinks to `len`.
+They are intrinsics (operations), never reflection — there is no
+`.^Capacity`.
+
 ## 8. Complete Example: Contact Manager
 
 ```briev
