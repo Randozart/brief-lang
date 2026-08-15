@@ -1,31 +1,16 @@
 // ── Bootstrap Type Universe ──────────────────────────────────
 //
-// 2026-07-24: Protocol-first type declarations. Each type declares
-// which protocol it implements (#Int, #Float, etc.). Width is
-// inferred unless explicit (bits <~ N). Bits is implicit.
+// 2026-08-15 (fundamentals-as-types): the fundamental types (`Data`,
+// `Bit<N>`, `Int`, `UInt`, `Float`, `Bool`, `Char`, `String`, `Blob`,
+// `Ptr`, `Void`) are compiler-native primordials seeded in the type
+// universe. They need NO stdlib redeclaration and carry no overloadable ops
+// (`op` is for user types; the intrinsics handle fundamental dispatch).
+// This file only declares the WIDTH refinements (Int8/Int16/.../Int128,
+// Float32/Float64, Double) and the byte-buffer `Blob` (a Data member like
+// String, `[len][bytes]`, no encoding interpretation).
 //
-// The compiler uses protocol information to drive all operation
-// dispatch. Backends know how to add, subtract, etc. for each
-// protocol without per-type configuration.
-//
-// op declarations use the new `:` binding syntax. The expr
-// body is documentation for bootstrap types; the backend uses
-// hardcoded codegen based on protocol membership.
-
-type Int: #Int {
-    op Add: add(#Lh, #Rh);
-    op Sub: sub(#Lh, #Rh);
-    op Mul: mul(#Lh, #Rh);
-    op Div: div(#Lh, #Rh);
-    op Mod: mod(#Lh, #Rh);
-    op Neg: neg(#Lh);
-    op Eq: eq(#Lh, #Rh);
-    op Ne: ne(#Lh, #Rh);
-    op Lt: lt(#Lh, #Rh);
-    op Le: le(#Lh, #Rh);
-    op Gt: gt(#Lh, #Rh);
-    op Ge: ge(#Lh, #Rh);
-};
+// Width is inferred from `spec Bits: N`; everything else is derived from
+// the fundamental's protocol by the casting graph.
 
 type UInt: Int;
 
@@ -41,57 +26,18 @@ type UInt32: Int { spec Bits: 32; };
 type Int64: Int { spec Bits: 64; };
 type UInt64: Int { spec Bits: 64; };
 
-type Float: #Float {
-    op Add: add(#Lh, #Rh);
-    op Sub: sub(#Lh, #Rh);
-    op Mul: mul(#Lh, #Rh);
-    op Div: div(#Lh, #Rh);
-    op Neg: neg(#Lh);
-    op Eq: eq(#Lh, #Rh);
-    op Ne: ne(#Lh, #Rh);
-    op Lt: lt(#Lh, #Rh);
-    op Le: le(#Lh, #Rh);
-    op Gt: gt(#Lh, #Rh);
-    op Ge: ge(#Lh, #Rh);
-};
+type Int128: Int { spec Bits: 128; };
+type UInt128: Int { spec Bits: 128; };
 
-type Double: #Float { spec Bits: 64; };
+type Float32: Float { spec Bits: 32; };
+type Float64: Float { spec Bits: 64; };
 
-type Bool: #Bool {
-    spec Bits: 8;
-    op Eq: eq(#Lh, #Rh);
-    op Ne: ne(#Lh, #Rh);
-    op And: band(#Lh, #Rh);
-    op Or: bor(#Lh, #Rh);
-    op Not: bnot(#Lh);
-};
-
-type Char: #Char { spec Bits: 32;
-};
-
-// 2026-07-30: String participates in #String protocol.
-// Casting graph handles all protocol-level casts:
-//   #String → #Bit = extractvalue 0 (hardcoded, never overridable)
-//   #String → #Int = ExtCall("str_to_int") (protocol default)
-//   #String → #Float = ExtCall("str_to_float") (protocol default)
-//   #Bit → #String = CastFrom(#Bit) override if declared (interpretation door)
-// 2026-08-01 (B0): String is a bare #String protocol member with NO fields and
-// NO metadata. The value is a ptr to a length-prefixed [len][bytes] buffer;
-// everything else is derived from the protocol by the casting graph.
-// 2026-08-05 (Phase 3): `prop Size/Bytes` removed — computed observations are
-// ordinary functions, and the props were never wired to dispatch.
-type String: #String {
-};
-
-// 2026-08-01 (B4): the legacy String types (UTF8View, StaticString,
-// SmallString64) were retired — a String is a bare #String protocol member
-// (ptr to [len][bytes]) with no fields. Their modules (utf8view.bv,
-// small_string.bv) were deleted.
+type Double: Float { spec Bits: 64; };
 
 // 2026-08-15 (fundamentals-as-types): the byte-buffer type is `Blob` (the
-// [len][bytes] buffer with no encoding interpretation); `Data` is reserved
-// for the universal parent (root). `#b"..."` literals are Blob-typed.
-type Blob: Int { spec Bits: 64; };
+// [len][bytes] buffer with no encoding interpretation); `Data` is the
+// universal parent (root). `#b"..."` literals are Blob-typed.
+type Blob: Data { spec Bits: 64; };
 
 // 2026-07-30: Slice<T> — fat-pointer view over contiguous elements.
 // LLVM type { ptr, i64 } derived from field shapes by emit_toplevel.rs:llvm_type().
