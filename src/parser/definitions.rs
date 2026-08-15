@@ -2256,12 +2256,16 @@ impl<'a> Parser<'a> {
         // `pack`/`seq` (`coll pack struct`, `pack coll struct`).
         let mut seq = false;
         let mut pack = false;
+        let mut coll = coll;
         // 2026-08-13 (Phase 6): `union` is standalone — no seq/pack prefixes.
         if !union {
             loop {
                 match self.tokens.get(self.pos).map(|(t, _)| t) {
                     Some(Token::Seq) => { seq = true; self.pos += 1; }
                     Some(Token::Pack) => { pack = true; self.pos += 1; }
+                    // 2026-08-15 (coll plan): `coll` is order-independent with
+                    // `pack`/`seq` (`pack coll struct`, `coll pack struct`).
+                    Some(Token::Coll) => { coll = true; self.pos += 1; }
                     _ => break,
                 }
             }
@@ -2871,6 +2875,29 @@ mod tests {
         assert!(s.union, "union flag must be set");
         assert!(!s.seq && !s.pack, "union is exclusive of seq/pack");
         assert_eq!(s.fields.len(), 3);
+    }
+
+    #[test]
+    fn test_coll_obj_and_struct_parses() {
+        // 2026-08-15 (coll plan): `coll obj`/`coll struct` set the coll flag;
+        // `coll pack struct` and `pack coll struct` are order-independent.
+        let tl = parse_top("coll obj MyQueue { data: Ptr<Int>; };").unwrap();
+        let crate::ast::TopLevel::TypeDef(t) = tl else { panic!("expected TypeDef") };
+        assert!(t.coll, "coll obj must set the coll flag");
+        assert_eq!(t.body.slots.len(), 1);
+
+        let tl = parse_top("coll struct Fixed { data: Int[4]; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.coll, "coll struct must set the coll flag");
+        assert!(!s.union, "coll is not a union");
+
+        let tl = parse_top("coll pack struct P { a: Bit<4>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.coll && s.pack, "coll pack struct must set both flags");
+
+        let tl = parse_top("pack coll struct Q { a: Bit<4>; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        assert!(s.coll && s.pack, "pack coll struct must set both flags");
     }
 
     #[test]

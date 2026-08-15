@@ -170,9 +170,14 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
                 // collided with inner.cap at offset 8. type_size resolves the
                 // flexible protocols (Cast.Int → 8, Cast.String → 8) and
                 // fixes Ptr at one word.
-                let total: u64 = td.body.slots.iter().map(|slot| {
+                // 2026-08-15 (coll plan §3.3): a `coll obj` adds two hidden
+                // slots (`cap` + `len`); the total includes them.
+                let mut total: u64 = td.body.slots.iter().map(|slot| {
                     crate::backend::llvm::types::type_size(&slot.ty, Some(universe))
                 }).sum();
+                if td.coll {
+                    total += 2 * crate::backend::llvm::types::type_size(&Type::int(), Some(universe));
+                }
                 Some(total)
             })
             .unwrap_or_else(|| primordial.as_ref().map(|p| p.bytes).unwrap_or_else(|| {
@@ -228,9 +233,19 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
             .and_then(|e| match e.as_ref() { Expr::Identifier(n) => Some(n.clone()), _ => None })
             .or_else(|| td.protocol.clone())
             .unwrap_or_else(|| "Bit".to_string());
-        let fields: Vec<(String, Type)> = td.body.slots.iter()
+        let mut fields: Vec<(String, Type)> = td.body.slots.iter()
             .map(|s| (s.name.clone(), s.ty.clone()))
             .collect();
+        // 2026-08-15 (coll plan §3.3): a `coll obj` appends two hidden trailing
+        // slots — `cap` then `len` (compiler-owned capacity + length). For
+        // `List` (sequence member `inner.data: Ptr<T>`) this reproduces the
+        // canonical `[inner.data, cap, len]` layout byte-for-byte. The hidden
+        // slots are part of the ResolvedType fields so the IR type and the
+        // universe's `bytes` both include them.
+        if td.coll {
+            fields.push(("<cap>".to_string(), Type::int()));
+            fields.push(("<len>".to_string(), Type::int()));
+        }
         let mut rt = ResolvedType {
             name: td.name.clone(),
             base,

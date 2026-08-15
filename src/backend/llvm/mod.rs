@@ -2214,15 +2214,27 @@ impl LlvmBackend {
         for item in items {
             match item {
                 TopLevel::StaticStruct(s) => {
-                    let fields: Vec<(String, Type)> = s.fields.iter()
+                    let mut fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|(n, t)| (n.clone(), t.clone()))
                         .collect();
+                    // 2026-08-15 (coll plan §3.3): a `coll struct` is fixed
+                    // `T[N]` — length == capacity == N, no hidden slots, C ABI
+                    // preserved. No append here.
                     self.ctx.struct_types.entry(s.name.clone()).or_insert(fields);
                 }
                 TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
-                    let fields: Vec<(String, Type)> = td.body.slots.iter()
+                    let mut fields: Vec<(String, Type)> = td.body.slots.iter()
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
+                    // 2026-08-15 (coll plan §3.3): a `coll obj` appends two
+                    // hidden trailing slots — `cap` then `len` (compiler-owned
+                    // capacity + length). For `List` (sequence member
+                    // `inner.data: Ptr<T>`) this reproduces the canonical
+                    // `[inner.data, cap, len]` layout byte-for-byte.
+                    if td.coll {
+                        fields.push(("<cap>".to_string(), Type::int()));
+                        fields.push(("<len>".to_string(), Type::int()));
+                    }
                     self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
                     // 2026-08-13 (obj value ABI): a slotted `obj`/`type` VALUE
                     // is a boxed i{int_bits} handle (struct literals box, state
@@ -2484,9 +2496,16 @@ impl LlvmBackend {
                 // This handles `obj` declarations (which parse to TypeDef) and
                 // other type declarations with field slots.
                 TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
-                    let fields: Vec<(String, Type)> = td.body.slots.iter()
+                    let mut fields: Vec<(String, Type)> = td.body.slots.iter()
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
+                    // 2026-08-15 (coll plan §3.3): a `coll obj` appends the two
+                    // hidden trailing slots here too, so the universe's `bytes`
+                    // and layout agree with the field registration above.
+                    if td.coll {
+                        fields.push(("<cap>".to_string(), Type::int()));
+                        fields.push(("<len>".to_string(), Type::int()));
+                    }
                     // 2026-07-24: Register struct type in both struct_types and universe
                     self.ctx.struct_types.insert(td.name.clone(), fields.clone());
                     // 2026-08-13 (Phase 5): `atomic` field slots (obj/type body).
