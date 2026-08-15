@@ -702,3 +702,50 @@ constant** — arguably `.^^` (compile-time descriptor) domain, not `.^`
 - The syntax highlighter (`vocab.rs` keywords + any editor grammar files).
 - All rationale comments carry the provenance rules (rule 15): when, why,
   what pattern, how to undo.
+
+---
+
+## 11. Implementation status (2026-08-15, later)
+
+Commits landed on `main` (working tree clean):
+
+- `b97c6739` §3.1 — `coll` keyword: lexer `Token::Coll`, parser
+  `coll obj`/`coll struct`/`coll pack struct`/`pack coll struct`, AST
+  `TypeDef.coll`/`StructDef.coll`, vocab entry.
+- `89177a97` §3.2 — frontend validation: exactly one sequence member
+  (`Ptr<T>`/`T[N]`/nested buffer), `coll struct` fixed-`T[N]`, no declared
+  `len`/`cap`.
+- `da80e51b` §3.3 — backend layout: hidden `cap`+`len` slots appended for
+  `coll obj` (canonical `[data, cap, len]`), `coll struct` C ABI preserved.
+- `a6589314` §3.4 + storage addendum — `CollStorage {HeapGrowable,
+  InlineFixed}` shape-aware classification; `coll obj` fully functional
+  (literals, `<-` push, `Count#`, index, `foreach`); synthesized member
+  bodies allocate the data buffer. Docs updated in the same family
+  (SPEC §8.10, learn-briev, iterable-protocol).
+- `37670ad4` + `d895131f` — `seq coll obj` / `coll seq obj`: `TypeDef.seq`.
+- `f23fd645` §3.6 — capacity intrinsics `Capacity#`/`Resize#`/
+  `EnsureCap#`/`TrimCap#` (+ `__briev_coll_resize` runtime helper),
+  typechecker signatures, backend whitelist, interpreter parity arms
+  (`Capacity#(product)` = field count; write forms no-op Void).
+- `0e1b720b` §3.7a — nested-buffer sequence member (`inner: ListBuffer<T>`,
+  the List shape): `seq_access` field-path emission, typechecker slot-map
+  derivation, `is_sequence_member_ty` nested recognition.
+- `7da7a581` §3.7b — stdlib `List` migrated to `coll obj`; `ListBuffer`
+  drops `cap`. Bool-closure zext fix (`result.ty == bool_()`). Adapter chain
+  (iter_map/filter/fold/chain) verified.
+- `36f98339` §3.5 — SVO deleted (`feature_svo`, `emit_svo_list`,
+  `emit_svo_index`, `pack_svo_header`, `svo_max_elements` config,
+  `is_vector_like`/`svo_capacity`). `emit_heap_seq` kept for tuples;
+  `IterKind::List` kept for stdlib-free unit tests.
+
+**Verified:** 1863 lib tests green; all 37 benchmarks MATCH (List migration
+and SVO deletion are performance-neutral). The stdlib-cleanup adapter
+acceptance (`iter_map([1,2,3], x->x*2)` etc.) works against the migrated
+coll List.
+
+**Deferred (documented in §3.5/§3.7):** `IterKind::List` and the
+`Expr::List → emit_heap_seq` fallback remain for stdlib-free unit tests and
+untyped expression-position literals; a follow-up can route those through
+the coll ops or migrate the tests. `grow`-on-full auto-trigger (plan §3.6)
+is a future slice — the scaffold's `push` allocates the default cap (16) but
+does not yet auto-grow past it.
