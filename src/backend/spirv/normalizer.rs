@@ -77,6 +77,7 @@ mod tests {
             traits: vec![],
             bit_range: None,
             coll: false,
+            seq: false,
             body: TypeDefBody {
                 slots: slots.into_iter().map(|(n, ty)| TypeDefSlot {
                     name: n.to_string(), ty, bit_range: None,

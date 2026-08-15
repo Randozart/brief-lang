@@ -404,6 +404,7 @@ mod tests {
             traits: vec![],
             bit_range: None,
             coll: false,
+            seq: false,
             body: TypeDefBody {
                 slots: vec![],
                 metadata,
