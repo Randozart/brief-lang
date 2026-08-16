@@ -130,3 +130,68 @@ probe shows the loss is real and structural across the family.
 - Rule 11/11b: baseline recorded here (§1); A/B after any change; full
   harness gates.
 - No benchmark-keyed special-casing — landing is structural + config-driven.
+
+## 8. Probe results (recorded 2026-08-16, after implementation `f67eeaba`)
+
+### 8.1 P1–P3 — REFUTED (metadata family)
+
+All `!llvm.loop` metadata probes on the countdown latch backedge, linked via
+the exact harness pipeline, timed best-of-5 at BOUND=50M:
+
+| Probe | Change | Result | Verdict |
+|-------|--------|--------|---------|
+| P1 | sparse `vectorize.enable=false` | 1.00× vs sparse base | refuted — sparse is SLP-packed, not loop-vectorized (gold plugin: "control flow cannot be substituted for a select"); blocking changes nothing |
+| P1b | sparse `interleave.count=4` | 1.00× | refuted |
+| P2 | dense / arr `interleave.count=2` | dense 1.00×, arr 0.97× | refuted — interleaving does not close the gap |
+| P3 | dense / arr `unroll.count=2` | dense 1.27× WORSE, arr 1.12× WORSE | refuted — forced unroll hurts (metadata IS honored; these reject UF) |
+| P4b | dense `vectorize.width=8` | 1.00× | refuted — already VF=8 |
+
+### 8.2 P4 — CONFIRMED (the fix)
+
+The countdown's float-field backedge copies were a **bare `fadd <ty> 0.0,
+%x` — no `fast`**. Under strict IEEE, `0.0 + x` is NOT `x` (the
+`-0.0`/signaling-NaN edge), so LLVM cannot fold the copy; it survived as a
+real floating add on the loop-carried critical path. In the vectorized
+countdown this materialized as a live `vaddps <reg>, <zero>` per iteration.
+
+`.ll` patch: `fadd float 0.0, X` → `fadd fast float 0.0, X`, BOUND=50M:
+
+| Variant | before | after | vs C |
+|---------|--------|-------|------|
+| sparse | .22s | **.15s** | 0.94× (was 1.37×) |
+| mid | .26s | **.22s** | 0.92× (was 1.08×) |
+| dense | .40s | **.36s** | 1.33× (was 1.48×) |
+| arr | .41s | .41s | 1.17× (unchanged — no copies; residual is AVX1 scheduling) |
+
+### 8.3 Landed fix
+
+All 6 `fadd ... 0.0` copy sites in `loop_engine/counter.rs` now emit `fast`
+(committed `f67eeaba`, rationale comment at the countdown latch
+counter.rs:1232-1239). The copy's semantic is a value rename, so folding is
+exact. Regression test `test_countdown_field_backedge_copies_are_fast`
+asserts `fadd fast float 0.0` and forbids bare `fadd float/double 0.0`
+(uses `with_type_universe(TypeUniverse::new())` — the CLI always passes a
+universe; without it float fields fall to i64 storage and the copy is an
+integer `add`, already foldable).
+
+### 8.4 Full harness after the fix (BOUND=50M, 40/40 MATCH, zero regressions)
+
+| Benchmark | Ratio | Winner |
+|-----------|------:|--------|
+| sweep_sparse | **0.97×** | Briev (was 1.37×) |
+| sweep_mid | **0.94×** | Briev (was 1.08×) |
+| sweep_dense | **1.35×** | C (was 1.48×) |
+| sweep_arr | **1.16×** | C (unchanged) |
+| kalman_filter_runtime | 0.85× | Briev (unchanged) |
+| float_math_nonzero | 0.96× | Briev (unchanged) |
+| queue_drain_idio | 0.57× | Briev (unchanged) |
+| all 36 others | 0.45–1.16× | — |
+
+### 8.5 Remaining known boundary
+
+sweep_arr and the dense residual are LLVM's AVX1 (Ivy Bridge, no AVX2/FMA)
+vectorizer/scheduler choices against the scalar-phi countdown web. The only
+guaranteed route past them is real vector-state SSA (VectorPhiGroup,
+mod.rs `shape.vector_groups` "Emission is identical today"), a substantial
+feature of low value-per-effort for synthetic stress benchmarks — deferred.
+Backlog item 1 (sweep triage) is closed with two family members beating C.

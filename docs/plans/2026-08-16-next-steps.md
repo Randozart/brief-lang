@@ -72,3 +72,13 @@ From the pre-session plan (coll-length-semantics / grow-on-full plans):
 
 1 → 2 (side-probe) → 3 → 4. All keep the "prove the known subset, fall back
 conservatively" discipline — polynomial passes, no combinatorial search.
+
+## Status (2026-08-16, after item 1)
+
+**Item 1 (sweep triage) CLOSED** — `f67eeaba`. The P1–P3 metadata probes were
+all refuted on the harness pipeline; P4 (the countdown's float backedge copies
+needed `fast` to fold `0.0 + x`) closed the gap: sweep_sparse 1.37× → 0.97×
+and sweep_mid 1.08× → 0.94× (both beat C), sweep_dense 1.48× → 1.35×. Full
+details: `docs/plans/2026-08-16-sweep-family-investigation.md` §8. Remaining
+dense/arr residual is a documented AVX1 scheduling boundary; only vector-state
+SSA (VectorPhiGroup) could pass it, deferred as low value-per-effort.
