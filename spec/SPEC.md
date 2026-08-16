@@ -765,7 +765,13 @@ coll struct Fixed<T, N> {
 - **`coll struct`** — fixed `T[N]` only (this slice): length == capacity
   == N, no hidden slots, C ABI preserved. `.^Length` and `Capacity#` both
   return N (a compile-time constant; §17.1). `Ptr<T>`-backed structs are a
-  documented follow-up.
+  documented follow-up. **Literal construction (2026-08-16):** `let f: Fixed =
+  [1,2,3,4]` stores the elements DIRECTLY into the inline `data: T[N]` array —
+  the value's layout IS the struct (`%Fixed = type { [4 x i64] }`), with no
+  `[len]` heap-seq header and no cap/len slots. The literal must not exceed N
+  (an over-length literal is a compile error); an empty `[]` constructs a
+  zero-filled N-array. Iteration, `op Count` (= N), `op At` (= `data[i]`),
+  and field reads all observe the same inline layout.
 - **Storage is the compiler's choice** (2026-08-15): the compiler picks the
   most effective representation for each coll from its shape and use — heap
   block (growable `Ptr<T>`), inline array (fixed `T[N]`), or pooled columns

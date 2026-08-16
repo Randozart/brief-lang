@@ -423,9 +423,13 @@ impl LlvmBackend {
                 writeln!(out, "%{} = type {{}}", name).ok();
             } else {
                 // 2026-08-13: packed structs are always declared via the
-                // universe path above; this legacy all-i64 path stays for
-                // plain structs.
-                let field_tys: Vec<&str> = fields.iter().map(|_| "i64").collect();
+                // universe path above; this path stays for plain structs.
+                // 2026-08-16 (Phase 3a): field types go through llvm_type so
+                // a fixed `T[N]` member declares `[N x i64]`, not the scalar
+                // i64 collapse that misaligned inline-array coll structs.
+                let field_tys: Vec<String> = fields.iter()
+                    .map(|(_, fty)| self.llvm_type(fty))
+                    .collect();
                 writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
             }
         }
@@ -529,6 +533,20 @@ impl LlvmBackend {
         // graph's generic application path widened it.
         if let Some(n) = crate::type_universe::bits_width(ty) {
             return format!("i{}", n);
+        }
+        // 2026-08-16 (Phase 3a): a fixed `T[N]` field lowers to an LLVM array
+        // `[N x i64]` — `coll struct Fixed { data: Int[4] }` must be
+        // `%Fixed = type { [4 x i64] }`, NOT `{ i64 }`. Field GEPs index the
+        // array; the old scalar collapse made the literal path misalign reads
+        // by the [len] header. State-slot push_field_type already uses
+        // vector_array_llvm_type; this makes struct DECLARATIONS agree.
+        if matches!(ty, Type::Vector(_, _)) {
+            if let Some(arr) = self.vector_array_llvm_type(ty) {
+                return arr;
+            }
+            if let Type::Vector(inner, _) = ty {
+                return self.llvm_type(inner);
+            }
         }
         // 2026-07-15: Ptr<T> always maps to LLVM opaque pointer type.
         // Must be checked BEFORE the universe lookup because Ptr<T> has no
@@ -1194,6 +1212,20 @@ impl LlvmBackend {
         let has = |op: &str| {
             members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == op))
         };
+        // 2026-08-16 (Phase 3a): an INLINE-FIXED coll struct (`coll struct
+        // Fixed { data: Int[4] }`) constructs the LITERAL DIRECTLY into its
+        // inline `T[N]` array — no malloc-based op members, no [len] header.
+        // This is the correct storage for a fixed coll: `.^Length` == N, the
+        // data field IS the array, and reads (`f.data[i]`, foreach via At)
+        // GEP the same layout. The old path fell to the heap-seq literal
+        // (emitted a [len][elems] buffer), misaligning every read by the
+        // header.
+        if matches!(
+            self.ctx.coll_storage.get(&base),
+            Some(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed)
+        ) {
+            return self.construct_local_fixed_collection(out, indent, briev_ty, list_literal);
+        }
         // Only Tier-2 collections (op Count + op At) get the op construction —
         // others fall back to the generic literal value.
         if !(has("Count") && has("At")) {
@@ -1273,6 +1305,101 @@ impl LlvmBackend {
             }
         }
         let _ = args;
+        Some(TypedRegister {
+            name: addr,
+            ty: briev_ty.clone(),
+        })
+    }
+
+    /// 2026-08-16 (Phase 3a, coll struct literal construction): build a LOCAL
+    /// INLINE-FIXED coll value (`let f: Fixed = [1,2,3,4]`) by storing the
+    /// literal elements DIRECTLY into the inline `data: T[N]` array. Layout:
+    /// malloc(struct_size) → inttoptr → GEP byte offset of the sequence member
+    /// → GEP `[N x T], i64 0, i64 i` → store element i. No [len] header, no
+    /// cap/len slots (SPEC §8.10: coll struct length == capacity == N).
+    /// Mirrors the boxed struct-literal lifetime: a heap malloc so the handle
+    /// survives the constructing function's return.
+    fn construct_local_fixed_collection(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        briev_ty: &Type,
+        list_literal: &Expr,
+    ) -> Option<TypedRegister> {
+        let (base, type_key) = match briev_ty {
+            Type::Custom(n) => (n.clone(), n.clone()),
+            Type::Applied(n, _) => {
+                let key = self.resolve_obj_key(briev_ty).unwrap_or_else(|| n.clone());
+                (n.clone(), key)
+            }
+            _ => return None,
+        };
+        let elems: Vec<&Expr> = match list_literal {
+            Expr::List(e) => e.iter().collect(),
+            _ => return None,
+        };
+        let n = self.coll_fixed_length(briev_ty) as usize;
+        // 2026-08-16: an over-length literal must NEVER fall back to the
+        // heap-seq path (it would misalign the inline array by the [len]
+        // header and silently construct the wrong value). The typechecker
+        // rejects it; codegen defends in depth with a hard error.
+        if elems.len() > n {
+            panic!(
+                "coll struct '{}' capacity is {} elements; literal has {} — \
+                 an over-length literal for a fixed coll must be a compile error",
+                base,
+                n,
+                elems.len()
+            );
+        }
+        let size = self.struct_type_size(&type_key);
+        let inst = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, inst, size).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
+        // The sequence member's byte offset within the struct (the data
+        // field). For a coll struct with one array member it is offset 0, but
+        // compute it so any future layout change stays correct.
+        let fields = self.ctx.struct_types.get(&type_key)
+            .cloned()
+            .unwrap_or_default();
+        let mut offset: u64 = 0;
+        let mut data_ty: Option<Type> = None;
+        let packed = self.ctx.packed_structs.contains(&type_key);
+        for (fname, fty) in &fields {
+            let _ = fname;
+            if data_ty.is_none() && !packed {
+                if matches!(fty, Type::Vector(_, _)) {
+                    data_ty = Some(fty.clone());
+                    break;
+                }
+                offset += crate::backend::llvm::types::type_size(fty, self.ctx.type_universe.as_ref());
+            }
+        }
+        let data_ty = data_ty?;
+        let data_gep = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, data_gep, inst, offset).ok();
+        let agg_ty = self.vector_array_llvm_type(&data_ty)
+            .unwrap_or_else(|| "i64".to_string());
+        for (i, e) in elems.iter().enumerate() {
+            let idx = i as i64;
+            let elem_ptr = self.fun.gen_reg();
+            writeln!(
+                out,
+                "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}",
+                indent, elem_ptr, agg_ty, data_gep, idx
+            )
+            .ok();
+            let val_tmp = self.fun.gen_reg();
+            let val = self.emit_expr_inner(out, &val_tmp, e, indent);
+            let store_val = self.ensure_typed_value(
+                out, indent, "i64", &val.name, Some(val.ty.clone()),
+                self.ctx.type_universe.clone().as_ref(),
+            );
+            writeln!(out, "{}store i64 {}, ptr {}", indent, store_val, elem_ptr).ok();
+        }
+        let _ = base;
         Some(TypedRegister {
             name: addr,
             ty: briev_ty.clone(),

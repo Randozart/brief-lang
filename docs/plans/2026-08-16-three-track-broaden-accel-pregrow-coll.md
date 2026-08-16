@@ -230,6 +230,58 @@ decided but partially pending.
 4. **Verify** — SPEC §8.10 example end-to-end: `coll struct Fixed { data: Int[4] }`,
    literal construction, `.^Length == 4`, iterate, `Data` floor reflection π.
 
+### SHIPPED 3a (2026-08-16)
+
+Implementation landed with one deviation from the sketch (the "op surface" was
+STORAGE-AWARE, not the shared growable surface):
+
+- **`derive_sequence_member` `Type::Vector` arm** (`coll_scaffold.rs:386`): a
+  fixed `T[N]` sequence member derives `(data, T)` — previously None, so a
+  `coll struct` never registered a sequence, never classified storage, and
+  fell to the heap-seq literal. This single arm unblocked coll_storage_mode
+  (InlineFixed), member synthesis, and literal construction.
+- **`llvm_type`/`declare_struct_types` Vector arm** (`emit_toplevel.rs:530`,
+  `:437`): `Int[4]` fields declare `[4 x i64]`, not the scalar `{ i64 }`
+  collapse. The old `{ i64 }` made `%Fixed = type { i64 }` and field GEPs read
+  misaligned heap-seq. The universe path was already correct (`llvm_type` per
+  field); the legacy struct_types path hardcoded all-i64 and now routes through
+  `llvm_type`.
+- **`coll struct` (StaticStruct) member synthesis** (`mod.rs:2463`): the
+  scaffolded op surface (`op Count`/`op At` + construction) now synthesizes
+  for `coll struct` too — previously only `coll obj` (TypeDef) got it. The
+  typechecker mirror (`synthesize_members_for_check` for StaticStruct,
+  `typechecker/mod.rs:3060`) makes `Count#`/`Capacity#`/foreach type-check.
+- **Storage-aware members** (`synthesize_members`): a FIXED coll gets
+  `op Count` returning the constant N (`synth_op_count_fixed`) — it has NO
+  hidden `len` slot — plus `op At`; the malloc-based `init_empty`/`init`/`push`/
+  `get`/`pop` are skipped for fixed (they assign a Ptr to the array field).
+- **`construct_local_fixed_collection`** (`emit_toplevel.rs:1319`): a local
+  `let f: Fixed = [1,2,3,4]` mallocs the struct, GEPs the inline array field,
+  and stores elements at `data[0..N-1]` — NO [len] header. Over-length literals
+  panic (codegen defense in depth) AND are rejected by the typechecker
+  (fixed-N literal bound, `typechecker/mod.rs:1237`).
+- **`instance_prefix_for` pooled-instance guard** (`emit_expr.rs:2205`): a
+  local boxed coll value (InlineFixed with synthesized members) was wrongly
+  classified as a POOLED instance once `obj_members` had it — the member body
+  resolved `data` against a nonexistent `f.data` column and emitted an
+  undefined `@data` global. Now the pooled path requires evidence of unpacked
+  `{base}.` columns (matching emit_member_body's boxed-fallback panic test).
+- **`Capacity#` fixed branch** (`intrinsics.rs:710`): a fixed coll struct has
+  no `cap` slot — Capacity# returns the compile-time N (SPEC §8.10), instead
+  of loading a neighboring field at offset 8.
+- **Verify** — runtime: `f.data[3]`=4, `.^Length`=4, `Count#`=4, `Capacity#`=4,
+  foreach sum=10 → total 26, exit 0. Interpreter parity test
+  (`coll_struct_literal_semantics_parity`, 18 = 4+4+10). Benchmarks: 40/40
+  MATCH, no regression. Tests: 5 new (inline-array IR, foreach no-extractelement,
+  oversize panic, typechecker lifecycle, interpreter parity) — 1887 lib green,
+  zero new Praetor diagnostics.
+
+**Not yet done (3a remainder)**: `Data` floor reflection π on a coll struct
+value, and `emit_heap_seq` deletion for coll-struct literals (the oversize
+panic + typechecker rejection now make it unreachable for fixed colls; the
+growable coll obj path never used it either — the deletion is now provably
+dead for ALL coll structs and can be removed in the slice-6 cleanup, 3d).
+
 ### 3b. Const generics (`coll struct Fixed<T,N> { data: T[N] }`)
 
 1. **Wire `N` into coll layout** — `coll_fixed_length` (`mod.rs:5456-5470`):

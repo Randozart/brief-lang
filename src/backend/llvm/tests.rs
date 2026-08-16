@@ -6111,6 +6111,110 @@ node go [done == 0][done == 1] {
     );
 }
 
+// ── Coll struct literal construction (2026-08-16, Phase 3a) ──────────
+
+/// A fixed `coll struct Fixed { data: Int[4] }` literal constructs DIRECTLY
+/// into the inline `T[N]` array — the IR declares `%Fixed = type { [4 x i64] }`
+/// (not the scalar collapse `{ i64 }`), and the literal stores elements at
+/// data[0..N-1] with NO [len] heap-seq header. `f.data[2]` then reads element
+/// 2 (the inline GEP), and `.^Length`/`Count#`/`Capacity#` all report N.
+#[test]
+fn test_coll_struct_literal_inline_array() {
+    let src = r#"
+coll struct Fixed { data: Int[4]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3, 4];
+    done = f.data[2];
+    done = f.^Length;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("%Fixed = type { [4 x i64] }"),
+        "the coll struct must declare the inline array type, not a scalar collapse; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("%Fixed = type { i64 }"),
+        "the fixed T[N] field must never collapse to a scalar i64; got:\n{ir}"
+    );
+    // The literal must NOT have a [len] heap-seq header (store of 4 then
+    // elements at GEP 1..4). A direct construction stores at data[0..3].
+    assert!(
+        !ir.contains("store i64 4, ptr"),
+        "the fixed literal must not write a [len] heap-seq header; got:\n{ir}"
+    );
+}
+
+/// foreach over a fixed `coll struct` iterates the inline array via the
+/// synthesized op surface (op Count returns the constant N, op At reads
+/// data[i]) — no extractelement on a scalar, no undefined @data global, no
+/// heap-seq literal. Runs the sum of [1,2,3,4] = 10.
+#[test]
+fn test_coll_struct_literal_foreach() {
+    let src = r#"
+coll struct Fixed { data: Int[4]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3, 4];
+    let s: Int = 0;
+    foreach v in f {
+        s = s + v;
+    };
+    done = s;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("extractelement"),
+        "foreach over a fixed coll struct must GEP+load the inline array, not extractelement; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("@data = "),
+        "the member-body 'data' must resolve through the boxed self, never an undefined @data global; got:\n{ir}"
+    );
+}
+
+/// An over-length literal for a fixed `coll struct` is a type error — the
+/// heap-seq fallback must never construct a coll struct value (it misaligns
+/// the inline array by the [len] header). Codegen defends in depth with a
+/// hard error (panic), not a silent fallback.
+#[test]
+#[should_panic(expected = "capacity is 2 elements")]
+fn test_coll_struct_oversize_literal_rejected() {
+    let src = r#"
+coll struct Fixed { data: Int[2]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3];
+    println!(f.^Length);
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let _ = backend.generate(&items, None);
+}
+
 // ── Multi-node internal fold (2026-08-16, Direction 3) ───────────────
 
 /// A counted-loop node in a MULTI-node program is folded into a noinline

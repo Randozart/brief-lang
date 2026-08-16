@@ -998,4 +998,31 @@ mod tests {
             "Count# 21 + Capacity# 21 (exact-fit) + sum 0..=20 = 210"
         );
     }
+
+    #[test]
+    fn coll_struct_literal_semantics_parity() {
+        // 2026-08-16 (Phase 3a): a fixed `coll struct` is a Product in the
+        // interpreter (a list literal's value). Count# == element count == N,
+        // Capacity# == N (exact-fit), foreach sums the elements. The backend's
+        // inline-array coll struct must agree on every observable.
+        let program = parse_program(
+            "coll struct Fixed { data: Int[4]; };\n\
+             defn fill() -> Int {\n\
+               let f: Fixed = [1, 2, 3, 4];\n\
+               let n: Int = f.Count#();\n\
+               let cap: Int = Capacity#(f);\n\
+               let sum: Int = 0;\n\
+               foreach x in f { sum = sum + x; };\n\
+               term n + cap + sum;\n\
+             };\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let v = interp.call_function("fill", &[]).unwrap();
+        assert_eq!(
+            v.as_i64(),
+            Some(4 + 4 + 10),
+            "Count# 4 + Capacity# 4 (fixed N) + sum 1+2+3+4 = 10 → 18"
+        );
+    }
 }

@@ -2194,12 +2194,26 @@ impl LlvmBackend {
                 // sequence) is a BOXED heap handle — never a pooled instance.
                 // Its members are the scaffolded op surface, resolved through
                 // the boxed self, not unpacked top-level columns. A FIXED
-                // `T[N]` coll may pool (the Stack shape). This mirrors the
+                // `T[N]` coll may pool (the Stack shape), and the packed
+                // `T[N]` coll struct may pool too. This mirrors the
                 // List-vs-Stack split (mod.rs build_field_index).
                 if matches!(
                     self.ctx.coll_storage.get(b),
                     Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
                 ) {
+                    return None;
+                }
+                // 2026-08-16 (Phase 3a): a pool-classifiable base is only a
+                // POOLED instance when it actually unpacked into top-level
+                // `{base}.{member}` columns. A LOCAL `let f: Fixed = [..]`
+                // constructs a BOXED handle (construct_local_fixed_collection
+                // mallocs + ptrtoint); treating it as a pooled row makes the
+                // member body resolve `data` against a nonexistent `f.data`
+                // column and emit an undefined `@data` global. The unpacked
+                // case is already handled above (obj_instance_inits / spawn
+                // rows); this get_local fallback requires evidence of the
+                // columns.
+                if !self.ctx.instance_slots.iter().any(|slot| slot.starts_with(&format!("{}.", b))) {
                     return None;
                 }
                 Some(b.clone())

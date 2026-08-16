@@ -2468,6 +2468,47 @@ impl LlvmBackend {
                             s.type_params.iter().map(|p| p.name.clone()).collect(),
                         );
                     }
+                    // 2026-08-16 (Phase 3a): a `coll struct` gets the SAME
+                    // synthesized collection surface as a `coll obj` — op
+                    // Count/At (iteration), Init/InitEmpty/InsertAt (literal
+                    // construction). A fixed `T[N]` sequence member derives via
+                    // derive_sequence_member's Vector arm, so `let f: Fixed =
+                    // [1,2,3,4]` constructs through the scaffolded ops instead
+                    // of the heap-seq literal (which misaligned the inline
+                    // array reads by the [len] header). InlineFixed storage was
+                    // registered at the pre-seed pass (mod.rs:2205).
+                    if s.coll {
+                        let td_slots: Vec<crate::ast::top::TypeDefSlot> = s.fields
+                            .iter()
+                            .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                                name: n.clone(), ty: ty.clone(), bit_range: None,
+                            })
+                            .collect();
+                        if let Some((seq_expr, elem_ty)) = crate::backend::llvm::coll_scaffold::derive_sequence_member(
+                            &td_slots,
+                            &self.ctx.struct_types,
+                        ) {
+                            let storage = self.ctx.coll_storage.get(&s.name)
+                                .copied()
+                                .unwrap_or(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed);
+                            let ftd = crate::ast::top::TypeDef {
+                                name: s.name.clone(), type_params: s.type_params.clone(),
+                                parent: None, protocol: None, traits: vec![],
+                                bit_range: None, span: None, coll: true, seq: false,
+                                body: crate::ast::top::TypeDefBody {
+                                    slots: td_slots.clone(), metadata: Default::default(),
+                                    projections: vec![], bindings: vec![],
+                                    operators: vec![], op_bindings: vec![],
+                                    constraints: vec![], members: vec![], span: None,
+                                },
+                            };
+                            let synth = crate::backend::llvm::coll_scaffold::synthesize_members(
+                                &ftd, &seq_expr, elem_ty, storage,
+                            );
+                            self.ctx.obj_members.entry(s.name.clone())
+                                .or_insert_with(|| synth.clone());
+                        }
+                    }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             // 2026-08-13 (layout-keywords plan): the spec-aware

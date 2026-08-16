@@ -1235,6 +1235,29 @@ fn try_coerce_via_parse(
         };
         if let Some(n) = target_base {
             if n == "List" || ctx.coll_types.contains(n) {
+                // 2026-08-16 (Phase 3a): a FIXED `coll struct` (`T[N]` sequence
+                // member) bounds the literal — `[1,2,3]` for `Int[2]` must be
+                // rejected (a growable `coll obj` / `List` is unbounded). The
+                // heap-seq fallback must never construct a coll struct value
+                // (it misaligns the inline array by the [len] header).
+                let fixed_n = if n == "List" {
+                    None
+                } else {
+                    ctx.type_slots.get(n).and_then(|slots| {
+                        slots.iter().find_map(|s| match &s.ty {
+                            Type::Vector(_, dims) => dims.first().and_then(|d| match d {
+                                crate::ast::Dimension::Anonymous(c) => Some(*c as i64),
+                                _ => None,
+                            }),
+                            _ => None,
+                        })
+                    })
+                };
+                if let Some(n_max) = fixed_n {
+                    if (elems.len() as i64) > n_max {
+                        return false;
+                    }
+                }
                 return true;
             }
         }
@@ -3032,6 +3055,48 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     sd.name.clone(),
                     sd.type_params.iter().map(|p| p.name.clone()).collect(),
                 );
+            }
+            // 2026-08-16 (Phase 3a): a `coll struct` gets the SAME scaffolded
+            // op surface in the typechecker as a `coll obj` — `op Count`/`op At`
+            // (iteration), `op InsertAt` (foreach element type). The LITERAL
+            // `let f: Fixed = [1,2,3,4]` is accepted (coll_types gate) and the
+            // op members make `Count#`/`Capacity#`/foreach type-check. was
+            // missing and `Count#` rejected a valid fixed coll.
+            if sd.coll {
+                let fake_slots: Vec<crate::ast::top::TypeDefSlot> = sd.fields
+                    .iter()
+                    .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                        name: n.clone(), ty: ty.clone(), bit_range: None,
+                    })
+                    .collect();
+                let ftd = crate::ast::top::TypeDef {
+                    name: sd.name.clone(), type_params: sd.type_params.clone(),
+                    parent: None, protocol: None, traits: vec![],
+                    bit_range: None, span: None, coll: true, seq: false,
+                    body: crate::ast::top::TypeDefBody {
+                        slots: fake_slots, metadata: Default::default(),
+                        projections: vec![], bindings: vec![],
+                        operators: vec![], op_bindings: vec![],
+                        constraints: vec![], members: vec![], span: None,
+                    },
+                };
+                let slot_map: std::collections::HashMap<String, Vec<(String, crate::ast::Type)>> =
+                    all_type_slots.iter().map(|(k, v)| (
+                        k.clone(),
+                        v.iter().map(|s| (s.name.clone(), s.ty.clone())).collect(),
+                    )).collect();
+                let synth = crate::backend::llvm::coll_scaffold::synthesize_members_for_check(&ftd, &slot_map);
+                let mut merged = Vec::new();
+                for m in synth {
+                    let m_name = crate::backend::llvm::emit_expr::member_briev_name(&m);
+                    let dup = merged.iter().any(|ex| {
+                        crate::backend::llvm::emit_expr::member_briev_name(ex) == m_name
+                    });
+                    if !dup {
+                        merged.push(m);
+                    }
+                }
+                all_type_members.insert(sd.name.clone(), merged);
             }
         }
     }
@@ -5949,6 +6014,62 @@ node go [done == 0][done == 1] {
     assert!(
         check(ok).is_ok(),
         "nested-buffer coll obj must type (List shape: literal + push + Count + index + foreach)"
+    );
+}
+
+/// 2026-08-16 (Phase 3a): a fixed `coll struct` literal construction typechecks
+/// when the element count fits `T[N]`, iterates, and `.^Length`/`Count#`/
+/// `Capacity#` all report N. An OVER-length literal is rejected (the fixed
+/// array cannot hold it — the heap-seq fallback must never fire for a coll
+/// struct).
+#[test]
+fn coll_struct_literal_lifecycle_typechecks() {
+    let ok = r#"
+coll struct Fixed { data: Int[4]; };
+let done: Int = 0;
+let total: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3, 4];
+    let len: Int = f.^Length;
+    let n: Int = f.Count#();
+    let cap: Int = Capacity#(f);
+    let one: Int = f.data[1];
+    let sum: Int = 0;
+    foreach v in f { sum = sum + v; }
+    total = len + n + cap + one + sum;
+    done = 1;
+    term;
+};
+"#;
+    let errs = check(ok);
+    assert!(
+        errs.is_ok(),
+        "fixed coll struct literal + Length + Count# + Capacity# + field read + foreach must type; got: {:?}",
+        errs
+    );
+    let empty_ok = r#"
+coll struct Fixed { data: Int[4]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [];
+    term;
+};
+"#;
+    assert!(
+        check(empty_ok).is_ok(),
+        "an empty literal for a fixed coll struct must type (length == capacity == N)"
+    );
+    let oversize = r#"
+coll struct Fixed { data: Int[2]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3];
+    term;
+};
+"#;
+    assert!(
+        check(oversize).is_err(),
+        "an over-length literal for a fixed coll struct must be a type error"
     );
 }
 

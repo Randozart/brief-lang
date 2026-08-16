@@ -411,6 +411,13 @@ pub(crate) fn derive_sequence_member(
                     )
                 })
             }
+            // 2026-08-16 (Phase 3a, coll struct literal): a fixed `T[N]`
+            // sequence member — `coll struct Fixed { data: Int[4] }`. The
+            // sequence is the inline array; elements are the inner type. This
+            // is the arm that makes a `coll struct` derive (previously it
+            // returned None and fell to the heap-seq literal path, which
+            // misaligned the inline array reads by the [len] header).
+            Type::Vector(inner, _) => Some((slot.name.clone(), (**inner).clone())),
             _ => None,
         };
         if derived.is_some() {
@@ -440,23 +447,65 @@ pub(crate) fn synthesize_members(
 ) -> Vec<TopLevel> {
     let mut members = Vec::new();
     let growable = storage == CollStorage::HeapGrowable;
-    members.push(TopLevel::TypeDefOperator(synth_op_count()));
+    // The fixed N from a `T[N]` sequence member (fixed coll structs only).
+    let fixed_n = td.body.slots.iter().find_map(|s| match &s.ty {
+        crate::ast::Type::Vector(_, dims) => dims.first().and_then(|d| match d {
+            crate::ast::Dimension::Anonymous(n) => Some(*n as i64),
+            _ => None,
+        }),
+        _ => None,
+    });
+    // 2026-08-16 (Phase 3a): fixed `T[N]` colls get a constant-N Count (their
+    // length == capacity == N, no hidden `len` slot). Growable coll obj's
+    // Count reads the `len` slot as before.
+    members.push(match fixed_n {
+        Some(n) => TopLevel::TypeDefOperator(synth_op_count_fixed(n)),
+        None => TopLevel::TypeDefOperator(synth_op_count()),
+    });
     members.push(TopLevel::TypeDefOperator(synth_op_at(seq_expr, elem_ty.clone())));
-    members.push(TopLevel::Definition(synth_init_empty(
-        seq_expr, elem_ty.clone(), elem_ty.clone(),
-    )));
-    members.push(TopLevel::Definition(synth_push(
-        seq_expr,
-        elem_ty.clone(),
-        if growable { Some(strategy_action(td, "Grow", default_grow_action())) } else { None },
-    )));
-    members.push(TopLevel::Definition(synth_get(seq_expr, elem_ty.clone())));
-    members.push(TopLevel::Definition(synth_pop(seq_expr, elem_ty.clone())));
-    members.push(TopLevel::Definition(synth_init(seq_expr, elem_ty)));
+    if growable {
+        members.push(TopLevel::Definition(synth_init_empty(
+            seq_expr, elem_ty.clone(), elem_ty.clone(),
+        )));
+        members.push(TopLevel::Definition(synth_push(
+            seq_expr,
+            elem_ty.clone(),
+            Some(strategy_action(td, "Grow", default_grow_action())),
+        )));
+        members.push(TopLevel::Definition(synth_get(seq_expr, elem_ty.clone())));
+        members.push(TopLevel::Definition(synth_pop(seq_expr, elem_ty.clone())));
+        members.push(TopLevel::Definition(synth_init(seq_expr, elem_ty)));
+    } else {
+        // 2026-08-16 (Phase 3a): a fixed T[N] coll constructs through the
+        // literal store path (construct_local_collection emits the inline
+        // array writes directly), so no malloc-based Init/InitEmpty/InsertAt
+        // members are synthesized — those would assign a Ptr to the array
+        // field or write a nonexistent `len` slot. `op At`/Count/foreach stay.
+    }
     // The op bindings (op InitEmpty: init_empty(#Lh), op InsertAt: push(#Lh,#Rh), ...)
     // live in operator_defs; they are appended by the caller.
     let _ = td;
     members
+}
+
+/// A synthesized `op Count() -> Int { term N; }` for a fixed `T[N]` coll —
+/// its length is the compile-time N (SPEC §8.10: length == capacity == N).
+fn synth_op_count_fixed(n: i64) -> Definition {
+    Definition {
+        name: "Count".to_string(),
+        type_params: vec![],
+        parameters: vec![],
+        output_type: Some(OutputType::single(Type::int())),
+        outputs: vec![Type::int()],
+        contract: default_coll_contract(),
+        body: vec![Statement::Term(Some(Expr::Decimal(n)))],
+        metadata: Default::default(),
+        derivation: None,
+        modifiers: vec![],
+        annotations: vec![],
+        span: None,
+        doc: Some("scaffolded by `coll` (fixed-length Count = N)".to_string()),
+    }
 }
 
 /// Build the `operator_defs` bindings for a coll type: the op-name → member
@@ -513,6 +562,11 @@ pub fn synthesize_members_for_check(
                 })
             })
         }
+        // 2026-08-16 (Phase 3a): a fixed `T[N]` sequence member gives the
+        // typechecker the element type too — previously a coll struct got
+        // Count only, so literal construction of a `coll struct` never saw
+        // `op At`/`op Init`/`op InsertAt` and the backend fell to heap-seq.
+        Type::Vector(inner, _) => Some((s.name.clone(), (**inner).clone())),
         _ => None,
     });
     let mut members = Vec::new();

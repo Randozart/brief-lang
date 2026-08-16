@@ -711,6 +711,40 @@ fn emit_capacity(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    // 2026-08-16 (Phase 3a): a fixed `coll struct` has NO hidden `cap` slot —
+    // its capacity IS the compile-time N (SPEC §8.10: Capacity# returns N, a
+    // constant). Reading offset 8 (the growable coll's cap slot) would load a
+    // neighboring field. A fixed coll struct registered InlineFixed gets the
+    // constant.
+    let is_fixed = match args.first() {
+        Some(Expr::Identifier(n)) => {
+            let bound = backend.fun.let_binding_types.get(n)
+                .cloned()
+                .or_else(|| backend.fun.let_original_types.get(n).cloned());
+            bound.map_or(false, |t| {
+                let base = match &t {
+                    crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+                    _ => return false,
+                };
+                matches!(
+                    backend.ctx.coll_storage.get(&base),
+                    Some(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed)
+                )
+            })
+        }
+        _ => false,
+    };
+    if is_fixed {
+        let n = backend.coll_fixed_length(&match args.first() {
+            Some(Expr::Identifier(name)) => backend.fun.let_binding_types.get(name)
+                .or_else(|| backend.fun.let_original_types.get(name))
+                .cloned()
+                .unwrap_or_else(crate::ast::Type::int),
+            _ => crate::ast::Type::int(),
+        });
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+    }
     let h = emit_arg(backend, out, &args[0], indent);
     let p = backend.fun.gen_reg();
     let gep = backend.fun.gen_reg();
