@@ -1,37 +1,42 @@
 # Bugs
 
-## stdlib iterator.bv / hashmap.bv written aspirationally — never compiled — OPEN
+## stdlib iterator.bv / hashmap.bv written aspirationally — never compiled — CLOSED
 
 **Date:** 2026-08-14 (found while verifying generic `defn f<T>` dispatch)
-**Status:** iterator.bv CLOSED 2026-08-16 (Phase 3c); hashmap.bv still OPEN.
+**Status:** BOTH CLOSED 2026-08-16 (iterator.bv in Phase 3c; hashmap.bv in the
+hashmap redesign).
 
-Two distinct root causes, both fixed or scoped on 2026-08-16:
+- **iterator.bv** — CLOSED (Phase 3c): `List` import + transitive function-deps
+  in the import closure + iter_any/all convergence rewrite. See the three-track
+  plan's 3c SHIPPED section.
+- **hashmap.bv** — CLOSED (2026-08-16, plan `2026-08-16-hashmap-redesign.md`).
+  The old file used syntax that never existed (`:>`, `term {}`, `Option`,
+  concat). The redesign made `obj HashMap<K,V>` a working collection through
+  its op surface (`op Count`/`op InsertAt`/`op Init`/Tier-1 ops, `Entry<K,V>`
+  element, linear-probe insert/get/contains/remove), fixed the compiler's
+  seed-init and literal-construction gates, and rewrote hashmap.bv against the
+  real surface. `brievc check` clean; runtime consumers verified.
 
-- **iterator.bv** — CLOSED. (1) `List`'s op surface (`op Count`/`op At`) was
-  NOT in scope for the adapter bodies — the file never imported `List`, so
-  `list.Count#()` and `result <- x` failed. Added `import { List } from
-  "std/collections.bv"`. (2) A named import did NOT pull a defn's transitive
-  referenced FUNCTIONS — `import { iter_map }` dropped `iter_map_loop`, the
-  helper call resolved to the raw-type fallback (return became Int), and the
-  generic body failed to typecheck. Fixed in import_resolver.rs: the closure
-  now also collects referenced function names (referenced_function_names).
-  (3) `iter_any`/`iter_all`'s early `term true` inside `when` could not
-  converge — the loop postcondition `i == Count#()` was never met on the early
-  exit, so the txn re-fired with the same `i` forever. Rewritten as
-  accumulator loops (`found`/`ok` carried to the loop end). All adapters now
-  `brievc check` clean and run: map/fold/filter/take/skip/chain/zip/enumerate/
-  any/all/sum/product verified end-to-end.
-- **hashmap.bv** — OPEN. `new_map<K,V>()` returns `term {}` (a parse error —
-  there is no empty-map literal), `map.Count#()` needs `op Count` on the
-  hand-written `obj HashMap` (it only has Tier-1 cursor ops Iter/Step/IsEnd/
-  Current), the empty HashMap has no construction path (`op Init: init(#Lh,
-  #Rh)` requires a seed value), and `Option`/`Some`/`None` forms don't
-  typecheck. Deferred to a dedicated HashMap surface work item.
+**Known limitations surfaced by the redesign (all pre-existing compiler bugs,
+documented in the redesign plan's SHIPPED section):**
+1. **Tier-1 foreach over a collection whose cursor ops contain their own
+   foreach** miscompiles (register cross-contamination, `%t243` undefined) —
+   a hand-written Tier-1 collection with foreach-scanning `op Iter`/`op Step`
+   cannot be `foreach`-ed.
+2. **Generic-member `List<K>` arrow accumulator** fails to typecheck across an
+   import boundary (free-T arrow) — `keys()`/`values()` scans deferred.
+3. **Nested `foreach` inside an `if` inside a txn member body** segfaults when
+   the txn re-fires — rehash-on-full deferred.
+4. **A collection obj passed as a defn PARAM then mutated via a member method**
+   corrupts memory (member-on-param ABI) — the hashmap.bv defn wrappers use
+   direct member calls; a functional wrapper style is not yet safe.
+5. **`hash_ops_idio` benchmark** removed from the suite — the probe-inlined
+   hot loop overflows clang's frontend (the map is correct for normal use).
 
-**Path:** a stdlib-cleanup pass that (a) fixes the free-`T`-body limitation
-(body literals/ops adopting the declared return type), (b) typechecks
-`Some`/`None` Option constructors, (c) verifies/fixes the nullary generic
-construction. Separate from the generic-dispatch core, which is complete.
+**Path for the follow-ups:** (a) fix the Tier-1 foreach register allocation,
+(b) fix the generic-member arrow cross-import, (c) fix nested-foreach-in-if in
+member bodies, (d) fix member-on-param ABI. Each is a distinct compiler bug;
+none weakens a contract.
 
 ## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
 

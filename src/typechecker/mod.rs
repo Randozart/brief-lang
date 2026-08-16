@@ -1205,6 +1205,73 @@ pub fn infer_expression(
     }
 }
 
+/// 2026-08-16 (hashmap redesign): does a type declare the collection op
+/// surface — `op Count`/`op Iter`/`op Init`/`op InitEmpty`/`op InsertAt` as
+/// operator members? A hand-written `obj HashMap<K,V>` declares them, making
+/// it a collection VALUE (literal construction opt-in) without the `coll`
+/// keyword. Op-driven; never name-based.
+fn declares_collection_ops(ctx: &TypecheckContext, type_name: &str) -> bool {
+    ctx.type_members.get(type_name).map_or(false, |members| {
+        members.iter().any(|m| match m {
+            crate::ast::top::TopLevel::TypeDefOperator(d) => {
+                matches!(d.name.as_str(), "Count" | "Iter" | "Init" | "InitEmpty" | "InsertAt")
+            }
+            _ => false,
+        })
+    })
+}
+
+/// 2026-08-16 (hashmap redesign): is a `[...]` list literal accepted for the
+/// TARGET type? `List` and any `coll` type always; a hand-written obj
+/// declaring the collection op surface opts in. A FIXED `coll struct` (`T[N]`)
+/// bounds the literal — an over-length literal is rejected.
+fn list_literal_accepted_by(target_ty: &Type, elems: &[Expr], ctx: &TypecheckContext) -> bool {
+    let target_base = match target_ty {
+        Type::Custom(n) => Some(n.as_str()),
+        Type::Applied(n, _) => Some(n.as_str()),
+        _ => None,
+    };
+    let Some(n) = target_base else { return false; };
+    if !(n == "List" || ctx.coll_types.contains(n) || declares_collection_ops(ctx, n)) {
+        return false;
+    }
+    if n == "List" {
+        return true;
+    }
+    // A FIXED `coll struct` (`T[N]` sequence member) bounds the literal —
+    // `[1,2,3]` for `Int[2]` must be rejected. A GENERIC `coll struct
+    // Fixed<T, N>` substitutes the const-generic dimension from the APPLIED
+    // args (the generic base's `T[N]` holds `Named("N",0)`).
+    let args: &[Type] = match target_ty {
+        Type::Applied(_, a) => a,
+        _ => &[],
+    };
+    let fixed_n = ctx.type_slots.get(n).and_then(|slots| {
+        slots.iter().find_map(|s| match &s.ty {
+            Type::Vector(_, dims) => dims.first().and_then(|d| match d {
+                crate::ast::Dimension::Anonymous(c) => Some(*c as i64),
+                crate::ast::Dimension::Named(nm, _) => {
+                    let params = ctx.type_params.get(n).cloned().unwrap_or_default();
+                    params.iter().position(|p| p == nm)
+                        .and_then(|i| args.get(i))
+                        .and_then(|a| match a {
+                            Type::Number(sz) => Some(*sz),
+                            _ => None,
+                        })
+                }
+                _ => None,
+            }),
+            _ => None,
+        })
+    });
+    if let Some(n_max) = fixed_n {
+        if (elems.len() as i64) > n_max {
+            return false;
+        }
+    }
+    true
+}
+
 /// 2026-07-20: Try to coerce a value from its inferred type to a target type
 /// via Parse ops. Returns true if the value can be accepted via Parse.
 /// Only works for literal expressions (Decimal, Quoted, Identifier).
@@ -1227,59 +1294,11 @@ fn try_coerce_via_parse(
         // `op Init`+`op InsertAt`, so the literal constructs through the
         // collection's own ops. `List` stays a built-in accepted target for
         // compatibility. Matches both the Custom (`MyQueue`) and Applied
-        // (`List<Int>`) target forms.
-        let target_base = match target_ty {
-            Type::Custom(n) => Some(n.as_str()),
-            Type::Applied(n, _) => Some(n.as_str()),
-            _ => None,
-        };
-        if let Some(n) = target_base {
-            if n == "List" || ctx.coll_types.contains(n) {
-                // 2026-08-16 (Phase 3a): a FIXED `coll struct` (`T[N]` sequence
-                // member) bounds the literal — `[1,2,3]` for `Int[2]` must be
-                // rejected (a growable `coll obj` / `List` is unbounded). The
-                // heap-seq fallback must never construct a coll struct value
-                // (it misaligns the inline array by the [len] header).
-                let fixed_n = if n == "List" {
-                    None
-                } else {
-                    // 2026-08-16 (Phase 3b): a GENERIC `coll struct
-                    // Fixed<T, N>` application (`Fixed<Int, 2>`) substitutes
-                    // the const-generic dimension from the APPLIED args — the
-                    // generic base's `T[N]` holds `Named("N",0)`, so the base
-                    // lookup alone yields no bound and an over-length literal
-                    // would slip through.
-                    let slots = ctx.type_slots.get(n);
-                    let args: &[Type] = match target_ty {
-                        Type::Applied(_, a) => a,
-                        _ => &[],
-                    };
-                    slots.and_then(|slots| {
-                        slots.iter().find_map(|s| match &s.ty {
-                            Type::Vector(_, dims) => dims.first().and_then(|d| match d {
-                                crate::ast::Dimension::Anonymous(c) => Some(*c as i64),
-                                crate::ast::Dimension::Named(nm, _) => {
-                                    let params = ctx.type_params.get(n).cloned().unwrap_or_default();
-                                    params.iter().position(|p| p == nm)
-                                        .and_then(|i| args.get(i))
-                                        .and_then(|a| match a {
-                                            Type::Number(sz) => Some(*sz),
-                                            _ => None,
-                                        })
-                                }
-                                _ => None,
-                            }),
-                            _ => None,
-                        })
-                    })
-                };
-                if let Some(n_max) = fixed_n {
-                    if (elems.len() as i64) > n_max {
-                        return false;
-                    }
-                }
-                return true;
-            }
+        // (`List<Int>`) target forms. 2026-08-16 (hashmap redesign): a
+        // hand-written obj declaring the collection op surface accepts too
+        // (opt-in literal construction).
+        if list_literal_accepted_by(target_ty, elems, ctx) {
+            return true;
         }
         if elems.is_empty() {
             return false;
@@ -6239,6 +6258,107 @@ node go [done == 0][done == 1] {
     assert!(
         check(ok).is_ok(),
         "Data-floor reflection must type (descriptor reflection + Blob stored length)"
+    );
+}
+
+/// 2026-08-16 (hashmap redesign, plan 2026-08-16-hashmap-redesign.md): a
+/// hand-written `obj` (no `coll` keyword) gets the collection op surface via
+/// declared ops — `op Count` makes `Count#` type, `op Init` makes the seed
+/// construction (`let m: MiniMap = 0`) type, and member methods type. LITERAL
+/// construction is opt-in: an obj declaring the construction ops accepts
+/// `[...]`.
+#[test]
+fn hashmap_op_surface_and_literal_construction_typechecks() {
+    let ok = r#"
+struct Pair { key: Int; val: Int; };
+obj MiniMap {
+    keys: Ptr<Int>;
+    vals: Ptr<Int>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    op InsertAt: insert(#Lh, #Rh);
+    op ExtractFrom: remove(#Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
+    op Count() -> Int { term count; };
+    txn init(v: Int) [v >= 0][v >= 0] {
+        keys = Malloc#(256 * 8) as Ptr<Int>;
+        vals = Malloc#(256 * 8) as Ptr<Int>;
+        occupied = Malloc#(256 * 8) as Ptr<Int>;
+        cap = 256;
+        count = 0;
+    };
+    txn insert(p: Pair) [count < cap][count <= cap] {
+        let h: Int = (p.key as Int) % cap;
+        keys[h] = p.key;
+        vals[h] = p.val;
+        occupied[h] = 1;
+        count = count + 1;
+    };
+    defn get(key: Int) -> Int [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        term vals[h];
+    };
+    defn contains(key: Int) -> Bool {
+        let h: Int = (key as Int) % cap;
+        term occupied[h] == 1;
+    };
+};
+let done: Int = 0;
+let total: Int = 0;
+node go [done == 0][done == 1] {
+    let m: MiniMap = 0;
+    let p: Pair = Pair { key: 1, val: 10 };
+    m.insert(p);
+    let g: Int = m.get(1);
+    let c: Bool = m.contains(1);
+    let n: Int = m.Count#();
+    total = g + (c as Int) + n;
+    done = 1;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "obj seed init + op Count + member methods must type (op-driven surface)"
+    );
+    let lit = r#"
+struct Pair { key: Int; val: Int; };
+obj MiniMap {
+    keys: Ptr<Int>;
+    vals: Ptr<Int>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    op InsertAt: insert(#Lh, #Rh);
+    op Init: init(#Lh, #Rh);
+    op Count() -> Int { term count; };
+    txn init(v: Int) [v >= 0][v >= 0] {
+        keys = Malloc#(256 * 8) as Ptr<Int>;
+        vals = Malloc#(256 * 8) as Ptr<Int>;
+        occupied = Malloc#(256 * 8) as Ptr<Int>;
+        cap = 256;
+        count = 0;
+    };
+    txn insert(p: Pair) [count < cap][count <= cap] {
+        let h: Int = (p.key as Int) % cap;
+        keys[h] = p.key;
+        vals[h] = p.val;
+        occupied[h] = 1;
+        count = count + 1;
+    };
+};
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let m: MiniMap = [Pair { key: 1, val: 10 }];
+    done = 1;
+    term;
+};
+"#;
+    assert!(
+        check(lit).is_ok(),
+        "an obj declaring construction ops must accept a list literal (opt-in)"
     );
 }
 

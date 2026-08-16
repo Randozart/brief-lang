@@ -369,14 +369,35 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // type (`MyQueue`), so a coll-typed binding is a collection
                     // too — construct it through the scaffolded ops.
                     let constructed = {
+                        // 2026-08-16 (hashmap redesign): a collection is an
+                        // op-surface type OR a `coll` keyword type — any
+                        // Custom/Applied obj declaring the collection ops
+                        // (op Init/InsertAt/Count) is a collection VALUE, not
+                        // a pooled instance, and a `coll struct` (InlineFixed)
+                        // constructs its literal directly. The old
+                        // coll_storage check only caught `coll` keyword types;
+                        // a hand-written `obj HashMap<K,V>` has no coll_storage
+                        // yet must construct the same way. is_coll_type covers
+                        // both (coll storage OR op-surface via is_heap_coll).
                         let is_coll = ty.as_ref().map(|t| match t {
-                            crate::ast::Type::Applied(..) => true,
-                            crate::ast::Type::Custom(n) => backend.ctx.coll_storage.contains_key(n),
+                            crate::ast::Type::Applied(n, _) | crate::ast::Type::Custom(n) => {
+                                backend.is_coll_type(t) || backend.is_heap_coll(n)
+                            }
                             _ => false,
                         }).unwrap_or(false);
                         if is_coll && matches!(e, crate::ast::Expr::List(_)) {
                             let briev = ty.clone().unwrap_or(crate::ast::Type::int());
                             backend.construct_local_collection(out, indent, &briev, e)
+                        } else if is_coll {
+                            // 2026-08-16 (hashmap redesign): a LOCAL collection
+                            // with a SEED init (`let m: HashMap<K,V> = 0`)
+                            // constructs through `op Init(seed)` — the same op
+                            // the state-field path uses. Previously a scalar
+                            // seed bound the raw value (NULL handle → member
+                            // calls segfaulted) for ANY non-coll obj (RingBuffer,
+                            // Stack, HashMap). This is the general fix.
+                            let briev = ty.clone().unwrap_or(crate::ast::Type::int());
+                            backend.construct_local_collection_seed(out, indent, &briev, e)
                         } else {
                             None
                         }

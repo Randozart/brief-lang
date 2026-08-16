@@ -88,6 +88,12 @@ coll obj List<T> {
 // so `(key as Int) % cap` maps each to a distinct slot. The chained-bucket
 // form (a Ptr array of per-bucket Lists) is a documented follow-up.
 
+// 2026-08-16 (hashmap redesign): a key/value pair as a NAMED struct — struct
+// elements are the coll/op machinery's native element type (tuple elements
+// miscompile today; see the hashmap redesign plan §6). Used by HashMap's
+// insert/iterate surface.
+struct Entry<K, V> { key: K; val: V; };
+
 obj HashMap<K, V> {
     keys: Ptr<K>;
     vals: Ptr<V>;
@@ -103,6 +109,12 @@ obj HashMap<K, V> {
     op ExtractFrom: remove(#Rh);
     op CopyFrom: get(#Rh);
     op Init: init(#Lh, #Rh);
+
+    // 2026-08-16 (hashmap redesign): `op Count` = the element count — the
+    // collection op surface (`Count#`/`len`/`is_empty`). This is a map's
+    // OCCUPIED count, NOT the slot-array size `cap` (the Tier-1 cursor scans
+    // `cap` slots skipping empties).
+    op Count() -> Int { term count; };
 
     // 2026-08-12 (Iterable protocol, Tier 1): the external cursor contract.
     // The cursor is the slot INDEX; the end sentinel is `cap` (past-the-end).
@@ -128,6 +140,10 @@ obj HashMap<K, V> {
         term j;
     };
     op IsEnd(i: Int) -> Bool { term i >= cap; };
+    // 2026-08-16 (hashmap redesign): `op Current` returns the VALUE at the
+    // occupied slot (a foreach over a map iterates its values). The
+    // key-at-cursor is reachable via `keys[i]` in a caller that tracks the
+    // index, or via `get`/`keys` scans.
     op Current(i: Int) -> V { term vals[i]; };
 
     txn init(val: K) [true][count == 0] {
@@ -142,24 +158,119 @@ obj HashMap<K, V> {
         term (key as Int) % cap;
     };
 
-    txn insert(key: K, val: V) [count < cap][count <= cap] {
-        let h = (key as Int) % cap;
-        keys[h] = key;
-        vals[h] = val;
-        occupied[h] = 1;
+    // 2026-08-16 (hashmap redesign): insert takes the PAIR as one Entry —
+    // the `op InsertAt: insert(#Lh,#Rh)` binding passes a single RHS, so a
+    // 2-arg insert could never receive a `<-`/literal value. Linear probing
+    // for collisions; rehash on full (double cap, reinsert all occupied).
+    // The foreach probe uses a `p = cap` done-sentinel (no `break` in Briev):
+    // once the slot is found, p becomes cap and later iterations no-op on
+    // `p < cap`.
+    txn insert(e: Entry<K, V>) [count < cap][count <= cap] {
+        let k: K = e.key;
+        let v: V = e.val;
+        // 2026-08-16: linear-probe for an empty slot or the same key. The
+        // `done` Bool gates the writes (a `p = cap` sentinel miscompiles —
+        // see the hashmap redesign plan). Rehash-on-full is DEFERRED: a
+        // nested `foreach` inside an `if` inside a txn member body segfaults
+        // when the txn re-fires (pre-existing codegen bug); the map stays at
+        // its initial cap and the `count < cap` contract fails at capacity.
+        let h: Int = (k as Int) % cap;
+        let p: Int = h;
+        let done_slot: Bool = false;
+        foreach q in 0..cap {
+            if !done_slot {
+                if occupied[p] == 0 || keys[p] == k {
+                    keys[p] = k;
+                    vals[p] = v;
+                    occupied[p] = 1;
+                    done_slot = true;
+                } else {
+                    if p + 1 < cap {
+                        p = p + 1;
+                    } else {
+                        p = 0;
+                    };
+                };
+            };
+        };
+        if !done_slot {
+            // Unreachable when count < cap (at least one slot is free).
+        };
         count = count + 1;
     };
 
-    txn remove(key: K) -> V [count > 0][count >= 0] {
-        let h = (key as Int) % cap;
-        let r: V = vals[h];
-        occupied[h] = 0;
-        count = count - 1;
+    defn get(key: K) -> V [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        let p: Int = h;
+        let r: V = vals[p];
+        let done_slot: Bool = false;
+        foreach q in 0..cap {
+            if !done_slot {
+                if occupied[p] == 1 && keys[p] == key {
+                    r = vals[p];
+                    done_slot = true;
+                } else {
+                    if p + 1 < cap {
+                        p = p + 1;
+                    } else {
+                        p = 0;
+                    };
+                };
+            };
+        };
         term r;
     };
 
-    defn get(key: K) -> V [count > 0][count >= 0] {
-        let h = (key as Int) % cap;
-        term vals[h];
+    defn contains(key: K) -> Bool {
+        let h: Int = (key as Int) % cap;
+        let p: Int = h;
+        let found_slot: Bool = false;
+        foreach q in 0..cap {
+            if !found_slot {
+                if occupied[p] == 1 && keys[p] == key {
+                    found_slot = true;
+                } else {
+                    if p + 1 < cap {
+                        p = p + 1;
+                    } else {
+                        p = 0;
+                    };
+                };
+            };
+        };
+        term found_slot;
     };
+
+    txn remove(key: K) -> V [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        let p: Int = h;
+        let r: V = vals[p];
+        let done_slot: Bool = false;
+        foreach q in 0..cap {
+            if !done_slot {
+                if occupied[p] == 1 && keys[p] == key {
+                    r = vals[p];
+                    occupied[p] = 0;
+                    done_slot = true;
+                } else {
+                    if p + 1 < cap {
+                        p = p + 1;
+                    } else {
+                        p = 0;
+                    };
+                };
+            };
+        };
+        if done_slot {
+            count = count - 1;
+        };
+        term r;
+    };
+
+    // 2026-08-16 (hashmap redesign): keys()/values()/entries() scans are
+    // DEFERRED — a `List<K>` accumulator in a generic member body fails to
+    // typecheck when collections.bv is imported (the free-T arrow-assign
+    // `acc <- keys[i]` can't resolve `push_element_type(List<K>)` across the
+    // import boundary; see BUGS.md). Iteration is a documented follow-up once
+    // the generic-member arrow is fixed.
 };

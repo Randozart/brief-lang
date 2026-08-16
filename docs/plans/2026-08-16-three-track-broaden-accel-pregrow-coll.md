@@ -344,13 +344,16 @@ iterator.bv is CLOSED (three root causes, all fixed):
   any=100, all=10, take=2, skip=2, chain=6, zip=3, enumerate=3, sum=6,
   product=6 → 138.
 
-hashmap.bv REMAINS OPEN (deferred): `term {}` empty-map literal is a parse
-error and there is no empty-HashMap construction path (`op Init` needs a seed);
-`map.Count#()` needs `op Count` on the hand-written `obj HashMap`; `Option`/
-`Some`/`None` forms don't typecheck. This is a dedicated HashMap-surface work
-item, not a quick stdlib fix.
+hashmap.bv CLOSED 2026-08-16 by the dedicated
+`docs/plans/2026-08-16-hashmap-redesign.md` plan (after this three-track plan
+deferred it): `obj HashMap<K,V>` redesigned around the op surface (`op Count`/
+`op InsertAt`/`op Init`/Tier-1 ops + `Entry<K,V>` element, linear-probe
+insert/get/contains/remove), compiler gates fixed (seed-init + literal
+construction, op-driven), hashmap.bv rewritten and `brievc check` clean.
+Known limitations (foreach-over-map, keys()/values() scans, rehash) are
+pre-existing compiler bugs logged in BUGS.md.
 
-**Docs updated**: `BUGS.md` (iterator.bv closed, hashmap.bv still open).
+**Docs updated**: `BUGS.md` (iterator.bv + hashmap.bv both closed).
 
 ### 3d. Iterable slice-6 deletions (`2026-08-14-iterable-slice6-cleanup.md`)
 

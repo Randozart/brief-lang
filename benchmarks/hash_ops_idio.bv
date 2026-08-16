@@ -1,7 +1,13 @@
 // hash_ops_idio — the idiomatic HashMap<K, V> via std/collections.bv.
-// m.insert(i, i*2) then m.get(i) each iteration — the sum of the read-back
-// values is the observable output. Direct hashing (the `_sym` flat-table form
-// is hash_ops.bv; the chained-bucket HashMap is a documented follow-up).
+// m.insert(Entry{key, val}) then m.get(key) each iteration — the sum of the
+// read-back values is the observable output. Direct hashing (the `_sym`
+// flat-table form is hash_ops.bv; the chained-bucket HashMap is a documented
+// follow-up).
+//
+// 2026-08-16 (hashmap redesign): insert takes the KEY/VALUE PAIR as one
+// `Entry` — the op surface (`op InsertAt: insert(#Lh,#Rh)`) passes a single
+// RHS, and tuple elements miscompile today, so a named Entry is the element
+// type.
 //
 // C reference: hash_ops_idio_c.c
 
@@ -13,7 +19,8 @@ let i: Int = 0;
 let sum: Int = 0;
 
 node work [i < N][i == N] {
-    m.insert(i, i * 2);
+    let e: Entry<Int, Int> = Entry { key: i, val: i * 2 };
+    m.insert(e);
     sum = sum + m.get(i);
     i = i + 1;
     when i % 5000000 == 0 {

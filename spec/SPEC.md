@@ -1565,6 +1565,15 @@ explicitly, not a reflection target (§17.3).
 > (folded at compile time). The element count is the `Count#` intrinsic,
 > never `.^Length` — the two coincide when the stored unit is the element and
 > diverge otherwise, exactly like String's stored bytes vs `CharCount#`.
+>
+> > **2026-08-16 (a hand-written collection obj).** A hand-written `obj`
+> > (no `coll` keyword) is a collection VALUE when it declares the collection
+> > op surface (`op Count`/`op InsertAt`/`op Init`/Tier-1 cursor ops) — the
+> > compiler's dispatch keys on the ops, never the `coll` keyword or a type
+> > name. A `HashMap<K,V>` (stdlib/collections.bv) is the reference example:
+> > `let m: HashMap<K,V> = 0` constructs via `op Init`, `Count#` reads
+> > `op Count`, `<-`/literals route through `op InsertAt`. `.^Length` stays a
+> > compile error on it (no compiler-owned length).
 
 > **2026-08-15 (boundary rule).** **Reflection (`.^`) = stored/frozen facts
 > that "observe and never compute"; intrinsics (`X#`) = operations.** A value

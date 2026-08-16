@@ -5513,10 +5513,29 @@ impl LlvmBackend {
     /// `Ptr<T>`-sequenced coll value must outlive the creating scope, so it is
     /// never unpacked to pool columns (SPEC §8.10 storage matrix).
     fn is_heap_coll(&self, base: &str) -> bool {
-        matches!(
+        // 2026-08-16 (hashmap redesign): a collection is identified by its OP
+        // SURFACE, not the `coll` keyword — a hand-written `obj HashMap<K,V>`
+        // that declares `op InsertAt`/`op Count`/`op Iter` IS a collection
+        // VALUE (a boxed heap handle), never a pooled/unpacked instance.
+        // Previously only `coll`-storage classified as heap, so a HashMap
+        // state field UNPACKED into per-member columns and member calls
+        // dereferenced NULL. The `coll` check stays (a `coll obj` with a
+        // `Ptr<T>` sequence is HeapGrowable); the op-surface check — the
+        // BINDINGS in operator_defs (`op InsertAt: insert(#Lh,#Rh)`), where
+        // the collection ops live for a hand-written obj — makes any obj
+        // declaring the collection ops heap too.
+        let coll_heap = matches!(
             self.ctx.coll_storage.get(base),
             Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
-        )
+        );
+        if coll_heap {
+            return true;
+        }
+        self.ctx.operator_defs.get(base).map_or(false, |defs| {
+            defs.iter().any(|d| {
+                d.op == "InsertAt" || d.op == "Count" || d.op == "Iter"
+            })
+        })
     }
 
     /// 2026-08-15 (coll plan §3.4.6): is `ty` a `coll` type (compiler-owned

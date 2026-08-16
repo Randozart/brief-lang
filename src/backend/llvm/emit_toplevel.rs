@@ -1038,6 +1038,9 @@ impl LlvmBackend {
             Some(Type::Applied(n, _)) => n.clone(),
             _ => return false,
         };
+        // 2026-08-16 (hashmap redesign): a hand-written collection obj
+        // (`obj HashMap<K,V>`) state field constructs through its `op Init`
+        // member — verified below via operator_defs["<base>"].
         // 2026-07-31 (A8): a generic field (`let q: RingBuffer<Int> = 0`)
         // monomorphizes to the applied key.
         let field_ty_clone = self.ctx.field_briev_types.get(idx).cloned();
@@ -1269,9 +1272,18 @@ impl LlvmBackend {
         ) {
             return self.construct_local_fixed_collection(out, indent, briev_ty, list_literal);
         }
-        // Only Tier-2 collections (op Count + op At) get the op construction —
-        // others fall back to the generic literal value.
-        if !(has("Count") && has("At")) {
+        // 2026-08-16 (hashmap redesign): a collection literal constructs when
+        // the type declares the CONSTRUCTION ops — `op Init`/`op InitEmpty`/
+        // `op InsertAt` in operator_defs (a hand-written `obj HashMap<K,V>`),
+        // OR the Tier-2 surface (`op Count`+`op At`, a `coll`/List). Previously
+        // ONLY Count+At qualified, so a map literal (Init+InsertAt, no At)
+        // fell to the deleted heap-seq path. Literal construction is opt-in:
+        // it works exactly when the type declares the ops.
+        let defs_present = self.ctx.operator_defs.get(&base).cloned().unwrap_or_default();
+        let has_construct_ops = defs_present.iter().any(|d| {
+            d.op == "Init" || d.op == "InitEmpty" || d.op == "InsertAt"
+        });
+        if !(has("Count") && has("At")) && !has_construct_ops {
             return None;
         }
         let type_key = self.resolve_obj_key(briev_ty).unwrap_or_else(|| base.clone());
@@ -1348,6 +1360,67 @@ impl LlvmBackend {
             }
         }
         let _ = args;
+        Some(TypedRegister {
+            name: addr,
+            ty: briev_ty.clone(),
+        })
+    }
+
+    /// 2026-08-16 (hashmap redesign): construct a LOCAL collection VALUE from
+    /// a SEED (`let m: HashMap<K,V> = 0`) through its `op Init` member —
+    /// allocate the struct, call `init(seed)` self-bound, box the handle.
+    /// Mirrors `emit_init_op_construction`'s non-List path for the heap-local
+    /// case. Previously a scalar-seed collection-typed local bound the RAW
+    /// value (a NULL/0 handle), so any member call (insert/get/Count#)
+    /// dereferenced garbage — for ANY collection obj (RingBuffer, Stack,
+    /// HashMap). Returns None when the type has no `op Init` binding.
+    pub(super) fn construct_local_collection_seed(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        briev_ty: &Type,
+        seed: &Expr,
+    ) -> Option<TypedRegister> {
+        let (base, type_key) = match briev_ty {
+            Type::Custom(n) => (n.clone(), n.clone()),
+            Type::Applied(n, _) => {
+                let key = self.resolve_obj_key(briev_ty).unwrap_or_else(|| n.clone());
+                (n.clone(), key)
+            }
+            _ => return None,
+        };
+        let defs = self.ctx.operator_defs.get(&base).cloned().unwrap_or_default();
+        let init_def = defs.iter().find(|d| d.op == "Init")?;
+        let fn_name = match init_def.impl_args.as_ref() {
+            Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&type_key).cloned().unwrap_or_default();
+        let member = members.iter()
+            .find(|m| super::emit_expr::member_briev_name(m) == fn_name)
+            .cloned()?;
+        let size = self.struct_type_size(&type_key);
+        let inst = self.fun.gen_reg();
+        // Heap lifetime: the handle must survive the constructing function's
+        // return (same rule as construct_local_collection).
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, inst, size).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
+        let box_recv = TypedRegister {
+            name: addr.clone(),
+            ty: Type::Custom(type_key.clone()),
+        };
+        let arg_tmp = self.fun.gen_reg();
+        let arg = self.emit_expr_inner(out, &arg_tmp, seed, indent);
+        let out_tmp = self.fun.gen_reg();
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation {
+            recv_reg: &box_recv,
+            type_name: &type_key,
+            member: &member,
+            arg_regs: &[(arg.name, arg.ty)],
+            prefix: None,
+        }, indent);
         Some(TypedRegister {
             name: addr,
             ty: briev_ty.clone(),

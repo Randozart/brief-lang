@@ -5780,6 +5780,76 @@ node go [done == 0][done == 1] {
     );
 }
 
+/// 2026-08-16 (hashmap redesign, plan 2026-08-16-hashmap-redesign.md): a
+/// hand-written `obj HashMap<K,V>` (no `coll` keyword) is a collection VALUE
+/// through its op surface — a state field `let m: HashMap<Int,Int> = 0`
+/// constructs via `op Init` (allocates the arrays), and insert/get/Count#
+/// work through the member methods. This verifies the op-driven
+/// classification (is_heap_coll via operator_defs) and the seed-init path
+/// that the redesign added. The obj is declared INLINE (tests don't resolve
+/// imports).
+#[test]
+fn test_hashmap_state_field_init_and_ops() {
+    let src = r#"
+struct Entry { key: Int; val: Int; };
+obj HashMap {
+    keys: Ptr<Int>;
+    vals: Ptr<Int>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    op InsertAt: insert(#Lh, #Rh);
+    op ExtractFrom: remove(#Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
+    op Count() -> Int { term count; };
+    txn init(v: Int) [v >= 0][v >= 0] {
+        keys = Malloc#(256 * 8) as Ptr<Int>;
+        vals = Malloc#(256 * 8) as Ptr<Int>;
+        occupied = Malloc#(256 * 8) as Ptr<Int>;
+        cap = 256;
+        count = 0;
+    };
+    txn insert(e: Entry) [count < cap][count <= cap] {
+        let h: Int = (e.key as Int) % cap;
+        keys[h] = e.key;
+        vals[h] = e.val;
+        occupied[h] = 1;
+        count = count + 1;
+    };
+    defn get(key: Int) -> Int [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        term vals[h];
+    };
+};
+let m: HashMap = 0;
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let e1: Entry = Entry { key: 1, val: 10 };
+    m.insert(e1);
+    let g: Int = m.get(1);
+    let n: Int = m.Count#();
+    done = g + n;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("srem"),
+        "insert/get must hash the key; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("ptr @m."),
+        "a HashMap state field must be a boxed handle, never unpacked columns; got:\n{ir}"
+    );
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the
