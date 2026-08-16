@@ -35,11 +35,16 @@ struct Track {
     len: i64,
     max: i64,
     known: bool,
+    /// The coll obj type base name (for the safe-set output).
+    base: String,
+    /// A LOCAL coll (created in the txn body) is fresh per firing — the
+    /// per-firing non-growth gate does not apply to it.
+    is_local: bool,
 }
 
 impl Track {
-    fn new(cap: i64) -> Track {
-        Track { cap, len: 0, max: 0, known: true }
+    fn new(cap: i64, base: &str, is_local: bool) -> Track {
+        Track { cap, len: 0, max: 0, known: true, base: base.to_string(), is_local }
     }
     fn push(&mut self) {
         if !self.known {
@@ -279,21 +284,19 @@ fn prove_txn(
     body: &[Statement],
     state_inits: &HashMap<String, (String, i64)>,
     shared: &HashSet<String>,
-    _coll_obj: &HashSet<String>,
+    coll_obj: &HashSet<String>,
 ) -> Vec<(String, String)> {
     let mut tracks = seed_tracks(state_inits, shared);
     // The entry length for a state field is its initializer's length; the
     // per-firing net delta must be ≤ 0 (non-growing across firings) for the
-    // repetition to be safe.
+    // repetition to be safe. Locals are fresh per firing — no delta gate.
     let entry: HashMap<String, i64> = tracks.iter().map(|(k, t)| (k.clone(), t.len)).collect();
-    walk_body(body, &mut tracks);
+    walk_body(body, &mut tracks, coll_obj);
 
     let mut out = Vec::new();
     for (name, t) in &tracks {
-        if t.known && provably_safe(t, name, body, &entry, state_inits) {
-            if let Some((base, _)) = state_inits.get(name) {
-                out.push((name.clone(), base.clone()));
-            }
+        if t.known && provably_safe(t, name, body, &entry) {
+            out.push((name.clone(), t.base.clone()));
         }
     }
     out
@@ -311,8 +314,7 @@ fn seed_tracks(
         if shared.contains(name) || *init_len < 0 {
             continue;
         }
-        let _ = base;
-        tracks.insert(name.clone(), Track::new(COLL_DEFAULT_CAP));
+        tracks.insert(name.clone(), Track::new(COLL_DEFAULT_CAP, base, false));
         if let Some(t) = tracks.get_mut(name) {
             t.len = *init_len;
             t.max = *init_len;
@@ -322,23 +324,20 @@ fn seed_tracks(
 }
 
 /// The four gates: the track is known, the txn actually pushes (the strip is
-/// per-push-site), the per-firing net delta is non-growing, and the peak stays
-/// below the known capacity.
-fn provably_safe(
-    t: &Track,
-    name: &str,
-    body: &[Statement],
-    entry: &HashMap<String, i64>,
-    _state_inits: &HashMap<String, (String, i64)>,
-) -> bool {
+/// per-push-site), the per-firing net delta is non-growing (state fields
+/// only — locals are fresh per firing), and the peak stays below the known
+/// capacity.
+fn provably_safe(t: &Track, name: &str, body: &[Statement], entry: &HashMap<String, i64>) -> bool {
     let pushed = body_contains_push(body, name);
     if !pushed {
         return false;
     }
-    let exit = t.len;
-    let entry_len = entry.get(name).copied().unwrap_or(0);
-    if exit > entry_len {
-        return false;
+    if !t.is_local {
+        let exit = t.len;
+        let entry_len = entry.get(name).copied().unwrap_or(0);
+        if exit > entry_len {
+            return false;
+        }
     }
     t.cap >= 0 && t.max < t.cap
 }
@@ -378,28 +377,42 @@ fn expr_contains_push(e: &Expr, coll: &str) -> bool {
     }
 }
 
-fn walk_body(body: &[Statement], tracks: &mut HashMap<String, Track>) {
+fn walk_body(body: &[Statement], tracks: &mut HashMap<String, Track>, coll_obj: &HashSet<String>) {
     for stmt in body {
-        walk_stmt(stmt, tracks);
+        walk_stmt(stmt, tracks, coll_obj);
         if matches!(stmt, Statement::Term(_) | Statement::EndProgram(_)) {
             break;
         }
     }
 }
 
-fn walk_stmt(stmt: &Statement, tracks: &mut HashMap<String, Track>) {
+fn walk_stmt(stmt: &Statement, tracks: &mut HashMap<String, Track>, coll_obj: &HashSet<String>) {
     match stmt {
-        Statement::Let { name, expr, .. } => {
-            // 2026-08-15: LOCAL colls are not tracked this pass (state-field
-            // colls only — the queue_drain_idio shape). A local that SHADOWS a
-            // tracked state field makes the field's track stale — the identity
-            // and length are unknown for the field.
+        Statement::Let { name, ty, expr, .. } => {
+            // A local that SHADOWS a tracked state field makes the field's
+            // track stale — the identity and length are unknown for the field.
             if tracks.contains_key(name) {
                 if let Some(t) = tracks.get_mut(name) {
                     t.fail();
                 }
             }
-            let _ = expr;
+            // 2026-08-16 (Direction 2): a coll obj LOCAL created in the txn
+            // body (`let q: MyQueue = [..]`) is fresh per firing — seed a
+            // track with the fresh-coll capacity; the intra-body peak is the
+            // only bound (no per-firing repetition). The grow guard then
+            // strips when the peak stays below the default cap.
+            if let Some((base, _)) = ty.as_ref().and_then(|t| coll_base(t, coll_obj)) {
+                let init_len = match expr.as_ref() {
+                    Some(Expr::List(elems)) => elems.len() as i64,
+                    _ => -1,
+                };
+                if init_len >= 0 {
+                    let mut tr = Track::new(COLL_DEFAULT_CAP, &base, true);
+                    tr.len = init_len;
+                    tr.max = init_len;
+                    tracks.insert(name.clone(), tr);
+                }
+            }
         }
         Statement::ArrowAssign { target, value, .. } => {
             // Only identifiers that are TRACKED colls count as collection
@@ -445,33 +458,33 @@ fn walk_stmt(stmt: &Statement, tracks: &mut HashMap<String, Track>) {
         Statement::If(_, then, els) => {
             let before = tracks.clone();
             let mut then_tracks = before.clone();
-            walk_body(then, &mut then_tracks);
+            walk_body(then, &mut then_tracks, coll_obj);
             let mut else_tracks = before.clone();
-            walk_body(els, &mut else_tracks);
+            walk_body(els, &mut else_tracks, coll_obj);
             join_max(tracks, &then_tracks, &else_tracks);
         }
         Statement::Guarded(_, body) => {
             let before = tracks.clone();
             let mut fired = before.clone();
-            walk_body(body, &mut fired);
+            walk_body(body, &mut fired, coll_obj);
             join_max(tracks, &fired, &before);
         }
         Statement::Block(b) | Statement::Defer(b) | Statement::Mutex(b) | Statement::SyncBlock(b) => {
-            walk_body(b, tracks);
+            walk_body(b, tracks, coll_obj);
         }
-        Statement::Barrier { body, .. } => walk_body(body, tracks),
+        Statement::Barrier { body, .. } => walk_body(body, tracks, coll_obj),
         Statement::Foreach { list, body, .. } => {
-            walk_foreach(list, body, tracks);
+            walk_foreach(list, body, tracks, coll_obj);
         }
         _ => {}
     }
 }
 
-fn walk_foreach(list: &Expr, body: &[Statement], tracks: &mut HashMap<String, Track>) {
+fn walk_foreach(list: &Expr, body: &[Statement], tracks: &mut HashMap<String, Track>, coll_obj: &HashSet<String>) {
     let n = range_len(list);
     let before = tracks.clone();
     let mut iter = before.clone();
-    walk_body(body, &mut iter);
+    walk_body(body, &mut iter, coll_obj);
     match n {
         Some(iters) if iters > 0 => {
             if foreach_body_is_conditional(body) {
@@ -785,6 +798,50 @@ mod tests {
         assert!(
             !safe.contains(&pair("work", "Q")),
             "21 pushes exceed cap 16 — must NOT prove, got {safe:?}"
+        );
+    }
+
+    /// A coll obj LOCAL created in the txn body (`let q: Q = [5,6,7]` plus two
+    /// pushes = 5 < cap 16) is fresh per firing — the intra-body peak proves
+    /// and the grow guard strips.
+    #[test]
+    fn local_coll_within_cap_proves() {
+        let items = parse(
+            "coll obj Q { data: Ptr<Int>; };\n\
+             let done: Int = 0;\n\
+             node work [done == 0][done == 1] {\n\
+               let q: Q = [5, 6, 7];\n\
+               q <- 8;\n\
+               q <- 9;\n\
+               done = 1;\n\
+               term;\n\
+             };\n",
+        );
+        let safe = analyze(&items);
+        assert!(
+            safe.contains(&pair("work", "Q")),
+            "a local coll with peak 5 < cap 16 must prove, got {safe:?}"
+        );
+    }
+
+    /// A local coll grown past the default cap (foreach 21) must NOT prove —
+    /// it genuinely grows.
+    #[test]
+    fn local_coll_beyond_cap_does_not_prove() {
+        let items = parse(
+            "coll obj Q { data: Ptr<Int>; };\n\
+             let done: Int = 0;\n\
+             node work [done == 0][done == 1] {\n\
+               let q: Q = [];\n\
+               foreach x in 0..21 { q <- x; };\n\
+               done = 1;\n\
+               term;\n\
+             };\n",
+        );
+        let safe = analyze(&items);
+        assert!(
+            !safe.contains(&pair("work", "Q")),
+            "21 pushes on a local exceed cap 16 — must NOT prove, got {safe:?}"
         );
     }
 }
