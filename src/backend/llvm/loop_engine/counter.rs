@@ -540,7 +540,7 @@ impl LlvmBackend {
                 // 2026-07-26: The backedge identity must match the phi type.
                 // Float fields use fadd, integer fields use the field's native width.
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }
@@ -796,7 +796,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }
@@ -890,7 +890,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", ol_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", ol_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", ol_f, field_ty, val).ok();
                 }
@@ -1229,8 +1229,19 @@ impl LlvmBackend {
                 let field_ty = self.ctx.field_index_map.get(fname.as_str())
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
+                // 2026-08-16 (sweep parity): `fast` on the backedge copy is
+                // REQUIRED — a bare `0.0 + x` cannot fold to `x` under strict
+                // IEEE (the `-0.0`/signaling-NaN edge), so LLVM kept it as a
+                // real floating add on the loop-carried critical path. In the
+                // vectorized countdown this surfaced as a live `vaddps <reg>,
+                // <zero>` per iteration (the sweep-family loss: sparse 1.37x,
+                // mid 1.08x, dense 1.48x). With `fast`, instcombine folds it to
+                // the value. The copy's semantic is a value rename (the field's
+                // new value), so folding is exact — see
+                // docs/plans/2026-08-16-sweep-family-investigation.md §5 P4.
+                // Undo: drop the `fast` at all 6 `fadd ... 0.0` copy sites.
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }
@@ -1509,7 +1520,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }
@@ -1550,7 +1561,7 @@ impl LlvmBackend {
                     .and_then(|idx| self.ctx.field_types.get(*idx))
                     .cloned().unwrap_or_else(|| "i64".to_string());
                 if field_ty == "float" || field_ty == "double" {
-                    writeln!(out, "  {} = fadd {} 0.0, {}", be_f, field_ty, val).ok();
+                    writeln!(out, "  {} = fadd fast {} 0.0, {}", be_f, field_ty, val).ok();
                 } else {
                     writeln!(out, "  {} = add {} 0, {}", be_f, field_ty, val).ok();
                 }

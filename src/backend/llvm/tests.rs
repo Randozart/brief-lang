@@ -4761,7 +4761,7 @@ fn test_modulo_partition_drives_rotated_loop() {
     }
     let output = LlvmBackend::new().generate(&program, None);
     assert!(output.contains(".mr_loop"),
-        "modulo-bounded set must use the rotated loop, got:\n{}", &output[..output.len().min(2000)]);
+        "modulo-bounded set must use the rotated loop, got:\n{}", &output[..output.len().min(12000)]);
     assert!(output.contains("srem i64"));
 }
 
@@ -4947,6 +4947,74 @@ fn test_batch_loop_dispatch_post_increment() {
     let body = output.split(".cdb_").nth(1).unwrap_or("");
     let body_seg = body.split(".cdg_").next().unwrap_or("");
     assert!(!body_seg.contains("urem"), "countdown body must not compute count % N per iteration");
+}
+
+/// 2026-08-16 (sweep parity): the countdown's float-field backedge copies must
+/// carry `fast`. A bare `fadd float 0.0, %x` cannot fold to `x` under strict
+/// IEEE (the `-0.0`/signaling-NaN edge), so LLVM kept it as a live vector add
+/// on the loop-carried critical path — the sweep-family loss (sparse 1.37x,
+/// mid 1.08x, dense 1.48x). `fast` lets instcombine fold the value rename.
+#[test]
+fn test_countdown_field_backedge_copies_are_fast() {
+    let fld = |n: &str| TopLevel::StateDecl(StateDecl { name: n.into(), ty: Type::float(), span: None });
+    let mut program = vec![
+        TopLevel::StateDecl(StateDecl { name: "count".into(), ty: Type::int(), span: None }),
+        TopLevel::StateDecl(StateDecl { name: "total".into(), ty: Type::int(), span: None }),
+        fld("f0"),
+        fld("f1"),
+    ];
+    let mul = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r));
+    let add = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r));
+    let body = vec![
+        Statement::Assign(Expr::Identifier("f0".into()),
+            add(mul(Expr::Identifier("f0".into()), Expr::Float(0.5)),
+                mul(Expr::Identifier("f1".into()), Expr::Float(0.25)))),
+        Statement::Assign(Expr::Identifier("f1".into()),
+            add(mul(Expr::Identifier("f1".into()), Expr::Float(0.5)),
+                mul(Expr::Identifier("f0".into()), Expr::Float(0.25)))),
+        Statement::Assign(Expr::Identifier("count".into()),
+            Expr::BinaryOp(BinaryOpKind::Add,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Decimal(1)))),
+        Statement::Guarded(
+            Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Mod,
+                    Box::new(Expr::Identifier("count".into())),
+                    Box::new(Expr::Decimal(100)))),
+                Box::new(Expr::Decimal(0))),
+            vec![Statement::Expression(Expr::Call("__print_float".into(), vec![Expr::Identifier("f0".into())], None))]),
+        Statement::Term(None),
+    ];
+    program.push(TopLevel::Transaction(Transaction {
+        name: "tick".into(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::BinaryOp(BinaryOpKind::Lt,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Identifier("total".into()))),
+            post_condition: Expr::BinaryOp(BinaryOpKind::Eq,
+                Box::new(Expr::Identifier("count".into())),
+                Box::new(Expr::Identifier("total".into()))),
+            watchdog: None, explicit: false, span: None,
+        },
+        body,
+        metadata: HashMap::new(), derivation: None, modifiers: vec![],
+        span: None, doc: None,
+    }));
+    let output = LlvmBackend::new().with_type_universe(crate::type_universe::TypeUniverse::new())
+        .generate(&program, None);
+    assert!(output.contains(".cd_"), "post-increment periodic guard must use the countdown loop, got:\n{}", &output[..output.len().min(1200)]);
+    assert!(output.contains("fadd fast float 0.0"),
+        "countdown field backedge copies must be fast-math value renames (foldable), got:\n{}", &output[..output.len().min(12000)]);
+    assert!(!output.contains("fadd float 0.0"),
+        "countdown must never emit a bare non-fast fadd float 0.0 copy: {output}");
+    assert!(!output.contains("fadd double 0.0"),
+        "countdown must never emit a bare non-fast fadd double 0.0 copy: {output}");
 }
 
 /// A pre-increment periodic guard (knucleotide pattern) is NOT batched — it
