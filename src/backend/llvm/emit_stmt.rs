@@ -292,6 +292,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
     match stmt {
         Statement::Let { name, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
+            let mut via_scaffolded_construction = false;
             let val = match expr {
                 Some(crate::ast::Expr::Identifier(alias))
                     if backend.fun.closure_lets.contains_key(alias) =>
@@ -381,6 +382,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             None
                         }
                     };
+                    via_scaffolded_construction = constructed.is_some();
                     let v = match constructed {
                         Some(v) => v,
                         None => backend.emit_expr(out, e, indent),
@@ -431,6 +433,36 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let bind_ty = ty.clone().unwrap_or_else(|| val.ty.clone());
             backend.fun.let_binding_types.insert(name.clone(), bind_ty.clone());
             backend.fun.let_original_types.insert(name.clone(), bind_ty);
+            // 2026-08-16 (three-track Phase 2, D2 pre-grow): a LOCAL coll whose
+            // intra-firing peak exceeds the default cap gets ONE `EnsureCap#(q,
+            // peak)` here — at construction, before ANY push. Emitted at the
+            // LET site (not the foreach arm) because the coll may be pushed
+            // BEFORE the loop too. Only for the scaffolded op construction
+            // path (the returned `val.name` is the coll handle then, not a
+            // generic heap-seq value) AND a HEAP-GROWABLE coll — a fixed
+            // `T[N]` coll has a fixed buffer, EnsureCap# would corrupt it.
+            // The grow guard strip elsewhere keys on this same (txn, coll_name)
+            // fact.
+            let growable_base = ty.as_ref().and_then(|t| match t {
+                crate::ast::Type::Custom(n) => Some(n.split('<').next().unwrap_or(n)),
+                crate::ast::Type::Applied(n, _) => Some(n.as_str()),
+                _ => None,
+            }).is_some_and(|b| backend.ctx.coll_storage.get(b)
+                == Some(&crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable));
+            if via_scaffolded_construction && growable_base {
+                let txn_name = backend.fun.txn_name.clone();
+                if let Some(peak) = backend.ctx.coll_pregrow.get(&(txn_name, name.clone())).copied() {
+                    let call = crate::ast::Expr::Call(
+                        "EnsureCap#".to_string(),
+                        vec![
+                            crate::ast::Expr::Identifier(name.clone()),
+                            crate::ast::Expr::Decimal(peak),
+                        ],
+                        None,
+                    );
+                    backend.emit_expr(out, &call, indent);
+                }
+            }
             TypedRegister { name: val.name, ty: Type::void() }
         }
         Statement::Assign(lhs, rhs) => {

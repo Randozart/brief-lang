@@ -12,7 +12,7 @@
 //! never weakens. The post-store-check alternative is unsound (Resize#(h, len)
 //! sets cap == len; the next push would store OOB) and is rejected here.
 
-use crate::ast::{Expr, Statement, TopLevel, Type};
+use crate::ast::{Expr, Statement, TopLevel, Transaction, Type};
 use std::collections::{HashMap, HashSet};
 
 /// The scaffold's fresh-coll capacity (`coll_scaffold` synth_init / synth_init_empty).
@@ -83,6 +83,98 @@ pub fn analyze(items: &[TopLevel]) -> HashSet<(String, String)> {
     let state_inits = collect_state_inits(items, &coll_obj);
     let shared = shared_writers(items, &state_inits);
     collect_safe_pairs(items, &state_inits, &shared, &coll_obj)
+}
+
+/// Compute the pre-grow facts: `(txn, coll_name) -> peak` for LOCAL colls
+/// (fresh per firing) whose intra-firing peak exceeds the default cap. The
+/// backend emits one `EnsureCap#(q, peak)` at the coll's construction and the
+/// per-push grow guard becomes dead (cap == peak >= len on every path). The
+/// existing `analyze` gate is strict (`max < cap`) so a coll that genuinely
+/// exceeds the cap never proves; pre-grow is the complementary route: raise
+/// the cap ONCE up front instead of growing on each push.
+///
+/// SOUNDNESS (2026-08-16, plan three-track Phase 2): only LOCAL colls qualify
+/// — a state coll grows across firings unboundedly, pre-grow to the intra-
+/// firing peak would NOT cover a later firing. A declared `op Grow` binding
+/// (`coll obj G { data: Ptr<Int>; op Grow: triple(#Lh); }`) is a user contract
+/// and must not be bypassed — pre-grow is skipped for such bases. The walker's
+/// `max` is an upper bound over all paths (rule: anything unknown fails the
+/// track), so `cap = max >= peak` on every path.
+pub fn analyze_pregrow(items: &[TopLevel]) -> HashMap<(String, String), i64> {
+    let coll_obj: HashSet<String> = items
+        .iter()
+        .filter_map(|it| match it {
+            TopLevel::TypeDef(t) if t.coll => Some(t.name.clone()),
+            _ => None,
+        })
+        .collect();
+    if coll_obj.is_empty() {
+        return HashMap::new();
+    }
+    let declared_grow = declared_grow_bases(items);
+    let state_inits = collect_state_inits(items, &coll_obj);
+    let shared = shared_writers(items, &state_inits);
+    let mut pre_grow = HashMap::new();
+    let ctx = PregrowCtx {
+        state_inits: &state_inits,
+        shared: &shared,
+        coll_obj: &coll_obj,
+        declared_grow: &declared_grow,
+    };
+    for item in items {
+        if let TopLevel::Transaction(t) = item {
+            collect_txn_pregrow(t, &ctx, &mut pre_grow);
+        }
+    }
+    pre_grow
+}
+
+/// Coll bases declaring a custom `op Grow` — pre-grow must not bypass the
+/// declared growth strategy.
+fn declared_grow_bases(items: &[TopLevel]) -> HashSet<String> {
+    items
+        .iter()
+        .filter_map(|it| match it {
+            TopLevel::TypeDef(t)
+                if t.coll && t.body.op_bindings.iter().any(|b| b.name == "Grow") =>
+            {
+                Some(t.name.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Context shared by the pre-grow walk across all txns.
+struct PregrowCtx<'a> {
+    state_inits: &'a HashMap<String, (String, i64)>,
+    shared: &'a HashSet<String>,
+    coll_obj: &'a HashSet<String>,
+    declared_grow: &'a HashSet<String>,
+}
+
+/// Emit `(txn, coll_name) -> peak` for every local coll in ONE txn whose
+/// intra-firing peak exceeds the default cap.
+fn collect_txn_pregrow(
+    t: &Transaction,
+    ctx: &PregrowCtx<'_>,
+    out: &mut HashMap<(String, String), i64>,
+) {
+    let mut tracks = seed_tracks(ctx.state_inits, ctx.shared);
+    walk_body(&t.body, &mut tracks, ctx.coll_obj);
+    for (name, tr) in &tracks {
+        if pregrow_qualifies(tr, ctx) {
+            out.insert((t.name.clone(), name.clone()), tr.max);
+        }
+    }
+}
+
+fn pregrow_qualifies(tr: &Track, ctx: &PregrowCtx<'_>) -> bool {
+    tr.is_local
+        && tr.known
+        && tr.cap >= 0
+        && tr.max > COLL_DEFAULT_CAP
+        && !ctx.declared_grow.contains(&tr.base)
 }
 
 /// State-field coll inits: name → (base coll type, initial list length).

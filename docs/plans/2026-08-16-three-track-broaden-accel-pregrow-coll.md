@@ -129,6 +129,72 @@ lands nothing this pass. Gap remains for the deferred vector-state SSA
 shipped marker), SPEC §8.10 grow-on-full cross-reference if behavior wording
 changes.
 
+### DESIGN REFINEMENT (2026-08-16, recorded after the feasibility audit)
+
+The feasibility audit refined the plan in three ways; the implemented design
+follows THIS section, not the sketch above.
+
+1. **Emit `EnsureCap#(q, peak)` at the LET site, not the foreach arm.**
+   `q` may be pushed *before* the loop (`q <- 1; foreach ...`) — a foreach-arm
+   emission would come too late. The local coll is constructed by
+   `construct_local_collection` inside `Statement::Let` (emit_stmt.rs:371-383);
+   emitting right after the binding (emit_stmt.rs:421) guarantees the cap is
+   raised before ANY push on the coll.
+2. **Strip keyed per coll NAME, not `(txn, base)`.** The grow-guard strip at
+   `emit_expr.rs:2541` keys on `(txn, base_type)` — two local `Q` colls in one
+   txn, only one pre-grown, would strip both. Pre-grow facts are keyed
+   `(txn, coll_name)` and the strip reverse-locates the receiver's binding name
+   from `let_bindings` (recv_reg.name == the coll handle reg).
+3. **Gate on no declared `op Grow`.** `test_coll_grow_override_binding_wins`
+   (GeometricQueue + `op Grow: triple(#Lh)`, LOCAL coll, 17 pushes) must keep
+   its guard — pre-grow would bypass the declared growth strategy. Exclude any
+   coll base whose `TypeDef.body.op_bindings` declares `Grow`.
+
+Soundness: the guard fires `len == cap` BEFORE the store. After
+`EnsureCap#(q, peak)` with `peak = track.max`, cap == peak >= len always; the
+push that would reach peak starts at `len == peak-1` ≠ cap, so no grow, and the
+store lands in `[0, peak-1]`. The walker's `max` is an upper bound over all
+paths, so every store is in-bounds. `track.known` (no runtime-bound foreach,
+no opaque call, no capacity write) and `cap >= 0` (no `Resize#/EnsureCap#/
+TrimCap#` in the txn) are required.
+
+### SHIPPED (2026-08-16, commit follows)
+
+Implementation landed exactly along the DESIGN REFINEMENT:
+
+- **Analysis** `analyze_pregrow` (`coll_length.rs:103`): reuses `seed_tracks` +
+  `walk_body`; emits `HashMap<(txn, coll_name), peak>` for LOCAL colls only
+  (state colls grow across firings — intra-firing peak is NOT a bound),
+  `tr.known && cap >= 0 && max > COLL_DEFAULT_CAP`, base not in `declared_grow`
+  (parsed from `TypeDef.body.op_bindings` `Grow`). Two extra backend gates:
+  emission only when the let took the scaffolded op-construction path
+  (`construct_local_collection` returned Some — `val.name` is the coll handle,
+  not a generic heap-seq value) AND the base storage mode is `HeapGrowable`
+  (a fixed `T[N]` coll has no grow guard to strip and EnsureCap# would corrupt
+  its buffer).
+- **Emit** at the Let site (`emit_stmt.rs:421` right after the binding), via an
+  `Expr::Call("EnsureCap#", [q, peak])` — one resize call per body emission,
+  BEFORE any push and before the foreach.
+- **Strip** (`emit_expr.rs:2539-2557`): existing `proven` path keeps
+  whole-(txn, base) membership; new `pregrown` path reverse-locates the receiver
+  name from `let_bindings` (value == `recv_reg.name`) and checks `(txn, name)`
+  in `coll_pregrow`. Per-NAME keying: two local `Q`s in one txn, one pre-grown,
+  cannot share a strip.
+- **Tests** `test_coll_pregrow_local_moves_resize_before_loop` (region scan:
+  NO `__briev_coll_resize` inside any `foreach.body`…`foreach.end` window) and
+  `test_coll_pregrow_strip_keys_on_coll_name_not_base` (per-name, cross-coll
+  isolation). Existing `test_coll_grow_on_full_guard_emits` still passes (the
+  let-site EnsureCap# keeps a resize call in the IR) — but note it now uses the
+  pre-grow path, so it is ALSO the pre-grow correctness guard.
+- **Verify** (rule 4/19, runtime): compiled the 21-push local-List program
+  against the real toolchain; runs 21 pushes, `Count#() == 21`, exit 0.
+  Benchmark suite: 40/40 MATCH, no coll benchmark regresses (all use state
+  colls with explicit Init — no monotone build-loop benchmark exists, exactly
+  as the plan predicted; the pre-grow path is codegen-neutral on the suite).
+- Baseline A/B vs `0f97c1c7` worktree on queue_drain / ring_buffer / linked_list
+  / global_lifetime: within tolerance (the coll suite is untouched by this
+  path).
+
 ---
 
 ## Phase 3 — Item 4: FULL coll track

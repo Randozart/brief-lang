@@ -2538,10 +2538,22 @@ impl LlvmBackend {
         // ability to if-convert the loop.
         let txn_name = self.fun.txn_name.clone();
         let base_type = type_name.split('<').next().unwrap_or(type_name).to_string();
-        let proven = self.ctx.coll_safe_txns.contains(&(txn_name, base_type));
+        let proven = self.ctx.coll_safe_txns.contains(&(txn_name.clone(), base_type));
         let member_is_push = matches!(member, crate::ast::TopLevel::Definition(d) if d.name == "push");
+        // 2026-08-16 (three-track Phase 2, D2 pre-grow): a local coll whose
+        // Let-site emitted a pre-loop `EnsureCap#` (its (txn, coll_name) fact
+        // is in ctx.coll_pregrow) also has a dead grow guard — cap == peak
+        // means the guard's `len == cap` can never fire before the last (in
+        // bounds) store. The coll handle register is the VALUE the name binds
+        // to (not a state-column address), so reverse-locate the receiver
+        // name from the current let bindings and check the per-NAME fact —
+        // keying on the coll name (not the base type) keeps two local `Q`s in
+        // one txn from sharing a strip.
+        let pregrown = member_is_push && self.fun.let_bindings.iter()
+            .find(|(_, v)| *v == &recv_reg.name)
+            .is_some_and(|(n, _)| self.ctx.coll_pregrow.contains_key(&(txn_name, n.clone())));
         let mut body = body;
-        if proven && member_is_push && body.first().is_some_and(is_grow_guard) {
+        if (proven || pregrown) && member_is_push && body.first().is_some_and(is_grow_guard) {
             body.remove(0);
         }
         crate::backend::llvm::emit_stmt::emit_statement_sequence(self, out, &body, indent);

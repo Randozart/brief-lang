@@ -2082,6 +2082,7 @@ impl LlvmBackend {
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
         self.ctx.observable_names = analysis.observable_names.clone();
         self.ctx.coll_safe_txns = analysis.coll_safe_txns.clone();
+        self.ctx.coll_pregrow = analysis.coll_pregrow.clone();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
         // 2026-08-04 (compiler-in-Briev, P4): the Briev pass (briev_pass.rs)

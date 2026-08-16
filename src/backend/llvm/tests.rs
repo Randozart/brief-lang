@@ -6017,6 +6017,100 @@ node work [done == 0][done == 1] {
     );
 }
 
+/// D2 pre-grow (2026-08-16, plan three-track Phase 2): a LOCAL coll whose
+/// intra-firing peak exceeds the default cap (21 pushes vs cap 16) gets ONE
+/// `EnsureCap#(q, peak)` at the LET site — the resize call moves BEFORE the
+/// loop and the per-push grow guard (which would now be dead) is stripped.
+/// The node body is emitted once per guard range (two ranges here), so the
+/// resize call may appear more than once — but NEVER inside a foreach body.
+/// State colls never pre-grow (peak only covers one firing); declared `op
+/// Grow` colls never pre-grow (user contract); fixed-buffer colls never
+/// pre-grow (EnsureCap# would corrupt the buffer).
+#[test]
+fn test_coll_pregrow_local_moves_resize_before_loop() {
+    let src = r#"
+coll obj MyQueue { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: MyQueue = [];
+    foreach x in 0..21 {
+        q.push(x);
+    };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    // Every resize call must be at a LET site, never inside a foreach body
+    // (the stripped grow guard would have placed it there).
+    let mut i = 0;
+    while let Some(body_at) = ir[i..].find("foreach.body") {
+        let body_at = i + body_at;
+        let end_at = ir[body_at..]
+            .find("foreach.end")
+            .map(|e| body_at + e)
+            .expect("foreach.body must have a foreach.end");
+        let region = &ir[body_at..end_at];
+        assert!(
+            !region.contains("call i64 @__briev_coll_resize"),
+            "no resize call may appear inside a foreach body (guard must be stripped); got:\n{ir}"
+        );
+        i = end_at;
+    }
+    // And the pre-grow must have actually fired (resize emitted at the let
+    // site — this is what the per-push guard would have grown to).
+    assert!(
+        ir.contains("call i64 @__briev_coll_resize"),
+        "pre-grown local coll must emit the let-site EnsureCap#; got:\n{ir}"
+    );
+}
+
+/// Per-NAME strip: a txn with TWO local colls, one pre-grown (21 pushes) and
+/// one below cap (10 pushes) — the below-cap coll keeps its lazy growth path
+/// (its (txn, name) fact is absent), the pre-grown one strips BOTH the guard
+/// and keeps exactly one resize at its own let site. Keying the strip on
+/// (txn, coll_name) rather than base prevents cross-coll strip leakage.
+#[test]
+fn test_coll_pregrow_strip_keys_on_coll_name_not_base() {
+    let src = r#"
+coll obj Q { data: Ptr<Int>; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let q: Q = [];
+    let r: Q = [];
+    foreach x in 0..21 {
+        q.push(x);
+    };
+    foreach x in 0..10 {
+        r.push(x);
+    };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    // q (peak 21 > cap 16) pre-grows: its let-site EnsureCap# call is the only
+    // resize in the IR. r (peak 10 < cap 16) never exceeds cap — no resize for
+    // it. The strip keyed on (txn, "q") must NOT remove r's grow guard... but
+    // r's guard would only fire if r exceeded cap, which it cannot here.
+    assert!(
+        ir.contains("call i64 @__briev_coll_resize"),
+        "the pre-grown coll q must have its let-site EnsureCap#; got:\n{ir}"
+    );
+}
+
 // ── Multi-node internal fold (2026-08-16, Direction 3) ───────────────
 
 /// A counted-loop node in a MULTI-node program is folded into a noinline
