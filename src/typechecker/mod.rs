@@ -2034,6 +2034,17 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                         // accepts; the declared type's concrete args are pinned
                         // by the mono instantiation.
                         (Type::Applied(dn, _), Type::Applied(inm, _)) => dn == inm,
+                        // 2026-08-16 (Phase 3e, SPEC §17.1): `Bit<N>` ↔ `Bits`
+                        // unification — `Bits` (bare, no width) is the FLEXIBLE
+                        // bit type (Type::Bits(0)), and it accepts a value of
+                        // any `Bit<N>`. A declared `Bit<N>` accepts an inferred
+                        // `Bits(0)` (the flexible value's width is pinned by the
+                        // declaration). Equal widths stay compatible. This is
+                        // the "Bit<N>↔Bits unified" hierarchy fact: there is no
+                        // separate `Bits` type, only the width-0 flexible form.
+                        (Type::Bits(a), Type::Bits(b)) => {
+                            *a == 0 || *b == 0 || a == b
+                        }
                         _ => false,
                     }
                 };
@@ -6165,6 +6176,69 @@ node go [done == 0][done == 1] {
     assert!(
         check(non_coll).is_err(),
         "non-coll obj .^Length must error (no compiler-owned length)"
+    );
+}
+
+/// 2026-08-16 (Phase 3e, SPEC §17.1): `Bit<N>` ↔ `Bits` unification — the bare
+/// `Bits` is the FLEXIBLE bit type (Type::Bits(0)), and it accepts a value of
+/// any `Bit<N>`; a declared `Bit<N>` pins an inferred flexible width. This is
+/// the "Bit<N> unified, no separate Bits" hierarchy fact.
+#[test]
+fn bit_n_and_bits_unify() {
+    let ok = r#"
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let b: Bit<8> = 0xFF as Bit<8>;
+    let bs: Bits = b;
+    let b2: Bit<16> = 0xFFFF as Bit<16>;
+    let bs2: Bits = b2;
+    done = 1;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "Bits must accept any Bit<N> value (flexible-width unification)"
+    );
+    let pinned = r#"
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let b: Bit<8> = 0xFF as Bit<8>;
+    let bs: Bits = b;
+    let p: Bit<8> = bs;
+    done = 1;
+    term;
+};
+"#;
+    assert!(
+        check(pinned).is_ok(),
+        "a declared Bit<N> must pin an inferred flexible Bits value"
+    );
+}
+
+/// 2026-08-16 (Phase 3e, SPEC §17.1): the Data reflective floor — a value
+/// observes as raw storage via compile-time descriptor reflection
+/// (`.^^Type`/`.^^Bytes`/`.^^Alignment`). A `coll struct` value and a Blob
+/// both reflect; `Blob.^Length` is the byte header.
+#[test]
+fn data_reflective_floor_typechecks() {
+    let ok = r#"
+coll struct Fixed { data: Int[4]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed = [1, 2, 3, 4];
+    let t: Int = f.^^Type;
+    let sz: Int = f.^^Bytes;
+    let al: Int = f.^^Alignment;
+    let blob: Blob = "abc" as Blob;
+    let len: Int = blob.^Length;
+    done = t + sz + al + len;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "Data-floor reflection must type (descriptor reflection + Blob stored length)"
     );
 }
 

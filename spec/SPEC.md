@@ -1583,6 +1583,14 @@ explicitly, not a reflection target (§17.3).
 > encoding interpretation. Absence is `Option::None` (§16.3); Blob is never
 > null — it always carries its length. See
 > `docs/plans/2026-08-15-fundamentals-as-types.md`.
+>
+> > **2026-08-16 (`Bit<N>` ↔ `Bits` unification).** A bare `Bits` is the
+> > FLEXIBLE bit type (`Type::Bits(0)`): it accepts a value of any `Bit<N>`,
+> > and a declared `Bit<N>` pins an inferred flexible width. This is the
+> > "unified bit type" fact — there is no separate `Bits` type, only the
+> > width-0 flexible form. (A runtime cast FROM a flexible-width `Bits`
+> > value to a specific width is a separate limitation: the value's runtime
+> > width is not tracked.)
 
 `value[i]` resolves the receiver type's `op At` (an indexed borrow, §15.2).
 

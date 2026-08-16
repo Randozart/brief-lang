@@ -380,6 +380,28 @@ See the slice-6 plan's SHIPPED section (appended). Summary:
    `Bit<N>`↔`Bits` unification; no universal `Data` supertype edge (decided).
 2. **Verify** — SPEC §17.1 hierarchy examples typecheck.
 
+### SHIPPED 3e (2026-08-16)
+
+- **`Bit<N>` ↔ `Bits` unification** (`typechecker/mod.rs` let-binding
+  compatibility): the bare `Bits` is the FLEXIBLE bit type (`Type::Bits(0)`);
+  a `Bits` binding now accepts any `Bit<N>` value, and a declared `Bit<N>`
+  pins an inferred flexible width. This is the "Bit<N> unified, no separate
+  Bits" hierarchy fact — 0 means "any width".
+- **Data reflective floor verified**: a value observes as raw storage via the
+  compile-time descriptor (`f.^^Type`/`f.^^Bytes`/`f.^^Alignment` on a `coll
+  struct`), and `Blob.^Length` reads the byte header — the SPEC §17.1
+  hierarchy examples typecheck and run. No universal Data supertype edge was
+  introduced (the casting graph stays untouched — Data is a reflective
+  category, not a parent).
+- Verify: `Bit<8> → Bits` assignment, `Bits` pinned to `Bit<8>`, coll struct
+  descriptor reflection (`.^^Type`+`.^^Bytes`+`.^^Alignment` = 45 at runtime),
+  `Blob.^Length` = 3. Tests: 2 new typechecker tests — 1887 lib green, zero
+  new Praetor diagnostics.
+- **Note**: a RUNTIME cast from a flexible-width `Bits` VALUE (`bs as Bit<16>`
+  where bs was assigned `Bit<8>`) still emits `i0` (the value's runtime width
+  isn't tracked) — a pre-existing codegen limitation, distinct from the
+  TYPE-level unification landed here.
+
 **Docs to update**: `docs/plans/2026-08-15-coll-length-semantics.md` (shipped
 markers), `2026-08-15-spec-implementation-status.md`, SPEC §8.10/§17.1 (same
 commit), `BUGS.md` entries closed.
