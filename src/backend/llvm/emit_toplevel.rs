@@ -1638,9 +1638,69 @@ impl LlvmBackend {
                 .into_iter()
                 .map(|(n, ty)| (n, crate::typechecker::substitute_type(&ty, &subst)))
                 .collect::<Vec<_>>();
-            self.ctx.struct_types.insert(key.clone(), slots);
+            self.ctx.struct_types.insert(key.clone(), slots.clone());
             if let Some(members) = self.ctx.obj_members.get(base).cloned() {
-                self.ctx.obj_members.insert(key.clone(), members);
+                self.ctx.obj_members.insert(key.clone(), members.clone());
+                // 2026-08-16 (Phase 3b): a GENERIC `coll struct` re-synthesizes
+                // its op surface against the SUBSTITUTED slots — the generic
+                // base's `data: T[N]` has an unresolved `Named("N",0)` dim, so
+                // its scaffolded Count read a `len` slot (wrong for a fixed
+                // coll: `%len` undefined). The mono key's `Int[4]` gives a
+                // constant-N Count. Only rebuild the synthesized members that
+                // depend on the resolved dim; keep user-declared members.
+                if self.ctx.coll_storage.contains_key(base) {
+                    let ftd = crate::ast::top::TypeDef {
+                        name: base.to_string(), type_params: vec![],
+                        parent: None, protocol: None, traits: vec![],
+                        bit_range: None, span: None, coll: true, seq: false,
+                        body: crate::ast::top::TypeDefBody {
+                            slots: slots.iter()
+                                .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                                    name: n.clone(), ty: ty.clone(), bit_range: None,
+                                })
+                                .collect(),
+                            metadata: Default::default(), projections: vec![],
+                            bindings: vec![], operators: vec![],
+                            op_bindings: vec![], constraints: vec![],
+                            members: vec![], span: None,
+                        },
+                    };
+                    if let Some((seq_expr, elem_ty)) = crate::backend::llvm::coll_scaffold::derive_sequence_member(
+                        &ftd.body.slots,
+                        &self.ctx.struct_types,
+                    ) {
+                        let storage = self.ctx.coll_storage.get(base)
+                            .copied()
+                            .unwrap_or(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed);
+                        let synth = crate::backend::llvm::coll_scaffold::synthesize_members(
+                            &ftd, &seq_expr, elem_ty, storage,
+                        );
+                        // 2026-08-16 (Phase 3b): a `coll struct` has NO user
+                        // members (StaticStruct body) — every member is
+                        // scaffolded, so the mono set REPLACES the base copy
+                        // (whose generic Count read a nonexistent `len` slot).
+                        // A `coll obj` keeps its user members + merged synth.
+                        let is_coll_struct = matches!(
+                            self.ctx.coll_storage.get(base),
+                            Some(crate::backend::llvm::coll_scaffold::CollStorage::InlineFixed)
+                        );
+                        let mut members = members;
+                        if is_coll_struct {
+                            members = synth;
+                        } else {
+                            for m in synth {
+                                let m_name = crate::backend::llvm::emit_expr::member_briev_name(&m);
+                                let dup = members.iter().any(|ex| {
+                                    crate::backend::llvm::emit_expr::member_briev_name(ex) == m_name
+                                });
+                                if !dup {
+                                    members.push(m);
+                                }
+                            }
+                        }
+                        self.ctx.obj_members.insert(key.clone(), members);
+                    }
+                }
             }
         }
         key

@@ -5495,12 +5495,25 @@ impl LlvmBackend {
     /// 2026-08-15 (coll plan §3.4.6): the fixed length N of a `coll struct`
     /// (fixed T[N]) — from its one sequence member's array dimension.
     /// Returns 0 if not determinable.
+    ///
+    /// 2026-08-16 (Phase 3b): a GENERIC `coll struct Fixed<T, N>` resolves its
+    /// dimension through the MONO key (`Fixed<Int, 4>`), not the generic base
+    /// — the base's `data: T[N]` still holds `Named("N", 0)` (unresolved).
+    /// ensure_mono inserts the substituted key whose slot is `Int[4]`; reading
+    /// the base entry alone returns 0 for every generic coll.
     fn coll_fixed_length(&self, ty: &crate::ast::Type) -> i64 {
-        let base = match ty {
-            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+        let key = match ty {
+            crate::ast::Type::Applied(n, args) if self.ctx.obj_type_params.contains_key(n.as_str()) => {
+                format!(
+                    "{}<{}>",
+                    n,
+                    args.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", ")
+                )
+            }
+            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
             _ => return 0,
         };
-        let fields = self.ctx.struct_types.get(base).cloned().unwrap_or_default();
+        let fields = self.ctx.struct_types.get(&key).cloned().unwrap_or_default();
         for (_, fty) in &fields {
             if let crate::ast::Type::Vector(_, dims) = fty {
                 if let Some(crate::ast::Dimension::Anonymous(n)) = dims.first() {

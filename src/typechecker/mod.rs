@@ -1243,10 +1243,30 @@ fn try_coerce_via_parse(
                 let fixed_n = if n == "List" {
                     None
                 } else {
-                    ctx.type_slots.get(n).and_then(|slots| {
+                    // 2026-08-16 (Phase 3b): a GENERIC `coll struct
+                    // Fixed<T, N>` application (`Fixed<Int, 2>`) substitutes
+                    // the const-generic dimension from the APPLIED args — the
+                    // generic base's `T[N]` holds `Named("N",0)`, so the base
+                    // lookup alone yields no bound and an over-length literal
+                    // would slip through.
+                    let slots = ctx.type_slots.get(n);
+                    let args: &[Type] = match target_ty {
+                        Type::Applied(_, a) => a,
+                        _ => &[],
+                    };
+                    slots.and_then(|slots| {
                         slots.iter().find_map(|s| match &s.ty {
                             Type::Vector(_, dims) => dims.first().and_then(|d| match d {
                                 crate::ast::Dimension::Anonymous(c) => Some(*c as i64),
+                                crate::ast::Dimension::Named(nm, _) => {
+                                    let params = ctx.type_params.get(n).cloned().unwrap_or_default();
+                                    params.iter().position(|p| p == nm)
+                                        .and_then(|i| args.get(i))
+                                        .and_then(|a| match a {
+                                            Type::Number(sz) => Some(*sz),
+                                            _ => None,
+                                        })
+                                }
                                 _ => None,
                             }),
                             _ => None,
@@ -6070,6 +6090,47 @@ node go [done == 0][done == 1] {
     assert!(
         check(oversize).is_err(),
         "an over-length literal for a fixed coll struct must be a type error"
+    );
+}
+
+/// 2026-08-16 (Phase 3b): a GENERIC `coll struct Fixed<T, N> { data: T[N] }`
+/// with a concrete application `Fixed<Int, 4>` typechecks the literal, the op
+/// surface (Count#/Capacity#/foreach), and field access — the const generic
+/// N resolves to the fixed capacity. An over-length literal on the generic is
+/// still rejected.
+#[test]
+fn coll_struct_generic_const_dimension_typechecks() {
+    let ok = r#"
+coll struct Fixed<T, N> { data: T[N]; };
+let done: Int = 0;
+let total: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed<Int, 4> = [1, 2, 3, 4];
+    let n: Int = f.Count#();
+    let cap: Int = Capacity#(f);
+    let one: Int = f.data[1];
+    let sum: Int = 0;
+    foreach v in f { sum = sum + v; }
+    total = n + cap + one + sum;
+    done = 1;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "generic coll struct literal + Count# + Capacity# + field + foreach must type"
+    );
+    let oversize = r#"
+coll struct Fixed<T, N> { data: T[N]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed<Int, 2> = [1, 2, 3];
+    term;
+};
+"#;
+    assert!(
+        check(oversize).is_err(),
+        "an over-length literal for a generic fixed coll must be a type error"
     );
 }
 

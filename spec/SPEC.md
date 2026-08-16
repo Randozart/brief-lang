@@ -771,7 +771,10 @@ coll struct Fixed<T, N> {
   `[len]` heap-seq header and no cap/len slots. The literal must not exceed N
   (an over-length literal is a compile error); an empty `[]` constructs a
   zero-filled N-array. Iteration, `op Count` (= N), `op At` (= `data[i]`),
-  and field reads all observe the same inline layout.
+  and field reads all observe the same inline layout. A **generic**
+  `coll struct Fixed<T, N>` application (`Fixed<Int, 4>`) resolves the const
+  dimension to a concrete `Int[4]` at monomorphization — the same inline
+  construction, bound, and op surface apply.
 - **Storage is the compiler's choice** (2026-08-15): the compiler picks the
   most effective representation for each coll from its shape and use — heap
   block (growable `Ptr<T>`), inline array (fixed `T[N]`), or pooled columns

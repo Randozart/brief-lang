@@ -6215,6 +6215,41 @@ node go [done == 0][done == 1] {
     let _ = backend.generate(&items, None);
 }
 
+/// Phase 3b — const generics: `coll struct Fixed<T, N> { data: T[N] }` with
+/// `Fixed<Int, 4>` must resolve the mono dimension to a concrete `Int[4]`:
+/// the literal stores into `[4 x i64]` GEPs, the scaffolded Count is the
+/// constant 4 (NOT a `len` slot read — a generic coll struct has no hidden
+/// len), and `f.data[3]` reads element 3. Before the mono-keyed fix the
+/// generic base's unresolved `Named("N",0)` dim made Count read an undefined
+/// `@len` global.
+#[test]
+fn test_coll_struct_generic_const_dimension() {
+    let src = r#"
+coll struct Fixed<T, N> { data: T[N]; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let f: Fixed<Int, 4> = [1, 2, 3, 4];
+    done = f.Count#() + f.data[3];
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("ptr @len"),
+        "the generic coll struct Count must be the constant N, not a len-slot read; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("getelementptr [4 x i64]"),
+        "the mono Fixed<Int, 4> literal must store into [4 x i64] GEPs; got:\n{ir}"
+    );
+}
+
 // ── Multi-node internal fold (2026-08-16, Direction 3) ───────────────
 
 /// A counted-loop node in a MULTI-node program is folded into a noinline

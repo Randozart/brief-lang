@@ -290,6 +290,30 @@ dead for ALL coll structs and can be removed in the slice-6 cleanup, 3d).
    + `ensure_mono` (`emit_toplevel.rs:1502-1527`).
 2. **Verify** — SPEC §8.10 generic example; literal construction for `T[N]`.
 
+### SHIPPED 3b (2026-08-16)
+
+The plan's assumption ("mono/substitute already handle `Fixed<Int,4>`") was
+WRONG for the DIMENSION — `substitute_type` resolves the inner `T` but a
+`Dimension::Named("N", 0)` stayed unresolved on the generic base, so
+`coll_fixed_length` returned 0 and the scaffolded Count read a nonexistent
+`len` slot (undefined `@len` global). Three fixes:
+
+- **`coll_fixed_length` mono-keyed** (`mod.rs:5498`): an `Applied("Fixed",
+  [Int, 4])` reads the MONO `struct_types` entry (`Fixed<Int, 4>`, whose slot
+  is the substituted `Int[4]`), not the generic base (`T[N]` still Named).
+- **`ensure_mono` coll re-synthesis** (`emit_toplevel.rs:1649`): a generic
+  `coll struct` re-synthesizes its op surface against the SUBSTITUTED slots —
+  the mono Count is the constant N. A `coll struct` (no user members) REPLACES
+  the base copy; a `coll obj` keeps the dedup-merge (user members preserved).
+- **Typechecker const-generic bound** (`typechecker/mod.rs:1237`): the
+  over-length literal gate substitutes `Named` dims from the APPLIED args
+  (`Fixed<Int, 2>` bound = 2), so `[1,2,3]` for `Int[2]` is rejected.
+
+Verify: `Fixed<Int, 4>` literal `[1,2,3,4]` → `[4 x i64]` GEPs, `Count#`=4,
+`Capacity#`=4, `data[3]`=4, foreach sum=10; over-length generic rejected.
+Tests: 2 new (backend IR: no `@len`, `[4 x i64]` GEPs; typechecker lifecycle)
+— 1889 lib green, benchmarks no failures, zero new Praetor diagnostics.
+
 ### 3c. BUGS.md stdlib files
 
 1. **iterator.bv** — free-`T`-body limitation (`?<-` arrow assign where element
