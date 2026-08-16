@@ -3,25 +3,30 @@
 ## stdlib iterator.bv / hashmap.bv written aspirationally — never compiled — OPEN
 
 **Date:** 2026-08-14 (found while verifying generic `defn f<T>` dispatch)
-**Status:** Open — documented. Generic dispatch is verified working; these
-stdlib files have their own latent issues that surface once generic txns
-parse (`5ce9aa8c` made them parseable):
+**Status:** iterator.bv CLOSED 2026-08-16 (Phase 3c); hashmap.bv still OPEN.
 
-- **iterator.bv**: `iter_fold`/`iter_zip`/`iter_enumerate`/`iter_find`/
-  `iter_max` fail to typecheck their bodies with free `T`/`U` (the
-  body-with-free-T limitation) and use `Option<T>`/`Some(...)`/`None`
-  constructors (`Option` defined in `option.bv`, but `Some`/`None` don't
-  typecheck). `iter_map`/`iter_filter` compile now (their `result.append(x)`
-  was migrated to `result <- x`). Also `''+'' on List<T>` (some function does
-  `a + b` on lists) and `iter_enumerate_loop` tuple mismatches.
-- **hashmap.bv**: `new_map<K,V>()` (returns `term {}`) isn't dispatching
-  generically — the `let m: HashMap<String, Int> = new_map()` call returns Int
-  (nullary generic binding via expected-type doesn't reach hashmap.bv's defns
-  at import; the two-param `HashMap<K,V>` construction path is unverified).
-- The typechecker stdlib-op visibility: `List`'s `op Count`/`op At` ARE
-  visible via `import "std/collections.bv"` (verified). `Stack`/`RingBuffer`
-  genuinely lack `op Count` (not a visibility bug — their count is `size()`
-  defn); `HashMap`'s Tier-1 cursor ops are unverified.
+Two distinct root causes, both fixed or scoped on 2026-08-16:
+
+- **iterator.bv** — CLOSED. (1) `List`'s op surface (`op Count`/`op At`) was
+  NOT in scope for the adapter bodies — the file never imported `List`, so
+  `list.Count#()` and `result <- x` failed. Added `import { List } from
+  "std/collections.bv"`. (2) A named import did NOT pull a defn's transitive
+  referenced FUNCTIONS — `import { iter_map }` dropped `iter_map_loop`, the
+  helper call resolved to the raw-type fallback (return became Int), and the
+  generic body failed to typecheck. Fixed in import_resolver.rs: the closure
+  now also collects referenced function names (referenced_function_names).
+  (3) `iter_any`/`iter_all`'s early `term true` inside `when` could not
+  converge — the loop postcondition `i == Count#()` was never met on the early
+  exit, so the txn re-fired with the same `i` forever. Rewritten as
+  accumulator loops (`found`/`ok` carried to the loop end). All adapters now
+  `brievc check` clean and run: map/fold/filter/take/skip/chain/zip/enumerate/
+  any/all/sum/product verified end-to-end.
+- **hashmap.bv** — OPEN. `new_map<K,V>()` returns `term {}` (a parse error —
+  there is no empty-map literal), `map.Count#()` needs `op Count` on the
+  hand-written `obj HashMap` (it only has Tier-1 cursor ops Iter/Step/IsEnd/
+  Current), the empty HashMap has no construction path (`op Init: init(#Lh,
+  #Rh)` requires a seed value), and `Option`/`Some`/`None` forms don't
+  typecheck. Deferred to a dedicated HashMap surface work item.
 
 **Path:** a stdlib-cleanup pass that (a) fixes the free-`T`-body limitation
 (body literals/ops adopting the declared return type), (b) typechecks

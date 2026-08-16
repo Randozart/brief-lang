@@ -144,6 +144,104 @@ fn referenced_type_names(item: &TopLevel) -> Vec<String> {
     out
 }
 
+/// 2026-08-16 (Phase 3c): the NAMED functions/txns a kept item CALLS in its
+/// body. A named import (`import { iter_map } from "std/iterator.bv"`) must
+/// also bring `iter_map_loop` (the helper txn iter_map's body calls) — the
+/// existing closure only pulled referenced TYPE names, so a generic adapter
+/// body referencing its `_loop` sibling resolved to the raw-type fallback
+/// (the call's return became Int, and the body failed to typecheck:
+/// "expected Bool for term value ... found Int").
+fn referenced_function_names(item: &TopLevel) -> Vec<String> {
+    fn expr_calls(e: &crate::ast::Expr, acc: &mut Vec<String>) {
+        match e {
+            crate::ast::Expr::Call(name, args, _) => {
+                acc.push(name.clone());
+                for a in args {
+                    expr_calls(a, acc);
+                }
+            }
+            crate::ast::Expr::MethodCall(recv, _, args, _) => {
+                expr_calls(recv, acc);
+                for a in args {
+                    expr_calls(a, acc);
+                }
+            }
+            crate::ast::Expr::BinaryOp(_, l, r) => {
+                expr_calls(l, acc);
+                expr_calls(r, acc);
+            }
+            crate::ast::Expr::UnaryOp(_, inner) => expr_calls(inner, acc),
+            crate::ast::Expr::Index(base, i) => {
+                expr_calls(base, acc);
+                expr_calls(i, acc);
+            }
+            crate::ast::Expr::Field(base, _) => expr_calls(base, acc),
+            crate::ast::Expr::List(elems) => {
+                for el in elems {
+                    expr_calls(el, acc);
+                }
+            }
+            crate::ast::Expr::Tuple(elems) => {
+                for el in elems {
+                    expr_calls(el, acc);
+                }
+            }
+            crate::ast::Expr::Lambda(_, body) => expr_calls(body, acc),
+            crate::ast::Expr::StructLiteral { fields, .. } => {
+                for (_, v) in fields {
+                    expr_calls(v, acc);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn stmt_calls(s: &crate::ast::Statement, acc: &mut Vec<String>) {
+        match s {
+            crate::ast::Statement::Expression(e) => expr_calls(e, acc),
+            crate::ast::Statement::Let { expr: Some(e), .. } => expr_calls(e, acc),
+            crate::ast::Statement::Let { .. } => {}
+            crate::ast::Statement::Assign(_, e) => expr_calls(e, acc),
+            crate::ast::Statement::ArrowAssign { value, .. } => expr_calls(value, acc),
+            crate::ast::Statement::Term(Some(e)) => expr_calls(e, acc),
+            crate::ast::Statement::Term(None) => {}
+            crate::ast::Statement::EndProgram(Some(e)) => expr_calls(e, acc),
+            crate::ast::Statement::EndProgram(None) => {}
+            crate::ast::Statement::If(_, t, e) => {
+                for b in t.iter().chain(e.iter()) {
+                    stmt_calls(b, acc);
+                }
+            }
+            crate::ast::Statement::Guarded(_, b) | crate::ast::Statement::Block(b) => {
+                for s in b {
+                    stmt_calls(s, acc);
+                }
+            }
+            crate::ast::Statement::Foreach { list, body, .. } => {
+                expr_calls(list, acc);
+                for s in body {
+                    stmt_calls(s, acc);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    match item {
+        TopLevel::Definition(d) => {
+            for s in &d.body {
+                stmt_calls(s, &mut out);
+            }
+        }
+        TopLevel::Transaction(t) => {
+            for s in &t.body {
+                stmt_calls(s, &mut out);
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 impl ImportResolver {
     pub fn new() -> Self {
         ImportResolver {
@@ -919,6 +1017,10 @@ impl ImportResolver {
         }
         // 2026-08-01 (D3): a named import must ALSO bring the requested item's
         // transitive referenced types (List -> ListBuffer<T>).
+        // 2026-08-16 (Phase 3c): and its referenced FUNCTIONS (iter_map ->
+        // iter_map_loop) — a generic adapter body calls its `_loop` sibling,
+        // which must be in scope or the call resolves to the raw-type
+        // fallback and the body fails to typecheck.
         let mut changed = true;
         while changed {
             changed = false;
@@ -926,6 +1028,9 @@ impl ImportResolver {
             for item in items {
                 if Self::item_name(item).map_or(false, |n| keep.contains(n)) {
                     for r in referenced_type_names(item) {
+                        refs.insert(r);
+                    }
+                    for r in referenced_function_names(item) {
                         refs.insert(r);
                     }
                 }
@@ -1458,6 +1563,46 @@ fn test_identical_duplicate_imports_do_not_conflict() {
     assert!(
         resolver.resolve_imports(items, &src).is_ok(),
         "identical duplicate definitions must not conflict"
+    );
+}
+
+/// 2026-08-16 (Phase 3c): a named import must ALSO bring the requested defn's
+/// transitive referenced FUNCTIONS — `import { iter_map } from "iterator.bv"`
+/// pulls `iter_map_loop` (the helper txn iter_map's body calls). Before this
+/// fix the closure only pulled referenced TYPE names, so the helper was
+/// dropped, the call resolved to the raw-type fallback (return became Int),
+/// and the generic adapter body failed to typecheck.
+#[test]
+fn test_named_import_pulls_transitive_function_deps() {
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("mod.bv"),
+        "txn helper_loop(list: List<Int>, acc: Int, i: Int) [i < list.Count#()][i == list.Count#()] -> Int {\n\
+             let _ = acc;\n\
+             term i;\n\
+         };\n\
+         defn use_helper(list: List<Int>) -> Int {\n\
+             term helper_loop(list, 0, 0);\n\
+         };\n",
+    )
+    .unwrap();
+    let src = dir.path().join("main.bv");
+    fs::write(&src, "").unwrap();
+    let items = vec![TopLevel::Import(Import::literal(
+        "mod.bv".to_string(),
+        vec![("use_helper".to_string(), "use_helper".to_string())],
+    ))];
+    let mut resolver = ImportResolver::new();
+    resolver.add_search_path(dir.path().to_path_buf());
+    let result = resolver.resolve_imports(items, &src).unwrap();
+    assert!(
+        result.iter().any(|i| matches!(i, TopLevel::Transaction(t) if t.name == "helper_loop")),
+        "importing a defn must pull the helper txn it calls (transitive function dep); got: {:?}",
+        result.iter().filter_map(|i| match i {
+            TopLevel::Definition(d) => Some(d.name.clone()),
+            TopLevel::Transaction(t) => Some(t.name.clone()),
+            _ => None,
+        }).collect::<Vec<_>>()
     );
 }
 

@@ -5,6 +5,12 @@
 // `[pre][post]` contracts for looping.  The `_loop` suffix marks txns
 // that take accumulator parameters (`result`, `i`) — the defn wrappers
 // provide initial values so the public API is unchanged.
+//
+// 2026-08-16 (Phase 3c): `List`'s op surface (`op Count`/`op At`/`op InsertAt`)
+// must be IN SCOPE for the adapter bodies — the typechecker resolves
+// `list.Count#()` and `result <- x` through the imported op members. Without
+// this import the file never type-checked (BUGS.md entry closed below).
+import { List } from "std/collections.bv";
 
 // ===== ITERATOR ADAPTERS =====
 
@@ -97,33 +103,38 @@ defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term.Count#() == 
 // and runs.
 
 // Check if any match
-txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
+// 2026-08-16 (Phase 3c): the early `term true` inside `when` could not
+// converge — the loop's postcondition `i == Count#()` was never met on the
+// early exit, so the txn re-fired with the same `i` forever (infinite loop,
+// found by the adapter consumer test). The accumulator form runs the scan to
+// completion and terms the accumulated result only when the loop ends.
+txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, found: Bool, i: Int)
     [i < list.Count#()][i == list.Count#()] -> Bool
 {
     when pred(list[i]) {
-        term true;
+        found = true;
     };
     i = i + 1;
-    term false;
+    term found;
 };
 
 defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
-    term iter_any_loop(list, pred, 0);
+    term iter_any_loop(list, pred, false, 0);
 };
 
 // Check if all match
-txn iter_all_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
+txn iter_all_loop<T>(list: List<T>, pred: T -> Bool, ok: Bool, i: Int)
     [i < list.Count#()][i == list.Count#()] -> Bool
 {
     when !pred(list[i]) {
-        term false;
+        ok = false;
     };
     i = i + 1;
-    term true;
+    term ok;
 };
 
 defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
-    term iter_all_loop(list, pred, 0);
+    term iter_all_loop(list, pred, true, 0);
 };
 
 // Collect into list (identity for List)

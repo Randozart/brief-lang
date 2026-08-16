@@ -325,6 +325,33 @@ Tests: 2 new (backend IR: no `@len`, `[4 x i64]` GEPs; typechecker lifecycle)
    map literal form; unblock; typecheck.
 3. **Verify** — both files `brievc check` clean; run-through a small consumer.
 
+### SHIPPED 3c — iterator.bv (2026-08-16); hashmap.bv deferred
+
+iterator.bv is CLOSED (three root causes, all fixed):
+- **Missing `List` import** — the adapter bodies called `list.Count#()` and
+  `result <- x` with no `List` op surface in scope. One import line fixed the
+  whole file (`brievc check` went from 9 errors to OK).
+- **Import closure dropped transitive FUNCTION deps** — `import { iter_map }`
+  pulled referenced TYPE names only (`List` → `ListBuffer`), never the helper
+  `iter_map_loop` a defn body calls. The helper resolved to the raw-type
+  fallback (return became Int) and the generic body failed to typecheck.
+  Fixed `import_resolver.rs` with `referenced_function_names` — the closure
+  now pulls called defns/txns too.
+- **iter_any/iter_all early-term divergence** — `term true` inside `when`
+  returned before the loop postcondition `i == Count#()` was met, so the txn
+  re-fired with the same `i` forever (infinite loop). Rewritten as accumulator
+  loops (`found`/`ok` carried to loop end). Verified all adapters end-to-end:
+  any=100, all=10, take=2, skip=2, chain=6, zip=3, enumerate=3, sum=6,
+  product=6 → 138.
+
+hashmap.bv REMAINS OPEN (deferred): `term {}` empty-map literal is a parse
+error and there is no empty-HashMap construction path (`op Init` needs a seed);
+`map.Count#()` needs `op Count` on the hand-written `obj HashMap`; `Option`/
+`Some`/`None` forms don't typecheck. This is a dedicated HashMap-surface work
+item, not a quick stdlib fix.
+
+**Docs updated**: `BUGS.md` (iterator.bv closed, hashmap.bv still open).
+
 ### 3d. Iterable slice-6 deletions (`2026-08-14-iterable-slice6-cleanup.md`)
 
 1. Delete the production-dead arms now accessible by 3a's coercion:
