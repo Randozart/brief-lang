@@ -204,10 +204,10 @@ non-MATCH ratio: `bash benchmarks/compare_baseline.sh <name>`.
 
 ## 7. Roadmap (subsequent legs, in order)
 
-0. **Frontend grow-guard pass (the queue_drain_idio regression fix)** — see
-   §8. Hoist the inlined grow call to the batch-loop's cold guard block or
-   eliminate it when the frontend proves the coll's length stays below
-   capacity across the loop.
+0. ~~Frontend grow-guard pass (the queue_drain_idio regression fix)~~ — DONE:
+   `src/analysis/coll_length.rs` (plan 2026-08-15-coll-loop-guard-elimination.md);
+   queue_drain_idio back to 0.59x. Next refinement: track LOCAL colls and
+   statically-bounded monotone push loops (pre-grow to the bound).
 1. **Coll-struct construction** — list-literal→`Int[N]` coercion so
    `coll struct` constructs from literals (prerequisite for const generics;
    unblocks the SPEC §8.10 example end-to-end).
@@ -249,14 +249,15 @@ clang crash. Shrink stays explicit: `TrimCap#` + a declared `op Shrink` binding
 (handle-only validation kept; nothing auto-invokes it). SPEC §8.10 mandates
 grow-on-full only.
 
-**Known regression: queue_drain_idio 0.58x → 4.00x.** The opaque resize call
-in a coll-push hot loop blocks LLVM's loop optimization (the batch-loop inner
-loop can no longer be if-converted; the call is a `memory(readwrite)` barrier).
-Tested structural alternatives — `cold` declare (0.53s), helper function
-(0.52s), `memory(argmem)` ptr declare (0.52s), sibling cold-block with
-duplicated store (0.75s), `llvm.expect` cold marking (crash) — none restore
-the baseline 0.0351s; the branch alone (no call) is free (0.03s), so ANY call
-in the loop CFG is the cost. queue_drain_idio still MATCHES (correctness); all
-C-comparable benchmarks (queue_drain, queue_drain_sym, stack_push_pop — fixed
-RingBuffer/Stack, not coll) are unchanged at 0.55-0.61x. The principled fix is
-roadmap item 0.
+**Known regression: queue_drain_idio 0.58x → 4.00x. RESOLVED (2026-08-15).**
+The opaque resize call in a coll-push hot loop blocked LLVM's loop optimization
+(the batch-loop inner loop can no longer be if-converted; the call is a
+`memory(readwrite)` barrier). The fix is the frontend bounded-length analysis —
+`src/analysis/coll_length.rs`, plan
+`docs/plans/2026-08-15-coll-loop-guard-elimination.md`: the compiler proves a
+balanced drain (pop then push keeps `len ≤ initial < cap`) never overflows and
+strips the dead guard from the inlined push. queue_drain_idio is back to
+**0.59x** (0.0356s) with **zero** resize calls in the loop. The investigation
+verified the branch alone (no call) is free (0.03s) and that `!prof`, `cold`,
+`argmem`, helper-function, and sibling-block variants all fail — only removing
+the call from the loop's data-flow path restores parity.

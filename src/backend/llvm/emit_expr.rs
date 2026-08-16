@@ -34,6 +34,38 @@ struct MaskIndexOperands<'a> {
 /// receiver (a boxed struct address OR an unpacked instance prefix), the
 /// member top-level, and the bound argument registers. Bundled so
 /// `emit_member_body` stays under the parameter budget.
+/// 2026-08-15 (coll grow-on-full): the scaffolded push member's grow guard —
+/// `if len == cap { <grow action> }` — the FIRST statement of the synthesized
+/// InsertAt body (`coll_scaffold::synth_push`). Identified structurally so the
+/// backend can strip it when the frontend proves the coll cannot overflow
+/// (`ctx.coll_safe_txns`). The grow action is a side-effect expression
+/// (`Resize#(#Self, cap*2)` or a declared `op Grow` binding call).
+fn is_grow_guard(stmt: &crate::ast::top::Statement) -> bool {
+    let crate::ast::top::Statement::If(cond, then_b, else_b) = stmt else {
+        return false;
+    };
+    if !else_b.is_empty() {
+        return false;
+    }
+    let len_cap_compare = matches!(
+        cond,
+        crate::ast::Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Eq,
+            l,
+            r,
+        ) if (is_ident(l.as_ref(), "len") && is_ident(r.as_ref(), "cap"))
+            || (is_ident(l.as_ref(), "cap") && is_ident(r.as_ref(), "len"))
+    );
+    len_cap_compare
+        && then_b
+            .iter()
+            .all(|s| matches!(s, crate::ast::Statement::Expression(_)))
+}
+
+fn is_ident(e: &crate::ast::Expr, name: &str) -> bool {
+    matches!(e, crate::ast::Expr::Identifier(n) if n == name)
+}
+
 pub(crate) struct MemberInvocation<'a> {
     pub recv_reg: &'a TypedRegister,
     pub type_name: &'a str,
@@ -2493,6 +2525,24 @@ impl LlvmBackend {
                 self.fun.let_original_types.insert(pname.clone(), pty.clone());
             }
             let _ = rty;
+        }
+        // 2026-08-15 (coll grow-on-full, plan 2026-08-15-coll-loop-guard-
+        // elimination): the frontend proved this (txn, coll) can never overflow
+        // (its length stays below capacity across the firing sequence), so the
+        // grow guard is dead and is stripped from the inlined push. The guard
+        // is the push member's FIRST statement — `if len == cap { <grow> }` —
+        // identified structurally. Sound: only stripped for pairs in
+        // `ctx.coll_safe_txns` (the analysis never proves without a complete
+        // bound); everywhere else the guard stays. The opaque resize call was
+        // the queue_drain_idio 4.00x regression — removing it restores LLVM's
+        // ability to if-convert the loop.
+        let txn_name = self.fun.txn_name.clone();
+        let base_type = type_name.split('<').next().unwrap_or(type_name).to_string();
+        let proven = self.ctx.coll_safe_txns.contains(&(txn_name, base_type));
+        let member_is_push = matches!(member, crate::ast::TopLevel::Definition(d) if d.name == "push");
+        let mut body = body;
+        if proven && member_is_push && body.first().is_some_and(is_grow_guard) {
+            body.remove(0);
         }
         crate::backend::llvm::emit_stmt::emit_statement_sequence(self, out, &body, indent);
         self.fun.self_binding = saved;

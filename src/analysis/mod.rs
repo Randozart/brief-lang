@@ -43,6 +43,7 @@ pub mod density;
 pub mod modulo_partition;
 pub mod inline_cost;
 pub mod batch_shape;
+pub mod coll_length;
 pub mod spawn_pool;
 pub mod component_instances;
 pub mod termination;

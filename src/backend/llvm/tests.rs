@@ -5892,6 +5892,63 @@ node go [done == 0][done == 1] {
     );
 }
 
+/// The frontend bounded-length analysis proves a balanced drain (pop then push
+/// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
+/// from the inlined push — no opaque resize call in the loop. This is the
+/// queue_drain_idio fix (0.58x → 4.00x → 0.58x).
+#[test]
+fn test_coll_guard_stripped_in_proven_drain() {
+    let src = r#"
+coll obj Q { data: Ptr<Int>; };
+let q: Q = [0];
+let count: Int = 0;
+node work [count < N][count == N] {
+    <- q;
+    q.push(count);
+    count = count + 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("call i64 @__briev_coll_resize"),
+        "a proven-safe drain must have NO resize call in the loop; got:\n{ir}"
+    );
+}
+
+/// A coll that genuinely exceeds the default cap (foreach with 21 pushes) is
+/// NOT provable — the grow guard must stay and the coll must still grow.
+#[test]
+fn test_coll_guard_kept_for_unproven_growth() {
+    let src = r#"
+coll obj Q { data: Ptr<Int>; };
+let q: Q = [];
+let done: Int = 0;
+node work [done == 0][done == 1] {
+    foreach x in 0..21 { q.push(x); };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call i64 @__briev_coll_resize"),
+        "an unprovable (growing) coll must keep the grow guard; got:\n{ir}"
+    );
+}
+
 /// `(n as String)` routes through the `Int → #String` casting-graph lane
 /// (`ExtCall int_to_str`), which must emit `call ptr @int_to_str(i64)` — the
 /// String IS a ptr to [len][bytes]. Regression: the ExtCall hardcoded `i64`

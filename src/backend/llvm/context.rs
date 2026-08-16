@@ -76,6 +76,11 @@ pub struct CompilerContext {
     /// so the backend's guard-outlining / folding gates treat calls to these
     /// like observable-intrinsic calls.
     pub observable_names: std::collections::HashSet<String>,
+    /// 2026-08-15 (coll grow-on-full): (txn, coll_obj_type) pairs whose coll
+    /// length provably stays below capacity across the txn — the grow guard is
+    /// dead and is stripped from the inlined push member body. Frontend-driven
+    /// (src/analysis/coll_length.rs).
+    pub coll_safe_txns: std::collections::HashSet<(String, String)>,
     /// 2026-08-03: Per-export `needs_state` from the export ABI analysis
     /// (src/analysis/export_abi.rs). Pure exports keep a clean C ABI;
     /// exports calling any Briev defn carry `ptr %state` first.
@@ -374,6 +379,7 @@ impl CompilerContext {
             global_free_after: HashMap::new(),
             pending_closures: Vec::new(),
             observable_names: std::collections::HashSet::new(),
+            coll_safe_txns: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
             collection_iterables: std::collections::HashSet::new(),

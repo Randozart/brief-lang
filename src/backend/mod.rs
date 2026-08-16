@@ -63,6 +63,11 @@ pub struct AnalysisResults {
     // stdlib-side twin of the intrinsic `observable: true` flag. Direct-only:
     // a pure function calling an `out` function is not itself pinned.
     pub observable_names: std::collections::HashSet<String>,
+    // 2026-08-15 (coll grow-on-full): (txn, coll_obj_type) pairs whose coll
+    // length provably stays below capacity across the txn's firing sequence —
+    // the grow guard is dead and the backend strips it from the inlined push.
+    // See docs/plans/2026-08-15-coll-loop-guard-elimination.md.
+    pub coll_safe_txns: std::collections::HashSet<(String, String)>,
     // 2026-08-06 (accel plan): module-level `!>` metadata (SPEC §8.9) merged
     // from TopLevel::ModuleMetadata nodes, last binding wins per key. Any
     // backend or plugin may consume it; the `accel` key gates the GPU
@@ -157,6 +162,7 @@ pub fn analyze_program(
         .collect();
     let global_lifetime = crate::analysis::global_lifetime::analyze(items, &field_inits, &node_order, &foldable);
     let observable_names = collect_observable_names(items);
+    let coll_safe_txns = crate::analysis::coll_length::analyze(items);
     let (spawn_pools, dependent_pools, _spawn_errors, spawn_storage) = crate::analysis::spawn_pool::analyze(items);
     let module_metadata = collect_module_metadata(items);
     let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
@@ -178,6 +184,7 @@ pub fn analyze_program(
         batch_shape,
         global_lifetime,
         observable_names,
+        coll_safe_txns,
         module_metadata,
         accel,
         spawn_pools,
