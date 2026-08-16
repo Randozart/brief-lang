@@ -374,6 +374,21 @@ impl LlvmBackend {
                 if let Some(ref slot) = active_slot {
                     writeln!(out, "  store i64 1, ptr {}", slot).ok();
                 }
+                // 2026-08-16 (multi-node internal fold, Direction 3): a node
+                // whose whole bounded pass is folded into @txn_<name> (a
+                // noinline countdown) is CALLED once per pass — the pass runs
+                // internally (the counter lives in a phi register) instead of
+                // this inline per-firing body. The precondition branch above
+                // still gates the call.
+                if self.ctx.internal_fold_txns.contains(name) {
+                    writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+                    if !self.fun.terminated {
+                        self.emit_beginprogram_goal_check(out, txn);
+                        writeln!(out, "  br label %{}", next_label).ok();
+                    }
+                    writeln!(out, "{}:", next_label).ok();
+                    continue;
+                }
                 for stmt in &txn.body {
                     if self.fun.terminated { break; }
                     self.emit_statement(out, stmt, "  ");

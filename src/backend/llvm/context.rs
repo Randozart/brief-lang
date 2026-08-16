@@ -81,6 +81,11 @@ pub struct CompilerContext {
     /// dead and is stripped from the inlined push member body. Frontend-driven
     /// (src/analysis/coll_length.rs).
     pub coll_safe_txns: std::collections::HashSet<(String, String)>,
+    /// 2026-08-16 (multi-node internal fold, Direction 3): reactive txn names
+    /// whose whole bounded pass runs inside `@txn_<name>` (a noinline countdown
+    /// loop) — the reactor dispatch calls the txn once per pass instead of
+    /// inlining the per-firing body.
+    pub internal_fold_txns: std::collections::HashSet<String>,
     /// 2026-08-03: Per-export `needs_state` from the export ABI analysis
     /// (src/analysis/export_abi.rs). Pure exports keep a clean C ABI;
     /// exports calling any Briev defn carry `ptr %state` first.
@@ -380,6 +385,7 @@ impl CompilerContext {
             pending_closures: Vec::new(),
             observable_names: std::collections::HashSet::new(),
             coll_safe_txns: std::collections::HashSet::new(),
+            internal_fold_txns: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
             collection_iterables: std::collections::HashSet::new(),

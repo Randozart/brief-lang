@@ -3858,6 +3858,17 @@ fn probe_ok_checks(
         self.fun.terminated = false;
         self.fun.returns_i64 = false;
             self.fun.fn_ret_ty = "void".to_string();
+        // 2026-08-16 (multi-node internal fold, Direction 3): an async worker
+        // whose whole bounded pass is folded into @txn_<name> (a noinline
+        // countdown) just calls it once per pass instead of inlining the body.
+        if self.ctx.internal_fold_txns.contains(name) {
+            writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+            writeln!(out, "  br label %{}_done", async_name).ok();
+            writeln!(out, "{}_done:", async_name).ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            return;
+        }
         for s in &txn.body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");

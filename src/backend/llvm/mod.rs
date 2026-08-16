@@ -3189,8 +3189,32 @@ impl LlvmBackend {
             }
         }
         // Transactions
+        // 2026-08-16 (multi-node internal fold, Direction 3): a counted-loop
+        // node in a MULTI-node program is emitted as an internal PerFieldPhi
+        // countdown — `@txn_<name>` runs the whole bounded pass, so the reactor
+        // sequences the phase-transition nodes once per pass instead of
+        // re-dispatching every iteration (the per-firing dispatch inlines the
+        // body each iteration, and after LTO the shared counter is memory-
+        // resident — the countdown keeps it in a phi register). The single-node
+        // case is the existing main fold. The eligibility gate
+        // (internal_fold_info) proves no OTHER node's pre can fire mid-pass —
+        // folding would starve it.
+        self.ctx.internal_fold_txns.clear();
+        for (name, _) in &txns {
+            if self.internal_fold_info(name, &analysis).is_some() {
+                self.ctx.internal_fold_txns.insert(name.clone());
+            }
+        }
         for (name, txn) in &txns {
-            self.emit_transaction(&mut out, txn, name, &mut range_meta);
+            if self.ctx.internal_fold_txns.contains(name) {
+                if let Some(info) = self.internal_fold_info(name, &analysis) {
+                    self.emit_internal_fold_txn(&mut out, name, txn, &analysis, info);
+                } else {
+                    self.emit_transaction(&mut out, txn, name, &mut range_meta);
+                }
+            } else {
+                self.emit_transaction(&mut out, txn, name, &mut range_meta);
+            }
             writeln!(out).ok();
         }
         // Precondition functions (skip callable txns — no ptr)
@@ -4498,8 +4522,179 @@ impl LlvmBackend {
     ///   `analysis.swan_songs`); LICM hoisting runs inside.
     /// * `post_hoist` — the hoisted post-loop swan-song tail, assigned to
     ///   `pending_post_hoist` for Path B emission.
-     fn emit_folded_loop_shape(
+    /// 2026-08-16 (multi-node internal fold, Direction 3): is `name` a
+    /// counted-loop node whose whole bounded pass can run inside `@txn_<name>`
+    /// without starving any other node? The reactor calls the txn once per
+    /// pass and sequences the phase-transition nodes around it.
+    ///
+    /// SOUNDNESS: folding X's pass into one txn call starves any node Y whose
+    /// precondition becomes true MID-pass (the reactor never gets control
+    /// between X's iterations). The gate proves no such Y exists:
+    ///   - X writes nothing Y's pre reads, except the counter itself;
+    ///   - Y's pre references the counter only at the pass boundary
+    ///     (`i == bound` / `i >= bound`) — an interior `<`/`<=`/`>` reference
+    ///     would be true mid-pass — unless Y's pre is gated by `beginprogram`
+    ///     (true only at program entry, cleared before any later pass).
+    fn internal_fold_info(
+        &self,
+        name: &str,
+        analysis: &crate::backend::AnalysisResults,
+    ) -> Option<InternalFoldInfo> {
+        let nodes = &analysis.transition_graph.nodes;
+        if nodes.len() <= 1 {
+            return None; // the single-node main fold handles this
+        }
+        if self.accel_kernel_idx.contains_key(name) {
+            return None; // the accel dispatch wrapper owns the CPU path
+        }
+        let node = nodes.iter().find(|n| n.name == *name)?;
+        if !node.is_reactive {
+            return None;
+        }
+        let shape = match analysis.loop_shapes.get(name) {
+            Some(s) => s,
+            None => return None,
+        };
+        let bp = match node.bounded_pre.as_ref() {
+            Some(b) => b,
+            None => return None,
+        };
+        let inc = match node.increments.as_ref() {
+            Some(i) => i,
+            None => return None,
+        };
+        if bp.var != inc.var {
+            return None;
+        }
+        let counter = &bp.var;
+        let (total_idx, total_const_name) = match &shape.bound {
+            crate::analysis::loop_shape::Bound::Field(f) => {
+                (self.ctx.field_index_map.get(f.as_str()).copied(), None)
+            }
+            crate::analysis::loop_shape::Bound::Const(c)
+            | crate::analysis::loop_shape::Bound::Init(c) => (None, Some(c.clone())),
+            _ => (None, None),
+        };
+        if total_idx.is_none() && total_const_name.is_none() {
+            return None;
+        }
+        // The fields X writes OTHER than the counter — anything Y's pre reads
+        // here would be clobbered mid-pass. The transition graph's write_set
+        // deliberately EXCLUDES array-element writes (`px[i] = ...`, 2026-07-21
+        // — pointer writes change memory AT the pointer), so collect the roots
+        // from the body directly.
+        let writes_except_counter: std::collections::HashSet<String> =
+            collect_written_fields(&node.body)
+                .into_iter()
+                .filter(|f| f != counter)
+                .collect();
+        for other in nodes {
+            if other.name == *name {
+                continue;
+            }
+            let mut reads = std::collections::HashSet::new();
+            crate::backend::collect_expr_identifiers(&other.precondition, &mut reads);
+            if reads.iter().any(|r| writes_except_counter.contains(r)) {
+                return None;
+            }
+            if !self.pre_counter_safe(&other.precondition, counter, bp) {
+                return None;
+            }
+        }
+        let bound_literal = bp.bound_literal;
+        Some(InternalFoldInfo {
+            counter_idx: *self.ctx.field_index_map.get(counter)?,
+            total_idx,
+            total_const_name,
+            bound_literal,
+            counter_var: counter.clone(),
+        })
+    }
+
+    /// Emit `@txn_<name>` as an internal PerFieldPhi countdown: the whole
+    /// bounded pass runs inside the txn, `%state` is the parameter (no alloca /
+    /// init stores — the reactor already initialized state).
+    fn emit_internal_fold_txn(
         &mut self,
+        out: &mut String,
+        name: &str,
+        txn: &crate::ast::Transaction,
+        analysis: &crate::backend::AnalysisResults,
+        info: InternalFoldInfo,
+    ) {
+        writeln!(out, "define void @txn_{}({}) local_unnamed_addr #0 noinline {{", name, self.ctx.state_ptr_param).ok();
+        writeln!(out, "  entry:").ok();
+        self.fun.txn_name = name.to_string();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.clear_locals();
+        self.fun.terminated = false;
+        self.fun.in_callable_txn = false;
+        self.fun.returns_i64 = false;
+        self.fun.fn_ret_ty = "void".to_string();
+        self.emit_arena_init(out, "  ");
+        // The swan-song-stripped body + post-loop hoist, mirroring the
+        // single-node fold (analysis.swan_songs).
+        let (txn_body, post_hoist) = match analysis.swan_songs.get(name) {
+            Some((stripped, hoisted)) => (stripped.clone(), hoisted.clone()),
+            None => (txn.body.clone(), Vec::new()),
+        };
+        self.fun.pending_post_hoist = post_hoist;
+        self.fun.pending_phi_backedge.clear();
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
+        let write_set: std::collections::HashSet<String> =
+            analysis.transition_graph.nodes.iter()
+                .find(|n| n.name == *name)
+                .map(|n| n.write_set.clone())
+                .unwrap_or_default();
+        self.emit_countable_loop_wrapped(
+            out,
+            name,
+            info.counter_idx,
+            info.total_idx,
+            info.total_const_name.as_deref(),
+            info.bound_literal,
+            &txn_body,
+            &write_set,
+            false,
+            Some(&info.counter_var),
+            txn.contract.watchdog.as_ref(),
+            false,
+        );
+        // The countdown left per-function register caches populated (the
+        // counter `i` → its loop register). They must not leak into the NEXT
+        // txn function — `emit_transaction`-style emissions resolve `i` via
+        // these and would reference a register defined in ANOTHER function
+        // (undefined-value IR). The single-node main fold never had this issue
+        // (main() is emitted last).
+        self.fun.last_val_temps.clear();
+        self.fun.last_val_types.clear();
+        self.fun.pending_phi_backedge.clear();
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+    }
+
+    /// 2026-08-16 (multi-node internal fold): a node's precondition may only
+    /// reference the pass counter at the pass boundary (`i == bound` /
+    /// `i >= bound`) — a strict-interior reference (`i < bound`, `i <= k`)
+    /// would be true mid-pass and the fold would starve that node. The one
+    /// exception: a `beginprogram && ...` conjunct (the entry flag is cleared
+    /// before any later pass, so the whole pre is false mid-pass).
+    fn pre_counter_safe(
+        &self,
+        pre: &Expr,
+        counter: &str,
+        bp: &crate::analysis::transition_graph::BoundedPre,
+    ) -> bool {
+        if contains_beginprogram_conjunct(pre) {
+            return true;
+        }
+        !expr_has_unsafe_counter_ref(pre, counter, &bp.bound_var, bp.bound_literal)
+    }
+
+    fn emit_folded_loop_shape(        &mut self,
         out: &mut String,
         analysis: &crate::backend::AnalysisResults,
         node: &crate::analysis::transition_graph::ReactorNode,
@@ -5388,6 +5583,208 @@ impl LlvmBackend {
             TopLevel::Export(e) => self.scan_item_for_wires(&e.inner),
             _ => {}
         }
+    }
+}
+
+/// 2026-08-16 (multi-node internal fold, Direction 3): the resolved loop inputs
+/// for folding a counted-loop node's whole bounded pass into `@txn_<name>`.
+struct InternalFoldInfo {
+    counter_idx: usize,
+    total_idx: Option<usize>,
+    total_const_name: Option<String>,
+    bound_literal: Option<i64>,
+    counter_var: String,
+}
+
+/// 2026-08-16 (multi-node internal fold): the state-field roots a body WRITES,
+/// INCLUDING array-element writes (`px[i] = ...` → `px`). The transition
+/// graph's write_set deliberately excludes Index roots (pointer writes change
+/// memory AT the pointer — 2026-07-21); the fold gate needs the full picture
+/// to prove no other node's pre is clobbered mid-pass.
+fn collect_written_fields(body: &[Statement]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    collect_written_fields_inner(body, &mut out);
+    out
+}
+
+fn collect_written_fields_inner(body: &[Statement], out: &mut std::collections::HashSet<String>) {
+    for stmt in body {
+        match stmt {
+            Statement::Assign(lhs, _) => insert_write_root(lhs, out),
+            Statement::ArrowAssign { target, value, .. } => {
+                if let Some(t) = target.as_deref() {
+                    insert_write_root(t, out);
+                }
+                insert_write_root(value, out);
+            }
+            Statement::Expression(Expr::MethodCall(recv, name, _, _)) => {
+                if name == "push" || name == "pop" {
+                    insert_write_root(recv, out);
+                }
+            }
+            Statement::If(_, then_b, else_b) => {
+                collect_written_fields_inner(then_b, out);
+                collect_written_fields_inner(else_b, out);
+            }
+            Statement::Guarded(_, body) | Statement::Block(body)
+            | Statement::Defer(body) | Statement::Mutex(body) | Statement::SyncBlock(body) => {
+                collect_written_fields_inner(body, out);
+            }
+            Statement::Barrier { body, .. } => collect_written_fields_inner(body, out),
+            Statement::Foreach { body, .. } => collect_written_fields_inner(body, out),
+            _ => {}
+        }
+    }
+}
+
+/// Insert the root variable of a write target (an expression that is assigned
+/// or arrow-mutated) into the written-fields set.
+fn insert_write_root(e: &Expr, out: &mut std::collections::HashSet<String>) {
+    if let Some(root) = write_root(e) {
+        out.insert(root);
+    }
+}
+
+/// Root variable of an assignment target, descending through Index and Field.
+fn write_root(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Identifier(n) => Some(n.clone()),
+        Expr::Index(base, _) => write_root(base),
+        Expr::Field(base, _) => write_root(base),
+        Expr::AddrOf(inner) => write_root(inner),
+        _ => None,
+    }
+}
+
+/// 2026-08-16 (multi-node internal fold): true when the precondition is a
+/// top-level conjunction containing the program-entry flag `beginprogram` —
+/// the flag is cleared after the entry pass, so the conjunct is false during
+/// any later pass and interior counter references in the pre are moot.
+fn contains_beginprogram_conjunct(e: &Expr) -> bool {
+    match e {
+        Expr::BeginProgram => true,
+        Expr::BinaryOp(crate::ast::BinaryOpKind::And, l, r) => {
+            contains_beginprogram_conjunct(l) || contains_beginprogram_conjunct(r)
+        }
+        _ => false,
+    }
+}
+
+/// 2026-08-16 (multi-node internal fold): true when `e` references `counter`
+/// in a comparison that is NOT at the pass boundary — `i < bound`, `i <= k`,
+/// `i > bound`, `i != bound`, a bare `i` use, or a boundary comparison against
+/// a value that isn't THIS node's bound. A boundary `i == bound` / `i >= bound`
+/// (either operand order) against the node's own bound is safe.
+fn expr_has_unsafe_counter_ref(e: &Expr, counter: &str, bound_var: &str, bound_lit: Option<i64>) -> bool {
+    match e {
+        Expr::Identifier(n) => n == counter,
+        Expr::BinaryOp(kind, l, r) => {
+            let l_is = matches!(l.as_ref(), Expr::Identifier(n) if n == counter);
+            let r_is = matches!(r.as_ref(), Expr::Identifier(n) if n == counter);
+            if l_is || r_is {
+                return counter_compare_is_unsafe(*kind, l_is, l, r, bound_var, bound_lit);
+            }
+            expr_has_unsafe_counter_ref(l, counter, bound_var, bound_lit)
+                || expr_has_unsafe_counter_ref(r, counter, bound_var, bound_lit)
+        }
+        _ => {
+            // Recurse into single-child containers (UnaryOp, Index, etc.).
+            let mut unsafe_ref = false;
+            walk_expr_children(e, &mut |child| {
+                if expr_has_unsafe_counter_ref(child, counter, bound_var, bound_lit) {
+                    unsafe_ref = true;
+                }
+            });
+            unsafe_ref
+        }
+    }
+}
+
+/// A binary comparison where exactly one operand is the counter: safe only as
+/// a boundary `==`/`>=` (counter on the left) or `==`/`<=` (counter on the
+/// right, i.e. `bound <= i`) against THIS node's bound value.
+fn counter_compare_is_unsafe(
+    kind: crate::ast::BinaryOpKind,
+    counter_on_left: bool,
+    l: &Expr,
+    r: &Expr,
+    bound_var: &str,
+    bound_lit: Option<i64>,
+) -> bool {
+    let other = if counter_on_left { r } else { l };
+    let boundary_kind = if counter_on_left {
+        matches!(kind, crate::ast::BinaryOpKind::Eq | crate::ast::BinaryOpKind::Ge)
+    } else {
+        matches!(kind, crate::ast::BinaryOpKind::Eq | crate::ast::BinaryOpKind::Le)
+    };
+    if !boundary_kind {
+        return true;
+    }
+    let matches_bound = matches!(other, Expr::Identifier(n) if n == bound_var)
+        || matches!(other, Expr::Decimal(n) if Some(*n) == bound_lit);
+    !matches_bound
+}
+
+/// Visit the immediate children of an expression that could contain the counter.
+fn walk_expr_children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
+    match e {
+        Expr::UnaryOp(_, inner) => f(inner),
+        Expr::Index(base, idx) => {
+            f(base);
+            f(idx);
+        }
+        Expr::Field(base, _) => f(base),
+        Expr::MethodCall(recv, _, args, _) => {
+            f(recv);
+            for a in args {
+                f(a);
+            }
+        }
+        Expr::Call(_, args, _) => {
+            for a in args {
+                f(a);
+            }
+        }
+        Expr::Reflect(base, _, _) => f(base),
+        Expr::List(elems) => {
+            for el in elems {
+                f(el);
+            }
+        }
+        Expr::Tuple(elems) => {
+            for el in elems {
+                f(el);
+            }
+        }
+        Expr::Slice { array, start, end, .. } => {
+            f(array);
+            if let Some(s) = start {
+                f(s);
+            }
+            if let Some(en) = end {
+                f(en);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            f(start);
+            f(end);
+        }
+        Expr::If(c, t, els) => {
+            f(c);
+            f(t);
+            if let Some(ee) = els {
+                f(ee);
+            }
+        }
+        Expr::Match(scrutinee, arms) => {
+            f(scrutinee);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    f(g);
+                }
+            }
+        }
+        _ => {}
     }
 }
 

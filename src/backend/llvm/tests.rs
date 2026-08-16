@@ -5949,6 +5949,69 @@ node work [done == 0][done == 1] {
     );
 }
 
+// ── Multi-node internal fold (2026-08-16, Direction 3) ───────────────
+
+/// A counted-loop node in a MULTI-node program is folded into a noinline
+/// countdown `@txn_<name>` that the reactor calls once per pass — the other
+/// node fires only at the pass boundary (`i == bound`), so it is not starved.
+#[test]
+fn test_multi_node_internal_fold_calls_txn() {
+    let src = r#"
+let i: Int = 0;
+let bound: Int = 10;
+let done: Int = 0;
+async node step [i < bound][i == bound] {
+    i = i + 1;
+    term;
+};
+async node fin [i == bound][done == 1] {
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("call void @txn_step("),
+        "the reactor must call the folded countdown txn; got:\n{ir}"
+    );
+}
+
+/// A node whose precondition fires MID-pass (`i % 2 == 0`) would be starved by
+/// the fold — the gate must reject it and keep the per-firing dispatch.
+#[test]
+fn test_multi_node_internal_fold_rejected_when_interior_fire() {
+    let src = r#"
+let i: Int = 0;
+let bound: Int = 10;
+let done: Int = 0;
+async node step [i < bound][i == bound] {
+    i = i + 1;
+    term;
+};
+async node intr [i % 2 == 0][true] {
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("call void @txn_step("),
+        "an interior-firing node must block the fold (it would be starved); got:\n{ir}"
+    );
+}
+
 /// `(n as String)` routes through the `Int → #String` casting-graph lane
 /// (`ExtCall int_to_str`), which must emit `call ptr @int_to_str(i64)` — the
 /// String IS a ptr to [len][bytes]. Regression: the ExtCall hardcoded `i64`

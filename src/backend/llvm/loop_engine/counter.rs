@@ -268,9 +268,35 @@ impl LlvmBackend {
         counter_var: Option<&str>,
         watchdog: Option<&crate::ast::top::WatchdogSpec>,
     ) {
-        self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
+        self.emit_countable_loop_wrapped(out, txn_name, counter_idx, total_idx, total_const_name,
+            bound_literal, body, write_set, is_decreasing, counter_var, watchdog, true);
+    }
+
+    /// The PerFieldPhi countdown loop, emitted as the whole `main()` (the
+    /// single-node fold) or inside a `define void @txn_<name>(ptr %state)`
+    /// function (2026-08-16, multi-node internal fold — Direction 3). In txn
+    /// mode the caller has already emitted the function header and `%state` is
+    /// the parameter; the main mode emits the header, alloca, and init stores.
+    pub(crate) fn emit_countable_loop_wrapped(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        bound_literal: Option<i64>,
+        body: &[Statement],
+        write_set: &HashSet<String>,
+        is_decreasing: bool,
+        counter_var: Option<&str>,
+        watchdog: Option<&crate::ast::top::WatchdogSpec>,
+        is_main: bool,
+    ) {
+        if is_main {
+            self.emit_main_header(out, "#0", true);
+            writeln!(out, "  %state = alloca %State, align 8").ok();
+            self.emit_inline_init_stores(out, "%state");
+        }
         // 2026-08-13 (reactor fix): buffer the loop construction so the
         // deferred struct-literal allocas can be flushed into the PREHEADER
         // (before the loop). An alloca inside a loop body makes clang -O3 peel
@@ -553,9 +579,13 @@ impl LlvmBackend {
         if let Some(fields) = self.ctx.global_free_after.get(txn_name).cloned() {
             self.emit_scheduled_frees(out, &fields);
         }
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
+        if is_main {
+            writeln!(out, "  ret i32 0").ok();
+            writeln!(out, "}}").ok();
+        } else {
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+        }        writeln!(out).ok();
         }
         self.flush_pending_struct_allocas(out);
         out.push_str(&loop_buf);
