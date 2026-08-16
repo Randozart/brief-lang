@@ -164,8 +164,6 @@ fn collect_foreach_assigned(stmts: &[Statement], out: &mut std::collections::Has
 enum IterKind {
     /// `0..n` / `0..=n` — the item IS the counter.
     Counter { init: String, bound: String, inclusive: bool },
-    /// A heap List value (`[len, e0, …]` i64 buffer, boxed to a handle).
-    List { ptr: String, len: String },
     /// A Data/String byte buffer ([len][bytes] ptr handle).
     Data { ptr: String, len: String },
     /// 2026-08-14 (String unification): a `#String` operand iterates CHARs —
@@ -242,13 +240,13 @@ impl LlvmBackend {
         lreg: &TypedRegister,
         indent: &str,
     ) -> IterKind {
-        if matches!(&lreg.ty, Type::Applied(n, _) if n == "List") {
-            let p = self.fun.gen_reg();
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, lreg.name).ok();
-            let len = self.fun.gen_reg();
-            writeln!(out, "{}{} = load i64, ptr {}", indent, len, p).ok();
-            IterKind::List { ptr: p, len }
-        } else if self.is_string_operand(&lreg.ty) {
+        // 2026-08-16 (slice-6 deletion): the hardcoded `[len][elems]`
+        // `IterKind::List` arm is DELETED — every List/coll iterable routes
+        // through try_emit_tier_iteration (op Count/op At) BEFORE reaching
+        // here, so a List value that lands here is a compiler bug (the tier
+        // path not firing). A `#String` operand is the char-decode lane; a
+        // Blob iterates bytes; anything else directs to the iterable contract.
+        if self.is_string_operand(&lreg.ty) {
             // 2026-08-14 (String unification): a `#String` operand iterates
             // CHARs via the decode lane — NOT bytes. `lreg.name` is the
             // [len][bytes] handle (ptr); the loop bound is the stored byte
@@ -262,7 +260,8 @@ impl LlvmBackend {
             IterKind::Data { ptr: lreg.name.clone(), len }
         } else {
             panic!(
-                "foreach iterable must be a range, List, Data, or vector field — got {:?}",
+                "foreach iterable must be a range, a #String/#Blob, or a vector field \
+                 with the iterable contract (op Count + op At) — got {:?}",
                 lreg.ty
             );
         }
@@ -1419,7 +1418,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 IterKind::Counter { init, bound, inclusive } => {
                     (init.clone(), bound.clone(), if *inclusive { "sle" } else { "slt" })
                 }
-                IterKind::List { len, .. } | IterKind::Data { len, .. } | IterKind::String { len, .. } => {
+                IterKind::Data { len, .. } | IterKind::String { len, .. } => {
                     let zero = backend.fun.gen_reg();
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero).ok();
                     (zero, len.clone(), "slt")
@@ -1523,15 +1522,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         item.name = p;
                     }
                     item.name
-                }
-                IterKind::List { ptr, .. } => {
-                    let off = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = add i64 {}, 1", indent, off, cur).ok();
-                    let elem_p = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, elem_p, ptr, off).ok();
-                    let elem = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = load i64, ptr {}", indent, elem, elem_p).ok();
-                    elem
                 }
                 IterKind::Data { ptr, .. } => {
                     let off = backend.fun.gen_reg();

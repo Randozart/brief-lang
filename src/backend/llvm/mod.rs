@@ -2586,6 +2586,44 @@ impl LlvmBackend {
                     }
                     self.ctx.obj_members.entry(td.name.clone())
                         .or_insert_with(|| coll_members.clone());
+                    // 2026-08-16 (slice-6 deletion): register the coll's
+                    // default op BINDINGS in the backend too — compile.rs
+                    // builds them, but tests and direct `backend.generate`
+                    // calls bypass compile.rs. Without them, `op InitEmpty`/
+                    // `op Init`/`op InsertAt` are unresolvable and a top-level
+                    // `let q: Q = []` (or any coll literal) fell to the
+                    // deleted heap-seq path. The backend owns the scaffolded
+                    // MEMBERS; it must own the corresponding BINDINGS so the
+                    // op dispatch and construction stay consistent everywhere.
+                    if td.coll {
+                        let mut coll_defs = self.ctx.operator_defs
+                            .get(&td.name)
+                            .cloned()
+                            .unwrap_or_default();
+                        for (op, impl_name) in [
+                            ("InitEmpty", "init_empty"),
+                            ("Init", "init"),
+                            ("InsertAt", "push"),
+                            ("ExtractFrom", "pop"),
+                            ("CopyFrom", "get"),
+                        ] {
+                            if coll_defs.iter().any(|d| d.op == op) {
+                                continue;
+                            }
+                            coll_defs.push(crate::ast::top::OperatorDef {
+                                op: op.to_string(),
+                                params: vec![],
+                                pre: None,
+                                suf: None,
+                                impl_args: Some(
+                                    crate::ast::PropertyValue::Identifier(impl_name.to_string()),
+                                ),
+                                impl_name: op.to_string(),
+                                span: None,
+                            });
+                        }
+                        self.ctx.operator_defs.insert(td.name.clone(), coll_defs);
+                    }
                     // 2026-07-31 (A8): register obj type parameters for
                     // monomorphization (`Stack<T, N>` → ["T", "N"]).
                     if !td.type_params.is_empty() {

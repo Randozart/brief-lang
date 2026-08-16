@@ -359,6 +359,20 @@ item, not a quick stdlib fix.
    literal heap path (dead via 3a). Keep `ringbuf_inline`.
 2. **Verify** — `git grep` of removed names zero; suite green.
 
+### SHIPPED 3d (2026-08-16)
+
+See the slice-6 plan's SHIPPED section (appended). Summary:
+- `emit_heap_seq` → `emit_tuple` (tuple-only; tuples are heterogeneous
+  products with no op replacement). The `Expr::List` fallback is now a hard
+  error — typed literals construct via the collection ops.
+- `IterKind::List` variant + both match arms DELETED — foreach over colls uses
+  the tier path. Panic message directs to the iterable contract.
+- Two latent bugs fixed (files touched ⇒ solved NOW): the mask gather over a
+  coll/List read slot 0 as the length (it's the data pointer — tier layout),
+  and the backend not registering coll op bindings (tests bypassing compile.rs).
+- 1885 lib green, benchmarks 75/75 MATCH, zero new Praetor diagnostics. Docs:
+  slice-6 plan SHIPPED + BUGS.md entry closed.
+
 ### 3e. Data as reflective floor (fundamentals-as-types)
 
 1. Finish the landed rename: `Data`-floor semantics pending bits

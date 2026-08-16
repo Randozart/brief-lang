@@ -415,61 +415,32 @@ fn test_mask_index_typed_emits_select64() {
         "the List result must be boxed to an i64 handle like emit_heap_seq");
 }
 
-/// A program with `let m: List<Int> = l[[true, false]]` where `l` is a heap
-/// `List<Int>` — exercises the heap-List mask gather.
-fn mask_index_list_program() -> Vec<TopLevel> {
-    let node = TopLevel::Transaction(Transaction {
-        name: "s".to_string(),
-        is_reactive: true,
-        is_async: false,
-        type_params: vec![],
-        parameters: vec![],
-        output_type: None,
-        outputs: vec![],
-        contract: Contract {
-            pre_condition: Expr::Bool(true),
-            post_condition: Expr::Bool(true),
-            watchdog: None,
-            explicit: false,
-            span: None,
-        },
-        body: vec![
-            Statement::Let {
-                name: "l".to_string(),
-                names: vec![],
-                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
-                expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
-                modifiers: vec![],
-            },
-            Statement::Let {
-                name: "m".to_string(),
-                names: vec![],
-                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
-                expr: Some(Expr::Index(
-                    Box::new(Expr::Identifier("l".to_string())),
-                    Box::new(Expr::List(vec![Expr::Bool(true), Expr::Bool(false)])),
-                )),
-                modifiers: vec![],
-            },
-            Statement::Term(None),
-        ],
-        metadata: HashMap::new(),
-        derivation: None,
-        modifiers: vec![],
-        span: None,
-        doc: None,
-    });
-    vec![node]
-}
-
+/// 2026-08-16 (slice-6 deletion + mask-list fix): a mask index over a
+/// `coll obj` value gathers the true-mask elements through the tier layout —
+/// the OLD heap-seq gather read slot 0 as the length (it is the data pointer)
+/// and segfaulted. The gather now loads the data pointer (slot 0) + length
+/// (slot 2) and boxes the selection as a proper `[data, cap, len]` block.
 #[test]
 fn test_mask_index_list_emits_element_gep() {
-    let mut backend = LlvmBackend::new();
-    let output = backend.generate(&mask_index_list_program(), None);
-    assert!(output.contains("getelementptr i64, ptr"),
-        "the heap-List mask gather must GEP past the length header");
-    assert!(output.contains("@briev_mask_select64"),
-        "the heap-List mask index must call the typed gather helper");
+    let src = r#"
+coll obj MyList { data: Ptr<Int>; };
+let done: Int = 0;
+node s [done == 0][done == 1] {
+    let l: MyList = [10, 20, 30, 40];
+    let m: MyList = l[[true, false, true, false]];
+    done = m.Count#();
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let output = backend.generate(&items, None);
+    assert!(output.contains("call ptr @briev_mask_select64"),
+        "the List mask index must call the typed gather helper; got:\n{output}");
 }
 
 /// A program with `let m: List<Float> = v[[true, false]]` where `v: Float[2]`
@@ -594,58 +565,36 @@ fn test_foreach_range_emits_counted_loop() {
         "foreach must emit a loop exit label");
 }
 
-/// A program with `foreach(x in items)` over a heap `List<Int>` — exercises
-/// the collection index-loop lowering (2026-08-07, Phase 7).
-fn foreach_list_program() -> Vec<TopLevel> {
-    let node = TopLevel::Transaction(Transaction {
-        name: "s".to_string(),
-        is_reactive: true,
-        is_async: false,
-        type_params: vec![],
-        parameters: vec![],
-        output_type: None,
-        outputs: vec![],
-        contract: Contract {
-            pre_condition: Expr::Bool(true),
-            post_condition: Expr::Bool(true),
-            watchdog: None,
-            explicit: false,
-            span: None,
-        },
-        body: vec![
-            Statement::Let {
-                name: "items".to_string(),
-                names: vec![],
-                ty: Some(Type::Applied("List".to_string(), vec![Type::int()])),
-                expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
-                modifiers: vec![],
-            },
-            Statement::Foreach {
-                item: "x".to_string(),
-                list: Box::new(Expr::Identifier("items".to_string())),
-                body: vec![Statement::Term(None)],
-            },
-            Statement::Term(None),
-        ],
-        metadata: HashMap::new(),
-        derivation: None,
-        modifiers: vec![],
-        span: None,
-        doc: None,
-    });
-    vec![node]
-}
-
+/// 2026-08-16 (slice-6 deletion): `foreach x in list` over a `coll obj` uses
+/// the TIER path (`op Count`/`op At` inlined member bodies) — the hardcoded
+/// `[len][elems]` heap-seq `IterKind::List` arm is DELETED. The coll is
+/// declared INLINE (tests don't resolve imports) so the scaffolded op surface
+/// fires `tier2_op_collection`.
 #[test]
 fn test_foreach_list_emits_index_loop() {
-    let mut backend = LlvmBackend::new();
-    let output = backend.generate(&foreach_list_program(), None);
-    assert!(output.contains("inttoptr"),
-        "a heap List iterable must be inttoptr'd back to a buffer");
-    assert!(output.contains("getelementptr i64, ptr"),
-        "the collection loop must GEP to each element slot");
+    let src = r#"
+coll obj MyList { data: Ptr<Int>; };
+let xs: MyList = [10, 20];
+let done: Int = 0;
+node s [done == 0][done == 1] {
+    foreach x in xs {
+        done = done + x;
+    };
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let output = backend.generate(&items, None);
     assert!(output.contains("icmp slt"),
         "a collection iteration compares the counter against the length");
+    assert!(output.contains("getelementptr i64, ptr"),
+        "the tier iteration must GEP each element slot from the data pointer");
 }
 
 /// 2026-08-14 (String unification): `foreach c in s` on a `#String` operand
@@ -3274,135 +3223,6 @@ fn test_emit_cast_string_to_int() {
 }
 
 // ── List tests ───────────────────────────────────────────
-
-#[test]
-fn test_list_literal_2slot_header() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "lst".to_string(), ty: Type::int(), span: None,
-        }),
-        TopLevel::Transaction(Transaction {
-            name: "mklist".to_string(), is_reactive: false, is_async: false,
-            type_params: vec![], parameters: vec![],
-            output_type: None, outputs: vec![],
-            contract: default_contract(),
-            body: vec![
-                Statement::Assign(Expr::Identifier("lst".to_string()), Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)])),
-            ],
-            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
-            doc: None,
-        }),
-    ];
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call ptr @malloc(i64 32)"), "2-elem list = 32 bytes (4 slots × 8). Got: {}", output);
-    assert!(output.contains("bitcast ptr"), "Should bitcast malloc result to ptr. Got: {}", output);
-    assert!(output.contains("store i64 2, ptr"), "Length should be 2. Got: {}", output);
-    assert!(output.contains("ptrtoint ptr"), "Should emit ptrtoint for data_ptr. Got: {}", output);
-}
-
-#[test]
-fn test_empty_list_global_sentinel() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "e".to_string(), ty: Type::int(), span: None,
-        }),
-        TopLevel::Transaction(Transaction {
-            name: "mkempty".to_string(), is_reactive: false, is_async: false,
-            type_params: vec![], parameters: vec![],
-            output_type: None, outputs: vec![],
-            contract: default_contract(),
-            body: vec![
-                Statement::Assign(Expr::Identifier("e".to_string()), Expr::List(vec![])),
-            ],
-            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
-            doc: None,
-        }),
-    ];
-    let output = backend.generate(&program, None);
-    // 2026-08-15 (coll plan §3.3 #4): @ll_empty_list DELETED — a shared
-    // sentinel aliases across every `[]` user. An empty sequence now
-    // allocates a fresh 2-slot heap block (malloc 16).
-    assert!(!output.contains("@ll_empty_list"), "Empty list should NOT reference the deleted shared sentinel. Got: {}", output);
-    assert!(!output.contains("alloca i64, i64 2"), "Empty list should NOT alloca 2 slots. Got: {}", output);
-    assert!(output.contains("call ptr @malloc(i64 16)"), "Empty list should malloc a fresh 16-byte block. Got: {}", output);
-}
-
-#[test]
-fn test_nonempty_list_uses_malloc() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "v".to_string(), ty: Type::int(), span: None,
-        }),
-        TopLevel::Transaction(Transaction {
-            name: "mklist".to_string(), is_reactive: false, is_async: false,
-            type_params: vec![], parameters: vec![],
-            output_type: None, outputs: vec![],
-            contract: default_contract(),
-            body: vec![
-                Statement::Assign(Expr::Identifier("v".to_string()), Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)])),
-            ],
-            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
-            doc: None,
-        }),
-    ];
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call ptr @malloc(i64 40)"), "3-elem list = 40 bytes (5 slots × 8). Got: {}", output);
-    assert!(output.contains("bitcast ptr"), "Should bitcast malloc result to ptr. Got: {}", output);
-    assert!(!output.contains("alloca i64, i64 5"), "Non-empty list should NOT use alloca. Got: {}", output);
-    assert!(output.contains("add i64 0, 1") && output.contains("add i64 0, 2") && output.contains("add i64 0, 3"),
-        "Should compute all 3 elements. Got: {}", output);
-    assert!(output.contains("store i64 3, ptr"), "Length should be 3. Got: {}", output);
-}
-
-#[test]
-fn test_list_index_uses_2slot_header() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "elem".to_string(), ty: Type::int(), span: None,
-        }),
-        TopLevel::Transaction(Transaction {
-            name: "idx".to_string(), is_reactive: false, is_async: false,
-            type_params: vec![], parameters: vec![],
-            output_type: None, outputs: vec![],
-            contract: default_contract(),
-            body: vec![
-                Statement::Assign(Expr::Identifier("elem".to_string()), Expr::Index(Box::new(Expr::List(vec![Expr::Decimal(99)])), Box::new(Expr::Decimal(0)))),
-            ],
-            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
-            doc: None,
-        }),
-    ];
-    let output = backend.generate(&program, None);
-    assert!(output.contains("load i64, ptr"), "Should load data_ptr. Got: {}", output);
-    assert!(output.contains("getelementptr i64, ptr"), "Should GEP from data. Got: {}", output);
-}
-
-#[test]
-fn test_list_len_loads_length() {
-    let mut backend = LlvmBackend::new();
-    let program = vec![
-        TopLevel::StateDecl(StateDecl {
-            name: "len".to_string(), ty: Type::int(), span: None,
-        }),
-        TopLevel::Transaction(Transaction {
-            name: "chk_len".to_string(), is_reactive: false, is_async: false,
-            type_params: vec![], parameters: vec![],
-            output_type: None, outputs: vec![],
-            contract: default_contract(),
-            body: vec![
-                Statement::Assign(Expr::Identifier("len".to_string()), Expr::Call("Len#".to_string(), vec![Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)])], None)),
-            ],
-            metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None,
-            doc: None,
-        }),
-    ];
-    let output = backend.generate(&program, None);
-    assert!(output.contains("load i64, ptr"), "Size projection should load from memory. Got: {}", output);
-}
 
 // ── Tuple tests ──────────────────────────────────────────
 
@@ -6542,12 +6362,15 @@ fn test_reflect_element_on_string_folds_char_code() {
 #[test]
 fn test_reflect_element_on_list_folds_element_code() {
     let src = r#"
-        let xs: List<Int> = [1, 2, 3];
-        node report [true][true] {
-            let e: Int = xs.^^Element;
-            term;
-        };
-    "#;
+coll obj MyList { data: Ptr<Int>; };
+let xs: MyList = [1, 2, 3];
+let done: Int = 0;
+node report [done == 0][done == 1] {
+    let e: Int = xs.^^Element;
+    done = e;
+    term;
+};
+"#;
     let mut items = parse_bv_source(src);
     let mut universe = crate::type_universe::TypeUniverse::new();
     let mut pm = crate::plugin::PluginManager::new();

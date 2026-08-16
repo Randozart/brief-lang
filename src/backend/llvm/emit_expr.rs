@@ -788,7 +788,7 @@ impl LlvmBackend {
             }
 
             // ── Tuple ────────────────────────────────────────────────
-            Expr::Tuple(exprs) => self.emit_heap_seq(out, v, exprs, indent),
+            Expr::Tuple(exprs) => self.emit_tuple(out, v, exprs, indent),
 
             // ── List literal ─────────────────────────────────────────
             Expr::List(exprs) => {
@@ -799,12 +799,19 @@ impl LlvmBackend {
                 if let Some(elem_ty) = self.detect_struct_list(exprs) {
                     return self.emit_struct_array(out, v, exprs, &elem_ty, indent);
                 }
-                // 2026-08-15 (coll plan §3.5): SVO removed (feature_svo was
-                // never enabled in production — the coll scaffold constructs
-                // lists through the collection ops). A bare list literal in
-                // expression position falls to the heap-seq layout (tuples
-                // and untyped products keep it).
-                self.emit_heap_seq(out, v, exprs, indent)
+                // 2026-08-16 (slice-6 deletion, plan 2026-08-14): a bare
+                // `Expr::List` reaching codegen is a COMPILER BUG — every
+                // typed list literal constructs through the collection's own
+                // ops (construct_local_collection at let-sites and typed call
+                // args), and the uncontextualized literal is a typechecker
+                // error (mod.rs:1872). The stale `[len][elems]` heap-seq
+                // layout is GONE; the tier ops read `[data, cap, len]`, so a
+                // heap-seq List would misalign every op read. Fail loudly.
+                panic!(
+                    "a bare list literal reached codegen without a collection type — \
+                     list literals must construct through the collection's ops \
+                     (annotate the binding: `let xs: List<Int> = [...]`)"
+                );
             }
 
             // ── Struct literal ─────────────────────────────────────────
@@ -900,42 +907,15 @@ impl LlvmBackend {
             // Check the original AST expression to decide.
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
-                let idx_reg = self.emit_expr(out, index, indent);
-                // 2026-08-13 (c[i] dispatches op At): a Tier-2 collection
-                // (`op Count` + `op At`) index must inline the At member body —
-                // the legacy struct/heap-seq paths below read a List value's
-                // fields directly (`b[0]` read the `inner` slot, then fed the
-                // buffer pointer to briev_char_len → garbage/crash). Same
-                // dispatch foreach uses. tier2_op_collection handles identifier
-                // receivers; a call-result receiver (`bytes("abc")[0]`) is
-                // dispatched by its register's type.
-                let recv_is_tier2 = self.tier2_op_collection(obj).is_some()
-                    || {
-                        let base = match &obj_reg.ty {
-                            Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
-                            _ => None,
-                        };
-                        base.map_or(false, |b| {
-                            self.ctx.obj_members.get(&b).map_or(false, |members| {
-                                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"))
-                            })
-                        })
-                    };
-                if recv_is_tier2 {
-                    // 2026-08-13: inline the At member body. The member's
-                    // `term inner.data[i]` already unboxes String/Data elements
-                    // (the Index arm's String-element path inttoprts), so no
-                    // extra conversion here.
-                    let out_tmp = self.fun.gen_reg();
-                    return self.emit_method_call(out, &out_tmp, obj, "At", &[(**index).clone()], indent);
-                }
-                // 2026-08-10: clone so gep_index can take &mut self while the
-                // struct_types borrow for self-array slots is live below.
-                let idx_clone = idx_reg.clone();
                 // 2026-08-07 (Phase 7): a Boolean-vector index is a MASK —
                 // `data[mask]` selects the bytes at the true positions
                 // (SPEC §16.5). Supported sources: a compile-time Boolean
-                // list literal or a Bool[N] state field.
+                // list literal or a Bool[N] state field. Checked FIRST — a
+                // mask must never dispatch to `op At` (a tier2 List receiver
+                // with a mask literal index would otherwise inline At with the
+                // mask as a scalar index). A mask list literal (`[true, false]`)
+                // is a Bool vector VALUE, not a List collection, and must
+                // never reach the list-literal construction path.
                 let mask_source = {
                     let const_bits = Self::constant_bool_mask(index);
                     let field_idx = match index.as_ref() {
@@ -964,6 +944,38 @@ impl LlvmBackend {
                         indent,
                     );
                 }
+                // 2026-08-13 (c[i] dispatches op At): a Tier-2 collection
+                // (`op Count` + `op At`) index must inline the At member body —
+                // the legacy struct/heap-seq paths below read a List value's
+                // fields directly (`b[0]` read the `inner` slot, then fed the
+                // buffer pointer to briev_char_len → garbage/crash). Same
+                // dispatch foreach uses. tier2_op_collection handles identifier
+                // receivers; a call-result receiver (`bytes("abc")[0]`) is
+                // dispatched by its register's type.
+                let recv_is_tier2 = self.tier2_op_collection(obj).is_some()
+                    || {
+                        let base = match &obj_reg.ty {
+                            Type::Custom(n) | Type::Applied(n, _) => Some(n.clone()),
+                            _ => None,
+                        };
+                        base.map_or(false, |b| {
+                            self.ctx.obj_members.get(&b).map_or(false, |members| {
+                                members.iter().any(|m| matches!(m, TopLevel::TypeDefOperator(d) if d.name == "At"))
+                            })
+                        })
+                    };
+                if recv_is_tier2 {
+                    // 2026-08-13: inline the At member body. The member's
+                    // `term inner.data[i]` already unboxes String/Data elements
+                    // (the Index arm's String-element path inttoprts), so no
+                    // extra conversion here.
+                    let out_tmp = self.fun.gen_reg();
+                    return self.emit_method_call(out, &out_tmp, obj, "At", &[(**index).clone()], indent);
+                }
+                let idx_reg = self.emit_expr(out, index, indent);
+                // 2026-08-10: clone so gep_index can take &mut self while the
+                // struct_types borrow for self-array slots is live below.
+                let idx_clone = idx_reg.clone();
                 // 2026-08-01 (D3): a Ptr-index read returns the POINTEE type
                 // (`buckets[h]` on a Ptr<List<...>> → List<...>); a heap List
                 // index returns its ELEMENT type (`List<String>[i]` → String).
@@ -1126,11 +1138,14 @@ impl LlvmBackend {
                         };
                     }
                 }
-                // 2026-08-13: a bare `[99]`/`(1,2)` seq literal now carries the
-                // boxed i64 handle type (Type::int) — recognize it by its AST
-                // form so the 2-slot heap path still applies (it is a heap seq
-                // with a length header, exactly like an Applied List value).
-                let is_seq_literal = matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_));
+                // 2026-08-16 (slice-6 deletion): a bare `(1,2)` TUPLE literal
+                // receiver still carries the boxed i64 handle type (Type::int)
+                // — recognize it by its AST form so the 2-slot heap path still
+                // applies (tuples are heap seqs with a length header). A bare
+                // `Expr::List` receiver is DEAD: list literals construct
+                // through the collection ops, and a bare list reaching codegen
+                // is a hard error.
+                let is_seq_literal = matches!(obj.as_ref(), Expr::Tuple(_));
                 if matches!(obj_reg.ty, Type::Ptr(_))
                     || matches!(&obj_reg.ty, Type::Applied(n, _) if n == "List")
                     || is_seq_literal
@@ -1685,24 +1700,61 @@ impl LlvmBackend {
                 ty: Type::Custom("Blob".into()),
             };
         }
-        // Heap List value (`List<Int>` — a `[len, e0, e1, …]` i64 buffer
-        // boxed to an i64 handle) → the typed gather over its elements.
-        if matches!(&op.obj_reg.ty, Type::Applied(n, _) if n == "List") {
+        // Heap coll value (`List<Int>` / any growable `coll obj` — a boxed
+        // `[data, cap, len]` tier block, slot 0 = element data ptr, slot 2 =
+        // length) → the typed gather over its elements. 2026-08-16 (slice-6
+        // deletion): the OLD `[len, e0, e1, …]` heap-seq layout is GONE — a
+        // real coll's slot 0 is the data POINTER, not the length, so the old
+        // gather (load len at slot 0, GEP slot 1) read a garbage length and
+        // segfaulted. The result is a proper tier block: the selected elements
+        // buffer from briev_mask_select64 is boxed as `[data, cap, len]`
+        // (cap == len — exact-fit selection).
+        if self.is_coll_type(&op.obj_reg.ty)
+            && matches!(
+                self.ctx.coll_storage.get(match &op.obj_reg.ty {
+                    Type::Custom(n) | Type::Applied(n, _) => n.as_str(),
+                    _ => "",
+                }),
+                Some(crate::backend::llvm::coll_scaffold::CollStorage::HeapGrowable)
+            )
+        {
             let list_p = self.fun.gen_reg();
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, list_p, op.obj_reg.name).ok();
+            // data = *(slot 0) — the element buffer.
+            let data = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, data, list_p).ok();
+            // len = *(slot 2).
+            let len_p = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, len_p, list_p).ok();
             let len = self.fun.gen_reg();
-            writeln!(out, "{}{} = load i64, ptr {}", indent, len, list_p).ok();
-            let elems = self.fun.gen_reg();
-            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, elems, list_p).ok();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len, len_p).ok();
+            let data_p = self.fun.gen_reg();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, data_p, data).ok();
             let buf = self.fun.gen_reg();
             writeln!(
                 out,
                 "{}{} = call ptr @briev_mask_select64(ptr {}, i64 {}, ptr {}, i64 {})",
-                indent, buf, elems, len, mask_ptr, mask_len
+                indent, buf, data_p, len, mask_ptr, mask_len
             )
             .ok();
+            // Box the selection as a tier List block: [data, cap, len].
+            let block = self.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
+            let sel_len = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, sel_len, buf).ok();
+            let d0 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
+            let buf_h = self.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, buf_h, buf).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, buf_h, d0).ok();
+            let d1 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, sel_len, d1).ok();
+            let d2 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, sel_len, d2).ok();
             let handle = self.fun.gen_reg();
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
             return TypedRegister {
                 name: handle,
                 ty: op.obj_reg.ty.clone(),
@@ -1789,13 +1841,13 @@ impl LlvmBackend {
         Some(bits)
     }
 
-    /// 2026-07-14: Emit a heap-allocated sequence (list/tuple) with 2-slot header.
-    /// Protocol: slot 0 = length (i64), slots 1..N = elements.
-    /// Empty seq → a fresh 2-slot heap block (2026-08-15, coll plan §3.3 #4:
-    /// @ll_empty_list DELETED — a shared sentinel aliases across users; a `[]`
-    /// coll constructs via `op InitEmpty`, an empty tuple gets its own block).
-    /// Non-empty → malloc((2+N)*8), bitcast, store N, store elements, ptrtoint.
-    fn emit_heap_seq(
+    /// 2026-08-16 (slice-6 deletion, plan 2026-08-14): a TUPLE literal's heap
+    /// allocation. A tuple is a heterogeneous PRODUCT (not an iterable
+    /// collection) — it has no op-based replacement, so it keeps the
+    /// `[len][elems]` heap layout. The former emit_heap_seq LIST path is
+    /// DELETED: typed list literals construct through the collection's ops,
+    /// and uncontextualized literals are a typechecker error.
+    fn emit_tuple(
         &mut self,
         out: &mut String,
         v: &str,

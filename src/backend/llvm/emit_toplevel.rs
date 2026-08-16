@@ -1061,6 +1061,49 @@ impl LlvmBackend {
         let members = self.ctx.obj_members.get(&type_key).cloned().unwrap_or_default();
         let member = members.iter().find(|m| super::emit_expr::member_briev_name(m) == fn_name).cloned();
         let Some(member) = member else { return false; };
+        // 2026-08-16 (slice-6 deletion): an EMPTY literal (`let q: Q = []`)
+        // constructs via `op InitEmpty` — the zero-arg construction member,
+        // never a hardcoded heap-seq block (a coll obj's value must be the
+        // `[data, cap, len]` tier block, and a heap-seq `[0]` block misread
+        // data/cap/len garbage). `op Init` is the ONE-ELEMENT construction;
+        // an empty init must route to InitEmpty BEFORE the Init path allocates
+        // a `data` buffer.
+        if matches!(init_expr, Some(crate::ast::Expr::List(e)) if e.is_empty()) {
+            let empty_def = defs.iter().find(|d| d.op == "InitEmpty").cloned();
+            let empty_member = match empty_def.as_ref().and_then(|d| d.impl_args.as_ref()) {
+                Some(crate::ast::PropertyValue::Identifier(s)) => members.iter()
+                    .find(|m| super::emit_expr::member_briev_name(m) == s)
+                    .cloned(),
+                _ => None,
+            };
+            if let Some(empty_member) = empty_member {
+                let size = self.struct_type_size(&type_key);
+                let inst = self.fun.gen_reg();
+                writeln!(out, "{}{} = alloca i8, i64 {}", indent, inst, size).ok();
+                let addr = self.fun.gen_reg();
+                let hw = format!("i{}", self.ctx.int_bits);
+                writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, inst, hw).ok();
+                let box_recv = crate::backend::llvm::TypedRegister {
+                    name: addr.clone(),
+                    ty: Type::Custom(type_key.clone()),
+                };
+                let out_tmp = self.fun.gen_reg();
+                self.emit_member_body(
+                    out,
+                    &out_tmp,
+                    super::emit_expr::MemberInvocation {
+                        recv_reg: &box_recv,
+                        type_name: &type_key,
+                        member: &empty_member,
+                        arg_regs: &[],
+                        prefix: None,
+                    },
+                    indent,
+                );
+                return true;
+            }
+            return false;
+        }
         // Allocate the instance storage and pass its address as `self`.
         let size = self.struct_type_size(&type_key);
         let inst = self.fun.gen_reg();

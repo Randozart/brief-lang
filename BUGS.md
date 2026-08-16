@@ -88,6 +88,17 @@ type-directed form; annotated literals unchanged.
 real `List` (item 2) — if tier iteration fires, the hardcoded `List` arm dies
 naturally and the tuple `emit_heap_seq` split can be scoped separately.
 
+**RESOLVED (2026-08-16, Phase 3d of `2026-08-16-three-track-broaden`):**
+`emit_heap_seq` renamed to `emit_tuple` (tuple-only), `IterKind::List` DELETED
+(all foreach over colls goes through the tier path), and the bare-list codegen
+fallback is now a hard error (typed literals construct via ops; unannotated
+literals are the slice-5 diagnostic). Two latent bugs fixed along the way: the
+mask gather over a coll/List read slot 0 as the length (it's the data pointer —
+now reads data + len from the tier block) and the backend did not register the
+coll op bindings (tests bypassing compile.rs fell to the deleted heap-seq
+path). Full suite green, benchmarks all MATCH. See the slice-6 plan's SHIPPED
+section.
+
 ## Runtime `.^Size` matched a `len` slot name — FIXED 2026-08-14
 
 **Date:** 2026-08-14 (found while removing the iterable-protocol §10.4

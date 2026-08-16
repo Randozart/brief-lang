@@ -169,4 +169,43 @@ direct to the iterable contract (`op Count`/`op At`).
 - `src/backend/llvm/tests.rs` — `test_foreach_list_program`,
   `test_foreach_list_emits_index_loop`.
 - `src/typechecker/mod.rs:1872` — the slice-5 `let` literal diagnostic.
+
+---
+
+## SHIPPED (2026-08-16, Phase 3d of `2026-08-16-three-track-broaden`)
+
+Executed on 2026-08-16 by the three-track plan. What landed, per work item:
+
+- **4.1 — tuple/list split**: `emit_heap_seq` renamed to `emit_tuple`
+  (tuple-only, keeps the `[len][elems]` heap layout — a tuple is a
+  heterogeneous PRODUCT with no op replacement). `Expr::Tuple` routes to it;
+  `Expr::List`'s fallback is a HARD ERROR ("bare list literal reached codegen
+  without a collection type") — typed literals construct via the ops, and the
+  uncontextualized literal is already a typechecker error (slice-5
+  diagnostic). `detect_struct_list`/`emit_struct_array` unchanged.
+- **4.2 — expression-position literals**: already correct — a List-literal
+  call arg whose param is a tier2 collection constructs via
+  `construct_local_collection` (emit_expr.rs:3806); `term [1,2]` with a
+  `-> List<Int>` return also constructs via ops; unannotated `let x = [1,2,3]`
+  errors (slice-5). No new typechecker work needed.
+- **4.3 — dead `IterKind::List` arm deleted**: the variant, both match arms,
+  and the `foreach_collection_kind` arm are GONE. `foreach x in coll` goes
+  through `try_emit_tier_iteration` (op Count/op At). The panic message now
+  directs to the iterable contract. Tests updated to declare an inline
+  `coll obj` (tests don't resolve imports).
+- **Two latent bugs fixed along the way** (files touched ⇒ solved NOW):
+  1. **Mask gather on a coll/List segfaulted** — the old gather read slot 0 as
+     the length (it's the data POINTER in the tier `[data, cap, len]` layout).
+     Now reads data (slot 0) + len (slot 2) and boxes the selection as a
+     proper tier block. The mask-source check was also moved BEFORE the
+     tier2/At dispatch (a mask literal `[true,false]` must never inline At as a
+     scalar index).
+  2. **Backend didn't register coll op bindings** — compile.rs did, so direct
+     `backend.generate` (tests) bypassed `op InitEmpty`/`op Init`/`op InsertAt`
+     and a top-level `let q: Q = []` fell to the deleted heap-seq path. The
+     backend now registers the coll bindings alongside the scaffolded members
+     (rule: the backend owns members AND bindings).
+- **Acceptance**: full suite green (1885), benchmarks all MATCH (75/75, no
+  FAIL), zero new Praetor diagnostics. Deleted 5 obsolete heap-seq layout
+  tests (they asserted the removed `[len, elems]` layout).
 - `lib/std/collections.bv:77-84` — `List` + `op Count`/`op At`.
