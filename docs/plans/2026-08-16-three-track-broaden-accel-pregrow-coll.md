@@ -70,6 +70,24 @@ emits only `vectorize.enable` + `loop.align 32`. Width is NOT runtime-decidable
 **Docs to update**: `docs/architecture/hash-words.md` (no), add § to
 `2026-08-16-sweep-family-investigation.md` §8 for the width probe results.
 
+### PROBE RESULT (2026-08-16) — REFUTED, no code landed
+
+Patching `nbody_newton_accel.ll` metadata to add `llvm.loop.vectorize.width = 8`
+changed NOTHING. Disassembly of the linked binary shows the current emission is
+ALREADY 8-wide (`vrcpps %ymm` at the hot loop, 41 ymm instrs — identical in the
+patched and unpatched binary). The 4-wide `rcpps %xmm` diagnosis was stale: the
+post-`f67eeaba` emission already vectorizes the countdown to 8 lanes, so width
+is NOT the gate.
+
+Timing (BODYCOUNT=2048, BOUND=50000, 5x): base .154s avg ≈ w8 .156s avg, C
+.132s avg → both hold the 1.16x residual. Output equality at BOUND=50
+(print-boundary crossing): three binaries IDENTICAL.
+
+The accel 1.16x residual is now the documented AVX1 scheduling boundary
+(same class as sweep_dense/arr) — NOT a width decision. `vector_max_width`
+lands nothing this pass. Gap remains for the deferred vector-state SSA
+(VectorPhiGroup) route.
+
 ---
 
 ## Phase 2 — Item 3: D2 pre-grow (monotone bounded foreach)
