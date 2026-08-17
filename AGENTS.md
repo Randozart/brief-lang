@@ -32,7 +32,21 @@ Patches are unacceptable. There is no "go fast and break things."
 
 1. **CONTRACT-FIRST**: Contracts are the source of truth. Never weaken
    `[product > 0]` to `[true]` — fix the code, not the contract.
-2. **NO OBFUSCATION OF SPECIAL TREATMENT**: The compiler has intrinsics,
+2. **MAXIMUM EFFICIENT DEFAULT**: The compiler MUST pick the most efficient
+   codegen strategy for EVERY program automatically — every case, not just the
+   benchmark at hand. This covers every codegen decision: tuple slot
+   allocation, collection strategy, probe cost, materialization, loop shape.
+   A user should never need a strategy keyword to reach competitive
+   performance; a keyword-beaten default is a compiler bug (fix the default,
+   never let the modifier carry the win). Strategy keywords (`seq`, `vol`,
+   `pack`, `async`, `sync<g>`, `atomic`, `union`, `trap`) exist for a
+   DIFFERENT purpose — to express intended behaviour that plain efficient
+   codegen cannot: `seq` forces a precise declaration order or sequential
+   execution that aggressive vectorization/parallelism would break, `vol`
+   demands volatile memory the optimizer may not eliminate, others express
+   required embedded/inter-language semantics. They are for correctness and
+   intent, never for speed. Requiring a keyword to win is a failing default.
+3. **NO OBFUSCATION OF SPECIAL TREATMENT**: The compiler has intrinsics,
    hashwords, reflection, and directives — they exist, and pretending they
    don't is a purist trap. What is forbidden is HIDING them behind
    ordinary-looking syntax. Two-part principle:
@@ -45,66 +59,65 @@ Patches are unacceptable. There is no "go fast and break things."
      `#Int`), `!` suffix (compile-time expansion `my_macro!`), `.^`/`.^^`
      (reflection). User-facing directives (`seq`, `pack`, `vol`, `async`,
      `sync<g>`, `atomic`, `union`, `trap`) are ordinary keywords — no `#` —
-     and **must never make code faster**:
-     the default is always the efficient path; a modifier-beaten default is a
-     compiler bug (fix the default, never let the modifier be the win).
+     disclosed at use (their purpose is correctness/intent, never speed —
+     see Rule 2).
    - **NEVER hardcode Rust string matches as built-in functions.**
      `is_digit` → `import char from "std/char.bv"`. Primitive types (Int,
      Float, Bool, Ptr, Void) are the sole bootstrap exceptions.
-3. **INTRINSICS BEFORE FRGN**: Check `get_intrinsic_signature()` before writing
+4. **INTRINSICS BEFORE FRGN**: Check `get_intrinsic_signature()` before writing
    `frgn`. All intrinsic names are PascalCase + `#` suffix (`Sqrt#`).
-4. **INTERPRETER IS REFERENCE**: If the interpreter runs it correctly, the
+5. **INTERPRETER IS REFERENCE**: If the interpreter runs it correctly, the
    backend must compile it. Fix codegen, never the interpreter.
-5. **ADDITIVE ONLY**: Never modify existing optimization paths — new match arms
+6. **ADDITIVE ONLY**: Never modify existing optimization paths — new match arms
    only. The `_ => return None;` fallthrough must remain unchanged.
-6. **ALWAYS FINISH**: No `todo!()`, `unreachable!()`, `// TODO:`, or stubs in
+7. **ALWAYS FINISH**: No `todo!()`, `unreachable!()`, `// TODO:`, or stubs in
    committed code. Every feature wired parser → AST → analysis → codegen → tests.
-7. **NEVER DISCARD UNCOMMITTED WORK**: `git checkout --`, `git restore`, and
+8. **NEVER DISCARD UNCOMMITTED WORK**: `git checkout --`, `git restore`, and
    `git checkout .` DESTROY work permanently — never use them. Commit your own
    changes with targeted `git add`; never stash others' work. `git reset HEAD`
    is safe (unstaging only).
-8. **TESTS OR IT DOESN'T EXIST**: Every feature, code path, and match arm needs
+9. **TESTS OR IT DOESN'T EXIST**: Every feature, code path, and match arm needs
    tests. `cargo test --lib` before every commit.
-9. **NO PROTOTYPING**: Every optimization is a first-class pass in its proper
-   module — never inline analysis into codegen as a shortcut.
-10. **EXECUTIVE REQUESTS ARE NOT OPTIONAL**: Told to fix a pattern? Do all of
+10. **NO PROTOTYPING**: Every optimization is a first-class pass in its proper
+    module — never inline analysis into codegen as a shortcut.
+11. **EXECUTIVE REQUESTS ARE NOT OPTIONAL**: Told to fix a pattern? Do all of
     it. If prereqs are missing, implement them first.
-11. **PLAN WITH BENCHMARKS**: Every performance plan MUST include a baseline
+12. **PLAN WITH BENCHMARKS**: Every performance plan MUST include a baseline
     table of ALL benchmark results at the current commit BEFORE changes, and the
     new results AFTER. Baseline from a clean `cargo build --release` +
     `bash benchmarks/build_and_bench.sh --runtime`.
-11b. **PERSISTENT BASELINE WORKTREE**: `../briv-compiler-baseline` holds the
+12b. **PERSISTENT BASELINE WORKTREE**: `../briv-compiler-baseline` holds the
     baseline commit for controlled A/B regression detection
     (`bash benchmarks/compare_baseline.sh <name>`). Never excuse a regression as
     "noise" without this experiment.
-12. **DOCUMENTATION MAINTENANCE IN PLANS**: Every plan must specify which doc
+13. **DOCUMENTATION MAINTENANCE IN PLANS**: Every plan must specify which doc
     comments, rationale comments, and architecture docs need updating, and how
     to preserve existing commentary when refactoring.
-13. **STDLIB IS THE EXTENSION MECHANISM**: New functionality goes in `.bv`
+14. **STDLIB IS THE EXTENSION MECHANISM**: New functionality goes in `.bv`
     files, not new Rust match arms. The compiler teaches; stdlib learns.
-14. **NO KNOWLEDGE OF SPECIFIC TYPES**: The compiler must never check for
+15. **NO KNOWLEDGE OF SPECIFIC TYPES**: The compiler must never check for
     `Type::string()` or match `"ring_push"`. Type-specific logic lives in config
     and stdlib. Sole exception: the bootstrap primitives.
-15. **FULL PROVENANCE TRACKING**: Every rationale comment carries *when, why,
+16. **FULL PROVENANCE TRACKING**: Every rationale comment carries *when, why,
     what pattern it targets, and how to undo it*. `// TEMP: YYYY-MM-DD:` flags
     temporary solutions with a path to permanence.
-16. **DRY**: A pattern appearing 3+ times becomes a centralized helper. Grep ALL
+17. **DRY**: A pattern appearing 3+ times becomes a centralized helper. Grep ALL
     call sites when changing a helper's behavior.
-17. **MIGRATE WHEN TOUCHED**: When you modify a file, migrate its hand-rolled
+18. **MIGRATE WHEN TOUCHED**: When you modify a file, migrate its hand-rolled
     instances to the centralized helpers at the same time.
-18. **NO TYPE NAME MATCHING**: Never match Briev type names (`t == "Int"`) in
+19. **NO TYPE NAME MATCHING**: Never match Briev type names (`t == "Int"`) in
     Rust. Derive LLVM type, protocol category, and ABI width from the
     `TypeUniverse` (via `universe_key()`/`Cast.#` properties) + `CastingGraph`.
     Exceptions: `Type::Ptr(_)`/`Type::Vector`/`Type::Bits(N)` (compiler
     constructs) and `tbaa_node` (operates on LLVM IR type strings). A `git
     grep` for `Type::Custom.*==` in `src/backend/llvm/` and `src/glue/` must
     return zero.
-19. **MEASURE BEFORE YOU BUILD**: Before implementing any performance fix, run a
+20. **MEASURE BEFORE YOU BUILD**: Before implementing any performance fix, run a
     pre-build A/B experiment on the ACTUAL generated IR (see Performance
     Recovery Protocol). A refuted hypothesis blocks the fix. A regression caused
     by removing a fragile-but-correct optimization is fixed by REBUILDING it on
     the current architecture — never accepted, never re-added as heuristics.
-20. **DELIMITER SEMANTIC LOAD**: Each delimiter carries one honest meaning:
+21. **DELIMITER SEMANTIC LOAD**: Each delimiter carries one honest meaning:
     `<>` = compile-time type-level specialization (generics `Stack<T>`,
     protocol variants `#String<UTF8>`, targets `asm<chip>`, groups
     `sync<group>`); `()` = application & binding (calls `f(a)`, params
@@ -112,7 +125,7 @@ Patches are unacceptable. There is no "go fast and break things."
     — declarations take params, so `op Add(Float)` is `()`); `[]` =
     containment/bound (`Int[8]`, `[pre]`); `{}` = grouping/definition. Never
     use a delimiter for a different load.
-21. **NO IMPLICIT CONCURRENCY**: The reactor never silently decides whether two
+22. **NO IMPLICIT CONCURRENCY**: The reactor never silently decides whether two
     reactive nodes may fire together. If the proof engine proves `pre_A ∧ pre_B`
     satisfiable AND there is no XOR read-write overlap between A and B, the
     compiler DEMANDS the developer classify the pair — `async` on both (explicit

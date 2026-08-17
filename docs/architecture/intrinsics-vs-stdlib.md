@@ -31,7 +31,8 @@ native-stdlib.md`):
 
 `out` is a **pin, never an acceleration**: the compiler always maximizes
 optimization (even to a LUT); `out` says "I need this specific call done, you
-cannot optimize it out." This is the never-faster contract (AGENTS.md Rule 2).
+cannot optimize it out." This is the never-faster contract (AGENTS.md Golden
+Rule 2 "MAXIMUM EFFICIENT DEFAULT": keywords express intent, never speed).
 
 ## Three-Layer Architecture
 

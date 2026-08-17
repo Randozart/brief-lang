@@ -10,6 +10,14 @@ A benchmark that reports `0.0002s vs 0.088s` (440x Briev win) is a diagnostic
 signal — it tells you the compiler folded the loop. The compiler is correct.
 The benchmark is measuring the wrong thing.
 
+The same applies in reverse: a benchmark that only reaches parity when the Briev
+program uses a strategy keyword (`seq`, `vol`, `pack`, …) or a non-idiomatic
+shape is surfacing a **default-codegen gap**, not a win. The compiler must pick
+the most efficient strategy for every program automatically (Golden Rule 2
+"MAXIMUM EFFICIENT DEFAULT", AGENTS.md); keywords exist for intended
+behaviour, never to win on speed. A modifier-beaten default is a compiler bug
+— fix the default, don't credit the modifier.
+
 ### Symmetric by Default
 
 Every Briev benchmark must compute the **same output** as its C reference for

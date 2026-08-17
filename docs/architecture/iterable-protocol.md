@@ -318,7 +318,7 @@ Vue's `v-`, Alpine's `x-`, Angular's `*ng-`. **Why it is not legacy:**
    other attribute passes through as plain HTML. Without it, `class="x"` is
    ambiguous (an HTML class or a binding?), and the view compiler would have
    to know every HTML attribute to avoid clobbering user markup.
-2. **Disclosure** (Rule 2) — `b-text` is visibly special; no hidden magic in
+2. **Disclosure** (Rule 3) — `b-text` is visibly special; no hidden magic in
    an ordinary-looking attribute.
 3. **Passthrough** — `.s.rbv` views being HTML-compatible is the point;
    non-`b-` attributes work as HTML.

@@ -1,5 +1,5 @@
 # Briev: A Programming Language
-<sub>(Briev is pronounced and was formerly known as 'Brief', but that name was overrepresented. Name can also be spelled as 'Brīv' for the long "ee" sound, or even Briiv, if that's your thing)</sub> 
+<sub>(Briev is pronounced and was formerly known as 'Brief', but that name was overrepresented.)</sub> 
 ### TL;DR
 
 **Briev is currently a WIP, be aware the design has not been entirely locked in yet**

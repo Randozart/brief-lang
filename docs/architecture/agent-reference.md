@@ -313,7 +313,8 @@ regex; ambiguity = error. `sql"SELECT"` → `Expr::TaggedQuotedLiteral`;
 ## 4. Modifiers and the concurrency gate (2026-07-31)
 
 User-facing directives are **ordinary keywords** (no `#`); they **must never
-make code faster** — a modifier-beaten default is a compiler bug. All modifiers
+make code faster** — a modifier-beaten default is a compiler bug (Golden Rule
+2 "MAXIMUM EFFICIENT DEFAULT", AGENTS.md; also §6). All modifiers
 are **prefix** (`async node`; `node async` is rejected). See
 `docs/architecture/concurrency-and-modifiers.md`.
 
@@ -414,6 +415,21 @@ lookups are fine. Reference: commit `139c345`,
 ---
 
 ## 6. Optimization Philosophy
+
+### The maximum-efficient default (foundational)
+
+The compiler MUST pick the most efficient codegen strategy for every program
+automatically — every case, not just the benchmark at hand (Golden Rule 2,
+AGENTS.md). This covers not just modifiers but every codegen decision: tuple
+slot allocation, collection strategy, probe cost, materialization, loop shape.
+A heuristic beaten by a strategy keyword on the *same program* is a compiler
+bug — fix the default, never require the user to reach for a keyword to be
+competitive. Strategy keywords exist to express **intended behaviour** that
+plain efficient codegen cannot deliver (embedded/inter-language semantics,
+precise declaration order, volatile memory, sequential execution) — never to
+win on speed. A benchmark whose efficient path requires a modifier or a
+non-idiomatic program shape is surfacing a default-codegen gap, not a valid
+comparison.
 
 ### Long-term best optimization
 
