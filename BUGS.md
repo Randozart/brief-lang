@@ -38,21 +38,60 @@ documented in the redesign plan's SHIPPED section):**
 member bodies, (d) fix member-on-param ABI. Each is a distinct compiler bug;
 none weakens a contract.
 
-## Inlined member with a foreach + a nested foreach overflows SSA register allocation — OPEN
+## Inlined member with a foreach + a nested foreach — runtime collapse by clang -O3 — SSA-path FIXED 2026-08-17; countdown path OPEN
 
 **Date:** 2026-08-17 (found by the HashMap tuple redesign)
-**Status:** Open — the HashMap's probe members (`insert`/`get`/`contains`/
-`remove`, each a `foreach` with a loop-carried local) work as a SINGLE inline
-or two, but THREE+ inlined probe members in one node body produce
-"instruction forward referenced with type 'i64'" clang errors (registers
-used before their def in `@main`). A plain node-body `foreach` and a single
-inlined member both work. Root: the SSA main inlines the node body; many
-member-inline `foreach` loops with loop-carried locals exhaust the phi /
-register bookkeeping.
+**Status:** SSA-reactor path FIXED; countdown/fold path (`hash_ops_idio`) OPEN.
 
-**Path:** fix the SSA main's handling of multiple inlined member `foreach`
-loops — likely the loop-carried local alloca/phi predecessor tracking
-(`fun.cur_block` / the countdown-latch phis, emit_stmt.rs:1284).
+**Root cause (verified, supersedes the earlier `pending_phi_backedge` thesis):**
+The emitted IR is SSA-clean and label-clean (`.ll` passes `llc`; per-function
+register dup scan = 0). The miscompile is clang -O3 (LTO) folding the reactive
+body dead after deep unrolling — NOT an emitter bug. Evidence:
+- `opt -O3` on the same `.ll` KEEPS the body; clang -O3 guts it.
+- clang pass trace (m2_clang_passes.log): every pass through ADCE retains the
+  body; TailCallElim creates 13 tail calls, then the loop fully unrolls (16x,
+  per-iteration phi chains) and a later pass collapses `@main` to
+  print-first + ret. The kill is count-based: `FAIL ⟺ (≥2 in-body member-probe
+  consumptions) OR (1 get + ≥2 fresh in-body tuple mallocs)`.
+- `.ll` A/Bs through the exact harness link: moving the constant tuple
+  materialization (malloc + header + element stores + ptrtoint) to the loop
+  preheader FIXES it; moving only the malloc or the ptrtoint does NOT — the
+  stores must leave the loop too.
+- `pending_phi_backedge` save/restore is NOT the mechanism — the raw
+  IR is clean.
+
+**Fix (SSA-reactor path):** `emit_tuple` now defers a CONSTANT-element tuple
+literal to the loop preheader when `defer_struct_allocas` is set
+(emit_expr.rs), and `emit_ssa_main` buffers the reactive loop and flushes
+pending materializations before `.ss_main_loop` (ssa.rs), mirroring the
+countdown path's loop_buf + flush (2026-08-13 struct-literal fix). Dynamic
+elements (var/field/call) stay inline — their registers cannot dominate a
+preheader. Verified at HEAD+fix:
+- `p5_3ins2get` (3 inline inserts + 2 inline-printed gets) → `10 20` ✓
+- `p5_core` (3 ins + Count# + 3 gets + 2 contains) → `3 10 20 30 true false` ✓
+- m-grid (m1/m2/m2_letget/m1_2get/vB/m3i_marker) full marker sequences ✓
+- `cargo test --lib` 1893/1893 green.
+
+**OPEN (countdown/fold path):** `hash_ops_idio` (`m.insert((i, i * 2)); sum =
+sum + m.get(i)` inside the bounded countdown, `when i % 5000000 == 0` print)
+still collapses. Compiler-linked binary prints nothing at BOUND=10M; an ad-hoc
+harness `clang -O3 -flto` link prints `240 240`. Root: the hot tuple is DYNAMIC
+(`(i, i*2)`) — the deferral cannot move it (domination), and the countdown
+path has no preheader equivalent for per-iteration heap writes. The get result
+is consumed by a state store (`sum = sum + ...`), so this is NOT the SSA-path
+mechanism — a distinct collapse on the `.cd_127`/`foreach` countdown IR.
+Next lever candidates: emit the (K,V) pair into a preallocated per-iteration
+slot (SROA-friendly) instead of malloc, or fix the tuple slot ABI so the body's
+`inttoptr + GEP` round-trip disappears — then A/B against the harness link
+before committing.
+
+**Pre-existing oddity (not a regression):** a node whose inserts are LET-BOUND
+(`let e1 = (1,10); m.insert(e1)`) and whose observables are ONLY inline gets
+(`vA_2get`) segfaults even on the pre-fix compiler: the SSA main emits the
+tuple materializations and insert bodies into the unused alwaysinline
+`@txn_go` fold copy, leaving `@main`'s `.ssb_go` with just the gets (which read
+an unwritten table). Out of scope for this fix; acceptance shapes are
+inline-consumption (`p5_*`).
 
 ## `when`-guard + nested probe `foreach` crashed clang — FIXED 2026-08-17
 

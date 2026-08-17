@@ -344,6 +344,17 @@ impl LlvmBackend {
         if let Some(ref slot) = active_slot {
             writeln!(out, "  {} = alloca i64, align 8", slot).ok();
         }
+        // 2026-08-17 (Phase B reactor fix): buffer the loop construction so a
+        // constant-element tuple arg to a member call in a reactive body can be
+        // flushed into the PREHEADER (before `.ss_main_loop`) via
+        // flush_pending_struct_allocas. Without it, clang -O3 collapses the
+        // post-first-statement body (the m2/m3i/m2_letget grid). Mirrors
+        // emit_countable_main's loop_buf + trailing flush (2026-08-13).
+        let prev_defer = self.fun.defer_struct_allocas;
+        self.fun.defer_struct_allocas = true;
+        let mut loop_buf = String::new();
+        {
+        let out = &mut loop_buf;
         writeln!(out, "  br label %.ss_main_loop").ok();
         writeln!(out, ".ss_main_loop:").ok();
         // Reset active flag each iteration
@@ -415,6 +426,10 @@ impl LlvmBackend {
         }
         writeln!(out, ".end:").ok();
         writeln!(out, "  ret i32 0").ok();
+        } // end loop_buf scope
+        self.fun.defer_struct_allocas = prev_defer;
+        self.flush_pending_struct_allocas(out);
+        out.push_str(&loop_buf);
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }

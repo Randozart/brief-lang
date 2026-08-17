@@ -66,6 +66,23 @@ fn is_ident(e: &crate::ast::Expr, name: &str) -> bool {
     matches!(e, crate::ast::Expr::Identifier(n) if n == name)
 }
 
+/// 2026-08-17 (Phase B): literal-only compile-time check for tuple element
+/// deferral. A deferred element's materialization moves to the loop preheader,
+/// so it must not reference body-defined registers. Literals (Decimal, Char,
+/// TaggedLiteral, TaggedQuotedLiteral, Bool, Float) emit operand-free adds; any
+/// Identifier/Field/Call element is body-defined and stays inline.
+pub(crate) fn is_compile_time_const(e: &Expr) -> bool {
+    matches!(
+        e,
+        Expr::Decimal(_)
+            | Expr::Char(_)
+            | Expr::TaggedLiteral(..)
+            | Expr::TaggedQuotedLiteral(..)
+            | Expr::Bool(_)
+            | Expr::Float(_)
+    )
+}
+
 pub(crate) struct MemberInvocation<'a> {
     pub recv_reg: &'a TypedRegister,
     pub type_name: &'a str,
@@ -1872,6 +1889,39 @@ impl LlvmBackend {
     /// DELETED: typed list literals construct through the collection's ops,
     /// and uncontextualized literals are a typechecker error.
     fn emit_tuple(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        exprs: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        // 2026-08-17 (Phase B reactor fix): a CONSTANT-element tuple literal
+        // materialized inside a reactor loop body makes clang -O3 collapse the
+        // post-first-statement body (the m2/m3i/m2_letget grid). Deferring the
+        // WHOLE materialization (malloc, count header, element stores, ptrtoint)
+        // to the loop preheader is the vA working shape — the .ll A/B relocated
+        // only the mallocs and still failed; stores must leave the loop too.
+        // Dynamic elements (vars, fields, calls) stay inline: their registers
+        // are body-defined and cannot dominate a preheader definition.
+        let const_elements = exprs.iter().all(is_compile_time_const);
+        if self.fun.defer_struct_allocas && const_elements {
+            let mut tmp = String::new();
+            self.emit_tuple_materialize(&mut tmp, v, exprs, indent);
+            for line in tmp.lines() {
+                self.fun.pending_struct_allocas.push(line.to_string());
+            }
+            return TypedRegister {
+                name: v.to_string(),
+                ty: Type::int(),
+            };
+        }
+        self.emit_tuple_materialize(out, v, exprs, indent)
+    }
+
+    /// The shared tuple materialization: malloc a `(2 + count) * 8` image,
+    /// store the element count header, store each element at slot i+1, and
+    /// return the boxed handle (ptrtoint) in `v`.
+    fn emit_tuple_materialize(
         &mut self,
         out: &mut String,
         v: &str,

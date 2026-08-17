@@ -67,14 +67,79 @@ before their def in `@main`) or silently wrong values (`get` returns 0 in a
 hot loop). Root: the countdown per-field register cache (`last_val_temps`,
 `pending_phi_backedge`) leaks across inlined member `foreach` loops.
 
-**Fix:** scope the field cache correctly across member inlines within a
-countdown body pass — check the save/restore at emit_expr.rs:2541/2655 and
-the clear points at counter.rs:569/832/867; ensure a member's field writes do
-not leave stale `last_val_temps` entries that a later statement reads as a
-register whose def was re-emitted.
+**Symptom status 2026-08-17 (P4 changed the failure mode — verify against the
+LIVE symptom, not this text):** after the P4 fix (Foreach arm sets
+`fun.cur_block`), the compile-time forward-ref is GONE for every repro shape
+(all `.ll` emit, `llc` clean). The bug now surfaces at RUNTIME when the member
+result is consumed INLINE. Empirically verified at HEAD (commit `ef2875e6`):
 
-**Verify:** 3 inserts + 2 gets in one node → correct values. hash_ops_idio
-hot loop → correct sum → re-add to the suite.
+- `p5_3ins2get` (3 inserts + 2 gets, `println!(m.get(1))` inline) → **SEGFAULT**.
+- `p5_core` (3 ins + `Count#` + 3 gets + 2 contains) → **SEGFAULT**.
+- `p5_3ins1get` (3 ins + 1 get inline) → silent no-output (wrong value).
+- `p5_getonly` (1 ins + 1 get) → correct `10`.
+- `hash_ops_idio` hot loop (`sum = sum + m.get(i)`, BOUND=10M) → prints `240`
+  twice; the C reference prints `24999995000000` / `99999990000000`.
+- **TRAP: `pb_obs` (let-bound `let g1 = m.get(1)` + `endprogram __print_int`)
+  already prints the correct `30`.** The bug hides behind a let-binding — the
+  register-collision cache is read back through `last_val_temps` for an
+  identifier. A verify that only uses the let-bound shape will falsely green.
+  The Phase B acceptance MUST use an inline-consumption shape (printed operand,
+  `sum = sum + m.get(i)`, a get result consumed directly in an FFI call).
+
+**Fix:** scope the field cache correctly across member inlines within a
+countdown body pass — check the save/restore at emit_expr.rs:2541/2655 and the
+clear points at counter.rs:569/832/867; ensure a member's field writes do not
+leave stale `last_val_temps` entries that a later statement reads as a register
+whose def was re-emitted. **Notable asymmetry:** the A5d save/restore at
+emit_expr.rs:2541/2655 covers `last_val_temps`/`last_val_types` only — no
+member-inline boundary restores `pending_phi_backedge`. Verify that hypothesis
+first (save/restore `pending_phi_backedge` at the same boundary, or key it by
+scope); the hash_ops_idio `240` (vs C's trillions) and the inline-consume
+segfaults are the litmus tests.
+
+**Verify (inline-consumption shapes — the let-bound `pb_obs` shape ALREADY
+passes and proves nothing):** `println!(m.get(1)); println!(m.get(2));` after 3
+inserts in one node → `10`, `20`, no segfault. `sum = sum + m.get(i)` hot loop
+(`p4_verify.bv` shape, BOUND short enough to cross the `when i % 5000000 == 0`
+print) → sum MATCHes the C reference. hash_ops_idio hot loop (BOUND=10M) →
+`24999995000000` / `99999990000000` → re-add to the suite.
+
+**STATUS 2026-08-17 (implemented):** SSA-reactor path FIXED; countdown path OPEN.
+
+The `pending_phi_backedge` save/restore hypothesis was TESTED and REFUTED — the
+raw `.ll` is SSA-clean and label-clean (per-function register-dup scan = 0;
+`llc` accepts every shape). The collapse is clang -O3 (LTO): pass traces show
+every pass through ADCE retains the body, TailCallElim creates 13 tail calls,
+the loop fully unrolls (16x, per-iteration phi chains), and a later pass
+collapses `@main` to print-first + ret (`m2_clang_passes.log`). `opt -O3`
+alone KEEPS the body. Empirical rule: `FAIL ⟺ (≥2 in-body member-probe
+consumptions) OR (1 get + ≥2 fresh in-body constant tuple mallocs)`. A
+`.ll`-level A/B through the exact harness link proved that relocating the FULL
+tuple materialization (malloc + count header + element stores + ptrtoint) to
+the loop preheader fixes it; relocating only the malloc (or the ptrtoint) does
+NOT — the stores must leave the loop.
+
+**Fix shipped (SSA path):** `emit_tuple` defers a CONSTANT-element tuple
+literal to `pending_struct_allocas` when `defer_struct_allocas` is set
+(emit_expr.rs, with a literal-only `is_compile_time_const` guard so body-defined
+registers never dominate a preheader); `emit_ssa_main` buffers the reactive
+loop and flushes before `.ss_main_loop` (ssa.rs), mirroring the countdown
+path's loop_buf + flush (2026-08-13 struct-literal fix, counter.rs:590/591).
+
+Verified at HEAD+fix (all via inline-consumption shapes):
+- `p5_3ins2get` → `10 20` ✓ (was SEGFAULT)
+- `p5_core` → `3 10 20 30 true false` ✓ (was SEGFAULT)
+- m-grid: m1, m2, m2_letget, m1_2get, vB, m3i_marker all print full marker
+  sequences ✓ (m2 was `1000`-only)
+- `cargo test --lib` 1893/1893 green.
+
+**OPEN (countdown path):** `hash_ops_idio` still collapses — the hot tuple
+`(i, i * 2)` is DYNAMIC, so the deferral cannot move it (domination). The
+countdown path needs a per-iteration preallocated slot or a tuple-slot ABI that
+drops the in-body `inttoptr + GEP` round-trip; A/B against the harness link
+before building. `vA_2get` (let-bound inserts + gets-only observable) segfaults
+even pre-fix: the inserts emit into the unused alwaysinline `@txn_go` copy, not
+`@main` — pre-existing, out of scope here.
 
 ## Phase C — Fix 2: arrow-push double-construction + member-field push
 
