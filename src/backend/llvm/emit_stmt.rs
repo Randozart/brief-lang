@@ -1380,6 +1380,24 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-08-17 (foreach break): `break;` — branch to the innermost
+        // enclosing foreach's `end` label (search-until-found early exit).
+        // Valid only inside a foreach body (the typechecker enforces it).
+        Statement::Break => {
+            match backend.fun.foreach_break_labels.last() {
+                Some(label) => {
+                    writeln!(out, "{}br label %{}", indent, label).ok();
+                }
+                None => {
+                    panic!(
+                        "'break' reached codegen with no enclosing foreach — \
+                         the typechecker must reject this (BreakOutsideLoop)"
+                    );
+                }
+            }
+            backend.fun.terminated = true;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         // 2026-08-07 (Phase 7): `foreach(item in iterable)` — the sole
         // iteration keyword (SPEC §11.4). This commit lowers ITERABLE
         // RANGES (`0..n` / `0..=n`) as a counted loop; collections (List /
@@ -1627,9 +1645,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.let_binding_types.insert(item.clone(), item_ty.clone());
             backend.fun.let_original_types.insert(item.clone(), item_ty);
             backend.fun.terminated = false;
+            // 2026-08-17 (foreach break): make the innermost foreach's `end`
+            // label the break target while the body runs (popped after).
+            backend.fun.foreach_break_labels.push(end_lbl.clone());
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
+            backend.fun.foreach_break_labels.pop();
             if !backend.fun.terminated {
                 // 2026-08-14 (String unification): the `#String` decode lane
                 // advanced the byte-offset slot IN PLACE — re-storing `cur + 1`

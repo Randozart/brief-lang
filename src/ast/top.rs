@@ -270,6 +270,11 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
+    /// 2026-08-17 (foreach break): `break;` — exit the innermost enclosing
+    /// `foreach` immediately (search-until-found early exit). Valid only
+    /// lexically inside a `foreach` body. `foreach` stays exhaustive by
+    /// default; `break` is an exit FORM of it — NOT a for/while/loop keyword.
+    Break,
     /// 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort
     /// (SPEC §8.8). Compiles to `call void @llvm.trap(); unreachable`, a
     /// never-type in the typechecker, and an abort diagnostic in the
@@ -382,6 +387,7 @@ impl PartialEq for Statement {
                 n1 == n2 && t1 == t2 && e1 == e2 && m1 == m2,
             (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
              (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
+            (Statement::Break, Statement::Break) => true,
              (Statement::EndProgram(e1), Statement::EndProgram(e2)) => e1 == e2,
              (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,

@@ -565,6 +565,78 @@ fn test_foreach_range_emits_counted_loop() {
         "foreach must emit a loop exit label");
 }
 
+/// A program with `foreach(i in 0..=5) { if i == 3 { acc = 42; break; } }` —
+/// exercises the `break` early-exit lowering (2026-08-17).
+fn foreach_break_program() -> Vec<TopLevel> {
+    let node = TopLevel::Transaction(Transaction {
+        name: "s".to_string(),
+        is_reactive: true,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![
+            Statement::Let {
+                name: "acc".to_string(),
+                names: vec![],
+                ty: Some(Type::int()),
+                expr: Some(Expr::Decimal(0)),
+                modifiers: vec![],
+            },
+            Statement::Foreach {
+                item: "i".to_string(),
+                list: Box::new(Expr::Range {
+                    start: Box::new(Expr::Decimal(0)),
+                    end: Box::new(Expr::Decimal(5)),
+                    inclusive: true,
+                }),
+                body: vec![Statement::If(
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Eq,
+                        Box::new(Expr::Identifier("i".to_string())),
+                        Box::new(Expr::Decimal(3)),
+                    ),
+                    vec![
+                        Statement::Assign(
+                            Expr::Identifier("acc".to_string()),
+                            Expr::Decimal(42),
+                        ),
+                        Statement::Break,
+                    ],
+                    vec![],
+                )],
+            },
+            Statement::Term(None),
+        ],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    });
+    vec![node]
+}
+
+#[test]
+fn test_foreach_break_emits_exit_branch() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&foreach_break_program(), None);
+    assert!(output.contains("foreach.hdr"),
+        "foreach must emit a loop header");
+    assert!(output.contains("br label %foreach.end"),
+        "a `break` must branch to the innermost foreach end label");
+    assert!(output.contains("foreach.end"),
+        "foreach must emit a loop exit label");
+}
+
 /// 2026-08-16 (slice-6 deletion): `foreach x in list` over a `coll obj` uses
 /// the TIER path (`op Count`/`op At` inlined member bodies) — the hardcoded
 /// `[len][elems]` heap-seq `IterKind::List` arm is DELETED. The coll is

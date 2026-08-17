@@ -1076,6 +1076,25 @@ foreach item in items {
 
 There are no `for`, `while`, or `loop` keywords. Counted iteration uses iterable ranges or reactive/transactional structure.
 
+`foreach` is exhaustive by default. A `break;` inside a `foreach` body exits
+the innermost enclosing `foreach` immediately — the honest form for
+search-until-found probes. It is an **exit form of `foreach`**, not a
+`for`/`while`/`loop` keyword. `break` is invalid outside a `foreach` (a
+compile error).
+
+```briev
+foreach q in 0..cap {
+    when keys[q] == target {
+        slot = q;
+        break;
+    };
+};
+```
+
+> **2026-08-17.** `break` was added for `HashMap` linear-probe termination;
+> it complements the reactive/transactional exit that `node`/`txn`
+> postcondition convergence provides, at the intra-body grain.
+
 #### 11.4.1 Iteration is structural
 
 A type is iterable if, and only if, it provides the iteration operations

@@ -70,6 +70,7 @@ impl Annotator {
                 }
                 Statement::Gate(cond) => self.collect_calls_from_expr(cond, calls),
                 Statement::Trap => {}
+                Statement::Break => {}
                 Statement::Term(val) => {
                     if let Some(v) = val {
                         self.collect_calls_from_expr(v, calls);
@@ -439,6 +440,7 @@ impl Annotator {
                 format!("{}term! {};\n", spaces, val_str)
             }
             Statement::Trap => format!("{}trap;\n", spaces),
+            Statement::Break => format!("{}break;\n", spaces),
             Statement::Rollback(val) => {
                 let val_str = val
                     .as_ref()

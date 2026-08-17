@@ -244,6 +244,7 @@ impl LlvmBackend {
             ),
             Statement::Gate(cond) => Statement::Gate(Self::rewrite_cell_identifiers(cond, cell_name)),
             Statement::Trap => Statement::Trap,
+            Statement::Break => Statement::Break,
             Statement::Term(e) => Statement::Term(
                 e.as_ref()
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),

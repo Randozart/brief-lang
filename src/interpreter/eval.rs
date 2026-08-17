@@ -1274,6 +1274,28 @@ fn eval_if(
 }
 
 /// Evaluate a statement.
+/// 2026-08-17 (foreach break): evaluate a `foreach` body once. Returns
+/// `false` if the body executed a `break;` (the innermost foreach must stop
+/// iterating). A `Break` is swallowed here — it never propagates outward.
+/// `result` accumulates the last statement's value (the foreach's return
+/// value), matching the pre-break semantics.
+fn run_foreach_body(
+    body: &[Statement],
+    heap: &mut VirtualHeap,
+    bindings: &mut HashMap<String, Value>,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
+    result: &mut Value,
+) -> Result<bool, RuntimeError> {
+    for stmt in body {
+        match eval_statement(stmt, heap, bindings, functions) {
+            Ok(v) => *result = v,
+            Err(RuntimeError::Break) => return Ok(false),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(true)
+}
+
 pub fn eval_statement(
     stmt: &Statement,
     heap: &mut VirtualHeap,
@@ -1418,6 +1440,12 @@ pub fn eval_statement(
         // 2026-08-07 (Phase 7): `foreach(item in list)` — the sole iteration
         // keyword (SPEC §11.4). The iterable is an integer range (`0..=n`) or
         // a collection (a Product for lists/vectors, or Bits for Data).
+        Statement::Break => {
+            // 2026-08-17 (foreach break): signal the innermost enclosing
+            // foreach to stop iterating. The foreach evaluator intercepts this
+            // (does NOT propagate outward), so it never surfaces to a caller.
+            Err(RuntimeError::Break)
+        }
         Statement::Foreach { item, list, body } => {
             let iterable = eval_expr(list, heap, bindings, functions)?;
             let mut result = Value::Void;
@@ -1427,8 +1455,8 @@ pub fn eval_statement(
                     if start <= last {
                         for cur in start..=last {
                             bindings.insert(item.clone(), Value::Atom(Atom::Int(cur)));
-                            for stmt in body {
-                                result = eval_statement(stmt, heap, bindings, functions)?;
+                            if !run_foreach_body(body, heap, bindings, functions, &mut result)? {
+                                break;
                             }
                         }
                     }
@@ -1436,8 +1464,8 @@ pub fn eval_statement(
                 Value::Product { fields, .. } => {
                     for f in &fields {
                         bindings.insert(item.clone(), f.clone());
-                        for stmt in body {
-                            result = eval_statement(stmt, heap, bindings, functions)?;
+                        if !run_foreach_body(body, heap, bindings, functions, &mut result)? {
+                            break;
                         }
                     }
                 }
@@ -1464,8 +1492,8 @@ pub fn eval_statement(
                             (b0 as u32, 1)
                         };
                         bindings.insert(item.clone(), Value::Atom(Atom::Char(char::from_u32(cp).unwrap_or('?'))));
-                        for stmt in body {
-                            result = eval_statement(stmt, heap, bindings, functions)?;
+                        if !run_foreach_body(body, heap, bindings, functions, &mut result)? {
+                            break;
                         }
                         i += width;
                     }
@@ -1721,6 +1749,52 @@ mod tests {
         };
         eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
         assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(10));
+    }
+
+    #[test]
+    fn test_foreach_break_exits_early() {
+        // 2026-08-17 (foreach break): `foreach i in 0..100 { if i == 3 { acc =
+        // 42; break; } }` stops at i==3 — acc is 42, and the loop does NOT run
+        // to 100 (a counter proves it).
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("acc".to_string(), Value::Atom(Atom::Int(0)));
+        bindings.insert("seen_last".to_string(), Value::Atom(Atom::Int(-1)));
+        let foreach = Statement::Foreach {
+            item: "i".to_string(),
+            list: Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(0)),
+                end: Box::new(Expr::Decimal(100)),
+                inclusive: false,
+            }),
+            body: vec![
+                Statement::If(
+                    Expr::BinaryOp(
+                        BinaryOpKind::Eq,
+                        Box::new(Expr::Identifier("i".to_string())),
+                        Box::new(Expr::Decimal(3)),
+                    ),
+                    vec![
+                        Statement::Assign(
+                            Expr::Identifier("acc".to_string()),
+                            Expr::Decimal(42),
+                        ),
+                        Statement::Break,
+                    ],
+                    vec![],
+                ),
+                Statement::Assign(
+                    Expr::Identifier("seen_last".to_string()),
+                    Expr::Identifier("i".to_string()),
+                ),
+            ],
+        };
+        eval_statement(&foreach, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        assert_eq!(bindings.get("acc").and_then(|v| v.as_i64()), Some(42));
+        // Break fired at i==3, so `seen_last` (set after the if each iteration)
+        // is the LAST value seen before the break — 2 — proving the loop did
+        // NOT continue past i==3 to 100.
+        assert_eq!(bindings.get("seen_last").and_then(|v| v.as_i64()), Some(2));
     }
 
     #[test]

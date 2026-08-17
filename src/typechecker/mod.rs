@@ -50,6 +50,9 @@ pub struct TypecheckContext<'a> {
     /// `self.universe.pending_member_errors` (shared with call-site ctxs).
     /// None for top-level defns/txns — a top-level `Error#` is a hard error.
     pub current_owner: Option<String>,
+    /// 2026-08-17 (foreach break): lexical enclosing `foreach` nesting depth.
+    /// `break` is valid only where this is > 0 (inside a foreach body).
+    pub foreach_depth: usize,
     /// 2026-08-15 (coll plan §3.2): the `coll obj`/`coll struct` type names —
     /// they accept empty list literals (`[]`), and their op surface is
     /// scaffolded by the compiler.
@@ -134,6 +137,7 @@ impl<'a> TypecheckContext<'a> {
             consumed_locals: std::collections::HashSet::new(),
             current_owner: None,
             coll_types: std::collections::HashSet::new(),
+            foreach_depth: 0,
             universe,
             casting_graph: crate::casting::graph::CastingGraph::new(),
             parse_ops: HashMap::new(),
@@ -2418,8 +2422,23 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // hardcoded Int.
             let element_ty = foreach_item_type(ctx, &list_ty);
             ctx.bindings.insert(item.clone(), element_ty);
+            ctx.foreach_depth += 1;
             for stmt in body {
-                infer_statement(stmt, ctx)?;
+                if let Err(e) = infer_statement(stmt, ctx) {
+                    ctx.foreach_depth -= 1;
+                    return Err(e);
+                }
+            }
+            ctx.foreach_depth -= 1;
+            Ok(())
+        }
+        // 2026-08-17 (foreach break): `break;` is valid only lexically inside
+        // a `foreach` body — it exits the innermost one.
+        Statement::Break => {
+            if ctx.foreach_depth == 0 {
+                return Err(crate::errors::TypeError::BreakOutsideLoop {
+                    span: crate::errors::Span::dummy(),
+                });
             }
             Ok(())
         }

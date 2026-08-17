@@ -506,6 +506,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             collect_strings_expr(value, seen, out);
         }
         Statement::FreeHint(_) | Statement::KeepHint(_) | Statement::Trap => {}
+        Statement::Break => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
         Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Term(None) | Statement::EndProgram(None) => {}

@@ -382,7 +382,8 @@ impl<'a> Parser<'a> {
             // 2026-07-15: Template/Macro tokens removed
             Token::Quote => "quote".into(),
             Token::Dollar => "$".into(), Token::DollarBang => "$!".into(),
-            Token::Foreach => "foreach".into(), Token::Pvt => "pvt".into(),
+            Token::Foreach => "foreach".into(), Token::Break => "break".into(),
+            Token::Pvt => "pvt".into(),
             Token::Sed => "sed".into(), Token::Sync => "sync".into(),
             Token::Underscore => "_".into(),
             Token::When => "when".into(),

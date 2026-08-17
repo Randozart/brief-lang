@@ -711,6 +711,10 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// boxed self address. The second element is the pool ROW register —
     /// "0" for a static instance, the handle's register for a spawned one.
     pub self_prefix: Option<(String, String)>,
+    /// 2026-08-17 (foreach break): stack of the innermost enclosing foreach's
+    /// `end` labels. Pushed when a `foreach` body begins, popped after. A
+    /// `break;` emits `br label %<top>` — the nearest enclosing foreach end.
+    pub foreach_break_labels: Vec<String>,
 
     // Register type caches
     pub reg_float_cache: HashMap<String, String>,
@@ -996,6 +1000,7 @@ impl FunctionContext {
             defer_struct_allocas: false,
             self_binding: None,
             self_prefix: None,
+            foreach_break_labels: Vec::new(),
             reg_float_cache: HashMap::new(),
             reg_type_cache: HashMap::new(),
             ssa_old_int_regs: HashMap::new(),
@@ -1090,6 +1095,7 @@ impl FunctionContext {
         self.struct_literal_allocas.clear();
         self.pending_struct_allocas.clear();
         self.defer_struct_allocas = false;
+        self.foreach_break_labels.clear();
         self.reg_float_cache.clear();
         self.reg_type_cache.clear();
     }

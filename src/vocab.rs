@@ -171,6 +171,7 @@ impl LanguageVocab {
                 kw("match", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("when", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("foreach", VocabStatus::Canonical, KeywordContext::Statement),
+                kw("break", VocabStatus::Canonical, KeywordContext::Statement),
                 kw("spawn", VocabStatus::Canonical, KeywordContext::Reactive),
                 kw("await", VocabStatus::Canonical, KeywordContext::Reactive),
                 kw("free", VocabStatus::Canonical, KeywordContext::Ownership),

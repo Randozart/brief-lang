@@ -232,6 +232,9 @@ pub enum Token {
     #[token("foreach")]
     Foreach,
 
+    #[token("break")]
+    Break,
+
     #[token("pvt")]
     Pvt,
 
@@ -591,6 +594,7 @@ impl std::fmt::Display for Token {
             Token::Dollar => write!(f, "$"),
             Token::DollarBang => write!(f, "$!"),
             Token::Foreach => write!(f, "foreach"),
+            Token::Break => write!(f, "break"),
             Token::Pvt => write!(f, "pvt"),
             Token::Sed => write!(f, "sed"),
             Token::Sync => write!(f, "sync"),
@@ -696,6 +700,7 @@ mod tests {
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",
+            "break",
             "sync", "true", "false", "cyc", "ms",
         ];
         for name in keyword_tokens {

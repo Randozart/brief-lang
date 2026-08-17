@@ -57,6 +57,11 @@ impl<'a> Parser<'a> {
             Some(Token::EndProgram) => self.parse_endprogram_statement(),
             Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
+            Some(Token::Break) => {
+                self.pos += 1;
+                self.eat(&Token::Semicolon);
+                Ok(Statement::Break)
+            }
             Some(Token::Trg) => self.parse_trg_binding(),
             Some(Token::Sync) => self.parse_sync_block(),
             Some(Token::Defer) => self.parse_defer_statement(),

@@ -363,6 +363,7 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Trap => write!(f, "trap;"),
+            Statement::Break => write!(f, "break;"),
             Statement::EndProgram(val) => {
                 if let Some(val) = val {
                     write!(f, "endprogram {};", val)

@@ -338,6 +338,10 @@ pub enum TypeError {
     MissingContract {
         declaration: String,
     },
+    /// 2026-08-17 (foreach break): `break;` written outside any `foreach` body.
+    BreakOutsideLoop {
+        span: Span,
+    },
 }
 
 impl fmt::Display for TypeError {
@@ -382,6 +386,9 @@ impl fmt::Display for TypeError {
             }
             TypeError::MissingContract { declaration } => {
                 write!(f, "'{}' must declare a contract with pre and post conditions so the compiler can prove and classify the transition", declaration)
+            }
+            TypeError::BreakOutsideLoop { .. } => {
+                write!(f, "'break' may only appear inside a 'foreach' body (it exits the innermost enclosing 'foreach'); at top level there is no loop to break out of")
             }
         }
     }
@@ -1106,6 +1113,11 @@ pub enum RuntimeError {
     /// 2026-07-28: Term statement evaluated — early return with value.
     /// Used by the interpreter's call_function to detect termination.
     TermReturn(crate::interpreter::Value),
+    /// 2026-08-17 (foreach break): `break;` evaluated — exit the innermost
+    /// enclosing `foreach`. The foreach's own evaluator intercepts this and
+    /// stops iterating (does NOT propagate outward), so it is internally
+    /// swallowed; the variant exists as the escape signal.
+    Break,
     /// 2026-08-06 (endprogram plan): `endprogram` evaluated — the process
     /// boundary (SPEC §11.5). Carries the exit code value. The reactor stops
     /// on this, unlike TermReturn (which ends the transaction only).
@@ -1145,6 +1157,7 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::ContractViolation(msg) => write!(f, "contract violation: {}", msg),
             RuntimeError::TermReturn(_) => write!(f, "term return"),
+            RuntimeError::Break => write!(f, "break (exit foreach)"),
             RuntimeError::ProgramExit(_) => write!(f, "endprogram (process exit)"),
             RuntimeError::NonExhaustiveMatch(desc) => {
                 write!(f, "non-exhaustive match: no arm matched {}", desc)

@@ -224,6 +224,13 @@ impl Reactor {
                                     local_failed = true;
                                     break;
                                 }
+                                // 2026-08-17 (foreach break): a `break;` at the
+                                // txn/body top level is typecheck-rejected
+                                // (BreakOutsideLoop); defend in depth.
+                                Ok(StmtResult::Break) => {
+                                    local_failed = true;
+                                    break;
+                                }
                                 Err(_) => {
                                     local_failed = true;
                                     break;
@@ -288,6 +295,7 @@ impl Reactor {
             // diagnostic stops the reactor (SPEC §8.8), mirroring the LLVM
             // `llvm.trap` + `unreachable` sequence.
             Statement::Trap => return Err(crate::interpreter::RuntimeError::Trap),
+            Statement::Break => Ok(StmtResult::Break),
             Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
@@ -347,15 +355,32 @@ impl Reactor {
                 };
                 for elem in fields {
                     interp.state.insert(item.clone(), elem);
+                    // 2026-08-17 (foreach break): a body `break;` stops this
+                    // foreach (interp.exec_stmt surfaces it as RuntimeError::Break).
+                    let mut broke = false;
                     for stmt in body {
-                        interp.exec_stmt(stmt)?;
+                        match interp.exec_stmt(stmt) {
+                            Err(crate::interpreter::RuntimeError::Break) => {
+                                broke = true;
+                                break;
+                            }
+                            r => {
+                                r?;
+                            }
+                        }
+                    }
+                    if broke {
+                        break;
                     }
                 }
                 Ok(StmtResult::Continue)
             }
             Statement::Block(body) => {
                 for stmt in body {
-                    interp.exec_stmt(stmt)?;
+                    let result = self.execute_statement(interp, stmt)?;
+                    if !matches!(result, StmtResult::Continue) {
+                        return Ok(result);
+                    }
                 }
                 Ok(StmtResult::Continue)
             }
@@ -394,6 +419,10 @@ enum StmtResult {
     TermFailed,
     Escaped,
     ProgramExit(crate::interpreter::Value),
+    /// 2026-08-17 (foreach break): a `break;` executed — exit the innermost
+    /// enclosing `foreach`. Consumed by the foreach arm; a stray one is a
+    /// typechecker-rejected shape.
+    Break,
 }
 
 pub fn run_reactor(
