@@ -44,6 +44,17 @@ pub struct TypecheckContext<'a> {
     /// src`, `~<- src;`). Reading a consumed local afterward is a use-after-move
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
     pub consumed_locals: std::collections::HashSet<String>,
+    /// 2026-08-17 (plan 2026-08-17-error-intrinsic-piggybank-hashmap-completion.md):
+    /// usage-gated compile errors from `Error#`. A member body's `Error#` is
+    /// RECORDED here (keyed by the enclosing member name) instead of failing
+    /// immediately — declaring a sealed collection's error-ops must not fail.
+    /// When a call/method/op dispatch resolves that member, the pending error
+    /// PROMOTES to a hard `TypeError`. A top-level defn/txn body has no
+    /// current_owner and its `Error#` is a hard error immediately (live code).
+    pub pending_errors: std::collections::HashMap<String, Vec<String>>,
+    /// The enclosing member name while a member body is typechecked (set by
+    /// the member-body loop); None for top-level defns/txns.
+    pub current_owner: Option<String>,
     /// 2026-08-15 (coll plan §3.2): the `coll obj`/`coll struct` type names —
     /// they accept empty list literals (`[]`), and their op surface is
     /// scaffolded by the compiler.
@@ -126,6 +137,8 @@ impl<'a> TypecheckContext<'a> {
             init_names: std::collections::HashSet::new(),
             defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
+            pending_errors: std::collections::HashMap::new(),
+            current_owner: None,
             coll_types: std::collections::HashSet::new(),
             universe,
             casting_graph: crate::casting::graph::CastingGraph::new(),
@@ -492,7 +505,37 @@ impl<'a> TypecheckContext<'a> {
         Some(substitute_type_params(&out, &params, &args))
     }
 
-    /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
+    /// 2026-08-17 (Error# usage-gate): the ExtractFrom/CopyFrom MEMBER NAME on a
+    /// collection value's type — mirrors extract_element_type's op-member
+    /// resolution (operator member first, then the binding's impl fn).
+    fn arrow_extract_member_name(&self, collection: &Expr) -> Option<String> {
+        let inner = match collection {
+            Expr::AddrOf(e) => e.as_ref(),
+            other => other,
+        };
+        let Expr::Identifier(name) = inner else { return None; };
+        let type_name = match self.bindings.get(name)? {
+            Type::Custom(n) => n.clone(),
+            Type::Applied(n, _) => n.clone(),
+            _ => return None,
+        };
+        let members = self.type_members.get(&type_name)?;
+    if let Some(op_member) = operator_member(members, "ExtractFrom")
+        .or_else(|| operator_member(members, "CopyFrom"))
+    {
+        return Some(op_member.name.clone());
+    }
+    let bindings = self.regular_bindings.get(&type_name)?;
+    let binding = bindings
+        .iter()
+        .find(|b| b.name == "ExtractFrom" || b.name == "CopyFrom")?;
+    match &binding.expr {
+        Expr::Call(fn_name, _, _) => Some(fn_name.clone()),
+        _ => None,
+    }
+}
+
+/// 2026-07-20: Find a Parse op on a type that could accept a literal form.
     /// form: "Decimal", "Quoted", "Bare", or a hashword category like "#Int".
     /// discriminator: optional prefix/suffix hint ("0x", "h", "bf", etc.)
     /// Returns the OperatorDef if a matching Parse op exists.
@@ -1576,6 +1619,32 @@ fn infer_intrinsic_call(
                 .unwrap_or(Ok(Type::int()))?
         }
         ReturnKind::Exact(t) => t.clone(),
+        ReturnKind::Never => {
+            // 2026-08-17 (Error# usage-gate): a compile-time-failing intrinsic.
+            // In a MEMBER body, record the message and defer to call-site
+            // promotion (declaring a sealed collection's error-ops must not
+            // fail). In live top-level code, it is a hard error immediately —
+            // a reachable Error# means the program does not compile.
+            let msg = match args.first() {
+                Some(Expr::Quoted(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
+                _ => "Error# requires a string message".to_string(),
+            };
+            match &ctx.current_owner {
+                Some(owner) => {
+                    ctx.pending_errors
+                        .entry(owner.clone())
+                        .or_default()
+                        .push(msg);
+                }
+                None => {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "call to 'Error#'".to_string(),
+                        type_name: msg,
+                    });
+                }
+            }
+            Type::void()
+        }
         _ => Type::int(), // fallback for unknown Native kinds
     })
 }
@@ -2206,6 +2275,12 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                         // READ/EXTRACT: `dest <- queue` / `dest ~<- queue`.
                         // The value IS the collection (value_ty = Stack<T>); the
                         // target must accept the ExtractFrom/CopyFrom return type.
+                        // 2026-08-17 (Error# usage-gate): `~<- piggy` /
+                        // `x <- piggy` invoke the ExtractFrom/CopyFrom member —
+                        // promote its pending compile error.
+                        if let Some(extract_member) = ctx.arrow_extract_member_name(value) {
+                            promote_member_error(ctx, &extract_member)?;
+                        }
                         let target_ty = infer_type_only(t, ctx)?;
                         if target_ty != elem_ty {
                             let coercible = try_coerce_via_parse(value, &value_ty, &target_ty, ctx);
@@ -3242,6 +3317,10 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     mctx.bindings.insert(slot.name.clone(), slot.ty.clone());
                     mctx.state_keys.insert(slot.name.clone());
                 }
+                // 2026-08-17 (Error# usage-gate): while a member body is
+                // checked, record its name so an `Error#` inside is deferred to
+                // call-site promotion instead of failing the whole type.
+                mctx.current_owner = Some(crate::backend::llvm::emit_expr::member_briev_name(member).to_string());
                 match member {
                     TopLevel::Transaction(t) => {
                         for (n, ty) in &t.parameters {
@@ -3905,7 +3984,27 @@ fn resolve_method_call(
             });
         }
     }
+    // 2026-08-17 (Error# usage-gate): invoking a member whose body reaches an
+    // Error# fails the compile with the message.
+    promote_member_error(ctx, &member_name(&member))?;
     Ok(out.map(|t| substitute_type(&t, &subst)).unwrap_or(Type::void()))
+}
+
+/// 2026-08-17 (Error# usage-gate): a member whose body reaches an `Error#`
+/// PROMOTES its pending compile error to a hard error when the member is
+/// actually invoked — a reachable Error# means the program does not compile.
+/// A member never called keeps its pending error un-promoted (declaring a
+/// sealed collection's error-ops compiles).
+fn promote_member_error(ctx: &mut TypecheckContext, member_name: &str) -> Result<(), TypeError> {
+    if let Some(msgs) = ctx.pending_errors.remove(member_name) {
+        if let Some(msg) = msgs.first() {
+            return Err(TypeError::InvalidOperation {
+                operation: format!("use of '{}'", member_name),
+                type_name: msg.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn member_name(m: &TopLevel) -> String {
@@ -3994,6 +4093,9 @@ fn infer_generative_op_call(
         .and_then(|o| o.all_types().into_iter().next())
         .map(|t| substitute_type(&t, &subst))
         .unwrap_or_else(Type::void);
+    // 2026-08-17 (Error# usage-gate): `OpName#(recv, …)` invokes the op
+    // member — promote its pending compile error.
+    promote_member_error(ctx, &member.name)?;
     Ok(Some(ret))
 }
 

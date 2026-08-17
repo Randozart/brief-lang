@@ -22,6 +22,10 @@ pub enum ReturnKind {
     Inferred,
     /// Fixed concrete type (pointer, void, etc.).
     Exact(Type),
+    /// 2026-08-17 (plan 2026-08-17-error-intrinsic-piggybank-hashmap-completion.md):
+    /// the intrinsic NEVER returns (e.g. `Error#`). A body ending in a Never
+    /// call typechecks as any return type without a trailing `term`.
+    Never,
 }
 
 /// The signature of a compiler-known # intrinsic.
@@ -40,6 +44,17 @@ pub struct Signature {
 /// Look up the signature of a # intrinsic by name.
 pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
     match name {
+        // 2026-08-17 (plan 2026-08-17-error-intrinsic-piggybank-hashmap-completion.md):
+        // `Error#("msg")` is a COMPILE-TIME failure — a reachable error means
+        // the program does not compile (the message is the diagnostic); a
+        // provably-unreachable one is dead code, eliminated. The typechecker
+        // handles the reachability + message; this registers the name so
+        // `infer_call` routes to it and Never makes an error-only body
+        // typecheck as any return type.
+        "Error#" => Some(Signature {
+            name: "Error#", parameters: vec![("message", Type::string())],
+            return_kind: ReturnKind::Never, observable: false, variadic: false,
+        }),
         // ── Arithmetic (return matches input type) ────────────────────
         "Add#" => Some(Signature { name: "Add#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Sub#" => Some(Signature { name: "Sub#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
