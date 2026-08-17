@@ -1696,6 +1696,40 @@ defn parity(x: Int) -> Bool
 
 Generated behavior must satisfy the declared contracts and reference obligations. Derivation never weakens a contract.
 
+### 18.6 `Error#` — compile-time failure (2026-08-17)
+
+`Error#("message")` is a COMPILE-TIME failure, not a runtime value. Its
+semantics follow reachability:
+
+- **Reachable → the program does not compile.** The message is the
+  diagnostic. A top-level `defn`/`txn` body that (statically) reaches an
+  `Error#` is live code and fails immediately.
+- **A MEMBER body's `Error#` is usage-gated.** Declaring a type whose op
+  members contain `Error#` compiles — this is how a "sealed" collection (a
+  `PiggyBank`) declares un-supported operations with a helpful message. The
+  error PROMOTES (fails the compile) only when that member is actually
+  invoked via a method call, a generative op (`Count#(x)`), or an arrow
+  extract (`x <- piggy` / `~<- piggy`). A member never called is provably
+  unreachable — its `Error#` is dead code, eliminated.
+- **Provably-dead branches** (constant-false conditions, statements after a
+  `term`) do not record an error.
+- Unprovable reachability resolves conservatively: if the compiler cannot
+  prove the call is dead, it fails.
+
+`Error#` returns nothing; a body ending in it typechecks as any return type
+(`ReturnKind::Never`). It has no runtime meaning — the compile fails before
+code generation.
+
+The canonical use is a `PiggyBank` (stdlib/collections.bv): a WORM-like,
+opaque, one-shot collection whose only in is `<-` (a declared `op InsertAt`)
+and whose only out is `~<-` (a declared `op ExtractFrom`) that returns
+everything and self-frees. Its other collection ops (`CopyFrom`, `At`, `Count`,
+`Iter`) are declared as members whose bodies call `Error#` — so `piggy[0]`,
+`foreach x in piggy`, `piggy.Count#()`, and `x <- piggy` each fail at compile
+time with a message directing the user to smash the jar. This proves the
+`#` intrinsic surface is op-driven: `Count#()` dispatches through the DECLARED
+`op Count`, never implicitly reading a `count` field.
+
 ## 19. Foreign functions, export, and GLUE
 
 ### 19.1 Foreign declaration

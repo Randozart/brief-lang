@@ -43,6 +43,18 @@ helpful messages.
 3. No backend emission — the compile fails before codegen; a dead `Error#` is
    DCE'd like any unreachable statement.
 
+**SHIPPED 2026-08-17 (commits `cebd4b8d` → `68ce2ecc`).** The pending-error
+store lives on `TypeUniverse` (`pending_member_errors: Mutex` — RefCell broke
+the interpreter's static OnceLock; a manual `Clone` was added since Mutex
+isn't Clone). Two implementation refinements surfaced during verification: (1)
+the member-body mctx and the call-site ctx must share a single store — the
+TypeUniverse both borrow; (2) `check_program` must check obj MEMBER bodies
+BEFORE `check_top_level` so a member's `Error#` is recorded before any call
+site promotes it (the original order promoted against an empty store and a
+invoked sealed-op wrongly compiled). Verified: top-level `Error#` → fails with
+the message; a member with `Error#` NOT invoked compiles; the SAME member
+invoked fails with the message. SPEC §18.6 documents the semantics.
+
 **Verify:** `Error#("x")` in a called fn → `brievc check` errors with "x".
 `Error#` in a never-called member → compiles. `Error#` after `term` / in a
 constant-false `when` → compiles.
