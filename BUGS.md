@@ -54,6 +54,19 @@ register bookkeeping.
 loops — likely the loop-carried local alloca/phi predecessor tracking
 (`fun.cur_block` / the countdown-latch phis, emit_stmt.rs:1284).
 
+## `when`-guard + nested probe `foreach` crashed clang — FIXED 2026-08-17
+
+**Date:** 2026-08-17 (found via hash_ops_idio)
+**Status:** FIXED — a countdown node with a `when`-guard AND an inlined member
+`foreach` produced IR where the countdown latch phi's predecessor set included
+the nested loop's internal blocks; `llc` reported "Instruction does not
+dominate all uses! %cdm337 = sub ...", and clang's LoopDeletionPass segfaulted.
+Fix: the `Statement::Foreach` arm sets `fun.cur_block = Some(foreach.endN)`
+(emit_stmt.rs), mirroring the Guarded/If arms — a countdown body ending in a
+`foreach` reports its end block so the decrement + latch phi land correctly.
+hash_ops_idio now compiles and runs. (Its hot-loop get still reads 0 — the
+multi-member register collision above, a SEPARATE bug.)
+
 ## Arrow `<-` push into a loop-carried local List double-constructs — OPEN
 
 **Date:** 2026-08-17 (found by the HashMap `keys()` scan)

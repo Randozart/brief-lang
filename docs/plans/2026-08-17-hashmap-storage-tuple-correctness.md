@@ -237,3 +237,25 @@ via direct member calls.
 1889 lib tests green; all stdlib `brievc check` clean; `cargo build` no new
 warnings; Praetor no new diagnostics (verified vs baseline). P4 (the
 `when`-guard clang crash) is NOT yet fixed — separate follow-up.
+
+## P4 — `when`-guard clang crash (FIXED, 2026-08-17)
+
+**Bug (exact):** a countdown node whose body contains a nested `foreach` (an
+inlined collection member's probe loop) AND a `when`-guard produced IR where
+the countdown latch phi's predecessor set included the nested loop's internal
+blocks — `llc`: "Instruction does not dominate all uses! `%cdm337 = sub i64
+%cdr136, 1`". clang's LoopDeletionPass then segfaulted.
+
+**Fix (emit_stmt.rs Foreach arm):** after emitting `foreach.endN`, set
+`fun.cur_block = Some(end_lbl)` — mirroring the Guarded/If arms (1289/1323).
+A countdown body that ends in a `foreach` now reports the foreach's END block
+so the countdown places its decrement + latch phi there. Verified: the pure
+`when`-guard countdown prints correct sums (45/190/435 — the trailing 0 from a
+non-converging `node fin` is pre-existing baseline behavior); hash_ops_idio
+now COMPILES and RUNS without crashing clang.
+
+**Remaining (separate pre-existing bug, BUGS.md):** the multi-member register
+collision — `m.get(i)` returns 0 when 3+ inlined probe members share a node
+body (hash_ops_idio compiles but its hot-loop get reads wrong values). Until
+fixed, hash_ops_idio stays out of the suite (it would fail the correctness
+check). The P4 fix (compiler crash) is independent and landed.

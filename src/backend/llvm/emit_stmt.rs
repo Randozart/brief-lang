@@ -1661,6 +1661,18 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 writeln!(out, "{}br label %{}", indent, header).ok();
             }
             writeln!(out, "{}{}:", indent, end_lbl).ok();
+            // 2026-08-17 (P4, plan 2026-08-17-hashmap-storage-tuple-correctness.md):
+            // a COUNTDOWN body that ends in a `foreach` (e.g. an inlined
+            // collection member's probe loop) must report the foreach's END
+            // block so the countdown places its decrement + latch phi there.
+            // Without this the latch phi's predecessor set includes the nested
+            // loop's internal blocks where the countdown decrement is not
+            // defined — llc: "Instruction does not dominate all uses! %cdm337 =
+            // sub". Mirrors the Guarded/If arms (1289/1323). Verified: the pure
+            // `when`-guard countdown still prints correct sums (the trailing 0
+            // from a non-converging `node fin` is pre-existing baseline
+            // behavior).
+            backend.fun.cur_block = Some(end_lbl.clone());
             backend.fun.terminated = false;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
