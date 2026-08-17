@@ -45,15 +45,10 @@ pub struct TypecheckContext<'a> {
     /// compile error; reassigning it (via `=` or `let`) clears the mark.
     pub consumed_locals: std::collections::HashSet<String>,
     /// 2026-08-17 (plan 2026-08-17-error-intrinsic-piggybank-hashmap-completion.md):
-    /// usage-gated compile errors from `Error#`. A member body's `Error#` is
-    /// RECORDED here (keyed by the enclosing member name) instead of failing
-    /// immediately — declaring a sealed collection's error-ops must not fail.
-    /// When a call/method/op dispatch resolves that member, the pending error
-    /// PROMOTES to a hard `TypeError`. A top-level defn/txn body has no
-    /// current_owner and its `Error#` is a hard error immediately (live code).
-    pub pending_errors: std::collections::HashMap<String, Vec<String>>,
-    /// The enclosing member name while a member body is typechecked (set by
-    /// the member-body loop); None for top-level defns/txns.
+    /// the enclosing member name while a member body is typechecked (set by
+    /// the member-body loop). An `Error#` in the body records its message in
+    /// `self.universe.pending_member_errors` (shared with call-site ctxs).
+    /// None for top-level defns/txns — a top-level `Error#` is a hard error.
     pub current_owner: Option<String>,
     /// 2026-08-15 (coll plan §3.2): the `coll obj`/`coll struct` type names —
     /// they accept empty list literals (`[]`), and their op surface is
@@ -137,7 +132,6 @@ impl<'a> TypecheckContext<'a> {
             init_names: std::collections::HashSet::new(),
             defined_fns: std::collections::HashSet::new(),
             consumed_locals: std::collections::HashSet::new(),
-            pending_errors: std::collections::HashMap::new(),
             current_owner: None,
             coll_types: std::collections::HashSet::new(),
             universe,
@@ -1631,7 +1625,10 @@ fn infer_intrinsic_call(
             };
             match &ctx.current_owner {
                 Some(owner) => {
-                    ctx.pending_errors
+                    ctx.universe
+                        .pending_member_errors
+                        .lock()
+                        .unwrap()
                         .entry(owner.clone())
                         .or_default()
                         .push(msg);
@@ -3255,12 +3252,6 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         defined_fns: &defined_fns,
     };
 
-    for item in items.iter() {
-        if let Err(e) = check_top_level(item, universe, &env) {
-            errors.push(e);
-        }
-    }
-
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
     // bound. Without this, `len = "hello"` inside a member passes silently.
     for item in items.iter() {
@@ -3361,6 +3352,13 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     _ => {}
                 }
             }
+        }
+    }
+
+
+    for item in items.iter() {
+        if let Err(e) = check_top_level(item, universe, &env) {
+            errors.push(e);
         }
     }
 
@@ -3996,8 +3994,10 @@ fn resolve_method_call(
 /// A member never called keeps its pending error un-promoted (declaring a
 /// sealed collection's error-ops compiles).
 fn promote_member_error(ctx: &mut TypecheckContext, member_name: &str) -> Result<(), TypeError> {
-    if let Some(msgs) = ctx.pending_errors.remove(member_name) {
+    let mut store = ctx.universe.pending_member_errors.lock().unwrap();
+    if let Some(msgs) = store.remove(member_name) {
         if let Some(msg) = msgs.first() {
+            drop(store);
             return Err(TypeError::InvalidOperation {
                 operation: format!("use of '{}'", member_name),
                 type_name: msg.clone(),

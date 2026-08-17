@@ -56,7 +56,7 @@ pub struct ResolvedType {
 /// 2026-08-09 (Phase 12, SPEC §19.6): the `melds` registry is removed — foreign
 /// shapes adapt through GLUE/Data Briev descriptors, explicit protocol cast
 /// edges, ownership contracts, and effects. No meld declarations exist.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
     /// 2026-07-31: Phase 3 (§8.5-E6) — non-fatal diagnostics surfaced by the
@@ -66,16 +66,37 @@ pub struct TypeUniverse {
     /// silent. The default VALUES are preserved (behavior unchanged); this
     /// channel just makes them observable.
     pub warnings: Vec<String>,
+    /// 2026-08-17 (plan 2026-08-17-error-intrinsic-piggybank-hashmap-completion.md):
+    /// usage-gated compile errors recorded by `Error#` in a MEMBER body. The
+    /// typechecker's member-body context and its call-site context both borrow
+    /// the same `&TypeUniverse`, so a member's pending error recorded here is
+    /// visible to the call-site promotion (resolve_method_call /
+    /// infer_generative_op_call / arrow extract). Keyed by member name.
+    /// Interior mutability: `TypecheckContext` holds `&TypeUniverse`.
+    pub pending_member_errors: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 /// Return the default ALU for a given Common Type Definition.
 // 2026-07-17: ALU describes what hardware computes with values of this type.
 // PascalCase = known to all backends; lowercase-quoted = backend-specific.
+impl Clone for TypeUniverse {
+    fn clone(&self) -> Self {
+        TypeUniverse {
+            types: self.types.clone(),
+            warnings: self.warnings.clone(),
+            pending_member_errors: std::sync::Mutex::new(
+                self.pending_member_errors.lock().unwrap().clone(),
+            ),
+        }
+    }
+}
+
 impl TypeUniverse {
     pub fn new() -> Self {
         let mut universe = TypeUniverse {
             types: HashMap::new(),
             warnings: Vec::new(),
+            pending_member_errors: std::sync::Mutex::new(std::collections::HashMap::new()),
         };
         universe.seed_primordial_types();
         universe

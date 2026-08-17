@@ -326,6 +326,7 @@ mod tests {
         TypeUniverse {
             types,
             warnings: Vec::new(),
+            pending_member_errors: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
