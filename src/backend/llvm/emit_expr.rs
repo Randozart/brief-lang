@@ -2580,6 +2580,16 @@ impl LlvmBackend {
             let iw = format!("i{}", self.ctx.int_bits);
             writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, self_ptr, iw, recv_reg.name).ok();
             self.fun.self_binding = Some((type_name.to_string(), self_ptr.clone()));
+            // 2026-08-17 (cap column clobber): a boxed member body must never
+            // inherit the ENCLOSING instance's self_prefix. The map's init
+            // member runs with an outer `m` preface-style prefix; its nested
+            // `let init_items: List<(K, V)> = []` (a boxed local coll) would
+            // otherwise resolve the coll's hidden `cap = 16` assign as
+            // `m.cap` — the MAP's cap column — overwriting `cap = 256` (the
+            // hash_ops_idio 240-vs-24999995000000 divergence). Boxed members
+            // resolve bare names against their OWN receiver; drop the leaking
+            // prefix for the body duration (restored at the end).
+            self.fun.self_prefix = None;
         }
         let saved_bindings = self.fun.let_bindings.clone();
         let saved_types = self.fun.let_binding_types.clone();

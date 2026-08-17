@@ -141,6 +141,35 @@ before building. `vA_2get` (let-bound inserts + gets-only observable) segfaults
 even pre-fix: the inserts emit into the unused alwaysinline `@txn_go` copy, not
 `@main` — pre-existing, out of scope here.
 
+**UPDATE 2026-08-17 (diagnosis — the countdown failure is NOT a collapse):**
+a full LTO pass trace of `hash_ops_idio` (8178 pass dumps) shows the
+`__print_int` NEVER leaves the IR; the final `@main` is semantically complete
+(fully unrolled 16-slot probe). The `240` output is a runtime EMISSION bug: the
+HashMap `init`'s nested `let init_items: List<(K, V)> = []` wrote the List's
+hidden `cap = 16` through the ENCLOSING `HashMap`-prefixed context into the
+MAP's `cap` column — clobbering `cap = 256` to 16 (10M inserts into a 16-slot
+table → read-back sum 240). Same double-store in both `@init_state` and `@main`.
+Small-key repros (p5, m-grid, keys < 16) were insensitive to cap 16 vs 256, so
+the grid never exposed it.
+
+**Fix shipped (cap column clobber):** `emit_member_body`'s boxed-self branch
+clears the leaking `self_prefix` for the body duration — boxed coll members
+resolve bare names against their OWN receiver, never the enclosing instance's
+columns (emit_expr.rs). Verified: hash_ops_idio 240 → 65280 (= 2·Σ0..255, the
+exact read-back for a correctly-256-cap map that fills at count==cap).
+
+**Remaining gap (this session):** even with cap correctly 256, the map fills at
+256 entries (`insert` refuses at `count < cap`) while the C reference is a
+direct O(1) write (`keys[i % CAP] = i; sum += vals[i % CAP]`, output ≡ Σ2i).
+And the map's linear-probe `foreach q in 0..cap` scans the FULL cap per
+get/insert (no early exit — the language has no `break`). Resolution: (a) add a
+bare `break` early-exit to `foreach` (search-until-found is a condition exit,
+per SPEC "counted iteration uses … reactive/transactional structure" — `break`
+is an exit FORM of `foreach`, not a for/while/loop keyword); (b) stdlib
+`HashMap.init` honors a capacity arg (0 → 256) and `insert`/`get`/`contains`/
+`remove` `break` on the matched slot; (c) `hash_ops_idio` uses `2 * N` capacity
+so it never fills, giving O(1) probes and output == C (Σ2i).
+
 ## Phase C — Fix 2: arrow-push double-construction + member-field push
 
 **Bugs:** (a) `acc <- keys[i]` into a loop-carried local List in a member

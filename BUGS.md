@@ -1,5 +1,26 @@
 # Bugs
 
+## Boxed member body inherited the enclosing instance's `self_prefix` — FIXED 2026-08-17
+
+**Date:** 2026-08-17 (surfaced by `hash_ops_idio` → 240 instead of C's
+24999995000000)
+**Status:** Fixed (`emit_expr.rs` — the `cap` column clobber).
+**Root cause:** `emit_member_body`'s boxed-self path set `self_binding` but
+left the ENCLOSING instance's `self_prefix` in place. The HashMap's `init`
+member runs with an outer `HashMap` prefix; its nested
+`let init_items: List<(K, V)> = []` (a boxed local coll) routed the coll's
+hidden `cap = 16` assign through that prefix → `HashMap.cap` → the MAP's cap
+state column (slot 6), overwriting the just-stored `cap = 256`. The List
+ended up with cap 16, so 10M inserts into a 16-slot table → read-back sum
+`240` instead of C's Σ2i. (`len`/`inner.data` didn't collide — `m.len`/
+`inner.data` aren't state columns, so they fell through to the correct
+boxed-self path; only `cap` shared a name with a real map field.)
+**Fix:** boxed member bodies clear the leaking `self_prefix` for their
+duration (restored at the end) — bare names resolve against the boxed
+receiver, never the enclosing instance's columns.
+**Verification:** hash_ops_idio 240 → 65280 (= 2·Σ0..255, correct for the
+256-cap map before the capacity rework).
+
 ## stdlib iterator.bv / hashmap.bv written aspirationally — never compiled — CLOSED
 
 **Date:** 2026-08-14 (found while verifying generic `defn f<T>` dispatch)
