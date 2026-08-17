@@ -289,7 +289,7 @@ fn guard_cond_i1(backend: &mut LlvmBackend, out: &mut String, indent: &str, cond
 
 pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
     match stmt {
-        Statement::Let { name, ty, expr, modifiers, .. } => {
+        Statement::Let { name, names, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
             let mut via_scaffolded_construction = false;
             let val = match expr {
@@ -369,19 +369,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // type (`MyQueue`), so a coll-typed binding is a collection
                     // too — construct it through the scaffolded ops.
                     let constructed = {
-                        // 2026-08-16 (hashmap redesign): a collection is an
-                        // op-surface type OR a `coll` keyword type — any
-                        // Custom/Applied obj declaring the collection ops
-                        // (op Init/InsertAt/Count) is a collection VALUE, not
-                        // a pooled instance, and a `coll struct` (InlineFixed)
-                        // constructs its literal directly. The old
-                        // coll_storage check only caught `coll` keyword types;
-                        // a hand-written `obj HashMap<K,V>` has no coll_storage
-                        // yet must construct the same way. is_coll_type covers
-                        // both (coll storage OR op-surface via is_heap_coll).
+                        // 2026-08-17 (storage correctness): a LOCAL collection
+                        // is a `coll` keyword type OR an op-surface obj
+                        // (declares op Init/InsertAt/Count). is_coll_type
+                        // covers `coll` storage; is_op_surface_coll covers a
+                        // hand-written obj (HashMap). A local collection can
+                        // never be an unpacked column, so it constructs
+                        // through the ops (List literal → construct_local_collection;
+                        // seed → construct_local_collection_seed).
                         let is_coll = ty.as_ref().map(|t| match t {
                             crate::ast::Type::Applied(n, _) | crate::ast::Type::Custom(n) => {
-                                backend.is_coll_type(t) || backend.is_heap_coll(n)
+                                backend.is_coll_type(t) || backend.is_op_surface_coll(n)
                             }
                             _ => false,
                         }).unwrap_or(false);
@@ -417,6 +415,41 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     TypedRegister { name: v, ty: ty.clone().unwrap_or(Type::int()) }
                 }
             };
+            // 2026-08-17 (tuple correctness, plan
+            // 2026-08-17-hashmap-storage-tuple-correctness.md): TUPLE
+            // DESTRUCTURE `let (a, b) = t`. The parser + typechecker already
+            // support it (check_let_destructure binds each name to the element
+            // type); codegen DROPPED the `names` list (only `name` = names[0]
+            // bound, to the WHOLE boxed handle). The value is a boxed i64
+            // handle to the emit_tuple `[len, e0, e1, …]` heap block; each
+            // name binds to `GEP i64 slot (i+1)` + load. The typechecker bound
+            // the element types; recover them from the declared tuple type
+            // (fallback Int for unannotated — most tuple elements are scalars).
+            if names.len() > 1 {
+                let elem_tys: Vec<Type> = match ty {
+                    Some(crate::ast::Type::Tuple(ts)) => ts.clone(),
+                    _ => vec![Type::int(); names.len()],
+                };
+                let handle_p = backend.fun.gen_reg();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, handle_p, val.name).ok();
+                for (i, n) in names.iter().enumerate() {
+                    let slot = backend.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = getelementptr i64, ptr {}, i64 {}",
+                        indent, slot, handle_p, i + 1
+                    )
+                    .ok();
+                    let elem = backend.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, elem, slot).ok();
+                    backend.fun.let_bindings.insert(n.clone(), elem.clone());
+                    backend.fun.let_binding_types
+                        .insert(n.clone(), elem_tys.get(i).cloned().unwrap_or_else(Type::int));
+                    backend.fun.let_original_types
+                        .insert(n.clone(), elem_tys.get(i).cloned().unwrap_or_else(Type::int));
+                }
+                return TypedRegister { name: val.name, ty: Type::void() };
+            }
             // 2026-08-04 (compiler-in-Briev): a top-level let that is reassigned
             // later was PRE-BOUND to an entry-block alloca (emit_definition's
             // pre-declaration). Store the value into that alloca and keep the

@@ -559,6 +559,17 @@ impl LlvmBackend {
         if matches!(ty, Type::Function(_, _)) {
             return "ptr".to_string();
         }
+        // 2026-08-17 (tuple correctness, plan
+        // 2026-08-17-hashmap-storage-tuple-correctness.md): a TUPLE VALUE is a
+        // boxed i64 handle (emit_tuple's `[len, e0, e1, …]` heap block,
+        // ptrtoint'd). The universe/casting-graph path resolved a tuple param
+        // to the struct type `{ i64, i64 }`, but the CALL SITE passes the boxed
+        // i64 handle — an ABI mismatch (`%arg0` defined `{i64,i64}` but used as
+        // `inttoptr i64`). Map a Tuple to the boxed handle type, exactly like
+        // obj values below.
+        if matches!(ty, Type::Tuple(_)) {
+            return format!("i{}", self.ctx.int_bits);
+        }
         // 2026-07-30: Slice<T> always uses { ptr, i64 } (fat pointer). Must be
         // checked BEFORE the general struct_types check because Slice is also
         // registered as a struct type but should be passed by value.

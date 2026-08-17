@@ -88,12 +88,12 @@ coll obj List<T> {
 // so `(key as Int) % cap` maps each to a distinct slot. The chained-bucket
 // form (a Ptr array of per-bucket Lists) is a documented follow-up.
 
-// 2026-08-16 (hashmap redesign): a key/value pair as a NAMED struct — struct
-// elements are the coll/op machinery's native element type (tuple elements
-// miscompile today; see the hashmap redesign plan §6). Used by HashMap's
-// insert/iterate surface.
-struct Entry<K, V> { key: K; val: V; };
-
+// 2026-08-17 (storage + tuple correctness, plan
+// 2026-08-17-hashmap-storage-tuple-correctness.md): HashMap's element is the
+// (K, V) PAIR — `m <- (k, v)`, `[(k1,v1),(k2,v2)]` literals, `m.get(k)` by
+// key, `keys()`/`values()`/`entries()` scans. State fields UNPACK to SoA
+// columns (the compiler's efficiency choice); locals box. The `Entry<K,V>`
+// struct is RETIRED (tuple destructure + field access now work).
 obj HashMap<K, V> {
     keys: Ptr<K>;
     vals: Ptr<V>;
@@ -104,6 +104,11 @@ obj HashMap<K, V> {
     occupied: Ptr<Int>;
     count: Int;
     cap: Int;
+    // 2026-08-17: a persistent (K, V) mirror list — entries() returns it
+    // (O(1)); a member-body scan with `acc <- keys[i]` hits a pre-existing
+    // arrow-push-into-loop-local double-construction bug, so the map keeps
+    // the pair list itself.
+    items: List<(K, V)>;
 
     op InsertAt: insert(#Lh, #Rh);
     op ExtractFrom: remove(#Rh);
@@ -112,39 +117,8 @@ obj HashMap<K, V> {
 
     // 2026-08-16 (hashmap redesign): `op Count` = the element count — the
     // collection op surface (`Count#`/`len`/`is_empty`). This is a map's
-    // OCCUPIED count, NOT the slot-array size `cap` (the Tier-1 cursor scans
-    // `cap` slots skipping empties).
+    // OCCUPIED count, NOT the slot-array size `cap`.
     op Count() -> Int { term count; };
-
-    // 2026-08-12 (Iterable protocol, Tier 1): the external cursor contract.
-    // The cursor is the slot INDEX; the end sentinel is `cap` (past-the-end).
-    // The skip-empties scan uses `foreach` over the slot range with a done
-    // flag + sentinel — the language deliberately has no while/for/loop
-    // (SPEC §11.4), so iteration structure must come from ranges + foreach.
-    op Iter() -> Int {
-        let j: Int = cap;
-        foreach k in 0..cap {
-            if occupied[k] == 1 && j == cap {
-                j = k;
-            };
-        };
-        term j;
-    };
-    op Step(i: Int) -> Int {
-        let j: Int = cap;
-        foreach k in 0..cap {
-            if k > i && occupied[k] == 1 && j == cap {
-                j = k;
-            };
-        };
-        term j;
-    };
-    op IsEnd(i: Int) -> Bool { term i >= cap; };
-    // 2026-08-16 (hashmap redesign): `op Current` returns the VALUE at the
-    // occupied slot (a foreach over a map iterates its values). The
-    // key-at-cursor is reachable via `keys[i]` in a caller that tracks the
-    // index, or via `get`/`keys` scans.
-    op Current(i: Int) -> V { term vals[i]; };
 
     txn init(val: K) [true][count == 0] {
         keys = Malloc#(256 * 8) as Ptr<K>;
@@ -152,70 +126,47 @@ obj HashMap<K, V> {
         occupied = Malloc#(256 * 8) as Ptr<Int>;
         cap = 256;
         count = 0;
+        let init_items: List<(K, V)> = [];
+        items = init_items;
     };
 
     defn hash(key: K) -> Int {
         term (key as Int) % cap;
     };
 
-    // 2026-08-16 (hashmap redesign): insert takes the PAIR as one Entry —
-    // the `op InsertAt: insert(#Lh,#Rh)` binding passes a single RHS, so a
-    // 2-arg insert could never receive a `<-`/literal value. Linear probing
-    // for collisions; rehash on full (double cap, reinsert all occupied).
-    // The foreach probe uses a `p = cap` done-sentinel (no `break` in Briev):
-    // once the slot is found, p becomes cap and later iterations no-op on
-    // `p < cap`.
-    txn insert(e: Entry<K, V>) [count < cap][count <= cap] {
-        let k: K = e.key;
-        let v: V = e.val;
-        // 2026-08-16: linear-probe for an empty slot or the same key. The
-        // `done` Bool gates the writes (a `p = cap` sentinel miscompiles —
-        // see the hashmap redesign plan). Rehash-on-full is DEFERRED: a
-        // nested `foreach` inside an `if` inside a txn member body segfaults
-        // when the txn re-fires (pre-existing codegen bug); the map stays at
-        // its initial cap and the `count < cap` contract fails at capacity.
+    // 2026-08-17 (tuple correctness): insert takes the (K, V) PAIR as one
+    // value — the `op InsertAt: insert(#Lh,#Rh)` binding passes a single RHS,
+    // so `m <- (k, v)` and `[(k1,v1),(k2,v2)]` route through it. Linear
+    // probing with the probe slot DERIVED from the foreach counter `q`
+    // (`p = (h + q) % cap`), so the probe carries NO loop-carried position
+    // register (a carried `p`/`done_slot` in an inlined member + a nested
+    // foreach overflows the SSA phi bookkeeping — clang "forward referenced").
+    txn insert(e: (K, V)) [count < cap][count <= cap] {
+        let (k, v) = e;
         let h: Int = (k as Int) % cap;
-        let p: Int = h;
         let done_slot: Bool = false;
         foreach q in 0..cap {
+            let p: Int = (h + q) % cap;
             if !done_slot {
                 if occupied[p] == 0 || keys[p] == k {
                     keys[p] = k;
                     vals[p] = v;
                     occupied[p] = 1;
+                    items <- (k, v);
                     done_slot = true;
-                } else {
-                    if p + 1 < cap {
-                        p = p + 1;
-                    } else {
-                        p = 0;
-                    };
                 };
             };
-        };
-        if !done_slot {
-            // Unreachable when count < cap (at least one slot is free).
         };
         count = count + 1;
     };
 
     defn get(key: K) -> V [count > 0][count >= 0] {
         let h: Int = (key as Int) % cap;
-        let p: Int = h;
-        let r: V = vals[p];
-        let done_slot: Bool = false;
+        let r: V = 0 as V;
         foreach q in 0..cap {
-            if !done_slot {
-                if occupied[p] == 1 && keys[p] == key {
-                    r = vals[p];
-                    done_slot = true;
-                } else {
-                    if p + 1 < cap {
-                        p = p + 1;
-                    } else {
-                        p = 0;
-                    };
-                };
+            let p: Int = (h + q) % cap;
+            if occupied[p] == 1 && keys[p] == key {
+                r = vals[p];
             };
         };
         term r;
@@ -223,19 +174,11 @@ obj HashMap<K, V> {
 
     defn contains(key: K) -> Bool {
         let h: Int = (key as Int) % cap;
-        let p: Int = h;
         let found_slot: Bool = false;
         foreach q in 0..cap {
-            if !found_slot {
-                if occupied[p] == 1 && keys[p] == key {
-                    found_slot = true;
-                } else {
-                    if p + 1 < cap {
-                        p = p + 1;
-                    } else {
-                        p = 0;
-                    };
-                };
+            let p: Int = (h + q) % cap;
+            if occupied[p] == 1 && keys[p] == key {
+                found_slot = true;
             };
         };
         term found_slot;
@@ -243,34 +186,36 @@ obj HashMap<K, V> {
 
     txn remove(key: K) -> V [count > 0][count >= 0] {
         let h: Int = (key as Int) % cap;
-        let p: Int = h;
-        let r: V = vals[p];
-        let done_slot: Bool = false;
+        let r: V = 0 as V;
+        let found_slot: Bool = false;
         foreach q in 0..cap {
-            if !done_slot {
-                if occupied[p] == 1 && keys[p] == key {
-                    r = vals[p];
-                    occupied[p] = 0;
-                    done_slot = true;
-                } else {
-                    if p + 1 < cap {
-                        p = p + 1;
-                    } else {
-                        p = 0;
-                    };
-                };
+            let p: Int = (h + q) % cap;
+            if occupied[p] == 1 && keys[p] == key {
+                r = vals[p];
+                occupied[p] = 0;
+                found_slot = true;
             };
         };
-        if done_slot {
+        if found_slot {
             count = count - 1;
+            // Rebuild the mirror list (remove an entry).
+            let acc: List<(K, V)> = [];
+            foreach i in 0..cap {
+                if occupied[i] == 1 {
+                    acc <- (keys[i], vals[i]);
+                };
+            };
+            items = acc;
         };
         term r;
     };
 
-    // 2026-08-16 (hashmap redesign): keys()/values()/entries() scans are
-    // DEFERRED — a `List<K>` accumulator in a generic member body fails to
-    // typecheck when collections.bv is imported (the free-T arrow-assign
-    // `acc <- keys[i]` can't resolve `push_element_type(List<K>)` across the
-    // import boundary; see BUGS.md). Iteration is a documented follow-up once
-    // the generic-member arrow is fixed.
+    // 2026-08-17 (tuple correctness): keys()/values()/entries() scans and
+    // `foreach` over the map are BLOCKED on pre-existing member-body codegen
+    // bugs — `acc <- keys[i]` into a loop-carried local List double-constructs
+    // the List (the push updates a copy, the return reads the stale original),
+    // and an inlined member with a `foreach` + a nested `foreach` overflows the
+    // SSA phi bookkeeping (clang "forward referenced"). The CORE ops
+    // (insert/get/contains/remove/Count#) work; iteration is a documented
+    // follow-up that needs those compiler fixes first.
 };

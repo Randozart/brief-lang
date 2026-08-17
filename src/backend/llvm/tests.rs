@@ -7437,3 +7437,60 @@ fn test_range_metadata_bounds_are_typed() {
     assert!(!ir.contains("!range !{ 0, 10 }"),
         "the untyped legacy range form must not be emitted; got:\n{ir}");
 }
+
+/// 2026-08-17 (tuple correctness, plan 2026-08-17-hashmap-storage-tuple-correctness.md):
+/// `let (a, b) = t` destructures a boxed tuple handle into element registers
+/// — GEP i64 slot (i+1) loads. Previously codegen dropped the `names` list and
+/// the second name was an undefined register.
+#[test]
+fn test_tuple_destructure_emits_element_geps() {
+    let src = r#"
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let t: (Int, Int) = (1, 2);
+    let (a, b) = t;
+    done = a + b;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.matches("getelementptr i64, ptr ").count() >= 2,
+        "the destructure must GEP each tuple element; got:\n{ir}"
+    );
+}
+
+/// 2026-08-17 (tuple correctness): numeric field access `t.0`/`t.1` reads a
+/// tuple element through the boxed handle.
+#[test]
+fn test_tuple_numeric_field_access() {
+    let src = r#"
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let t: (Int, Int) = (5, 6);
+    done = t.0 + t.1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.matches("getelementptr i64, ptr ").count() >= 2,
+        "numeric field access must GEP each tuple element; got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("@t = "),
+        "numeric field access must not emit an undefined @t global; got:\n{ir}"
+    );
+}

@@ -275,7 +275,31 @@ impl<'a> Parser<'a> {
                 }
             } else if self.eat(&Token::Dot) {
                 // Field access: a.f — the receiver is PRESERVED.
-                let name = self.expect_identifier()?;
+                // 2026-08-17 (tuple correctness, plan
+                // 2026-08-17-hashmap-storage-tuple-correctness.md): a NUMERIC
+                // field name `t.0`/`t.1` is a tuple ELEMENT access (the
+                // typechecker's resolve_field_type already supports numeric
+                // field names; the parser rejected them with expect_identifier).
+                // `a.1$(args)` navigation chains are identifier-only; a numeric
+                // name is always an element read.
+                let name = if self.peek().is_some_and(|t| matches!(t, Token::Integer(_))) {
+                    match self.advance() {
+                        Some((Token::Integer(n), span)) => n.to_string(),
+                        Some((tok, span)) => {
+                            return Err(crate::errors::SyntaxError::UnexpectedToken {
+                                expected: "an integer field name after '.'".into(),
+                                found: format!("{}", tok),
+                                span: self.make_span(span),
+                            });
+                        }
+                        None => return Err(crate::errors::SyntaxError::UnexpectedEOF {
+                            expected: "an integer field name after '.'".into(),
+                            span: crate::errors::Span::dummy(),
+                        }),
+                    }
+                } else {
+                    self.expect_identifier()?
+                };
                 // 2026-07-21: Navigation chain call: a.first$(args).
                 if name.ends_with('$') && self.check(&Token::LParen) {
                     self.expect(Token::LParen)?;

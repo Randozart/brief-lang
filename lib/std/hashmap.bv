@@ -1,26 +1,22 @@
 // HashMap - a hash map over the `obj HashMap<K, V>` in std/collections.bv
 // Tier 9: Standard Library Extensions
 //
-// 2026-08-16 (hashmap redesign, plan 2026-08-16-hashmap-redesign.md): this
-// file is rewritten against the REAL compiler surface. The old version used
-// syntax that never existed (`:>` object-property calls, `term {}` empty-map
-// literal, `Option`/`Some`/`None`, list concat `+`) and never type-checked.
-// The new API uses the HashMap's op surface (`op Count` + member methods) and
-// the `Entry<K, V>` pair struct (tuple elements miscompile today — see plan
-// §6).
+// 2026-08-17 (storage + tuple correctness, plan
+// 2026-08-17-hashmap-storage-tuple-correctness.md): rewritten on the TUPLE
+// PAIR surface. `HashMap<K,V>` is a hand-written collection obj: state fields
+// UNPACK to SoA columns (the compiler's efficiency decision), locals box. The
+// element type is the `(K, V)` pair — `m.insert((k, v))`, `m.get(k)`,
+// `m.contains(k)`, `m.remove(k)`, `m.Count#()`.
 //
-// KNOWN LIMITATIONS (documented in BUGS.md, all pre-existing compiler bugs
-// exposed by this redesign):
-// - A `HashMap` passed as a DEFN PARAM then mutated via a member method
-//   (`m.insert(e)`) corrupts memory — direct member calls on a local/state
-//   instance work. The `insert`/`remove` wrappers below are therefore the
-//   direct-member form; use the member methods (`m.insert(e)`, `m.get(k)`)
-//   in user code.
-// - `keys()`/`values()`/`entries()` scans and `foreach` over a map hit
-//   member-body-foreach codegen bugs (wrong element counts). Use `get`/
-//   `contains`/`Count#` for now.
+// USE: call the MEMBER methods directly on the map (`m.insert((k, v))`,
+// `m.get(k)`) — a local map works, and a state map works in the node body.
+// The defn-wrapper form (`insert(map, k, v)` returning a mutated map) is NOT
+// safe: a map passed as a defn param then mutated via a member hits a
+// pre-existing member-on-param codegen bug (BUGS.md). Iteration
+// (keys/values/entries/foreach) is blocked on a pre-existing
+// member-inline+foreach register-collision bug (BUGS.md).
 
-import { List, HashMap, Entry } from "std/collections.bv";
+import { HashMap } from "std/collections.bv";
 
 defn new_map<K,V>() -> HashMap<K,V> {
     let m: HashMap<K,V> = 0;
@@ -32,27 +28,6 @@ defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> {
     term m;
 };
 
-defn insert<K,V>(map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>
-{
-    let e: Entry<K, V> = Entry { key: key, val: value };
-    map.insert(e);
-    term map;
-};
-
-defn get<K,V>(map: HashMap<K,V>, key: K) -> V {
-    term map.get(key);
-};
-
-defn contains_key<K,V>(map: HashMap<K,V>, key: K) -> Bool {
-    term map.contains(key);
-};
-
-defn remove<K,V>(map: HashMap<K,V>, key: K) -> (V, HashMap<K,V>)
-{
-    let v: V = map.remove(key);
-    term (v, map);
-};
-
 defn len<K,V>(map: HashMap<K,V>) -> Int {
     term map.Count#();
 };
@@ -61,7 +36,10 @@ defn is_empty<K,V>(map: HashMap<K,V>) -> Bool {
     term map.Count#() == 0;
 };
 
-defn clear<K,V>(map: HashMap<K,V>) -> HashMap<K,V> {
-    let m: HashMap<K,V> = 0;
-    term m;
+defn contains_key<K,V>(map: HashMap<K,V>, key: K) -> Bool {
+    term map.contains(key);
+};
+
+defn get<K,V>(map: HashMap<K,V>, key: K) -> V {
+    term map.get(key);
 };

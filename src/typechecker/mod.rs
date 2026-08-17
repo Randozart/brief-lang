@@ -6386,4 +6386,84 @@ node start [true][false] { term; };
         "two-arg op Grow must error (handle-only)"
     );
 }
+
+
+/// 2026-08-17 (tuple correctness): tuple destructure and numeric field access
+/// typecheck; a tuple value flows through a defn param/return.
+#[test]
+fn tuple_destructure_and_field_access_typechecks() {
+    let ok = r#"
+defn add(p: (Int, Int)) -> Int { term p.0 + p.1; };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let t: (Int, Int) = (1, 2);
+    let (a, b) = t;
+    let s: Int = a + b + t.0 + t.1 + add(t);
+    done = s;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "tuple destructure + numeric field access + tuple param must type"
+    );
+}
+
+/// 2026-08-17 (hashmap tuple core): the HashMap op surface — seed init,
+/// tuple insert, get/contains/remove by key, Count# — typechecks. The map is
+/// declared INLINE (the typechecker test harness has no stdlib).
+#[test]
+fn hashmap_tuple_core_typechecks() {
+    let ok = r#"
+obj MiniMap<K, V> {
+    keys: Ptr<K>;
+    vals: Ptr<V>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    op InsertAt: insert(#Lh, #Rh);
+    op ExtractFrom: remove(#Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
+    op Count() -> Int { term count; };
+    txn init(v: K) [true][count == 0] {
+        keys = Malloc#(256 * 8) as Ptr<K>;
+        vals = Malloc#(256 * 8) as Ptr<V>;
+        occupied = Malloc#(256 * 8) as Ptr<Int>;
+        cap = 256;
+        count = 0;
+    };
+    txn insert(e: (K, V)) [count < cap][count <= cap] {
+        let (k, v) = e;
+        let h: Int = (k as Int) % cap;
+        keys[h] = k;
+        vals[h] = v;
+        occupied[h] = 1;
+        count = count + 1;
+    };
+    defn get(key: K) -> V [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        term vals[h];
+    };
+    defn contains(key: K) -> Bool {
+        let h: Int = (key as Int) % cap;
+        term occupied[h] == 1;
+    };
+};
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    let m: MiniMap<Int, Int> = 0;
+    m.insert((1, 10));
+    let g: Int = m.get(1);
+    let c: Bool = m.contains(1);
+    let n: Int = m.Count#();
+    done = g + (c as Int) + n;
+    term;
+};
+"#;
+    assert!(
+        check(ok).is_ok(),
+        "HashMap tuple insert + get/contains/Count# must type"
+    );
+}
 }

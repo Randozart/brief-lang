@@ -38,6 +38,47 @@ documented in the redesign plan's SHIPPED section):**
 member bodies, (d) fix member-on-param ABI. Each is a distinct compiler bug;
 none weakens a contract.
 
+## Inlined member with a foreach + a nested foreach overflows SSA register allocation — OPEN
+
+**Date:** 2026-08-17 (found by the HashMap tuple redesign)
+**Status:** Open — the HashMap's probe members (`insert`/`get`/`contains`/
+`remove`, each a `foreach` with a loop-carried local) work as a SINGLE inline
+or two, but THREE+ inlined probe members in one node body produce
+"instruction forward referenced with type 'i64'" clang errors (registers
+used before their def in `@main`). A plain node-body `foreach` and a single
+inlined member both work. Root: the SSA main inlines the node body; many
+member-inline `foreach` loops with loop-carried locals exhaust the phi /
+register bookkeeping.
+
+**Path:** fix the SSA main's handling of multiple inlined member `foreach`
+loops — likely the loop-carried local alloca/phi predecessor tracking
+(`fun.cur_block` / the countdown-latch phis, emit_stmt.rs:1284).
+
+## Arrow `<-` push into a loop-carried local List double-constructs — OPEN
+
+**Date:** 2026-08-17 (found by the HashMap `keys()` scan)
+**Status:** Open — `let acc: List<K> = []; foreach i in 0..cap { if ... { acc <-
+keys[i] } }; term acc;` in a MEMBER body emits TWO empty-List constructions;
+the push updates a copy, `term acc` reads the stale original (returns 1 of 3
+elements). A plain node-body version works. Root: the foreach pre-declaration
+(re-seeding loop-carried locals) interacts with the member-inline `<-` push.
+
+**Path:** the foreach pre-declaration (emit_stmt.rs:1396-1409) must rebind the
+ORIGINAL name so `term acc` reads the loop-carried slot, and the `<-` push
+must store its result back through the alloca.
+
+## Defn-param member mutation loses the value — OPEN
+
+**Date:** 2026-08-17 (found by the hashmap.bv `insert(map, ...)` wrapper)
+**Status:** Open — a collection obj passed as a defn param then mutated via a
+member method (`defn f(m: HashMap) { m.insert(...); term m; }`) loses the
+mutation (returns the pre-mutation handle). Direct member calls on a local or
+state instance work. Root: the member-on-param ABI (a param is bound to a
+register, the member's self-resolution doesn't write back).
+
+**Path:** fix the member-inline self binding for defn-param receivers so
+mutating members update the param's storage.
+
 ## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
 
 **Date:** 2026-08-14 (found while executing slice 6, leak cleanup)

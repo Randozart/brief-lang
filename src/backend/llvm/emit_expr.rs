@@ -844,6 +844,30 @@ impl LlvmBackend {
                     }
                 }
                 let obj_reg = self.emit_expr(out, obj, indent);
+                // 2026-08-17 (tuple correctness, plan
+                // 2026-08-17-hashmap-storage-tuple-correctness.md): a NUMERIC
+                // field name on a TUPLE value is a tuple ELEMENT access
+                // (`t.0`/`t.1`). A tuple is a boxed i64 handle to the
+                // emit_tuple `[len, e0, e1, …]` heap block; element n lives at
+                // `GEP i64 slot (n+1)`. resolve_field_type (typechecker) already
+                // resolves numeric names; this emits the read.
+                if let Ok(n) = field.parse::<usize>() {
+                    if let crate::ast::Type::Tuple(ts) = &obj_reg.ty {
+                        let handle_p = self.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, handle_p, obj_reg.name).ok();
+                        let slot = self.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = getelementptr i64, ptr {}, i64 {}",
+                            indent, slot, handle_p, n + 1
+                        )
+                        .ok();
+                        let elem = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, elem, slot).ok();
+                        let elem_ty = ts.get(n).cloned().unwrap_or_else(Type::int);
+                        return TypedRegister { name: elem, ty: elem_ty };
+                    }
+                }
                 // 2026-07-14: Layout field access — #fieldname triggers bit-shift/mask
                 if field.starts_with('#') {
                     return self.emit_layout_field_read(out, v, &obj_reg, field, indent);
