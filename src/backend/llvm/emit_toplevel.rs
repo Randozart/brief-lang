@@ -6,6 +6,24 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
+/// 2026-08-18 (pooled-member iteration): peel the POOLED-COLUMN wrapper
+/// `Vector(inner, [Anonymous(1)])` and split a type into its base name +
+/// concrete generic args. A pooled member field (`items` in a pooled obj body)
+/// is keyed `{prefix}.items` and typed `Vector(List<Int>, [Anonymous(1)])`;
+/// the base/args under the wrapper drive tier-2 iteration and strategy
+/// dispatch exactly like a bare `Applied`/`Custom` type.
+fn peel_column_type(ty: &crate::ast::Type) -> Option<(String, Vec<crate::ast::Type>)> {
+    let ty = match ty {
+        crate::ast::Type::Vector(inner, _) => inner.as_ref(),
+        other => other,
+    };
+    match ty {
+        crate::ast::Type::Custom(n) => Some((n.clone(), Vec::new())),
+        crate::ast::Type::Applied(n, a) => Some((n.clone(), a.clone())),
+        _ => None,
+    }
+}
+
 /// Arguments for one output-equality-gate element comparison (probe).
 struct ProbeCmpArg<'a> {
     elem: &'a str,
@@ -124,15 +142,7 @@ impl LlvmBackend {
     /// its InsertAt/ExtractFrom binding; without it the push was a no-op.
     pub(super) fn collection_base_type_name(&self, var_name: &str) -> Option<String> {
         fn base_name(ty: &crate::ast::Type) -> Option<String> {
-            let ty = match ty {
-                crate::ast::Type::Vector(inner, _) => inner.as_ref(),
-                other => other,
-            };
-            match ty {
-                crate::ast::Type::Custom(n) => Some(n.clone()),
-                crate::ast::Type::Applied(n, _) => Some(n.clone()),
-                _ => None,
-            }
+            peel_column_type(ty).map(|(b, _)| b)
         }
         if let Some(ty) = self.fun.let_original_types.get(var_name) {
             return base_name(ty);
@@ -266,18 +276,34 @@ impl LlvmBackend {
     /// iteration: the compiler knows only the operator surface, never a layout.
     pub(super) fn tier2_op_collection(&self, list: &crate::ast::Expr) -> Option<(crate::ast::Type, String)> {
         use crate::ast::TopLevel;
-        let crate::ast::Expr::Identifier(name) = list else { return None; };
-        let full_ty = if let Some(ty) = self.fun.let_original_types.get(name) {
-            ty.clone()
-        } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
-            self.ctx.field_briev_types.get(idx).cloned().unwrap_or(crate::ast::Type::int())
-        } else {
-            return None;
-        };
-        let base = match &full_ty {
-            crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.clone(),
+        // 2026-08-18: the iterated expression is either a bare name (`items`,
+        // a POOLED MEMBER slot `{prefix}.items`) or a FIELD ACCESS
+        // (`ledger.items`) — both resolve through the column/slot type and are
+        // peeled of the `Vector(inner, [Anonymous(1)])` column wrapper.
+        // Previously only bare let/state names resolved and the foreach
+        // panicked at emit_stmt.rs:262.
+        let full_ty = match list {
+            crate::ast::Expr::Identifier(name) => self.resolve_id_type(name)?,
+            crate::ast::Expr::Field(recv, field) => {
+                let recv_name = recv.as_var_name()?;
+                let slot = format!("{}.{}", recv_name, field);
+                if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                    self.ctx.field_briev_types.get(idx).cloned()?
+                } else {
+                    // A boxed/local receiver's member: the receiver type's
+                    // struct field, substituted with the receiver's args.
+                    let (base, args) = peel_column_type(&self.resolve_id_type(recv_name)?)?;
+                    let fields = self.ctx.struct_types.get(&base)?;
+                    let (_, fty) = fields.iter().find(|(n, _)| n == field)?;
+                    let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+                    let subst: std::collections::HashMap<String, crate::ast::Type> =
+                        params.into_iter().zip(args.into_iter()).collect();
+                    crate::typechecker::substitute_type(fty, &subst)
+                }
+            }
             _ => return None,
         };
+        let (base, args) = peel_column_type(&full_ty)?;
         let members = self.ctx.obj_members.get(&base)?;
         let has_count = members
             .iter()
@@ -296,10 +322,6 @@ impl LlvmBackend {
             .as_ref()
             .and_then(|o| o.all_types().into_iter().next())
             .unwrap_or_else(crate::ast::Type::int);
-        let args = match &full_ty {
-            crate::ast::Type::Applied(_, a) => a.clone(),
-            _ => Vec::new(),
-        };
         let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
         let subst: std::collections::HashMap<String, crate::ast::Type> =
             params.into_iter().zip(args.into_iter()).collect();
