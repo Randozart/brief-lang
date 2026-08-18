@@ -157,7 +157,8 @@ none weakens a contract.
 ## Inlined member with a foreach + a nested foreach — runtime collapse by clang -O3 — FIXED 2026-08-17/18
 
 **Date:** 2026-08-17 (found by the HashMap tuple redesign)
-**Status:** SSA-reactor path FIXED; countdown/fold path (`hash_ops_idio`) OPEN.
+**Status:** SSA-reactor path FIXED 2026-08-17; countdown/fold path FIXED
+2026-08-18 (RESOLVED block below supersedes the OPEN status).
 
 **Root cause (verified, supersedes the earlier `pending_phi_backedge` thesis):**
 The emitted IR is SSA-clean and label-clean (`.ll` passes `llc`; per-function
@@ -187,19 +188,6 @@ preheader. Verified at HEAD+fix:
 - `p5_core` (3 ins + Count# + 3 gets + 2 contains) → `3 10 20 30 true false` ✓
 - m-grid (m1/m2/m2_letget/m1_2get/vB/m3i_marker) full marker sequences ✓
 - `cargo test --lib` 1893/1893 green.
-
-**OPEN (countdown/fold path):** `hash_ops_idio` (`m.insert((i, i * 2)); sum =
-sum + m.get(i)` inside the bounded countdown, `when i % 5000000 == 0` print)
-still collapses. Compiler-linked binary prints nothing at BOUND=10M; an ad-hoc
-harness `clang -O3 -flto` link prints `240 240`. Root: the hot tuple is DYNAMIC
-(`(i, i*2)`) — the deferral cannot move it (domination), and the countdown
-path has no preheader equivalent for per-iteration heap writes. The get result
-is consumed by a state store (`sum = sum + ...`), so this is NOT the SSA-path
-mechanism — a distinct collapse on the `.cd_127`/`foreach` countdown IR.
-Next lever candidates: emit the (K,V) pair into a preallocated per-iteration
-slot (SROA-friendly) instead of malloc, or fix the tuple slot ABI so the body's
-`inttoptr + GEP` round-trip disappears — then A/B against the harness link
-before committing.
 
 **RESOLVED 2026-08-18** (Phase B of the 2026-08-17 completion plan): the
 collapse root was the same param/field shadow asymmetry that dropped the
@@ -317,22 +305,34 @@ wrappers (previously omitted as unsafe); `let m2 = insert(m, ...)` + `get`
 round-trips correctly. Regression test `test_pooled_instance_defn_arg_is_boxed`
 (no `@p` global, box malloc present).
 
-## `brievc check` over-reports on imported generic collection scans — OPEN
+## `brievc check` over-reports on imported generic collection scans — FIXED 2026-08-18
 
 **Date:** 2026-08-18 (found while adding the hashmap.bv wrappers)
-**Status:** Open — a CHECK-only divergence: `brievc check` on a program that
-imports `std/collections.bv` (or `std/hashmap.bv`) reports type errors on the
-HashMap's GENERIC scans (`acc <- keys[i]` in `keys()`, `acc <- vals[i]` in
-`values()`, `acc <- (keys[i], vals[i])` in `entries()`) — "expected
-List<K> for arrow assignment, found K" etc. `brievc check lib/std/collections.bv`
-alone passes; the same imports BUILD and run correctly (the arrow dispatch and
-codegen are fine). The divergence is a typechecker over-report specific to the
-imported/combined context — the arrow_ok element-match on the generic scan
-fails there. Pre-existing (verified against the pre-wrapper hashmap.bv).
-Needs the arrow push_element_type/type-param identity check in the combined
-module context.
+**Status:** FIXED 2026-08-18 (plan
+`docs/plans/2026-08-18-check-build-pipeline-unification.md`, commit `c3bab243`).
+`brievc check` on a program importing `std/collections.bv` reported type errors
+on the HashMap's GENERIC scans (`acc <- keys[i]` → "expected List<K> for arrow
+assignment, found K"). `brievc check lib/std/collections.bv` alone passed; the
+same imports built and ran correctly.
 
-## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
+**Root cause (A/B instrumentation):** `import { HashMap }` dropped `List` —
+the import resolver's transitive-reference scan (`referenced_type_names`)
+walked only slots and member PARAMS, never member OUTPUT types, so `List`
+(referenced only in `keys()`'s RETURN) was tree-shaken away. The typechecker's
+built-in `List` name special-case (`list_literal_accepted_by`) masked the gap,
+and `brievc check`'s stale LEAN pipeline (parse → resolve → check, no plugin
+stages) surfaced it while build's fuller pipeline re-added List.
+
+**Fix:** (1) the resolver walks member output types — a named import brings
+its returned collection types; (2) `parse_and_check` now runs the SAME
+pre-check pipeline as `compile_source` (plugin manager, comptime eval,
+Parsed/Resolved stages, resolve_comptime_refs), so check and build cannot
+diverge. Regression: `test_filter_keeps_member_output_types` (resolver) +
+`check_on_imported_generic_scans_is_clean` (bin). `brievc check` clean on
+`test_hashmap_surface.bv`, `collections.bv`, and `hashmap.bv` (previously
+erroring).
+
+## Iterable-protocol slice-6 deletions blocked on two live paths — RESOLVED 2026-08-16
 
 **Date:** 2026-08-14 (found while executing slice 6, leak cleanup)
 **Status:** Open — documented, not force-deleted. Two of the plan's
@@ -449,16 +449,26 @@ per-language `lib/glue/<lang>/glue.dbv` folders.
 integration-test binaries incl. the C/C++/Java/Node/Python/C#/Go/Lua drivers);
 `tests/glue_integration.sh` 11/11.
 
-## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — FIXED (verified 2026-08-18)
 
 **Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
-**Status:** Open. An exported defn with a `String` parameter, built via
+**Status:** FIXED — verified NOT reproducible with the current binary
+(2026-08-18). An exported defn with a `String` parameter, built via
 `brievc build --library`, emits `%ac0` typed i64 in the shim while the body
 expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
 'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
 and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
 marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
 a ptr).
+
+**Verification (2026-08-18):** `export defn greet(name: String)` and a
+stateful `export defn state_str(name: String)` both emit clean
+`define ptr @…(ptr %arg0)` with `--library`; `opt -O2` on the generated `.ll`
+(the original failure) passes; `cargo test --test c_driver_needs_state` (the
+driver that surfaced it) is green. The fix landed via the struct/String param
+ABI (`emit_toplevel.rs:2631-2638`: `ptr` params → `ptrtoint`) plus the retired
+SSO String-param branch. The `CStr` workaround in `lib/compiler/needs_state.bv`
+is left in place — a legitimate ABI choice for the C boundary.
 
 ## Local collection values segfault — FIXED (slice 4)
 
@@ -4091,7 +4101,7 @@ Verified end-to-end: `s = (n as String); println!("s={}", s)` prints `s=42`.
 Regression tests: `test_cast_int_to_string_lane_emits_ptr_call` (lane path) +
 `test_emit_cast_int_to_string` (direct path).
 
-## Float ABI/opcode corruption in the LLVM backend — OPEN
+## Float ABI/opcode corruption in the LLVM backend — FIXED 2026-08-03 (status line stale)
 
 **Date:** 2026-08-03
 **Root cause (two related):** (1) The `#Float` protocol crosses the boundary as

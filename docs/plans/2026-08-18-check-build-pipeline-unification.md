@@ -143,3 +143,37 @@ Plan doc → A Step 0 (instrumented A/B) → A Step 1 (unify) → A Step 2
 leaves the suite green. `cargo test --lib` before every commit; runtime suite
 before the A commit; Praetor on changed dirs (`src/backend/llvm`,
 `src/compile.rs`); update BUGS.md + this plan in the same commits.
+
+## As-built 2026-08-18
+
+**A Step 0 — instrumentation finding (recorded):** the A/B dumped
+`type_members["List"]`/`regular_bindings["List"]` in the failing ArrowAssign:
+CHECK → `type_members[List]=None` (no List TypeDef in the items);
+BUILD → `type_members[List]=Some(7)` (List present). `filter_items` kept
+`{HashMap}` in BOTH — so List entered the build items via its fuller
+multi-pass pipeline, masking the resolver gap.
+
+**A Step 1 — the concrete fix (beyond unification):** `referenced_type_names`
+(import_resolver.rs) walked only slots + member PARAMS, never member OUTPUT
+types, so `import { HashMap }` dropped `List` (referenced only in `keys()`'s
+return). The resolver now walks output types (`TypeDefOperator`/Definition/
+Transaction). **AND** `parse_and_check` runs the SAME pre-check pipeline as
+`compile_source` (plugin manager + lockfile, PreLex, inline stage blocks,
+comptime eval, Parsed/Resolved plugin stages, resolve_imports,
+resolve_comptime_refs) — check and build can no longer diverge.
+
+**A Step 2 — regression:** `test_filter_keeps_member_output_types`
+(import_resolver, pins the resolver walk: fails with `kept=["Outer"]`);
+`check_on_imported_generic_scans_is_clean` (brievc bin, whole-pipeline).
+`brievc check` clean on `test_hashmap_surface.bv`, `collections.bv`,
+`hashmap.bv` (previously erroring). Commit `c3bab243`.
+
+**B — verified FIXED:** `cargo test --test c_driver_needs_state` green;
+`opt -O2` on `--library` exports with `String` params passes (clean `ptr`
+ABI). The `%ac0` i64-vs-ptr failure is gone; BUGS.md entry marked FIXED with
+the evidence; the `CStr` workaround in `lib/compiler/needs_state.bv` is left
+in place.
+
+**Housekeeping:** BUGS.md statuses swept (countdown/fold, slice-6, Float ABI,
+String-param, check-over-report).
+
