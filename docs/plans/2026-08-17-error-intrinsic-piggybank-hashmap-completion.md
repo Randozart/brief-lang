@@ -3,6 +3,8 @@
 **Date:** 2026-08-17. **Head commit:** `b9fbc3e3`.
 **Build/test:** `cargo build --release` / `cargo test --lib` /
 `bash benchmarks/build_and_bench.sh --runtime` / `./target/release/brievc check <file>`.
+**SHIPPED 2026-08-18** (Phases A–F; commits `cebd4b8d` → `7f20a2cc` +
+Phase E `db0bc869`, Phase F follow-ups).
 
 ## Context
 

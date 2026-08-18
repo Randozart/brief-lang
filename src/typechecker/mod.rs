@@ -502,7 +502,8 @@ impl<'a> TypecheckContext<'a> {
         let bindings = self.regular_bindings.get(&type_name)?;
         let binding = bindings
             .iter()
-            .find(|b| b.name == first || b.name == second)?;
+            .find(|b| b.name == first)
+            .or_else(|| bindings.iter().find(|b| b.name == second))?;
         let fn_name = match &binding.expr {
             Expr::Call(name, _, _) => name.clone(),
             _ => return None,
@@ -546,7 +547,8 @@ impl<'a> TypecheckContext<'a> {
     let bindings = self.regular_bindings.get(&type_name)?;
     let binding = bindings
         .iter()
-        .find(|b| b.name == first || b.name == second)?;
+        .find(|b| b.name == first)
+        .or_else(|| bindings.iter().find(|b| b.name == second))?;
     let fn_name = match &binding.expr {
         Expr::Call(fn_name, _, _) => fn_name.clone(),
         _ => return None,
@@ -4574,6 +4576,59 @@ txn push [v == 3][c.count == 3] {
         // A typecheck failure here means the op-as-member body was not
         // self-parameterized, or the arrow did not resolve the operator member.
         check(src).expect("op-as-member must typecheck");
+    }
+
+    /// 2026-08-18 (Phase D, PiggyBank): a SEALED collection — op members whose
+    /// bodies are `Error#` — compiles when the sealed ops are never used, and
+    /// each use promotes the error: indexing (op At), foreach (op At/Iter),
+    /// `Count#()` (op Count), and a `<-` read (op CopyFrom). The destructive
+    /// `~<-` (op ExtractFrom) is NOT sealed and must work.
+    #[test]
+    fn sealed_op_error_promotion() {
+        let seal = r#"
+obj Jar {
+    items: Int;
+    op InsertAt: push(#Lh, #Rh);
+    op ExtractFrom: pop(#Lh);
+    op CopyFrom: read_error(#Lh, #Rh);
+    op At(i: Int) -> Int { Error#("a Jar is opaque"); };
+    op Count() -> Int { Error#("a Jar is opaque"); };
+    op Iter() -> Int { Error#("a Jar is opaque"); };
+    defn push(v: Int) { items = v; term; }
+    defn pop() -> Int { term items; }
+    defn read_error() -> Int { Error#("a Jar is opaque"); }
+};
+let j: Jar = Jar { items: 0 };
+"#;
+        // Declaration alone (sealed ops never invoked) compiles.
+        check(seal).expect("declaring a sealed collection must compile");
+
+        // A `~<-` extract is the ONE way out — not sealed.
+        let extract = format!(r#"{seal}
+txn t [true][j.items >= 0] {{ let v: Int; v ~<- j; }};
+"#);
+        check(&extract).expect("the destructive ~<- extract must work");
+
+        // Each sealed op USE must fail with the Error# promotion.
+        let sealed_uses: &[&str] = &[
+            // op At through indexing.
+            "let v: Int = j[0];",
+            // op At/Iter through foreach.
+            "foreach x in j { let _ = x; }",
+            // op Count through the Count# intrinsic.
+            "let v: Int = j.Count#();",
+            // op CopyFrom through a non-destructive read.
+            "let v: Int; v <- j;",
+        ];
+        for use_src in sealed_uses {
+            let full = format!(r#"{seal}
+txn t [true][j.items >= 0] {{ {use_src} }};
+"#);
+            assert!(
+                check(&full).is_err(),
+                "sealed op use must fail at compile time: {use_src}"
+            );
+        }
     }
 
     /// 2026-08-14 (generic `defn f<T>` dispatch): a call to a generic defn

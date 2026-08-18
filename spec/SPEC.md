@@ -1727,9 +1727,11 @@ semantics follow reachability:
   members contain `Error#` compiles — this is how a "sealed" collection (a
   `PiggyBank`) declares un-supported operations with a helpful message. The
   error PROMOTES (fails the compile) only when that member is actually
-  invoked via a method call, a generative op (`Count#(x)`), or an arrow
-  extract (`x <- piggy` / `~<- piggy`). A member never called is provably
-  unreachable — its `Error#` is dead code, eliminated.
+  invoked via a method call, a generative op (`Count#(x)`), an arrow
+  extract (`x <- piggy` → the sealed `CopyFrom`), or the SYNTAX that
+  consults a sealed op — indexing `piggy[0]` promotes `op At`, and
+  `foreach x in piggy` promotes `op At`/`op Iter`. A member never called is
+  provably unreachable — its `Error#` is dead code, eliminated.
 - **Provably-dead branches** (constant-false conditions, statements after a
   `term`) do not record an error.
 - Unprovable reachability resolves conservatively: if the compiler cannot
@@ -1748,6 +1750,13 @@ everything and self-frees. Its other collection ops (`CopyFrom`, `At`, `Count`,
 time with a message directing the user to smash the jar. This proves the
 `#` intrinsic surface is op-driven: `Count#()` dispatches through the DECLARED
 `op Count`, never implicitly reading a `count` field.
+
+**2026-08-18 (Phase D):** the arrow's CONSUME flag selects the value-side op —
+`dest <- src` (a non-destructive read) resolves `op CopyFrom`, while the
+destructive `dest ~<- src` resolves `op ExtractFrom` (the other is the
+fallback). Only a ZERO-PARAM member is a valid arrow target (the arrow
+supplies no arguments — the coll scaffold's parameterized `get(i)` CopyFrom
+can never read). A drain must therefore be the tilde form: `~<- queue`.
 
 ## 19. Foreign functions, export, and GLUE
 
