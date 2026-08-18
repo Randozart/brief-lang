@@ -147,7 +147,7 @@ symmetric read/write, pooled/boxed shadow guards in emit_expr.rs/emit_stmt.rs.
 `hash_ops_idio` now MATCHes C (Σ2i) at BOUND=10M and 50M, and the loop is
 verified live at BOUND=500M (11.8s, not folded). The old C reference was a
 256-ring (a different workload) — rewritten as a real 2*N open-addressing
-table; Briev ~0.693s vs C ~0.661s (~1.05x parity, user-CPU harness timer).
+table; the runtime suite records Briev 0.7292s vs C 0.6655s (1.09x, MATCH).
 Benchmark re-added to the suite.
 
 **Pre-existing oddity (not a regression):** a node whose inserts are LET-BOUND
