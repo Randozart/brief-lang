@@ -464,7 +464,13 @@ impl<'a> TypecheckContext<'a> {
     /// where `src` is a collection with an `ExtractFrom`/`CopyFrom` op binding.
     /// Returns the member's RETURN type (what reading/extracting from the
     /// collection produces), mirroring `push_element_type` (InsertAt → param).
-    pub fn extract_element_type(&self, collection: &Expr) -> Option<Type> {
+    /// 2026-08-18 (Phase D, PiggyBank): the arrow's CONSUME flag picks the op —
+    /// `dest <- src` (read/copy) prefers `CopyFrom`, `dest ~<- src`
+    /// (destructive) prefers `ExtractFrom`; the other is the fallback. A
+    /// PiggyBank's `x <- piggy` therefore resolves the sealed `CopyFrom` error
+    /// member while `all ~<- piggy` resolves `ExtractFrom` (smash).
+    pub fn extract_element_type(&self, collection: &Expr, consume: bool) -> Option<Type> {
+        let (first, second) = extract_op_order(consume);
         // 2026-08-11 (housekeeping 1b fix): unwrap AddrOf (`&queue <- dest`)
         // like push_element_type.
         let inner = match collection {
@@ -480,8 +486,14 @@ impl<'a> TypecheckContext<'a> {
         let members = self.type_members.get(&type_name)?;
         // 2026-08-12 (Iterable protocol, op-as-member): the operator IS the
         // member — its return type is the extracted element type.
-        if let Some(op_member) = operator_member(members, "ExtractFrom")
-            .or_else(|| operator_member(members, "CopyFrom"))
+        // 2026-08-18 (Phase D): the arrow supplies NO arguments, so only a
+        // ZERO-PARAM read/extract member is a valid target. The coll scaffold's
+        // CopyFrom (`get(i)`) takes an index — it can never be an arrow read,
+        // so a parameterized preferred op falls through to the other one (and a
+        // `b <- q` on a coll pops again, the pre-Phase-D behavior).
+        if let Some(op_member) = operator_member(members, first)
+            .filter(|m| m.parameters.is_empty())
+            .or_else(|| operator_member(members, second).filter(|m| m.parameters.is_empty()))
         {
             let out = op_member.output_type.as_ref().and_then(|o| o.all_types().into_iter().next())?;
             let params = self.type_params.get(&type_name).cloned().unwrap_or_default();
@@ -490,12 +502,15 @@ impl<'a> TypecheckContext<'a> {
         let bindings = self.regular_bindings.get(&type_name)?;
         let binding = bindings
             .iter()
-            .find(|b| b.name == "ExtractFrom" || b.name == "CopyFrom")?;
+            .find(|b| b.name == first || b.name == second)?;
         let fn_name = match &binding.expr {
             Expr::Call(name, _, _) => name.clone(),
             _ => return None,
         };
         let member = members.iter().find(|m| member_name(m) == fn_name)?;
+        if !member_params(member).is_empty() {
+            return None;
+        }
         let out = member_output(member)?;
         // 2026-08-01 (Phase 3): substitute concrete args into the generic
         // return (`Stack<Int>` pop → `T` → `Int`).
@@ -506,7 +521,11 @@ impl<'a> TypecheckContext<'a> {
     /// 2026-08-17 (Error# usage-gate): the ExtractFrom/CopyFrom MEMBER NAME on a
     /// collection value's type — mirrors extract_element_type's op-member
     /// resolution (operator member first, then the binding's impl fn).
-    fn arrow_extract_member_name(&self, collection: &Expr) -> Option<String> {
+    /// 2026-08-18 (Phase D): returns the `{type}.{member}` key (the pending-
+    /// error store is keyed that way — a bare member name collides across
+    /// types).
+    fn arrow_extract_member_name(&self, collection: &Expr, consume: bool) -> Option<String> {
+        let (first, second) = extract_op_order(consume);
         let inner = match collection {
             Expr::AddrOf(e) => e.as_ref(),
             other => other,
@@ -518,19 +537,25 @@ impl<'a> TypecheckContext<'a> {
             _ => return None,
         };
         let members = self.type_members.get(&type_name)?;
-    if let Some(op_member) = operator_member(members, "ExtractFrom")
-        .or_else(|| operator_member(members, "CopyFrom"))
+    if let Some(op_member) = operator_member(members, first)
+        .filter(|m| m.parameters.is_empty())
+        .or_else(|| operator_member(members, second).filter(|m| m.parameters.is_empty()))
     {
-        return Some(op_member.name.clone());
+        return Some(format!("{}.{}", type_name, op_member.name));
     }
     let bindings = self.regular_bindings.get(&type_name)?;
     let binding = bindings
         .iter()
-        .find(|b| b.name == "ExtractFrom" || b.name == "CopyFrom")?;
-    match &binding.expr {
-        Expr::Call(fn_name, _, _) => Some(fn_name.clone()),
-        _ => None,
+        .find(|b| b.name == first || b.name == second)?;
+    let fn_name = match &binding.expr {
+        Expr::Call(fn_name, _, _) => fn_name.clone(),
+        _ => return None,
+    };
+    let member = members.iter().find(|m| member_name(m) == fn_name)?;
+    if !member_params(member).is_empty() {
+        return None;
     }
+    Some(format!("{}.{}", type_name, fn_name))
 }
 
 /// 2026-07-20: Find a Parse op on a type that could accept a literal form.
@@ -947,6 +972,11 @@ pub fn infer_expression(
                 Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
                 _ => Type::int(),
             };
+            // 2026-08-18 (Phase D): indexing an OBJ consults its `op At`
+            // member (tier 2) — promote a sealed error so `piggy[0]` fails at
+            // compile time (never the generic-first-arg fallback for a sealed
+            // jar).
+            promote_op_member_error(ctx, &obj_ty, "At")?;
             Ok((
                 elem_ty,
                 Provenance::Index {
@@ -2266,7 +2296,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             }
             Ok(())
         }
-        Statement::ArrowAssign { target, value, .. } => {
+        Statement::ArrowAssign { target, value, consume, .. } => {
             // 2026-08-01 (Phase 3): the arrow — `target <- value` (copy into
             // lhs) / `target ~<- value` (destructive). The dispatch finds the
             // collection by the op binding on each side:
@@ -2311,14 +2341,17 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     }
                 }
                 if !arrow_ok {
-                    if let Some(elem_ty) = ctx.extract_element_type(value) {
+                    // 2026-08-18 (Phase D): `consume` selects the value-side
+                    // op — CopyFrom for the read `<-`, ExtractFrom for the
+                    // destructive `~<-` (see extract_op_order).
+                    if let Some(elem_ty) = ctx.extract_element_type(value, *consume) {
                         // READ/EXTRACT: `dest <- queue` / `dest ~<- queue`.
                         // The value IS the collection (value_ty = Stack<T>); the
                         // target must accept the ExtractFrom/CopyFrom return type.
                         // 2026-08-17 (Error# usage-gate): `~<- piggy` /
                         // `x <- piggy` invoke the ExtractFrom/CopyFrom member —
                         // promote its pending compile error.
-                        if let Some(extract_member) = ctx.arrow_extract_member_name(value) {
+                        if let Some(extract_member) = ctx.arrow_extract_member_name(value, *consume) {
                             promote_member_error(ctx, &extract_member)?;
                         }
                         let target_ty = infer_type_only(t, ctx)?;
@@ -2455,6 +2488,11 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         Statement::Rollback(_) => Ok(()),
         Statement::Foreach { item, list, body } => {
             let list_ty = infer_type_only(list, ctx)?;
+            // 2026-08-18 (Phase D): `foreach x in piggy` consults the type's
+            // iteration ops (At for tier 2, Iter for tier 1) — promote their
+            // sealed errors so a PiggyBank's foreach fails at compile time.
+            promote_op_member_error(ctx, &list_ty, "At")?;
+            promote_op_member_error(ctx, &list_ty, "Iter")?;
             // 2026-08-12 (Iterable protocol, Tier 2, SPEC §11.4): the item
             // type is the collection's ELEMENT type — the `op At` op-as-member
             // return, substituted with the concrete generic args. Never a
@@ -3369,7 +3407,15 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 // 2026-08-17 (Error# usage-gate): while a member body is
                 // checked, record its name so an `Error#` inside is deferred to
                 // call-site promotion instead of failing the whole type.
-                mctx.current_owner = Some(crate::backend::llvm::emit_expr::member_briev_name(member).to_string());
+                // 2026-08-18 (Phase D, PiggyBank): key by `{type}.{member}` —
+                // the bare member name COLLIDES across types (List.Count vs
+                // PiggyBank.Count), so resolving List.Count promoted the jar's
+                // sealed-Count error.
+                mctx.current_owner = Some(format!(
+                    "{}.{}",
+                    td.name,
+                    crate::backend::llvm::emit_expr::member_briev_name(member)
+                ));
                 match member {
                     TopLevel::Transaction(t) => {
                         for (n, ty) in &t.parameters {
@@ -4042,7 +4088,7 @@ fn resolve_method_call(
     }
     // 2026-08-17 (Error# usage-gate): invoking a member whose body reaches an
     // Error# fails the compile with the message.
-    promote_member_error(ctx, &member_name(&member))?;
+    promote_member_error(ctx, &format!("{}.{}", type_name, member_name(&member)))?;
     Ok(out.map(|t| substitute_type(&t, &subst)).unwrap_or(Type::void()))
 }
 
@@ -4152,8 +4198,8 @@ fn infer_generative_op_call(
         .map(|t| substitute_type(&t, &subst))
         .unwrap_or_else(Type::void);
     // 2026-08-17 (Error# usage-gate): `OpName#(recv, …)` invokes the op
-    // member — promote its pending compile error.
-    promote_member_error(ctx, &member.name)?;
+    // member — promote its pending compile error (keyed `{type}.{member}`).
+    promote_member_error(ctx, &format!("{}.{}", base, member.name))?;
     Ok(Some(ret))
 }
 
@@ -4162,6 +4208,34 @@ fn operator_member<'a>(members: &'a [TopLevel], op: &str) -> Option<&'a Definiti
         TopLevel::TypeDefOperator(d) if d.name == op => Some(d),
         _ => None,
     })
+}
+
+/// 2026-08-18 (Phase D, PiggyBank): resolve `op {op}` on a value's type and
+/// PROMOTE its pending compile error. Sealed ops (`op At` on a PiggyBank) that
+/// are consulted through SYNTAX — indexing (`piggy[0]` → At), foreach
+/// (`foreach x in piggy` → At/Iter) — must fail like an explicit `At#()` call.
+fn promote_op_member_error(ctx: &mut TypecheckContext, ty: &Type, op: &str) -> Result<(), TypeError> {
+    let base = match ty {
+        Type::Custom(n) => n.clone(),
+        Type::Applied(n, _) => n.clone(),
+        _ => return Ok(()),
+    };
+    let members = ctx.type_members.get(&base).cloned().unwrap_or_default();
+    if let Some(m) = operator_member(&members, op) {
+        promote_member_error(ctx, &format!("{}.{}", base, m.name))?;
+    }
+    Ok(())
+}
+
+/// 2026-08-18 (Phase D, PiggyBank): the arrow's value-side op priority —
+/// `dest <- src` (read/copy, non-destructive) prefers `CopyFrom`, `dest ~<- src`
+/// (destructive) prefers `ExtractFrom`, with the other as the fallback.
+fn extract_op_order(consume: bool) -> (&'static str, &'static str) {
+    if consume {
+        ("ExtractFrom", "CopyFrom")
+    } else {
+        ("CopyFrom", "ExtractFrom")
+    }
 }
 
 /// 2026-08-14 (boundary plan, SPEC §17.2): the ELEMENT type of an iterable

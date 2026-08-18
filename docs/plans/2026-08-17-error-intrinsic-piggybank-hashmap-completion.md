@@ -252,6 +252,26 @@ obj PiggyBank<K> {
   usage (`x <- piggy`, `piggy[0]`, `piggy.Count#()`, `foreach`) → compile
   error with the message. A second `put` after smash → use-after-free error.
 
+## Phase D — `PiggyBank<K>` (one-shot, opaque, ExtractFrom, self-free)
+
+**As-built 2026-08-18:** shipped in `lib/std/collections.bv`. The sealed ops
+are declared inline as op-as-member error bodies (`op At(i: Int) -> K { Error#
+(…); }`) plus a CopyFrom binding (`op CopyFrom: read_error(#Lh, #Rh)`) —
+the param'd op BINDING form (`op At(i): fn(…)`) doesn't parse, and a CopyFrom
+op-as-member would shadow the ExtractFrom binding in the arrow dispatch.
+
+Five pre-existing compiler gaps fixed (BUGS.md 2026-08-18): consume-aware
+arrow op selection (CopyFrom for `<-`, ExtractFrom for `~<-`), zero-param
+extract-op rule, pooled-instance strategy resolution, `{type}.{member}`
+pending-error keys, and sealed At/Iter promotion through Index/Foreach syntax.
+
+**Verify (as-built):** `tests/tier1/test_piggybank.bv` → `3`/`6`/`0` at -O0 and
+-O3; each sealed op (`x <- piggy`, `piggy[0]`, `piggy.Count#()`,
+`foreach x in piggy`) → compile error with the message. Regression test
+`test_arrow_consume_selects_copyfrom_vs_extractfrom` pins the arity rule (fails
+with the `@i` undefined bug otherwise). `queue_drain_idio` re-expressed as
+`~<- queue` (a drain is destructive).
+
 ## Phase E — HashMap completion
 
 1. Restore `keys()`/`values()`/`entries()` scans (Fix C unblocks them).

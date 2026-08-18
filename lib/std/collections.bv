@@ -263,3 +263,42 @@ obj HashMap<K, V> {
     // entries() result. The mirror list is gone — the column scan is the
     // single source of truth for iteration.
 };
+
+// 2026-08-18 (Phase D): `PiggyBank<K>` — a ONE-SHOT, OPAQUE collection.
+// Money goes in (`piggy <- x`, the ONLY way in), and the ONLY way out is to
+// smash it (`let all: List<K>; all ~<- piggy;` → everything at once, jar
+// reset). The sealed ops (read an element, index, count, iterate) are bound
+// to `Error#` members — a REACHABLE use fails at compile time with a helpful
+// message (the Error# intrinsic is a compile-time failure; see SPEC §18.6).
+obj PiggyBank<K> {
+    items: List<K>;
+    op InsertAt: put(#Lh, #Rh);
+    op ExtractFrom: smash(#Lh);
+    op Init: init(#Lh, #Rh);
+    op CopyFrom: read_error(#Lh, #Rh);
+    op At(i: Int) -> K {
+        Error#("a PiggyBank is opaque — there is no indexing into a sealed jar. Smash it to extract everything at once: `let all: List<K>; all ~<- piggy;`");
+    };
+    op Count() -> Int {
+        Error#("a PiggyBank is opaque — you cannot count what is inside without smashing it. Extract everything at once: `let all: List<K>; all ~<- piggy;`");
+    };
+    op Iter() -> Int {
+        Error#("a PiggyBank is opaque — a sealed jar cannot be iterated. Smash it to extract everything at once: `let all: List<K>; all ~<- piggy;`");
+    };
+
+    txn init(v: K) [true][items.^Size == 0] {
+        let e: List<K> = [];
+        items = e;
+    };
+    defn put(e: K) { items <- e; };
+    defn smash() -> List<K> {
+        let all: List<K> = items;
+        let e: List<K> = [];
+        items = e;
+        free items;
+        term all;
+    };
+    defn read_error() -> K {
+        Error#("a PiggyBank is opaque — individual elements cannot be read out. Smash it to extract everything at once: `let all: List<K>; all ~<- piggy;`");
+    };
+};

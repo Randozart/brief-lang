@@ -148,6 +148,13 @@ impl LlvmBackend {
                 return base_name(ty);
             }
         }
+        // 2026-08-18 (Phase D, PiggyBank): a POOLED INSTANCE identifier
+        // (`all ~<- piggy`, `piggy <- 1`) has no top-level slot — resolve the
+        // instance prefix's base so the strategy dispatchers find its
+        // ExtractFrom/InsertAt bindings.
+        if let Some(ty) = self.resolve_id_type(var_name) {
+            return base_name(&ty);
+        }
         None
     }
 
@@ -170,6 +177,85 @@ impl LlvmBackend {
         let type_name = self.lookup_strategy_type_name(var_name)?;
         self.ctx.operator_defs.get(&type_name)?
             .iter().find(|d| d.op == "InsertAt")
+    }
+
+    /// 2026-08-18 (Phase D): the declared type of an identifier, across locals,
+    /// state fields, self-prefixed pooled slots, and pooled INSTANCES (whose
+    /// base comes from `obj_instance_inits` — a top-level `let piggy:
+    /// PiggyBank<Int> = 0` has no state slot). Used to type the arrow's VALUE
+    /// without emitting it (an instance identifier emits as the scalar Int
+    /// fallback, which would defeat the insert/extract gate).
+    pub(super) fn resolve_id_type(&self, name: &str) -> Option<crate::ast::Type> {
+        self.fun.let_original_types.get(name).cloned()
+            .or_else(|| self.fun.let_binding_types.get(name).cloned())
+            .or_else(|| {
+                let &idx = self.ctx.field_index_map.get(name)?;
+                self.ctx.field_briev_types.get(idx).cloned()
+            })
+            .or_else(|| {
+                let (prefix, _) = self.fun.self_prefix.as_ref()?;
+                let slot = format!("{}.{}", prefix, name);
+                let &idx = self.ctx.field_index_map.get(&slot)?;
+                self.ctx.field_briev_types.get(idx).cloned()
+            })
+            .or_else(|| {
+                let (prefix, _row) = self.unpacked_instance_prefix(name)?;
+                self.ctx.obj_instance_inits.get(&prefix).and_then(|(base, _)| {
+                    self.ctx.obj_type_params.get(base).map(|_| {
+                        crate::ast::Type::Custom(base.clone())
+                    })
+                }).or_else(|| Some(crate::ast::Type::Custom(prefix)))
+            })
+    }
+
+    /// 2026-08-18 (Phase D, PiggyBank): the element type of a target's
+    /// `InsertAt` op — mirrors the typechecker's `push_element_type`. The arrow
+    /// codegen must compare the value's type against this BEFORE emitting the
+    /// push: `all ~<- piggy` (target `all: List<Int>`, value a PiggyBank) must
+    /// NOT push — the typechecker already chose the EXTRACT (smash) path, and
+    /// an unconditional push would insert the jar handle as an i64.
+    pub(super) fn insert_element_type(&self, target: &crate::ast::Expr) -> Option<crate::ast::Type> {
+        use crate::ast::TopLevel;
+        let mut t = target;
+        while let crate::ast::Expr::AddrOf(inner) = t {
+            t = inner;
+        }
+        let name = t.as_var_name()?;
+        let full_ty = self.resolve_id_type(name)?;
+        let (base, args) = match &full_ty {
+            crate::ast::Type::Custom(n) => (n.clone(), Vec::new()),
+            crate::ast::Type::Applied(n, a) => (n.clone(), a.clone()),
+            _ => return None,
+        };
+        let members = self.ctx.obj_members.get(&base)?;
+        let params = self.ctx.obj_type_params.get(&base).cloned().unwrap_or_default();
+        let subst: std::collections::HashMap<String, crate::ast::Type> =
+            params.into_iter().zip(args.into_iter()).collect();
+        // op-as-member `op InsertAt(v: T) { … }` — first param is the element.
+        let member = members.iter().find_map(|m| match m {
+            TopLevel::TypeDefOperator(d) if d.name == "InsertAt" => d.parameters.first().map(|(_, ty)| ty.clone()),
+            _ => None,
+        }).or_else(|| {
+            // Binding `op InsertAt: push(#Lh, #Rh)` → the impl member's param.
+            let binding = self.ctx.operator_defs.get(&base)?.iter().find(|d| d.op == "InsertAt")?;
+            let fn_name = match binding.impl_args.as_ref()? {
+                crate::ast::PropertyValue::Identifier(s) => s.clone(),
+                crate::ast::PropertyValue::List(items) => match items.first() {
+                    Some(crate::ast::PropertyValue::Identifier(f)) => f.clone(),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            let m = members.iter().find(|m| crate::backend::llvm::emit_expr::member_briev_name(m) == fn_name)?;
+            let params = match m {
+                TopLevel::Definition(d) => &d.parameters,
+                TopLevel::Transaction(t) => &t.parameters,
+                TopLevel::TypeDefOperator(d) => &d.parameters,
+                _ => return None,
+            };
+            params.first().map(|(_, ty)| ty.clone())
+        })?;
+        Some(crate::typechecker::substitute_type(&member, &subst))
     }
 
     /// 2026-08-12 (Iterable protocol, Tier 2, SPEC §11.4): does the list
@@ -325,7 +411,35 @@ impl LlvmBackend {
     /// 2026-07-20: Find an OperatorDef for ExtractFrom by looking up the
     /// variable's type in the operator_defs map (populated from AST).
     /// Returns None when the type has no ExtractFrom operator definition.
+    /// 2026-08-18 (Phase D): the value-side op of an arrow, selected by the
+    /// arrow's CONSUME flag — `dest <- src` (read) prefers `CopyFrom`, the
+    /// destructive `dest ~<- src` prefers `ExtractFrom`, the other is the
+    /// fallback (mirrors the typechecker's extract_op_order). A PiggyBank's
+    /// `all ~<- piggy` therefore finds `ExtractFrom` (smash), while `x <- piggy`
+    /// resolves `CopyFrom` (the sealed read error — rejected in typechecking).
+    pub(super) fn find_extract_strategy_for_arrow(
+        &self,
+        target: &crate::ast::Expr,
+        consume: bool,
+    ) -> Option<&crate::ast::top::OperatorDef> {
+        let (first, second) = if consume {
+            ("ExtractFrom", "CopyFrom")
+        } else {
+            ("CopyFrom", "ExtractFrom")
+        };
+        self.find_extract_strategy_op(target, first)
+            .or_else(|| self.find_extract_strategy_op(target, second))
+    }
+
     pub(super) fn find_extract_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
+        self.find_extract_strategy_op(target, "ExtractFrom")
+    }
+
+    fn find_extract_strategy_op(
+        &self,
+        target: &crate::ast::Expr,
+        op: &str,
+    ) -> Option<&crate::ast::top::OperatorDef> {
         // 2026-08-01 (A10): peel AddrOf layers — `<- &st` lowers to
         // Expression(AddrOf(AddrOf(Identifier))) and the plain `<- st` to
         // AddrOf(Identifier); the strategy lookup must reach the identifier.
@@ -335,8 +449,28 @@ impl LlvmBackend {
         }
         let var_name = t.as_var_name()?;
         let type_name = self.lookup_strategy_type_name(var_name)?;
-        self.ctx.operator_defs.get(&type_name)?
-            .iter().find(|d| d.op == "ExtractFrom")
+        let def = self.ctx.operator_defs.get(&type_name)?
+            .iter().find(|d| d.op == op)?;
+        // 2026-08-18 (Phase D): the arrow supplies NO arguments — a
+        // parameterized member (the coll's CopyFrom `get(i)`) can never be the
+        // target. Only a zero-param member reads/extracts.
+        let fn_name = match def.impl_args.as_ref()? {
+            crate::ast::PropertyValue::Identifier(s) => s.clone(),
+            crate::ast::PropertyValue::List(items) => match items.first() {
+                Some(crate::ast::PropertyValue::Identifier(f)) => f.clone(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let member = self.ctx.obj_members.get(&type_name)?.iter()
+            .find(|m| crate::backend::llvm::emit_expr::member_briev_name(m) == fn_name)?;
+        let params = match member {
+            crate::ast::TopLevel::Definition(d) => &d.parameters,
+            crate::ast::TopLevel::Transaction(t) => &t.parameters,
+            crate::ast::TopLevel::TypeDefOperator(d) => &d.parameters,
+            _ => return None,
+        };
+        if params.is_empty() { Some(def) } else { None }
     }
 
     pub(super) fn emit_header(&self, out: &mut String) {

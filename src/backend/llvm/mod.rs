@@ -5545,10 +5545,17 @@ impl LlvmBackend {
 
     /// 2026-08-15 (coll plan §3.4.6): is `ty` a `coll` type (compiler-owned
     /// Length)? Checks the base's storage classification — any coll, growable
-    /// or fixed.
+    /// or fixed. 2026-08-18 (Phase D, PiggyBank): a POOLED member-field read of
+    /// a collection carries the COLUMN type `Vector(inner, [Anonymous(1)])` —
+    /// peel the wrapper before the base check so `let all: List<K> = items`
+    /// binds the returned handle directly instead of re-seeding a `[<list>]`.
     fn is_coll_type(&self, ty: &crate::ast::Type) -> bool {
         let base = match ty {
             crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+            crate::ast::Type::Vector(inner, _) => match inner.as_ref() {
+                crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n,
+                _ => return false,
+            },
             _ => return false,
         };
         self.ctx.coll_storage.contains_key(base)

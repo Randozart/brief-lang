@@ -408,6 +408,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             let rhs = backend.emit_expr(out, e, indent);
                             let rhs_is_coll = {
                                 let base = match &rhs.ty {
+                                    crate::ast::Type::Vector(inner, _) => match inner.as_ref() {
+                                        crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => n.as_str(),
+                                        _ => "",
+                                    },
                                     crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => {
                                         n.as_str()
                                     }
@@ -1073,19 +1077,59 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
             if let Some(t) = target.as_ref() {
                 if let Some(op_def) = backend.find_insert_strategy(t).cloned() {
-                    let val = backend.emit_expr(out, value, indent);
-                    if emit_strategy_member_call(backend, out, indent, t, &op_def, Some(&val.name)).is_none() {
-                        emit_strategy_fn_call(backend, out, indent, t, &op_def, Some(&val.name));
+                    // 2026-08-18 (Phase D, PiggyBank): only PUSH when the value
+                    // actually matches the target's element type (mirrors the
+                    // typechecker's arrow_ok). `all ~<- piggy` — target
+                    // `all: List<Int>`, value a PiggyBank — must fall through to
+                    // the EXTRACT (smash), not push the jar handle as an i64.
+                    // The value is emitted into a scratch buffer and only spliced
+                    // in when the push actually fires (a type-mismatched value
+                    // would otherwise leave dead IR behind).
+                    let mut val_buf = String::new();
+                    let val = {
+                        let out2 = &mut val_buf;
+                        backend.emit_expr(out2, value, indent)
+                    };
+                    let elem_ty = backend.insert_element_type(t);
+                    // 2026-08-18: an identifier VALUE that is a pooled instance
+                    // (`all ~<- piggy`) emits with the scalar Int FALLBACK type —
+                    // resolve its DECLARED type so the insert gate rejects the
+                    // push and falls through to the extract.
+                    let val_ty = match value.as_ref() {
+                        crate::ast::Expr::Identifier(n) => backend.resolve_id_type(n).unwrap_or_else(|| val.ty.clone()),
+                        _ => val.ty.clone(),
+                    };
+                    let matches = elem_ty.as_ref().map_or(true, |et| {
+                        // 2026-08-18 (Phase D): a BARE generic param (`K` in
+                        // `PiggyBank<K>` — the backend instance type carries no
+                        // concrete args) can't be compared — allow the push (the
+                        // typechecker already validated it; the member body is
+                        // type-agnostic, storing i64 handles). Only a CONCRETE
+                        // mismatch (`List<Int>` target vs a PiggyBank value) must
+                        // fall through to the extract.
+                        let bare_generic = matches!(et, crate::ast::Type::Custom(n)
+                            if n.len() == 1 && n.chars().next().unwrap().is_uppercase());
+                        bare_generic
+                            || *et == val_ty
+                            || (matches!(et, crate::ast::Type::Custom(n) if n == "Int")
+                                && matches!(&val_ty, crate::ast::Type::Custom(n) if n == "Int"))
+                    });
+                    if matches {
+                        out.push_str(&val_buf);
+                        if emit_strategy_member_call(backend, out, indent, t, &op_def, Some(&val.name)).is_none() {
+                            emit_strategy_fn_call(backend, out, indent, t, &op_def, Some(&val.name));
+                        }
+                        return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                     }
-                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
                 }
             }
-            if let Some(op_def) = backend.find_extract_strategy(value).cloned() {
+            if let Some(op_def) = backend.find_extract_strategy_for_arrow(value, *consume).cloned() {
                 // EXTRACT — the value is the collection. Member-bound
                 // ExtractFrom (e.g. the Stack's self-bound `pop`) dispatches to
                 // the member call, which returns the popped value; the
                 // free-function convention is the fallback. The result is
-                // stored into the target (or discarded).
+                // stored into the target (or discarded). 2026-08-18 (Phase D):
+                // the CONSUME flag picks CopyFrom (`<-`) vs ExtractFrom (`~<-`).
                 let result = match emit_strategy_member_call(backend, out, indent, value, &op_def, None) {
                     Some(r) => r,
                     None => match emit_strategy_fn_call(backend, out, indent, value, &op_def, None) {
@@ -1949,8 +1993,23 @@ pub(super) fn emit_strategy_member_call(
     let member = members.iter().find(|m| member_briev_name(m) == fn_name.as_str()).cloned();
     let Some(member) = member else { return None; };
     // Emit the receiver (the struct address) and pass the value register.
+    // 2026-08-18 (Phase D, PiggyBank): a POOLED INSTANCE receiver (`piggy <-
+    // 1` on `let piggy: PiggyBank<Int> = 0`) has no top-level slot — emitting
+    // the identifier resolves a bogus `@piggy` global. Mirror emit_method_call:
+    // resolve the instance prefix and use a dummy receiver register (the member
+    // body addresses the pool columns via the prefix), never the identifier.
     let recv_tmp = backend.fun.gen_reg();
-    let recv_reg = backend.emit_expr_inner(out, &recv_tmp, &recv, indent);
+    let recv_reg = if let Some((prefix, _row)) = backend.instance_prefix_for(recv_name) {
+        writeln!(out, "{}{} = add i64 0, 0", indent, recv_tmp).ok();
+        crate::backend::llvm::TypedRegister {
+            name: recv_tmp,
+            ty: crate::ast::Type::Custom(backend.ctx.obj_instance_inits.get(&prefix)
+                .map(|(b, _)| b.clone())
+                .unwrap_or_else(|| prefix.clone())),
+        }
+    } else {
+        backend.emit_expr_inner(out, &recv_tmp, &recv, indent)
+    };
     let mut arg_regs: Vec<(String, Type)> = Vec::new();
     if let Some(vreg) = value {
         arg_regs.push((vreg.to_string(), Type::int()));
@@ -2058,16 +2117,37 @@ fn emit_arrow_store(
 ) {
     let crate::ast::Expr::Identifier(name) = target else { return };
     if let Some(reg) = backend.fun.let_bindings.get(name) {
-        writeln!(out, "{}store i64 {}, ptr {}", indent, result, reg).ok();
-    } else if backend.ctx.field_index_map.contains_key(name) {
+        // 2026-08-18 (Phase D, PiggyBank): a local bound to a VALUE register
+        // (`let all: List<Int> = []; all ~<- piggy`) must REBIND to the extract
+        // result, never `store i64 …, ptr <value-reg>` (a store into a value
+        // is invalid IR). Only alloca/param-slot bindings store in place —
+        // their address is the persistent slot.
+        if is_persistent_slot(backend, reg) {
+            writeln!(out, "{}store i64 {}, ptr {}", indent, result, reg).ok();
+        } else {
+            backend.fun.let_bindings.insert(name.clone(), result.to_string());
+        }
+        return;
+    }
+    if backend.ctx.field_index_map.contains_key(name) {
         backend.emit_state_store_i64(out, indent, name, result);
-    } else if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
+        return;
+    }
+    if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
         // 2026-08-18 (Phase C): an extract into a pooled member-field target
         // stores through the instance column (`{prefix}.{name}`).
         let slot = format!("{}.{}", prefix, name);
         let val = TypedRegister { name: result.to_string(), ty: crate::ast::Type::int() };
         emit_state_store_self_slot(backend, out, indent, &slot, &row_reg, &val);
     }
+}
+
+/// 2026-08-18 (Phase D): a local binding whose register is a REAL slot (a
+/// stack alloca or a param slot) — stores through it persist. A plain VALUE
+/// register has no address; the arrow rebinds it instead.
+fn is_persistent_slot(backend: &LlvmBackend, reg: &str) -> bool {
+    backend.fun.let_binding_allocas.contains(reg)
+        || backend.fun.param_slots.values().any(|s| s == reg)
 }
 
 /// 2026-08-18 (Phase C, BUGS.md member-field arrow): store a value into a
@@ -2119,9 +2199,17 @@ fn emit_arrow_store_local(
     val: &TypedRegister,
 ) {
     if let Some(reg) = backend.fun.let_bindings.get(name) {
-        let store_ty = backend.llvm_type(&val.ty);
-        writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
-    } else if backend.ctx.field_index_map.contains_key(name) {
+        // 2026-08-18 (Phase D): same rebind rule as emit_arrow_store — a
+        // value-register local rebinds (SSA); an alloca/param slot stores.
+        if is_persistent_slot(backend, reg) {
+            let store_ty = backend.llvm_type(&val.ty);
+            writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
+        } else {
+            backend.fun.let_bindings.insert(name.to_string(), val.name.clone());
+        }
+        return;
+    }
+    if backend.ctx.field_index_map.contains_key(name) {
         let fidx = *backend.ctx.field_index_map.get(name).unwrap();
         let fty = backend.ctx.field_types.get(fidx).cloned().unwrap_or_else(|| "i64".to_string());
         let store_val = backend.ensure_typed_value(
@@ -2129,7 +2217,9 @@ fn emit_arrow_store_local(
             backend.ctx.type_universe.clone().as_ref(),
         );
         backend.emit_state_store_i64(out, indent, name, &store_val);
-    } else if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
+        return;
+    }
+    if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
         // 2026-08-18 (Phase C): a bare member name in a pooled member body
         // writes through the instance column (`{prefix}.{name}`), mirroring
         // the strategy-lookup resolution in lookup_strategy_type_name.

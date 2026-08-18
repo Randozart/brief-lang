@@ -6412,6 +6412,95 @@ node go [done == false][done == true] {
     );
 }
 
+/// 2026-08-18 (Phase D, PiggyBank): the arrow's CONSUME flag selects the
+/// value-side op — `dest <- src` (read) resolves `op CopyFrom`, `dest ~<- src`
+/// (destructive) resolves `op ExtractFrom` (extract_op_order in the
+/// typechecker, find_extract_strategy_for_arrow in codegen). Only a
+/// ZERO-PARAM member is a valid arrow target (the arrow supplies no args — the
+/// coll scaffold's `get(i)` CopyFrom can never read). q holds [1,2,3]: pop → 3,
+/// front (no pop) → 1, pop → 2.
+#[test]
+fn test_arrow_consume_selects_copyfrom_vs_extractfrom() {
+    let src = r#"
+coll obj Q { data: Ptr<Int>; };
+let q: Q = [1, 2, 3];
+let done: Bool = false;
+node go [done == false][done == true] {
+    when done == false {
+        let a: Int;
+        a ~<- q;
+        println!(a);
+        let b: Int;
+        b <- q;
+        println!(b);
+        done = true;
+    };
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+
+    use std::process::Command;
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let rt = std::path::Path::new(&manifest).join("lib/runtime/briev_rt.c");
+    let out = std::env::temp_dir().join(format!(
+        "briev_arrow_consume_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let ll = out.with_extension("ll");
+    // Declare the runtime prints (the unit-test pipeline emits the calls but
+    // not the FFI declarations).
+    let prelude = "declare i64 @__print_int(i64)\ndeclare i64 @__print_char(i64)\n";
+    let ir = if let Some(pos) = ir.find("target triple") {
+        let end = ir[pos..].find('\n').map(|e| pos + e + 1).unwrap_or(ir.len());
+        format!("{}{}{}", &ir[..end], prelude, &ir[end..])
+    } else {
+        format!("{prelude}{ir}")
+    };
+    std::fs::write(&ll, &ir).expect("write .ll");
+    let compile = Command::new("clang")
+        .arg("-O0")
+        .arg(&ll)
+        .arg(&rt)
+        .arg("-lm")
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "link failed: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = Command::new(&out).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let _ = std::fs::remove_file(&ll);
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        run.status.success(),
+        "program crashed: {} (ir:\n{ir})",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        stdout.trim(),
+        "3\n3",
+        "`~<- q` and `<- q` must both POP (the scaffold's CopyFrom `get(i)` is \
+         parameterized, so a plain `<-` falls back to ExtractFrom pop, the \
+         pre-Phase-D behavior); got:\n{stdout}\n---\n{ir}"
+    );
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the

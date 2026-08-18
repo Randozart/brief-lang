@@ -1,7 +1,12 @@
 // queue_drain_idio — Idiomatic Briev-native version of queue_drain.
-// Reactive transaction with collection drain (`<- queue` + `queue <- count`).
+// Reactive transaction with collection drain (`~<- queue` + `queue <- count`).
 // Exercises the collection drain analysis (detect_collection_drain) in the
 // compiler, while the symmetric variant (queue_drain_sym) mirrors C.
+//
+// 2026-08-18 (Phase D): `~<- queue` — the DESTRUCTIVE extract. The arrow
+// semantics now distinguish a READ (`<- src` → op CopyFrom) from a
+// destructive EXTRACT (`~<- src` → op ExtractFrom); a drain must pop, so it is
+// the tilde form.
 //
 // Build:
 //   ./target/release/briev-compiler build --llvm benchmarks/queue_drain_idio.bv \
@@ -18,7 +23,7 @@ let count: Int = 0;
 let queue: List<Int> = [0];
 
 node work [count < N][count == N] {
-    <- queue;
+    ~<- queue;
     queue <- count;
 count = count + 1;
 

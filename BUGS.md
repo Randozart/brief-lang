@@ -1,5 +1,36 @@
 # Bugs
 
+## PiggyBank Phase D — arrow dispatch + sealed-op gaps (FIXED 2026-08-18)
+
+**Date:** 2026-08-18 (implementing the plan's PiggyBank)
+**Status:** FIXED 2026-08-18. Five gaps the sealed one-shot collection surfaced:
+
+1. **Consume-blind arrow dispatch.** `dest <- src` and `dest ~<- src`
+   typechecked/codegen'd IDENTICALLY — both resolved the value's
+   ExtractFrom (a `<- queue` DRAIN popped). There was no way to express a
+   non-destructive READ. The typechecker's `extract_op_order` and codegen's
+   `find_extract_strategy_for_arrow` now select `CopyFrom` for `<-` and
+   `ExtractFrom` for `~<-` (fallback to the other). `queue_drain_idio`'s
+   drain is destructive → `~<- queue` (the correct form).
+2. **Parameterized extract ops.** The arrow supplies NO arguments, but the
+   coll scaffold's CopyFrom is `get(i)` — a `b <- q` dispatched get WITHOUT
+   the index, emitting an undefined `@i` global (invalid IR). Extract ops
+   must be zero-param; a parameterized preferred op falls back to the other.
+3. **Pooled-instance strategy resolution.** `piggy <- 1` (InsertAt arrow on a
+   pooled instance) and `all ~<- piggy` (ExtractFrom arrow) found no strategy
+   — `collection_base_type_name` didn't resolve pooled instances, so the
+   receiver emitted an undefined `@piggy`. `resolve_id_type` now covers
+   instance-prefix bases; `is_coll_type` peels the `Vector(..)` column
+   wrapper; the arrow receiver uses the instance-prefix dummy.
+4. **Pending-error name collision.** The Error# store was keyed by member
+   NAME only — `PiggyBank.Count` (sealed) collided with `List.Count`, so
+   resolving a List's Count promoted the jar's sealed error. Keyed by
+   `{type}.{member}`.
+5. **Sealed At/Iter not promoted through syntax.** `piggy[0]` used the
+   generic-first-arg rule and `foreach x in piggy` computed an element type
+   without consulting the sealed ops. `promote_op_member_error` now fires on
+   Index (→ At) and Foreach (→ At/Iter).
+
 ## Foreach item name poisoned a later member tuple-destructure (SSA main) — FIXED 2026-08-18
 
 **Date:** 2026-08-18 (found by the Phase E full-HashMap-surface program:
