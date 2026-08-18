@@ -10,11 +10,10 @@
 //
 // USE: call the MEMBER methods directly on the map (`m.insert((k, v))`,
 // `m.get(k)`) — a local map works, and a state map works in the node body.
-// The defn-wrapper form (`insert(map, k, v)` returning a mutated map) is NOT
-// safe: a map passed as a defn param then mutated via a member hits a
-// pre-existing member-on-param codegen bug (BUGS.md). Iteration
-// (keys/values/entries/foreach) is blocked on a pre-existing
-// member-inline+foreach register-collision bug (BUGS.md).
+// The defn-wrapper form is available too: `insert(map, k, v)` returns a map —
+// a POOLED map passed in is BOXED (a value copy) at the call, so capture the
+// returned map (`let m2 = insert(m, ...)`). Iteration
+// (keys/values/entries/foreach) is a List foreach over the returned list.
 
 import { HashMap } from "std/collections.bv";
 
@@ -42,4 +41,17 @@ defn contains_key<K,V>(map: HashMap<K,V>, key: K) -> Bool {
 
 defn get<K,V>(map: HashMap<K,V>, key: K) -> V {
     term map.get(key);
+};
+
+// 2026-08-18 (BUGS.md defn-param mutation, FIXED): a defn-param collection
+// receives a BOXED handle (a pooled map argument is boxed at the call — a
+// value copy). The insert wrapper mutates the box and returns it; capture the
+// result (`let m2 = insert(m, k, v)`).
+defn insert<K,V>(map: HashMap<K,V>, key: K, val: V) -> HashMap<K,V> {
+    map.insert((key, val));
+    term map;
+};
+
+defn remove<K,V>(map: HashMap<K,V>, key: K) -> V {
+    term map.remove(key);
 };

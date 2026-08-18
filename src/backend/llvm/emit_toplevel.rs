@@ -1611,6 +1611,62 @@ impl LlvmBackend {
         })
     }
 
+    /// 2026-08-18 (BUGS.md defn-param mutation): a POOLED INSTANCE used as a
+    /// VALUE (a defn argument, `term` return) has NO scalar register — its
+    /// fields live in the state's pooled columns and the identifier arm emits
+    /// an undefined `@name` global. Materialize a BOX: malloc the struct size,
+    /// copy each pooled column field into the box at its struct offset, and
+    /// return the box handle. The callee's member calls then write the box
+    /// (the boxed self path) and the returned handle carries the mutations.
+    /// This is the storage-class rule "locals box": a pooled instance that
+    /// flows into a VALUE context boxes.
+    pub(super) fn box_pooled_instance_value(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+    ) -> Option<TypedRegister> {
+        let (prefix, row) = self.unpacked_instance_prefix(name)?;
+        let base = self
+            .ctx
+            .obj_instance_inits
+            .get(&prefix)
+            .map(|(b, _)| b.clone())
+            .unwrap_or_else(|| prefix.clone());
+        let fields = self.ctx.struct_types.get(&base)?.clone();
+        if fields.is_empty() {
+            return None;
+        }
+        let size = self.struct_type_size(&base).max(8);
+        let alloc = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, alloc, size).ok();
+        let hw = format!("i{}", self.ctx.int_bits);
+        let addr = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, addr, alloc, hw).ok();
+        let box_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, box_p, hw, addr).ok();
+        for (fname, fty) in fields {
+            // Pooled columns are keyed `{base}.{member}` (shared across
+            // instances of the base; the ROW differentiates them).
+            let slot = format!("{}.{}", base, fname);
+            let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue; };
+            let (row_p, _row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx, &row);
+            let val = self.fun.gen_reg();
+            writeln!(out, "{}{} = load {}, ptr {}", indent, val, load_ty, row_p).ok();
+            let off = self.lookup_field_offset(&base, &fname);
+            let gep = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, gep, box_p, off).ok();
+            // All pooled fields are boxed to i64 words in the instance block.
+            let store_val = if load_ty == "i64" {
+                val.clone()
+            } else {
+                self.adapt_to_i64(out, indent, &TypedRegister { name: val.clone(), ty: fty.clone() })
+            };
+            writeln!(out, "{}store i64 {}, ptr {}", indent, store_val, gep).ok();
+        }
+        Some(TypedRegister { name: addr, ty: Type::Custom(base.clone()) })
+    }
+
     /// 2026-08-16 (Phase 3a, coll struct literal construction): build a LOCAL
     /// INLINE-FIXED coll value (`let f: Fixed = [1,2,3,4]`) by storing the
     /// literal elements DIRECTLY into the inline `data: T[N]` array. Layout:

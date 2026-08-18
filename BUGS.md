@@ -154,7 +154,7 @@ documented in the redesign plan's SHIPPED section):**
 member bodies, (d) fix member-on-param ABI. Each is a distinct compiler bug;
 none weakens a contract.
 
-## Inlined member with a foreach + a nested foreach — runtime collapse by clang -O3 — SSA-path FIXED 2026-08-17; countdown path OPEN
+## Inlined member with a foreach + a nested foreach — runtime collapse by clang -O3 — FIXED 2026-08-17/18
 
 **Date:** 2026-08-17 (found by the HashMap tuple redesign)
 **Status:** SSA-reactor path FIXED; countdown/fold path (`hash_ops_idio`) OPEN.
@@ -284,17 +284,53 @@ The arrow stores (extract + plain copy) write pooled member targets through the
 instance column via a GEP-into-element store (`emit_state_store_self_slot`),
 mirroring the Assign arm. Verified: 3 puts → size() reads 3 at -O0 and -O3.
 
-## Defn-param member mutation loses the value — OPEN
+## Defn-param member mutation loses the value — FIXED 2026-08-18
 
 **Date:** 2026-08-17 (found by the hashmap.bv `insert(map, ...)` wrapper)
-**Status:** Open — a collection obj passed as a defn param then mutated via a
-member method (`defn f(m: HashMap) { m.insert(...); term m; }`) loses the
-mutation (returns the pre-mutation handle). Direct member calls on a local or
-state instance work. Root: the member-on-param ABI (a param is bound to a
-register, the member's self-resolution doesn't write back).
+**Status:** FIXED 2026-08-18.
 
-**Path:** fix the member-inline self binding for defn-param receivers so
-mutating members update the param's storage.
+**Root cause (A/B-verified 2026-08-18):** a POOLED instance used as a VALUE (a
+defn argument) has no scalar register — its fields live in the state's pooled
+columns, and the identifier arm emitted an undefined `@map` GLOBAL (`load i64,
+ptr @map` → invalid IR; the caller's map was never boxed). A BOXED local map
+worked (its handle passed, mutations persisted).
+
+**Fix:**
+1. `box_pooled_instance_value` (emit_toplevel.rs): a pooled-instance defn
+   ARG is boxed at the call — malloc the struct size, copy each pooled column
+   field into the box at its struct offset, pass the handle. The callee's
+   member calls (boxed self path) then mutate the box and the returned handle
+   carries the mutations (storage-class rule "locals box": a pooled instance
+   that flows into a VALUE context boxes).
+2. `instance_prefix_for`'s get_local fallback now matches ONLY spawn-pool
+   bases — a defn param / boxed local of a pooled-typed obj is a BOXED value,
+   never a pooled row, so its field access (`x.data`) and member calls use the
+   boxed self (previously the field access indexed the pooled columns by the
+   handle → garbage/crash).
+3. The boxed-self regression guard (`is_pool_instance` in emit_member_body) is
+   narrowed to spawn-pool bases — a base can BOTH pool (a top-level instance)
+   AND box (a defn param of the same type), so the boxed path is legitimate
+   for non-spawn-pool receivers.
+
+**Verify:** `hashmap.bv` gained `insert(map, k, v)` / `remove(map, k, v)`
+wrappers (previously omitted as unsafe); `let m2 = insert(m, ...)` + `get`
+round-trips correctly. Regression test `test_pooled_instance_defn_arg_is_boxed`
+(no `@p` global, box malloc present).
+
+## `brievc check` over-reports on imported generic collection scans — OPEN
+
+**Date:** 2026-08-18 (found while adding the hashmap.bv wrappers)
+**Status:** Open — a CHECK-only divergence: `brievc check` on a program that
+imports `std/collections.bv` (or `std/hashmap.bv`) reports type errors on the
+HashMap's GENERIC scans (`acc <- keys[i]` in `keys()`, `acc <- vals[i]` in
+`values()`, `acc <- (keys[i], vals[i])` in `entries()`) — "expected
+List<K> for arrow assignment, found K" etc. `brievc check lib/std/collections.bv`
+alone passes; the same imports BUILD and run correctly (the arrow dispatch and
+codegen are fine). The divergence is a typechecker over-report specific to the
+imported/combined context — the arrow_ok element-match on the generic scan
+fails there. Pre-existing (verified against the pre-wrapper hashmap.bv).
+Needs the arrow push_element_type/type-param identity check in the combined
+module context.
 
 ## Iterable-protocol slice-6 deletions blocked on two live paths — OPEN
 

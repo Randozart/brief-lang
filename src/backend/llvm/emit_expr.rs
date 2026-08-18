@@ -2362,7 +2362,15 @@ impl LlvmBackend {
                 // case is already handled above (obj_instance_inits / spawn
                 // rows); this get_local fallback requires evidence of the
                 // columns.
-                if !self.ctx.instance_slots.iter().any(|slot| slot.starts_with(&format!("{}.", b))) {
+                // 2026-08-18 (BUGS.md defn-param mutation): only a SPAWN-POOL
+                // base binds its handles as pool ROWS. A defn param or boxed
+                // local of a pooled-typed obj (`defn poke(x: P) { term x.data }`
+                // — the caller boxes the value) must resolve the BOXED self,
+                // never the pooled columns; the caller passes a heap handle,
+                // not a row id. Restrict the fallback to spawn_pools bases.
+                if !self.ctx.spawn_pools.contains_key(b)
+                    || !self.ctx.instance_slots.iter().any(|slot| slot.starts_with(&format!("{}.", b)))
+                {
                     return None;
                 }
                 Some(b.clone())
@@ -2587,8 +2595,15 @@ impl LlvmBackend {
             // column. Detect a pool base by its `{base}.`-prefixed instance
             // slots (registered by build_field_index), and fail loudly if one
             // ever reaches the boxed fallback.
-            let is_pool_instance = self.ctx.instance_slots.iter()
-                .any(|slot| slot.starts_with(&format!("{}.", type_name)));
+            // 2026-08-18 (BUGS.md defn-param mutation): a base can BOTH pool
+            // (a top-level instance) AND box (a defn param / boxed local of
+            // the same type) — a boxed receiver legitimately reaches this
+            // path. Only a SPAWN-POOL base is always a pooled row (its handle
+            // is the row id, never a heap block): if THAT reaches the boxed
+            // fallback, the pool prefix failed to resolve (regression).
+            let is_pool_instance = self.ctx.spawn_pools.contains_key(type_name)
+                && self.ctx.instance_slots.iter()
+                    .any(|slot| slot.starts_with(&format!("{}.", type_name)));
             if is_pool_instance {
                 panic!(
                     "obj instance member call '.{}' on '{}' reached the retired boxed self path \
@@ -3932,6 +3947,19 @@ impl LlvmBackend {
                                 ) {
                                     return reg;
                                 }
+                            }
+                        }
+                    }
+                    // 2026-08-18 (BUGS.md defn-param mutation): a POOLED
+                    // INSTANCE used as a VALUE (a defn argument) has no scalar
+                    // register — its fields live in the state's pooled columns
+                    // and the identifier arm would emit an undefined `@name`
+                    // global. BOX it (malloc + copy the columns) so the callee
+                    // receives a real handle and its member mutations persist.
+                    if let crate::ast::Expr::Identifier(arg_name) = a {
+                        if self.unpacked_instance_prefix(arg_name).is_some() {
+                            if let Some(reg) = self.box_pooled_instance_value(out, indent, arg_name) {
+                                return reg;
                             }
                         }
                     }

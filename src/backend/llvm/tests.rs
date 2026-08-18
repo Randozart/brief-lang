@@ -6568,6 +6568,44 @@ node go [done == false][done == true] {
     );
 }
 
+/// 2026-08-18 (BUGS.md defn-param mutation): a POOLED instance used as a VALUE
+/// (a defn argument) has no scalar register — its fields live in the state's
+/// pooled columns, and the identifier arm emits an undefined `@p` global.
+/// box_pooled_instance_value must materialize a heap BOX at the call site.
+/// Assert the IR: no `@p` global, and the box is malloc'd.
+#[test]
+fn test_pooled_instance_defn_arg_is_boxed() {
+    let src = r#"
+obj P {
+    data: Int;
+    defn set(v: Int) { data = v; }
+};
+let p: P = 0;
+defn poke(x: P) -> Int { term x.data; };
+node go [true][true] {
+    let r: Int = poke(p);
+    println!(r);
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("load i64, ptr @p"),
+        "a pooled-instance defn ARG must be boxed, never emitted as the @p global; got:\n{ir}"
+    );
+    assert!(
+        ir.contains("call ptr @malloc"),
+        "the pooled-instance defn arg must be boxed with a malloc; got:\n{ir}"
+    );
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the

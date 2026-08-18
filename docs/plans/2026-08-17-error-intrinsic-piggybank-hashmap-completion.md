@@ -320,3 +320,23 @@ HashMap `items` mirror list is gone (deleted in Phase C). insert/remove use
 ## Execution order
 
 A → B → C → D → E → F. Commit after each phase that leaves the suite green.
+
+## Follow-ups (2026-08-18, after SHIPPED)
+
+Two pre-existing compiler gaps closed as follow-ups (both BUGS.md):
+
+1. **foreach over pooled member-field collections** (commit `747b994f`):
+   `foreach x in obj.items` — `items` a POOLED member List (slot
+   `{prefix}.items`, column type `Vector(List<Int>, [Anonymous(1)])`) —
+   panicked at emit_stmt.rs:262. `tier2_op_collection` now resolves the
+   iterable type through `resolve_id_type` (self-prefix + locals + fields +
+   instances) and the FIELD-ACCESS form (`ledger.items`), peeling the column
+   wrapper (shared `peel_column_type`).
+2. **Defn-param member mutation** (this commit): a POOLED instance used as a
+   defn argument is now BOXED at the call (`box_pooled_instance_value` — malloc
+   + copy the pooled columns), so `defn f(m: HashMap) { m.insert(...); term m }`
+   receives a real handle and the mutations persist. `instance_prefix_for`'s
+   local fallback matches only spawn-pool bases (a defn param/boxed local of a
+   pooled type is a boxed value), and the boxed-self regression guard is
+   narrowed to spawn-pool bases. `hashmap.bv` gained the `insert`/`remove`
+   wrappers (previously omitted as unsafe).
