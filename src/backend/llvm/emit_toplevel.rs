@@ -2875,6 +2875,43 @@ impl LlvmBackend {
                 _ => false,
             }
         }
+        // 2026-08-18 (Phase E, HashMap surface): a guard body may be outlined
+        // into a cold function ONLY if it is a pure scalar read of its captured
+        // idents. The cold function has no `%state` param — every state access
+        // must flow through the rewritten idents — and it CANNOT write state
+        // (a rewritten `done = true` would store to the param copy and vanish).
+        // Member calls inline member bodies that read POOLED columns via
+        // `%state`, so any method call, reflection, index, tuple, block,
+        // if/match, or foreach in the guard body defeats outlining. The one
+        // supported shape is `println!(sum)`-style FFI/observable prints over
+        // scalar idents (and `let`-derived scalars).
+        fn outlinable_expr(expr: &Expr) -> bool {
+            match expr {
+                Expr::Identifier(_)
+                | Expr::Quoted(_)
+                | Expr::Decimal(_)
+                | Expr::Char(_)
+                | Expr::TaggedLiteral(_, _)
+                | Expr::TaggedQuotedLiteral(_, _)
+                | Expr::Bool(_)
+                | Expr::Float(_) => true,
+                Expr::Call(_, args, _) | Expr::PluginIntercept { args, .. } => {
+                    args.iter().all(outlinable_expr)
+                }
+                Expr::BinaryOp(_, lhs, rhs) => outlinable_expr(lhs) && outlinable_expr(rhs),
+                Expr::UnaryOp(_, e) => outlinable_expr(e),
+                Expr::Cast(inner, _) => outlinable_expr(inner),
+                _ => false,
+            }
+        }
+        fn outlinable_stmt(stmt: &Statement) -> bool {
+            match stmt {
+                Statement::Expression(e) => outlinable_expr(e),
+                Statement::Let { expr: Some(e), .. } => outlinable_expr(e),
+                Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => outlinable_expr(e),
+                _ => false,
+            }
+        }
         fn collect_idents(stmt: &Statement, names: &mut Vec<String>) {
             match stmt {
                 Statement::Let { expr: Some(e), .. } => collect_expr_idents(e, names),
@@ -3012,7 +3049,13 @@ impl LlvmBackend {
                 let mut guard_bodies: Vec<&[Statement]> = Vec::new();
                 for (ri, s) in reordered.iter().enumerate() {
                     if let Statement::Guarded(_, body) = s {
-                        if body.iter().any(|s| has_ffi_call(s, &self.ctx.observable_names)) {
+                        // 2026-08-18: only PURE scalar-read guard bodies may be
+                        // outlined — see outlinable_stmt above. A mutating or
+                        // member-calling guard must stay inline (the cold copy
+                        // would reference the undefined `%state` or lose writes).
+                        if body.iter().any(|s| has_ffi_call(s, &self.ctx.observable_names))
+                            && body.iter().all(outlinable_stmt)
+                        {
                             ffi_guard_indices.push(ri);
                             guard_bodies.push(body);
                         }

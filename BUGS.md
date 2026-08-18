@@ -1,5 +1,38 @@
 # Bugs
 
+## Foreach item name poisoned a later member tuple-destructure (SSA main) — FIXED 2026-08-18
+
+**Date:** 2026-08-18 (found by the Phase E full-HashMap-surface program:
+`foreach k in ks { ... }` before `m.insert((i, i*10))` in a boolean-contract
+node)
+**Status:** FIXED 2026-08-18.
+
+**Symptoms:** wrong `get`/`contains`/`keys()` results AND a clang -O3 -flto
+frontend SIGSEGV on the generated IR. The `let (k, v) = e` destructure inside
+the HashMap `insert` member bound `k` to a register that was owned by a LATER
+statement (`%t516 = mul …` — a list-resize capacity). `clang -O0` read the
+undefined value (garbage inserts/gets); clang -O3 crashed in the frontend/gold
+plugin on the SSA dominance violation (use before def).
+
+**Root cause (two leaks, both required):**
+1. A `foreach` loop-variable binding was inserted into `last_val_temps` +
+   `let_bindings` (emit_stmt.rs) and NEVER removed after the loop body. The
+   item name (`k`) therefore outlived the loop.
+2. `last_val_temps` was not cleared at an emission-pass boundary — the
+   alwaysinline `@txn_go` copy and the SSA-main replay emit the SAME node body,
+   and `clear_locals()` (context.rs) skipped `last_val_temps`/`last_val_types`.
+
+The SSA-main replay of `insert` then resolved `k` through the stale
+`last_val_temps` entry (checked BEFORE `get_local` in emit_expr) to the
+@txn_go pass's foreach register — a name that in the replay's numbering
+belonged to a different, later value.
+
+**Fix:** the foreach item binding is now scoped to the foreach body (removed
+from all five binding maps after the body), and `clear_locals()` clears
+`last_val_temps`/`last_val_types` so emission passes are isolated. Regression
+test `test_foreach_item_does_not_poison_member_destructure` links + RUNS a
+program that would print garbage without the fix; it prints `7`.
+
 ## Member-param / instance-field shadowing asymmetry — FIXED 2026-08-18
 
 **Date:** 2026-08-18 (surfaced by `hash_ops_idio` capacity-init: the passed

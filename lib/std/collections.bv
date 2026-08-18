@@ -174,7 +174,7 @@ obj HashMap<K, V> {
                 };
             };
         };
-        count = count + 1;
+        count += 1;
     };
 
     defn get(key: K) -> V [count > 0][count >= 0] {
@@ -203,6 +203,42 @@ obj HashMap<K, V> {
         term found_slot;
     };
 
+    // 2026-08-18 (Phase E): keys()/values()/entries() column scans — unblocked
+    // by the arrow-push double-construction fix (BUGS.md 2026-08-18). The
+    // loop-carried local `acc` is bound to a fresh List and pushed once per
+    // occupied slot; the returned list is the LIVE binding (no `[<list>]`
+    // wrapper). Order is slot order, not insertion order (the C reference and
+    // hash_ops_idio do not depend on it).
+    defn keys() -> List<K> {
+        let acc: List<K> = [];
+        foreach i in 0..cap {
+            when occupied[i] == 1 {
+                acc <- keys[i];
+            };
+        };
+        term acc;
+    };
+
+    defn values() -> List<V> {
+        let acc: List<V> = [];
+        foreach i in 0..cap {
+            when occupied[i] == 1 {
+                acc <- vals[i];
+            };
+        };
+        term acc;
+    };
+
+    defn entries() -> List<(K, V)> {
+        let acc: List<(K, V)> = [];
+        foreach i in 0..cap {
+            when occupied[i] == 1 {
+                acc <- (keys[i], vals[i]);
+            };
+        };
+        term acc;
+    };
+
     txn remove(key: K) -> V [count > 0][count >= 0] {
         let h: Int = (key as Int) % cap;
         let r: V = 0 as V;
@@ -217,15 +253,13 @@ obj HashMap<K, V> {
             };
         };
         when found_slot {
-            count = count - 1;
+            count -= 1;
         };
         term r;
     };
 
-    // 2026-08-18: keys()/values()/entries() scans and `foreach` over the map
-    // are a Phase E follow-up. The blocking member-body bug (`acc <- keys[i]`
-    // double-constructing a loop-carried local) is FIXED (BUGS.md 2026-08-18),
-    // so the scans can now build on the column scan `foreach i in 0..cap {
-    // when occupied[i] == 1 { acc <- keys[i] } }` — the same shape remove()
-    // used before the mirror list was deleted.
+    // 2026-08-18: keys()/values()/entries() are implemented as column scans
+    // (above); `foreach` over the map is a normal List foreach over the
+    // entries() result. The mirror list is gone — the column scan is the
+    // single source of truth for iteration.
 };

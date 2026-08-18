@@ -1098,6 +1098,16 @@ impl FunctionContext {
         self.foreach_break_labels.clear();
         self.reg_float_cache.clear();
         self.reg_type_cache.clear();
+        // 2026-08-18 (Phase E, BUGS.md SSA-main destructure): last_val_temps
+        // is a PER-ITERATION "just written" cache — it must not survive an
+        // emission-pass boundary. The alwaysinline @txn_go pass and the
+        // SSA-main replay emit the SAME node body; a stale entry (e.g. a
+        // foreach item name) made the replay's `let (k, v) = e` destructure
+        // resolve `k` to a register owned by a LATER statement of the FIRST
+        // pass (undefined forward reference → wrong hash probes). Clearing
+        // here isolates the passes.
+        self.last_val_temps.clear();
+        self.last_val_types.clear();
     }
 
     /// Reset function state for a new function (keeps txn_counter if needed).

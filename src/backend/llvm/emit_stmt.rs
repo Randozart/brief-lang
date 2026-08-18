@@ -1710,6 +1710,23 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 emit_statement(backend, out, stmt, indent);
             }
             backend.fun.foreach_break_labels.pop();
+            // 2026-08-18 (Phase E, BUGS.md SSA-main destructure): the loop
+            // variable is scoped to the foreach BODY — remove its binding after
+            // the body, or a later same-named `let`/destructure in the SAME
+            // transaction resolves through the stale `last_val_temps` entry
+            // (last_val_temps wins over let_bindings in emit_expr). With the
+            // leak, `foreach k in ks { }` before an insert whose member
+            // destructures `let (k, v) = e` bound k to the POISONED foreach
+            // register in the second emission pass (the alwaysinline @txn_go
+            // copy + the SSA-main replay), so the hash probe read a register
+            // defined by a LATER statement (undefined forward ref, wrong
+            // inserts/gets). The item's let_bindings entry is also removed —
+            // the item is dead after the loop.
+            backend.fun.last_val_temps.remove(item);
+            backend.fun.last_val_types.remove(item);
+            backend.fun.let_bindings.remove(item);
+            backend.fun.let_binding_types.remove(item);
+            backend.fun.let_original_types.remove(item);
             if !backend.fun.terminated {
                 // 2026-08-14 (String unification): the `#String` decode lane
                 // advanced the byte-offset slot IN PLACE — re-storing `cur + 1`

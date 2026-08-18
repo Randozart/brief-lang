@@ -265,6 +265,26 @@ obj PiggyBank<K> {
 contains/remove/Count#/keys/values/entries/foreach) all correct; hash_ops_idio
 MATCH.
 
+**As-built 2026-08-18:** keys()/values()/entries() are column scans
+(`foreach i in 0..cap { when occupied[i] == 1 { acc <- keys[i] } }`); the
+HashMap `items` mirror list is gone (deleted in Phase C). insert/remove use
+`count += 1` / `count -= 1`. `hash_ops_idio` re-verified 1.06x MATCH.
+`tests/tier1/test_hashmap_surface.bv` exercises the full surface in one node
+(prints 20/true/false/5/10/100/10/10/4/9).
+
+**Two pre-existing compiler bugs fixed on the way (both BUGS.md 2026-08-18):**
+- FFI guard outlining: a guard body with member calls/state writes was outlined
+  into a `txn_*_cold_*` function that has NO `%state` param — the inlined
+  member bodies (pooled-column reads) referenced the undefined `%state`
+  (compile error). Outline is now restricted to pure scalar-read guard bodies
+  (`println!(sum)`-style); everything else stays inline.
+- Foreach item / member-destructure register poisoning (new BUGS.md entry):
+  the loop-variable binding leaked out of the foreach into `last_val_temps`,
+  and `clear_locals` didn't clear that map, so the SSA-main replay's
+  `let (k, v) = e` resolved `k` to a stale/forward register — wrong values and
+  a clang -O3 -flto SIGSEGV. Fixed by scoping the item to the body and clearing
+  `last_val_temps` at pass boundaries.
+
 ## Phase F — Tests + docs
 
 - Tests: `Error#` reachable/dead; PiggyBank (drain, one-shot use-after-free,

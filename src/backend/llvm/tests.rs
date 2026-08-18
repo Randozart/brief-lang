@@ -6312,6 +6312,106 @@ node go [done == 0][done == 3] {
     assert_eq!(prints.len(), 4, "expected four prints (two per copy); got:\n{ir}");
 }
 
+/// 2026-08-18 (Phase E, BUGS.md SSA-main destructure): a FOREACH loop variable
+/// whose name is also a member-body destructure name (`let (k, v) = e`)
+/// poisoned the member's reads. The foreach item binding leaked into
+/// `last_val_temps` AFTER the loop, and `last_val_temps` also survived the
+/// @txn_go → SSA-main emission-pass boundary (clear_locals didn't clear it).
+/// The SSA-main replay's `(k as Int) % 16` then resolved `k` to the stale
+/// foreach register (owned by a LATER statement — an undefined forward
+/// reference, wrong inserts/gets, and a clang -O3 -flto frontend SIGSEGV).
+/// This test compiles and RUNS the program: the member must hash the tuple's
+/// FIRST element (7), never the leftover foreach counter.
+#[test]
+fn test_foreach_item_does_not_poison_member_destructure() {
+    let src = r#"
+coll obj MyList { data: Ptr<Int>; };
+obj Probe {
+    data: Int;
+    defn hash_of_pair(e: (Int, Int)) -> Int {
+        let (k, v) = e;
+        term (k as Int) % 16;
+    };
+};
+let p: Probe = 0;
+let done: Bool = false;
+node go [done == false][done == true] {
+    when done == false {
+        let acc: Int = 0;
+        foreach k in 0..3 {
+            acc = acc + k;
+        };
+        let r: Int = p.hash_of_pair((7, 8));
+        println!(r);
+        done = true;
+    };
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+
+    use std::process::Command;
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let rt = std::path::Path::new(&manifest).join("lib/runtime/briev_rt.c");
+    let out = std::env::temp_dir().join(format!(
+        "briev_foreach_destructure_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let ll = out.with_extension("ll");
+    // The unit-test pipeline registers PrintPlugin (emitting `call` sites) but
+    // not the FFI runtime DECLARATIONS (compile.rs normally does that); declare
+    // them for the standalone link — inserted after the module header (top-level
+    // entity position).
+    let prelude = "declare i64 @__print_int(i64)\ndeclare i64 @__print_char(i64)\n";
+    let ir = if let Some(pos) = ir.find("target triple") {
+        let end = ir[pos..].find('\n').map(|e| pos + e + 1).unwrap_or(ir.len());
+        format!("{}{}{}", &ir[..end], prelude, &ir[end..])
+    } else {
+        format!("{prelude}{ir}")
+    };
+    std::fs::write(&ll, &ir).expect("write .ll");
+    let compile = Command::new("clang")
+        .arg("-O0")
+        .arg(&ll)
+        .arg(&rt)
+        .arg("-lm")
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "link failed: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = Command::new(&out).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let _ = std::fs::remove_file(&ll);
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        run.status.success(),
+        "program crashed: {} (ir:\n{ir})",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        stdout.trim(),
+        "7",
+        "hash_of_pair((7, 8)) must return 7 % 16 — the foreach item leaked into \
+         the member's `(k, v)` destructure resolution; got:\n{stdout}\n---\n{ir}"
+    );
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the
