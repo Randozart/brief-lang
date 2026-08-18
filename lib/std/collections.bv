@@ -120,11 +120,28 @@ obj HashMap<K, V> {
     // OCCUPIED count, NOT the slot-array size `cap`.
     op Count() -> Int { term count; };
 
-    txn init(val: K) [true][count == 0] {
-        keys = Malloc#(256 * 8) as Ptr<K>;
-        vals = Malloc#(256 * 8) as Ptr<V>;
-        occupied = Malloc#(256 * 8) as Ptr<Int>;
-        cap = 256;
+    // 2026-08-17: the constructor param is an honest `Int` CAPACITY — NOT a
+    // `K`-typed overload (a `K` is the map's KEY type and has nothing to do
+    // with table size; reinterpreting it as capacity silently truncated
+    // non-Int keys). The seed (`let m: HashMap<K,V> = 2 * N`) sizes the table
+    // so it never fills for a known bound. A 0 seed (the default `= 0`) falls
+    // back to 256, so existing fixed-size maps keep working. The `count == 0`
+    // contract runs the body only once (a map initializes from the empty state).
+    // 2026-08-18: the param is `capacity`, NOT `cap` — the body writes the
+    // FIELD `cap = c`, and a param named `cap` would SHADOW it. Lexical
+    // scoping says a bound param wins over a same-named field on READ, so the
+    // seed would read the param and the loop bounds would read the field —
+    // read/write resolution must stay symmetric (see emit_stmt/emit_expr
+    // shadow guards).
+    txn init(capacity: Int) [true][count == 0] {
+        let c: Int = match capacity {
+            0 => 256,
+            _ => capacity,
+        };
+        keys = Malloc#(c * 8) as Ptr<K>;
+        vals = Malloc#(c * 8) as Ptr<V>;
+        occupied = Malloc#(c * 8) as Ptr<Int>;
+        cap = c;
         count = 0;
         let init_items: List<(K, V)> = [];
         items = init_items;
@@ -147,13 +164,14 @@ obj HashMap<K, V> {
         let done_slot: Bool = false;
         foreach q in 0..cap {
             let p: Int = (h + q) % cap;
-            if !done_slot {
-                if occupied[p] == 0 || keys[p] == k {
+            when !done_slot {
+                when occupied[p] == 0 || keys[p] == k {
                     keys[p] = k;
                     vals[p] = v;
                     occupied[p] = 1;
                     items <- (k, v);
                     done_slot = true;
+                    break;
                 };
             };
         };
@@ -165,8 +183,9 @@ obj HashMap<K, V> {
         let r: V = 0 as V;
         foreach q in 0..cap {
             let p: Int = (h + q) % cap;
-            if occupied[p] == 1 && keys[p] == key {
+            when occupied[p] == 1 && keys[p] == key {
                 r = vals[p];
+                break;
             };
         };
         term r;
@@ -177,8 +196,9 @@ obj HashMap<K, V> {
         let found_slot: Bool = false;
         foreach q in 0..cap {
             let p: Int = (h + q) % cap;
-            if occupied[p] == 1 && keys[p] == key {
+            when occupied[p] == 1 && keys[p] == key {
                 found_slot = true;
+                break;
             };
         };
         term found_slot;
@@ -190,18 +210,19 @@ obj HashMap<K, V> {
         let found_slot: Bool = false;
         foreach q in 0..cap {
             let p: Int = (h + q) % cap;
-            if occupied[p] == 1 && keys[p] == key {
+            when occupied[p] == 1 && keys[p] == key {
                 r = vals[p];
                 occupied[p] = 0;
                 found_slot = true;
+                break;
             };
         };
-        if found_slot {
+        when found_slot {
             count = count - 1;
             // Rebuild the mirror list (remove an entry).
             let acc: List<(K, V)> = [];
             foreach i in 0..cap {
-                if occupied[i] == 1 {
+                when occupied[i] == 1 {
                     acc <- (keys[i], vals[i]);
                 };
             };

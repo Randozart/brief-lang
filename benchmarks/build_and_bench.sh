@@ -166,12 +166,11 @@ BENCHMARKS=(
     "arena_churn"       # bump-arena exhaustion + realloc-grow
     "linked_list"       # Malloc# heap nodes + pointer chasing
     "hash_ops"          # hash-indexed flat table ops
-    # "hash_ops_idio"    # REMOVED 2026-08-16 — written against the broken
-    #                     # HashMap; after the redesign the linear-probe
-    #                     # insert inlined per iteration overflows clang's
-    #                     # frontend (the map is correct for normal use; a
-    #                     # hot-loop HashMap benchmark needs a lighter insert
-    #                     # or a non-inlined map member)
+    "hash_ops_idio"     # idiomatic HashMap via std/collections.bv — restored
+    #                     # 2026-08-18: the map is a real 2*N open-addressing
+    #                     # table (never fills); the C reference mirrors that
+    #                     # structure (was a 256-ring, a different workload).
+    #                     # Verified MATCH at BOUND=50M, ~1.05x parity.
     "enemy_swarm"       # SoA reactive swarm (array-state)
     "bridge_glue"
     "bridge_multi"

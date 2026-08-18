@@ -1345,6 +1345,13 @@ fn try_coerce_via_parse(
             return false;
         }
     }
+    let target_name = match target_ty {
+        Type::Custom(n) => n.as_str(),
+        // 2026-07-31 (Phase 2): Applied types use their base name for op
+        // lookup (`RingBuffer<Int>` → `RingBuffer`).
+        Type::Applied(n, _) => n.as_str(),
+        _ => return false,
+    };
     let (form, discriminator) = match expr {
         Expr::Decimal(_) => ("Decimal", None),
         Expr::Float(_) => ("Decimal", None),
@@ -1361,47 +1368,79 @@ fn try_coerce_via_parse(
                 _ => return false,
             }
         }
-        _ => return (false),
+        // 2026-08-17: a COMPUTED numeric seed — `let m: HashMap<Int,Int> =
+        // 2 * N` — is a legitimate `op Init` construction value (the seed is
+        // the Init param, not a literal). A binary/other operator is
+        // non-literal, so it can only coerce for a type whose construction
+        // surface takes a numeric seed; handled below via the numeric check.
+        _ => {
+            // A non-literal, non-list expression: only accepted when the
+            // target's construction surface is numeric-seeded (checked below).
+            return construction_accepts_numeric(target_ty, arg_ty, ctx);
+        }
     };
-    let target_name = match target_ty {
-        Type::Custom(n) => n.as_str(),
-        // 2026-07-31 (Phase 2): Applied types use their base name for op
-        // lookup (`RingBuffer<Int>` → `RingBuffer`).
-        Type::Applied(n, _) => n.as_str(),
-        _ => return false,
-    };
+    // 2026-07-31 (Phase 2): `op Init: init(#Lh, #Rh)` / a registered Parse op
+    // authorizes `let t: T = v` construction (the collection stdlib pattern).
     if ctx.find_parse_op(target_name, form, discriminator).is_some() {
         return true;
     }
-    // 2026-07-31 (Phase 2): `op Init: init(#Lh, #Rh)` authorizes `let t: T = v`
-    // construction (the collection stdlib pattern).
-    let has_init = ctx
-        .regular_bindings
-        .get(target_name)
-        .map_or(false, |b| b.iter().any(|op| op.name == "Init"));
-    if has_init {
+    if type_has_init_op(target_name, ctx) {
         return true;
     }
     // 2026-07-31 (Phase 2): Numeric-protocol members construct from numeric
     // literals even without an explicit Parse op (`let v: MyNum = 0` where
     // `type MyNum : #Int`). A type is numeric if it carries Cast.Int,
     // Cast.UInt, or Cast.Float.
-    if matches!(form, "Decimal") {
-        let numeric = ["Cast.Int", "Cast.UInt", "Cast.Float"];
-        let is_numeric = target_ty
-            .universe_key()
-            .and_then(|k| ctx.universe.get(k))
-            .map_or(false, |rt| numeric.iter().any(|p| rt.properties.contains_key(*p)));
-        // Also honor a declared numeric protocol hashword (`type MyNum : #Int`).
-        let proto_numeric = ctx
-            .type_protocols
-            .get(target_name)
-            .map_or(false, |p| matches!(p.as_str(), "#Int" | "#UInt" | "#Float"));
-        if is_numeric || proto_numeric {
-            return true;
-        }
+    if matches!(form, "Decimal") && construction_accepts_numeric(target_ty, arg_ty, ctx) {
+        return true;
     }
     false
+}
+
+/// 2026-08-17: does the target type's construction surface accept a NUMERIC
+/// seed (type is numeric / has a Decimal Parse op / has `op Init`) AND is the
+/// inferred seed type itself numeric (Int/Float/etc.)? True ⇒ an expression
+/// like `2 * N` (a computed capacity seed) can construct the type.
+fn construction_accepts_numeric(
+    target_ty: &Type,
+    arg_ty: &Type,
+    ctx: &TypecheckContext,
+) -> bool {
+    if *arg_ty != Type::int() && *arg_ty != Type::float() {
+        // A non-numeric inferred seed cannot be a numeric-capacity seed.
+        return false;
+    }
+    // 2026-08-17: numeric-ness via the canonical canonical protocol-membership
+    // helper (`operand_implements_protocol`) — FUNDAMENTALS first (the `Cast.*`
+    // universe property, e.g. `#Int` → `Cast.Int`), then the `declared_protocol_of`
+    // fallback for a custom `type MyNum : #Int`. Never hand-match the hashword
+    // string directly (hashwords were replaced by the casting graph / fundamentals).
+    if ctx.operand_implements_protocol(target_ty, "#Int")
+        || ctx.operand_implements_protocol(target_ty, "#UInt")
+        || ctx.operand_implements_protocol(target_ty, "#Float")
+    {
+        return true;
+    }
+    match target_ty {
+        Type::Custom(n) | Type::Applied(n, _) => {
+            // A Decimal Parse op or `op Init` is a numeric-seeded construction.
+            if ctx.find_parse_op(n, "Decimal", None).is_some() {
+                return true;
+            }
+            type_has_init_op(n, ctx)
+        }
+        _ => false,
+    }
+}
+
+/// 2026-08-17: does the type (by its base name) declare an `op Init`?
+/// `op Init: init(#Lh, #Rh)` is the construction surface that authorizes
+/// `let t: T = v` (the collection stdlib pattern). Shared by
+/// `try_coerce_via_parse` and `construction_accepts_numeric` (DRY).
+fn type_has_init_op(target_name: &str, ctx: &TypecheckContext) -> bool {
+    ctx.regular_bindings
+        .get(target_name)
+        .map_or(false, |b| b.iter().any(|op| op.name == "Init"))
 }
 
 /// 2026-07-18: Convenience wrapper — infer type without provenance.

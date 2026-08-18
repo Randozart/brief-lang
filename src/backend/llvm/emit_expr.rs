@@ -236,7 +236,22 @@ impl LlvmBackend {
                 // 2026-08-07 (object instance pools): a bare member name in an
                 // UNPACKED member body resolves to the instance's top-level
                 // slot — `data` inside `st`'s push → the `st.data` field.
-                if let Some((prefix, row_reg)) = self.fun.self_prefix.clone() {
+                // 2026-08-17 (param/field shadowing): a member-body PARAMETER
+                // or local shadows a same-named instance field (lexical
+                // scoping). `txn init(cap: Int)` on obj HashMap has a state
+                // field `cap` (slot 6); without this guard, `cap` in the body
+                // resolved to the field column (zero at init) instead of the
+                // passed seed — dropping the 2*N capacity seed so cap
+                // defaulted to 256 (hash_ops_idio sum froze at 2·Σ0..255). A
+                // bound local/param must win; fall through to the local lookup
+                // below. 2026-08-18: nulling the prefix (flat) instead of an
+                // empty `if` block.
+                let pooled_prefix = if self.fun.let_bindings.contains_key(name) {
+                    None
+                } else {
+                    self.fun.self_prefix.clone()
+                };
+                if let Some((prefix, row_reg)) = pooled_prefix {
                     let slot = format!("{}.{}", prefix, name);
 
                     if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
@@ -342,7 +357,15 @@ impl LlvmBackend {
                 // name in a member body resolves to self+offset (GEP + load).
                 // Array slots are skipped here — `data[i]` is handled by the
                 // Index arm (self-slot array GEP), not loaded as a scalar.
-                let self_binding = self.fun.self_binding.clone();
+                // 2026-08-18 (shadow guard, BOXED read): a bound param/local
+                // shadows a same-named field here too — symmetric with the
+                // pooled read guard above and the boxed write guard in
+                // emit_stmt.rs.
+                let self_binding = if self.fun.let_bindings.contains_key(name) {
+                    None
+                } else {
+                    self.fun.self_binding.clone()
+                };
                 if let Some((self_type, self_ptr)) = &self_binding {
                     let is_self_slot = self.ctx.struct_types.get(self_type)
                         .map_or(false, |f| f.iter().any(|(n, _)| n == name));

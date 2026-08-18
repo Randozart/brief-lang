@@ -5922,6 +5922,226 @@ node go [done == 0][done == 1] {
     );
 }
 
+/// 2026-08-17 (param/field shadowing regression): a member-body PARAMETER must
+/// shadow a same-named INSTANCE FIELD. `txn set(cap: Int)` on obj Box has a
+/// state field `cap`; before the fix, `cap` in the body resolved to the field
+/// column (zero) instead of the passed argument, so the argument was silently
+/// dropped. This pins the arg (600) reaching the body via the parameter, not
+/// the field column.
+#[test]
+fn test_member_param_shadows_same_named_field() {
+    let src = r#"
+obj Box {
+    cap: Int;
+    txn set(cap: Int) [cap >= 0][cap >= 0] {
+        cap = cap + 100;
+    };
+};
+let b: Box = Box { cap: 0 };
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    b.set(600);
+    done = 1;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    // `cap = cap + 100` with arg 600 must store 700, computed from the
+    // PARAMETER (the arg), not from a load of the (zeroed) `cap` field column.
+    // In the buggy code the arg register is dead and the +100 add takes a field
+    // load; in the fixed code the arg register feeds the add. Robustly verify
+    // the arg register is consumed by an `add nsw` (the +100 computation).
+    let seed_reg = ir
+        .lines()
+        .find(|l| l.contains("add i64 0, 600"))
+        .and_then(|l| l.split('=').next().map(|s| s.trim().to_string()));
+    let seed_reg = seed_reg.expect("the member arg (600) must be emitted as a register");
+    let add_results: Vec<String> = ir
+        .lines()
+        .filter(|l| l.contains(&format!("add nsw i64 {}, ", seed_reg)))
+        .filter_map(|l| l.split('=').next().map(|s| s.trim().to_string()))
+        .collect();
+    assert!(
+        !add_results.is_empty(),
+        "the param (arg {seed_reg}) must feed the +100 add (not a field load); got:\n{ir}"
+    );
+    // 2026-08-18 (WRITE side of the shadow): `cap = cap + 100` must STORE
+    // into the param's shadowed local (a fresh alloca), NOT into the `b.cap`
+    // field column. In the asymmetric bug the read took the param but the
+    // store went to the pooled column; both sides must resolve to the same
+    // storage. Every store of an add-result must target an alloca.
+    let add_regs: Vec<String> = add_results
+        .iter()
+        .map(|r| format!("store i64 {r}, ptr "))
+        .collect();
+    let field_store = ir.lines().find(|l| {
+        add_regs
+            .iter()
+            .any(|needle| l.contains(needle.as_str()))
+            && {
+                let tgt = l
+                    .split("store i64")
+                    .nth(1)
+                    .and_then(|s| s.split("ptr").nth(1))
+                    .map(|s| s.trim().to_string())
+                    .expect("store must name a target");
+                !ir.lines()
+                    .any(|al| al.contains(&format!("{tgt} = alloca ")))
+            }
+    });
+    assert!(
+        field_store.is_none(),
+        "every store of a +100 result must target an alloca, never the field column (found: {}); got:\n{ir}",
+        field_store.unwrap_or_default()
+    );
+    assert!(
+        add_results.iter().all(|result| ir
+            .lines()
+            .any(|l| l.contains(&format!("store i64 {result}, ptr ")))),
+        "each +100 result must be stored (shadowed param write); got:\n{ir}"
+    );
+}
+
+/// 2026-08-18 (HashMap capacity-init + break-probe): `txn init(capacity)` must
+/// flow the seed through `match capacity { 0 => 256, _ => capacity }` into the
+/// table size (`c * 8` mallocs) and the `cap` column. The linear-probe loops
+/// must EARLY-EXIT on the matched/free slot (the `break` after the `when`)
+/// instead of scanning the full cap. The init is called directly (`m.init(40)`)
+/// because unit tests skip the full pipeline's numeric-seed construction — that
+/// path (`let m: HashMap<Int,Int> = 2 * N`) is pinned end-to-end by the
+/// hash_ops_idio benchmark (MATCH at parity).
+#[test]
+fn test_hashmap_capacity_seed_and_break_probe() {
+    let src = r#"
+obj HashMap<K, V> {
+    keys: Ptr<K>;
+    vals: Ptr<V>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    op InsertAt: insert(#Lh, #Rh);
+    op CopyFrom: get(#Rh);
+    op Init: init(#Lh, #Rh);
+    op Count() -> Int { term count; };
+    txn init(capacity: Int) [true][count == 0] {
+        let c: Int = match capacity {
+            0 => 256,
+            _ => capacity,
+        };
+        keys = Malloc#(c * 8) as Ptr<K>;
+        vals = Malloc#(c * 8) as Ptr<V>;
+        occupied = Malloc#(c * 8) as Ptr<Int>;
+        cap = c;
+        count = 0;
+    };
+    txn insert(e: (K, V)) [count < cap][count <= cap] {
+        let (k, v) = e;
+        let h: Int = (k as Int) % cap;
+        let done_slot: Bool = false;
+        foreach q in 0..cap {
+            let p: Int = (h + q) % cap;
+            when !done_slot {
+                when occupied[p] == 0 || keys[p] == k {
+                    keys[p] = k;
+                    vals[p] = v;
+                    occupied[p] = 1;
+                    done_slot = true;
+                    break;
+                };
+            };
+        };
+        count = count + 1;
+    };
+    defn get(key: K) -> V [count > 0][count >= 0] {
+        let h: Int = (key as Int) % cap;
+        let r: V = 0 as V;
+        foreach q in 0..cap {
+            let p: Int = (h + q) % cap;
+            when occupied[p] == 1 && keys[p] == key {
+                r = vals[p];
+                break;
+            };
+        };
+        term r;
+    };
+};
+let m: HashMap<Int, Int> = 0;
+let done: Int = 0;
+node go [done == 0][done == 1] {
+    m.init(40);
+    m.insert((1, 10));
+    m.insert((2, 20));
+    let g: Int = m.get(2);
+    done = g;
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    // 1. The numeric seed (40) must be a live register (the typechecker's
+    //    numeric-seed construction admits it as an `op Init` capacity).
+    let seed_reg = ir
+        .lines()
+        .find(|l| l.contains("add i64 0, 40"))
+        .and_then(|l| l.split('=').next().map(|s| s.trim().to_string()));
+    let seed_reg = seed_reg.expect("the capacity seed (40) must be emitted; got:\n{ir}");    // 2. `match capacity { 0 => 256, _ => capacity }` → the seed and the 256
+    //    fallback must meet in a phi (the fallback feeds the table size).
+    let phi_lines: Vec<&str> = ir
+        .lines()
+        .filter(|l| l.contains("phi") && l.contains(&seed_reg))
+        .collect();
+    assert!(
+        !phi_lines.is_empty(),
+        "the capacity seed {seed_reg} must feed a phi (0 => 256 fallback); got:\n{ir}"
+    );
+    let fallback_regs: Vec<String> = ir
+        .lines()
+        .filter(|l| l.contains("add i64 0, 256"))
+        .filter_map(|l| l.split('=').next().map(|s| s.trim().to_string()))
+        .collect();
+    assert!(
+        !fallback_regs.is_empty(),
+        "the 0 => 256 fallback constant must be emitted; got:\n{ir}"
+    );
+    let phi_meets_fallback = phi_lines
+        .iter()
+        .any(|l| fallback_regs.iter().any(|r| l.contains(r)));
+    assert!(
+        phi_meets_fallback,
+        "the capacity seed {seed_reg} and the 0 => 256 fallback must meet in a phi; got:\n{ir}"
+    );
+    // 3. The `c * 8` malloc sizing must consume the seed-derived phi (the
+    //    capacity reaches the allocations — not a dropped seed).
+    let phi_reg = ir
+        .lines()
+        .filter(|l| l.contains("phi") && l.contains(&seed_reg))
+        .find_map(|l| l.split('=').next().map(|s| s.trim().to_string()))
+        .expect("the seed-feeding phi must have a result register; got:\n{ir}");
+    assert!(
+        ir.lines()
+            .any(|l| l.contains("mul nsw i64") && l.contains(&phi_reg)),
+        "the capacity phi {phi_reg} must size the column mallocs (mul by 8); got:\n{ir}"
+    );
+    // 4. The linear probes must EARLY-EXIT: an unconditional `br label
+    //    %foreach.end{label}` from inside the body (the `break`), distinct
+    //    from the header backedge. Without `break` the loop scans the full cap.
+    assert!(
+        ir.lines().any(|l| l.trim().starts_with("br label %foreach.end")),
+        "the probe loops must break early (unconditional branch to foreach.end); got:\n{ir}"
+    );
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the

@@ -552,7 +552,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // target in an UNPACKED member body writes the instance's
                     // top-level slot — `total = 1` in `st`'s member → the
                     // `st.total` field.
-                    if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
+                    // 2026-08-18 (param/field shadowing, WRITE side): a
+                    // member-body PARAMETER or local shadows a same-named
+                    // instance field on WRITES too — symmetric with the read
+                    // guard in emit_expr.rs. Without this, `cap = cap + 100`
+                    // READ the param but STORED into the `{prefix}.cap`
+                    // column (read and write resolved to different storage —
+                    // lexical scoping must resolve both sides identically). A
+                    // shadowed name falls through to the local-binding store
+                    // below (which allocas the param/local). Nulling the
+                    // prefix is the flat way to skip the field path.
+                    let pooled_prefix = if backend.fun.let_bindings.contains_key(name) {
+                        None
+                    } else {
+                        backend.fun.self_prefix.clone()
+                    };
+                    if let Some((prefix, row_reg)) = pooled_prefix {
                         let slot = format!("{}.{}", prefix, name);
                         if let Some(&idx) = backend.ctx.field_index_map.get(&slot) {
                             let field_ty = backend.ctx.field_types[idx].clone();
@@ -593,7 +608,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     }
                     // 2026-07-31 (A5): obj member `self` slot write — a bare
                     // slot name in a member body stores to self+offset.
-                    let self_binding = backend.fun.self_binding.clone();
+                    // 2026-08-18: same shadow guard as above for the BOXED
+                    // self-slot write — a shadowed name writes its own alloca,
+                    // never the receiver's field slot.
+                    let self_binding = if backend.fun.let_bindings.contains_key(name) {
+                        None
+                    } else {
+                        backend.fun.self_binding.clone()
+                    };
                     if let Some((self_type, self_ptr)) = &self_binding {
                         let is_self_slot = backend.ctx.struct_types.get(self_type)
                             .map_or(false, |f| f.iter().any(|(n, _)| n == name));

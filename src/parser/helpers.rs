@@ -181,6 +181,15 @@ impl<'a> Parser<'a> {
             Some((tok, span)) => {
                 if let Some(name) = self.keyword_as_identifier(&tok) {
                     Ok(name)
+                } else if let Some(kw) = Self::reserved_keyword_name(&tok) {
+                    // 2026-08-17: a RESERVED keyword (modifier/strategy word
+                    // like `out`, `vol`, `seq`) cannot be an identifier here —
+                    // say so specifically instead of the generic "expected
+                    // identifier, found 'out'".
+                    Err(SyntaxError::ReservedKeyword {
+                        keyword: kw.to_string(),
+                        span: self.make_span(span),
+                    })
                 } else {
                     Err(SyntaxError::UnexpectedToken {
                         expected: "identifier".into(),
@@ -391,6 +400,30 @@ impl<'a> Parser<'a> {
             Token::Ms => "ms".into(),
             Token::Input => "input".into(), Token::Output => "output".into(),
             Token::BoolTrue => "true".into(), Token::BoolFalse => "false".into(),
+            _ => return None,
+        })
+    }
+
+    /// 2026-08-17: report the keyword name for tokens that are RESERVED (a
+    /// modifier/strategy/construct keyword that CANNOT be used as an
+    /// identifier) — the complement of `keyword_as_identifier`. These are the
+    /// words a user most often mistakes for a variable name (`out`, `vol`,
+    /// `seq`, `pack`, ...). When `expect_identifier` hits one it emits a
+    /// specific "reserved keyword" error instead of the generic
+    /// "expected identifier, found 'out'".
+    fn reserved_keyword_name(tok: &Token) -> Option<&'static str> {
+        Some(match tok {
+            Token::Out => "out",
+            Token::Vol => "vol",
+            Token::Seq => "seq",
+            Token::Pack => "pack",
+            Token::Coll => "coll",
+            Token::Accel => "accel",
+            Token::Atomic => "atomic",
+            Token::Union => "union",
+            Token::Trap => "trap",
+            Token::Spawn => "spawn",
+            Token::BeginProgram => "beginprogram",
             _ => return None,
         })
     }

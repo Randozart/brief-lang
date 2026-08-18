@@ -694,6 +694,13 @@ pub enum SyntaxError {
         feature: String,
         span: Span,
     },
+    /// 2026-08-17: the token is a reserved KEYWORD that cannot be used as an
+    /// identifier in this position (e.g. the `out`/`vol`/`seq` modifiers).
+    /// A specific message beats the generic "expected identifier, found 'out'".
+    ReservedKeyword {
+        keyword: String,
+        span: Span,
+    },
 }
 
 impl fmt::Display for SyntaxError {
@@ -705,6 +712,7 @@ impl fmt::Display for SyntaxError {
             SyntaxError::InvalidStatement { span, .. } => format!(" at {}", span),
             SyntaxError::InvalidType { span, .. } => format!(" at {}", span),
             SyntaxError::StagedFeature { span, .. } => format!(" at {}", span),
+            SyntaxError::ReservedKeyword { span, .. } => format!(" at {}", span),
         };
 
         match self {
@@ -718,6 +726,9 @@ impl fmt::Display for SyntaxError {
             }
             SyntaxError::InvalidExpression { reason, .. } => {
                 write!(f, "invalid expression: {}{}", reason, span_str)
+            }
+            SyntaxError::ReservedKeyword { keyword, .. } => {
+                write!(f, "'{}' is a reserved keyword and cannot be used as an identifier{}", keyword, span_str)
             }
             SyntaxError::InvalidStatement { reason, .. } => {
                 write!(f, "invalid statement: {}{}", reason, span_str)

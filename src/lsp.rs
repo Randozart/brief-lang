@@ -475,6 +475,10 @@ impl LspServer {
                 format!("Staged feature '{}' is normative but not yet implemented", feature),
                 *span,
             ),
+            SyntaxError::ReservedKeyword { keyword, span } => (
+                format!("'{}' is a reserved keyword and cannot be used as an identifier", keyword),
+                *span,
+            ),
         };
 
         serde_json::json!({

@@ -1,5 +1,32 @@
 # Bugs
 
+## Member-param / instance-field shadowing asymmetry — FIXED 2026-08-18
+
+**Date:** 2026-08-18 (surfaced by `hash_ops_idio` capacity-init: the passed
+capacity never reached the table size)
+**Status:** Fixed (`emit_expr.rs` + `emit_stmt.rs` + `lib/std/collections.bv`).
+**Root cause:** a member-body parameter that shadows a same-named instance
+field (`txn init(cap: Int)` on an obj with field `cap`) resolved asymmetrically
+in the backend: the READ side (`emit_expr.rs`) guarded against the shadow, but
+the WRITE side (`emit_stmt.rs`) did not — pooled (`self_prefix`) and boxed
+(`self_binding`) writes of `cap` routed to the FIELD COLUMN, dropping the
+argument and leaving the table at the zero-init size (256-slot growth stall,
+capacity seed silently discarded). A separate lexical bug: the enclosing
+instance's `self_prefix` leaked into nested boxed locals (the earlier boxed
+member-body bug, same family).
+**Fix (two layers, so the guard and the fix cannot disagree):**
+1. Kill the shadow at the source — `init(cap)` → `init(capacity)` in
+   `lib/std/collections.bv` with `match capacity { 0 => 256, _ => capacity }`.
+2. Symmetric guards on BOTH sides: `emit_expr.rs` read guards (pooled + boxed)
+   and `emit_stmt.rs` write guards (pooled `self_prefix` + boxed
+   `self_binding`), all via the flat "None-trick" (`let x = if shadowed { None }
+   else { clone }`) to avoid nesting/Praetor complexity.
+**Verification:** `test_member_param_shadows_same_named_field` strengthened to
+assert shadowed writes store into a fresh alloca, never the field column;
+`test_hashmap_capacity_seed_and_break_probe` pins the seed → `0 => 256` phi →
+`c*8` malloc sizing and the probe loops' early-exit `break`. `cargo test --lib`
+1897/1897 green.
+
 ## Boxed member body inherited the enclosing instance's `self_prefix` — FIXED 2026-08-17
 
 **Date:** 2026-08-17 (surfaced by `hash_ops_idio` → 240 instead of C's
@@ -53,6 +80,10 @@ documented in the redesign plan's SHIPPED section):**
    direct member calls; a functional wrapper style is not yet safe.
 5. **`hash_ops_idio` benchmark** removed from the suite — the probe-inlined
    hot loop overflows clang's frontend (the map is correct for normal use).
+   **RE-ADDED 2026-08-18** (Phase B): the collapse was the param/field shadow
+   asymmetry, fixed (see the 2026-08-18 entries); the benchmark now MATCHes C
+   at ~1.05x parity with an honest 2*N open-addressing C reference and is back
+   in `build_and_bench.sh`.
 
 **Path for the follow-ups:** (a) fix the Tier-1 foreach register allocation,
 (b) fix the generic-member arrow cross-import, (c) fix nested-foreach-in-if in
@@ -105,6 +136,19 @@ Next lever candidates: emit the (K,V) pair into a preallocated per-iteration
 slot (SROA-friendly) instead of malloc, or fix the tuple slot ABI so the body's
 `inttoptr + GEP` round-trip disappears — then A/B against the harness link
 before committing.
+
+**RESOLVED 2026-08-18** (Phase B of the 2026-08-17 completion plan): the
+collapse root was the same param/field shadow asymmetry that dropped the
+capacity seed (see the new entry below) — a countdown-path write side of the
+shadow left the enclosing instance's `self_prefix`, so per-iteration probe
+writes routed to the wrong column and clang folded the dead table. Fixed by
+(1) renaming `init(cap)` → `init(capacity)` (no shadow at all) AND (2)
+symmetric read/write, pooled/boxed shadow guards in emit_expr.rs/emit_stmt.rs.
+`hash_ops_idio` now MATCHes C (Σ2i) at BOUND=10M and 50M, and the loop is
+verified live at BOUND=500M (11.8s, not folded). The old C reference was a
+256-ring (a different workload) — rewritten as a real 2*N open-addressing
+table; Briev ~0.693s vs C ~0.661s (~1.05x parity, user-CPU harness timer).
+Benchmark re-added to the suite.
 
 **Pre-existing oddity (not a regression):** a node whose inserts are LET-BOUND
 (`let e1 = (1,10); m.insert(e1)`) and whose observables are ONLY inline gets
