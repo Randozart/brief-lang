@@ -177,13 +177,31 @@ body emits two `[]` blocks; the push writes a copy, `term acc` reads the
 stale original (scans return 1 of N). (b) `items <- e` on a MEMBER-FIELD
 List in a member body hits `%t432` undefined (register collision).
 
-**Fix:** the foreach pre-declaration (emit_stmt.rs:1396-1409) must seed the
-loop-carried local from the ACTUAL binding handle (no re-`[]`); the `<-`
-push (emit_stmt.rs:1033) must write its result back through the binding. Fix
-both the loop-local and member-field paths.
+**Fix (as-built 2026-08-18):** the ACTUAL root of (a) was the CALLER side —
+`let ks: List<K> = b.keys()` routed the returned (already-a-List) collection
+through the seed constructor and wrapped it as `[<list>]` (len forced to 1).
+`construct_local_collection_seed` now takes an emitted `TypedRegister` and
+binds a collection-valued RHS DIRECTLY; only a genuine non-collection becomes
+a seed. Bug (b) was the strategy lookup + plain-copy fallback recognizing only
+BARE names while a pooled slot is keyed `{prefix}.{name}` with the COLUMN type
+`Vector(inner, [Anonymous(1)])` — centralized `collection_base_type_name`
+(emit_toplevel.rs) resolves locals / state fields / self-prefixed member names,
+peeling the Vector wrapper; arrow stores into pooled member targets write the
+instance column via a GEP-into-element store (`emit_state_store_self_slot`).
 
-**Verify:** `keys()`/`values()`/`entries()` counts correct. A member-field
-`items <- e` (PiggyBank `put`) works.
+**Verify (as-built):** repro prints `3`/`3` at -O0 and -O3;
+`test_arrow_push_binds_returned_list_and_pooled_member_field` (asserts no
+constant-1 len seed, exactly 8 push increments, printed values are loads).
+1898 lib tests green.
+
+**Perf follow-up (as-built):** fixing (b) exposed that the HashMap's persistent
+`items: List<(K, V)>` mirror (a 2026-08-16 workaround for bug (a)) was being
+silently DROPPED at Phase B — hash_ops_idio's 1.09x was measured with no mirror
+writes. With the push fixed the mirror cost 2 mallocs/insert (3.28x). Since
+bug (a) is now fixed, the mirror is DEAD (no reader) and was DELETED:
+keys()/values()/entries()/foreach will scan the columns directly in Phase E
+(the pre-workaround design). hash_ops_idio re-measured 1.06x MATCH with no
+dropped work.
 
 ## Phase D — `PiggyBank<K>` (one-shot, opaque, ExtractFrom, self-free)
 

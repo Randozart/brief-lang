@@ -150,7 +150,17 @@ verified live at BOUND=500M (11.8s, not folded). The old C reference was a
 table; the runtime suite records Briev 0.7292s vs C 0.6655s (1.09x, MATCH).
 Benchmark re-added to the suite.
 
-**Pre-existing oddity (not a regression):** a node whose inserts are LET-BOUND
+**Correction 2026-08-18 (Phase C):** the recorded 1.09x was partially enabled
+by a SILENTLY-DROPPED write — `insert`'s `items <- (k, v)` (a pooled
+member-field List push) emitted nothing, so the map skipped mirror maintenance.
+Phase C fixed that push (new entry below); the honest-with-mirror result was
+3.28x (2 mallocs/insert). The mirror list was itself a 2026-08-16 workaround
+for the `acc <- keys[i]` double-construction bug that Phase C ALSO fixed, so
+the dead mirror was DELETED from the HashMap (keys()/values()/entries()/foreach
+will scan columns in Phase E). hash_ops_idio re-measured 0.7203s vs C 0.6751s
+(1.06x, MATCH) with no dropped work.
+
+## Pre-existing oddity (not a regression):** a node whose inserts are LET-BOUND
 (`let e1 = (1,10); m.insert(e1)`) and whose observables are ONLY inline gets
 (`vA_2get`) segfaults even on the pre-fix compiler: the SSA main emits the
 tuple materializations and insert bodies into the unused alwaysinline
@@ -171,18 +181,44 @@ Fix: the `Statement::Foreach` arm sets `fun.cur_block = Some(foreach.endN)`
 hash_ops_idio now compiles and runs. (Its hot-loop get still reads 0 — the
 multi-member register collision above, a SEPARATE bug.)
 
-## Arrow `<-` push into a loop-carried local List double-constructs — OPEN
+## Arrow `<-` push into a loop-carried local List double-constructs — FIXED 2026-08-18
 
 **Date:** 2026-08-17 (found by the HashMap `keys()` scan)
-**Status:** Open — `let acc: List<K> = []; foreach i in 0..cap { if ... { acc <-
-keys[i] } }; term acc;` in a MEMBER body emits TWO empty-List constructions;
-the push updates a copy, `term acc` reads the stale original (returns 1 of 3
-elements). A plain node-body version works. Root: the foreach pre-declaration
-(re-seeding loop-carried locals) interacts with the member-inline `<-` push.
+**Status:** FIXED 2026-08-18. The `keys()` scan itself was correct; the bug was
+the CALLER binding. `let ks: List<Int> = b.keys()` was routed through the
+collection SEED constructor (`construct_local_collection_seed`), which treated
+ANY non-List RHS as a seed — so the returned list was wrapped as `[<list>]` (a
+new box with len forced to 1) and the scan read 1 of N elements. The typechecker
+only routes a MISMATCHING RHS through parse-op construction, so codegen had no
+type to distinguish "a collection that is already a List" from "a seed".
 
-**Path:** the foreach pre-declaration (emit_stmt.rs:1396-1409) must rebind the
-ORIGINAL name so `term acc` reads the loop-carried slot, and the `<-` push
-must store its result back through the alloca.
+**Root:** `emit_stmt.rs` coll-typed-let path — `is_coll && !List` assumed every
+non-List RHS was a seed.
+
+**Fix:** emit the RHS once, then branch on the result type: if it is a
+collection (`is_coll_type` / op-surface coll), bind it DIRECTLY; only a genuine
+non-collection becomes a seed. `construct_local_collection_seed` now takes an
+emitted `TypedRegister` instead of `&Expr`. Verified: keys() returns all 3
+elements at -O0 and -O3.
+
+## Pooled member-field List push (`items <- e`) silently dropped — FIXED 2026-08-18
+
+**Date:** 2026-08-18 (found by the PiggyBank `put`)
+**Status:** FIXED 2026-08-18. Inside a pooled member body, `items <- e` (a
+PiggyBank `put` on `items: List<Int>`) emitted NOTHING — `p.size()` read 0. The
+strategy lookup and the plain-copy fallback only recognized BARE names
+(`let_original_types`, `field_index_map`), but a pooled slot is keyed
+`{prefix}.{name}` (`PiggyBank.items`) AND its briev type is the COLUMN type
+`Vector(inner, [Anonymous(1)])` (`List<Int>[1]`), so no InsertAt strategy fired
+and the plain-copy target was unresolvable.
+
+**Fix:** centralized `collection_base_type_name` (emit_toplevel.rs) resolves a
+collection identifier's base name across function locals, state fields, and
+bare pooled member names, peeling the `Vector` column wrapper; used by
+`find_insert_strategy`/`find_extract_strategy` and `emit_strategy_member_call`.
+The arrow stores (extract + plain copy) write pooled member targets through the
+instance column via a GEP-into-element store (`emit_state_store_self_slot`),
+mirroring the Assign arm. Verified: 3 puts → size() reads 3 at -O0 and -O3.
 
 ## Defn-param member mutation loses the value — OPEN
 

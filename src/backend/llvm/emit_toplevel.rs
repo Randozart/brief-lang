@@ -114,31 +114,47 @@ impl LlvmBackend {
         }
     }
 
-    /// Check the target expression for an InsertAt strategy by looking up
-    /// the variable's type in the TypeUniverse.
-    fn lookup_strategy_type_name(&self, var_name: &str) -> Option<String> {
-        // 2026-07-01: First check let_original_types (populated for function params).
-        // If not found, fall back to ctx.field_briev_types (populated for state vars).
-        // State variables like `queue: RingBuffer<Int>` are NOT in let_original_types
-        // (only function params go there). Without this fallback, strategy dispatch
-        // returns None and custom types like RingBuffer fall through to the default
-        // List arena path, causing realloc on non-heap memory.
-        if let Some(ty) = self.fun.let_original_types.get(var_name) {
-            return match ty {
+    /// 2026-08-18 (Phase C, BUGS.md member-field arrow): the base type name of
+    /// a collection identifier — a function local, a state field, or a BARE
+    /// member name in a pooled member body (the field slot is `{prefix}.{name}`
+    /// like `PiggyBank.items`, never the bare name). A pooled slot's briev type
+    /// is the COLUMN type `Vector(inner, [Anonymous(1)])` (e.g. `List<Int>[1]`)
+    /// — peel the Vector wrapper before extracting the base. Shared by the
+    /// strategy dispatchers (insert/extract) so the member-field arrow finds
+    /// its InsertAt/ExtractFrom binding; without it the push was a no-op.
+    pub(super) fn collection_base_type_name(&self, var_name: &str) -> Option<String> {
+        fn base_name(ty: &crate::ast::Type) -> Option<String> {
+            let ty = match ty {
+                crate::ast::Type::Vector(inner, _) => inner.as_ref(),
+                other => other,
+            };
+            match ty {
                 crate::ast::Type::Custom(n) => Some(n.clone()),
                 crate::ast::Type::Applied(n, _) => Some(n.clone()),
                 _ => None,
-            };
+            }
+        }
+        if let Some(ty) = self.fun.let_original_types.get(var_name) {
+            return base_name(ty);
         }
         if let Some(&idx) = self.ctx.field_index_map.get(var_name) {
             let ty = self.ctx.field_briev_types.get(idx)?;
-            return match ty {
-                crate::ast::Type::Custom(n) => Some(n.clone()),
-                crate::ast::Type::Applied(n, _) => Some(n.clone()),
-                _ => None,
-            };
+            return base_name(ty);
+        }
+        if let Some((prefix, _)) = &self.fun.self_prefix {
+            let slot = format!("{}.{}", prefix, var_name);
+            if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
+                let ty = self.ctx.field_briev_types.get(idx)?;
+                return base_name(ty);
+            }
         }
         None
+    }
+
+    /// Check the target expression for an InsertAt strategy by looking up
+    /// the variable's type in the TypeUniverse.
+    fn lookup_strategy_type_name(&self, var_name: &str) -> Option<String> {
+        self.collection_base_type_name(var_name)
     }
 
     pub(super) fn find_insert_strategy(&self, target: &crate::ast::Expr) -> Option<&crate::ast::top::OperatorDef> {
@@ -1385,12 +1401,15 @@ impl LlvmBackend {
     /// value (a NULL/0 handle), so any member call (insert/get/Count#)
     /// dereferenced garbage — for ANY collection obj (RingBuffer, Stack,
     /// HashMap). Returns None when the type has no `op Init` binding.
+    /// 2026-08-18 (Phase C): the seed REGISTER is passed in — the caller emits
+    /// the RHS once and decides whether it is a genuine scalar seed (a
+    /// collection-valued RHS binds directly, never wrapped in `op Init`).
     pub(super) fn construct_local_collection_seed(
         &mut self,
         out: &mut String,
         indent: &str,
         briev_ty: &Type,
-        seed: &Expr,
+        seed: TypedRegister,
     ) -> Option<TypedRegister> {
         let (base, type_key) = match briev_ty {
             Type::Custom(n) => (n.clone(), n.clone()),
@@ -1422,14 +1441,12 @@ impl LlvmBackend {
             name: addr.clone(),
             ty: Type::Custom(type_key.clone()),
         };
-        let arg_tmp = self.fun.gen_reg();
-        let arg = self.emit_expr_inner(out, &arg_tmp, seed, indent);
         let out_tmp = self.fun.gen_reg();
         self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation {
             recv_reg: &box_recv,
             type_name: &type_key,
             member: &member,
-            arg_regs: &[(arg.name, arg.ty)],
+            arg_regs: &[(seed.name, seed.ty)],
             prefix: None,
         }, indent);
         Some(TypedRegister {

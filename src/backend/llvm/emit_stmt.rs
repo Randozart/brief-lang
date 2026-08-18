@@ -394,8 +394,33 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             // seed bound the raw value (NULL handle → member
                             // calls segfaulted) for ANY non-coll obj (RingBuffer,
                             // Stack, HashMap). This is the general fix.
+                            // 2026-08-18 (Phase C, BUGS.md arrow-push
+                            // double-construct): the previous rule routed EVERY
+                            // non-list RHS through `op Init` — `let ks: List<Int>
+                            // = b.keys()` became `List.init(<the returned List>)`
+                            // = `[<list>]`, a 1-element wrapper (a keys() scan
+                            // returned 1 of N). Only a PRIMITIVE RHS is a genuine
+                            // seed. Emit the RHS ONCE, then decide by its result
+                            // type: a collection value binds directly; a scalar
+                            // constructs through `op Init` with the emitted
+                            // register.
                             let briev = ty.clone().unwrap_or(crate::ast::Type::int());
-                            backend.construct_local_collection_seed(out, indent, &briev, e)
+                            let rhs = backend.emit_expr(out, e, indent);
+                            let rhs_is_coll = {
+                                let base = match &rhs.ty {
+                                    crate::ast::Type::Custom(n) | crate::ast::Type::Applied(n, _) => {
+                                        n.as_str()
+                                    }
+                                    _ => "",
+                                };
+                                backend.is_coll_type(&rhs.ty)
+                                    || (!base.is_empty() && backend.is_op_surface_coll(base))
+                            };
+                            if rhs_is_coll {
+                                Some(rhs)
+                            } else {
+                                backend.construct_local_collection_seed(out, indent, &briev, rhs)
+                            }
                         } else {
                             None
                         }
@@ -1084,8 +1109,19 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // behavior where the unresolvable `<-` fell through silently.
             if let Some(t) = target.as_ref() {
                 if let Expr::Identifier(name) = t.as_ref() {
+                    // 2026-08-18 (Phase C): a pooled member-field target
+                    // (`items` → `p.items`) is resolvable too — the bare name
+                    // falls through to the instance column, else the plain
+                    // copy would be a silently-dropped no-op.
+                    let slot = backend
+                        .fun
+                        .self_prefix
+                        .as_ref()
+                        .map(|(prefix, _)| format!("{}.{}", prefix, name))
+                        .filter(|s| backend.ctx.field_index_map.contains_key(s));
                     let resolvable = backend.fun.let_bindings.contains_key(name)
-                        || backend.ctx.field_index_map.contains_key(name);
+                        || backend.ctx.field_index_map.contains_key(name)
+                        || slot.is_some();
                     if resolvable {
                         let val = backend.emit_expr(out, value, indent);
                         emit_arrow_store_local(backend, out, indent, name, &val);
@@ -1887,22 +1923,11 @@ pub(super) fn emit_strategy_member_call(
     let Expr::Identifier(recv_name) = &recv else { return None; };
     // 2026-08-12 (Iterable protocol): a LOCAL collection receiver
     // (`let ys: List<Int> = []; &ys <- 10`) resolves its type from the local
-    // binding, not just a state field.
-    let type_name = if let Some(&ridx) = backend.ctx.field_index_map.get(recv_name) {
-        match backend.ctx.field_briev_types.get(ridx) {
-            Some(Type::Custom(n)) => n.clone(),
-            Some(Type::Applied(n, _)) => n.clone(),
-            _ => return None,
-        }
-    } else if let Some(ty) = backend.fun.let_original_types.get(recv_name) {
-        match ty {
-            Type::Custom(n) => n.clone(),
-            Type::Applied(n, _) => n.clone(),
-            _ => return None,
-        }
-    } else {
-        return None;
-    };
+    // binding, not just a state field. 2026-08-18 (Phase C): a pooled
+    // member-field receiver (`items`, slot `PiggyBank.items`) resolves through
+    // the self prefix; the shared base-name resolver handles both plus the
+    // `Vector([Anonymous(1)])` column-type wrapper.
+    let type_name = backend.collection_base_type_name(recv_name)?;
     let members = backend.ctx.obj_members.get(&type_name).cloned().unwrap_or_default();
     let member = members.iter().find(|m| member_briev_name(m) == fn_name.as_str()).cloned();
     let Some(member) = member else { return None; };
@@ -2019,6 +2044,51 @@ fn emit_arrow_store(
         writeln!(out, "{}store i64 {}, ptr {}", indent, result, reg).ok();
     } else if backend.ctx.field_index_map.contains_key(name) {
         backend.emit_state_store_i64(out, indent, name, result);
+    } else if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
+        // 2026-08-18 (Phase C): an extract into a pooled member-field target
+        // stores through the instance column (`{prefix}.{name}`).
+        let slot = format!("{}.{}", prefix, name);
+        let val = TypedRegister { name: result.to_string(), ty: crate::ast::Type::int() };
+        emit_state_store_self_slot(backend, out, indent, &slot, &row_reg, &val);
+    }
+}
+
+/// 2026-08-18 (Phase C, BUGS.md member-field arrow): store a value into a
+/// POOLED member-field slot (`{prefix}.{name}`). Mirrors the Assign arm's
+/// pooled-column store: GEP into the column element — the column type is an
+/// aggregate (`[N x i64]`), never stored as a whole. Heap-backed columns load
+/// the buffer address from the slot first. The value is stored at the
+/// element's native type, boxed via adapt_to_i64 when it doesn't match.
+fn emit_state_store_self_slot(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    indent: &str,
+    slot: &str,
+    row_reg: &str,
+    val: &TypedRegister,
+) {
+    let Some(&idx) = backend.ctx.field_index_map.get(slot) else { return; };
+    let (gep, elem_ty) = if let Some(elem_ty) = backend.ctx.heap_columns.get(&idx).cloned() {
+        let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
+        let addr = backend.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, addr, base).ok();
+        let buf = backend.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf, addr).ok();
+        let row = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, row, elem_ty, buf, row_reg).ok();
+        (row, elem_ty)
+    } else {
+        let base = backend.emit_state_gep(out, indent, "m", "%state", idx);
+        let gep = backend.fun.gen_reg();
+        let col_ty = backend.ctx.field_types[idx].clone();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 0, i64 {}", indent, gep, col_ty, base, row_reg).ok();
+        (gep, "i64".to_string())
+    };
+    if backend.llvm_type(&val.ty) == elem_ty {
+        writeln!(out, "{}store {} {}, ptr {}", indent, elem_ty, val.name, gep).ok();
+    } else {
+        let boxed = backend.adapt_to_i64(out, indent, val);
+        writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, gep).ok();
     }
 }
 
@@ -2042,6 +2112,12 @@ fn emit_arrow_store_local(
             backend.ctx.type_universe.clone().as_ref(),
         );
         backend.emit_state_store_i64(out, indent, name, &store_val);
+    } else if let Some((prefix, row_reg)) = backend.fun.self_prefix.clone() {
+        // 2026-08-18 (Phase C): a bare member name in a pooled member body
+        // writes through the instance column (`{prefix}.{name}`), mirroring
+        // the strategy-lookup resolution in lookup_strategy_type_name.
+        let slot = format!("{}.{}", prefix, name);
+        emit_state_store_self_slot(backend, out, indent, &slot, &row_reg, val);
     }
 }
 

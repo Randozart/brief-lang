@@ -6142,6 +6142,176 @@ node go [done == 0][done == 1] {
     );
 }
 
+/// 2026-08-18 (Phase C, BUGS.md arrow-push): the two silent-drop arrow bugs.
+/// (a) `let ks: List<Int> = b.keys()` was routed through the collection
+/// SEED constructor — a non-List RHS was assumed to be a seed, so the returned
+/// list got wrapped as `[<list>]` (a new box with len forced to 1) and the
+/// scan read `1` of N elements. The fix binds the returned list DIRECTLY.
+/// (b) `items <- e` on a POOLED member-field list (PiggyBank.put) found no
+/// InsertAt strategy (the slot is `PiggyBank.items`, a `Vector(..)` column)
+/// and the plain-copy fallback couldn't resolve the target — the push emitted
+/// NOTHING. The fix resolves the self-prefixed slot with the Vector column
+/// type peeled. Both pins: the printed values (`n`, `s`) must be LOADS of a
+/// List len field (i64 16 GEP) that was written by exactly `N` INCREMENT
+/// stores (`add nsw i64 %{..}, 1`, one per push) — never a constant-1 seed
+/// store (bug a) and never an empty/absent field (bug b).
+#[test]
+fn test_arrow_push_binds_returned_list_and_pooled_member_field() {
+    let src = r#"
+coll obj MyList { data: Ptr<Int>; };
+obj Box {
+    keys: Ptr<Int>;
+    vals: Ptr<Int>;
+    occupied: Ptr<Int>;
+    count: Int;
+    cap: Int;
+    txn init(capacity: Int) [true][count == 0] {
+        let c: Int = match capacity { 0 => 256, _ => capacity };
+        keys = Malloc#(c * 8) as Ptr<Int>;
+        vals = Malloc#(c * 8) as Ptr<Int>;
+        occupied = Malloc#(c * 8) as Ptr<Int>;
+        cap = c;
+        count = 0;
+    };
+    txn insert(k: Int, v: Int) [count < cap][count <= cap] {
+        let h: Int = k % cap;
+        foreach q in 0..cap {
+            when occupied[(h + q) % cap] == 0 {
+                keys[(h + q) % cap] = k;
+                vals[(h + q) % cap] = v;
+                occupied[(h + q) % cap] = 1;
+                break;
+            };
+        };
+        count = count + 1;
+    };
+    defn keys() -> MyList {
+        let acc: MyList = [];
+        foreach i in 0..cap {
+            when occupied[i] == 1 {
+                acc <- keys[i];
+            };
+        };
+        term acc;
+    };
+};
+obj PiggyBank {
+    items: MyList;
+    defn init(v: Int) { let e: MyList = []; items = e; }
+    defn put(e: Int) { items <- e; }
+    defn size() -> Int { term items.Count#(); };
+};
+let p: PiggyBank = 0;
+let b: Box = 8;
+let done: Int = 0;
+node go [done == 0][done == 3] {
+    b.insert(1, 10);
+    b.insert(2, 20);
+    b.insert(3, 30);
+    let ks: MyList = b.keys();
+    let n: Int = ks.Count#();
+    p.put(1);
+    p.put(2);
+    p.put(3);
+    let s: Int = p.size();
+    done = n;
+    println!(n);
+    println!(s);
+    term;
+};
+"#;
+    let mut items = parse_bv_source(src);
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.register(Box::new(crate::plugin::print_plugin::PrintPlugin));
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .expect("plugin stage failed");
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    let lines: Vec<&str> = ir.lines().collect();
+
+    // The transaction body is emitted twice (the alwaysinline @txn_go defn +
+    // main's reactive replay), each with its own registers; any assertion must
+    // hold over the WHOLE IR (both copies count the same way).
+
+    // Bug (a) — the `[<list>]` seed wrapper. When `let ks: MyList = b.keys()`
+    // was misrouted to the collection seed constructor, the RETURNED list was
+    // wrapped in a NEW box whose len field was forced to the constant 1 (a
+    // `store i64 {c}, ptr {len_gep}` with `{c} = add i64 0, 1`). The fixed
+    // code binds the returned list DIRECTLY: its len is built only by `add nsw`
+    // increments (one per scanned element), never by a constant-1 seed store.
+    let len_geps: Vec<String> = lines
+        .iter()
+        .filter(|l| l.contains("getelementptr i8, ptr") && l.contains("i64 16"))
+        .filter_map(|l| l.split('=').next().map(|s| s.trim().to_string()))
+        .collect();
+    assert!(!len_geps.is_empty(), "no List len fields emitted; got:\n{ir}");
+    let constant_one_seed_store = lines.iter().find(|l| {
+        let Some(v) = l.trim_start().strip_prefix("store i64 ").and_then(|s| s.split(',').next().map(|s| s.trim().to_string())) else {
+            return false;
+        };
+        let Some(gep) = l.split("ptr").nth(1).map(|s| s.trim().to_string()) else {
+            return false;
+        };
+        len_geps.contains(&gep)
+            && (v == "1"
+                || lines
+                    .iter()
+                    .any(|dl| dl.trim().starts_with(&format!("{v} = add i64 0, 1"))))
+    });
+    assert!(
+        constant_one_seed_store.is_none(),
+        "a len field must never be written with the constant 1 (`[<list>]` wrapper bug); got:\n{ir}"
+    );
+
+    // Bug (b) — the pooled member-field push. `items <- e` must emit the List
+    // push inline: the len field is INCREMENTED once per push (`add nsw i64
+    // {..}, 1`, stored to a len GEP). There are 3 keys-scan pushes + 3 put
+    // pushes per copy, two copies = 12. When the push was SILENTLY DROPPED the
+    // put bodies emitted nothing (only the argument eval), so the count fell to
+    // 3 per copy.
+    let increment_stores: Vec<&str> = lines
+        .iter()
+        .cloned()
+        .filter(|l| {
+            let Some(v) = l.trim_start().strip_prefix("store i64 ").and_then(|s| s.split(',').next().map(|s| s.trim().to_string())) else {
+                return false;
+            };
+            let Some(gep) = l.split("ptr").nth(1).map(|s| s.trim().to_string()) else {
+                return false;
+            };
+            len_geps.contains(&gep)
+                && lines.iter().any(|dl| {
+                    dl.trim().starts_with(&format!("{v} = add nsw i64"))
+                })
+        })
+        .collect();
+    assert_eq!(
+        increment_stores.len(),
+        8,
+        "the len fields must be written by exactly 8 push increments (1 keys-scan loop body + 3 member-field puts, twice); got:\n{ir}"
+    );
+
+    // Sanity: the printed values (n = ks.Count#(), s = p.size()) are LOADs of a
+    // len field, never constants or forwarded args.
+    let prints: Vec<String> = lines
+        .iter()
+        .filter(|l| l.contains("call i64 @__print_int"))
+        .filter_map(|l| {
+            l.split("__print_int(i64 ").nth(1).and_then(|s| s.split(')').next().map(|r| r.trim().to_string()))
+        })
+        .collect();
+    for p in &prints {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.trim().starts_with(&format!("{p} = load i64"))),
+            "the printed value {p} must be a load (the returned/member list length); got:\n{ir}"
+        );
+    }
+    assert_eq!(prints.len(), 4, "expected four prints (two per copy); got:\n{ir}");
+}
+
 /// The frontend bounded-length analysis proves a balanced drain (pop then push
 /// keeps len ≤ initial < cap) never overflows, so the grow guard is stripped
 /// from the inlined push — no opaque resize call in the loop. This is the

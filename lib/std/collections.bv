@@ -104,11 +104,13 @@ obj HashMap<K, V> {
     occupied: Ptr<Int>;
     count: Int;
     cap: Int;
-    // 2026-08-17: a persistent (K, V) mirror list — entries() returns it
-    // (O(1)); a member-body scan with `acc <- keys[i]` hits a pre-existing
-    // arrow-push-into-loop-local double-construction bug, so the map keeps
-    // the pair list itself.
-    items: List<(K, V)>;
+    // 2026-08-18: NO `items` mirror list. A 2026-08-16 workaround kept a
+    // persistent (K, V) list because `acc <- keys[i]` inside a member body
+    // double-constructed the loop-carried local (scans returned 1 of N). That
+    // arrow-push bug is FIXED (2026-08-18, BUGS.md), so keys()/values()/
+    // entries()/foreach scan the COLUMNS directly (the compiler's efficiency
+    // choice — no dead mirror writes in the hot path). Removing the mirror
+    // restores the pre-workaround design; see Phase E.
 
     op InsertAt: insert(#Lh, #Rh);
     op ExtractFrom: remove(#Rh);
@@ -143,8 +145,6 @@ obj HashMap<K, V> {
         occupied = Malloc#(c * 8) as Ptr<Int>;
         cap = c;
         count = 0;
-        let init_items: List<(K, V)> = [];
-        items = init_items;
     };
 
     defn hash(key: K) -> Int {
@@ -169,7 +169,6 @@ obj HashMap<K, V> {
                     keys[p] = k;
                     vals[p] = v;
                     occupied[p] = 1;
-                    items <- (k, v);
                     done_slot = true;
                     break;
                 };
@@ -219,24 +218,14 @@ obj HashMap<K, V> {
         };
         when found_slot {
             count = count - 1;
-            // Rebuild the mirror list (remove an entry).
-            let acc: List<(K, V)> = [];
-            foreach i in 0..cap {
-                when occupied[i] == 1 {
-                    acc <- (keys[i], vals[i]);
-                };
-            };
-            items = acc;
         };
         term r;
     };
 
-    // 2026-08-17 (tuple correctness): keys()/values()/entries() scans and
-    // `foreach` over the map are BLOCKED on pre-existing member-body codegen
-    // bugs — `acc <- keys[i]` into a loop-carried local List double-constructs
-    // the List (the push updates a copy, the return reads the stale original),
-    // and an inlined member with a `foreach` + a nested `foreach` overflows the
-    // SSA phi bookkeeping (clang "forward referenced"). The CORE ops
-    // (insert/get/contains/remove/Count#) work; iteration is a documented
-    // follow-up that needs those compiler fixes first.
+    // 2026-08-18: keys()/values()/entries() scans and `foreach` over the map
+    // are a Phase E follow-up. The blocking member-body bug (`acc <- keys[i]`
+    // double-constructing a loop-carried local) is FIXED (BUGS.md 2026-08-18),
+    // so the scans can now build on the column scan `foreach i in 0..cap {
+    // when occupied[i] == 1 { acc <- keys[i] } }` — the same shape remove()
+    // used before the mirror list was deleted.
 };
