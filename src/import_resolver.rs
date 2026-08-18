@@ -132,6 +132,37 @@ fn referenced_type_names(item: &TopLevel) -> Vec<String> {
                 for (_, ty) in params {
                     type_names(ty, &mut out);
                 }
+                // 2026-08-18 (check/build divergence): a member's RETURN type is
+                // a reference too. `import { HashMap }` from collections.bv
+                // dropped `List` because HashMap's `keys()`/`values()`/`entries()`
+                // return it — only their PARAMS were walked. The dropped type
+                // then fell back to the typechecker's name-based `List`
+                // special-case with NO members, so the generic scans
+                // (`acc <- keys[i]`) failed `push_element_type` and `brievc
+                // check` over-reported ("expected List<K> for arrow assignment,
+                // found K"). `brievc build` masked it via a second resolution
+                // pass. Walk output types so an imported collection brings its
+                // returned collection types.
+                let outputs: Vec<crate::ast::Type> = match m {
+                    TopLevel::Definition(d) => {
+                        let mut v: Vec<crate::ast::Type> = Vec::new();
+                        if let Some(ot) = &d.output_type {
+                            v.extend(ot.all_types());
+                        }
+                        v
+                    }
+                    TopLevel::Transaction(t) => {
+                        let mut v: Vec<crate::ast::Type> = Vec::new();
+                        if let Some(ot) = &t.output_type {
+                            v.extend(ot.all_types());
+                        }
+                        v
+                    }
+                    _ => Vec::new(),
+                };
+                for ty in &outputs {
+                    type_names(ty, &mut out);
+                }
             }
         }
         TopLevel::StaticStruct(sd) => {

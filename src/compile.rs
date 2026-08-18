@@ -2314,16 +2314,62 @@ fn effective_view_html(
 
 /// Lex + parse + resolve imports + typecheck, returning items and universe.
 fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<briev_compiler::ast::TopLevel>, TypeUniverse), String> {
+    // 2026-08-18 (check/build divergence): `brievc check` MUST run the SAME
+    // pipeline stages as `brievc build` before check_types — plugin manager +
+    // lockfile, PreLex, inline stage blocks, comptime evaluation, the Parsed
+    // and Resolved plugin stages, import resolution, and comptime-ref
+    // resolution. The check path was a stale LEAN pipeline (parse → resolve →
+    // check) predating those stages; it silently diverged — e.g. `brievc check`
+    // over-reported "expected List<K> for arrow assignment, found K" on
+    // imported generic collection scans while `build` was clean (the resolver
+    // now walks member OUTPUT types so `import { HashMap }` brings `List`; the
+    // divergence class is closed by sharing the pipeline).
     let preprocessed = preprocess_source_for_path(file_path, source)?;
-    let tokens = lex_for_path(file_path, &preprocessed.briev_source)?;
-    let items = parse(file_path, &tokens, &preprocessed.briev_source)?;
-
+    let mut source = preprocessed.briev_source;
+    let mut pm = build_plugin_manager(file_path, opts);
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("cannot determine project root: {}", e))?;
+    let project_root_str = project_root.to_string_lossy().to_string();
+    if opts.update_lockfile {
+        let granted = briev_compiler::macros::lockfile::cli_granted_set(
+            opts.allow_read,
+            opts.allow_write,
+            opts.allow_run,
+            opts.allow_sys_query,
+            opts.allow_net,
+        );
+        let lock = briev_compiler::macros::lockfile::generate_lockfile(&granted, None)?;
+        briev_compiler::macros::lockfile::save_lockfile(&project_root_str, &lock)?;
+    } else if let Some(lock) = briev_compiler::macros::lockfile::load_lockfile(&project_root_str)? {
+        briev_compiler::macros::lockfile::validate_and_apply(&lock, &mut pm, None)?;
+    }
+    pm.run_source(StageKind::PreLex, &mut source)?;
+    let tokens = lex_for_path(file_path, &source)?;
+    let mut items = parse(file_path, &tokens, &source)?;
+    extract_inline_stage_blocks(&mut items, &mut pm);
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
+    {
+        let mut parsed_universe = TypeUniverse::new();
+        pm.run_ast(StageKind::Parsed, &mut items, &mut parsed_universe)?;
+    }
     let mut resolver = briev_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
     resolver = resolver.with_prefer_ebv(get_extension(file_path) == ".ebv");
-    let mut items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+    items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+    extract_inline_stage_blocks(&mut items, &mut pm);
+    {
+        let mut eval_universe = TypeUniverse::new();
+        evaluate_pending_comptime(&mut pm, &mut items, &mut eval_universe)?;
+    }
+    {
+        pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;
+    }
+    resolve_comptime_refs(&pm, &mut items)?;
 
     let universe = TypeUniverse::new();
     check_types(&mut items, &universe)?;
@@ -2466,6 +2512,45 @@ fn check_types(items: &mut [briev_compiler::ast::TopLevel], universe: &TypeUnive
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-08-18 (check/build divergence): `brievc check` on a program that
+    /// imports `std/collections.bv` and calls the HashMap's generic scans
+    /// (`m.keys()` → `ks.Count#()`) previously over-reported type errors
+    /// ("expected List<K> for arrow assignment, found K") while `build` was
+    /// clean. Two causes, both fixed: the import resolver did not walk member
+    /// OUTPUT types (so `import { HashMap }` dropped `List`, referenced only in
+    /// `keys()`'s return) and the typechecker's name-based `List` special-case
+    /// masked the gap; and the check path was a stale lean pipeline that
+    /// skipped the build path's plugin/comptime stages. check_source now runs
+    /// the unified pipeline and must be clean.
+    #[test]
+    fn check_on_imported_generic_scans_is_clean() {
+        let src = r#"
+import { HashMap } from "std/collections.bv";
+let m: HashMap<Int, Int> = 4;
+let done: Bool = false;
+node go [done == false][done == true] {
+    when done == false {
+        m.insert((1, 10));
+        let ks: List<Int> = m.keys();
+        println!(ks.Count#());
+        done = true;
+    };
+    term;
+};
+"#;
+        // The import resolves relative to the file's directory — write the
+        // program into the workspace (tests/tier1/) so `std/collections.bv`
+        // resolves exactly as a real user file would.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let dir = std::path::Path::new(&manifest).join("tests/tier1");
+        std::fs::create_dir_all(&dir).expect("create tests/tier1");
+        let path = dir.join("check_divergence_tmp.bv");
+        std::fs::write(&path, src).expect("write fixture");
+        let result = check_source(path.to_str().unwrap(), src);
+        let _ = std::fs::remove_file(&path);
+        result.expect("briev check must be clean on imported generic scans");
+    }
 
     #[test]
     fn test_preprocess_source_for_path_rbv_extracts_briev_and_view() {
