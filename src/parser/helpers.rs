@@ -179,6 +179,18 @@ impl<'a> Parser<'a> {
         match self.advance() {
             Some((Token::Identifier(name), _)) => Ok(name),
             Some((tok, span)) => {
+                // 2026-08-22 (spec-conformance Phase 2): SPEC §4.1 reserved
+                // words (`sed`, `pvt`, `reg`) and removed forms (`meld`) are
+                // rejected as identifier spellings with their own messages
+                // instead of being silently accepted via the keyword-as-
+                // identifier fallback. Undo: re-add their arms to
+                // keyword_as_identifier below.
+                if let Some(msg) = Self::removed_word_message(&tok) {
+                    return Err(SyntaxError::InvalidStatement {
+                        reason: msg.to_string(),
+                        span: self.make_span(span),
+                    });
+                }
                 if let Some(name) = self.keyword_as_identifier(&tok) {
                     Ok(name)
                 } else if let Some(kw) = Self::reserved_keyword_name(&tok) {
@@ -309,6 +321,20 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// 2026-08-22 (spec-conformance plan Phase 2): an unrecognized
+    /// declaration word at top level or statement head (SPEC §4.1: a wrong
+    /// keyword spelling gives a suggested correction). Falls back to the
+    /// plain message when no canonical keyword is within edit range.
+    pub fn error_unknown_item<T>(&self, name: &str, position: &str) -> Result<T, SyntaxError> {
+        static VOCAB: std::sync::OnceLock<crate::vocab::LanguageVocab> = std::sync::OnceLock::new();
+        let vocab = VOCAB.get_or_init(crate::vocab::LanguageVocab::canonical);
+        let reason = match crate::vocab::keyword_hint(vocab, name) {
+            Some(hint) => format!("unknown {position} '{name}' — {hint}"),
+            None => format!("unknown {position} '{name}'"),
+        };
+        self.error_at_current(&reason)
+    }
+
     /// Report an error at a specific span.
     pub fn error_at<T>(&self, msg: &str, span: Span) -> Result<T, SyntaxError> {
         Err(SyntaxError::InvalidExpression {
@@ -380,7 +406,6 @@ impl<'a> Parser<'a> {
             Token::Import => "import".into(),
             Token::From => "from".into(), Token::As => "as".into(),
             Token::Frgn => "frgn".into(),
-            Token::Meld => "meld".into(), Token::Reg => "reg".into(),
             Token::Op => "op".into(), Token::Type => "type".into(),
             Token::Trait => "trait".into(), Token::Impl => "impl".into(),
             Token::Cell => "cell".into(),             Token::Struct => "struct".into(),
@@ -392,8 +417,7 @@ impl<'a> Parser<'a> {
             Token::Quote => "quote".into(),
             Token::Dollar => "$".into(), Token::DollarBang => "$!".into(),
             Token::Foreach => "foreach".into(), Token::Break => "break".into(),
-            Token::Pvt => "pvt".into(),
-            Token::Sed => "sed".into(), Token::Sync => "sync".into(),
+            Token::Sync => "sync".into(),
             Token::Underscore => "_".into(),
             Token::When => "when".into(),
             Token::Cyc => "cyc".into(),
@@ -411,6 +435,20 @@ impl<'a> Parser<'a> {
     /// `seq`, `pack`, ...). When `expect_identifier` hits one it emits a
     /// specific "reserved keyword" error instead of the generic
     /// "expected identifier, found 'out'".
+    /// 2026-08-22 (spec-conformance Phase 2): message for tokens that are
+    /// removed surface (§4.4) or reserved words (§4.1) when they appear
+    /// where a name is expected. `None` for everything else.
+    pub(crate) fn removed_word_message(tok: &Token) -> Option<&'static str> {
+        Some(match tok {
+            Token::Meld => "`meld` was removed — structural sums (`Int | String`) and \
+                            `coll` declarations replace it",
+            Token::Reg => "`reg` is reserved and cannot be used as a name",
+            Token::Pvt => "`pvt` is reserved and cannot be used as a name",
+            Token::Sed => "`sed` is reserved and cannot be used as a name",
+            _ => return None,
+        })
+    }
+
     fn reserved_keyword_name(tok: &Token) -> Option<&'static str> {
         Some(match tok {
             Token::Out => "out",

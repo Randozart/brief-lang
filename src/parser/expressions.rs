@@ -555,6 +555,14 @@ impl<'a> Parser<'a> {
 
             // 2026-07-15: Keywords used as identifiers (input, output, etc.)
             Some((tok, span)) => {
+                // 2026-08-22 (spec-conformance Phase 2): removed/reserved
+                // words reject with their own message in expression position.
+                if let Some(msg) = Parser::removed_word_message(&tok) {
+                    return Err(SyntaxError::InvalidExpression {
+                        reason: msg.to_string(),
+                        span: self.make_span(span),
+                    });
+                }
                 if let Some(name) = self.keyword_as_identifier(&tok) {
                     return Ok(Expr::Identifier(name));
                 }

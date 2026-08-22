@@ -134,6 +134,19 @@ impl<'a> Parser<'a> {
                 } else if self.check_identifier("keep") {
                     self.parse_lifetime_hint(false)
                 } else {
+                    // 2026-08-22 (spec-conformance plan Phase 2): a
+                    // declaration-shaped misspelled keyword (`nod ready { … }`)
+                    // dies here as a generic expression error — intercept the
+                    // Ident Ident shape and suggest. `Ident { … }` is left to
+                    // fall through: it is a struct literal.
+                    if let Some(Token::Identifier(name)) = self.peek() {
+                        if matches!(
+                            self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                            Some(Token::Identifier(_))
+                        ) {
+                            return self.error_unknown_item(name, "statement");
+                        }
+                    }
                     self.parse_expression_statement()
                 }
             }
@@ -643,6 +656,38 @@ mod tests {
             assert!(
                 err.to_string().contains("match") && err.to_string().contains("when"),
                 "message must name both replacements, got: {err}"
+            );
+        }
+    }
+
+    // 2026-08-22 (spec-conformance plan Phase 2): SPEC §4.1 — misspelled
+    // keywords get a suggested correction; reserved words are not usable
+    // as names.
+    #[test]
+    fn misspelled_keyword_gets_suggestion() {
+        let src = "nod ready [x < 3][x == 3] { x = x + 1; term; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let err = p.parse_program().unwrap_err();
+        assert!(
+            err.to_string().contains("did you mean `node`?"),
+            "expected a node suggestion, got: {err}"
+        );
+    }
+
+    #[test]
+    fn reserved_words_are_rejected_as_names() {
+        for (src, word) in [
+            ("let sed: Int = 1;", "sed"),
+            ("defn f(pvt: Int) -> Int { term pvt; };", "pvt"),
+            ("let reg: Int = 2;", "reg"),
+        ] {
+            let tokens = tokenize(src).unwrap();
+            let mut p = Parser::new(tokens, src);
+            let err = p.parse_program().unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("`{word}` is reserved")),
+                "expected reserved-word rejection for {word}, got: {err}"
             );
         }
     }

@@ -779,6 +779,11 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             return Err(format!("termination errors:\n{}", term_errors.join("\n")));
         }
     }
+    // 2026-08-22 (spec-conformance plan Phase 2): identifier casing advisory
+    // (SPEC §4.1 — user-declared violations warn, never error).
+    for w in briev_compiler::analysis::casing::analyze(&items) {
+        eprintln!("warning: {w}");
+    }
     // 2026-08-07 (object instance pools): spawn pools must be predictably
     // inexhaustible — the spawn-count analysis rejects any spawn whose
     // multiplicity cannot be statically bounded (Briev has no runtime errors).
@@ -2392,6 +2397,11 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     }
     if !term_errors.is_empty() {
         return Err(format!("termination errors:\n{}", term_errors.join("\n")));
+    }
+    // 2026-08-22 (spec-conformance plan Phase 2): casing advisory — `check`
+    // reports the same advisories as `build` so the two paths never diverge.
+    for w in briev_compiler::analysis::casing::analyze(&items) {
+        eprintln!("warning: {w}");
     }
     // 2026-08-07 (object instance pools): `check` must reject unprovable
     // spawn counts exactly like `build` (Briev has no runtime errors).

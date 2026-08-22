@@ -496,3 +496,109 @@ mod tests {
         );
     }
 }
+
+// ── 2026-08-22 (spec-conformance plan Phase 2): did-you-mean support ─────
+// SPEC §4.1: a wrong keyword spelling gives a suggested-correction error.
+// These helpers power that hint; the parser consults them at declaration
+// positions where a misspelled keyword otherwise dies as a generic
+// "unexpected item" error.
+
+/// Bounded Levenshtein edit distance. `None` once the distance provably
+/// exceeds `max` (early-exit band so typo scanning stays cheap).
+pub fn edit_distance_within(a: &str, b: &str, max: u8) -> Option<u8> {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.len().abs_diff(b.len()) as u8 > max {
+        return None;
+    }
+    let mut prev: Vec<u16> = (0..=b.len() as u16).collect();
+    let mut cur: Vec<u16> = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i as u16 + 1;
+        let mut row_min = cur[0];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = u16::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+            row_min = row_min.min(cur[j + 1]);
+        }
+        if row_min > max as u16 {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    let d = prev[b.len()];
+    (d <= max as u16).then_some(d as u8)
+}
+
+/// The unique-closest candidate within `max_dist` of `input`, or `None`.
+/// Deterministic: ties break by candidate order.
+pub fn closest_keyword<'a>(input: &str, candidates: &[&'a str], max_dist: u8) -> Option<&'a str> {
+    let mut best: Option<(&'a str, u8)> = None;
+    for cand in candidates {
+        if let Some(d) = edit_distance_within(input, cand, max_dist) {
+            let better = match best {
+                None => true,
+                Some((_, bd)) => d < bd,
+            };
+            if better {
+                best = Some((cand, d));
+            }
+        }
+    }
+    best.map(|(name, _)| name)
+}
+
+/// Full house-style hint line for a misspelled keyword, or `None`.
+/// Removed and reserved words never fuzzy-suggest: they carry their own
+/// diagnostics (removal notices, reserved-word errors), and a removed form
+/// must not masquerade as a typo of an unrelated canonical keyword
+/// (`meld` is distance-2 from `cell` — suggesting it would be absurd).
+pub fn keyword_hint(vocab: &LanguageVocab, input: &str) -> Option<String> {
+    if vocab.is_removed_keyword(input) || vocab.is_reserved(input) {
+        return None;
+    }
+    let names: Vec<&str> = vocab.canonical_keywords().map(|k| k.name.as_str()).collect();
+    // Distance 1 catches transposition-free typos (`nod`, `defn`); 2 catches
+    // doubled/missing letters on longer words (`whn`, `matchh`) without
+    // dragging unrelated short words into range.
+    closest_keyword(input, &names, 2)
+        .filter(|cand| cand.len() >= 3 || *cand == input)
+        .map(|cand| format!("did you mean `{cand}`?"))
+}
+
+#[cfg(test)]
+mod suggest_tests {
+    use super::*;
+
+    #[test]
+    fn distance_bounds_respected() {
+        assert_eq!(edit_distance_within("nod", "node", 2), Some(1));
+        assert_eq!(edit_distance_within("xyzzy", "node", 2), None);
+        assert_eq!(edit_distance_within("whn", "when", 2), Some(1));
+    }
+
+    #[test]
+    fn closest_keyword_picks_minimum_and_is_deterministic() {
+        let cands = ["node", "term", "foreach"];
+        assert_eq!(closest_keyword("nod", &cands, 2), Some("node"));
+        // Distance-2 deletion ("teeerm" → "term") is in range and correct.
+        assert_eq!(closest_keyword("teeerm", &cands, 2), Some("term"));
+        assert_eq!(closest_keyword("xyzzy", &cands, 2), None);
+        assert_eq!(closest_keyword("forecah", &cands, 2), Some("foreach"));
+    }
+
+    #[test]
+    fn vocab_hint_suggests_canonical_keywords_only() {
+        let vocab = LanguageVocab::canonical();
+        assert_eq!(
+            keyword_hint(&vocab, "nod"),
+            Some("did you mean `node`?".to_string())
+        );
+        // Removed forms must not be suggested as corrections — neither as
+        // candidates (`meld` is distance-2 from `cell`) nor for removed
+        // inputs themselves (they get their own removal diagnostic).
+        assert_eq!(keyword_hint(&vocab, "meld"), None);
+        assert_eq!(keyword_hint(&vocab, "celf"), Some("did you mean `cell`?".to_string()));
+        assert_eq!(keyword_hint(&vocab, "counter"), None);
+    }
+}

@@ -240,7 +240,7 @@ impl<'a> Parser<'a> {
                     self.parse_stage_block().map(TopLevel::StageBlock)
                 } else {
                     let name = self.expect_identifier()?;
-                    self.error_at_current(&format!("unexpected top-level item '{}'", name))
+                    self.error_unknown_item(&name, "top-level item")
                 }
             }
             // 2026-08-05 (Phase 3): `frgn` declarations. `optional frgn` is the
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 let name = self.expect_identifier()?;
-                self.error_at_current(&format!("unexpected top-level item '{}'", name))
+                self.error_unknown_item(&name, "top-level item")
             }
         }
     }
@@ -1922,7 +1922,21 @@ impl<'a> Parser<'a> {
             let mut suf: Option<String> = None;
             let mut reg: Option<String> = None;
             while self.eat(&Token::Comma) {
-                let key = self.expect_identifier()?;
+                // 2026-08-22 (spec-conformance Phase 2): discriminator keys
+                // are CONTEXTUAL keywords of the op grammar (`pre:`/`suf:`/
+                // `reg:`), not name bindings — read the identifier raw so the
+                // reserved-word rejection for `reg` doesn't fire here.
+                let key = match self.advance() {
+                    Some((Token::Identifier(k), _)) => k,
+                    // `reg` lexes as its own token — as a discriminator KEY
+                    // it is contextual op grammar, not a reserved name.
+                    Some((Token::Reg, _)) => "reg".to_string(),
+                    Some((tok, _)) => {
+                        let m = format!("expected discriminator key, found '{}'", tok);
+                        return self.error_at_current(&m);
+                    }
+                    None => return self.error_at_current("expected discriminator key"),
+                };
                 self.expect(Token::Colon)?;
                 let val = self.expect_string()?;
                 match key.as_str() {
