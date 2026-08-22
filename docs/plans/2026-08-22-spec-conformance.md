@@ -324,6 +324,28 @@ Suite: 1903 → 1916 passing, 0 failures. Remaining: Phases 5 (dyn), 6-finish
 (mask codegen + ellipsis), 7 (obj/cell ports), 8 (task lifecycle),
 9 (.s strict), 10 (conformance sweep).
 
+### 2026-08-22 session 2
+- **Phase 6a** ✅ 940239aa — mask segfault root-caused to TWO stacked faults:
+  raw `[len,e…]` gather buffers consumed as tier Lists, and Bool[N] columns
+  (`[N x i8]`) read as i64 masks. Tier boxing shared via
+  box_gather_as_tier_list; i8-mask runtime variants routed on the stored
+  column LLVM type. examples/mask_select.bv pins 13580.
+- **Phase 6b** ✅ 9e6d4880 — `a[...]` full-range ellipsis live; multidim
+  selectors staged explicitly with named forms; state-column vector slices
+  lower to real range gathers (briev_slice_range64/_f32); Vector slices
+  infer List<T> (checker/backend aligned). PRE-EXISTING guard-merge
+  dominance bug found and fixed (merge phis for conditionally-written
+  fields) — it had been silently breaking every multi-guard program shape.
+  examples/slice_state.bv pins 56857.
+- Deviation from plan: multidim ellipsis (`t[1:3, ...]`) is staged-rejected,
+  not built — needs a SliceDim dims-list AST before it can exist honestly.
+  Float64 slice/mask gathers still panic (explicit, same as before).
+- New pre-existing bug class surfaced by the dominance fix: NONE remaining
+  open — both repros closed.
+
+Remaining after this session: Phases 5 (dyn), 7 (obj/cell ports),
+8 (task lifecycle), 9 (.s strict), 10 (conformance sweep).
+
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.
