@@ -327,3 +327,38 @@ Suite: 1903 → 1916 passing, 0 failures. Remaining: Phases 5 (dyn), 6-finish
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.
+
+## Work order addendum — 2026-08-22 session 2 (owner-confirmed: 6→9→5→8→7→10)
+
+### Phase 6a — mask-indexing segfault (crash first)
+
+Repro: `bugs/repro_mask_index_segfault.bv` (`Int[8]`/`Bool[8]` state fields,
+`data[mask]`, index into compacted result). Machinery exists
+(`emit_masked_index`, `briev_mask_select{,64,_f32}`); fault site to bisect:
+1. Mask-source read: `MaskSource::StateField` GEPs with prefix "m" — verify a
+   `Bool[N]` column's storage width vs the `i64*` the gather expects.
+2. Result handling: direct state-field path returns the RAW `[len,e0,…]`
+   helper buffer while coll paths wrap as tier blocks — check what
+   `picked[i]` expects and make both agree.
+3. Reactor/endprogram timing: low suspicion (interp identical shape works).
+
+Method: gdb backtrace + IR read BEFORE patching (LTO lesson rule). Fix at
+the found site; Float64 masks get an f64 gather or explicit staged error —
+the panic goes either way. Parity fixture `examples/mask_select.bv`
+(interp == compiled bytes) joins the suite.
+
+### Phase 6b — ellipsis slices
+
+1. AST: `Slice { array, dims: Vec<SliceDim> }`;
+   `SliceDim::{Range{start,end,stride}, Named(name), Full}`.
+2. Parser: bracket loop consumes `Token::Ellipsis` → Full; legacy forms →
+   Range; `name =>` → Named.
+3. Interp first: Full desugars per dimension; compose with named dims;
+   depth >2 staged error; single-dim `a[...]` = whole copy.
+4. LLVM second: per-dim lowering on existing stride machinery.
+5. Tests: `t[1:3, ...]` ≡ `t[1:3, :]`; composed named+ellipsis; depth gate.
+
+### Then Phase 9 unchanged (master plan §9)
+
+Acceptance per commit: cargo test --lib green, Praetor touched dirs, docs
+same commit; BUGS.md mask entry closed when the segfault dies.
