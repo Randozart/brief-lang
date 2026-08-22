@@ -323,14 +323,22 @@ impl<'a> Parser<'a> {
 
     /// 2026-08-22 (spec-conformance plan Phase 2): an unrecognized
     /// declaration word at top level or statement head (SPEC §4.1: a wrong
-    /// keyword spelling gives a suggested correction). Falls back to the
-    /// plain message when no canonical keyword is within edit range.
+    /// keyword spelling gives a suggested correction). A canonical keyword
+    /// in the WRONG POSITION is not a spelling problem — say so instead of
+    /// suggesting the word to itself (`endprogram` at top level).
     pub fn error_unknown_item<T>(&self, name: &str, position: &str) -> Result<T, SyntaxError> {
         static VOCAB: std::sync::OnceLock<crate::vocab::LanguageVocab> = std::sync::OnceLock::new();
         let vocab = VOCAB.get_or_init(crate::vocab::LanguageVocab::canonical);
-        let reason = match crate::vocab::keyword_hint(vocab, name) {
-            Some(hint) => format!("unknown {position} '{name}' — {hint}"),
-            None => format!("unknown {position} '{name}'"),
+        let reason = if vocab.is_canonical_keyword(name) {
+            format!(
+                "'{name}' is not valid at this position ({position}) — check the \
+                 surrounding syntax"
+            )
+        } else {
+            match crate::vocab::keyword_hint(vocab, name) {
+                Some(hint) => format!("unknown {position} '{name}' — {hint}"),
+                None => format!("unknown {position} '{name}'"),
+            }
         };
         self.error_at_current(&reason)
     }

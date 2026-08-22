@@ -600,6 +600,8 @@ impl fmt::Display for Pattern {
             Pattern::Wildcard => write!(f, "_"),
             Pattern::Literal(expr) => write!(f, "{}", expr),
             Pattern::Binding(name) => write!(f, "{}", name),
+            // 2026-08-22 (Phase 3): typed binding of a structural sum member.
+            Pattern::TypedBinding(name, ty) => write!(f, "{}: {}", name, ty),
             Pattern::EnumVariant(name, fields) => {
                 write!(f, "{}", name)?;
                 if !fields.is_empty() {

@@ -213,6 +213,11 @@ pub enum Pattern {
     Wildcard,
     Literal(Expr),
     Binding(String),
+    /// 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): a typed
+    /// binding arm of a structural sum — `number: Int => use_int(number)`.
+    /// Matches only when the scrutinee's type is this sum member; binds the
+    /// name at the member's type.
+    TypedBinding(String, Box<crate::ast::Type>),
     EnumVariant(String, Vec<Pattern>),
     Tuple(Vec<Pattern>),
     Range(Expr, Expr),

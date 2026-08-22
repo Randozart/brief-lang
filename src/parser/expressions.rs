@@ -797,6 +797,14 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(name)) => {
                 let name = name.clone();
                 self.pos += 1;
+                // 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): a
+                // typed binding of a structural sum member — `number: Int =>`.
+                // Distinguished from a plain Binding by the colon; the type
+                // operand is a full type (union members are single types).
+                if self.eat(&Token::Colon) {
+                    let ty = self.parse_type()?;
+                    return Ok(crate::ast::Pattern::TypedBinding(name, Box::new(ty)));
+                }
                 // Enum variant with fields: Foo(a, b)
                 if self.eat(&Token::LParen) {
                     let mut fields = Vec::new();

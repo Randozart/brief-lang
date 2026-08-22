@@ -1597,7 +1597,8 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
         if let Some(param_ty) = param_types.get(i) {
             // 2026-08-09 (Phase 12, SPEC §18.2): the meld admission is removed —
             // only an explicit coercion path admits the pair.
-            if arg_ty != *param_ty {
+            // 2026-08-22 (Phase 3): a structural-sum parameter admits its members.
+            if !types_compatible(param_ty, &arg_ty) {
                 let coercible = try_coerce_via_parse(arg, &arg_ty, param_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -1735,7 +1736,23 @@ fn quoted_literal_type(prefix: &str) -> Type {
     }
 }
 
-fn arithmetic_result_ty(    ctx: &TypecheckContext,
+// ── 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): assignability ──
+
+/// Is `value` acceptable where `declared` is annotated? A structural sum
+/// (`Int | String`) accepts exactly its members. Single home for the rule so
+/// call arguments, let annotations, and returns stay consistent (DRY). The
+/// Bit<N>↔Bits width fact keeps its dedicated let-site logic.
+pub(crate) fn types_compatible(declared: &Type, value: &Type) -> bool {
+    if declared == value {
+        return true;
+    }
+    if let Type::Union(members) = declared {
+        return members.iter().any(|m| m == value);
+    }
+    false
+}
+
+fn arithmetic_result_ty(ctx: &TypecheckContext,
     kind: &BinaryOpKind,
     lhs_ty: &Type,
     rhs_ty: &Type,
@@ -2101,12 +2118,35 @@ fn infer_match(
     arms: &[MatchArm],
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
-    let _matched_ty = infer_type_only(expr, ctx)?;
-    if let Some(first) = arms.first() {
-        infer_type_only(&first.body, ctx)
-    } else {
-        Ok(Type::void())
+    let matched_ty = infer_type_only(expr, ctx)?;
+    // 2026-08-22 (spec-conformance plan Phase 3): typed bindings of a
+    // structural sum — `n: Int => body` binds `n` at the member's type for
+    // the arm body. Exhaustive coverage / unreachable arms / result-type
+    // unification land with the Phase 4 match-semantics engine; this pass
+    // makes typed-binding ARM BODIES typecheck against their binding.
+    let mut result_ty: Option<Type> = None;
+    for arm in arms {
+        let mut saved: Vec<(String, Option<Type>)> = Vec::new();
+        if let crate::ast::Pattern::TypedBinding(name, member) = &arm.pattern {
+            saved.push((name.clone(), ctx.bindings.get(name).cloned()));
+            ctx.bindings.insert(name.clone(), (**member).clone());
+            let _ = &matched_ty;
+        } else if let crate::ast::Pattern::Binding(name) = &arm.pattern {
+            saved.push((name.clone(), ctx.bindings.get(name).cloned()));
+            ctx.bindings.insert(name.clone(), matched_ty.clone());
+        }
+        let ty = infer_type_only(&arm.body, ctx)?;
+        for (name, prev) in saved {
+            match prev {
+                Some(p) => { ctx.bindings.insert(name, p); }
+                None => { ctx.bindings.remove(&name); }
+            }
+        }
+        if result_ty.is_none() {
+            result_ty = Some(ty);
+        }
     }
+    Ok(result_ty.unwrap_or_else(Type::void))
 }
 
 /// Infer the type of a statement.
@@ -2175,7 +2215,9 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // initializer type — no implicit coercion. Literal Parse-ops
             // (`let f: Float = 5`) remain the one sanctioned path.
             if let Some(declared) = ty {
-                let compatible = if inferred == *declared {
+                // 2026-08-22 (Phase 3): structural sums admit their members
+                // (`let v: Int | String = 5`) via types_compatible.
+                let compatible = if types_compatible(declared, &inferred) {
                     true
                 } else {
                     // 2026-07-31: `let lb: ListBuffer<Int> = ListBuffer {...}`

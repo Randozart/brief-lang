@@ -4621,3 +4621,18 @@ registers.
 6. Import-cycle detection keyed on specifier STRING, not canonical path (`import_resolver.rs` circular-import check) — alias spellings of one file can evade or false-positive.
 7. Bare default CLI route accepts only `.bv/.rbv/.abv`; `.ebv/.cbv` need explicit `build` subcommand (cosmetic; fully supported there).
 8. `discover_active_sources()` had zero callers until Phase 10 wires it (fixed by Phase 10).
+
+## Structural sums: LLVM tagged-union ABI not yet lowered (2026-08-22)
+
+**Status:** OPEN — Phase 3b of `docs/plans/2026-08-22-spec-conformance.md`
+**Found:** fizzbuzz/sums work during spec-conformance Phase 3
+**Behavior:** parser (`A | B` in any type position), typechecker
+(member assignability at call args + let annotations via
+`types_compatible`), and interpreter (dynamic-shape TypedBinding dispatch)
+are complete. The LLVM backend panics with an explicit message when a
+match arm uses a typed sum binding — the union value has no runtime tag,
+so branch dispatch would be silently wrong. Never emitted.
+**Fix:** tagged representation `{ i64 tag, payload }` for union-typed
+values across call args, params, returns, and phis; TypedBinding
+conditions test the tag; bindings extract the payload. Derive the layout
+via the casting graph per AGENTS Rule 19.

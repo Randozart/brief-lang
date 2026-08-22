@@ -4147,6 +4147,18 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         let scrut = self.emit_expr(out, scrutinee, indent);
+        // 2026-08-22 (Phase 3): typed sum bindings (`n: Int => …`) need a
+        // tagged union ABI at call/param/return boundaries before the branch
+        // can test membership at runtime. The interpreter and typechecker
+        // are complete; LLVM codegen rejects explicitly until the tagged
+        // slice lands (never emit silently-wrong dispatch).
+        if arms.iter().any(|a| matches!(a.pattern, crate::ast::Pattern::TypedBinding(_, _))) {
+            panic!(
+                "match on a structural sum (`Int | String` typed binding) is not yet \
+                 lowered by the LLVM backend — run with the interpreter, or restructure \
+                 with enum variants until the tagged union ABI lands"
+            );
+        }
         let counter = self.fun.txn_counter;
         self.fun.txn_counter += 1;
         let end_label = format!(".match_end_{}", counter);
@@ -4318,12 +4330,25 @@ impl LlvmBackend {
         out: &mut String,
         indent: &str,
     ) {
-        if let crate::ast::Pattern::Binding(name) = pat {
-            self.fun.last_val_temps.insert(name.clone(), scrut.to_string());
-            self.fun.last_val_types.insert(name.clone(), Type::int());
-            self.fun.let_bindings.insert(name.clone(), scrut.to_string());
-            self.fun.let_binding_types.insert(name.clone(), Type::int());
-            self.fun.let_original_types.insert(name.clone(), Type::int());
+        match pat {
+            crate::ast::Pattern::Binding(name) => {
+                self.fun.last_val_temps.insert(name.clone(), scrut.to_string());
+                self.fun.last_val_types.insert(name.clone(), Type::int());
+                self.fun.let_bindings.insert(name.clone(), scrut.to_string());
+                self.fun.let_binding_types.insert(name.clone(), Type::int());
+                self.fun.let_original_types.insert(name.clone(), Type::int());
+            }
+            // 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): a typed
+            // binding aliases the scrutinee register at the MEMBER's type —
+            // same register, precise static type for downstream emission.
+            crate::ast::Pattern::TypedBinding(name, ty) => {
+                self.fun.last_val_temps.insert(name.clone(), scrut.to_string());
+                self.fun.last_val_types.insert(name.clone(), (**ty).clone());
+                self.fun.let_bindings.insert(name.clone(), scrut.to_string());
+                self.fun.let_binding_types.insert(name.clone(), (**ty).clone());
+                self.fun.let_original_types.insert(name.clone(), (**ty).clone());
+            }
+            _ => {}
         }
         let _ = (out, indent);
     }

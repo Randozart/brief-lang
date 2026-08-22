@@ -463,6 +463,23 @@ fn index_oob(index: usize, len: usize) -> RuntimeError {
 }
 
 /// Short value description for error messages (not Debug — stay terse).
+/// 2026-08-22 (Phase 3): does `val` carry the dynamic shape of type `ty`?
+/// See the TypedBinding arm of `pattern_match` for the boundary rationale.
+fn value_has_type_shape(ty: &crate::ast::Type, val: &Value) -> bool {
+    match ty {
+        crate::ast::Type::Custom(name) => match name.as_str() {
+            "Int" | "UInt" => matches!(val, Value::Atom(Atom::Int(_))),
+            "Float" | "Float64" => matches!(val, Value::Atom(Atom::Float(_))),
+            "Bool" => matches!(val, Value::Atom(Atom::Bool(_))),
+            "Char" => matches!(val, Value::Atom(Atom::Char(_))),
+            // String values live as Bits in the interpreter.
+            "String" => matches!(val, Value::Bits(_)),
+            _ => true,
+        },
+        _ => true,
+    }
+}
+
 fn describe_value(v: &Value) -> String {
     match v {
         Value::Atom(Atom::Int(n)) => format!("integer {}", n),
@@ -805,6 +822,20 @@ pub fn pattern_match(
         Pattern::Binding(name) => {
             bindings.insert(name.clone(), val.clone());
             true
+        }
+        // 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): a typed
+        // binding matches when the VALUE carries the member's dynamic shape.
+        // Atom members (Int/Float/Bool/Char) are checked by variant; String
+        // members match the Bits representation (the interpreter's string
+        // carrier). Types with no dynamic shape in the interpreter (custom
+        // structs, generics) bind unconditionally — their membership is
+        // guaranteed statically by the typechecker.
+        Pattern::TypedBinding(name, ty) => {
+            let ok = value_has_type_shape(ty, val);
+            if ok {
+                bindings.insert(name.clone(), val.clone());
+            }
+            ok
         }
         Pattern::Literal(lit) => match literal_pattern_value(lit) {
             Some(lv) => &lv == val,
@@ -1976,6 +2007,45 @@ mod tests {
             guard,
             body: Box::new(Expr::Decimal(body)),
         }
+    }
+
+    // 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): typed
+    // bindings of a structural sum dispatch on the value's dynamic shape.
+    #[test]
+    fn test_match_typed_binding_dispatches_on_member_shape() {
+        let int_arm = MatchArm {
+            pattern: Pattern::TypedBinding("n".into(), Box::new(Type::int())),
+            guard: None,
+            body: Box::new(Expr::Identifier("n".into())),
+        };
+        let str_arm = MatchArm {
+            pattern: Pattern::TypedBinding("s".into(), Box::new(Type::string())),
+            guard: None,
+            body: Box::new(Expr::Decimal(7)),
+        };
+        let m_int = Expr::Match(
+            Box::new(Expr::Decimal(42)),
+            vec![int_arm.clone(), str_arm],
+        );
+        assert_eq!(eval1(&m_int).as_i64(), Some(42));
+
+        let m_str = Expr::Match(
+            Box::new(Expr::Quoted(b"hey".to_vec())),
+            vec![
+                MatchArm {
+                    pattern: Pattern::TypedBinding("x".into(), Box::new(Type::int())),
+                    guard: None,
+                    body: Box::new(Expr::Decimal(1)),
+                },
+                MatchArm {
+                    pattern: Pattern::TypedBinding("s".into(), Box::new(Type::string())),
+                    guard: None,
+                    body: Box::new(Expr::Decimal(7)),
+                },
+            ],
+        );
+        assert_eq!(eval1(&m_str).as_i64(), Some(7));
+        let _ = int_arm;
     }
 
     #[test]

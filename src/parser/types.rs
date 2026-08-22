@@ -116,9 +116,28 @@ impl<'a> Parser<'a> {
             }
         }
         if !dims.is_empty() {
-            return Ok(Type::Vector(Box::new(base.1), dims));
+            // 2026-08-22 (Phase 3): a union of array members — `Int[4] | Float[8]`.
+            let first = Type::Vector(Box::new(base.1), dims);
+            let mut members = vec![first];
+            while self.eat(&Token::Pipe) {
+                members.push(self.parse_type()?);
+            }
+            if members.len() == 1 {
+                return Ok(members.pop().unwrap_or_else(|| Type::void()));
+            }
+            return Ok(Type::Union(members));
         }
-        Ok(base.1)
+        // 2026-08-22 (Phase 3): structural sums — `Int | String` is an
+        // anonymous union (SPEC §8.4). `|` binds loosest in type grammar;
+        // operands are full types (arrays/generics included).
+        let mut members = vec![base.1.clone()];
+        while self.eat(&Token::Pipe) {
+            members.push(self.parse_type()?);
+        }
+        if members.len() == 1 {
+            return Ok(base.1);
+        }
+        Ok(Type::Union(members))
     }
 
     /// Parse a named type, possibly with generic parameters or pointer prefix.
