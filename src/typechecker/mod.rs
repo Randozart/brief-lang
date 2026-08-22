@@ -2119,34 +2119,213 @@ fn infer_match(
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
     let matched_ty = infer_type_only(expr, ctx)?;
-    // 2026-08-22 (spec-conformance plan Phase 3): typed bindings of a
-    // structural sum — `n: Int => body` binds `n` at the member's type for
-    // the arm body. Exhaustive coverage / unreachable arms / result-type
-    // unification land with the Phase 4 match-semantics engine; this pass
-    // makes typed-binding ARM BODIES typecheck against their binding.
+    // ── 2026-08-22 (spec-conformance plan Phase 4, SPEC §11.3) ──────────
+    // Match semantics engine: exhaustiveness over closed domains,
+    // unreachable-arm rejection, arm-result compatibility. Replaces the
+    // first-arm-type stub (and the Phase 3 interim binding-only pass).
+
+    // 1. The coverage domain. Closed = every value is accounted for by
+    //    naming its member: structural sums (their members) and nominal
+    //    enums (their `__variant_*` slots). Everything else is open and
+    //    demands a `_` arm.
+    let domain: MatchDomain = match_domain_of(&matched_ty, ctx);
+
+    let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut saw_catchall = false;
     let mut result_ty: Option<Type> = None;
+
     for arm in arms {
         let mut saved: Vec<(String, Option<Type>)> = Vec::new();
-        if let crate::ast::Pattern::TypedBinding(name, member) = &arm.pattern {
-            saved.push((name.clone(), ctx.bindings.get(name).cloned()));
-            ctx.bindings.insert(name.clone(), (**member).clone());
-            let _ = &matched_ty;
-        } else if let crate::ast::Pattern::Binding(name) = &arm.pattern {
-            saved.push((name.clone(), ctx.bindings.get(name).cloned()));
-            ctx.bindings.insert(name.clone(), matched_ty.clone());
+        let mut binds: Vec<(String, Type)> = Vec::new();
+
+        // 2a. Pattern-level checks + coverage contribution.
+        match &arm.pattern {
+            crate::ast::Pattern::Wildcard | crate::ast::Pattern::Binding(_) => {
+                saw_catchall = true;
+            }
+            crate::ast::Pattern::TypedBinding(name, member) => {
+                if !is_sum_member(&matched_ty, member) {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!(
+                            "match arm binds '{name}: {}' — not a member of {}",
+                            member, matched_ty
+                        ),
+                        type_name: format!("{}", matched_ty),
+                    });
+                }
+                let id = format!("{}", member);
+                if covered.contains(&id) {
+                    return Err(unreachable_arm(&id, matched_ty.clone()));
+                }
+                if arm.guard.is_none() {
+                    covered.insert(id);
+                }
+                binds.push((name.clone(), (**member).clone()));
+            }
+            crate::ast::Pattern::EnumVariant(name, _) => {
+                if let MatchDomain::Enum(variants) = &domain {
+                    if !variants.contains(name) {
+                        return Err(TypeError::InvalidOperation {
+                            operation: format!(
+                                "match arm names variant '{}' which '{}' does not declare \
+                                 (declared: {})",
+                                name,
+                                matched_ty,
+                                variants.join(", ")
+                            ),
+                            type_name: format!("{}", matched_ty),
+                        });
+                    }
+                }
+                if covered.contains(name) {
+                    return Err(unreachable_arm(name, matched_ty.clone()));
+                }
+                if arm.guard.is_none() {
+                    covered.insert(name.clone());
+                }
+            }
+            _ => {}
         }
-        let ty = infer_type_only(&arm.body, ctx)?;
-        for (name, prev) in saved {
+
+        // 2b. Bind pattern names for the arm body, then infer it.
+        match &arm.pattern {
+            crate::ast::Pattern::TypedBinding(name, member) => {
+                binds.push((name.clone(), (**member).clone()));
+            }
+            crate::ast::Pattern::Binding(name) => {
+                binds.push((name.clone(), matched_ty.clone()));
+            }
+            _ => {}
+        }
+        for (n, t) in &binds {
+            saved.push((n.clone(), ctx.bindings.get(n).cloned()));
+            ctx.bindings.insert(n.clone(), t.clone());
+        }
+        let ty = infer_type_only(&arm.body, ctx);
+        for (n, prev) in saved {
             match prev {
-                Some(p) => { ctx.bindings.insert(name, p); }
-                None => { ctx.bindings.remove(&name); }
+                Some(p) => {
+                    ctx.bindings.insert(n, p);
+                }
+                None => {
+                    ctx.bindings.remove(&n);
+                }
             }
         }
-        if result_ty.is_none() {
-            result_ty = Some(ty);
+        let ty = ty?;
+
+        // 3. Arm-result compatibility (SPEC §11.3): all arm bodies must have
+        //    compatible types; the first non-() type is authoritative.
+        match &result_ty {
+            None => result_ty = Some(ty),
+            Some(prev) => {
+                if *prev != ty && ty != Type::void() && *prev != Type::void() {
+                    return Err(TypeError::TypeMismatch {
+                        expected: format!("{}", prev),
+                        found: format!("{}", ty),
+                        context: "match arm results must be compatible".into(),
+                    });
+                }
+                if *prev == Type::void() && ty != Type::void() {
+                    result_ty = Some(ty);
+                }
+            }
         }
     }
+
+    // 4. Exhaustiveness (SPEC §11.3): a CLOSED scrutinee must cover every
+    //    member or end with `_`. An OPEN scrutinee must end with `_` —
+    //    literal arms alone can never account for the whole domain. A
+    //    guarded arm never closes coverage (its condition is unknown), so
+    //    only unguarded contributions count toward exhaustiveness.
+    match &domain {
+        MatchDomain::Closed(items) => {
+            if !saw_catchall {
+                let missing: Vec<String> = items
+                    .iter()
+                    .filter(|i| !covered.contains(*i))
+                    .map(|i| i.clone())
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!(
+                            "non-exhaustive match on {} — no arm covers: {}",
+                            matched_ty,
+                            missing.join(", ")
+                        ),
+                        type_name: format!(
+                            "add those arms or a trailing `_ =>` fallback"
+                        ),
+                    });
+                }
+            }
+        }
+        MatchDomain::Open | MatchDomain::Enum(_) => {
+            if !saw_catchall {
+                return Err(TypeError::InvalidOperation {
+                    operation: format!(
+                        "non-exhaustive match on {} — an open scrutinee requires a \
+                         trailing `_ =>` fallback",
+                        matched_ty
+                    ),
+                    type_name: "match".into(),
+                });
+            }
+        }
+    }
+
     Ok(result_ty.unwrap_or_else(Type::void))
+}
+
+/// The coverage domain of a match scrutinee (SPEC §11.3).
+enum MatchDomain {
+    /// Every value names exactly one of these members.
+    Closed(Vec<String>),
+    /// Enum: closed over declared variants (`__variant_*` slots).
+    Enum(Vec<String>),
+    /// No closed domain — `_` required for exhaustiveness.
+    Open,
+}
+
+fn match_domain_of(ty: &Type, ctx: &TypecheckContext) -> MatchDomain {
+    match ty {
+        Type::Union(members) => MatchDomain::Closed(
+            members.iter().map(|m| format!("{}", m)).collect(),
+        ),
+        Type::Custom(name) => enum_variants(ctx, name).map_or(MatchDomain::Open, |v| MatchDomain::Enum(v)),
+        Type::Applied(base, _) => {
+            enum_variants(ctx, base).map_or(MatchDomain::Open, |v| MatchDomain::Enum(v))
+        }
+        _ => MatchDomain::Open,
+    }
+}
+
+fn enum_variants(ctx: &TypecheckContext, name: &str) -> Option<Vec<String>> {
+    let slots = ctx.type_slots.get(name)?;
+    let variants: Vec<String> = slots
+        .iter()
+        .filter_map(|s| s.name.strip_prefix("__variant_").map(|v| v.to_string()))
+        .collect();
+    (!variants.is_empty()).then_some(variants)
+}
+
+/// Is `member` acceptable inside a sum-typed scrutinee? Unions list their
+/// members structurally; enums admit their own name (variant dispatch goes
+/// through EnumVariant patterns, but `r: Result` bindings stay legal).
+fn is_sum_member(scrutinee: &Type, member: &Type) -> bool {
+    match scrutinee {
+        Type::Union(members) => members.iter().any(|m| m == member),
+        other => other == member,
+    }
+}
+
+fn unreachable_arm(what: &str, scrutinee: Type) -> TypeError {
+    TypeError::InvalidOperation {
+        operation: format!(
+            "unreachable match arm: '{what}' is already covered by an earlier arm"
+        ),
+        type_name: format!("{}", scrutinee),
+    }
 }
 
 /// Infer the type of a statement.
@@ -6781,5 +6960,95 @@ node go [done == 0][done == 1] {
         check(ok).is_ok(),
         "HashMap tuple insert + get/contains/Count# must type"
     );
+}
+
+// ── 2026-08-22 (spec-conformance plan Phase 4): match semantics ──────────
+
+#[test]
+fn exhaustive_sum_match_without_wildcard_typechecks() {
+    let src = r#"
+defn pick(v: Int | String) -> Int {
+    term match v {
+        n: Int => n,
+        s: String => 7,
+    };
+};
+"#;
+    check(src).expect("closed sum covered member-for-member must typecheck");
+}
+
+#[test]
+fn non_exhaustive_sum_match_lists_missing_member() {
+    let src = r#"
+defn pick(v: Int | String) -> Int {
+    term match v {
+        n: Int => n,
+    };
+};
+"#;
+    let errs = check(src).expect_err("missing String arm must fail");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("String"), "must name the uncovered member: {}", text);
+}
+
+#[test]
+fn duplicate_typed_binding_is_unreachable() {
+    let src = r#"
+defn pick(v: Int | String) -> Int {
+    term match v {
+        n: Int => n,
+        m: Int => m,
+        _ => 0,
+    };
+};
+"#;
+    let errs = check(src).expect_err("second Int binding is dead");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("unreachable"), "{}", text);
+}
+
+#[test]
+fn typed_binding_of_non_member_rejected() {
+    let src = r#"
+defn pick(v: Int | String) -> Int {
+    term match v {
+        f: Float => 1,
+        _ => 0,
+    };
+};
+"#;
+    let errs = check(src).expect_err("Float is not a member of Int | String");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("not a member"), "{}", text);
+}
+
+#[test]
+fn open_scrutinee_requires_fallback() {
+    let src = r#"
+defn pick(v: Int) -> Int {
+    term match v {
+        0 => 10,
+        1 => 11,
+    };
+};
+"#;
+    let errs = check(src).expect_err("int domain is open; `_` required");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("`_ =>`"), "{}", text);
+}
+
+#[test]
+fn arm_result_types_must_be_compatible() {
+    let src = r#"
+defn pick(v: Bool) -> Int {
+    term match v {
+        true => 1,
+        _ => "one",
+    };
+};
+"#;
+    let errs = check(src).expect_err("Int vs String arm results");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("compatible"), "{}", text);
 }
 }
