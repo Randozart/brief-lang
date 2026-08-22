@@ -1703,6 +1703,11 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         // The mask pointer + mask length (shared by both gathers).
+        // 2026-08-22 (Phase 6a): a Bool[N] STATE column is [N x i8] — the
+        // gather must read i8 masks, so StateField sources select the
+        // _i8mask runtime variants (constant masks materialize as [N x i64]
+        // globals and keep the original helpers).
+        let mut i8_mask = false;
         let (mask_ptr, mask_len) = match op.source {
             MaskSource::Constant(bits) => {
                 let bytes: Vec<u8> = bits.iter().map(|b| if *b { 1 } else { 0 }).collect();
@@ -1721,6 +1726,16 @@ impl LlvmBackend {
                 (cast, bytes.len() as i64)
             }
             MaskSource::StateField(fidx) => {
+                // Route on the STORED column type ("[N x i8]"), not a
+                // protocol lookup — the storage width is what the gather
+                // must match. Protocol membership proved unreliable here
+                // (Bool element didn't resolve → silent i64 misread).
+                i8_mask = self
+                    .ctx
+                    .field_types
+                    .get(fidx)
+                    .map(|ty| ty.contains(" x i8"))
+                    .unwrap_or(false);
                 let gep = self.emit_state_gep(out, indent, "m", "%state", fidx);
                 let n = self.ctx.field_briev_types.get(fidx)
                     .map(|t| self.vector_element_count(t))
@@ -1843,12 +1858,31 @@ impl LlvmBackend {
             let buf = self.fun.gen_reg();
             writeln!(
                 out,
-                "{}{} = call ptr @briev_mask_select_f32(ptr {}, i64 {}, ptr {}, i64 {})",
-                indent, buf, data_ptr, n, mask_ptr, mask_len
+                "{}{} = call ptr @briev_mask_select_f32{}(ptr {}, i64 {}, ptr {}, i64 {})",
+                indent, buf, if i8_mask { "_i8mask" } else { "" }, data_ptr, n, mask_ptr, mask_len
             )
             .ok();
+            // 2026-08-22 (Phase 6a): box `[len,f0,…]` as a tier block, same
+            // as the i64 route below.
+            let len_p = self.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, len_p, buf).ok();
+            let block = self.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
+            let d0 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
+            let e0 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, e0, buf).ok();
+            let data_h = self.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_h, e0).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, data_h, d0).ok();
+            let d1 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d1).ok();
+            let d2 = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d2).ok();
             let handle = self.fun.gen_reg();
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
             let elem_ty = match &op.obj_reg.ty {
                 Type::Vector(inner, _) => (**inner).clone(),
                 _ => Type::int(),
@@ -1866,7 +1900,11 @@ impl LlvmBackend {
         {
             panic!("mask indexing on Float64 (double) vectors is not yet supported");
         }
-        let helper = "@briev_mask_select64";
+        let helper = if i8_mask {
+            "@briev_mask_select64_i8mask"
+        } else {
+            "@briev_mask_select64"
+        };
         let buf = self.fun.gen_reg();
         writeln!(
             out,
@@ -1874,8 +1912,30 @@ impl LlvmBackend {
             indent, buf, helper, data_ptr, n, mask_ptr, mask_len
         )
         .ok();
+        // 2026-08-22 (Phase 6a fix): the gather buffer is `[len, e0, e1, …]`
+        // — NOT the tier-List `[data, cap, len]` layout consumers expect.
+        // Handing the raw buffer back made Count# read garbage and element
+        // indexing walk an untyped pointer (the repro segfault). Box it as a
+        // proper tier block: data → e0 slot, cap = len = header length.
+        let len_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, len_p, buf).ok();
+        let block = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
+        let d0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
+        let e0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, e0, buf).ok();
+        let data_h = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_h, e0).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, data_h, d0).ok();
+        let d1 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d1).ok();
+        let d2 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d2).ok();
         let handle = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, buf).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
         let elem_ty = match &op.obj_reg.ty {
             Type::Vector(inner, _) => (**inner).clone(),
             _ => Type::int(),

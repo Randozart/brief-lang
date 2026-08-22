@@ -1,0 +1,25 @@
+// mask_select — SPEC §16.5 `data[mask]` over state fields.
+// Regression fixture for the Phase 6a segfault/garbage fix: Bool[N] columns
+// read as i8 masks, gather buffer boxed as a tier List.
+// Expected output: "13580" = picked[0]*1000+picked[1]*100+picked[2]*10+picked[3]
+//   with picked = [10, 30, 50, 80] (mask true at 0, 2, 4, 7).
+let data: Int[8];
+let mask: Bool[8];
+let total_out: Int = 0;
+let i: Int = 0;
+
+node run [i < 9][i == 9] {
+  when i == 0 {
+    data[0] = 10; data[1] = 20; data[2] = 30; data[3] = 40;
+    data[4] = 50; data[5] = 60; data[6] = 70; data[7] = 80;
+    mask[0] = true; mask[1] = false; mask[2] = true; mask[3] = false;
+    mask[4] = true; mask[5] = false; mask[6] = false; mask[7] = true;
+  };
+  when i == 1 {
+    let picked = data[mask];
+    total_out = picked[0] * 1000 + picked[1] * 100 + picked[2] * 10 + picked[3];
+    endprogram Print#(total_out);
+  };
+  i = i + 1;
+  term;
+};

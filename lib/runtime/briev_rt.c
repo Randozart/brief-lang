@@ -974,6 +974,43 @@ uint8_t* briev_mask_select(const uint8_t* data, const int64_t* mask, int64_t mas
 /// in ascending order (SPEC §16.5 `array[mask]`). Returns a LIST buffer —
 /// slot 0 is the length, slots 1.. hold the selected elements. A mask longer
 /// than the data is truncated (the mask governs). 2026-08-07 (Phase 7).
+/// 2026-08-22 (Phase 6a): i8-mask variants. A `Bool[N]` state column is
+/// `[N x i8]` in %State — reading it as `int64_t*` walks past the column and
+/// selects on garbage (the mask-index segfault/garbage bug). Same contracts
+/// as the i64-mask originals; only the mask element width differs.
+int64_t* briev_mask_select64_i8mask(const int64_t* data, int64_t data_len,
+                                    const uint8_t* mask, int64_t mask_len) {
+    if (mask_len > data_len) mask_len = data_len;
+    int64_t new_len = 0;
+    for (int64_t i = 0; i < mask_len; i++) if (mask[i]) new_len++;
+    int64_t* out = (int64_t*)malloc((size_t)((1 + new_len) * 8));
+    if (!out) return NULL;
+    out[0] = new_len;
+    int64_t w = 1;
+    for (int64_t i = 0; i < mask_len; i++) if (mask[i]) out[w++] = data[i];
+    return out;
+}
+
+int64_t* briev_mask_select_f32_i8mask(const float* data, int64_t data_len,
+                                      const uint8_t* mask, int64_t mask_len) {
+    if (mask_len > data_len) mask_len = data_len;
+    int64_t new_len = 0;
+    for (int64_t i = 0; i < mask_len; i++) if (mask[i]) new_len++;
+    int64_t* out = (int64_t*)malloc((size_t)((1 + new_len) * 8));
+    if (!out) return NULL;
+    out[0] = new_len;
+    int64_t w = 1;
+    for (int64_t i = 0; i < mask_len; i++) {
+        if (mask[i]) {
+            float f = data[i];
+            int64_t bits = 0;
+            memcpy(&bits, &f, 4);
+            out[w++] = bits;
+        }
+    }
+    return out;
+}
+
 int64_t* briev_mask_select64(const int64_t* data, int64_t data_len,
                             const int64_t* mask, int64_t mask_len) {
     if (mask_len > data_len) mask_len = data_len;

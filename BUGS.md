@@ -4645,7 +4645,19 @@ via the casting graph per AGENTS Rule 19.
 
 ## Boolean mask indexing segfaults in compiled code (2026-08-22)
 
-**Status:** OPEN — Phase 6 remainder of `docs/plans/2026-08-22-spec-conformance.md`
+**Status:** CLOSED 2026-08-22 (Phase 6a). Two stacked faults:
+1. The gather buffer `[len, e0, …]` was handed back raw where consumers
+   expect a tier List `[data, cap, len]` — Count# read garbage, indexing
+   walked an untyped pointer. Now boxed at both i64 and f32 routes.
+2. A `Bool[N]` state column is `[N x i8]`; the gather read it as
+   `int64_t*`, selecting on adjacent state bytes — correct output was luck.
+   New runtime variants `briev_mask_select{64,_f32}_i8mask` take `uint8_t`
+   masks; routing keys on the stored column LLVM type (`x i8`), not
+   protocol lookup (which proved unreliable here).
+Verified: examples/mask_select.bv → 13580 stable across runs; suite green.
+Note: the unit-test harness cannot host this fixture (lacks reactor/
+contract passes — values diverge); the CLI-built example is the gate.
+See also: repro_guard_chain_dominance.bv entry below. Original report:
 **Repro:** `bugs/repro_mask_index_segfault.bv` — `data[mask]` over `Int[8]` /
 `Bool[8]` state fields, index into the compacted result.
 **Behavior:** interpreter correct (mask select landed 2026-08-07). The LLVM
@@ -4657,3 +4669,17 @@ read path (same GEP shape as plain `data[i]`), then compact via the popcount
 loop; add interp/backend parity fixture. Ellipsis (`...`) multidim slices
 also remain: token lexed, Slice AST has no dims list — needs `SliceDim`
 enum (Range | Named | Ellipsis) per plan §Phase 6.
+
+## Guard-chain endprogram dominance errors (2026-08-22)
+
+**Status:** OPEN — pre-existing (fails identically at the pre-fix commit)
+**Repro:** `bugs/repro_guard_chain_dominance.bv` — three sequential `when`
+guards where a LATER guard computes into state and the FINAL guard ends the
+program (`endprogram Print#(total_out)`); plain indexed reads, no masks.
+**Behavior:** clang rejects the emitted IR — "Instruction does not dominate
+all uses" around the print argument; same shape without any mask indexing,
+so independent of the Phase 6a mask work. Works when endprogram shares the
+guard with the computation (mask repro shape).
+**Fix direction:** audit cold-path outlining / guard-chain emission for the
+case where a later guard's value feeds an earlier-outlined region's
+terminator; likely a cur_block tracking gap sibling to the match-edge fix.

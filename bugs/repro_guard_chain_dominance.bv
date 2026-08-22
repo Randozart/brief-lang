@@ -1,0 +1,16 @@
+let data: Int[8];
+let total_out: Int = 0;
+let i: Int = 0;
+node run [i < 3][i == 3] {
+  when i == 0 {
+    data[0] = 10;
+  };
+  when i == 1 {
+    total_out = data[0] * 1000 + data[1] * 100;
+  };
+  when i == 2 {
+    endprogram Print#(total_out);
+  };
+  i = i + 1;
+  term;
+};

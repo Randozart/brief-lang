@@ -3004,10 +3004,14 @@ impl LlvmBackend {
         // 2026-08-07 (Phase 7): typed mask select — an Int/Bool vector state
         // field (`[N x i64]`) masked into a new heap List buffer.
         writeln!(out, "declare ptr @briev_mask_select64(ptr, i64, ptr, i64) #1").ok();
+        // 2026-08-22 (Phase 6a): i8-mask variants — a Bool[N] state column is
+        // [N x i8]; reading it as i64 walked past the column (garbage/segfault).
+        writeln!(out, "declare ptr @briev_mask_select64_i8mask(ptr, i64, ptr, i64) #1").ok();
         // 2026-08-07 (Phase 7): Float (f32) mask select — a `Float[N]` vector
         // state field masked into a new heap List<Float> (i64 bit-pattern
         // slots, matching how heap List<Float> stores floats).
         writeln!(out, "declare ptr @briev_mask_select_f32(ptr, i64, ptr, i64) #1").ok();
+        writeln!(out, "declare ptr @briev_mask_select_f32_i8mask(ptr, i64, ptr, i64) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (briev_rt.c) read them as externs. The compiler OWNS the globals
