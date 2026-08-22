@@ -4607,3 +4607,17 @@ fields) fired on these handles too, producing `ptrtoint ptr <i64 handle>`
 **Fix:** `ensure_typed_value` returns Ptr/Custom/Applied handle-typed values
 unchanged; the `("ptr", "i64")` arm now only fires for genuine String/Data
 registers.
+
+## Deferred dead surface — spec-conformance plan 2026-08-22
+
+**Date:** 2026-08-22 (owner decision: fix opportunistically when touching these files)
+**Plan:** `docs/plans/2026-08-22-spec-conformance.md` § Deferred
+**Items:**
+1. `Token::DollarBang` (`$!`) lexed (`src/lexer.rs`) with zero consumers — dead surface, no semantics.
+2. Legacy AST variants `TopLevel::StateDecl` / `Signature` survive in `import_resolver.rs`, `beast/serialize.rs` — removed-grammar residue (SPEC §4.4 removes `state`/`sig`).
+3. Lexer tokens `input`/`output` labeled ".c.bv cell file keywords" (`src/lexer.rs`) — the `.c.bv` variant is rejected by SPEC §3.1; tokens now serve only as identifier-mappable words.
+4. Orphan fixtures contradicting §3.1 "not part of the language": `tests/test_strict.sbv`, `tests/test_sig.bv`, `tests/test_sig2.bv`, `tests/test_sig3.bv` — unreferenced by any test.
+5. `vocab.rs` marks `Ok/Err/Some/None/some/none` as Removed ("parser must reject") — SPEC §4.4 says they are NOT reserved and behavior already treats them as ordinary identifiers; the vocab label is wrong, not the behavior.
+6. Import-cycle detection keyed on specifier STRING, not canonical path (`import_resolver.rs` circular-import check) — alias spellings of one file can evade or false-positive.
+7. Bare default CLI route accepts only `.bv/.rbv/.abv`; `.ebv/.cbv` need explicit `build` subcommand (cosmetic; fully supported there).
+8. `discover_active_sources()` had zero callers until Phase 10 wires it (fixed by Phase 10).
