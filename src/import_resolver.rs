@@ -618,10 +618,15 @@ impl ImportResolver {
             return self.resolve_target_import();
         }
 
-        // Handle glob expansion (* or ** in last path segment)
-        let is_glob = import.path().ends_with("/*") || import.path().ends_with("/**");
-        if is_glob {
-            return self.resolve_glob(import, source_file);
+        // 2026-08-22 (spec-conformance plan Phase 1a): glob imports are
+        // invalid (SPEC §7.2). Removed the directory-glob expansion that used
+        // to live here (`resolve_glob`); a `*`/`**` path is now an error.
+        // Undo: restore resolve_glob + its call site + the non-recursive test.
+        if import.path().contains('*') {
+            return Err(format!(
+                "glob import '{}' is invalid — import each file explicitly (SPEC §7.2)",
+                import.path()
+            ));
         }
 
         // Cache check
@@ -937,77 +942,6 @@ impl ImportResolver {
         result
     }
 
-    /// Resolve a glob pattern (* or **) into individual Import nodes.
-    fn resolve_glob(
-        &mut self,
-        import: &Import,
-        source_file: &PathBuf,
-    ) -> Result<Vec<TopLevel>, String> {
-        let is_recursive = import.path().ends_with("/**");
-        let glob_prefix = import.path().trim_end_matches("/*").trim_end_matches("/**");
-        let path_prefix: Vec<String> = glob_prefix.split('/').map(|s| s.to_string()).collect();
-
-        // Determine base directory
-        let base_dir = {
-            // Non-magic glob: resolve relative to project search paths
-            let is_relative = glob_prefix.starts_with("./") || glob_prefix.starts_with("../");
-            let source_dir = if is_relative {
-                source_file
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("."))
-            } else {
-                self.root_path.clone()
-            };
-            let mut found = None;
-            for search_dir in &self.search_paths {
-                let candidate = source_dir.join(search_dir).join(glob_prefix);
-                if candidate.exists() {
-                    found = Some(candidate);
-                    break;
-                }
-            }
-            found.unwrap_or_else(|| source_dir.join(glob_prefix))
-        };
-
-        // Collect .bv files
-        let mut entries: Vec<PathBuf> = Vec::new();
-        if is_recursive {
-            collect_bv_files_recursive(&base_dir, &mut entries)
-                .map_err(|e| format!("Error reading directory '{}': {}", base_dir.display(), e))?;
-        } else {
-            if let Ok(rd) = std::fs::read_dir(&base_dir) {
-                for entry in rd.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    if path.is_file()
-                        && path.extension().map(|ext| ext == "bv").unwrap_or(false)
-                    {
-                        entries.push(path);
-                    }
-                }
-            }
-        }
-        entries.sort();
-
-        // Generate wildcard Import nodes for each file
-        let items: Vec<TopLevel> = entries
-            .into_iter()
-            .map(|path| {
-                let rel_path = path
-                    .strip_prefix(&base_dir)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .to_string();
-                let mut path_components = path_prefix.clone();
-                path_components.extend(rel_path.split('/').map(|s| s.to_string()));
-                let module_path = path_components.join("/");
-                TopLevel::Import(Import::literal(module_path, vec![]))
-            })
-            .collect();
-
-        Ok(items)
-    }
-
     /// 2026-08-06 (Phase 11): filter imported items by the EXPORTED names and
     /// apply selective renames (`{ Local: Exported }`). Preserves the D3
     /// transitive-referenced-type closure and the file-private (sed) filter.
@@ -1205,22 +1139,6 @@ fn lex_source(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, Stri
     Ok(tokens)
 }
 
-/// Recursively collect all .bv files under a directory.
-fn collect_bv_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                collect_bv_files_recursive(&path, files)?;
-            } else if path.extension().map(|ext| ext == "bv").unwrap_or(false) {
-                files.push(path);
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Keep only the first occurrence of each named top-level item.
 fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -1373,26 +1291,29 @@ mod tests {
     }
 
     #[test]
-    fn test_glob_import_non_recursive() {
+    fn test_glob_path_import_is_rejected() {
+        // 2026-08-22 (Phase 1a): directory-glob paths are invalid (SPEC §7.2).
+        // The old resolver expanded "std/core/*" into per-file imports; the
+        // spec forbids globs outright, so any `*` in the path is now an error.
         let dir = TempDir::new().unwrap();
         let stdlib_root = dir.path().join("lib");
         let core_dir = stdlib_root.join("std").join("core");
         fs::create_dir_all(&core_dir).unwrap();
         fs::write(core_dir.join("a.bv"), "defn a_fn -> Int { term 1; };").unwrap();
-        fs::write(core_dir.join("b.bv"), "defn b_fn -> Int { term 2; };").unwrap();
-        let sub_dir = core_dir.join("sub");
-        fs::create_dir_all(&sub_dir).unwrap();
-        fs::write(sub_dir.join("c.bv"), "defn c_fn -> Int { term 3; };").unwrap();
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let items = vec![TopLevel::Import(Import::literal("std/core/*", vec![]))];
-        let mut resolver = ImportResolver::new()
-            ;
-        resolver.add_search_path(stdlib_root);
-        let result = resolver.resolve_imports(items, &src).unwrap();
-        let defns: Vec<&TopLevel> = result.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
-        assert_eq!(defns.len(), 2, "non-recursive glob should pick up a.bv and b.bv, but not sub/c.bv");
+        for pattern in ["std/core/*", "./**"] {
+            let items = vec![TopLevel::Import(Import::literal(pattern, vec![]))];
+            let mut resolver = ImportResolver::new();
+            resolver.add_search_path(stdlib_root.clone());
+            let result = resolver.resolve_imports(items, &src);
+            assert!(result.is_err(), "glob path '{}' must be rejected", pattern);
+            assert!(
+                result.err().unwrap().contains("glob"),
+                "rejection must name the glob rule"
+            );
+        }
     }
 
     #[test]
