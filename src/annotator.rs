@@ -91,11 +91,6 @@ impl Annotator {
                         self.collect_calls_from_expr(v, calls);
                     }
                 }
-                Statement::If(cond, then, else_) => {
-                    self.collect_calls_from_expr(cond, calls);
-                    self.collect_calls_from_body(then, calls);
-                    self.collect_calls_from_body(else_, calls);
-                }
                 Statement::Block(stmts) => {
                     self.collect_calls_from_body(stmts, calls);
                 }
@@ -460,22 +455,6 @@ impl Annotator {
                 } else {
                     format!("{}let {};\n", spaces, name)
                 }
-            }
-            Statement::If(cond, then, else_) => {
-                let mut output = format!("{}if {} {{\n", spaces, self.format_expr(cond));
-                for s in then {
-                    output.push_str(&self.format_statement(s, indent + 2));
-                }
-                if !else_.is_empty() {
-                    output.push_str(&format!("{}}} else {{\n", spaces));
-                    for s in else_ {
-                        output.push_str(&self.format_statement(s, indent + 2));
-                    }
-                    output.push_str(&format!("{}}}\n", spaces));
-                } else {
-                    output.push_str(&format!("{}}}\n", spaces));
-                }
-                output
             }
             Statement::Block(stmts) => {
                 let mut output = format!("{} {{\n", spaces);

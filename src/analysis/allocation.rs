@@ -256,7 +256,6 @@ impl<'a> DagBuilder<'a> {
                 }
                 Statement::Expression(e) => { self.walk_expr(e); }
                 Statement::Guarded(cond, body) => { self.walk_expr(cond); self.walk_stmts(body); }
-                Statement::If(cond, then, else_) => { self.walk_expr(cond); self.walk_stmts(then); self.walk_stmts(else_); }
                 Statement::Block(body) => { self.walk_stmts(body); }
                 _ => {}
             }

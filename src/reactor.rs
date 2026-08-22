@@ -387,25 +387,6 @@ impl Reactor {
             Statement::TrgBinding { .. } => {
                 Ok(StmtResult::Continue)
             }
-            Statement::If(cond, then, else_) => {
-                let cv = interp.eval_expr(cond)?;
-                if cv .is_true() {
-                    for stmt in then {
-                        let result = self.execute_statement(interp, stmt)?;
-                        if !matches!(result, StmtResult::Continue) {
-                            return Ok(result);
-                        }
-                    }
-                } else {
-                    for stmt in else_ {
-                        let result = self.execute_statement(interp, stmt)?;
-                        if !matches!(result, StmtResult::Continue) {
-                            return Ok(result);
-                        }
-                    }
-                }
-                Ok(StmtResult::Continue)
-            }
             Statement::MetadataAssignment(_, _) => {
                 Ok(StmtResult::Continue)
             }

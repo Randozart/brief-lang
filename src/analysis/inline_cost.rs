@@ -49,7 +49,7 @@ pub fn callable_inline_decision(txn: &Transaction) -> InlineDecision {
 /// Weighted instruction cost of a txn body.
 ///
 /// 2026-07-31: Statement base cost 1, plus expression weights
-/// (call=10, binop=1, operand use=1). Guarded/Block/Foreach/If recurse.
+/// (call=10, binop=1, operand use=1). Guarded/Block/Foreach recurse.
 /// The load/store weight (2) is folded into statement + identifier costs —
 /// a field read is one identifier use, a state store is one Assign.
 fn weight_of_body(body: &[Statement]) -> u32 {
@@ -67,7 +67,6 @@ fn weight_of_stmt(stmt: &Statement) -> u32 {
         Statement::Expression(e) => 1 + weight_of_expr(e),
         Statement::Guarded(cond, body) => 1 + weight_of_expr(cond) + weight_of_body(body),
         Statement::Gate(e) => 1 + weight_of_expr(e),
-        Statement::If(c, t, e) => 1 + weight_of_expr(c) + weight_of_body(t) + weight_of_body(e),
         Statement::Block(b) => 1 + weight_of_body(b),
         Statement::Foreach { list, body, .. } => 1 + weight_of_expr(list) + weight_of_body(body),
         Statement::MetadataAssignment(_, _) => 1,

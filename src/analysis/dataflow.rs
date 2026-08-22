@@ -231,15 +231,6 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
-            Statement::If(cond, then, else_) => {
-                self.extract_ids_recursive(cond, ids);
-                for s in then {
-                    self.extract_ids_from_statement(s, ids);
-                }
-                for s in else_ {
-                    self.extract_ids_from_statement(s, ids);
-                }
-            }
             Statement::Foreach { list, body, .. } => {
                 self.extract_ids_recursive(list, ids);
                 for s in body {

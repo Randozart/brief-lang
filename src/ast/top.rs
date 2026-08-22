@@ -291,8 +291,6 @@ pub enum Statement {
     Gate(Expr),
     /// expr;
     Expression(Expr),
-    /// if expr { ... } else { ... }
-    If(Expr, Vec<Statement>, Vec<Statement>),
     /// { ... }
     Block(Vec<Statement>),
     /// key <~ value;
@@ -392,7 +390,6 @@ impl PartialEq for Statement {
              (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,
             (Statement::Expression(e1), Statement::Expression(e2)) => e1 == e2,
-            (Statement::If(c1, t1, e1), Statement::If(c2, t2, e2)) => c1 == c2 && t1 == t2 && e1 == e2,
             (Statement::Block(b1), Statement::Block(b2)) => b1 == b2,
             (Statement::MetadataAssignment(k1, v1), Statement::MetadataAssignment(k2, v2)) => k1 == k2 && v1 == v2,
             (Statement::Rollback(e1), Statement::Rollback(e2)) => e1 == e2,

@@ -207,10 +207,6 @@ fn stmt_arith_ops(s: &Statement) -> usize {
         Statement::Guarded(cond, body) => {
             expr_arith_ops(cond) + body.iter().map(stmt_arith_ops).sum::<usize>()
         }
-        Statement::If(c, t, e) => {
-            expr_arith_ops(c) + t.iter().map(stmt_arith_ops).sum::<usize>()
-                + e.iter().map(stmt_arith_ops).sum::<usize>()
-        }
         _ => 0,
     }
 }

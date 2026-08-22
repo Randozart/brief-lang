@@ -237,11 +237,6 @@ fn referenced_function_names(item: &TopLevel) -> Vec<String> {
             crate::ast::Statement::Term(None) => {}
             crate::ast::Statement::EndProgram(Some(e)) => expr_calls(e, acc),
             crate::ast::Statement::EndProgram(None) => {}
-            crate::ast::Statement::If(_, t, e) => {
-                for b in t.iter().chain(e.iter()) {
-                    stmt_calls(b, acc);
-                }
-            }
             crate::ast::Statement::Guarded(_, b) | crate::ast::Statement::Block(b) => {
                 for s in b {
                     stmt_calls(s, acc);

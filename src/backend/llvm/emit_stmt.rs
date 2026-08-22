@@ -148,10 +148,6 @@ fn collect_foreach_assigned(stmts: &[Statement], out: &mut std::collections::Has
         match s {
             Statement::Assign(Expr::Identifier(name), _) => { out.insert(name.clone()); }
             Statement::Guarded(_, body) => collect_foreach_assigned(body, out),
-            Statement::If(_, then, els) => {
-                collect_foreach_assigned(then, out);
-                collect_foreach_assigned(els, out);
-            }
             Statement::Block(body) | Statement::SyncBlock(body) => collect_foreach_assigned(body, out),
             Statement::Foreach { body, .. } => collect_foreach_assigned(body, out),
             _ => {}
@@ -1388,40 +1384,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             // loop body block, or the phi's predecessor list mismatches the
             // CFG (invalid IR; clang's LoopDeletionPass then crashes). The
             // countdown engine's own If/Guarded handlers already do this.
-            backend.fun.cur_block = Some(end_lbl.clone());
-            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
-        }
-        Statement::If(cond, then, else_) => {
-            let cond_reg = backend.emit_expr(out, cond, indent);
-            // 2026-07-14: labels need a counter without % prefix — gen_reg() returns %tN
-            let label_n = backend.fun.txn_counter;
-            backend.fun.txn_counter += 1;
-            let then_lbl = format!("if.then{}", label_n);
-            let else_lbl = format!("if.else{}", label_n);
-            let end_lbl = format!("if.end{}", label_n);
-            let cond_i1 = guard_cond_i1(backend, out, indent, &cond_reg);
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, else_lbl).ok();
-            writeln!(out, "{}{}:", indent, then_lbl).ok();
-            backend.fun.terminated = false;
-            for stmt in then {
-                emit_statement(backend, out, stmt, indent);
-            }
-            if !backend.fun.terminated {
-                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            }
-            writeln!(out, "{}{}:", indent, else_lbl).ok();
-            backend.fun.terminated = false;
-            for stmt in else_ {
-                emit_statement(backend, out, stmt, indent);
-            }
-            // 2026-07-18: Always emit end label (referenced by br i1 false branch
-            // and/or then->end and else->end branches).
-            if !backend.fun.terminated {
-                writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            }
-            writeln!(out, "{}{}:", indent, end_lbl).ok();
-            // 2026-08-15 (coll grow-on-full): record the merge block as the
-            // live block — see the Guarded arm above (countdown latch phis).
             backend.fun.cur_block = Some(end_lbl.clone());
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

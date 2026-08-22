@@ -149,15 +149,6 @@ pub fn collect_field_refs(
         Statement::Let { expr: Some(e), .. } => {
             collect_expr_field_refs(e, fields, field_index_map);
         }
-        Statement::If(cond, then_b, else_b) => {
-            collect_expr_field_refs(cond, fields, field_index_map);
-            for s in then_b {
-                collect_field_refs(s, fields, field_index_map);
-            }
-            for s in else_b {
-                collect_field_refs(s, fields, field_index_map);
-            }
-        }
         Statement::Guarded(cond, stmts) => {
             collect_expr_field_refs(cond, fields, field_index_map);
             for s in stmts {
@@ -435,13 +426,6 @@ pub fn filter_dead_assignments(
                 let filtered = filter_dead_assignments(stmts, live_fields);
                 if !filtered.is_empty() {
                     result.push(Statement::Guarded(cond.clone(), filtered));
-                }
-            }
-            Statement::If(cond, then_b, else_b) => {
-                let then_f = filter_dead_assignments(then_b, live_fields);
-                let else_f = filter_dead_assignments(else_b, live_fields);
-                if !then_f.is_empty() || !else_f.is_empty() {
-                    result.push(Statement::If(cond.clone(), then_f, else_f));
                 }
             }
             _ => {

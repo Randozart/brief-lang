@@ -1373,22 +1373,6 @@ pub fn eval_statement(
             eval_expr(cond, heap, bindings, functions)?;
             Ok(Value::Void)
         }
-        Statement::If(cond, then, else_) => {
-            let cv = eval_expr(cond, heap, bindings, functions)?;
-            if cv.is_true() {
-                let mut result = Value::Void;
-                for stmt in then {
-                    result = eval_statement(stmt, heap, bindings, functions)?;
-                }
-                Ok(result)
-            } else {
-                let mut result = Value::Void;
-                for stmt in else_ {
-                    result = eval_statement(stmt, heap, bindings, functions)?;
-                }
-                Ok(result)
-            }
-        }
         Statement::Block(stmts) => {
             let mut result = Value::Void;
             for stmt in stmts {
@@ -1753,7 +1737,7 @@ mod tests {
 
     #[test]
     fn test_foreach_break_exits_early() {
-        // 2026-08-17 (foreach break): `foreach i in 0..100 { if i == 3 { acc =
+        // 2026-08-17 (foreach break): `foreach i in 0..100 { when i == 3 { acc =
         // 42; break; } }` stops at i==3 — acc is 42, and the loop does NOT run
         // to 100 (a counter proves it).
         let mut heap = VirtualHeap::new();
@@ -1768,7 +1752,7 @@ mod tests {
                 inclusive: false,
             }),
             body: vec![
-                Statement::If(
+                Statement::Guarded(
                     Expr::BinaryOp(
                         BinaryOpKind::Eq,
                         Box::new(Expr::Identifier("i".to_string())),
@@ -1781,7 +1765,6 @@ mod tests {
                         ),
                         Statement::Break,
                     ],
-                    vec![],
                 ),
                 Statement::Assign(
                     Expr::Identifier("seen_last".to_string()),

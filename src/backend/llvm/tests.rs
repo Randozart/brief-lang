@@ -598,7 +598,7 @@ fn foreach_break_program() -> Vec<TopLevel> {
                     end: Box::new(Expr::Decimal(5)),
                     inclusive: true,
                 }),
-                body: vec![Statement::If(
+                body: vec![Statement::Guarded(
                     Expr::BinaryOp(
                         crate::ast::BinaryOpKind::Eq,
                         Box::new(Expr::Identifier("i".to_string())),
@@ -611,7 +611,6 @@ fn foreach_break_program() -> Vec<TopLevel> {
                         ),
                         Statement::Break,
                     ],
-                    vec![],
                 )],
             },
             Statement::Term(None),

@@ -380,21 +380,6 @@ impl fmt::Display for Statement {
             }
             Statement::Gate(cond) => write!(f, "[{}];", cond),
             Statement::Expression(expr) => write!(f, "{};", expr),
-            Statement::If(cond, then, else_) => {
-                write!(f, "if {} {{ ", cond)?;
-                for stmt in then {
-                    write!(f, "{} ", stmt)?;
-                }
-                write!(f, "}}")?;
-                if !else_.is_empty() {
-                    write!(f, " else {{ ")?;
-                    for stmt in else_ {
-                        write!(f, "{} ", stmt)?;
-                    }
-                    write!(f, "}}")?;
-                }
-                Ok(())
-            }
             Statement::Block(stmts) => {
                 write!(f, "{{ ")?;
                 for stmt in stmts {

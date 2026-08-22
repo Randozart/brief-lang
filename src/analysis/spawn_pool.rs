@@ -182,14 +182,6 @@ fn walk_stmt_for_storage(
                 walk_stmt_for_storage(s, out);
             }
         }
-        crate::ast::Statement::If(_, t, e) => {
-            for s in t {
-                walk_stmt_for_storage(s, out);
-            }
-            for s in e {
-                walk_stmt_for_storage(s, out);
-            }
-        }
         crate::ast::Statement::Block(b) | crate::ast::Statement::SyncBlock(b) => {
             for s in b {
                 walk_stmt_for_storage(s, out);
@@ -416,10 +408,6 @@ fn walk_stmt(
             }
         }
         Statement::Guarded(_, body) => walk_stmts(body, multiplier, ctx, live, terms, errors),
-        Statement::If(_, then, els) => {
-            walk_stmts(then, multiplier, ctx, live, terms, errors);
-            walk_stmts(els, multiplier, ctx, live, terms, errors);
-        }
         Statement::Block(body) | Statement::SyncBlock(body) => {
             walk_stmts(body, multiplier, ctx, live, terms, errors);
         }

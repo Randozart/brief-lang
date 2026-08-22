@@ -244,11 +244,6 @@ fn collect_bytes_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<Vec
                 collect_bytes_stmt(s, seen, out);
             }
         }
-        Statement::If(_, then, els) => {
-            for s in then.iter().chain(els.iter()) {
-                collect_bytes_stmt(s, seen, out);
-            }
-        }
         Statement::Foreach { list, body, .. } => {
             collect_bytes_expr(list, seen, out);
             for s in body {
@@ -351,11 +346,6 @@ fn collect_masks_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<Vec
         Statement::Expression(e) | Statement::Gate(e) => collect_masks_expr(e, seen, out),
         Statement::Guarded(_, body) | Statement::Block(body) | Statement::SyncBlock(body) => {
             for s in body {
-                collect_masks_stmt(s, seen, out);
-            }
-        }
-        Statement::If(_, then, els) => {
-            for s in then.iter().chain(els.iter()) {
                 collect_masks_stmt(s, seen, out);
             }
         }
@@ -515,10 +505,6 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             for s in statements { collect_strings_stmt(s, seen, out); }
         }
         Statement::Gate(cond) => { collect_strings_expr(cond, seen, out); }
-        Statement::If(_, then_body, else_body) => {
-            for s in then_body { collect_strings_stmt(s, seen, out); }
-            for s in else_body { collect_strings_stmt(s, seen, out); }
-        }
         Statement::Block(body) | Statement::SyncBlock(body)
         | Statement::Defer(body) | Statement::Mutex(body) => {
             for s in body { collect_strings_stmt(s, seen, out); }
@@ -1957,10 +1943,6 @@ impl LlvmBackend {
                 for s in statements {
                     self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
                 }
-            }
-            Statement::If(_, then_body, else_body) => {
-                for s in then_body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
-                for s in else_body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
             }
             Statement::Block(body) | Statement::SyncBlock(body) => {
                 for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
@@ -5745,10 +5727,6 @@ fn collect_written_fields_inner(body: &[Statement], out: &mut std::collections::
                 if name == "push" || name == "pop" {
                     insert_write_root(recv, out);
                 }
-            }
-            Statement::If(_, then_b, else_b) => {
-                collect_written_fields_inner(then_b, out);
-                collect_written_fields_inner(else_b, out);
             }
             Statement::Guarded(_, body) | Statement::Block(body)
             | Statement::Defer(body) | Statement::Mutex(body) | Statement::SyncBlock(body) => {

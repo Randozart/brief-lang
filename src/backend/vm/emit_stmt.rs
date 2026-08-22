@@ -117,28 +117,6 @@ impl VmBackend {
                 // For MVP: just let it accumulate (the tamer won't stack-overflow).
             }
 
-            Statement::If(cond, then_stmts, else_stmts) => {
-                self.emit_expr(cond);
-                let else_label = self.fresh_label("stmt_if_else");
-                let end_label = self.fresh_label("stmt_if_end");
-
-                self.asm.emit_jz(&else_label);
-
-                // Then branch
-                for s in then_stmts {
-                    self.emit_stmt(s);
-                }
-                self.asm.emit_jmp(&end_label);
-
-                // Else branch
-                self.asm.define_label(&else_label);
-                for s in else_stmts {
-                    self.emit_stmt(s);
-                }
-
-                self.asm.define_label(&end_label);
-            }
-
             Statement::Block(stmts) => {
                 // Push a new variable scope
                 let saved_slots = self.next_local_slot;

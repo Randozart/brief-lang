@@ -1852,11 +1852,6 @@ fn elaborate_stmt(stmt: &mut Statement, ctx: &mut TypecheckContext, errors: &mut
             elaborate_expr(cond, ctx, errors);
             elaborate_stmts(body, ctx, errors);
         }
-        Statement::If(cond, then, else_) => {
-            elaborate_expr(cond, ctx, errors);
-            elaborate_stmts(then, ctx, errors);
-            elaborate_stmts(else_, ctx, errors);
-        }
         Statement::Block(body) | Statement::SyncBlock(body)
         | Statement::Defer(body) | Statement::Mutex(body) => elaborate_stmts(body, ctx, errors),
         Statement::Barrier { body, .. } => elaborate_stmts(body, ctx, errors),
@@ -2458,16 +2453,6 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
         }
         Statement::Expression(expr) => {
             infer_type_only(expr, ctx)?;
-            Ok(())
-        }
-        Statement::If(cond, then, else_) => {
-            infer_type_only(cond, ctx)?;
-            for stmt in then {
-                infer_statement(stmt, ctx)?;
-            }
-            for stmt in else_ {
-                infer_statement(stmt, ctx)?;
-            }
             Ok(())
         }
         Statement::Guarded(cond, body) => {

@@ -68,10 +68,6 @@ fn rewrite_body(
             }
             Statement::Assign(_, expr) => rewrite_expr(expr, env, universe),
             Statement::Guarded(_, body) => rewrite_body(body, env, universe),
-            Statement::If(_, then, els) => {
-                rewrite_body(then, env, universe);
-                rewrite_body(els, env, universe);
-            }
             Statement::Foreach { body, .. } => rewrite_body(body, env, universe),
             Statement::Block(body) => rewrite_body(body, env, universe),
             _ => {}

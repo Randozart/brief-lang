@@ -40,21 +40,6 @@ pub fn from_beast(text: &str) -> Result<(Vec<TopLevel>, TypeUniverse), String> {
     Ok((items, universe))
 }
 
-/// 2026-07-14: Parse then/else branches from an `if` S-expression.
-fn parse_if_branches(parts: &[SExpr]) -> Result<(Vec<Statement>, Vec<Statement>), String> {
-    let mut then = Vec::new();
-    let mut els = Vec::new();
-    let mut in_else = false;
-    for i in 2..parts.len() {
-        let ptag = tag(parts, i)?;
-        if ptag == "then" { continue; }
-        if ptag == "else" { in_else = true; continue; }
-        let s = parse_statement(&parts[i])?;
-        if in_else { els.push(s); } else { then.push(s); }
-    }
-    Ok((then, els))
-}
-
 fn sexpr_str(expr: &SExpr) -> Result<&str, String> {
     match expr {
         SExpr::Atom(Atom::String(s)) => Ok(s.as_str()),
@@ -495,11 +480,6 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
         "gate" => {
             let cond = parse_expr(&parts[1])?;
             Ok(Statement::Gate(cond))
-        }
-        "if" => {
-            let cond = parse_expr(&parts[1])?;
-            let (then, els) = parse_if_branches(parts)?;
-            Ok(Statement::If(cond, then, els))
         }
         "block" => {
             let mut body = Vec::new();

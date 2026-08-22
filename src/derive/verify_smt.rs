@@ -725,13 +725,6 @@ fn rename_stmt(stmt: &Statement, from_names: &[String], to_names: &[String]) -> 
         Statement::Gate(cond) => {
             Statement::Gate(rename_variables(cond, from_names, to_names))
         }
-        Statement::If(cond, then, else_) => {
-            Statement::If(
-                rename_variables(cond, from_names, to_names),
-                then.iter().map(|s| rename_stmt(s, from_names, to_names)).collect(),
-                else_.iter().map(|s| rename_stmt(s, from_names, to_names)).collect(),
-            )
-        }
         Statement::Block(body) => {
             Statement::Block(body.iter().map(|s| rename_stmt(s, from_names, to_names)).collect())
         }

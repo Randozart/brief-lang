@@ -796,12 +796,6 @@ fn stmt_vars(stmt: &Statement, out: &mut std::collections::HashSet<String>) {
             }
             expr_vars(value, out);
         }
-        Statement::If(c, t, e) => {
-            expr_vars(c, out);
-            for s in t.iter().chain(e.iter()) {
-                stmt_vars(s, out);
-            }
-        }
         Statement::Guarded(c, b) => {
             expr_vars(c, out);
             for s in b.iter() {
@@ -911,15 +905,6 @@ fn rewrite_stmt(stmt: &mut Statement, qualifier: &dyn Fn(&str) -> Option<String>
                 rewrite_expr_mut(t, qualifier);
             }
             rewrite_expr_mut(value, qualifier);
-        }
-        Statement::If(cond, then_b, else_b) => {
-            rewrite_expr_mut(cond, qualifier);
-            for s in then_b.iter_mut() {
-                rewrite_stmt(s, qualifier);
-            }
-            for s in else_b.iter_mut() {
-                rewrite_stmt(s, qualifier);
-            }
         }
         Statement::Guarded(cond, body) => {
             rewrite_expr_mut(cond, qualifier);

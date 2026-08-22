@@ -296,10 +296,6 @@ fn collect_observable_bodies(body: &[Statement]) -> Vec<&[Statement]> {
     for stmt in body {
         match stmt {
             Statement::Guarded(_, stmts) => out.push(stmts.as_slice()),
-            Statement::If(_, then_b, else_b) => {
-                out.push(then_b.as_slice());
-                out.push(else_b.as_slice());
-            }
             _ => {}
         }
     }

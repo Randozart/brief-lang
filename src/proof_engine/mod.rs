@@ -190,9 +190,6 @@ pub fn stmt_cost(stmt: &Statement) -> u64 {
         Statement::Guarded(cond, body) => {
             expr_cost(cond) + body.iter().map(stmt_cost).sum::<u64>()
         }
-        Statement::If(cond, then, else_) => {
-            expr_cost(cond) + then.iter().chain(else_.iter()).map(|s| stmt_cost(s)).sum::<u64>()
-        }
         Statement::Block(stmts) => stmts.iter().map(stmt_cost).sum(),
         _ => 2,
     }

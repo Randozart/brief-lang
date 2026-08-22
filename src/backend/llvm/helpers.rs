@@ -269,17 +269,6 @@ impl LlvmBackend {
                     .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
                 modifiers: modifiers.clone(),
             },
-            Statement::If(cond, then_b, else_b) => Statement::If(
-                Self::rewrite_cell_identifiers(cond, cell_name),
-                then_b
-                    .iter()
-                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
-                    .collect(),
-                else_b
-                    .iter()
-                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name))
-                    .collect(),
-            ),
             Statement::Block(stmts) => Statement::Block(
                 stmts
                     .iter()

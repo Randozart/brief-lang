@@ -1010,15 +1010,6 @@ fn scan_for_state_identifiers(stmts: &[Statement], state_fields: &HashSet<String
             Statement::Guarded(_, statements) => {
                 scan_for_state_identifiers(statements, state_fields, out);
             }
-            // 2026-08-12 (slice 2 String gap): an `if` condition and branches
-            // reference state fields — without this arm a field read ONLY in an
-            // if (`if a == "hi"`) was never marked referenced, pruned as Never,
-            // and the body emitted an undefined `@a` global.
-            Statement::If(cond, then_b, else_b) => {
-                collect_state_identifiers(cond, state_fields, out);
-                scan_for_state_identifiers(then_b, state_fields, out);
-                scan_for_state_identifiers(else_b, state_fields, out);
-            }
             Statement::Block(body) => {
                 scan_for_state_identifiers(body, state_fields, out);
             }
@@ -1198,15 +1189,6 @@ pub(crate) fn collect_statement_identifiers(
         Statement::Guarded(cond, body) => {
             collect_state_identifiers(cond, state_fields, out);
             for s in body {
-                collect_statement_identifiers(s, state_fields, out);
-            }
-        }
-        Statement::If(cond, then_b, else_b) => {
-            collect_state_identifiers(cond, state_fields, out);
-            for s in then_b {
-                collect_statement_identifiers(s, state_fields, out);
-            }
-            for s in else_b {
                 collect_statement_identifiers(s, state_fields, out);
             }
         }
@@ -1447,10 +1429,6 @@ fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> Hash
                         writes.insert(name);
                     }
                 }
-            }
-            Statement::If(_, then_b, else_b) => {
-                writes.extend(extract_write_set(then_b, state_fields));
-                writes.extend(extract_write_set(else_b, state_fields));
             }
             Statement::Guarded(_, body) => {
                 writes.extend(extract_write_set(body, state_fields));
@@ -1900,7 +1878,7 @@ mod tests {
                 Expr::Identifier("count".to_string()),
                 Expr::Decimal(1),
             ),
-            Statement::If(
+            Statement::Guarded(
                 Expr::BinaryOp(
                     BinaryOpKind::Gt,
                     Box::new(Expr::Identifier("count".to_string())),
@@ -1910,7 +1888,6 @@ mod tests {
                     Expr::Identifier("show".to_string()),
                     Expr::Bool(true),
                 )],
-                vec![],
             ),
         ];
         let writes = extract_write_set(&body, &fields);

@@ -491,35 +491,6 @@ fn format_braced(out: &mut String, level: usize, header: &str, body: &[Statement
     let _ = write!(out, "}};");
 }
 
-/// 2026-08-05: format an `if`/`else` statement.
-fn format_if_into(
-    cond: &Expr,
-    then: &[Statement],
-    else_: &[Statement],
-    out: &mut String,
-    level: usize,
-) {
-    indent(out, level);
-    let _ = write!(out, "if {} {{", cond);
-    if !then.is_empty() {
-        out.push('\n');
-        format_block(then, level + 1, out);
-        indent(out, level);
-    } else {
-        out.push(' ');
-    }
-    let _ = write!(out, "}}");
-    if !else_.is_empty() {
-        out.push_str(" else {");
-        out.push('\n');
-        format_block(else_, level + 1, out);
-        indent(out, level);
-        let _ = write!(out, "}};");
-    } else {
-        out.push(';');
-    }
-}
-
 /// 2026-08-05: format a statement block with indentation. Leaf statements use
 /// the debug `Display`; block-like statements recurse.
 fn format_block(stmts: &[Statement], level: usize, out: &mut String) {
@@ -536,7 +507,6 @@ fn format_stmt_into(stmt: &Statement, out: &mut String, level: usize) {
         Statement::Foreach { item, list, body } => {
             format_braced(out, level, &format!("foreach({} in {}) {{", item, list), body);
         }
-        Statement::If(cond, then, else_) => format_if_into(cond, then, else_, out, level),
         Statement::Block(body) => format_braced(out, level, "{", body),
         Statement::SyncBlock(body) => format_braced(out, level, "sync {", body),
         Statement::Match { expr, arms } => {

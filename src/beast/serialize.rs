@@ -192,16 +192,6 @@ fn emit_statement(s: &Statement) -> SExpr {
             SExpr::List(children)
         }
         Statement::Gate(cond) => list(&[atom("gate"), emit_expr(cond)]),
-        Statement::If(cond, then, els) => {
-            let mut children = vec![atom("if"), emit_expr(cond)];
-            children.push(list(&[atom("then")]));
-            for s in then { children.push(emit_statement(s)); }
-            if !els.is_empty() {
-                children.push(list(&[atom("else")]));
-                for s in els { children.push(emit_statement(s)); }
-            }
-            SExpr::List(children)
-        }
         Statement::Block(body) => {
             let mut children = vec![atom("block")];
             for s in body { children.push(emit_statement(s)); }

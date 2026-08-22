@@ -210,10 +210,6 @@ fn rewrite_body(
                 }
             }
             Statement::Guarded(_, body) => rewrite_body(ctx, env, body, current_output.clone()),
-            Statement::If(_, then, els) => {
-                rewrite_body(ctx, env, then, current_output.clone());
-                rewrite_body(ctx, env, els, current_output.clone());
-            }
             Statement::Foreach { body, .. } => rewrite_body(ctx, env, body, current_output.clone()),
             Statement::Block(body) => rewrite_body(ctx, env, body, current_output.clone()),
             _ => {}

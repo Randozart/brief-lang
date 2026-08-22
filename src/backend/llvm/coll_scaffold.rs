@@ -232,14 +232,13 @@ fn synth_push(seq_expr: &str, elem_ty: crate::ast::Type, grow_action: Option<Exp
     );
     let mut body = Vec::new();
     if let Some(grow) = grow_action {
-        body.push(Statement::If(
+        body.push(Statement::Guarded(
             Expr::BinaryOp(
                 crate::ast::BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("len".to_string())),
                 Box::new(Expr::Identifier("cap".to_string())),
             ),
             vec![Statement::Expression(grow)],
-            vec![],
         ));
     }
     body.push(data_write);

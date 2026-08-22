@@ -296,10 +296,6 @@ fn collect_writes(
             }
             Statement::Expression(e) => collect_expr_coll_writes(e, state_inits, out),
             Statement::Assign(lhs, _) => record_coll(lhs, state_inits, out),
-            Statement::If(_, then, els) => {
-                collect_writes(then, state_inits, out);
-                collect_writes(els, state_inits, out);
-            }
             Statement::Guarded(_, body) => collect_writes(body, state_inits, out),
             Statement::Block(body) => collect_writes(body, state_inits, out),
             Statement::Foreach { body, .. } => collect_writes(body, state_inits, out),
@@ -448,9 +444,6 @@ fn stmt_contains_push(stmt: &Statement, coll: &str) -> bool {
             }
         }
         Statement::Expression(e) => expr_contains_push(e, coll),
-        Statement::If(_, t, e) => {
-            t.iter().any(|s| stmt_contains_push(s, coll)) || e.iter().any(|s| stmt_contains_push(s, coll))
-        }
         Statement::Guarded(_, b) => b.iter().any(|s| stmt_contains_push(s, coll)),
         Statement::Block(b) => b.iter().any(|s| stmt_contains_push(s, coll)),
         Statement::Foreach { body, .. } => body.iter().any(|s| stmt_contains_push(s, coll)),
@@ -547,14 +540,6 @@ fn walk_stmt(stmt: &Statement, tracks: &mut HashMap<String, Track>, coll_obj: &H
             }
         }
         Statement::Expression(e) => walk_expr(e, tracks),
-        Statement::If(_, then, els) => {
-            let before = tracks.clone();
-            let mut then_tracks = before.clone();
-            walk_body(then, &mut then_tracks, coll_obj);
-            let mut else_tracks = before.clone();
-            walk_body(els, &mut else_tracks, coll_obj);
-            join_max(tracks, &then_tracks, &else_tracks);
-        }
         Statement::Guarded(_, body) => {
             let before = tracks.clone();
             let mut fired = before.clone();
@@ -598,11 +583,11 @@ fn walk_foreach(list: &Expr, body: &[Statement], tracks: &mut HashMap<String, Tr
     }
 }
 
-/// A conditional (`if`/`when`) that touches a coll makes the per-iteration
+/// A conditional (`when`) that touches a coll makes the per-iteration
 /// delta len-dependent — not a constant transform.
 fn foreach_body_is_conditional(body: &[Statement]) -> bool {
     body.iter().any(|s| {
-        matches!(s, Statement::If(..) | Statement::Guarded(..)) && stmt_has_coll_op(s)
+        matches!(s, Statement::Guarded(..)) && stmt_has_coll_op(s)
     })
 }
 

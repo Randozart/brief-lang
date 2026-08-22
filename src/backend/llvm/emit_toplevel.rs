@@ -50,10 +50,6 @@ impl LlvmBackend {
                     if let Expr::Identifier(name) = e.as_ref() { out.insert(name.clone()); }
                 }
                 Statement::Guarded(_, body) => { for st in body { collect_assigned(st, out); } }
-                Statement::If(_, then, els) => {
-                    for st in then { collect_assigned(st, out); }
-                    for st in els { collect_assigned(st, out); }
-                }
                 Statement::Block(body) => { for st in body { collect_assigned(st, out); } }
                 Statement::Foreach { body, .. } => { for st in body { collect_assigned(st, out); } }
                 Statement::SyncBlock(body) => { for st in body { collect_assigned(st, out); } }

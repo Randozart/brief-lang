@@ -968,9 +968,6 @@ impl RegionAnalyzer {
             match s {
                 Statement::Assign(Expr::Index(..), _) => true,
                 Statement::Guarded(_, inner) => inner.iter().any(stmt_has_indexed_write),
-                Statement::If(_, t, e) => {
-                    t.iter().any(stmt_has_indexed_write) || e.iter().any(stmt_has_indexed_write)
-                }
                 Statement::Block(inner) | Statement::SyncBlock(inner) => {
                     inner.iter().any(stmt_has_indexed_write)
                 }

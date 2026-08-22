@@ -142,10 +142,6 @@ fn stmt_needs_state(
         Statement::Guarded(_, body) => {
             body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }
-        Statement::If(_, then, els) => {
-            then.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
-                || els.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
-        }
         Statement::Foreach { body, .. } => {
             body.iter().any(|s| stmt_needs_state(s, regular, txns, exports, state_fields, memo, visiting))
         }

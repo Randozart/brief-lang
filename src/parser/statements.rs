@@ -108,7 +108,8 @@ impl<'a> Parser<'a> {
                     // Briev has no `if`/`else`; branching is exhaustive `match`,
                     // one-sided execution is `when` or inline guards. The parser
                     // previously accepted full if/else trees (deviation D1);
-                    // Statement::If and every consumer were excised alongside.
+                    // the if-statement AST variant and every consumer were
+                    // excised alongside.
                     // Undo: restore parse_if_statement + this dispatch to it.
                     let span = self
                         .peek_with_span()

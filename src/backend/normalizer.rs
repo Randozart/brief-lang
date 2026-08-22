@@ -63,10 +63,6 @@ where F: FnMut(&Expr) {
             Statement::EndProgram(Some(e)) => f(e),
             Statement::Guarded(_, body) => walk_statements(body, f),
             Statement::Block(body) => walk_statements(body, f),
-            Statement::If(_, then_, else_) => {
-                walk_statements(then_, f);
-                walk_statements(else_, f);
-            }
             _ => {}
         }
     }

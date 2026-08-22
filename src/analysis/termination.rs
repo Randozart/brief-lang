@@ -56,9 +56,6 @@ pub fn analyze(items: &[TopLevel]) -> (Vec<String>, Vec<String>) {
 fn statement_always_terminates(s: &Statement) -> bool {
     match s {
         Statement::Term(Some(_)) | Statement::EndProgram(Some(_)) => true,
-        Statement::If(_, then, else_) => {
-            list_always_terminates(then) && list_always_terminates(else_)
-        }
         Statement::Block(body) => list_always_terminates(body),
         _ => false,
     }
@@ -115,10 +112,6 @@ fn check_list(name: &str, stmts: &[Statement], errors: &mut Vec<String>, warning
 fn recurse(name: &str, stmt: &Statement, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
     match stmt {
         Statement::Guarded(_, body) => check_list(name, body, errors, warnings),
-        Statement::If(_, then, else_) => {
-            check_list(name, then, errors, warnings);
-            check_list(name, else_, errors, warnings);
-        }
         Statement::Block(body) => check_list(name, body, errors, warnings),
         Statement::Foreach { body, .. } => check_list(name, body, errors, warnings),
         Statement::SyncBlock(body) => check_list(name, body, errors, warnings),
@@ -177,16 +170,8 @@ mod tests {
     }
 
     #[test]
-    fn always_terminates_ifs_and_blocks() {
+    fn always_terminates_blocks() {
         let term = Statement::EndProgram(Some(Expr::Decimal(1)));
-        let if_both = Statement::If(
-            Expr::Bool(true),
-            vec![term.clone()],
-            vec![term.clone()],
-        );
-        assert!(statement_always_terminates(&if_both));
-        let if_one = Statement::If(Expr::Bool(true), vec![term.clone()], Vec::new());
-        assert!(!statement_always_terminates(&if_one));
         assert!(statement_always_terminates(&Statement::Block(vec![term])));
         assert!(!statement_always_terminates(&Statement::Block(Vec::new())));
     }
@@ -217,16 +202,6 @@ mod tests {
             ),
         ])]);
         assert_eq!(errors.len(), 1, "sibling after term! inside a guard is unreachable: {errors:?}");
-    }
-
-    #[test]
-    fn unreachable_after_if_both_branches_terminate() {
-        let term = Statement::Term(Some(Expr::Decimal(1)));
-        let (errors, _) = analyze(&[txn("n", vec![
-            Statement::If(Expr::Bool(true), vec![term.clone()], vec![term]),
-            Statement::Expression(expr_call("dead")),
-        ])]);
-        assert_eq!(errors.len(), 1);
     }
 
     #[test]

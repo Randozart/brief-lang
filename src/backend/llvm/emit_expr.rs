@@ -35,18 +35,15 @@ struct MaskIndexOperands<'a> {
 /// member top-level, and the bound argument registers. Bundled so
 /// `emit_member_body` stays under the parameter budget.
 /// 2026-08-15 (coll grow-on-full): the scaffolded push member's grow guard —
-/// `if len == cap { <grow action> }` — the FIRST statement of the synthesized
+/// `when len == cap { <grow action> }` — the FIRST statement of the synthesized
 /// InsertAt body (`coll_scaffold::synth_push`). Identified structurally so the
 /// backend can strip it when the frontend proves the coll cannot overflow
 /// (`ctx.coll_safe_txns`). The grow action is a side-effect expression
 /// (`Resize#(#Self, cap*2)` or a declared `op Grow` binding call).
 fn is_grow_guard(stmt: &crate::ast::top::Statement) -> bool {
-    let crate::ast::top::Statement::If(cond, then_b, else_b) = stmt else {
+    let crate::ast::top::Statement::Guarded(cond, then_b) = stmt else {
         return false;
     };
-    if !else_b.is_empty() {
-        return false;
-    }
     let len_cap_compare = matches!(
         cond,
         crate::ast::Expr::BinaryOp(

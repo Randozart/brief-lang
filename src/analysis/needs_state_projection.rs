@@ -122,11 +122,6 @@ fn emit_stmt_flat(out: &mut Vec<String>, stmt: &Statement) {
             out.push("g:".into());
             for s in body { emit_stmt_flat(out, s); }
         }
-        Statement::If(_, then, els) => {
-            out.push("i:".into());
-            for s in then { emit_stmt_flat(out, s); }
-            for s in els { emit_stmt_flat(out, s); }
-        }
         Statement::Foreach { body, .. } => {
             out.push("f:".into());
             for s in body { emit_stmt_flat(out, s); }

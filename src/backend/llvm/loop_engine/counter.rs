@@ -1838,23 +1838,6 @@ impl LlvmBackend {
                     i += 1;
                     continue;
                 }
-                Statement::If(cond, then_b, else_b) => {
-                    let cond_reg = self.emit_expr(out, cond, "  ");
-                    let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
-                    let then_label = format!(".cmit{}", self.fun.txn_counter);
-                    let else_label = format!(".cmie{}", self.fun.txn_counter);
-                    let merge_label = format!(".cmim{}", self.fun.txn_counter);
-                    self.fun.txn_counter += 1;
-                    writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, then_label, else_label).ok();
-                    writeln!(out, "{}:", then_label).ok();
-                    self.emit_countable_body(out, then_b, write_set, hoisted);
-                    writeln!(out, "  br label %{}", merge_label).ok();
-                    writeln!(out, "{}:", else_label).ok();
-                    self.emit_countable_body(out, else_b, write_set, hoisted);
-                    writeln!(out, "  br label %{}", merge_label).ok();
-                    writeln!(out, "{}:", merge_label).ok();
-                    self.fun.cur_block = Some(merge_label);
-                }
                 Statement::Guarded(cond, stmts) => {
                     let cond_reg = self.emit_expr(out, cond, "  ");
                     let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);

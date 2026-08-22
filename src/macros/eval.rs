@@ -2100,16 +2100,6 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
             Ok(())
         }
         Statement::Expression(expr) => resolve_dollar_refs_in_expr(expr, scope),
-        Statement::If(cond, then, else_) => {
-            resolve_dollar_refs_in_expr(cond, scope)?;
-            for s in then.iter_mut() {
-                resolve_dollar_refs_in_stmt(s, scope)?;
-            }
-            for s in else_.iter_mut() {
-                resolve_dollar_refs_in_stmt(s, scope)?;
-            }
-            Ok(())
-        }
         Statement::Guarded(guard, body) => {
             resolve_dollar_refs_in_expr(guard, scope)?;
             for s in body.iter_mut() {
