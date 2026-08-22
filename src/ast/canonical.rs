@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn formatter_handles_blocky_statements() {
         assert_idempotent(
-            "defn nested(x: Int) -> Int [true][true] {\n  if x > 0 {\n    term x;\n  } else {\n    term 0;\n  };\n};\n",
+            "defn nested(x: Int) -> Int [true][true] {\n  when x > 0 {\n    term x;\n  };\n  term 0;\n};\n",
         );
     }
 

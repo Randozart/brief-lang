@@ -103,8 +103,25 @@ impl<'a> Parser<'a> {
                             .to_string(),
                         span,
                     });
-                } else if self.check_identifier("if") {
-                    self.parse_if_statement()
+                } else if self.check_identifier("if") || self.check_identifier("else") {
+                    // 2026-08-22 (spec-conformance plan Phase 1b): SPEC §11.1 —
+                    // Briev has no `if`/`else`; branching is exhaustive `match`,
+                    // one-sided execution is `when` or inline guards. The parser
+                    // previously accepted full if/else trees (deviation D1);
+                    // Statement::If and every consumer were excised alongside.
+                    // Undo: restore parse_if_statement + this dispatch to it.
+                    let span = self
+                        .peek_with_span()
+                        .map(|(_, r)| self.make_span(r.clone()))
+                        .unwrap_or_else(crate::errors::Span::dummy);
+                    Err(SyntaxError::InvalidStatement {
+                        reason: "`if`/`else` do not exist in Briev. Use an exhaustive \
+                                 `match cond { true => …, false => … };` for two-way \
+                                 branching, or `when cond { … };` / `[cond] stmt;` for \
+                                 one-sided guarded execution."
+                            .to_string(),
+                        span,
+                    })
                 } else if self.check_identifier("$defn") {
                     self.parse_inline_defn()
                 } else if self.check_identifier("$txn") {
@@ -205,30 +222,6 @@ impl<'a> Parser<'a> {
         };
         self.expect(Token::Semicolon)?;
         Ok(Statement::Rollback(val))
-    }
-
-    /// if expr { ... } else { ... }
-    fn parse_if_statement(&mut self) -> Result<Statement, SyntaxError> {
-        self.pos += 1; // consume 'if'
-        let cond = self.parse_expression()?;
-        let then_branch = self.parse_block()?;
-        let else_branch = if self.eat_identifier("else") {
-            if self.check(&Token::LBrace) {
-                self.parse_block()?
-            } else if self.check_identifier("if") {
-                let else_if = self.parse_if_statement()?;
-                vec![else_if]
-            } else {
-                return self.error_at_current("expected '{' or 'if' after 'else'");
-            }
-        } else {
-            Vec::new()
-        };
-        // 2026-08-05 (Phase 2 canonical formatter): consume an optional
-        // trailing `;` so `if ... {} else {};` round-trips without producing a
-        // spurious empty `0;` statement. Mirrors `when`/`match` termination.
-        self.eat(&Token::Semicolon);
-        Ok(Statement::If(cond, then_branch, else_branch))
     }
 
     /// foreach(item in list) { ... }
@@ -627,6 +620,39 @@ mod tests {
         let mut p = Parser::new(tokens, src);
         let program = p.parse_program().unwrap();
         assert_eq!(program.len(), 2, "both defn and node must parse");
+    }
+
+    // 2026-08-22 (spec-conformance plan Phase 1b): SPEC §11.1 — no `if`/`else`.
+    // The parser previously accepted full if/else trees; every form must now
+    // fail with the message naming `match` / `when` as the replacements.
+    #[test]
+    fn if_else_statements_are_rejected_with_guidance() {
+        for src in [
+            "defn f(x: Int) -> Int { if x > 0 { term 1; }; term 0; };",
+            "defn g(x: Int) -> Int { if x > 0 { term 1; } else { term 0; }; };",
+            "defn h(x: Int) -> Int { if x > 0 { term 1; } else if x < 0 { term 2; } else { term 3; }; };",
+        ] {
+            let tokens = tokenize(src).unwrap();
+            let mut p = Parser::new(tokens, src);
+            let err = p.parse_program().unwrap_err();
+            assert!(
+                err.to_string().contains("`if`/`else` do not exist"),
+                "expected the no-if/else message, got: {err}"
+            );
+            assert!(
+                err.to_string().contains("match") && err.to_string().contains("when"),
+                "message must name both replacements, got: {err}"
+            );
+        }
+    }
+
+    // One-sided `when` (the sanctioned conditional) still parses.
+    #[test]
+    fn when_statement_still_parses() {
+        let src = "defn f(ready: Bool) -> Int { when ready { term 1; }; term 0; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        assert!(p.parse_program().is_ok(), "`when` remains valid");
     }
 
     #[test]

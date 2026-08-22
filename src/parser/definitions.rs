@@ -2830,18 +2830,20 @@ mod tests {
     #[test]
     fn test_trap_statement_parses() {
         // 2026-08-13 (layout-keywords plan Phase 4): `trap;` — hardware abort.
-        let src = "defn f(x: Int) -> Int {\n  if x > 0 {\n    trap;\n  } else {\n    term 0;\n  };\n  term 1;\n};\n";
+        // 2026-08-22 (Phase 1b): fixture migrated from if/else to `when`
+        // (SPEC §11.1 — no if/else; the guarded body is the sanctioned form).
+        let src = "defn f(x: Int) -> Int {\n  when x > 0 {\n    trap;\n  };\n  term 1;\n};\n";
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
         let items = p.parse_program().unwrap();
         let crate::ast::TopLevel::Definition(def) = &items[0] else { panic!("expected defn") };
         let has_trap = def.body.iter().any(|s| match s {
-            crate::ast::Statement::If(_, then, _) => {
-                then.iter().any(|t| matches!(t, crate::ast::Statement::Trap))
+            crate::ast::Statement::Guarded(_, body) => {
+                body.iter().any(|t| matches!(t, crate::ast::Statement::Trap))
             }
             _ => false,
         });
-        assert!(has_trap, "trap; in an if-body must parse to Statement::Trap");
+        assert!(has_trap, "trap; in a guarded body must parse to Statement::Trap");
     }
 
     #[test]
