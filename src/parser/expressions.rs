@@ -241,6 +241,26 @@ impl<'a> Parser<'a> {
     }
 
     /// Postfix: a[b], a.f, a(args), a within { }
+
+    /// 2026-08-22 (Phase 6b): multi-dimensional selectors exceed the flat
+    /// Slice AST. Name the ellipsis form when one follows the comma.
+    fn reject_multidim<T>(&mut self) -> Result<T, SyntaxError> {
+        let mut probe = self.pos;
+        let mut sees_ellipsis = false;
+        while probe < self.tokens.len() {
+            match &self.tokens[probe].0 {
+                Token::RBracket => break,
+                Token::Ellipsis => { sees_ellipsis = true; break; }
+                _ => probe += 1,
+            }
+        }
+        if sees_ellipsis {
+            self.error_staged("multi-dimensional ellipsis slicing (`t[1:3, ...]`)")
+        } else {
+            self.error_staged("multi-dimensional indexing (`t[i, j]`)")
+        }
+    }
+
     fn parse_postfix(&mut self) -> Result<Expr, SyntaxError> {
         let mut expr = self.parse_primary()?;
         loop {
@@ -336,6 +356,19 @@ impl<'a> Parser<'a> {
                 let name = self.expect_identifier()?;
                 expr = Expr::Reflect(Box::new(expr), name, ReflectKind::Runtime);
             } else if self.eat(&Token::LBracket) {
+                // 2026-08-22 (spec-conformance plan Phase 6b, SPEC §16.5):
+                // `a[...]` — the FULL-RANGE ellipsis. Single-dimension it is
+                // exactly `a[:]` (whole copy). A comma after any selector
+                // means multi-dimensional indexing, which the flat Slice
+                // AST cannot represent: staged error naming the fix.
+                if self.eat(&Token::Ellipsis) {
+                    if self.eat(&Token::Comma) {
+                        return self.reject_multidim();
+                    }
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::Slice { array: Box::new(expr), start: None, end: None, stride: None };
+                    continue;
+                }
                 // 2026-08-07 (Phase 7): NAMED selectors — `arr[name => sel]`
                 // (SPEC §16.5). For a 1-D array the name LABELS the single
                 // dimension; it lowers to the plain slice/index. The name is
@@ -365,6 +398,9 @@ impl<'a> Parser<'a> {
                             Some(Box::new(self.parse_expression()?))
                         } else { None }
                     } else { None };
+                    if self.eat(&Token::Comma) {
+                        return self.reject_multidim();
+                    }
                     self.expect(Token::RBracket)?;
                     expr = Expr::Slice { array: Box::new(expr), start: None, end, stride };
                 } else {
@@ -382,10 +418,16 @@ impl<'a> Parser<'a> {
                                 Some(Box::new(self.parse_expression()?))
                             } else { None }
                         } else { None };
+                        if self.eat(&Token::Comma) {
+                            return self.reject_multidim();
+                        }
                         self.expect(Token::RBracket)?;
                         expr = Expr::Slice { array: Box::new(expr), start: Some(Box::new(first)), end, stride };
                     } else {
                         // Simple index: arr[idx]
+                        if self.eat(&Token::Comma) {
+                            return self.reject_multidim();
+                        }
                         self.expect(Token::RBracket)?;
                         expr = Expr::Index(Box::new(expr), Box::new(first));
                     }

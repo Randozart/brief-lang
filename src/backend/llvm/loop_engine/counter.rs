@@ -1839,6 +1839,20 @@ impl LlvmBackend {
                     continue;
                 }
                 Statement::Guarded(cond, stmts) => {
+                    // 2026-08-22 (Phase 6b dominance fix): a field written ONLY
+                    // inside the guard yields a register defined on the then-
+                    // path; the latch backedge and later guards must not cite
+                    // it directly (clang: "does not dominate all uses"). At the
+                    // merge block we insert one phi per conditionally-written
+                    // field — [written, body] / [pre-value, fall-through] — and
+                    // re-point pending_phi_backedge at the phi. Conditional
+                    // last_val_temps entries are dropped instead (cross-guard
+                    // reads reload via the normal paths; intra-guard chaining
+                    // is untouched because the map is snapshotted, not cleared).
+                    let pre_guard_block = self.fun.cur_block.clone()
+                        .unwrap_or_else(|| format!(".cmgn_pre{}", self.fun.txn_counter));
+                    let lvt_before = self.fun.last_val_temps.clone();
+                    let pending_before = self.fun.pending_phi_backedge.clone();
                     let cond_reg = self.emit_expr(out, cond, "  ");
                     let bool_reg = self.as_bool_reg(out, "  ", &cond_reg);
                     let body_label = format!(".cmgb{}", self.fun.txn_counter);
@@ -1847,8 +1861,36 @@ impl LlvmBackend {
                     writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
                     writeln!(out, "{}:", body_label).ok();
                     self.emit_countable_body(out, stmts, write_set, hoisted);
+                    // Snapshot what the BODY wrote, keyed by field, BEFORE the
+                    // merge phis (their inputs come from this block).
+                    let mut written: Vec<(String, String)> = Vec::new();
+                    for (f, v) in &self.fun.pending_phi_backedge {
+                        if pending_before.get(f).map(|old| old != v).unwrap_or(true) {
+                            written.push((f.clone(), v.clone()));
+                        }
+                    }
+                    written.sort();
                     writeln!(out, "  br label %{}", next_label).ok();
                     writeln!(out, "{}:", next_label).ok();
+                    for (f, v) in &written {
+                        let Some(&idx) = self.ctx.field_index_map.get(f.as_str()) else { continue };
+                        let ty = self.ctx.field_types.get(idx)
+                            .cloned().unwrap_or_else(|| "i64".to_string());
+                        let old_v = pending_before.get(f).cloned()
+                            .unwrap_or_else(|| "0".to_string());
+                        let mrg = self.fun.next_reg_with_prefix("cmgm");
+                        writeln!(out, "  {} = phi {} [ {}, %{} ], [ {}, %{} ]",
+                            mrg, ty, v, body_label, old_v, pre_guard_block).ok();
+                        self.fun.pending_phi_backedge.insert(f.clone(), mrg);
+                    }
+                    for (f, v) in &self.fun.last_val_temps {
+                        if lvt_before.get(f).map(|old| old != v).unwrap_or(true) {
+                            // Conditionally-defined temp: drop so later reads
+                            // don't cite a register from a non-dominating block.
+                            let _ = (f, v);
+                        }
+                    }
+                    self.fun.last_val_temps = lvt_before;
                     self.fun.cur_block = Some(next_label);
                 }
                 Statement::Block(stmts) => {

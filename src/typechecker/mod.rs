@@ -1249,6 +1249,18 @@ pub fn infer_expression(
                 if let Some(e) = start.as_deref() { infer_type_only(e, ctx)?; }
                 if let Some(e) = end.as_deref() { infer_type_only(e, ctx)?; }
                 if let Some(e) = stride.as_deref() { infer_type_only(e, ctx)?; }
+                // 2026-08-22 (Phase 6b): a slice of a VECTOR lowers to a heap
+                // List of the elements (range gather + tier box) — the old
+                // same-shape-array claim made `let c: Int[8] = data[...]`
+                // typecheck and then store an i64 handle into an [8 x i64]
+                // column (invalid IR). Slices are Lists; whole fixed-size
+                // array values stay a future feature.
+                if let Type::Vector(inner, _) = elem_ty {
+                    return Ok((
+                        Type::Applied("List".into(), vec![(*inner).clone()]),
+                        Provenance::Unknown,
+                    ));
+                }
                 Ok((elem_ty, Provenance::Unknown))
             }
             // 2026-08-07 (Phase 7): an iterable integer range — `start..end`

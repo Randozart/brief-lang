@@ -1,0 +1,33 @@
+// slice_state — SPEC §16.5 slicing over state columns (Phase 6b).
+// Regression fixture: contiguous ranges and the full-range ellipsis lower
+// to range gathers boxed as tier Lists; guarded writes phi-merge at the
+// guard join so cross-guard reads dominate.
+//
+// Expected output: "56" then "857".
+//   56  = data[0:2] -> [5,6] -> 5*10+6
+//   857 = data[...] -> Count# 8, [0]=5, [7]=7 -> 8*100+5*10+7
+
+let data: Int[8];
+let total_out: Int = 0;
+let i: Int = 0;
+
+node run [i < 4][i == 4] {
+  when i == 0 {
+    data[0] = 5; data[1] = 6; data[2] = 7; data[3] = 8;
+    data[7] = 7;
+  };
+  when i == 1 {
+    let mid = data[0:2];
+    total_out = mid[0] * 10 + mid[1];
+  };
+  when i == 2 {
+    Print#(total_out);
+    let whole = data[...];
+    total_out = whole.Count#() * 100 + whole[0] * 10 + whole[7];
+  };
+  when i == 3 {
+    endprogram Print#(total_out);
+  };
+  i = i + 1;
+  term;
+};

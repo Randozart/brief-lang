@@ -978,6 +978,45 @@ uint8_t* briev_mask_select(const uint8_t* data, const int64_t* mask, int64_t mas
 /// `[N x i8]` in %State — reading it as `int64_t*` walks past the column and
 /// selects on garbage (the mask-index segfault/garbage bug). Same contracts
 /// as the i64-mask originals; only the mask element width differs.
+/// Contiguous range slice over an i64-slot array state column
+/// (`data[lo:hi]`, SPEC §16.5): elements lo..hi clamped to [0,n], ascending,
+/// stride 1 only at this ABI. Returns a LIST buffer — slot 0 length, slots
+/// 1.. the selected elements. 2026-08-22 (Phase 6b): before this existed the
+/// backend fell through to "return the base array", so every state-column
+/// slice was invalid IR or silently the whole column.
+int64_t* briev_slice_range64(const int64_t* data, int64_t n,
+                             int64_t lo, int64_t hi) {
+    if (lo < 0) lo = 0;
+    if (hi > n) hi = n;
+    if (hi < lo) hi = lo;
+    int64_t len = hi - lo;
+    int64_t* out = (int64_t*)malloc((size_t)((1 + len) * 8));
+    if (!out) return NULL;
+    out[0] = len;
+    for (int64_t i = 0; i < len; i++) out[1 + i] = data[lo + i];
+    return out;
+}
+
+/// f32 variant: selected floats stored as i64 bit patterns (List<Float>
+/// slot convention, matching the mask gathers).
+int64_t* briev_slice_range_f32(const float* data, int64_t n,
+                               int64_t lo, int64_t hi) {
+    if (lo < 0) lo = 0;
+    if (hi > n) hi = n;
+    if (hi < lo) hi = lo;
+    int64_t len = hi - lo;
+    int64_t* out = (int64_t*)malloc((size_t)((1 + len) * 8));
+    if (!out) return NULL;
+    out[0] = len;
+    for (int64_t i = 0; i < len; i++) {
+        float f = data[lo + i];
+        int64_t bits = 0;
+        memcpy(&bits, &f, 4);
+        out[1 + i] = bits;
+    }
+    return out;
+}
+
 int64_t* briev_mask_select64_i8mask(const int64_t* data, int64_t data_len,
                                     const uint8_t* mask, int64_t mask_len) {
     if (mask_len > data_len) mask_len = data_len;

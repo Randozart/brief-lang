@@ -3012,6 +3012,10 @@ impl LlvmBackend {
         // slots, matching how heap List<Float> stores floats).
         writeln!(out, "declare ptr @briev_mask_select_f32(ptr, i64, ptr, i64) #1").ok();
         writeln!(out, "declare ptr @briev_mask_select_f32_i8mask(ptr, i64, ptr, i64) #1").ok();
+        // 2026-08-22 (Phase 6b): contiguous range slice over a state column —
+        // `data[lo:hi]` (and the full-copy forms `data[:]` / `data[...]`).
+        writeln!(out, "declare ptr @briev_slice_range64(ptr, i64, i64, i64) #1").ok();
+        writeln!(out, "declare ptr @briev_slice_range_f32(ptr, i64, i64, i64) #1").ok();
         // 2026-08-01 (Phase 3): CLI argv capture. The emitted main stores
         // its argc/argv into these globals; the runtime argv helpers
         // (briev_rt.c) read them as externs. The compiler OWNS the globals

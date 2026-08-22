@@ -1362,7 +1362,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         }
         Statement::Guarded(cond, body) => {
             let cond_reg = backend.emit_expr(out, cond, indent);
-            // 2026-07-14: labels need a counter without % prefix — gen_reg() returns %tN
+            // 2026-08-22 (Phase 6b): last_val_temps are INTRA-GUARD values —
+            // a register computed inside `when` A is not dominated by the
+            // blocks of `when` B (a later `endprogram Print#(total_out)`
+            // reusing guard A's temp emitted dominance-invalid IR). Scope
+            // the cache to the guard: reads after the merge reload from the
+            // state slot like any cross-block read. Same save/restore shape
+            // as emit_member_body.
+            let saved_lvt = backend.fun.last_val_temps.clone();
+            let saved_lvt_types = backend.fun.last_val_types.clone();
+            // labels need a counter without % prefix — gen_reg() returns %tN
             let label_n = backend.fun.txn_counter;
             backend.fun.txn_counter += 1;
             let then_lbl = format!("guard.then{}", label_n);
@@ -1374,6 +1383,8 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
+            backend.fun.last_val_temps = saved_lvt;
+            backend.fun.last_val_types = saved_lvt_types;
             // 2026-08-04 (term-termination-diagnostics): REWRITTEN from the
             // 2026-07-19 "always emit br" version. That version was a
             // workaround: a value-form term!/term in a void txn set

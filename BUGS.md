@@ -4672,7 +4672,15 @@ enum (Range | Named | Ellipsis) per plan §Phase 6.
 
 ## Guard-chain endprogram dominance errors (2026-08-22)
 
-**Status:** OPEN — pre-existing (fails identically at the pre-fix commit)
+**Status:** CLOSED 2026-08-22 (Phase 6b). Root cause: inside countable-loop
+bodies, `emit_countable_body`'s Guarded arm recursed into the Assign arm
+which records raw value registers into pending_phi_backedge / last_val_temps;
+a field written ONLY on the then-path left a conditionally-defined register
+for the latch backedge and later guards to cite (clang: does not dominate).
+Fix: at each `.cmgn` merge, one phi per conditionally-written field —
+[written, body] / [pre-value, fall-through] — re-points the backedge map;
+conditional last_val_temps entries are dropped so cross-guard reads reload.
+Verified by the repro (10000) plus slice/mask fixtures. Original report:
 **Repro:** `bugs/repro_guard_chain_dominance.bv` — three sequential `when`
 guards where a LATER guard computes into state and the FINAL guard ends the
 program (`endprogram Print#(total_out)`); plain indexed reads, no masks.

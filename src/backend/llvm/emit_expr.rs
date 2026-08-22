@@ -1630,6 +1630,83 @@ impl LlvmBackend {
                         indent, sub, sp, lo.name, hi.name).ok();
                     return TypedRegister { name: sub, ty: crate::ast::Type::Custom("String".to_string()) };
                 }
+                // 2026-08-22 (spec-conformance plan Phase 6b): VECTOR slices
+                // over 1-D state columns lower to a real range gather — the
+                // old fallthrough returned the base array, so `data[0:2]`
+                // was invalid IR or silently the WHOLE column (offset lost).
+                // `data[:]` / `data[...]` are the full-copy case lo=0,hi=N.
+                let vec_field: Option<(usize, Type)> = match array.as_ref() {
+                    Expr::Identifier(nm) => self.ctx.field_index_map.get(nm).and_then(|&fidx| {
+                        self.ctx.field_briev_types.get(fidx).and_then(|t| {
+                            if matches!(t, Type::Vector(_, dims) if dims.len() == 1) {
+                                Some((fidx, t.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                    }),
+                    _ => None,
+                };
+                if let Some((fidx, vec_ty)) = vec_field {
+                    if stride.is_some() {
+                        panic!(
+                            "strided vector slicing (`data[a:b:c]`) is not yet supported — \
+                             use a contiguous slice or foreach"
+                        );
+                    }
+                    let n = self.vector_element_count(&vec_ty) as i64;
+                    let data_ptr = self.emit_state_gep(out, indent, "f", "%state", fidx);
+                    let is_f32 = matches!(&vec_ty, Type::Vector(inner, _)
+                        if self.is_protocol_member(inner, "#Float")
+                            && self.ctx.type_universe.as_ref()
+                                .and_then(|u| inner.universe_key().and_then(|k| u.get(k)))
+                                .map(|rt| rt.max_bits <= 32)
+                                .unwrap_or(true));
+                    if matches!(&vec_ty, Type::Vector(inner, _)
+                        if self.is_protocol_member(inner, "#Float") && !is_f32)
+                    {
+                        panic!("slicing on Float64 (double) vectors is not yet supported");
+                    }
+                    let lo = match start {
+                        Some(sx) => self.emit_expr(out, sx, indent),
+                        None => TypedRegister {
+                            name: {
+                                let z = self.fun.gen_reg();
+                                writeln!(out, "{}{} = add i64 0, 0", indent, z).ok();
+                                z
+                            },
+                            ty: Type::int(),
+                        },
+                    };
+                    let hi = match end {
+                        Some(ex) => self.emit_expr(out, ex, indent),
+                        None => TypedRegister {
+                            name: {
+                                let nn = self.fun.gen_reg();
+                                writeln!(out, "{}{} = add i64 {}, 0", indent, nn, n).ok();
+                                nn
+                            },
+                            ty: Type::int(),
+                        },
+                    };
+                    let helper = if is_f32 {
+                        "@briev_slice_range_f32"
+                    } else {
+                        "@briev_slice_range64"
+                    };
+                    let buf = self.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = call ptr {}(ptr {}, i64 {}, i64 {}, i64 {})",
+                        indent, buf, helper, data_ptr, n, lo.name, hi.name
+                    )
+                    .ok();
+                    let elem_ty = match &vec_ty {
+                        Type::Vector(inner, _) => (**inner).clone(),
+                        _ => Type::int(),
+                    };
+                    return self.box_gather_as_tier_list(out, indent, &buf, elem_ty);
+                }
                 if let Some(s) = start { self.emit_expr(out, s, indent); }
                 if let Some(e) = end { self.emit_expr(out, e, indent); }
                 if let Some(s) = stride { self.emit_expr(out, s, indent); }
@@ -1696,6 +1773,41 @@ impl LlvmBackend {
     /// Mask lengths longer than the data truncate (the mask governs), matching
     /// the interpreter. The typechecker has already rejected unsupported
     /// containers, so the object here is a byte buffer or an i64-slot vector.
+    /// 2026-08-22 (Phase 6a/6b, DRY): box a `[len, e0, e1, …]` gather/slice
+    /// buffer as a tier List handle (`[data, cap, len]`, data = pointer to
+    /// slot 1). Consumers (`picked[i]`, `Count#`) read this layout.
+    fn box_gather_as_tier_list(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        buf: &str,
+        elem_ty: crate::ast::Type,
+    ) -> TypedRegister {
+        let len_p = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, len_p, buf).ok();
+        let block = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
+        let d0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
+        let e0 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, e0, buf).ok();
+        let data_h = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_h, e0).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, data_h, d0).ok();
+        let d1 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d1).ok();
+        let d2 = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d2).ok();
+        let handle = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
+        TypedRegister {
+            name: handle,
+            ty: Type::Applied("List".into(), vec![elem_ty]),
+        }
+    }
+
     fn emit_masked_index(
         &mut self,
         out: &mut String,
@@ -1864,33 +1976,11 @@ impl LlvmBackend {
             .ok();
             // 2026-08-22 (Phase 6a): box `[len,f0,…]` as a tier block, same
             // as the i64 route below.
-            let len_p = self.fun.gen_reg();
-            writeln!(out, "{}{} = load i64, ptr {}", indent, len_p, buf).ok();
-            let block = self.fun.gen_reg();
-            writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
-            let d0 = self.fun.gen_reg();
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
-            let e0 = self.fun.gen_reg();
-            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, e0, buf).ok();
-            let data_h = self.fun.gen_reg();
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_h, e0).ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, data_h, d0).ok();
-            let d1 = self.fun.gen_reg();
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d1).ok();
-            let d2 = self.fun.gen_reg();
-            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
-            writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d2).ok();
-            let handle = self.fun.gen_reg();
-            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
             let elem_ty = match &op.obj_reg.ty {
                 Type::Vector(inner, _) => (**inner).clone(),
                 _ => Type::int(),
             };
-            return TypedRegister {
-                name: handle,
-                ty: Type::Applied("List".into(), vec![elem_ty]),
-            };
+            return self.box_gather_as_tier_list(out, indent, &buf, elem_ty);
         }
         // A Float64 (double) vector is NOT an i64-slot array — routing it to
         // briev_mask_select64 would read `[N x double]` as i64s (garbage).
@@ -1912,38 +2002,11 @@ impl LlvmBackend {
             indent, buf, helper, data_ptr, n, mask_ptr, mask_len
         )
         .ok();
-        // 2026-08-22 (Phase 6a fix): the gather buffer is `[len, e0, e1, …]`
-        // — NOT the tier-List `[data, cap, len]` layout consumers expect.
-        // Handing the raw buffer back made Count# read garbage and element
-        // indexing walk an untyped pointer (the repro segfault). Box it as a
-        // proper tier block: data → e0 slot, cap = len = header length.
-        let len_p = self.fun.gen_reg();
-        writeln!(out, "{}{} = load i64, ptr {}", indent, len_p, buf).ok();
-        let block = self.fun.gen_reg();
-        writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, block).ok();
-        let d0 = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 0", indent, d0, block).ok();
-        let e0 = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, e0, buf).ok();
-        let data_h = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_h, e0).ok();
-        writeln!(out, "{}store i64 {}, ptr {}", indent, data_h, d0).ok();
-        let d1 = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, d1, block).ok();
-        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d1).ok();
-        let d2 = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, d2, block).ok();
-        writeln!(out, "{}store i64 {}, ptr {}", indent, len_p, d2).ok();
-        let handle = self.fun.gen_reg();
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, block).ok();
         let elem_ty = match &op.obj_reg.ty {
             Type::Vector(inner, _) => (**inner).clone(),
             _ => Type::int(),
         };
-        TypedRegister {
-            name: handle,
-            ty: Type::Applied("List".into(), vec![elem_ty]),
-        }
+        self.box_gather_as_tier_list(out, indent, &buf, elem_ty)
     }
 
     /// 2026-08-07 (Phase 7): the bits of a compile-time Boolean mask literal
