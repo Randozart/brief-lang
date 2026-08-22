@@ -4642,3 +4642,18 @@ so branch dispatch would be silently wrong. Never emitted.
 values across call args, params, returns, and phis; TypedBinding
 conditions test the tag; bindings extract the payload. Derive the layout
 via the casting graph per AGENTS Rule 19.
+
+## Boolean mask indexing segfaults in compiled code (2026-08-22)
+
+**Status:** OPEN — Phase 6 remainder of `docs/plans/2026-08-22-spec-conformance.md`
+**Repro:** `bugs/repro_mask_index_segfault.bv` — `data[mask]` over `Int[8]` /
+`Bool[8]` state fields, index into the compacted result.
+**Behavior:** interpreter correct (mask select landed 2026-08-07). The LLVM
+backend's vector-mask routing (`emit_expr.rs` "only admits state-field
+objects" path) emits a memory access that dumps core under the compiled
+reactor loop; unverified whether Float64 panic path is adjacent.
+**Fix direction:** audit the state-field mask emitter against the SoA column
+read path (same GEP shape as plain `data[i]`), then compact via the popcount
+loop; add interp/backend parity fixture. Ellipsis (`...`) multidim slices
+also remain: token lexed, Slice AST has no dims list — needs `SliceDim`
+enum (Range | Named | Ellipsis) per plan §Phase 6.
