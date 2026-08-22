@@ -695,6 +695,14 @@ impl LlvmBackend {
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> String {
+        // 2026-08-22 (spec-conformance Phase 3b): a structural sum
+        // (`Int | String`) is a TAGGED HANDLE — i64 pointing at a 16-byte
+        // image `{ i64 tag, i64 payload }`. Members are boxed/unboxed at the
+        // seams (call args, returns, lets, match dispatch); the handle form
+        // keeps %State columns and the call ABI uniform. See wrap_union_value.
+        if matches!(ty, Type::Union(_)) {
+            return "i64".to_string();
+        }
         // 2026-08-13 (Phase 6): `Bits<N>` (both AST forms) is exactly N bits —
         // resolve the Applied("Bits", [Number(N)]) alias here so a `Bits<32>`
         // struct field reads/writes i32, not the generic i64. The casting
@@ -3299,6 +3307,51 @@ impl LlvmBackend {
                 txn_let_names.sort();
                 txn_let_names.dedup();
                 for body in &guard_bodies {
+                    // 2026-08-22 (Phase 3b): a USER CALL inside the outlined
+                    // body marshals `ptr %state` as its first argument — the
+                    // cold function has no %state param, so outlining would
+                    // emit a reference to an undefined value. Leave such
+                    // guards inline (intrinsics/FFI calls are unaffected).
+                    fn expr_has_user_call(
+                        e: &Expr,
+                        frgn: &std::collections::HashMap<String, crate::ast::ForeignSignature>,
+                    ) -> bool {
+                        match e {
+                            Expr::Call(name, args, _) => {
+                                (!name.ends_with('#') && !frgn.contains_key(name.as_str()))
+                                    || args.iter().any(|a| expr_has_user_call(a, frgn))
+                            }
+                            Expr::BinaryOp(_, l, r) => {
+                                expr_has_user_call(l, frgn) || expr_has_user_call(r, frgn)
+                            }
+                            Expr::UnaryOp(_, x) => expr_has_user_call(x, frgn),
+                            Expr::Cast(x, _) => expr_has_user_call(x, frgn),
+                            Expr::Field(o, _) => expr_has_user_call(o, frgn),
+                            Expr::Index(o, i) => {
+                                expr_has_user_call(o, frgn) || expr_has_user_call(i, frgn)
+                            }
+                            Expr::List(es) | Expr::Tuple(es) => {
+                                es.iter().any(|x| expr_has_user_call(x, frgn))
+                            }
+                            Expr::Deref(x)
+                            | Expr::AddrOf(x)
+                            | Expr::IsType(x, _)
+                            | Expr::Consume(x) => expr_has_user_call(x, frgn),
+                            _ => false,
+                        }
+                    }
+                    let stmt_has = body.iter().any(|stmt| match stmt {
+                        Statement::Let { expr: Some(e), .. }
+                        | Statement::Expression(e)
+                        | Statement::Term(Some(e))
+                        | Statement::EndProgram(Some(e)) => expr_has_user_call(e, &self.ctx.frgn_map),
+                        Statement::Assign(_, r) => expr_has_user_call(r, &self.ctx.frgn_map),
+                        _ => false,
+                    });
+                    if stmt_has {
+                        can_outline_all = false;
+                        break;
+                    }
                     let mut idents: Vec<String> = Vec::new();
                     let mut local_lets: Vec<String> = Vec::new();
                     for stmt in *body {

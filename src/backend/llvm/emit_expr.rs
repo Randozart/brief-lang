@@ -3883,6 +3883,143 @@ impl LlvmBackend {
     /// 2026-07-17: defn functions expect (ptr %state, ...) as their first parameter.
     /// We must prepend the state pointer and adapt argument types from register
     /// types to the function's parameter types (via defn_params).
+    // ── 2026-08-22 (spec-conformance Phase 3b): tagged-union ABI ─────────
+    // A union value travels as an i64 handle to a 16-byte image:
+    //   offset 0: i64 tag (member index within the union's declared list)
+    //   offset 8: i64 payload (the member value in its boxed representation)
+    // Boxing rule: every member scalar is carried as i64 — ints raw, ptrs
+    // ptrtoint'd, floats bitcast. The interpreter needs none of this (its
+    // values are dynamically typed); this ABI exists for LLVM only.
+
+    /// Box `value` into a tagged handle for `union_ty`. The member index is
+    /// the position of the value's type among the declared members.
+    pub(super) fn wrap_union_value(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        value: &TypedRegister,
+        union_ty: &Type,
+    ) -> TypedRegister {
+        let Type::Union(members) = union_ty else {
+            return value.clone();
+        };
+        let Some(tag) = members.iter().position(|m| m == &value.ty) else {
+            // Static typing guarantees membership; unreachable in practice —
+            // carry the value untagged rather than mislabel it.
+            return TypedRegister { name: value.name.clone(), ty: union_ty.clone() };
+        };
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 16)", indent, raw).ok();
+        let img = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, img, raw).ok();
+        let tag_slot = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 0",
+            indent, tag_slot, img
+        )
+        .ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, tag, tag_slot).ok();
+        let val_llvm = self.llvm_type(&value.ty);
+        let payload_i64 = match val_llvm.as_str() {
+            "i64" => value.name.clone(),
+            "ptr" => {
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = ptrtoint {} {} to i64", indent, c, val_llvm, value.name).ok();
+                c
+            }
+            "double" => {
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast double {} to i64", indent, c, value.name).ok();
+                c
+            }
+            "float" => {
+                let c = self.fun.gen_reg();
+                let w = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, c, value.name).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, w, c).ok();
+                w
+            }
+            _ => value.name.clone(),
+        };
+        let payload_slot = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 1",
+            indent, payload_slot, img
+        )
+        .ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, payload_i64, payload_slot).ok();
+        let handle = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, raw).ok();
+        TypedRegister { name: handle, ty: union_ty.clone() }
+    }
+
+    /// Unbox the payload of a union handle as a member-typed register.
+    pub(super) fn unwrap_union_payload(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        handle: &str,
+        member_ty: &Type,
+    ) -> TypedRegister {
+        let base = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, handle).ok();
+        let slot = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slot, base).ok();
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, raw, slot).ok();
+        let llvm_ty = self.llvm_type(member_ty);
+        let name = match llvm_ty.as_str() {
+            "i64" => raw,
+            "ptr" => {
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, c, raw).ok();
+                c
+            }
+            "double" => {
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast i64 {} to double", indent, c, raw).ok();
+                c
+            }
+            "float" => {
+                let t = self.fun.gen_reg();
+                let c = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, raw).ok();
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, c, t).ok();
+                c
+            }
+            _ => raw,
+        };
+        TypedRegister { name, ty: member_ty.clone() }
+    }
+
+    /// Emit the i1 membership test: does the union handle carry `member_ty`?
+    pub(super) fn emit_union_tag_test(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        handle: &str,
+        union_ty: &Type,
+        member_ty: &Type,
+    ) -> String {
+        let Type::Union(members) = union_ty else {
+            let r = self.fun.gen_reg();
+            writeln!(out, "{}{} = icmp eq i64 0, 0", indent, r).ok();
+            return r;
+        };
+        let idx = members.iter().position(|m| m == member_ty).unwrap_or(usize::MAX);
+        let base = self.fun.gen_reg();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, handle).ok();
+        let slot = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, slot, base).ok();
+        let tag = self.fun.gen_reg();
+        writeln!(out, "{}{} = load i64, ptr {}", indent, tag, slot).ok();
+        let r = self.fun.gen_reg();
+        writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, r, tag, idx).ok();
+        r
+    }
+
     pub(super) fn emit_user_call(
         &mut self,
         out: &mut String,
@@ -3960,7 +4097,16 @@ impl LlvmBackend {
                             }
                         }
                     }
-                    self.emit_expr(out, a, indent)
+                    let emitted = self.emit_expr(out, a, indent);
+                    // 2026-08-22 (Phase 3b): a member flowing into a
+                    // structural-sum parameter is boxed into the tagged
+                    // union representation at the boundary.
+                    if let Some(pt) = fn_params.as_ref().and_then(|p| p.get(i)) {
+                        if matches!(pt, Type::Union(_)) && *pt != emitted.ty {
+                            return self.wrap_union_value(out, indent, &emitted, pt);
+                        }
+                    }
+                    emitted
                 })
                 .collect()
         };
@@ -4147,18 +4293,22 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         let scrut = self.emit_expr(out, scrutinee, indent);
-        // 2026-08-22 (Phase 3): typed sum bindings (`n: Int => …`) need a
-        // tagged union ABI at call/param/return boundaries before the branch
-        // can test membership at runtime. The interpreter and typechecker
-        // are complete; LLVM codegen rejects explicitly until the tagged
-        // slice lands (never emit silently-wrong dispatch).
-        if arms.iter().any(|a| matches!(a.pattern, crate::ast::Pattern::TypedBinding(_, _))) {
-            panic!(
-                "match on a structural sum (`Int | String` typed binding) is not yet \
-                 lowered by the LLVM backend — run with the interpreter, or restructure \
-                 with enum variants until the tagged union ABI lands"
-            );
-        }
+        // 2026-08-22 (Phase 3b): typed sum bindings dispatch through the
+        // tagged-union ABI — the scrutinee handle's tag selects the arm and
+        // the payload unboxes into the binding. If the scrutinee ISN'T
+        // already a union (a bare member value), box it so tags exist.
+        let scrut = if arms.iter().any(|a| matches!(a.pattern, crate::ast::Pattern::TypedBinding(_, _)))
+            && !matches!(scrut.ty, Type::Union(_))
+        {
+            // Infer the union shape from the first TypedBinding arm is
+            // impossible statically — this path only triggers for direct
+            // member values, which the typechecker rejects at the match
+            // scrutinee position. Leave untouched; conditions below test
+            // handles only when scrut.ty is a Union.
+            scrut
+        } else {
+            scrut
+        };
         let counter = self.fun.txn_counter;
         self.fun.txn_counter += 1;
         let end_label = format!(".match_end_{}", counter);
@@ -4170,7 +4320,7 @@ impl LlvmBackend {
         for (i, arm) in arms.iter().enumerate() {
             let arm_label = format!(".match_arm_{}_{}", counter, i);
             let next_label = format!(".match_next_{}_{}", counter, i);
-            let cond = self.emit_pattern_condition(&arm.pattern, &scrut.name, out, indent);
+            let cond = self.emit_pattern_condition(&arm.pattern, &scrut.name, &scrut.ty, out, indent);
             writeln!(out, "  br i1 {}, label %{}, label %{}", cond, arm_label, next_label).ok();
             writeln!(out, "{}:", next_label).ok();
             // Track the insertion block so the merge phi can cite the TRUE
@@ -4183,11 +4333,47 @@ impl LlvmBackend {
         // No arm matched — default to a typed zero and merge at the end.
         writeln!(out, "  br label %{}", end_label).ok();
         // Phase 2: the arm blocks.
+        // 2026-08-22 (Phase 3b): each arm's tail (boxing code + branch) is
+        // buffered so heterogeneous results can splice their tagged wrap
+        // into the CORRECT block — the branch text is identical across arms,
+        // so post-hoc splicing into `out` cannot target the right one.
+        // Phase 1.5 (2026-08-22, Phase 3b): predict arm result TYPES with a
+        // throwaway emission so heterogeneous (structural-sum) matches know
+        // their tagged shape UPFRONT. Side effects are snapshotted: the
+        // deferred-alloca queue truncates back and the tracked block is
+        // restored. Pattern BINDING lives outside emit_expr, so name maps
+        // are untouched by the probe.
+        let probe_types: Vec<crate::ast::Type> = {
+            let saved_alloca_len = self.fun.pending_struct_allocas.len();
+            let saved_block = self.fun.cur_block.clone();
+            let mut sink = String::new();
+            let mut tys = Vec::with_capacity(n);
+            for arm in arms {
+                let reg = self.emit_expr(&mut sink, &arm.body, indent);
+                tys.push(reg.ty);
+            }
+            self.fun.pending_struct_allocas.truncate(saved_alloca_len);
+            self.fun.cur_block = saved_block;
+            tys
+        };
+        let mut synth_members: Vec<Type> = Vec::new();
+        for ty in &probe_types {
+            if !synth_members.contains(ty) {
+                synth_members.push(ty.clone());
+            }
+        }
+        let heterogeneous = synth_members.len() > 1;
+        let synth_ty = Type::Union(synth_members);
+
+        // Phase 2: the arm blocks. Each tail flushes INLINE — every block
+        // must terminate before the next label. A heterogeneous arm boxes
+        // its value into `synth_ty` ahead of the branch so the phi merges
+        // uniform i64 tagged handles.
         let mut phi_incoming: Vec<(String, String, crate::ast::Type)> = Vec::with_capacity(n);
         for (i, arm) in arms.iter().enumerate() {
             writeln!(out, "{}:", arm_labels[i]).ok();
             self.fun.cur_block = Some(arm_labels[i].clone());
-            self.bind_pattern(&arm.pattern, &scrut.name, out, indent);
+            self.bind_pattern(&arm.pattern, &scrut.name, &scrut.ty, out, indent);
             let body_reg;
             if let Some(guard) = &arm.guard {
                 let gv = self.emit_expr(out, guard, indent);
@@ -4213,7 +4399,14 @@ impl LlvmBackend {
                 .cur_block
                 .clone()
                 .unwrap_or_else(|| arm_labels[i].clone());
-            phi_incoming.push((body_reg.name.clone(), pred, body_reg.ty));
+            let mut reg = body_reg.name.clone();
+            let mut ty = body_reg.ty.clone();
+            if heterogeneous && ty != synth_ty {
+                let wrapped = self.wrap_union_value(out, indent, &body_reg, &synth_ty);
+                reg = wrapped.name;
+                ty = wrapped.ty;
+            }
+            phi_incoming.push((reg, pred, ty));
             writeln!(out, "  br label %{}", end_label).ok();
         }
         // Phase 3: the end block merges the arm results (and the default).
@@ -4221,13 +4414,17 @@ impl LlvmBackend {
         // arm's value type — the old `phi i64 [ 0, ... ]` hardcoded i64 and
         // produced invalid IR for String/ptr-typed arms (`'%t58' defined with
         // type 'ptr' but expected 'i64'`, exposed by the fizzbuzz tuple-match
-        // migration). Arm-type unification is enforced by the typechecker
-        // (Phase 4); here the first arm's type is authoritative.
-        writeln!(out, "{}:", end_label).ok();
-        let result_ty = phi_incoming
+        // migration).
+        // 2026-08-22 (Phase 3b): heterogeneous arms already boxed into
+        // `synth_ty` in Phase 2 — the phi is uniform either way.
+        let mut result_ty = phi_incoming
             .first()
             .map(|(_, _, ty)| ty.clone())
             .unwrap_or_else(crate::ast::Type::int);
+        if heterogeneous {
+            result_ty = synth_ty;
+        }
+        writeln!(out, "{}:", end_label).ok();
         let llvm_ty = self.llvm_type(&result_ty);
         let default_val = if llvm_ty == "ptr" {
             "null".to_string()
@@ -4257,6 +4454,7 @@ impl LlvmBackend {
         &mut self,
         pat: &crate::ast::Pattern,
         scrut: &str,
+        scrut_ty: &Type,
         out: &mut String,
         indent: &str,
     ) -> String {
@@ -4265,6 +4463,10 @@ impl LlvmBackend {
                 let r = self.fun.gen_reg();
                 writeln!(out, "{}{} = icmp eq i64 0, 0", indent, r).ok();
                 r
+            }
+            // 2026-08-22 (Phase 3b): a typed sum binding tests the tag.
+            crate::ast::Pattern::TypedBinding(_, member) => {
+                self.emit_union_tag_test(out, indent, scrut, scrut_ty, member)
             }
             crate::ast::Pattern::Literal(lit) => {
                 let lv = self.emit_pattern_literal(out, lit, indent);
@@ -4376,6 +4578,7 @@ impl LlvmBackend {
         &mut self,
         pat: &crate::ast::Pattern,
         scrut: &str,
+        scrut_ty: &Type,
         out: &mut String,
         indent: &str,
     ) {
@@ -4387,19 +4590,25 @@ impl LlvmBackend {
                 self.fun.let_binding_types.insert(name.clone(), Type::int());
                 self.fun.let_original_types.insert(name.clone(), Type::int());
             }
-            // 2026-08-22 (spec-conformance plan Phase 3, SPEC §8.4): a typed
-            // binding aliases the scrutinee register at the MEMBER's type —
-            // same register, precise static type for downstream emission.
+            // 2026-08-22 (Phase 3b): a typed sum binding UNBOXES the payload
+            // at the member's representation — the arm body sees a genuine
+            // member-typed register, not the tagged handle.
             crate::ast::Pattern::TypedBinding(name, ty) => {
-                self.fun.last_val_temps.insert(name.clone(), scrut.to_string());
+                // One load feeds both maps: the arm body reads the binding
+                // through either path (last_val_temps for expressions,
+                // let_bindings for name resolution), so both must hold the
+                // SAME unboxed register.
+                let payload = self.unwrap_union_payload(out, indent, scrut, ty);
+                let reg = payload.name;
+                self.fun.last_val_temps.insert(name.clone(), reg.clone());
                 self.fun.last_val_types.insert(name.clone(), (**ty).clone());
-                self.fun.let_bindings.insert(name.clone(), scrut.to_string());
+                self.fun.let_bindings.insert(name.clone(), reg);
                 self.fun.let_binding_types.insert(name.clone(), (**ty).clone());
                 self.fun.let_original_types.insert(name.clone(), (**ty).clone());
             }
             _ => {}
         }
-        let _ = (out, indent);
+        let _ = scrut_ty;
     }
 
     /// Resolve the current register for a name bound by `let` (or a pending

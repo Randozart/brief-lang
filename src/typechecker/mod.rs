@@ -2184,6 +2184,13 @@ fn infer_match(
                     covered.insert(name.clone());
                 }
             }
+            crate::ast::Pattern::Literal(lit) => {
+                // Bool literals close their half of the two-member domain;
+                // other literals contribute nothing to exhaustiveness.
+                if let Expr::Bool(b) = lit {
+                    covered.insert(b.to_string());
+                }
+            }
             _ => {}
         }
 
@@ -2216,15 +2223,26 @@ fn infer_match(
 
         // 3. Arm-result compatibility (SPEC §11.3): all arm bodies must have
         //    compatible types; the first non-() type is authoritative.
+        //    2026-08-22 (Phase 3b): arms yielding DIFFERENT members are
+        //    compatible when the contextual expected type is the union that
+        //    contains them (`term match b { true => 7, false => "s" }` inside
+        //    `-> Int | String`).
         match &result_ty {
             None => result_ty = Some(ty),
             Some(prev) => {
                 if *prev != ty && ty != Type::void() && *prev != Type::void() {
-                    return Err(TypeError::TypeMismatch {
-                        expected: format!("{}", prev),
-                        found: format!("{}", ty),
-                        context: "match arm results must be compatible".into(),
-                    });
+                    let union_ctx = ctx
+                        .current_output_type
+                        .as_ref()
+                        .map(|out| types_compatible(out, prev) && types_compatible(out, &ty))
+                        .unwrap_or(false);
+                    if !union_ctx {
+                        return Err(TypeError::TypeMismatch {
+                            expected: format!("{}", prev),
+                            found: format!("{}", ty),
+                            context: "match arm results must be compatible".into(),
+                        });
+                    }
                 }
                 if *prev == Type::void() && ty != Type::void() {
                     result_ty = Some(ty);
@@ -2292,6 +2310,10 @@ fn match_domain_of(ty: &Type, ctx: &TypecheckContext) -> MatchDomain {
         Type::Union(members) => MatchDomain::Closed(
             members.iter().map(|m| format!("{}", m)).collect(),
         ),
+        // 2026-08-22 (Phase 4): Bool is a two-member closed domain.
+        Type::Custom(n) if n == "Bool" => {
+            MatchDomain::Closed(vec!["true".to_string(), "false".to_string()])
+        }
         Type::Custom(name) => enum_variants(ctx, name).map_or(MatchDomain::Open, |v| MatchDomain::Enum(v)),
         Type::Applied(base, _) => {
             enum_variants(ctx, base).map_or(MatchDomain::Open, |v| MatchDomain::Enum(v))
@@ -2502,7 +2524,8 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // 2026-07-31 (A2): assignment must preserve the LHS type — no
             // 2026-08-09 (Phase 12, SPEC §18.2): the meld admission is removed —
             // only an explicit coercion path admits the pair.
-            if lhs_ty != rhs_ty {
+            // 2026-08-22 (Phase 3b): a structural-sum target admits members.
+            if !types_compatible(&lhs_ty, &rhs_ty) {
                 let coercible = try_coerce_via_parse(rhs, &rhs_ty, &lhs_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -2661,7 +2684,9 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 // term value — no implicit coercion. A declared meld
                 // (2026-08-03, P3) admits the pair instead.
                 if let Some(out) = &ctx.current_output_type {
-                    if vty != *out {
+                    // 2026-08-22 (Phase 3b): a structural-sum return admits
+                    // its members (`term 7` inside `-> Int | String`).
+                    if !types_compatible(out, &vty) {
                         return Err(TypeError::TypeMismatch {
                             expected: format!("{}", out),
                             found: format!("{}", vty),

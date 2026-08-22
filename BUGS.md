@@ -4624,7 +4624,13 @@ registers.
 
 ## Structural sums: LLVM tagged-union ABI not yet lowered (2026-08-22)
 
-**Status:** OPEN — Phase 3b of `docs/plans/2026-08-22-spec-conformance.md`
+**Status:** CLOSED 2026-08-22 — Phase 3b landed. Union values travel as
+i64 handles to `{ i64 tag, i64 payload }` images; boxing happens at call
+args, heterogeneous match arms, term-of-union, lets and state-field
+stores; TypedBinding conditions test the tag and bindings unbox the
+payload. Verified by examples/structural_sums.bv through the compiled
+binary. Cold-path outlining refuses guards containing user calls (no
+%state param to marshal). Original report:
 **Found:** fizzbuzz/sums work during spec-conformance Phase 3
 **Behavior:** parser (`A | B` in any type position), typechecker
 (member assignability at call args + let annotations via

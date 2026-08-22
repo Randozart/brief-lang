@@ -1,0 +1,47 @@
+// structural_sums — SPEC §8.4 end-to-end: `Int | String` through the
+// tagged-union ABI (Phase 3b of docs/plans/2026-08-22-spec-conformance.md).
+//
+// Exercises every seam a sum value crosses in compiled code:
+//   1. member → union parameter        (boxed at the call boundary)
+//   2. heterogeneous match arms        (phi over uniform tagged handles)
+//   3. union return → union parameter  (handle passes through)
+//   4. union-typed local let
+//
+// Expected output: "4205706" (Print# emits no separator).
+//   4205 = 42*100 + CharCount("hello")
+//   706  = 7*100  + CharCount("seven!")
+
+defn show(v: Int | String) -> Int {
+  term match v {
+    n: Int => n,
+    s: String => CharCount#(s),
+  };
+};
+
+defn pick(b: Bool) -> Int | String {
+  term match b {
+    true => 7,
+    false => "seven!",
+  };
+};
+
+let first: Int = 0;
+let second: Int = 0;
+
+node run [first == 0][second > 0] {
+  when second == 0 {
+    let x: Int = show(42);
+    let y: Int = show("hello");
+    first = x * 100 + y;
+  };
+  when first > 0 && second == 0 {
+    Print#(first);
+    // union return flows into a union parameter; union-typed local let
+    let held: Int | String = pick(false);
+    second = show(pick(true)) * 100 + show(held);
+  };
+  when second > 0 {
+    endprogram Print#(second);
+  };
+  term;
+};

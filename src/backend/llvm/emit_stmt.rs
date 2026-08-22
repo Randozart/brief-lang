@@ -705,6 +705,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // counter's increment never moved the count; the volatile
                     // swan-song store to ptr 0 was all that remained).
                     if backend.ctx.field_index_map.contains_key(name) {
+                        // 2026-08-22 (Phase 3b): a structural-sum FIELD stores
+                        // the tagged handle — box a member value at the seam.
+                        let fidx = *backend.ctx.field_index_map.get(name).unwrap();
+                        let field_briev_ty = backend
+                            .ctx
+                            .field_briev_types
+                            .get(fidx)
+                            .cloned()
+                            .unwrap_or_else(Type::int);
+                        let val = if matches!(field_briev_ty, Type::Union(_))
+                            && field_briev_ty != val.ty
+                        {
+                            backend.wrap_union_value(out, indent, &val, &field_briev_ty)
+                        } else {
+                            val
+                        };
                         // 2026-08-13 (merge fix): adapt the value to the SLOT's
                         // LLVM type before storing. A String/Data value is a
                         // `ptr` that must be ptrtoint'd to the i64 slot, a Bool
