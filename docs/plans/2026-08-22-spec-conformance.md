@@ -294,6 +294,36 @@ Tests: `.s.bv` file with fallback decision fails citing point; same file sans `.
 
 TBD — phases append outcome lines: date, phase, commits, test delta, benchmark deltas.
 
+### 2026-08-22 session 1
+- **Phase 0** ✅ c069b680 — baseline 1903 tests; deferrals in BUGS.md.
+- **Phase 1a** ✅ ff7702c6 — glob imports removed, rejection tested.
+- **Phase 1b** ✅ f7d91644 + 7f053f72 + c13cbdd9 — if/else rejected at parse,
+  Statement::If excised crate-wide (62 sites), active sources migrated;
+  two latent match-codegen bugs fixed en route (phi typing + edge labels).
+- **Phase 2** ✅ 5dbac11e — did-you-mean hints, sed/pvt/reg rejection,
+  casing advisory pass wired into build+check; op `reg:` discriminator kept
+  contextual.
+- **Phase 3** ✅ 2199f5a7 — sums parse/typecheck/interpret; backend staged
+  explicitly pending ABI.
+- **Phase 4a** ✅ dc59a39e — unified pattern grammar; tuple patterns dispatch
+  in LLVM (memberwise heap-image compare); fizzbuzz restored to tuple form;
+  dead match_normalize removed.
+- **Phase 4** ✅ 65a76d0e — match semantics engine: closed-domain
+  exhaustiveness (sums/enums/Bool), open-scrutinee `_` requirement,
+  unreachable arms, non-member typed bindings, arm-result unification with
+  contextual union escape.
+- **Phase 3b** ✅ 574330c5 — tagged-union ABI: i64 handles to {tag,payload}
+  images; boxing at call args, heterogeneous arms (probe-pass shape
+  prediction), term-of-union, lets, state fields; TypedBinding tag-test +
+  payload unbox. examples/structural_sums.bv verifies all seams compiled.
+- **Phase 6 partial** ⏳ aee58b05 — masks already correct in interpreter;
+  LLVM state-field mask routing segfaults → repro + fix direction recorded
+  in BUGS.md. Ellipsis still needs SliceDim AST.
+
+Suite: 1903 → 1916 passing, 0 failures. Remaining: Phases 5 (dyn), 6-finish
+(mask codegen + ellipsis), 7 (obj/cell ports), 8 (task lifecycle),
+9 (.s strict), 10 (conformance sweep).
+
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.
