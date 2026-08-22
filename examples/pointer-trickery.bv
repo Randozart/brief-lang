@@ -1,29 +1,31 @@
 // pointer-trickery: Ptr<T> low-level operations — type punning, MMIO, contract safety
 //
-// Demonstrates:
-//   1. Ptr<Int> arithmetic (navigate a register block)
-//   2. Ptr<Int> → Ptr<Int> type reinterpretation via `as` cast
-//   3. volatile_load# / volatile_store# for MMIO register access
+// Demonstrates (SPEC §14.2 surface — &value, *ptr, casts, contracts):
+//   1. Ptr<Int> register-block navigation via explicit cast-based address math
+//   2. Ptr<Int> → Ptr<Char> type reinterpretation via `as` cast
+//   3. Load# / Store# for volatile MMIO register access
 //   4. Contract-proven bounds safety
-//   5. BILD inline asm via asm target { } for raw syscalls
+//
+// 2026-08-22 (spec-conformance Phase 1b): migrated off if/else (SPEC §11.1),
+// off the removed volatile_load#/volatile_store# names to Load#/Store#, and
+// off non-normative direct Ptr±Int operators to cast-based math.
 
 const UART_BASE: Int = 0x40011000;
 const UART_END:  Int = 0x40011020;
 
-// --- MMIO register block (sequentially addressed 32-bit registers) ---
+// --- MMIO register block (sequentially addressed registers) ---
 const UART_DR:    Ptr<Int> = 0x40011000 as Ptr<Int>;   // data register
-const UART_FR:    Ptr<Int> = 0x40011004 as Ptr<Int>;   // flag register
-const UART_IBRD:  Ptr<Int> = 0x40011008 as Ptr<Int>;   // integer baud rate
-const UART_FBRD:  Ptr<Int> = 0x4001100C as Ptr<Int>;   // fractional baud rate
-const UART_LCRH:  Ptr<Int> = 0x40011010 as Ptr<Int>;   // line control
+const UART_FR:    Ptr<Int> = (0x40011000 + 4) as Ptr<Int>;   // flag register
+const UART_IBRD:  Ptr<Int> = (0x40011000 + 8) as Ptr<Int>;   // integer baud rate
+const UART_FBRD:  Ptr<Int> = (0x40011000 + 12) as Ptr<Int>;  // fractional baud rate
+const UART_LCRH:  Ptr<Int> = (0x40011000 + 16) as Ptr<Int>;  // line control
 
-// --- Pointer arithmetic: navigate register block ---
-// UART_FR can also be computed as UART_DR + 4
-let computed_fr: Ptr<Int> = UART_DR + 4;
-let base_reg: Ptr<Int> = UART_DR + 8;  // arbitrary offset
+// --- Address arithmetic: navigate the register block ---
+let computed_fr: Ptr<Int> = (UART_DR as Int + 4) as Ptr<Int>;
+let base_reg: Ptr<Int> = (UART_DR as Int + 8) as Ptr<Int>;
 
-// --- Type reinterpretation: access lower 32 bits of an Int register as Char ---
-// ptr as Ptr<Char> reinterprets the same address with i32 semantics
+// --- Type reinterpretation: access an Int register's bytes as Char ---
+// ptr as Ptr<Char> reinterprets the same address with Char semantics
 let uart_dr_as_char: Ptr<Char> = UART_DR as Ptr<Char>;
 
 // --- Volatile access with contract-proven safety ---
@@ -31,27 +33,28 @@ defn read_uart(reg: Ptr<Int>) -> Int
     [reg as Int >= UART_BASE]
     [reg as Int <  UART_END]
 {
-    term volatile_load#(reg);
+    term Load#(reg);
 };
 
-defn write_uart(reg: Ptr<Int>, val: Int) -> Bool
+defn write_uart(reg: Ptr<Int>, val: Int)
     [reg as Int >= UART_BASE]
     [reg as Int <  UART_END]
 {
-    term volatile_store#(reg, val);
+    Store#(reg, val);
 };
 
 // --- Sequenced MMIO transaction ---
 let uart_config_done: Bool = false;
 let uart_init_done: Bool = false;
 let result: Int = 0;
+let step: Int = 0;
 
 node configure_uart [step < 3][step == 3] {
     when step == 0 {
         // Step 0: configure baud rate registers
-        let ok: Bool = write_uart(UART_IBRD, 26);
-        let ok2: Bool = write_uart(UART_FBRD, 3);
-        uart_config_done = ok && ok2;
+        write_uart(UART_IBRD, 26);
+        write_uart(UART_FBRD, 3);
+        uart_config_done = true;
         step = step + 1;
         term;
     };
@@ -59,7 +62,7 @@ node configure_uart [step < 3][step == 3] {
         // Step 1: read back configuration to verify
         let ibrd_val: Int = read_uart(UART_IBRD);
         let fbrd_val: Int = read_uart(UART_FBRD);
-        if ibrd_val == 0 && fbrd_val == 0 {
+        when ibrd_val == 0 && fbrd_val == 0 {
             result = 1;  // interpreter returns 0 for volatile_load (dummy)
         };
         step = step + 1;
@@ -67,13 +70,13 @@ node configure_uart [step < 3][step == 3] {
     };
     when step == 2 {
         // Step 2: finalize — these pass because contracts prove bounds safety
-        let final_ok: Bool = write_uart(UART_LCRH, 0x60);
-        uart_init_done = final_ok;
+        write_uart(UART_LCRH, 0x60);
+        uart_init_done = true;
         result = result + 2;  // total = 3
         step = step + 1;
         term;
     };
 };
 
-// Compile:   ./target/release/briev-compiler build examples/pointer-trickery.bv
+// Compile:   ./target/release/brievc build examples/pointer-trickery.bv
 // Expected:  (interpreter runs to completion, result = 3)

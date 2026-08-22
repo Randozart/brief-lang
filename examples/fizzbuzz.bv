@@ -1,23 +1,25 @@
+// fizzbuzz — classic reactive loop.
+// 2026-08-22 (spec-conformance Phase 1b): migrated from if/else-if chain to
+// exhaustive match (SPEC §11.1 — no if/else); prior-state postcondition
+// (`current == @current + 1`) replaced by a goal-bound form since prior-
+// state reads are removed surface; result printed per cycle so the program
+// has an observable effect (accumulating into an unread field is dead).
 let n: Int = 100;
 let current: Int = 1;
-let output: String = "";
 
-node fizzbuzz [current <= n][current == @current + 1 || current > n] {
-  let is_fizz: Bool = current % 3 == 0;
-  let is_buzz: Bool = current % 5 == 0;
-  let result: String = "";
-
-  if is_fizz && is_buzz {
-    result = "FizzBuzz";
-  } else if is_fizz {
-    result = "Fizz";
-  } else if is_buzz {
-    result = "Buzz";
-  } else {
-    result = String(current);
+node fizzbuzz [current <= n][current == n + 1] {
+  let result: String = match current % 15 {
+    0 => "FizzBuzz",
+    _ => match current % 3 {
+      0 => "Fizz",
+      _ => match current % 5 {
+        0 => "Buzz",
+        _ => current as String,
+      },
+    },
   };
 
-  output = output + result + "\n";
+  println!(result);
   current = current + 1;
   term;
 };

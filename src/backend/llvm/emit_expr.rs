@@ -4161,18 +4161,22 @@ impl LlvmBackend {
             let cond = self.emit_pattern_condition(&arm.pattern, &scrut.name, out, indent);
             writeln!(out, "  br i1 {}, label %{}, label %{}", cond, arm_label, next_label).ok();
             writeln!(out, "{}:", next_label).ok();
+            // Track the insertion block so the merge phi can cite the TRUE
+            // predecessor even when an arm body emits further blocks (a
+            // nested match ends in ITS `.match_end_N`, not the arm entry).
+            self.fun.cur_block = Some(next_label.clone());
             arm_labels.push(arm_label);
             next_labels.push(next_label);
         }
-        // No arm matched — default to 0 and merge at the end.
+        // No arm matched — default to a typed zero and merge at the end.
         writeln!(out, "  br label %{}", end_label).ok();
         // Phase 2: the arm blocks.
-        let mut phi_incoming: Vec<(String, String)> = Vec::with_capacity(n);
+        let mut phi_incoming: Vec<(String, String, crate::ast::Type)> = Vec::with_capacity(n);
         for (i, arm) in arms.iter().enumerate() {
             writeln!(out, "{}:", arm_labels[i]).ok();
+            self.fun.cur_block = Some(arm_labels[i].clone());
             self.bind_pattern(&arm.pattern, &scrut.name, out, indent);
             let body_reg;
-            let body_block_label;
             if let Some(guard) = &arm.guard {
                 let gv = self.emit_expr(out, guard, indent);
                 // Briev bool comparisons emit i8 (0/1) — narrow to i1 for `br`.
@@ -4184,25 +4188,54 @@ impl LlvmBackend {
                 // the last arm it is the no-match default to the end).
                 writeln!(out, "  br i1 {}, label %{}, label %{}", g1, body_label, next_labels[i]).ok();
                 writeln!(out, "{}:", body_label).ok();
+                self.fun.cur_block = Some(body_label.clone());
                 body_reg = self.emit_expr(out, &arm.body, indent);
-                // The body lives in the guard block — that block branches to
-                // the end, so the phi edge must come from it.
-                body_block_label = body_label;
             } else {
                 body_reg = self.emit_expr(out, &arm.body, indent);
-                body_block_label = arm_labels[i].clone();
             }
-            phi_incoming.push((body_reg.name.clone(), body_block_label));
+            // The phi edge comes from wherever the body emission actually
+            // ended — a plain body stays in the arm/guard block, a nested
+            // match leaves us in its own end block.
+            let pred = self
+                .fun
+                .cur_block
+                .clone()
+                .unwrap_or_else(|| arm_labels[i].clone());
+            phi_incoming.push((body_reg.name.clone(), pred, body_reg.ty));
             writeln!(out, "  br label %{}", end_label).ok();
         }
         // Phase 3: the end block merges the arm results (and the default).
+        // 2026-08-22 (spec-conformance Phase 1b): the merge takes the FIRST
+        // arm's value type — the old `phi i64 [ 0, ... ]` hardcoded i64 and
+        // produced invalid IR for String/ptr-typed arms (`'%t58' defined with
+        // type 'ptr' but expected 'i64'`, exposed by the fizzbuzz tuple-match
+        // migration). Arm-type unification is enforced by the typechecker
+        // (Phase 4); here the first arm's type is authoritative.
         writeln!(out, "{}:", end_label).ok();
-        let mut phi = format!("  {} = phi i64 [ 0, %{} ]", v, next_labels[n - 1]);
-        for (reg, label) in phi_incoming {
+        let result_ty = phi_incoming
+            .first()
+            .map(|(_, _, ty)| ty.clone())
+            .unwrap_or_else(crate::ast::Type::int);
+        let llvm_ty = self.llvm_type(&result_ty);
+        let default_val = if llvm_ty == "ptr" {
+            "null".to_string()
+        } else if llvm_ty.starts_with("float") || llvm_ty.starts_with("double") {
+            "0.0".to_string()
+        } else {
+            "0".to_string()
+        };
+        let mut phi = format!(
+            "  {} = phi {} [ {}, %{} ]",
+            v, llvm_ty, default_val, next_labels[n - 1]
+        );
+        for (reg, label, _) in &phi_incoming {
             phi.push_str(&format!(", [ {}, %{} ]", reg, label));
         }
         writeln!(out, "{}", phi).ok();
-        TypedRegister { name: v.to_string(), ty: Type::int() }
+        // The merge block is now the insertion point — a nested caller must
+        // cite THIS block as its phi predecessor, not our last arm.
+        self.fun.cur_block = Some(end_label);
+        TypedRegister { name: v.to_string(), ty: result_ty }
     }
 
     /// Emit the i1 condition a pattern matches the scrutinee register.

@@ -156,6 +156,30 @@ Acceptance: fixture `sums.bv` with `Int | String` flows through contracts, match
 
 ---
 
+### Phase 4a — Complete pattern grammar (amended in 2026-08-22 session; owner: enrich stmt-match too)
+
+Discovered during Phase 1b migration: tuple patterns are declared (`ast::expr::Pattern::Tuple`), displayed, and matched by the interpreter (`interpreter/eval.rs:839`) but UNPARSEABLE — `parse_pattern` (expressions.rs:783) lacks a `(` arm. Two divergent pattern grammars exist:
+
+1. **Unify on one grammar (DRY):** statement-match's ad-hoc `StmtMatchPattern` {Wildcard, Int-literal, String, Multi} folds into `ast::expr::Pattern`. Add `Pattern::Multi(Vec<Pattern>)` for `|`-separated or-arms; both match forms support them. Statement arms keep block bodies + trailing `;`; expression arms stay exprs. Delete `StmtMatchPattern`/`StmtMatchArm` once migrated.
+2. **Tuple patterns:** `(p1, p2, …)` arm in `parse_pattern`, recursing into full pattern grammar. Typing: scrutinee must be a tuple of equal arity; each sub-pattern compatible member-wise. Interpreter already works; add typecheck + backend parity test.
+3. **Bool literal patterns:** parse path exists (expressions.rs:811); typing/coverage verified end-to-end as part of this phase.
+4. **Range patterns** (`1..5`, `1..=5` — parse today): coverage semantics = contributes its bound interval to exhaustiveness v1 only via `_` fallback elsewhere (no adjacent-interval solver); document.
+5. **Enum-variant patterns:** unchanged (working).
+6. **fizzbuzz restored** to the elegant tuple form:
+   ```briev
+   let result: String = match (is_fizz, is_buzz) {
+     (true, true) => "FizzBuzz",
+     (true, false) => "Fizz",
+     (false, true) => "Buzz",
+     _ => String(current),
+   };
+   ```
+   and becomes the feature's regression fixture (tuple-scrutinee + Bool literals + wildcard fallback). enemy_swarm keeps integer statement-match (`0 => / _ =>`) — that form's natural shape.
+
+Acceptance: fizzbuzz tuple fixture passes interp + compiled parity; `|`-or-arm parses in BOTH match forms with correct first-match semantics; stale `StmtMatchPattern` fully gone; negative: arity mismatch, non-tuple scrutinee with tuple pattern.
+
+---
+
 ### Phase 4 — Match semantics (G2)
 
 Replace `infer_match` stub (`typechecker/mod.rs:2106–2117`).
