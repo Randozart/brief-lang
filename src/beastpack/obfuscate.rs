@@ -288,7 +288,7 @@ fn rename_stmt(stmt: &Statement, map: &HashMap<String, String>) -> Statement {
         Statement::Match { expr, arms } => Statement::Match {
             expr: Box::new(rename_expr(expr, map)),
             arms: arms.iter().map(|a| StmtMatchArm {
-                pattern: a.pattern.clone(),
+                patterns: a.patterns.clone(),
                 body: a.body.iter().map(|s| rename_stmt(s, map)).collect(),
             }).collect(),
         },

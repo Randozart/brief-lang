@@ -788,7 +788,25 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a pattern for match arms.
-    fn parse_pattern(&mut self) -> Result<crate::ast::Pattern, SyntaxError> {
+    pub(crate) fn parse_pattern(&mut self) -> Result<crate::ast::Pattern, SyntaxError> {
+        // 2026-08-22 (spec-conformance plan Phase 4a): a parenthesized
+        // pattern is a TUPLE pattern `(p1, p2, …)` — the Bool-tuple form
+        // (`(true, true) => …`) and member-wise destructuring. A single
+        // element keeps Product shape (`(x)` matches 1-tuples); use `x` for
+        // plain bindings.
+        if self.eat(&Token::LParen) {
+            let mut elems = Vec::new();
+            if !self.check(&Token::RParen) {
+                loop {
+                    elems.push(self.parse_pattern()?);
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(Token::RParen)?;
+            return Ok(crate::ast::Pattern::Tuple(elems));
+        }
         match self.peek() {
             Some(Token::Underscore) => {
                 self.pos += 1;

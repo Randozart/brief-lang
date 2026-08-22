@@ -349,28 +349,21 @@ pub enum Statement {
     },
 }
 
-/// 2026-07-24: A single arm in a statement-level match (inside $defn bodies).
-/// Differs from ast::expr::MatchArm which is for expression-level match.
+/// 2026-07-24: A single arm in a statement-level match. 2026-08-22
+/// (spec-conformance plan Phase 4a): unified onto the rich expression-match
+/// pattern grammar (`ast::expr::Pattern`) — one grammar, both forms (DRY).
+/// `patterns` holds the `|`-separated alternatives (`0x30 | 0x31 => …`);
+/// first match wins. Statement arms take block bodies.
 #[derive(Debug, Clone)]
 pub struct StmtMatchArm {
-    pub pattern: StmtMatchPattern,
+    pub patterns: Vec<crate::ast::expr::Pattern>,
     pub body: Vec<Statement>,
 }
 
 impl PartialEq for StmtMatchArm {
     fn eq(&self, other: &Self) -> bool {
-        self.pattern == other.pattern && self.body == other.body
+        self.patterns == other.patterns && self.body == other.body
     }
-}
-
-/// 2026-07-24: A pattern in a statement-level match arm.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StmtMatchPattern {
-    Literal(i128),
-    String(String),
-    Wildcard,
-    /// 2026-07-30: Multiple patterns separated by `|`: `0x30 | 0x31 => body;`
-    Multi(Vec<StmtMatchPattern>),
 }
 
 // 2026-07-23: Manual PartialEq — InlineDefn/InlineTxn wrap Definition/Transaction

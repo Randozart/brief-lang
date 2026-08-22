@@ -395,19 +395,8 @@ fn spec_display_key(key: &str) -> Option<&'static str> {
     }
 }
 
-/// 2026-08-05: format a statement-level match pattern.
-fn format_stmt_match_pattern(p: &StmtMatchPattern) -> String {
-    match p {
-        StmtMatchPattern::Literal(n) => n.to_string(),
-        StmtMatchPattern::String(s) => format!("\"{}\"", s),
-        StmtMatchPattern::Wildcard => "_".to_string(),
-        StmtMatchPattern::Multi(parts) => parts
-            .iter()
-            .map(format_stmt_match_pattern)
-            .collect::<Vec<_>>()
-            .join(" | "),
-    }
-}
+// 2026-08-22 (Phase 4a): statement-match patterns are the unified
+// `ast::expr::Pattern`; Display already renders each, `|` joins here.
 
 /// 2026-08-05: format an enum variant in canonical form.
 fn format_enum_variant(v: &EnumVariant) -> String {
@@ -515,7 +504,16 @@ fn format_stmt_into(stmt: &Statement, out: &mut String, level: usize) {
             for arm in arms {
                 out.push('\n');
                 indent(out, level + 1);
-                let _ = write!(out, "{} =>", format_stmt_match_pattern(&arm.pattern));
+                let _ = write!(
+                    out,
+                    "{} =>",
+                    arm
+                        .patterns
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                );
                 if !arm.body.is_empty() {
                     out.push('\n');
                     format_block(&arm.body, level + 2, out);

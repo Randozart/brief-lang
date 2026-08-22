@@ -4272,6 +4272,55 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, r, scrut, lv).ok();
                 r
             }
+            // 2026-08-22 (spec-conformance plan Phase 4a): tuple patterns
+            // compare memberwise. The scrutinee is a tuple's heap image
+            // (`[count, e0, e1, …]`, carried as inttoptr-able i64); each
+            // sub-pattern tests its slot. Scalar literals only — binding
+            // sub-patterns need extraction into arm scope (later slice).
+            crate::ast::Pattern::Tuple(subpats) => {
+                let mut chain: Option<String> = None;
+                for (i, sp) in subpats.iter().enumerate() {
+                    let scalar = match sp {
+                        crate::ast::Pattern::Literal(Expr::Decimal(n)) => Some(*n),
+                        crate::ast::Pattern::Literal(Expr::Bool(b)) => Some(i64::from(*b)),
+                        crate::ast::Pattern::Wildcard | crate::ast::Pattern::Binding(_) => None,
+                        _ => None,
+                    };
+                    let Some(elem_val) = scalar else { continue };
+                    let base = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, scrut).ok();
+                    let slot = self.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = getelementptr i64, ptr {}, i64 {}",
+                        indent, slot, base, i + 1
+                    )
+                    .ok();
+                    let lv = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, lv, slot).ok();
+                    let cmp = self.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = icmp eq i64 {}, {}",
+                        indent, cmp, lv, elem_val
+                    )
+                    .ok();
+                    chain = Some(match chain {
+                        None => cmp,
+                        Some(prev) => {
+                            let anded = self.fun.gen_reg();
+                            writeln!(out, "{}{} = and i1 {}, {}", indent, anded, prev, cmp).ok();
+                            anded
+                        }
+                    });
+                }
+                chain.unwrap_or_else(|| {
+                    // All-wildcard tuple: matches unconditionally.
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp eq i64 0, 0", indent, r).ok();
+                    r
+                })
+            }
             crate::ast::Pattern::Range(start, end)
             | crate::ast::Pattern::RangeInclusive(start, end) => {
                 let ls = self.emit_pattern_literal(out, start, indent);

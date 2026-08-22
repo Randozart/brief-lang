@@ -33,7 +33,6 @@ pub mod slp_isomorphism;
 pub mod soa_reorder;
 pub mod soa_projection;
 pub mod licm;
-pub mod match_normalize;
 pub mod node_decompose;
 pub mod loop_carried;
 pub mod layout_optimizer;

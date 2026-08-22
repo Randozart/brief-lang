@@ -557,7 +557,9 @@ impl<'a> Parser<'a> {
 
     /// match expr { pattern => body; pattern => body; };
     /// 2026-07-24: Compile-time pattern matching for $defn bodies.
-    /// Patterns: literal integer, literal string, or wildcard.
+    /// 2026-08-22 (spec-conformance plan Phase 4a): unified onto the rich
+    /// expression-match pattern grammar — literals, strings, wildcards,
+    /// typed bindings, tuples, ranges, enum variants, `|` alternatives.
     fn parse_match_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1; // consume 'match'
         let expr = Box::new(self.parse_expression()?);
@@ -565,36 +567,19 @@ impl<'a> Parser<'a> {
 
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) {
-            // 2026-07-30: Parse | -separated patterns: 0x30 | 0x31 => body;
-            let mut patterns: Vec<crate::ast::StmtMatchPattern> = Vec::new();
+            // | -separated alternatives: 0x30 | 0x31 => body; — first wins.
+            let mut patterns: Vec<crate::ast::Pattern> = Vec::new();
             loop {
-                let pat = if self.eat(&Token::Underscore) {
-                    crate::ast::StmtMatchPattern::Wildcard
-                } else if let Some(&Token::Integer(n)) = self.peek() {
-                    self.pos += 1;
-                    crate::ast::StmtMatchPattern::Literal(n as i128)
-                } else if let Some(&Token::String(ref s)) = self.peek() {
-                    let s = s.clone();
-                    self.pos += 1;
-                    crate::ast::StmtMatchPattern::String(s)
-                } else {
-                    return self.error_at_current("expected pattern in match arm (string, integer, or _)");
-                };
-                patterns.push(pat);
+                patterns.push(self.parse_pattern()?);
                 if !self.eat(&Token::Pipe) {
                     break;
                 }
             }
-            let pattern = if patterns.len() == 1 {
-                patterns.into_iter().next().unwrap()
-            } else {
-                crate::ast::StmtMatchPattern::Multi(patterns)
-            };
 
             self.expect(crate::lexer::Token::FatArrow)?;
             let body = self.parse_block()?;
             self.expect(Token::Semicolon)?;
-            arms.push(crate::ast::StmtMatchArm { pattern, body });
+            arms.push(crate::ast::StmtMatchArm { patterns, body });
         }
         self.pos += 1; // consume '}'
         self.expect(Token::Semicolon)?;
@@ -693,6 +678,22 @@ mod tests {
     }
 
     // One-sided `when` (the sanctioned conditional) still parses.
+    // 2026-08-22 (spec-conformance plan Phase 4a): statement match carries
+    // the unified rich pattern grammar — | alternatives, tuples, bools.
+    #[test]
+    fn statement_match_parses_rich_patterns() {
+        let src = "$defn pick(v: Int) -> Int { match v { 1 | 2 => { term 10; }; _ => { term 0; }; }; };";
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        assert!(p.parse_program().is_ok(), "legacy int-or patterns must parse");
+
+        let src2 = "defn pick(flag: Bool, other: Bool) -> Int { match flag { (true, false) => { term 1; }; _ => { term 0; }; }; };";
+        let tokens2 = tokenize(src2).unwrap();
+        let mut p2 = Parser::new(tokens2, src2);
+        let prog = p2.parse_program().unwrap();
+        assert!(matches!(prog.first(), Some(crate::ast::TopLevel::Definition(_))), "tuple-pattern match parses inside a defn");
+    }
+
     #[test]
     fn when_statement_still_parses() {
         let src = "defn f(ready: Bool) -> Int { when ready { term 1; }; term 0; };";

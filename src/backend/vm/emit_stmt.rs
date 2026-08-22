@@ -133,46 +133,34 @@ impl VmBackend {
             Statement::Match { expr: scrutinee, arms } => {
                 self.emit_expr(&**scrutinee);
                 let end_label = self.fresh_label("stmt_match_end");
+                // 2026-08-22 (Phase 4a): unified Pattern grammar. Each
+                // alternative in an arm's `patterns` vec gets its own
+                // comparison chain; first hit jumps to the shared body.
                 for arm in arms {
                     let next_label = self.fresh_label("stmt_match_next");
-                    match &arm.pattern {
-                        StmtMatchPattern::Wildcard => {}
-                        StmtMatchPattern::Literal(pat_val) => {
-                            self.asm.emit_dup();
-                            let v = *pat_val;
-                            if v >= i16::MIN as i128 && v <= i16::MAX as i128 {
-                                self.asm.emit_push_i16(v as i16);
-                            } else {
-                                self.asm.emit_push_i64(v as i64);
+                    let mut has_wildcard = false;
+                    for pat in &arm.patterns {
+                        match pat {
+                            crate::ast::Pattern::Wildcard | crate::ast::Pattern::Binding(_) => {
+                                has_wildcard = true;
                             }
-                            self.asm.emit_eq();
-                            self.asm.emit_jz(&next_label);
-                        }
-                        // 2026-07-30: Multi-pattern: duplicate scrutinee for each
-                        StmtMatchPattern::Multi(patterns) => {
-                            for pat in patterns {
-                                match pat {
-                                    StmtMatchPattern::Literal(pat_val) => {
-                                        self.asm.emit_dup();
-                                        let v = *pat_val;
-                                        if v >= i16::MIN as i128 && v <= i16::MAX as i128 {
-                                            self.asm.emit_push_i16(v as i16);
-                                        } else {
-                                            self.asm.emit_push_i64(v as i64);
-                                        }
-                                        self.asm.emit_eq();
-                                        let body_label = self.fresh_label("multi_match_body");
-                                        self.asm.emit_jnz(&body_label);
-                                        self.asm.emit_jmp(&next_label);
-                                        self.asm.define_label(&body_label);
-                                    }
-                                    StmtMatchPattern::Wildcard => {}
-                                    _ => {}
+                            crate::ast::Pattern::Literal(Expr::Decimal(v)) => {
+                                self.asm.emit_dup();
+                                if *v >= i16::MIN as i64 && *v <= i16::MAX as i64 {
+                                    self.asm.emit_push_i16(*v as i16);
+                                } else {
+                                    self.asm.emit_push_i64(*v);
                                 }
+                                self.asm.emit_eq();
+                                let body_label = self.fresh_label("multi_match_body");
+                                self.asm.emit_jnz(&body_label);
+                                self.asm.emit_jmp(&next_label);
+                                self.asm.define_label(&body_label);
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
+                    let _ = has_wildcard;
                     for s in &arm.body {
                         self.emit_stmt(s);
                     }

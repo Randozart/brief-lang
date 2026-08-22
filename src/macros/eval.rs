@@ -582,34 +582,10 @@ fn evaluate_stage_stmt(
         }
         Statement::Match { expr, arms } => {
             let val = eval_nav_chain(expr, program, universe, stage, scope, sandbox, pm)?;
+            // 2026-08-22 (Phase 4a): arms carry the unified Pattern grammar;
+            // `|` alternatives are a plain vec, first matching arm wins.
             for arm in arms {
-                let matches = match &arm.pattern {
-                    crate::ast::StmtMatchPattern::Wildcard => true,
-                    crate::ast::StmtMatchPattern::Literal(n) => match &val {
-                        NavValue::Int(i) => *i as i128 == *n,
-                        _ => false,
-                    },
-                    crate::ast::StmtMatchPattern::String(s) => match &val {
-                        NavValue::Str(v) => v == s,
-                        _ => false,
-                    },
-                    crate::ast::StmtMatchPattern::Multi(patterns) => {
-                        patterns.iter().any(|p| {
-                            match p {
-                                crate::ast::StmtMatchPattern::Literal(n) => match &val {
-                                    NavValue::Int(i) => *i as i128 == *n,
-                                    _ => false,
-                                },
-                                crate::ast::StmtMatchPattern::String(s) => match &val {
-                                    NavValue::Str(v) => v == s,
-                                    _ => false,
-                                },
-                                crate::ast::StmtMatchPattern::Wildcard => true,
-                                crate::ast::StmtMatchPattern::Multi(_) => false,
-                            }
-                        })
-                    }
-                };
+                let matches = arm.patterns.iter().any(|p| pattern_matches_nav(p, &val));
                 if matches {
                     for s in &arm.body {
                         if let Some(val) = evaluate_stage_stmt(s, program, universe, stage, scope, sandbox, pm)? {
@@ -3396,5 +3372,32 @@ mod tests {
         let desc = &pm.expansion_traces[&0];
         assert!(desc.starts_with("ReplaceWith$ -> defn"),
             "trace should describe the replacement, got: {}", desc);
+    }
+}
+
+/// 2026-08-22 (spec-conformance plan Phase 4a): does one unified `Pattern`
+/// match a `$`-stage NavValue? Legacy shapes (int/string/wildcard literals)
+/// behave exactly as before; richer patterns match their natural shape where
+/// the stage value model can represent it (bool/int/str atoms), else no.
+fn pattern_matches_nav(p: &crate::ast::Pattern, val: &NavValue) -> bool {
+    use crate::ast::Pattern;
+    match p {
+        Pattern::Wildcard | Pattern::Binding(_) => true,
+        Pattern::Literal(Expr::Decimal(n)) => matches!(val, NavValue::Int(i) if *i == *n),
+        Pattern::Literal(Expr::Quoted(b)) => {
+            matches!(val, NavValue::Str(v) if v.as_bytes() == b.as_slice())
+        }
+        Pattern::Literal(Expr::Bool(b)) => matches!(val, NavValue::Bool(v) if v == b),
+        Pattern::TypedBinding(_, inner) => pattern_matches_nav(
+            &Pattern::Literal(literal_of_shape(inner)), val),
+        _ => false,
+    }
+}
+
+fn literal_of_shape(ty: &Type) -> Expr {
+    // A typed binding's membership test reduces to the member's atom shape.
+    match ty {
+        Type::Custom(n) if n == "Bool" => Expr::Bool(true),
+        _ => Expr::Decimal(0),
     }
 }

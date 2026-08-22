@@ -1,22 +1,22 @@
 // fizzbuzz — classic reactive loop.
-// 2026-08-22 (spec-conformance Phase 1b): migrated from if/else-if chain to
-// exhaustive match (SPEC §11.1 — no if/else); prior-state postcondition
-// (`current == @current + 1`) replaced by a goal-bound form since prior-
-// state reads are removed surface; result printed per cycle so the program
-// has an observable effect (accumulating into an unread field is dead).
+// 2026-08-22 (spec-conformance Phase 4a): the elegant tuple-pattern form,
+// restored now that `(a, b) =>` patterns parse (unified Pattern grammar).
+// Prior-state postcondition (`current == @current + 1`) replaced by a
+// goal-bound form since prior-state reads are removed surface; result is
+// printed per cycle so the program has an observable effect.
 let n: Int = 100;
 let current: Int = 1;
+let fizz: Bool = false;
+let buzz: Bool = false;
 
 node fizzbuzz [current <= n][current == n + 1] {
-  let result: String = match current % 15 {
-    0 => "FizzBuzz",
-    _ => match current % 3 {
-      0 => "Fizz",
-      _ => match current % 5 {
-        0 => "Buzz",
-        _ => current as String,
-      },
-    },
+  fizz = current % 3 == 0;
+  buzz = current % 5 == 0;
+  let result: String = match (fizz, buzz) {
+    (true, true) => "FizzBuzz",
+    (true, false) => "Fizz",
+    (false, true) => "Buzz",
+    _ => current as String,
   };
 
   println!(result);
