@@ -3,7 +3,7 @@
 // Uses print_int# to produce output, and __get_env_int to make the
 // loop bound runtime-determined (prevents compile-time precomputation).
 
-frgn __get_env_int(name: Ptr<Byte>) -> Int ;
+frgn __get_env_int(name: Ptr<Byte>) -> Int from #System;
 
 let limit: Int = __get_env_int("LIMIT");
 let counter: Int = 0;

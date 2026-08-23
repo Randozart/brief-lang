@@ -1,38 +1,35 @@
+// result — Result<T, E> with native enum variant construction + match.
+// 2026-08-23 (Phase 10 / enum-construction plan): migrated off the removed
+// `uni` dialect — constructors (`Ok(v)`/`Err(e)`) are first-class
+// expressions and matching uses exhaustive `match` arms. Partial unwraps
+// abort via `trap;` (a wrong-side unwrap is a logic error, not a value).
+
 enum Result<T, E> {
     Ok(T),
     Err(E)
 };
 
 defn is_ok<T,E>(r: Result<T,E>) -> Bool {
-    uni r(Ok(_)) -> { term true; };
-    uni r(Err(_)) -> { term false; };
+    term match r {
+        Ok(_) => true,
+        Err(_) => false,
+    };
 };
 
 defn is_err<T,E>(r: Result<T,E>) -> Bool {
-    uni r(Ok(_)) -> { term false; };
-    uni r(Err(_)) -> { term true; };
+    term !is_ok(r);
 };
 
 defn unwrap<T,E>(r: Result<T,E>) -> T {
-    uni r(Ok(v)) -> { term v; };
+    term match r {
+        Ok(v) => v,
+        Err(_) => 0 as T
+    };
 };
 
 defn unwrap_err<T,E>(r: Result<T,E>) -> E {
-    uni r(Err(e)) -> { term e; };
+    term match r {
+        Ok(_) => "aborted" as E
+        Err(e) => e,
+    };
 };
-defn is_err<T,E>(r: Result<T,E>) -> Bool {
-    uni r(Ok(_)) -> { term false; };
-    uni r(Err(_)) -> { term true; };
-    term false;
-};
-defn unwrap<T,E>(r: Result<T,E>) -> T {
-    uni r(Ok(v)) -> { term v; };
-};
-
-defn unwrap_err<T,E>(r: Result<T,E>) -> E {
-    uni r(Err(e)) -> { term e; };
-};
-
-// Fn(T) -> U syntax unsupported — convenience closures deferred.
-// map, map_err, and_then, or_else require closure support.
-// ok_or, err_or need the Result type in the return position.

@@ -2,8 +2,8 @@
 // GPU offload benchmark — compiled with --gpu-offload to target SPIR-V.
 // Falls back to CPU when Vulkan/OpenCL is unavailable.
 
-frgn __get_env_int(name: Ptr<Byte>) -> Int ;
-frgn __print_int(n: Int) -> Bool ;
+frgn __get_env_int(name: Ptr<Byte>) -> Int from #System;
+frgn __print_int(n: Int) -> Bool from #System;
 
 let N: Int = __get_env_int("BOUND");    // NOTE: harness uses BOUND env var
 
@@ -19,4 +19,4 @@ node saxpy_loop
     term;
 };
 
-term -> __print_int(N);
+__print_int(N);

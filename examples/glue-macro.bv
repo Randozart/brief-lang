@@ -5,7 +5,7 @@
 // (SPEC 19.6) — layouts adapt through GLUE descriptors + explicit casts.
 
 // Foreign function: import from the target language
-frgn print_number(n: Int) -> Bool ;
+frgn print_number(n: Int) -> Bool from "lib/demo_glue.c";
 
 // Exported function: available to foreign callers
 export defn add_and_print(a: Int, b: Int) -> Int {

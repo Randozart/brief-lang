@@ -23,8 +23,8 @@ const SR_TXE: Byte = 0x20;  // Transmit data register empty
 const SR_RXNE: Byte = 0x10; // Read data register not empty
 
 // Contract helper: check that a register address lies within a peripheral range
-defn in_range(reg: Ptr<Byte>, base: Int, end: Int) -> Bool {
-    term (reg as Int) >= base && (reg as Int) < end;
+defn in_range(reg_addr: Ptr<Byte>, base: Int, end: Int) -> Bool {
+    term (reg_addr as Int) >= base && (reg_addr as Int) < end;
 };
 
 // Send a character via UART (polling)
@@ -65,19 +65,19 @@ defn uart_set_baud(divisor: Int) -> Bool
 };
 
 // Read-modify-write: set a bit in a control register
-defn set_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
-    [in_range(reg, UART_BASE, UART_END)]
+defn set_bit(reg_addr: Ptr<Byte>, bit: Byte) -> Bool
+    [in_range(reg_addr, UART_BASE, UART_END)]
 {
-    let val: Byte = volatile_load#(reg);
-    term volatile_store#(reg, val | bit);
+    let val: Byte = volatile_load#(reg_addr);
+    term volatile_store#(reg_addr, val | bit);
 };
 
 // Read-modify-write: clear a bit in a control register
-defn clear_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
-    [in_range(reg, UART_BASE, UART_END)]
+defn clear_bit(reg_addr: Ptr<Byte>, bit: Byte) -> Bool
+    [in_range(reg_addr, UART_BASE, UART_END)]
 {
-    let val: Byte = volatile_load#(reg);
-    term volatile_store#(reg, val & !bit);
+    let val: Byte = volatile_load#(reg_addr);
+    term volatile_store#(reg_addr, val & !bit);
 };
 
 // Block read: read N bytes from an MMIO FIFO into a local buffer

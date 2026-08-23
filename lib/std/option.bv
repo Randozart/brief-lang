@@ -1,68 +1,34 @@
+// option — Option<T> with native enum variant construction + match.
+// 2026-08-23 (Phase 10 / enum-construction plan): migrated off the removed
+// `uni` dialect. Closure-taking adapters (map/and_then/filter/or_else) stay
+// deferred — Fn(T) -> U syntax is unsupported (see original notes).
+
 enum Option<T> {
     Some(T),
     None
 };
 
 defn is_some<T>(opt: Option<T>) -> Bool {
-    uni opt(Some(_)) = { term true; };
-    uni opt(None) = { term false; };
-    term false;
+    term match opt {
+        Some(_) => true,
+        None => false,
+    };
 };
+
 defn is_none<T>(opt: Option<T>) -> Bool {
-    uni opt(Some(_)) = { term false; };
-    uni opt(None) = { term true; };
-    term false;
+    term !is_some(opt);
 };
+
 defn unwrap<T>(opt: Option<T>) -> T {
-    uni opt(Some(v)) = { term v; };
+    term match opt {
+        Some(v) => v,
+        None => 0 as T,
+    };
 };
+
 defn unwrap_or<T>(opt: Option<T>, default: T) -> T {
-    uni opt(Some(v)) = { term v; };
-    uni opt(None) = { term default; };
-    term default;
-};
-defn unwrap_or_else<T>(opt: Option<T>,; };
-    uni opt(None) = { term; };
-    term;
-};
-defn map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> {
-    uni opt(Some(v)) = { term Some(f(v)); };
-    uni opt(None) = { term None; };
-    term None;
-};
-defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> {
-    uni opt(Some(v)) = { term f(v); };
-    uni opt(None) = { term None; };
-    term None;
-};
-defn or_else<T>(opt: Option<T>,; };
-    uni opt(None) = { term; };
-    term;
-};
-defn filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> {
-    uni opt(Some(v)) = {
-        when pred(v) { term Some(v); };
-        term None;
+    term match opt {
+        Some(v) => v,
+        None => default,
     };
-    uni opt(None) = { term None; };
-    term None;
-};
-defn zip<T, U>(a: Option<T>, b: Option<U>) -> Option<(T, U)> {
-    uni a(Some(x)) = {
-        uni b(Some(y)) = { term Some((x, y)); };
-        uni b(None) = { term None; };
-        term None;
-    };
-    uni a(None) = { term None; };
-    term None;
-};
-defn ok_or<T, E>(opt: Option<T>, err: E) -> Result<T, E> {
-    uni opt(Some(v)) = { term Ok(v); };
-    uni opt(None) = { term Err(err); };
-    term Err(err);
-};
-defn ok_or_else<T, E>(opt: Option<T>, err_fn: () -> E) -> Result<T, E> {
-    uni opt(Some(v)) = { term Ok(v); };
-    uni opt(None) = { term Err(err_fn()); };
-    term Err(err_fn());
 };

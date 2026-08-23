@@ -375,7 +375,17 @@ fn eval_call(
             // DYNAMIC scoping — its body reads the CALLER's state, so the local
             // env is seeded from the caller's bindings (not a captured
             // snapshot). A `term <value>` inside the body is the return.
-            None => match functions.get(name) {
+            None => {
+                // 2026-08-23 (enum construction): a call naming a declared
+                // ENUM VARIANT constructs a Sum — after closures/functions,
+                // so user fns shadow variants.
+                let is_variant = crate::interpreter::variant_defs()
+                    .map(|v| v.contains_key(name))
+                    .unwrap_or(false);
+                if is_variant {
+                    return Ok(Value::sum(name.to_string(), evaluated));
+                }
+                match functions.get(name) {
                 Some(fn_def) => {
                     if fn_def.parameters.len() != evaluated.len() {
                         return Err(RuntimeError::TypeError {
@@ -394,7 +404,8 @@ fn eval_call(
                     }
                 }
                 None => Err(RuntimeError::UndefinedFunction(name.into())),
-            },
+                }
+            }
         }
     }
 }

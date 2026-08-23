@@ -4,10 +4,10 @@
 // ===== SHARED MEMORY REGIONS =====
 
 obj SharedRegion {
-    id: String,           // Unique identifier
-    base_address: Int,    // Base memory address
-    size: Int,            // Size in bytes
-    permissions: String,  // "rw", "r", "w", "ro"
+    id: String;           // Unique identifier
+    base_address: Int;    // Base memory address
+    size: Int;            // Size in bytes
+    permissions: String;  // "rw", "r", "w", "ro"
     foreign_id: String    // Foreign language's identifier for this region
 }
 
@@ -46,10 +46,10 @@ defn release_shared_region(region: SharedRegion) -> Result<Void, String> {
 
 // Map a foreign function to a shared memory region
 obj MappedFFI {
-    name: String,
-    region: SharedRegion,
-    input_offset: Int,
-    output_offset: Int,
+    name: String;
+    region: SharedRegion;
+    input_offset: Int;
+    output_offset: Int;
     status_offset: Int
 }
 
@@ -152,9 +152,9 @@ defn memory_barrier() {
 // ===== METROPOLITAN PROTOCOL =====
 
 obj MetropolitanChannel {
-    id: String,
-    request_region: SharedRegion,
-    response_region: SharedRegion,
+    id: String;
+    request_region: SharedRegion;
+    response_region: SharedRegion;
     sync_region: SharedRegion
 }
 

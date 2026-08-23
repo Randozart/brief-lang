@@ -2576,10 +2576,20 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let variant_name = self.expect_identifier()?;
+                // 2026-08-23: MULTI-PAYLOAD variants — `RegisterOk(String, Int)`
+                // stores a Tuple payload; single-payload stays the bare type;
+                // zero-payload defaults Int (never matched by position).
                 let variant_ty = if self.eat(&Token::LParen) {
-                    let inner = self.parse_type()?;
+                    let mut inners = vec![self.parse_type()?];
+                    while self.eat(&Token::Comma) {
+                        inners.push(self.parse_type()?);
+                    }
                     self.expect(Token::RParen)?;
-                    inner
+                    if inners.len() == 1 {
+                        inners.pop().unwrap_or_else(Type::int)
+                    } else {
+                        Type::Tuple(inners)
+                    }
                 } else {
                     Type::int()
                 };
