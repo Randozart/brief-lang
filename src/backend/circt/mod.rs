@@ -76,6 +76,10 @@ impl CirctBackend {
     }
 
     pub fn generate(&mut self, items: &[TopLevel]) -> String {
+        // 2026-08-23 (Plan 0.1): direct-construction callers (unit tests)
+        // self-compute the dependency graph exactly as the pipeline's
+        // analyze_program does — identical build call + identical empty
+        // fallback — so both paths agree.
         let dep_graph = DependencyGraph::build(items)
             .unwrap_or_else(|_| DependencyGraph {
                 topo_order: Vec::new(),
@@ -85,7 +89,14 @@ impl CirctBackend {
                 is_trg: std::collections::HashSet::new(),
                 all_vars: std::collections::HashSet::new(),
             });
+        self.generate_with_dep_graph(items, &dep_graph)
+    }
 
+    /// 2026-08-23 (Plan 0.1, backend-scaffolding-foundation): pipeline entry —
+    /// consumes the shared `AnalysisResults.dependency_graph` computed once in
+    /// src/compile.rs instead of re-deriving it (frontend-driven dispatch:
+    /// the backend CONSUMES decisions). To undo: inline back into generate().
+    pub fn generate_with_dep_graph(&mut self, items: &[TopLevel], dep_graph: &DependencyGraph) -> String {
         for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {

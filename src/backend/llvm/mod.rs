@@ -1063,6 +1063,16 @@ pub struct LlvmBackend {
     // during the main compilation pass. The backend uses these to
     // decide whether to inline a foreign call or emit a bridge call.
     pub(crate) resolved_frgns: Option<std::collections::HashMap<String, crate::analysis::frgn_dispatch::ResolvedFrgn>>,
+
+    // ── Precomputed Frontend Analysis ─────────────────────────
+    // 2026-08-23 (Plan 0.1, backend-scaffolding-foundation): the pipeline
+    // computes AnalysisResults ONCE (src/compile.rs codegen) so every backend
+    // consumes the same frontend decisions; this field carries it into the
+    // LLVM path. generate() consumes it when present, else self-computes as
+    // before (direct-construction callers — glue/export.rs, unit tests).
+    // To undo: delete with_analysis + this field, restore the inline
+    // analyze_program call at the top of generate().
+    precomputed_analysis: Option<crate::backend::AnalysisResults>,
 }
 
 #[derive(Debug, Clone)]
@@ -1158,7 +1168,17 @@ impl LlvmBackend {
             arena_base_idx: None,
             analysis_alloc_strategies: None,
             resolved_frgns: None,
+            precomputed_analysis: None,
         }
+    }
+
+    /// 2026-08-23 (Plan 0.1): accept pipeline-computed frontend analysis so
+    /// every backend consumes the same `AnalysisResults` (frontend-driven
+    /// dispatch pillar). When unset, generate() self-computes — the
+    /// historical path used by direct-construction callers.
+    pub fn with_analysis(mut self, analysis: crate::backend::AnalysisResults) -> Self {
+        self.precomputed_analysis = Some(analysis);
+        self
     }
 
     pub fn with_alloc_strategies(mut self, strategies: std::collections::HashMap<usize, AllocStrategy>) -> Self {
@@ -2050,17 +2070,23 @@ impl LlvmBackend {
                 self.warnings.push(w.clone());
             }
         }
-        let mut analysis = crate::backend::analyze_program(
-            items,
-            false,
-            // 2026-07-31: Phase 3 (§8.1) — vector-phi promotion gate from
-            // config/targets.dbvl `vector_min_width` for this target.
-            crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
-            // 2026-08-06 (accel plan): the populated TypeUniverse for the
-            // flat-type proof in src/analysis/accel.rs (rule 18 — never name
-            // matching). Built by the normalizer before the backend runs.
-            self.ctx.type_universe.as_ref(),
-        );
+        // 2026-08-23 (Plan 0.1): consume the pipeline-computed analysis when
+        // the caller provided it (.with_analysis); otherwise self-compute —
+        // identical inputs, identical result, so both paths agree.
+        let mut analysis = match self.precomputed_analysis.take() {
+            Some(a) => a,
+            None => crate::backend::analyze_program(
+                items,
+                false,
+                // 2026-07-31: Phase 3 (§8.1) — vector-phi promotion gate from
+                // config/targets.dbvl `vector_min_width` for this target.
+                crate::config_tuning::target_settings_for(&self.ctx.target_triple).vector_min_width,
+                // 2026-08-06 (accel plan): the populated TypeUniverse for the
+                // flat-type proof in src/analysis/accel.rs (rule 18 — never name
+                // matching). Built by the normalizer before the backend runs.
+                self.ctx.type_universe.as_ref(),
+            ),
+        };
         self.ctx.dep_graph = analysis.dependency_graph.clone();
         self.ctx.global_free_after = analysis.global_lifetime.free_after.clone();
         self.ctx.observable_names = analysis.observable_names.clone();

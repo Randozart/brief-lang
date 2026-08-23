@@ -4718,3 +4718,22 @@ monomorphization (one slot per required fn, declaration order, sorted where
 iterated); indirect calls through slots; interpreter DynValue wrapper
 resolving through registered conformance. Field requirements and op-binding
 requirements staged behind defn-shaped ones.
+
+## Webstack `.rbv` compile nondeterminism — unsorted map iterations in component mounting (2026-08-23)
+
+**Status:** CLOSED 2026-08-23 (`backend-foundation` branch).
+**Found:** Plan 0.1 byte-identical IR verification — `counter.rbv` /
+`shopping_cart.rbv` produced different `.ll` across runs OF THE SAME BINARY
+(function order + field order varied with the SipHash seed).
+**Root causes (3, all in `src/analysis/component_instances.rs`):**
+1. `expand_component_instances` iterated `render_blocks: HashMap` while
+   rewriting `items` (mount insertion order).
+2. `instance_slot_set` pushed `StateDecl`s iterating a `HashSet<String>`.
+3. `build_txn_variants` snapshotted `obj.member_txns` (HashMap) into an
+   unsorted Vec before appending variant txns to `items`.
+**Fix:** render_blocks → `BTreeMap`; sorted snapshot before StateDecl pushes;
+`members.sort_by(key)` before variant appends. All dated 2026-08-23 with
+undo notes. Verified: 6 consecutive compiles of counter.rbv byte-identical;
+single hash across shopping_cart runs; full suite green.
+**Lesson:** the determinism rule must cover ANY map iteration feeding
+program REWRITING, not just direct IR emission.

@@ -1728,6 +1728,31 @@ fn codegen(
         }
     }
 
+    // ── Shared frontend analysis (Plan 0.1, 2026-08-23) ────────────────
+    // Computed ONCE here so every backend consumes identical frontend
+    // decisions (frontend-driven-dispatch pillar) instead of re-deriving
+    // them per backend. The tuning triple replicates each backend's own
+    // triple resolution (LLVM/Gpu default x86_64-unknown-linux-gnu from
+    // CompilerContext::new(); Webstack forces wasm32-unknown-wasi; a
+    // config/targets.dbvl entry overrides either) so the vector-phi gate
+    // matches what the backend would have derived itself.
+    // To undo: delete this block, restore per-backend analyze_program calls
+    // (LLVM: llvm/mod.rs generate(); CIRCT: circt/mod.rs generate()).
+    let default_triple = match opts.backend {
+        BackendKind::Webstack => "wasm32-unknown-wasi",
+        _ => "x86_64-unknown-linux-gnu",
+    };
+    let tuning_triple = load_target_config(opts)
+        .lookup(&get_extension(&opts.file_path))
+        .and_then(|e| e.target_triple.clone())
+        .unwrap_or_else(|| default_triple.to_string());
+    let analysis = briev_compiler::backend::analyze_program(
+        items,
+        false,
+        briev_compiler::config_tuning::target_settings_for(&tuning_triple).vector_min_width,
+        Some(&*universe),
+    );
+
     let output;
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
@@ -1744,7 +1769,10 @@ fn codegen(
                 .with_cast_from_bit_overrides(cast_from_bit_overrides)
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
-                .with_module_init(enable_module_init);
+                .with_module_init(enable_module_init)
+                // 2026-08-23 (Plan 0.1): pipeline-computed analysis, shared
+                // across backends — see the block above the dispatch.
+                .with_analysis(analysis);
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the
@@ -1774,7 +1802,7 @@ fn codegen(
                 // collapse in find_path can make them zero-cost.
                 graph.register_inverse_pairs_from(items);
             }
-output = b.generate(items, None);
+            output = b.generate(items, None);
             // 2026-08-01: surface the backend's warnings (redundant-keep hints,
             // GPU-info, target-triple notes) — they were test-only.
             for w in b.warnings() {
@@ -1807,7 +1835,10 @@ output = b.generate(items, None);
                 .with_resolved_frgns(resolved_frgns.clone())
                 .with_trg_unresolved_action(opts.trg_unresolved_action)
                 .with_module_init(enable_module_init)
-                .with_component_initializers(component_initializers.clone());
+                .with_component_initializers(component_initializers.clone())
+                // 2026-08-23 (Plan 0.1): pipeline-computed analysis, shared
+                // across backends — see the block above the dispatch.
+                .with_analysis(analysis);
             // 2026-08-11 (view wiring): view-bound fields are observability —
             // the DOM consumes them, so dead-field elimination must keep them.
             b.ctx.view_bound_fields = view_signals.clone();
@@ -1851,7 +1882,9 @@ output = b.generate(items, None);
         }
         BackendKind::Circt => {
             let mut b = briev_compiler::backend::circt::CirctBackend::new();
-            output = b.generate(items);
+            // 2026-08-23 (Plan 0.1): consume the shared dependency graph from
+            // the pipeline analysis instead of re-deriving it.
+            output = b.generate_with_dep_graph(items, &analysis.dependency_graph);
             ".mlir"
         }
         BackendKind::Gpu => {
@@ -1864,7 +1897,10 @@ output = b.generate(items, None);
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_resolved_frgns(resolved_frgns)
-                .with_trg_unresolved_action(opts.trg_unresolved_action);
+                .with_trg_unresolved_action(opts.trg_unresolved_action)
+                // 2026-08-23 (Plan 0.1): pipeline-computed analysis, shared
+                // across backends — see the block above the dispatch.
+                .with_analysis(analysis);
             // Apply target config (same logic as Llvm)
             let ext = get_extension(&opts.file_path);
             // 2026-08-04 (Phase 4): an .ebv embedded target activates the

@@ -81,7 +81,12 @@ pub fn expand_component_instances(
     view_html: &str,
 ) -> Result<ComponentInstancePlan, String> {
     // ── Collect render blocks + obj definitions ──────────────────────
-    let render_blocks: HashMap<String, String> = items
+    // 2026-08-23 (bugfix, determinism): BTreeMap — the mount loop below
+    // rewrites `items` in iteration order, so a HashMap here made the
+    // compiled AST (and thus emitted IR function order) vary per process
+    // seed. Every map iterated for program rewriting must be sorted by key.
+    // To undo: revert to HashMap (reintroduces nondeterministic mounts).
+    let render_blocks: std::collections::BTreeMap<String, String> = items
         .iter()
         .filter_map(|item| match item {
             TopLevel::RenderBlock(rb) => Some((rb.struct_name.clone(), rb.view_html.clone())),
@@ -463,7 +468,7 @@ const RESERVED_TAG_NAMES: &[&str] = &[
 /// state becomes the `name.<field>` slots).
 fn collect_instance_lets(
     items: &mut Vec<TopLevel>,
-    render_blocks: &HashMap<String, String>,
+    render_blocks: &std::collections::BTreeMap<String, String>,
     obj_defs: &HashMap<String, ObjInfo>,
 ) -> Result<Vec<(String, String, Option<HashMap<String, Expr>>)>, String> {
     let mut infos: Vec<(String, String, Option<HashMap<String, Expr>>)> = Vec::new();
@@ -635,7 +640,7 @@ fn strip_quotes(v: &str) -> Option<&str> {
 fn count_component_mounts(
     view_html: &str,
     component: &str,
-    fragments: &HashMap<String, String>,
+    fragments: &std::collections::BTreeMap<String, String>,
 ) -> usize {
     let mut total = count_mounts_in(view_html, component);
     for (name, html) in fragments {
@@ -688,7 +693,12 @@ fn instance_slot_set(
             collect_txn_slots(member, &obj.slots, &mut slots);
         }
     }
-    for field in &slots {
+    // 2026-08-23 (bugfix, determinism): sort before pushing StateDecls — a
+    // HashSet iteration here made emitted IR field/function order vary per
+    // process seed. To undo: revert to `for field in &slots` (nondeterministic).
+    let mut sorted_slots: Vec<&String> = slots.iter().collect();
+    sorted_slots.sort();
+    for field in sorted_slots {
         let ty = obj.slots.get(field).cloned().unwrap_or_else(Type::int);
         items.push(TopLevel::StateDecl(crate::ast::top::StateDecl {
             name: format!("{}.{}", prefix, field),
@@ -725,12 +735,16 @@ fn build_txn_variants(
     let mut variants = HashMap::new();
     // Snapshot the members to variant-ize (those triggered by the fragment or
     // referencing the fragment's fields).
-    let members: Vec<(String, Transaction)> = obj
+    let mut members: Vec<(String, Transaction)> = obj
         .member_txns
         .iter()
         .filter(|(name, t)| refs.txns.contains(*name) || txn_references_fields(t, &refs.fields))
         .map(|(name, t)| (name.clone(), t.clone()))
         .collect();
+    // 2026-08-23 (bugfix, determinism): member_txns is a HashMap — sort the
+    // snapshot so variant txns are appended to `items` in a stable order.
+    // To undo: remove the sort (reintroduces per-process IR variance).
+    members.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, mut t) in members {
         let variant_name = format!("{}_{}", name, suffix);
         // for_each keeps the body-rewrite single-level for Praetor.
