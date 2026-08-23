@@ -1,7 +1,12 @@
 # Webstack flush buffer — real update batches at term
 
 **Date:** 2026-08-10
-**Status:** active
+**Status:** DONE 2026-08-23 — implemented in the live v2 path
+(src/backend/llvm/emit_stmt.rs:44-104: buffered `__web_flush_buf` +
+count-parameterized `__web_flush_state(ptrtoint buf, count)` at term;
+JS shim `_applyFlush` reads the same layout). Covered by
+test_webstack_emits_flush_at_term et al. The plan-era stub lived in the
+deleted v1 webstack/mod.rs.
 **Related:** `docs/plans/2026-07-26-rendered-briev-webstack-v2.md` (Phase 4), `docs/architecture/features/rendered-briev-wasm.md` (the state_layout/flush contract), `src/glue/web_generator.rs` (JS shim).
 
 ## Problem

@@ -19,8 +19,6 @@ pub mod vector_phi;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(feature = "kani", feature = "kani_full"))]
-mod kani;
 
 pub use builder::LLVMBuilder;
 pub use context::{CompilerContext, FunctionContext, FunctionGuard};

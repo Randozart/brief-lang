@@ -1,7 +1,14 @@
 # Webstack backend — v2 completion and legacy removal
 
 **Date:** 2026-08-23
-**Status:** active
+**Status:** DONE 2026-08-23. Investigation outcome: v2 had already
+absorbed everything — the "legacy TS emitter" had ZERO live callers, the
+flush-buffer work was complete in emit_stmt.rs, and set_stdout_buf#
+existed only in dead code. Landed: deletion of backend/webstack/mod.rs
+(1289 lines), src/features/ (314 lines), stale kani.rs (feature-gated,
+referenced a nonexistent AST shape); normalizer untouched (live).
+AddressOf# is implemented in LLVM intrinsics with eprintln warnings —
+upgrading those to house diagnostics remains an opportunistic sweep item.
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first (capability
 matrix; artifact contract). Work confined to `src/backend/webstack/`,
