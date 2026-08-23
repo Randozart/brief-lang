@@ -346,6 +346,24 @@ Suite: 1903 → 1916 passing, 0 failures. Remaining: Phases 5 (dyn), 6-finish
 Remaining after this session: Phases 5 (dyn), 7 (obj/cell ports),
 8 (task lifecycle), 9 (.s strict), 10 (conformance sweep).
 
+### 2026-08-22 session 2 (cont.) — Phase 9
+- **Phase 9** ✅ — `.s` strict enforcement:
+  - GlobalLifetime now records WHY each heap field fell back
+    (`lifetime_fallbacks`: no reader / last consumer not foldable) —
+    single source of truth shared by memcheck output and strict.
+  - `analysis::strict::enforce` escalates fallbacks to hard errors under
+    dotted-profile sources (`.s.bv`, `.s.rbv`; compound forms already
+    rejected and still tested), wired into BOTH build and check paths.
+  - Trust-boundary report `<src>.report.txt` written on strict builds:
+    every frgn/asm axiom + per-field memory decision (one wording with
+    memcheck via field_decision_line).
+  - examples/strict_demo.s.bv: passing strict program (freed field);
+    orphaned-malloc fixture rejects with the fix in the message.
+  - Suite 1916 → 1921.
+
+Remaining: Phases 5 (dyn), 7 (obj/cell ports), 8 (task lifecycle),
+10 (conformance sweep).
+
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.

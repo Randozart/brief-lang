@@ -23,6 +23,12 @@ pub struct GlobalLifetime {
     /// 2026-08-01 (Phase 5): fields with a `keep x;` hint that the scheduler
     /// would NOT have auto-freed anyway — the hint is redundant (a warning).
     pub redundant_keeps: Vec<String>,
+    /// 2026-08-22 (spec-conformance Phase 9, SPEC §3.2): heap-backed fields
+    /// that fell back to "lives for the program" with WHY (no sound consumer,
+    /// or last consumer not foldable). Normal profiles surface these as
+    /// memcheck report lines; `.s` strict profiles escalate them to errors.
+    /// Empty for scalars — only genuine heap fallbacks belong here.
+    pub lifetime_fallbacks: Vec<(String, &'static str)>,
 }
 
 /// Compute the scheduled frees. `field_initializers` maps a state field to its
@@ -81,6 +87,7 @@ pub fn analyze(
         return GlobalLifetime {
             free_after: HashMap::new(),
             redundant_keeps: kept.into_iter().collect(),
+            lifetime_fallbacks: Vec::new(),
         };
     }
 
@@ -102,6 +109,7 @@ pub fn analyze(
     }
 
     let mut free_after: HashMap<String, Vec<String>> = HashMap::new();
+    let mut fallbacks: Vec<(String, &'static str)> = Vec::new();
     for field in &heap_backed {
         // The ordered list of txns that touch this field, in reactor order.
         let consumers: Vec<&String> = node_order
@@ -111,6 +119,7 @@ pub fn analyze(
         let Some(last) = consumers.last() else {
             // No consumer at all — the field is written but never read.
             // Conservatively NOT freed (its initializer may still be live).
+            fallbacks.push((field.clone(), "no transaction reads it"));
             continue;
         };
         // 2026-08-06 (fix): only schedule a free when the last consumer has a
@@ -118,6 +127,10 @@ pub fn analyze(
         // point). A non-foldable last consumer falls back to "lives for the
         // program" — scheduling here would be silently dropped.
         if !foldable.contains(last.as_str()) {
+            fallbacks.push((
+                field.clone(),
+                "its last consumer has no bounded-loop shape to free after",
+            ));
             continue;
         }
         free_after.entry((*last).clone()).or_default().push(field.clone());
@@ -137,6 +150,7 @@ pub fn analyze(
     GlobalLifetime {
         free_after,
         redundant_keeps,
+        lifetime_fallbacks: fallbacks,
     }
 }
 

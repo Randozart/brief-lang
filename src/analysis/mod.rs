@@ -1,5 +1,6 @@
 pub mod address_space;
 pub mod casing;
+pub mod strict;
 pub mod call_graph;
 pub mod concurrency_gate;
 pub mod cross_reference;

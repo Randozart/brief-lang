@@ -136,7 +136,7 @@ pub fn print_memcheck(report: &MemcheckReport) {
         println!("  (no state fields)");
     }
     for f in &fields {
-        print_field_decision(report, f);
+        println!("{}", field_decision_line(report, f));
     }
     if !report.lifetime.redundant_keeps.is_empty() {
         println!("  redundant `keep` hints (the scheduler would not free these anyway):");
@@ -147,9 +147,11 @@ pub fn print_memcheck(report: &MemcheckReport) {
     println!("=== end memcheck ===");
 }
 
-/// Print one field's scheduling decision: freed after a txn, sealed by an
-/// init bound, or "lives for the program".
-fn print_field_decision(report: &MemcheckReport, f: &str) {
+/// One field's scheduling decision as a single line: freed after a txn,
+/// sealed by an init bound, or "lives for the program".
+/// 2026-08-22 (Phase 9): shared by `memcheck` output and the `.s`
+/// verification report (analysis::strict::render_report) — one wording.
+pub fn field_decision_line(report: &MemcheckReport, f: &str) -> String {
     let scheduled: Vec<&String> = report
         .lifetime
         .free_after
@@ -164,13 +166,13 @@ fn print_field_decision(report: &MemcheckReport, f: &str) {
         .collect();
     if !scheduled.is_empty() {
         let txn_names: Vec<&str> = scheduled.iter().map(|t| t.as_str()).collect();
-        println!("  {}: freed after {}", f, txn_names.join(", "));
+        format!("  {}: freed after {}", f, txn_names.join(", "))
     } else if report.sealed_fields.iter().any(|x| x == f) {
         // 2026-08-09 (init kind, Phase 2): an init-bound pool is sealed —
         // capacity is the bound-set max, provably inexhaustible. Not a leak.
-        println!("  {}: sealed (capacity bound by an init — provably inexhaustible)", f);
+        format!("  {}: sealed (capacity bound by an init — provably inexhaustible)", f)
     } else {
-        println!("  {}: lives for the program (unprovable — potential leak; add `free`/`keep` or a refcount)", f);
+        format!("  {}: lives for the program (unprovable — potential leak; add `free`/`keep` or a refcount)", f)
     }
 }
 

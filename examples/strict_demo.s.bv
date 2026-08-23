@@ -1,0 +1,10 @@
+let buf: Ptr<Bit<8>> = Malloc#(64);
+let n: Int = 0;
+node run [n < 1][n == 1] {
+  when n == 0 {
+    Store#(buf, 7);
+    endprogram Print#(Load#(buf));
+  };
+  n = n + 1;
+  term;
+};

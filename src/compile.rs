@@ -784,6 +784,27 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     for w in briev_compiler::analysis::casing::analyze(&items) {
         eprintln!("warning: {w}");
     }
+    // 2026-08-22 (spec-conformance plan Phase 9, SPEC §3.2): `.s` strict
+    // profile — representation fallbacks become hard errors. The dotted-flag
+    // forms only (`.s.bv`, `.s.rbv`); classify() already rejects compound
+    // `.sbv`/`.srbv`. Proof obligations, trivial contracts, and concurrency
+    // classification are global gates already; strict adds the memory-
+    // decision tier. The trust-boundary report is written when strict passes.
+    let strict_profile =
+        briev_compiler::conformance::is_strict(std::path::Path::new(file_path));
+    if strict_profile {
+        let mc = briev_compiler::macros::memcheck::run_memcheck(&items);
+        briev_compiler::analysis::strict::enforce(&items, &mc)?;
+        let report = briev_compiler::analysis::strict::render_report(&items, &mc);
+        let report_path = std::path::Path::new(file_path).with_extension("report.txt");
+        if let Err(e) = std::fs::write(&report_path, &report) {
+            return Err(format!(
+                "cannot write the `.s` verification report to {}: {}",
+                report_path.display(), e
+            ));
+        }
+        eprintln!("[.s] verification report: {}", report_path.display());
+    }
     // 2026-08-07 (object instance pools): spawn pools must be predictably
     // inexhaustible — the spawn-count analysis rejects any spawn whose
     // multiplicity cannot be statically bounded (Briev has no runtime errors).
@@ -2402,6 +2423,12 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     // reports the same advisories as `build` so the two paths never diverge.
     for w in briev_compiler::analysis::casing::analyze(&items) {
         eprintln!("warning: {w}");
+    }
+    // 2026-08-22 (Phase 9): `.s` strict gate in `check` too — acceptance
+    // criteria must not diverge between check and build (2026-08-18 lesson).
+    if briev_compiler::conformance::is_strict(std::path::Path::new(file_path)) {
+        let mc = briev_compiler::macros::memcheck::run_memcheck(&items);
+        briev_compiler::analysis::strict::enforce(&items, &mc)?;
     }
     // 2026-08-07 (object instance pools): `check` must reject unprovable
     // spawn counts exactly like `build` (Briev has no runtime errors).
