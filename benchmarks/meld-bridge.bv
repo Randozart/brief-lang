@@ -17,7 +17,7 @@
 
 // briev_rt.c linked automatically
 
-frgn consume_buffer(data: Int, size: Int) -> Int ;
+frgn consume_buffer(data: Int, size: Int) -> Int from "lib/meld_bridge.c";
 
 obj CBuffer { ptr: Int, len: Int };
 obj RSBuffer { data: Int, size: Int };

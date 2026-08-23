@@ -4922,7 +4922,14 @@ bounded-iteration txn chain (ugly), or drive the interpretation loop from
 C (install_sim calls a single-step `exec_op_entry` export repeatedly —
 keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
 
-## Conformance sweep: 132 active sources fail the real-pipeline gate (2026-08-23 update #2)
+## Conformance sweep: 119 active sources fail the real-pipeline gate (2026-08-23 update #3)
+
+**Progress this pass:** 132 → 119. Landed: multi-payload enum variants
+(parser), bits.bv migrated off `:>`, metro/ext archive (zero-consumer,
+uni+Blob-construction chains), frgn provenance on 7 demo/bench files,
+reg/pvt/out renames. Per-demo deep migrations remain: each legacy file
+reveals further removed syntax beneath the first fix (var statements,
+missing semis, top-level term) — burn down one file per pass.
 
 **Progress:** enum variant construction LANDED (4bb965cb) — result.bv +
 option.bv migrated to native constructors + exhaustive match. Sweep at

@@ -3,7 +3,7 @@
 // with --backend webstack. All .bv imports are WASM by default — no (wasm) annotation needed.
 // See docs/architecture/features/rendered-briev-wasm.md
 
-frgn submit_triangles(verts: Ptr<Float>, count: Int) -> Bool ;
+frgn submit_triangles(verts: Ptr<Float>, count: Int) -> Bool from #System;
 
 txn simulate(p: Ptr<Float>, n: Int) -> Float {
     let result: Float = 0.0;

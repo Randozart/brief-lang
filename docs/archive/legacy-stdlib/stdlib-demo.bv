@@ -3,7 +3,9 @@
 // string/char operations from stdlib
 
 import { new_map, insert, get, contains_key, remove, keys, values } from "std/hashmap";
-import { new_set, add, contains, to_list, union, intersection } from "std/hashset";
+// 2026-08-23: std/hashset archived AND this demo uses removed @-syntax —
+// archived alongside it; rewrite against modern syntax when revived.
+
 import { new_stack, push, pop, peek, top } from "std/stack";
 import { new_queue, enqueue, dequeue, front } from "std/queue";
 import { new_builder, append_str, to_string, clear, len } from "std/string_builder";

@@ -4,23 +4,23 @@
 // ===== SERVICE ENTRY =====
 
 obj ServiceEntry {
-    name: String,
-    shm_name: String,
-    addr: Int,
-    capacity: Int,
-    payload_size: Int,
-    input_fields: Int,
-    output_fields: Int,
-    registered_at: Int,
+    name: String;
+    shm_name: String;
+    addr: Int;
+    capacity: Int;
+    payload_size: Int;
+    input_fields: Int;
+    output_fields: Int;
+    registered_at: Int;
     active: Bool
 }
 
 // ===== REGISTRATION REQUEST =====
 
 obj RegisterRequest {
-    name: String,
-    capacity: Int,
-    input_fields: Int,
+    name: String;
+    capacity: Int;
+    input_fields: Int;
     output_fields: Int
 }
 
@@ -41,11 +41,11 @@ obj LookupRequest {
 // ===== LOOKUP RESPONSE =====
 
 obj LookupResponse {
-    found: Bool,
-    shm_name: String,
-    addr: Int,
-    capacity: Int,
-    header_offset: Int,
+    found: Bool;
+    shm_name: String;
+    addr: Int;
+    capacity: Int;
+    header_offset: Int;
     payload_offset: Int
 }
 
@@ -58,20 +58,20 @@ obj DeregisterRequest {
 // ===== DAEMON STATUS =====
 
 obj DaemonStatus {
-    service_count: Int,
-    total_memory: Int,
-    uptime_ms: Int,
+    service_count: Int;
+    total_memory: Int;
+    uptime_ms: Int;
     version: String
 }
 
 // ===== MEMORY SPEC JSON FIELDS =====
 
 obj MemorySpecChannel {
-    address: String,
-    header_offset: Int,
-    payload_offset: Int,
-    capacity: Int,
-    input_fields: Int,
+    address: String;
+    header_offset: Int;
+    payload_offset: Int;
+    capacity: Int;
+    input_fields: Int;
     output_fields: Int
 }
 
@@ -92,14 +92,14 @@ defn make_shm_name(service_name: String) -> String {
 // ===== HELPER: Format memory spec as JSON string =====
 
 defn format_memory_spec(entry: ServiceEntry) -> String {
-    let spec: String = "{";
-    let spec = spec + "\"channel\": {";
-    let spec = spec + "\"address\": \"" + entry.shm_name + "\",";
-    let spec = spec + "\"header_offset\": 0,";
-    let spec = spec + "\"payload_offset\": 32,";
-    let spec = spec + "\"capacity\": " + to_string(entry.capacity) + ",";
-    let spec = spec + "\"input_fields\": " + to_string(entry.input_fields) + ",";
-    let spec = spec + "\"output_fields\": " + to_string(entry.output_fields);
-    let spec = spec + "}}";
+    let spec_json: String = "{";
+    let spec_json = spec_json + "\"channel\": {";
+    let spec_json = spec_json + "\"address\": \"" + entry.shm_name + "\",";
+    let spec_json = spec_json + "\"header_offset\": 0,";
+    let spec_json = spec_json + "\"payload_offset\": 32,";
+    let spec_json = spec_json + "\"capacity\": " + to_string(entry.capacity) + ",";
+    let spec_json = spec_json + "\"input_fields\": " + to_string(entry.input_fields) + ",";
+    let spec_json = spec_json + "\"output_fields\": " + to_string(entry.output_fields);
+    let spec_json = spec_json + "}}";
     term spec;
 }

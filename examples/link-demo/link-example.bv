@@ -10,8 +10,8 @@
 import "link-demo/helper.c";
 
 // Declare the C functions as FFI
-frgn double_it(n: Int) -> Int;
-frgn greet(name: String) -> Bool;
+frgn double_it(n: Int) -> Int from #Link<linkdemo>;
+frgn greet(name: String) -> Bool from #Link<linkdemo>;
 
 txn run [true][result == 84] {
     let doubled: Int = double_it(42);

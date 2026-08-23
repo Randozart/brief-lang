@@ -7,8 +7,8 @@
 // needed for operations the compiler already knows about.
 
 // GLUE-style FFI declarations (no TOML bindings)
-frgn string_length(s: String) -> Result<Int, StringError> ;
-frgn string_concat(a: String, b: String) -> Result<String, StringError> ;
+frgn string_length(s: String) -> Result<Int, StringError> from "lib/string_ops.c";
+frgn string_concat(a: String, b: String) -> Result<String, StringError> from "lib/string_ops.c";
 
 // Test 1: println via intrinsic
 txn test1 [true][term == void] {
