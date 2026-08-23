@@ -376,6 +376,17 @@ Remaining: Phases 5 (dyn), 7 (obj/cell ports), 8 (task lifecycle),
 Remaining: Phase 5b (thunk tables), 7 (obj/cell ports), 8 (task
 lifecycle), 10 (conformance sweep).
 
+## Session-3 decisions (owner, 2026-08-22)
+
+| Question | Decision |
+|---|---|
+| Dyn ABI | Owner deferred to my efficiency judgment. Verdict: **i64 handle to a {data, table} image** — true two-word fat pointers are theoretically leaner but this backend's registers are single-valued, so a two-word ABI degenerates to pass-by-alloca anyway; the handle is the efficient choice WITHIN the architecture (union-handle precedent, uniform %State columns). |
+| `free task` gate | Explicit short keyword **prepended**: `canc defn …` (4 letters, joins the disclosed strategy-keyword family seq/vol/pack/…). Effect inference may replace it later without breaking annotated code. |
+| Phase 7 strategy | **Interp-first slice** (sums/dyn precedent): parse/typecheck/interp event delivery complete; LLVM + rbv staged behind BUGS entry. |
+| Cell depth | **Interp-complete cells** in the same arc: cells parse fully, seal-check, run in the interpreter; LLVM cell instances wait for the ports backend slice. |
+
+### Execution order: 5b → 8 → 7 → 10 (unchanged)
+
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.
