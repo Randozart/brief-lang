@@ -1890,8 +1890,19 @@ fn infer_variant_construction(
             type_name: format!("{}", enum_name),
         });
     }
+    // Type params of the enum — a payload whose declared type IS a param
+    // (e.g. T in Ok(T)) BINDS that param from the argument.
+    let params: Vec<String> =
+        ctx.type_params.get(enum_name).cloned().unwrap_or_default();
+    let mut subst: std::collections::HashMap<String, Type> = HashMap::new();
     for (a, pty) in args.iter().zip(payload_tys.iter()) {
         let aty = infer_type_only(a, ctx)?;
+        if let Type::Custom(pn) = pty {
+            if params.contains(pn) {
+                subst.insert(pn.clone(), aty.clone());
+                continue;
+            }
+        }
         if !types_compatible(pty, &aty, ctx) && aty != *pty {
             return Err(TypeError::TypeMismatch {
                 expected: format!("{}", pty),
@@ -1899,13 +1910,6 @@ fn infer_variant_construction(
                 context: format!("payload of '{}'", variant),
             });
         }
-    }
-
-    // Type params of the enum, bound positionally from payloads first.
-    let params = ctx.type_params.get(enum_name).cloned().unwrap_or_default();
-    let mut subst: std::collections::HashMap<String, Type> = HashMap::new();
-    for (pname, pty) in params.iter().zip(payload_tys.iter()) {
-        subst.insert(pname.clone(), pty.clone());
     }
     let mut type_args: Vec<Type> = params
         .iter()
@@ -2373,15 +2377,27 @@ fn infer_match(
                     Type::Applied(n, _) | Type::Custom(n) => n.clone(),
                     other => format!("{}", other),
                 };
+                let params_of: Vec<String> =
+                    ctx.type_params.get(&base_name).cloned().unwrap_or_default();
                 if let Some(slots) = ctx.type_slots.get(&base_name) {
                     if let Some(slot) = slots.iter().find(|s| s.name == format!("__variant_{name}")) {
                         let payload: Vec<Type> = match &slot.ty {
                             Type::Tuple(elems) => elems.clone(),
                             one => vec![one.clone()],
                         };
+                        // Substitute the enum's type params with the
+                        // scrutinee's concrete args (Result<Int,_> ⇒ T=Int).
+                        let mut subst: std::collections::HashMap<String, Type> =
+                            std::collections::HashMap::new();
+                        if let Type::Applied(_, args) = &matched_ty {
+                            for (pn, at) in params_of.iter().zip(args.iter()) {
+                                subst.insert(pn.clone(), at.clone());
+                            }
+                        }
                         for (sp, pty) in subpats.iter().zip(payload.iter()) {
                             if let crate::ast::Pattern::Binding(bn) = sp {
-                                binds.push((bn.clone(), pty.clone()));
+                                let resolved = substitute_type(pty, &subst);
+                                binds.push((bn.clone(), resolved));
                             }
                         }
                     }

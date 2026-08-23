@@ -695,6 +695,15 @@ impl LlvmBackend {
             Expr::Call(name, args, analysis_id) => {
                 if name.ends_with('#') {
                     self.emit_intrinsic_call_dispatch(out, v, name, args, *analysis_id, indent)
+                }
+                // 2026-08-23 (Phase 5d): ENUM VARIANT CONSTRUCTION — `Ok(x)`
+                // boxes { tag: variant index, payload } as an i64 handle.
+                // Runs BEFORE user-call resolution so variants can't be
+                // shadowed accidentally at the emission layer (the
+                // typechecker already lets user fns shadow).
+                else if let Some((_enum_name, tag_idx)) = self.enum_variant_ctor(name)
+                {
+                    self.emit_enum_construct(out, v, tag_idx, args, indent)
                 } else if self.ctx.struct_types.contains_key(name) {
                     // 2026-07-31 (A5): struct constructor call — `Stack()` /
                     // `Person("Alice", 30)` — emits a struct literal with the
@@ -4223,6 +4232,95 @@ impl LlvmBackend {
         r
     }
 
+    // ── 2026-08-23 (Phase 5d): ENUM VARIANT lowering ─────────────────────
+    // An enum value uses the union tagged ABI: an i64 handle to a 16-byte
+    // { i64 tag (variant index), i64 payload } image. Construction boxes;
+    // match dispatch reads the tag and extracts the payload. Multi-payload
+    // variants stage until tuple unboxing lands in pattern bindings.
+
+    /// Resolve `name` to a variant constructor: (enum, tag index). Scans the
+    /// type_slots registry for `__variant_{name}`; ambiguous names error —
+    /// bare construction requires unique variant names.
+    pub(crate) fn enum_variant_ctor(&self, name: &str) -> Option<(String, usize)> {
+        self.ctx.variant_ctor.get(name).cloned()
+    }
+
+    /// Emit a variant constructor: box {tag, payload} → i64 handle.
+    pub(crate) fn emit_enum_construct(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        tag_idx: usize,
+        args: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        if args.len() > 1 {
+            panic!(
+                "multi-payload variant construction is staged — bind the payload \\
+                 as one value or split the variant"
+            );
+        }
+        let raw = self.fun.gen_reg();
+        writeln!(out, "{}{} = call ptr @malloc(i64 16)", indent, raw).ok();
+        let img = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, img, raw).ok();
+        let tag_slot = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 0",
+            indent, tag_slot, img
+        )
+        .ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, tag_idx, tag_slot).ok();
+
+        // Payload: single argument stored in its boxed-i64 representation;
+        // zero-payload variants store 0.
+        let payload_i64 = if args.is_empty() {
+            "0".to_string()
+        } else {
+            let preg = self.emit_expr(out, &args[0], indent);
+            let llvm_ty = self.llvm_type(&preg.ty);
+            match llvm_ty.as_str() {
+                "ptr" => {
+                    let c = self.fun.gen_reg();
+                    writeln!(
+                        out,
+                        "{}{} = ptrtoint {} {} to i64",
+                        indent, c, llvm_ty, preg.name
+                    )
+                    .ok();
+                    c
+                }
+                "double" => {
+                    let c = self.fun.gen_reg();
+                    writeln!(out, "{}{} = bitcast double {} to i64", indent, c, preg.name)
+                        .ok();
+                    c
+                }
+                "float" => {
+                    let c = self.fun.gen_reg();
+                    let w = self.fun.gen_reg();
+                    writeln!(out, "{}{} = bitcast float {} to i32", indent, c, preg.name)
+                        .ok();
+                    writeln!(out, "{}{} = zext i32 {} to i64", indent, w, c).ok();
+                    w
+                }
+                _ => preg.name.clone(),
+            }
+        };
+        let payload_slot = self.fun.gen_reg();
+        writeln!(
+            out,
+            "{}{} = getelementptr i64, ptr {}, i64 1",
+            indent, payload_slot, img
+        )
+        .ok();
+        writeln!(out, "{}store i64 {}, ptr {}", indent, payload_i64, payload_slot).ok();
+        let handle = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, raw).ok();
+        TypedRegister { name: handle, ty: Type::int() }
+    }
+
     pub(super) fn emit_user_call(
         &mut self,
         out: &mut String,
@@ -4671,6 +4769,31 @@ impl LlvmBackend {
             crate::ast::Pattern::TypedBinding(_, member) => {
                 self.emit_union_tag_test(out, indent, scrut, scrut_ty, member)
             }
+            // 2026-08-23 (Phase 5d): an ENUM VARIANT arm tests the tag —
+            // the scrutinee is the tagged-handle i64 (union ABI), the tag
+            // index is the variant's position among the enum's declared
+            // variants.
+            crate::ast::Pattern::EnumVariant(vname, _) => {
+                let Some((_, tag_idx)) = self.enum_variant_ctor(vname) else {
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = icmp eq i64 0, 1", indent, r).ok();
+                    return r;
+                };
+                let base = self.fun.gen_reg();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, scrut).ok();
+                let slot = self.fun.gen_reg();
+                writeln!(
+                    out,
+                    "{}{} = getelementptr i64, ptr {}, i64 0",
+                    indent, slot, base
+                )
+                .ok();
+                let tag = self.fun.gen_reg();
+                writeln!(out, "{}{} = load i64, ptr {}", indent, tag, slot).ok();
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, r, tag, tag_idx).ok();
+                r
+            }
             crate::ast::Pattern::Literal(lit) => {
                 let lv = self.emit_pattern_literal(out, lit, indent);
                 let r = self.fun.gen_reg();
@@ -4808,6 +4931,47 @@ impl LlvmBackend {
                 self.fun.let_bindings.insert(name.clone(), reg);
                 self.fun.let_binding_types.insert(name.clone(), (**ty).clone());
                 self.fun.let_original_types.insert(name.clone(), (**ty).clone());
+            }
+            // 2026-08-23 (Phase 5d): an ENUM VARIANT arm extracts the
+            // payload (slot 1 of the tagged image) and binds single-payload
+            // Binding sub-patterns to it. Multi-payload sub-patterns stage.
+            crate::ast::Pattern::EnumVariant(vname, subpats) => {
+                let staged = subpats.iter().any(|sp| {
+                    !matches!(
+                        sp,
+                        crate::ast::Pattern::Binding(_)
+                            | crate::ast::Pattern::Wildcard
+                    )
+                }) || subpats.len() > 1;
+                if staged {
+                    panic!(
+                        "enum variant '{vname}' with multi-payload or non-Binding \\
+                         sub-patterns is staged — bind a single value or use `_`"
+                    );
+                }
+                let base = self.fun.gen_reg();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, scrut).ok();
+                let slot = self.fun.gen_reg();
+                writeln!(
+                    out,
+                    "{}{} = getelementptr i64, ptr {}, i64 1",
+                    indent, slot, base
+                )
+                .ok();
+                let raw = self.fun.gen_reg();
+                writeln!(out, "{}{} = load i64, ptr {}", indent, raw, slot).ok();
+                let bound_ty = Type::int();
+                for sp in subpats {
+                    if let crate::ast::Pattern::Binding(bn) = sp {
+                        self.fun.last_val_temps.insert(bn.clone(), raw.clone());
+                        self.fun.last_val_types.insert(bn.clone(), bound_ty.clone());
+                        self.fun.let_bindings.insert(bn.clone(), raw.clone());
+                        self.fun.let_binding_types.insert(bn.clone(), bound_ty.clone());
+                        self.fun
+                            .let_original_types
+                            .insert(bn.clone(), bound_ty.clone());
+                    }
+                }
             }
             _ => {}
         }

@@ -4945,6 +4945,22 @@ bounded-iteration txn chain (ugly), or drive the interpretation loop from
 C (install_sim calls a single-step `exec_op_entry` export repeatedly —
 keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
 
+## Version-DAG phi mismatch with nested guard bodies (2026-08-23)
+
+**Status:** OPEN — pre-existing, enum-independent
+**Repro:** `bugs/repro_vd_phi_nested_guard.bv` — single-runtime-guard node
+(version-DAG path) whose body contains a NESTED `when` plus calls into an
+imported stdlib fn.
+**Behavior:** clang rejects: "PHI node entries do not match predecessors!"
+— `%vdc10 = phi i64 [ %t5, %entry ], [ %bl8, %.vd0_latch ], [ %bp9,
+%.vd0_present ]` cites `.vd0_present`/`.vd0_latch` blocks whose real
+predecessor sets differ (the nested guard's merge re-parents blocks).
+Same family as the earlier match-edge and guard-merge dominance fixes but
+in the version-DAG emitter, which has its own phi bookkeeping.
+**Fix direction:** audit `emit_version_dag`'s phi predecessor capture the
+same way the countable Guarded arm was fixed — derive predecessors from
+the blocks that ACTUALLY branch, never from tracked names.
+
 ## Conformance sweep: 119 active sources fail the real-pipeline gate (2026-08-23 update #3)
 
 **Progress this pass:** 132 → 119. Landed: multi-payload enum variants

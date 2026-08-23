@@ -29,18 +29,18 @@ let base_reg: Ptr<Int> = (UART_DR as Int + 8) as Ptr<Int>;
 let uart_dr_as_char: Ptr<Char> = UART_DR as Ptr<Char>;
 
 // --- Volatile access with contract-proven safety ---
-defn read_uart(reg_addr: Ptr<Int>) -> Int
-    [reg_addr as Int >= UART_BASE]
-    [reg_addr as Int <  UART_END]
+defn read_uart(reg: Ptr<Int>) -> Int
+    [reg as Int >= UART_BASE]
+    [reg as Int <  UART_END]
 {
-    term Load#(reg_addr);
+    term Load#(reg);
 };
 
-defn write_uart(reg_addr: Ptr<Int>, val: Int)
-    [reg_addr as Int >= UART_BASE]
-    [reg_addr as Int <  UART_END]
+defn write_uart(reg: Ptr<Int>, val: Int)
+    [reg as Int >= UART_BASE]
+    [reg as Int <  UART_END]
 {
-    Store#(reg_addr, val);
+    Store#(reg, val);
 };
 
 // --- Sequenced MMIO transaction ---

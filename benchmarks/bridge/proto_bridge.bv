@@ -40,7 +40,7 @@ $(Normalized @ highest) {
     c = c + "}\n";
 
     FileWrite$("glue-out/proto_shim.c", c, true);
-    let build_out = ShellCmd$("gcc", "-c", "-fPIC", "-O2",
+    let out = ShellCmd$("gcc", "-c", "-fPIC", "-O2",
         "glue-out/proto_shim.c",
         "-o", "glue-out/proto_shim.o");
     InsertObject$("glue-out/proto_shim.o");

@@ -59,7 +59,7 @@ node process [count < total][count == total] {
     let fb: Float = fb1 + fb2;
 
     // Output = feedforward - feedback
-    let build_out: Float = ff - fb;
+    let out: Float = ff - fb;
 
     // Shift delay line
 x2 = x1;

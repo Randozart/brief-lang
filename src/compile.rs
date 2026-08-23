@@ -1672,6 +1672,7 @@ fn compile_wasm(ll_path: &str, wasm_path: &str, exports: &[String]) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use briev_compiler::pipeline::PreprocessedSource;
 
     /// 2026-08-18 (check/build divergence): `brievc check` on a program that
     /// imports `std/collections.bv` and calls the HashMap's generic scans

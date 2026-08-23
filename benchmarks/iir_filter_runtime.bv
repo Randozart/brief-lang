@@ -32,7 +32,7 @@ node process [bound > 0 && count < bound][count == bound] {
     let fb2: Float = a2 * y2;
     let fb: Float = fb1 + fb2;
 
-    let build_out: Float = ff - fb;
+    let out: Float = ff - fb;
 
     x2 = x1;
     x1 = input;
