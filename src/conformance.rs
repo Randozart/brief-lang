@@ -150,7 +150,11 @@ pub fn classify(path: &Path) -> Option<SourceKind> {
 /// 2026-08-05: the active source roots that CI must inventory. Historical or
 /// archive directories are intentionally absent.
 pub fn active_roots() -> Vec<PathBuf> {
-    vec![
+    // 2026-08-22 (Phase 10): roots resolve against the crate root when
+    // available so the conformance sweep works from any working directory;
+    // the plain relative form stays for CLI use from the repo root.
+    let base = std::env::var("CARGO_MANIFEST_DIR").map(PathBuf::from);
+    [
         PathBuf::from("lib/std"),
         PathBuf::from("lib/compiler"),
         PathBuf::from("lib/glue"),
@@ -158,6 +162,12 @@ pub fn active_roots() -> Vec<PathBuf> {
         PathBuf::from("benchmarks"),
         PathBuf::from(".smoke"),
     ]
+    .into_iter()
+    .map(|r| match &base {
+        Ok(manifest) => manifest.join(r),
+        Err(_) => r,
+    })
+    .collect()
 }
 
 /// 2026-08-05: recursively discover every file under the active roots with a
@@ -190,8 +200,109 @@ fn collect_dir(dir: &Path, out: &mut Vec<(PathBuf, SourceKind)>) {
     }
 }
 
+/// 2026-08-22 (Phase 10): parse + typecheck one source under its classified
+/// profile — the sweep's per-file gate.
+fn frontend_check(path: &str, src: &str) -> Result<(), String> {
+    let tokens = crate::lexer::tokenize(src)
+        .map_err(|e| format!("lex: {:?}", e))?;
+    let mut parser = crate::parser::Parser::new(tokens, src);
+    let mut items = parser
+        .parse_program()
+        .map_err(|e| format!("parse: {}", e))?;
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    let mut pm = crate::plugin::PluginManager::new();
+    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
+        .map_err(|e| format!("plugins: {:?}", e))?;
+    crate::typechecker::check_program(&mut items, &universe)
+        .map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "))
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    // ── 2026-08-22 (Phase 10, SPEC §23.4): the CONFORMANCE SWEEP ────────
+    // Every active source file must parse and typecheck under its
+    // classified profile.
+    //
+    // IGNORED 2026-08-22 with triage (BUGS.md): the shallow frontend gate
+    // reports 152 failures whose ROOT CAUSES split three ways —
+    //   (a) harness gaps: lib/std sources need macro/plugin elaboration +
+    //       special parse modes my per-file gate skips (.f layout parser);
+    //       the REAL pipeline entry (compile::check_source) lives in the
+    //       BINARY and must move into the lib first;
+    //   (b) genuine backlog: @-era demo examples, reserved-word migrations
+    //       (bit_clear.bv `reg`), missing stdlib member surfaces;
+    //   (c) another agent's WIP track: lib/compiler/*.bv (tamer inputs).
+    // Enforcement lands when check_source is lib-reachable and (a) closes;
+    // run with `cargo test -- --ignored` to see current state.
+    #[test]
+    #[ignore = "Phase 10 continuation: needs check_source moved into lib +                 plugin-stage routing in this harness (BUGS.md triage, 152 files)"]
+    fn conformance_sweep_every_active_source_parses_and_checks() {
+        let sources = discover_active_sources();
+        assert!(
+            sources.len() > 10,
+            "discovery found only {} active sources — roots broken?",
+            sources.len()
+        );
+        let mut failures: Vec<String> = Vec::new();
+        let mut checked = 0usize;
+        for (path, kind) in &sources {
+            let path_str = path.display().to_string();
+            let src = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    failures.push(format!("{}: unreadable ({})", path_str, e));
+                    continue;
+                }
+            };
+            match kind {
+                SourceKind::Briev
+                | SourceKind::Embedded
+                | SourceKind::Accelerator
+                | SourceKind::Circuit => {
+                    checked += 1;
+                    // Parse + typecheck under the profile — the sweep gate is
+                    // FRONTEND conformance (SPEC §23.4); full codegen runs via
+                    // the build/bench harnesses.
+                    if let Err(e) = frontend_check(&path_str, &src) {
+                        failures.push(format!("{}: {}", path_str, e));
+                    }
+                }
+                SourceKind::Rendered => {
+                    checked += 1;
+                    if let Err(e) = crate::rbv::RbvFile::parse(&src) {
+                        failures.push(format!("{}: {:?}", path_str, e));
+                    }
+                }
+                SourceKind::DataStructured | SourceKind::DataLine => {
+                    checked += 1;
+                    match crate::dbriev::v2::parse_document(&src) {
+                        Ok(doc) => {
+                            for problem in crate::dbriev::validate::validate_document(&doc) {
+                                failures.push(format!("{}: {}", path_str, problem));
+                            }
+                        }
+                        Err(e) => failures.push(format!("{}: {}", path_str, e)),
+                    }
+                }
+            }
+        }
+        assert!(
+            checked >= sources.len() / 2,
+            "sweep skipped too many kinds (checked {} of {})",
+            checked,
+            sources.len()
+        );
+        assert!(
+            failures.is_empty(),
+            "conformance sweep found {} failing source(s):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+
     use super::*;
 
     #[test]
