@@ -292,6 +292,12 @@ impl<'a> Parser<'a> {
                     return self.parse_compile_time_let(true);
                 }
                 // 2026-07-23: proto variant: #Category { ... } — protocol declaration
+                // 2026-08-22 (Phase 8): `free x;` / `keep x;` are legal at top
+                // level too — task handles may live as reactive state.
+                if self.check_identifier("free") || self.check_identifier("keep") {
+                    let stmt = self.parse_statement()?;
+                    return Ok(TopLevel::Statement(Box::new(stmt)));
+                }
                 if self.check_identifier("proto") {
                     return self.parse_protocol_def().map(TopLevel::ProtocolDef);
                 }

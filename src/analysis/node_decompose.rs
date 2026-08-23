@@ -48,8 +48,10 @@ pub enum PredicateClass {
 /// Partition a transaction body into segments at top-level `when` guards.
 /// Guard bodies are recursively decomposed into nested segments.
 ///
-/// 2026-07-31: This runs AFTER `match_normalize::normalize_match_to_when`,
-/// so the body contains only `when` guards (no statement-level match).
+/// 2026-07-31: statement-level `match` never reaches this pass — it exists
+/// only inside `$defn` macro bodies (interpreter invariant, eval.rs) and is
+/// expanded at macro time. The former match→when normalizer was removed
+/// 2026-08-22 (Phase 4a): it had zero callers.
 pub fn split_into_segments(body: &[Statement]) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     let mut compute: Vec<Statement> = Vec::new();

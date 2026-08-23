@@ -2050,6 +2050,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
 /// Recursively resolve $ident references in a Statement tree.
 fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<(), String> {
     match stmt {
+        Statement::Yield => Ok(()),
         Statement::Let { expr, .. } => {
             if let Some(e) = expr {
                 resolve_dollar_refs_in_expr(e, scope)?;
@@ -2119,6 +2120,7 @@ fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<()
 fn resolve_dollar_refs_in_type(ty: &mut Type, scope: &Scope) -> Result<(), String> {
     match ty {
         Type::Dyn(inner) => resolve_dollar_refs_in_type(inner, scope),
+        Type::Task(inner) => resolve_dollar_refs_in_type(inner, scope),
         Type::Number(_) => Ok(()),
         Type::Custom(name) => {
             if let Some(var_name) = name.strip_prefix('$') {

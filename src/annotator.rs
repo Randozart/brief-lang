@@ -52,6 +52,7 @@ impl Annotator {
     fn collect_calls_from_body(&self, body: &[Statement], calls: &mut Vec<String>) {
         for stmt in body {
             match stmt {
+                Statement::Yield => {}
                 Statement::Expression(expr) => self.collect_calls_from_expr(expr, calls),
                 Statement::Assign(lhs, expr) => {
                     self.collect_calls_from_expr(lhs, calls);
@@ -240,6 +241,7 @@ impl Annotator {
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
             Type::Dyn(inner) => format!("dyn {}", inner),
+            Type::Task(inner) => format!("Task<{}>", inner),
             Type::Number(n) => n.to_string(),
             Type::Custom(__t) if __t == "Int" => "Int".to_string(),
             Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
@@ -399,6 +401,7 @@ impl Annotator {
     fn format_statement(&self, stmt: &Statement, indent: usize) -> String {
         let spaces = " ".repeat(indent);
         match stmt {
+            Statement::Yield => format!("{}yield;\n", spaces),
             Statement::Expression(expr) => format!("{}{};\n", spaces, self.format_expr(expr)),
             Statement::Assign(lhs, expr) => {
                 format!(

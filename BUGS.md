@@ -4718,3 +4718,21 @@ monomorphization (one slot per required fn, declaration order, sorted where
 iterated); indirect calls through slots; interpreter DynValue wrapper
 resolving through registered conformance. Field requirements and op-binding
 requirements staged behind defn-shaped ones.
+
+## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
+
+**Status:** OPEN — Phase 8 remainder
+**Repro:** `bugs/repro_task_free_second_guard.bv` — node with TWO sequential
+`when` guards; guard A spawns a local task, awaits/frees it, assigns a state
+field; guard B reads that field with arithmetic under `endprogram`.
+**Behavior:** emitted IR cites `%guard.end49` (an emit_stmt-style guard-end
+label) inside a countable-loop merge phi (`%cmgm…`) that references it as a
+PREDECESSOR, but no such label exists — clang/opt reject. Single-guard
+spawn+await (_g3 shape) and spawn+free (_g4 shape) compile and run correctly;
+static linearity gates all pass. Suspect: an inner emit_stmt-emitted guard
+(candidates: the scheduled-Free# epilogue or a coll/spawn grow guard)
+advances `fun.cur_block` past a block whose label is later renamed or never
+written, so the outer merge phi captures a phantom predecessor.
+**Fix direction:** audit cur_block updates across nested emit_statement calls
+inside countable bodies (same family as the match-edge fix); make the merge-
+phi predecessor cite the block that ACTUALLY branches.

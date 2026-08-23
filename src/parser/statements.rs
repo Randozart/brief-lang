@@ -85,12 +85,14 @@ impl<'a> Parser<'a> {
                     return self.parse_statement();
                 }
                 // Keywords that lex as identifiers: if, $defn, $txn
-                // 2026-08-04 (remove-vestigial-return): Briev has NO `return`
-                // statement (never specced, never used). Previously it parsed to
-                // Statement::Return whose semantics disagreed across the
-                // interpreter (continues) and the LLVM/VM backends (exits) —
-                // a latent wrong-codegen hazard. Raise a helpful error instead.
-                if self.check_identifier("return") {
+                // 2026-08-22 (Phase 8, SPEC §12.2): `yield;` — cooperative
+                // cancellation point. Contextual keyword; identifiers named
+                // yield elsewhere are untouched.
+                if self.check_identifier("yield") {
+                    self.pos += 1;
+                    self.expect(Token::Semicolon)?;
+                    Ok(Statement::Yield)
+                } else if self.check_identifier("return") {
                     let span = self
                         .peek_with_span()
                         .map(|(_, r)| self.make_span(r.clone()))

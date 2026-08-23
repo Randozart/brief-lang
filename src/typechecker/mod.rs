@@ -665,6 +665,13 @@ impl<'a> TypecheckContext<'a> {
     /// 2026-07-18: Check if a variable name refers to a mutable state location.
     /// Used by AddrOf to decide Ptr<T> (mutable) vs Ptr<const T> (immutable).
     pub fn is_mutable_location(&self, name: &str) -> bool {
+        // 2026-08-22 (Phase 8, SPEC §12.2): a LOCAL TASK HANDLE is linear —
+        // consuming it (free/keep/await) is its whole purpose. Mutability in
+        // the storage-field sense doesn't apply; the binding's declared type
+        // decides.
+        if let Some(Type::Task(_)) = self.bindings.get(name) {
+            return true;
+        }
         self.state_keys.contains(name)
     }
 }
@@ -1163,7 +1170,21 @@ pub fn infer_expression(
         // use errors) is enforced by the ownership analysis.
         Expr::Await(inner) => {
             let (ty, prov) = infer_expression(inner, ctx)?;
-            Ok((ty, prov))
+            // 2026-08-22 (Phase 8): await consumes a task handle — only a
+            // Task<R> admits it, and it yields R.
+            match ty {
+                Type::Task(ret) => Ok((
+                    *ret,
+                    prov,
+                )),
+                other => Err(TypeError::InvalidOperation {
+                    operation: "await".into(),
+                    type_name: format!(
+                        "await consumes a `spawn fn()` handle (Task<…>), found {}",
+                        other
+                    ),
+                }),
+            }
         }
         // 2026-07-31: Reflection: x.^Length / x.^^Size (see resolve_reflect).
         Expr::Reflect(recv, target, kind) => {
@@ -1291,7 +1312,10 @@ pub fn infer_expression(
                 // its handle carries the defn's return type (SPEC §12.2); an
                 // obj spawn keeps the obj's Custom type.
                 if let Some(ty) = ctx.fn_return_types.get(type_name) {
-                    Ok((ty.clone(), Provenance::Unknown))
+                    // 2026-08-22 (Phase 8, SPEC §12.2): a callable spawn yields
+                    // a LINEAR handle Task<R> — await unwraps R; the handle
+                    // must be consumed exactly once (task_linear pass).
+                    Ok((Type::Task(Box::new(ty.clone())), Provenance::Unknown))
                 } else {
                     Ok((Type::Custom(type_name.clone()), Provenance::Unknown))
                 }
@@ -2394,6 +2418,8 @@ fn unreachable_arm(what: &str, scrutinee: Type) -> TypeError {
 /// Infer the type of a statement.
 pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(), TypeError> {
     match stmt {
+        // 2026-08-22 (Phase 8): yield; types as void and terminates nothing.
+        Statement::Yield => Ok(()),
         Statement::Let { name, names, ty, expr, .. } => {
             // 2026-08-09 (init kind, Phase 2): a `let` declaring an `init`
             // name would shadow the seeded invariant — reject the shadow.
@@ -3247,8 +3273,30 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         .filter_map(|item| {
             match item {
                 TopLevel::Statement(stmt) => {
-                    if let Statement::Let { name, ty, .. } = stmt.as_ref() {
-                        return ty.clone().map(|t| (name.clone(), t));
+                    if let Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
+                        if let Some(t) = ty {
+                            return Some((name.clone(), t.clone()));
+                        }
+                        // 2026-08-22 (Phase 8): a TYPELESS top-level let whose
+                        // initializer is a callable spawn still yields a
+                        // Task<R> — register it so later top-level statements
+                        // see the handle (`let a = await t;`).
+                        if let Some(Expr::Spawn { type_name, .. }) = expr.as_ref() {
+                            if let Some(ret) = items.iter().find_map(|i| match i {
+                                TopLevel::Definition(d) if d.name == *type_name => {
+                                    d.output_type.as_ref().and_then(|ot| match ot {
+                                        OutputType::Single(t) => Some(t.clone()),
+                                        _ => None,
+                                    })
+                                }
+                                _ => None,
+                            }) {
+                                return Some((
+                                    name.clone(),
+                                    Type::Task(Box::new(ret)),
+                                ));
+                            }
+                        }
                     }
                 }
                 TopLevel::Constant(c) => {
@@ -4360,17 +4408,32 @@ fn resolve_method_call(
         if let Some(functions) = trait_fns {
             for d in &functions {
                 if d.name == lookup {
-                    // Arity + arg types against the requirement signature.
-                    if args.len() != d.parameters.len() {
+                    // 2026-08-22 (Phase 5b): a FIRST parameter of type `Self`
+                    // receives the object implicitly — the method syntax IS
+                    // the receiver thread. Validate the remaining args.
+                    let takes_self = d
+                        .parameters
+                        .first()
+                        .map(|(_, ty)| matches!(ty, Type::Custom(n) if n == "Self"))
+                        .unwrap_or(false);
+                    let value_params: &[(String, Type)] = if takes_self {
+                        &d.parameters[1..]
+                    } else {
+                        &d.parameters[..]
+                    };
+                    if args.len() != value_params.len() {
                         return Err(TypeError::InvalidOperation {
                             operation: format!(
                                 "method call '.{}()' on dyn {} — {} arg(s), trait declares {}",
-                                name, trait_name, args.len(), d.parameters.len()
+                                name,
+                                trait_name,
+                                args.len(),
+                                value_params.len()
                             ),
                             type_name: format!("dyn {}", trait_name),
                         });
                     }
-                    for (a, (_, pty)) in args.iter().zip(d.parameters.iter()) {
+                    for (a, (_, pty)) in args.iter().zip(value_params.iter()) {
                         let aty = infer_type_only(a, ctx)?;
                         if !types_compatible(pty, &aty, ctx) && aty != *pty {
                             return Err(TypeError::TypeMismatch {

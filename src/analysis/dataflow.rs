@@ -170,6 +170,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
     fn extract_ids_from_statement(&self, stmt: &Statement, ids: &mut HashSet<String>) {
         match stmt {
+            Statement::Yield => {}
             Statement::Assign(lhs, expr) => {
                 self.extract_ids_recursive(lhs, ids);
                 self.extract_ids_recursive(expr, ids);

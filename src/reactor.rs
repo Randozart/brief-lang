@@ -270,7 +270,9 @@ impl Reactor {
     ) -> Result<StmtResult, crate::interpreter::RuntimeError> {
         match stmt {
             Statement::Assign(_, _) | Statement::ArrowAssign { .. }
-            | Statement::FreeHint(_) | Statement::KeepHint(_) => {
+            | Statement::FreeHint(_) | Statement::KeepHint(_)
+            // 2026-08-22 (Phase 8): yield; is a no-op in the eager reference.
+            | Statement::Yield => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }

@@ -1851,6 +1851,11 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-08-22 (Phase 8): yield; — a cancellation point. No-op in the
+        // eager model; the concurrent scheduler replaces it with a suspend.
+        Statement::Yield => {
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         _ => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
