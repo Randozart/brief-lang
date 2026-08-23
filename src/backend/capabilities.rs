@@ -121,6 +121,8 @@ pub struct BackendCapabilities {
     pub gate_stmt: bool,
     /// trigger bindings inside bodies (`trg name @ instance;`).
     pub trg_bindings: bool,
+    /// cooperative cancellation checkpoints (`yield;`, SPEC §12.2).
+    pub yield_stmt: bool,
 }
 
 impl BackendCapabilities {
@@ -172,6 +174,7 @@ impl BackendCapabilities {
         rollback: false,
         gate_stmt: false,
         trg_bindings: false,
+        yield_stmt: false,
     };
 }
 
@@ -504,6 +507,9 @@ fn check_stmt_flow(s: &Statement, caps: &BackendCapabilities, out: &mut Vec<Stri
         Statement::InlineDefn(_) | Statement::InlineTxn(_) => {
             // 2026-08-23: stage-block internals — stripped before codegen,
             // never a target-surface question.
+        }
+        Statement::Yield => {
+            require(caps.yield_stmt, "yield checkpoints", caps, out);
         }
         _ => return false,
     }

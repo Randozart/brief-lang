@@ -270,6 +270,13 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
+    /// 2026-08-23 (fix-forward for 6f955614): `yield;` — cooperative
+    /// cancellation checkpoint (SPEC §12.2, Phase 8). Consumers on main
+    /// (parser, display, beast, interpreter, annotator, task_linear) were
+    /// committed against this variant before the enum gained it — the
+    /// tree did not compile at main tip 9e55719d. Unit variant: bare
+    /// `yield;` only, no payload.
+    Yield,
     /// 2026-08-17 (foreach break): `break;` — exit the innermost enclosing
     /// `foreach` immediately (search-until-found early exit). Valid only
     /// lexically inside a `foreach` body. `foreach` stays exhaustive by
@@ -379,6 +386,7 @@ impl PartialEq for Statement {
             (Statement::Assign(l1, r1), Statement::Assign(l2, r2)) => l1 == l2 && r1 == r2,
              (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
             (Statement::Break, Statement::Break) => true,
+            (Statement::Yield, Statement::Yield) => true,
              (Statement::EndProgram(e1), Statement::EndProgram(e2)) => e1 == e2,
              (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,
