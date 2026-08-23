@@ -381,7 +381,7 @@ lifecycle), 10 (conformance sweep).
 | Question | Decision |
 |---|---|
 | Dyn ABI | Owner deferred to my efficiency judgment. Verdict: **i64 handle to a {data, table} image** — true two-word fat pointers are theoretically leaner but this backend's registers are single-valued, so a two-word ABI degenerates to pass-by-alloca anyway; the handle is the efficient choice WITHIN the architecture (union-handle precedent, uniform %State columns). |
-| `free task` gate | Explicit short keyword **prepended**: `canc defn …` (4 letters, joins the disclosed strategy-keyword family seq/vol/pack/…). Effect inference may replace it later without breaking annotated code. |
+| `free task` gate | Explicit short keyword **prepended**: **`yields defn …`** (owner revision of my `canc` draft — reads as "this body yields control at cooperative points", 6 letters, same disclosed strategy-keyword family as seq/vol/pack). Effect inference may replace it later without breaking annotated code. |
 | Phase 7 strategy | **Interp-first slice** (sums/dyn precedent): parse/typecheck/interp event delivery complete; LLVM + rbv staged behind BUGS entry. |
 | Cell depth | **Interp-complete cells** in the same arc: cells parse fully, seal-check, run in the interpreter; LLVM cell instances wait for the ports backend slice. |
 
