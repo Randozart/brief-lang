@@ -19,4 +19,4 @@ node saxpy_loop
     term;
 };
 
-term -> __print_int(N);
+__print_int(N);

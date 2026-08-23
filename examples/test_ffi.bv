@@ -31,12 +31,12 @@ txn test4 [Pow#(2.0, 3.0) == 8.0][term == 8.0] {
 };
 
 // Test 5: string length — GLUE-style FFI
-txn test5 [string_length("hello") == 5][result == 5]] {
+txn test5 [string_length("hello") == 5][result == 5] {
     term string_length("hello");
 };
 
 // Test 6: string concat — GLUE-style FFI
-txn test6 [string_concat("hello", "world") == "helloworld"][result == "helloworld"]] {
+txn test6 [string_concat("hello", "world") == "helloworld"][result == "helloworld"] {
     term string_concat("hello", "world");
 };
 
