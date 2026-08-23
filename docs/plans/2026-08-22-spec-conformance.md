@@ -433,8 +433,9 @@ noted in sub-plan).
   (152 files: harness gaps / backlog / foreign WIP) into BUGS.md;
   enforcement flips on once check_source moves into the lib. NOT closed.
 
-Remaining: Phase 5c, Phase 10 enforcement (lib refactor + backlog
-migration), cell interpreter scheduling.
+Remaining: Phase 5c, Phase 10 enforcement (lib refactor DONE ✅ 3739a6f8;
+backlog migration blocked on enum variant CONSTRUCTION — new language arc),
+cell interpreter scheduling.
 
 ## Session-3 decisions (owner, 2026-08-22)
 
