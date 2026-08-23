@@ -1,7 +1,10 @@
 # VM backend — compile-tail parity for bounty archives
 
 **Date:** 2026-08-23
-**Status:** active
+**Status:** active — §1.1 (arg-drop fix), §1.4 (diagnostics), §1.2
+(parity harness + div/rem opcodes + bounty e2e asserting real output)
+landed 2026-08-23; see BUGS.md for the match-drop root cause that gated
+execution and its four-bug fix chain.
 **Sequencing:** parallel branch; requires `2026-08-23-backend-scaffolding-foundation.md`
 (Plan 0) merged first. Work confined to `src/backend/vm/`, `lib/tamer/`,
 `lib/std/` (only if opcode support needs it), own tests, own doc sections.
