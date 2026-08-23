@@ -38,12 +38,27 @@ fi
 git -C "$SRC" fetch origin main --tags
 git -C "$SRC" checkout "$CIRCT_PIN"
 
-# CIRCT builds against a matching LLVM at the pinned monorepo commit.
+# CIRCT builds against a matching LLVM — build MLIR first from the pinned
+# submodule (2026-08-23 fix: bare configure failed with "MLIR not found").
 git -C "$SRC" submodule update --init llvm
 
+if [ ! -f "$SRC/llvm/build/lib/cmake/mlir/MLIRConfig.cmake" ]; then
+    echo "[install-circt] building LLVM/MLIR (~30-50 min)..."
+    cmake -G Ninja -S "$SRC/llvm" -B "$SRC/llvm/build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_PROJECTS="mlir" \
+        -DLLVM_ENABLE_ASSERTIONS=ON \
+        -DLLVM_TARGETS_TO_BUILD=host \
+        -DCMAKE_INSTALL_PREFIX="$DEST"
+    cmake --build "$SRC/llvm/build" --target install -j"$JOBS"
+fi
+
+echo "[install-circt] configuring CIRCT..."
 cmake -G Ninja -S "$SRC" -B "$SRC/build" \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DMLIR_DIR="$SRC/llvm/build/lib/cmake/mlir" \
+    -DLLVM_DIR="$SRC/llvm/build/lib/cmake/llvm" \
     -DCIRCT_SV_FRONTEND=ON \
     -DLLVM_TARGETS_TO_BUILD=host \
     -DCMAKE_INSTALL_PREFIX="$DEST"
