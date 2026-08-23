@@ -433,9 +433,16 @@ noted in sub-plan).
   (152 files: harness gaps / backlog / foreign WIP) into BUGS.md;
   enforcement flips on once check_source moves into the lib. NOT closed.
 
-Remaining: Phase 5c, Phase 10 enforcement (lib refactor DONE ✅ 3739a6f8;
-backlog migration blocked on enum variant CONSTRUCTION — new language arc),
-cell interpreter scheduling.
+Remaining: Phase 5c, Phase 10 enforcement (lib refactor ✅ + real-pipeline
+gate ✅ + enum construction ✅ 4bb965cb + burn-down pass 1 ✅ 279192d2/
+ae20a9b8: 152→119; remaining classes tracked in BUGS.md with per-class
+fix paths), cell interpreter scheduling.
+
+### NEW ARC (surfaced by sweep): enum construction in LLVM (5d)
+Interp-side construction landed; compiled targets stage it via the
+capability matrix. Lowering = Sum values as tagged layout (reuse the
+union tagged ABI), constructor calls build tags, match dispatch reads
+them. Unblocks compiled error-handling once landed.
 
 ## Session-3 decisions (owner, 2026-08-22)
 
