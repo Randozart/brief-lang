@@ -4922,7 +4922,37 @@ bounded-iteration txn chain (ugly), or drive the interpretation loop from
 C (install_sim calls a single-step `exec_op_entry` export repeatedly —
 keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
 
-## Conformance sweep: 134 active sources fail the real-pipeline gate (2026-08-23 update)
+## Conformance sweep: 132 active sources fail the real-pipeline gate (2026-08-23 update #2)
+
+**Progress:** enum variant construction LANDED (4bb965cb) — result.bv +
+option.bv migrated to native constructors + exhaustive match. Sweep at
+132. Classified inventory (from full sweep output):
+1. **@-era demos** (~20): examples using removed prior-state syntax
+   (arrow-mutation, async_mutual_exclusion, bank_transfer_system, cobol/*,
+   reactive_counter, simple-counter, contract_verification, …).
+2. **Reserved-word fallout** (~8): bit_clear/pointer-trickery/ptr-arithmetic/
+   layout-ptr-demo/volatile-io (`reg`), visibility-demo (`pvt`),
+   proto_bridge/iir_filter* (`out`), stdlib-demo (`union`).
+3. **frgn missing provenance** (~7): physics, test_ffi*, ptr-runtime,
+   glue-macro, link-example, saxpy, meld-bridge — need `from <source>`.
+4. **Tamer WIP** (~17): lib/compiler/*.bv — comma-separated defn params +
+   `uni` remnants + one lex error; foreign track, coordinate first.
+5. **glue.dbv parser mismatch** (~9): all per-language glue configs fail
+   "Expected named field" — dbv parser vs quoted-mode dialect drift.
+6. **stdlib legacy dialects** (~30 zero-consumer files): bits(`:>`),
+   console(`cell!`), briev_rt(old-trg), hashset/stack/queue(`{}` literal),
+   encoding(when-else), ext/*+posix-ish(comma-fields), skiplist(op-in?),
+   metro*(truncated), tty/system/ffi/*(misc), gpu/spatial/memory/*
+   (missing intrinsics Barrier#/Memcpy#/Memcmp#/Memset#/Hash#),
+   http/string_c(string-vs-int returns), posix/*(undefined SYS_* consts).
+7. **Misc**: string.ebv [true][true]x5, todo.rbv List.push member,
+   wasm-import.rbv, main.bv import syntax, fn-ptr-demo undefined fns,
+   data-briev config.dbv identifier positions, proof-oracle `?`.
+
+**Unblock order:** (2)+(3) mechanical → (6) per-file as touched → (1)
+demo rewrites → (4) coordinate → (5) parser dialect decision.
+
+
 
 **Status:** OPEN — Phase 10 continuation. **Primary blocker identified:
 enum variant CONSTRUCTION does not exist.** Patterns parse
