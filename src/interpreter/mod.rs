@@ -82,6 +82,9 @@ pub struct Interpreter {
     /// inputs bind at construction, outputs get fresh slots, plain fields
     /// default. Registered from TypeDef items carrying ports.
     pub objs: HashMap<String, ObjShape>,
+    /// 2026-08-23 (enum-construction plan): variant_name → enum_name.
+    /// A call naming a variant CONSTRUCTS a Sum value.
+    pub variants: HashMap<String, String>,
 
     /// 2026-08-09 (Phase 10): `defer { ... }` cleanup stack — bodies pushed by
     /// `exec_stmt(Defer)` and flushed LIFO on term/rollback/endprogram. The
@@ -99,6 +102,7 @@ impl Interpreter {
             functions: HashMap::new(),
             init_names: std::collections::HashSet::new(),
             objs: HashMap::new(),
+            variants: HashMap::new(),
             defer_stack: Vec::new(),
         }
     }
@@ -155,6 +159,20 @@ impl Interpreter {
                 }
             }
         }
+        // 2026-08-23 (enum construction): variant registry for constructors.
+        let mut registered_variants: HashMap<String, String> = HashMap::new();
+        for item in program {
+            if let TopLevel::TypeDef(td) = item {
+                for slot in &td.body.slots {
+                    if let Some(vname) = slot.name.strip_prefix("__variant_") {
+                        registered_variants.insert(vname.to_string(), td.name.clone());
+                    }
+                }
+            }
+        }
+        self.variants = registered_variants.clone();
+        VARIANT_DEFS.with(|c| *c.borrow_mut() = Some(registered_variants));
+
         OBJ_SHAPES.with(|c| *c.borrow_mut() = Some(registered_objs));
 
         for item in program {
@@ -533,6 +551,9 @@ impl PartialEq for Value {
 }
 
 thread_local! {
+    /// 2026-08-23 (enum construction): active variant registry mirror.
+    static VARIANT_DEFS: std::cell::RefCell<Option<HashMap<String, String>>> =
+        const { std::cell::RefCell::new(None) };
     /// 2026-08-22 (Phase 7b): process-local mirror of the ACTIVE
     /// interpreter's obj shapes, read by the spawn constructor deep inside
     /// expression evaluation where no scope carries them. The interpreter
@@ -540,6 +561,11 @@ thread_local! {
     /// `load_program` wins.
     static OBJ_SHAPES: std::cell::RefCell<Option<HashMap<String, ObjShape>>> =
         const { std::cell::RefCell::new(None) };
+}
+
+/// Active variant registry for constructor calls (Phase 7b/enum plan).
+pub fn variant_defs() -> Option<HashMap<String, String>> {
+    VARIANT_DEFS.with(|c| c.borrow().clone())
 }
 
 /// Snapshot of the active obj shapes for spawn construction (Phase 7b).

@@ -133,6 +133,10 @@ pub struct TypecheckContext<'a> {
     /// 2026-08-22 (Phase 5): declared traits by name — dyn member resolution
     /// reads the requirement signatures from here.
     trait_defs: HashMap<String, crate::ast::top::TraitDef>,
+    /// 2026-08-23 (enum-construction plan): variant_name → enum_name, built
+    /// from every TypeDef carrying __variant_* slots. A Call to a variant
+    /// CONSTRUCTS an enum value.
+    variant_defs: HashMap<String, String>,
     /// 2026-08-22 (Phase 7a, SPEC §9.6): cell name → its PORT surface.
     /// Sealing: external field access on a cell resolves ONLY through these;
     /// anything else names the ports-only rule.
@@ -170,6 +174,7 @@ impl<'a> TypecheckContext<'a> {
             trait_assertions: HashMap::new(),
             trait_defs: HashMap::new(),
             cell_ports: HashMap::new(),
+            variant_defs: HashMap::new(),
         }
     }
 
@@ -1549,6 +1554,17 @@ pub fn infer_type_only(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type, 
 
 /// Infer the type of a function/intrinsic call.
 fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<Type, TypeError> {
+    // 2026-08-23 (enum-construction plan): a call naming a declared ENUM
+    // VARIANT constructs an enum value. Payload types bind the enum's
+    // leading type params positionally; the rest unify against the
+    // contextual expected type (nearly all sites return a fully-known
+    // Result/Option). User functions shadow variants — this check runs
+    // AFTER defined-fn resolution in the caller.
+    if let Some(enum_name) = ctx.variant_defs.get(name).cloned() {
+        if !ctx.defined_fns.contains(name) {
+            return infer_variant_construction(&enum_name, name, args, ctx);
+        }
+    }
     // Intrinsic call (ends with #): look up signature
     if name.ends_with('#') {
         let op_name = name.trim_end_matches('#');
@@ -1836,6 +1852,86 @@ pub(crate) fn types_compatible(
         return false;
     }
     false
+}
+
+
+/// 2026-08-23 (enum-construction plan): type a variant constructor call.
+/// `Ok(x)` under `Result<T,E>`: payload x:T binds T; E comes from the
+/// contextual output type or defaults Void-with-note.
+fn infer_variant_construction(
+    enum_name: &str,
+    variant: &str,
+    args: &[Expr],
+    ctx: &mut TypecheckContext,
+) -> Result<Type, TypeError> {
+    // Payload arity from the __variant_ slot's tuple type.
+    let payload_tys: Vec<Type> = ctx
+        .type_slots
+        .get(enum_name)
+        .map(|slots| {
+            slots
+                .iter()
+                .find(|s| s.name == format!("__variant_{variant}"))
+                .map(|s| match &s.ty {
+                    Type::Tuple(elems) => elems.clone(),
+                    one => vec![one.clone()],
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    if args.len() != payload_tys.len() {
+        return Err(TypeError::InvalidOperation {
+            operation: format!(
+                "constructing '{}' — {} argument(s), variant declares {}",
+                variant,
+                args.len(),
+                payload_tys.len()
+            ),
+            type_name: format!("{}", enum_name),
+        });
+    }
+    for (a, pty) in args.iter().zip(payload_tys.iter()) {
+        let aty = infer_type_only(a, ctx)?;
+        if !types_compatible(pty, &aty, ctx) && aty != *pty {
+            return Err(TypeError::TypeMismatch {
+                expected: format!("{}", pty),
+                found: format!("{}", aty),
+                context: format!("payload of '{}'", variant),
+            });
+        }
+    }
+
+    // Type params of the enum, bound positionally from payloads first.
+    let params = ctx.type_params.get(enum_name).cloned().unwrap_or_default();
+    let mut subst: std::collections::HashMap<String, Type> = HashMap::new();
+    for (pname, pty) in params.iter().zip(payload_tys.iter()) {
+        subst.insert(pname.clone(), pty.clone());
+    }
+    let mut type_args: Vec<Type> = params
+        .iter()
+        .map(|pn| {
+            subst.get(pn).cloned().unwrap_or_else(|| Type::Custom(pn.clone()))
+        })
+        .collect();
+    // Unify the remaining (unbound) params against the contextual type.
+    if let Some(out) = &ctx.current_output_type {
+        if let Type::Applied(base, out_args) = out {
+            if base == enum_name && out_args.len() == type_args.len() {
+                for (i, ta) in type_args.iter_mut().enumerate() {
+                    let pn = &params[i];
+                    let still_generic = matches!(ta, Type::Custom(n) if n == pn);
+                    if still_generic {
+                        *ta = out_args[i].clone();
+                    }
+                }
+            }
+        }
+    }
+    if type_args.is_empty() {
+        Ok(Type::Custom(enum_name.to_string()))
+    } else {
+        Ok(Type::Applied(enum_name.to_string(), type_args))
+    }
 }
 
 fn arithmetic_result_ty(ctx: &TypecheckContext,
@@ -2248,7 +2344,7 @@ fn infer_match(
                 }
                 binds.push((name.clone(), (**member).clone()));
             }
-            crate::ast::Pattern::EnumVariant(name, _) => {
+            crate::ast::Pattern::EnumVariant(name, subpats) => {
                 if let MatchDomain::Enum(variants) = &domain {
                     if !variants.contains(name) {
                         return Err(TypeError::InvalidOperation {
@@ -2268,6 +2364,27 @@ fn infer_match(
                 }
                 if arm.guard.is_none() {
                     covered.insert(name.clone());
+                }
+                // 2026-08-23 (enum construction): Binding sub-patterns bind
+                // the variant's PAYLOAD members, typed from the __variant_
+                // slot's tuple (generic params stay raw — bodies that merely
+                // return them are fine; deeper uses go through inference).
+                let base_name = match &matched_ty {
+                    Type::Applied(n, _) | Type::Custom(n) => n.clone(),
+                    other => format!("{}", other),
+                };
+                if let Some(slots) = ctx.type_slots.get(&base_name) {
+                    if let Some(slot) = slots.iter().find(|s| s.name == format!("__variant_{name}")) {
+                        let payload: Vec<Type> = match &slot.ty {
+                            Type::Tuple(elems) => elems.clone(),
+                            one => vec![one.clone()],
+                        };
+                        for (sp, pty) in subpats.iter().zip(payload.iter()) {
+                            if let crate::ast::Pattern::Binding(bn) = sp {
+                                binds.push((bn.clone(), pty.clone()));
+                            }
+                        }
+                    }
                 }
             }
             crate::ast::Pattern::Literal(lit) => {
@@ -2364,7 +2481,28 @@ fn infer_match(
                 }
             }
         }
-        MatchDomain::Open | MatchDomain::Enum(_) => {
+        MatchDomain::Enum(items) => {
+            // 2026-08-23: enums are CLOSED over their declared variants —
+            // coverage works exactly like structural sums.
+            if !saw_catchall {
+                let missing: Vec<String> = items
+                    .iter()
+                    .filter(|i| !covered.contains(*i))
+                    .map(|i| i.clone())
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!(
+                            "non-exhaustive match on {} — no arm covers: {}",
+                            matched_ty,
+                            missing.join(", ")
+                        ),
+                        type_name: "add those arms or a trailing `_ =>` fallback".into(),
+                    });
+                }
+            }
+        }
+        MatchDomain::Open => {
             if !saw_catchall {
                 return Err(TypeError::InvalidOperation {
                     operation: format!(
@@ -3557,9 +3695,18 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // slots stay unregistered so internal fields cannot resolve externally.
     let mut all_cell_ports: HashMap<String, Vec<(String, crate::ast::Type)>> =
         HashMap::new();
+    // 2026-08-23 (enum construction): variants from enum TypeDefs.
+    let mut all_variant_defs: HashMap<String, String> = HashMap::new();
     for item in items.iter() {
         if let TopLevel::Cell(c) = item {
             all_cell_ports.insert(c.name.clone(), c.ports_out.clone());
+        }
+        if let TopLevel::TypeDef(td) = item {
+            for slot in &td.body.slots {
+                if let Some(vname) = slot.name.strip_prefix("__variant_") {
+                    all_variant_defs.insert(vname.to_string(), td.name.clone());
+                }
+            }
         }
     }
     for item in items.iter() {
@@ -3756,6 +3903,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_trait_assertions: &all_trait_assertions,
         all_trait_defs: &all_trait_defs,
         all_cell_ports: &all_cell_ports,
+        all_variant_defs: &all_variant_defs,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -4149,6 +4297,8 @@ struct CheckEnv<'a> {
     all_trait_defs: &'a HashMap<String, crate::ast::top::TraitDef>,
     /// 2026-08-22 (Phase 7a): cell port surfaces for sealing.
     all_cell_ports: &'a HashMap<String, Vec<(String, crate::ast::Type)>>,
+    /// 2026-08-23 (enum construction): variant registry.
+    all_variant_defs: &'a HashMap<String, String>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -4173,6 +4323,7 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     // 2026-08-22 (Phase 5): trait assertions power dyn coercions.
     ctx.trait_assertions = env.all_trait_assertions.clone();
     ctx.trait_defs = env.all_trait_defs.clone();
+    ctx.variant_defs = env.all_variant_defs.clone();
     // 2026-08-22 (Phase 7a): sealing surface + resolvable cell outputs.
     for (cname, outs) in env.all_cell_ports {
         let entry = ctx.cell_ports.entry(cname.clone()).or_default();
