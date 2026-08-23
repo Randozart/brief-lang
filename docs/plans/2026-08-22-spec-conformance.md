@@ -422,6 +422,20 @@ Remaining: Phase 5c (LLVM dyn tables), 10 (conformance sweep + closure),
 cell INTERPRETER scheduling (internal nodes per instance — beyond v1,
 noted in sub-plan).
 
+### 2026-08-23 session (cont.) — Phase 7 + Phase 10 infrastructure
+- **Phase 7 COMPLETE** (interp slice): 7a finish `6ed16a4b` (port
+  bindings, Event fields, sealing), 7b `0e1f4460` (EventQ/Instance,
+  shared-slot wiring, firing, dispatch), 7c staged `7a42ec60`
+  (capability-matrix flags; LLVM joins the gate). SPEC Enemy shape runs:
+  examples/object_ports.bv.
+- **Phase 10 infrastructure** ✅ e47662e9 — active_roots manifest-
+  resolved; discover+per-kind sweep wired as a test; first light triaged
+  (152 files: harness gaps / backlog / foreign WIP) into BUGS.md;
+  enforcement flips on once check_source moves into the lib. NOT closed.
+
+Remaining: Phase 5c, Phase 10 enforcement (lib refactor + backlog
+migration), cell interpreter scheduling.
+
 ## Session-3 decisions (owner, 2026-08-22)
 
 | Question | Decision |
