@@ -91,8 +91,6 @@ pub struct WebstackGenerator {
     pending_promises: Vec<PendingPromise>,
     // 2026-07-26: Deprecated — WASM modules are now compiled via LlvmBackend(wasm32).
     wasm_modules: Vec<(String, Vec<u8>)>,
-    // 2026-07-28: Phase H.1 — !> metadata registry.
-    metadata_registry: crate::backend::metadata::MetadataRegistry,
 }
 
 #[derive(Debug, Clone)]
@@ -176,7 +174,6 @@ impl WebstackGenerator {
             trigger_names: Vec::new(),
             promise_counter: 0,
             pending_promises: Vec::new(),
-            metadata_registry: crate::backend::metadata::MetadataRegistry::load(),
         }
     }
 

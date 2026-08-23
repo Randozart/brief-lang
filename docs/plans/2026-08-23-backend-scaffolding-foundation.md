@@ -107,14 +107,23 @@ category / property, never `Type::Custom(name)` matches.
 
 ### 0.3 Uniform artifact contract
 
+**AMENDED 2026-08-23 during implementation — scope reduced, rationale:**
+the contract's motivating problem (non-uniform diagnostics) is solved by
+0.2's capability gate + `VmBackend.errors` / LLVM `warnings` vectors.
+Changing all five backends' public signatures immediately before four
+parallel branches fork would generate exactly the merge conflicts the
+sequencing exists to avoid. The per-backend plans own their signature
+stabilization; a cross-backend `Artifact` enum lands in the integration
+pass if still warranted. Original item preserved below for that decision.
+
 ```rust
 pub enum Artifact { Text(String), Binary(Vec<u8>) }
 ```
 
-Backends return `(Artifact, Vec<Diagnostic>)`. `compile.rs:1732` dispatch
-collapses to one shape; the Spirv/Vm arms stop special-casing file writes
-(`compile.rs:1905-1927`). Linking steps (LLVM/Gpu/Webstack) stay in
-compile.rs — they consume `Artifact::Text`.
+Backends return `(Artifact, Vec<Diagnostic>)`. `compile.rs` dispatch
+collapses to one shape; the Spirv/Vm arms stop special-casing file writes.
+Linking steps (LLVM/Gpu/Webstack) stay in compile.rs — they consume
+`Artifact::Text`.
 
 ### 0.4 Doc truth sweep
 

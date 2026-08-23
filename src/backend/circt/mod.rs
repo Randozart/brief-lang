@@ -32,8 +32,6 @@ pub struct CirctBackend {
     /// Cell definitions encountered during program traversal.
     /// Key is cell name, value is the CellDef AST node.
     cell_defs: HashMap<String, crate::ast::CellDef>,
-    // 2026-07-28: Phase H.2 — !> metadata registry for optimization hints.
-    metadata_registry: crate::backend::metadata::MetadataRegistry,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -100,7 +98,6 @@ impl CirctBackend {
             mmio_vars: Vec::new(),
             fn_arity: HashMap::new(),
             cell_defs: HashMap::new(),
-            metadata_registry: crate::backend::metadata::MetadataRegistry::load(),
         }
     }
 
@@ -1055,4 +1052,22 @@ mod tests {
         let count = output.matches("sensor: i64").count();
         assert!(count >= 1, "Trigger should appear as port. Got {} occurrences. Output:\n{}", count, output);
     }
+}
+
+/// 2026-08-23 (Plan 0.6): CIRCT toolchain availability — mirrors the
+/// `is_available()` pattern (backend/assembler/mod.rs). Toolchain-validated
+/// tests (parse/translate/simulate parity) gate on this and skip loudly
+/// when tools are absent; structural string checks always run.
+/// To undo: remove this fn + tools/install-circt.sh + tools/circt_probe.sh.
+pub fn circt_tools_available() -> bool {
+    // 1. Local install from tools/install-circt.sh
+    let local = std::path::Path::new("tools/circt/bin/circt-opt");
+    if local.exists() {
+        return true;
+    }
+    // 2. Somewhere on PATH
+    std::process::Command::new("circt-opt")
+        .arg("--version")
+        .output()
+        .is_ok()
 }

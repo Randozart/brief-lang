@@ -190,128 +190,179 @@ impl BackendCapabilities {
 /// Returns house-style error messages; empty means the program is within
 /// the surface.
 pub fn validate_program(items: &[TopLevel], caps: &BackendCapabilities) -> Vec<String> {
+    // 2026-08-23: per-item work lives in check_toplevel — keeps this loop
+    // single-depth (Praetor complexity gate).
     let mut errs = Vec::new();
     for item in items {
-        match item {
-            TopLevel::Transaction(t) => {
-                check_expr(&t.contract.pre_condition, caps, &mut errs);
-                check_expr(&t.contract.post_condition, caps, &mut errs);
-                for s in &t.body {
-                    check_stmt(s, caps, &mut errs);
-                }
-            }
-            TopLevel::Definition(d) => {
-                for s in &d.body {
-                    check_stmt(s, caps, &mut errs);
-                }
-            }
-            TopLevel::Constant(c) => {
-                check_expr(&c.expr, caps, &mut errs);
-            }
-            TopLevel::Statement(stmt) => check_stmt(stmt, caps, &mut errs),
-            _ => {}
-        }
+        check_toplevel(item, caps, &mut errs);
     }
     errs
 }
 
+fn check_toplevel(item: &TopLevel, caps: &BackendCapabilities, errs: &mut Vec<String>) {
+    match item {
+        TopLevel::Transaction(t) => {
+            check_expr(&t.contract.pre_condition, caps, errs);
+            check_expr(&t.contract.post_condition, caps, errs);
+            for s in &t.body {
+                check_stmt(s, caps, errs);
+            }
+        }
+        TopLevel::Definition(d) => {
+            for s in &d.body {
+                check_stmt(s, caps, errs);
+            }
+        }
+        TopLevel::Constant(c) => check_expr(&c.expr, caps, errs),
+        TopLevel::Statement(stmt) => check_stmt(stmt, caps, errs),
+        _ => {}
+    }
+}
+
 fn check_expr(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) {
+    // 2026-08-23: split into per-category helpers so every function stays
+    // under the Praetor complexity gate (≤15); the router owns no logic.
+    if check_expr_leaf(e, caps, out) {
+        return;
+    }
+    if check_expr_operator(e, caps, out) {
+        return;
+    }
+    if check_expr_call_access(e, caps, out) {
+        return;
+    }
+    check_expr_composite(e, caps, out);
+}
+
+/// Literals + leaf forms. Returns true when `e` was handled.
+fn check_expr_leaf(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
+    let handled = match e {
+        Expr::Decimal(_) | Expr::TaggedLiteral(..) => !caps.int_literals,
+        Expr::Float(_) => !caps.floats,
+        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(..) => !caps.strings,
+        Expr::Bool(_) | Expr::Char(_) => !caps.bool_char_literals,
+        _ => return false,
+    };
+    if handled {
+        let what = match e {
+            Expr::Float(_) => "float literals",
+            Expr::Quoted(_) | Expr::TaggedQuotedLiteral(..) => "string literals",
+            Expr::Bool(_) | Expr::Char(_) => "bool/char literals",
+            _ => "integer literals",
+        };
+        out.push(caps.missing(what));
+    }
+    true
+}
+
+/// Unary/binary operators, casts, pointer forms. Returns true when handled.
+fn check_expr_operator(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
     match e {
-        Expr::Decimal(_) | Expr::TaggedLiteral(..) if !caps.int_literals => {
-            out.push(caps.missing("integer literals"))
-        }
-        Expr::Decimal(_) | Expr::TaggedLiteral(..) => {}
-        Expr::Float(_) if !caps.floats => out.push(caps.missing("float literals")),
-        Expr::Float(_) => {}
-        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(..) if !caps.strings => {
-            out.push(caps.missing("string literals"))
-        }
-        Expr::Quoted(_) | Expr::TaggedQuotedLiteral(..) => {}
-        Expr::Bool(_) | Expr::Char(_) if !caps.bool_char_literals => {
-            out.push(caps.missing("bool/char literals"))
-        }
-        Expr::Bool(_) | Expr::Char(_) => {}
-        Expr::Identifier(_) | Expr::FormattingAnnotation(_) => {}
         Expr::BinaryOp(kind, l, r) => {
             if matches!(kind, crate::ast::BinaryOpKind::Concat) {
-                if !caps.strings {
-                    out.push(caps.missing("string concatenation"));
-                }
-            } else if !caps.int_ops {
-                out.push(caps.missing("arithmetic operations"));
+                require(caps.strings, "string concatenation", caps, out);
+            } else {
+                require(caps.int_ops, "arithmetic operations", caps, out);
             }
             check_expr(l, caps, out);
             check_expr(r, caps, out);
         }
         Expr::UnaryOp(_, inner) => {
-            if !caps.unary_ops {
-                out.push(caps.missing("unary operators"));
-            }
+            require(caps.unary_ops, "unary operators", caps, out);
             check_expr(inner, caps, out);
         }
+        Expr::Cast(inner, _) => {
+            require(caps.casts, "casts", caps, out);
+            check_expr(inner, caps, out);
+        }
+        Expr::IsType(inner, _) => {
+            require(caps.is_type, "type checks", caps, out);
+            check_expr(inner, caps, out);
+        }
+        Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => {
+            require(caps.deref_addr_of, "pointer operations", caps, out);
+            check_expr(inner, caps, out);
+        }
+        Expr::Await(inner) => {
+            require(caps.await_expr, "await", caps, out);
+            check_expr(inner, caps, out);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Calls, field/index access, reflection, spawn. Returns true when handled.
+fn check_expr_call_access(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
+    match e {
         Expr::Call(name, args, _) => {
             let intrinsic = name.ends_with('#') || name.ends_with('!');
-            if intrinsic && !caps.intrinsics {
-                out.push(caps.missing(&format!("intrinsic '{}'", name)));
-            } else if !intrinsic && !caps.calls {
-                out.push(caps.missing("function calls"));
+            if intrinsic {
+                require(caps.intrinsics, &format!("intrinsic '{}'", name), caps, out);
+            } else {
+                require(caps.calls, "function calls", caps, out);
             }
-            for a in args {
-                check_expr(a, caps, out);
-            }
+            walk_args(args, caps, out);
         }
         Expr::Field(recv, _) => {
-            if !caps.field_access {
-                out.push(caps.missing("field access"));
-            }
+            require(caps.field_access, "field access", caps, out);
             check_expr(recv, caps, out);
         }
         Expr::MethodCall(recv, _, args, _) => {
-            if !caps.method_calls {
-                out.push(caps.missing("method calls"));
-            }
+            require(caps.method_calls, "method calls", caps, out);
             check_expr(recv, caps, out);
-            for a in args {
-                check_expr(a, caps, out);
-            }
+            walk_args(args, caps, out);
         }
         Expr::Index(obj, idx) => {
-            if !caps.index {
-                out.push(caps.missing("indexing"));
-            }
+            require(caps.index, "indexing", caps, out);
             check_expr(obj, caps, out);
             check_expr(idx, caps, out);
         }
         Expr::Slice { array, start, end, stride } => {
-            if !caps.slices_ranges {
-                out.push(caps.missing("slices"));
-            }
+            require(caps.slices_ranges, "slices", caps, out);
             check_expr(array, caps, out);
-            for part in [start.as_deref(), end.as_deref(), stride.as_deref()].into_iter().flatten() {
+            for part in [start.as_deref(), end.as_deref(), stride.as_deref()]
+                .into_iter()
+                .flatten()
+            {
                 check_expr(part, caps, out);
             }
         }
         Expr::Range { start, end, .. } => {
-            if !caps.slices_ranges {
-                out.push(caps.missing("ranges"));
-            }
+            require(caps.slices_ranges, "ranges", caps, out);
             check_expr(start, caps, out);
             check_expr(end, caps, out);
         }
+        Expr::Reflect(recv, _, _) => {
+            require(caps.reflect, "reflection", caps, out);
+            check_expr(recv, caps, out);
+        }
+        Expr::PluginIntercept { args, .. } => {
+            require(caps.plugin_intercept, "plugin intercepts", caps, out);
+            walk_args(args, caps, out);
+        }
+        Expr::Spawn { args, .. } => {
+            require(caps.spawn, "spawn", caps, out);
+            walk_args(args, caps, out);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Control-flow and composite expressions. Returns true when handled.
+fn check_expr_composite(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
+    match e {
         Expr::If(cond, then, els) => {
-            if !caps.if_expr {
-                out.push(caps.missing("if expressions"));
-            }
+            require(caps.if_expr, "if expressions", caps, out);
             check_expr(cond, caps, out);
             check_expr(then, caps, out);
-            if let Some(e) = els {
-                check_expr(e, caps, out);
+            if let Some(x) = els {
+                check_expr(x, caps, out);
             }
         }
         Expr::Match(scrutinee, arms) => {
-            if !caps.match_expr {
-                out.push(caps.missing("match expressions"));
-            }
+            require(caps.match_expr, "match expressions", caps, out);
             check_expr(scrutinee, caps, out);
             for arm in arms {
                 if let Some(g) = &arm.guard {
@@ -321,257 +372,184 @@ fn check_expr(e: &Expr, caps: &BackendCapabilities, out: &mut Vec<String>) {
             }
         }
         Expr::Block(stmts) => {
-            if !caps.block_expr {
-                out.push(caps.missing("block expressions"));
-            }
+            require(caps.block_expr, "block expressions", caps, out);
             for s in stmts {
                 check_stmt(s, caps, out);
             }
         }
         Expr::Tuple(elems) => {
-            if !caps.tuple_list_literals {
-                out.push(caps.missing("tuple literals"));
-            }
-            for e in elems {
-                check_expr(e, caps, out);
-            }
+            require(caps.tuple_list_literals, "tuple literals", caps, out);
+            walk_args(elems, caps, out);
         }
         Expr::List(elems) => {
-            if !caps.tuple_list_literals {
-                out.push(caps.missing("list literals"));
-            }
-            for e in elems {
-                check_expr(e, caps, out);
-            }
+            require(caps.tuple_list_literals, "list literals", caps, out);
+            walk_args(elems, caps, out);
         }
         Expr::StructLiteral { fields, .. } => {
-            if !caps.struct_literal {
-                out.push(caps.missing("struct literals"));
-            }
-            for (_, e) in fields {
-                check_expr(e, caps, out);
+            require(caps.struct_literal, "struct literals", caps, out);
+            for (_, x) in fields {
+                check_expr(x, caps, out);
             }
         }
         Expr::Lambda(_, body) => {
-            if !caps.lambda {
-                out.push(caps.missing("lambdas"));
-            }
+            require(caps.lambda, "lambdas", caps, out);
             check_expr(body, caps, out);
         }
-        Expr::Cast(inner, _) => {
-            if !caps.casts {
-                out.push(caps.missing("casts"));
-            }
-            check_expr(inner, caps, out);
-        }
-        Expr::IsType(inner, _) => {
-            if !caps.is_type {
-                out.push(caps.missing("type checks"));
-            }
-            check_expr(inner, caps, out);
-        }
-        Expr::Deref(inner) | Expr::AddrOf(inner) | Expr::Consume(inner) => {
-            if !caps.deref_addr_of {
-                out.push(caps.missing("pointer operations"));
-            }
-            check_expr(inner, caps, out);
-        }
-        Expr::Await(inner) => {
-            if !caps.await_expr {
-                out.push(caps.missing("await"));
-            }
-            check_expr(inner, caps, out);
-        }
         Expr::Within(outer, inner) => {
-            if !caps.within {
-                out.push(caps.missing("within expressions"));
-            }
+            require(caps.within, "within expressions", caps, out);
             check_expr(outer, caps, out);
             check_expr(inner, caps, out);
         }
-        Expr::Spawn { args, .. } => {
-            if !caps.spawn {
-                out.push(caps.missing("spawn"));
-            }
-            for a in args {
-                check_expr(a, caps, out);
-            }
-        }
-        Expr::Reflect(recv, _, _) => {
-            if !caps.reflect {
-                out.push(caps.missing("reflection"));
-            }
-            check_expr(recv, caps, out);
-        }
-        Expr::PluginIntercept { args, .. } => {
-            if !caps.plugin_intercept {
-                out.push(caps.missing("plugin intercepts"));
-            }
-            for a in args {
-                check_expr(a, caps, out);
-            }
-        }
         Expr::DerivationBlock(db) => {
-            if !caps.derivation_blocks {
-                out.push(caps.missing("derivation blocks"));
-            }
+            require(caps.derivation_blocks, "derivation blocks", caps, out);
             for ex in &db.examples {
-                for i in &ex.inputs {
-                    check_expr(i, caps, out);
-                }
+                walk_args(&ex.inputs, caps, out);
                 check_expr(&ex.output, caps, out);
             }
         }
-        Expr::BeginProgram | Expr::Exists(_) => {}
+        Expr::BeginProgram | Expr::Exists(_) | Expr::Identifier(_)
+        | Expr::FormattingAnnotation(_) => {}
+        _ => return false,
+    }
+    true
+}
+
+fn walk_args(args: &[Expr], caps: &BackendCapabilities, out: &mut Vec<String>) {
+    for a in args {
+        check_expr(a, caps, out);
+    }
+}
+
+fn require(
+    supported: bool,
+    what: &str,
+    caps: &BackendCapabilities,
+    out: &mut Vec<String>,
+) {
+    if !supported {
+        out.push(caps.missing(what));
     }
 }
 
 fn check_stmt(s: &Statement, caps: &BackendCapabilities, out: &mut Vec<String>) {
+    // 2026-08-23: split per category (see check_expr note).
+    if check_stmt_binding(s, caps, out) {
+        return;
+    }
+    if check_stmt_flow(s, caps, out) {
+        return;
+    }
+    check_stmt_body(s, caps, out);
+}
+
+fn check_stmt_binding(s: &Statement, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
     match s {
-        Statement::Let { names, ty: _, expr, modifiers: _, name: _ } => {
-            if !caps.let_stmt {
-                out.push(caps.missing("let bindings"));
-            }
-            if !names.is_empty() {
-                // tuple destructuring rides on let support
-            }
-            if let Some(e) = expr {
-                check_expr(e, caps, out);
+        Statement::Let { expr, .. } => {
+            require(caps.let_stmt, "let bindings", caps, out);
+            if let Some(x) = expr {
+                check_expr(x, caps, out);
             }
         }
         Statement::Assign(lhs, rhs) => {
-            if !caps.assign_stmt {
-                out.push(caps.missing("assignments"));
-            }
+            require(caps.assign_stmt, "assignments", caps, out);
             check_expr(lhs, caps, out);
             check_expr(rhs, caps, out);
         }
         Statement::ArrowAssign { target, value, consume: _ } => {
-            if !caps.arrow_assign {
-                out.push(caps.missing("arrow assignment (<-)"));
-            }
+            require(caps.arrow_assign, "arrow assignment (<-)", caps, out);
             if let Some(t) = target {
                 check_expr(t, caps, out);
             }
             check_expr(value, caps, out);
         }
-        Statement::Guarded(cond, body) => {
-            if !caps.guarded_stmt {
-                out.push(caps.missing("guarded bodies (when/[])"));
-            }
-            check_expr(cond, caps, out);
-            for s in body {
-                check_stmt(s, caps, out);
-            }
+        Statement::MetadataAssignment(..) => {
+            require(caps.metadata_assign, "metadata assignment", caps, out);
         }
+        Statement::FreeHint(_) | Statement::KeepHint(_) => {
+            require(caps.lifetime_hints, "free/keep lifetime hints", caps, out);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn check_stmt_flow(s: &Statement, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
+    match s {
         Statement::Term(e) | Statement::EndProgram(e) => {
-            if !caps.term_endprogram {
-                out.push(caps.missing("term/endprogram"));
-            }
-            if let Some(e) = e {
-                check_expr(e, caps, out);
+            require(caps.term_endprogram, "term/endprogram", caps, out);
+            if let Some(x) = e {
+                check_expr(x, caps, out);
             }
         }
-        Statement::Break => {
-            if !caps.break_stmt {
-                out.push(caps.missing("break"));
-            }
-        }
-        Statement::Trap => {
-            if !caps.trap_stmt {
-                out.push(caps.missing("trap"));
-            }
-        }
+        Statement::Break => require(caps.break_stmt, "break", caps, out),
+        Statement::Trap => require(caps.trap_stmt, "trap", caps, out),
         Statement::Gate(cond) => {
-            if !caps.gate_stmt {
-                out.push(caps.missing("convergence gates ([cond];)"));
-            }
+            require(caps.gate_stmt, "convergence gates ([cond];)", caps, out);
             check_expr(cond, caps, out);
         }
         Statement::Expression(e) => check_expr(e, caps, out),
-        Statement::Block(body) => {
-            for s in body {
-                check_stmt(s, caps, out);
-            }
-        }
-        Statement::MetadataAssignment(..) => {
-            if !caps.metadata_assign {
-                out.push(caps.missing("metadata assignment"));
-            }
-        }
         Statement::Rollback(e) => {
-            if !caps.rollback {
-                out.push(caps.missing("rollback/escape"));
-            }
-            if let Some(e) = e {
-                check_expr(e, caps, out);
-            }
-        }
-        Statement::FreeHint(_) | Statement::KeepHint(_) => {
-            if !caps.lifetime_hints {
-                out.push(caps.missing("free/keep lifetime hints"));
-            }
-        }
-        Statement::Foreach { item: _, list, body } => {
-            if !caps.foreach {
-                out.push(caps.missing("foreach loops"));
-            }
-            check_expr(list, caps, out);
-            for s in body {
-                check_stmt(s, caps, out);
+            require(caps.rollback, "rollback/escape", caps, out);
+            if let Some(x) = e {
+                check_expr(x, caps, out);
             }
         }
         Statement::TrgBinding { instance, .. } => {
-            if !caps.trg_bindings {
-                out.push(caps.missing("trigger bindings"));
-            }
+            require(caps.trg_bindings, "trigger bindings", caps, out);
             check_expr(instance, caps, out);
         }
         Statement::InlineAsm { .. } => {
-            if !caps.inline_asm {
-                out.push(caps.missing("inline asm"));
-            }
-        }
-        Statement::SyncBlock(body) | Statement::Mutex(body) => {
-            if !caps.concurrency_sections {
-                out.push(caps.missing("sync/mutex sections"));
-            }
-            for s in body {
-                check_stmt(s, caps, out);
-            }
-        }
-        Statement::Barrier { body, .. } => {
-            if !caps.concurrency_sections {
-                out.push(caps.missing("barrier sections"));
-            }
-            for s in body {
-                check_stmt(s, caps, out);
-            }
-        }
-        Statement::Defer(body) => {
-            if !caps.defer_stmt {
-                out.push(caps.missing("defer blocks"));
-            }
-            for s in body {
-                check_stmt(s, caps, out);
-            }
-        }
-        Statement::Match { expr: scrutinee, arms } => {
-            if !caps.match_stmt {
-                out.push(caps.missing("match statements"));
-            }
-            check_expr(scrutinee, caps, out);
-            for arm in arms {
-                for s in &arm.body {
-                    check_stmt(s, caps, out);
-                }
-            }
+            require(caps.inline_asm, "inline asm", caps, out);
         }
         Statement::InlineDefn(_) | Statement::InlineTxn(_) => {
             // 2026-08-23: stage-block internals — stripped before codegen,
             // never a target-surface question.
         }
+        _ => return false,
     }
+    true
+}
+
+fn check_stmt_body(s: &Statement, caps: &BackendCapabilities, out: &mut Vec<String>) -> bool {
+    fn walk_body(body: &[Statement], caps: &BackendCapabilities, out: &mut Vec<String>) {
+        for stmt in body {
+            check_stmt(stmt, caps, out);
+        }
+    }
+    match s {
+        Statement::Guarded(cond, body) => {
+            require(caps.guarded_stmt, "guarded bodies (when/[])", caps, out);
+            check_expr(cond, caps, out);
+            walk_body(body, caps, out);
+        }
+        Statement::Foreach { list, body, .. } => {
+            require(caps.foreach, "foreach loops", caps, out);
+            check_expr(list, caps, out);
+            walk_body(body, caps, out);
+        }
+        Statement::Block(body) => walk_body(body, caps, out),
+        Statement::SyncBlock(body) | Statement::Mutex(body) => {
+            require(caps.concurrency_sections, "sync/mutex sections", caps, out);
+            walk_body(body, caps, out);
+        }
+        Statement::Barrier { body, .. } => {
+            require(caps.concurrency_sections, "barrier sections", caps, out);
+            walk_body(body, caps, out);
+        }
+        Statement::Defer(body) => {
+            require(caps.defer_stmt, "defer blocks", caps, out);
+            walk_body(body, caps, out);
+        }
+        Statement::Match { expr: scrutinee, arms } => {
+            require(caps.match_stmt, "match statements", caps, out);
+            check_expr(scrutinee, caps, out);
+            for arm in arms {
+                walk_body(&arm.body, caps, out);
+            }
+        }
+        _ => return false,
+    }
+    true
 }
 
 #[cfg(test)]

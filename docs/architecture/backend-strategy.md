@@ -48,30 +48,36 @@ Nine dead backends were moved to `archive/backend/` — zero fixes:
 return errors. VHDL trait system (`ExprCodegenVHDL`, `StmtCodegenVHDL`)
 removed from `src/features/traits.rs` and all 28 `impl` blocks.
 
-## Backend Routing by Extension (2026-06-19)
+## Backend Routing by Extension (2026-06-19, corrected 2026-08-23)
 
 File extension determines which backend (and `CompilationTarget`) is used:
 
-| Extension | Backend | CompilationTarget | Notes |
-|-----------|---------|-------------------|-------|
-| `.bv`/`.sbv` | LLVM | `Interpreter` | Standard native binary |
-| `.abv` | LLVM | `Interpreter` | GPU offload enabled via SPIR-V |
-| `.rbv`/`.srbv` | Webstack | `Wasm` | Rendered Briev → WASM+JS |
-| `.ebv`/`.sebv` | LLVM | `Embedded` | Bare-metal LLVM, `halt#` emits `wfi` |
-| `.cbv` | CIRCT | `Circuit` | Pure logic graph → MLIR |
+| Extension | Backend | Notes |
+|-----------|---------|-------|
+| `.bv`/`.sbv` | LLVM | Standard native binary |
+| `.ebv`/`.sebv` | LLVM | Bare-metal LLVM, `halt#` emits `wfi` |
+| `.rbv`/`.srbv` | Webstack | Rendered Briev → wasm32 via `LlvmBackend(wasm32)` + JS shim |
+| `.cbv` | CIRCT | Pure logic graph → MLIR |
+| `.abv` | SPIR-V | Standalone GPU-kernel binaries (`spirv/mod.rs`) |
+| *(none)* | VM | Reachable via `brievc bounty`; the tamer finishes compilation on the install machine |
 
-Routing dispatch is `run_build()` (`src/main.rs:453`) → `compile_build_opts()`
-(`src/compile.rs`), which dispatches on `opts.backend` (inferred from the file
-extension via `config/targets.dbvl`):
-- `.bv`/`.ebv` → LLVM backend (`BackendKind::Llvm`)
-- `.cbv` → CIRCT (`BackendKind::Circt`)
-- `.rbv` → Webstack (`BackendKind::Webstack`)
-- `.abv` → SPIR-V (`BackendKind::Gpu`)
-- `.vbv` → VM (`BackendKind::Vm`)
+**Routing truth (2026-08-23):** `config/targets.dbvl` maps extensions; the
+table above matches it. Two older claims in this file were wrong and are
+corrected here:
+- `.abv` does NOT route through the LLVM accel path. Standalone SPIR-V
+  emission is its own backend (`BackendKind::Spirv`).
+- GPU OFFLOAD is a different mechanism entirely: module-level `!> accel:`
+  metadata drives `BackendKind::Gpu` (LLVM emitter reuse, plan
+  `2026-08-06-accel-gpu-offload.md`). It is selected by metadata, not by
+  file extension.
+- The VM has no user-facing extension; it exists to FINISH COMPILATION on
+  any machine with a tamer — one `.bounty` archive ships everywhere, macros
+  adapt to the target machine at install time (plan
+  `2026-08-23-vm-compile-tail-parity.md`).
 
-There is no `is_embedded_extension()`/`is_circuit_extension()` helper (the old
-`run_compile_unified()` routing was removed); `.ebv` detection is
-`get_extension(file_path) == ".ebv"` in `compile.rs`.
+Routing dispatch is `run_build()` (`src/main.rs:453`) → `codegen()`
+(`src/compile.rs`), which dispatches on `opts.backend` (inferred from the
+file extension via `config/targets.dbvl`).
 
 ## Embedded LLVM Mode (.ebv) (2026-06-19)
 

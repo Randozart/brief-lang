@@ -1,5 +1,4 @@
 pub mod assembler;
-pub mod bindgen;
 pub mod capabilities;
 pub mod register_types;
 pub mod circt;
@@ -631,28 +630,6 @@ pub fn detect_fusable_pairs(items: &[TopLevel]) -> Vec<(String, String)> {
 /// Intent: Shared peephole optimizer that works at the AST level.
 pub fn peephole_optimize_program(items: &[TopLevel]) -> Vec<TopLevel> {
     items.to_vec()
-}
-
-/// Intent: Memory overlay analysis — identifies mutually exclusive variables
-/// that can share the same memory location to reduce stack usage.
-/// Used by C and Rust backends.
-#[derive(Debug, Clone)]
-pub struct MemoryOverlay {
-    pub groups: Vec<Vec<String>>,
-}
-
-impl MemoryOverlay {
-    pub fn new() -> Self {
-        Self { groups: Vec::new() }
-    }
-
-    pub fn analyze(_items: &[TopLevel]) -> Self {
-        Self { groups: Vec::new() }
-    }
-
-    pub fn has_overlays(&self) -> bool {
-        !self.groups.is_empty()
-    }
 }
 
 fn collect_assignments(body: &[Statement], out: &mut Vec<String>) {

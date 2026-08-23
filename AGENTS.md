@@ -297,6 +297,8 @@ contracts.
 
 | Resource | Location |
 |----------|----------|
+| **Backend scaffolding set (active 2026-08-23)** | `docs/plans/2026-08-23-backend-scaffolding-foundation.md` (foundation, first) + parallel: `-vm-compile-tail-parity`, `-spirv-kernel-emission`, `-circt-toolchain-validation`, `-webstack-v2-completion` |
+| **Capability matrix (backend surfaces)** | `src/backend/capabilities.rs` — declare before emitting, reject out-of-surface programs with what/why/fix |
 | **Rigorous methodology (REQUIRED reading)** | `docs/handoff-methodology.md` — the investigate→plan→experiment→implement→verify→document loop, evidence standard, and failure modes, with the frontend-driven-dispatch session as the worked example |
 | **Language syntax, contracts, coding standards, backend rules** | `docs/architecture/agent-reference.md` |
 | **Full pre-rewrite guidelines** | `AGENTS.md.archive` |
