@@ -403,6 +403,25 @@ Phase-8 codegen gap, 10 (conformance sweep + closure).
 Remaining: Phase 5c (LLVM dyn tables), 7 (obj/cell ports),
 10 (conformance sweep + closure).
 
+### 2026-08-23 session (post-merge) — Phase 7 COMPLETE (interp slice)
+- **7a finish** ✅ 6ed16a4b — ports bind in member bodies; `.Ready`=Bool +
+  payload fallthrough on Event<T>; cell sealing (external internals fail
+  naming the ports-only rule); node `Name()` parens tolerated.
+- **7b** ✅ 0e1f4460 — Value::EventQ + Value::Instance; spawn constructs
+  real instances with SHARED port slots (the wire); instance method
+  dispatch with slot write-back; ArrowAssign to a port FIRES; payload
+  typecheck for event targets. examples/object_ports.bv drives the spec
+  Enemy shape end-to-end (arm(100); hits deliver 90/80; died Ready=80;
+  damage wiring intact).
+- **7c staged** ✅ bd4eeb88-followup — capability matrix gains
+  obj_ports/cells flags; LLVM CAPABILITIES = full() minus those two and
+  now JOINS the pipeline gate; rejections name what/why/fix.
+- Suite 1932 green throughout.
+
+Remaining: Phase 5c (LLVM dyn tables), 10 (conformance sweep + closure),
+cell INTERPRETER scheduling (internal nodes per instance — beyond v1,
+noted in sub-plan).
+
 ## Session-3 decisions (owner, 2026-08-22)
 
 | Question | Decision |

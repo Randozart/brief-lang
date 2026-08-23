@@ -1,5 +1,7 @@
 # Obj/Cell Ports — Sub-Plan (Phase 7)
 
+**Status:** 7a/7b COMPLETE, 7c STAGED (2026-08-22)
+
 **Date:** 2026-08-22
 **Parent:** `docs/plans/2026-08-22-spec-conformance.md` §Phase 7
 **Strategy (owner):** interp-first slice; **interp-complete cells**. LLVM + rbv staged behind a BUGS entry.
@@ -62,10 +64,14 @@ Normative facts:
 - Fixture `examples/object_ports.bv` (Enemy/damage/died shape) runs in the
   interpreter with pinned output.
 
-### 7c — LLVM + rbv (STAGED)
-- Explicit rejection when a program instantiates port-bearing objs or any
-  cell, until the backend grows port columns + event queues + rbv mount
-  wiring. BUGS.md entry tracks it. Non-port programs unaffected.
+### 7c — LLVM + rbv (STAGED ✅ 2026-08-22)
+- DONE via the capability matrix (merged agent's `backend/capabilities.rs`):
+  new declaration-surface flags `obj_ports`/`cells`; LLVM declares full
+  surface EXCEPT these two via `BackendCapabilities::full()` and joins the
+  pipeline gate; port-bearing objs or any cell are rejected with
+  what/why/fix naming the interpreter as the executable target.
+- BUGS.md entry NOT needed — rejection is declared-surface diagnostics, the
+  mechanism Plan 0.2 was built for.
 
 ## Acceptance
 - Spec example shapes parse/typecheck/run (interp).
