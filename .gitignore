@@ -299,5 +299,7 @@ benchmarks/linked_list
 
 # Renamify workspace
 .renamify/
+
+# CIRCT source checkout (third-party build tree)
 tools/circt-src/
 tools/circt/

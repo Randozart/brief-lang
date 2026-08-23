@@ -1771,9 +1771,12 @@ fn codegen(
     // skips this gate.
     if matches!(
         opts.backend,
-        BackendKind::Circt | BackendKind::Spirv | BackendKind::Vm
+        BackendKind::Llvm | BackendKind::Circt | BackendKind::Spirv | BackendKind::Vm
     ) {
         let caps = match opts.backend {
+            // 2026-08-22 (Phase 7c): LLVM joins the gate — its surface is
+            // full EXCEPT the staged port/cell execution.
+            BackendKind::Llvm => briev_compiler::backend::llvm::CAPABILITIES,
             BackendKind::Circt => briev_compiler::backend::circt::CirctBackend::CAPABILITIES,
             BackendKind::Spirv => briev_compiler::backend::spirv::CAPABILITIES,
             _ => briev_compiler::backend::vm::CAPABILITIES,

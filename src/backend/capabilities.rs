@@ -74,6 +74,14 @@ pub struct BackendCapabilities {
     pub deref_addr_of: bool,
     /// spawn expressions.
     pub spawn: bool,
+    /// 2026-08-22 (Phase 7c, SPEC §9.5): obj PORT headers — Event wiring
+    /// across instances. Interpreter-only until the LLVM backend grows
+    /// port columns and event queues.
+    pub obj_ports: bool,
+    /// 2026-08-22 (Phase 7c, SPEC §9.6): CELLS — sealed state machines.
+    /// Interpreter-only; sealing + internal-node scheduling have no LLVM
+    /// lowering yet.
+    pub cells: bool,
     /// await expressions.
     pub await_expr: bool,
     /// Method-call syntax (receiver.method(args)).
@@ -151,6 +159,8 @@ impl BackendCapabilities {
         is_type: false,
         deref_addr_of: false,
         spawn: false,
+        obj_ports: false,
+        cells: false,
         await_expr: false,
         method_calls: false,
         reflect: false,
@@ -179,6 +189,63 @@ impl BackendCapabilities {
 }
 
 impl BackendCapabilities {
+    /// 2026-08-22 (Phase 7c): the FULL expression/statement surface, for
+    /// backends that implement everything except explicitly staged items
+    /// (LLVM flips obj_ports/cells off until their lowering lands).
+    pub const fn full(name: &'static str, nature: &'static str) -> Self {
+        Self {
+            name,
+            nature,
+            int_literals: true,
+            floats: true,
+            strings: true,
+            bool_char_literals: true,
+            int_ops: true,
+            unary_ops: true,
+            calls: true,
+            intrinsics: true,
+            if_expr: true,
+            match_expr: true,
+            block_expr: true,
+            field_access: true,
+            index: true,
+            slices_ranges: true,
+            tuple_list_literals: true,
+            struct_literal: true,
+            lambda: true,
+            casts: true,
+            is_type: true,
+            deref_addr_of: true,
+            spawn: true,
+            obj_ports: false,
+            cells: false,
+            await_expr: true,
+            method_calls: true,
+            reflect: true,
+            plugin_intercept: true,
+            derivation_blocks: true,
+            within: true,
+            let_stmt: true,
+            assign_stmt: true,
+            arrow_assign: true,
+            guarded_stmt: true,
+            term_endprogram: true,
+            break_stmt: true,
+            trap_stmt: true,
+            match_stmt: true,
+            foreach: true,
+            inline_asm: true,
+            concurrency_sections: true,
+            defer_stmt: true,
+            lifetime_hints: true,
+            metadata_assign: true,
+            rollback: true,
+            gate_stmt: true,
+            trg_bindings: true,
+            yield_stmt: true,
+        }
+    }
+
     fn missing(&self, feature: &str) -> String {
         format!(
             "error: {} does not support {}\n  why: {}.\n  fix: rewrite without \
@@ -204,6 +271,29 @@ pub fn validate_program(items: &[TopLevel], caps: &BackendCapabilities) -> Vec<S
 
 fn check_toplevel(item: &TopLevel, caps: &BackendCapabilities, errs: &mut Vec<String>) {
     match item {
+        // 2026-08-22 (Phase 7c): declaration-surface checks — ports and
+        // cells are interpreter-only surfaces for now (SPEC §9.5/§9.6).
+        TopLevel::Cell(c) if !caps.cells => errs.push(format!(
+            "error: {} does not support cells\n  why: {}.\n  fix: run the \
+             program on the reference interpreter, or replace the cell with \
+             an ordinary obj while the cell lowering is staged.",
+            caps.name, caps.nature
+        )),
+        TopLevel::TypeDef(td)
+            if (!td.ports_in.is_empty() || !td.ports_out.is_empty()) && !caps.obj_ports =>
+        {
+            errs.push(format!(
+                "error: {} does not support obj port headers\n  why: {}.\n  \
+                 fix: run the program on the reference interpreter, or drop \
+                 the ({}) -> ({}) port header from '{}' while Event wiring is \
+                 staged.",
+                caps.name,
+                caps.nature,
+                td.ports_in.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "),
+                td.ports_out.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "),
+                td.name
+            ));
+        }
         TopLevel::Transaction(t) => {
             check_expr(&t.contract.pre_condition, caps, errs);
             check_expr(&t.contract.post_condition, caps, errs);

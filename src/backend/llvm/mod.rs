@@ -995,6 +995,18 @@ pub enum TrgUnresolvedAction {
     Error,
 }
 
+/// 2026-08-22 (Phase 7c): LLVM declares its surface honestly — everything
+/// EXCEPT the staged port/cell execution (SPEC §9.5/§9.6 interpreter-only).
+pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities = {
+    let mut caps = crate::backend::capabilities::BackendCapabilities::full(
+        "the native LLVM target",
+        "it compiles Briev to machine code through LLVM",
+    );
+    caps.obj_ports = false;
+    caps.cells = false;
+    caps
+};
+
 pub struct LlvmBackend {
     // ── Context Architecture (Phase 0) ─────────────────────
     //

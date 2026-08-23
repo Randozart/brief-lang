@@ -133,6 +133,10 @@ pub struct TypecheckContext<'a> {
     /// 2026-08-22 (Phase 5): declared traits by name — dyn member resolution
     /// reads the requirement signatures from here.
     trait_defs: HashMap<String, crate::ast::top::TraitDef>,
+    /// 2026-08-22 (Phase 7a, SPEC §9.6): cell name → its PORT surface.
+    /// Sealing: external field access on a cell resolves ONLY through these;
+    /// anything else names the ports-only rule.
+    cell_ports: HashMap<String, Vec<(String, crate::ast::Type)>>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -165,6 +169,7 @@ impl<'a> TypecheckContext<'a> {
             variant_cross_ops: HashMap::new(),
             trait_assertions: HashMap::new(),
             trait_defs: HashMap::new(),
+            cell_ports: HashMap::new(),
         }
     }
 
@@ -887,9 +892,25 @@ pub fn infer_expression(
         Expr::Field(obj, name) => {
             let (obj_ty, obj_prov) = infer_expression(obj, ctx)?;
             let field_ty = resolve_field_type(&obj_ty, name, ctx).ok_or_else(|| {
-                TypeError::InvalidOperation {
-                    operation: format!("field access '.{}'", name),
-                    type_name: format!("{}", obj_ty),
+                // 2026-08-22 (Phase 7a, SPEC §9.6): a miss on a CELL receiver
+                // is a sealing violation, not a generic missing-member.
+                let sealed = match &obj_ty {
+                    Type::Custom(n) => ctx.cell_ports.contains_key(n.as_str()),
+                    _ => false,
+                };
+                if sealed {
+                    TypeError::InvalidOperation {
+                        operation: format!(
+                            "field access '.{}' on a cell — cells communicate only through their declared output ports",
+                            name
+                        ),
+                        type_name: format!("{}", obj_ty),
+                    }
+                } else {
+                    TypeError::InvalidOperation {
+                        operation: format!("field access '.{}'", name),
+                        type_name: format!("{}", obj_ty),
+                    }
                 }
             })?;
             Ok((
@@ -2690,6 +2711,19 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                             }
                         }
                         let lhs_ty = infer_type_only(t, ctx)?;
+                        // 2026-08-22 (Phase 7b, SPEC §9.5): FIRING an event
+                        // port — `died <- health;` where died: Event<Int> —
+                        // admits the PAYLOAD type, not the Event wrapper.
+                        let (lhs_ty, value_ty) = if let Type::Applied(base, args) = &lhs_ty {
+                            if base == "Event" {
+                                let payload = args.first().cloned().unwrap_or_else(Type::void);
+                                (payload, value_ty)
+                            } else {
+                                (lhs_ty, value_ty)
+                            }
+                        } else {
+                            (lhs_ty, value_ty)
+                        };
                         if lhs_ty != value_ty {
                             let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
                             if !coercible {
@@ -3519,6 +3553,15 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // (`type Meter: #Int, Comparable<Meter>, Printable { … }` → traits list).
     let mut all_trait_assertions: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_trait_defs: HashMap<String, crate::ast::top::TraitDef> = HashMap::new();
+    // 2026-08-22 (Phase 7a): cells register their PORT surface only — the
+    // slots stay unregistered so internal fields cannot resolve externally.
+    let mut all_cell_ports: HashMap<String, Vec<(String, crate::ast::Type)>> =
+        HashMap::new();
+    for item in items.iter() {
+        if let TopLevel::Cell(c) = item {
+            all_cell_ports.insert(c.name.clone(), c.ports_out.clone());
+        }
+    }
     for item in items.iter() {
         if let TopLevel::Trait(t) = item {
             all_trait_defs.insert(t.name.clone(), t.clone());
@@ -3712,6 +3755,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         defined_fns: &defined_fns,
         all_trait_assertions: &all_trait_assertions,
         all_trait_defs: &all_trait_defs,
+        all_cell_ports: &all_cell_ports,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -3750,6 +3794,19 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     mctx.state_keys.insert(name.clone());
                 }
                 mctx.bindings.insert("self".into(), self_ty.clone());
+                // 2026-08-22 (Phase 7a, SPEC §9.5): PORTS bind as members'
+                // own names — `damage.Ready` / `died <- v` resolve through
+                // the ordinary binding paths. Duplicate names vs slots are
+                // a declaration error.
+                for (pname, pty) in td.ports_in.iter().chain(td.ports_out.iter()) {
+                    if mctx.bindings.contains_key(pname) {
+                        errors.push(TypeError::InvalidOperation {
+                            operation: format!("port '{}' duplicates a slot name", pname),
+                            type_name: td.name.clone(),
+                        });
+                    }
+                    mctx.bindings.insert(pname.clone(), pty.clone());
+                }
                 // 2026-08-15 (coll plan §3.3): a `coll obj`'s hidden `cap`/
                 // `len` slots are bound too — the synthesized member bodies
                 // (`init_empty`/`init`/`push`) reference them as bare names.
@@ -4090,6 +4147,8 @@ struct CheckEnv<'a> {
     all_trait_assertions: &'a HashMap<String, Vec<String>>,
     /// 2026-08-22 (Phase 5): declared traits by name.
     all_trait_defs: &'a HashMap<String, crate::ast::top::TraitDef>,
+    /// 2026-08-22 (Phase 7a): cell port surfaces for sealing.
+    all_cell_ports: &'a HashMap<String, Vec<(String, crate::ast::Type)>>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -4114,6 +4173,22 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     // 2026-08-22 (Phase 5): trait assertions power dyn coercions.
     ctx.trait_assertions = env.all_trait_assertions.clone();
     ctx.trait_defs = env.all_trait_defs.clone();
+    // 2026-08-22 (Phase 7a): sealing surface + resolvable cell outputs.
+    for (cname, outs) in env.all_cell_ports {
+        let entry = ctx.cell_ports.entry(cname.clone()).or_default();
+        for (oname, oty) in outs {
+            entry.push((oname.clone(), oty.clone()));
+            // Output ports resolve as fields of the instance; inputs do NOT
+            // (they are supplied at construction).
+            ctx.type_slots.entry(cname.clone()).or_default().push(
+                crate::ast::top::TypeDefSlot {
+                    name: oname.clone(),
+                    ty: oty.clone(),
+                    bit_range: None,
+                },
+            );
+        }
+    }
     ctx.variant_cross_ops = env.all_cross_ops.clone();
     // 2026-08-15 (coll plan): coll types accept `[]` and have a scaffolded
     // op surface.
@@ -4233,6 +4308,20 @@ fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> O
             .parse::<usize>()
             .ok()
             .and_then(|i| elems.get(i).cloned());
+    }
+    // 2026-08-22 (Phase 7a, SPEC §9.5): an EVENT PORT exposes `.Ready`
+    // (a pending event is observable → Bool) and projects the PAYLOAD's
+    // members directly (`damage.amount` where damage: Event<Damage>).
+    if let Type::Applied(base, args) = receiver {
+        if base == "Event" {
+            if field == "Ready" {
+                return Some(Type::bool_());
+            }
+            if let Some(payload) = args.first() {
+                return resolve_field_type(payload, field, ctx);
+            }
+            return None;
+        }
     }
     let type_name = match receiver {
         Type::Custom(n) => n.as_str(),

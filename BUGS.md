@@ -4909,3 +4909,26 @@ inlining.
 bounded-iteration txn chain (ugly), or drive the interpretation loop from
 C (install_sim calls a single-step `exec_op_entry` export repeatedly —
 keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
+
+## Conformance sweep: 152 active sources fail the frontend gate (2026-08-22)
+
+**Status:** OPEN — Phase 10 continuation (`docs/plans/2026-08-22-spec-conformance.md`)
+**Gate:** `conformance_sweep_every_active_source_parses_and_checks`
+(conformance.rs, currently `#[ignore]`d pending the refactor below).
+Run: `cargo test --lib conformance_sweep -- --ignored`.
+**Triage at first light (by root):** .smoke 8 · benchmarks 12 · examples 57
+· lib 74 (21 = lib/compiler tamer WIP from the backend-foundation track,
+53 = lib/std+glue under the SHALLOW gate).
+**Root-cause classes:**
+1. Harness gaps: lib/std uses macro/plugin elaboration + special parse
+   modes; `.f.bv` needs the layout parser; the real entry
+   (`compile::check_source`) is BIN-only and must move into the lib so the
+   sweep runs the true pipeline instead of a shallow reimplementation.
+2. Genuine backlog: @-era demo examples (arrow-mutation, async_mutual_*,
+   bank_*…), reserved-word fallout (benchmarks/bit_clear.bv uses `reg` as
+   a name since Phase 2), stdlib HashMap lacking `.insert()` member surface
+   for older examples.
+3. Foreign WIP: lib/compiler/*.bv belong to the meta-circular tamer track —
+   coordinate with that agent before migrating.
+**Fix order:** (1) move check_source to lib → rerun → (2) fix harness-routable
+failures → (3) migrate backlog by root → flip off `#[ignore]`.
