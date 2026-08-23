@@ -1,6 +1,6 @@
-// PARITY fixture: bitwise ops, shifts, masks.
+// PARITY fixture (see arith.bv for the harness contract).
 // EXPECT: 8,14,6,240,6,1,0
-txn go [0xF0 & 0x0F == 0][1 == 1] {
+defn go() -> Int {
   Print#(12 & 10);
   Print#(12 | 10 | 2);
   Print#(12 ^ 10);
@@ -8,5 +8,5 @@ txn go [0xF0 & 0x0F == 0][1 == 1] {
   Print#(13 >> 1);
   Print#(1 & 1);
   Print#(1 & 0);
-  term;
+  term 0;
 };

@@ -1,9 +1,9 @@
 // PARITY fixture: basic integer arithmetic.
 // EXPECT: 999,42,13,-8
-txn go [6 * 7 == 42][1 + 1 == 2] {
+defn go() -> Int {
   Print#(999);
   Print#(6 * 7);
   Print#(13 + 5 * 2 - 10);
   Print#(3 - 11);
-  term;
+  term 0;
 };

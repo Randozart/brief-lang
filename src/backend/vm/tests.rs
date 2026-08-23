@@ -188,16 +188,22 @@ fn parity_expected_values_match_independent_evaluation() {
         let mut parser = crate::parser::Parser::new(tokens, &source);
         let items = parser.parse_program().expect("parse");
 
-        // Collect the txn body's Print# argument expressions.
+        // Collect the body's Print# argument expressions. Fixtures use a
+        // plain defn (no contract needed for --backend vm builds); accept
+        // txns too so older shapes keep working.
         let mut prints: Vec<Expr> = Vec::new();
+        let mut bodies: Vec<&Vec<Statement>> = Vec::new();
         for item in &items {
-            if let TopLevel::Transaction(t) = item {
-                for s in &t.body {
-                    if let Statement::Expression(Expr::Call(name, args, _)) = s {
-                        if name == "Print#" && args.len() == 1 {
-                            prints.push(args[0].clone());
-                        }
-                    }
+            match item {
+                TopLevel::Transaction(t) => bodies.push(&t.body),
+                TopLevel::Definition(d) => bodies.push(&d.body),
+                _ => {}
+            }
+        }
+        for s in bodies.iter().flat_map(|b| b.iter()) {
+            if let Statement::Expression(Expr::Call(name, args, _)) = s {
+                if name == "Print#" && args.len() == 1 {
+                    prints.push(args[0].clone());
                 }
             }
         }
@@ -206,9 +212,10 @@ fn parity_expected_values_match_independent_evaluation() {
         // Independent evaluation with the txn's let-sequence applied.
         let mut vars: HashMap<String, i64> = HashMap::new();
         let mut actual: Vec<i64> = Vec::new();
-        'stmts: for item in &items {
-            if let TopLevel::Transaction(t) = item {
-                for s in &t.body {
+        'stmts: for body in &bodies {
+            {
+                let t_body = *body;
+                for s in t_body {
                     match s {
                         Statement::Let { name, expr: Some(e), .. } => {
                             vars.insert(name.clone(), parity_eval_expr(e, &vars));

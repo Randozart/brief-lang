@@ -70,8 +70,12 @@ corrected here:
   metadata drives `BackendKind::Gpu` (LLVM emitter reuse, plan
   `2026-08-06-accel-gpu-offload.md`). It is selected by metadata, not by
   file extension.
-- The VM has no user-facing extension; it exists to FINISH COMPILATION on
-  any machine with a tamer — one `.bounty` archive ships everywhere, macros
+- The VM has no file extension BY DESIGN — it is an emit mode, not a
+  target language variant. Bytecode only:
+  `brievc build foo.bv --backend vm` → `foo.lair` (debug/CI affordance;
+  capability gate applies). Full archive with tamer + beastpack + manifest:
+  `brievc bounty foo.bv`. The VM exists to FINISH COMPILATION on any
+  machine with a tamer — one `.bounty` archive ships everywhere, macros
   adapt to the target machine at install time (plan
   `2026-08-23-vm-compile-tail-parity.md`).
 

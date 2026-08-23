@@ -98,10 +98,15 @@ Audit all HashMap iteration in `vm/*.rs` emission paths; sort by key
 collect_declarations iterates insertion-ordered Vec today but confirm;
 struct_fields lookups fine, any future iteration must sort.
 
-### 1.6 Debug reachability
+### 1.6 Debug reachability — RESOLVED 2026-08-23 as a COMMAND, not an extension
 
-Route `.vbv` extension → Vm in `targets.dbvl` (add line) so VM output is
-buildable outside `brievc bounty` for debugging. Update target docs.
+`brievc build foo.bv --backend vm` already routed correctly (`--backend`
+override + TargetConfig::resolve("vm")); verified end-to-end producing
+`.lair`, capability gate included. Decision record: an extension would
+imply a distinct source dialect; this is an emit mode of the SAME language,
+so the flag is the honest shape. Docs updated (usage string lists vm/spirv;
+strategy doc records the emit-mode rationale). Raw-`.lair` execution via
+install_sim remains bounty-only for now (manifest carries entry_bc).
 
 ## Documentation maintenance
 

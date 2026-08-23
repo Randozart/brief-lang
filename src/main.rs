@@ -286,7 +286,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             }
             i += if stage_str.is_some() { 2 } else { 1 };
         } else if arg == "--backend" {
-            let name = args.get(i + 1).ok_or("--backend requires a name argument (llvm, circt, webstack, gpu)")?;
+            let name = args.get(i + 1).ok_or("--backend requires a name argument (llvm, circt, webstack, gpu, spirv, vm)")?;
             backend_override = Some(name.clone());
             i += 2;
         } else if arg == "--no-std" {
