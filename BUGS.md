@@ -4737,3 +4737,16 @@ undo notes. Verified: 6 consecutive compiles of counter.rbv byte-identical;
 single hash across shopping_cart runs; full suite green.
 **Lesson:** the determinism rule must cover ANY map iteration feeding
 program REWRITING, not just direct IR emission.
+
+## Bounty flow broken at branch point: tamer `.bv` fails typecheck (2026-08-23)
+
+**Status:** OPEN — owned by plan 2026-08-23-vm-compile-tail-parity.
+**Found:** Plan 0 verification — `brievc bounty examples/hello/main.bv`.
+**Symptom:** tamer compilation dies in TYPECHECK (pre-backend):
+`expected Ptr<Int> for binary op '+' … found Int` ×2, plus
+`lib/tamer/vm.bv` parse warning (`unexpected token ']'`). Identical output
+from the pre-change binary — drift between lib/tamer/*.bv and the current
+typechecker/parser, NOT a backend regression.
+**Fix direction:** update lib/tamer sources to current syntax/type rules,
+then make the bounty round-trip an integration test so this class of rot
+fails CI instead of install time.

@@ -32,9 +32,10 @@ impl VmBackend {
             }
 
             Expr::Float(_) => {
-                // Float literals: delegate to host FFI for now.
-                // For MVP, push a placeholder and emit a trap.
-                // In the full tamer, the host provides float operations.
+                // 2026-08-23 (Plan 0.2): float support does not exist in the
+                // tamer opcode set — record a compile error instead of the
+                // old silent push-0 + trap (wrong value at install time).
+                self.record_unsupported("float literals", &self.current_fn.clone());
                 self.asm.emit_push_i64(0);
                 self.asm.emit_trap();
             }
@@ -282,7 +283,17 @@ impl VmBackend {
 
             // ── Remaining expressions ───────────────────────────────────
             other => {
-                // For MVP: unsupported expressions push 0 and trap.
+                // 2026-08-23 (Plan 0.2): unsupported expressions record a
+                // compile error alongside the trap — never a silent drop.
+                let kind = format!("{:?}", other)
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("this")
+                    .to_string();
+                self.record_unsupported(
+                    &format!("{} expressions", kind),
+                    &self.current_fn.clone(),
+                );
                 self.asm.emit_push_i64(0);
                 self.asm.emit_trap();
             }

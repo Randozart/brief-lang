@@ -19,6 +19,27 @@ use crate::ast::TopLevel;
 use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::kernel::{emit_kernel, is_kernel};
 
+/// 2026-08-23 (Plan 0.2): SPIR-V's declared surface — v1 lowers the kernel
+/// loop skeleton plus integer scalar compute inside bodies. Floats, strings,
+/// collections and control flow beyond the induction loop are compile
+/// errors until their emission lands (plan 2026-08-23-spirv-kernel-emission).
+pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
+    crate::backend::capabilities::BackendCapabilities {
+        name: "SPIR-V (.spv GPU kernels)",
+        nature: "a Vulkan/OpenCL compute kernel is bounded structured control \
+                 flow over typed buffers",
+        int_literals: true,
+        bool_char_literals: true,
+        int_ops: true,
+        unary_ops: true,
+        intrinsics: true,
+        if_expr: true,
+        let_stmt: true,
+        assign_stmt: true,
+        term_endprogram: true,
+        ..crate::backend::capabilities::BackendCapabilities::NONE
+    };
+
 /// 2026-07-15: Compile a Briev program to SPIR-V binary.
 ///
 /// # Parameters

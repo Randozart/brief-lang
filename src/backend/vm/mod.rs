@@ -14,6 +14,38 @@ use crate::ast::*;
 use crate::ast::top::*;
 use std::collections::{HashMap, HashSet};
 
+/// 2026-08-23 (Plan 0.2): the tamer VM's declared surface — what emit_expr/
+/// emit_stmt genuinely lower today. Integer stack machine: no floats, no
+/// strings (OP_PUSH_STR has no emitter yet), no collections/foreach, no
+/// concurrency sections. Anything outside this surface is a compile error
+/// via backend::capabilities::validate_program, never a silent runtime trap.
+/// To undo: remove this const + the validate_program call in src/compile.rs.
+pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
+    crate::backend::capabilities::BackendCapabilities {
+        name: "tamer VM (.lair)",
+        nature: "the tamer VM is an integer stack machine that finishes \
+                 compilation on the install machine",
+        int_literals: true,
+        bool_char_literals: true,
+        int_ops: true,
+        unary_ops: true,
+        calls: true,
+        intrinsics: true,
+        if_expr: true,
+        match_expr: true,
+        block_expr: true,
+        field_access: true,
+        index: true,
+        casts: true,
+        deref_addr_of: true,
+        let_stmt: true,
+        assign_stmt: true,
+        guarded_stmt: true,
+        term_endprogram: true,
+        match_stmt: true,
+        ..crate::backend::capabilities::BackendCapabilities::NONE
+    };
+
 /// 2026-07-30: Compute byte size of a field type for VM struct layout.
 /// The VM is untyped: only Int (8 bytes), Ptr (8 bytes), and fixed arrays.
 fn vm_field_size(ty: &Type, struct_fields: &HashMap<String, Vec<(String, u64)>>) -> u64 {
@@ -58,6 +90,13 @@ pub struct VmBackend {
     /// 2026-07-30: Struct field offsets for Field expression compilation.
     /// Populated from struct definitions during collect_declarations.
     pub(crate) struct_fields: HashMap<String, Vec<(String, u64)>>,
+    /// 2026-08-23 (Plan 0.2): constructs that reached codegen outside
+    /// CAPABILITIES and were emitted as traps. The pipeline turns non-empty
+    /// into a hard compile error — a silent wrong-behavior trap at install
+    /// time is never acceptable.
+    pub errors: Vec<String>,
+    /// 2026-08-23 (Plan 0.2): enclosing defn/txn name for diagnostics.
+    pub(crate) current_fn: String,
 }
 
 impl VmBackend {
@@ -73,7 +112,21 @@ impl VmBackend {
             label_counter: 0,
             fn_index_counter: 0,
             struct_fields: HashMap::new(),
+            errors: Vec::new(),
+            current_fn: String::new(),
         }
+    }
+
+    /// 2026-08-23 (Plan 0.2): record an unsupported construct that would
+    /// otherwise become a silent bytecode trap. `what` names the construct,
+    /// `ctx` the enclosing function/txn.
+    pub(crate) fn record_unsupported(&mut self, what: &str, ctx: &str) {
+        self.errors.push(format!(
+            "error: {} does not support {} (in '{}')\n  why: {}.\n  fix: rewrite \
+             without {}, or build for a target that supports it (e.g. the native \
+             LLVM target).",
+            CAPABILITIES.name, what, ctx, CAPABILITIES.nature, what
+        ));
     }
 
     /// Generate .lair bytecode from a typed program.

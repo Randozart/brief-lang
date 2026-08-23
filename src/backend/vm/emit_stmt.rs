@@ -182,7 +182,17 @@ impl VmBackend {
             }
 
             _ => {
-                // Unsupported statement: trap
+                // 2026-08-23 (Plan 0.2): unsupported statements record a
+                // compile error alongside the trap — never a silent drop.
+                let kind = format!("{:?}", stmt)
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("this")
+                    .to_string();
+                self.record_unsupported(
+                    &format!("{} statements", kind),
+                    &self.current_fn.clone(),
+                );
                 self.asm.emit_trap();
             }
         }

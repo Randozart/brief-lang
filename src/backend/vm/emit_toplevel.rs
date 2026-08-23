@@ -26,6 +26,7 @@ impl VmBackend {
         self.local_slots.clear();
         self.ptr_slots.clear();
         self.next_local_slot = 0;
+        self.current_fn = d.name.clone();
         for (name, ty) in &d.parameters {
             self.local_slots.insert(name.clone(), self.next_local_slot);
             // 2026-07-25: Track Ptr<Int> slots for pointer arithmetic scaling.
@@ -63,6 +64,7 @@ impl VmBackend {
         self.local_slots.clear();
         self.ptr_slots.clear();
         self.next_local_slot = 0;
+        self.current_fn = t.name.clone();
         for (name, ty) in &t.parameters {
             self.local_slots.insert(name.clone(), self.next_local_slot);
             // 2026-07-25: Track Ptr<Int> slots for pointer arithmetic scaling.
@@ -92,6 +94,7 @@ impl VmBackend {
         // that returns the constant's value.
         self.local_slots.clear();
         self.next_local_slot = 0;
+        self.current_fn = c.name.clone();
 
         self.asm.define_function(&c.name, 0, 0);
         self.emit_expr(&c.expr);

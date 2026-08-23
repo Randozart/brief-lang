@@ -63,6 +63,35 @@ impl NameGen {
 }
 
 impl CirctBackend {
+    /// 2026-08-23 (Plan 0.2): CIRCT's declared surface — synthesizable
+    /// register-level logic: integer arithmetic/logic, guards, FSM bodies.
+    /// No floats (comb has no float dialect here), no strings/collections,
+    /// no spawn/concurrency. Enforced by validate_program before codegen.
+    pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
+        crate::backend::capabilities::BackendCapabilities {
+            name: "CIRCT (.mlir hardware)",
+            nature: "hardware synthesis lowers to finite register-level logic \
+                     — bounded state and combinational logic only",
+            int_literals: true,
+            bool_char_literals: true,
+            int_ops: true,
+            unary_ops: true,
+            calls: true,
+            intrinsics: true,
+            if_expr: true,
+            match_expr: true,
+            field_access: true,
+            index: true,
+            casts: true,
+            let_stmt: true,
+            assign_stmt: true,
+            guarded_stmt: true,
+            term_endprogram: true,
+            match_stmt: true,
+            trap_stmt: true,
+            ..crate::backend::capabilities::BackendCapabilities::NONE
+        };
+
     pub fn new() -> Self {
         CirctBackend {
             trg_ports: Vec::new(),

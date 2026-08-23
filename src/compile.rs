@@ -1753,6 +1753,27 @@ fn codegen(
         Some(&*universe),
     );
 
+    // ── Capability validation (Plan 0.2, 2026-08-23) ───────────────────
+    // Backends with a partial surface declare it (backend::*::CAPABILITIES);
+    // programs reaching beyond are rejected here with what/why/fix instead
+    // of silently dropping constructs mid-codegen (the old CIRCT `None`
+    // fallbacks / VM trap-on-drop behavior). LLVM has the full surface and
+    // skips this gate.
+    if matches!(
+        opts.backend,
+        BackendKind::Circt | BackendKind::Spirv | BackendKind::Vm
+    ) {
+        let caps = match opts.backend {
+            BackendKind::Circt => briev_compiler::backend::circt::CirctBackend::CAPABILITIES,
+            BackendKind::Spirv => briev_compiler::backend::spirv::CAPABILITIES,
+            _ => briev_compiler::backend::vm::CAPABILITIES,
+        };
+        let cap_errors = briev_compiler::backend::capabilities::validate_program(items, &caps);
+        if !cap_errors.is_empty() {
+            return Err(cap_errors.join("\n"));
+        }
+    }
+
     let output;
     let ext: &str = match opts.backend {
         BackendKind::Llvm => {
@@ -1953,6 +1974,12 @@ fn codegen(
             // 2026-07-25: VM backend emits .lair bytecode
             let mut b = briev_compiler::backend::vm::VmBackend::new();
             let lair_data = b.generate(items, universe);
+            // 2026-08-23 (Plan 0.2): constructs outside the VM surface that
+            // slipped past validation became traps — surface them as the
+            // compile errors they are instead of shipping silent wrongness.
+            if !b.errors.is_empty() {
+                return Err(b.errors.join("\n"));
+            }
             let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
             let out_path = out.replace(".ll", ".lair");
             std::fs::write(&out_path, &lair_data)
