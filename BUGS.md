@@ -4740,7 +4740,8 @@ program REWRITING, not just direct IR emission.
 
 ## Bounty flow broken at branch point: tamer `.bv` fails typecheck (2026-08-23)
 
-**Status:** OPEN — owned by plan 2026-08-23-vm-compile-tail-parity.
+**Status:** PARTIAL 2026-08-23 (`backend-foundation`) — interpreter core
+ported; entry point remains.
 **Found:** Plan 0 verification — `brievc bounty examples/hello/main.bv`.
 **Symptom:** tamer compilation dies in TYPECHECK (pre-backend):
 `expected Ptr<Int> for binary op '+' … found Int` ×2, plus
@@ -4750,6 +4751,28 @@ typechecker/parser, NOT a backend regression.
 **Fix direction:** update lib/tamer sources to current syntax/type rules,
 then make the bounty round-trip an integration test so this class of rot
 fails CI instead of install time.
+
+**Done 2026-08-23:**
+- `vm.bv` `[] -> Int` → `-> Int` (empty-bracket contract no longer parses).
+- `vm.bv` field access through pointers ported to `(*p).field` (72 sites);
+  exec_op gains an explicit contract; Load#/Store# replace raw-address
+  casts. vm.bv compiles to a working binary.
+- `loader.bv` read_* ported to proven element indexing (`bc[addr / 8]`);
+  dead pre-beastpack helpers (`lair_*`, `find_bounty_section`) removed.
+- LLVM backend bugfix this uncovered: `(*p).field` / `(*p).member()` /
+  `(*p).field[i]` loaded the struct by value and fed a ptr into inttoptr
+  (invalid IR). Field/method/store receivers through Deref now use the
+  pointer handle directly; array fields return row views.
+
+**Remaining (owned by plan 2026-08-23-vm-compile-tail-parity §1.2):**
+1. `main.bv tame()` still uses the old pointer dialect (`lair_data + N`)
+   AND reads a STALE .lair header layout — its w4..w7 word reads do not
+   match the current assembler's byte layout (assembler.rs assemble():
+   magic(4) ver(4) endian/flags(8) + section table u64 pairs at byte 16).
+   Port = remap header reads to the current format + element indexing.
+2. `analyze.bv` — same dialect audit (imports loader.bv).
+3. `combined.bv` — legacy all-in-one variant, same treatment or delete.
+4. Then: bounty round-trip integration test (native ≡ install-simulated).
 
 ## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
 

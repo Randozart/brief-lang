@@ -2324,6 +2324,31 @@ impl LlvmBackend {
     /// 2026-07-31: `p.name` — load a struct field. The receiver register
     /// holds the struct's address (struct literals emit ptrtoint; state slots
     /// store the same address form). GEP by field offset and load.
+    /// 2026-08-23 (bugfix): a struct receiver through a DEREFERENCED pointer
+    /// (`(*p).field`, `(*p).member()`) is the pointer's boxed i64 address
+    /// itself — the struct must NOT be loaded by value (the old by-value
+    /// path emitted `load %Struct`/`load ptr` and fed a ptr into inttoptr;
+    /// clang: "defined with type 'ptr' but expected 'i64'", lib/tamer/vm.ll).
+    /// Returns the receiver register typed as the POINTEE so obj-key
+    /// resolution proceeds unchanged. None for non-deref receivers.
+    /// To undo: revert call sites to plain emit_expr_inner emission.
+    pub(crate) fn deref_struct_receiver(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        recv: &Expr,
+    ) -> Option<TypedRegister> {
+        if let Expr::Deref(p) = recv {
+            let p_reg = self.emit_expr(out, p, indent);
+            let inner = match &p_reg.ty {
+                Type::Ptr(inner) => (**inner).clone(),
+                other => other.clone(),
+            };
+            return Some(TypedRegister { name: p_reg.name.clone(), ty: inner });
+        }
+        None
+    }
+
     fn emit_field_access(
         &mut self,
         out: &mut String,
@@ -2369,7 +2394,12 @@ impl LlvmBackend {
         }
         let _ = v;
         let recv_tmp = self.fun.gen_reg();
-        let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+        // 2026-08-23 (bugfix): `(*p).field` routes through the pointer handle
+        // — see deref_struct_receiver.
+        let recv_reg = match self.deref_struct_receiver(out, indent, recv) {
+            Some(r) => r,
+            None => self.emit_expr_inner(out, &recv_tmp, recv, indent),
+        };
         let type_name = match self.resolve_obj_key(&recv_reg.ty) {
             Some(n) => n,
             None => panic!(
@@ -2438,6 +2468,13 @@ impl LlvmBackend {
         } else {
             self.llvm_type(&field_ty)
         };
+        // 2026-08-23 (bugfix): an ARRAY/vector field returns a POINTER to its
+        // storage (row view) — loading `[4096 x i64]` by value is invalid in
+        // this register model, and a following `data[i]` must GEP into the
+        // storage (same contract as the instance-column path above).
+        if let Type::Vector(..) = &field_ty {
+            return TypedRegister { name: gep, ty: field_ty.clone() };
+        }
         let val = self.fun.gen_reg();
         writeln!(out, "{}  {} = load {}, ptr {}", indent, val, llvm_ty, gep).ok();
         TypedRegister { name: val, ty: field_ty }
@@ -2539,7 +2576,12 @@ impl LlvmBackend {
                 base,
             )
         } else {
-            let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
+            // 2026-08-23 (bugfix): `(*p).member()` — pointer-handle receiver,
+            // see deref_struct_receiver.
+            let recv_reg = match self.deref_struct_receiver(out, indent, recv) {
+                Some(r) => r,
+                None => self.emit_expr_inner(out, &recv_tmp, recv, indent),
+            };
             let type_name = match self.resolve_obj_key(&recv_reg.ty) {
                 Some(n) => n,
                 None => String::new(),

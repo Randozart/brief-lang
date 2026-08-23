@@ -78,136 +78,137 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
             bc: Ptr<Int>, ft: Ptr<Int>, fnc: Int,
             op: Int, pc: Int, sll: Int)
-    [] -> Int
+    [op >= 0 && op <= 255 && pc >= 0][pc >= 0]
+    -> Int
 {
-    let sl = stack.len;
+    let sl = (*stack).len;
     match op {
         0x00 => { // nop
             term pc + 1;
         };
 
         0x01 => { // drop
-            when sl > 0 { stack.len = sl - 1; };
+            when sl > 0 { (*stack).len = sl - 1; };
             term pc + 1;
         };
 
         0x02 => { // dup
             when sl > 0 {
-                stack.data[sl] = stack.data[sl - 1];
-                stack.len = sl + 1;
+                (*stack).data[sl] = (*stack).data[sl - 1];
+                (*stack).len = sl + 1;
             };
             term pc + 1;
         };
 
         0x03 => { // swap
             when sl >= 2 {
-                let a = stack.data[sl - 1];
-                let b = stack.data[sl - 2];
-                stack.data[sl - 2] = a;
-                stack.data[sl - 1] = b;
+                let a = (*stack).data[sl - 1];
+                let b = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = a;
+                (*stack).data[sl - 1] = b;
             };
             term pc + 1;
         };
 
         0x06 => { // add
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] + stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] + (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x07 => { // sub
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] - stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] - (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x08 => { // mul
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] * stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] * (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x0B => { // and
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] & stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] & (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x0C => { // or
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] | stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] | (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x0D => { // xor
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] ^ stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] ^ (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x0E => { // not (logical NOT)
             when sl >= 1 {
-                when stack.data[sl - 1] == 0 { stack.data[sl - 1] = 1; };
-                when stack.data[sl - 1] != 0 { stack.data[sl - 1] = 0; };
+                when (*stack).data[sl - 1] == 0 { (*stack).data[sl - 1] = 1; };
+                when (*stack).data[sl - 1] != 0 { (*stack).data[sl - 1] = 0; };
             };
             term pc + 1;
         };
 
         0x0F => { // shl
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] << (stack.data[sl - 1] & 63);
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] << ((*stack).data[sl - 1] & 63);
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x10 => { // shr_s (arithmetic)
             when sl >= 2 {
-                stack.data[sl - 2] = stack.data[sl - 2] >> (stack.data[sl - 1] & 63);
-                stack.len = sl - 1;
+                (*stack).data[sl - 2] = (*stack).data[sl - 2] >> ((*stack).data[sl - 1] & 63);
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x11 => { // eq
             when sl >= 2 {
-                when stack.data[sl - 2] == stack.data[sl - 1] {
-                    stack.data[sl - 2] = 1;
+                when (*stack).data[sl - 2] == (*stack).data[sl - 1] {
+                    (*stack).data[sl - 2] = 1;
                 };
-                when stack.data[sl - 2] != stack.data[sl - 1] {
-                    stack.data[sl - 2] = 0;
+                when (*stack).data[sl - 2] != (*stack).data[sl - 1] {
+                    (*stack).data[sl - 2] = 0;
                 };
-                stack.len = sl - 1;
+                (*stack).len = sl - 1;
             };
             term pc + 1;
         };
 
         0x17 => { // load
             when sl >= 1 {
-                let addr = stack.data[sl - 1];
-                stack.data[sl - 1] = *(addr as Ptr<Int>);
+                let addr = (*stack).data[sl - 1];
+                (*stack).data[sl - 1] = Load#(addr, 8);
             };
             term pc + 1;
         };
 
         0x18 => { // store
             when sl >= 2 {
-                let addr = stack.data[sl - 2];
-                let val = stack.data[sl - 1];
-                *(addr as Ptr<Int>) = val;
-                stack.len = sl - 2;
+                let addr = (*stack).data[sl - 2];
+                let val = (*stack).data[sl - 1];
+                Store#(addr, val, 8);
+                (*stack).len = sl - 2;
             };
             term pc + 1;
         };
@@ -223,18 +224,18 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x30 => { // push_i8
             let val = read_i8(bc, pc + 1);
             when sl < 1024 {
-                stack.data[sl] = val;
-                stack.len = sl + 1;
+                (*stack).data[sl] = val;
+                (*stack).len = sl + 1;
             };
             term pc + 2;
         };
 
         0x31 => { // load_local
             let slot = read_u8(bc, pc + 1);
-            let val = locals.data[sll + slot];
+            let val = (*locals).data[sll + slot];
             when sl < 1024 {
-                stack.data[sl] = val;
-                stack.len = sl + 1;
+                (*stack).data[sl] = val;
+                (*stack).len = sl + 1;
             };
             term pc + 2;
         };
@@ -242,26 +243,26 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x32 => { // store_local
             let slot = read_u8(bc, pc + 1);
             when sl >= 1 {
-                locals.data[sll + slot] = stack.data[sl - 1];
-                stack.len = sl - 1;
+                (*locals).data[sll + slot] = (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
             };
             term pc + 2;
         };
 
         0x33 => { // push_frame
             let slots = read_u8(bc, pc + 1);
-            when frames.count < 256 {
-                frames.data[frames.count].locals_base = locals.len;
-                frames.data[frames.count].local_count = slots;
-                frames.data[frames.count].return_pc = pc + 2;
-                frames.count = frames.count + 1;
+            when (*frames).count < 256 {
+                (*frames).data[(*frames).count].locals_base = (*locals).len;
+                (*frames).data[(*frames).count].local_count = slots;
+                (*frames).data[(*frames).count].return_pc = pc + 2;
+                (*frames).count = (*frames).count + 1;
             };
             term pc + 2;
         };
 
         0x34 => { // pop_frame
-            when frames.count > 0 {
-                frames.count = frames.count - 1;
+            when (*frames).count > 0 {
+                (*frames).count = (*frames).count - 1;
             };
             term pc + 1;
         };
@@ -269,8 +270,8 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x50 => { // push_i16
             let val = read_i16(bc, pc + 1);
             when sl < 1024 {
-                stack.data[sl] = val;
-                stack.len = sl + 1;
+                (*stack).data[sl] = val;
+                (*stack).len = sl + 1;
             };
             term pc + 3;
         };
@@ -283,8 +284,8 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x52 => { // jz
             let offset = read_i16(bc, pc + 1);
             when sl >= 1 {
-                let cond = stack.data[sl - 1];
-                stack.len = sl - 1;
+                let cond = (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
                 when cond == 0 { term pc + 3 + offset; };
                 term pc + 3;
             };
@@ -294,8 +295,8 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x53 => { // jnz
             let offset = read_i16(bc, pc + 1);
             when sl >= 1 {
-                let cond = stack.data[sl - 1];
-                stack.len = sl - 1;
+                let cond = (*stack).data[sl - 1];
+                (*stack).len = sl - 1;
                 when cond != 0 { term pc + 3 + offset; };
                 term pc + 3;
             };
@@ -308,27 +309,27 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
                 let callee_bc_off = fn_bc_offset(ft, fn_idx);
                 let callee_local_c = fn_local_count(ft, fn_idx);
                 let callee_arg_c = fn_arg_count(ft, fn_idx);
-                when frames.count < 256 {
+                when (*frames).count < 256 {
                     // Save return state on CURRENT frame (before pushing new frame)
-                    frames.data[frames.count].return_pc = pc + 3;
-                    frames.data[frames.count].locals_base = locals.len;
-                    frames.data[frames.count].local_count = callee_local_c;
-                    frames.count = frames.count + 1;
+                    (*frames).data[(*frames).count].return_pc = pc + 3;
+                    (*frames).data[(*frames).count].locals_base = (*locals).len;
+                    (*frames).data[(*frames).count].local_count = callee_local_c;
+                    (*frames).count = (*frames).count + 1;
                     // Copy args from stack to local slots
                     when callee_arg_c >= 1 {
-                        locals.data[locals.len + 0] = stack.data[sl - 1];
+                        (*locals).data[(*locals).len + 0] = (*stack).data[sl - 1];
                     };
                     when callee_arg_c >= 2 {
-                        locals.data[locals.len + 1] = stack.data[sl - 2];
+                        (*locals).data[(*locals).len + 1] = (*stack).data[sl - 2];
                     };
                     when callee_arg_c >= 3 {
-                        locals.data[locals.len + 2] = stack.data[sl - 3];
+                        (*locals).data[(*locals).len + 2] = (*stack).data[sl - 3];
                     };
                     when callee_arg_c >= 4 {
-                        locals.data[locals.len + 3] = stack.data[sl - 4];
+                        (*locals).data[(*locals).len + 3] = (*stack).data[sl - 4];
                     };
-                    locals.len = locals.len + callee_local_c;
-                    stack.len = sl - callee_arg_c;
+                    (*locals).len = (*locals).len + callee_local_c;
+                    (*stack).len = sl - callee_arg_c;
                     term callee_bc_off;
                 };
                 term pc + 3;
@@ -339,8 +340,8 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x70 => { // push_i32
             let val = read_i32(bc, pc + 1);
             when sl < 1024 {
-                stack.data[sl] = val;
-                stack.len = sl + 1;
+                (*stack).data[sl] = val;
+                (*stack).len = sl + 1;
             };
             term pc + 5;
         };
@@ -354,15 +355,15 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x90 => { // push_i64
             let val = read_i64(bc, pc + 1);
             when sl < 1024 {
-                stack.data[sl] = val;
-                stack.len = sl + 1;
+                (*stack).data[sl] = val;
+                (*stack).len = sl + 1;
             };
             term pc + 9;
         };
 
         0x1C => { // bnot (bitwise NOT)
             when sl >= 1 {
-                stack.data[sl - 1] = ~stack.data[sl - 1];
+                (*stack).data[sl - 1] = ~(*stack).data[sl - 1];
             };
             term pc + 1;
         };

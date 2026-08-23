@@ -941,7 +941,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                             }
                         }
                     }
-                    let obj_reg = backend.emit_expr(out, obj, indent);
+                    // 2026-08-23 (bugfix): `(*p).field = v` — the receiver
+                    // through a deref'd struct pointer is its boxed i64
+                    // address (see LlvmBackend::deref_struct_receiver); no
+                    // by-value load.
+                    let obj_reg = match backend.deref_struct_receiver(out, indent, obj) {
+                        Some(r) => r,
+                        None => backend.emit_expr(out, obj, indent),
+                    };
                     let Some(obj_key) = backend.resolve_obj_key(&obj_reg.ty) else {
                         return TypedRegister { name: val.name, ty: Type::void() };
                     };
