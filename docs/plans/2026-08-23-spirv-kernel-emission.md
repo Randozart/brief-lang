@@ -1,7 +1,13 @@
 # SPIR-V backend — real kernel emission for standalone `.abv`
 
 **Date:** 2026-08-23
-**Status:** active
+**Status:** active — §2.1 core landed 2026-08-23: real statement/
+expression lowering over locals + invocation-id builtins + one SSBO
+binding for indexed state (src/backend/spirv/lower.rs); capability
+errors replace silent drops; structural tests on the in-memory module.
+OPEN: assembled-binary validation (BUGS.md 2026-08-23 — rspirv/spirv-val
+reject the serialized stream; test #[ignore]d). §2.2 accel-analysis-driven
+selection still pending.
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first. Work confined
 to `src/backend/spirv/`, own tests, own doc sections.

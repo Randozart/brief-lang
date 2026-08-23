@@ -13,7 +13,9 @@ use std::collections::HashMap;
 /// provided `types: &mut Vec<Instruction>` arena.
 pub struct TypeCache {
     cache: HashMap<u64, Word>,
-    next_id: Word,
+    /// 2026-08-23: pub(crate) — SpirvBuilder reserves a disjoint high range
+    /// for cache ids so they never collide with dr::Builder ids (id-unification).
+    pub(crate) next_id: Word,
     /// 2026-07-21: Accumulated type instructions (OpType*).
     pub types_arena: Vec<rspirv::dr::Instruction>,
 }
@@ -78,6 +80,50 @@ impl TypeCache {
                     ]);
                 }
                 Ok(id)
+            }
+            // 2026-08-23 (§2.1): fixed-size arrays for indexed state.
+            // Vulkan requires ArrayStride on arrays inside SSBOs; the stride
+            // is the element's byte size (scalars only in the supported
+            // surface: i64 → 8).
+            Type::Vector(inner, dims) => {
+                let inner_id = self.lower(inner)?;
+                let elem_bytes = 8; // supported surface: i64 elements
+                let mut cur = inner_id;
+                let mut stride = elem_bytes;
+                // Build innermost-out so each level's stride covers its tail.
+                                let mut dim_sizes: Vec<usize> = dims
+                    .iter()
+                    .map(|d| match d {
+                        crate::ast::Dimension::Anonymous(n) => *n,
+                        crate::ast::Dimension::Named(_, n) => *n,
+                    })
+                    .collect();
+                dim_sizes.reverse();
+                for n in dim_sizes {
+                    let u32_id = self.alloc_id();
+                    self.push_type(spirv::Op::TypeInt, u32_id, vec![
+                        Operand::LiteralBit32(32),
+                        Operand::LiteralBit32(0),
+                    ]);
+                    let len_const = self.alloc_id();
+                    self.push_type(spirv::Op::Constant, len_const, vec![
+                        Operand::IdRef(u32_id),
+                        Operand::LiteralBit32(n as u32),
+                    ]);
+                    let arr = self.alloc_id();
+                    self.push_type(spirv::Op::TypeArray, arr, vec![
+                        Operand::IdRef(cur),
+                        Operand::IdRef(len_const),
+                    ]);
+                    self.push_type(spirv::Op::Decorate, 0, vec![
+                        Operand::IdRef(arr),
+                        Operand::Decoration(spirv::Decoration::ArrayStride),
+                        Operand::LiteralBit32(stride as u32),
+                    ]);
+                    cur = arr;
+                    stride *= n;
+                }
+                Ok(cur)
             }
             Type::Ptr(elem) => {
                 let elem_id = self.lower(elem)?;

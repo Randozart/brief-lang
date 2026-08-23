@@ -4779,6 +4779,29 @@ fails CI instead of install time.
    (`term pc + 5`) — user programs run but host calls (print) are skipped
    until host-fn dispatch lands (next slice).
 
+## SPIR-V assembled binary rejected by rspirv parser / spirv-val (2026-08-23)
+
+**Status:** OPEN — blocks test_scale_kernel_passes_spirv_val (#[ignore]d)
+and real-device execution of `.spv` output.
+**Symptom:** re-parsing the assembled binary fails with
+`OperandExceeded(144, 9)`; spirv-val reports `Id 1000003 is defined more
+than once`. The IN-MEMORY dr::Module is well-formed (all structural
+assertions pass on it).
+**Isolated facts:** high-range cache ids (>=1000000) are distinct from
+builder ids; bound is correct post-build; arena instructions are inserted
+into types_global_values. Duplication appears only after assembly.
+**Suspect:** interaction between raw `insert_types_global_values`
+emissions and rspirv Builder's internal dedup/state for
+types/constants — possibly the Decorate-with-result-id-0 pushed through
+push_type, or constants emitted via emit_type while the builder also
+tracks its own constant table.
+**Fix direction:** switch emission to rspirv's typed builder helpers
+(`constant_i64`, typed type-instruction methods) so its internal tables
+stay consistent, then flip the ignored test on.
+**Interim:** structural coverage lives on the in-memory module
+(test_scale_kernel_lowers_real_body) — lowering correctness IS verified;
+only the serialization path is in question.
+
 ## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
 
 **Status:** CLOSED 2026-08-22. Two stacked causes, both fixed:
