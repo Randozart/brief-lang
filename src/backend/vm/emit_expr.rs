@@ -41,19 +41,26 @@ impl VmBackend {
             }
 
             // ── Identifiers (variable access) ──────────────────────────
-            Expr::Identifier(name) => {
-                match self.local_slots.get(name.as_str()) {
-                    Some(slot) => {
-                        self.asm.emit_load_local(*slot);
+                    Expr::Identifier(name) => {
+                        match self.local_slots.get(name.as_str()) {
+                            Some(slot) => {
+                                self.asm.emit_load_local(*slot);
+                            }
+                            None => {
+                                // 2026-08-23 (Plan 1.4): unresolvable
+                                // identifier (state field, global, or
+                                // strategy tag) records a compile error —
+                                // the old silent push-0+trap shipped wrong
+                                // values to install time.
+                                self.record_unsupported(
+                                    &format!("reference '{}' (not a local/param)", name),
+                                    &self.current_fn.clone(),
+                                );
+                                self.asm.emit_push_i64(0);
+                                self.asm.emit_trap();
+                            }
+                        }
                     }
-                    None => {
-                        // Not a local — could be a global or function name.
-                        // For MVP, treat as zero and emit trap.
-                        self.asm.emit_push_i64(0);
-                        self.asm.emit_trap();
-                    }
-                }
-            }
 
             // ── Binary operations ──────────────────────────────────────
             Expr::BinaryOp(kind, lhs, rhs) => {
@@ -94,7 +101,16 @@ impl VmBackend {
                     BinaryOpKind::BitXor => self.asm.emit_xor(),
                     BinaryOpKind::Shl    => self.asm.emit_shl(),
                     BinaryOpKind::Shr    => self.asm.emit_shr_s(),
-                    BinaryOpKind::Concat => self.asm.emit_trap(),
+                    BinaryOpKind::Concat => {
+                        // 2026-08-23 (Plan 1.4): string concat needs the
+                        // string opcode family — compile error, not a
+                        // silent wrong-value trap.
+                        self.record_unsupported(
+                            "string concatenation (Concat)",
+                            &self.current_fn.clone(),
+                        );
+                        self.asm.emit_trap();
+                    }
                 }
             }
 
@@ -194,13 +210,15 @@ impl VmBackend {
                         self.host_fn_ids.insert(name.clone(), id);
                     }
                     let host_id = self.host_fn_ids[name.as_str()];
-                    // Emit only Int arguments (skip PascalCase strategy identifiers
-                    // like Malloc that the VM backend can't resolve).
+                    // 2026-08-23 (Plan 1.1 bugfix): emit EVERY argument
+                    // right-to-left. The old code skipped ALL Identifier
+                    // args claiming they were "PascalCase strategy tags" —
+                    // it actually dropped real variable arguments, so e.g.
+                    // Alloc#(buf) called the host with no buffer. An
+                    // unresolvable identifier is diagnosed by the
+                    // Identifier arm itself (record_unsupported), never by
+                    // shape-guessing here.
                     for arg in args.iter().rev() {
-                        if matches!(arg, Expr::Identifier(_)) {
-                            // 2026-07-25: Skip PascalCase identifiers (strategy tags)
-                            continue;
-                        }
                         self.emit_expr(arg);
                     }
                     self.asm.emit_hcall(host_id);
@@ -219,7 +237,12 @@ impl VmBackend {
                     match self.fn_indices.get(name.as_str()) {
                         Some(idx) => self.asm.emit_call(*idx),
                         None => {
-                            // Unknown function — trap
+                            // 2026-08-23 (Plan 1.4): unknown function is a
+                            // compile error, not a silent trap.
+                            self.record_unsupported(
+                                &format!("call to unknown function '{}'", name),
+                                &self.current_fn.clone(),
+                            );
                             self.asm.emit_trap();
                         }
                     }
