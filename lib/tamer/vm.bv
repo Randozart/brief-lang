@@ -52,21 +52,21 @@ let OP_PUSH_I64:    Int = 0x90;
 
 txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
-            bc_data: Ptr<Int>, bc_len: Int,
-            fn_table: Ptr<Int>, fn_count: Int,
+            bc_data: Ptr<Int>, bc_end: Int,
+            fn_table: Ptr<Int>, foff: Int, fn_count: Int,
             pc: Int, saved_locals_base: Int,
             running: Int)
-    [pc >= 0 && pc < bc_len && running != 0]
+    [pc >= 0 && pc < bc_end && running != 0]
     [running == 0] -> Int
 {
     let op = read_u8(bc_data, pc);
     let new_pc = exec_op(
         stack, locals, frames,
-        bc_data, fn_table, fn_count,
+        bc_data, fn_table, foff, fn_count,
         op, pc, saved_locals_base);
 
     when new_pc < 0 { running = 0; };
-    when new_pc >= 0 && new_pc < bc_len { pc = new_pc; };
+    when new_pc >= 0 && new_pc < bc_end { pc = new_pc; };
     term 0;
 };
 
@@ -76,7 +76,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 
 txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
-            bc: Ptr<Int>, ft: Ptr<Int>, fnc: Int,
+            bc: Ptr<Int>, ft: Ptr<Int>, foff: Int, fnc: Int,
             op: Int, pc: Int, sll: Int)
     [op >= 0 && op <= 255 && pc >= 0][pc >= 0]
     -> Int
@@ -306,9 +306,9 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         0x54 => { // call
             let fn_idx = read_u16(bc, pc + 1);
             when fn_idx < fnc {
-                let callee_bc_off = fn_bc_offset(ft, fn_idx);
-                let callee_local_c = fn_local_count(ft, fn_idx);
-                let callee_arg_c = fn_arg_count(ft, fn_idx);
+                let callee_bc_off = fn_bc_offset(ft, foff, fn_idx);
+                let callee_local_c = fn_local_count(ft, foff, fn_idx);
+                let callee_arg_c = fn_arg_count(ft, foff, fn_idx);
                 when (*frames).count < 256 {
                     // Save return state on CURRENT frame (before pushing new frame)
                     (*frames).data[(*frames).count].return_pc = pc + 3;

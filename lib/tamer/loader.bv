@@ -49,15 +49,15 @@ defn fn_bc_offset(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
     term read_i64(fn_table, fn_idx * 20 + 4);
 };
 
-defn fn_bc_len(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u32(fn_table, fn_idx * 20 + 12);
+defn fn_bc_len(fn_table: Ptr<Int>, foff: Int, fn_idx: Int) -> Int {
+    term read_u32(fn_table, foff + fn_idx * 20 + 12);
 };
 
-defn fn_local_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table, fn_idx * 20 + 16);
+defn fn_local_count(fn_table: Ptr<Int>, foff: Int, fn_idx: Int) -> Int {
+    term read_u16(fn_table, foff + fn_idx * 20 + 16);
 };
 
-defn fn_arg_count(fn_table: Ptr<Int>, fn_idx: Int) -> Int {
-    term read_u16(fn_table, fn_idx * 20 + 18);
+defn fn_arg_count(fn_table: Ptr<Int>, foff: Int, fn_idx: Int) -> Int {
+    term read_u16(fn_table, foff + fn_idx * 20 + 18);
 };
 

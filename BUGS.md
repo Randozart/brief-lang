@@ -4772,7 +4772,12 @@ fails CI instead of install time.
    Port = remap header reads to the current format + element indexing.
 2. `analyze.bv` — same dialect audit (imports loader.bv).
 3. `combined.bv` — legacy all-in-one variant, same treatment or delete.
-4. Then: bounty round-trip integration test (native ≡ install-simulated).
+4. ✅ DONE — `tools/bounty_e2e.sh` (2026-08-23): packages a program,
+   drives the native tamer's exported `tame()` on the archive via
+   `tamer/install_sim.c`; tame() interprets the user .lair to completion
+   (exit 0). Known limit: exec_op's 0x71 HCALL arm is still a placeholder
+   (`term pc + 5`) — user programs run but host calls (print) are skipped
+   until host-fn dispatch lands (next slice).
 
 ## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
 

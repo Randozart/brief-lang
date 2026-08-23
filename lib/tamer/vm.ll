@@ -342,307 +342,43 @@ define i64 @fn_bc_offset(ptr noundef noalias nocapture align 8 %state, ptr %arg0
   ret i64 %t0
 }
 
-define i64 @fn_bc_len(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
+define i64 @fn_bc_len(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t7 = add i64 0, 20
-  %t5 = mul nsw i64 %arg2, %t7
-  %t3 = add nsw i64 %arg1, %t5
-  %t8 = add i64 0, 12
-  %t2 = add nsw i64 %t3, %t8
-  %t9 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u32(ptr %state, ptr %t9, i64 %t2)
+  %t5 = add i64 0, 20
+  %t3 = mul nsw i64 %arg1, %t5
+  %t6 = add i64 0, 12
+  %t2 = add nsw i64 %t3, %t6
+  %t7 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u32(ptr %state, ptr %t7, i64 %t2)
   ret i64 %t0
 }
 
-define i64 @fn_local_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
+define i64 @fn_local_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t7 = add i64 0, 20
-  %t5 = mul nsw i64 %arg2, %t7
-  %t3 = add nsw i64 %arg1, %t5
-  %t8 = add i64 0, 16
-  %t2 = add nsw i64 %t3, %t8
-  %t9 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u16(ptr %state, ptr %t9, i64 %t2)
-  ret i64 %t0
-}
-
-define i64 @fn_arg_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
-  entry:
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %t7 = add i64 0, 20
-  %t5 = mul nsw i64 %arg2, %t7
-  %t3 = add nsw i64 %arg1, %t5
-  %t8 = add i64 0, 18
-  %t2 = add nsw i64 %t3, %t8
-  %t9 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u16(ptr %state, ptr %t9, i64 %t2)
-  ret i64 %t0
-}
-
-define i64 @opcode_stack_change(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  ret i64 0
-}
-
-define i64 @instr_size(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  ret i64 0
-}
-
-define i64 @analyze_fn_stack(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
-  entry:
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %t2 = add nsw i64 %arg1, %arg2
-  %t6 = add i64 0, 0
-  %t7 = add i64 0, 0
-  %t8 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @analyze_fn_stack_loop(ptr %state, ptr %t8, i64 %t2, i64 %arg1, i64 %t6, i64 %t7)
-  ret i64 %t0
-}
-
-define i64 @analyze_max_stack(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, ptr %arg3, i64 %arg4) local_unnamed_addr #8 {
-  entry:
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %ac3 = ptrtoint ptr %arg3 to i64
-  %t6 = add i64 0, 0
-  %t7 = add i64 0, 0
-  %t8 = inttoptr i64 %ac0 to ptr
-  %t9 = inttoptr i64 %ac3 to ptr
-  %t0 = call i64 @analyze_max_stack_loop(ptr %state, ptr %t8, i64 %arg1, i64 %arg2, ptr %t9, i64 %arg4, i64 %t6, i64 %t7)
-  %t12 = add i64 0, 1024
-  %t13 = icmp sgt i64 %t0, %t12
-  %t10 = zext i1 %t13 to i8
-  %t15 = trunc i8 %t10 to i1
-  br i1 %t15, label %guard.then14, label %guard.end14
-  guard.then14:
-  %t16 = add i64 0, 1024
-  ret i64 %t16
-  guard.end14:
-  ret i64 %t0
-}
-
-define i64 @stack_slots(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  %t2 = add i64 0, 64
-  %t3 = icmp slt i64 %arg0, %t2
-  %t0 = zext i1 %t3 to i8
-  %t5 = trunc i8 %t0 to i1
-  br i1 %t5, label %guard.then4, label %guard.end4
-  guard.then4:
-  %t6 = add i64 0, 64
-  ret i64 %t6
-  guard.end4:
-  ret i64 %arg0
-}
-
-define i64 @locals_slots(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  %t2 = add i64 0, 256
-  %t3 = icmp slt i64 %arg0, %t2
-  %t0 = zext i1 %t3 to i8
-  %t5 = trunc i8 %t0 to i1
-  br i1 %t5, label %guard.then4, label %guard.end4
-  guard.then4:
-  %t6 = add i64 0, 256
-  ret i64 %t6
-  guard.end4:
-  %t11 = add i64 0, 2
-  %t9 = mul nsw i64 %arg0, %t11
-  ret i64 %t9
-}
-
-define i64 @frames_max(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  %t2 = add i64 0, 16
-  %t3 = icmp slt i64 %arg0, %t2
-  %t0 = zext i1 %t3 to i8
-  %t5 = trunc i8 %t0 to i1
-  br i1 %t5, label %guard.then4, label %guard.end4
-  guard.then4:
+  %t5 = add i64 0, 20
+  %t3 = mul nsw i64 %arg1, %t5
   %t6 = add i64 0, 16
-  ret i64 %t6
-  guard.end4:
-  %t11 = add i64 0, 2
-  %t9 = mul nsw i64 %arg0, %t11
-  ret i64 %t9
-}
-
-define i64 @compute_stack_slots(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, ptr %arg3, i64 %arg4) local_unnamed_addr #8 {
-  entry:
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %ac3 = ptrtoint ptr %arg3 to i64
-  %t6 = inttoptr i64 %ac0 to ptr
-  %t7 = inttoptr i64 %ac3 to ptr
-  %t0 = call i64 @analyze_max_stack(ptr %state, ptr %t6, i64 %arg1, i64 %arg2, ptr %t7, i64 %arg4)
-  %t10 = add i64 0, 64
-  %t11 = icmp slt i64 %t0, %t10
-  %t8 = zext i1 %t11 to i8
-  %t13 = trunc i8 %t8 to i1
-  br i1 %t13, label %guard.then12, label %guard.end12
-  guard.then12:
-  %t14 = add i64 0, 64
-  ret i64 %t14
-  guard.end12:
+  %t2 = add nsw i64 %t3, %t6
+  %t7 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u16(ptr %state, ptr %t7, i64 %t2)
   ret i64 %t0
 }
 
-define i64 @compute_locals_slots(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, ptr %arg3, i64 %arg4) local_unnamed_addr #8 {
+define i64 @fn_arg_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %ac3 = ptrtoint ptr %arg3 to i64
-  %t6 = inttoptr i64 %ac0 to ptr
-  %t7 = inttoptr i64 %ac3 to ptr
-  %t0 = call i64 @analyze_max_stack(ptr %state, ptr %t6, i64 %arg1, i64 %arg2, ptr %t7, i64 %arg4)
-  %t10 = add i64 0, 256
-  %t11 = icmp slt i64 %t0, %t10
-  %t8 = zext i1 %t11 to i8
-  %t13 = trunc i8 %t8 to i1
-  br i1 %t13, label %guard.then12, label %guard.end12
-  guard.then12:
-  %t14 = add i64 0, 256
-  ret i64 %t14
-  guard.end12:
-  %t19 = add i64 0, 2
-  %t17 = mul nsw i64 %t0, %t19
-  ret i64 %t17
+  %t5 = add i64 0, 20
+  %t3 = mul nsw i64 %arg1, %t5
+  %t6 = add i64 0, 18
+  %t2 = add nsw i64 %t3, %t6
+  %t7 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u16(ptr %state, ptr %t7, i64 %t2)
+  ret i64 %t0
 }
 
-define i64 @compute_frames_max(ptr noundef noalias nocapture align 8 %state, i64 %arg0) local_unnamed_addr #8 {
-  entry:
-  %t2 = add i64 0, 16
-  %t3 = icmp slt i64 %arg0, %t2
-  %t0 = zext i1 %t3 to i8
-  %t5 = trunc i8 %t0 to i1
-  br i1 %t5, label %guard.then4, label %guard.end4
-  guard.then4:
-  %t6 = add i64 0, 16
-  ret i64 %t6
-  guard.end4:
-  %t12 = add i64 0, 2
-  %t10 = mul nsw i64 %arg0, %t12
-  %t13 = add i64 0, 256
-  %t14 = icmp sgt i64 %t10, %t13
-  %t9 = zext i1 %t14 to i8
-  %t16 = trunc i8 %t9 to i1
-  br i1 %t16, label %guard.then15, label %guard.end15
-  guard.then15:
-  %t17 = add i64 0, 256
-  ret i64 %t17
-  guard.end15:
-  %t22 = add i64 0, 2
-  %t20 = mul nsw i64 %arg0, %t22
-  ret i64 %t20
-}
-
-define i64 @tame(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, ptr %arg2, i64 %arg3) local_unnamed_addr #8 {
-  entry:
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %ac2 = ptrtoint ptr %arg2 to i64
-  %t2 = add i64 0, 0
-  %t3 = inttoptr i64 %ac0 to ptr
-  %t4 = add i64 %t2, 0
-  %t5 = getelementptr i64, ptr %t3, i64 %t4
-  %t0 = load i64, ptr %t5
-  %t8 = add i64 0, 4294967295
-  %t6 = and i64 %t0, %t8
-  %t11 = add i64 0, 1380532556
-  %t12 = icmp ne i64 %t6, %t11
-  %t9 = zext i1 %t12 to i8
-  %t14 = trunc i8 %t9 to i1
-  br i1 %t14, label %guard.then13, label %guard.end13
-  guard.then13:
-  %t15 = add i64 0, 101
-  ret i64 %t15
-  guard.end13:
-  %t20 = add i64 0, 4
-  %t21 = inttoptr i64 %ac0 to ptr
-  %t22 = add i64 %t20, 0
-  %t23 = getelementptr i64, ptr %t21, i64 %t22
-  %t18 = load i64, ptr %t23
-  %t26 = add i64 0, 5
-  %t27 = inttoptr i64 %ac0 to ptr
-  %t28 = add i64 %t26, 0
-  %t29 = getelementptr i64, ptr %t27, i64 %t28
-  %t24 = load i64, ptr %t29
-  %t32 = add i64 0, 6
-  %t33 = inttoptr i64 %ac0 to ptr
-  %t34 = add i64 %t32, 0
-  %t35 = getelementptr i64, ptr %t33, i64 %t34
-  %t30 = load i64, ptr %t35
-  %t38 = add i64 0, 7
-  %t39 = inttoptr i64 %ac0 to ptr
-  %t40 = add i64 %t38, 0
-  %t41 = getelementptr i64, ptr %t39, i64 %t40
-  %t36 = load i64, ptr %t41
-  %t44 = add i64 0, 20
-  %t42 = sdiv i64 %t24, %t44
-  %t46 = add nsw i64 %t30, %t36
-  %t50 = icmp sgt i64 %t46, %arg1
-  %t45 = zext i1 %t50 to i8
-  %t52 = trunc i8 %t45 to i1
-  br i1 %t52, label %guard.then51, label %guard.end51
-  guard.then51:
-  %t53 = add i64 0, 103
-  ret i64 %t53
-  guard.end51:
-  %t57 = add nsw i64 %t18, %t24
-  %t61 = icmp sgt i64 %t57, %arg1
-  %t56 = zext i1 %t61 to i8
-  %t63 = trunc i8 %t56 to i1
-  br i1 %t63, label %guard.then62, label %guard.end62
-  guard.then62:
-  %t64 = add i64 0, 104
-  ret i64 %t64
-  guard.end62:
-  %t69 = add i64 0, 0
-  %t70 = icmp eq i64 %t42, %t69
-  %t67 = zext i1 %t70 to i8
-  %t72 = trunc i8 %t67 to i1
-  br i1 %t72, label %guard.then71, label %guard.end71
-  guard.then71:
-  %t73 = add i64 0, 105
-  ret i64 %t73
-  guard.end71:
-  %t78 = add i64 0, 8200
-  %t77_p = call ptr @malloc(i64 %t78)
-  %t77 = ptrtoint ptr %t77_p to i64
-   %t79 = add i64 %t78, 0
-  %t82 = add i64 0, 32776
-  %t81_p = call ptr @malloc(i64 %t82)
-  %t81 = ptrtoint ptr %t81_p to i64
-   %t83 = add i64 %t82, 0
-  %t86 = add i64 0, 6152
-  %t85_p = call ptr @malloc(i64 %t86)
-  %t85 = ptrtoint ptr %t85_p to i64
-   %t87 = add i64 %t86, 0
-  %t88 = add i64 0, 0
-  %t90 = inttoptr i64 %t77 to ptr
-  %t91 = getelementptr i8, ptr %t90, i64 8192
-  store i64 %t88, ptr %t91
-  %t92 = add i64 0, 0
-  %t94 = inttoptr i64 %t81 to ptr
-  %t95 = getelementptr i8, ptr %t94, i64 32768
-  store i64 %t92, ptr %t95
-  %t96 = add i64 0, 0
-  %t98 = inttoptr i64 %t85 to ptr
-  %t99 = getelementptr i8, ptr %t98, i64 6144
-  store i64 %t96, ptr %t99
-  %t105 = add nsw i64 %t30, %t36
-  %t112 = add i64 0, 0
-  %t113 = add i64 0, 1
-  %t114 = inttoptr i64 %t77 to ptr
-  %t115 = inttoptr i64 %t81 to ptr
-  %t116 = inttoptr i64 %t85 to ptr
-  %t117 = inttoptr i64 %ac0 to ptr
-  %t118 = inttoptr i64 %ac0 to ptr
-  %t100 = call i64 @vm_loop(ptr %state, ptr %t114, ptr %t115, ptr %t116, ptr %t117, i64 %t105, ptr %t118, i64 %t18, i64 %t42, i64 %t30, i64 %t112, i64 %t113)
-  %t119 = add i64 0, 0
-  ret i64 %t119
-}
-
-define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, i64 %arg4, ptr %arg5, i64 %arg6, i64 %arg7, i64 %arg8, i64 %arg9, i64 %arg10) local_unnamed_addr #8 {
+define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, i64 %arg4, ptr %arg5, i64 %arg6, i64 %arg7, i64 %arg8, i64 %arg9) local_unnamed_addr #8 {
   entry:
   %result = alloca i64, align 8
   store i64 0, ptr %result, align 8
@@ -671,31 +407,28 @@ define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr
   store i64 %arg8, ptr %p8_s, align 8
   %p9_s = alloca i64, align 8
   store i64 %arg9, ptr %p9_s, align 8
-  %p10_s = alloca i64, align 8
-  store i64 %arg10, ptr %p10_s, align 8
   br label %loop
 loop:
-  %p0_l121 = load i64, ptr %p0_s, align 8
-  %p1_l122 = load i64, ptr %p1_s, align 8
-  %p2_l123 = load i64, ptr %p2_s, align 8
-  %p3_l124 = load i64, ptr %p3_s, align 8
-  %p4_l125 = load i64, ptr %p4_s, align 8
-  %p5_l126 = load i64, ptr %p5_s, align 8
-  %p6_l127 = load i64, ptr %p6_s, align 8
-  %p7_l128 = load i64, ptr %p7_s, align 8
-  %p8_l129 = load i64, ptr %p8_s, align 8
-  %p9_l130 = load i64, ptr %p9_s, align 8
-  %p10_l131 = load i64, ptr %p10_s, align 8
-  %t4 = load i64, ptr %p8_s, align 8
+  %p0_l9 = load i64, ptr %p0_s, align 8
+  %p1_l10 = load i64, ptr %p1_s, align 8
+  %p2_l11 = load i64, ptr %p2_s, align 8
+  %p3_l12 = load i64, ptr %p3_s, align 8
+  %p4_l13 = load i64, ptr %p4_s, align 8
+  %p5_l14 = load i64, ptr %p5_s, align 8
+  %p6_l15 = load i64, ptr %p6_s, align 8
+  %p7_l16 = load i64, ptr %p7_s, align 8
+  %p8_l17 = load i64, ptr %p8_s, align 8
+  %p9_l18 = load i64, ptr %p9_s, align 8
+  %t4 = load i64, ptr %p7_s, align 8
   %t5 = add i64 0, 0
   %t6 = icmp sge i64 %t4, %t5
   %t2 = zext i1 %t6 to i8
-  %t9 = load i64, ptr %p8_s, align 8
+  %t9 = load i64, ptr %p7_s, align 8
   %t11 = load i64, ptr %p4_s, align 8
   %t12 = icmp slt i64 %t9, %t11
   %t7 = zext i1 %t12 to i8
   %t1 = and i8 %t2, %t7
-  %t15 = load i64, ptr %p10_s, align 8
+  %t15 = load i64, ptr %p9_s, align 8
   %t16 = add i64 0, 0
   %t17 = icmp ne i64 %t15, %t16
   %t13 = zext i1 %t17 to i8
@@ -704,7 +437,7 @@ loop:
   br i1 %pc18, label %body, label %done
 body:
   %t21 = load i64, ptr %p3_s, align 8
-  %t23 = load i64, ptr %p8_s, align 8
+  %t23 = load i64, ptr %p7_s, align 8
   %t24 = inttoptr i64 %t21 to ptr
   %t19 = call i64 @read_u8(ptr %state, ptr %t24, i64 %t23)
   %t27 = load i64, ptr %p0_s, align 8
@@ -713,49 +446,48 @@ body:
   %t33 = load i64, ptr %p3_s, align 8
   %t35 = load i64, ptr %p5_s, align 8
   %t37 = load i64, ptr %p6_s, align 8
-  %t39 = load i64, ptr %p7_s, align 8
+  %t40 = load i64, ptr %p7_s, align 8
   %t42 = load i64, ptr %p8_s, align 8
-  %t44 = load i64, ptr %p9_s, align 8
-  %t45 = inttoptr i64 %t27 to ptr
-  %t46 = inttoptr i64 %t29 to ptr
-  %t47 = inttoptr i64 %t31 to ptr
-  %t48 = inttoptr i64 %t33 to ptr
-  %t49 = inttoptr i64 %t35 to ptr
-  %t25 = call i64 @exec_op(ptr %state, ptr %t45, ptr %t46, ptr %t47, ptr %t48, ptr %t49, i64 %t37, i64 %t39, i64 %t19, i64 %t42, i64 %t44)
-  %t52 = add i64 0, 0
-  %t53 = icmp slt i64 %t25, %t52
-  %t50 = zext i1 %t53 to i8
-  %t55 = trunc i8 %t50 to i1
-  br i1 %t55, label %guard.then54, label %guard.end54
-  guard.then54:
-  %t56 = add i64 0, 0
-  store i64 %t56, ptr %p10_s
-  br label %guard.end54
-  guard.end54:
-  %t61 = add i64 0, 0
-  %t62 = icmp sge i64 %t25, %t61
-  %t59 = zext i1 %t62 to i8
-  %t66 = load i64, ptr %p4_s, align 8
-  %t67 = icmp slt i64 %t25, %t66
-  %t63 = zext i1 %t67 to i8
-  %t58 = and i8 %t59, %t63
-  %t69 = trunc i8 %t58 to i1
-  br i1 %t69, label %guard.then68, label %guard.end68
-  guard.then68:
-  store i64 %t25, ptr %p8_s
-  br label %guard.end68
-  guard.end68:
-  %t72 = add i64 0, 0
-  store i64 %t72, ptr %result
+  %t43 = inttoptr i64 %t27 to ptr
+  %t44 = inttoptr i64 %t29 to ptr
+  %t45 = inttoptr i64 %t31 to ptr
+  %t46 = inttoptr i64 %t33 to ptr
+  %t47 = inttoptr i64 %t35 to ptr
+  %t25 = call i64 @exec_op(ptr %state, ptr %t43, ptr %t44, ptr %t45, ptr %t46, ptr %t47, i64 %t37, i64 %t19, i64 %t40, i64 %t42)
+  %t50 = add i64 0, 0
+  %t51 = icmp slt i64 %t25, %t50
+  %t48 = zext i1 %t51 to i8
+  %t53 = trunc i8 %t48 to i1
+  br i1 %t53, label %guard.then52, label %guard.end52
+  guard.then52:
+  %t54 = add i64 0, 0
+  store i64 %t54, ptr %p9_s
+  br label %guard.end52
+  guard.end52:
+  %t59 = add i64 0, 0
+  %t60 = icmp sge i64 %t25, %t59
+  %t57 = zext i1 %t60 to i8
+  %t64 = load i64, ptr %p4_s, align 8
+  %t65 = icmp slt i64 %t25, %t64
+  %t61 = zext i1 %t65 to i8
+  %t56 = and i8 %t57, %t61
+  %t67 = trunc i8 %t56 to i1
+  br i1 %t67, label %guard.then66, label %guard.end66
+  guard.then66:
+  store i64 %t25, ptr %p7_s
+  br label %guard.end66
+  guard.end66:
+  %t70 = add i64 0, 0
+  store i64 %t70, ptr %result
   br label %post
 post:
   br label %loop
 done:
-  %ret74 = load i64, ptr %result, align 8
-  ret i64 %ret74
+  %ret72 = load i64, ptr %result, align 8
+  ret i64 %ret72
 }
 
-define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i64 %arg5, i64 %arg6, i64 %arg7, i64 %arg8, i64 %arg9) local_unnamed_addr #8 alwaysinline {
+define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i64 %arg5, i64 %arg6, i64 %arg7, i64 %arg8) local_unnamed_addr #8 alwaysinline {
   entry:
   %result = alloca i64, align 8
   store i64 0, ptr %result, align 8
@@ -782,30 +514,27 @@ define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr
   store i64 %arg7, ptr %p7_s, align 8
   %p8_s = alloca i64, align 8
   store i64 %arg8, ptr %p8_s, align 8
-  %p9_s = alloca i64, align 8
-  store i64 %arg9, ptr %p9_s, align 8
   br label %loop
 loop:
-  %p0_l75 = load i64, ptr %p0_s, align 8
-  %p1_l76 = load i64, ptr %p1_s, align 8
-  %p2_l77 = load i64, ptr %p2_s, align 8
-  %p3_l78 = load i64, ptr %p3_s, align 8
-  %p4_l79 = load i64, ptr %p4_s, align 8
-  %p5_l80 = load i64, ptr %p5_s, align 8
-  %p6_l81 = load i64, ptr %p6_s, align 8
-  %p7_l82 = load i64, ptr %p7_s, align 8
-  %p8_l83 = load i64, ptr %p8_s, align 8
-  %p9_l84 = load i64, ptr %p9_s, align 8
-  %t4 = load i64, ptr %p7_s, align 8
+  %p0_l73 = load i64, ptr %p0_s, align 8
+  %p1_l74 = load i64, ptr %p1_s, align 8
+  %p2_l75 = load i64, ptr %p2_s, align 8
+  %p3_l76 = load i64, ptr %p3_s, align 8
+  %p4_l77 = load i64, ptr %p4_s, align 8
+  %p5_l78 = load i64, ptr %p5_s, align 8
+  %p6_l79 = load i64, ptr %p6_s, align 8
+  %p7_l80 = load i64, ptr %p7_s, align 8
+  %p8_l81 = load i64, ptr %p8_s, align 8
+  %t4 = load i64, ptr %p6_s, align 8
   %t5 = add i64 0, 0
   %t6 = icmp sge i64 %t4, %t5
   %t2 = zext i1 %t6 to i8
-  %t9 = load i64, ptr %p7_s, align 8
+  %t9 = load i64, ptr %p6_s, align 8
   %t10 = add i64 0, 255
   %t11 = icmp sle i64 %t9, %t10
   %t7 = zext i1 %t11 to i8
   %t1 = and i8 %t2, %t7
-  %t14 = load i64, ptr %p8_s, align 8
+  %t14 = load i64, ptr %p7_s, align 8
   %t15 = add i64 0, 0
   %t16 = icmp sge i64 %t14, %t15
   %t12 = zext i1 %t16 to i8
@@ -826,157 +555,6 @@ post:
 done:
   %ret30 = load i64, ptr %result, align 8
   ret i64 %ret30
-}
-
-define i64 @analyze_fn_stack_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, i64 %arg3, i64 %arg4) local_unnamed_addr #8 {
-  entry:
-  %result = alloca i64, align 8
-  store i64 0, ptr %result, align 8
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %p0_s = alloca i64, align 8
-  store i64 %ac0, ptr %p0_s, align 8
-  %p1_s = alloca i64, align 8
-  store i64 %arg1, ptr %p1_s, align 8
-  %p2_s = alloca i64, align 8
-  store i64 %arg2, ptr %p2_s, align 8
-  %p3_s = alloca i64, align 8
-  store i64 %arg3, ptr %p3_s, align 8
-  %p4_s = alloca i64, align 8
-  store i64 %arg4, ptr %p4_s, align 8
-  br label %loop
-loop:
-  %p0_l31 = load i64, ptr %p0_s, align 8
-  %p1_l32 = load i64, ptr %p1_s, align 8
-  %p2_l33 = load i64, ptr %p2_s, align 8
-  %p3_l34 = load i64, ptr %p3_s, align 8
-  %p4_l35 = load i64, ptr %p4_s, align 8
-  %t2 = load i64, ptr %p2_s, align 8
-  %t4 = load i64, ptr %p1_s, align 8
-  %t5 = icmp slt i64 %t2, %t4
-  %t0 = zext i1 %t5 to i8
-  %pc6 = trunc i8 %t0 to i1
-  br i1 %pc6, label %body, label %done
-body:
-  %t9 = load i64, ptr %p0_s, align 8
-  %t11 = load i64, ptr %p2_s, align 8
-  %t12 = inttoptr i64 %t9 to ptr
-  %t7 = call i64 @read_u8(ptr %state, ptr %t12, i64 %t11)
-  %t13 = call i64 @opcode_stack_change(ptr %state, i64 %t7)
-  %t17 = load i64, ptr %p3_s, align 8
-  %t15 = add nsw i64 %t17, %t13
-  store i64 %t15, ptr %p3_s
-  %t21 = load i64, ptr %p3_s, align 8
-  %t23 = load i64, ptr %p4_s, align 8
-  %t24 = icmp sgt i64 %t21, %t23
-  %t19 = zext i1 %t24 to i8
-  %t26 = trunc i8 %t19 to i1
-  br i1 %t26, label %guard.then25, label %guard.end25
-  guard.then25:
-  %t28 = load i64, ptr %p3_s, align 8
-  store i64 %t28, ptr %p4_s
-  br label %guard.end25
-  guard.end25:
-  %t32 = load i64, ptr %p3_s, align 8
-  %t33 = add i64 0, 0
-  %t34 = icmp slt i64 %t32, %t33
-  %t30 = zext i1 %t34 to i8
-  %t36 = trunc i8 %t30 to i1
-  br i1 %t36, label %guard.then35, label %guard.end35
-  guard.then35:
-  %t37 = add i64 0, 0
-  store i64 %t37, ptr %p3_s
-  br label %guard.end35
-  guard.end35:
-  %t41 = load i64, ptr %p2_s, align 8
-  %t42 = call i64 @instr_size(ptr %state, i64 %t7)
-  %t39 = add nsw i64 %t41, %t42
-  store i64 %t39, ptr %p2_s
-  %t45 = load i64, ptr %p4_s, align 8
-  store i64 %t45, ptr %result
-  br label %post
-post:
-  br label %loop
-done:
-  %ret47 = load i64, ptr %result, align 8
-  ret i64 %ret47
-}
-
-define i64 @analyze_max_stack_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2, ptr %arg3, i64 %arg4, i64 %arg5, i64 %arg6) local_unnamed_addr #8 {
-  entry:
-  %result = alloca i64, align 8
-  store i64 0, ptr %result, align 8
-  %ac0 = ptrtoint ptr %arg0 to i64
-  %p0_s = alloca i64, align 8
-  store i64 %ac0, ptr %p0_s, align 8
-  %p1_s = alloca i64, align 8
-  store i64 %arg1, ptr %p1_s, align 8
-  %p2_s = alloca i64, align 8
-  store i64 %arg2, ptr %p2_s, align 8
-  %ac3 = ptrtoint ptr %arg3 to i64
-  %p3_s = alloca i64, align 8
-  store i64 %ac3, ptr %p3_s, align 8
-  %p4_s = alloca i64, align 8
-  store i64 %arg4, ptr %p4_s, align 8
-  %p5_s = alloca i64, align 8
-  store i64 %arg5, ptr %p5_s, align 8
-  %p6_s = alloca i64, align 8
-  store i64 %arg6, ptr %p6_s, align 8
-  br label %loop
-loop:
-  %p0_l48 = load i64, ptr %p0_s, align 8
-  %p1_l49 = load i64, ptr %p1_s, align 8
-  %p2_l50 = load i64, ptr %p2_s, align 8
-  %p3_l51 = load i64, ptr %p3_s, align 8
-  %p4_l52 = load i64, ptr %p4_s, align 8
-  %p5_l53 = load i64, ptr %p5_s, align 8
-  %p6_l54 = load i64, ptr %p6_s, align 8
-  %t2 = load i64, ptr %p5_s, align 8
-  %t4 = load i64, ptr %p2_s, align 8
-  %t5 = icmp slt i64 %t2, %t4
-  %t0 = zext i1 %t5 to i8
-  %pc6 = trunc i8 %t0 to i1
-  br i1 %pc6, label %body, label %done
-body:
-  %t9 = load i64, ptr %p0_s, align 8
-  %t11 = load i64, ptr %p1_s, align 8
-  %t13 = load i64, ptr %p5_s, align 8
-  %t14 = inttoptr i64 %t9 to ptr
-  %t7 = call i64 @fn_bc_offset(ptr %state, ptr %t14, i64 %t11, i64 %t13)
-  %t17 = load i64, ptr %p0_s, align 8
-  %t19 = load i64, ptr %p1_s, align 8
-  %t21 = load i64, ptr %p5_s, align 8
-  %t22 = inttoptr i64 %t17 to ptr
-  %t15 = call i64 @fn_bc_len(ptr %state, ptr %t22, i64 %t19, i64 %t21)
-  %t25 = load i64, ptr %p0_s, align 8
-  %t27 = load i64, ptr %p1_s, align 8
-  %t29 = load i64, ptr %p5_s, align 8
-  %t30 = inttoptr i64 %t25 to ptr
-  %t23 = call i64 @fn_local_count(ptr %state, ptr %t30, i64 %t27, i64 %t29)
-  %t33 = load i64, ptr %p3_s, align 8
-  %t36 = inttoptr i64 %t33 to ptr
-  %t31 = call i64 @analyze_fn_stack(ptr %state, ptr %t36, i64 %t7, i64 %t15)
-  %t37 = add nsw i64 %t31, %t23
-  %t43 = load i64, ptr %p6_s, align 8
-  %t44 = icmp sgt i64 %t37, %t43
-  %t40 = zext i1 %t44 to i8
-  %t46 = trunc i8 %t40 to i1
-  br i1 %t46, label %guard.then45, label %guard.end45
-  guard.then45:
-  store i64 %t37, ptr %p6_s
-  br label %guard.end45
-  guard.end45:
-  %t51 = load i64, ptr %p5_s, align 8
-  %t52 = add i64 0, 1
-  %t49 = add nsw i64 %t51, %t52
-  store i64 %t49, ptr %p5_s
-  %t54 = load i64, ptr %p6_s, align 8
-  store i64 %t54, ptr %result
-  br label %post
-post:
-  br label %loop
-done:
-  %ret56 = load i64, ptr %result, align 8
-  ret i64 %ret56
 }
 
 define void @init_state(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {

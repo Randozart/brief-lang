@@ -1,4 +1,9 @@
 // 2026-07-26: Tamer entry point — DAG-based buffer sizing, no Alloc#.
+// 2026-08-23: ported to the CURRENT .lair layout (assembler.rs assemble():
+// magic(4) ver(4) endian/flags(8), then u64 section table at byte 16:
+// str_off/str_size/fn_off/fn_size/bc_off/bc_len/host_off/host_size) and to
+// ABSOLUTE byte addressing — one base pointer, offsets carried as Ints
+// (memory-by-proof: no pointer arithmetic anywhere).
 
 import "vm.bv";
 import "analyze.bv";
@@ -6,40 +11,44 @@ import "analyze.bv";
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
                  beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
 {
-    let word0 = *(lair_data + 0);
+    // Header: bytes 0..4 = "LAIR" (low half of word 0).
+    let word0 = lair_data[0];
     let magic = word0 & 0xFFFFFFFF;
     when magic != 0x5249414C { term 101; };
 
-    let w4 = *(lair_data + 4);
-    let fn_off = w4;
-    let w5 = *(lair_data + 5);
-    let fn_size = w5;
-    let w6 = *(lair_data + 6);
-    let bc_off = w6;
-    let w7 = *(lair_data + 7);
-    let bc_len = w7;
+    // Section table (u64 LE at byte 16 → words 2..9). We need fn + bc.
+    let fn_off = lair_data[4];
+    let fn_size = lair_data[5];
+    let bc_off = lair_data[6];
+    let bc_len = lair_data[7];
     let fn_count = fn_size / 20;
-    let bc_data = lair_data + bc_off;
-    let fn_table = lair_data + fn_off;
 
     when bc_off + bc_len > lair_len { term 103; };
     when fn_off + fn_size > lair_len { term 104; };
     when fn_count == 0 { term 105; };
 
-    // Single-return buffer sizing
-    let stack_slots = compute_stack_slots(fn_table, fn_count, bc_data, bc_len);
-    let locals_slots = compute_locals_slots(fn_table, fn_count, bc_data, bc_len);
-    let frames_max = compute_frames_max(fn_table, fn_count, bc_data, bc_len);
+    // Interpreter buffers — heap blocks per the stdlib collection idiom
+    // (Malloc#(bytes) as Ptr<T>; field access through the pointer via
+    // (*p).field). Sizes are the fixed struct layouts:
+    //   VMStack  = Int[1024] + len  = 8200 bytes
+    //   VMLocals = Int[4096] + len  = 32776 bytes
+    //   VMFrames = Frame[256] + cnt = 256*24 + 8 = 6152 bytes
+    let stack_ptr = Malloc#(8200) as Ptr<VMStack>;
+    let locals_ptr = Malloc#(32776) as Ptr<VMLocals>;
+    let frames_ptr = Malloc#(6152) as Ptr<VMFrames>;
 
-    // Allocate buffers and run the user's program via the inner VM
-    let stack: VMStack;
-    let locals: VMLocals;
-    let frames: VMFrames;
+    // 2026-08-23: malloc memory is uninitialized — the interpreter's very
+    // first reads are the length counters, so zero them explicitly.
+    (*stack_ptr).len = 0;
+    (*locals_ptr).len = 0;
+    (*frames_ptr).count = 0;
 
+    // pc starts at the ABSOLUTE bytecode offset; vm_loop's bound is the
+    // absolute end (bc_off + bc_len).
     let _result = vm_loop(
-        &stack, &locals, &frames,
-        bc_data, bc_len, fn_table, fn_count,
-        0, 0, 1);
+        stack_ptr, locals_ptr, frames_ptr,
+        lair_data, bc_off + bc_len, lair_data, fn_off, fn_count,
+        bc_off, 0, 1);
 
     term 0;
 };

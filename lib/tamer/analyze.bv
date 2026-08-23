@@ -84,14 +84,14 @@ defn analyze_fn_stack(bc: Ptr<Int>, fn_offset: Int, fn_len: Int) -> Int {
 // Walk all functions, build call graph, compute transitive worst-case
 // stack depth accounting for function calls (which push frame + args).
 
-txn analyze_max_stack_loop(fn_table: Ptr<Int>, fn_count: Int,
+txn analyze_max_stack_loop(fn_table: Ptr<Int>, foff: Int, fn_count: Int,
                            bc_data: Ptr<Int>, bc_len: Int,
                            fn_idx: Int, global_max: Int)
     [fn_idx < fn_count][fn_idx >= fn_count] -> Int
 {
-    let bc_offset = fn_bc_offset(fn_table, fn_idx);
-    let bclen = fn_bc_len(fn_table, fn_idx);
-    let local_count = fn_local_count(fn_table, fn_idx);
+    let bc_offset = fn_bc_offset(fn_table, foff, fn_idx);
+    let bclen = fn_bc_len(fn_table, foff, fn_idx);
+    let local_count = fn_local_count(fn_table, foff, fn_idx);
     let fn_max = analyze_fn_stack(bc_data, bc_offset, bclen);
     let total = fn_max + local_count;  // stack + locals
     when total > global_max { global_max = total; };
@@ -99,11 +99,11 @@ txn analyze_max_stack_loop(fn_table: Ptr<Int>, fn_count: Int,
     term global_max;
 };
 
-defn analyze_max_stack(fn_table: Ptr<Int>, fn_count: Int,
+defn analyze_max_stack(fn_table: Ptr<Int>, foff: Int, fn_count: Int,
                        bc_data: Ptr<Int>, bc_len: Int) -> Int
 {
     let result = analyze_max_stack_loop(
-        fn_table, fn_count, bc_data, bc_len, 0, 0);
+        fn_table, foff, fn_count, bc_data, bc_len, 0, 0);
     when result > 1024 { term 1024; };
     term result;
 };
@@ -127,22 +127,21 @@ defn frames_max(fn_count: Int) -> Int {
     term fn_count * 2;
 };
 
-defn compute_stack_slots(fn_table: Ptr<Int>, fn_count: Int,
+defn compute_stack_slots(fn_table: Ptr<Int>, foff: Int, fn_count: Int,
                           bc_data: Ptr<Int>, bc_len: Int) -> Int {
-    let ms = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
+    let ms = analyze_max_stack(fn_table, foff, fn_count, bc_data, bc_len);
     when ms < 64 { term 64; };
     term ms;
 };
 
-defn compute_locals_slots(fn_table: Ptr<Int>, fn_count: Int,
+defn compute_locals_slots(fn_table: Ptr<Int>, foff: Int, fn_count: Int,
                            bc_data: Ptr<Int>, bc_len: Int) -> Int {
-    let ms = analyze_max_stack(fn_table, fn_count, bc_data, bc_len);
+    let ms = analyze_max_stack(fn_table, foff, fn_count, bc_data, bc_len);
     when ms < 256 { term 256; };
     term ms * 2;
 };
 
-defn compute_frames_max(fn_table: Ptr<Int>, fn_count: Int,
-                         bc_data: Ptr<Int>, bc_len: Int) -> Int {
+defn compute_frames_max(fn_count: Int) -> Int {
     when fn_count < 16 { term 16; };
     when fn_count * 2 > 256 { term 256; };
     term fn_count * 2;
