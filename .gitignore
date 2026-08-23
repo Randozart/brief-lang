@@ -303,3 +303,4 @@ benchmarks/linked_list
 # CIRCT source checkout (third-party build tree)
 tools/circt-src/
 tools/circt/
+lib/tamer/main
