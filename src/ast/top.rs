@@ -274,13 +274,6 @@ pub enum Statement {
     },
     /// term; or term expr;
     Term(Option<Expr>),
-    /// 2026-08-23 (fix-forward for 6f955614): `yield;` — cooperative
-    /// cancellation checkpoint (SPEC §12.2, Phase 8). Consumers on main
-    /// (parser, display, beast, interpreter, annotator, task_linear) were
-    /// committed against this variant before the enum gained it — the
-    /// tree did not compile at main tip 9e55719d. Unit variant: bare
-    /// `yield;` only, no payload.
-    Yield,
     /// 2026-08-17 (foreach break): `break;` — exit the innermost enclosing
     /// `foreach` immediately (search-until-found early exit). Valid only
     /// lexically inside a `foreach` body. `foreach` stays exhaustive by
@@ -296,6 +289,9 @@ pub enum Statement {
     /// cooperative cancellation point. No-op in the eager reference
     /// scheduler; grows into the concurrent scheduler's suspension point.
     /// Legal in any function body; advisory warning when never spawned.
+    /// 2026-08-23 (merge note): main added this variant independently while
+    /// backend-foundation carried an identical fix-forward for the same
+    /// red-tree gap (9f0b205a) — reconciled to ONE variant here.
     Yield,
     /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
