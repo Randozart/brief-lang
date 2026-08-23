@@ -4692,9 +4692,18 @@ guard with the computation (mask repro shape).
 case where a later guard's value feeds an earlier-outlined region's
 terminator; likely a cur_block tracking gap sibling to the match-edge fix.
 
-## `dyn Trait` execution: thunk-table ABI not yet lowered (2026-08-22)
+## `dyn Trait` execution: LLVM thunk-table ABI not yet lowered (2026-08-22)
 
-**Status:** OPEN — Phase 5b of `docs/plans/2026-08-22-spec-conformance.md`
+**Status:** HALF-CLOSED 2026-08-22 — interpreter dispatch COMPLETE (Phase 5b):
+`Value::Dyn{trait,concrete,inner}` wraps at dyn-annotated lets (constructor or
+dyn-rebind sources), member calls resolve impl bodies under
+`Concrete::fn`, receiver threads by arity shape (params == args+1 ⇒ Self-
+first). Static checker validates Self-convention signatures.
+**Remaining (Phase 5c):** the LLVM backend still panics on Dyn values —
+thunk tables per (trait, concrete) with per-slot indirect calls, boxed
+handle representation. Also v1 coercion-source limits: constructor
+expressions and dyn rebinds only; identifier-of-typed-let needs binding-
+type provenance threaded through EvalScope. Original report:
 **Found:** spec-conformance Phase 5 work
 **Complete:** parse (`dyn Name` contextual in type-prefix position),
 typecheck (concrete→dyn coercion ONLY into an explicit dyn annotation and

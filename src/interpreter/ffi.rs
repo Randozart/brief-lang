@@ -34,6 +34,8 @@ pub fn marshal_value(v: &Value) -> Marshalled {
         Value::Atom(Atom::Bool(b)) => Marshalled::Bool(*b),
         Value::Atom(Atom::Char(c)) => Marshalled::Int(*c as i64),
         Value::Bits(bytes) => Marshalled::Bytes(bytes.clone()),
+        // 2026-08-22 (Phase 5b): a dyn value crosses FFI as its payload.
+        Value::Dyn { inner, .. } => marshal_value(inner),
         Value::Product { fields, .. } => {
             Marshalled::Seq(fields.iter().map(marshal_value).collect())
         }

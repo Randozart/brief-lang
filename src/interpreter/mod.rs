@@ -69,6 +69,7 @@ pub struct Interpreter {
     /// `load_program` when it seeds each `TopLevel::Init`; reads resolve via
     /// `state`, and a later write to one is a `RuntimeError::ImmutableInit`.
     pub init_names: std::collections::HashSet<String>,
+
     /// 2026-08-09 (Phase 10): `defer { ... }` cleanup stack — bodies pushed by
     /// `exec_stmt(Defer)` and flushed LIFO on term/rollback/endprogram. The
     /// reference semantics: cleanup runs exactly once per registered defer,
@@ -91,6 +92,24 @@ impl Interpreter {
     /// 2026-07-28: Phase B.1 — Load all definitions and transactions from
     /// a parsed program into the function registry for call_function().
     pub fn load_program(&mut self, program: &[TopLevel]) {
+        // 2026-08-22 (Phase 5b): impl bodies become callables under the
+        // qualified key `Concrete::fn_name` for dyn member dispatch. Whether
+        // the receiver threads as the first argument is decided AT THE CALL
+        // by arity (params == args+1 ⇒ receiver-first), matching the trait's
+        // Self-first convention checked statically.
+        for item in program {
+            if let TopLevel::Impl(i) = item {
+                for d in &i.functions {
+                    let key = format!("{}::{}", i.target, d.name);
+                    let param_names = d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(key, FunctionDef {
+                        name: d.name.clone(),
+                        parameters: param_names,
+                        body: d.body.clone(),
+                    });
+                }
+            }
+        }
         for item in program {
             match item {
                 TopLevel::Definition(d) => {
@@ -367,6 +386,16 @@ pub enum Value {
     Product {
         fields: Vec<Value>,
         names: Option<std::sync::Arc<Vec<String>>>,
+    },
+
+    /// 2026-08-22 (Phase 5b): a trait object — `let g: dyn Greeter = d`.
+    /// Carries the trait AND the concrete type name so member calls can find
+    /// the impl body (`Concrete::fn`) and thread the receiver when the
+    /// trait function's first parameter is `Self`.
+    Dyn {
+        trait_name: String,
+        concrete: String,
+        inner: Box<Value>,
     },
 
     Void,

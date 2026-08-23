@@ -488,6 +488,7 @@ fn describe_value(v: &Value) -> String {
         Value::Atom(Atom::Char(c)) => format!("character '{}'", c),
         Value::Bits(_) => "raw bits".into(),
         Value::Product { .. } => "product".into(),
+        Value::Dyn { trait_name, .. } => format!("dyn {} value", trait_name),
         Value::Void => "void".into(),
         Value::Ref(_) => "reference".into(),
         Value::Closure { .. } => "closure".into(),
@@ -551,6 +552,37 @@ fn eval_method_call(
         let mut all = vec![recv_val];
         all.extend(arg_vals);
         return execute_intrinsic(name, &all, heap);
+    }
+    // 2026-08-22 (Phase 5b): dyn member dispatch — find the impl body under
+    // `Concrete::fn`, thread the receiver when the trait fn's first parameter
+    // is `Self`, and run it in a caller-seeded scope (the interpreter's
+    // dynamic-scoping convention for user code).
+    if let Value::Dyn { concrete, inner, .. } = &recv_val {
+        let key = format!("{}::{}", concrete, name);
+        let fn_def = scope.functions.get(&key).ok_or_else(|| RuntimeError::UndefinedFunction(key.clone()))?;
+        let mut params = fn_def.parameters.clone();
+        let mut local: HashMap<String, Value> = scope.bindings.clone();
+        // Receiver threading by shape: one more parameter than call-site
+        // arguments means the trait fn is Self-first — the object goes in
+        // as that parameter.
+        if params.len() == arg_vals.len() + 1 {
+            let recv_param = params.remove(0);
+            local.insert(recv_param, (**inner).clone());
+        }
+        if params.len() != arg_vals.len() {
+            return Err(RuntimeError::TypeError {
+                expected: format!("{} arguments", params.len()),
+                found: format!("{} arguments", arg_vals.len()),
+            });
+        }
+        for (p, v) in params.iter().zip(arg_vals.into_iter()) {
+            local.insert(p.clone(), v);
+        }
+        let block = Expr::Block(fn_def.body.clone());
+        return match eval_expr(&block, heap, &mut local, scope.functions) {
+            Err(RuntimeError::TermReturn(v)) => Ok(v),
+            other => other,
+        };
     }
     Ok(scope.bindings.get(name).cloned().unwrap_or(Value::Void))
 }
@@ -753,6 +785,9 @@ fn reflect_type_code(v: &Value) -> i64 {
         Value::Atom(Atom::Char(_)) => 3,
         Value::Bits(_) => 4,
         Value::Product { .. } => 5,
+        // A trait object marshals as its inner payload (the concrete value);
+        // the trait/concrete names are compile-time dispatch metadata.
+        Value::Dyn { inner, .. } => reflect_type_code(inner),
         Value::Sum { .. } => 6,
         Value::Ref(_) => 7,
         Value::Closure { .. } => 8,
@@ -1334,9 +1369,56 @@ pub fn eval_statement(
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     match stmt {
-        Statement::Let { name, expr, .. } => {
+        Statement::Let { name, ty, expr, .. } => {
             if let Some(expr) = expr {
                 let val = eval_expr(expr, heap, bindings, functions)?;
+                // 2026-08-22 (Phase 5b): an explicit `dyn Trait` annotation
+                // wraps the value — the coercion site. The concrete type name
+                // comes from the expression syntactically (constructor call or
+                // another dyn binding); there is no runtime type reflection
+                // over plain products.
+                // 2026-08-22 (Phase 5b v1): coercions resolve the concrete
+                // type from a CONSTRUCTOR expression or another dyn binding.
+                // Identifier-of-typed-let needs binding-type provenance
+                // threaded through EvalScope — tracked as a Phase 5c limit
+                // in BUGS.md; the error says exactly what works today.
+                let val = match ty.as_ref().and_then(|t| match t {
+                    crate::ast::Type::Dyn(inner) => Some(&**inner),
+                    _ => None,
+                }) {
+                    Some(tr) => {
+                        let trait_name = match tr {
+                            crate::ast::Type::Custom(n) => n.clone(),
+                            other => format!("{}", other),
+                        };
+                        let concrete = match expr {
+                            Expr::StructLiteral { type_name, .. } => type_name.clone(),
+                            Expr::Identifier(src_name) => match bindings.get(src_name) {
+                                Some(Value::Dyn { concrete, .. }) => concrete.clone(),
+                                _ => {
+                                    return Err(RuntimeError::TypeError {
+                                        expected: format!(
+                                            "a constructor or another `dyn` binding to coerce into dyn {}",
+                                            trait_name
+                                        ),
+                                        found: "a plain value — bind it via a dyn-annotated let at the constructor site".into(),
+                                    });
+                                }
+                            },
+                            _ => {
+                                return Err(RuntimeError::TypeError {
+                                    expected: format!(
+                                        "a constructor or another `dyn` binding to coerce into dyn {}",
+                                        trait_name
+                                    ),
+                                    found: "this expression form".into(),
+                                });
+                            }
+                        };
+                        Value::Dyn { trait_name, concrete, inner: Box::new(val) }
+                    }
+                    _ => val,
+                };
                 bindings.insert(name.clone(), val);
             }
             Ok(Value::Void)
@@ -2677,4 +2759,57 @@ mod tests {
         );
         assert_eq!(eval1(&r), Value::Void);
     }
+}
+
+// ── 2026-08-22 (spec-conformance plan Phase 5b): dyn dispatch ────────────
+
+#[test]
+fn dyn_member_call_dispatches_to_impl_with_self_receiver() {
+    let src = r#"
+trait Greeter {
+    defn greet(me: Self, times: Int) -> Int;
+};
+// SPEC §8.6: the ASSERTION on the type is what admits the coercion.
+type Dog: Greeter { base: Int; };
+impl Dog {
+    defn greet(me: Dog, times: Int) -> Int { term me.base * 100 + times; }
+};
+let g: dyn Greeter = Dog { base: 7 };
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    // Execute the top-level lets in order to build the dyn binding.
+    // Execute the top-level lets through the interpreter itself.
+    for item in &items {
+        if let TopLevel::Statement(stmt) = item {
+            interp.exec_stmt(stmt).unwrap();
+        }
+    }
+    let g_val = interp.state.get("g").cloned().expect("g bound");
+    match &g_val {
+        Value::Dyn { concrete, trait_name, .. } => {
+            assert_eq!(concrete, "Dog");
+            assert_eq!(trait_name, "Greeter");
+        }
+        other => panic!("expected dyn value, got {:?}", describe_value(other)),
+    }
+    // g.greet(3): receiver threaded → 7*100+3 = 703. Run through the real
+    // statement path so dispatch, coercion, and scoping are all exercised.
+    let tokens2 = crate::lexer::tokenize(
+        "let r: Int = g.greet(3);"
+    ).unwrap();
+    let mut p2 = crate::parser::Parser::new(tokens2, "let r: Int = g.greet(3);");
+    let stmts = p2.parse_program().unwrap();
+    for item in &stmts {
+        if let TopLevel::Statement(st) = item {
+            // Seed the interpreter's state with the dyn binding so the
+            // statement sees `g`.
+            interp.exec_stmt(st).unwrap();
+        }
+    }
+    assert_eq!(interp.state.get("r").and_then(|v| v.as_i64()), Some(703));
 }
