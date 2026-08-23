@@ -818,6 +818,8 @@ fn unpacked_instance_program() -> Vec<TopLevel> {
         traits: vec![],
         bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
         body: crate::ast::top::TypeDefBody {
             slots: vec![
@@ -934,6 +936,8 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
         traits: vec![],
         bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
@@ -1128,6 +1132,8 @@ fn spawn_pool_countdown_program_storage(
         traits: vec![],
         bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
@@ -1359,6 +1365,8 @@ fn test_spawn_only_base_registers_pool() {
         traits: vec![],
         bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
         body: TypeDefBody {
             slots: vec![TypeDefSlot { name: "count".to_string(), ty: Type::int(), bit_range: None }],
@@ -2400,6 +2408,8 @@ fn test_type_with_slots_populates_struct_types() {
             traits: vec![],
             bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
             body: TypeDefBody {
                 slots: vec![

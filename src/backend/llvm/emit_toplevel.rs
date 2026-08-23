@@ -2024,6 +2024,8 @@ impl LlvmBackend {
                         name: base.to_string(), type_params: vec![],
                         parent: None, protocol: None, traits: vec![],
                         bit_range: None, span: None, coll: true, seq: false,
+                        ports_in: Vec::new(),
+                        ports_out: Vec::new(),
                         body: crate::ast::top::TypeDefBody {
                             slots: slots.iter()
                                 .map(|(n, ty)| crate::ast::top::TypeDefSlot {

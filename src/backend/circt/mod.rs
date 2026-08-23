@@ -117,9 +117,9 @@ impl CirctBackend {
                 }
                 TopLevel::Cell(cell) => {
                     self.cell_defs.insert(cell.name.clone(), cell.clone());
-                    for field in &cell.fields {
-                        self.var_types.insert(format!("{}${}", cell.name, field.name), field.ty.clone());
-                        self.var_exprs.insert(format!("{}${}", cell.name, field.name), Some(Expr::Decimal(field.metadata.len() as i64)));
+                    for (field_name, field_ty) in &cell.fields {
+                        self.var_types.insert(format!("{}${}", cell.name, field_name), field_ty.clone());
+                        self.var_exprs.insert(format!("{}${}", cell.name, field_name), Some(Expr::Decimal(0)));
                     }
                     for (param_name, param_ty) in &cell.parameters {
                         self.var_types.insert(format!("{}${}", cell.name, param_name), param_ty.clone());
@@ -609,18 +609,13 @@ impl CirctBackend {
         writeln!(out, " {{").ok();
 
         let mut reg_names: HashMap<String, String> = HashMap::new();
-        for field in &cell.fields {
-            let mlir_ty = self.mlir_type(&field.ty);
-            let init_val = if let Some(crate::ast::PropertyValue::Int(n)) = field.metadata.get("init") {
-                format!("{}", n)
-            } else if let Some(crate::ast::PropertyValue::Bool(b)) = field.metadata.get("init") {
-                format!("{}", if *b { 1 } else { 0 })
-            } else {
-                "0".to_string()
-            };
+        for (field_name, field_ty) in &cell.fields {
+            let _ = field_name;
+            let mlir_ty = self.mlir_type(field_ty);
+            let init_val = "0".to_string();
             let reg = ng.fresh_reg(cell_name);
             writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
-            reg_names.insert(field.name.clone(), reg);
+            reg_names.insert(field_name.clone(), reg);
         }
 
         for txn in &cell.transactions {
