@@ -785,6 +785,12 @@ impl<'a> Parser<'a> {
         // transaction in parallel when write sets are disjoint.
         let is_async = self.eat(&Token::Async);
         let name = self.expect_identifier()?;
+        // 2026-08-22 (Phase 7a, SPEC §9.5): `node apply_damage()` — an EMPTY
+        // parameter list is legal in source (nodes take no parameters); the
+        // parens are tolerated and skipped.
+        if self.eat(&Token::LParen) {
+            self.expect(Token::RParen)?;
+        }
         // node has no parameters and no return value (purely reactive)
         let contract = self.parse_contract()?;
         // 2026-07-28: Body is optional for consistency with defn/txn.
