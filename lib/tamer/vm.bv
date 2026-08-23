@@ -11,6 +11,7 @@ import "loader.bv";
 // (src/backend/vm/mod.rs): Print#=0, Log#=1; unknown services carry ids
 // >= 1000 and are rejected loudly by BrievHostFail.
 frgn BrievHostPrintInt(v: Int) -> Int : briev_host_print_int from "lib/runtime/briev_rt.c";
+frgn BrievHostArity(id: Int) -> Int : briev_host_arity_of from "lib/runtime/briev_rt.c";
 struct HostTable { ids: Int[64]; arities: Int[64]; count: Int; };
 const HOST_ID_PRINT_INT:   Int = 0;
 const HOST_ID_LOG_INT:     Int = 1;
@@ -73,7 +74,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
     let op = read_u8(bc_data, pc);
     let new_pc = exec_op(
         stack, locals, frames,
-        bc_data, fn_table, foff, fn_count, ht,
+        bc_data, fn_table, foff, fn_count,
         op, pc, saved_locals_base);
 
     when new_pc < 0 { running = 0; };
@@ -85,13 +86,13 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 // Each arm reads/writes struct fields through Ptr<VMStack>, Ptr<VMLocals>,
 // Ptr<VMFrames>. No flat pointer arithmetic.
 
-txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
+// 2026-08-23: a DEFN, not a txn — opcode dispatch is a pure function;
+// as a txn its convergent loop spun forever when called directly (the
+// pre-condition never changes within one call).
+defn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
             bc: Ptr<Int>, ft: Ptr<Int>, foff: Int, fnc: Int,
-            ht: Ptr<HostTable>,
-            op: Int, pc: Int, sll: Int)
-    [op >= 0 && op <= 255 && pc >= 0][pc >= 0]
-    -> Int
+            op: Int, pc: Int, sll: Int) -> Int
 {
     let sl = (*stack).len;
     match op {
@@ -360,7 +361,8 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 
         0x71 => { // hcall — host-service dispatch (Plan 1, 2026-08-23)
             let host_id = read_u32(bc, pc + 1);
-            let n = host_arity(ht, host_id);
+            // Arity lookup lives in C (briev_rt.c owns the parsed table).
+            let n = BrievHostArity(host_id);
             when n == 1 {
                 let a = (*stack).data[(*stack).len - 1];
                 (*stack).len = (*stack).len - 1;
@@ -393,9 +395,10 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 // The .lair host table maps service id → arity. Ids are canonical
 // (HOST_ID_* above); the name strings ride along for diagnostics only.
 
-txn host_arity_scan(ht: Ptr<HostTable>, id: Int, i: Int)
-    [i >= 0][i > (*ht).count || (*ht).ids[i] == id] -> Int
-{
+// 2026-08-23: plain recursive DEFNS — the txn form's convergent loop spun
+// forever when called from a non-reactive context (same family as
+// parse_host_table; BUGS.md 2026-08-23).
+defn host_arity_scan(ht: Ptr<HostTable>, id: Int, i: Int) -> Int {
     when i >= (*ht).count { term -1; };
     when (*ht).ids[i] == id { term (*ht).arities[i]; };
     term host_arity_scan(ht, id, i + 1);

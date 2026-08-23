@@ -13,44 +13,42 @@ defn read_u8(bc: Ptr<Int>, addr: Int) -> Int {
 };
 
 defn read_i8(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u8(bc, addr);
-    when val >= 128 { term val - 256; };
-    term val;
+    let raw = read_u8(bc, addr);
+    when raw >= 128 { term raw - 256; };
+    term raw;
 };
 
+// 2026-08-23: every multi-byte reader stitches BYTES via read_u8 — the old
+// word-shift forms broke on unaligned offsets that span two words (e.g.
+// byte offset 567: 567%8==7 put the operand past the word edge and
+// read_i16 returned junk). To undo: restore the word-shift bodies.
 defn read_u16(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = bc[addr / 8];
-    let byte_off = addr % 8;
-    term (word >> (byte_off * 8)) & 0xFFFF;
+    term read_u8(bc, addr) | (read_u8(bc, addr + 1) << 8);
 };
 
 defn read_i16(bc: Ptr<Int>, addr: Int) -> Int {
-    let val = read_u16(bc, addr);
-    when val >= 32768 { term val - 65536; };
-    term val;
+    let raw = read_u16(bc, addr);
+    when raw >= 32768 { term raw - 65536; };
+    term raw;
 };
 
 defn read_u32(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = bc[addr / 8];
-    let byte_off = addr % 8;
-    term (word >> (byte_off * 8)) & 0xFFFFFFFF;
+    term read_u8(bc, addr)
+        | (read_u8(bc, addr + 1) << 8)
+        | (read_u8(bc, addr + 2) << 16)
+        | (read_u8(bc, addr + 3) << 24);
+};
+
+defn read_i32(bc: Ptr<Int>, addr: Int) -> Int {
+    let raw = read_u32(bc, addr);
+    when raw >= 2147483648 { term raw - 4294967296; };
+    term raw;
 };
 
 defn read_i64(bc: Ptr<Int>, addr: Int) -> Int {
-    let word = bc[addr / 8];
-    let byte_off = addr % 8;
-    term (word >> (byte_off * 8));
-};
-
-defn read_u64(bc: Ptr<Int>, addr: Int) -> Int {
-    // 2026-08-23: unaligned-safe 64-bit read — stitch the low word's high
-    // bytes with the next word's low bytes (fn-table bc_offset sits at a
-    // 4-byte-aligned offset inside a 20-byte entry).
-    let lo = bc[addr / 8];
-    let hi = bc[addr / 8 + 1];
-    let shift = (addr % 8) * 8;
-    when shift == 0 { term lo; };
-    term (lo >> shift) | (hi << (64 - shift));
+    let lo = read_u32(bc, addr);
+    let hi = read_u32(bc, addr + 4);
+    term lo | (hi << 32);
 };
 
 // ── Function table entries ───────────────────────────────────────────────

@@ -1863,6 +1863,92 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Yield => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        Statement::Match { expr: scrutinee, arms } => {
+            // 2026-08-23 (bugfix, BUGS.md "callable-txn bodies silently drop
+            // match"): statement-level match had NO arm here — it fell to the
+            // catch-all and vanished, so lib/tamer/vm.bv's exec_op opcode
+            // dispatch compiled to an empty convergent loop. Emission:
+            // evaluate the scrutinee ONCE; chain per-arm any-of pattern
+            // conditions (emit_pattern_condition, same machinery as the
+            // expression match); each matched arm binds its patterns, runs
+            // its statements, then branches to the merge; no-match falls
+            // through the condition chain into the merge.
+            // To undo: delete this arm (restores the silent drop).
+            let scrut = backend.emit_expr(out, scrutinee, indent);
+            let counter = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let merge = format!(".smt_end_{}", counter);
+            for (i, arm) in arms.iter().enumerate() {
+                let next = format!(".smt_next_{}_{}", counter, i);
+                // Any-of semantics: a match arm with several patterns fires
+                // when ANY matches. Wildcard/Binding conditions are the
+                // constant true — short-circuit the rest of the arm's
+                // patterns when one appears.
+                let mut cond: Option<String> = None;
+                for pat in &arm.patterns {
+                    if matches!(pat, crate::ast::Pattern::Wildcard | crate::ast::Pattern::Binding(_)) {
+                        cond = Some(format!("{}", backend.fun.gen_reg()));
+                        writeln!(out, "  {} = icmp eq i64 0, 0", cond.as_deref().unwrap_or("")).ok();
+                        break;
+                    }
+                    let c = backend.emit_pattern_condition(pat, &scrut.name, &scrut.ty, out, indent);
+                    cond = Some(match cond {
+                        None => c,
+                        Some(prev) => {
+                            let r = backend.fun.gen_reg();
+                            writeln!(out, "  {} = or i1 {}, {}", r, prev, c).ok();
+                            format!("{}", r)
+                        }
+                    });
+                }
+                let body_label = format!(".smt_body_{}_{}", counter, i);
+                let cond = cond.unwrap_or_else(|| {
+                    // Empty-pattern arm: treat as always-matching.
+                    let r = backend.fun.gen_reg();
+                    writeln!(out, "  {} = icmp eq i64 0, 0", r).ok();
+                    r
+                });
+                writeln!(out, "  br i1 {}, label %{}, label %{}", cond, body_label, next).ok();
+                writeln!(out, "{}:", next).ok();
+                backend.fun.cur_block = Some(next.clone());
+            }
+            // No arm matched: fall through to the merge.
+            writeln!(out, "  br label %{}", merge).ok();
+            for (i, arm) in arms.iter().enumerate() {
+                let body_label = format!(".smt_body_{}_{}", counter, i);
+                writeln!(out, "{}:", body_label).ok();
+                backend.fun.cur_block = Some(body_label.clone());
+                // 2026-08-23: an arm ending in `term` sets fun.terminated —
+                // reset per arm or every later arm inherits it and emits
+                // nothing (same discipline as emit_ssa_main's per-txn reset).
+                backend.fun.terminated = false;
+                for p in &arm.patterns {
+                    backend.bind_pattern(p, &scrut.name, &scrut.ty, out, indent);
+                }
+                for s in &arm.body {
+                    if backend.fun.terminated {
+                        break;
+                    }
+                    emit_statement(backend, out, s, indent);
+                }
+                if !backend.fun.terminated {
+                    writeln!(out, "  br label %{}", merge).ok();
+                }
+            }
+            // 2026-08-23: when EVERY arm terminated (`term`), the merge has
+            // no live predecessors — an EMPTY label pair is invalid LLVM
+            // ('expected instruction opcode'). The condition chain still
+            // branches here, so print the label with an explicit
+            // `unreachable` terminator (dead code, removed by opt); a live
+            // merge stays a normal open block.
+            writeln!(out, "{}:", merge).ok();
+            if backend.fun.terminated {
+                writeln!(out, "  unreachable").ok();
+            } else {
+                backend.fun.cur_block = Some(merge);
+            }
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         _ => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }

@@ -4811,7 +4811,7 @@ phi predecessor cite the block that ACTUALLY branches.
 
 ## Callable-txn bodies silently drop `match` statements (2026-08-23)
 
-**Status:** OPEN — ROOT CAUSE CONFIRMED; blocks the tamer's `exec_op`.
+**Status:** CLOSED 2026-08-23 (`backend-foundation`) — Statement::Match emission implemented + regression test + e2e PASS.
 **Symptom chain:** native tamer's `exec_op` compiled body contains only its
 leading `let` — the entire `match op { ... }` vanishes, leaving an infinite
 convergent loop with no side effects (UB under clang -O2 -> garbage return,
@@ -4822,11 +4822,23 @@ catch-all silently. `vm.bv`'s opcode dispatch is a statement-level match.
 **Why the capability gate missed it:** LLVM is declared full-surface and skips
 validation — that declaration is wrong for statement-level match. Plan 0's
 "declare what you truly lower" applies to LLVM too.
-**Fix direction:** implement Statement::Match emission in emit_stmt.rs via
-the Phase-4a unified pattern grammar (patterns -> icmp chains + branch tree);
-add an IR-level regression test (callable txn containing a statement match
-must emit its arms). Interim honesty: LLVM surface declaration should not
-claim match_stmt until this lands.
+**FIXED 2026-08-23 — the fix exposed a four-bug chain, all closed:**
+1. Statement::Match emission (emit_stmt.rs): scrutinee once; per-arm any-of
+   pattern conditions via emit_pattern_condition; per-arm terminated-flag
+   reset (arms inheriting term from a prior arm emitted nothing); terminal-
+   arms merge prints `unreachable` (empty label pair = invalid IR).
+   Regression test: test_statement_match_emits_arm_blocks_in_callable_txn.
+2. exec_op converted txn->defn — opcode dispatch is a pure function; as a
+   txn its convergent loop spun forever under direct call. Same for
+   host_arity_scan.
+3. read_u16/i16/u32/i64 rewritten as byte stitches over read_u8 — the
+   word-shift forms returned junk for unaligned offsets spanning words
+   (read_i16(567) gave -25 instead of 999).
+4. Struct-array row-view byte-addressing over-fired on Custom("Int")
+   element names — guarded to genuine registered structs.
+
+E2E: tools/bounty_e2e.sh packages the arith fixture, native tamer executes
+it, asserts stdout "999\n42" — PASS.
 
 **Resolved en route (same investigation, 2026-08-23):**
 - Export-wrapper ABI: EVERY exported defn takes a leading %state pointer —

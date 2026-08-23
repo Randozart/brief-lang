@@ -115,19 +115,16 @@ int main(int argc, char** argv) {
     uint64_t host_off = lair_word(lair, 6);
     uint64_t host_size = lair_word(lair, 7);
 
-    static uint8_t ht[HT_BYTES];
-    memset(ht, 0, sizeof ht);
+    extern void briev_host_table_set(long long idx, long long id, long long arity);
     uint64_t hcount = host_size / 12;
-    if (hcount > 24) { fprintf(stderr, "host table too large\n"); return 3; }
+    if (hcount > 64) { fprintf(stderr, "host table too large\n"); return 3; }
     for (uint64_t i = 0; i < hcount; i++) {
         const uint8_t* e = lair + host_off + i * 12;
         uint32_t id, arity;
         memcpy(&id, e + 4, 4);
         memcpy(&arity, e + 8, 4);
-        ((int64_t*)ht)[i] = (int64_t)id;         /* ids[i] */
-        ((int64_t*)ht)[64 + i] = (int64_t)arity; /* arities[i] */
+        briev_host_table_set((long long)i, (long long)id, (long long)arity);
     }
-    ((int64_t*)ht)[128] = (int64_t)hcount;       /* count */
 
     /* Interpreter buffers, zero-initialized (len/count start at 0). */
     uint8_t* vstack  = calloc(1, VMSTACK_BYTES);
@@ -140,7 +137,7 @@ int main(int argc, char** argv) {
     extern int64_t step(int64_t state, int64_t stack, int64_t locals,
                         int64_t frames, int64_t lair, int64_t bc_end,
                         int64_t fn_table, int64_t foff, int64_t fn_count,
-                        int64_t ht, int64_t pc);
+                        int64_t pc);
     extern void briev_host_print_int(long long v);   /* briev_rt.c */
     extern long long briev_host_fail(long long id, long long arg);
 
@@ -155,8 +152,7 @@ int main(int argc, char** argv) {
         pc = step(st, (int64_t)(intptr_t)vstack, (int64_t)(intptr_t)vlocals,
                   (int64_t)(intptr_t)vframes, (int64_t)(intptr_t)lair,
                   bc_end, (int64_t)(intptr_t)(lair + fn_off),
-                  (int64_t)fn_off, (int64_t)fn_size / 20,
-                  (int64_t)(intptr_t)ht, pc);
+                  (int64_t)fn_off, (int64_t)fn_size / 20, pc);
         steps++;
     }
     fprintf(stderr, "[install_sim] halted after %d steps\n", steps);

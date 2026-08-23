@@ -8259,3 +8259,73 @@ node go [done == 0][done == 1] {
         "numeric field access must not emit an undefined @t global; got:\n{ir}"
     );
 }
+
+/// 2026-08-23 (BUGS.md "callable-txn bodies silently drop match"): a
+/// STATEMENT-level match inside a callable txn — the exact shape of
+/// lib/tamer/vm.bv's exec_op opcode dispatch — must emit its arm blocks.
+/// The old emit_statement had no Statement::Match arm; the construct fell
+/// to the catch-all and vanished, leaving an empty convergent loop.
+fn stmt_match_program() -> Vec<TopLevel> {
+    vec![TopLevel::Transaction(Transaction {
+        name: "dispatch".to_string(),
+        is_reactive: false,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![("op".to_string(), Type::int())],
+        output_type: Some(OutputType::Single(Type::int())),
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![Statement::Match {
+            expr: Box::new(Expr::Identifier("op".to_string())),
+            arms: vec![
+                StmtMatchArm {
+                    patterns: vec![Pattern::Literal(Expr::Decimal(1))],
+                    body: vec![Statement::Term(Some(Expr::Decimal(11)))],
+                },
+                StmtMatchArm {
+                    patterns: vec![Pattern::Literal(Expr::Decimal(2))],
+                    body: vec![Statement::Term(Some(Expr::Decimal(22)))],
+                },
+                StmtMatchArm {
+                    patterns: vec![Pattern::Wildcard],
+                    body: vec![Statement::Term(Some(Expr::Decimal(0)))],
+                },
+            ],
+        }],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        span: None,
+        doc: None,
+    })]
+}
+
+#[test]
+fn test_statement_match_emits_arm_blocks_in_callable_txn() {
+    let mut backend = LlvmBackend::new();
+    let output = backend.generate(&stmt_match_program(), None);
+    assert!(
+        output.contains(".smt_body_"),
+        "statement-match arms MUST be emitted as blocks (was silently dropped):\n{output}"
+    );
+    assert!(
+        output.contains(".smt_end_"),
+        "statement-match merge block must exist:\n{output}"
+    );
+    // Arm conditions materialize each literal (add i64 0, N) and icmp
+    // against the scrutinee register.
+    assert!(output.contains("add i64 0, 1"), "arm 1 literal materialized");
+    assert!(output.contains("add i64 0, 2"), "arm 2 literal materialized");
+    assert!(output.contains("icmp eq i64"), "literal compare against scrutinee");
+    // …and every arm's result store reaches the IR (three %result stores
+    // after the match chain — one per arm).
+    let arm_stores = output.matches("store i64 %t").count();
+    assert!(arm_stores >= 3, "all three arms must store their result:\n{output}");
+}
+

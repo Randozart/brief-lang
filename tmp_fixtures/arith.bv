@@ -1,0 +1,6 @@
+txn go [6 * 7 == 42][1 + 1 == 2] {
+  Print#(999);
+  let a: Int = 6 * 7;
+  Print#(a);
+  term;
+};

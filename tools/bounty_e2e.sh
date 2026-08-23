@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-PROG="${1:-$ROOT/examples/hello/main.bv}"
+PROG="${1:-$ROOT/tmp_fixtures/arith.bv}"
 cd "$ROOT"
 
 echo "[e2e] 1. native tamer"
@@ -33,7 +33,17 @@ clang -O2 -c tamer/install_sim.c -o "$WORK/sim.o" 2>/dev/null
 clang -O2 "$WORK/sim.o" "$WORK/tamer_main.o" lib/runtime/briev_rt.c \
     -o "$WORK/install_sim" -lm -Wl,--allow-multiple-definition 2>/dev/null
 
-"$WORK/install_sim" "$BOUNTY"
+# Expected output is baked into the fixture (arith prints 999 then 42).
+OUT="$("$WORK/install_sim" "$BOUNTY" 2>/dev/null)"
 RC=$?
-rm -f "$BOUNTY"
-exit $RC
+EXPECTED="999
+42"
+if [ "$OUT" = "$EXPECTED" ] && [ $RC -eq 0 ]; then
+    echo "[e2e] PASS: install-time execution printed expected output"
+    rm -f "$BOUNTY"
+    exit 0
+else
+    echo "[e2e] FAIL: got '$OUT' (rc=$RC), want '$EXPECTED'"
+    rm -f "$BOUNTY"
+    exit 1
+fi

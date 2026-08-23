@@ -1177,6 +1177,38 @@ impl LlvmBackend {
                 // whole fields; this handles a Vector-typed ROW register.
                 if let Type::Vector(inner, dims) = &obj_reg.ty {
                     if !dims.is_empty() {
+                        // 2026-08-23 (bugfix): STRUCT-element arrays
+                        // (`frames.data[i]`, data: Frame[256]) must be
+                        // byte-addressed — llvm_type(struct) is "ptr" here,
+                        // so the typed `[256 x ptr]` GEP loaded a pointer as
+                        // the element and the following `.field` inttoptr
+                        // rejected it ('ptr' vs 'i64'). The element register
+                        // is its ADDRESS as a boxed i64 handle (the same
+                        // convention instance fields use), typed as the
+                        // struct so a following `.field` resolves offsets.
+                        // To undo: delete this block (restores [N x ptr] GEP).
+                        if let Type::Custom(sname) = &**inner {
+                            // ONLY genuine structs (registered fields) take
+                            // byte-addressing — resolve_field_type carries
+                            // scalar element names as Custom("Int") too, and
+                            // routing those here returned slot ADDRESSES as
+                            // values (2026-08-23 follow-up bug).
+                            if dims.len() == 1 && self.get_struct_fields(sname).is_some() {
+                                let idxr = self.gep_index(out, indent, &idx_clone);
+                                let esz = self.struct_byte_size(sname);
+                                let off = self.fun.gen_reg();
+                                let addr = self.fun.gen_reg();
+                                let handle = self.fun.gen_reg();
+                                writeln!(out, "  {} = mul i64 {}, {}", off, idxr, esz).ok();
+                                writeln!(out, "  {} = getelementptr i8, ptr {}, i64 {}", addr, obj_reg.name, off).ok();
+                                writeln!(out, "  {} = ptrtoint ptr {} to i64", handle, addr).ok();
+                                let _ = v;
+                                return TypedRegister {
+                                    name: handle,
+                                    ty: (**inner).clone(),
+                                };
+                            }
+                        }
                         let agg_ty = self.vector_array_llvm_type(&obj_reg.ty)
                             .unwrap_or_else(|| "i64".to_string());
                         let elem = self.fun.gen_reg();
@@ -4621,7 +4653,7 @@ impl LlvmBackend {
     /// Emit the i1 condition a pattern matches the scrutinee register.
     /// Unimplemented patterns (Tuple/EnumVariant) emit `false` — the arm is
     /// never taken (documented boundary; the interpreter handles all forms).
-    fn emit_pattern_condition(
+    pub(crate) fn emit_pattern_condition(
         &mut self,
         pat: &crate::ast::Pattern,
         scrut: &str,
@@ -4745,7 +4777,7 @@ impl LlvmBackend {
     /// Bind a pattern's Binding names to the scrutinee register (or sub-values)
     /// so the arm body resolves them. Tuple/EnumVariant bindings are not
     /// lowered (their conditions emit false, so the block is unreachable).
-    fn bind_pattern(
+    pub(crate) fn bind_pattern(
         &mut self,
         pat: &crate::ast::Pattern,
         scrut: &str,
@@ -5842,5 +5874,25 @@ pub(crate) fn member_briev_name(m: &crate::ast::TopLevel) -> &str {
         crate::ast::TopLevel::Definition(d) => &d.name,
         crate::ast::TopLevel::TypeDefOperator(d) => &d.name,
         _ => "",
+    }
+}
+
+impl LlvmBackend {
+    /// 2026-08-23: byte size of a struct = sum of field sizes (same walk
+    /// lookup_field_offset uses to accumulate offsets). Falls back to one
+    /// word for unknown structs.
+    pub(crate) fn struct_byte_size(&self, type_name: &str) -> u64 {
+        if let Some(fields) = self.get_struct_fields(type_name) {
+            return fields
+                .iter()
+                .map(|(_, fty)| {
+                    crate::backend::llvm::types::type_size(
+                        fty,
+                        self.ctx.type_universe.as_ref(),
+                    )
+                })
+                .sum();
+        }
+        8
     }
 }

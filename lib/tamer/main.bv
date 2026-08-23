@@ -19,11 +19,11 @@ export defn step(stack_ptr: Ptr<VMStack>, locals_ptr: Ptr<VMLocals>,
                  frames_ptr: Ptr<VMFrames>,
                  lair_data: Ptr<Int>, bc_end: Int,
                  fn_table: Ptr<Int>, foff: Int, fn_count: Int,
-                 ht: Ptr<HostTable>, pc: Int) -> Int
+                 pc: Int) -> Int
 {
     when pc < 0 || pc >= bc_end { term -1; };
     let op = read_u8(lair_data, pc);
     term exec_op(stack_ptr, locals_ptr, frames_ptr,
-                 lair_data, fn_table, foff, fn_count, ht,
+                 lair_data, fn_table, foff, fn_count,
                  op, pc, 0);
 };
