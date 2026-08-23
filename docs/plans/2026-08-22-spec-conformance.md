@@ -392,6 +392,17 @@ lifecycle), 10 (conformance sweep).
 Remaining: Phase 5c (LLVM dyn tables), 7 (obj/cell ports),
 Phase-8 codegen gap, 10 (conformance sweep + closure).
 
+### 2026-08-22 session 3 (cont.)
+- **Two-guard codegen gap CLOSED** ✅ bd4eeb88 — freshly-labeled condition
+  blocks (.cmgcN) replace stale cur_block inheritance; .cm_body resets
+  terminated/cur_block; free/keep/yield no longer silently dropped in
+  countable bodies. Repro runs (4221); all five pinned fixtures green.
+  The readiness assessment's "backend composure" concern just lost its
+  only open item — multi-guard compositions now verified end-to-end.
+
+Remaining: Phase 5c (LLVM dyn tables), 7 (obj/cell ports),
+10 (conformance sweep + closure).
+
 ## Session-3 decisions (owner, 2026-08-22)
 
 | Question | Decision |

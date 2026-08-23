@@ -3653,6 +3653,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 let ftd = crate::ast::top::TypeDef {
                     name: sd.name.clone(), type_params: sd.type_params.clone(),
                     parent: None, protocol: None, traits: vec![],
+                    ports_in: vec![], ports_out: vec![],
                     bit_range: None, span: None, coll: true, seq: false,
                     body: crate::ast::top::TypeDefBody {
                         slots: fake_slots, metadata: Default::default(),

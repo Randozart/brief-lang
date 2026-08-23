@@ -477,6 +477,12 @@ impl LlvmBackend {
             writeln!(out, "  br i1 {}, label %.cm_body, label %{}", done_reg, exit_label).ok();
         }
         writeln!(out, ".cm_body:").ok();
+        // 2026-08-22 (two-guard fix): the header ALWAYS branches here — the
+        // body starts unterminated regardless of what a PREVIOUS emission
+        // region left behind (a stale `terminated` skipped my guard blocks'
+        // fall-through branch and produced empty predecessor blocks).
+        self.fun.terminated = false;
+        self.fun.cur_block = Some(".cm_body".to_string());
 
         // 2026-07-17: Initialize pending_phi_backedge with identity values.
         // Body writes will overwrite entries for modified fields.
@@ -1849,8 +1855,22 @@ impl LlvmBackend {
                     // last_val_temps entries are dropped instead (cross-guard
                     // reads reload via the normal paths; intra-guard chaining
                     // is untouched because the map is snapshotted, not cleared).
-                    let pre_guard_block = self.fun.cur_block.clone()
-                        .unwrap_or_else(|| format!(".cmgn_pre{}", self.fun.txn_counter));
+                    // 2026-08-22 (two-guard repro fix): the fall-through
+                    // predecessor is a FRESHLY LABELED condition block — never
+                    // the inherited cur_block, which may name a pre-loop guard
+                    // merge from an earlier emission region (the two-guard task
+                    // repro cited %guard.end49 as a loop-internal predecessor).
+                    let pre_guard_block = format!(".cmgc{}", self.fun.txn_counter);
+                    self.fun.txn_counter += 1;
+                    // LLVM has no implicit fall-through: branch into the
+                    // condition block unless the previous statement already
+                    // terminated its block.
+                    if !self.fun.terminated {
+                        writeln!(out, "  br label %{}", pre_guard_block).ok();
+                    }
+                    self.fun.terminated = false;
+                    writeln!(out, "{}:", pre_guard_block).ok();
+                    self.fun.cur_block = Some(pre_guard_block.clone());
                     let lvt_before = self.fun.last_val_temps.clone();
                     let pending_before = self.fun.pending_phi_backedge.clone();
                     let cond_reg = self.emit_expr(out, cond, "  ");
@@ -1895,6 +1915,14 @@ impl LlvmBackend {
                 }
                 Statement::Block(stmts) => {
                     self.emit_countable_body(out, stmts, write_set, hoisted);
+                }
+                // 2026-08-22 (two-guard repro audit): free/keep fell into
+                // `_ => {}` here — SILENTLY DROPPED in countable bodies. The
+                // eager model has nothing to free at runtime, but the hint
+                // must still flow through the standard emitter so any future
+                // lowering sees it; silence would hide real semantics later.
+                Statement::FreeHint(_) | Statement::KeepHint(_) | Statement::Yield => {
+                    super::emit_stmt::emit_statement(self, out, stmt, "  ");
                 }
                 Statement::Expression(e) => {
                     // 2026-08-01 (A10): `<- &collection` discard — dispatch the

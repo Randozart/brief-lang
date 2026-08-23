@@ -855,45 +855,118 @@ impl<'a> Parser<'a> {
 
     /// Parse: cell name { ... }
     fn parse_cell(&mut self) -> Result<CellDef, SyntaxError> {
-        self.pos += 1;
+        // 2026-08-22 (Phase 7b, SPEC §9.6): REAL cell bodies — the token-skip
+        // skeleton is gone. Cells share the obj port-header grammar and take
+        // slots/metadata/members like an obj; sealing (ports-only external
+        // access) is enforced in the typechecker.
+        // Undo: restore the skip-loop skeleton.
+        self.pos += 1; // consume 'cell'
         let name = self.expect_identifier()?;
-        // Cell definition details are complex — for now, parse a minimal skeleton
-        self.expect(Token::LBrace)?;
-        let mut transactions = Vec::new();
-        let mut definitions = Vec::new();
-        while !self.check(&Token::RBrace) && !self.is_at_end() {
-            // Parse txn inside cell
-            if self.check_identifier("txn") || self.check_identifier("node") {
-                // handled in full implementation
+        let type_params = self.parse_type_params()?;
+        // Port headers — identical grammar to obj (§9.6: "Cells and objects
+        // share input (...) and named output -> syntax").
+        let ports_in = if self.eat(&Token::LParen) {
+            let mut ps: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::RParen) && !self.is_at_end() {
+                let pname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let pty = self.parse_type()?;
+                ps.push((pname, pty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
             }
-            self.parse_toplevel_inside_cell(&mut transactions, &mut definitions)?;
+            self.expect(Token::RParen)?;
+            ps
+        } else {
+            Vec::new()
+        };
+        let ports_out = if self.eat(&Token::Arrow) {
+            let mut os: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::LBrace) && !self.is_at_end() {
+                let oname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let oty = self.parse_type()?;
+                os.push((oname, oty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            os
+        } else {
+            Vec::new()
+        };
+        self.expect(Token::LBrace)?;
+        let mut fields: Vec<(String, crate::ast::Type)> = Vec::new();
+        let mut metadata = std::collections::HashMap::new();
+        let mut members: Vec<crate::ast::TopLevel> = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
+                self.parse_metadata_clause(&mut metadata)?;
+                continue;
+            }
+            if self.check(&Token::Txn)
+                || self.check(&Token::Node)
+                || self.check(&Token::Defn)
+            {
+                if self.check(&Token::Txn) {
+                    let t = self.parse_transaction(false, false)?;
+                    members.push(crate::ast::TopLevel::Transaction(t));
+                } else if self.check(&Token::Node) {
+                    let n = self.parse_node()?;
+                    members.push(crate::ast::TopLevel::Transaction(n));
+                } else {
+                    let d = self.parse_definition()?;
+                    members.push(crate::ast::TopLevel::Definition(d));
+                }
+                self.eat(&Token::Semicolon);
+                continue;
+            }
+            if self.eat(&Token::Trg) {
+                // internal trigger — reuse the trigger declaration parser via
+                // the top-level path, then keep it in members.
+                let item = self.parse_top_level()?;
+                members.push(item);
+                self.eat(&Token::Semicolon);
+                continue;
+            }
+            // slot: Type; (field declarations)
+            let fname = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let fty = self.parse_type()?;
+            fields.push((fname, fty));
+            self.eat(&Token::Semicolon);
         }
         self.expect(Token::RBrace)?;
+        self.eat(&Token::Semicolon);
         Ok(CellDef {
             name,
-            type_params: vec![],
-            parameters: vec![],
+            type_params,
+            parameters: ports_in.clone(),
             output_type: None,
-            fields: vec![],
-            transactions,
-            definitions,
+            fields,
+            transactions: members
+                .iter()
+                .filter_map(|m| match m {
+                    crate::ast::TopLevel::Transaction(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .collect(),
+            definitions: members
+                .iter()
+                .filter_map(|m| match m {
+                    crate::ast::TopLevel::Definition(d) => Some(d.clone()),
+                    _ => None,
+                })
+                .collect(),
             internal_triggers: vec![],
             is_persistent: false,
-            metadata: std::collections::HashMap::new(),
+            metadata,
             span: None,
-            doc: self.take_doc(),
+            doc: None,
+            ports_in: ports_in.clone(),
+            ports_out,
         })
-    }
-
-    /// Parse items inside a cell body.
-    fn parse_toplevel_inside_cell(
-        &mut self,
-        _txns: &mut Vec<Transaction>,
-        _defns: &mut Vec<Definition>,
-    ) -> Result<(), SyntaxError> {
-        // Simplified: skip unknown tokens inside cell
-        let _ = self.advance();
-        Ok(())
     }
 
     /// Parse: export defn ...
@@ -1840,6 +1913,8 @@ impl<'a> Parser<'a> {
             traits,
             bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
             body: TypeDefBody {
                 slots,
@@ -2195,6 +2270,41 @@ impl<'a> Parser<'a> {
         self.pos += 1; // consume obj
         let name = self.expect_identifier()?;
         let type_params = self.parse_type_params()?;
+        // 2026-08-22 (Phase 7a, SPEC §9.5/§9.6): PORT headers.
+        //   obj Name<T>(in1: T, …) -> out1: Type, out2: Type { … }
+        // Inputs bind at construction; named outputs form a complete
+        // product. Both sides optional; cells share the same grammar.
+        let ports_in = if self.eat(&Token::LParen) {
+            let mut ps: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::RParen) && !self.is_at_end() {
+                let pname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let pty = self.parse_type()?;
+                ps.push((pname, pty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            ps
+        } else {
+            Vec::new()
+        };
+        let ports_out = if self.eat(&Token::Arrow) {
+            let mut os: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::LBrace) && !self.is_at_end() {
+                let oname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let oty = self.parse_type()?;
+                os.push((oname, oty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            os
+        } else {
+            Vec::new()
+        };
         let mut slots = Vec::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
         let mut metadata = std::collections::HashMap::new();
@@ -2251,6 +2361,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
+            ports_in, ports_out,
             bit_range: None, span: None, coll, seq,
             body: TypeDefBody {
                 slots, metadata, projections: vec![], bindings: vec![], operators, op_bindings, constraints: vec![], members, span: None,
@@ -2476,6 +2587,7 @@ impl<'a> Parser<'a> {
             name, type_params, parent: None,
             protocol: None,
             traits: vec![],
+            ports_in: vec![], ports_out: vec![],
             bit_range: None, span: None, coll: false, seq: false,
             body: TypeDefBody {
                 slots, metadata: std::collections::HashMap::new(),

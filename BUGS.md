@@ -4781,7 +4781,19 @@ fails CI instead of install time.
 
 ## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
 
-**Status:** OPEN — Phase 8 remainder
+**Status:** CLOSED 2026-08-22. Two stacked causes, both fixed:
+1. The countable Guarded arm trusted inherited `fun.cur_block` as its merge
+   phi's fall-through predecessor — it could name a pre-loop guard merge
+   from an earlier emission region (`%guard.end49`). Condition blocks are
+   now freshly labeled (`.cmgcN`) with an explicit fall-through branch.
+2. `.cm_body` entry never reset `terminated`/`cur_block`, so a stale
+   terminated flag skipped that fall-through branch and left an empty
+   predecessor block (slice_state regression during fix). Body entry now
+   resets both by construction.
+Also found in the same audit: FreeHint/KeepHint/Yield were silently
+DROPPED by emit_countable_body\'s `_ => {}` — they now delegate to the
+standard emitter. Verified: repro 4221, all five pinned fixtures, suite
+1928 green. Original report:
 **Repro:** `bugs/repro_task_free_second_guard.bv` — node with TWO sequential
 `when` guards; guard A spawns a local task, awaits/frees it, assigns a state
 field; guard B reads that field with arithmetic under `endprogram`.

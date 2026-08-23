@@ -232,13 +232,17 @@ pub struct CellDef {
     pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
     pub output_type: Option<OutputType>,
-    pub fields: Vec<super::Field>,
+    pub fields: Vec<(String, crate::ast::types::Type)>,
     pub transactions: Vec<Transaction>,
     pub definitions: Vec<Definition>,
     pub internal_triggers: Vec<Trigger>,
     pub is_persistent: bool,
     pub metadata: HashMap<String, PropertyValue>,
     pub span: Option<Span>,
+    /// 2026-08-22 (Phase 7b, SPEC §9.6): declared ports — same grammar as
+    /// obj headers; the ONLY externally visible names (sealing).
+    pub ports_in: Vec<(String, crate::ast::types::Type)>,
+    pub ports_out: Vec<(String, crate::ast::types::Type)>,
     /// 2026-07-24: Doc comment text.
     pub doc: Option<String>,
 }
@@ -288,6 +292,11 @@ pub enum Statement {
     /// reference interpreter. Valid as a statement, a guarded body, and a
     /// match-arm value.
     Trap,
+    /// 2026-08-22 (spec-conformance Phase 8, SPEC §12.2): `yield;` — a
+    /// cooperative cancellation point. No-op in the eager reference
+    /// scheduler; grows into the concurrent scheduler's suspension point.
+    /// Legal in any function body; advisory warning when never spawned.
+    Yield,
     /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
     /// process-exit codegen is staged (SPEC §11.5).
@@ -997,6 +1006,13 @@ pub struct TypeDef {
     pub bit_range: Option<BitRange>,
     pub body: TypeDefBody,
     pub span: Option<Span>,
+    /// 2026-08-22 (spec-conformance Phase 7a, SPEC §9.5): declared PORTS.
+    /// Inputs `(name: Type, …)` bind at construction; named outputs
+    /// `-> name: Type, …` form a complete product. Ports appear in member
+    /// contracts (`[damage.Ready]`) and bodies, and are the only externally
+    /// visible names on cells (§9.6 sealing).
+    pub ports_in: Vec<(String, crate::ast::types::Type)>,
+    pub ports_out: Vec<(String, crate::ast::types::Type)>,
     /// 2026-08-15 (coll plan): `coll obj` — the native strategy keyword for
     /// declaring collections. Compiler-owned Length semantics: the compiler
     /// appends hidden `cap`/`len` slots and scaffolds the op surface

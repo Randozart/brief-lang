@@ -453,6 +453,8 @@ mod tests {
             traits: vec![],
             bit_range: None,
             coll: false,
+            ports_in: Vec::new(),
+            ports_out: Vec::new(),
             seq: false,
             body: crate::ast::top::TypeDefBody {
                 slots: vec![],

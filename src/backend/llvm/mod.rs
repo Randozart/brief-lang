@@ -2505,6 +2505,8 @@ impl LlvmBackend {
                                 name: s.name.clone(), type_params: s.type_params.clone(),
                                 parent: None, protocol: None, traits: vec![],
                                 bit_range: None, span: None, coll: true, seq: false,
+                                ports_in: Vec::new(),
+                                ports_out: Vec::new(),
                                 body: crate::ast::top::TypeDefBody {
                                     slots: td_slots.clone(), metadata: Default::default(),
                                     projections: vec![], bindings: vec![],
@@ -5237,13 +5239,13 @@ impl LlvmBackend {
                     // Build cell-state type info for this persistent cell
                     let mut cs_imap: HashMap<String, usize> = HashMap::new();
                     let mut cs_tys: Vec<String> = Vec::new();
-                    for field in &c.fields {
-                        let prefixed = format!("cell${}${}", c.name, field.name);
+                    for (field_name, field_ty) in &c.fields {
+                        let prefixed = format!("cell${}${}", c.name, field_name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
-                        cs_tys.push(self.llvm_type(&field.ty).to_string());
+                        cs_tys.push(self.llvm_type(field_ty).to_string());
                         // Also register in %State for cell_persistent_ticks access
                         self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
-                        self.push_field_type(&field.ty);
+                        self.push_field_type(field_ty);
                         self.ctx.field_initializers.insert(prefixed, None);
                     }
                     for (param_name, param_ty) in &c.parameters {
@@ -5273,10 +5275,10 @@ impl LlvmBackend {
                     }
                 } else {
                     // Non-persistent (sync) cell: add to %State as prefixed slots
-                    for field in &c.fields {
-                        let prefixed = format!("cell${}${}", c.name, field.name);
+                    for (field_name, field_ty) in &c.fields {
+                        let prefixed = format!("cell${}${}", c.name, field_name);
                         self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
-                        self.push_field_type(&field.ty);
+                        self.push_field_type(field_ty);
                         self.ctx.field_initializers.insert(prefixed, None);
                     }
                     for (param_name, param_ty) in &c.parameters {
