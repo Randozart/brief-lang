@@ -4,7 +4,7 @@
 // The public API matches officina's needs: parse, is_array, length,
 // get (by key), get_by_index.
 
-import# "std/char";
+import "std/char";
 
 // ===== Types =====
 
@@ -19,8 +19,8 @@ enum JsonValue {
 };
 
 obj ParseFrame {
-    value: JsonValue,
-    pos: Int,
+    value: JsonValue;
+    pos: Int;
 };
 
 // Error helpers — typed per return type to help inference

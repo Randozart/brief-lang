@@ -54,7 +54,7 @@ defn set_current_dir_res(path: String) -> Result<Void, String> {
 
 // ===== NATIVE WRAPPERS =====
 
-defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -1] {
+defn run(command: String, args: List<String>) -> Int [command != ""][term >= -1] {
     let result = spawn_res(command, args);
     when is_ok(result) {
         term unwrap(result);
@@ -105,7 +105,7 @@ defn set_current_dir(path: String) -> Bool [path != ""][term == true || term == 
 // ===== CONVENIENCE FUNCTIONS =====
 
 defn run_command(command: String) -> Bool [command != ""][term == true || term == false] {
-    let result = spawn(command, []);
+    let result = run(command, []);
     when result == 0 {
         term true;
     };
@@ -113,7 +113,7 @@ defn run_command(command: String) -> Bool [command != ""][term == true || term =
 };
 
 defn run_command_with_args(command: String, args: List<String>) -> Bool [command != ""][term == true || term == false] {
-    let result = spawn(command, args);
+    let result = run(command, args);
     when result == 0 {
         term true;
     };

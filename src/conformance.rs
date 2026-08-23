@@ -203,18 +203,14 @@ fn collect_dir(dir: &Path, out: &mut Vec<(PathBuf, SourceKind)>) {
 /// 2026-08-22 (Phase 10): parse + typecheck one source under its classified
 /// profile — the sweep's per-file gate.
 fn frontend_check(path: &str, src: &str) -> Result<(), String> {
-    let tokens = crate::lexer::tokenize(src)
-        .map_err(|e| format!("lex: {:?}", e))?;
-    let mut parser = crate::parser::Parser::new(tokens, src);
-    let mut items = parser
-        .parse_program()
-        .map_err(|e| format!("parse: {}", e))?;
-    let mut universe = crate::type_universe::TypeUniverse::new();
-    let mut pm = crate::plugin::PluginManager::new();
-    pm.run_ast(crate::ast::StageKind::Parsed, &mut items, &mut universe)
-        .map_err(|e| format!("plugins: {:?}", e))?;
-    crate::typechecker::check_program(&mut items, &universe)
-        .map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "))
+    // 2026-08-23 (Phase 10 continuation): the REAL pipeline entry now lives
+    // in the lib (src/pipeline.rs) — the sweep runs the same
+    // parse/elaborate/typecheck path as `brievc check`, closing the
+    // shallow-gate harness gaps from the first triage.
+    if path.ends_with(".dbv") || path.ends_with(".dbvl") {
+        return crate::pipeline::check_data_source(path, src).map(|_| ());
+    }
+    crate::pipeline::check_source(path, src)
 }
 
 #[cfg(test)]
@@ -269,21 +265,13 @@ mod tests {
                         failures.push(format!("{}: {}", path_str, e));
                     }
                 }
-                SourceKind::Rendered => {
+                SourceKind::Rendered
+                | SourceKind::DataStructured
+                | SourceKind::DataLine => {
+                    // check_source/check_data_source dispatch by extension.
                     checked += 1;
-                    if let Err(e) = crate::rbv::RbvFile::parse(&src) {
-                        failures.push(format!("{}: {:?}", path_str, e));
-                    }
-                }
-                SourceKind::DataStructured | SourceKind::DataLine => {
-                    checked += 1;
-                    match crate::dbriev::v2::parse_document(&src) {
-                        Ok(doc) => {
-                            for problem in crate::dbriev::validate::validate_document(&doc) {
-                                failures.push(format!("{}: {}", path_str, problem));
-                            }
-                        }
-                        Err(e) => failures.push(format!("{}: {}", path_str, e)),
+                    if let Err(e) = frontend_check(&path_str, &src) {
+                        failures.push(format!("{}: {}", path_str, e));
                     }
                 }
             }
