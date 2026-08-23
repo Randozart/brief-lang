@@ -226,6 +226,53 @@ pub fn eval_expr(
             if functions.contains_key(type_name) {
                 return eval_task_spawn(type_name, args, heap, bindings, functions);
             }
+            // 2026-08-22 (Phase 7b, SPEC §9.5): a PORTED obj spawn builds a
+            // real instance — input ports bind positionally to the evaluated
+            // arguments (an EventQ argument SHARES the producer's slot; plain
+            // values wrap as an already-ready event), output ports get fresh
+            // slots, plain fields default.
+            let shape = crate::interpreter::obj_shapes().and_then(|o| o.get(type_name).cloned());
+            if let Some(shape) = shape {
+                if args.len() != shape.ports_in.len() {
+                    return Err(RuntimeError::TypeError {
+                        expected: format!(
+                            "{} constructor takes {} port argument(s)",
+                            type_name,
+                            shape.ports_in.len()
+                        ),
+                        found: format!("{} argument(s)", args.len()),
+                    });
+                }
+                let mut fields: HashMap<String, Value> = HashMap::new();
+                for ((pname, _pty), a) in shape.ports_in.iter().zip(args.iter()) {
+                    let v = eval_expr(a, heap, bindings, functions)?;
+                    let wrapped = match v {
+                        Value::EventQ(_) => v,
+                        other => Value::EventQ(std::rc::Rc::new(std::cell::RefCell::new(
+                            crate::interpreter::EventSlot {
+                                ready: true,
+                                payload: Some(other),
+                            },
+                        ))),
+                    };
+                    fields.insert(pname.clone(), wrapped);
+                }
+                for (oname, _) in &shape.ports_out {
+                    fields.insert(
+                        oname.clone(),
+                        Value::EventQ(std::rc::Rc::new(std::cell::RefCell::new(
+                            crate::interpreter::EventSlot { ready: false, payload: None },
+                        ))),
+                    );
+                }
+                for (fname, fty) in &shape.fields {
+                    fields.insert(fname.clone(), default_for_type(fty));
+                }
+                return Ok(Value::Instance {
+                    type_name: type_name.clone(),
+                    fields: std::rc::Rc::new(std::cell::RefCell::new(fields)),
+                });
+            }
             for a in args {
                 eval_expr(a, heap, bindings, functions)?;
             }
@@ -480,6 +527,21 @@ fn value_has_type_shape(ty: &crate::ast::Type, val: &Value) -> bool {
     }
 }
 
+
+/// 2026-08-22 (Phase 7b): zero-value defaults for obj slot fields.
+fn default_for_type(ty: &crate::ast::Type) -> Value {
+    use crate::ast::Type;
+    match ty {
+        Type::Custom(n) => match n.as_str() {
+            "Bool" => Value::Atom(Atom::Bool(false)),
+            "Float" | "Float32" => Value::Atom(Atom::Float(0.0)),
+            _ => Value::Atom(Atom::Int(0)),
+        },
+        Type::Bits(_) => Value::Bits(vec![0; ((ty.bit_width() as usize) + 7) / 8]),
+        _ => Value::Atom(Atom::Int(0)),
+    }
+}
+
 fn describe_value(v: &Value) -> String {
     match v {
         Value::Atom(Atom::Int(n)) => format!("integer {}", n),
@@ -489,6 +551,9 @@ fn describe_value(v: &Value) -> String {
         Value::Bits(_) => "raw bits".into(),
         Value::Product { .. } => "product".into(),
         Value::Dyn { trait_name, .. } => format!("dyn {} value", trait_name),
+        // 2026-08-22 (Phase 7b): ports and instances describe by identity.
+        Value::EventQ(_) => "event port".into(),
+        Value::Instance { type_name, .. } => format!("{} instance", type_name),
         Value::Void => "void".into(),
         Value::Ref(_) => "reference".into(),
         Value::Closure { .. } => "closure".into(),
@@ -516,6 +581,54 @@ fn eval_field(
                 found: describe_value(&Value::Product { fields, names }),
             }),
         },
+        // 2026-08-22 (Phase 7b, SPEC §9.5): instance fields — ports yield
+        // their SHARED EventQ handle (the wire), slots their current value.
+        Value::Instance { fields, .. } => {
+            let f = fields.borrow();
+            f.get(name).cloned().ok_or_else(|| RuntimeError::TypeError {
+                expected: format!("a declared port or slot named '{}'", name),
+                found: format!(
+                    "instance with fields {:?}",
+                    f.keys().collect::<Vec<_>>()
+                ),
+            })
+        }
+        // An EVENT PORT: `.Ready` observes the flag; any other name
+        // projects the current payload's members (SPEC §9.5 `damage.amount`).
+        Value::EventQ(q) => {
+            let slot = q.borrow();
+            if name == "Ready" {
+                return Ok(Value::Atom(Atom::Bool(slot.ready)));
+            }
+            match &slot.payload {
+                Some(Value::Product { fields, names }) => {
+                    match names
+                        .as_ref()
+                        .and_then(|ns| ns.iter().position(|n| n == name))
+                    {
+                        Some(i) => fields
+                            .get(i)
+                            .cloned()
+                            .ok_or_else(|| field_oob(name, fields.len())),
+                        None => Err(RuntimeError::TypeError {
+                            expected: format!("a payload field named '{}'", name),
+                            found: format!(
+                                "product with fields {:?}",
+                                names.as_ref().map(|ns| ns.as_ref()).unwrap_or(&vec![])
+                            ),
+                        }),
+                    }
+                }
+                Some(other) => Err(RuntimeError::TypeError {
+                    expected: format!("a payload with field '{}'", name),
+                    found: describe_value(other),
+                }),
+                None => Err(RuntimeError::TypeError {
+                    expected: format!("'{}' on an event port", name),
+                    found: "no pending event — the port is not Ready".into(),
+                }),
+            }
+        }
         other => Err(RuntimeError::TypeError {
             expected: "a struct value".into(),
             found: describe_value(&other),
@@ -583,6 +696,54 @@ fn eval_method_call(
             Err(RuntimeError::TermReturn(v)) => Ok(v),
             other => other,
         };
+    }
+    // 2026-08-22 (Phase 7b, SPEC §9.5): INSTANCE member dispatch — the body
+    // runs with the instance's slots and ports bound as names (the same
+    // view the typechecker gives members); slot writes reflect back into
+    // the instance so callers holding the identity observe mutations.
+    if let Value::Instance { type_name, fields } = &recv_val {
+        let key = format!("{}::{}", type_name, name);
+        let fn_def = scope
+            .functions
+            .get(&key)
+            .ok_or_else(|| RuntimeError::UndefinedFunction(key.clone()))?;
+        let mut params = fn_def.parameters.clone();
+        let mut local: HashMap<String, Value> = scope.bindings.clone();
+        {
+            let f = fields.borrow();
+            for (k, v) in f.iter() {
+                local.insert(k.clone(), v.clone());
+            }
+        }
+        // A Self-first signature receives the instance itself.
+        if params.len() == arg_vals.len() + 1 {
+            let recv_param = params.remove(0);
+            local.insert(recv_param, recv_val.clone());
+        }
+        if params.len() != arg_vals.len() {
+            return Err(RuntimeError::TypeError {
+                expected: format!("{} arguments", params.len()),
+                found: format!("{} arguments", arg_vals.len()),
+            });
+        }
+        for (p, v) in params.iter().zip(arg_vals.into_iter()) {
+            local.insert(p.clone(), v);
+        }
+        let block = Expr::Block(fn_def.body.clone());
+        let result = match eval_expr(&block, heap, &mut local, scope.functions) {
+            Err(RuntimeError::TermReturn(v)) => Ok(v),
+            other => other,
+        };
+        // Write back slot values (ports are EventQ handles — never rebound).
+        {
+            let mut f = fields.borrow_mut();
+            for (k, v) in local.iter() {
+                if !matches!(v, Value::EventQ(_)) && f.contains_key(k) {
+                    f.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        return result;
     }
     Ok(scope.bindings.get(name).cloned().unwrap_or(Value::Void))
 }
@@ -788,6 +949,19 @@ fn reflect_type_code(v: &Value) -> i64 {
         // A trait object marshals as its inner payload (the concrete value);
         // the trait/concrete names are compile-time dispatch metadata.
         Value::Dyn { inner, .. } => reflect_type_code(inner),
+        // Ports marshal through their current payload; instances as products
+        // of their field values.
+        Value::EventQ(q) => {
+            let slot = q.borrow();
+            match &slot.payload {
+                Some(p) => reflect_type_code(p),
+                None => 9, // Void when no event is pending
+            }
+        }
+        Value::Instance { fields, .. } => {
+            let vals: Vec<Value> = fields.borrow().values().cloned().collect();
+            reflect_type_code(&Value::Product { fields: vals, names: None })
+        }
         Value::Sum { .. } => 6,
         Value::Ref(_) => 7,
         Value::Closure { .. } => 8,
@@ -1444,7 +1618,22 @@ pub fn eval_statement(
             let val = eval_expr(value, heap, bindings, functions)?;
             if let Some(t) = target.as_ref() {
                 if let Expr::Identifier(name) = t.as_ref() {
-                    bindings.insert(name.clone(), val);
+                    // 2026-08-22 (Phase 7b, SPEC §9.5): FIRING an event port —
+                    // `died <- value;` where the binding holds an EventQ sets
+                    // the shared slot (Ready + payload). The handle itself is
+                    // never rebound, so every wired consumer observes it.
+                    let fired = match bindings.get(name) {
+                        Some(Value::EventQ(q)) => {
+                            let mut slot = q.borrow_mut();
+                            slot.ready = true;
+                            slot.payload = Some(val.clone());
+                            true
+                        }
+                        _ => false,
+                    };
+                    if !fired {
+                        bindings.insert(name.clone(), val);
+                    }
                 }
             }
             if *consume {
@@ -2815,4 +3004,81 @@ let g: dyn Greeter = Dog { base: 7 };
         }
     }
     assert_eq!(interp.state.get("r").and_then(|v| v.as_i64()), Some(703));
+}
+
+// ── 2026-08-22 (spec-conformance Phase 7b): obj ports end-to-end ─────────
+
+#[test]
+fn spec_object_ports_example_runs() {
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/object_ports.bv"
+    ))
+    .unwrap();
+    let tokens = crate::lexer::tokenize(&src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, &src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    // Drive the node body statement-by-statement with a persistent scope.
+    let node_body: Vec<Statement> = items
+        .iter()
+        .find_map(|i| match i {
+            TopLevel::Transaction(t) if t.name == "run" => Some(t.body.clone()),
+            _ => None,
+        })
+        .expect("node run present");
+
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    let mut results: Vec<Value> = Vec::new();
+    for stmt in &node_body {
+        let _ = eval_statement(stmt, &mut interp.heap, &mut bindings, &interp.functions);
+    }
+    let first = bindings
+        .get("first")
+        .and_then(|v| v.as_i64())
+        .expect("first hit bound");
+    assert_eq!(first, 90, "first hit: 100 - damage.amount 10");
+    let second = bindings
+        .get("second")
+        .and_then(|v| v.as_i64())
+        .expect("second hit bound");
+    assert_eq!(second, 80, "second hit sees mutated health");
+
+    // The instance identity: died fired with the LAST health (80).
+    let e = bindings.get("e").cloned().expect("instance bound");
+    if let Value::Instance { fields, .. } = &e {
+        let f = fields.borrow();
+        let health = f.get("health").and_then(|v| v.as_i64());
+        assert_eq!(health, Some(80), "slot write-back persists");
+        if let Some(Value::EventQ(q)) = f.get("died") {
+            let slot = q.borrow();
+            assert!(slot.ready, "fired port is Ready");
+            assert_eq!(
+                slot.payload.as_ref().and_then(|p| p.as_i64()),
+                Some(80),
+                "last fired event observable through the shared slot"
+            );
+        } else {
+            panic!("died port missing");
+        }
+        // Wiring shares storage: the input port still holds the Damage event.
+        if let Some(Value::EventQ(q)) = f.get("damage") {
+            let slot = q.borrow();
+            assert!(slot.ready);
+            match &slot.payload {
+                Some(Value::Product { fields, names }) => {
+                    let idx = names.as_ref().and_then(|ns| ns.iter().position(|n| n == "amount"));
+                    assert_eq!(idx, Some(0));
+                    assert_eq!(fields[0].as_i64(), Some(10));
+                }
+                other => panic!("damage payload shape {:?}", other.is_some()),
+            }
+        } else {
+            panic!("damage port missing");
+        }
+    } else {
+        panic!("expected instance");
+    }
 }

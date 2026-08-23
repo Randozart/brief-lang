@@ -2711,6 +2711,19 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                             }
                         }
                         let lhs_ty = infer_type_only(t, ctx)?;
+                        // 2026-08-22 (Phase 7b, SPEC §9.5): FIRING an event
+                        // port — `died <- health;` where died: Event<Int> —
+                        // admits the PAYLOAD type, not the Event wrapper.
+                        let (lhs_ty, value_ty) = if let Type::Applied(base, args) = &lhs_ty {
+                            if base == "Event" {
+                                let payload = args.first().cloned().unwrap_or_else(Type::void);
+                                (payload, value_ty)
+                            } else {
+                                (lhs_ty, value_ty)
+                            }
+                        } else {
+                            (lhs_ty, value_ty)
+                        };
                         if lhs_ty != value_ty {
                             let coercible = try_coerce_via_parse(value, &value_ty, &lhs_ty, ctx);
                             if !coercible {

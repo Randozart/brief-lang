@@ -50,6 +50,15 @@ pub struct FunctionDef {
     pub body: Vec<Statement>,
 }
 
+/// 2026-08-22 (Phase 7b, SPEC §9.5): an obj's PORT/FIELD surface for the
+/// interpreter's spawn constructor.
+#[derive(Debug, Clone, Default)]
+pub struct ObjShape {
+    pub ports_in: Vec<(String, crate::ast::Type)>,
+    pub ports_out: Vec<(String, crate::ast::Type)>,
+    pub fields: Vec<(String, crate::ast::Type)>,
+}
+
 /// Compatibility struct bridging old Interpreter-based code to the new
 /// function-based eval API. The old `Interpreter` had `state`, `prior_state`,
 /// `heap`, `eval_expr()`, and `exec_stmt()`. This shim preserves that API
@@ -69,6 +78,10 @@ pub struct Interpreter {
     /// `load_program` when it seeds each `TopLevel::Init`; reads resolve via
     /// `state`, and a later write to one is a `RuntimeError::ImmutableInit`.
     pub init_names: std::collections::HashSet<String>,
+    /// 2026-08-22 (Phase 7b, SPEC §9.5): obj shapes for port-aware spawn —
+    /// inputs bind at construction, outputs get fresh slots, plain fields
+    /// default. Registered from TypeDef items carrying ports.
+    pub objs: HashMap<String, ObjShape>,
 
     /// 2026-08-09 (Phase 10): `defer { ... }` cleanup stack — bodies pushed by
     /// `exec_stmt(Defer)` and flushed LIFO on term/rollback/endprogram. The
@@ -85,6 +98,7 @@ impl Interpreter {
             heap: VirtualHeap::new(),
             functions: HashMap::new(),
             init_names: std::collections::HashSet::new(),
+            objs: HashMap::new(),
             defer_stack: Vec::new(),
         }
     }
@@ -97,6 +111,52 @@ impl Interpreter {
         // the receiver threads as the first argument is decided AT THE CALL
         // by arity (params == args+1 ⇒ receiver-first), matching the trait's
         // Self-first convention checked statically.
+        // 2026-08-22 (Phase 7b, SPEC §9.5): register OBJ SHAPES (ports +
+        // fields) and their member functions under `Type::member` so spawn
+        // constructs instances and method calls dispatch to bodies.
+        let mut registered_objs: HashMap<String, ObjShape> = HashMap::new();
+        for item in program {
+            if let TopLevel::TypeDef(td) = item {
+                if td.ports_in.is_empty() && td.ports_out.is_empty() && td.body.members.is_empty()
+                {
+                    continue;
+                }
+                let shape = ObjShape {
+                    ports_in: td.ports_in.clone(),
+                    ports_out: td.ports_out.clone(),
+                    fields: td.body.slots.iter().map(|s| (s.name.clone(), s.ty.clone())).collect(),
+                };
+                registered_objs.insert(td.name.clone(), shape.clone());
+                self.objs.insert(td.name.clone(), shape);
+                for m in &td.body.members {
+                    match m {
+                        TopLevel::Definition(d) => {
+                            let key = format!("{}::{}", td.name, d.name);
+                            let params: Vec<String> =
+                                d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                            self.functions.insert(key, FunctionDef {
+                                name: d.name.clone(),
+                                parameters: params,
+                                body: d.body.clone(),
+                            });
+                        }
+                        TopLevel::Transaction(t) => {
+                            let key = format!("{}::{}", td.name, t.name);
+                            let params: Vec<String> =
+                                t.parameters.iter().map(|(n, _)| n.clone()).collect();
+                            self.functions.insert(key, FunctionDef {
+                                name: t.name.clone(),
+                                parameters: params,
+                                body: t.body.clone(),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        OBJ_SHAPES.with(|c| *c.borrow_mut() = Some(registered_objs));
+
         for item in program {
             if let TopLevel::Impl(i) = item {
                 for d in &i.functions {
@@ -365,10 +425,18 @@ pub enum Atom {
 /// behavior is NOT interpreter knowledge; the interpreter holds the field
 /// sequence, stdlib owns the semantics.
 ///
+/// 2026-08-22 (Phase 7b): the one-slot event storage behind an
+/// `EventQ` value (SPEC §9.5 `.Ready` + payload semantics).
+#[derive(Debug, Clone)]
+pub struct EventSlot {
+    pub ready: bool,
+    pub payload: Option<Value>,
+}
+
 /// 2026-08-06 (Slice D): struct literals produce a product carrying its
 /// declared field names (`names: Some(...)`); field access resolves the
 /// index from that map. Tuples and list literals stay unnamed (`names: None`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     /// The sole representational storage cell for opaque program data.
     Bits(Vec<u8>),
@@ -396,6 +464,20 @@ pub enum Value {
         trait_name: String,
         concrete: String,
         inner: Box<Value>,
+    },
+
+    /// 2026-08-22 (Phase 7b, SPEC §9.5): an EVENT PORT slot — one event
+    /// deep. Shared behind Rc<RefCell> so a producer instance and every
+    /// consumer wiring see the SAME storage: `.Ready` reads the flag,
+    /// payload projection reads the current event, firing replaces both.
+    EventQ(std::rc::Rc<std::cell::RefCell<EventSlot>>),
+
+    /// 2026-08-22 (Phase 7b, SPEC §9.5): an object INSTANCE — named fields
+    /// (slots AND ports) behind shared storage so member calls mutate the
+    /// same identity the caller holds.
+    Instance {
+        type_name: String,
+        fields: std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>>,
     },
 
     Void,
@@ -429,6 +511,70 @@ pub enum Value {
     /// `start..=end` (inclusive). Produced by `Expr::Range`; consumed by
     /// `foreach` (SPEC §11.4 counted iteration).
     Range { start: i64, end: i64, inclusive: bool },
+}
+
+/// 2026-08-22 (Phase 7b): manual equality — shared-storage variants
+/// (EventQ, Instance) compare by IDENTITY (same underlying slot), the way
+/// wiring semantics demand; everything else compares structurally.
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::EventQ(a), Value::EventQ(b)) => std::rc::Rc::ptr_eq(a, b),
+            (
+                Value::Instance { type_name: ta, fields: fa },
+                Value::Instance { type_name: tb, fields: fb },
+            ) => ta == tb && std::rc::Rc::ptr_eq(fa, fb),
+            _ => match std::mem::discriminant(self) == std::mem::discriminant(other) {
+                true => self.debug_eq(other),
+                false => false,
+            },
+        }
+    }
+}
+
+thread_local! {
+    /// 2026-08-22 (Phase 7b): process-local mirror of the ACTIVE
+    /// interpreter's obj shapes, read by the spawn constructor deep inside
+    /// expression evaluation where no scope carries them. The interpreter
+    /// is single-threaded and one program is active per thread — the last
+    /// `load_program` wins.
+    static OBJ_SHAPES: std::cell::RefCell<Option<HashMap<String, ObjShape>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Snapshot of the active obj shapes for spawn construction (Phase 7b).
+pub fn obj_shapes() -> Option<HashMap<String, ObjShape>> {
+    OBJ_SHAPES.with(|c| c.borrow().clone())
+}
+
+impl Value {
+    /// Structural fallback used by PartialEq for same-variant pairs without
+    /// shared storage. Kept coarse: exact structural equality for the
+    /// data-bearing shapes the reactor compares in practice.
+    fn debug_eq(&self, other: &Self) -> bool {
+        use Value::*;
+        match (self, other) {
+            (Bits(a), Bits(b)) => a == b,
+            (Atom(a), Atom(b)) => a == b,
+            (
+                Product { fields: fa, names: na },
+                Product { fields: fb, names: nb },
+            ) => fa == fb && na == nb,
+            (Void, Void) => true,
+            (Ref(a), Ref(b)) => a == b,
+            (Sum { name: na, payload: pa }, Sum { name: nb, payload: pb }) => {
+                na == nb && pa == pb
+            }
+            (
+                Range { start: sa, end: ea, inclusive: ia },
+                Range { start: sb, end: eb, inclusive: ib },
+            ) => sa == sb && ea == eb && ia == ib,
+            (Dyn { trait_name: ta, concrete: ca, inner: ia }, Dyn { trait_name: tb, concrete: cb, inner: ib }) => {
+                ta == tb && ca == cb && ia == ib
+            }
+            _ => format!("{:?}", self) == format!("{:?}", other),
+        }
+    }
 }
 
 // 2026-08-06 (Slice I): the last ad-hoc variant (`List`) is dropped — no

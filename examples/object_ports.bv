@@ -1,0 +1,45 @@
+// object_ports — SPEC §9.5 end-to-end (Phase 7b, interpreter).
+//
+// The spec's Enemy/damage/died shape: an input port carries a Damage event,
+// the body observes `damage.Ready` and projects `damage.amount`, and the
+// output port fires via `<-`. Wiring shares storage: `spawn Enemy(src)`
+// binds the input port to a ready Damage event; the instance is an
+// identity, so health persists across member calls.
+//
+// Verified values (interpreter): first=90, second=80.
+//   arm(100); take_hit #1: health 100 - damage.amount 10 -> fires died with 90
+//   take_hit #2: health 90 - 10 -> fires died with 80
+
+type Damage {
+    amount: Int;
+};
+
+obj Enemy(damage: Event<Damage>) -> died: Event<Int> {
+    health: Int;
+
+    defn arm(h: Int) -> Bool {
+        health = h;
+        term true;
+    };
+
+    defn take_hit() -> Int {
+        when damage.Ready {
+            health = health - damage.amount;
+        };
+        died <- health;
+        term health;
+    };
+};
+
+let i: Int = 0;
+
+node run [i < 1][i == 1] {
+    let e = spawn Enemy(Damage { amount: 10 });
+    e.arm(100);
+    // Hit #1: Ready observes the wired event; amount projects 10.
+    let first = e.take_hit();
+    // Hit #2 on the SAME identity: health mutated by hit #1.
+    let second = e.take_hit();
+    i = i + 1;
+    term;
+};

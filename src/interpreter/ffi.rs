@@ -36,6 +36,15 @@ pub fn marshal_value(v: &Value) -> Marshalled {
         Value::Bits(bytes) => Marshalled::Bytes(bytes.clone()),
         // 2026-08-22 (Phase 5b): a dyn value crosses FFI as its payload.
         Value::Dyn { inner, .. } => marshal_value(inner),
+        // 2026-08-22 (Phase 7b): ports marshal their current payload;
+        // instances marshal as a sequence of field values.
+        Value::EventQ(q) => match &q.borrow().payload {
+            Some(p) => marshal_value(p),
+            None => Marshalled::Bytes(vec![]),
+        },
+        Value::Instance { fields, .. } => Marshalled::Seq(
+            fields.borrow().values().map(marshal_value).collect(),
+        ),
         Value::Product { fields, .. } => {
             Marshalled::Seq(fields.iter().map(marshal_value).collect())
         }
