@@ -1136,3 +1136,24 @@ long long briev_host_fail(long long id, long long arg) {
     exit(4);
     return -1;
 }
+
+/* Host-table lookup — C owns the parsed table (install_sim.c fills it via
+ * briev_host_table_set); the Briev interpreter asks by id. Linear scan;
+ * tables are tiny. Returns arity, or -1 when the id is unknown. */
+static long long g_host_ids[64];
+static long long g_host_arities[64];
+static long long g_host_count = 0;
+
+void briev_host_table_set(long long idx, long long id, long long arity) {
+    if (idx < 0 || idx >= 64) return;
+    g_host_ids[idx] = id;
+    g_host_arities[idx] = arity;
+    if (idx + 1 > g_host_count) g_host_count = idx + 1;
+}
+
+long long briev_host_arity_of(long long id) {
+    for (long long i = 0; i < g_host_count; i++) {
+        if (g_host_ids[i] == id) return g_host_arities[i];
+    }
+    return -1;
+}
