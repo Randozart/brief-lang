@@ -1,56 +1,49 @@
-// error-handling.bv — Result<T,E> and Option<T> from stdlib
-// Demonstrates: import Option/Result, uni pattern matching,
-// Ok/Err/Some/None discriminants, ? operator
+// error-handling.bv — Result<T,E> from stdlib, modern enum syntax.
+// 2026-08-23 (enum-construction plan): constructors are first-class
+// expressions; matching is exhaustive `match` arms with payload bindings.
 
-import { some, none, map, unwrap, unwrap_or } from "std/option";
-import { ok, err, is_ok, is_err } from "std/result";
+import { is_ok } from "std/result";
 
 // Function returning Result
-defn divide(a: Int, b: Int) -> Result<Int, String> [true][term.is_ok() || term.is_err()] {
+defn divide(a: Int, b: Int) -> Result<Int, String> {
     when b == 0 {
         term Err("division by zero");
     };
     term Ok(a / b);
 };
 
-// Pattern matching on Result via uni
+// Pattern matching on Result with payload bindings
 defn safe_divide(a: Int, b: Int) -> Int {
     let res = divide(a, b);
-    uni res(Ok(val)) = {
-        term val;
+    term match res {
+        Ok(val) => val,
+        Err(msg) => 0 - 1,
     };
-    uni res(Err(msg)) = {
-        endprogram Print#("Error: " + msg);
-    };
-};
-
-// Option type usage
-defn find_first_even(items: List<Int>) -> Option<Int> {
-    let i: Int = 0;
-    let len: Int = items .#Size;
-    txn search_loop [i < len][i == len || found] -> Option<Int> {
-        when items[i] % 2 == 0 {
-            term some(items[i]);
-        };
-        i = i + 1;
-        term;
-    };
-    term none();
-};
-
-defn get_or_zero(items: List<Int>) -> Int {
-    let opt = find_first_even(items);
-    uni opt(Some(val)) = {
-        term val;
-    };
-    term 0;
 };
 
 // Chaining with Result
-defn parse_and_divide(input: String) -> Result<Int, String> {
-    let parsed: Result<Int, String> = ToString#(input) :> Parse;
-    when is_ok(parsed) {
-        term divide(unwrap(parsed), 2);
+defn parse_and_divide(input: Int) -> Result<Int, String> {
+    when input == 0 {
+        term Err("zero input");
     };
-    term parsed;
+    term divide(input, 2);
+};
+
+let i: Int = 0;
+
+node run [i < 3][i == 3] {
+    when i == 0 {
+        Print#(safe_divide(10, 2));
+        i = i + 1;
+        term;
+    };
+    when i == 1 {
+        // Err path: safe_divide maps to -1.
+        endprogram Print#(safe_divide(5, 0));
+    };
+    when i == 2 {
+        // Ok(8/2) flows through the constructor + match machinery.
+        let final = parse_and_divide(8);
+        endprogram Print#(safe_divide(final, 1));
+    };
 };

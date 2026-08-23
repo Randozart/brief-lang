@@ -170,6 +170,31 @@ fn referenced_type_names(item: &TopLevel) -> Vec<String> {
                 type_names(ty, &mut out);
             }
         }
+        // 2026-08-23 (enum construction follow-up): top-level DEFINITIONS
+        // and TRANSACTIONS were never walked — `import { is_ok } from
+        // "std/result"` dropped the Result TYPEDEF because is_ok's PARAM
+        // type (`r: Result<T,E>`) never entered refs; every constructor or
+        // match on the dropped enum then failed open-scrutinee.
+        TopLevel::Definition(d) => {
+            for (_, ty) in &d.parameters {
+                type_names(ty, &mut out);
+            }
+            if let Some(ot) = &d.output_type {
+                for t in ot.all_types() {
+                    type_names(&t, &mut out);
+                }
+            }
+        }
+        TopLevel::Transaction(t) => {
+            for (_, ty) in &t.parameters {
+                type_names(ty, &mut out);
+            }
+            if let Some(ot) = &t.output_type {
+                for ty in ot.all_types() {
+                    type_names(&ty, &mut out);
+                }
+            }
+        }
         _ => {}
     }
     out

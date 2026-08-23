@@ -8,31 +8,31 @@
 // ===== COUNTING =====
 
 defn popcount(x: Int) [true][term >= 0 && term <= 64] -> Int {
-    term Popcount#(x);
+    term x :> Popcount;
 };
 
 defn leading_zeros(x: Int) [true][term >= 0 && term <= 64] -> Int {
-    term LeadingZeros#(x);
+    term x :> LeadingZeros;
 };
 
 defn trailing_zeros(x: Int) [true][term >= 0 && term <= 64] -> Int {
-    term TrailingZeros#(x);
+    term x :> TrailingZeros;
 };
 
 // ===== ABSOLUTE VALUE =====
 
 defn abs(x: Int) [true][term >= 0] -> Int {
-    term Abs#(x);
+    term x :> Absolute;
 };
 
 defn abs_float(x: Float) [true][term >= 0.0] -> Float {
-    term Abs#(x);
+    term x :> Absolute;
 };
 
 // ===== BIT REVERSAL =====
 
 defn bit_reverse(x: Int) -> Int {
-    term BitReverse#(x);
+    term x :> BitReverse;
 };
 
 // ===== COMPOSITE BIT OPS =====
@@ -41,7 +41,7 @@ defn ffs(x: Int) [true][term >= 0 && term <= 64] -> Int {
     when x == 0 {
         term 0;
     };
-    term TrailingZeros#(x) + 1;
+    term (x :> TrailingZeros) + 1;
 };
 
 defn is_power_of_two(x: Int) [true][term == true || term == false] -> Bool {

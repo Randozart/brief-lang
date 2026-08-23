@@ -2608,6 +2608,20 @@ impl LlvmBackend {
                     }
                     self.ctx.obj_members.entry(td.name.clone())
                         .or_insert_with(|| coll_members.clone());
+                    // 2026-08-23 (Phase 5d): ENUM VARIANT CONSTRUCTION
+                    // registry — parser enums are TypeDefs whose slots are
+                    // __variant_<Name>; declaration order is the tag index.
+                    let ctor_variants: Vec<&crate::ast::top::TypeDefSlot> = td
+                        .body
+                        .slots
+                        .iter()
+                        .filter(|s| s.name.starts_with("__variant_"))
+                        .collect();
+                    for (idx, slot) in ctor_variants.iter().enumerate() {
+                        let vname =
+                            slot.name.trim_start_matches("__variant_").to_string();
+                        self.ctx.variant_ctor.insert(vname, (td.name.clone(), idx));
+                    }
                     // 2026-08-16 (slice-6 deletion): register the coll's
                     // default op BINDINGS in the backend too — compile.rs
                     // builds them, but tests and direct `backend.generate`

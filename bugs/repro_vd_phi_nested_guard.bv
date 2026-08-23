@@ -1,0 +1,22 @@
+import { is_ok } from "std/result";
+defn divide(a: Int, b: Int) -> Result<Int, String> {
+  when b == 0 { term Err("zero"); };
+  term Ok(a / b);
+};
+defn is_one(r: Result<Int,String>) -> Bool {
+  term match r { Ok(v) => v == 1, Err(_) => false };
+};
+let i: Int = 0;
+node run [i < 1][i == 1] {
+  when i == 0 {
+    let probe = divide(3, 3);
+    let flag = is_one(probe);
+    when flag { Print#(777); };
+    endprogram Print#(safe_like());
+  };
+  i = i + 1;
+  term;
+};
+defn safe_like() -> Int {
+  term 42;
+};
