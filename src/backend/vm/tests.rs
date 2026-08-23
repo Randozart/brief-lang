@@ -130,3 +130,126 @@ fn unknown_function_records_error() {
         vm.errors
     );
 }
+
+// ── Compile-tail parity: host-side expectation checker ──────────────────
+// 2026-08-23 (plan 2026-08-23-vm-compile-tail-parity §1.2): the EXPECT
+// comments in tmp_fixtures/parity/*.bv are the parity contract between the
+// host semantics and the tamer. This test independently evaluates each
+// fixture's Print# expressions (mini evaluator over the parsed AST) and
+// asserts the baked EXPECT line matches — so the contract is verified
+// against parsed source, not hand-maintained. tools/parity_harness.sh then
+// holds the tamer side to the same numbers.
+
+fn parity_eval_expr(e: &Expr, vars: &HashMap<String, i64>) -> i64 {
+    match e {
+        Expr::Decimal(n) => *n,
+        Expr::Identifier(name) => vars.get(name.as_str()).copied().unwrap_or_else(|| {
+            panic!("parity eval: unbound variable '{}'", name)
+        }),
+        Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => -parity_eval_expr(inner, vars),
+        Expr::BinaryOp(kind, l, r) => {
+            let a = parity_eval_expr(l, vars);
+            let b = parity_eval_expr(r, vars);
+            match kind {
+                crate::ast::BinaryOpKind::Add => a.wrapping_add(b),
+                crate::ast::BinaryOpKind::Sub => a.wrapping_sub(b),
+                crate::ast::BinaryOpKind::Mul => a.wrapping_mul(b),
+                crate::ast::BinaryOpKind::Div => {
+                    if b == 0 { 0 } else { a.wrapping_div(b) }
+                }
+                crate::ast::BinaryOpKind::Mod => {
+                    if b == 0 { 0 } else { a.wrapping_rem(b) }
+                }
+                crate::ast::BinaryOpKind::BitAnd | crate::ast::BinaryOpKind::And => a & b,
+                crate::ast::BinaryOpKind::BitOr | crate::ast::BinaryOpKind::Or => a | b,
+                crate::ast::BinaryOpKind::BitXor => a ^ b,
+                crate::ast::BinaryOpKind::Shl => a << (b as u32 & 63),
+                crate::ast::BinaryOpKind::Shr => a >> (b as u32 & 63),
+                other => panic!("parity eval: unsupported op {:?}", other),
+            }
+        }
+        other => panic!("parity eval: unsupported expr {:?}", other),
+    }
+}
+
+#[test]
+fn parity_expected_values_match_independent_evaluation() {
+    use crate::lexer;
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dir = format!("{}/tmp_fixtures/parity", manifest_dir);
+    let mut checked = 0usize;
+    for entry in std::fs::read_dir(&dir).expect("parity fixture dir") {
+        let path = entry.unwrap().path();
+        if path.extension().map(|e| e != "bv").unwrap_or(true) {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        let tokens = lexer::tokenize(&source).expect("lex");
+        let mut parser = crate::parser::Parser::new(tokens, &source);
+        let items = parser.parse_program().expect("parse");
+
+        // Collect the txn body's Print# argument expressions.
+        let mut prints: Vec<Expr> = Vec::new();
+        for item in &items {
+            if let TopLevel::Transaction(t) = item {
+                for s in &t.body {
+                    if let Statement::Expression(Expr::Call(name, args, _)) = s {
+                        if name == "Print#" && args.len() == 1 {
+                            prints.push(args[0].clone());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(!prints.is_empty(), "{}: no Print# statements", path.display());
+
+        // Independent evaluation with the txn's let-sequence applied.
+        let mut vars: HashMap<String, i64> = HashMap::new();
+        let mut actual: Vec<i64> = Vec::new();
+        'stmts: for item in &items {
+            if let TopLevel::Transaction(t) = item {
+                for s in &t.body {
+                    match s {
+                        Statement::Let { name, expr: Some(e), .. } => {
+                            vars.insert(name.clone(), parity_eval_expr(e, &vars));
+                        }
+                        Statement::Assign(lhs, rhs) => {
+                            if let Expr::Identifier(n) = lhs {
+                                vars.insert(n.clone(), parity_eval_expr(rhs, &vars));
+                            }
+                        }
+                        Statement::Expression(Expr::Call(name, args, _)) => {
+                            if name == "Print#" && args.len() == 1 {
+                                actual.push(parity_eval_expr(&args[0], &vars));
+                            }
+                        }
+                        Statement::Term(_) => break 'stmts,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Compare against the baked EXPECT comment.
+        let expected_line = source
+            .lines()
+            .find(|l| l.contains("// EXPECT:"))
+            .expect("EXPECT comment")
+            .split("// EXPECT: ")
+            .nth(1)
+            .unwrap()
+            .to_string();
+        let expected: Vec<i64> = expected_line
+            .split(',')
+            .map(|v| v.trim().parse().expect("EXPECT value"))
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "{}: independent evaluation disagrees with the baked contract",
+            path.display()
+        );
+        assert_eq!(actual.len(), prints.len());
+        checked += 1;
+    }
+    assert!(checked >= 4, "corpus must not shrink: {}", checked);
+}

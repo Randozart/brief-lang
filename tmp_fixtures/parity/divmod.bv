@@ -1,0 +1,10 @@
+// PARITY fixture: division and modulo (truncating, C semantics).
+// EXPECT: 6,10,-6,-6,0
+txn go [100 / 7 == 14][1 == 1] {
+  Print#(100 / 15);
+  Print#(100 % 15);
+  Print#(0 - 100 / 15);
+  Print#((0 - 100) / 15);
+  Print#(100 % 15 - 100 % 15);
+  term;
+};

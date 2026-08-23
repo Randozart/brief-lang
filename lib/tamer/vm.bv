@@ -147,6 +147,30 @@ defn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             term pc + 1;
         };
 
+        0x09 => { // div_s — truncating toward zero (C semantics)
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                when b != 0 {
+                    (*stack).data[sl - 2] = a / b;
+                    (*stack).len = sl - 1;
+                };
+            };
+            term pc + 1;
+        };
+
+        0x0A => { // rem_s — C remainder (sign of dividend)
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                when b != 0 {
+                    (*stack).data[sl - 2] = a % b;
+                    (*stack).len = sl - 1;
+                };
+            };
+            term pc + 1;
+        };
+
         0x0B => { // and
             when sl >= 2 {
                 (*stack).data[sl - 2] = (*stack).data[sl - 2] & (*stack).data[sl - 1];

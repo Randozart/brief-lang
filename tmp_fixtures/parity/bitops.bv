@@ -1,0 +1,12 @@
+// PARITY fixture: bitwise ops, shifts, masks.
+// EXPECT: 8,14,6,240,6,1,0
+txn go [0xF0 & 0x0F == 0][1 == 1] {
+  Print#(12 & 10);
+  Print#(12 | 10 | 2);
+  Print#(12 ^ 10);
+  Print#(15 << 4);
+  Print#(13 >> 1);
+  Print#(1 & 1);
+  Print#(1 & 0);
+  term;
+};
