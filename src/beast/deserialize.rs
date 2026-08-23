@@ -470,6 +470,7 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
             let e = if parts.len() > 1 { Some(parse_expr(&parts[1])?) } else { None };
             Ok(Statement::EndProgram(e))
         }
+        "yield" => Ok(Statement::Yield),
         "expr" => Ok(Statement::Expression(parse_expr(&parts[1])?)),
         "guarded" => {
             let cond = parse_expr(&parts[1])?;

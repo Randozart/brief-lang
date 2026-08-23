@@ -439,6 +439,7 @@ fn prop_value_matches(v: &crate::ast::PropertyValue, val: &str) -> bool {
 /// Get the S-expression tag of a statement.
 pub fn stmt_tag(stmt: &Statement) -> &str {
     match stmt {
+        Statement::Yield => "yield",
         Statement::Let { .. } => "let",
         Statement::Assign(_, _) => "assign",
         Statement::ArrowAssign { .. } => "arrow",

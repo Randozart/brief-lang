@@ -1,0 +1,35 @@
+// task_lifecycle — SPEC §12.2 linear handles (Phase 8).
+// spawn yields Task<R>; await consumes it exactly once; `free` requires a
+// cancellation point (yield; or term;) in the spawned body.
+//
+// Expected output: "42" then "21".
+let r: Int = 0;
+let i: Int = 0;
+
+defn double(n: Int) -> Int {
+  term n * 2;
+};
+
+node run [i < 2][i == 2] {
+  when i == 0 {
+    let t = spawn double(21);
+    r = await t;
+    Print#(r);
+    i = i + 1;
+    term;
+  };
+  when i == 1 {
+    // A yield;-only body is free-able: the checkpoint proves stopping safe.
+    let h = spawn half(84);
+    free h;
+    r = r / 2 + 1000000;
+    endprogram Print#(r - 1000000);
+  };
+  i = i + 1;
+  term;
+};
+
+defn half(n: Int) -> Int {
+  yield;
+  term n / 2;
+};

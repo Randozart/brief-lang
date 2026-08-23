@@ -185,6 +185,8 @@ fn emit_statement(s: &Statement) -> SExpr {
                 None => list(&[atom("term!")]),
             }
         }
+        // 2026-08-22 (Phase 8): yield; round-trips through beast snapshots.
+        Statement::Yield => list(&[atom("yield")]),
         Statement::Expression(e) => list(&[atom("expr"), emit_expr(e)]),        Statement::Guarded(cond, body) => {
             let mut children = vec![atom("guarded"), emit_expr(cond)];
             children.push(list(&[atom("body")]));

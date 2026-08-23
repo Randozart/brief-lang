@@ -296,6 +296,7 @@ impl fmt::Display for Type {
             }
             Type::TypeVar(name) => write!(f, "{}", name),
             Type::Dyn(inner) => write!(f, "dyn {}", inner),
+            Type::Task(inner) => write!(f, "Task<{}>", inner),
             Type::Ptr(inner) => write!(f, "Ptr<{}>", inner),
             Type::PtrConst(inner) => write!(f, "Ptr<const {}>", inner),
             Type::Function(params, ret) => {
@@ -364,6 +365,7 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Trap => write!(f, "trap;"),
+            Statement::Yield => write!(f, "yield;"),
             Statement::Break => write!(f, "break;"),
             Statement::EndProgram(val) => {
                 if let Some(val) = val {

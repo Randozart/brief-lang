@@ -34,6 +34,11 @@ pub enum Type {
     /// trait's object type); no downcast in v1. Execution lands with the
     /// thunk-table ABI (Phase 5b).
     Dyn(Box<Type>),
+    /// 2026-08-22 (spec-conformance plan Phase 8, SPEC §12.2): a linear task
+    /// handle — `spawn fn()` yields Task<R>; await unwraps R. Compiler
+    /// construct (Ptr precedent): consumed exactly once by await/free/keep;
+    /// dropping a live handle is an error.
+    Task(Box<Type>),
     /// Pointer type: Ptr(T)
     Ptr(Box<Type>),
     /// Read-only pointer type: Ptr<const T>. Same size as Ptr(T), but the

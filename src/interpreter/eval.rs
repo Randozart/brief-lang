@@ -1369,6 +1369,9 @@ pub fn eval_statement(
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
     match stmt {
+        // 2026-08-22 (Phase 8): yield; is a no-op in the eager reference
+        // scheduler — the concurrent scheduler's future suspension point.
+        Statement::Yield => Ok(Value::Void),
         Statement::Let { name, ty, expr, .. } => {
             if let Some(expr) = expr {
                 let val = eval_expr(expr, heap, bindings, functions)?;

@@ -153,6 +153,7 @@ impl MemorySpec {
 fn format_type(ty: &Type) -> String {
     match ty {
         Type::Dyn(inner) => format!("dyn {}", inner),
+        Type::Task(inner) => format!("Task<{}>", inner),
         Type::Number(n) => n.to_string(),
         Type::Custom(__t) if __t == "Int" => "Int".to_string(),
         Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
@@ -222,8 +223,10 @@ fn format_bit_range(br: &BitRange) -> String {
 fn estimate_type_size(ty: &Type) -> usize {
     match ty {
         // A trait object is a fat pointer; the payload dominates layout
-        // estimates until the thunk-table ABI lands (Phase 5b).
+        // estimates until the thunk-table ABI lands (Phase 5c).
         Type::Dyn(inner) => estimate_type_size(inner).max(8),
+        // A task handle is one i64 slot (the eager result-handle model).
+        Type::Task(_) => 8,
         Type::Number(n) => (*n).max(0) as usize,
         Type::Custom(__t) if __t == "Int" || __t == "UInt" => 8,
         Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => 1,
