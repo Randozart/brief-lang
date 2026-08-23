@@ -376,6 +376,22 @@ Remaining: Phases 5 (dyn), 7 (obj/cell ports), 8 (task lifecycle),
 Remaining: Phase 5b (thunk tables), 7 (obj/cell ports), 8 (task
 lifecycle), 10 (conformance sweep).
 
+### 2026-08-22 session 3
+- **Phase 5b** ✅ 1d89f510 — interpreter dyn dispatch: Value::Dyn wraps at
+  dyn-annotated lets; impl bodies registered under Concrete::fn; receiver
+  threads by arity shape. LLVM thunk tables remain open as **Phase 5c**
+  (BUGS.md).
+- **Phase 8** ✅ 6f955614 — Task<R> typing, yield; checkpoints, full
+  linearity discipline (drop-live / use-after-move / checkpoint-gated
+  free), wired into both paths. SPEC §12.2 + §11.3 updated same-commit.
+  One codegen interaction open (two-guard spawn + cross-guard arithmetic,
+  repro in BUGS.md) — static layer fully verified.
+- Owner decisions recorded: i64-handle dyn ABI, `yield;`/`term;`
+  checkpoint set replacing the yields-annotation draft, full gate now.
+
+Remaining: Phase 5c (LLVM dyn tables), 7 (obj/cell ports),
+Phase-8 codegen gap, 10 (conformance sweep + closure).
+
 ## Session-3 decisions (owner, 2026-08-22)
 
 | Question | Decision |
