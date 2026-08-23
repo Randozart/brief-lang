@@ -44,7 +44,7 @@ git -C "$SRC" submodule update --init llvm
 
 if [ ! -f "$SRC/llvm/build/lib/cmake/mlir/MLIRConfig.cmake" ]; then
     echo "[install-circt] building LLVM/MLIR (~30-50 min)..."
-    cmake -G Ninja -S "$SRC/llvm" -B "$SRC/llvm/build" \
+    cmake -G Ninja -S "$SRC/llvm/llvm" -B "$SRC/llvm/build" \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="mlir" \
         -DLLVM_ENABLE_ASSERTIONS=ON \

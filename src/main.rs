@@ -545,15 +545,21 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         let _str_off = hdr(0);
         let fn_off = hdr(2) as usize;
         let fn_size = hdr(3) as usize;
+        let bc_off = hdr(4);
         let n = fn_size / 20;
-        (0..n)
-            .map(|k| {
-                u64::from_le_bytes(
-                    user_lair[fn_off + k * 20 + 4..fn_off + k * 20 + 12].try_into().unwrap(),
-                )
-            })
-            .max()
-            .unwrap_or(0)
+        // fn bc_offsets are RELATIVE to the bytecode section; the tamer
+        // indexes from the .lair base, so ship the ABSOLUTE offset.
+        bc_off
+            + (0..n)
+                .map(|k| {
+                    u64::from_le_bytes(
+                        user_lair[fn_off + k * 20 + 4..fn_off + k * 20 + 12]
+                            .try_into()
+                            .unwrap(),
+                    )
+                })
+                .max()
+                .unwrap_or(0)
     };
     let manifest = format!(
         r#"{{"version":1,"entry_point":"main","entry_bc":{},"noise_seed":{}}}"#,

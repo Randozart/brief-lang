@@ -385,7 +385,7 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             term pc + 1;
         };
 
-        _ => { term -1; };
+        _ => { term -1; }; // TEMP-MARK
     };
 };
 

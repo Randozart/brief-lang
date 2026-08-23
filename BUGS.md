@@ -4809,6 +4809,65 @@ written, so the outer merge phi captures a phantom predecessor.
 inside countable bodies (same family as the match-edge fix); make the merge-
 phi predecessor cite the block that ACTUALLY branches.
 
+## Callable-txn bodies silently drop `match` statements (2026-08-23)
+
+**Status:** OPEN — ROOT CAUSE CONFIRMED; blocks the tamer's `exec_op`.
+**Symptom chain:** native tamer's `exec_op` compiled body contains only its
+leading `let` — the entire `match op { ... }` vanishes, leaving an infinite
+convergent loop with no side effects (UB under clang -O2 -> garbage return,
+"halts after 1 step").
+**Root cause:** `src/backend/llvm/emit_stmt.rs emit_statement` has NO arm for
+`Statement::Match` (zero hits); statement-level match falls through the
+catch-all silently. `vm.bv`'s opcode dispatch is a statement-level match.
+**Why the capability gate missed it:** LLVM is declared full-surface and skips
+validation — that declaration is wrong for statement-level match. Plan 0's
+"declare what you truly lower" applies to LLVM too.
+**Fix direction:** implement Statement::Match emission in emit_stmt.rs via
+the Phase-4a unified pattern grammar (patterns -> icmp chains + branch tree);
+add an IR-level regression test (callable txn containing a statement match
+must emit its arms). Interim honesty: LLVM surface declaration should not
+claim match_stmt until this lands.
+
+**Resolved en route (same investigation, 2026-08-23):**
+- Export-wrapper ABI: EVERY exported defn takes a leading %state pointer —
+  C prototypes omitting it shift all args by one register (phantom halts).
+- fn bc_offsets are section-relative; tamer addressing is base-absolute —
+  manifest now ships absolute entry_bc (src/main.rs).
+- Exported-defn state writes do NOT round-trip through the %state view
+  (accessors read zeros). Final architecture: C owns memory + host-table
+  parse; Briev exports one pure `step()` (lib/tamer/main.bv +
+  tamer/install_sim.c).
+
+## Two-guard task spawn + cross-guard state arithmetic: undefined guard label (2026-08-22)
+
+**Status:** CLOSED 2026-08-22. Two stacked causes, both fixed:
+1. The countable Guarded arm trusted inherited `fun.cur_block` as its merge
+   phi's fall-through predecessor — it could name a pre-loop guard merge
+   from an earlier emission region (`%guard.end49`). Condition blocks are
+   now freshly labeled (`.cmgcN`) with an explicit fall-through branch.
+2. `.cm_body` entry never reset `terminated`/`cur_block`, so a stale
+   terminated flag skipped that fall-through branch and left an empty
+   predecessor block (slice_state regression during fix). Body entry now
+   resets both by construction.
+Also found in the same audit: FreeHint/KeepHint/Yield were silently
+DROPPED by emit_countable_body\'s `_ => {}` — they now delegate to the
+standard emitter. Verified: repro 4221, all five pinned fixtures, suite
+1928 green. Original report:
+**Repro:** `bugs/repro_task_free_second_guard.bv` — node with TWO sequential
+`when` guards; guard A spawns a local task, awaits/frees it, assigns a state
+field; guard B reads that field with arithmetic under `endprogram`.
+**Behavior:** emitted IR cites `%guard.end49` (an emit_stmt-style guard-end
+label) inside a countable-loop merge phi (`%cmgm…`) that references it as a
+PREDECESSOR, but no such label exists — clang/opt reject. Single-guard
+spawn+await (_g3 shape) and spawn+free (_g4 shape) compile and run correctly;
+static linearity gates all pass. Suspect: an inner emit_stmt-emitted guard
+(candidates: the scheduled-Free# epilogue or a coll/spawn grow guard)
+advances `fun.cur_block` past a block whose label is later renamed or never
+written, so the outer merge phi captures a phantom predecessor.
+**Fix direction:** audit cur_block updates across nested emit_statement calls
+inside countable bodies (same family as the match-edge fix); make the merge-
+phi predecessor cite the block that ACTUALLY branches.
+
 ## Convergent-txn loop: body side-effects don't persist across iterations (2026-08-23)
 
 **Status:** OPEN — blocks the tamer's `vm_loop` execution (Plan 1 HCALL
