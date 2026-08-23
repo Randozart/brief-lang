@@ -12,6 +12,16 @@ impl<'a> Parser<'a> {
     /// 2026-07-16: Bits-thesis — all type names are Token::Identifier.
     /// Dispatch on identifier string, not token variant.
     pub fn parse_type(&mut self) -> Result<Type, SyntaxError> {
+        // 2026-08-22 (Phase 5, SPEC §8.6): `dyn TraitName` — a trait object.
+        // `dyn` is contextual (no Token); recognized only in type-prefix
+        // position, so identifiers named dyn elsewhere are untouched.
+        if self.check_identifier("dyn") {
+            if let Some(Token::Identifier(trait_name)) = self.tokens.get(self.pos + 1).map(|(t, _)| t) {
+                let trait_name = trait_name.clone();
+                self.pos += 2;
+                return Ok(Type::Dyn(Box::new(Type::Custom(trait_name))));
+            }
+        }
         let base = match self.peek() {
             Some(Token::Identifier(name)) => {
                 let name = name.clone();

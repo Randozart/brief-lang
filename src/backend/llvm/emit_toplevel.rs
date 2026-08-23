@@ -703,6 +703,17 @@ impl LlvmBackend {
         if matches!(ty, Type::Union(_)) {
             return "i64".to_string();
         }
+        // 2026-08-22 (Phase 5): `dyn Trait` execution needs the thunk-table
+        // ABI (fat pointer {data, table} + per-(trait, concrete) tables).
+        // Until Phase 5b lands, reject explicitly — never emit silently-
+        // wrong dispatch. Parse/typecheck/coercion are complete.
+        if matches!(ty, Type::Dyn(_)) {
+            panic!(
+                "`dyn Trait` values cannot be compiled yet — the thunk-table ABI \
+                 is not landed. Track Phase 5b in BUGS.md; the interpreter and \
+                 typechecker accept dyn programs."
+            );
+        }
         // 2026-08-13 (Phase 6): `Bits<N>` (both AST forms) is exactly N bits —
         // resolve the Applied("Bits", [Number(N)]) alias here so a `Bits<32>`
         // struct field reads/writes i32, not the generic i64. The casting

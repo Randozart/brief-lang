@@ -28,6 +28,12 @@ pub enum Type {
     Tuple(Vec<Type>),
     /// Type variable for generics
     TypeVar(String),
+    /// 2026-08-22 (spec-conformance plan Phase 5, SPEC §8.6): a trait object
+    /// — `dyn Printable`. Explicit runtime dispatch: only an annotated `dyn`
+    /// binding admits the coercion (a concrete value into its asserted
+    /// trait's object type); no downcast in v1. Execution lands with the
+    /// thunk-table ABI (Phase 5b).
+    Dyn(Box<Type>),
     /// Pointer type: Ptr(T)
     Ptr(Box<Type>),
     /// Read-only pointer type: Ptr<const T>. Same size as Ptr(T), but the

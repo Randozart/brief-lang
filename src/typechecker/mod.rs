@@ -125,6 +125,14 @@ pub struct TypecheckContext<'a> {
     /// a sub-protocol value prefers its variant's own op (zero cast) — "adopt
     /// whatever operations are most convenient."
     variant_cross_ops: HashMap<String, HashMap<String, String>>,
+    /// 2026-08-22 (Phase 5, SPEC §8.6): explicit trait assertions — concrete
+    /// type name → asserted trait names. The conformance proof for a
+    /// concrete → `dyn Trait` coercion (check_trait_assertion already
+    /// verified the type PROVIDES everything at declaration time).
+    trait_assertions: HashMap<String, Vec<String>>,
+    /// 2026-08-22 (Phase 5): declared traits by name — dyn member resolution
+    /// reads the requirement signatures from here.
+    trait_defs: HashMap<String, crate::ast::top::TraitDef>,
 }
 
 impl<'a> TypecheckContext<'a> {
@@ -155,6 +163,8 @@ impl<'a> TypecheckContext<'a> {
             current_output_type: None,
             type_protocols: HashMap::new(),
             variant_cross_ops: HashMap::new(),
+            trait_assertions: HashMap::new(),
+            trait_defs: HashMap::new(),
         }
     }
 
@@ -1610,7 +1620,7 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
             // 2026-08-09 (Phase 12, SPEC §18.2): the meld admission is removed —
             // only an explicit coercion path admits the pair.
             // 2026-08-22 (Phase 3): a structural-sum parameter admits its members.
-            if !types_compatible(param_ty, &arg_ty) {
+            if !types_compatible(param_ty, &arg_ty, ctx) {
                 let coercible = try_coerce_via_parse(arg, &arg_ty, param_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -1754,12 +1764,31 @@ fn quoted_literal_type(prefix: &str) -> Type {
 /// (`Int | String`) accepts exactly its members. Single home for the rule so
 /// call arguments, let annotations, and returns stay consistent (DRY). The
 /// Bit<N>↔Bits width fact keeps its dedicated let-site logic.
-pub(crate) fn types_compatible(declared: &Type, value: &Type) -> bool {
+pub(crate) fn types_compatible(
+    declared: &Type,
+    value: &Type,
+    ctx: &TypecheckContext,
+) -> bool {
     if declared == value {
         return true;
     }
     if let Type::Union(members) = declared {
         return members.iter().any(|m| m == value);
+    }
+    // 2026-08-22 (Phase 5, SPEC §8.6): concrete → `dyn Trait` — ONLY into an
+    // explicit dyn annotation (this fn is only consulted for annotated
+    // positions), and only when the concrete type ASSERTS the trait. The
+    // assertion is the conformance proof; check_trait_assertion already
+    // verified the type provides every requirement at declaration time.
+    if let Type::Dyn(trait_ty) = declared {
+        if let (Type::Custom(trait_name), Type::Custom(concrete)) =
+            (trait_ty.as_ref(), value)
+        {
+            if let Some(asserted) = ctx.trait_assertions.get(concrete.as_str()) {
+                return asserted.iter().any(|t| t == trait_name);
+            }
+        }
+        return false;
     }
     false
 }
@@ -2246,7 +2275,7 @@ fn infer_match(
                     let union_ctx = ctx
                         .current_output_type
                         .as_ref()
-                        .map(|out| types_compatible(out, prev) && types_compatible(out, &ty))
+                        .map(|out| types_compatible(out, prev, ctx) && types_compatible(out, &ty, ctx))
                         .unwrap_or(false);
                     if !union_ctx {
                         return Err(TypeError::TypeMismatch {
@@ -2430,7 +2459,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             if let Some(declared) = ty {
                 // 2026-08-22 (Phase 3): structural sums admit their members
                 // (`let v: Int | String = 5`) via types_compatible.
-                let compatible = if types_compatible(declared, &inferred) {
+                let compatible = if types_compatible(declared, &inferred, ctx) {
                     true
                 } else {
                     // 2026-07-31: `let lb: ListBuffer<Int> = ListBuffer {...}`
@@ -2537,7 +2566,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // 2026-08-09 (Phase 12, SPEC §18.2): the meld admission is removed —
             // only an explicit coercion path admits the pair.
             // 2026-08-22 (Phase 3b): a structural-sum target admits members.
-            if !types_compatible(&lhs_ty, &rhs_ty) {
+            if !types_compatible(&lhs_ty, &rhs_ty, ctx) {
                 let coercible = try_coerce_via_parse(rhs, &rhs_ty, &lhs_ty, ctx);
                 if !coercible {
                     return Err(TypeError::TypeMismatch {
@@ -2698,7 +2727,7 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                 if let Some(out) = &ctx.current_output_type {
                     // 2026-08-22 (Phase 3b): a structural-sum return admits
                     // its members (`term 7` inside `-> Int | String`).
-                    if !types_compatible(out, &vty) {
+                    if !types_compatible(out, &vty, ctx) {
                         return Err(TypeError::TypeMismatch {
                             expected: format!("{}", out),
                             found: format!("{}", vty),
@@ -3182,6 +3211,35 @@ fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
 }
 
 pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
+    // 2026-08-22 (Phase 5, SPEC §8.5): the parser's relationship list is
+    // SYNTACTIC — a bare name becomes the refinement parent whether or not
+    // it names a trait. Here, with the trait registry known, reclassify:
+    // a parent naming a declared trait is an explicit ASSERTION (traits have
+    // no layout/state to refine), and duplicates collapse.
+    {
+        let trait_names: std::collections::HashSet<String> = items.iter().filter_map(
+            |i| match i {
+                TopLevel::Trait(t) => Some(t.name.clone()),
+                _ => None,
+            },
+        ).collect();
+        for item in items.iter_mut() {
+            if let TopLevel::TypeDef(td) = item {
+                let mut asserted = td.traits.clone();
+                if let Some(crate::ast::Expr::Identifier(pname)) =
+                    td.parent.as_deref()
+                {
+                    if trait_names.contains(pname) {
+                        asserted.push(pname.clone());
+                        td.parent = None;
+                    }
+                }
+                let mut seen = std::collections::HashSet::new();
+                asserted.retain(|t| seen.insert(t.clone()));
+                td.traits = asserted;
+            }
+        }
+    }
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
     let state_bindings: std::collections::HashMap<String, Type> = items
@@ -3409,6 +3467,15 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // 2026-07-31: Pre-collect struct/obj field slots and obj member
     // declarations for Expr::Field / Expr::MethodCall resolution.
     let mut all_type_slots: HashMap<String, Vec<crate::ast::top::TypeDefSlot>> = HashMap::new();
+    // 2026-08-22 (Phase 5): explicit trait assertions per concrete type
+    // (`type Meter: #Int, Comparable<Meter>, Printable { … }` → traits list).
+    let mut all_trait_assertions: HashMap<String, Vec<String>> = HashMap::new();
+    let mut all_trait_defs: HashMap<String, crate::ast::top::TraitDef> = HashMap::new();
+    for item in items.iter() {
+        if let TopLevel::Trait(t) = item {
+            all_trait_defs.insert(t.name.clone(), t.clone());
+        }
+    }
     let mut all_type_members: HashMap<String, Vec<TopLevel>> = HashMap::new();
     let mut all_type_params: HashMap<String, Vec<String>> = HashMap::new();
     // 2026-08-15 (coll plan): `coll obj`/`coll struct` type names — they
@@ -3458,6 +3525,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     });
                 }
                 all_type_slots.insert(td.name.clone(), slots);
+                if !td.traits.is_empty() {
+                    all_trait_assertions.insert(td.name.clone(), td.traits.clone());
+                }
             }
             if td.coll {
                 // 2026-08-15 (coll plan §3.4): the typechecker must see the
@@ -3591,6 +3661,8 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_cross_ops: &all_cross_ops,
         all_coll_types: &all_coll_types,
         defined_fns: &defined_fns,
+        all_trait_assertions: &all_trait_assertions,
+        all_trait_defs: &all_trait_defs,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -3964,6 +4036,11 @@ struct CheckEnv<'a> {
     all_coll_types: &'a std::collections::HashSet<String>,
     /// 2026-08-06 (diagnostics): every defined function/transaction name.
     defined_fns: &'a std::collections::HashSet<String>,
+    /// 2026-08-22 (Phase 5, SPEC §8.6): concrete type → asserted trait names.
+    /// The conformance proof behind a concrete → `dyn Trait` coercion.
+    all_trait_assertions: &'a HashMap<String, Vec<String>>,
+    /// 2026-08-22 (Phase 5): declared traits by name.
+    all_trait_defs: &'a HashMap<String, crate::ast::top::TraitDef>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -3985,6 +4062,9 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.fn_param_types = env.fn_param_types.clone();
     ctx.fn_type_params = env.fn_type_params.clone();
     ctx.type_protocols = env.all_type_protocols.clone();
+    // 2026-08-22 (Phase 5): trait assertions power dyn coercions.
+    ctx.trait_assertions = env.all_trait_assertions.clone();
+    ctx.trait_defs = env.all_trait_defs.clone();
     ctx.variant_cross_ops = env.all_cross_ops.clone();
     // 2026-08-15 (coll plan): coll types accept `[]` and have a scaffolded
     // op surface.
@@ -4265,6 +4345,54 @@ fn resolve_method_call(
     args: &[Expr],
     ctx: &mut TypecheckContext,
 ) -> Result<Type, TypeError> {
+    // 2026-08-22 (Phase 5, SPEC §8.6): a `dyn Trait` receiver resolves the
+    // member against the TRAIT's declared requirements (static shape check —
+    // the runtime thunk table is Phase 5b). Required fns carry no body in
+    // the declaration; defaults do. Either way the signature is what the
+    // call must match.
+    if let Type::Dyn(trait_ty) = receiver {
+        let trait_name = match trait_ty.as_ref() {
+            Type::Custom(n) => n.as_str(),
+            _ => "",
+        };
+        let lookup = name.trim_end_matches('#');
+        let trait_fns = ctx.trait_defs.get(trait_name).map(|td| td.functions.clone());
+        if let Some(functions) = trait_fns {
+            for d in &functions {
+                if d.name == lookup {
+                    // Arity + arg types against the requirement signature.
+                    if args.len() != d.parameters.len() {
+                        return Err(TypeError::InvalidOperation {
+                            operation: format!(
+                                "method call '.{}()' on dyn {} — {} arg(s), trait declares {}",
+                                name, trait_name, args.len(), d.parameters.len()
+                            ),
+                            type_name: format!("dyn {}", trait_name),
+                        });
+                    }
+                    for (a, (_, pty)) in args.iter().zip(d.parameters.iter()) {
+                        let aty = infer_type_only(a, ctx)?;
+                        if !types_compatible(pty, &aty, ctx) && aty != *pty {
+                            return Err(TypeError::TypeMismatch {
+                                expected: format!("{}", pty),
+                                found: format!("{}", aty),
+                                context: format!("argument of '.{}()' via dyn {}", name, trait_name),
+                            });
+                        }
+                    }
+                    return Ok(d
+                        .output_type
+                        .as_ref()
+                        .and_then(|ot| ot.all_types().into_iter().next())
+                        .unwrap_or(Type::void()));
+                }
+            }
+        }
+        return Err(TypeError::InvalidOperation {
+            operation: format!("method call '.{}()' on dyn {}", name, trait_name),
+            type_name: format!("trait '{}' declares no function '{}'", trait_name, lookup),
+        });
+    }
     let type_name = match receiver {
         Type::Custom(n) => n.as_str(),
         Type::Applied(n, _) => n.as_str(),
@@ -7087,5 +7215,49 @@ defn pick(v: Bool) -> Int {
     let errs = check(src).expect_err("Int vs String arm results");
     let text = format!("{:?}", errs);
     assert!(text.contains("compatible"), "{}", text);
+}
+
+// ── 2026-08-22 (spec-conformance plan Phase 5): dyn trait objects ─────────
+
+#[test]
+fn dyn_coercion_requires_asserted_trait() {
+    let src = r#"
+trait Greeter {
+    defn greet(self_name: Int) -> Int;
+};
+type Dog: Greeter { sound: Int; };
+impl Dog { defn greet(self_name: Int) -> Int { term self_name; } };
+let d: Dog = Dog { sound: 1 };
+let g: dyn Greeter = d;
+"#;
+    check(src).expect("Dog asserts Greeter; explicit dyn coercion must typecheck");
+}
+
+#[test]
+fn dyn_coercion_without_asserted_trait_rejected() {
+    let src = r#"
+trait Greeter {
+    defn greet(x: Int) -> Int;
+};
+type Cat { sound: Int; };
+let c: Cat = Cat { sound: 1 };
+let g: dyn Greeter = c;
+"#;
+    let errs = check(src).expect_err("Cat does not assert Greeter");
+    let text = format!("{:?}", errs);
+    assert!(text.contains("dyn") || text.contains("Greeter"), "{}", text);
+}
+
+#[test]
+fn implicit_dyn_coercion_never_happens() {
+    let src = r#"
+trait Greeter { defn greet(x: Int) -> Int; };
+type Dog: Greeter { sound: Int; };
+defn take(g: Greeter) -> Int { term 0; };
+let d: Dog = Dog { sound: 1 };
+let r: Int = take(d);
+"#;
+    let errs = check(src).expect_err("bare trait name is not a type; dyn required");
+    let _ = errs;
 }
 }

@@ -295,6 +295,7 @@ impl fmt::Display for Type {
                 write!(f, ")")
             }
             Type::TypeVar(name) => write!(f, "{}", name),
+            Type::Dyn(inner) => write!(f, "dyn {}", inner),
             Type::Ptr(inner) => write!(f, "Ptr<{}>", inner),
             Type::PtrConst(inner) => write!(f, "Ptr<const {}>", inner),
             Type::Function(params, ret) => {

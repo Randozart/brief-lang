@@ -4691,3 +4691,21 @@ guard with the computation (mask repro shape).
 **Fix direction:** audit cold-path outlining / guard-chain emission for the
 case where a later guard's value feeds an earlier-outlined region's
 terminator; likely a cur_block tracking gap sibling to the match-edge fix.
+
+## `dyn Trait` execution: thunk-table ABI not yet lowered (2026-08-22)
+
+**Status:** OPEN — Phase 5b of `docs/plans/2026-08-22-spec-conformance.md`
+**Found:** spec-conformance Phase 5 work
+**Complete:** parse (`dyn Name` contextual in type-prefix position),
+typecheck (concrete→dyn coercion ONLY into an explicit dyn annotation and
+ONLY when the concrete type asserts the trait — the checker reclassifies
+trait-named relationship entries from refinement-parent to assertion, since
+the parser is syntactic), static member resolution on dyn receivers
+(arity/arg types against the trait's requirement signatures).
+**Missing:** execution. The LLVM backend panics explicitly when a Dyn value
+reaches codegen; the interpreter has no member dispatch for dyn receivers.
+**Fix:** fat pointer `{data, table}`; per-(trait, concrete) thunk tables at
+monomorphization (one slot per required fn, declaration order, sorted where
+iterated); indirect calls through slots; interpreter DynValue wrapper
+resolving through registered conformance. Field requirements and op-binding
+requirements staged behind defn-shaped ones.

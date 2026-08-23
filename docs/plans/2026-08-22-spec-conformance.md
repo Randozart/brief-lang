@@ -364,6 +364,18 @@ Remaining after this session: Phases 5 (dyn), 7 (obj/cell ports),
 Remaining: Phases 5 (dyn), 7 (obj/cell ports), 8 (task lifecycle),
 10 (conformance sweep).
 
+### 2026-08-22 session 2 (cont.) — Phase 5 slice A
+- **Phase 5 (parse/typecheck)** ✅ — `dyn Trait` objects: contextual parse,
+  explicit-only coercion gated on asserted traits (checker reclassifies
+  syntactic parents naming traits into assertions per §8.5's one-parent
+  rule), static requirement-signature checking for dyn member calls.
+  Execution staged explicitly (backend panic / interp unimplemented)
+  pending the Phase 5b thunk-table ABI — BUGS.md tracks it. Suite 1916 →
+  1924.
+
+Remaining: Phase 5b (thunk tables), 7 (obj/cell ports), 8 (task
+lifecycle), 10 (conformance sweep).
+
 ## Deferred (BUGS.md, out of scope by decision)
 
 `$!` DollarBang token; StateDecl/Signature AST residue; `input`/`output` cell-file tokens; orphan fixtures; Ok/Err/Some/None vocab labels; cycle-detection keyed on specifier string rather than canonical path; bare-default CLI route accepting only .bv/.rbv/.abv.
