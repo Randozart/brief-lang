@@ -381,11 +381,30 @@ lifecycle), 10 (conformance sweep).
 | Question | Decision |
 |---|---|
 | Dyn ABI | Owner deferred to my efficiency judgment. Verdict: **i64 handle to a {data, table} image** — true two-word fat pointers are theoretically leaner but this backend's registers are single-valued, so a two-word ABI degenerates to pass-by-alloca anyway; the handle is the efficient choice WITHIN the architecture (union-handle precedent, uniform %State columns). |
-| `free task` gate | Explicit short keyword **prepended**: **`yields defn …`** (owner revision of my `canc` draft — reads as "this body yields control at cooperative points", 6 letters, same disclosed strategy-keyword family as seq/vol/pack). Effect inference may replace it later without breaking annotated code. |
+| `free task` gate | **REPLACED 2026-08-22 session 3 (owner challenged `yields`):** annotation retired. The proof is now STRUCTURAL over cancellation points — `{ yield;, term; }`. `free <task>` valid ⟺ the spawned callable's body contains ≥1 checkpoint (walked through guards/blocks); else error citing the fix. FFI clause self-satisfying (foreign calls are never interruption points). `yield;` = new no-op statement today, grows into the async suspend point; legal in any defn body, advisory warning when never spawned. Owner chose FULL gate now over staging. SPEC §12.2 rewritten accordingly. |
 | Phase 7 strategy | **Interp-first slice** (sums/dyn precedent): parse/typecheck/interp event delivery complete; LLVM + rbv staged behind BUGS entry. |
 | Cell depth | **Interp-complete cells** in the same arc: cells parse fully, seal-check, run in the interpreter; LLVM cell instances wait for the ports backend slice. |
 
 ### Execution order: 5b → 8 → 7 → 10 (unchanged)
+
+## Phase 8 revised work order (2026-08-22 session 3)
+
+1. **`yield;` surface** — Statement::Yield; contextual parse (mirror trap;
+   precedent); Display/canonical/beast arms; interp no-op; backend no-op;
+   termination analysis aware (yield does not terminate).
+2. **Task typing** — Type::Task(Box<Type>) compiler construct; spawn of a
+   registered fn infers Task<Ret>; await Task<T> -> T; await on non-task
+   errors; llvm_type(Task) = "i64" (eager result-handle model).
+3. **Linearity pass** (`src/analysis/task_linear.rs`) — per txn/defn body:
+   Let(init=Spawn-of-fn)/Assign-move inserts live handles; Await/FreeHint/
+   KeepHint consume (move); scope end with live handle = dropped-handle
+   error; consume-of-dead = use-after-move error. FreeHint on a task
+   consults the checkpoint proof of its spawn target; FreeHint on
+   non-tasks keeps the existing storage-hint meaning.
+4. **Wiring** — pass runs from build AND check paths next to termination.
+
+SPEC updates land with these commits (§12.2 cancellation points + yield +
+Task<R>; §11.3 tuple patterns — done up front).
 
 ## Deferred (BUGS.md, out of scope by decision)
 

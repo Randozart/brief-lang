@@ -1053,6 +1053,11 @@ match value {
 - Open or unknown alternatives require `_ =>`.
 - Unreachable arms are errors.
 - All expression arms must have compatible result types.
+- Patterns include enum variants (`Result::Ok(result)`), tuple patterns
+  matching member-wise against a tuple scrutinee (`(true, false) => …`),
+  typed sum bindings (`number: Int => …`), literals (integer, string,
+  Bool), ranges, and `_`. Alternatives within one arm use `|`; the first
+  match wins.
 
 ### 11.4 Iteration
 
@@ -1263,7 +1268,7 @@ let result = await task;
 
 `async` is not a statement-level call modifier. Legacy `async call` and `async await` forms do not exist.
 
-`spawn` creates a persistent task or component instance and returns a linear owned handle.
+`spawn` creates a persistent task or component instance and returns a linear owned handle. Spawning a callable yields a value of type `Task<R>`, where R is the callable's declared result; `await` unwraps it.
 
 - `await task` consumes a task handle and returns the callable's declared result.
 - `free task` requests cancellation/stop and runs `defer` cleanup.
@@ -1285,7 +1290,18 @@ let h = spill spawn Counter();   // may grow beyond a static pool column
 capacity and never triggers the unprovable-spawn error (the user opted out of
 the pooled column explicitly).
 
-`free task` is valid only when effect analysis proves cooperative cancellation points and cancellation-safe active FFI. Otherwise the handle must be awaited or kept.
+A **cancellation point** is a `yield;` statement or a `term;` — the places
+where stopping a task is safe by construction. `free task` is valid when
+the spawned callable's body contains at least one cancellation point,
+checked structurally through guards and blocks. Foreign calls are never
+interruption points, so active FFI is never cancelled mid-call.
+
+`yield;` marks a cooperative cancellation point inside a function body.
+It completes no value and changes no control flow; in the reference
+scheduler it executes as nothing and grows into the actual suspension
+point of the concurrent scheduler. `yield` is a contextual keyword — legal
+as an identifier elsewhere. It may appear in any function body; in a body
+never spawned it draws an advisory warning.
 
 ### 12.3 Reference scheduling
 
