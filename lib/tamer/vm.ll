@@ -6,6 +6,7 @@ target triple = "x86_64-unknown-linux-gnu"
 %Frame = type { i64, i64, i64 }
 %HCallArgs = type { i64, i64, i64, i64, i64 }
 %HashMap = type { ptr, ptr, ptr, i64, i64 }
+%HostTable = type { [64 x i64], [64 x i64], i64 }
 %List = type { { ptr }, i64, i64 }
 %ListBuffer = type { ptr }
 %PiggyBank = type { i64 }
@@ -342,43 +343,88 @@ define i64 @fn_bc_offset(ptr noundef noalias nocapture align 8 %state, ptr %arg0
   ret i64 %t0
 }
 
-define i64 @fn_bc_len(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i64 @fn_bc_len(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t5 = add i64 0, 20
-  %t3 = mul nsw i64 %arg1, %t5
-  %t6 = add i64 0, 12
-  %t2 = add nsw i64 %t3, %t6
-  %t7 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u32(ptr %state, ptr %t7, i64 %t2)
+  %t7 = add i64 0, 20
+  %t5 = mul nsw i64 %arg2, %t7
+  %t3 = add nsw i64 %arg1, %t5
+  %t8 = add i64 0, 12
+  %t2 = add nsw i64 %t3, %t8
+  %t9 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u32(ptr %state, ptr %t9, i64 %t2)
   ret i64 %t0
 }
 
-define i64 @fn_local_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i64 @fn_local_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t5 = add i64 0, 20
-  %t3 = mul nsw i64 %arg1, %t5
-  %t6 = add i64 0, 16
-  %t2 = add nsw i64 %t3, %t6
-  %t7 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u16(ptr %state, ptr %t7, i64 %t2)
+  %t7 = add i64 0, 20
+  %t5 = mul nsw i64 %arg2, %t7
+  %t3 = add nsw i64 %arg1, %t5
+  %t8 = add i64 0, 16
+  %t2 = add nsw i64 %t3, %t8
+  %t9 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u16(ptr %state, ptr %t9, i64 %t2)
   ret i64 %t0
 }
 
-define i64 @fn_arg_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
+define i64 @fn_arg_count(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
   entry:
   %ac0 = ptrtoint ptr %arg0 to i64
-  %t5 = add i64 0, 20
-  %t3 = mul nsw i64 %arg1, %t5
-  %t6 = add i64 0, 18
-  %t2 = add nsw i64 %t3, %t6
-  %t7 = inttoptr i64 %ac0 to ptr
-  %t0 = call i64 @read_u16(ptr %state, ptr %t7, i64 %t2)
+  %t7 = add i64 0, 20
+  %t5 = mul nsw i64 %arg2, %t7
+  %t3 = add nsw i64 %arg1, %t5
+  %t8 = add i64 0, 18
+  %t2 = add nsw i64 %t3, %t8
+  %t9 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @read_u16(ptr %state, ptr %t9, i64 %t2)
   ret i64 %t0
 }
 
-define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, i64 %arg4, ptr %arg5, i64 %arg6, i64 %arg7, i64 %arg8, i64 %arg9) local_unnamed_addr #8 {
+define i64 @host_arity(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1) local_unnamed_addr #8 {
+  entry:
+  %ac0 = ptrtoint ptr %arg0 to i64
+  %t3 = add i64 0, 0
+  %t4 = inttoptr i64 %ac0 to ptr
+  %t0 = call i64 @host_arity_scan(ptr %state, ptr %t4, i64 %arg1, i64 %t3)
+  ret i64 %t0
+}
+
+define i64 @host_dispatch1(ptr noundef noalias nocapture align 8 %state, i64 %arg0, i64 %arg1) local_unnamed_addr #8 {
+  entry:
+  %t2 = load i64, ptr @HOST_ID_PRINT_INT
+  %t3 = icmp eq i64 %arg0, %t2
+  %t0 = zext i1 %t3 to i8
+  %t5 = trunc i8 %t0 to i1
+  br i1 %t5, label %guard.then4, label %guard.end4
+  guard.then4:
+  %t6 = call i64 @BrievHostPrintInt(i64 %arg1)
+  ret i64 %t6
+  guard.end4:
+  %t12 = load i64, ptr @HOST_ID_LOG_INT
+  %t13 = icmp eq i64 %arg0, %t12
+  %t10 = zext i1 %t13 to i8
+  %t15 = trunc i8 %t10 to i1
+  br i1 %t15, label %guard.then14, label %guard.end14
+  guard.then14:
+  %t16 = call i64 @BrievHostPrintInt(i64 %arg1)
+  ret i64 %t16
+  guard.end14:
+  %t22 = load i64, ptr @HOST_ID_UNKNOWN_MIN
+  %t23 = icmp sge i64 %arg0, %t22
+  %t20 = zext i1 %t23 to i8
+  %t25 = trunc i8 %t20 to i1
+  br i1 %t25, label %guard.then24, label %guard.end24
+  guard.then24:
+  %t26 = call i64 @BrievHostFail(i64 %arg0, i64 %arg1)
+  ret i64 %t26
+  guard.end24:
+  %t31 = call i64 @BrievHostFail(i64 %arg0, i64 %arg1)
+  ret i64 %t31
+}
+
+define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, i64 %arg4, ptr %arg5, i64 %arg6, i64 %arg7, ptr %arg8, i64 %arg9, i64 %arg10, i64 %arg11) local_unnamed_addr #8 {
   entry:
   %result = alloca i64, align 8
   store i64 0, ptr %result, align 8
@@ -403,32 +449,39 @@ define i64 @vm_loop(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr
   store i64 %arg6, ptr %p6_s, align 8
   %p7_s = alloca i64, align 8
   store i64 %arg7, ptr %p7_s, align 8
+  %ac8 = ptrtoint ptr %arg8 to i64
   %p8_s = alloca i64, align 8
-  store i64 %arg8, ptr %p8_s, align 8
+  store i64 %ac8, ptr %p8_s, align 8
   %p9_s = alloca i64, align 8
   store i64 %arg9, ptr %p9_s, align 8
+  %p10_s = alloca i64, align 8
+  store i64 %arg10, ptr %p10_s, align 8
+  %p11_s = alloca i64, align 8
+  store i64 %arg11, ptr %p11_s, align 8
   br label %loop
 loop:
-  %p0_l9 = load i64, ptr %p0_s, align 8
-  %p1_l10 = load i64, ptr %p1_s, align 8
-  %p2_l11 = load i64, ptr %p2_s, align 8
-  %p3_l12 = load i64, ptr %p3_s, align 8
-  %p4_l13 = load i64, ptr %p4_s, align 8
-  %p5_l14 = load i64, ptr %p5_s, align 8
-  %p6_l15 = load i64, ptr %p6_s, align 8
-  %p7_l16 = load i64, ptr %p7_s, align 8
-  %p8_l17 = load i64, ptr %p8_s, align 8
-  %p9_l18 = load i64, ptr %p9_s, align 8
-  %t4 = load i64, ptr %p7_s, align 8
+  %p0_l35 = load i64, ptr %p0_s, align 8
+  %p1_l36 = load i64, ptr %p1_s, align 8
+  %p2_l37 = load i64, ptr %p2_s, align 8
+  %p3_l38 = load i64, ptr %p3_s, align 8
+  %p4_l39 = load i64, ptr %p4_s, align 8
+  %p5_l40 = load i64, ptr %p5_s, align 8
+  %p6_l41 = load i64, ptr %p6_s, align 8
+  %p7_l42 = load i64, ptr %p7_s, align 8
+  %p8_l43 = load i64, ptr %p8_s, align 8
+  %p9_l44 = load i64, ptr %p9_s, align 8
+  %p10_l45 = load i64, ptr %p10_s, align 8
+  %p11_l46 = load i64, ptr %p11_s, align 8
+  %t4 = load i64, ptr %p9_s, align 8
   %t5 = add i64 0, 0
   %t6 = icmp sge i64 %t4, %t5
   %t2 = zext i1 %t6 to i8
-  %t9 = load i64, ptr %p7_s, align 8
+  %t9 = load i64, ptr %p9_s, align 8
   %t11 = load i64, ptr %p4_s, align 8
   %t12 = icmp slt i64 %t9, %t11
   %t7 = zext i1 %t12 to i8
   %t1 = and i8 %t2, %t7
-  %t15 = load i64, ptr %p9_s, align 8
+  %t15 = load i64, ptr %p11_s, align 8
   %t16 = add i64 0, 0
   %t17 = icmp ne i64 %t15, %t16
   %t13 = zext i1 %t17 to i8
@@ -437,7 +490,7 @@ loop:
   br i1 %pc18, label %body, label %done
 body:
   %t21 = load i64, ptr %p3_s, align 8
-  %t23 = load i64, ptr %p7_s, align 8
+  %t23 = load i64, ptr %p9_s, align 8
   %t24 = inttoptr i64 %t21 to ptr
   %t19 = call i64 @read_u8(ptr %state, ptr %t24, i64 %t23)
   %t27 = load i64, ptr %p0_s, align 8
@@ -446,48 +499,51 @@ body:
   %t33 = load i64, ptr %p3_s, align 8
   %t35 = load i64, ptr %p5_s, align 8
   %t37 = load i64, ptr %p6_s, align 8
-  %t40 = load i64, ptr %p7_s, align 8
-  %t42 = load i64, ptr %p8_s, align 8
-  %t43 = inttoptr i64 %t27 to ptr
-  %t44 = inttoptr i64 %t29 to ptr
-  %t45 = inttoptr i64 %t31 to ptr
-  %t46 = inttoptr i64 %t33 to ptr
-  %t47 = inttoptr i64 %t35 to ptr
-  %t25 = call i64 @exec_op(ptr %state, ptr %t43, ptr %t44, ptr %t45, ptr %t46, ptr %t47, i64 %t37, i64 %t19, i64 %t40, i64 %t42)
-  %t50 = add i64 0, 0
-  %t51 = icmp slt i64 %t25, %t50
-  %t48 = zext i1 %t51 to i8
-  %t53 = trunc i8 %t48 to i1
-  br i1 %t53, label %guard.then52, label %guard.end52
-  guard.then52:
-  %t54 = add i64 0, 0
-  store i64 %t54, ptr %p9_s
-  br label %guard.end52
-  guard.end52:
+  %t39 = load i64, ptr %p7_s, align 8
+  %t41 = load i64, ptr %p8_s, align 8
+  %t44 = load i64, ptr %p9_s, align 8
+  %t46 = load i64, ptr %p10_s, align 8
+  %t47 = inttoptr i64 %t27 to ptr
+  %t48 = inttoptr i64 %t29 to ptr
+  %t49 = inttoptr i64 %t31 to ptr
+  %t50 = inttoptr i64 %t33 to ptr
+  %t51 = inttoptr i64 %t35 to ptr
+  %t52 = inttoptr i64 %t41 to ptr
+  %t25 = call i64 @exec_op(ptr %state, ptr %t47, ptr %t48, ptr %t49, ptr %t50, ptr %t51, i64 %t37, i64 %t39, ptr %t52, i64 %t19, i64 %t44, i64 %t46)
+  %t55 = add i64 0, 0
+  %t56 = icmp slt i64 %t25, %t55
+  %t53 = zext i1 %t56 to i8
+  %t58 = trunc i8 %t53 to i1
+  br i1 %t58, label %guard.then57, label %guard.end57
+  guard.then57:
   %t59 = add i64 0, 0
-  %t60 = icmp sge i64 %t25, %t59
-  %t57 = zext i1 %t60 to i8
-  %t64 = load i64, ptr %p4_s, align 8
-  %t65 = icmp slt i64 %t25, %t64
-  %t61 = zext i1 %t65 to i8
-  %t56 = and i8 %t57, %t61
-  %t67 = trunc i8 %t56 to i1
-  br i1 %t67, label %guard.then66, label %guard.end66
-  guard.then66:
-  store i64 %t25, ptr %p7_s
-  br label %guard.end66
-  guard.end66:
-  %t70 = add i64 0, 0
-  store i64 %t70, ptr %result
+  store i64 %t59, ptr %p11_s
+  br label %guard.end57
+  guard.end57:
+  %t64 = add i64 0, 0
+  %t65 = icmp sge i64 %t25, %t64
+  %t62 = zext i1 %t65 to i8
+  %t69 = load i64, ptr %p4_s, align 8
+  %t70 = icmp slt i64 %t25, %t69
+  %t66 = zext i1 %t70 to i8
+  %t61 = and i8 %t62, %t66
+  %t72 = trunc i8 %t61 to i1
+  br i1 %t72, label %guard.then71, label %guard.end71
+  guard.then71:
+  store i64 %t25, ptr %p9_s
+  br label %guard.end71
+  guard.end71:
+  %t75 = add i64 0, 0
+  store i64 %t75, ptr %result
   br label %post
 post:
   br label %loop
 done:
-  %ret72 = load i64, ptr %result, align 8
-  ret i64 %ret72
+  %ret77 = load i64, ptr %result, align 8
+  ret i64 %ret77
 }
 
-define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i64 %arg5, i64 %arg6, i64 %arg7, i64 %arg8) local_unnamed_addr #8 alwaysinline {
+define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i64 %arg5, i64 %arg6, ptr %arg7, i64 %arg8, i64 %arg9, i64 %arg10) local_unnamed_addr #8 alwaysinline {
   entry:
   %result = alloca i64, align 8
   store i64 0, ptr %result, align 8
@@ -510,31 +566,38 @@ define i64 @exec_op(ptr noundef noalias nocapture align 8 %state, ptr %arg0, ptr
   store i64 %arg5, ptr %p5_s, align 8
   %p6_s = alloca i64, align 8
   store i64 %arg6, ptr %p6_s, align 8
+  %ac7 = ptrtoint ptr %arg7 to i64
   %p7_s = alloca i64, align 8
-  store i64 %arg7, ptr %p7_s, align 8
+  store i64 %ac7, ptr %p7_s, align 8
   %p8_s = alloca i64, align 8
   store i64 %arg8, ptr %p8_s, align 8
+  %p9_s = alloca i64, align 8
+  store i64 %arg9, ptr %p9_s, align 8
+  %p10_s = alloca i64, align 8
+  store i64 %arg10, ptr %p10_s, align 8
   br label %loop
 loop:
-  %p0_l73 = load i64, ptr %p0_s, align 8
-  %p1_l74 = load i64, ptr %p1_s, align 8
-  %p2_l75 = load i64, ptr %p2_s, align 8
-  %p3_l76 = load i64, ptr %p3_s, align 8
-  %p4_l77 = load i64, ptr %p4_s, align 8
-  %p5_l78 = load i64, ptr %p5_s, align 8
-  %p6_l79 = load i64, ptr %p6_s, align 8
-  %p7_l80 = load i64, ptr %p7_s, align 8
-  %p8_l81 = load i64, ptr %p8_s, align 8
-  %t4 = load i64, ptr %p6_s, align 8
+  %p0_l78 = load i64, ptr %p0_s, align 8
+  %p1_l79 = load i64, ptr %p1_s, align 8
+  %p2_l80 = load i64, ptr %p2_s, align 8
+  %p3_l81 = load i64, ptr %p3_s, align 8
+  %p4_l82 = load i64, ptr %p4_s, align 8
+  %p5_l83 = load i64, ptr %p5_s, align 8
+  %p6_l84 = load i64, ptr %p6_s, align 8
+  %p7_l85 = load i64, ptr %p7_s, align 8
+  %p8_l86 = load i64, ptr %p8_s, align 8
+  %p9_l87 = load i64, ptr %p9_s, align 8
+  %p10_l88 = load i64, ptr %p10_s, align 8
+  %t4 = load i64, ptr %p8_s, align 8
   %t5 = add i64 0, 0
   %t6 = icmp sge i64 %t4, %t5
   %t2 = zext i1 %t6 to i8
-  %t9 = load i64, ptr %p6_s, align 8
+  %t9 = load i64, ptr %p8_s, align 8
   %t10 = add i64 0, 255
   %t11 = icmp sle i64 %t9, %t10
   %t7 = zext i1 %t11 to i8
   %t1 = and i8 %t2, %t7
-  %t14 = load i64, ptr %p7_s, align 8
+  %t14 = load i64, ptr %p9_s, align 8
   %t15 = add i64 0, 0
   %t16 = icmp sge i64 %t14, %t15
   %t12 = zext i1 %t16 to i8
@@ -542,19 +605,93 @@ loop:
   %pc17 = trunc i8 %t0 to i1
   br i1 %pc17, label %body, label %done
 body:
-  %t21 = load i64, ptr %p0_s, align 8
-  %t22 = inttoptr i64 %t21 to ptr
-  %t19 = load ptr, ptr %t22, align 8
-  %t25 = load i64, ptr %p0_s, align 8
-    %t26 = inttoptr i64 %t25 to ptr
-    %t27 = getelementptr i8, ptr %t26, i64 8192
-    %t28 = load i64, ptr %t27
+  %t20 = load i64, ptr %p0_s, align 8
+  %t23 = load i64, ptr %p0_s, align 8
+    %t24 = inttoptr i64 %t23 to ptr
+    %t25 = getelementptr i8, ptr %t24, i64 8192
+    %t26 = load i64, ptr %t25
   br label %post
 post:
   br label %loop
 done:
-  %ret30 = load i64, ptr %result, align 8
-  ret i64 %ret30
+  %ret28 = load i64, ptr %result, align 8
+  ret i64 %ret28
+}
+
+define i64 @host_arity_scan(ptr noundef noalias nocapture align 8 %state, ptr %arg0, i64 %arg1, i64 %arg2) local_unnamed_addr #8 {
+  entry:
+  %result = alloca i64, align 8
+  store i64 0, ptr %result, align 8
+  %ac0 = ptrtoint ptr %arg0 to i64
+  %p0_s = alloca i64, align 8
+  store i64 %ac0, ptr %p0_s, align 8
+  %p1_s = alloca i64, align 8
+  store i64 %arg1, ptr %p1_s, align 8
+  %p2_s = alloca i64, align 8
+  store i64 %arg2, ptr %p2_s, align 8
+  br label %loop
+loop:
+  %p0_l29 = load i64, ptr %p0_s, align 8
+  %p1_l30 = load i64, ptr %p1_s, align 8
+  %p2_l31 = load i64, ptr %p2_s, align 8
+  %t2 = load i64, ptr %p2_s, align 8
+  %t3 = add i64 0, 0
+  %t4 = icmp sge i64 %t2, %t3
+  %t0 = zext i1 %t4 to i8
+  %pc5 = trunc i8 %t0 to i1
+  br i1 %pc5, label %body, label %done
+body:
+  %t8 = load i64, ptr %p2_s, align 8
+  %t11 = load i64, ptr %p0_s, align 8
+  %t14 = load i64, ptr %p0_s, align 8
+    %t15 = inttoptr i64 %t14 to ptr
+    %t16 = getelementptr i8, ptr %t15, i64 1024
+    %t17 = load i64, ptr %t16
+  %t18 = icmp sge i64 %t8, %t17
+  %t6 = zext i1 %t18 to i8
+  %t20 = trunc i8 %t6 to i1
+  br i1 %t20, label %guard.then19, label %guard.end19
+  guard.then19:
+  %t22 = add i64 0, 1
+  %t21 = sub i64 0, %t22
+  store i64 %t21, ptr %result
+  br label %post
+  guard.end19:
+  %t29 = load i64, ptr %p0_s, align 8
+  %t30 = inttoptr i64 %t29 to ptr
+  %t31 = getelementptr i8, ptr %t30, i64 0
+  %t33 = load i64, ptr %p2_s, align 8
+  %t34 = getelementptr [64 x i64], ptr %t31, i64 0, i64 %t33
+  %t35 = load i64, ptr %t34
+  %t37 = load i64, ptr %p1_s, align 8
+  %t38 = icmp eq i64 %t35, %t37
+  %t25 = zext i1 %t38 to i8
+  %t40 = trunc i8 %t25 to i1
+  br i1 %t40, label %guard.then39, label %guard.end39
+  guard.then39:
+  %t44 = load i64, ptr %p0_s, align 8
+  %t45 = inttoptr i64 %t44 to ptr
+  %t46 = getelementptr i8, ptr %t45, i64 512
+  %t48 = load i64, ptr %p2_s, align 8
+  %t49 = getelementptr [64 x i64], ptr %t46, i64 0, i64 %t48
+  %t50 = load i64, ptr %t49
+  store i64 %t50, ptr %result
+  br label %post
+  guard.end39:
+  %t55 = load i64, ptr %p0_s, align 8
+  %t57 = load i64, ptr %p1_s, align 8
+  %t60 = load i64, ptr %p2_s, align 8
+  %t61 = add i64 0, 1
+  %t58 = add nsw i64 %t60, %t61
+  %t62 = inttoptr i64 %t55 to ptr
+  %t53 = call i64 @host_arity_scan(ptr %state, ptr %t62, i64 %t57, i64 %t58)
+  store i64 %t53, ptr %result
+  br label %post
+post:
+  br label %loop
+done:
+  %ret64 = load i64, ptr %result, align 8
+  ret i64 %ret64
 }
 
 define void @init_state(ptr noundef noalias nocapture align 8 %state) local_unnamed_addr #0 {
@@ -627,28 +764,29 @@ attributes #12 = {
 !13 = !{!"HCallArgs", !0}
 !14 = !{!"Half", !0}
 !15 = !{!"HashMap", !0}
-!16 = !{!"BFloat", !0}
-!17 = !{!"Int128", !0}
-!18 = !{!"Int16", !0}
-!19 = !{!"Int32", !0}
-!20 = !{!"Int64", !0}
-!21 = !{!"Int8", !0}
-!22 = !{!"List", !0}
-!23 = !{!"ListBuffer", !0}
-!24 = !{!"PiggyBank", !0}
-!25 = !{!"RingBuffer", !0}
-!26 = !{!"Slice", !0}
-!27 = !{!"Stack", !0}
-!28 = !{!"String", !0}
-!29 = !{!"UInt", !0}
-!30 = !{!"UInt128", !0}
-!31 = !{!"UInt16", !0}
-!32 = !{!"UInt32", !0}
-!33 = !{!"UInt64", !0}
-!34 = !{!"UInt8", !0}
-!35 = !{!"VMFrames", !0}
-!36 = !{!"VMLocals", !0}
-!37 = !{!"VMStack", !0}
-!38 = !{!"Void", !0}
-!39 = !{!"X86_FP80", !0}
+!16 = !{!"HostTable", !0}
+!17 = !{!"BFloat", !0}
+!18 = !{!"Int128", !0}
+!19 = !{!"Int16", !0}
+!20 = !{!"Int32", !0}
+!21 = !{!"Int64", !0}
+!22 = !{!"Int8", !0}
+!23 = !{!"List", !0}
+!24 = !{!"ListBuffer", !0}
+!25 = !{!"PiggyBank", !0}
+!26 = !{!"RingBuffer", !0}
+!27 = !{!"Slice", !0}
+!28 = !{!"Stack", !0}
+!29 = !{!"String", !0}
+!30 = !{!"UInt", !0}
+!31 = !{!"UInt128", !0}
+!32 = !{!"UInt16", !0}
+!33 = !{!"UInt32", !0}
+!34 = !{!"UInt64", !0}
+!35 = !{!"UInt8", !0}
+!36 = !{!"VMFrames", !0}
+!37 = !{!"VMLocals", !0}
+!38 = !{!"VMStack", !0}
+!39 = !{!"Void", !0}
+!40 = !{!"X86_FP80", !0}
 !99 = distinct !{} ; StateAliasScope

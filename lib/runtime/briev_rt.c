@@ -1116,3 +1116,23 @@ int64_t __briev_coll_resize(int64_t handle, int64_t new_cap) {
     block[1] = new_cap;
     return 0;
 }
+
+/* ── Install-time host services (Plan 1 HCALL slice, 2026-08-23) ────────
+ * Called by the SELF-HOSTED tamer's host dispatch (lib/tamer/vm.bv
+ * exec_op 0x71) when a packaged user program issues an HCALL. Ids are the
+ * canonical ones from src/backend/vm/mod.rs (canonical_host_id).
+ * To undo: remove these two fns + the frgn lines in lib/tamer/main.bv. */
+
+void briev_host_print_int(long long v) {
+    printf("%lld\n", v);
+    fflush(stdout);
+}
+
+/* Unknown/unsupported host service: loud failure, never silent. */
+long long briev_host_fail(long long id, long long arg) {
+    fprintf(stderr, "tamer: user program called unsupported host service "
+                    "id %lld (arg %lld). This archive needs a newer tamer.\n",
+            id, arg);
+    exit(4);
+    return -1;
+}

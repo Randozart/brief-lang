@@ -172,10 +172,29 @@ impl VmBackend {
                     self.fn_indices.insert(c.name.clone(), idx);
                 }
                 crate::ast::TopLevel::ForeignBinding(fb) => {
-                    // Register host function IDs for frgn declarations
-                    let id = self.host_fn_ids.len() as u32;
-                    self.host_fn_ids.insert(fb.foreign_name.clone(), id);
-                    self.asm.register_host_fn(&fb.foreign_name, id);
+                    // Register host function IDs for frgn declarations.
+                    // 2026-08-23 (Plan 1 HCALL slice): key by the BRIEV name
+                    // (what call sites use — the old code keyed by
+                    // foreign_name, so plain-named frgn calls like
+                    // `__print_int(x)` fell through to fn_indices and died
+                    // as "unknown function"). Arity rides into the .lair
+                    // host table so the tamer pops the right slot count.
+                    // briev_name is Option — fall back to foreign_name.
+                    let local_name = fb
+                        .briev_name
+                        .clone()
+                        .unwrap_or_else(|| fb.foreign_name.clone());
+                    if !self.host_fn_ids.contains_key(local_name.as_str()) {
+                        let id = match canonical_host_id(&local_name) {
+                            Some(cid) => cid,
+                            None => {
+                                HOST_ID_CANONICAL_MAX + self.host_fn_ids.len() as u32
+                            }
+                        };
+                        let arity = fb.inputs.len() as u32;
+                        self.asm.register_host_fn_with_arity(&local_name, id, arity);
+                        self.host_fn_ids.insert(local_name, id);
+                    }
                 }
                 crate::ast::TopLevel::Obj(sd) => {
                     // 2026-07-30: Compute field offsets for struct types.
@@ -229,3 +248,23 @@ impl VmBackend {
         0
     }
 }
+
+/// 2026-08-23 (Plan 1 HCALL slice): canonical host-service ids. STABLE
+/// across programs — the tamer dispatches by number, so a service keeps its
+/// id no matter what else a user program calls. Names still ride in the
+/// .lair host table for diagnostics. Unknown services get ids ≥
+/// HOST_ID_CANONICAL_MAX (first-use order among themselves); the tamer
+/// rejects those at run time with a helpful message.
+/// To undo: revert emit_expr to `id = host_fn_ids.len()` and delete this fn.
+pub fn canonical_host_id(name: &str) -> Option<u32> {
+    match name {
+        "Print#" | "PrintInt#" => Some(HOST_ID_PRINT_INT),
+        "Log#" => Some(HOST_ID_LOG_INT),
+        _ => None,
+    }
+}
+
+pub const HOST_ID_PRINT_INT: u32 = 0;
+pub const HOST_ID_LOG_INT: u32 = 1;
+/// Unknown services start here (first-use order among themselves).
+pub const HOST_ID_CANONICAL_MAX: u32 = 1000;

@@ -4808,3 +4808,45 @@ written, so the outer merge phi captures a phantom predecessor.
 **Fix direction:** audit cur_block updates across nested emit_statement calls
 inside countable bodies (same family as the match-edge fix); make the merge-
 phi predecessor cite the block that ACTUALLY branches.
+
+## Convergent-txn loop: body side-effects don't persist across iterations (2026-08-23)
+
+**Status:** OPEN — blocks the tamer's `vm_loop` execution (Plan 1 HCALL
+slice). All surrounding infrastructure is landed and verified; this is the
+last execution blocker.
+**Repro:** `lib/tamer/main.bv` native tamer + `tools/bounty_e2e.sh`-style
+run of `tmp_probe/arith.bv` bounty. `vm_loop` (convergent txn: pre
+`[pc >= 0 && pc < bc_end && running != 0]`, post `[running == 0]`, body =
+exec_op + pc/running updates) loops forever re-executing the SAME
+instruction — instrumented prints show exec_op called with identical `pc`
+every iteration, and param-slot stores (`pc = new_pc`,
+`running = 0`) never take effect across iterations. No syscalls, no exit.
+**Isolation facts:**
+- Loop structure in IR is well-formed (`loop:` pre → body → post → back
+  edge; guarded stores present).
+- exec_op gets INLINED into vm_loop at -O2 (no symbol) — single-stepping
+  needs source-level debug or a reduced IR case.
+- Straight-line convergent txns and non-looping txns behave correctly
+  (parse_host_table originally recursive-convergent ALSO spun; rewritten
+  straight-line it works).
+**Suspect:** `src/backend/llvm/loop_engine/` SSA-loop conversion for
+NON-COUNTABLE loops whose bodies contain calls + stores to param-slot
+allocas — possibly same family as the two-guard phantom-label bug
+(bd4eeb88 touched counter.rs).
+**Fix direction:** reduce to minimal IR: one txn, one iteration-bound
+param store; check whether loop-engine drops the back-edge phi update for
+the stored slot. Then fix forward with a Kani/IR-level regression test.
+
+**Update (same day, C-driver workaround attempt):** exported single-step
+`step()` + C driver loop (install_sim.c). Result: halts after 1 step —
+exec_op's `match op` takes the wildcard even though `read_u8(lair, pc)`
+returns the correct opcode when called directly. Suspicion: txn-call
+convention from a DEFN caller (implicit `%state` threading) or slot
+initialization ordering. Next probe: call `step` variants passing each
+buffer handle through module-level state vs params; dump exec_op IR pre-
+inlining.
+
+**Workarounds available:** hand-peel vm_loop's loop in Briev via explicit
+bounded-iteration txn chain (ugly), or drive the interpretation loop from
+C (install_sim calls a single-step `exec_op_entry` export repeatedly —
+keeps the interpreter pure-Briev, moves ONLY the driver loop to C).

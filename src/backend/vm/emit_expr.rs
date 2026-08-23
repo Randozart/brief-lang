@@ -4,7 +4,7 @@
 use crate::ast::*;
 use crate::ast::Expr;
 use super::assembler::Assembler;
-use super::VmBackend;
+use super::{canonical_host_id, VmBackend};
 
 impl VmBackend {
     /// Emit VM bytecode for an expression. Result is left on the stack.
@@ -204,9 +204,21 @@ impl VmBackend {
                 if name.ends_with('#') {
                     // 2026-07-25: Intrinsic calls (Alloc#, SysCall#, ShellCmd#, etc.)
                     // are handled as host calls.
+                    // 2026-08-23 (Plan 1 HCALL slice): ids are CANONICAL —
+                    // canonical_host_id assigns a stable number per service
+                    // so the tamer dispatches by id without parsing names
+                    // from the string table. Unknown services take ids above
+                    // HOST_ID_CANONICAL_MAX, still table-recorded with their
+                    // name (the tamer rejects them by id with a diagnostic).
                     if !self.host_fn_ids.contains_key(name.as_str()) {
-                        let id = self.host_fn_ids.len() as u32;
-                        self.asm.register_host_fn(name, id);
+                        let id = match canonical_host_id(name) {
+                            Some(cid) => cid,
+                            None => {
+                                crate::backend::vm::HOST_ID_CANONICAL_MAX
+                                    + self.host_fn_ids.len() as u32
+                            }
+                        };
+                        self.asm.register_host_fn_with_arity(name, id, args.len() as u32);
                         self.host_fn_ids.insert(name.clone(), id);
                     }
                     let host_id = self.host_fn_ids[name.as_str()];

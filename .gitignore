@@ -299,3 +299,5 @@ benchmarks/linked_list
 
 # Renamify workspace
 .renamify/
+tools/circt-src/
+tools/circt/

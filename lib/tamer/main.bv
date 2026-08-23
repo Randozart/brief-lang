@@ -8,24 +8,49 @@
 import "vm.bv";
 import "analyze.bv";
 
+// 2026-08-23: driver-loop handles (state; set by tame, read via rc_* exports).
+let rc_stack: Int = 0;
+let rc_locals: Int = 0;
+let rc_frames: Int = 0;
+let rc_ht: Int = 0;
+let rc_foff: Int = 0;
+let rc_fnc: Int = 0;
+
+// 2026-08-23 (Plan 1 HCALL slice): install-time host services, backed by
+// lib/runtime/briev_rt.c (linked into the native tamer binary).
+frgn BrievHostPrintInt(v: Int) -> Int : briev_host_print_int from "lib/runtime/briev_rt.c";
+frgn BrievHostFail(id: Int, a: Int) -> Int : briev_host_fail from "lib/runtime/briev_rt.c";
+
 export defn tame(lair_data: Ptr<Int>, lair_len: Int,
-                 beastpack_data: Ptr<Int>, beastpack_len: Int) -> Int
+                 beastpack_data: Ptr<Int>, beastpack_len: Int,
+                 entry_bc: Int) -> Int
 {
     // Header: bytes 0..4 = "LAIR" (low half of word 0).
     let word0 = lair_data[0];
     let magic = word0 & 0xFFFFFFFF;
     when magic != 0x5249414C { term 101; };
 
-    // Section table (u64 LE at byte 16 → words 2..9). We need fn + bc.
+    // Section table (u64 LE at byte 16 → words 2..9). We need fn + bc + host.
     let fn_off = lair_data[4];
     let fn_size = lair_data[5];
     let bc_off = lair_data[6];
     let bc_len = lair_data[7];
+    let host_off = lair_data[8];
+    let host_size = lair_data[9];
     let fn_count = fn_size / 20;
 
     when bc_off + bc_len > lair_len { term 103; };
     when fn_off + fn_size > lair_len { term 104; };
     when fn_count == 0 { term 105; };
+
+    // Host-service table (Plan 1 HCALL slice): 12-byte entries —
+    // name_idx(u32) id(u32) arity(u32); names stay in the string table.
+    let ht: Ptr<HostTable> = Malloc#(1544) as Ptr<HostTable>;
+    (*ht).count = 0;
+    let hcount = host_size / 12;
+    when hcount > 24 { term 106; };
+    parse_host_table(ht, lair_data, host_off, hcount);
+
 
     // Interpreter buffers — heap blocks per the stdlib collection idiom
     // (Malloc#(bytes) as Ptr<T>; field access through the pointer via
@@ -43,12 +68,89 @@ export defn tame(lair_data: Ptr<Int>, lair_len: Int,
     (*locals_ptr).len = 0;
     (*frames_ptr).count = 0;
 
-    // pc starts at the ABSOLUTE bytecode offset; vm_loop's bound is the
-    // absolute end (bc_off + bc_len).
-    let _result = vm_loop(
-        stack_ptr, locals_ptr, frames_ptr,
-        lair_data, bc_off + bc_len, lair_data, fn_off, fn_count,
-        bc_off, 0, 1);
+    // pc starts at the ABSOLUTE bytecode offset of the USER entry — shipped
+    // in the manifest as "entry_bc" (user fns emit after prelude helpers, so
+    // the builder computes it Rust-side and the driver threads it here).
+    // 2026-08-23: publish handles for the C driver loop (BUGS.md workaround).
+    rc_stack = stack_ptr as Int;
+    rc_locals = locals_ptr as Int;
+    rc_frames = frames_ptr as Int;
+    rc_ht = ht as Int;
+    rc_foff = fn_off;
+    rc_fnc = fn_count;
 
+    // 2026-08-23: drive the fetch-decode loop from the C driver
+    // (tamer/install_sim.c) via the exported single-step `step` below —
+    // BUGS.md 2026-08-23: the convergent-txn loop engine drops param-slot
+    // updates across iterations, so a Briev-side while-equivalent cannot
+    // host the loop yet. Interpreter logic stays pure-Briev.
+    term step(stack_ptr, locals_ptr, frames_ptr,
+              lair_data, bc_off + bc_len, lair_data, fn_off, fn_count,
+              ht, entry_bc);
+};
+
+// Buffer/table accessors for the C driver loop (BUGS.md workaround).
+export defn buffers_stack() -> Int { term rc_stack; };
+export defn buffers_locals() -> Int { term rc_locals; };
+export defn buffers_frames() -> Int { term rc_frames; };
+export defn buffers_ht() -> Int { term rc_ht; };
+export defn rc_fn_off() -> Int { term rc_foff; };
+export defn rc_fn_count() -> Int { term rc_fnc; };
+
+// Single fetch-decode-execute step for the C driver loop. Returns the next
+// pc, or -1 when the program halted (RET/TRAP).
+export defn step(stack_ptr: Ptr<VMStack>, locals_ptr: Ptr<VMLocals>,
+                 frames_ptr: Ptr<VMFrames>,
+                 lair_data: Ptr<Int>, bc_end: Int,
+                 fn_table: Ptr<Int>, foff: Int, fn_count: Int,
+                 ht: Ptr<HostTable>, pc: Int) -> Int
+{
+    when pc < 0 || pc >= bc_end { term -1; };
+    let op = read_u8(lair_data, pc);
+    term exec_op(stack_ptr, locals_ptr, frames_ptr,
+                 lair_data, fn_table, foff, fn_count, ht,
+                 op, pc, 0);
+};
+
+
+// 2026-08-23 (Plan 1 HCALL slice): fill the HostTable from the .lair host
+// section — 12-byte entries at `off + i*12`: name_idx(u32) id(u32)
+// arity(u32). Names are skipped (dispatch is by canonical id).
+// STRAIGHT-LINE on purpose: the recursive-convergent form spun forever in
+// the loop engine (found 2026-08-23); a bounded unrolled sequence has no
+// loop machinery to misfire. Cap 24 — raise alongside HostTable arrays.
+defn parse_host_table(ht: Ptr<HostTable>, data: Ptr<Int>, off: Int, count: Int) -> Int {
+    when count >= 1 { parse_host_entry(ht, data, off, 0); };
+    when count >= 2 { parse_host_entry(ht, data, off, 1); };
+    when count >= 3 { parse_host_entry(ht, data, off, 2); };
+    when count >= 4 { parse_host_entry(ht, data, off, 3); };
+    when count >= 5 { parse_host_entry(ht, data, off, 4); };
+    when count >= 6 { parse_host_entry(ht, data, off, 5); };
+    when count >= 7 { parse_host_entry(ht, data, off, 6); };
+    when count >= 8 { parse_host_entry(ht, data, off, 7); };
+    when count >= 9 { parse_host_entry(ht, data, off, 8); };
+    when count >= 10 { parse_host_entry(ht, data, off, 9); };
+    when count >= 11 { parse_host_entry(ht, data, off, 10); };
+    when count >= 12 { parse_host_entry(ht, data, off, 11); };
+    when count >= 13 { parse_host_entry(ht, data, off, 12); };
+    when count >= 14 { parse_host_entry(ht, data, off, 13); };
+    when count >= 15 { parse_host_entry(ht, data, off, 14); };
+    when count >= 16 { parse_host_entry(ht, data, off, 15); };
+    when count >= 17 { parse_host_entry(ht, data, off, 16); };
+    when count >= 18 { parse_host_entry(ht, data, off, 17); };
+    when count >= 19 { parse_host_entry(ht, data, off, 18); };
+    when count >= 20 { parse_host_entry(ht, data, off, 19); };
+    when count >= 21 { parse_host_entry(ht, data, off, 20); };
+    when count >= 22 { parse_host_entry(ht, data, off, 21); };
+    when count >= 23 { parse_host_entry(ht, data, off, 22); };
+    when count >= 24 { parse_host_entry(ht, data, off, 23); };
+    (*ht).count = count;
+    term count;
+};
+
+defn parse_host_entry(ht: Ptr<HostTable>, data: Ptr<Int>, off: Int, i: Int) -> Int {
+    let base = off + i * 12;
+    (*ht).ids[i] = read_u32(data, base + 4);
+    (*ht).arities[i] = read_u32(data, base + 8);
     term 0;
 };

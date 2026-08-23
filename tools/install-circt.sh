@@ -11,7 +11,11 @@
 # dialects the backend emits (HW/Comb/Seq/SV). First build takes ~30-60 min.
 #
 # Pin: circt-monorepo commit (update deliberately; record why here).
-CIRCT_PIN="e1b0d4c5f2a37a5f9b8c6d0e1f2a3b4c5d6e7f80"
+# 2026-08-23: pinned to upstream main HEAD at script-creation time
+# (231e82511, "[ESI] Use ChannelMergeOneValid for ChannelMMIO responses").
+# The original placeholder hash was fabricated — that was the
+# "reference is not a tree" failure.
+CIRCT_PIN="231e82511220444b0fc1be37e8deabea19925a5a"
 JOBS="$(nproc)"
 
 set -euo pipefail
@@ -35,7 +39,7 @@ git -C "$SRC" fetch origin main --tags
 git -C "$SRC" checkout "$CIRCT_PIN"
 
 # CIRCT builds against a matching LLVM at the pinned monorepo commit.
-git -C "$SRC" submodule update --init ../llvm 2>/dev/null || git -C "$SRC" submodule update --init
+git -C "$SRC" submodule update --init llvm
 
 cmake -G Ninja -S "$SRC" -B "$SRC/build" \
     -DCMAKE_BUILD_TYPE=Release \

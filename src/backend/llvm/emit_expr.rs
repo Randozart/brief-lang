@@ -880,7 +880,13 @@ impl LlvmBackend {
                         }
                     }
                 }
-                let obj_reg = self.emit_expr(out, obj, indent);
+                // 2026-08-23 (bugfix): `(*p).field` — route the receiver
+                // through the pointer handle (deref_struct_receiver); a plain
+                // emit_expr would load the struct BY VALUE here.
+                let obj_reg = match self.deref_struct_receiver(out, indent, obj) {
+                    Some(r) => r,
+                    None => self.emit_expr(out, obj, indent),
+                };
                 // 2026-08-17 (tuple correctness, plan
                 // 2026-08-17-hashmap-storage-tuple-correctness.md): a NUMERIC
                 // field name on a TUPLE value is a tuple ELEMENT access

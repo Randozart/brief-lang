@@ -451,7 +451,12 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         optimize_budget: 256,
         emit_beast_stages: vec![],
         backend: briev_compiler::target::BackendKind::Vm,
-        no_stdlib: false,
+        // 2026-08-23 (Plan 1 HCALL slice): the tamer archive must not carry
+        // the LLVM-oriented stdlib prelude — those helpers are outside the
+        // VM's declared surface (they'd fail the capability gate mid-stream)
+        // and the compile tail provides its own runtime
+        // (lib/runtime/briev_rt.c host services).
+        no_stdlib: true,
         stdlib_path: None,
         disable_plugins: vec![],
         enable_plugins: vec![],
@@ -511,12 +516,49 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
     eprintln!("[bounty]   tamer .lair: {} bytes", tamer_lair.len());
 
     // 5. Compile user program to .lair too (data for tamer to interpret)
+    // 2026-08-23 (Plan 1 HCALL slice): the bounty path bypasses codegen()'s
+    // capability gate (it constructs VmBackend directly), so validate here —
+    // out-of-surface constructs must be compile errors, never silent
+    // install-time traps.
+    let cap_errors = briev_compiler::backend::capabilities::validate_program(
+        &obfuscated_items, &briev_compiler::backend::vm::CAPABILITIES);
+    if !cap_errors.is_empty() {
+        return Err(cap_errors.join("\n"));
+    }
     let mut vm2 = briev_compiler::backend::vm::VmBackend::new();
     let user_lair = vm2.generate(&obfuscated_items, &universe);
+    if !vm2.errors.is_empty() {
+        return Err(vm2.errors.join("\n"));
+    }
     eprintln!("[bounty]   user .lair: {} bytes", user_lair.len());
 
     // 6. Assemble .bounty (4-section: tamer.lair + user.lair + beastpack + manifest)
-    let manifest = format!(r#"{{"version":1,"entry_point":"main","noise_seed":{}}}"#, noise_seed);
+    // 2026-08-23 (Plan 1 HCALL slice): ship the USER entry's bytecode offset
+    // in the manifest — the tamer starts execution there instead of fn 0
+    // (which is a prelude helper stub). User fns emit last, so the entry is
+    // the fn with the largest bc_offset in the user .lair's fn table.
+    let user_entry_bc = {
+        use std::convert::TryInto;
+        let hdr = |i: usize| -> u64 {
+            u64::from_le_bytes(user_lair[16 + i * 8..16 + (i + 1) * 8].try_into().unwrap())
+        };
+        let _str_off = hdr(0);
+        let fn_off = hdr(2) as usize;
+        let fn_size = hdr(3) as usize;
+        let n = fn_size / 20;
+        (0..n)
+            .map(|k| {
+                u64::from_le_bytes(
+                    user_lair[fn_off + k * 20 + 4..fn_off + k * 20 + 12].try_into().unwrap(),
+                )
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let manifest = format!(
+        r#"{{"version":1,"entry_point":"main","entry_bc":{},"noise_seed":{}}}"#,
+        user_entry_bc, noise_seed
+    );
     let bounty = briev_compiler::bounty::write_bounty_full(
         &tamer_lair, &user_lair, &beastpack, &manifest);
 

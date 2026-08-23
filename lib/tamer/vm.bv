@@ -6,6 +6,16 @@ import "loader.bv";
 
 // ── Struct definitions ────────────────────────────────────────────────────
 
+// 2026-08-23 (Plan 1 HCALL slice): host-service table parsed from the
+// .lair host section. Ids are the canonical ones from the compiler
+// (src/backend/vm/mod.rs): Print#=0, Log#=1; unknown services carry ids
+// >= 1000 and are rejected loudly by BrievHostFail.
+frgn BrievHostPrintInt(v: Int) -> Int : briev_host_print_int from "lib/runtime/briev_rt.c";
+struct HostTable { ids: Int[64]; arities: Int[64]; count: Int; };
+const HOST_ID_PRINT_INT:   Int = 0;
+const HOST_ID_LOG_INT:     Int = 1;
+const HOST_ID_UNKNOWN_MIN: Int = 1000;
+
 struct VMStack { data: Int[1024]; len: Int; };
 struct VMLocals { data: Int[4096]; len: Int; };
 struct VMFrames { data: Frame[256]; count: Int; };
@@ -14,38 +24,38 @@ struct HCallArgs { a0: Int; a1: Int; a2: Int; a3: Int; a4: Int; };
 
 // ── Opcodes ────────────────────────────────────────────────────────────────
 
-let OP_NOP:     Int = 0x00;
-let OP_DROP:    Int = 0x01;
-let OP_DUP:     Int = 0x02;
-let OP_SWAP:    Int = 0x03;
-let OP_ADD:     Int = 0x06;
-let OP_SUB:     Int = 0x07;
-let OP_MUL:     Int = 0x08;
-let OP_AND:     Int = 0x0B;
-let OP_OR:      Int = 0x0C;
-let OP_XOR:     Int = 0x0D;
-let OP_NOT:     Int = 0x0E;
-let OP_SHL:     Int = 0x0F;
-let OP_SHR_S:   Int = 0x10;
-let OP_EQ:      Int = 0x11;
-let OP_BNOT:    Int = 0x1C;
-let OP_LOAD:    Int = 0x17;
-let OP_STORE:   Int = 0x18;
-let OP_RET:     Int = 0x19;
-let OP_TRAP:    Int = 0x1B;
-let OP_PUSH_I8:     Int = 0x30;
-let OP_LOAD_LOCAL:  Int = 0x31;
-let OP_STORE_LOCAL: Int = 0x32;
-let OP_PUSH_FRAME:  Int = 0x33;
-let OP_POP_FRAME:   Int = 0x34;
-let OP_PUSH_I16:    Int = 0x50;
-let OP_JMP:         Int = 0x51;
-let OP_JZ:          Int = 0x52;
-let OP_JNZ:         Int = 0x53;
-let OP_CALL:        Int = 0x54;
-let OP_PUSH_I32:    Int = 0x70;
-let OP_HCALL:       Int = 0x71;
-let OP_PUSH_I64:    Int = 0x90;
+const OP_NOP: Int = 0x00;
+const OP_DROP: Int = 0x01;
+const OP_DUP: Int = 0x02;
+const OP_SWAP: Int = 0x03;
+const OP_ADD: Int = 0x06;
+const OP_SUB: Int = 0x07;
+const OP_MUL: Int = 0x08;
+const OP_AND: Int = 0x0B;
+const OP_OR: Int = 0x0C;
+const OP_XOR: Int = 0x0D;
+const OP_NOT: Int = 0x0E;
+const OP_SHL: Int = 0x0F;
+const OP_SHR_S: Int = 0x10;
+const OP_EQ: Int = 0x11;
+const OP_BNOT: Int = 0x1C;
+const OP_LOAD: Int = 0x17;
+const OP_STORE: Int = 0x18;
+const OP_RET: Int = 0x19;
+const OP_TRAP: Int = 0x1B;
+const OP_PUSH_I8: Int = 0x30;
+const OP_LOAD_LOCAL: Int = 0x31;
+const OP_STORE_LOCAL: Int = 0x32;
+const OP_PUSH_FRAME: Int = 0x33;
+const OP_POP_FRAME: Int = 0x34;
+const OP_PUSH_I16: Int = 0x50;
+const OP_JMP: Int = 0x51;
+const OP_JZ: Int = 0x52;
+const OP_JNZ: Int = 0x53;
+const OP_CALL: Int = 0x54;
+const OP_PUSH_I32: Int = 0x70;
+const OP_HCALL: Int = 0x71;
+const OP_PUSH_I64: Int = 0x90;
 
 // ── Execution loop ───────────────────────────────────────────────────────
 // Callable txn: loops while running != 0. Entry function is fn_idx=0.
@@ -54,6 +64,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
             bc_data: Ptr<Int>, bc_end: Int,
             fn_table: Ptr<Int>, foff: Int, fn_count: Int,
+            ht: Ptr<HostTable>,
             pc: Int, saved_locals_base: Int,
             running: Int)
     [pc >= 0 && pc < bc_end && running != 0]
@@ -62,7 +73,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
     let op = read_u8(bc_data, pc);
     let new_pc = exec_op(
         stack, locals, frames,
-        bc_data, fn_table, foff, fn_count,
+        bc_data, fn_table, foff, fn_count, ht,
         op, pc, saved_locals_base);
 
     when new_pc < 0 { running = 0; };
@@ -77,6 +88,7 @@ txn vm_loop(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             frames: Ptr<VMFrames>,
             bc: Ptr<Int>, ft: Ptr<Int>, foff: Int, fnc: Int,
+            ht: Ptr<HostTable>,
             op: Int, pc: Int, sll: Int)
     [op >= 0 && op <= 255 && pc >= 0][pc >= 0]
     -> Int
@@ -346,9 +358,14 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
             term pc + 5;
         };
 
-        0x71 => { // hcall
+        0x71 => { // hcall — host-service dispatch (Plan 1, 2026-08-23)
             let host_id = read_u32(bc, pc + 1);
-            // HCall dispatching — placeholder for now
+            let n = host_arity(ht, host_id);
+            when n == 1 {
+                let a = (*stack).data[(*stack).len - 1];
+                (*stack).len = (*stack).len - 1;
+                let _r = host_dispatch1(host_id, a);
+            };
             term pc + 5;
         };
 
@@ -370,4 +387,27 @@ txn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
 
         _ => { term -1; };
     };
+};
+
+// ── Host-service dispatch (Plan 1 HCALL slice, 2026-08-23) ──────────────
+// The .lair host table maps service id → arity. Ids are canonical
+// (HOST_ID_* above); the name strings ride along for diagnostics only.
+
+txn host_arity_scan(ht: Ptr<HostTable>, id: Int, i: Int)
+    [i >= 0][i > (*ht).count || (*ht).ids[i] == id] -> Int
+{
+    when i >= (*ht).count { term -1; };
+    when (*ht).ids[i] == id { term (*ht).arities[i]; };
+    term host_arity_scan(ht, id, i + 1);
+};
+
+defn host_arity(ht: Ptr<HostTable>, id: Int) -> Int {
+    term host_arity_scan(ht, id, 0);
+};
+
+defn host_dispatch1(id: Int, a: Int) -> Int {
+    when id == HOST_ID_PRINT_INT { term BrievHostPrintInt(a); };
+    when id == HOST_ID_LOG_INT   { term BrievHostPrintInt(a); };
+    when id >= HOST_ID_UNKNOWN_MIN { term BrievHostFail(id, a); };
+    term BrievHostFail(id, a);
 };

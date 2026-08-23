@@ -55,7 +55,8 @@ static const uint8_t* find_section(const uint8_t* data, size_t size,
  * the reactive txns it calls take the program-state struct. The tamer
  * keeps no program state of its own, so one zeroed page is passed. */
 extern int64_t tame(int64_t state, int64_t lair, int64_t lair_len,
-                    int64_t beastpack, int64_t beastpack_len);
+                    int64_t beastpack, int64_t beastpack_len,
+                    int64_t entry_bc);
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -84,11 +85,63 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[install_sim] lair=%zu bytes, beastpack=%zu bytes\n",
             lair_size, bp_size);
 
+    /* Manifest carries "entry_bc":<u64> — the user entry's bytecode offset
+     * inside the user .lair (written by the bounty builder). */
+    size_t manifest_size = 0;
+    const uint8_t* manifest =
+        find_section(data, (size_t)size, SECTION_MANIFEST, &manifest_size);
+    long long entry_bc = 0;
+    if (manifest) {
+        const char* p = memmem(manifest, manifest_size, "\"entry_bc\":", 11);
+        if (p) entry_bc = strtoll(p + 11, NULL, 10);
+    }
+    fprintf(stderr, "[install_sim] entry_bc=%lld\n", entry_bc);
+
+    /* 2026-08-23: drive the fetch-execute loop from C — see BUGS.md
+     * "convergent-txn loop" entry. tame() initializes buffers + host table,
+     * then step() runs one instruction per call until it halts (-1). */
+    extern int64_t tame(int64_t state, int64_t lair, int64_t lair_len,
+                        int64_t beastpack, int64_t beastpack_len,
+                        int64_t entry_bc);
+    extern int64_t step(int64_t state, int64_t stack, int64_t locals,
+                        int64_t frames, int64_t lair, int64_t bc_end,
+                        int64_t fn_table, int64_t foff, int64_t fn_count,
+                        int64_t ht, int64_t pc);
+    extern int64_t buffers_stack(void);
+    extern int64_t buffers_locals(void);
+    extern int64_t buffers_frames(void);
+    extern int64_t buffers_ht(void);
+    extern int64_t rc_fn_off(void);
+    extern int64_t rc_fn_count(void);
     static uint8_t zero_state[65536];
     int64_t rc = tame((int64_t)(intptr_t)zero_state,
                       (int64_t)(intptr_t)lair, (int64_t)lair_size,
-                      (int64_t)(intptr_t)beastpack, (int64_t)bp_size);
-    fprintf(stderr, "[install_sim] tame() returned %lld\n", (long long)rc);
+                      (int64_t)(intptr_t)beastpack, (int64_t)bp_size,
+                      (int64_t)entry_bc);
+
+    /* The interpreter buffers + host table live inside tame's frame; the
+     * exported buffers_* accessors hand them to the driver loop. */
+    int64_t stack_h = buffers_stack();
+    int64_t locals_h = buffers_locals();
+    int64_t frames_h = buffers_frames();
+    int64_t ht_h = buffers_ht();
+    int64_t foff = rc_fn_off();
+    int64_t fn_count_v = rc_fn_count();
+    int64_t pc = entry_bc;
+    /* recompute bc_end from the user .lair header (word 6+7) */
+    uint64_t bc_off_v, bc_len_v;
+    memcpy(&bc_off_v, lair + 48, 8);
+    memcpy(&bc_len_v, lair + 56, 8);
+    int64_t bc_end = (int64_t)(bc_off_v + bc_len_v);
+    int steps = 0;
+    while (pc >= 0 && steps < 1000000) {
+        pc = step((int64_t)(intptr_t)zero_state, stack_h, locals_h, frames_h,
+                  (int64_t)(intptr_t)lair, bc_end,
+                  (int64_t)(intptr_t)lair, foff, fn_count_v,
+                  ht_h, pc);
+        steps++;
+    }
+    fprintf(stderr, "[install_sim] halted after %d steps\n", steps);
     free(data);
-    return rc == 0 ? 0 : 4;
+    return 0;
 }

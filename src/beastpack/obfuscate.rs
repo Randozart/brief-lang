@@ -23,8 +23,27 @@ pub fn obfuscate(items: &[TopLevel], seed: u64) -> (Vec<TopLevel>, HashMap<Strin
     let all_names = collect_names(items);
 
     // 2. Filter to obfuscatable names (exclude reserved and exports)
+    // 2026-08-23 (bugfix): also exclude FOREIGN BINDING names — a frgn's
+    // call sites must keep matching its registration; renaming one side
+    // produced calls to functions that exist nowhere (`v_…` unknown at VM
+    // codegen). To undo: drop this filter.
+    let frgn_names: HashSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::ForeignBinding(fb) => {
+                let mut out = vec![fb.foreign_name.clone()];
+                if let Some(ref b) = fb.briev_name {
+                    out.push(b.clone());
+                }
+                Some(out)
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
     let internal_names: Vec<&str> = all_names.iter()
         .filter(|n| !RESERVED_NAMES.contains(&n.as_str()))
+        .filter(|n| !frgn_names.contains(*n))
         .map(|n| n.as_str())
         .collect();
 
@@ -123,7 +142,15 @@ fn collect_expr_names(expr: &Expr, names: &mut HashSet<String>) {
     match expr {
         Expr::Identifier(name) => { names.insert(name.clone()); }
         Expr::Call(name, args, _) => {
-            names.insert(name.clone());
+            // 2026-08-23 (bugfix): intrinsic/host-call names (`Print#`,
+            // `Alloc#`, macro `f!`) are DISCLOSED compiler-facing markers —
+            // obfuscating them broke the `#`-keeper branch in rename_expr
+            // (the map lookup hit first, renaming Print# → v_…, and the VM
+            // backend then saw an unknown plain call). Skip them here so
+            // they never enter the map.
+            if !name.ends_with('#') && !name.ends_with('!') {
+                names.insert(name.clone());
+            }
             for a in args { collect_expr_names(a, names); }
         }
         Expr::BinaryOp(_, l, r) => {

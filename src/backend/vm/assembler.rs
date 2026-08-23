@@ -85,6 +85,11 @@ pub struct HostFunctionEntry {
     pub name: String,
     pub name_idx: u32,
     pub id: u32,
+    /// 2026-08-23 (Plan 1 HCALL slice): argument count for the call — the
+    /// interpreter pops exactly this many stack slots before dispatch.
+    /// Without it the tamer cannot know where args end (the bytecode
+    /// carries only the id).
+    pub arity: u32,
 }
 
 /// Pending jump patch — the offset in the bytecode where a relative
@@ -189,11 +194,18 @@ impl Assembler {
     // ── Host function registration ───────────────────────────────────────
 
     pub fn register_host_fn(&mut self, name: &str, id: u32) {
+        self.register_host_fn_with_arity(name, id, 0);
+    }
+
+    /// 2026-08-23 (Plan 1 HCALL slice): registration with argument count.
+    /// To undo: revert to `register_host_fn` + drop the arity field.
+    pub fn register_host_fn_with_arity(&mut self, name: &str, id: u32, arity: u32) {
         let name_idx = self.intern_string(name);
         self.host_functions.push(HostFunctionEntry {
             name: name.to_string(),
             name_idx,
             id,
+            arity,
         });
     }
 
@@ -387,6 +399,9 @@ impl Assembler {
             let name_offset = *str_offsets.get(h.name_idx as usize).unwrap_or(&0);
             host_data.extend_from_slice(&name_offset.to_le_bytes()); // name_idx (u32)
             host_data.extend_from_slice(&h.id.to_le_bytes());       // host_fn_id (u32)
+            // 2026-08-23 (Plan 1 HCALL slice): arity rides in the table so
+            // the tamer knows how many slots to pop. 12-byte stride.
+            host_data.extend_from_slice(&h.arity.to_le_bytes());    // arity (u32)
         }
         let host_size = host_data.len();
 
