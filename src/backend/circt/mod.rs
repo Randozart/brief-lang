@@ -192,6 +192,16 @@ impl CirctBackend {
                     self.var_types.insert(port_name, Type::int());
                     self.var_exprs.insert(trg.name.clone(), None);
                 }
+                // 2026-08-23 (Plan 3.1 follow-up): top-level `let` IS state.
+                // Without this arm, declared types (and the vars themselves)
+                // never reached var_types — counters emitted as i64 defaults
+                // or vanished from outputs entirely.
+                TopLevel::Statement(stmt) => {
+                    if let Statement::Let { name, ty: Some(ty), expr, .. } = &**stmt {
+                        self.var_types.insert(name.clone(), ty.clone());
+                        self.var_exprs.insert(name.clone(), expr.clone());
+                    }
+                }
                 TopLevel::Transaction(txn) => {
                     self.fn_arity.insert(txn.name.clone(), txn.parameters.len());
                     for stmt in &txn.body {

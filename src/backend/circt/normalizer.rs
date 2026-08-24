@@ -32,11 +32,16 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
         return Err(format!("CIRCT normalizer:\n  {}", errors.join("\n  ")));
     }
 
-    // Strip everything except what CIRCT needs
-    let keep: HashSet<String> = ["bit_width", "hardware", "alignment"]
+    // Strip everything except what CIRCT needs.
+    // 2026-08-23 (Plan 3.1 bugfix): KEEP the protocol-category properties
+    // (Cast.Int / Cast.UInt / Cast.Float / …) — mlir_type derives MLIR
+    // signedness (siN/uN/fN) from them. The old keep-set stripped them, so
+    // every pipeline-built module rendered plain i64 regardless of the
+    // declared type. To undo: restore the three-key keep list.
+    let keep_exact: HashSet<String> = ["bit_width", "hardware", "alignment"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
-        rt.properties.retain(|k, _| keep.contains(k));
+        rt.properties.retain(|k, _| keep_exact.contains(k) || k.starts_with("Cast."));
     }
 
     Ok(())

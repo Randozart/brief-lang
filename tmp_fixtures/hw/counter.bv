@@ -1,7 +1,8 @@
-// HW validation fixture: 8-bit counter (Plan 3.5).
-// Sized-uint math goes through explicit Int casts (no implicit coercion).
-let counter: UInt[8] = 0 as UInt[8];
+// HW validation fixture: counter with tick trigger (Plan 3.5).
+// Plain Int — the hardware surface is 64-bit registers; sized scalars
+// (BitRange) are not reachable from source syntax yet.
+let counter: Int = 0;
 
 txn step [counter < 255][counter < 255] {
-  counter = ((counter as Int) + 1) as UInt[8];
+  counter = counter + 1;
 }
