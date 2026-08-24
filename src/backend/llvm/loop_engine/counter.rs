@@ -1322,6 +1322,31 @@ impl LlvmBackend {
         free_after: &[String],
     ) -> bool {
         use crate::analysis::node_decompose::{PredicateClass, Segment, split_into_segments};
+        // 2026-08-23 (vd-phi repro fix): a body that ENDS THE PROGRAM mid-loop
+        // (endprogram inside a guard) emits `ret` inside the present/latch
+        // blocks — the header phis then cite predecessors whose terminators
+        // are dead and the whole fold emits invalid IR. The general
+        // PerFieldPhi path handles early termination proven-correctly, so
+        // DECLINE the fold when any segment body terminates.
+        let body_terminates = body.iter().any(|st| {
+            matches!(
+                st,
+                Statement::EndProgram(_)
+            ) || {
+                let mut found = false;
+                if let Statement::Guarded(_, inner) = st {
+                    found = inner.iter().any(|s2| {
+                        matches!(s2, Statement::EndProgram(_))
+                            || matches!(s2, Statement::Guarded(_, deeper)
+                                if deeper.iter().any(|s3| matches!(s3, Statement::EndProgram(_))))
+                    });
+                }
+                found
+            }
+        });
+        if body_terminates {
+            return false;
+        }
         let segments = split_into_segments(body);
 
         // Locate the single runtime guard and collect [pre] / [post] statements.

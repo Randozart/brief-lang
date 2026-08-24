@@ -4947,7 +4947,12 @@ keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
 
 ## Version-DAG phi mismatch with nested guard bodies (2026-08-23)
 
-**Status:** OPEN — pre-existing, enum-independent
+**Status:** CLOSED 2026-08-23. `emit_version_dag_main` now DECLINES the
+fold when any loop-body segment ends the program (endprogram inside a
+guard, one nesting level deep) — mid-loop `ret` poisoned the present/latch
+blocks and invalidated the header phis. The general PerFieldPhi path
+handles early termination proven-correctly; repro builds and runs
+(77742), all pinned fixtures byte-correct, suites green. Original report:
 **Repro:** `bugs/repro_vd_phi_nested_guard.bv` — single-runtime-guard node
 (version-DAG path) whose body contains a NESTED `when` plus calls into an
 imported stdlib fn.
