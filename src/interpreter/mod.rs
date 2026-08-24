@@ -114,12 +114,20 @@ pub struct TaskEntry {
     /// 2026-08-23 (Phase A2): the captured call bindings for lazy execution.
     /// Set at spawn; consumed by the first `await`.
     pub pending_args: Option<Vec<Value>>,
+    /// 2026-08-23 (Phase A3): body segments split at `yield;` checkpoints.
+    /// Segment N runs on scheduling pass N. Empty for zero-yield tasks
+    /// (single segment = whole body).
+    pub segments: Vec<Vec<Statement>>,
+    /// Which segment executes next.
+    pub current_segment: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskStatus {
     /// Lazy model: spawned but not yet executed — awaiting triggers it.
     Ready,
+    /// Phase A3: partially executed — yielded at a checkpoint, more segments remain.
+    Yielded,
     /// Task ran to completion.
     Done,
     /// `free task` was called before execution — cancelled, never runs.
@@ -612,7 +620,16 @@ pub fn variant_defs() -> Option<HashMap<String, String>> {
 
 /// 2026-08-23 (async Phase A2): register a PENDING task — spawned but not
 /// yet executed. The first `await` triggers `execute_and_consume`.
-pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>) {
+pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>, body: Vec<Statement>) {
+    // 2026-08-23 (Phase A3): split body at yield; checkpoints into segments.
+    let mut segments: Vec<Vec<Statement>> = vec![Vec::new()];
+    for stmt in &body {
+        if matches!(stmt, Statement::Yield) {
+            segments.push(Vec::new());
+        } else {
+            segments.last_mut().unwrap().push(stmt.clone());
+        }
+    }
     TASK_TABLE.with(|t| {
         if let Some(table) = t.borrow_mut().as_mut() {
             table.insert(id, TaskEntry {
@@ -621,6 +638,8 @@ pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>) {
                 status: TaskStatus::Ready,
                 result: None,
                 pending_args: Some(args),
+                segments,
+                current_segment: 0,
             });
         }
     });
@@ -629,12 +648,14 @@ pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>) {
 /// 2026-08-23 (async Phase A2): look up a pending task and return its
 /// captured args for execution. Marks the task as Done with the result.
 pub fn take_pending_task(id: u64) -> Option<(String, Vec<Value>)> {
+    // 2026-08-23 (Phase A3): do NOT change status here — execute_pending_task
+    // needs the segments via take_task_segments, which requires Ready/Yielded.
+    // Status transitions to Done only after ALL segments complete (mark_done).
     TASK_TABLE.with(|t| {
         let mut table_ref = t.borrow_mut();
         let table = table_ref.as_mut()?;
         let entry = table.get_mut(&id)?;
-        if entry.status == TaskStatus::Ready {
-            entry.status = TaskStatus::Done;
+        if entry.status == TaskStatus::Ready || entry.status == TaskStatus::Yielded {
             if let Some(args) = entry.pending_args.take() {
                 return Some((entry.fn_name.clone(), args));
             }
@@ -1334,4 +1355,44 @@ mod tests {
 /// 2026-08-23 (async A1): read-only snapshot of the thread-local task table.
 pub fn task_table_snapshot() -> Option<HashMap<u64, TaskEntry>> {
     TASK_TABLE.with(|t| t.borrow().clone())
+}
+
+/// 2026-08-23 (async Phase A3): take segments + current position for
+/// execution. Called by await before running the task's next segment.
+pub fn take_task_segments(id: u64) -> Option<(Vec<Vec<Statement>>, usize)> {
+    TASK_TABLE.with(|t| {
+        let mut table_ref = t.borrow_mut();
+        let table = table_ref.as_mut()?;
+        let entry = table.get_mut(&id)?;
+        if entry.status == TaskStatus::Ready || entry.status == TaskStatus::Yielded {
+            Some((entry.segments.clone(), entry.current_segment))
+        } else {
+            None
+        }
+    })
+}
+
+/// 2026-08-23 (async Phase A3): advance the segment counter after executing.
+pub fn advance_segment(id: u64) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                entry.current_segment += 1;
+                if entry.current_segment < entry.segments.len() {
+                    entry.status = TaskStatus::Yielded;
+                }
+            }
+        }
+    });
+}
+
+/// 2026-08-23 (async Phase A3): mark a task as Done.
+pub fn mark_done(id: u64) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                entry.status = TaskStatus::Done;
+            }
+        }
+    });
 }

@@ -333,13 +333,15 @@ fn eval_task_spawn(
     for a in args {
         arg_vals.push(eval_expr(a, heap, bindings, functions)?);
     }
-    if !functions.contains_key(type_name) {
-        return Err(RuntimeError::UndefinedFunction(type_name.to_string()));
-    }
+    let defn = functions
+        .get(type_name)
+        .cloned()
+        .ok_or_else(|| RuntimeError::UndefinedFunction(type_name.to_string()))?;
     let task_id = next_task_id();
-    crate::interpreter::register_pending_task(task_id, type_name.to_string(), arg_vals);
-    // Return a marker value — the typechecker types this as Task<Ret>, and
-    // the first `await` replaces it with the real result via the table.
+    crate::interpreter::register_pending_task(
+        task_id, type_name.to_string(), arg_vals, defn.body.clone(),
+    );
+    // Return a task-id marker — await triggers lazy segment-by-segment execution.
     Ok(Value::Atom(Atom::Int(task_id as i64)))
 }
 
@@ -352,6 +354,11 @@ fn execute_pending_task(
     heap: &mut VirtualHeap,
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
+    // Phase A3: get segments from the table and execute them in order.
+    // Each segment runs to completion; yield; boundaries separate them.
+    let (segments, current) = crate::interpreter::take_task_segments(task_id)
+        .ok_or_else(|| RuntimeError::UndefinedFunction(fn_name.to_string()))?;
+
     let defn = functions
         .get(fn_name)
         .cloned()
@@ -363,17 +370,24 @@ fn execute_pending_task(
             call_bindings.insert(pname.clone(), v.clone());
         }
     }
+
     let mut result = Value::Void;
-    for stmt in &defn.body {
-        match eval_statement(stmt, heap, &mut call_bindings, functions) {
-            Ok(v) => result = v,
-            Err(RuntimeError::TermReturn(v)) => {
-                result = v;
-                break;
+    for seg_idx in current..segments.len() {
+        crate::interpreter::advance_segment(task_id);
+        for stmt in &segments[seg_idx] {
+            match eval_statement(stmt, heap, &mut call_bindings, functions) {
+                Ok(v) => result = v,
+                Err(RuntimeError::TermReturn(v)) => {
+                    result = v;
+                    // Mark Done on term.
+                    crate::interpreter::mark_done(task_id);
+                    return Ok(result);
+                }
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
     }
+    crate::interpreter::mark_done(task_id);
     Ok(result)
 }
 
