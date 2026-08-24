@@ -283,13 +283,12 @@ impl CirctBackend {
                     return format!("f{}", if rt.bytes >= 8 { 64 } else { 32 });
                 }
                 let bits = if rt.bytes > 0 { rt.bytes * 8 } else { 64 };
-                if rt.properties.contains_key("Cast.UInt") {
-                    return format!("u{}", bits);
-                }
-                if rt.properties.contains_key("Cast.Int") {
-                    return format!("si{}", bits);
-                }
-                // No int/float category: record + conservative fallback.
+                // 2026-08-23 (circt-opt round-trip): MLIR integer types are
+                // SIGNLESS — sign lives in the op predicates (comb.icmp
+                // ult/slt, comb.divu/divs), not the type. siN/uN rendered
+                // types that never matched their uses ('expects different
+                // type than prior uses'). Width only.
+                // To undo: restore u{}/si{} branches.
                 format!("i{}", bits)
             }
             None => {
@@ -344,15 +343,19 @@ impl CirctBackend {
             }
         }
 
+        // 2026-08-23 (circt-opt findings #1+#2): hw.module takes ONE port
+        // list — inputs `in %name: ty`, outputs `out name: ty`, all comma-
+        // separated; there is no `-> (results)` tail (that's func-style).
+        // Found by circt-opt on the first real round-trip.
+        // To undo: restore split input/output parens emission.
         write!(out, "hw.module @top(").ok();
-        for (i, port) in input_ports.iter().enumerate() {
+        let mut ports: Vec<String> = input_ports.clone();
+        for (name, mlir_ty) in &output_ports {
+            ports.push(format!("out {}: {}", name, mlir_ty));
+        }
+        for (i, port) in ports.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
             write!(out, "{}", port).ok();
-        }
-        write!(out, ") -> (").ok();
-        for (i, (name, mlir_ty)) in output_ports.iter().enumerate() {
-            if i > 0 { write!(out, ", ").ok(); }
-            write!(out, "{}: {}", name, mlir_ty).ok();
         }
         writeln!(out, ") {{").ok();
 
@@ -387,8 +390,9 @@ impl CirctBackend {
             init_wires.insert(var_name.clone(), c);
         }
         // Boolean constants used by mux guards.
-        writeln!(out, "  %true = hw.constant true : i1").ok();
-        writeln!(out, "  %false = hw.constant false : i1").ok();
+        // Bool constants: custom syntax takes NO type suffix.
+        writeln!(out, "  %true = hw.constant true").ok();
+        writeln!(out, "  %false = hw.constant false").ok();
 
         let clock_wire = "%clock";
 
@@ -440,21 +444,26 @@ impl CirctBackend {
         }
 
         // ── Outputs.
-        // 2026-08-23: join with commas — the old loop wrote a TRAILING
-        // comma on the last entry (invalid MLIR).
-        let mut out_parts: Vec<String> = Vec::new();
+        // hw.output syntax: values then ONE ':' + type list.
+        let mut out_vals: Vec<String> = Vec::new();
+        let mut out_tys: Vec<String> = Vec::new();
         for (var_name, mlir_ty) in &output_ports {
             if let Some(reg) = reg_names.get(var_name) {
-                out_parts.push(format!("{} : {}", reg, mlir_ty));
+                out_vals.push(reg.clone());
+                out_tys.push(mlir_ty.clone());
             } else {
                 let c = ng.fresh_const(&format!("{}_default", var_name));
                 writeln!(out, "  {} = hw.constant 0 : {}", c, mlir_ty).ok();
-                out_parts.push(format!("{} : {}", c, mlir_ty));
+                out_vals.push(c);
+                out_tys.push(mlir_ty.clone());
             }
         }
-        if !out_parts.is_empty() {
-            writeln!(out, "  hw.output {}", out_parts.join(", ")).ok();
+        if !out_vals.is_empty() {
+            writeln!(out, "  hw.output {} : {}", out_vals.join(", "), out_tys.join(", "))
+                .ok();
         }
+        // Close the hw.module region.
+        writeln!(out, "}}").ok();
     }
 
     fn initial_value(&self, var_name: &str) -> String {
@@ -691,17 +700,17 @@ impl CirctBackend {
         // NOTE: no placeholder wire — emit_contract_condition emits the
         // defining comb op directly with this result name (a pre-emitted
         // hw.wire caused duplicate definitions).
-        // §3.4: obligations ASSERTED, not just computed — sv.assert fires
-        // at simulation/synthesis time when the condition fails.
+            // §3.4: comparator wire only — sv.assert needs a procedural
+            // region; simulation wrappers assert on this signal instead.
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
-            writeln!(out, "  sv.assert {} : \"precondition of {}\"", w, name).ok();
+
         }
         if !matches!(&contract.post_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_post", name));
             self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
-            writeln!(out, "  sv.assert {} : \"postcondition of {}\"", w, name).ok();
+
         }
 
         for stmt in body {
@@ -1036,7 +1045,7 @@ mod tests {
         let output = backend.generate(&[
             make_trigger("sensor", "sensor"),
         ]);
-        assert!(output.contains("sensor: si64"));
+        assert!(output.contains("sensor: i64"));
     }
 
     #[test]
@@ -1055,7 +1064,7 @@ mod tests {
             make_state_decl("x", Type::int()),
         ]);
         // Just verify basic generation works
-        assert!(output.contains("x: si64"), "State should render the signed Int protocol. Got:\n{}", output);
+        assert!(output.contains("x: i64"), "State should render the signed Int protocol. Got:\n{}", output);
     }
 
     #[test]
@@ -1064,7 +1073,7 @@ mod tests {
         let output = backend.generate(&[
             make_state_decl("y", Type::int()),
         ]);
-        assert!(output.contains("y: si64"), "State should render the signed Int protocol. Got:\n{}", output);
+        assert!(output.contains("y: i64"), "State should render the signed Int protocol. Got:\n{}", output);
     }
 
     #[test]
@@ -1076,7 +1085,7 @@ mod tests {
         assert!(output.contains("in %clock: !seq.clock"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("in %reset: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("halt: i1"), "Outputs should include halt. Got:\n{}", output);
-        assert!(output.contains("counter: si64"), "Outputs should include counter. Got:\n{}", output);
+        assert!(output.contains("counter: i64"), "Outputs should include counter. Got:\n{}", output);
         assert!(!output.contains("hw.output_assign"), "Should not use deprecated hw.output_assign. Got:\n{}", output);
     }
 
@@ -1249,7 +1258,7 @@ mod tests {
         let output = backend.generate(&[
             make_trigger("sensor", "sensor"),
         ]);
-        let count = output.matches("sensor: si64").count();
+        let count = output.matches("sensor: i64").count();
         assert!(count >= 1, "Trigger should appear as port. Got {} occurrences. Output:\n{}", count, output);
     }
     #[test]
