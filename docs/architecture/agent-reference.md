@@ -496,6 +496,22 @@ When a feature has two implementations each better under different workloads,
 support BOTH with a static compile-time decision tree (e.g., stack/arena vs
 heap; folded/O(1) vs vectorized loop; enum/switch vs sequential reactor).
 
+### Backend integration contract (2026-08-23)
+
+Normative: `docs/architecture/backend-contracts.md`. Headlines:
+
+- AnalysisResults computed ONCE in the pipeline; backends consume it.
+- Partial-surface backends declare `CAPABILITIES`; the pipeline rejects
+  out-of-surface programs BEFORE codegen. LLVM's full-surface claim must
+  stay true (the Statement::Match regression proved why).
+- Emission-time gaps go to a backend error accumulator
+  (`VmBackend.errors`, `CirctBackend.errors`) -> pipeline hard error.
+- Determinism law: any HashMap iteration feeding output or program
+  rewriting is sorted/BTreeMap.
+- Per-backend emission invariants (SPIR-V typed-builder-only, CIRCT
+  wire-map + annotations-before-types, VM .lair absolute addressing) are
+  documented with their failure histories in backend-contracts.md §3–§7.
+
 ### Frontend constructs are abstract — backends give meaning
 
 | Construct | Universal meaning | LLVM | SPIR-V | CIRCT |

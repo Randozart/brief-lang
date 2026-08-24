@@ -30,15 +30,21 @@ Backend codegen is extracted into feature files via per-backend traits.
 Each backend is a separate trait so changing VHDL emission never
 recompiles LLVM codegen.
 
-## Three Canonical Backends (2026-06-15)
+## Five Backends (2026-08-23)
 
-Only three backends are actively developed. All others are dead code.
+Normative contracts for all five: `docs/architecture/backend-contracts.md`.
 
-| Backend | Target | Status |
-|---------|--------|--------|
-| **LLVM** (`src/backend/llvm/`) | Native binary (`.ll` + `llc`) | **Active** — canonical OS target |
-| **Webstack** (`src/backend/webstack.rs`) | WASM + JS glue | **Active** — canonical web target |
-| **CIRCT** (`src/backend/circt.rs`) | Hardware (`.mlir` + `circt-opt` + `circt-translate`) | **Active** — canonical hardware target |
+| Backend | Location | Target | Status |
+|---------|----------|--------|--------|
+| **LLVM** (`src/backend/llvm/`) | subdirectory | Native binary (`.ll` + `llc`) | **Active** — reference implementation, full surface |
+| **VM** (`src/backend/vm/`) | subdirectory | `.lair` bytecode → tamer | **Active** — finish-compilation tail (bounty) |
+| **SPIR-V** (`src/backend/spirv/`) | subdirectory | GPU kernels (`.spv`, spirv-val validated) | **Active** — accel-analysis driven |
+| **CIRCT** (`src/backend/circt/`) | subdirectory | Hardware (`.mlir` → Verilog → synthesis) | **Active** — toolchain-validated |
+| **Webstack** (`src/backend/webstack/normalizer.rs` + `glue/web_generator.rs`) | — | wasm32 + JS shim | **Active** — v2 only |
+
+All non-LLVM backends declare `CAPABILITIES`; the pipeline rejects
+out-of-surface programs before codegen. Emission invariants per backend:
+see backend-contracts.md §3–§7.
 
 ### Dead Backends (Archived 2026-06-19)
 
@@ -142,190 +148,82 @@ file is small enough to navigate, and no optimization path was touched.
 
 ## CIRCT Backend
 
-(`src/backend/circt.rs`, 860 lines, 17 unit tests) — emits MLIR text in
-HW + Comb + Seq dialects. Trigger variables become input ports, state
-variables become `seq.firreg` sequential registers, contract guards are
-lowered to `comb.icmp` operations, and transaction bodies become FSMs
-with state registers.
+(`src/backend/circt/`, mod.rs + normalizer.rs) — emits MLIR in HW + Comb +
+Seq dialects from the frontend's dependency graph and normalized universe.
 
-### Architecture
+> **Normative reference:** `docs/architecture/backend-contracts.md` §6 —
+> type lowering, sequential semantics, honest comb subset, validation.
+> The section below is a summary only.
+
+### Architecture (2026-08-23 rewrite)
 
 ```
 CirctBackend
-├── trigger_port_name()      — LinkRef → port name mapping
-├── mlir_type()              — Type → MLIR type (supports sized ints via Constrained)
-├── emit_module()
-│   ├── input_ports          — clock, reset, trg variables (in % prefix)
-│   ├── output_ports         — state vars, wake_<trg>, halt (return signature)
-│   ├── seq.firreg           — sequential registers for state variables
-│   ├── emit_expr()          — recursion into comb/arithmetic ops
-│   │   ├── emit_binary_comb — comb.add/sub/mul/divu/and/or/xor/icmp
-│   │   └── emit_unary_comb  — comb.xor/neg (via xor with 1)
-│   ├── emit_contract_condition — pre/post guards via comb.icmp
-│   └── emit_txn_body()      — FSM state register + body + halt
-│       ├── FSM state reg    — 2-bit seq.firreg for idle/running/done
-│       ├── Await handling   — sub-module start/done handshake + stall
-│       ├── Async handling   — fire-and-forget body emission
-│       ├── SyncBlock        — parallel combinational paths
-│       └── TermBang         — drives halt output port high
+├── with_universe()           — pipeline injects the normalized TypeUniverse
+├── generate_with_dep_graph_universe()
+│   │                          consumes shared DependencyGraph + universe
+│   ├── emit_module()         — wire-map sequential semantics:
+│   │     Phase A init consts → Phase B txn bodies repoint pending wires
+│   │     (NBA reads) → Phase C seq.firreg per var (reset mux + preset)
+│   ├── emit_expr()           — honest comb subset ONLY (see contracts §6);
+│   │                           unknown intrinsics record capability errors
+│   ├── emit_contract_condition + sv.assert   — §3.4 obligations
+│   └── emit_cell_module()    — real hw.instance port names
+└── errors (RefCell)          — unsupported constructs -> pipeline hard error
 ```
 
-### Module Output Convention (modern CIRCT)
+### Emitted shape (real example)
 
 ```mlir
-hw.module @top(in %clock: i1, in %reset: i1, in %sensor: i64)
-    -> (counter: i64, wake_btn: i1, halt: i1) {
-  %counter_0 = seq.firreg initial_value { init_value = 0 : i64 } : i64
-  %counter_next = comb.add %counter_0, %c1_i64 : i64
-  seq.always(posedge %clock) {
-    %counter_0 <= %counter_next
-  }
-  hw.output %counter_0 : i64, %c0_i1 : i1,
+hw.module @top(in %clock: !seq.clock, in %reset: i1) -> (halt: i1, counter: si64) {
+  %ccounter_init_1 = hw.constant 0 : si64
+  %step_pre_0 = comb.icmp ult %ccounter_init_1, %cint_2 : i64
+  %counter_next_5 = comb.mux %true, %bin_2, %ccounter_init_1 : si64
+  %counter_next_7 = comb.mux %reset, %ccounter_init_1, %counter_next_5 : si64
+  %counter_1 = seq.firreg %counter_next_7 clock %clock preset 0 : si64
+  sv.assert %step_pre_0 : "precondition of step"
+  hw.output %halt_0 : i1, %counter_1 : si64
 }
 ```
 
-### FSM State Machine
+### Validation
 
-Each `node` body becomes a finite state machine:
-
-| State | Value | Meaning |
-|-------|-------|---------|
-| Idle  | 0 | Waiting for precondition |
-| Running | 1 | Executing body |
-| Done  | 2 | Postcondition met, commit |
-
-State transitions: `pre → run → (stall on await) → post → done → idle`
-
-### Sized Integer Support
-
-`mlir_type()` maps `Type::Constrained(inner, BitRange::Single(N))` to `iN`,
-enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
-
-### Trigger Port Mapping
-
-| `LinkRef` variant | Port name | Example |
-|-------------------|-----------|---------|
-| `Explicit(addr)` | Trigger name | `sensor` |
-| `Linked("name")` | Linked name | `button0` |
-| `Timer(freq)` | `timer_<freq>hz` | `timer_1000hz` |
-| `Signal("name")` | Signal name | `irq_line` |
-| `is_wake` (default `true`) | Additional `wake_<name>` output port | `wake_sensor` |
+Probe-gated on the installed toolchain (`tools/install-circt.sh`):
+`test_emitted_module_parses_under_circt_opt`, `tools/hw_harness.sh`
+(parse → translate --export-verilog → verilator lint), and
+`tools/vivado_check.sh` for xvlog/synth_design against real parts.
 
 ## Webstack Backend
 
-> **⚠️ SUPERSEDED 2026-07-26** — This section describes the old TypeScript emitter
-> (`src/backend/webstack.rs`). The webstack v2 architecture compiles to **WASM + JS shim**
-> via the existing `LlvmBackend(wasm32)` and a new `GlueWebGenerator`. See
-> `docs/architecture/features/rendered-briev-wasm.md` and
-> `docs/plans/2026-07-26-rendered-briev-webstack-v2.md` for the current design.
->
-> The content below is preserved for historical reference during the migration.
+v2 ONLY (2026-08-23): `.rbv` → wasm32 module via `LlvmBackend` +
+`GlueWebGenerator` JS shim (`src/glue/web_generator.rs`). The legacy
+TypeScript emitter was DELETED — see plan
+`2026-08-23-webstack-v2-completion.md` for the removal rationale.
 
-(`src/backend/webstack.rs`, 1,200 lines) — TypeScript emitter for the web target.
-Replaced the Rust/wasm-bindgen codegen (Phase A, 2026-06-19). The archived Rust
-codegen lives at `archive/backend/webstack_rust_codegen.rs` (1,758 lines).
+Key components:
+- Flush batching: `emit_stmt.rs` (`__web_flush_buf` /
+  count-parameterized `__web_flush_state` at term boundaries)
+- AddressOf#: implemented in LLVM intrinsics
+- Normalizer: `src/backend/webstack/normalizer.rs`
 
-### Architecture
+## VM Backend (.lair emit mode)
 
-```
-WebstackGenerator
-├── collect_signals_and_transactions()  — AST → signal map + txn map (shared with archived codegen)
-├── generate_ts_code()                  — main TS emitter entry point
-│   ├── ts_type_for_signal()            — SignalType → "number" / "string" / "boolean" / "any[]"
-│   ├── ts_ident()                      — name normalization (hyphens → underscores)
-│   ├── emit_ts_txn_body()              — transaction body → TS method body
-│   │   └── statement_to_ts()           — Statement → TS code (Assignment, Let, Guarded, Term, etc.)
-│   ├── expr_to_ts()                    — Expr → native TS expression (no JsValue boxing)
-│   ├── ffi_ts_impl                    — frgn from "javascript" → inline TS methods on App class
-│   └── js_glue via generate_js_glue() — view binding watchers (b-text, b-trigger, b-show, b-class, b-each)
-└── generate_arm_rust_code()            — dead code path (placeholder body)
-```
+Normative reference: `docs/architecture/backend-contracts.md` §4.
+Charter: finish compilation on any machine with a tamer — one `.bounty`
+archive ships everywhere. Bytecode via `--backend vm`; archives via
+`brievc bounty`. Execution: C-driven `step()` loop over exported Briev
+interpreter; host services in `lib/runtime/briev_rt.c`; canonical host
+ids; conformance via `tools/parity_harness.sh` (7 fixtures).
 
-### TypeScript Output
+## SPIR-V Backend
 
-Each `.rbv` file compiles to an `App` class with typed fields and async transaction methods:
-
-```typescript
-class App {
-  count: number = 0;
-  name: string = "";
-  items: any[] = [];
-
-  async increment(): Promise<void> {
-    this.count = this.count + 1;
-    return;
-  }
-}
-
-export function createApp(): App {
-  return new App();
-}
-```
-
-### Key Differences from Old Rust/wasm-bindgen Codegen
-
-| Aspect | Old (archived) | New (TS emitter) |
-|--------|----------------|-------------------|
-| Output language | Rust (`#[wasm_bindgen]`) | TypeScript |
-| Signal storage | `Vec<JsValue>` (all boxing) | Typed fields (`number`, `string`, `boolean`) |
-| Arithmetic | `JsValue::from(a + b)` → JS number | Direct `a + b` (native) |
-| FFI calls | `js_sys::Reflect::get()` + dynamic dispatch | Inline TS implementation from `frgn from "javascript"` |
-| Intrinsics | Matched on `Intrinsic` enum → Rust | Matched on `Intrinsic` enum → native TS (`console.log`, `String.fromCharCode`, etc.) |
-| Toolchain | `wasm-pack` + `wasm-bindgen` | `tsc` (standard TypeScript compiler) |
-| DOM bindings | Rust struct methods called from JS glue | Direct `app.` property/method calls from JS glue |
-| Build dependencies | Rust + wasm-pack + wasm-bindgen | TypeScript only |
-
-### Signal Type Mapping
-
-| Briev type | TS type | Initializer |
-|------------|---------|-------------|
-| `Int` | `number` | `0` |
-| `Float` | `number` | `0` |
-| `Bool` | `boolean` | `false` |
-| `String` | `string` | `""` |
-| `List<T>` | `any[]` | `[]` |
-| `Vector(N)` | `number[]` | `new Array(N).fill(0)` |
-
-### frgn from "javascript" FFI
-
-When a `.bv` file declares `frgn from "javascript"`, the `wasm_impl` and
-`wasm_setup` fields (which contain JavaScript code) are registered in
-`ffi_ts_impl` / `ffi_ts_setups`. The TS emitter inlines these as methods
-on the `App` class:
-
-```typescript
-class App {
-  myFn(arg0: any): any {
-    // wasm_impl code inlined here
-  }
-}
-```
-
-The `wasm_impl` field name is historical (from when Rust/wasm-bindgen targeted WASM).
-In the TS emitter, it serves as the JavaScript implementation code for any
-`frgn` declaration — whether or not WASM is involved.
-
-### View Binding JS Glue
-
-The `generate_js_glue()` method emits DOM watchers that reference the `App` instance:
-
-| Directive | Generated Code |
-|-----------|---------------|
-| `b-text="x"` | `el.textContent = String(app.x)` |
-| `b-trigger:click="txn"` | `el.addEventListener('click', () => app.txn())` |
-| `b-show="cond"` | `el.style.display = app.cond ? '' : 'none'` |
-| `b-class="cond:cls"` | `el.classList.toggle('cls', Boolean(app.cond))` |
-
-### Known Limitations
-
-- **ArrowMut/ArrowDiscard/ArrowTransfer**: Emit as `splice` calls; filtered
-  transfer falls through to a no-op comment
-- **Block expressions**: Emit as IIFE `(() => { ...; return last; })()`
-- **Pattern B feature dispatch**: Feature module `ExprCodegenWebstack` trait
-  still uses Rust-codegen return values (`"JsValue::TRUE"`); TS emitter
-  bypasses these by matching Expr variants directly in `expr_to_ts()`
-- **ARM target**: `generate_arm_rust_code` emits Rust for bare-metal KV260
-  (dead code path — not actively maintained)
+Normative reference: `docs/architecture/backend-contracts.md` §5.
+Kernels from the frontend accel analysis (eligible AccelEntries;
+body = proven statements); work-item emission (`index_var` binds
+GetGlobalId(0), no loop); one StorageBuffer binding with explicit
+layout; spirv-val validated (`test_scale_kernel_passes_spirv_val`,
+`test_mad_kernel_reads_two_buffers`). Standalone `.abv` only — GPU
+OFFLOAD is `!> accel` metadata through BackendKind::Gpu (LLVM).
 
 ## FFI Marshaling Convention (Critical)
 
