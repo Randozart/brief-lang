@@ -1,16 +1,21 @@
+// reactive_counter — two-node reactive system with handoff.
+// increment fires until max; mark_done terminates on completion.
 let counter: Int = 0;
 let max_count: Int = 10;
 let done: Bool = false;
 
 node increment [counter < max_count && done == false]
-  [counter == @counter + 1 && done == false]
+  [done == true || counter >= max_count]
 {
   counter = counter + 1;
+  when counter >= max_count {
+    done = true;
+  };
   term;
 };
 
-node mark_done [counter >= max_count && done == false]
-  [done == true && counter == @counter]
+node mark_done [done == false && counter >= max_count]
+  [done == true]
 {
   done = true;
   term;

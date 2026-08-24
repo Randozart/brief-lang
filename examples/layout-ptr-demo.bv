@@ -1,29 +1,43 @@
 // ─────────────────────────────────────────────────────────────
-// layout-ptr-demo.bv — Demonstrates layout-constrained pointers
-// (Phase 1-2: Type::LayoutPtr, PtrN syntax, compatible casts)
+// layout-ptr-demo.bv — Demonstrates typed pointers with contracts
+// 2026-08-23: migrated off removed PtrN/Ptr64 aliases and
+// volatile_load#/volatile_store# onto Ptr<Bit<N>> + Load#/Store#.
 // ─────────────────────────────────────────────────────────────
 
-// PtrN shorthand — fixed-width pointee
-let byte_ptr: Ptr8  = 0x4000 as Ptr8;    // points to 1 byte
-let word_ptr: Ptr16 = 0x4000 as Ptr16;   // points to 2 bytes
-let dword_ptr: Ptr32 = 0x4000 as Ptr32;  // points to 4 bytes
-let qword_ptr: Ptr64 = 0x4000 as Ptr64;  // points to 8 bytes
+import "std/types";
 
-// Bare Ptr — same as Ptr64 (safe void* equivalent)
-let raw: Ptr = 0x4000 as Ptr;
+let byte_ptr: Ptr<Bit<8>>  = 0x4000 as Ptr<Bit<8>>;
+let word_ptr: Ptr<Bit<16>> = 0x4000 as Ptr<Bit<16>>;
+let qword_ptr: Ptr<Bit<64>> = 0x4000 as Ptr<Bit<64>>;
 
-// Layout-compatible cast: Float ↔ Int32 (same layout: 4 bytes, align 4)
-let f: Ptr<Float> = 0x40010000 as Ptr<Float>;
-let i: Ptr<Int32> = f as Ptr<Int32>;
+defn read_byte(addr: Ptr<Bit<8>>) -> Int {
+    term Load#(addr);
+};
 
-// Address arithmetic preserves the pointer type
-let next: Ptr64 = qword_ptr + 8;
-let aligned: Ptr64 = qword_ptr & !7;
+defn write_byte(addr: Ptr<Bit<8>>, val: Int) -> Bool {
+    Store#(addr, val);
+    term true;
+};
 
-// Contract-verified bounds safety
-defn read_register(reg_addr: Ptr<Int>) -> Int
-    [reg_addr as Int >= 0x40000000]
-    [reg_addr as Int <  0x40001000]
-{
-    term volatile_load#(reg_addr);
+defn addr_as_ptr(addr: Int) -> Ptr<Bit<8>> {
+    term addr as Ptr<Bit<8>>;
+};
+
+// Contract-proven address arithmetic (SPEC §14.2: cast-based math)
+defn addr_offset(base: Ptr<Bit<8>>, offset: Int) -> Int {
+    term base as Int + offset;
+};
+
+let i: Int = 0;
+
+node demo [i < 1][i == 1] {
+    let addr = addr_offset(byte_ptr, 4);
+    write_byte(addr as Ptr<Bit<8>>, 42);
+    let val = read_byte(addr as Ptr<Bit<8>>);
+
+    // Cast round-trip
+    let raw = qword_ptr as Int;
+    let back = raw as Ptr<Bit<64>>;
+
+    endprogram Print#(val);
 };

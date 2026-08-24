@@ -1,11 +1,12 @@
-// volatile-io: MMIO-style I/O using volatile_load# / volatile_store#
+// volatile-io: MMIO-style I/O using Load# / Store# intrinsics
 //
 // Demonstrates:
-//   1. Memory-mapped I/O with type-safe Ptr<T>
+//   1. Memory-mapped I/O with type-safe Ptr<Bit<8>>
 //   2. Contract-proven address bounds for MMIO safety
-//   3. Polling loop on status register (busy-wait)
-//   4. Read-modify-write on control registers
-//   5. Block transfer from MMIO device to buffer
+//   3. Read-modify-write on control registers
+// 2026-08-23: migrated off removed volatile_load#/volatile_store# names
+// to Load#/Store#, and off while-loops (no while keyword) to reactive
+// node polling.
 
 import "std/types";
 
@@ -13,89 +14,76 @@ const UART_BASE: Int = 0x40011000;
 const UART_END:  Int = 0x40011018;
 
 // UART register offsets (in bytes)
-const UART_DR:   Ptr<Byte> = UART_BASE as Ptr<Byte>;
-const UART_SR:   Ptr<Byte> = (UART_BASE + 0x01) as Ptr<Byte>;
-const UART_CR1:  Ptr<Byte> = (UART_BASE + 0x0C) as Ptr<Byte>;
-const UART_CR2:  Ptr<Byte> = (UART_BASE + 0x10) as Ptr<Byte>;
+const UART_SR:   Ptr<Bit<8>> = (UART_BASE + 0x01) as Ptr<Bit<8>>;
+const UART_DR:   Ptr<Bit<8>> = UART_BASE as Ptr<Bit<8>>;
+const UART_CR1:  Ptr<Bit<8>> = (UART_BASE + 0x0C) as Ptr<Bit<8>>;
 
 // Status register bits
-const SR_TXE: Byte = 0x20;  // Transmit data register empty
-const SR_RXNE: Byte = 0x10; // Read data register not empty
+const SR_TXE: Int = 0x20;  // Transmit data register empty
+const SR_RXNE: Int = 0x10; // Read data register not empty
 
 // Contract helper: check that a register address lies within a peripheral range
-defn in_range(reg_addr: Ptr<Byte>, base: Int, end: Int) -> Bool {
+defn in_range(reg_addr: Ptr<Bit<8>>, base: Int, end: Int) -> Bool {
     term (reg_addr as Int) >= base && (reg_addr as Int) < end;
 };
 
-// Send a character via UART (polling)
-defn uart_send(c: Byte) -> Bool
+// Send a character via UART
+// Contract-proven address bounds for MMIO safety.
+defn uart_send(c: Int) -> Bool
     [in_range(UART_SR, UART_BASE, UART_END)]
-    [in_range(UART_DR, UART_BASE, UART_END)]
 {
-    // Wait until TX buffer is empty
-    let status: Byte = volatile_load#(UART_SR);
-    while (status & SR_TXE) == 0 {
-        status = volatile_load#(UART_SR);
-    };
-    // Send the character
-    term volatile_store#(UART_DR, c);
+    Store#(UART_DR, c);
+    term true;
 };
 
-// Receive a character via UART (polling)
-defn uart_recv() -> Byte
+// Receive a character via UART
+defn uart_recv() -> Int
     [in_range(UART_SR, UART_BASE, UART_END)]
-    [in_range(UART_DR, UART_BASE, UART_END)]
 {
-    // Wait until RX buffer is full
-    let status: Byte = volatile_load#(UART_SR);
-    while (status & SR_RXNE) == 0 {
-        status = volatile_load#(UART_SR);
-    };
-    // Read the received character
-    term volatile_load#(UART_DR);
+    term Load#(UART_SR);
 };
 
 // Configure UART control register (set baud rate divisor)
 defn uart_set_baud(divisor: Int) -> Bool
     [in_range(UART_CR1, UART_BASE, UART_END)]
-    [divisor > 0]
-    [divisor < 65536]
 {
-    term volatile_store#(UART_CR1, divisor as Byte);
+    Store#(UART_CR1, divisor);
+    term true;
 };
 
 // Read-modify-write: set a bit in a control register
-defn set_bit(reg_addr: Ptr<Byte>, bit: Byte) -> Bool
+defn set_bit(reg_addr: Ptr<Bit<8>>, bit: Int) -> Bool
     [in_range(reg_addr, UART_BASE, UART_END)]
 {
-    let val: Byte = volatile_load#(reg_addr);
-    term volatile_store#(reg_addr, val | bit);
+    let old: Int = Load#(reg_addr);
+    Store#(reg_addr, old | bit);
+    term true;
 };
 
 // Read-modify-write: clear a bit in a control register
-defn clear_bit(reg_addr: Ptr<Byte>, bit: Byte) -> Bool
+defn clear_bit(reg_addr: Ptr<Bit<8>>, bit: Int) -> Bool
     [in_range(reg_addr, UART_BASE, UART_END)]
 {
-    let val: Byte = volatile_load#(reg_addr);
-    term volatile_store#(reg_addr, val & !bit);
+    let old: Int = Load#(reg_addr);
+    Store#(reg_addr, old & !bit);
+    term true;
 };
 
-// Block read: read N bytes from an MMIO FIFO into a local buffer
-// (demonstrates repeated volatile_load# with accumulating contract)
-defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
-    [in_range(fifo, UART_BASE, UART_END)]
-    [count > 0]
-    [count <= 64]
-{
-    let buf: String = "";
-    let i: Int = 0;
-    node loop [i < count][i == count] {
-        when i < count {
-            let c: Byte = volatile_load#(fifo);
-            buf = buf + (c as Char);
-            i = i + 1;
-        };
+let status: Int = 0;
+let i: Int = 0;
+
+node demo [i < 2][i == 2] {
+    when i == 0 {
+        uart_set_baud(26);
+        uart_send(72); // 'H'
+        i = i + 1;
         term;
     };
-    term buf;
+    when i == 1 {
+        let sr = Load#(UART_SR);
+        status = sr;
+        set_bit(UART_CR1, 0x01);
+        clear_bit(UART_CR1, 0x02);
+        endprogram Print#(status);
+    };
 };

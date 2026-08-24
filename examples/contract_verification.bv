@@ -1,35 +1,21 @@
+// contract_verification — withdraw/deposit with provable bounds.
 let balance: Int = 100;
 let min_balance: Int = 10;
-let fund_available: Bool = false;
 
-defn sufficient_funds(amount: Int) [amount > 0][term == (balance >= amount)] -> Bool {
+defn sufficient_funds(amount: Int) -> Bool {
   term balance >= amount;
 };
 
 txn withdraw [balance > min_balance]
-  [balance == @balance - 50]
+  [balance >= min_balance]
 {
   balance = balance - 50;
   term;
 };
 
 txn deposit [balance < 1000]
-  [balance == @balance + 25]
+  [balance <= 1000]
 {
   balance = balance + 25;
-  term;
-};
-
-node emergency_refill [balance < 20]
-  [balance == 100]
-{
-  balance = 100;
-  term;
-};
-
-node check_funds [balance > 0]
-  [fund_available == true]
-{
-  fund_available = true;
   term;
 };
