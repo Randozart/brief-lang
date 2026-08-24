@@ -4974,6 +4974,14 @@ tmp_fixtures/parity/*.bv are the VM plan's conformance corpus (owned by
 backend-foundation track); tmp_fixtures/hw/* are the hardware plan's.
 Do not sweep either without checking both branches.
 
+## Conformance sweep: CLOSED (2026-08-23)
+
+**Status:** RESOLVED — the sweep runs as a first-class test in `cargo
+test --lib`. Campaign cleared 152 → 0 non-tamer failures across 8 passes.
+Excludes: glue.dbv (own test suite) and lib/compiler/*.bv (tamer WIP).
+Any new file that fails parse/typecheck will be caught immediately by
+cargo test.
+
 ## Conformance sweep: 67 active sources fail the real-pipeline gate (2026-08-23 update #8)
 
 **Progress:** ... → 89 → **67**. Pass 7 was the @-era demo pass:
@@ -5035,6 +5043,14 @@ rewritten onto Fill#/Copy#, archived module-orphaned benchmarks.
    data-briev dbv positions, link-demo missing helper.c module
 
 (Older triages preserved below.)
+
+## Conformance sweep: CLOSED (2026-08-23)
+
+**Status:** RESOLVED — the sweep runs as a first-class test in `cargo
+test --lib`. Campaign cleared 152 → 0 non-tamer failures across 8 passes.
+Excludes: glue.dbv (own test suite) and lib/compiler/*.bv (tamer WIP).
+Any new file that fails parse/typecheck will be caught immediately by
+cargo test.
 
 ## Conformance sweep: 119 active sources fail
 

@@ -7,7 +7,7 @@ frgn submit_triangles(verts: Ptr<Float>, count: Int) -> Bool from #System;
 
 txn simulate(p: Ptr<Float>, n: Int) -> Float {
     let result: Float = 0.0;
-    var i: Int = 0;
+    let i: Int = 0;
     node loop [i < n][i == n] {
         when i < n {
             result = result + (p[i] * p[i]);
