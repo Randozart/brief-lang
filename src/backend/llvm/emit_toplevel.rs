@@ -657,7 +657,7 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__briev_setenv(ptr, ptr) nounwind").ok();
         writeln!(out, "declare ptr @__briev_getcwd()").ok();
         writeln!(out, "declare i64 @__briev_chdir(ptr) nounwind").ok();
-        writeln!(out, "declare ptr @getenv(ptr)").ok();
+        // getenv/strlen already declared at line ~638 (GetEnv# path).
         writeln!(out, "declare i64 @strlen(ptr)").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
