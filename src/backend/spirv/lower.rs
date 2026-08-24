@@ -171,6 +171,21 @@ impl<'a> FnLowerer<'a> {
                 }
                 self.err(format!("unknown identifier '{}' in kernel", name))
             }
+            // 2026-08-23 (§2.1 read path): state-field element LOADS —
+            // out[i] = a[i] + b[i] needs AccessChain + Load on the SSBO.
+            Expr::Index(obj, idx) => {
+                let Some(fname) = FnLowerer::field_name_of(obj) else {
+                    return self.err("only direct state-field indexing reads");
+                };
+                if !self.state_fields.iter().any(|f| f.name == fname) {
+                    return self.err(format!("unknown state field '{}' (declare it as indexed state)", fname));
+                }
+                let (idx_val, _) = self.emit_expr(idx)?;
+                let (ptr, ety) = self.state_field_elem_ptr(fname, idx_val)?;
+                let tid = self.type_id(&ety)?;
+                let loaded = self.builder.load(tid, ptr);
+                Ok((loaded, ety))
+            }
             Expr::BinaryOp(kind, l, r) => self.emit_binop(kind, l, r),
             Expr::Call(name, args, _) => self.emit_intrinsic_call(name, args),
             other => self.err(format!(

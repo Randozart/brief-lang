@@ -1,0 +1,382 @@
+(
+  (
+  "Bit"
+  ("maxbits" "0")
+  ("alignment" "0")
+  ("properties" ("Cast.Bit" true))
+)
+  (
+  "UInt8"
+  ("maxbits" "8")
+  ("alignment" "1")
+  (
+  "properties"
+  ("alignment" 1)
+  ("Cast.Bit" "true")
+  ("Cast.UInt" "true")
+  ("Cast.Data" "true")
+)
+)
+  (
+  "Half"
+  ("maxbits" "16")
+  ("alignment" "2")
+  (
+  "properties"
+  ("alignment" 2)
+  ("Cast.Float" "true")
+  ("bits" 16)
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "UInt64"
+  ("maxbits" "64")
+  ("alignment" "8")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("alignment" 8)
+  ("Cast.UInt" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "BFloat"
+  ("maxbits" "16")
+  ("alignment" "2")
+  (
+  "properties"
+  ("Cast.Float" "true")
+  ("Cast.Bit" "true")
+  ("alignment" 2)
+  ("bits" 16)
+)
+)
+  (
+  "Int8"
+  ("maxbits" "8")
+  ("alignment" "1")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("Cast.Int" "true")
+  ("alignment" 1)
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "UInt32"
+  ("maxbits" "32")
+  ("alignment" "4")
+  (
+  "properties"
+  ("Cast.Bit" "true")
+  ("Cast.UInt" "true")
+  ("Cast.Data" "true")
+  ("alignment" 4)
+)
+)
+  (
+  "Double"
+  ("maxbits" "64")
+  ("alignment" "8")
+  (
+  "properties"
+  ("Cast.Bit" "true")
+  ("Cast.Float" "true")
+  ("bits" 64)
+  ("alignment" 8)
+)
+)
+  (
+  "X86_FP80"
+  ("maxbits" "80")
+  ("alignment" "4")
+  (
+  "properties"
+  ("bits" 80)
+  ("alignment" 4)
+  ("Cast.Float" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "Data"
+  ("maxbits" "0")
+  ("alignment" "0")
+  ("properties" ("Cast.Data" true))
+)
+  (
+  "Int64"
+  ("maxbits" "64")
+  ("alignment" "8")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("alignment" 8)
+  ("Cast.Int" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "Int"
+  ("maxbits" "0")
+  ("alignment" "0")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("Cast.Int" "true")
+  ("Cast.Bit" "true")
+  ("alignment" 0)
+)
+)
+  (
+  "Float"
+  ("maxbits" "32")
+  ("alignment" "4")
+  (
+  "properties"
+  ("Cast.Float" "true")
+  ("bits" 32)
+  ("alignment" 4)
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "Blob"
+  ("maxbits" "64")
+  ("alignment" "8")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("Cast.Bit" "true")
+  ("Cast.Blob" "true")
+  ("alignment" 8)
+)
+)
+  (
+  "Float32"
+  ("maxbits" "32")
+  ("alignment" "4")
+  (
+  "properties"
+  ("alignment" 4)
+  ("Cast.Bit" "true")
+  ("Cast.Float" "true")
+  ("bits" 32)
+)
+)
+  (
+  "UInt128"
+  ("maxbits" "128")
+  ("alignment" "16")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("alignment" 16)
+  ("Cast.Bit" "true")
+  ("Cast.UInt" "true")
+)
+)
+  (
+  "Bool"
+  ("maxbits" "8")
+  ("alignment" "1")
+  (
+  "properties"
+  ("Cast.Bool" "true")
+  ("alignment" 1)
+  ("Cast.Data" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "UInt"
+  ("maxbits" "0")
+  ("alignment" "0")
+  (
+  "properties"
+  ("Cast.UInt" "true")
+  ("alignment" 0)
+  ("Cast.Bit" "true")
+  ("Cast.Data" "true")
+)
+)
+  (
+  "UInt16"
+  ("maxbits" "16")
+  ("alignment" "2")
+  (
+  "properties"
+  ("Cast.Data" "true")
+  ("Cast.UInt" "true")
+  ("alignment" 2)
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "Int16"
+  ("maxbits" "16")
+  ("alignment" "2")
+  (
+  "properties"
+  ("alignment" 2)
+  ("Cast.Int" "true")
+  ("Cast.Bit" "true")
+  ("Cast.Data" "true")
+)
+)
+  (
+  "Int32"
+  ("maxbits" "32")
+  ("alignment" "4")
+  (
+  "properties"
+  ("Cast.Bit" "true")
+  ("Cast.Data" "true")
+  ("Cast.Int" "true")
+  ("alignment" 4)
+)
+)
+  (
+  "Int128"
+  ("maxbits" "128")
+  ("alignment" "16")
+  (
+  "properties"
+  ("alignment" 16)
+  ("Cast.Data" "true")
+  ("Cast.Int" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "Float64"
+  ("maxbits" "64")
+  ("alignment" "8")
+  (
+  "properties"
+  ("Cast.Bit" "true")
+  ("Cast.Float" "true")
+  ("bits" 64)
+  ("alignment" 8)
+)
+)
+  (
+  "FP128"
+  ("maxbits" "128")
+  ("alignment" "16")
+  (
+  "properties"
+  ("alignment" 16)
+  ("bits" 128)
+  ("Cast.Bit" "true")
+  ("Cast.Float" "true")
+)
+)
+  (
+  "Void"
+  ("maxbits" "0")
+  ("alignment" "0")
+  ("properties" ("alignment" 0))
+)
+  (
+  "String"
+  ("maxbits" "0")
+  ("alignment" "8")
+  ("properties" ("Cast.String" "true") ("alignment" 8))
+)
+  (
+  "Char"
+  ("maxbits" "32")
+  ("alignment" "4")
+  (
+  "properties"
+  ("alignment" 4)
+  ("Cast.Data" "true")
+  ("Cast.Char" "true")
+  ("Cast.Bit" "true")
+)
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/types/bootstrap.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/protocols.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/collections.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/fs.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/net.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/signal.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/ipc.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/thread.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/user.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/mem.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/atomic.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/env.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/io.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/cli.bv"), symbols: [], alias: None, span: None })"
+)
+  (
+  "toplevel"
+  "Statement(Let { name: "counter", names: ["counter"], ty: Some(Vector(Custom("UInt"), [Anonymous(8)])), expr: Some(Cast(Decimal(0), Vector(Custom("UInt"), [Anonymous(8)]))), modifiers: [] })"
+)
+  (
+  "txn"
+  "step"
+  ("params")
+  (
+  "contract"
+  ("pre" ("binop" "Lt" ("ident" "counter") 255))
+  ("post" ("binop" "Lt" ("ident" "counter") 255))
+)
+  ("body")
+  (
+  "assign"
+  ("ident" "counter")
+  (
+  "cast"
+  ("binop" "Add" ("cast" ("ident" "counter") "Int") 1)
+  "UInt[8]"
+)
+)
+)
+)

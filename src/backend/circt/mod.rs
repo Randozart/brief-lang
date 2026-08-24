@@ -691,13 +691,17 @@ impl CirctBackend {
         // NOTE: no placeholder wire — emit_contract_condition emits the
         // defining comb op directly with this result name (a pre-emitted
         // hw.wire caused duplicate definitions).
+        // §3.4: obligations ASSERTED, not just computed — sv.assert fires
+        // at simulation/synthesis time when the condition fails.
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
+            writeln!(out, "  sv.assert {} : \"precondition of {}\"", w, name).ok();
         }
         if !matches!(&contract.post_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_post", name));
             self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
+            writeln!(out, "  sv.assert {} : \"postcondition of {}\"", w, name).ok();
         }
 
         for stmt in body {

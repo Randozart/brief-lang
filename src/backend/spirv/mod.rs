@@ -270,6 +270,106 @@ mod tests {
         );
     }
 
+    /// §2.1 read-path lock: a kernel READING two buffers (scale-and-add)
+    /// must emit TWO AccessChains + loads feeding the compute — locks the
+    /// SSBO read side, not just writes.
+    #[test]
+    fn test_mad_kernel_reads_two_buffers() {
+        // out[i] = fa * (a[i] + b[i])
+        // Policy gate — without '!> accel:' the analysis produces no entries.
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("accel".into(), crate::ast::PropertyValue::String("try_all".into()));
+        let program = vec![
+            TopLevel::ModuleMetadata(meta),
+            TopLevel::StateDecl(StateDecl {
+                name: "i".into(),
+                ty: Type::int(),
+                span: None,
+            }),
+            state_decl("a", 256),
+            state_decl("b", 256),
+            state_decl("out", 256),
+            TopLevel::Transaction(Transaction {
+                name: "mad".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::BinaryOp(
+                        BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(64)),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("out".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Index(
+                                Box::new(Expr::Identifier("a".into())),
+                                Box::new(Expr::Identifier("i".into())),
+                            )),
+                            Box::new(Expr::Index(
+                                Box::new(Expr::Identifier("b".into())),
+                                Box::new(Expr::Identifier("i".into())),
+                            )),
+                        ),
+                    ),
+                    Statement::Assign(
+                        Expr::Identifier("i".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("i".into())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let analysis = analyze(&program);
+        let entry = analysis.accel.get("mad")
+            .unwrap_or_else(|| panic!("mad must be analyzed; accel keys: {:?}",
+                analysis.accel.keys().collect::<Vec<_>>()));
+        assert!(entry.shape.eligible, "{:?}", entry.shape.reasons);
+        assert!(entry.shape.write_buffers.contains(&"out".to_string()),
+            "write buffers: {:?}", entry.shape.write_buffers);
+        // Reads may be empty if the analysis classifies a[i]/b[i] as
+        // work-item-affine loads folded into the write — the KERNEL-side
+        // assertion below (AccessChains) is what locks the read path.
+        let reads = entry.shape.read_buffers.clone();
+        eprintln!("read_buffers={:?} scalars={:?}", reads, entry.shape.scalar_ins);
+
+        let mut builder = SpirvBuilder::new();
+        emit_kernel(&mut builder, "mad", &entry.shape, &program).unwrap();
+        let m = builder.module_ref();
+        let access_chains = m.functions.iter()
+            .flat_map(|f| f.blocks.iter())
+            .flat_map(|b| b.instructions.iter())
+            .filter(|i| i.class.opcode == rspirv::spirv::Op::AccessChain)
+            .count();
+        // 3 chains: a[i] load, b[i] load, out[i] store (the index local
+        // needs none). Locks BOTH read paths + the write path.
+        assert!(access_chains >= 3,
+            "two reads + one write need >=3 access chains; got {}",
+            access_chains);
+    }
+
     /// Capability honesty + selection: ineligible bodies never become
     /// kernels, and a named entry that doesn't exist errors helpfully.
     #[test]

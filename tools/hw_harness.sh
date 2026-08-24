@@ -61,6 +61,18 @@ for FIX in tmp_fixtures/hw/*.bv; do
         fi
     fi
 
+    # 5-6. Vivado compile + optional synthesis (user install; gated)
+    if [ -x "${VIVADO_BIN:-/mnt/data/tools/Xilinx/Vivado/2023.1/bin}/xvlog" ] && [ -s "$SV" ]; then
+        if ! bash "$ROOT/tools/vivado_check.sh" "$SV" > "$WORK/viv.log" 2>&1; then
+            echo "HW $NAME: FAIL (vivado)"; sed 's/^/    /' "$WORK/viv.log" | head -5
+            FAIL=1; rm -rf "$WORK"; continue
+        fi
+        if [ "${VIVADO_SYNTH:-0}" = "1" ]; then
+            VIVADO_SYNTH=1 TOP_MODULE=top bash "$ROOT/tools/vivado_check.sh" "$SV" \
+                > /dev/null 2>&1 || { echo "HW $NAME: FAIL (vivado synth)"; FAIL=1; rm -rf "$WORK"; continue; }
+        fi
+    fi
+
     echo "HW $NAME: ok"
     rm -rf "$WORK"
 done
