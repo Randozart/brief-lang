@@ -44,6 +44,14 @@ pub fn emit_intrinsic_call(
             return BTypedRegister { name: narrowed, ty: Type::int() };
         }
         "Load#" => return emit_load(backend, out, v, args, indent),
+        // 2026-08-23 (gpu.bv): workgroup barrier — CPU lowering is a no-op
+        // returning true (single thread trivially reaches the barrier).
+        // The SPIR-V backend maps this to OpControlBarrier.
+        "Barrier#" => {
+            writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
+            let narrowed = narrow_int_result(backend, out, v, indent);
+            return BTypedRegister { name: narrowed, ty: Type::int() };
+        }
         "Store#" => return emit_store(backend, out, v, args, indent),
         "Copy#" => return emit_copy(backend, out, v, args, indent),
         "Fill#" => return emit_fill(backend, out, v, args, indent),

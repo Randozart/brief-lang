@@ -3506,6 +3506,21 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 TopLevel::Constant(c) => {
                     return Some((c.name.clone(), c.ty.clone()));
                 }
+                // 2026-08-23: `export let` wraps a Constant OR a typed Let
+                // statement — unwrap both so exported constants are visible
+                // to the file's own bodies (posix/io.bv's FD_STDOUT was
+                // invisible to its own defns).
+                TopLevel::Export(e) => match e.inner.as_ref() {
+                    TopLevel::Constant(c) => {
+                        return Some((c.name.clone(), c.ty.clone()));
+                    }
+                    TopLevel::Statement(stmt) => {
+                        if let Statement::Let { name, ty: Some(t), .. } = stmt.as_ref() {
+                            return Some((name.clone(), t.clone()));
+                        }
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
             None
