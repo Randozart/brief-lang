@@ -1157,3 +1157,43 @@ long long briev_host_arity_of(long long id) {
     }
     return -1;
 }
+
+// ── 2026-08-23 (process.bv revival): process/environment intrinsics ────
+// Exit-code convention: 0 = success, nonzero = failure (errno-ish).
+
+int64_t __briev_spawn(const uint8_t* cmd) {
+    int status = system((const char*)cmd);
+    if (status == -1) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    return -1;
+}
+
+uint8_t* __briev_spawn_output(const uint8_t* cmd) {
+    FILE* fp = popen((const char*)cmd, "r");
+    if (!fp) return NULL;
+    size_t cap = 4096, len = 0;
+    uint8_t* buf = (uint8_t*)malloc(cap);
+    if (!buf) { pclose(fp); return NULL; }
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0) {
+        len += n;
+        if (cap - len < 2) { cap *= 2; buf = (uint8_t*)realloc(buf, cap); }
+    }
+    pclose(fp);
+    buf[len] = 0;
+    return buf;
+}
+
+int64_t __briev_setenv(const uint8_t* k, const uint8_t* v) {
+    return (int64_t)setenv((const char*)k, (const char*)v, 1);
+}
+
+uint8_t* __briev_getcwd(void) {
+    char buf[4096];
+    if (!getcwd(buf, sizeof(buf))) return NULL;
+    return (uint8_t*)strdup(buf);
+}
+
+int64_t __briev_chdir(const uint8_t* p) {
+    return (int64_t)chdir((const char*)p);
+}

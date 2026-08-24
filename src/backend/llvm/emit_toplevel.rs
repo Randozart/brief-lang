@@ -651,6 +651,14 @@ impl LlvmBackend {
         // 2026-08-01 (D2): `Now#` — monotonic clock for the watchdog
         // `within N ms` deadline compare.
         writeln!(out, "declare i64 @__briev_now() nounwind").ok();
+        // 2026-08-23 (process.bv revival): process/environment helpers.
+        writeln!(out, "declare i64 @__briev_spawn(ptr) nounwind").ok();
+        writeln!(out, "declare ptr @__briev_spawn_output(ptr)").ok();
+        writeln!(out, "declare i64 @__briev_setenv(ptr, ptr) nounwind").ok();
+        writeln!(out, "declare ptr @__briev_getcwd()").ok();
+        writeln!(out, "declare i64 @__briev_chdir(ptr) nounwind").ok();
+        writeln!(out, "declare ptr @getenv(ptr)").ok();
+        writeln!(out, "declare i64 @strlen(ptr)").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
         writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();

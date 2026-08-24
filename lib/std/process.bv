@@ -1,40 +1,41 @@
 // Process - Process spawning and environment
-// Tier 8: Infrastructure
+// Tier 8: Infrastructure.
+// 2026-08-23 (revival): Spawn#/SpawnWithOutput#/SetEnv#/GetCwd#/ChDir#
+// registered with C runtime helpers (__briev_spawn etc. — system()/popen/
+// setenv/getcwd/chdir). Commands are shell-interpreted single strings;
+// pass arguments inside the command string. Result members use exhaustive
+// match (no member syntax on enums).
 
 import "std/result";
 
 // ===== PROCESS SPAWNING (Intrinsics) =====
-// Replaced: frgn __spawn/__spawn_with_output (TOML-based) with
-// Spawn#/SpawnWithOutput# intrinsics. Remaining frgns (env_var,
-// set_env_var, etc.) have no intrinsic equivalent yet.
 
-defn spawn_res(command: String, args: List<String>) -> Result<Int, String> {
-    term Spawn#(command, args);
+defn spawn_res(command: String) -> Result<Int, String> {
+    let code = Spawn#(command);
+    term Ok(code);
 };
 
-defn spawn_with_output_res(command: String, args: List<String>) -> Result<String, String> {
-    term SpawnWithOutput#(command, args);
+defn spawn_with_output_res(command: String) -> Result<String, String> {
+    let output_text = SpawnWithOutput#(command);
+    term Ok(output_text);
 };
 
-// Replaced: frgn __env_var with GetEnv# intrinsic
 defn env_var_res(name: String) -> Result<String, String> {
-    let val = GetEnv#(name);
+    let val = get_env!(name);
     when val != "" {
         term Ok(val);
     };
     term Err("env var not found");
 };
 
-// Replaced: frgn __set_env_var with SetEnv# intrinsic
-defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
+defn set_env_var_res(name: String, value: String) -> Result<Int, String> {
     let ret = SetEnv#(name, value);
     when ret == 0 {
-        term Ok(void);
+        term Ok(ret);
     };
     term Err("setenv failed");
 };
 
-// Replaced: frgn __current_dir with GetCwd# intrinsic
 defn current_dir_res() -> Result<String, String> {
     let dir = GetCwd#();
     when dir != "" {
@@ -43,84 +44,72 @@ defn current_dir_res() -> Result<String, String> {
     term Err("getcwd failed");
 };
 
-// Replaced: frgn __set_current_dir with ChDir# intrinsic
-defn set_current_dir_res(path: String) -> Result<Void, String> {
+defn set_current_dir_res(path: String) -> Result<Int, String> {
     let ret = ChDir#(path);
     when ret == 0 {
-        term Ok(void);
+        term Ok(ret);
     };
     term Err("chdir failed");
 };
 
 // ===== NATIVE WRAPPERS =====
 
-defn run(command: String, args: List<String>) -> Int [command != ""][term >= -1] {
-    let result = spawn_res(command, args);
-    when is_ok(result) {
-        term unwrap(result);
+defn run(command: String) -> Int [command != ""] {
+    let result = spawn_res(command);
+    term match result {
+        Ok(code) => code,
+        Err(_) => 0 - 1,
     };
-    term -1;
 };
 
-defn spawn_with_output(command: String, args: List<String>) -> String [command != ""][term .^Length >= 0] {
-    let result = spawn_with_output_res(command, args);
-    when is_ok(result) {
-        term unwrap(result);
+defn spawn_with_output(command: String) -> String [command != ""] {
+    let result = spawn_with_output_res(command);
+    term match result {
+        Ok(output_text) => output_text,
+        Err(_) => "",
     };
-    term "";
 };
 
-defn env_var(name: String) -> String [name != ""][term .^Length >= 0] {
+defn env_var(name: String) -> String [name != ""] {
     let result = env_var_res(name);
-    when result.is_ok() {
-        term result.value;
+    term match result {
+        Ok(v) => v,
+        Err(_) => "",
     };
-    term "";
 };
 
-defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true || term == false] {
+defn set_env_var(name: String, value: String) -> Bool [name != ""] {
     let result = set_env_var_res(name, value);
-    when result.is_ok() {
-        term true;
+    term match result {
+        Ok(_) => true,
+        Err(_) => false,
     };
-    term false;
 };
 
-defn current_dir() -> String [true][term .^Length >= 0] {
+defn current_dir() -> String {
     let result = current_dir_res();
-    when result.is_ok() {
-        term result.value;
+    term match result {
+        Ok(d) => d,
+        Err(_) => "",
     };
-    term "";
 };
 
-defn set_current_dir(path: String) -> Bool [path != ""][term == true || term == false] {
+defn set_current_dir(path: String) -> Bool [path != ""] {
     let result = set_current_dir_res(path);
-    when result.is_ok() {
-        term true;
+    term match result {
+        Ok(_) => true,
+        Err(_) => false,
     };
-    term false;
 };
 
 // ===== CONVENIENCE FUNCTIONS =====
 
-defn run_command(command: String) -> Bool [command != ""][term == true || term == false] {
-    let result = run(command, []);
-    when result == 0 {
-        term true;
-    };
-    term false;
+defn run_command(command: String) -> Bool [command != ""] {
+    let result = run(command);
+    term result == 0;
 };
 
-defn run_command_with_args(command: String, args: List<String>) -> Bool [command != ""][term == true || term == false] {
-    let result = run(command, args);
-    when result == 0 {
-        term true;
-    };
-    term false;
-};
-
-defn get_env_or_default(name: String, default: String) -> String [name != ""][term .^Length >= 0] {
+defn get_env_or_default(name: String, default: String) -> String [name != ""] {
     let val = env_var(name);
     when val != "" {
         term val;
