@@ -1890,6 +1890,8 @@ fn infer_variant_construction(
                 .find(|s| s.name == format!("__variant_{variant}"))
                 .map(|s| match &s.ty {
                     Type::Tuple(elems) => elems.clone(),
+                    // 2026-08-23: Void = zero-payload variant → 0 args.
+                    Type::Void => vec![],
                     one => vec![one.clone()],
                 })
                 .unwrap_or_default()

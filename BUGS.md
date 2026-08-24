@@ -4996,6 +4996,15 @@ Load#/Store#, Ptr<Bit<N>>), archived 12 removed-feature showcases.
    saxpy top-level call, test_ffi Result-vs-Bool, gpu-compute Ptr
    literals, vector_test UInt literal, fn-ptr .#Ptr remnants the real-pipeline gate (2026-08-23 update #7, revised)
 
+NOTE: json.bv migration BLOCKED on three language gaps:
+(a) List<T> + List<T> concatenation via `+` operator not typed for
+    generic element types (works for concrete Int/Float but not JsonValue)
+(b) String indexing s[i] returns Int (byte) not Char — need char_at
+    helper or indexing change
+(c) Slice arithmetic parens needed: s[i:(i+1)] not s[i..i+1]
+Zero-payload enum variants FIXED (Void marker, 0-arg construction).
+The uni→match rewrite itself is done (the match-based code is correct).
+
 NOTE: json.bv requires a DEEP migration, not just uni→match. After the
 uni rewrite (done by hand), the underlying code has ~12 type errors from
 string-indexing drift (s[i] returns Int not Char), List<JsonValue>
