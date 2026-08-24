@@ -776,9 +776,12 @@ impl<'a> Parser<'a> {
     fn parse_block_expr(&mut self) -> Result<Expr, SyntaxError> {
         // 2026-08-23: the `{` was already consumed by parse_primary's
         // advance() before dispatching here — parse statements directly.
-        // A trailing expression WITHOUT `;` is the block's implicit value
-        // (`Ok(v) => { let x = …; x }`). parse_statement enforces semicolons,
-        // so the tail case is handled by parse_expression + RBrace check.
+        //
+        // 2026-08-23 (nested match fix): parse_statement dispatches
+        // Token::Match to the STATEMENT match form (block bodies + `;`),
+        // but inside a block expression we need the EXPRESSION match form.
+        // Route Match tokens to parse_match_expr directly and wrap in
+        // Statement::Expression.
         let mut stmts = Vec::new();
         loop {
             if self.check(&Token::RBrace) || self.is_at_end() {
@@ -786,6 +789,14 @@ impl<'a> Parser<'a> {
             }
             if self.check(&Token::Semicolon) {
                 self.advance();
+                continue;
+            }
+            // Match expression: use the expression form, not the statement form.
+            if self.check(&Token::Match) {
+                self.advance(); // consume 'match' keyword
+                let expr = self.parse_match_expr()?;
+                self.eat(&Token::Semicolon);
+                stmts.push(crate::ast::Statement::Expression(expr));
                 continue;
             }
             // Try parsing as a full statement (with semicolon).
