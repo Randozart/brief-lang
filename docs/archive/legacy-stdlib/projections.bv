@@ -24,14 +24,14 @@ let a: Int = val .#Alignment;
 let r: Int = val .#Range;
 
 // Bit manipulation projections on Int
-let pop: Int = val :> Popcount;       // count of set bits
-let lz: Int = val :> LeadingZeros;    // leading zero bits
-let tz: Int = val :> TrailingZeros;   // trailing zero bits
-let abs: Int = val :> Absolute;        // absolute value
-let rev: Int = val :> BitReverse;      // bit-reversed
+let pop: Int = val.Popcount#;       // count of set bits
+let lz: Int = val.LeadingZeros#;    // leading zero bits
+let tz: Int = val.TrailingZeros#;   // trailing zero bits
+let abs: Int = val.Abs#;        // absolute value
+let rev: Int = val.BitReverse#;      // bit-reversed
 
 // Type — runtime type tag (useful in generics)
-let ty: Int = val :> Type;
+let ty: Int = val.^Type;
 
 // Match — pattern-match dispatch on type
 let matched: Bool = val :> Match;

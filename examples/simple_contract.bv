@@ -1,7 +1,8 @@
+// simple_contract — basic reactive node with pre/goal contract.
 let counter: Int = 0;
 
-node increment [counter < 10]
-  [counter == @counter + 1]
+node increment [counter >= 0 && counter < 10]
+  [counter == 10]
 {
   counter = counter + 1;
   term;

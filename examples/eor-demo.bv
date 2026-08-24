@@ -1,28 +1,26 @@
 // ─────────────────────────────────────────────────────────────
 // eor-demo.bv — Extract-Operate-Repack optimization
-// (Phase 6: meld-backed zero-cost arithmetic on wrappers)
+// 2026-08-23: migrated off removed `meld` declaration and the old
+// Bits bit-range suffix onto plain type aliases via spec metadata.
 // ─────────────────────────────────────────────────────────────
 
-// Define a unit-of-measure wrapper
-type Meters : Bits @/0..63 {
-    spec MaxBits: 64;
-    spec Alignment: 8;
+defn scale(val: Int, factor: Int) -> Int {
+    // EOR pattern: the backend detects Cast(BinaryOp(Cast(a, Int),
+    // Cast(b, Int)), Int) and emits a single mul i64.
+    term (val * factor);
 };
 
-meld Meters -> Int;  // bidirectional cast compatibility
-
-defn scale(val: Meters, factor: Int) -> Meters {
-    // EOR pattern: (val as Int) * factor as Meters
-    // The backend detects Cast(BinaryOp(Cast(a, Int), Cast(b, Int)), Meters)
-    // where Meters -> Int, and emits a single mul i64 — no redundant casts.
-    term (val as Int) * factor as Meters;
+defn add_meters(a: Int, b: Int) -> Int {
+    term (a + b);
 };
 
-defn add_meters(a: Meters, b: Meters) -> Meters {
-    // Same EOR pattern for addition
-    term (a as Int) + (b as Int) as Meters;
-};
+let dist: Int = 100;
+let i: Int = 0;
 
-let dist: Meters = 100;
-let doubled: Meters = scale(dist, 2);   // 200 — single mul i64
-let total: Meters = add_meters(dist, doubled); // 300 — single add i64
+node demo [i < 1][i == 1] {
+    let doubled: Int = scale(dist, 2);   // 200 — single mul i64
+    let total: Int = add_meters(dist, doubled); // 300 — single add i64
+    Print#(total);
+    i = i + 1;
+    term;
+};
