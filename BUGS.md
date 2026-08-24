@@ -4740,8 +4740,12 @@ program REWRITING, not just direct IR emission.
 
 ## Bounty flow broken at branch point: tamer `.bv` fails typecheck (2026-08-23)
 
-**Status:** PARTIAL 2026-08-23 (`backend-foundation`) — interpreter core
-ported; entry point remains.
+**Status:** CLOSED 2026-08-23 (`backend-foundation`) — full port landed;
+bounty pipeline executes real programs end-to-end (e2e asserts stdout).
+Superseded architecture note: tame()/vm_loop were replaced by the
+C-driven step() loop + manifest-carried absolute entry_bc during the HCALL
+slice — see tools/bounty_e2e.sh, tamer/install_sim.c, and the parity
+harness (7 fixtures green) as the living proof.
 **Found:** Plan 0 verification — `brievc bounty examples/hello/main.bv`.
 **Symptom:** tamer compilation dies in TYPECHECK (pre-backend):
 `expected Ptr<Int> for binary op '+' … found Int` ×2, plus
@@ -4920,45 +4924,25 @@ phi predecessor cite the block that ACTUALLY branches.
 
 ## Convergent-txn loop: body side-effects don't persist across iterations (2026-08-23)
 
-**Status:** OPEN — blocks the tamer's `vm_loop` execution (Plan 1 HCALL
-slice). All surrounding infrastructure is landed and verified; this is the
-last execution blocker.
-**Repro:** `lib/tamer/main.bv` native tamer + `tools/bounty_e2e.sh`-style
-run of `tmp_probe/arith.bv` bounty. `vm_loop` (convergent txn: pre
-`[pc >= 0 && pc < bc_end && running != 0]`, post `[running == 0]`, body =
-exec_op + pc/running updates) loops forever re-executing the SAME
-instruction — instrumented prints show exec_op called with identical `pc`
-every iteration, and param-slot stores (`pc = new_pc`,
-`running = 0`) never take effect across iterations. No syscalls, no exit.
-**Isolation facts:**
-- Loop structure in IR is well-formed (`loop:` pre → body → post → back
-  edge; guarded stores present).
-- exec_op gets INLINED into vm_loop at -O2 (no symbol) — single-stepping
-  needs source-level debug or a reduced IR case.
-- Straight-line convergent txns and non-looping txns behave correctly
-  (parse_host_table originally recursive-convergent ALSO spun; rewritten
-  straight-line it works).
-**Suspect:** `src/backend/llvm/loop_engine/` SSA-loop conversion for
-NON-COUNTABLE loops whose bodies contain calls + stores to param-slot
-allocas — possibly same family as the two-guard phantom-label bug
-(bd4eeb88 touched counter.rs).
-**Fix direction:** reduce to minimal IR: one txn, one iteration-bound
-param store; check whether loop-engine drops the back-edge phi update for
-the stored slot. Then fix forward with a Kani/IR-level regression test.
+**Status:** CLOSED-AS-ARCHITECTED 2026-08-23 — superseded, no longer a
+blocker. The tamer executes via the C-driven `step()` loop
+(`tamer/install_sim.c` calls the exported single-step Briev function);
+`vm_loop` is dead code. The parity harness (7 fixtures) runs REAL
+programs through this path green — execution correctness is covered.
 
-**Update (same day, C-driver workaround attempt):** exported single-step
-`step()` + C driver loop (install_sim.c). Result: halts after 1 step —
-exec_op's `match op` takes the wildcard even though `read_u8(lair, pc)`
-returns the correct opcode when called directly. Suspicion: txn-call
-convention from a DEFN caller (implicit `%state` threading) or slot
-initialization ordering. Next probe: call `step` variants passing each
-buffer handle through module-level state vs params; dump exec_op IR pre-
-inlining.
-
-**Workarounds available:** hand-peel vm_loop's loop in Briev via explicit
-bounded-iteration txn chain (ugly), or drive the interpretation loop from
-C (install_sim calls a single-step `exec_op_entry` export repeatedly —
-keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
+**Known limitation preserved for loop_engine owners:** a convergent txn
+whose pre-condition never changes across iterations (exec_op-style pure
+functions misdeclared as txns) spins forever — param-slot stores across
+iterations did not persist under investigation at the time. Two of the
+three repro symptoms were since explained: (1) exec_op-as-txn was a
+semantics error (pure dispatch must be a defn — fixed), (2) the C-driver
+"halts after 1 step" was an ABI bug (missing leading %state in C
+prototypes — fixed). The residual observation (param-slot stores across
+convergent iterations) remains UNVERIFIED against current main; anyone
+touching src/backend/llvm/loop_engine/ should re-run the original repro
+(lib/tamer/vm.bv vm_loop shape) before trusting either verdict.
+Related family: Version-DAG phi entry below (CLOSED), two-guard
+phantom-label fix (bd4eeb88).
 
 ## Version-DAG phi mismatch with nested guard bodies (2026-08-23)
 
@@ -4983,7 +4967,12 @@ the blocks that ACTUALLY branch, never from tracked names.
 
 ## VM parity test: missing tmp_fixtures/parity fixtures (2026-08-23)
 
-**Status:** OPEN — foreign tamer-track issue. The parity test expects .bv files under tmp_fixtures/parity/ (empty dir). Coordinate with that track.
+**Status:** CLOSED 2026-08-23 — collision resolved in fb01f8c5 (fixtures
+restored from backend-foundation history after main's backlog sweep saw
+them as untracked strays mid-merge). OWNERSHIP NOTE for future sweeps:
+tmp_fixtures/parity/*.bv are the VM plan's conformance corpus (owned by
+backend-foundation track); tmp_fixtures/hw/* are the hardware plan's.
+Do not sweep either without checking both branches.
 
 ## Conformance sweep: 67 active sources fail the real-pipeline gate (2026-08-23 update #8)
 
