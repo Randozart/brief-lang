@@ -5,9 +5,10 @@
 expression lowering over locals + invocation-id builtins + one SSBO
 binding for indexed state (src/backend/spirv/lower.rs); capability
 errors replace silent drops; structural tests on the in-memory module.
-OPEN: assembled-binary validation (BUGS.md 2026-08-23 — rspirv/spirv-val
-reject the serialized stream; test #[ignore]d). §2.2 accel-analysis-driven
-selection still pending.
+Assembled-binary validation FIXED + spirv-val PASSES (BUGS.md closed —
+seven stacked emission bugs documented there). Remaining: §2.2
+accel-analysis-driven kernel selection (replaces [idx < N] sniffing),
+Vulkan smoke test when a runner is available.
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first. Work confined
 to `src/backend/spirv/`, own tests, own doc sections.

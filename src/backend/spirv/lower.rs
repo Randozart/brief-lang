@@ -19,7 +19,6 @@ use rspirv::spirv::{self, StorageClass, Word};
 
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::spirv::builder::SpirvBuilder;
-use crate::backend::spirv::types::TypeCache;
 
 /// One program-state field referenced by the kernel body. Collected before
 /// emission so the SSBO layout is stable regardless of use order.
@@ -31,19 +30,16 @@ pub struct StateField {
 
 pub struct FnLowerer<'a> {
     pub builder: &'a mut SpirvBuilder,
-    /// int / bool type ids (cached once).
-    pub int_ty: Word,
-    pub bool_ty: Word,
     /// Local variables: name → (Function-storage pointer id, type).
     pub vars: HashMap<String, (Word, Type)>,
     /// State fields exposed through the SSBO: sorted name → (type, member idx).
     pub state_fields: Vec<StateField>,
     /// SSBO variable id (StorageBuffer storage class); set by setup_state_buffer.
     pub ssbo_var: Option<Word>,
-    /// BuiltIn GlobalInvocationId input variable (lazily created).
-    global_id_var: Option<Word>,
-    /// BuiltIn LocalInvocationId input variable (lazily created).
-    local_id_var: Option<Word>,
+    /// BuiltIn GlobalInvocationId input variable (pre-threaded or lazy).
+    pub global_id_var: Option<Word>,
+    /// BuiltIn LocalInvocationId input variable (pre-threaded or lazy).
+    pub local_id_var: Option<Word>,
     /// Set when the body executed a term/endprogram — callers stop
     /// branching afterwards (a block can only have one terminator).
     pub terminated: bool,
@@ -51,15 +47,8 @@ pub struct FnLowerer<'a> {
 
 impl<'a> FnLowerer<'a> {
     pub fn new(builder: &'a mut SpirvBuilder, state_fields: Vec<StateField>) -> Self {
-        let int_ty = builder.types.lower(&Type::int()).expect("int type");
-        let bool_ty = builder
-            .types
-            .lower(&Type::Bits(1))
-            .expect("bool type");
         FnLowerer {
             builder,
-            int_ty,
-            bool_ty,
             vars: HashMap::new(),
             state_fields,
             ssbo_var: None,
@@ -87,22 +76,15 @@ impl<'a> FnLowerer<'a> {
     pub fn emit_stmt(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
             Statement::Let { name, expr: Some(e), .. } => {
-                let (val, ty) = self.emit_expr(e)?;
-                let ptr_ty = self.ptr_to(&ty)?;
-                let var = self.builder.gen_id();
-                self.builder.emit(Instruction::new(
-                    spirv::Op::Variable,
-                    Some(ptr_ty),
-                    Some(var),
-                    vec![Operand::StorageClass(StorageClass::Function)],
-                ));
-                self.builder.emit(Instruction::new(
-                    spirv::Op::Store,
-                    None,
-                    None,
-                    vec![Operand::IdRef(var), Operand::IdRef(val)],
-                ));
-                self.vars.insert(name.clone(), (var, ty));
+                // 2026-08-23: the VARIABLE itself was pre-declared in the
+                // entry block (SPIR-V requires every function-scope
+                // OpVariable in the FIRST block); here we only store.
+                let (val, _ty) = self.emit_expr(e)?;
+                let Some((var, _)) = self.vars.get(name.as_str()) else {
+                    return self.err(format!("local '{}' was not pre-declared", name));
+                };
+                let var = *var;
+                self.builder.store(var, val);
                 Ok(())
             }
             Statement::Let { expr: None, .. } => {
@@ -171,7 +153,7 @@ impl<'a> FnLowerer<'a> {
     pub fn emit_expr(&mut self, e: &Expr) -> Result<(Word, Type), String> {
         match e {
             Expr::Decimal(n) => {
-                let c = self.int_const(*n);
+                let c = self.builder.i64_const(*n as u64);
                 Ok((c, Type::int()))
             }
             Expr::Identifier(name) => {
@@ -211,9 +193,9 @@ impl<'a> FnLowerer<'a> {
                     _ => self.local_invocation_id()?,
                 };
                 // Component pointer: AccessChain(var, dim)
-                let u32_ty = self.u32_ty()?;
-                let ptr_u32 = self.ptr_type(StorageClass::Input, u32_ty);
-                let dim_const = self.const_u32(dim);
+                let u32_ty = self.builder.u32_type();
+                let ptr_u32 = self.builder.ptr_class(StorageClass::Input, u32_ty);
+                let dim_const = self.builder.u32_const(dim);
                 let comp = self.builder.gen_id();
                 self.builder.emit(Instruction::new(
                     spirv::Op::AccessChain,
@@ -230,10 +212,11 @@ impl<'a> FnLowerer<'a> {
                 ));
                 // Widen u32 → i64 (values are small; zero-extension matches
                 // GLSL uint→int64 semantics for invocation ids).
+                let int_res_ty = self.builder.lower_type(&Type::int())?;
                 let wide = self.builder.gen_id();
                 self.builder.emit(Instruction::new(
                     spirv::Op::UConvert,
-                    Some(self.int_ty),
+                    Some(int_res_ty),
                     Some(wide),
                     vec![Operand::IdRef(raw)],
                 ));
@@ -246,7 +229,7 @@ impl<'a> FnLowerer<'a> {
                     _ => return self.err("builtins take a constant dimension 0..=2"),
                 };
                 let sizes = [64u64, 1, 1];
-                let c = self.i64_const(sizes[dim as usize]);
+                let c = self.builder.i64_const(sizes[dim as usize]);
                 Ok((c, Type::int()))
             }
             "Load#" | "Store#" => self.err(
@@ -263,7 +246,7 @@ impl<'a> FnLowerer<'a> {
         use crate::ast::BinaryOpKind::*;
         let (lid, lty) = self.emit_expr(l)?;
         let (rid, rty) = self.emit_expr(r)?;
-        let result_int = self.int_ty;
+        let result_int = self.builder.lower_type(&Type::int())?;
         let op = match kind {
             Add => spirv::Op::IAdd,
             Sub => spirv::Op::ISub,
@@ -284,10 +267,11 @@ impl<'a> FnLowerer<'a> {
             And | Or => {
                 // Logical over bool operands.
                 let op = if matches!(kind, And) { spirv::Op::LogicalAnd } else { spirv::Op::LogicalOr };
+                let bool_ty = self.builder.lower_type(&Type::Bits(1))?;
                 let res = self.builder.gen_id();
                 self.builder.emit(Instruction::new(
                     op,
-                    Some(self.bool_ty),
+                    Some(bool_ty),
                     Some(res),
                     vec![Operand::IdRef(lid), Operand::IdRef(rid)],
                 ));
@@ -296,7 +280,11 @@ impl<'a> FnLowerer<'a> {
             Concat => return self.err("string concat is not a kernel operation"),
         };
         let is_cmp = matches!(kind, Lt | Gt | Le | Ge | Eq | Neq);
-        let res_ty = if is_cmp { self.bool_ty } else { result_int };
+        let res_ty = if is_cmp {
+            self.builder.lower_type(&Type::Bits(1))?
+        } else {
+            result_int
+        };
         // Both operands must share the lowered type id (Int vs Bits widths).
         let lid = self.coerce(lid, &lty, &rty)?;
         let rid = self.coerce(rid, &rty, &lty)?;
@@ -338,15 +326,23 @@ impl<'a> FnLowerer<'a> {
         for ty in &field_types {
             members.push(self.type_id(ty)?);
         }
-        let struct_ty = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::TypeStruct,
-            struct_ty,
-            members.iter().map(|&m| Operand::IdRef(m)).collect(),
-        );
+        let member_ids: Vec<Word> = members.clone();
+        let struct_ty = self.builder.builder.type_struct(member_ids);
         // Block decoration (required for SSBO interface).
-        self.decorate(struct_ty, spirv::Decoration::Block, 0);
-        let struct_ptr = self.ptr_type(StorageClass::StorageBuffer, struct_ty);
+                self.builder
+            .decorate_raw(struct_ty, spirv::Decoration::Block, vec![]);
+        // Explicit member offsets — Block structs must be fully laid out.
+        let mut offset: u32 = 0;
+        for (idx, f) in self.state_fields.iter().enumerate() {
+            self.builder.builder.member_decorate(
+                struct_ty,
+                idx as u32,
+                spirv::Decoration::Offset,
+                [rspirv::dr::Operand::LiteralBit32(offset)],
+            );
+            offset += spirv_type_bytes(&f.ty);
+        }
+        let struct_ptr = self.builder.ptr_class(StorageClass::StorageBuffer, struct_ty);
         let var = self.builder.gen_id();
         self.builder.emit_global(Instruction::new(
             spirv::Op::Variable,
@@ -354,8 +350,16 @@ impl<'a> FnLowerer<'a> {
             Some(var),
             vec![Operand::StorageClass(StorageClass::StorageBuffer)],
         ));
-        self.decorate(var, spirv::Decoration::DescriptorSet, 0);
-        self.decorate(var, spirv::Decoration::Binding, 0);
+        self.builder.decorate_raw(
+            var,
+            spirv::Decoration::DescriptorSet,
+            vec![rspirv::dr::Operand::LiteralBit32(0)],
+        );
+        self.builder.decorate_raw(
+            var,
+            spirv::Decoration::Binding,
+            vec![rspirv::dr::Operand::LiteralBit32(0)],
+        );
         self.ssbo_var = Some(var);
         Ok(())
     }
@@ -375,8 +379,8 @@ impl<'a> FnLowerer<'a> {
         };
         let elem_id = self.type_id(&elem_ty)?;
         // Chain: ssbo var → member index → element index.
-        let member_idx = self.const_u32(pos as u32);
-        let ptr_ty = self.ptr_type(StorageClass::StorageBuffer, elem_id);
+        let member_idx = self.builder.u32_const(pos as u32);
+        let ptr_ty = self.builder.ptr_class(StorageClass::StorageBuffer, elem_id);
         let chain = self.builder.gen_id();
         self.builder.emit(Instruction::new(
             spirv::Op::AccessChain,
@@ -394,74 +398,12 @@ impl<'a> FnLowerer<'a> {
     // ── Small helpers ───────────────────────────────────────────────────
 
     fn type_id(&mut self, ty: &Type) -> Result<Word, String> {
-        self.builder.types.lower(ty)
+        self.builder.lower_type(ty)
     }
 
     fn ptr_to(&mut self, ty: &Type) -> Result<Word, String> {
         let t = self.type_id(ty)?;
-        Ok(self.ptr_type(StorageClass::Function, t))
-    }
-
-    fn ptr_type(&mut self, class: StorageClass, pointee: Word) -> Word {
-        // Duplicate OpTypePointer instructions are legal SPIR-V; per-call
-        // ids keep this simple (dedup would need a side map on FnLowerer).
-        let id = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::TypePointer,
-            id,
-            vec![Operand::StorageClass(class), Operand::IdRef(pointee)],
-        );
-        id
-    }
-
-    fn decorate(&mut self, target: Word, decoration: spirv::Decoration, literal: u32) {
-        self.builder.emit_global(Instruction::new(
-            spirv::Op::Decorate,
-            None,
-            None,
-            vec![
-                Operand::IdRef(target),
-                Operand::Decoration(decoration),
-                Operand::LiteralBit32(literal),
-            ],
-        ));
-    }
-
-    fn const_u32(&mut self, v: u32) -> Word {
-        let u32_ty = self.u32_ty().unwrap_or_else(|_| self.int_ty);
-        let c = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::Constant,
-            c,
-            vec![Operand::IdRef(u32_ty), Operand::LiteralBit32(v)],
-        );
-        c
-    }
-
-    fn i64_const(&mut self, v: u64) -> Word {
-        let c = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::Constant,
-            c,
-            vec![Operand::IdRef(self.int_ty), Operand::LiteralBit64(v)],
-        );
-        c
-    }
-
-    pub fn int_const(&mut self, v: i64) -> Word {
-        self.i64_const(v as u64)
-    }
-
-    fn u32_ty(&mut self) -> Result<Word, String> {
-        // 32-bit unsigned int type, created directly (not via Briev Types —
-        // builtins are u32 by spec).
-        let id = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::TypeInt,
-            id,
-            vec![Operand::LiteralBit32(32), Operand::LiteralBit32(0)],
-        );
-        Ok(id)
+        Ok(self.builder.ptr_class(StorageClass::Function, t))
     }
 
     fn global_invocation_id(&mut self) -> Result<Word, String> {
@@ -484,14 +426,9 @@ impl<'a> FnLowerer<'a> {
 
     fn builtin_input(&mut self, builtin: spirv::BuiltIn) -> Result<Word, String> {
         // Type: #3 x u32 (vec3<uint>) in Input storage.
-        let u32_ty = self.u32_ty()?;
-        let vec3 = self.builder.gen_id();
-        self.builder.emit_type(
-            spirv::Op::TypeVector,
-            vec3,
-            vec![Operand::IdRef(u32_ty), Operand::LiteralBit32(3)],
-        );
-        let ptr = self.ptr_type(StorageClass::Input, vec3);
+        let u32_ty = self.builder.u32_type();
+        let vec3 = self.builder.builder.type_vector(u32_ty, 3);
+        let ptr = self.builder.ptr_class(StorageClass::Input, vec3);
         let var = self.builder.gen_id();
         self.builder.emit_global(Instruction::new(
             spirv::Op::Variable,
@@ -558,8 +495,36 @@ mod __collect {
     }
 }
 
-// Silence unused import when Instruction re-export shifts.
-#[allow(unused)]
-fn _t(_: Instruction) {}
-#[allow(unused)]
-fn _t2(_: TypeCache) {}
+/// 2026-08-23: pre-scan a kernel body for typed `let` bindings so their
+/// OpVariables can live in the ENTRY block (SPIR-V layout rule). Nested
+/// statement lists (guarded bodies) are included.
+pub fn collect_locals(body: &[Statement], out: &mut Vec<(String, Type)>) {
+    for stmt in body {
+        match stmt {
+            Statement::Let { name, ty: Some(ty), .. } => {
+                out.push((name.clone(), ty.clone()));
+            }
+            Statement::Guarded(_, inner) | Statement::Block(inner) => {
+                collect_locals(inner, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 2026-08-23: byte size of the supported kernel-surface types (i64 scalars
+/// and arrays thereof).
+pub fn spirv_type_bytes(ty: &Type) -> u32 {
+    match ty {
+        Type::Vector(_, dims) => dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u32,
+                crate::ast::Dimension::Named(_, n) => *n as u32,
+            })
+            .product::<u32>()
+            .max(1)
+            * 8,
+        _ => 8,
+    }
+}

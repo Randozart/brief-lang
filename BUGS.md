@@ -4781,8 +4781,8 @@ fails CI instead of install time.
 
 ## SPIR-V assembled binary rejected by rspirv parser / spirv-val (2026-08-23)
 
-**Status:** OPEN — blocks test_scale_kernel_passes_spirv_val (#[ignore]d)
-and real-device execution of `.spv` output.
+**Status:** CLOSED 2026-08-23 — full typed-emission refactor; spirv-val
+PASSES on the scale kernel (test flipped on).
 **Symptom:** re-parsing the assembled binary fails with
 `OperandExceeded(144, 9)`; spirv-val reports `Id 1000003 is defined more
 than once`. The IN-MEMORY dr::Module is well-formed (all structural
@@ -4795,9 +4795,24 @@ emissions and rspirv Builder's internal dedup/state for
 types/constants — possibly the Decorate-with-result-id-0 pushed through
 push_type, or constants emitted via emit_type while the builder also
 tracks its own constant table.
-**Fix direction:** switch emission to rspirv's typed builder helpers
-(`constant_i64`, typed type-instruction methods) so its internal tables
-stay consistent, then flip the ignored test on.
+**FIXED 2026-08-23 — root cause was MULTIPLE stacked emission bugs, each
+masked by the next:**
+1. `instr()` allocated/embedded a result id for RESULT-LESS ops
+   (OpUnreachable encoded wc=2 with a phantom operand).
+2. Terminators via raw insert_into_block left rspirv's selected_block
+   open -> NestedBlock on the next begin_block (typed branch/ret/unreachable
+   now used everywhere).
+3. Decorations lost their parameter operands through dr::Builder::decorate
+   -> replaced with decorate_raw() carrying explicit operands.
+4. Layout: SPIR-V §2.4 requires annotations BEFORE types/constants/variables;
+   incremental emission interleaved them -> build() now stable-buckets
+   types_global_values into [decorates | types+consts | variables].
+5. LoopMerge names merge AND continue targets: both blocks must exist even
+   when the body always returns (continue got skipped on terminated bodies).
+6. Function-scope OpVariables must be the FIRST instructions of entry:
+   locals pre-scanned + declared in entry, values stored from the body.
+7. Entry-point interface must list every Input/Output + SSBO variable.
+
 **Interim:** structural coverage lives on the in-memory module
 (test_scale_kernel_lowers_real_body) — lowering correctness IS verified;
 only the serialization path is in question.

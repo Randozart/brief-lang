@@ -1,86 +1,82 @@
-/// SPIR-V module builder — wraps `rspirv::dr::build::Builder` with type cache.
+/// SPIR-V module builder — dr::Builder wrapper with typed emission.
 ///
 /// 2026-07-15: Sets capabilities, memory model, provides id and type helpers.
+/// 2026-08-23 (assembly-bug fix, BUGS.md): ALL type/constant/decoration
+/// emission goes through rspirv's TYPED builder helpers (type_int,
+/// constant_bit64, decorate, …) so its internal dedup tables stay
+/// consistent. The old path mixed raw insert_types_global_values with the
+/// builder's own state and produced streams rspirv/spirv-val reject
+/// (duplicate ids / OperandExceeded). The separate TypeCache id space is
+/// gone — one id counter, one source of truth.
+/// To undo: restore TypeCache + arena + flush_types (git history).
 
 use rspirv::dr::Builder;
-use rspirv::dr::Operand;
+use std::collections::HashMap;
+
+use crate::ast::Type;
 use rspirv::binary::Assemble;
 use rspirv::spirv::{self, Word, ExecutionModel};
-use crate::backend::spirv::types::TypeCache;
 
-/// 2026-07-15: Combines rspirv Builder with type/id management.
+/// Combines rspirv Builder with Briev-type lowering.
 pub struct SpirvBuilder {
     pub builder: Builder,
-    pub types: TypeCache,
+    /// Dedup map for lowered Briev types (key = canonical debug form).
+    type_keys: HashMap<String, Word>,
 }
 
 impl SpirvBuilder {
-    /// 2026-07-15: Create builder, set Shader + Int64 + Float64 + GLSL450.
+    /// Create builder, set Shader + Int64 + Float64 + GLSL450.
     pub fn new() -> Self {
         let mut b = Builder::new();
         b.capability(spirv::Capability::Shader);
         b.capability(spirv::Capability::Int64);
         b.capability(spirv::Capability::Float64);
         b.memory_model(spirv::AddressingModel::Logical, spirv::MemoryModel::GLSL450);
-        let mut types = TypeCache::new();
-        // 2026-08-23 (id-unification bugfix): the dr::Builder assigns ids
-        // from its own counter (starting at 1) while TypeCache started at
-        // 100 — the ranges overlapped and modules referenced duplicated ids
-        // ("Type Id 10 is not a type", spirv-val). Reserve a disjoint high
-        // range for the cache and widen the module bound accordingly.
-        types.next_id = 1_000_000;
-        let mut sb = SpirvBuilder {
+        SpirvBuilder {
             builder: b,
-            types,
-        };
-        sb
-    }
-
-    /// 2026-08-23: move queued cache-type instructions into the module's
-    /// types/global-values section. MUST be called before begin_function —
-    /// types referenced inside a function have to precede it, and appending
-    /// after assembly ordering broke spirv-val ('Id defined more than once'
-    /// / reference-before-definition). To undo: restore the drain inside
-    /// build().
-    pub fn flush_types(&mut self) {
-        for inst in std::mem::take(&mut self.types.types_arena) {
-            self.builder
-                .insert_types_global_values(rspirv::dr::InsertPoint::End, inst);
+            type_keys: HashMap::new(),
         }
     }
 
-    /// Raise the module's id bound (call again if high-range ids grow).
-    pub fn raise_bound(&mut self, min: u32) {
-        if let Some(header) = self.builder.module_mut().header.as_mut() {
-            if header.bound < min {
-                header.bound = min;
-            }
-        }
-    }
-
-    /// 2026-07-15: Finalize module and assemble to SPIR-V binary.
-    /// 2026-07-21: Inserts type instructions from TypeCache.types_arena
-    /// into the module's types/global values section before assembly.
+    /// Finalize module and assemble to SPIR-V binary.
     pub fn build(mut self) -> Result<Vec<u8>, String> {
-        // Cache-range id floor. NOTE: Builder::module() (below) OVERWRITES
-        // header.bound with its own next_id, so the max is applied AFTER it.
-        let cache_floor = self.types.next_id + 1;
-        // Transfer type instructions from TypeCache into the module
-        for inst in &self.types.types_arena {
-            eprintln!("[arena] op={:?} rid={:?} ops={} ", inst.class.opcode, inst.result_id, inst.operands.len());
-        }
+        // 2026-08-23 (layout bugfix): strict validators require the globals
+        // section ordered types/constants → variables → decorations. Our
+        // incremental emission interleaved them (builtin variables between
+        // constants), which spirv-val rejects as 'Decorate is in an invalid
+        // layout section'. Stable-bucket sort here; deterministic because
+        // each bucket keeps emission order.
+        // To undo: remove this reordering block.
         {
-            let m = self.builder.module_ref();
-            eprintln!("[pre] tgv={} fns={}", m.types_global_values.len(), m.functions.len());
-            for (i, g) in m.types_global_values.iter().enumerate().take(60) {
-                eprintln!("[tgv {:02}] {:?} rid={:?}", i, g.class.opcode, g.result_id);
+            let mut types_ct = Vec::new();
+            let mut vars = Vec::new();
+            let mut decors = Vec::new();
+            let tgv = &mut self.builder.module_mut().types_global_values;
+            for inst in std::mem::take(tgv) {
+                match inst.class.opcode {
+                    spirv::Op::Variable => vars.push(inst),
+                    spirv::Op::Decorate | spirv::Op::MemberDecorate => decors.push(inst),
+                    _ => types_ct.push(inst),
+                }
             }
+            // SPIR-V §2.4 logical layout: annotations (OpDecorate) come in
+            // their OWN section BEFORE types/constants/global-variables.
+            for d in &decors {
+                eprintln!("[bucket-dec] {:?} rid={:?} ops={:?}",
+                    d.class.opcode, d.result_id,
+                    d.operands.iter().map(|o| match o {
+                        rspirv::dr::Operand::IdRef(w) => format!("id{}", w),
+                        rspirv::dr::Operand::Decoration(x) => format!("{:?}", x),
+                        rspirv::dr::Operand::LiteralBit32(v) => format!("lit{}", v),
+                        rspirv::dr::Operand::BuiltIn(b) => format!("{:?}", b),
+                        other => format!("{:?}", other),
+                    }).collect::<Vec<_>>());
+            }
+            tgv.extend(decors);
+            tgv.extend(types_ct);
+            tgv.extend(vars);
         }
-        self.flush_types();
-        let mut module = self.builder.module();
-        if let Some(header) = module.header.as_mut() {
-            header.bound = header.bound.max(cache_floor);
-        }
+        let module = self.builder.module();
         let words = module.assemble();
         let mut binary = Vec::with_capacity(words.len() * 4);
         for w in &words {
@@ -89,75 +85,288 @@ impl SpirvBuilder {
         Ok(binary)
     }
 
-    /// 2026-07-15: Allocate a fresh result ID.
+    /// Allocate a fresh result ID.
     pub fn gen_id(&mut self) -> Word {
         self.builder.id()
     }
 
-    /// 2026-07-15: Set entry point via builder.
-    pub fn set_entry_point(&mut self, func_id: Word, name: &str, execution_model: ExecutionModel) {
-        self.builder.entry_point(execution_model, func_id, name, vec![]);
+    // ── Briev type lowering (typed, internally deduped by rspirv) ───────
+
+    /// Lower a Briev type to a SPIR-V type id.
+    pub fn lower_type(&mut self, ty: &Type) -> Result<Word, String> {
+        let key = format!("{:?}", ty);
+        if let Some(&id) = self.type_keys.get(&key) {
+            return Ok(id);
+        }
+        let id = self.lower_type_fresh(ty)?;
+        self.type_keys.insert(key, id);
+        Ok(id)
     }
 
-    /// 2026-07-15: Add execution mode via builder.
-    pub fn add_execution_mode(&mut self, func_id: Word, mode: spirv::ExecutionMode, x: u32, y: u32, z: u32) {
-        self.builder.execution_mode(func_id, mode, &[x, y, z]);
+    fn lower_type_fresh(&mut self, ty: &Type) -> Result<Word, String> {
+        match ty {
+            Type::Void => Ok(self.builder.type_void()),
+            Type::Bits(1) => Ok(self.builder.type_bool()),
+            Type::Bits(bytes) => {
+                // Bits(N) unsigned ints; 8 for i8/u8, else full width.
+                Ok(self.builder.type_int(*bytes as u32, 0))
+            }
+            Type::Ptr(elem) => {
+                let elem_id = self.lower_type(elem)?;
+                Ok(self.builder.type_pointer(None, spirv::StorageClass::Function, elem_id))
+            }
+            Type::Vector(inner, dims) => {
+                // Fixed-size array (indexed state). Innermost-out so each
+                // ArrayStride covers its tail; stride = element bytes (8).
+                let inner_id = self.lower_type(inner)?;
+                let mut cur = inner_id;
+                let mut dim_sizes: Vec<usize> = dims
+                    .iter()
+                    .map(|d| match d {
+                        crate::ast::Dimension::Anonymous(n) => *n,
+                        crate::ast::Dimension::Named(_, n) => *n,
+                    })
+                    .collect();
+                dim_sizes.reverse();
+                let elem_bytes = 8u32;
+                let mut stride = elem_bytes;
+                for n in dim_sizes {
+                    let len = self.u32_const(n as u32);
+                    let arr = self.builder.type_array(cur, len);
+                    self.decorate_raw(
+                        arr,
+                        spirv::Decoration::ArrayStride,
+                        vec![rspirv::dr::Operand::LiteralBit32(stride)],
+                    );
+                    cur = arr;
+                    stride *= n as u32;
+                }
+                Ok(cur)
+            }
+            Type::Custom(name) => match name.as_str() {
+                "Int" => Ok(self.builder.type_int(64, 0)),
+                "Float" => Ok(self.builder.type_float(32)),
+                "Float64" => Ok(self.builder.type_float(64)),
+                "Bool" => Ok(self.builder.type_bool()),
+                "String" => {
+                    // String is a 24-byte struct (3 × i64) in Briev.
+                    let m0 = self.builder.type_int(64, 0);
+                    let members = vec![m0, m0, m0];
+                    Ok(self.builder.type_struct(members))
+                }
+                other => Err(format!("SPIR-V: unsupported type Custom({:?})", other)),
+            },
+            other => Err(format!("SPIR-V: unsupported type {:?}", other)),
+        }
     }
 
-    /// 2026-07-15: Begin a new function.
-    pub fn begin_function(&mut self, return_type: Word, func_id: Word, control: spirv::FunctionControl, func_type: Word) {
-        self.builder.begin_function(return_type, Some(func_id), control, func_type).unwrap();
+    /// Cached 32-bit unsigned type (builtins use u32 by spec).
+    pub fn u32_type(&mut self) -> Word {
+        let key = "builtin_u32";
+        if let Some(&id) = self.type_keys.get(key) {
+            return id;
+        }
+        let id = self.builder.type_int(32, 0);
+        self.type_keys.insert(key.to_string(), id);
+        id
     }
 
-    /// 2026-07-15: End current function.
-    pub fn end_function(&mut self) {
-        self.builder.end_function().unwrap();
+    /// Cached i64 constant.
+    pub fn i64_const(&mut self, v: u64) -> Word {
+        let key = format!("i64c_{}", v);
+        if let Some(&id) = self.type_keys.get(&key) {
+            return id;
+        }
+        let int_ty = match self.lower_type(&Type::int()) {
+            Ok(t) => t,
+            Err(_) => unreachable!("i64 type always lowers"),
+        };
+        let id = self.builder.constant_bit64(int_ty, v);
+        self.type_keys.insert(key, id);
+        id
     }
 
-    /// 2026-07-15: Begin a new block with optional label ID.
-    pub fn begin_block(&mut self, label_id: Option<Word>) {
-        self.builder.begin_block(label_id).unwrap();
+    /// Cached u32 constant.
+    pub fn u32_const(&mut self, v: u32) -> Word {
+        let key = format!("u32c_{}", v);
+        if let Some(&id) = self.type_keys.get(&key) {
+            return id;
+        }
+        let u32_ty = self.u32_type();
+        let id = self.builder.constant_bit32(u32_ty, v);
+        self.type_keys.insert(key, id);
+        id
     }
 
-    /// 2026-07-15: Emit a type instruction (OpType*).
-    pub fn emit_type(&mut self, op: spirv::Op, result_id: Word, operands: Vec<Operand>) {
-        let inst = rspirv::dr::Instruction::new(op, None, Some(result_id), operands);
-        self.builder.insert_types_global_values(rspirv::dr::InsertPoint::End, inst);
+    /// 2026-08-23: Decoration with EXPLICIT operand list. The typed
+    /// dr::Builder::decorate dropped additional_params on the wire for
+    /// BuiltIn/DescriptorSet/Binding (assembled wc=3 instead of 4 ->
+    /// 'expected more operands'). Raw emission guarantees the words.
+    /// To undo: return to self.builder.decorate(...) calls.
+    pub fn decorate_raw(
+        &mut self,
+        target: Word,
+        decoration: spirv::Decoration,
+        params: Vec<rspirv::dr::Operand>,
+    ) {
+        let mut operands = vec![
+            rspirv::dr::Operand::IdRef(target),
+            rspirv::dr::Operand::Decoration(decoration),
+        ];
+        operands.extend(params);
+        let inst = rspirv::dr::Instruction::new(spirv::Op::Decorate, None, None, operands);
+        self.emit_global(inst);
     }
 
-    /// 2026-08-23: Emit a MODULE-GLOBAL instruction (OpVariable in
-    /// StorageBuffer/Input classes, decorations) — these live outside any
-    /// function, so they must not go through emit() (current block).
+    /// Typed pointer with explicit storage class (deduped per class+pointee).
+    pub fn ptr_class(&mut self, class: spirv::StorageClass, pointee: Word) -> Word {
+        let key = format!("ptr_{:?}_{}", class, pointee);
+        if let Some(&id) = self.type_keys.get(&key) {
+            return id;
+        }
+        let id = self.builder.type_pointer(None, class, pointee);
+        self.type_keys.insert(key, id);
+        id
+    }
+
+
+    /// BuiltIn decoration (requires the BuiltIn literal operand).
+    pub fn decorate_builtin(&mut self, target: Word, builtin: spirv::BuiltIn) {
+        self.decorate_raw(
+            target,
+            spirv::Decoration::BuiltIn,
+            vec![rspirv::dr::Operand::BuiltIn(builtin)],
+        );
+    }
+
+    // ── Module globals / function plumbing ──────────────────────────────
+
+    /// Emit a MODULE-GLOBAL instruction (StorageBuffer/Input OpVariables).
     pub fn emit_global(&mut self, inst: rspirv::dr::Instruction) {
         self.builder
             .insert_types_global_values(rspirv::dr::InsertPoint::End, inst);
     }
 
-    /// 2026-08-23: Store value into pointer (inside current block).
+    /// Set entry point via builder.
+    pub fn set_entry_point(
+        &mut self,
+        func_id: Word,
+        name: &str,
+        execution_model: ExecutionModel,
+        interface: &[Word],
+    ) {
+        self.builder.entry_point(
+            execution_model,
+            func_id,
+            name,
+            interface.to_vec(),
+        );
+    }
+
+    /// Add execution mode via builder.
+    pub fn add_execution_mode(
+        &mut self,
+        func_id: Word,
+        mode: spirv::ExecutionMode,
+        x: u32,
+        y: u32,
+        z: u32,
+    ) {
+        self.builder.execution_mode(func_id, mode, &[x, y, z]);
+    }
+
+    /// Begin a new function.
+    pub fn begin_function(
+        &mut self,
+        return_type: Word,
+        func_id: Word,
+        control: spirv::FunctionControl,
+        func_type: Word,
+    ) {
+        self.builder
+            .begin_function(return_type, Some(func_id), control, func_type)
+            .unwrap();
+    }
+
+    /// End current function.
+    pub fn end_function(&mut self) {
+        self.builder.end_function().unwrap();
+    }
+
+    /// Begin a new block with optional label ID.
+    pub fn begin_block(&mut self, label_id: Option<Word>) {
+        self.builder.begin_block(label_id).unwrap();
+    }
+
+    /// Emit an instruction into the current block.
+    pub fn emit(&mut self, inst: rspirv::dr::Instruction) {
+        self.builder
+            .insert_into_block(rspirv::dr::InsertPoint::End, inst);
+    }
+
+    /// Store value into pointer (inside current block).
     pub fn store(&mut self, ptr: Word, val: Word) {
         let inst = rspirv::dr::Instruction::new(
             spirv::Op::Store,
             None,
             None,
-            vec![Operand::IdRef(ptr), Operand::IdRef(val)],
+            vec![rspirv::dr::Operand::IdRef(ptr), rspirv::dr::Operand::IdRef(val)],
         );
-        self.builder.insert_into_block(rspirv::dr::InsertPoint::End, inst);
+        self.emit(inst);
     }
 
-    /// 2026-08-23: Branch to label. Uses rspirv's TYPED terminator so the
-    /// builder's selected-block state closes — raw insert_into_block leaves
-    /// the block 'open' and the next begin_block panics (NestedBlock).
-    /// To undo: revert to raw Instruction emission.
+    /// Branch to label. Uses rspirv's TYPED terminator so the builder's
+    /// selected-block state closes — raw inserts leave it open and the next
+    /// begin_block panics (NestedBlock).
     pub fn branch(&mut self, label: Word) {
         self.builder.branch(label).expect("branch");
     }
 
-    /// 2026-08-23: Typed return (see branch note).
+    /// Typed return (see branch note).
     pub fn ret(&mut self) {
         self.builder.ret().expect("ret");
     }
 
-    /// 2026-08-23: Typed loop merge + conditional branch pair (closes block).
+    /// Typed unreachable (see branch note).
+    pub fn spirv_unreachable(&mut self) {
+        self.builder.unreachable().expect("unreachable");
+    }
+
+    /// Load from pointer into fresh id of result type.
+    pub fn load(&mut self, result_ty: Word, ptr: Word) -> Word {
+        self.instr(spirv::Op::Load, Some(result_ty), None, vec![
+            rspirv::dr::Operand::IdRef(ptr),
+        ])
+    }
+
+    /// 2026-08-23: read-only module view for tests/inspection.
+    pub fn module_ref(&self) -> &rspirv::dr::Module {
+        self.builder.module_ref()
+    }
+
+    /// Generic instruction into current block.
+    pub fn instr(
+        &mut self,
+        op: spirv::Op,
+        result_ty: Option<Word>,
+        result_id: Option<Word>,
+        operands: Vec<rspirv::dr::Operand>,
+    ) -> Word {
+        // 2026-08-23 (bugfix): only allocate/embed a result id when the
+        // instruction HAS a result type — a result-less op (OpUnreachable)
+        // emitted with Some(id) encodes word-count 2 and every consumer
+        // rejects it ('expected no more operands after 1 words').
+        let id = match (result_ty, result_id) {
+            (_, Some(explicit)) => Some(explicit),
+            (Some(_), None) => Some(self.gen_id()),
+            (None, None) => None,
+        };
+        let inst = rspirv::dr::Instruction::new(op, result_ty, id, operands);
+        self.emit(inst);
+        id.unwrap_or_else(|| self.gen_id())
+    }
+
+    /// LoopMerge + conditional branch pair (typed — closes the header block).
     pub fn loop_header_tail(
         &mut self,
         cond: Word,
@@ -171,34 +380,5 @@ impl SpirvBuilder {
         self.builder
             .branch_conditional(cond, body, merge, [])
             .expect("branch_conditional");
-    }
-
-    /// 2026-08-23: Load from pointer into fresh id of result type.
-    pub fn load(&mut self, result_ty: Word, ptr: Word) -> Word {
-        self.instr(spirv::Op::Load, Some(result_ty), None, vec![Operand::IdRef(ptr)])
-    }
-
-    /// 2026-08-23: Generic instruction into current block.
-    pub fn instr(&mut self, op: spirv::Op, result_ty: Option<Word>, result_id: Option<Word>, operands: Vec<Operand>) -> Word {
-        let id = result_id.unwrap_or_else(|| self.gen_id());
-        let inst = rspirv::dr::Instruction::new(op, result_ty, Some(id), operands);
-        self.builder.insert_into_block(rspirv::dr::InsertPoint::End, inst);
-        id
-    }
-
-    /// 2026-07-15: Emit an instruction into the current block.
-    pub fn emit(&mut self, inst: rspirv::dr::Instruction) {
-        self.builder.insert_into_block(rspirv::dr::InsertPoint::End, inst);
-    }
-
-    /// 2026-07-15: Get mutable access to the underlying module for
-    /// direct Function manipulation (used by kernel.rs).
-    pub fn module_mut(&mut self) -> &mut rspirv::dr::Module {
-        self.builder.module_mut()
-    }
-
-    /// 2026-08-23: read-only module view for tests/inspection.
-    pub fn module_ref(&self) -> &rspirv::dr::Module {
-        self.builder.module_ref()
     }
 }

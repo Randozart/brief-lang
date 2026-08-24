@@ -10,11 +10,9 @@
 /// or OpenCL consumption.
 
 pub mod builder;
-pub mod intrinsics;
 pub mod kernel;
 pub mod lower;
 pub mod normalizer;
-pub mod types;
 
 use crate::ast::TopLevel;
 use crate::backend::spirv::builder::SpirvBuilder;
@@ -217,10 +215,9 @@ mod tests {
         assert!(ssbo, "indexed state must lower to a StorageBuffer variable");
     }
 
-    /// §2.5: spirv-val validation. IGNORED pending the assembly bug below —
-    /// do not delete; flip on when BUGS.md item closes.
+    /// §2.5: spirv-val validation — typed-emission refactor closed the
+    /// assembly bug (BUGS.md 2026-08-23 CLOSED).
     #[test]
-    #[ignore = "module assembly produces a stream rspirv/spirv-val reject                 (OperandExceeded / duplicate id) — BUGS.md 2026-08-23"]
     fn test_scale_kernel_passes_spirv_val() {
         let program = scale_kernel_program();
         let binary = compile_spirv(&program, "scale").unwrap();
@@ -228,6 +225,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("scale.spv");
         std::fs::write(&path, &binary).unwrap();
+        let out = std::process::Command::new("spirv-val")
+            .arg(&path)
+            .output()
+            .expect("spirv-val");
+        eprintln!("[dbg] binary {} bytes", binary.len());
         let out = std::process::Command::new("spirv-val")
             .arg(&path)
             .output()

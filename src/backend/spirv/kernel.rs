@@ -13,7 +13,7 @@ use rspirv::dr::Operand;
 use rspirv::spirv::{self, Word, ExecutionModel, StorageClass, FunctionControl};
 use crate::ast::{Expr, Transaction, Type};
 use crate::backend::spirv::builder::SpirvBuilder;
-use crate::backend::spirv::lower::{collect_state_fields, FnLowerer};
+use crate::backend::spirv::lower::{collect_locals, collect_state_fields, FnLowerer};
 
 /// Local workgroup size — matches the WorkgroupSize# intrinsic constants.
 const LOCAL_SIZE_X: u32 = 64;
@@ -25,14 +25,7 @@ pub fn is_kernel(txn: &Transaction) -> bool {
 
 /// Module-section i64 constant (usable before/without a FnLowerer).
 fn const_i64(builder: &mut SpirvBuilder, v: u64) -> Word {
-    let int_ty = builder.types.lower(&Type::int()).expect("int type");
-    let c = builder.gen_id();
-    builder.emit_type(
-        spirv::Op::Constant,
-        c,
-        vec![Operand::IdRef(int_ty), Operand::LiteralBit64(v)],
-    );
-    c
+    builder.i64_const(v)
 }
 
 /// Emit a complete SPIR-V kernel with a lowered body.
@@ -54,22 +47,16 @@ pub fn emit_kernel(
         return Err("not a kernel: no [idx < N] precondition".into());
     };
 
-    let void_id = builder.types.lower(&Type::void())?;
-    let int_ty = builder.types.lower(&Type::int())?;
-    let bool_ty = builder.types.lower(&Type::Bits(1))?;
+    let void_id = builder.lower_type(&Type::void())?;
+    let int_ty = builder.lower_type(&Type::int())?;
+    let bool_ty = builder.lower_type(&Type::Bits(1))?;
     let func_id = builder.gen_id();
     let func_type_id = builder.gen_id();
-    builder.emit_type(spirv::Op::TypeFunction, func_type_id, vec![
-        Operand::IdRef(void_id),
-    ]);
+    builder.builder.type_function_id(Some(func_type_id), void_id, []);
 
     // Induction variable type + ids for constants and blocks, allocated
     // BEFORE the body lowerer borrows the builder.
-    let ptr_int = builder.gen_id();
-    builder.emit_type(spirv::Op::TypePointer, ptr_int, vec![
-        Operand::StorageClass(StorageClass::Function),
-        Operand::IdRef(int_ty),
-    ]);
+    let ptr_int = builder.ptr_class(StorageClass::Function, int_ty);
     let idx_var = builder.gen_id();
     let entry_id = builder.gen_id();
     let loop_id = builder.gen_id();
@@ -84,27 +71,48 @@ pub fn emit_kernel(
     // the module section, so emitting them via a short-lived lowerer here is
     // order-independent; the ssbo var id carries into the body lowerer.
     let state_fields = collect_state_fields(items, &txn.name);
-    let ssbo_var = {
+    let (ssbo_var, global_id_var, local_id_var) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
-        if std::env::var("BRIEV_NO_BUILTIN").is_err() { warm.warm_builtins()?; }
-        if std::env::var("BRIEV_NO_SSBO").is_err() { warm.setup_state_buffer()?; }
-        warm.ssbo_var
+        warm.warm_builtins()?;
+        warm.setup_state_buffer()?;
+        (warm.ssbo_var, warm.global_id_var, warm.local_id_var)
     };
-    // Types referenced by the function must precede it in the module.
-    builder.flush_types();
-
     builder.begin_function(void_id, func_id, FunctionControl::empty(), func_type_id);
 
     // ── entry: idx_var = 0
-    builder.begin_block(Some(entry_id));
+builder.begin_block(Some(entry_id));
     // Function-scope variables must be the first instructions of entry.
+    // Typed `let` locals are pre-scanned so EVERY function-scope
+    // OpVariable lands as the first instructions of the first block
+    // (SPIR-V layout rule) — stores come after all declarations.
+    // Induction variable declaration (first, like every function-scope var).
     builder.instr(
         spirv::Op::Variable,
         Some(ptr_int),
         Some(idx_var),
         vec![Operand::StorageClass(StorageClass::Function)],
     );
+    let mut collected_locals: Vec<(String, Type)> = Vec::new();
+    collect_locals(&txn.body, &mut collected_locals);
+    let local_vars: Vec<(String, Word, Type)> = collected_locals
+        .into_iter()
+        .map(|(name, ty)| {
+            let elem = builder.lower_type(&ty)?;
+            let ptr = builder.ptr_class(StorageClass::Function, elem);
+            let var = builder.gen_id();
+            builder.instr(
+                spirv::Op::Variable,
+                Some(ptr),
+                Some(var),
+                vec![Operand::StorageClass(StorageClass::Function)],
+            );
+            Ok((name, var, ty))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     builder.store(idx_var, zero);
+    for (_, var, _) in &local_vars {
+        builder.store(*var, zero);
+    }
     builder.branch(loop_id);
 
     // ── loop header: cond = idx < N
@@ -119,19 +127,30 @@ pub fn emit_kernel(
     builder.loop_header_tail(cond, merge_id, continue_id, body_id);
 
     // ── body: lowered statements (the lowerer owns the builder here).
-    builder.begin_block(Some(body_id));
+builder.begin_block(Some(body_id));
     let terminated = {
         let mut lower = FnLowerer::new(builder, state_fields.clone());
         lower.ssbo_var = ssbo_var;
+        lower.global_id_var = global_id_var;
+        lower.local_id_var = local_id_var;
         lower.vars.insert("idx".to_string(), (idx_var, Type::int()));
+        for (name, var, ty) in &local_vars {
+            lower.vars.insert(name.clone(), (*var, ty.clone()));
+        }
         for stmt in &txn.body {
             if lower.terminated {
                 break;
             }
             lower.emit_stmt(stmt)?;
         }
-        lower.terminated
+        let t = lower.terminated;
+        t
     };
+    // 2026-08-23 (bugfix): LoopMerge NAMES merge + continue targets — both
+    // blocks must exist even when the body always returned (a missing
+    // continue label reads as an undefined forward reference). Dead paths
+    // get OpUnreachable and are stripped by the optimizer.
+    // To undo: restore the conditional skip.
     if !terminated {
         let cur = builder.load(int_ty, idx_var);
         let next = builder.instr(
@@ -141,23 +160,31 @@ pub fn emit_kernel(
             vec![Operand::IdRef(cur), Operand::IdRef(one)],
         );
         builder.store(idx_var, next);
+        // Body block already ended with OpReturn when terminated — a second
+        // terminator there is MismatchedTerminator.
         builder.branch(continue_id);
-
-        builder.begin_block(Some(continue_id));
-        builder.branch(loop_id);
     }
 
-    // ── merge: exit point. When every body path already returned, the block
-    // is unreachable but must still EXIST (LoopMerge names it).
-    builder.begin_block(Some(merge_id));
+builder.begin_block(Some(continue_id));
+    // The loop header requires EXACTLY ONE back-edge — this branch IS it,
+    // unconditional even when the body always returned (the block is then
+    // simply unreachable from entry).
+    builder.branch(loop_id);
+
+builder.begin_block(Some(merge_id));
     if terminated {
-        builder.instr(spirv::Op::Unreachable, None, None, vec![]);
+        builder.spirv_unreachable();
     } else {
         builder.ret();
     }
     builder.end_function();
 
-    builder.set_entry_point(func_id, &txn.name, ExecutionModel::GLCompute);
+    // Entry-point interface lists every Input/Output variable (Vulkan rule).
+    let interface: Vec<Word> = [global_id_var, local_id_var, ssbo_var]
+        .into_iter()
+        .flatten()
+        .collect();
+    builder.set_entry_point(func_id, &txn.name, ExecutionModel::GLCompute, &interface);
     builder.add_execution_mode(func_id, spirv::ExecutionMode::LocalSize, LOCAL_SIZE_X, 1, 1);
 
     Ok(func_id)
