@@ -166,6 +166,9 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // 2026-07-15: Additional GPU intrinsics
         "GetGroupId#"    => Some(Signature { name: "GetGroupId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "GetNumGroups#"  => Some(Signature { name: "GetNumGroups#",  parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        // 2026-08-23: workgroup barrier — GPU-target only; CPU fallback is a
+        // no-op (single-threaded execution trivially passes the barrier).
+        "Barrier#"       => Some(Signature { name: "Barrier#",       parameters: vec![], return_kind: ReturnKind::Exact(Type::bool_()), observable: true, variadic: false }),
         "Dims#"          => Some(Signature { name: "Dims#",          parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
 
         // ── Pointers (compile-time address resolution) ──────────────

@@ -17,3 +17,8 @@ export defn execve(path: Int, argv: Int, envp: Int) -> Int {
 export defn wait4(pid: Int, wstatus: Int, options: Int) -> Int {
     term syscall3(SYS_WAIT4, pid, wstatus, options);
 };
+
+// Linux x86_64 syscall numbers (asm/unistd.h)
+let SYS_CLONE:   Int = 56;
+let SYS_EXECVE:  Int = 59;
+let SYS_WAIT4:   Int = 61;
