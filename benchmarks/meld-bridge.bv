@@ -19,8 +19,8 @@
 
 frgn consume_buffer(data: Int, size: Int) -> Int from "lib/meld_bridge.c";
 
-obj CBuffer { ptr: Int, len: Int };
-obj RSBuffer { data: Int, size: Int };
+obj CBuffer { ptr: Int; len: Int; };
+obj RSBuffer { data: Int; size: Int; };
 // 2026-08-09 (Phase 12): the meld declaration is removed (SPEC 19.6) —
 // CBuffer <:> RSBuffer adapts through explicit protocol cast edges.
 

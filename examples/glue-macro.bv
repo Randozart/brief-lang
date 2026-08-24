@@ -16,15 +16,12 @@ export defn add_and_print(a: Int, b: Int) -> Int {
 
 // Another export with meld-proven type compatibility
 export defn compute_dot(x: List<Float>, y: List<Float>) -> Float {
-    let dot: Float = 0.0;
-    let i: Int = 0;
-    let n: Int = x .#Size;
-    txn dot_loop [i < n][i == n] -> Float {
-        dot = dot + (x[i] * y[i]);
-        i = i + 1;
-        term;
-    };
-    term dot;
+    term compute_dot_loop(x, y, 0, 0.0);
+};
+
+defn compute_dot_loop(x: List<Float>, y: List<Float>, i: Int, acc: Float) -> Float {
+    when i >= x.Count#() { term acc; };
+    term compute_dot_loop(x, y, i + 1, acc + (x[i] * y[i]));
 };
 
 // The GLUE adapter macro (in glue/adapters/rust.bv) generates:

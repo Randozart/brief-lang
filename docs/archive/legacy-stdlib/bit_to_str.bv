@@ -2,7 +2,7 @@
 let s: String = "hello";
 let tick: Int = 0;
 node report [tick < 1][tick == 1] {
-    let b: #Bit = s as #Bit;          // content view: buffer address
+    let b: #Bit = s as Data as #Bit;          // content view: buffer address
     let r: String = b as String;      // encoding door: UTF8 wrap
     println!("{}", r);
     tick = 1;

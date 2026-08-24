@@ -1,7 +1,7 @@
 let s: String = "hello";
 let tick: Int = 0;
 node report [tick < 1][tick == 1] {
-    let b: #Bit = s as #Bit;
+    let b: #Bit = s as Data as #Bit;
     let n: Int = b as Int;
     println!("{}", n);
     tick = 1;

@@ -1,7 +1,7 @@
 // Example: Using the Briev Standard Library
 // Imports and exercises core stdlib modules: char, bits, option, result
 
-import char from "std/char";
+import <std/char>;
 import { absolute, min, max, clamp, is_positive, is_even } from "std/bits";
 import { some, none, map, unwrap } from "std/option";
 import { ok, err, is_ok, is_err } from "std/result";
