@@ -4983,10 +4983,15 @@ the blocks that ACTUALLY branch, never from tracked names.
 
 ## Conformance sweep: 89 active sources fail the real-pipeline gate (2026-08-23 update #7, revised)
 
-NOTE: json.bv requires HAND migration — a scripted uni→match transform
-proved unsafe on its mixed single-line/multi-line/nested forms (reverted;
-~25 sites including nested `uni` inside constructor args and struct-literal
-payloads like ParseFrame { value, pos }). the real-pipeline gate (2026-08-23 update #7)
+NOTE: json.bv requires a DEEP migration, not just uni→match. After the
+uni rewrite (done by hand), the underlying code has ~12 type errors from
+string-indexing drift (s[i] returns Int not Char), List<JsonValue>
+operations, and generic enum payload mismatches. These are pre-existing
+issues that were invisible behind the parse failure. A follow-up pass
+needs to: (a) add char_at helper + replace s[i] with it for Char access,
+(b) fix slice arithmetic parens, (c) address List<JsonValue> typing in
+Array/Object payloads. The match-arm block-expression parser bug was
+found and fixed (parse_block_expr double-LBrace). the real-pipeline gate (2026-08-23 update #7)
 
 **Progress:** ... → 92 → **89**. Pass 6 archived the legacy trg-binding
 files (briev_rt.bv ×2). the real-pipeline gate (2026-08-23 update #6)

@@ -774,7 +774,38 @@ impl<'a> Parser<'a> {
 
     /// Parse a block expression: { stmt; stmt; ... }
     fn parse_block_expr(&mut self) -> Result<Expr, SyntaxError> {
-        let stmts = self.parse_block()?;
+        // 2026-08-23: the `{` was already consumed by parse_primary's
+        // advance() before dispatching here — parse statements directly.
+        // A trailing expression WITHOUT `;` is the block's implicit value
+        // (`Ok(v) => { let x = …; x }`). parse_statement enforces semicolons,
+        // so the tail case is handled by parse_expression + RBrace check.
+        let mut stmts = Vec::new();
+        loop {
+            if self.check(&Token::RBrace) || self.is_at_end() {
+                break;
+            }
+            if self.check(&Token::Semicolon) {
+                self.advance();
+                continue;
+            }
+            // Try parsing as a full statement (with semicolon).
+            let saved = self.pos;
+            match self.parse_statement() {
+                Ok(stmt) => {
+                    stmts.push(stmt);
+                    continue;
+                }
+                Err(_) => {
+                    // Restore and try as a bare tail expression.
+                    self.pos = saved;
+                }
+            }
+            // Tail expression: parsed WITHOUT semicolon expectation.
+            let tail = self.parse_expression()?;
+            stmts.push(crate::ast::Statement::Expression(tail));
+            break;
+        }
+        self.expect(Token::RBrace)?;
         Ok(Expr::Block(stmts))
     }
 
