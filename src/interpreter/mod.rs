@@ -91,6 +91,32 @@ pub struct Interpreter {
     /// reference semantics: cleanup runs exactly once per registered defer,
     /// even when the enclosing firing rolls back.
     pub defer_stack: Vec<Vec<Statement>>,
+
+    /// 2026-08-23 (async scheduler Phase A1, SPEC §12.2): task table.
+    /// Every `spawn defn(...)` registers an entry; the handle flows through
+    /// await/free/keep which consume it linearly. In the eager reference
+    /// model tasks run to completion at spawn — the table provides the
+    /// bookkeeping that coroutine scheduling (Phase A2) will sit on.
+    pub task_table: HashMap<u64, TaskEntry>,
+    next_task_id: u64,
+}
+
+/// 2026-08-23 (async scheduler Phase A1): a single spawned task's lifecycle
+/// record. Status transitions: Running → Done (normal) or Cancelled (free).
+#[derive(Debug, Clone)]
+pub struct TaskEntry {
+    pub id: u64,
+    pub fn_name: String,
+    pub status: TaskStatus,
+    pub result: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskStatus {
+    /// Task ran to completion (eager model). Phase A2 adds Suspended/Ready.
+    Done,
+    /// `free task` was called — cancellation recorded.
+    Cancelled,
 }
 
 impl Interpreter {
@@ -104,6 +130,8 @@ impl Interpreter {
             objs: HashMap::new(),
             variants: HashMap::new(),
             defer_stack: Vec::new(),
+            task_table: HashMap::new(),
+            next_task_id: 0,
         }
     }
 
@@ -172,6 +200,10 @@ impl Interpreter {
         }
         self.variants = registered_variants.clone();
         VARIANT_DEFS.with(|c| *c.borrow_mut() = Some(registered_variants));
+        // 2026-08-23 (async A1): fresh task table per program.
+        self.task_table.clear();
+        self.next_task_id = 0;
+        TASK_TABLE.with(|t| *t.borrow_mut() = Some(HashMap::new()));
 
         OBJ_SHAPES.with(|c| *c.borrow_mut() = Some(registered_objs));
 
@@ -554,6 +586,9 @@ thread_local! {
     /// 2026-08-23 (enum construction): active variant registry mirror.
     static VARIANT_DEFS: std::cell::RefCell<Option<HashMap<String, String>>> =
         const { std::cell::RefCell::new(None) };
+    /// 2026-08-23 (async scheduler A1): active task table mirror.
+    static TASK_TABLE: std::cell::RefCell<Option<HashMap<u64, TaskEntry>>> =
+        const { std::cell::RefCell::new(None) };
     /// 2026-08-22 (Phase 7b): process-local mirror of the ACTIVE
     /// interpreter's obj shapes, read by the spawn constructor deep inside
     /// expression evaluation where no scope carries them. The interpreter
@@ -566,6 +601,21 @@ thread_local! {
 /// Active variant registry for constructor calls (Phase 7b/enum plan).
 pub fn variant_defs() -> Option<HashMap<String, String>> {
     VARIANT_DEFS.with(|c| c.borrow().clone())
+}
+
+/// 2026-08-23 (async scheduler Phase A1): register a completed task in the
+/// thread-local table. Phase A2 replaces this with proper coroutine handles.
+pub fn register_task(id: u64, fn_name: String, result: Value) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            table.insert(id, TaskEntry {
+                id,
+                fn_name,
+                status: TaskStatus::Done,
+                result: Some(result),
+            });
+        }
+    });
 }
 
 /// Snapshot of the active obj shapes for spawn construction (Phase 7b).

@@ -333,7 +333,32 @@ fn eval_task_spawn(
             Err(e) => return Err(e),
         }
     }
+    // 2026-08-23 (async scheduler Phase A1): register the completed task in
+    // the table. The raw result value is still returned (backward compat —
+    // the eager model collapses handle+result into one). Phase A2 replaces
+    // this with a suspended coroutine and returns a proper TaskId handle.
+    let task_id = next_task_id();
+    crate::interpreter::register_task(task_id, type_name.to_string(), result.clone());
     Ok(result)
+}
+
+// 2026-08-23 (async scheduler Phase A1): thread-local task bookkeeping,
+// accessible from deep inside expression evaluation where no &mut Interpreter
+// is in scope. Same pattern as OBJ_SHAPES / VARIANT_DEFS.
+use std::cell::RefCell;
+use std::cell::Cell;
+thread_local! {
+    static TASK_TABLE: RefCell<Option<HashMap<u64, crate::interpreter::TaskEntry>>> =
+        const { RefCell::new(None) };
+    static TASK_ID_COUNTER: Cell<u64> = const { Cell::new(0) };
+}
+
+fn next_task_id() -> u64 {
+    TASK_ID_COUNTER.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        id
+    })
 }
 
 /// Evaluate a function/intrinsic call.
