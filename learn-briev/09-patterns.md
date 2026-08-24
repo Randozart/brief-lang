@@ -14,7 +14,7 @@ node mark_paid()
     [state == OrderState::Pending]
     [state == OrderState::Paid]
 {
-    &state = OrderState::Paid;
+    state = OrderState::Paid;
     term;
 };
 
@@ -22,7 +22,7 @@ node mark_shipped()
     [state == OrderState::Paid]
     [state == OrderState::Shipped]
 {
-    &state = OrderState::Shipped;
+    state = OrderState::Shipped;
     term;
 };
 
@@ -30,7 +30,7 @@ node mark_delivered()
     [state == OrderState::Shipped]
     [state == OrderState::Delivered]
 {
-    &state = OrderState::Delivered;
+    state = OrderState::Delivered;
     term;
 };
 
@@ -38,7 +38,7 @@ node cancel()
     [state == OrderState::Pending || state == OrderState::Paid]
     [state == OrderState::Cancelled]
 {
-    &state = OrderState::Cancelled;
+    state = OrderState::Cancelled;
     term;
 };
 ```
@@ -59,19 +59,19 @@ let notified_value: Int = -1;
 
 node notify_observers() 
     [subject_value != notified_value]
-    [notified_value == @subject_value]
+    [notified_value == subject_value]
 {
     let i: Int = 0;
     [i < observers .^Len] {
         send_notification(observers[i], subject_value);
         i = i + 1;
     };
-    &notified_value = subject_value;
+    notified_value = subject_value;
     term;
 };
 
 txn subscribe(observer: String) [true][observers.contains(observer)] {
-    &observers = observers.append(observer);
+    observers = observers.append(observer);
     term;
 };
 ```
@@ -84,10 +84,10 @@ Separate state-changing transactions from queries:
 // Commands (state-changing)
 txn create_user(name: String, email: String) 
     [!user_exists(email)]
-    [users .^Len == @users .^Len + 1]
+    [users .^Len == users .^Len + 1]
 {
     let user = User { id: next_id(), name: name, email: email };
-    &users = users.append(user);
+    users = users.append(user);
     term;
 };
 
@@ -251,7 +251,7 @@ txn sort(list: List<Int>) -> List<Int> {
 };
 
 txn set_strategy(new_strategy: SortStrategy) [true][strategy == new_strategy] {
-    &strategy = new_strategy;
+    strategy = new_strategy;
     term;
 };
 ```
@@ -270,8 +270,8 @@ node trip_circuit()
     [failure_count >= 5 && circuit_state == CircuitState::Closed]
     [circuit_state == CircuitState::Open]
 {
-    &circuit_state = CircuitState::Open;
-    &last_failure_time = current_time();
+    circuit_state = CircuitState::Open;
+    last_failure_time = current_time();
     term;
 };
 
@@ -279,8 +279,8 @@ node reset_circuit()
     [circuit_state == CircuitState::HalfOpen && success_count >= 3]
     [circuit_state == CircuitState::Closed && failure_count == 0]
 {
-    &circuit_state = CircuitState::Closed;
-    &failure_count = 0;
+    circuit_state = CircuitState::Closed;
+    failure_count = 0;
     term;
 };
 
@@ -288,7 +288,7 @@ node test_circuit()
     [circuit_state == CircuitState::Open && current_time() - last_failure_time > 60000]
     [circuit_state == CircuitState::HalfOpen]
 {
-    &circuit_state = CircuitState::HalfOpen;
+    circuit_state = CircuitState::HalfOpen;
     term;
 };
 
@@ -299,10 +299,10 @@ defn call_external_service() -> Result<String, String> {
     
     let result = external_call();
     [result.is_ok()] {
-        &failure_count = 0;
+        failure_count = 0;
     };
     [result.is_err()] {
-        &failure_count = failure_count + 1;
+        failure_count = failure_count + 1;
     };
     
     term result;
@@ -317,17 +317,17 @@ let last_attempt_time: Int = 0;
 
 node retry_operation() 
     [!operation_success && attempts < 5]
-    [attempts == @attempts + 1]
+    [attempts == attempts + 1]
 {
     let delay = math.pow(2, attempts) * 1000;  // Exponential backoff
     [current_time() - last_attempt_time >= delay] {
         let result = try_operation();
         [result.is_ok()] {
-            &operation_success = true;
+            operation_success = true;
         };
         [result.is_err()] {
-            &attempts = attempts + 1;
-            &last_attempt_time = current_time();
+            attempts = attempts + 1;
+            last_attempt_time = current_time();
         };
     };
     term;
@@ -344,16 +344,16 @@ node reset_window()
     [current_time() - window_start >= 60000]  // 1 minute
     [request_count == 0 && window_start == current_time()]
 {
-    &request_count = 0;
-    &window_start = current_time();
+    request_count = 0;
+    window_start = current_time();
     term;
 };
 
 txn process_request() 
     [request_count < 100]
-    [request_count == @request_count + 1]
+    [request_count == request_count + 1]
 {
-    &request_count = request_count + 1;
+    request_count = request_count + 1;
     handle_request();
     term;
 };
@@ -392,10 +392,10 @@ txn cache_put(key: String, value: String, ttl: Int)
     };
     
     [cache .^Len >= cache_size] {
-        &cache = evict_oldest(cache);
+        cache = evict_oldest(cache);
     };
     
-    &cache = cache.insert(key, entry);
+    cache = cache.insert(key, entry);
     term;
 };
 ```
@@ -411,7 +411,7 @@ txn process() [true][true] { ... }
 // ✅ GOOD - documents requirements and guarantees
 txn withdraw(amount: Int) 
     [amount > 0 && balance >= amount]  // When it can run
-    [balance == @balance - amount]      // What it guarantees
+    [balance == balance - amount]      // What it guarantees
 { ... };
 ```
 

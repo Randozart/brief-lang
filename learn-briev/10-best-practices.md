@@ -42,10 +42,10 @@ let s = sb.to_string();
 ```briev
 // ❌ BAD - many small mutations
 txn process() {
-    &x = x + 1;
-    &y = y + 2;
-    &z = z + 3;
-    &total = x + y + z;
+    x = x + 1;
+    y = y + 2;
+    z = z + 3;
+    total = x + y + z;
     term;
 };
 
@@ -55,10 +55,10 @@ txn process() {
     let new_y = y + 2;
     let new_z = z + 3;
     let new_total = new_x + new_y + new_z;
-    &x = new_x;
-    &y = new_y;
-    &z = new_z;
-    &total = new_total;
+    x = new_x;
+    y = new_y;
+    z = new_z;
+    total = new_total;
     term;
 };
 ```
@@ -78,7 +78,7 @@ node log_important_changes()
     [logged == true]
 {
     println("Critical: " + String(critical_value));
-    &logged = true;
+    logged = true;
     term;
 };
 ```
@@ -216,14 +216,14 @@ node check_invariants() [true][true] {
         // Invariant holds
     };
     [counter < 0] {
-        escape;  // Invariant violated!
+        rollback;  // Invariant violated!
     };
     
     [balance >= 0] {
         // Invariant holds
     };
     [balance < 0] {
-        escape;  // Invariant violated!
+        rollback;  // Invariant violated!
     };
     
     term;
@@ -236,7 +236,7 @@ node check_invariants() [true][true] {
 let execution_log: List<String> = [];
 
 txn log_execution(step: String) {
-    &execution_log = execution_log.append(step);
+    execution_log = execution_log.append(step);
     term;
 };
 
@@ -276,7 +276,7 @@ txn login(user: User, password: String)
     [verify_password(user, password)]
     [current_user == Some(user)]
 {
-    &current_user = Some(user);
+    current_user = Some(user);
     term;
 };
 
@@ -285,7 +285,7 @@ txn check_permission(resource: String, action: String)
     [permissions.get(current_user.unwrap().id).contains(resource + ":" + action)]
     [permission_granted == true]
 {
-    &permission_granted = true;
+    permission_granted = true;
     term;
 };
 ```
@@ -333,15 +333,15 @@ defn sanitize_html(input: String) -> String {
 
 ```briev
 // ❌ BAD - infinite loop
-node bad_increment() [true][counter == @counter + 1] {
-    &counter = counter + 1;
+node bad_increment() [true][counter == counter + 1] {
+    counter = counter + 1;
     term;
 };
 // Compiler will reject: cannot prove termination
 
 // ✅ GOOD - bounded loop
-node good_increment() [counter < 100][counter == @counter + 1] {
-    &counter = counter + 1;
+node good_increment() [counter < 100][counter == counter + 1] {
+    counter = counter + 1;
     term;
 };
 ```
@@ -350,19 +350,19 @@ node good_increment() [counter < 100][counter == @counter + 1] {
 
 ```briev
 // ❌ BAD - potential race condition
-async node bad_transfer() [balance >= 100][balance == @balance - 100] {
-    &balance = balance - 100;
+async node bad_transfer() [balance >= 100][balance == balance - 100] {
+    balance = balance - 100;
     term;
 };
 
 // ✅ GOOD - compiler verifies mutual exclusion
 async node good_transfer() 
     [balance >= 100 && !transfer_in_progress]
-    [balance == @balance - 100]
+    [balance == balance - 100]
 {
-    &transfer_in_progress = true;
-    &balance = balance - 100;
-    &transfer_in_progress = false;
+    transfer_in_progress = true;
+    balance = balance - 100;
+    transfer_in_progress = false;
     term;
 };
 ```

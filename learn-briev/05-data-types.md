@@ -43,7 +43,7 @@ defn count_words(text: String) -> HashMap<String, Int> {
         [current.is_none()] {
             counts = counts.insert(word, 1);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term counts;
@@ -72,7 +72,7 @@ set = set.insert("cherry");
 set = set.remove("banana");
 
 // Metadata
-let len = set .^Len;
+let len = set .^Length;
 [set.is_empty()] {
     println("Set is empty");
 };
@@ -95,7 +95,7 @@ defn unique_items(list: List<String>) -> List<String> {
             seen = seen.insert(item);
             result = result.append(item);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term result;
@@ -150,18 +150,18 @@ defn evaluate_rpn(expr: List<String>) -> Int {
         [token == "+"] {
             let (b, s) = stack.pop().unwrap();
             let (a, s2) = s.pop().unwrap();
-            &stack = s2.push(a + b);
+            stack = s2.push(a + b);
         };
         [token == "*"] {
             let (b, s) = stack.pop().unwrap();
             let (a, s2) = s.pop().unwrap();
-            &stack = s2.push(a * b);
+            stack = s2.push(a * b);
         };
         [!is_operator(token)] {
             let num = String(token).to_int();
-            &stack = stack.push(num);
+            stack = stack.push(num);
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term stack.pop().unwrap().0;
@@ -192,7 +192,7 @@ let result = queue.dequeue();
 let front = queue.front();
 
 // Metadata
-let len = queue .^Len;
+let len = queue .^Length;
 [queue.is_empty()] {
     println("Queue is empty");
 };
@@ -214,7 +214,7 @@ defn bfs(start: Node) -> List<Node> {
     
     [!queue.is_empty()] {
         let (node, q) = queue.dequeue().unwrap();
-        &queue = q;
+        queue = q;
         result = result.append(node);
         
         let neighbors = node.get_neighbors();
@@ -225,7 +225,7 @@ defn bfs(start: Node) -> List<Node> {
                 visited = visited.insert(neighbor);
                 queue = queue.enqueue(neighbor);
             };
-            &i = i + 1;
+            i = i + 1;
         };
     };
     
@@ -253,7 +253,7 @@ sb = sb.append_float(3.14);
 let result = sb.to_string();  // "Hello42true3.14"
 
 // Metadata
-let len = sb .^Len;
+let len = sb .^Length;
 [sb.is_empty()] {
     println("Builder is empty");
 };
@@ -277,10 +277,10 @@ defn build_csv(rows: List<List<String>>) -> String {
                 sb = sb.append_char(',');
             };
             sb = sb.append_str(row[j]);
-            &j = j + 1;
+            j = j + 1;
         };
         sb = sb.append_char('\n');
-        &i = i + 1;
+        i = i + 1;
     };
     
     term sb.to_string();
@@ -577,7 +577,7 @@ txn add_contact(name: String, phone: String, email: String)
         phone: phone,
         email: email
     };
-    &contacts = contacts.insert(name, contact);
+    contacts = contacts.insert(name, contact);
     term;
 };
 
@@ -585,11 +585,11 @@ txn remove_contact(name: String)
     [contacts.contains_key(name)]
     [!contacts.contains_key(name)]
 {
-    &contacts = contacts.remove(name);
+    contacts = contacts.remove(name);
     term;
 };
 
-txn lookup(name: String) [name != ""][contacts == @contacts] {
+txn lookup(name: String) [name != ""][contacts == contacts] {
     let contact = contacts.get(name);
     when contact.is_some() {
         let c = contact.unwrap();
@@ -603,12 +603,12 @@ txn lookup(name: String) [name != ""][contacts == @contacts] {
     term;
 };
 
-txn list_all() [true][contacts == @contacts] {
+txn list_all() [true][contacts == contacts] {
     let names = contacts.keys();
     let i: Int = 0;
     when i < names .^Len {
         println(names[i]);
-        &i = i + 1;
+        i = i + 1;
     };
     term;
 };
@@ -818,7 +818,7 @@ let v = read_i64(p, 0);
 // Safe write — same precondition
 write_i64(p, 0, 99);
 
-// Block copy — precondition: non-overlapping ranges → @llvm.memcpy
+// Block copy — precondition: non-overlapping ranges → llvm.memcpy
 copy(dest, src, count);
 
 // Get raw address

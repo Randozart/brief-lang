@@ -75,7 +75,7 @@ Square brackets are for **logical checks and verification**. This is the primary
 
 ```briev
 [x > 0] {        // Guard: only runs if x is positive
-    &result = x;
+    result = x;
 };
 ```
 
@@ -115,7 +115,7 @@ Curly braces **divvy up code** - they group statements into logical units:
 
 ```briev
 txn increment [true][count == @count + 1] {
-    &count = count + 1;   // Block 1
+    count = count + 1;   // Block 1
     term;                  // Block 2
 };
 ```
@@ -202,7 +202,7 @@ txn withdraw(amount: Int)
     [balance >= amount]
     [balance == @balance - amount]
 {
-    &balance = balance - amount;
+    balance = balance - amount;
     term;
 };
 
@@ -220,7 +220,7 @@ let nibble = word @/0..3;
 **You must use `&` to mutate state.** This is mandatory and deliberate.
 
 ```briev
-&count = count + 1;    // Correct - mutates state
+count = count + 1;    // Correct - mutates state
 count = count + 1;     // Wrong - won't compile
 ```
 
@@ -277,7 +277,7 @@ When you see `!`, pause and think: "What makes this call unusual?"
 ```briev
 txn long_operation() [true][done] ?[5000ms] {   // Must finish in 5 seconds
     do_work();
-    &done = true;
+    done = true;
     term;
 };
 ```
@@ -292,7 +292,7 @@ Arrows always represent **directional movement, dataflow, or state transitions**
 &list <- x;                        # Push: x ends up in list
 x <- &list;                        # Pop: last element becomes x
 <- &list;                          # Discard: pop last element, throw away
-term -> &order_status = 1;         # Swan song: on successful term, set status
+term -> order_status = 1;         # Swan song: on successful term, set status
 defn double(x: Int) -> Int [...] { # Signature: input transitions to output
     term x * 2;
 };
@@ -318,7 +318,7 @@ This ensures no system-level side-effect can ever be silently ignored. The compi
 
 ```briev
 node t [x < 10] [x == 10] {
-    &x = x + 1;
+    x = x + 1;
     term;
 };
 ```
@@ -358,7 +358,7 @@ Something **will change state**. Transactions are atomic - they either complete 
 
 ```briev
 txn deposit(amount) [amount > 0][balance == @balance + amount] {
-    &balance = balance + amount;
+    balance = balance + amount;
     term;
 };
 ```
@@ -370,7 +370,7 @@ This **fires automatically** when its precondition becomes true. No caller neede
 ```briev
 node auto_save() [dirty && !saving][!dirty] {
     save_to_disk();
-    &dirty = false;
+    dirty = false;
     term;
 };
 ```
@@ -408,8 +408,8 @@ frgn! log(msg: String) -> void;
 
 ```briev
 // NOT if/else - these are guards, both CAN fire
-[x > 0] &positive = true;
-[x < 0] &negative = true;
+[x > 0] positive = true;
+[x < 0] negative = true;
 ```
 
 ### Contracts as Documentation
@@ -492,7 +492,7 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 
 ```briev
 node fill_buffer() [buffer .^Len < 100][buffer .^Len == 100] {
-    &buffer = buffer + [new_item];
+    buffer = buffer + [new_item];
     term;
 };
 ```

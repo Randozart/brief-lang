@@ -705,12 +705,20 @@ impl CirctBackend {
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
+<<<<<<< HEAD
 
+=======
+            writeln!(out, "  sv.assert {}, immediate message \"pre: {}\"", w, name).ok();
+>>>>>>> main
         }
         if !matches!(&contract.post_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_post", name));
             self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
+<<<<<<< HEAD
 
+=======
+            writeln!(out, "  sv.assert {}, immediate message \"post: {}\"", w, name).ok();
+>>>>>>> main
         }
 
         for stmt in body {

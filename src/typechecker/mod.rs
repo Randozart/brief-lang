@@ -307,6 +307,17 @@ impl<'a> TypecheckContext<'a> {
         lhs: &Type,
         rhs: &Type,
     ) -> Option<OpBinding> {
+        // 2026-08-23: List<T> + List<T> concatenation — a built-in for the
+        // coll/List system (SPEC §8.10). Both sides must be Applied("List", _)
+        // with matching element types. Returns the LHS type (concatenation
+        // preserves the element type).
+        if *kind == BinaryOpKind::Add {
+            if let (Type::Applied(ln, _), Type::Applied(rn, _)) = (lhs, rhs) {
+                if ln == "List" && rn == "List" {
+                    return Some(OpBinding::Intrinsic("list_concat".to_string()));
+                }
+            }
+        }
         let rune = format!("{}", kind);
         let op_name = crate::type_universe::operators::rune_to_op_name(&rune)?;
         if let Some(fn_name) = self.type_declares_op_binding(lhs, &op_name, rhs) {
@@ -1890,6 +1901,8 @@ fn infer_variant_construction(
                 .find(|s| s.name == format!("__variant_{variant}"))
                 .map(|s| match &s.ty {
                     Type::Tuple(elems) => elems.clone(),
+                    // 2026-08-23: Void = zero-payload variant → 0 args.
+                    Type::Void => vec![],
                     one => vec![one.clone()],
                 })
                 .unwrap_or_default()

@@ -2588,7 +2588,8 @@ impl<'a> Parser<'a> {
                 let variant_name = self.expect_identifier()?;
                 // 2026-08-23: MULTI-PAYLOAD variants — `RegisterOk(String, Int)`
                 // stores a Tuple payload; single-payload stays the bare type;
-                // zero-payload defaults Int (never matched by position).
+                // ZERO-PAYLOAD variants (no parens) get Void — the typechecker
+                // treats Void payload as "0 args expected".
                 let variant_ty = if self.eat(&Token::LParen) {
                     let mut inners = vec![self.parse_type()?];
                     while self.eat(&Token::Comma) {
@@ -2601,7 +2602,7 @@ impl<'a> Parser<'a> {
                         Type::Tuple(inners)
                     }
                 } else {
-                    Type::int()
+                    Type::Void
                 };
                 self.eat(&Token::Comma);
                 slots.push(TypeDefSlot { name: format!("__variant_{}", variant_name), ty: variant_ty, bit_range: None });
