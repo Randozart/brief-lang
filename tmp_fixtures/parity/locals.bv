@@ -1,0 +1,18 @@
+// PARITY fixture (see arith.bv for the harness contract).
+// EXPECT: 9,720,120
+defn go() -> Int {
+  let a: Int = 3;
+  let b: Int = 4;
+  let c: Int = a * b;
+  Print#(c - a);
+  let acc: Int = 1;
+  acc = acc * 2;
+  acc = acc * 3;
+  acc = acc * 4;
+  acc = acc * 5;
+  acc = acc * 6;
+  Print#(acc);
+  let half: Int = acc / 6;
+  Print#(half);
+  term 0;
+};

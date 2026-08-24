@@ -1,0 +1,11 @@
+// PARITY fixture: equality + negative operands.
+// EXPECT: 1,0,1,0,-6
+txn go [1 == 1] {
+  let a: Int = 0 - 7;
+  Print#(a == 0 - 7);
+  Print#(a == 7);
+  Print#(a != 7);
+  Print#(a != 0 - 7);
+  Print#(a + 1);
+  term;
+};

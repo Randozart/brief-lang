@@ -1,0 +1,10 @@
+// PARITY fixture: unary operators (logical not, bitwise not).
+// EXPECT: 0,1,-14,13,-8
+txn go [1 == 1] {
+  Print#(!1);
+  Print#(!0);
+  Print#(~13);
+  Print#(~0 - ~13);
+  Print#(0 - 8);
+  term;
+};
