@@ -4981,7 +4981,10 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
-## Conformance sweep: 92 active sources fail the real-pipeline gate (2026-08-23 update #6)
+## Conformance sweep: 89 active sources fail the real-pipeline gate (2026-08-23 update #7)
+
+**Progress:** ... → 92 → **89**. Pass 6 archived the legacy trg-binding
+files (briev_rt.bv ×2). the real-pipeline gate (2026-08-23 update #6)
 
 **Progress:** ... → 96 → **92**. Pass 5 landed: posix SYS_* consts +
 export-let visibility fix (typechecker), Barrier# intrinsic (CPU no-op /
