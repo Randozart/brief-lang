@@ -181,7 +181,24 @@ pub fn eval_expr(
         // scheduler runs a spawned task inline, so its handle already holds
         // the result; await reads it (the handle's consumption is enforced by
         // the ownership analysis).
-        Expr::Await(inner) => eval_expr(inner, heap, bindings, functions),
+        // 2026-08-23 (async Phase A2): await consumes a task handle. In the
+        // eager model this was pass-through; now it triggers lazy execution
+        // of the pending task's body via the task table.
+        Expr::Await(inner) => {
+            let inner_val = eval_expr(inner, heap, bindings, functions)?;
+            // If the inner expression produced an Int (our task-id marker),
+            // look up and execute the pending task.
+            if let Value::Atom(Atom::Int(task_id)) = &inner_val {
+                let id = *task_id as u64;
+                if let Some((fn_name, arg_vals)) = crate::interpreter::take_pending_task(id) {
+                    let result = execute_pending_task(id, &fn_name, &arg_vals, heap, functions)?;
+                    crate::interpreter::complete_task(id, result.clone());
+                    return Ok(result);
+                }
+            }
+            // Not a task handle — plain pass-through (non-task await).
+            Ok(inner_val)
+        }
         Expr::AddrOf(inner) => {
             let val = eval_expr(inner, heap, bindings, functions)?;
             Ok(Value::Ref(Box::new(val)))
@@ -307,22 +324,46 @@ fn eval_task_spawn(
     bindings: &mut HashMap<String, Value>,
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<Value, RuntimeError> {
+    // 2026-08-23 (async scheduler Phase A2, SPEC §12.2): LAZY execution —
+    // spawn captures the function + evaluated args but does NOT run the body.
+    // The first `await` triggers execution. This is the foundation for
+    // cooperative scheduling: a spawned task exists as a Ready entry in the
+    // task table; `free` before await cancels it (body never runs).
     let mut arg_vals = Vec::new();
     for a in args {
         arg_vals.push(eval_expr(a, heap, bindings, functions)?);
     }
+    if !functions.contains_key(type_name) {
+        return Err(RuntimeError::UndefinedFunction(type_name.to_string()));
+    }
+    let task_id = next_task_id();
+    crate::interpreter::register_pending_task(task_id, type_name.to_string(), arg_vals);
+    // Return a marker value — the typechecker types this as Task<Ret>, and
+    // the first `await` replaces it with the real result via the table.
+    Ok(Value::Atom(Atom::Int(task_id as i64)))
+}
+
+/// 2026-08-23 (async Phase A2): execute a pending task's body and return
+/// its result. Called by `await`.
+fn execute_pending_task(
+    task_id: u64,
+    fn_name: &str,
+    arg_vals: &[Value],
+    heap: &mut VirtualHeap,
+    functions: &HashMap<String, crate::interpreter::FunctionDef>,
+) -> Result<Value, RuntimeError> {
     let defn = functions
-        .get(type_name)
+        .get(fn_name)
         .cloned()
-        .ok_or_else(|| RuntimeError::UndefinedFunction(type_name.to_string()))?;
-    let mut result = Value::Void;
+        .ok_or_else(|| RuntimeError::UndefinedFunction(fn_name.to_string()))?;
     let mut call_bindings: std::collections::HashMap<String, Value> =
         std::collections::HashMap::new();
-    for (i, name) in defn.parameters.iter().enumerate() {
+    for (i, pname) in defn.parameters.iter().enumerate() {
         if let Some(v) = arg_vals.get(i) {
-            call_bindings.insert(name.clone(), v.clone());
+            call_bindings.insert(pname.clone(), v.clone());
         }
     }
+    let mut result = Value::Void;
     for stmt in &defn.body {
         match eval_statement(stmt, heap, &mut call_bindings, functions) {
             Ok(v) => result = v,
@@ -333,12 +374,6 @@ fn eval_task_spawn(
             Err(e) => return Err(e),
         }
     }
-    // 2026-08-23 (async scheduler Phase A1): register the completed task in
-    // the table. The raw result value is still returned (backward compat —
-    // the eager model collapses handle+result into one). Phase A2 replaces
-    // this with a suspended coroutine and returns a proper TaskId handle.
-    let task_id = next_task_id();
-    crate::interpreter::register_task(task_id, type_name.to_string(), result.clone());
     Ok(result)
 }
 

@@ -108,14 +108,21 @@ pub struct TaskEntry {
     pub id: u64,
     pub fn_name: String,
     pub status: TaskStatus,
+    /// Eager model: the result is set at spawn. Lazy model (Phase A2):
+    /// result is None until await triggers execution.
     pub result: Option<Value>,
+    /// 2026-08-23 (Phase A2): the captured call bindings for lazy execution.
+    /// Set at spawn; consumed by the first `await`.
+    pub pending_args: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskStatus {
-    /// Task ran to completion (eager model). Phase A2 adds Suspended/Ready.
+    /// Lazy model: spawned but not yet executed — awaiting triggers it.
+    Ready,
+    /// Task ran to completion.
     Done,
-    /// `free task` was called — cancellation recorded.
+    /// `free task` was called before execution — cancelled, never runs.
     Cancelled,
 }
 
@@ -603,17 +610,47 @@ pub fn variant_defs() -> Option<HashMap<String, String>> {
     VARIANT_DEFS.with(|c| c.borrow().clone())
 }
 
-/// 2026-08-23 (async scheduler Phase A1): register a completed task in the
-/// thread-local table. Phase A2 replaces this with proper coroutine handles.
-pub fn register_task(id: u64, fn_name: String, result: Value) {
+/// 2026-08-23 (async Phase A2): register a PENDING task — spawned but not
+/// yet executed. The first `await` triggers `execute_and_consume`.
+pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>) {
     TASK_TABLE.with(|t| {
         if let Some(table) = t.borrow_mut().as_mut() {
             table.insert(id, TaskEntry {
                 id,
                 fn_name,
-                status: TaskStatus::Done,
-                result: Some(result),
+                status: TaskStatus::Ready,
+                result: None,
+                pending_args: Some(args),
             });
+        }
+    });
+}
+
+/// 2026-08-23 (async Phase A2): look up a pending task and return its
+/// captured args for execution. Marks the task as Done with the result.
+pub fn take_pending_task(id: u64) -> Option<(String, Vec<Value>)> {
+    TASK_TABLE.with(|t| {
+        let mut table_ref = t.borrow_mut();
+        let table = table_ref.as_mut()?;
+        let entry = table.get_mut(&id)?;
+        if entry.status == TaskStatus::Ready {
+            entry.status = TaskStatus::Done;
+            if let Some(args) = entry.pending_args.take() {
+                return Some((entry.fn_name.clone(), args));
+            }
+        }
+        None
+    })
+}
+
+/// 2026-08-23 (async Phase A2): store the result after lazy execution.
+pub fn complete_task(id: u64, result: Value) {
+    TASK_TABLE.with(|t| {
+        let mut table_ref = t.borrow_mut();
+        if let Some(table) = table_ref.as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                entry.result = Some(result);
+            }
         }
     });
 }
@@ -1201,22 +1238,38 @@ mod tests {
 
     #[test]
     fn task_spawn_runs_inline_and_await_reads_result() {
-        // The reference semantic scheduler is deterministic: a spawned task
-        // runs to completion; `await` returns the stored result (SPEC §12.2).
+        // 2026-08-23 (async Phase A2): LAZY execution — spawn captures the
+        // fn+args as a Ready task entry; the first `await` triggers execution
+        // and returns the real result. The spawn handle is a task-id marker.
         let program = parse_program("defn compute(x: Int) -> Int { term x * 2; };");
         let mut interp = Interpreter::new();
         interp.load_program(&program);
-        // spawn = call the defn inline (the handle is the result).
+        // Spawn creates a Ready task entry, returns a task-id marker.
         let handle = interp.eval_expr(&Expr::Spawn {
             type_name: "compute".to_string(),
             args: vec![Expr::Decimal(21)],
             storage: crate::ast::SpawnStorage::Pooled,
         }).unwrap();
-        assert_eq!(handle.as_i64(), Some(42), "spawn must run the task inline");
-        // Bind the handle, then await reads it.
+        let task_id = handle.as_i64().expect("handle is task-id Int");
+        assert!(task_id >= 0, "task id is non-negative");
+        // Verify the task table has a Ready entry (thread-local mirror).
+        let snapshot = crate::interpreter::task_table_snapshot().unwrap();
+        assert_eq!(
+            snapshot.get(&(task_id as u64)).map(|e| e.status.clone()),
+            Some(crate::interpreter::TaskStatus::Ready),
+            "spawn must register a Ready task"
+        );
+        // Bind the handle, then await triggers lazy execution.
         interp.state.insert("t".to_string(), handle);
         let awaited = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t".to_string())))).unwrap();
         assert_eq!(awaited.as_i64(), Some(42), "await must yield the task result");
+        // After await, the table shows Done.
+        let snapshot = crate::interpreter::task_table_snapshot().unwrap();
+        assert_eq!(
+            snapshot.get(&(task_id as u64)).map(|e| e.status.clone()),
+            Some(crate::interpreter::TaskStatus::Done),
+            "await must transition the task to Done"
+        );
     }
 
     // ── 2026-08-15 (coll grow-on-full): reference value parity ────────
@@ -1276,4 +1329,9 @@ mod tests {
             "Count# 4 + Capacity# 4 (fixed N) + sum 1+2+3+4 = 10 → 18"
         );
     }
+}
+
+/// 2026-08-23 (async A1): read-only snapshot of the thread-local task table.
+pub fn task_table_snapshot() -> Option<HashMap<u64, TaskEntry>> {
+    TASK_TABLE.with(|t| t.borrow().clone())
 }
