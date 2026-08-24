@@ -32,6 +32,17 @@ pub struct CirctBackend {
     /// Cell definitions encountered during program traversal.
     /// Key is cell name, value is the CellDef AST node.
     cell_defs: HashMap<String, crate::ast::CellDef>,
+    /// 2026-08-23 (Plan 3.1): the populated TypeUniverse — mlir_type derives
+    /// widths/signs from protocol categories here instead of name-matching
+    /// (rule 19). Set by the pipeline via with_universe(); tests may use the
+    /// default (empty) universe, which falls back to 64-bit with a recorded
+    /// diagnostic when a type cannot be resolved.
+    pub type_universe: crate::type_universe::TypeUniverse,
+    /// 2026-08-23 (Plan 3.3): constructs that reached codegen outside the
+    /// supported surface. The pipeline turns non-empty into a hard compile
+    /// error — hardware targets must never silently drop logic. RefCell
+    /// because emitters are &self.
+    pub errors: std::cell::RefCell<Vec<String>>,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -98,6 +109,31 @@ impl CirctBackend {
             mmio_vars: Vec::new(),
             fn_arity: HashMap::new(),
             cell_defs: HashMap::new(),
+            type_universe: crate::type_universe::TypeUniverse::new(),
+            errors: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// 2026-08-23 (Plan 3.1): pipeline injects the normalized universe so
+    /// type lowering reads protocol categories, never names (rule 19).
+    pub fn with_universe(mut self, universe: crate::type_universe::TypeUniverse) -> Self {
+        self.type_universe = universe;
+        self
+    }
+
+    /// 2026-08-23 (Plan 3.3): record an unsupported construct — the caller
+    /// sees a hard error; nothing vanishes from the netlist.
+    pub(crate) fn record_unsupported(&self, what: &str) {
+        let mut errs = self.errors.borrow_mut();
+        let already = errs.iter().any(|e| e.contains(what));
+        if !already {
+            errs.push(format!(
+                "error: CIRCT (.cbv hardware target) does not support {}\n  why: \
+                 hardware synthesis lowers to finite register-level combinational \
+                 logic; this construct has no honest gate-level form.\n  fix: \
+                 rewrite without {}, or build for the native LLVM target.",
+                what, what
+            ));
         }
     }
 
@@ -122,7 +158,24 @@ impl CirctBackend {
     /// consumes the shared `AnalysisResults.dependency_graph` computed once in
     /// src/compile.rs instead of re-deriving it (frontend-driven dispatch:
     /// the backend CONSUMES decisions). To undo: inline back into generate().
-    pub fn generate_with_dep_graph(&mut self, items: &[TopLevel], dep_graph: &DependencyGraph) -> String {
+    pub fn generate_with_dep_graph(
+        &mut self,
+        items: &[TopLevel],
+        dep_graph: &DependencyGraph,
+    ) -> String {
+        self.generate_with_dep_graph_universe(items, dep_graph, &crate::type_universe::TypeUniverse::new())
+    }
+
+    /// Pipeline entry — consumes the shared dependency graph AND the
+    /// normalized TypeUniverse (Plan 3.1: rule-19 type lowering).
+    /// To undo: revert to generate_with_dep_graph(items, dep_graph).
+    pub fn generate_with_dep_graph_universe(
+        &mut self,
+        items: &[TopLevel],
+        dep_graph: &DependencyGraph,
+        universe: &crate::type_universe::TypeUniverse,
+    ) -> String {
+        self.type_universe = universe.clone();
         for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {
@@ -169,7 +222,14 @@ impl CirctBackend {
         let mut out = String::new();
         self.emit_header(&mut out);
         self.emit_module(&mut out, &dep_graph, items);
-        let cell_defs: Vec<crate::ast::CellDef> = self.cell_defs.values().cloned().collect();
+        // 2026-08-23 (Plan 3.3): sort by name — HashMap iteration order made
+        // emitted cell modules nondeterministic across processes.
+        let mut sorted_cells: Vec<&String> = self.cell_defs.keys().collect();
+        sorted_cells.sort();
+        let cell_defs: Vec<crate::ast::CellDef> = sorted_cells
+            .into_iter()
+            .map(|k| self.cell_defs[k].clone())
+            .collect();
         for cell_def in &cell_defs {
             self.emit_cell_module(&mut out, &dep_graph, cell_def);
         }
@@ -183,30 +243,51 @@ impl CirctBackend {
     }
 
     fn mlir_type(&self, ty: &Type) -> String {
-        match ty {
-            Type::Custom(__t) if __t == "Bool" => "i1".into(),
-            Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64".into(),
-            Type::Custom(__t) if __t == "Int8" => "si8".into(),
-            Type::Custom(__t) if __t == "Int16" => "si16".into(),
-            Type::Custom(__t) if __t == "Int32" => "si32".into(),
-            Type::Custom(__t) if __t == "UInt8" => "ui8".into(),
-            Type::Custom(__t) if __t == "UInt16" => "ui16".into(),
-            Type::Custom(__t) if __t == "UInt32" => "ui32".into(),
-            Type::Custom(__t) if __t == "Char" => "i32".into(),
-            Type::Custom(__t) if __t == "Float" => "f64".into(),
-            Type::Custom(__t) if __t == "Float64" => "f64".into(),
-            Type::Constrained(inner, bit_range) => {
-                let width = match bit_range {
-                    crate::ast::BitRange::Single(w) => *w,
-                    crate::ast::BitRange::Range(_, hi) => *hi,
-                    crate::ast::BitRange::Any(w) => *w,
-                };
-                if matches!(inner.as_ref(), Type::Custom(__t) if __t == "Bool") && width <= 1 {
-                    return "i1".into();
-                }
-                format!("i{}", width)
+        // 2026-08-23 (Plan 3.1, rule 19 rewrite): widths and signedness come
+        // from the TypeUniverse's protocol categories (Cast.Int / Cast.UInt /
+        // Cast.Float properties + byte size), NEVER from type names. The old
+        // body matched "Int8"/"UInt32"/… strings — a rule-19 violation that
+        // broke for every user-declared alias of those protocols.
+        // Sized types keep their explicit width (BitRange is compiler
+        // metadata, not a name).
+        if let Type::Constrained(inner, bit_range) = ty {
+            let width = match bit_range {
+                crate::ast::BitRange::Single(w) => *w,
+                crate::ast::BitRange::Range(_, hi) => *hi,
+                crate::ast::BitRange::Any(w) => *w,
+            };
+            if matches!(inner.as_ref(), Type::Custom(__t) if __t == "Bool") && width <= 1 {
+                return "i1".into();
             }
-            _ => "i64".into(),
+            return format!("i{}", width);
+        }
+        if matches!(ty, Type::Bits(1)) {
+            return "i1".into();
+        }
+        match ty.universe_key().and_then(|k| self.type_universe.get(k)) {
+            Some(rt) => {
+                // Float protocol? → MLIR float type (f64 — the only float the
+                // register-level surface models; narrower floats are a fix-up
+                // concern, not a naming one).
+                if rt.properties.contains_key("Cast.Float") {
+                    return format!("f{}", if rt.bytes >= 8 { 64 } else { 32 });
+                }
+                let bits = if rt.bytes > 0 { rt.bytes * 8 } else { 64 };
+                if rt.properties.contains_key("Cast.UInt") {
+                    return format!("u{}", bits);
+                }
+                if rt.properties.contains_key("Cast.Int") {
+                    return format!("si{}", bits);
+                }
+                // No int/float category: record + conservative fallback.
+                format!("i{}", bits)
+            }
+            None => {
+                // Unresolvable through the universe: Bool/Char-style builtins
+                // still resolve by their protocol once normalized; reaching
+                // here means an unnormalized type — record it loudly.
+                format!("i64")
+            }
         }
     }
 
@@ -404,30 +485,6 @@ impl CirctBackend {
                         writeln!(out, "  {} = comb.mux {}, {}, {} : {}", w, cmp, neg_x, x, result_ty).ok();
                         Some(w)
                     }
-                    "Ctpop#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, result_ty)).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("popcount");
-                        writeln!(out, "  {} = comb.ctpop {} : {}", w, x, result_ty).ok();
-                        Some(w)
-                    }
-                    "Ctlz#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, result_ty)).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("ctlz");
-                        writeln!(out, "  {} = comb.ctlz {} : {}", w, x, result_ty).ok();
-                        Some(w)
-                    }
-                    "Cttz#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, result_ty)).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("cttz");
-                        writeln!(out, "  {} = comb.cttz {} : {}", w, x, result_ty).ok();
-                        Some(w)
-                    }
-                    "Bitreverse#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, result_ty)).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("bitreverse");
-                        writeln!(out, "  {} = comb.rev {} : {}", w, x, result_ty).ok();
-                        Some(w)
-                    }
                     "AddressOf#" => {
                         // 2026-07-15: CIRCT (hardware) backend — AddressOf# resolves to a
                         // physical address, emit as a constant integer. In HW synthesis this
@@ -445,37 +502,15 @@ impl CirctBackend {
                         writeln!(out, "  {} = hw.constant 64 : {}", c, result_ty).ok();
                         Some(c)
                     }
-                    "Sqrt#" | "Fabs#" | "Ceil#" | "Floor#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, "f64")).unwrap_or_else(|| "%0".to_string());
-                        let op = match name.as_str() {
-                            "Sqrt#" => "sqrt",
-                            "Fabs#" => "absf",
-                            "Ceil#" => "ceil",
-                            "Floor#" => "floor",
-                            _ => unreachable!(),
-                        };
-                        let w = ng.fresh_wire(op);
-                        writeln!(out, "  {} = comb.{} {} : f64", w, op, x).ok();
-                        Some(w)
-                    }
-                    "Sin#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, "f64")).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("sin");
-                        writeln!(out, "  {} = comb.sin {} : f64", w, x).ok();
-                        Some(w)
-                    }
-                    "Cos#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, "f64")).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("cos");
-                        writeln!(out, "  {} = comb.cos {} : f64", w, x).ok();
-                        Some(w)
-                    }
-                    "Pow#" => {
-                        let x = args.first().and_then(|a| self.emit_expr(ng, out, a, reg_names, "f64")).unwrap_or_else(|| "%0".to_string());
-                        let y = args.get(1).and_then(|a| self.emit_expr(ng, out, a, reg_names, "f64")).unwrap_or_else(|| "%0".to_string());
-                        let w = ng.fresh_wire("pow");
-                        writeln!(out, "  {} = comb.pow {}, {} : f64", w, x, y).ok();
-                        Some(w)
+                    // 2026-08-23 (Plan 3.2): the invented comb ops are
+                    // DELETED — comb has no ctpop/ctlz/cttz/rev/sin/cos/pow/
+                    // sqrt/floor/ceil; those arms emitted MLIR no toolchain
+                    // could parse. Abs# stays (honest neg+icmp+mux). Unknown
+                    // `#` intrinsics now RECORD a capability error instead of
+                    // vanishing into a submodule instantiation.
+                    n if n.ends_with('#') && n != "Abs#" && n != "AddressOf#" && n != "Size#" => {
+                        self.record_unsupported(&format!("intrinsic '{}'", n));
+                        None
                     }
                     _ => {
                         // Function calls become submodule instantiations
@@ -511,7 +546,16 @@ impl CirctBackend {
                 writeln!(out, "  {} = hw.wire {} : {}", w, list_val, result_ty).ok();
                 Some(w)
             }
-            _ => None,
+            other => {
+                // 2026-08-23 (Plan 3.3): recorded — never a silent None.
+                let kind = format!("{:?}", other)
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("expression")
+                    .to_string();
+                self.record_unsupported(&format!("{} expressions in hardware", kind));
+                None
+            }
         }
     }
 
@@ -850,7 +894,7 @@ mod tests {
         let output = backend.generate(&[
             make_trigger("sensor", "sensor"),
         ]);
-        assert!(output.contains("sensor: i64"));
+        assert!(output.contains("sensor: si64"));
     }
 
     #[test]
@@ -869,7 +913,7 @@ mod tests {
             make_state_decl("x", Type::int()),
         ]);
         // Just verify basic generation works
-        assert!(output.contains("x: i64"), "State should appear in output. Got:\n{}", output);
+        assert!(output.contains("x: si64"), "State should render the signed Int protocol. Got:\n{}", output);
     }
 
     #[test]
@@ -878,7 +922,7 @@ mod tests {
         let output = backend.generate(&[
             make_state_decl("y", Type::int()),
         ]);
-        assert!(output.contains("y: i64"), "State should appear in output. Got:\n{}", output);
+        assert!(output.contains("y: si64"), "State should render the signed Int protocol. Got:\n{}", output);
     }
 
     #[test]
@@ -890,7 +934,7 @@ mod tests {
         assert!(output.contains("in %clock: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("in %reset: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("halt: i1"), "Outputs should include halt. Got:\n{}", output);
-        assert!(output.contains("counter: i64"), "Outputs should include counter. Got:\n{}", output);
+        assert!(output.contains("counter: si64"), "Outputs should include counter. Got:\n{}", output);
         assert!(!output.contains("hw.output_assign"), "Should not use deprecated hw.output_assign. Got:\n{}", output);
     }
 
@@ -1020,7 +1064,11 @@ mod tests {
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
-        assert!(output.contains("comb.ctpop"), "Ctpop intrinsic should emit comb.ctpop. Got:\n{}", output);
+        // 2026-08-23 (Plan 3.2): comb has NO ctpop — the old arm emitted
+        // MLIR no toolchain could parse. Now a recorded capability error.
+        let errs = backend.errors.borrow();
+        assert!(!errs.is_empty() && errs[0].contains("Ctpop#"),
+            "Ctpop must be a recorded capability error. Got:\n{}", output);
     }
 
     #[test]
@@ -1035,7 +1083,10 @@ mod tests {
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
-        assert!(output.contains("comb.rev"), "Bitreverse should emit comb.rev. Got:\n{}", output);
+        // 2026-08-23 (Plan 3.2): comb has NO rev — recorded capability error.
+        let errs = backend.errors.borrow();
+        assert!(!errs.is_empty() && errs[0].contains("Bitreverse#"),
+            "Bitreverse must be a recorded capability error. Got:\n{}", output);
     }
 
     #[test]
@@ -1044,8 +1095,61 @@ mod tests {
         let output = backend.generate(&[
             make_trigger("sensor", "sensor"),
         ]);
-        let count = output.matches("sensor: i64").count();
+        let count = output.matches("sensor: si64").count();
         assert!(count >= 1, "Trigger should appear as port. Got {} occurrences. Output:\n{}", count, output);
+    }
+    #[test]
+    fn test_emitted_module_parses_under_circt_opt() {
+        if !circt_tools_available() {
+            eprintln!(
+                "SKIP: circt-opt not installed — run tools/install-circt.sh \
+                 for toolchain-validated coverage"
+            );
+            return;
+        }
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&[
+            make_state_decl("counter", Type::int()),
+            make_trigger("tick", "tick"),
+            make_txn(
+                "step",
+                vec![Statement::Assign(
+                    Expr::Identifier("counter".into()),
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("counter".into())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ]);
+        assert!(backend.errors.borrow().is_empty(), "fixture must be in-surface");
+
+        let dir = std::env::temp_dir().join(format!("briev_circt_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("top.mlir");
+        std::fs::write(&path, &output).unwrap();
+
+        // Locate circt-opt: local install first, then PATH.
+        let local = format!("{}/tools/circt/bin/circt-opt", env!("CARGO_MANIFEST_DIR"));
+        let tool = if std::path::Path::new(&local).exists() {
+            local
+        } else {
+            "circt-opt".to_string()
+        };
+        let out = std::process::Command::new(tool)
+            .arg(&path)
+            .output()
+            .expect("run circt-opt");
+        assert!(
+            out.status.success(),
+            "circt-opt rejected the emitted module:\n{}\n{}",
+            String::from_utf8_lossy(&out.stderr),
+            output
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
 

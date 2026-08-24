@@ -1224,10 +1224,19 @@ fn codegen(
             ".ll"
         }
         BackendKind::Circt => {
-            let mut b = briev_compiler::backend::circt::CirctBackend::new();
+            let mut b = briev_compiler::backend::circt::CirctBackend::new()
+                // 2026-08-23 (Plan 3.1): normalized universe for rule-19
+                // type lowering (protocol categories, never names).
+                .with_universe(universe.clone());
             // 2026-08-23 (Plan 0.1): consume the shared dependency graph from
             // the pipeline analysis instead of re-deriving it.
-            output = b.generate_with_dep_graph(items, &analysis.dependency_graph);
+            output = b.generate_with_dep_graph_universe(items, &analysis.dependency_graph, universe);
+            // 2026-08-23 (Plan 3.3): recorded unsupported constructs are hard
+            // errors — hardware targets never silently drop logic.
+            let errs = b.errors.borrow().clone();
+            if !errs.is_empty() {
+                return Err(errs.join("\n"));
+            }
             ".mlir"
         }
         BackendKind::Gpu => {
