@@ -4981,7 +4981,19 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
-## Conformance sweep: 89 active sources fail the real-pipeline gate (2026-08-23 update #7, revised)
+## Conformance sweep: 67 active sources fail the real-pipeline gate (2026-08-23 update #8)
+
+**Progress:** ... → 89 → **67**. Pass 7 was the @-era demo pass:
+migrated 7 demos to modern syntax (goal-based contracts, callable types,
+Load#/Store#, Ptr<Bit<N>>), archived 12 removed-feature showcases.
+**Remaining classes:**
+1. lib/compiler tamer WIP (~17): comma-separated defn params; foreign track
+2. glue.dbv dialect (~9): parser vs quoted-mode decision needed
+3. stdlib deep-legacy (~15): console cell!, json.bv deep-type,
+   process.bv List-args staging, memory/crossword generic issues
+4. misc singles (~26): data-briev positions, link-demo missing .c,
+   saxpy top-level call, test_ffi Result-vs-Bool, gpu-compute Ptr
+   literals, vector_test UInt literal, fn-ptr .#Ptr remnants the real-pipeline gate (2026-08-23 update #7, revised)
 
 NOTE: json.bv requires a DEEP migration, not just uni→match. After the
 uni rewrite (done by hand), the underlying code has ~12 type errors from
