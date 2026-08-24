@@ -196,9 +196,14 @@ defn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         };
 
         0x0E => { // not (logical NOT)
+            // 2026-08-23: same mutated-slot fix as EQ/NE — the second when
+            // re-read the overwritten value and clobbered the result.
             when sl >= 1 {
-                when (*stack).data[sl - 1] == 0 { (*stack).data[sl - 1] = 1; };
-                when (*stack).data[sl - 1] != 0 { (*stack).data[sl - 1] = 0; };
+                let v = (*stack).data[sl - 1];
+                (*stack).data[sl - 1] = 0;
+                when v == 0 {
+                    (*stack).data[sl - 1] = 1;
+                };
             };
             term pc + 1;
         };
@@ -220,12 +225,82 @@ defn exec_op(stack: Ptr<VMStack>, locals: Ptr<VMLocals>,
         };
 
         0x11 => { // eq
+            // 2026-08-23 (bugfix): the old two-when form re-read the MUTATED
+            // slot in the second condition (equal -> slot=1 -> 1 != other ->
+            // reset to 0), so every EQ returned 0. Preset before evaluating
+            // the condition, like the ordered comparison arms.
             when sl >= 2 {
-                when (*stack).data[sl - 2] == (*stack).data[sl - 1] {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 0;
+                when a == b {
                     (*stack).data[sl - 2] = 1;
                 };
-                when (*stack).data[sl - 2] != (*stack).data[sl - 1] {
+                (*stack).len = sl - 1;
+            };
+            term pc + 1;
+        };
+
+        0x12 => { // ne
+            // 2026-08-23: same preset-then-conditional fix as EQ.
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 1;
+                when a == b {
                     (*stack).data[sl - 2] = 0;
+                };
+                (*stack).len = sl - 1;
+            };
+            term pc + 1;
+        };
+
+        0x13 => { // lt_s
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 0;
+                when a < b {
+                    (*stack).data[sl - 2] = 1;
+                };
+                (*stack).len = sl - 1;
+            };
+            term pc + 1;
+        };
+
+        0x14 => { // le_s
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 0;
+                when a <= b {
+                    (*stack).data[sl - 2] = 1;
+                };
+                (*stack).len = sl - 1;
+            };
+            term pc + 1;
+        };
+
+        0x15 => { // gt_s
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 0;
+                when a > b {
+                    (*stack).data[sl - 2] = 1;
+                };
+                (*stack).len = sl - 1;
+            };
+            term pc + 1;
+        };
+
+        0x16 => { // ge_s
+            when sl >= 2 {
+                let b = (*stack).data[sl - 1];
+                let a = (*stack).data[sl - 2];
+                (*stack).data[sl - 2] = 0;
+                when a >= b {
+                    (*stack).data[sl - 2] = 1;
                 };
                 (*stack).len = sl - 1;
             };

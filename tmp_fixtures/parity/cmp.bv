@@ -1,0 +1,11 @@
+// PARITY fixture: comparisons produce 0/1 values (C semantics).
+// EXPECT: 1,0,1,0,1,0
+txn go [3 < 5][1 == 1] {
+  Print#(3 < 5);
+  Print#(5 < 3);
+  Print#(3 <= 3);
+  Print#(4 <= 3);
+  Print#(7 >= 7);
+  Print#(2 >= 7);
+  term;
+};
