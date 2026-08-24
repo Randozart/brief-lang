@@ -1308,6 +1308,11 @@ impl<'a> Parser<'a> {
         // 2026-07-31: true once any `[` was consumed — distinguishes an
         // explicit contract from the no-contract default `[true][true]`.
         let mut contract_saw_bracket = false;
+        // 2026-08-23: distinguish WHICH brackets were written — a pre-only
+        // `[true]` with an OMITTED post auto-fills true, which must not
+        // count as the banned written-[true][true] tautology.
+        let mut saw_pre_bracket = false;
+        let mut saw_post_bracket = false;
         // 2026-08-01 (Phase 2): `[#]` entry-point marker removed. Peek for it
         // and raise a clear error — the entry!/args! plugin (Phase 3) replaces
         // the marker with explicit macros, so `[#]` must not silently parse as
@@ -1331,7 +1336,10 @@ impl<'a> Parser<'a> {
         let mut saw_invert = false;
         if self.check(&Token::LBracket) {
             contract_saw_bracket = true;
+            saw_pre_bracket = true;
             if self.contract_is_invert() {
+                // The two-in-one invert form writes both sides.
+                saw_post_bracket = true;
                 (pre, post) = self.parse_contract_invert()?;
                 saw_invert = true;
             } else {
@@ -1341,6 +1349,7 @@ impl<'a> Parser<'a> {
         // Parse: [post] if present (skipped for the two-in-one invert form)
         if !saw_invert && self.check(&Token::LBracket) {
             contract_saw_bracket = true;
+            saw_post_bracket = true;
             post = self.parse_single_contract_condition()?;
         }
         // 2026-07-31 (Phase 3): Watchdog — optional `?[cond]` or required
@@ -1466,7 +1475,8 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let explicit = contract_saw_bracket;
+        let explicit =
+            contract_saw_bracket && saw_pre_bracket && saw_post_bracket;
         Ok(Contract {
             pre_condition: pre,
             post_condition: post,
