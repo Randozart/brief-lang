@@ -304,3 +304,4 @@ benchmarks/linked_list
 tools/circt-src/
 tools/circt/
 lib/tamer/main
+tmp_fixtures/hw/
