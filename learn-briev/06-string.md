@@ -198,9 +198,9 @@ defn analyze_text(text: String) -> TextStats {
     let words = text.split(" ");
     let lines = text.split("\n");
     
-    &stats.char_count = text .^Length;
-    &stats.word_count = words .^Length;
-    &stats.line_count = lines .^Length;
+    stats.char_count = CharCount#(text);
+    stats.word_count = CharCount#(words);
+    stats.line_count = CharCount#(lines);
     
     // Count spaces
     let i: Int = 0;
