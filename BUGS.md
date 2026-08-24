@@ -4981,7 +4981,12 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
-## Conformance sweep: 96 active sources fail the real-pipeline gate (2026-08-23 update #5)
+## Conformance sweep: 92 active sources fail the real-pipeline gate (2026-08-23 update #6)
+
+**Progress:** ... → 96 → **92**. Pass 5 landed: posix SYS_* consts +
+export-let visibility fix (typechecker), Barrier# intrinsic (CPU no-op /
+future OpControlBarrier), ffi/http.bv modern frgn syntax + http.bv
+Result passthrough, <std/result> import for constructor visibility. the real-pipeline gate (2026-08-23 update #5)
 
 **Progress:** 152 → 136 → 134 → 119 → 106 → **97 → 96**. Pass 4 landed:
 pre-only `[true]` contract misflag fix (parser), memory/arena+crossword
