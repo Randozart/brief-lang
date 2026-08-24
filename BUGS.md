@@ -4981,7 +4981,13 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
-## Conformance sweep: 106 active sources fail the real-pipeline gate (2026-08-23 update #4)
+## Conformance sweep: 96 active sources fail the real-pipeline gate (2026-08-23 update #5)
+
+**Progress:** 152 → 136 → 134 → 119 → 106 → **97 → 96**. Pass 4 landed:
+pre-only `[true]` contract misflag fix (parser), memory/arena+crossword
+cast-based Ptr arithmetic + Free# typing, string_c.bv typed-String
+migration, archived queue/stack/ptr/skiplist/shm/system/tty (zero-
+consumer legacy). the real-pipeline gate (2026-08-23 update #4)
 
 **Progress:** 152 → 136 → 134 → 119 → **106** across four burn-down
 passes. Landed this pass: fn-as-value typing (SPEC §9.2 identifier
