@@ -1,0 +1,7 @@
+// HW validation fixture: 8-bit counter with tick trigger (Plan 3.5).
+let counter: UInt[8] = 0;
+let tick: Int = 0;
+
+txn step [counter < 255] {
+  counter = counter + 1;
+}

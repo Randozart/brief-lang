@@ -1,0 +1,7 @@
+// HW validation fixture: combinational add of two state words.
+let a: UInt[16] = 0;
+let b: UInt[16] = 0;
+
+txn sum [1 == 1] {
+  a = a + b;
+}

@@ -88,6 +88,21 @@ land — additive follow-up commit within the branch.
 - Rationale comments dated 2026-08-23 where invented-op/drop sites were
   replaced; each names the old behavior and why it was unsound.
 
+## Hardware validation harnesses (added 2026-08-23, user-requested)
+
+The user has Vivado 2023.1 installed at `/mnt/data/tools/Xilinx/Vivado/2023.1`
+(K26 KV260 project present) plus verilator/iverilog. Two harnesses:
+
+- `tools/hw_harness.sh` — per `.cbv` fixture: brievc → .mlir → circt-opt
+  parse → circt-translate --export-verilog → verilator lint. Gated on
+  circt-opt (skips until tools/install-circt.sh lands).
+- `tools/vivado_check.sh` — xvlog compile of generated Verilog, optional
+  full `synth_design` (VIVADO_SYNTH=1) against the KV260 part
+  (xck26-sfvc784-2LV-c). PROVEN end-to-end with hand-written RTL:
+  xvlog PASS, synthesis PASS with utilization report.
+  When circt-translate lands, wire it as stage 5 of hw_harness.sh so every
+  emitted module is provably synthesizable on real silicon tooling.
+
 ## Verification
 
 1. Emitted MLIR parses under pinned circt-opt (all fixtures).

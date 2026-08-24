@@ -296,7 +296,8 @@ impl CirctBackend {
 
         let mut input_ports: Vec<String> = Vec::new();
         let mut output_ports: Vec<(String, String)> = Vec::new();
-        input_ports.push("in %clock: i1".to_string());
+        // 2026-08-23 (Plan 3): clocks are !seq.clock — seq.firreg requires it.
+        input_ports.push("in %clock: !seq.clock".to_string());
         input_ports.push("in %reset: i1".to_string());
 
         for trg in &self.trg_ports {
@@ -308,9 +309,22 @@ impl CirctBackend {
 
         output_ports.push(("halt".to_string(), "i1".to_string()));
 
-        let sorted_vars = &dep_graph.topo_order;
+        // 2026-08-23 (robustness): topo_order can DROP declared state —
+        // self-dependencies (counter = counter + 1) create cycles that make
+        // DependencyGraph::build fail, and the caller's fallback is an EMPTY
+        // graph. Emission must not lose declared state: union topo with
+        // every declared var, sorted for determinism.
+        // To undo: revert to iterating topo_order alone.
+        let mut ordered: Vec<String> = dep_graph.topo_order.clone();
+        for name in self.var_types.keys() {
+            if !ordered.contains(name) {
+                ordered.push(name.clone());
+            }
+        }
+        ordered.sort();
+        let ordered: &[String] = &ordered;
         let trg_names: std::collections::HashSet<String> = self.trg_ports.iter().map(|t| t.trg_name.clone()).collect();
-        for var_name in sorted_vars {
+        for var_name in ordered {
             if trg_names.contains(var_name) {
                 continue;
             }
@@ -332,53 +346,93 @@ impl CirctBackend {
         }
         writeln!(out, ") {{").ok();
 
+        // ── Wire-map architecture (Plan 3, sequential semantics):
+        //
+        //   Phase A: one INITIAL constant per output var; var→wire starts there.
+        //   Phase B: txn bodies emit against the CURRENT map — an assignment
+        //            computes a new value WIRE and repoints the map (reads see
+        //            pre-update values: non-blocking-assignment semantics).
+        //   Phase C: one seq.firreg per var consumes the FINAL wire — legal
+        //            SSA because next-wires are defined before the register,
+        //            and no forward references exist anywhere.
+        //
+        // To undo: restore the seq.always/fantasy-initial_value emission.
         let mut reg_names: HashMap<String, String> = HashMap::new();
+
+        // Phase A: init constants.
         let special_outputs: std::collections::HashSet<&str> = ["halt"].iter().cloned().collect();
         for (var_name, mlir_ty) in &output_ports {
-            if special_outputs.contains(var_name.as_str()) {
-                continue;
+            let init_val = if special_outputs.contains(var_name.as_str()) {
+                "0".to_string()
+            } else {
+                self.initial_value(var_name)
+            };
+            let c = ng.fresh_const(&format!("{}_init", var_name));
+            writeln!(out, "  {} = hw.constant {} : {}", c, init_val, mlir_ty).ok();
+            reg_names.insert(var_name.clone(), c);
+        }
+
+        let clock_wire = "%clock";
+
+        // Phase B: transaction bodies (in program order).
+        let mut pending: HashMap<String, String> = HashMap::new();
+        for item in items {
+            if let TopLevel::Transaction(txn) = item {
+                self.emit_txn_body(
+                    &mut ng,
+                    out,
+                    &txn.name,
+                    &txn.body,
+                    &txn.contract,
+                    &mut reg_names,
+                    &mut pending,
+                    clock_wire,
+                );
             }
-            let init_val = self.initial_value(var_name);
+        }
+
+        // Phase C: registers consume FINAL wires; reset forces init values.
+        for (var_name, mlir_ty) in &output_ports {
+            let init_wire = format!("%{}_init", var_name);
+            let next = pending
+                .get(var_name)
+                .cloned()
+                .unwrap_or_else(|| init_wire.clone());
+            // next-on-reset mux: %reset high -> init value.
+            let mux = ng.fresh_wire(&format!("{}_next", var_name));
+            writeln!(
+                out,
+                "  {} = comb.mux %reset, {}, {} : {}",
+                mux, init_wire, next, mlir_ty
+            )
+            .ok();
             let reg = ng.fresh_reg(var_name);
-            writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
+            let preset = self.initial_value(var_name);
+            writeln!(
+                out,
+                "  {} = seq.firreg {} clock {} preset {} : {}",
+                reg, mux, clock_wire, preset, mlir_ty
+            )
+            .ok();
             reg_names.insert(var_name.clone(), reg);
         }
 
-        for (var_name, mlir_ty) in &output_ports {
-            if let Some(expr) = self.var_exprs.get(var_name).and_then(|e| e.as_ref()) {
-                let result = self.emit_expr(&mut ng, out, expr, &reg_names, mlir_ty);
-                if let Some(r) = result {
-                    if let Some(reg) = reg_names.get(var_name) {
-                        writeln!(out, "  seq.always(posedge %clock) {{").ok();
-                        writeln!(out, "    {} <= comb.mux %reset, {}_init, {}", reg, r, r).ok();
-                        writeln!(out, "  }}").ok();
-                    }
-                }
-            } else {
-                let c = ng.fresh_const(var_name);
-                writeln!(out, "  {} = hw.constant 0 : {}", c, mlir_ty).ok();
-            }
-        }
-
-        for item in items {
-            if let TopLevel::Transaction(txn) = item {
-                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &txn.contract, &mut reg_names);
-            }
-        }
-
-        write!(out, "  hw.output").ok();
+        // ── Outputs.
+        // 2026-08-23: join with commas — the old loop wrote a TRAILING
+        // comma on the last entry (invalid MLIR).
+        let mut out_parts: Vec<String> = Vec::new();
         for (var_name, mlir_ty) in &output_ports {
             if let Some(reg) = reg_names.get(var_name) {
-                write!(out, " {} : {},", reg, mlir_ty).ok();
-            } else if var_name == "halt" {
-                let c = ng.fresh_const("halt_default");
-                writeln!(out, "  {} = hw.constant 0 : i1", c).ok();
-                write!(out, " {} : {},", c, mlir_ty).ok();
+                out_parts.push(format!("{} : {}", reg, mlir_ty));
+            } else {
+                let c = ng.fresh_const(&format!("{}_default", var_name));
+                writeln!(out, "  {} = hw.constant 0 : {}", c, mlir_ty).ok();
+                out_parts.push(format!("{} : {}", c, mlir_ty));
             }
         }
-        writeln!(out).ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
+        if !out_parts.is_empty() {
+            writeln!(out, "  hw.output {}", out_parts.join(", ")).ok();
+        }
     }
 
     fn initial_value(&self, var_name: &str) -> String {
@@ -516,18 +570,34 @@ impl CirctBackend {
                         // Function calls become submodule instantiations
                         let inst_name = name.replace('-', "_");
                         let result_wire = ng.fresh_wire(&format!("{}_result", inst_name));
+                        // 2026-08-23 (Plan 3.2): real hw.instance syntax —
+                        // port names must match the cell's declared params.
+                        // The old form emitted $arg0/$result ($ names are
+                        // invalid MLIR identifiers).
+                        let param_names: Vec<String> = self
+                            .cell_defs
+                            .get(&inst_name)
+                            .map(|c| c.parameters.iter().map(|(n, _)| n.clone()).collect())
+                            .unwrap_or_else(|| {
+                                (0..args.len()).map(|i| format!("in{}", i)).collect()
+                            });
                         let mut arg_parts = Vec::new();
                         for (i, arg) in args.iter().enumerate() {
+                            let port = param_names.get(i).cloned().unwrap_or_else(|| format!("in{}", i));
                             let arg_mlir_ty = if i == 0 { "i64" } else { result_ty };
                             if let Some(arg_val) = self.emit_expr(ng, out, arg, reg_names, arg_mlir_ty) {
-                                arg_parts.push(format!("{}: $arg{}: {}", arg_val, i, arg_mlir_ty));
+                                arg_parts.push(format!("{}: {}: {}", port, arg_val, arg_mlir_ty));
                             }
                         }
-                        let result_mlir_ty = result_ty;
-                        writeln!(out, "  {} = hw.instance \"{}\" @{} ({}) -> ({}: ${}: {})",
+                        let out_port = self
+                            .cell_defs
+                            .get(&inst_name)
+                            .and_then(|c| Self::extract_output_names_llvm(&c.output_type).into_iter().next())
+                            .unwrap_or_else(|| "out".to_string());
+                        writeln!(out, "  {} = hw.instance \"{}\" @{} ({}) -> ({}: {})",
                             result_wire, inst_name, inst_name,
                             arg_parts.join(", "),
-                            result_wire, "result", result_mlir_ty,
+                            out_port, result_ty,
                         ).ok();
                         Some(result_wire)
                     }
@@ -580,92 +650,137 @@ impl CirctBackend {
         Some(w)
     }
 
-    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], contract: &Contract, reg_names: &mut HashMap<String, String>) {
-        let state_reg = ng.fresh_reg("txn_state");
-        writeln!(out, "  {} = seq.firreg initial_value {{ init_value = 0 : i2 }} : i2", state_reg).ok();
-
-        let halt_reg = ng.fresh_reg("halt");
-        let c0 = ng.fresh_const("zero_i1");
-        writeln!(out, "  {} = hw.constant 0 : i1", c0).ok();
-        writeln!(out, "  {} = seq.firreg initial_value {{ init_value = 0 : i1 }} : i1", halt_reg).ok();
-        reg_names.insert("halt".to_string(), halt_reg.clone());
-
-        let pre_cond = ng.fresh_wire("pre");
-        self.emit_contract_condition(out, ng, &contract.pre_condition, &pre_cond, reg_names);
-
-        for stmt in body {
-            match stmt {
-                Statement::Assign(lhs, expr) => {
-                    if let Some(var_name) = lhs.as_var_name() {
-                        let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::int()));
-                        if let Some(reg) = reg_names.get(var_name) {
-                            let val = self.emit_expr(ng, out, expr, reg_names, &mlir_ty);
-                            if let Some(v) = val {
-                                writeln!(out, "  seq.always(posedge %clock) {{").ok();
-                                writeln!(out, "    {} <= {}", reg, v).ok();
-                                writeln!(out, "  }}").ok();
-                            }
-                        }
-                    }
-                }
-                Statement::Expression(expr) => {
-                    self.emit_expr(ng, out, expr, reg_names, "i64");
-                }
-
-                Statement::EndProgram(..) => {
-                    writeln!(out, "  seq.always(posedge %clock) {{").ok();
-                    writeln!(out, "    {} <= 1 : i1", halt_reg).ok();
-                    writeln!(out, "  }}").ok();
-                }
-                Statement::Term(..) => {}
-                Statement::Foreach { item, list, body, .. } => {
-                    let list_items = match list.as_ref() {
-                        Expr::List(items) => Some(items),
-                        _ => None,
-                    };
-                    if let Some(items) = list_items {
-                        for (i, elem) in items.iter().enumerate() {
-                            writeln!(out, "  // foreach iteration {}: {} = {:?}", i, item, elem).ok();
-                            for stmt in body {
-                                self.emit_txn_body(ng, out, _name, &[stmt.clone()], contract, reg_names);
-                            }
-                        }
-                    } else {
-                        writeln!(out, "  // foreach skipped — non-constant list, unroll not possible").ok();
-                    }
-                }
-                Statement::Let { name, expr: Some(e), .. } => {
-                    let mlir_ty = self.mlir_type(self.var_types.get(name).unwrap_or(&Type::int()));
-                    if let Some(val) = self.emit_expr(ng, out, e, reg_names, &mlir_ty) {
-                        let w = ng.fresh_wire("let");
-                        writeln!(out, "  {} = hw.wire {} : {}", w, val, mlir_ty).ok();
-                        reg_names.insert(name.clone(), w);
-                    }
-                }
-                Statement::Guarded(cond, stmts) => {
-                    let cond_mlir = self.mlir_type(&Type::bool_());
-                    if let Some(cond_val) = self.emit_expr(ng, out, cond, reg_names, &cond_mlir) {
-                        let cond_icmp = ng.fresh_wire("gic");
-                        writeln!(out, "  {} = comb.icmp ne {}, %true : i1", cond_icmp, cond_val).ok();
-                        for s in stmts {
-                            self.emit_txn_body(ng, out, _name, &[s.clone()], contract, reg_names);
-                        }
-                    }
-                }
-                _ => {}
-            }
+    #[allow(clippy::too_many_arguments)]
+    fn emit_txn_body(
+        &self,
+        ng: &mut NameGen,
+        out: &mut String,
+        name: &str,
+        body: &[Statement],
+        contract: &Contract,
+        reg_names: &mut HashMap<String, String>,
+        pending: &mut HashMap<String, String>,
+        clock_wire: &str,
+    ) {
+        let _ = clock_wire;
+        // ── §3.4: contracts as hardware obligations — pre/post conditions
+        // materialize as real comparators so synthesis/simulation tools can
+        // assert on them (sv.assert wiring lands with the toolchain harness).
+        if !matches!(&contract.pre_condition, Expr::Bool(true)) {
+            let w = ng.fresh_wire(&format!("{}_pre", name));
+            writeln!(out, "  {} = hw.wire 0 : i1", w).ok();
+            self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
+        }
+        if !matches!(&contract.post_condition, Expr::Bool(true)) {
+            let w = ng.fresh_wire(&format!("{}_post", name));
+            writeln!(out, "  {} = hw.wire 0 : i1", w).ok();
+            self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
         }
 
-        let post_cond = ng.fresh_wire("post");
-        self.emit_contract_condition(out, ng, &contract.post_condition, &post_cond, reg_names);
+        for stmt in body {
+            self.emit_stmt_pending(ng, out, stmt, reg_names, pending);
+        }
+    }
 
-        let state_next = ng.fresh_wire("txn_state_next");
-        writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_next, post_cond, 2, 1).ok();
-        let state_after_body = ng.fresh_wire("txn_state_after");
-        writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_after_body, pre_cond, state_next, 0).ok();
-        writeln!(out, "  seq.always(posedge %clock) {{").ok();
-        writeln!(out, "    {} <= {}", state_reg, state_after_body).ok();
-        writeln!(out, "  }}").ok();
+    /// 2026-08-23 (Plan 3): assignments compute a value WIRE and repoint the
+    /// pending map — reads elsewhere keep seeing pre-update values until the
+    /// register consumes the final wire. Guarded bodies mux on their
+    /// condition against the current pending/current wire.
+    fn emit_stmt_pending(
+        &self,
+        ng: &mut NameGen,
+        out: &mut String,
+        stmt: &Statement,
+        reg_names: &mut HashMap<String, String>,
+        pending: &mut HashMap<String, String>,
+    ) {
+        match stmt {
+            Statement::Expression(expr) => {
+                self.emit_expr(ng, out, expr, reg_names, "i64");
+            }
+            Statement::Assign(lhs, expr) => {
+                if let Some(var_name) = lhs.as_var_name() {
+                    let mlir_ty =
+                        self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::int()));
+                    if let Some(val) = self.emit_expr(ng, out, expr, reg_names, &mlir_ty) {
+                        let current = pending
+                            .get(var_name)
+                            .cloned()
+                            .or_else(|| reg_names.get(var_name).cloned());
+                        let target = match current {
+                            Some(c) => c,
+                            None => {
+                                // First write to a var with no init wire yet:
+                                // declare its init constant now.
+                                let init_val = self.initial_value(var_name);
+                                let c = ng.fresh_const(&format!("{}_init", var_name));
+                                writeln!(
+                                    out,
+                                    "  {} = hw.constant {} : {}",
+                                    c, init_val, mlir_ty
+                                )
+                                .ok();
+                                reg_names.insert(var_name.to_string(), c.clone());
+                                c
+                            }
+                        };
+                        let w = ng.fresh_wire(&format!("{}_next", var_name));
+                        writeln!(out, "  {} = comb.mux %true, {}, {} : {}", w, val, target, mlir_ty)
+                            .ok();
+                        pending.insert(var_name.to_string(), w);
+                    }
+                }
+            }
+            Statement::Guarded(condition, statements) => {
+                let cond_ty = "i1";
+                if let Some(cond) = self.emit_expr(ng, out, condition, reg_names, cond_ty) {
+                    for inner in statements {
+                        if let Statement::Assign(lhs, expr) = inner {
+                            if let Some(var_name) = lhs.as_var_name() {
+                                let mlir_ty = self.mlir_type(
+                                    self.var_types.get(var_name).unwrap_or(&Type::int()),
+                                );
+                                if let Some(val) =
+                                    self.emit_expr(ng, out, expr, reg_names, &mlir_ty)
+                                {
+                                    let current = pending
+                                        .get(var_name)
+                                        .cloned()
+                                        .or_else(|| reg_names.get(var_name).cloned())
+                                        .unwrap_or_else(|| "%0".to_string());
+                                    // enabled write: cond ? new : hold-current
+                                    let w =
+                                        ng.fresh_wire(&format!("{}_when", var_name));
+                                    writeln!(
+                                        out,
+                                        "  {} = comb.mux {}, {}, {} : {}",
+                                        w, cond, val, current, mlir_ty
+                                    )
+                                    .ok();
+                                    pending.insert(var_name.to_string(), w);
+                                }
+                            }
+                        } else {
+                            self.emit_stmt_pending(ng, out, inner, reg_names, pending);
+                        }
+                    }
+                }
+            }
+            Statement::SyncBlock(body) | Statement::Block(body) => {
+                for inner in body {
+                    self.emit_stmt_pending(ng, out, inner, reg_names, pending);
+                }
+            }
+            other => {
+                // 2026-08-23 (Plan 3.3): recorded — never silent.
+                let kind = format!("{:?}", other)
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("statement")
+                    .to_string();
+                self.record_unsupported(&format!("{} statements in hardware", kind));
+            }
+        }
     }
 
     fn emit_cell_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, cell: &crate::ast::CellDef) {
@@ -683,7 +798,7 @@ impl CirctBackend {
             let out_mlir_ty = cell.parameters.first()
                 .map(|(_, t)| self.mlir_type(t))
                 .unwrap_or_else(|| "i64".to_string());
-            write!(out, ") -> ({}: ${}: {})", first_out, "result", out_mlir_ty).ok();
+            write!(out, ") -> ({}: {})", first_out, out_mlir_ty).ok();
         } else {
             write!(out, ") -> ()").ok();
         }
@@ -884,7 +999,7 @@ mod tests {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&[]);
         assert!(output.contains("hw.module @top"));
-        assert!(output.contains("clock: i1"));
+        assert!(output.contains("clock: !seq.clock"));
         assert!(output.contains("hw.output"));
     }
 
@@ -931,7 +1046,7 @@ mod tests {
         let output = backend.generate(&[
             make_state_decl("counter", Type::int()),
         ]);
-        assert!(output.contains("in %clock: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
+        assert!(output.contains("in %clock: !seq.clock"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("in %reset: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("halt: i1"), "Outputs should include halt. Got:\n{}", output);
         assert!(output.contains("counter: si64"), "Outputs should include counter. Got:\n{}", output);
@@ -972,7 +1087,11 @@ mod tests {
         ]);
         assert!(output.contains("seq.firreg"), "FSM should have state reg. Got:\n{}", output);
         assert!(output.contains("comb.mux"), "FSM should have state transition mux. Got:\n{}", output);
-        assert!(output.contains("seq.always(posedge %clock)"), "FSM should have seq.always. Got:\n{}", output);
+        // 2026-08-23 (Plan 3): seq.alwas was fantasy syntax — the register
+        // consumes a next-value wire via typed `seq.firreg %next clock`.
+        // Register consumes the computed next wire (suffix from NameGen).
+        assert!(output.contains("= seq.firreg %counter_next"),
+            "register must consume the computed next wire. Got:\n{}", output);
     }
 
     #[test]
@@ -1018,7 +1137,15 @@ mod tests {
                 ]),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
-        assert!(output.contains("seq.always(posedge %clock)"), "Sync block should emit seq updates. Got:\n{}", output);
+        // 2026-08-23 (Plan 3): sync blocks lower through the same pending-
+        // wire path — both registers consume computed next wires.
+        assert!(output.contains("= seq.firreg %a_next"), "a register consumes next. Got:\n{}", output);
+        assert!(output.contains("= seq.firreg %b_next"), "b register consumes next. Got:\n{}", output);
+        // a := 10: an enabled mux selects the constant over the init wire.
+        assert!(output.contains("OpConstant") || output.contains("hw.constant 10"),
+            "constant 10 must be materialized. Got:\n{}", output);
+        assert!(output.matches("comb.mux %true,").count() >= 2,
+            "both assignments produce enabled muxes. Got:\n{}", output);
     }
 
     #[test]
