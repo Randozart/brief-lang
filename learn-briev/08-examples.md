@@ -8,12 +8,12 @@ Real-world Briev programs demonstrating all features.
 // counter.rbv
 let count: Int = 0;
 
-txn increment [count < 100][@count + 1 == count] {
+txn increment [count < 100][count + 1 == count] {
     count = count + 1;
     term;
 };
 
-txn decrement [count > 0][@count - 1 == count] {
+txn decrement [count > 0][count - 1 == count] {
     count = count - 1;
     term;
 };
@@ -46,35 +46,35 @@ let overdraft_protection: Bool = false;
 
 txn deposit(amount: Int) 
     [amount > 0]
-    [balance == @balance + amount]
+    [balance == balance + amount]
 {
-    &balance = balance + amount;
+    balance = balance + amount;
     term;
 };
 
 txn withdraw(amount: Int) 
     [amount > 0 && (balance >= amount || overdraft_protection)]
-    [balance == @balance - amount]
+    [balance == balance - amount]
 {
-    &balance = balance - amount;
+    balance = balance - amount;
     term;
 };
 
 txn transfer(to_account: Int, amount: Int)
     [amount > 0 && balance >= amount]
-    [balance == @balance - amount]
+    [balance == balance - amount]
 {
-    &balance = balance - amount;
+    balance = balance - amount;
     send_to(to_account, amount);
     term;
 };
 
 node apply_interest() 
     [balance > 10000]
-    [balance == @balance + (@balance * 5 / 100)]
+    [balance == balance + (balance * 5 / 100)]
 {
     let interest = balance * 5 / 100;
-    &balance = balance + interest;
+    balance = balance + interest;
     term;
 };
 
@@ -82,7 +82,7 @@ txn enable_overdraft()
     [!overdraft_protection]
     [overdraft_protection == true]
 {
-    &overdraft_protection = true;
+    overdraft_protection = true;
     term;
 };
 ```
@@ -97,7 +97,7 @@ let discount_applied: Bool = false;
 
 txn add_item(price: Float, quantity: Int)
     [price > 0 && quantity > 0]
-    [items == @items + quantity && total == @total + (price * quantity)]
+    [items == items + quantity && total == total + (price * quantity)]
 {
     items = items + quantity;
     total = total + (price * quantity);
@@ -106,7 +106,7 @@ txn add_item(price: Float, quantity: Int)
 
 txn remove_item(quantity: Int)
     [quantity > 0 && quantity <= items]
-    [items == @items - quantity]
+    [items == items - quantity]
 {
     items = items - quantity;
     term;
@@ -121,7 +121,7 @@ txn clear_cart [items > 0][items == 0 && total == 0.0] {
 
 node apply_bulk_discount 
     [items > 10 && total > 100.0 && !discount_applied]
-    [total < @total && discount_applied == true]
+    [total < total && discount_applied == true]
 {
     let discount: Float = total * 0.1;
     total = total - discount;
@@ -169,7 +169,7 @@ struct Todo {
 let todos: List<Todo> = [];
 let filter: String = "all";
 
-txn add_todo(text: String) [text.^Len > 0][todos.^Len == @todos.^Len + 1] {
+txn add_todo(text: String) [text.^Len > 0][todos.^Len == todos.^Len + 1] {
     let new_todo = Todo {
         id: todos.^Len,
         text: text,
@@ -189,7 +189,7 @@ txn toggle_todo(id: Int) [id >= 0 && id < todos.^Len][true] {
     term;
 };
 
-txn remove_todo(id: Int) [id >= 0 && id < todos.^Len][todos.^Len == @todos.^Len - 1] {
+txn remove_todo(id: Int) [id >= 0 && id < todos.^Len][todos.^Len == todos.^Len - 1] {
     todos = todos.remove(id);
     term;
 };
@@ -242,8 +242,8 @@ node change_to_green()
     [state == LightState::Red && timer >= 60]
     [state == LightState::Green]
 {
-    &state = LightState::Green;
-    &timer = 0;
+    state = LightState::Green;
+    timer = 0;
     term;
 };
 
@@ -251,8 +251,8 @@ node change_to_yellow()
     [state == LightState::Green && timer >= 30]
     [state == LightState::Yellow]
 {
-    &state = LightState::Yellow;
-    &timer = 0;
+    state = LightState::Yellow;
+    timer = 0;
     term;
 };
 
@@ -260,13 +260,13 @@ node change_to_red()
     [state == LightState::Yellow && timer >= 5]
     [state == LightState::Red]
 {
-    &state = LightState::Red;
-    &timer = 0;
+    state = LightState::Red;
+    timer = 0;
     term;
 };
 
-node increment_timer() [true][timer == @timer + 1] {
-    &timer = timer + 1;
+node increment_timer() [true][timer == timer + 1] {
+    timer = timer + 1;
     term;
 };
 ```
@@ -282,20 +282,20 @@ let consumed: Int = 0;
 
 async node produce() 
     [buffer .^Len < buffer_size && produced < 100]
-    [produced == @produced + 1 && buffer .^Len == @buffer .^Len + 1]
+    [produced == produced + 1 && buffer .^Len == buffer .^Len + 1]
 {
-    &produced = produced + 1;
-    &buffer = buffer.append(produced);
+    produced = produced + 1;
+    buffer = buffer.append(produced);
     term;
 };
 
 async node consume() 
     [buffer .^Len > 0]
-    [consumed == @consumed + 1 && buffer .^Len == @buffer .^Len - 1]
+    [consumed == consumed + 1 && buffer .^Len == buffer .^Len - 1]
 {
     let item = buffer[0];
-    &buffer = buffer.drop(1);
-    &consumed = consumed + 1;
+    buffer = buffer.drop(1);
+    consumed = consumed + 1;
     process(item);
     term;
 };
@@ -354,10 +354,10 @@ let selected_item: String = "";
 
 node insert_coin(amount: Int) 
     [state == MachineState::Idle || state == MachineState::Selection]
-    [credit == @credit + amount]
+    [credit == credit + amount]
 {
-    &credit = credit + amount;
-    &state = MachineState::Selection;
+    credit = credit + amount;
+    state = MachineState::Selection;
     term;
 };
 
@@ -365,19 +365,19 @@ node select_item(item: String, price: Int)
     [state == MachineState::Selection && credit >= price]
     [selected_item == item]
 {
-    &selected_item = item;
-    &state = MachineState::Payment;
+    selected_item = item;
+    state = MachineState::Payment;
     term;
 };
 
 node dispense_item() 
     [state == MachineState::Payment]
-    [state == MachineState::Idle && credit == @credit - price && selected_item == ""]
+    [state == MachineState::Idle && credit == credit - price && selected_item == ""]
 {
     dispense(selected_item);
-    &credit = credit - price;
-    &selected_item = "";
-    &state = MachineState::Idle;
+    credit = credit - price;
+    selected_item = "";
+    state = MachineState::Idle;
     term;
 };
 
@@ -386,8 +386,8 @@ node refund()
     [state == MachineState::Idle && credit == 0]
 {
     refund_money(credit);
-    &credit = 0;
-    &state = MachineState::Idle;
+    credit = 0;
+    state = MachineState::Idle;
     term;
 };
 ```

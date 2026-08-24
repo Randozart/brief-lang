@@ -22,7 +22,7 @@ let b: Blob   = #b"\x89PNG\r\n"; // byte literal: raw bytes (exact \xHH content)
 
 ```briev
 let bytes: Blob = #b"\x00\xff";
-let n: Int = bytes.^Len;  // 2
+let n: Int = bytes.^Length;  // 2
 ```
 
 ## 1. Basic Operations
@@ -31,7 +31,7 @@ let n: Int = bytes.^Len;  // 2
 let s: String = "Hello, World!";
 
 // Length (method syntax)
-let len = s .^Len;  // 13
+let len = s .^Length;  // 13
 
 // Concatenation
 let combined = "Hello" + "World";  // "HelloWorld"
@@ -198,9 +198,9 @@ defn analyze_text(text: String) -> TextStats {
     let words = text.split(" ");
     let lines = text.split("\n");
     
-    &stats.char_count = text .^Len;
-    &stats.word_count = words .^Len;
-    &stats.line_count = lines .^Len;
+    &stats.char_count = text .^Length;
+    &stats.word_count = words .^Length;
+    &stats.line_count = lines .^Length;
     
     // Count spaces
     let i: Int = 0;
@@ -215,7 +215,7 @@ defn analyze_text(text: String) -> TextStats {
         [c.is_lower()] {
             &stats.lower_count = stats.lower_count + 1;
         };
-        &i = i + 1;
+        i = i + 1;
     };
     
     term stats;
@@ -228,7 +228,7 @@ defn reverse_words(text: String) -> String {
     let i: Int = words .^Len - 1;
     [i >= 0] {
         reversed = reversed.append(words[i]);
-        &i = i - 1;
+        i = i - 1;
     };
     
     term string.join(reversed, " ");
@@ -250,7 +250,7 @@ node run [!done][done == true] {
     println("Uppercase: " + String(stats.upper_count));
     println("Lowercase: " + String(stats.lower_count));
     
-    &done = true;
+    done = true;
     term;
 };
 ```

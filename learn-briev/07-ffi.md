@@ -48,7 +48,7 @@ The `from` sources:
 | `from "link/library.so"` | Links a system library |
 
 `import "glue/c.bv"` brings the C boundary types (`CStr`, `CDouble`, …) and the
-`meld CStr -> String` declaration, so boundary modules' vocabulary applies to
+protocol cast declaration (CStr → String), so boundary modules' vocabulary applies to
 your bridge.
 
 ---
@@ -62,7 +62,7 @@ import "glue/c.bv";
 
 export defn echo(name: CStr) -> CStr { term name; };
 export defn greet(name: CStr) -> CStr {
-    let s: String = name;      // the CStr ↔ String meld: no `as` needed
+    let s: String = name;      // the CStr ↔ String protocol cast: no `as` needed
     term s;
 };
 export defn join(a: CStr, b: CStr) -> CStr { term a + b; };
