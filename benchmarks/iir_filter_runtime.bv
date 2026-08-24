@@ -5,7 +5,7 @@
 //
 // Build:
 //   ./target/release/briev-compiler build --llvm benchmarks/iir_filter_runtime.bv \
-//       --out benchmarks --optimize-budget 256
+//       --build_out benchmarks --optimize-budget 256
 
 
 let bound: Int = get_env_int!("BOUND");
@@ -32,16 +32,16 @@ node process [bound > 0 && count < bound][count == bound] {
     let fb2: Float = a2 * y2;
     let fb: Float = fb1 + fb2;
 
-    let out: Float = ff - fb;
+    let build_out: Float = ff - fb;
 
     x2 = x1;
     x1 = input;
     y2 = y1;
-    y1 = out;
+    y1 = build_out;
 
     count = count + 1;
     when count % 5000000 == 0 {
-        println!(out);
+        println!(build_out);
     };
     term;
 };
