@@ -1,0 +1,17 @@
+// PARITY fixture: match expressions + when guards (JZ/JMP/JNZ arms).
+// EXPECT: 10,70,99,5
+txn go [1 == 1][1 == 1] {
+  let a: Int = 5;
+  let m1: Int = match a { 5 => 10, 4 => 20, _ => 30 };
+  Print#(m1);
+  let m2: Int = match a { 9 => 90, _ => 70 };
+  Print#(m2);
+  when a > 3 {
+    Print#(99);
+  };
+  when a > 9 {
+    Print#(1);
+  };
+  Print#(a);
+  term;
+};
