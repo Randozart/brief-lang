@@ -808,6 +808,22 @@ pub fn infer_expression(
                 ctx.bindings
                     .get(name)
                     .cloned()
+                    .or_else(|| {
+                        // 2026-08-23 (SPEC §9.2): a NAMED FUNCTION used as a
+                        // value — `apply_function("hi", my_printer)` — types
+                        // as its own signature, so it flows into callable-
+                        // typed parameters. fn_param_types/fn_return_types
+                        // carry the declared shapes.
+                        ctx.fn_return_types.get(name).map(|ret| {
+                            Type::Function(
+                                ctx.fn_param_types
+                                    .get(name)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                Box::new(ret.clone()),
+                            )
+                        })
+                    })
                     .ok_or_else(|| TypeError::UndefinedVariable {
                         name: name.clone(),
                         available: ctx.bindings.keys().cloned().collect(),

@@ -1,22 +1,22 @@
 // ─────────────────────────────────────────────────────────────
-// spatial-demo.bv — Spatial intrinsics and stdlib wrappers
-// 2026-07-15: Replaced __alloc#/__memcpy#/__memcmp# with
-// Malloc#/Memcpy# (already-existing intrinsics).
+// spatial-demo.bv — Spatial stdlib wrappers over block intrinsics
+// 2026-08-23: migrated onto the Fill#/Copy# intrinsics via the
+// std/spatial.bv wrappers, driven from a node. Compare/hash await
+// their arcs (see BUGS.md sweep triage).
 // ─────────────────────────────────────────────────────────────
 
-import { block_copy, block_compare, block_fill, block_hash }
-    from "std/spatial.bv";
+import { block_copy, block_fill } from "std/spatial.bv";
 
-// Allocate and fill two buffers (Malloc# replaces __alloc#)
-let a: Ptr64 = Malloc#(8);
-let b: Ptr64 = Malloc#(8);
+let i: Int = 0;
 
-block_fill(a, 0xFF, 8);   // fill a with 0xFF
-block_copy(b, a, 8);       // copy a → b
-let eq = block_compare(a, b, 8);  // eq == 0 (equal)
+node demo [i < 1][i == 1] {
+    // Allocate and fill two buffers (Malloc# replaces __alloc#)
+    let a: Ptr<Bit<8>> = Malloc#(8);
+    let b: Ptr<Bit<8>> = Malloc#(8);
 
-let hash_a = block_hash(a, 8);   // FNV-1a hash of buffer a
+    let _filled = block_fill(a, 255, 8);
+    let _copied = block_copy(b, a, 8);
 
-// Direct intrinsic calls (without stdlib)
-let copied = Memcpy#(b, a, 8);
-let same = 0;  // int_to_str# was removed — use block_compare above
+    i = i + 1;
+    term;
+};

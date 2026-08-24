@@ -21,9 +21,9 @@ let next: Ptr64 = qword_ptr + 8;
 let aligned: Ptr64 = qword_ptr & !7;
 
 // Contract-verified bounds safety
-defn read_register(reg: Ptr<Int>) -> Int
-    [reg as Int >= 0x40000000]
-    [reg as Int <  0x40001000]
+defn read_register(reg_addr: Ptr<Int>) -> Int
+    [reg_addr as Int >= 0x40000000]
+    [reg_addr as Int <  0x40001000]
 {
-    term volatile_load#(reg);
+    term volatile_load#(reg_addr);
 };

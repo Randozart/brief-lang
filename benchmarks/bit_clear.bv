@@ -1,8 +1,8 @@
 // bit_clear — Popcount decay benchmark
 //
-// Tests: compiler proves convergence for `reg = reg & (reg - 1)` via
+// Tests: compiler proves convergence for `reg_addr = reg_addr & (reg_addr - 1)` via
 // `detect_popcount_decay`. Each iteration clears exactly one bit,
-// so the ranking function `popcount(reg) → 0` converges in at most
+// so the ranking function `popcount(reg_addr) → 0` converges in at most
 // 63 iterations (for a 63-bit positive integer).
 //
 // Inherently bounded by integer width (63 iterations max for i64::MAX).
@@ -17,15 +17,15 @@
 
 
 const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
-let reg: Int = initial_reg;
+let reg_addr: Int = initial_reg;
 
-node clear_bit [reg != 0][reg == 0] {
-    let next_reg = reg & (reg - 1);
+node clear_bit [reg_addr != 0][reg_addr == 0] {
+    let next_reg = reg_addr & (reg_addr - 1);
 
     when next_reg % 100000 == 0 {
         println!(next_reg);
     };
 
-    reg = next_reg;
+    reg_addr = next_reg;
     term;
 };

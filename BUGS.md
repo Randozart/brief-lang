@@ -4962,7 +4962,12 @@ keeps the interpreter pure-Briev, moves ONLY the driver loop to C).
 
 ## Version-DAG phi mismatch with nested guard bodies (2026-08-23)
 
-**Status:** OPEN — pre-existing, enum-independent
+**Status:** CLOSED 2026-08-23. `emit_version_dag_main` now DECLINES the
+fold when any loop-body segment ends the program (endprogram inside a
+guard, one nesting level deep) — mid-loop `ret` poisoned the present/latch
+blocks and invalidated the header phis. The general PerFieldPhi path
+handles early termination proven-correctly; repro builds and runs
+(77742), all pinned fixtures byte-correct, suites green. Original report:
 **Repro:** `bugs/repro_vd_phi_nested_guard.bv` — single-runtime-guard node
 (version-DAG path) whose body contains a NESTED `when` plus calls into an
 imported stdlib fn.
@@ -4976,7 +4981,94 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
-## Conformance sweep: 119 active sources fail the real-pipeline gate (2026-08-23 update #3)
+## Conformance sweep: 106 active sources fail the real-pipeline gate (2026-08-23 update #4)
+
+**Progress:** 152 → 136 → 134 → 119 → **106** across four burn-down
+passes. Landed this pass: fn-as-value typing (SPEC §9.2 identifier
+fallback), sig-family migrations onto callable types, spatial.bv
+rewritten onto Fill#/Copy#, archived module-orphaned benchmarks.
+**Remaining classes (per-file diagnostics in sweep output):**
+1. @-era demos (~15): prior-state reads → restructure contracts
+2. lib/compiler tamer WIP (~17): comma-separated defn params dominate;
+   foreign track, coordinate before migrating
+3. glue.dbv dialect (~9): "Expected named field" — parser vs quoted-mode
+   decision needed
+4. stdlib zero-consumer legacy (~25): old-trg, cell!, when-else,
+   comma-fields, missing SYS_*/FD_* consts, missing Mem*/Barrier#/
+   Spawn#/SetEnv# intrinsics, [true][true]x5 in string.ebv, Ptr
+   arithmetic semantics drift in memory/*
+5. misc singles: fn-ptr-demo (.#Ptr on fn type + undefined done),
+   todo.rbv List.push, map-set/multi_output/subtype-projections/
+   target-import/projections/constraint_* (removed header/field syntax),
+   main.bv/stdlib_usage import forms, proof-oracle `?`, wasm-import.rbv,
+   saxpy top-level call, test_ffi Result-vs-Bool contracts,
+   vector_test.ebv UInt literal, gpu-compute.abv Ptr literals,
+   data-briev dbv positions, link-demo missing helper.c module
+
+(Older triages preserved below.)
+
+## Conformance sweep: 119 active sources fail
+
+**Progress this pass:** 132 → 119. Landed: multi-payload enum variants
+(parser), bits.bv migrated off `:>`, metro/ext archive (zero-consumer,
+uni+Blob-construction chains), frgn provenance on 7 demo/bench files,
+reg/pvt/out renames. Per-demo deep migrations remain: each legacy file
+reveals further removed syntax beneath the first fix (var statements,
+missing semis, top-level term) — burn down one file per pass.
+
+**Progress:** enum variant construction LANDED (4bb965cb) — result.bv +
+option.bv migrated to native constructors + exhaustive match. Sweep at
+132. Classified inventory (from full sweep output):
+1. **@-era demos** (~20): examples using removed prior-state syntax
+   (arrow-mutation, async_mutual_exclusion, bank_transfer_system, cobol/*,
+   reactive_counter, simple-counter, contract_verification, …).
+2. **Reserved-word fallout** (~8): bit_clear/pointer-trickery/ptr-arithmetic/
+   layout-ptr-demo/volatile-io (`reg`), visibility-demo (`pvt`),
+   proto_bridge/iir_filter* (`out`), stdlib-demo (`union`).
+3. **frgn missing provenance** (~7): physics, test_ffi*, ptr-runtime,
+   glue-macro, link-example, saxpy, meld-bridge — need `from <source>`.
+4. **Tamer WIP** (~17): lib/compiler/*.bv — comma-separated defn params +
+   `uni` remnants + one lex error; foreign track, coordinate first.
+5. **glue.dbv parser mismatch** (~9): all per-language glue configs fail
+   "Expected named field" — dbv parser vs quoted-mode dialect drift.
+6. **stdlib legacy dialects** (~30 zero-consumer files): bits(`:>`),
+   console(`cell!`), briev_rt(old-trg), hashset/stack/queue(`{}` literal),
+   encoding(when-else), ext/*+posix-ish(comma-fields), skiplist(op-in?),
+   metro*(truncated), tty/system/ffi/*(misc), gpu/spatial/memory/*
+   (missing intrinsics Barrier#/Memcpy#/Memcmp#/Memset#/Hash#),
+   http/string_c(string-vs-int returns), posix/*(undefined SYS_* consts).
+7. **Misc**: string.ebv [true][true]x5, todo.rbv List.push member,
+   wasm-import.rbv, main.bv import syntax, fn-ptr-demo undefined fns,
+   data-briev config.dbv identifier positions, proof-oracle `?`.
+
+**Unblock order:** (2)+(3) mechanical → (6) per-file as touched → (1)
+demo rewrites → (4) coordinate → (5) parser dialect decision.
+
+
+
+**Status:** OPEN — Phase 10 continuation. **Primary blocker identified:
+enum variant CONSTRUCTION does not exist.** Patterns parse
+(`Result::Ok(v) =>`); constructors do not (`term Ok(v)` is a call to an
+undefined fn). This single feature blocks the result/option/json/
+string.ebv/process stdlib chains (~40 of the 134).
+**Progress:** 152 → 136 (real pipeline via new `src/pipeline.rs` lib
+module; shallow-gate false failures gone) → 134 (mechanical stdlib
+migrations landed: time.bv contract typos, types.bv removed bit-range
+suffix, json.bv import#+comma-fields, process.bv spawn→run rename).
+**Gate:** conformance.rs sweep test (still `#[ignore]`d until the count
+is small enough to fix in one pass). Run with `--ignored`.
+**Residual classes:**
+1. Enum construction blocker (above) — build it, then migrate
+   result/option/json/string.ebv/process chains to match-syntax.
+2. Zero-consumer legacy files in lib/std (bits `:>`, console `cell!`,
+   briev_rt old-trg, hashset `{}`, encoding when-else, ext/*+posix/*
+   comma-fields…) — no active importers; archive or migrate at leisure.
+3. @-era demo examples + reserved-word fallout (bit_clear.bv `reg`).
+4. lib/compiler/*.bv — foreign tamer-track WIP; coordinate first.
+
+(Original 2026-08-22 triage preserved below for history.)
+
+ the real-pipeline gate (2026-08-23 update #3)
 
 **Progress this pass:** 132 → 119. Landed: multi-payload enum variants
 (parser), bits.bv migrated off `:>`, metro/ext archive (zero-consumer,

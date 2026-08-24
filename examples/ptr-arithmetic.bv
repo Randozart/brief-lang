@@ -5,7 +5,7 @@
 //   1. Ptr<T> as a first-class typed memory address
 //   2. Explicit as casts between Ptr<T> and Int
 //   3. Address arithmetic on the raw Int, reinterpreted via cast
-//   4. Contract integration: [reg >= BASE][reg < END]
+//   4. Contract integration: [reg_addr >= BASE][reg_addr < END]
 //   5. Load# / Store# for volatile MMIO access
 //
 // 2026-08-22 (spec-conformance Phase 1b): migrated off if/else (SPEC §11.1),
@@ -34,18 +34,18 @@ let same: Bool = uart_rx == uart_tx;
 let lower: Bool = uart_rx < uart_tx;
 
 // Contract-proven pointer safety
-defn read_uart(reg: Ptr<Int>) -> Int
-    [reg as Int >= UART0_BASE]
-    [reg as Int <  UART0_END]
+defn read_uart(reg_addr: Ptr<Int>) -> Int
+    [reg_addr as Int >= UART0_BASE]
+    [reg_addr as Int <  UART0_END]
 {
-    term Load#(reg);
+    term Load#(reg_addr);
 };
 
-defn write_uart(reg: Ptr<Int>, val: Int)
-    [reg as Int >= UART0_BASE]
-    [reg as Int <  UART0_END]
+defn write_uart(reg_addr: Ptr<Int>, val: Int)
+    [reg_addr as Int >= UART0_BASE]
+    [reg_addr as Int <  UART0_END]
 {
-    Store#(reg, val);
+    Store#(reg_addr, val);
 };
 
 // Load# / Store# usage

@@ -3,7 +3,7 @@
 
 // ===== STRUCT FIELD VISIBILITY =====
 obj Buffer<T> {
-    pvt  data: List<T>;          // obj-private — only accessible within this obj
+    data: List<T>;          // obj-private — only accessible within this obj
     sed  cache: HashMap<Int, T>; // file-private — only in this .bv file
     size: Int;                   // public (default) — accessible from anywhere
 };
