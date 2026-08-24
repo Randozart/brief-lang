@@ -147,6 +147,15 @@ fn parity_eval_expr(e: &Expr, vars: &HashMap<String, i64>) -> i64 {
             panic!("parity eval: unbound variable '{}'", name)
         }),
         Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => -parity_eval_expr(inner, vars),
+        // 2026-08-23: unary ops from the unary fixture.
+        Expr::UnaryOp(kind, inner) => {
+            let v = parity_eval_expr(inner, vars);
+            match kind {
+                crate::ast::UnaryOpKind::Not => (v == 0) as i64,
+                crate::ast::UnaryOpKind::BitNot => !v,
+                other => panic!("parity eval: unsupported unary {:?}", other),
+            }
+        }
         Expr::BinaryOp(kind, l, r) => {
             let a = parity_eval_expr(l, vars);
             let b = parity_eval_expr(r, vars);
@@ -165,6 +174,14 @@ fn parity_eval_expr(e: &Expr, vars: &HashMap<String, i64>) -> i64 {
                 crate::ast::BinaryOpKind::BitXor => a ^ b,
                 crate::ast::BinaryOpKind::Shl => a << (b as u32 & 63),
                 crate::ast::BinaryOpKind::Shr => a >> (b as u32 & 63),
+                // 2026-08-23: comparisons yield 0/1 (C semantics) — the
+                // fixture corpus now includes comparison fixtures.
+                crate::ast::BinaryOpKind::Eq => (a == b) as i64,
+                crate::ast::BinaryOpKind::Neq => (a != b) as i64,
+                crate::ast::BinaryOpKind::Lt => (a < b) as i64,
+                crate::ast::BinaryOpKind::Gt => (a > b) as i64,
+                crate::ast::BinaryOpKind::Le => (a <= b) as i64,
+                crate::ast::BinaryOpKind::Ge => (a >= b) as i64,
                 other => panic!("parity eval: unsupported op {:?}", other),
             }
         }
