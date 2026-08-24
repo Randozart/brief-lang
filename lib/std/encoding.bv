@@ -74,10 +74,11 @@ defn byte_to_hex(b: Int) [b >= 0 && b <= 255][CharCount#(term) == 2] -> String {
 txn url_encode_loop(s: String, result: String, i: Int)
     [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
-  let c: String = s[i..i+1];
+  let c: String = s[i:(i+1)];
   when c == " " {
     result = result + "%20";
-  } {
+  };
+  when c != " " {
     result = result + c;
   };
   i = i + 1;
@@ -92,11 +93,12 @@ defn url_encode_simple(s: String) [true][CharCount#(term) >= CharCount#(s)] -> S
 txn url_decode_loop(s: String, result: String, i: Int)
     [i < CharCount#(s)][i == CharCount#(s)] -> String
 {
-  when i + 2 < CharCount#(s) && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
+  when i + 2 < CharCount#(s) && s[i:(i+1)] == "%" && s[(i+1):(i+3)] == "20" {
     result = result + " ";
     i = i + 3;
-  } {
-    result = result + s[i..i+1];
+  };
+  when !(i + 2 < CharCount#(s) && s[i:(i+1)] == "%" && s[(i+1):(i+3)] == "20") {
+    result = result + s[i:(i+1)];
     i = i + 1;
   };
   term result;
@@ -110,7 +112,7 @@ defn url_decode_simple(s: String) [true][CharCount#(term) <= CharCount#(s)] -> S
 txn is_hex_loop(s: String, i: Int)
     [i < CharCount#(s)][i == CharCount#(s)] -> Bool
 {
-  when !is_hex_digit(s[i..i+1]) {
+  when !is_hex_digit(s[i:(i+1)]) {
     term false;
   };
   i = i + 1;
@@ -126,7 +128,7 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
 txn reverse_string_loop(s: String, result: String, i: Int)
     [i >= 0][i < 0] -> String
 {
-  result = result + s[i..i+1];
+  result = result + s[i:(i+1)];
   i = i - 1;
   term result;
 };
@@ -140,7 +142,7 @@ defn reverse_string(s: String) [true][CharCount#(term) == CharCount#(s)] -> Stri
 txn count_char_loop(s: String, c: String, count: Int, i: Int)
     [i < CharCount#(s)][i == CharCount#(s)] -> Int
 {
-  when s[i..i+1] == c {
+  when s[i:(i+1)] == c {
     count = count + 1;
   };
   i = i + 1;
@@ -150,21 +152,18 @@ txn count_char_loop(s: String, c: String, count: Int, i: Int)
 defn count_char(s: String, c: String) [CharCount#(c) == 1][term >= 0] -> Int {
   term count_char_loop(s, c, 0, 0);
 };
-    i = i + 1;
-  };
-  term result;
-};
 
 // Simple URL decode (basic version - only decodes %20)
 defn url_decode_simple(s: String) [true][CharCount#(term) <= CharCount#(s)] -> String {
   let result: String = "";
   let i: Int = 0;
   when i < CharCount#(s) {
-    when i + 2 < CharCount#(s) && s[i..i+1] == "%" && s[i+1..i+3] == "20" {
+    when i + 2 < CharCount#(s) && s[i:(i+1)] == "%" && s[(i+1):(i+3)] == "20" {
       result = result + " ";
       i = i + 3;
-    } {
-      result = result + s[i..i+1];
+    };
+    when !(i + 2 < CharCount#(s) && s[i:(i+1)] == "%" && s[(i+1):(i+3)] == "20") {
+      result = result + s[i:(i+1)];
       i = i + 1;
     };
   };
@@ -185,9 +184,10 @@ defn is_hex_string(s: String) [true][term == true || term == false] -> Bool {
   let i: Int = 0;
   let valid: Bool = true;
   when i < CharCount#(s) && valid {
-    when is_hex_digit(s[i..i+1]) {
+    when is_hex_digit(s[i:(i+1)]) {
       valid = true;
-    } {
+    };
+    when !is_hex_digit(s[i:(i+1)]) {
       valid = false;
     };
     i = i + 1;
@@ -201,7 +201,7 @@ defn reverse_string(s: String) [true][CharCount#(term) == CharCount#(s)] -> Stri
   let result: String = "";
   let i: Int = CharCount#(s) - 1;
   when i >= 0 {
-    result = result + s[i..i+1];
+    result = result + s[i:(i+1)];
     i = i - 1;
   };
   term result;
@@ -212,7 +212,7 @@ defn count_char(s: String, c: String) [CharCount#(c) == 1][term >= 0] -> Int {
   let count: Int = 0;
   let i: Int = 0;
   when i < CharCount#(s) {
-    when s[i..i+1] == c {
+    when s[i:(i+1)] == c {
       count = count + 1;
     };
     i = i + 1;

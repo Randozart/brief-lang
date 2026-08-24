@@ -66,6 +66,78 @@ pub fn emit_intrinsic_call(
 
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetEnvInt#" => return emit_get_env_int(backend, out, v, args, indent),
+        // 2026-08-23 (process.bv revival): process/environment intrinsics.
+        // String returns pack as { i64 len, i64 data-ptr } via the same
+        // pattern as emit_get_env (helpers return malloc'd C strings).
+        "Spawn#" => {
+            let cmd = backend.emit_expr(out, &args[0], indent);
+            let cmd_ptr = backend.string_ptr(out, indent, &cmd);
+            let r = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call i64 @__briev_spawn(ptr {})", indent, r, cmd_ptr).ok();
+            return BTypedRegister { name: r, ty: Type::int() };
+        }
+        "SpawnWithOutput#" => {
+            let cmd = backend.emit_expr(out, &args[0], indent);
+            let cmd_ptr = backend.string_ptr(out, indent, &cmd);
+            let cstr = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @__briev_spawn_output(ptr {})", indent, cstr, cmd_ptr).ok();
+            let is_null = backend.fun.gen_reg();
+            writeln!(out, "{}{} = icmp eq ptr {}, null", indent, is_null, cstr).ok();
+            let fb = backend.fun.gen_reg();
+            writeln!(out, "{}{} = alloca i8, i64 1", indent, fb).ok();
+            writeln!(out, "{}store i8 0, ptr {}", indent, fb).ok();
+            let safe_ptr = backend.fun.gen_reg();
+            writeln!(out, "{}{} = select i1 {}, ptr {}, ptr {}", indent, safe_ptr, is_null, fb, cstr).ok();
+            let len = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call i64 @strlen(ptr {})", indent, len, safe_ptr).ok();
+            let data_raw = backend.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_raw, safe_ptr).ok();
+            let data = backend.fun.gen_reg();
+            writeln!(out, "{}{} = select i1 {}, i64 0, i64 {}", indent, data, is_null, data_raw).ok();
+            let t1 = backend.fun.gen_reg();
+            writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, t1, data).ok();
+            let t2 = backend.fun.gen_reg();
+            writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, t2, t1, len).ok();
+            return BTypedRegister { name: t2, ty: Type::string() };
+        }
+        "SetEnv#" => {
+            let k = backend.emit_expr(out, &args[0], indent);
+            let val = backend.emit_expr(out, &args[1], indent);
+            let kptr = backend.string_ptr(out, indent, &k);
+            let vptr = backend.string_ptr(out, indent, &val);
+            let r = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call i64 @__briev_setenv(ptr {}, ptr {})", indent, r, kptr, vptr).ok();
+            return BTypedRegister { name: r, ty: Type::int() };
+        }
+        "GetCwd#" => {
+            let cstr = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @__briev_getcwd()", indent, cstr).ok();
+            let is_null = backend.fun.gen_reg();
+            writeln!(out, "{}{} = icmp eq ptr {}, null", indent, is_null, cstr).ok();
+            let fb = backend.fun.gen_reg();
+            writeln!(out, "{}{} = alloca i8, i64 1", indent, fb).ok();
+            writeln!(out, "{}store i8 0, ptr {}", indent, fb).ok();
+            let safe_ptr = backend.fun.gen_reg();
+            writeln!(out, "{}{} = select i1 {}, ptr {}, ptr {}", indent, safe_ptr, is_null, fb, cstr).ok();
+            let len = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call i64 @strlen(ptr {})", indent, len, safe_ptr).ok();
+            let data_raw = backend.fun.gen_reg();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, data_raw, safe_ptr).ok();
+            let data = backend.fun.gen_reg();
+            writeln!(out, "{}{} = select i1 {}, i64 0, i64 {}", indent, data, is_null, data_raw).ok();
+            let t1 = backend.fun.gen_reg();
+            writeln!(out, "{}{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0", indent, t1, data).ok();
+            let t2 = backend.fun.gen_reg();
+            writeln!(out, "{}{} = insertvalue {{ i64, i64 }} %{}, i64 {}, 1", indent, t2, t1, len).ok();
+            return BTypedRegister { name: t2, ty: Type::string() };
+        }
+        "ChDir#" => {
+            let pth = backend.emit_expr(out, &args[0], indent);
+            let pptr = backend.string_ptr(out, indent, &pth);
+            let r = backend.fun.gen_reg();
+            writeln!(out, "{}{} = call i64 @__briev_chdir(ptr {})", indent, r, pptr).ok();
+            return BTypedRegister { name: r, ty: Type::int() };
+        }
         // 2026-08-03: call a function-pointer value (host callback).
         "CallPtr#" => return emit_call_ptr(backend, out, v, args, indent),
         // 2026-08-03: host cancellation flag (process-global atomic).

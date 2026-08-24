@@ -169,6 +169,12 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // 2026-08-23: workgroup barrier — GPU-target only; CPU fallback is a
         // no-op (single-threaded execution trivially passes the barrier).
         "Barrier#"       => Some(Signature { name: "Barrier#",       parameters: vec![], return_kind: ReturnKind::Exact(Type::bool_()), observable: true, variadic: false }),
+        // 2026-08-23 (process.bv revival): process/environment intrinsics.
+        "Spawn#"             => Some(Signature { name: "Spawn#",             parameters: vec![("command", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
+        "SpawnWithOutput#"   => Some(Signature { name: "SpawnWithOutput#",   parameters: vec![("command", Type::string())], return_kind: ReturnKind::Exact(Type::string()), observable: true, variadic: false }),
+        "SetEnv#"            => Some(Signature { name: "SetEnv#",            parameters: vec![("name", Type::string()), ("value", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
+        "GetCwd#"            => Some(Signature { name: "GetCwd#",            parameters: vec![], return_kind: ReturnKind::Exact(Type::string()), observable: true, variadic: false }),
+        "ChDir#"             => Some(Signature { name: "ChDir#",             parameters: vec![("path", Type::string())], return_kind: ReturnKind::Exact(Type::int()), observable: true, variadic: false }),
         "Dims#"          => Some(Signature { name: "Dims#",          parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
 
         // ── Pointers (compile-time address resolution) ──────────────
