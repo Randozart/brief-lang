@@ -17,7 +17,7 @@
 // interface as List and RingBuffer, via InsertAt/ExtractFrom
 // property bindings.
 type CrosswordArena<T> : List<T> {
-    base: Ptr<Byte>;
+    base: Ptr<Bit<8>>;
     capacity: Int;
     slot_offset: Int;
     string_offset: Int;
@@ -29,7 +29,7 @@ type CrosswordArena<T> : List<T> {
 // (bottom of arena). string_offset starts at capacity (top
 // of arena). Both grow toward each other.
 defn crossword_init(cap: Int) -> CrosswordArena<Byte> {
-    let base: Ptr<Byte> = Alloc#(cap) as Ptr<Byte>;
+    let base: Ptr<Bit<8>> = Alloc#(cap) as Ptr<Bit<8>>;
     term CrosswordArena {
         base,
         capacity: cap,
@@ -41,8 +41,8 @@ defn crossword_init(cap: Int) -> CrosswordArena<Byte> {
 // Allocate a fixed-size slot from the bottom of the arena.
 // Bumps slot_offset forward. Contract ensures no collision
 // with the string region.
-defn crossword_alloc_slot(ca: CrosswordArena, size: Int) -> Ptr<Byte> {
-    let ptr: Ptr<Byte> = ca.base + ca.slot_offset;
+defn crossword_alloc_slot(ca: CrosswordArena, size: Int) -> Ptr<Bit<8>> {
+    let ptr: Ptr<Bit<8>> = ca.base + ca.slot_offset;
     ca.slot_offset = ca.slot_offset + size;
     [ca.slot_offset <= ca.string_offset]; // collision guard
     term ptr;
@@ -51,9 +51,9 @@ defn crossword_alloc_slot(ca: CrosswordArena, size: Int) -> Ptr<Byte> {
 // Allocate variable-length data from the top of the arena.
 // Decrements string_offset backward. Contract ensures no
 // collision with the slot region.
-defn crossword_alloc_string(ca: CrosswordArena, len: Int) -> Ptr<Byte> {
+defn crossword_alloc_string(ca: CrosswordArena, len: Int) -> Ptr<Bit<8>> {
     ca.string_offset = ca.string_offset - len;
-    let ptr: Ptr<Byte> = ca.base + ca.string_offset;
+    let ptr: Ptr<Bit<8>> = ca.base + ca.string_offset;
     [ca.slot_offset <= ca.string_offset]; // collision guard
     term ptr;
 };

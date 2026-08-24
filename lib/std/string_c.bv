@@ -2,12 +2,13 @@
 // Briev string format: [8-byte length (i64)][UTF-8 data].
 // C string format: [data][null byte].
 // Allocates via Malloc# — caller must free.
+// 2026-08-23: migrated to typed String parameters (the old Int-handle
+// string ABI predates the string unification).
 
-defn to_c_string(s: Int) -> Int {
-    let len: Int = Length#(s);
-    let data_start: Int = s + 8;
-    let cstr: Int = Malloc#(len + 1);
-    Copy#(cstr, data_start, len);
-    Fill#(cstr + len, 0, 1);
+defn to_c_string(s: String) -> Ptr<Bit<8>> {
+    let len: Int = s .^Length;
+    let cstr: Ptr<Bit<8>> = Malloc#(len + 1);
+    Copy#(cstr, s, len);
+    Fill#(cstr as Int + len, 0, 1);
     term cstr;
 };
