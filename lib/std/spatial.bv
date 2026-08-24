@@ -1,43 +1,15 @@
-// ─────────────────────────────────────────────────────────────
-// spatial.bv — Generic spatial memory operations over Ptr<Bits @/N>
-//
-// These functions operate on layout-constrained pointers. They
-// compile to a SINGLE machine-code block per (bytes, alignment)
-// layout shape — no monomorphization per type.
-//
-// Usage:
-//   let dst: Ptr64 = ...;
-//   let src: Ptr64 = ...;
-//   block_copy(dst, src);  // copy 8 bytes
-//
-// Each function works for ANY type with matching layout:
-//   Ptr64, Ptr<Int>, Ptr<Float64>, or user-defined types with
-//   compatible layout.
-// ─────────────────────────────────────────────────────────────
+// spatial — block memory operations over the compiler's Fill#/Copy#
+// intrinsics (llvm.memset/llvm.memcpy under the hood).
+// 2026-08-23: migrated off removed block_* statement forms and the
+// never-implemented Memcmp#/Hash# intrinsics — compare/hash await their
+// own arcs (tracked in BUGS.md sweep triage).
 
-// ── Block copy ───────────────────────────────────────────────
-// Copies N bytes from src to dst. Non-overlapping.
-// Returns true on success. Emits @llvm.memcpy.
-defn block_copy(dst: Ptr, src: Ptr, n: Int) -> Bool {
-    term Memcpy#(dst, src, n);
-};
-
-// ── Block compare ────────────────────────────────────────────
-// Compares N bytes. Returns 0 if equal.
-// Emits @llvm.memcmp.
-defn block_compare(a: Ptr, b: Ptr, n: Int) -> Int {
-    term Memcmp#(a, b, n);
-};
-
-// ── Block fill ───────────────────────────────────────────────
-// Sets N bytes to val. Returns true on success.
-// Emits @llvm.memset.
 defn block_fill(ptr: Ptr, val: Int, n: Int) -> Bool {
-    term Memset#(ptr, val, n);
+    Fill#(ptr, val, n);
+    term true;
 };
 
-// ── Block hash ───────────────────────────────────────────────
-// Computes FNV-1a hash of N bytes. Returns 64-bit hash.
-defn block_hash(ptr: Ptr, n: Int) -> Int {
-    term Hash#(ptr, n);
+defn block_copy(dst: Ptr, src: Ptr, n: Int) -> Bool {
+    Copy#(dst, src, n);
+    term true;
 };

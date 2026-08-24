@@ -1,15 +1,19 @@
-sig print_func: String -> true;
+// sig_as_type — higher-order functions with callable types (SPEC §9.2).
+// 2026-08-23: migrated off the removed `sig` declaration system onto
+// callable-type annotations — `fn_type = (Args) -> Ret`.
 
 defn my_printer(msg: String) [msg != ""][term == true] -> Bool {
   term true;
 };
 
-defn apply_function(msg: String, func: sig_print_func) [func != null][term == true || term == false] -> Bool {
+defn apply_function(msg: String, func: (String) -> Bool) [msg != ""] -> Bool {
   term func(msg);
 };
 
-txn test_higher_order [true][term != null]
-{
+let i: Int = 0;
+
+node test_higher_order [i < 1][i == 1] {
   let result = apply_function("hello", my_printer);
+  i = i + 1;
   term;
 };
