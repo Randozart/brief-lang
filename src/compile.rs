@@ -1283,7 +1283,15 @@ fn codegen(
         }
         BackendKind::Spirv => {
             // 2026-07-15: SPIR-V backend compiles kernels to binary
-            let binary = briev_compiler::backend::spirv::compile_spirv(items, "main")?;
+            // 2026-08-23 (§2.2): frontend-driven kernel selection via the shared
+            // accel analysis. "main" = wildcard entry (all eligible kernels);
+            // a specific txn name validates presence once §9.7 dispatch
+            // metadata lands.
+            let binary = briev_compiler::backend::spirv::compile_spirv(
+                items,
+                "main",
+                &analysis,
+            )?;
             let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
             let out_path = out.replace(".ll", ".spv");
             std::fs::write(&out_path, &binary)

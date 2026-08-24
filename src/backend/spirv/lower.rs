@@ -472,10 +472,7 @@ mod __collect {
 
     /// Walk a txn body collecting every state-field reference used with an
     /// index (the SSBO surface). Sorted + deduped by setup_state_buffer.
-    pub fn collect_state_fields(
-        items: &[crate::ast::TopLevel],
-        kernel: &str,
-    ) -> Vec<StateField> {
+    pub fn collect_state_fields(items: &[crate::ast::TopLevel]) -> Vec<StateField> {
         let mut fields: Vec<StateField> = Vec::new();
         for item in items {
             if let crate::ast::TopLevel::StateDecl(d) = item {
@@ -488,7 +485,6 @@ mod __collect {
                 }
             }
         }
-        let _ = kernel;
         fields.sort_by(|a, b| a.name.cmp(&b.name));
         fields.dedup_by(|a, b| a.name == b.name);
         fields

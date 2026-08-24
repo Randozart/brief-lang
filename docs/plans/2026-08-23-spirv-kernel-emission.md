@@ -6,9 +6,12 @@ expression lowering over locals + invocation-id builtins + one SSBO
 binding for indexed state (src/backend/spirv/lower.rs); capability
 errors replace silent drops; structural tests on the in-memory module.
 Assembled-binary validation FIXED + spirv-val PASSES (BUGS.md closed —
-seven stacked emission bugs documented there). Remaining: §2.2
-accel-analysis-driven kernel selection (replaces [idx < N] sniffing),
-Vulkan smoke test when a runner is available.
+seven stacked emission bugs documented there). §2.2 LANDED 2026-08-23: compile_spirv consumes AnalysisResults.accel —
+selection = eligible entries; body = the PROVEN kernel_stmts (not raw);
+index_var binds to get_global_id(0); entry_name validated ("main" =
+wildcard). The [idx<N] sniffer and the induction-loop skeleton are gone —
+a GLCompute invocation IS one work item. Remaining: Vulkan smoke test when
+a runner is available.
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first. Work confined
 to `src/backend/spirv/`, own tests, own doc sections.
