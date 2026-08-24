@@ -361,6 +361,10 @@ impl CirctBackend {
 
         // Phase A: init constants.
         let special_outputs: std::collections::HashSet<&str> = ["halt"].iter().cloned().collect();
+        // 2026-08-23: init WIRE IDS recorded (Phase C previously guessed
+        // '%<name>_init' strings that never matched the fresh_const names ->
+        // undefined references).
+        let mut init_wires: HashMap<String, String> = HashMap::new();
         for (var_name, mlir_ty) in &output_ports {
             let init_val = if special_outputs.contains(var_name.as_str()) {
                 "0".to_string()
@@ -369,8 +373,12 @@ impl CirctBackend {
             };
             let c = ng.fresh_const(&format!("{}_init", var_name));
             writeln!(out, "  {} = hw.constant {} : {}", c, init_val, mlir_ty).ok();
-            reg_names.insert(var_name.clone(), c);
+            reg_names.insert(var_name.clone(), c.clone());
+            init_wires.insert(var_name.clone(), c);
         }
+        // Boolean constants used by mux guards.
+        writeln!(out, "  %true = hw.constant true : i1").ok();
+        writeln!(out, "  %false = hw.constant false : i1").ok();
 
         let clock_wire = "%clock";
 
@@ -393,7 +401,11 @@ impl CirctBackend {
 
         // Phase C: registers consume FINAL wires; reset forces init values.
         for (var_name, mlir_ty) in &output_ports {
-            let init_wire = format!("%{}_init", var_name);
+            // stored ids already carry their '%' prefix
+            let init_wire = init_wires
+                .get(var_name)
+                .cloned()
+                .unwrap_or_else(|| "%0".to_string());
             let next = pending
                 .get(var_name)
                 .cloned()
@@ -666,14 +678,15 @@ impl CirctBackend {
         // ── §3.4: contracts as hardware obligations — pre/post conditions
         // materialize as real comparators so synthesis/simulation tools can
         // assert on them (sv.assert wiring lands with the toolchain harness).
+        // NOTE: no placeholder wire — emit_contract_condition emits the
+        // defining comb op directly with this result name (a pre-emitted
+        // hw.wire caused duplicate definitions).
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
-            writeln!(out, "  {} = hw.wire 0 : i1", w).ok();
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
         }
         if !matches!(&contract.post_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_post", name));
-            writeln!(out, "  {} = hw.wire 0 : i1", w).ok();
             self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
         }
 
