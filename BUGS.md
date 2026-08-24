@@ -4981,6 +4981,10 @@ in the version-DAG emitter, which has its own phi bookkeeping.
 same way the countable Guarded arm was fixed — derive predecessors from
 the blocks that ACTUALLY branch, never from tracked names.
 
+## VM parity test: missing tmp_fixtures/parity fixtures (2026-08-23)
+
+**Status:** OPEN — foreign tamer-track issue. The parity test expects .bv files under tmp_fixtures/parity/ (empty dir). Coordinate with that track.
+
 ## Conformance sweep: 67 active sources fail the real-pipeline gate (2026-08-23 update #8)
 
 **Progress:** ... → 89 → **67**. Pass 7 was the @-era demo pass:
