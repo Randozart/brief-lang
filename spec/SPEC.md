@@ -416,6 +416,10 @@ storage strategy, the programmer classifies explicitly:
 box    // heap-per-instance storage, not a pooled column; an explicit choice,
        //   not a hidden special case
 spill  // a value may grow beyond its static pool column into a growable buffer
+mem    // (hardware targets) pin a state array to the memory-macro lowering:
+       //   accepts port limits; element postconditions are unavailable
+reg    // (hardware targets) pin a state array to per-element registers:
+       //   combinational access, full element obligations
 ```
 
 - These markers carry the same rule as `seq`/`vol`/`async`: they must never
@@ -425,6 +429,11 @@ spill  // a value may grow beyond its static pool column into a growable buffer
   guess, at the points where the compiler genuinely cannot decide a single
   best-fitting, fastest, most-efficient strategy.
 - Their absence is the normal case: derived storage is proven, not annotated.
+- **Loud defaults**: when a hardware target lowers an unannotated state
+  array by policy (e.g. depth ≥ threshold → memory macro), the compiler
+  prints ONE aggregated note naming every such array with its reason and
+  the pin that silences it. Explicitly pinned arrays never appear in the
+  note. Silent storage decisions do not exist.
 
 **Memory-decision audit.** `brievc memcheck` reports every memory decision
 point — lifetime, capacity, storage class, dependent versus static columns —

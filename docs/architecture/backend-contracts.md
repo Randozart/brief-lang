@@ -190,6 +190,20 @@ contract == tamer behavior.
   by an accepted commit) shows up as a check drop in simulation — that
   is the violation signal, and sim parity caught exactly this on the
   counter fixture's original `[c<255][c<255]` pair.
+- **seq.firmem memory macros + loud-default policy (2026-08-25,
+  seq-firmem plan):** state arrays past `circt.firmem_min_depth`
+  (config, 64) with zero init, single writer, and no postcondition
+  element references default to the macro; everything else register
+  file. `mem let` / `reg let` pin per-variable (pins are validated —
+  impossible pins are capability errors naming the fix). Default-policy
+  decisions surface in ONE aggregated note naming each array + reason;
+  explicit pins silence it. Latency-0 reads keep cycle-exact parity
+  with the interpreter; the §3.4 commit gate rides the write enable.
+  Export: SeqToSV lowers firmem to an externally-generated module —
+  brievc emits reference-implementation companions (`<var>_<D>x<W>.sv`)
+  linked by the harness (BUGS.md: circt-opt cannot emit these bodies).
+  Vivado A/B on xck26: 17 FF + 10 LUTRAM (macro) vs 522 FF + 242 LUT
+  (registers).
 - **Multi-txn arbitration:** several txns writing one var resolve by
   program order (last commit gate wins). Single-txn-per-var is the
   tested surface; beyond it stays honest via this documented rule.

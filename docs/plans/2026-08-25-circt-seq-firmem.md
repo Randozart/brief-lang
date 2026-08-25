@@ -1,7 +1,7 @@
 # Plan — CIRCT: seq.firmem memory lowering with loud-default policy
 
 **Date:** 2026-08-25
-**Status:** active
+**Status:** COMPLETE (all steps landed; see commits 16a14178..HEAD)
 **Predecessor:** 2026-08-23-circt-toolchain-validation.md (COMPLETE — register-file arrays landed, sim-parity harness live)
 **User decisions (this session):**
 - Keywords `mem` / `reg` (prefix on `let`, mirroring `vol let` / `out let`).
@@ -205,7 +205,13 @@ contradicts 64, retune config + plan doc in the SAME commit.
    structural tests.
 6. **Fixtures/harness**: big.bv + gen.py + full harness green; five old
    fixtures unchanged.
-7. **Vivado A/B** + calibration record.
+7. **Vivado A/B** — DONE 2026-08-25 (xck26-sfvc784-2LV-c, both PASS):
+   | metric            | mem macro | reg file (64 lanes) |
+   |-------------------|-----------|---------------------|
+   | CLB Registers     | 17        | 522                 |
+   | LUT as Logic      | 24        | 242                 |
+   | LUT as Memory     | 10        | 0                   |
+   ~30× fewer flip-flops via the macro; threshold 64 confirmed.
 8. **Docs** (§9) + sync main worktree.
 
 ## Undo paths

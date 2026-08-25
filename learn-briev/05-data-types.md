@@ -368,6 +368,24 @@ struct Cache {
 `Int[1024]` → `[1024 x i64]`, `Frame[256]` → `[256 x %Frame]`.
 Bounds proven by contract: `[i >= 0 && i < stack .^Len]`.
 
+#### Hardware state arrays: `mem let` / `reg let`
+
+On hardware targets (`.cbv`), a top-level fixed array is state. The compiler
+picks the lowering automatically — registers for small arrays, a memory
+macro past the size crossover — and **tells you**: one note per build lists
+every array it lowered by default, with the reason. Pin a choice with a
+prefix keyword when you want to own it:
+
+```briev
+let  small: Int[8]   = [0,0,0,0,0,0,0,0];  // registers; appears in the note
+mem  let big: Int[64] = [0, ...];          // memory macro, pinned (silent)
+reg  let tab: Int[64] = [0, ...];          // registers, pinned (silent)
+```
+
+`mem` accepts port limits and forbids element postconditions; `reg` keeps
+combinational access and full obligations. Neither makes code faster —
+the default already is.
+
 #### Array Slices: `arr[start:end:stride]`
 
 A slice is a **zero-copy view** into an existing array:
