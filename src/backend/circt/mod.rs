@@ -317,6 +317,9 @@ impl CirctBackend {
         }
 
         output_ports.push(("halt".to_string(), "i1".to_string()));
+        // §3.4 obligation port: AND of all txn post-guard verdicts on
+        // committed next values; high when no obligations exist.
+        output_ports.push(("check".to_string(), "i1".to_string()));
 
         // 2026-08-23 (robustness): topo_order can DROP declared state —
         // self-dependencies (counter = counter + 1) create cycles that make
@@ -359,45 +362,59 @@ impl CirctBackend {
         }
         writeln!(out, ") {{").ok();
 
-        // ── Wire-map architecture (Plan 3, sequential semantics):
-        //
-        //   Phase A: one INITIAL constant per output var; var→wire starts there.
-        //   Phase B: txn bodies emit against the CURRENT map — an assignment
-        //            computes a new value WIRE and repoints the map (reads see
-        //            pre-update values: non-blocking-assignment semantics).
-        //   Phase C: one seq.firreg per var consumes the FINAL wire — legal
-        //            SSA because next-wires are defined before the register,
-        //            and no forward references exist anywhere.
-        //
-        // To undo: restore the seq.always/fantasy-initial_value emission.
+        // ── Wire-map architecture v2 (Plan 3 §3.4, 2026-08-25): registers
+        // FIRST. hw.module bodies are MLIR graph regions — circt-opt accepts
+        // use-before-def (probe: seq.firreg referenced before its def passes
+        // the verifier) — so transaction bodies read live register outputs
+        // instead of folded init constants. Guards now gate transitions on
+        // CURRENT state; obligations surface as ports: `halt` (a pre-guard
+        // refused this cycle ⇒ state holds) and `check` (AND of post-guard
+        // verdicts on committed next values).
+        // The previous scheme (bodies read init constants) made guards fold
+        // to compile-time constants and transitions fire unconditionally —
+        // a guarded counter ran past its bound, diverging from the
+        // interpreter at the bound cycle.
+        // To undo: restore Phase-A-reads scheme (guards on init constants,
+        // `%true` transition muxes, no halt/check driving).
+        let clock_wire = "%clock";
         let mut reg_names: HashMap<String, String> = HashMap::new();
 
-        // Phase A: init constants.
-        let special_outputs: std::collections::HashSet<&str> = ["halt"].iter().cloned().collect();
-        // 2026-08-23: init WIRE IDS recorded (Phase C previously guessed
-        // '%<name>_init' strings that never matched the fresh_const names ->
-        // undefined references).
+        // Phase A: init constants + registers. Each register consumes a
+        // forward-named next wire that Phase C defines (legal: graph region).
+        // Init doubles as the power-on preset — a register's reset/preset
+        // value IS its declared initial value.
         let mut init_wires: HashMap<String, String> = HashMap::new();
+        let mut next_names: HashMap<String, String> = HashMap::new();
         for (var_name, mlir_ty) in &output_ports {
-            let init_val = if special_outputs.contains(var_name.as_str()) {
-                "0".to_string()
-            } else {
-                self.initial_value(var_name)
+            let init_val: String = match var_name.as_str() {
+                "halt" => "0".to_string(),
+                "check" => "1".to_string(),
+                _ => self.initial_value(var_name),
             };
             let c = ng.fresh_const(&format!("{}_init", var_name));
             writeln!(out, "  {} = hw.constant {} : {}", c, init_val, mlir_ty).ok();
-            reg_names.insert(var_name.clone(), c.clone());
             init_wires.insert(var_name.clone(), c);
+            let next_w = ng.fresh_wire(&format!("{}_next", var_name));
+            next_names.insert(var_name.clone(), next_w.clone());
+            let reg = ng.fresh_reg(var_name);
+            writeln!(
+                out,
+                "  {} = seq.firreg {} clock {} preset {} : {}",
+                reg, next_w, clock_wire, init_val, mlir_ty
+            )
+            .ok();
+            reg_names.insert(var_name.clone(), reg);
         }
         // Boolean constants used by mux guards.
         // Bool constants: custom syntax takes NO type suffix.
         writeln!(out, "  %true = hw.constant true").ok();
         writeln!(out, "  %false = hw.constant false").ok();
 
-        let clock_wire = "%clock";
-
-        // Phase B: transaction bodies (in program order).
+        // Phase B: transaction bodies (in program order) against live
+        // register outputs. Refusal/post verdicts collected for halt/check.
         let mut pending: HashMap<String, String> = HashMap::new();
+        let mut pre_fail_wires: Vec<String> = Vec::new();
+        let mut post_ok_wires: Vec<String> = Vec::new();
         for item in items {
             if let TopLevel::Transaction(txn) = item {
                 self.emit_txn_body(
@@ -409,38 +426,62 @@ impl CirctBackend {
                     &mut reg_names,
                     &mut pending,
                     clock_wire,
+                    &mut pre_fail_wires,
+                    &mut post_ok_wires,
                 );
             }
         }
 
-        // Phase C: registers consume FINAL wires; reset forces init values.
+        // Phase C: define the forward-referenced next wires. Reset forces
+        // the init value; an unwritten var holds its register output.
         for (var_name, mlir_ty) in &output_ports {
-            // stored ids already carry their '%' prefix
-            let init_wire = init_wires
+            if var_name == "halt" || var_name == "check" {
+                continue; // obligation outputs driven below
+            }
+            let next_w = next_names.get(var_name).cloned().unwrap_or_default();
+            let init_wire = init_wires.get(var_name).cloned().unwrap_or_default();
+            let current = reg_names.get(var_name).cloned().unwrap_or_default();
+            let src = pending
                 .get(var_name)
                 .cloned()
-                .unwrap_or_else(|| "%0".to_string());
-            let next = pending
-                .get(var_name)
-                .cloned()
-                .unwrap_or_else(|| init_wire.clone());
-            // next-on-reset mux: %reset high -> init value.
-            let mux = ng.fresh_wire(&format!("{}_next", var_name));
+                .unwrap_or_else(|| current.clone());
             writeln!(
                 out,
                 "  {} = comb.mux %reset, {}, {} : {}",
-                mux, init_wire, next, mlir_ty
+                next_w, init_wire, src, mlir_ty
             )
             .ok();
-            let reg = ng.fresh_reg(var_name);
-            let preset = self.initial_value(var_name);
+        }
+
+        // Obligation outputs (§3.4): halt = OR of pre-guard refusals this
+        // cycle (state held); check = AND of post-guard verdicts on the
+        // committed next values. No txns with obligations ⇒ halt stays low,
+        // check stays high. Registered like every output; reset clears.
+        let halt_src = Self::reduce_tree(
+            &mut ng,
+            out,
+            "halt_or",
+            "comb.or",
+            &pre_fail_wires,
+            "%false",
+        );
+        let check_src = Self::reduce_tree(
+            &mut ng,
+            out,
+            "check_and",
+            "comb.and",
+            &post_ok_wires,
+            "%true",
+        );
+        for (ob_name, src) in [("halt", halt_src), ("check", check_src)] {
+            let next_w = next_names.get(ob_name).cloned().unwrap_or_default();
+            let init_wire = init_wires.get(ob_name).cloned().unwrap_or_default();
             writeln!(
                 out,
-                "  {} = seq.firreg {} clock {} preset {} : {}",
-                reg, mux, clock_wire, preset, mlir_ty
+                "  {} = comb.mux %reset, {}, {} : i1",
+                next_w, init_wire, src
             )
             .ok();
-            reg_names.insert(var_name.clone(), reg);
         }
 
         // ── Outputs.
@@ -681,6 +722,37 @@ impl CirctBackend {
         Some(w)
     }
 
+    /// 2026-08-25 (§3.4): balanced binary reduce over obligation wires.
+    /// `unit` is the identity constant (%false for or, %true for and) used
+    /// when no wires exist. Returns the reduced wire (or the unit).
+    fn reduce_tree(
+        ng: &mut NameGen,
+        out: &mut String,
+        tag: &str,
+        op: &str,
+        wires: &[String],
+        unit: &str,
+    ) -> String {
+        if wires.is_empty() {
+            return unit.to_string();
+        }
+        let mut level: Vec<String> = wires.to_vec();
+        while level.len() > 1 {
+            let mut next: Vec<String> = Vec::new();
+            for pair in level.chunks(2) {
+                if pair.len() == 1 {
+                    next.push(pair[0].clone());
+                    continue;
+                }
+                let w = ng.fresh_wire(tag);
+                writeln!(out, "  {} = {} {}, {} : i1", w, op, pair[0], pair[1]).ok();
+                next.push(w);
+            }
+            level = next;
+        }
+        level[0].clone()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn emit_txn_body(
         &self,
@@ -692,27 +764,80 @@ impl CirctBackend {
         reg_names: &mut HashMap<String, String>,
         pending: &mut HashMap<String, String>,
         clock_wire: &str,
+        pre_fails: &mut Vec<String>,
+        post_oks: &mut Vec<String>,
     ) {
         let _ = clock_wire;
-        // ── §3.4: contracts as hardware obligations — pre/post conditions
-        // materialize as real comparators so synthesis/simulation tools can
-        // assert on them (sv.assert wiring lands with the toolchain harness).
-        // NOTE: no placeholder wire — emit_contract_condition emits the
-        // defining comb op directly with this result name (a pre-emitted
-        // hw.wire caused duplicate definitions).
-            // §3.4: comparator wire only — sv.assert needs a procedural
-            // region; simulation wrappers assert on this signal instead.
+        // ── §3.4 (2026-08-25): contracts carry semantic load in hardware.
+        // Pre-guard is evaluated against live register state and GATES the
+        // commit: refusal ⇒ every write this txn would make is replaced by
+        // hold-current, and the refusal raises `halt` for that cycle.
+        // Post-guard is evaluated against COMMITTED next values (shadow map)
+        // and ANDs into `check`. Trivially-true guards contribute nothing.
+        // To undo: revert to comparator-only emission (guards as dead wires).
+        let mut pre_ok_wire: Option<String> = None;
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
-        }
-        if !matches!(&contract.post_condition, Expr::Bool(true)) {
-            let w = ng.fresh_wire(&format!("{}_post", name));
-            self.emit_contract_condition(out, ng, &contract.post_condition, &w, reg_names);
+            let f = ng.fresh_wire(&format!("{}_prefail", name));
+            writeln!(out, "  {} = comb.icmp eq {}, %false : i1", f, w).ok();
+            pre_fails.push(f);
+            pre_ok_wire = Some(w);
         }
 
+        // Track exactly which vars THIS txn writes so the commit gate wraps
+        // those pendings only. Several txns writing one var arbitrate by
+        // program order (last committed gate wins) — recorded decision,
+        // see docs/architecture/backend-contracts.md.
+        let mut written: Vec<String> = Vec::new();
         for stmt in body {
-            self.emit_stmt_pending(ng, out, stmt, reg_names, pending);
+            self.emit_stmt_pending(ng, out, stmt, reg_names, pending, &mut written);
+        }
+
+        // Commit gate: guarded txn ⇒ mux(pre_ok, computed_next, current).
+        // Current is the register output (cycle-start state), so a refused
+        // txn leaves state untouched regardless of mid-body writes.
+        if let Some(pre_ok) = &pre_ok_wire {
+            for var in written.iter() {
+                let Some(pval) = pending.get(var).cloned() else {
+                    continue;
+                };
+                let ty = self.mlir_type(self.var_types.get(var).unwrap_or(&Type::int()));
+                let Some(cur) = reg_names.get(var).cloned() else {
+                    continue;
+                };
+                let g = ng.fresh_wire(&format!("{}_commit", var));
+                writeln!(
+                    out,
+                    "  {} = comb.mux {}, {}, {} : {}",
+                    g, pre_ok, pval, cur, ty
+                )
+                .ok();
+                pending.insert(var.clone(), g);
+            }
+        }
+
+        // Post-guard verdict on the values this cycle will commit. Obligation
+        // form: pre_ok ⇒ post (refused txn carries no post obligation —
+        // otherwise a halted FSM would flag check forever). Encoded as
+        // ¬pre ∨ post = prefail ∨ post_verdict.
+        if !matches!(&contract.post_condition, Expr::Bool(true)) {
+            let mut shadow = reg_names.clone();
+            for var in written.iter() {
+                if let Some(pv) = pending.get(var) {
+                    shadow.insert(var.clone(), pv.clone());
+                }
+            }
+            let w = ng.fresh_wire(&format!("{}_post", name));
+            self.emit_contract_condition(out, ng, &contract.post_condition, &w, &shadow);
+            match &pre_ok_wire {
+                Some(pre_ok) => {
+                    let imp = ng.fresh_wire(&format!("{}_postok", name));
+                    writeln!(out, "  {} = comb.or {}, {} : i1", imp, pre_ok, w).ok();
+                    post_oks.push(imp);
+                }
+                None => post_oks.push(w),
+            }
         }
     }
 
@@ -720,6 +845,7 @@ impl CirctBackend {
     /// pending map — reads elsewhere keep seeing pre-update values until the
     /// register consumes the final wire. Guarded bodies mux on their
     /// condition against the current pending/current wire.
+    /// `written` collects every var assigned by THIS txn (for §3.4 gating).
     fn emit_stmt_pending(
         &self,
         ng: &mut NameGen,
@@ -727,6 +853,7 @@ impl CirctBackend {
         stmt: &Statement,
         reg_names: &mut HashMap<String, String>,
         pending: &mut HashMap<String, String>,
+        written: &mut Vec<String>,
     ) {
         match stmt {
             Statement::Expression(expr) => {
@@ -762,6 +889,9 @@ impl CirctBackend {
                         writeln!(out, "  {} = comb.mux %true, {}, {} : {}", w, val, target, mlir_ty)
                             .ok();
                         pending.insert(var_name.to_string(), w);
+                        if !written.iter().any(|v| v == var_name) {
+                            written.push(var_name.to_string());
+                        }
                     }
                 }
             }
@@ -792,17 +922,20 @@ impl CirctBackend {
                                     )
                                     .ok();
                                     pending.insert(var_name.to_string(), w);
+                                    if !written.iter().any(|v| v == var_name) {
+                                        written.push(var_name.to_string());
+                                    }
                                 }
                             }
                         } else {
-                            self.emit_stmt_pending(ng, out, inner, reg_names, pending);
+                            self.emit_stmt_pending(ng, out, inner, reg_names, pending, written);
                         }
                     }
                 }
             }
             Statement::SyncBlock(body) | Statement::Block(body) => {
                 for inner in body {
-                    self.emit_stmt_pending(ng, out, inner, reg_names, pending);
+                    self.emit_stmt_pending(ng, out, inner, reg_names, pending, written);
                 }
             }
             other => {
