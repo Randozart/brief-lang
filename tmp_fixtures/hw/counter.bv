@@ -1,8 +1,11 @@
 // HW validation fixture: counter with tick trigger (Plan 3.5).
 // Plain Int — the hardware surface is 64-bit registers; sized scalars
 // (BitRange) are not reachable from source syntax yet.
+// Contract pair CONSISTENT: one application under [counter < 255]
+// commits at most 255, so post [counter <= 255] holds on every accepted
+// commit (refusals carry no obligation — implication form).
 let counter: Int = 0;
 
-txn step [counter < 255][counter < 255] {
+txn step [counter < 255][counter <= 255] {
   counter = counter + 1;
 }

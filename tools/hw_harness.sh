@@ -56,6 +56,30 @@ for FIX in tmp_fixtures/hw/*.bv; do
         fi
     fi
 
+    # ── Simulation parity (Plan 3.5 tier 3, 2026-08-25): clock the FSM,
+    # print output ports per cycle, diff against the locked .expect
+    # sequence (derived from interpreter semantics — see *.expect.gen.py).
+    EXPECT="${FIX%.bv}.expect"
+    if [ ! -f "$EXPECT" ]; then
+        echo "HW $NAME: SKIP (sim — no .expect contract)"
+    elif command -v verilator >/dev/null 2>&1 && [ -s "$SV" ]; then
+        CYCLES="${CYCLES:-270}"
+        python3 "$ROOT/tools/hw_sim_tb.py" "$WORK/top.mlir" "$CYCLES" > "$WORK/tb.sv" \
+            || { echo "HW $NAME: FAIL (tb gen)"; FAIL=1; rm -rf "$WORK"; continue; }
+        if ! verilator --binary --top-module tb -Wno-fatal \
+             --Mdir "$WORK/vlsim" "$WORK/tb.sv" "$SV" > "$WORK/simbuild.log" 2>&1; then
+            echo "HW $NAME: FAIL (sim build)"
+            grep -m3 "%Error" "$WORK/simbuild.log" | sed 's/^/    /'
+            FAIL=1; rm -rf "$WORK"; continue
+        fi
+        "$WORK/vlsim/Vtb" 2>/dev/null | grep -v "Verilog \$finish" > "$WORK/sim.out"
+        if ! diff -q "$EXPECT" "$WORK/sim.out" > /dev/null 2>&1; then
+            echo "HW $NAME: FAIL (sim parity)"
+            diff "$EXPECT" "$WORK/sim.out" | head -6 | sed 's/^/    /'
+            FAIL=1; rm -rf "$WORK"; continue
+        fi
+    fi
+
     # Vivado compile + optional synthesis
     VIVADO_BIN="${VIVADO_BIN:-/mnt/data/tools/Xilinx/Vivado/2023.1/bin}"
     if [ -x "$VIVADO_BIN/xvlog" ] && [ -s "$SV" ]; then
