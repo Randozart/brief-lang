@@ -162,13 +162,37 @@ contract == tamer behavior.
 
 - **Ports:** clock is `!seq.clock` (never i1); triggers/state render via
   mlir_type.
-- **Sequential semantics (wire-map):**
-  Phase A — init constant per output var (`%c<name>_init_<n>`), wire-map
-  points there. Phase B — txn bodies emit against the CURRENT map;
-  assignments compute new wires and repoint (reads see pre-update values =
-  NBA semantics); guarded bodies mux on condition. Phase C — one
-  `seq.firreg <final> clock %clock preset <init>` per var consumes the
-  final wire. Reset muxes force init values. No forward references exist.
+- **Sequential semantics (wire-map v2, 2026-08-25 — registers FIRST):**
+  hw.module bodies are MLIR graph regions; circt-opt accepts
+  use-before-def (probed). Phase A — init constant + `seq.firreg` per
+  output var, each register consuming a forward-named `<var>_next` wire;
+  the wire-map points at REGISTER OUTPUTS from the start. Phase B — txn
+  bodies emit against live register outputs; assignments compute new
+  wires and repoint pending (reads see cycle-start state = NBA
+  semantics); guarded bodies mux on condition. Phase C — defines the
+  forward-referenced `<var>_next = mux(%reset, init, pending-or-reg)`
+  wires. Reset forces init; unwritten vars hold.
+  The previous scheme (bodies read init constants) folded guards to
+  compile-time constants and fired transitions unconditionally — a
+  guarded counter ran past its bound, diverging from the interpreter at
+  the bound cycle. See BUGS.md (2026-08-25).
+- **Contract obligations as ports (2026-08-25):** pre-guard evaluated on
+  live state GATES the commit: `commit = mux(pre_ok, computed_next,
+  current_reg)` — refusal holds state and raises `halt` (registered OR
+  of refusals). Post-guard is evaluated on COMMITTED next values via a
+  shadow wire-map, as an implication `¬pre ∨ post` (a refused txn
+  carries no post obligation), ANDed into the `check` output port.
+  Toolchain findings driving this form: pinned build has NO `seq.assert`;
+  module-level `sv.assert` is rejected ("non-procedural region");
+  procedural `sv.assert` inside `sv.alwaysff (posedge %i1)` works but
+  would need an extra i1 event input — ports need none and are
+  simulatable everywhere. An inconsistent contract pair (post falsified
+  by an accepted commit) shows up as a check drop in simulation — that
+  is the violation signal, and sim parity caught exactly this on the
+  counter fixture's original `[c<255][c<255]` pair.
+- **Multi-txn arbitration:** several txns writing one var resolve by
+  program order (last commit gate wins). Single-txn-per-var is the
+  tested surface; beyond it stays honest via this documented rule.
 - **Type lowering:** universe-driven (rule 19) — width from rt.bytes,
   signedness from protocol category (`Cast.Int`→siN, `Cast.UInt`→uN,
   `Cast.Float`→fN); BitRange widths honored. REQUIRES the normalizer
@@ -182,17 +206,22 @@ contract == tamer behavior.
   Abs# lowers honestly (neg+icmp+mux).
 - **No silent drops:** every unsupported construct records into
   `errors` (RefCell) → pipeline hard-error. cell_defs iterated SORTED.
-- **Contracts:** pre/post conditions materialize as comparators plus
-  `sv.assert` — obligations observable by simulation/synthesis tools.
+- **Contracts:** see "Contract obligations as ports" above — pre gates
+  the commit (refusal ⇒ hold + halt), post is an implication on
+  committed values into `check`.
 - `UInt[N]` source syntax is an ELEMENT ARRAY (Vector), not a sized
   scalar; Constrained/BitRange types are currently programmatic-only
   (parser gap, logged).
-- Validation: probe-gated `circt-opt` round-trip
-  (`test_emitted_module_parses_under_circt_opt`,
-  `circt_tools_available()`), full chain in `tools/hw_harness.sh`
-  (parse → translate --export-verilog → verilator lint → optional Vivado),
-  synthesis via `tools/vivado_check.sh` (KV260 part xck26-sfvc784-2LV-c
-  proven end-to-end).
+- Validation (2026-08-25, all tiers LIVE): probe-gated `circt-opt`
+  round-trip (`test_emitted_module_parses_under_circt_opt`,
+  `circt_tools_available()`); full chain in `tools/hw_harness.sh`
+  (parse → lower-seq-to-sv + export-verilog → verilator lint →
+  SIMULATION PARITY — 270-cycle verilator --binary run diffed against
+  locked `.expect` sequences derived from interpreter semantics,
+  generators in `tmp_fixtures/hw/*.expect.gen.py` → optional Vivado);
+  synthesis via `tools/vivado_check.sh` on KV260 xck26-sfvc784-2LV-c —
+  generated counter FSM synthesizes to 21 LUTs
+  (`VIVADO_SYNTH=1 VIVADO_REPORT_DIR=... tools/hw_harness.sh`).
 
 ---
 

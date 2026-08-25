@@ -5183,3 +5183,36 @@ is small enough to fix in one pass). Run with `--ignored`.
 
 (Original 2026-08-22 triage preserved below for history.)
 
+
+## CIRCT guards folded to init constants — FSM ran past its bound (2026-08-25) RESOLVED
+
+**Symptom:** the emitted counter FSM incremented unconditionally every
+cycle; contract comparators referenced `%c<var>_init` constants, so
+`[counter < 255]` folded at emission time and never gated anything. The
+hardware would diverge from the interpreter at cycle 256 (counter kept
+counting past the bound; halt stuck low forever).
+
+**Root cause:** wire-map Phase B pointed `reg_names` at INIT CONSTANTS
+because registers were emitted after txn bodies (plain SSA forbids
+use-before-def), so bodies could only read constants; transition mux
+conditions were literally `%true`.
+
+**Fix:** hw.module bodies are MLIR graph regions — circt-opt accepts
+use-before-def (probed before building). Registers now emit FIRST,
+bodies read live register outputs, pre-guard gates the commit
+(`mux(pre_ok, next, current)`), refusal raises `halt`, post-guard is an
+implication (`¬pre ∨ post`) ANDed into the new `check` port.
+Commit 420b5449.
+
+**Caught by the new simulation-parity tier** (5515d6e9) in two more
+places, proving the tier pays for itself:
+1. Implication polarity: first cut ORed `pre_ok` into the post verdict;
+   check flagged at every refusal (sim: `257 1 0 255`). Correct form ORs
+   the PREFAIL wire (`¬pre`).
+2. Inconsistent fixture contract pair: `[c<255][c<255]` fails post on
+   the accepted 254→255 commit — sim showed a check drop at exactly that
+   cycle. Fixture fixed to `[c<255][c<=255]` (contract-first: the SOURCE
+   was wrong, not the checker).
+
+**To undo:** restore Phase-A-reads scheme — but that reintroduces
+interpreter divergence at guard bounds; do not.
