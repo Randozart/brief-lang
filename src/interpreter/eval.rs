@@ -184,19 +184,43 @@ pub fn eval_expr(
         // 2026-08-23 (async Phase A2): await consumes a task handle. In the
         // eager model this was pass-through; now it triggers lazy execution
         // of the pending task's body via the task table.
+        // 2026-08-23 (async Phase A3): await triggers round-robin scheduling.
         Expr::Await(inner) => {
             let inner_val = eval_expr(inner, heap, bindings, functions)?;
-            // If the inner expression produced an Int (our task-id marker),
-            // look up and execute the pending task.
-            if let Value::Atom(Atom::Int(task_id)) = &inner_val {
-                let id = *task_id as u64;
-                if let Some((fn_name, arg_vals)) = crate::interpreter::take_pending_task(id) {
-                    let result = execute_pending_task(id, &fn_name, &arg_vals, heap, functions)?;
-                    crate::interpreter::complete_task(id, result.clone());
+            if let Value::Atom(Atom::Int(raw_id)) = &inner_val {
+                let target_id = *raw_id as u64;
+                if !crate::interpreter::task_is_done(target_id) {
+                    loop {
+                        if crate::interpreter::task_is_done(target_id) { break; }
+                        let runnable = crate::interpreter::collect_runnable();
+                        if runnable.is_empty() { break; }
+                        for (tid, fn_name, arg_vals, segments, current) in &runnable {
+                            if crate::interpreter::task_is_done(*tid) { continue; }
+                            if *current >= segments.len() { continue; }
+                            let defn = match functions.get(fn_name) { Some(d) => d.clone(), None => continue };
+                            let mut cb: HashMap<String, Value> = HashMap::new();
+                            for (i, pname) in defn.parameters.iter().enumerate() {
+                                if let Some(v) = arg_vals.get(i) { cb.insert(pname.clone(), v.clone()); }
+                            }
+                            let mut result = Value::Void;
+                            for stmt in &segments[*current] {
+                                match eval_statement(stmt, heap, &mut cb, functions) {
+                                    Ok(v) => result = v,
+                                    Err(RuntimeError::TermReturn(v)) => { result = v; break; }
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            crate::interpreter::store_task_result(*tid, result);
+                            let done = crate::interpreter::advance_segment_status(*tid);
+                            if *tid == target_id && done { break; }
+                        }
+                        if crate::interpreter::task_is_done(target_id) { break; }
+                    }
+                }
+                if let Some(result) = crate::interpreter::get_task_result(target_id) {
                     return Ok(result);
                 }
             }
-            // Not a task handle — plain pass-through (non-task await).
             Ok(inner_val)
         }
         Expr::AddrOf(inner) => {
