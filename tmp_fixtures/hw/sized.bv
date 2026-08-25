@@ -1,0 +1,9 @@
+// HW validation fixture: width-specialized scalars (sized-scalar syntax).
+// Inline sugar Int<8> + stdlib alias pattern (Int8 = spec Bits 8). Literal
+// arithmetic stays IN the domain; guard holds at the Int8 boundary.
+let n: Int<8> = 120;
+let w: Int8 = 7;
+
+txn tick [n < 126][n <= 127] {
+  n = n + 1;
+}

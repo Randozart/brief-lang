@@ -3872,6 +3872,32 @@ mod tests {
     }
 
     #[test]
+    fn test_sized_scalar_int8_parses() {
+        // 2026-08-25 (sized scalars): `Int<8>` inline width specialization.
+        use crate::ast::{BitRange, Type};
+        let t = parse_type("Int<8>").unwrap();
+        assert!(
+            matches!(t, Type::Constrained(_, BitRange::Single(8))),
+            "got: {:?}",
+            t
+        );
+        let u = parse_type("UInt<12>").unwrap();
+        assert!(
+            matches!(u, Type::Constrained(_, BitRange::Single(12))),
+            "got: {:?}",
+            u
+        );
+    }
+
+    #[test]
+    fn test_sized_scalar_rejects_bad_width() {
+        // Int<0> / Int<65> / Bool<2> are outside the value-domain contract.
+        assert!(parse_type("Int<0>").is_err());
+        assert!(parse_type("Int<65>").is_err());
+        assert!(parse_type("Bool<2>").is_err());
+    }
+
+    #[test]
     fn test_contract_without_watchdog() {
         let t = parse_txn("txn f() [true][done] { term; };").unwrap();
         assert!(t.contract.watchdog.is_none());

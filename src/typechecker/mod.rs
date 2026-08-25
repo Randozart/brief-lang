@@ -2230,6 +2230,57 @@ fn elaborate_expr(expr: &mut Expr, ctx: &mut TypecheckContext, errors: &mut Vec<
     }
 }
 
+/// 2026-08-25 (sized scalars): a DECIMAL literal inside the declared
+/// width's value domain is admitted against a width-specialized operand —
+/// the width makes the domain explicit, so this is not coercion: the
+/// literal IS in range. `Bool<1>` admits true/false.
+fn literal_fits_sized(ty: &Type, expr: &Expr, universe: &TypeUniverse) -> bool {
+    let Type::Constrained(inner, range) = ty else {
+        return false;
+    };
+    if matches!(expr, Expr::Bool(_))
+        && matches!(inner.as_ref(), Type::Custom(b) if b == "Bool")
+    {
+        return true;
+    }
+    let BitRange::Single(w) = range else {
+        return false;
+    };
+    let Some(v) = decimal_value(expr) else {
+        return false;
+    };
+    let unsigned = inner
+        .universe_key()
+        .and_then(|k| universe.get(k))
+        .map(|rt| rt.properties.contains_key("Cast.UInt"))
+        .unwrap_or(false);
+    value_fits_width(v, *w, unsigned)
+}
+
+fn decimal_value(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::Decimal(n) => i64::try_from(*n).ok(),
+        Expr::UnaryOp(UnaryOpKind::Neg, inner) => decimal_value(inner).map(|v| -v),
+        _ => None,
+    }
+}
+
+/// Value domain of a w-bit integer: [0, 2^w) unsigned, [-2^(w-1), 2^(w-1))
+/// signed.
+fn value_fits_width(v: i64, w: usize, unsigned: bool) -> bool {
+    if w == 0 || w > 64 {
+        return false;
+    }
+    if unsigned {
+        return v >= 0 && (w >= 64 || v < (1i64 << w));
+    }
+    if w >= 64 {
+        return true;
+    }
+    let half = 1i64 << (w - 1);
+    v >= -half && v < half
+}
+
 /// Infer the type of a binary operation.
 fn infer_binary_op(
     kind: &BinaryOpKind,
@@ -2267,15 +2318,20 @@ fn infer_binary_op(
         }
     };
 
+    // 2026-08-25 (sized scalars): a fitting literal is IN the specialized
+    // domain — `n + 1`, `[n < 15]` on Int8 — no coercion, no overload needed.
+    let literal_admitted = literal_fits_sized(&lhs_ty, rhs, ctx.universe)
+        || literal_fits_sized(&rhs_ty, lhs, ctx.universe);
+
     if kind.is_comparison() || kind.is_logical() {
-        if lhs_str != rhs_str {
+        if lhs_str != rhs_str && !literal_admitted {
             return Err(TypeError::TypeMismatch {
                 expected: lhs_str,
                 found: rhs_str,
                 context: format!("binary op '{}'", kind),
             });
         }
-    } else if lhs_str != rhs_str {
+    } else if lhs_str != rhs_str && !literal_admitted {
         // 2026-07-31: No implicit numeric coercion — `Int * Float` is a TYPE
         // ERROR unless the LHS (or RHS) type declares a cross-type / cross-
         // protocol operator overload (`op Mul(#Float)` / `op Mul(Float)`). The
@@ -2745,9 +2801,17 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     }
                     _ => false,
                 };
+                // 2026-08-25 (sized scalars): `let x: Int8 = 7` — a literal
+                // inside the width domain constructs the specialized type.
+                let sized_literal = match (declared, expr.as_ref()) {
+                    (t @ Type::Constrained(..), Some(e)) => {
+                        literal_fits_sized(t, e, ctx.universe)
+                    }
+                    _ => false,
+                };
                 // 2026-08-22 (Phase 3): structural sums admit their members
                 // (`let v: Int | String = 5`) via types_compatible.
-                let compatible = if vector_literal {
+                let compatible = if vector_literal || sized_literal {
                     true
                 } else if types_compatible(declared, &inferred, ctx) {
                     true
@@ -6454,6 +6518,46 @@ node probe [xs.^^Element == 0][true] {
 };
 "#;
         let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn sized_scalar_admits_fitting_literal_arithmetic() {
+        // 2026-08-25 (sized scalars): `n + 1` on Int<8> — the literal is IN
+        // the width domain; no coercion, no overload needed.
+        let src = r#"
+let n: Int<8> = 7;
+node probe [n < 100][true] {
+    let m: Int<8> = n + 1;
+    term;
+};
+"#
+        .to_string();
+        let e = check(&src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn sized_scalar_rejects_out_of_domain_literal() {
+        // 300 does not fit Int<8>'s signed domain (-128..=127).
+        let src = r#"
+let n: Int<8> = 7;
+node probe [n < 100][true] {
+    let m: Int<8> = n + 300;
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected out-of-domain literal to error");
+    }
+    #[test]
+    fn sized_scalar_let_admits_fitting_init() {
+        let src = r#"
+let small: Int8 = 42;
+node probe [small < 100][true] {
+    term;
+};
+"#
+        .to_string();
+        let e = check(&src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
     }
     #[test]

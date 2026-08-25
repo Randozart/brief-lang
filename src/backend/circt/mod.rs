@@ -1344,6 +1344,31 @@ impl CirctBackend {
     }
 
     /// Emit combinational logic for a contract condition (precondition or postcondition).
+    /// 2026-08-25 (sized scalars): comparisons emit at the OPERAND's
+    /// register width — an Int<8> state var compares as i8, never widened
+    /// to i64 (circt-opt rejects mixed-width icmp operands — found by the
+    /// sim-parity harness on the sized fixture).
+    fn operand_width(&self, e: &Expr) -> String {
+        if let Expr::Identifier(name) = e {
+            if let Some(ty) = self.var_types.get(name) {
+                let t = self.mlir_type(ty);
+                if t.starts_with('i') && t != "i64" {
+                    return t;
+                }
+            }
+        }
+        "i64".to_string()
+    }
+
+    /// Width for a comparison: whichever side carries a sized register.
+    fn compare_width(&self, l: &Expr, r: &Expr) -> String {
+        let lw = self.operand_width(l);
+        if lw != "i64" {
+            return lw;
+        }
+        self.operand_width(r)
+    }
+
     fn emit_contract_condition(&self, out: &mut String, ng: &mut NameGen, cond: &Expr, result_wire: &str, reg_names: &HashMap<String, String>) {
         match cond {
             Expr::Bool(true) => {
@@ -1353,29 +1378,34 @@ impl CirctBackend {
                 writeln!(out, "  {} = hw.constant 0 : i1", result_wire).ok();
             }
             Expr::BinaryOp(BinaryOpKind::Lt, l, r) => {
-                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                writeln!(out, "  {} = comb.icmp ult {}, {} : i64", result_wire, left, right).ok();
+                let w = self.compare_width(l, r);
+                let left = self.emit_expr(ng, out, l, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ult {}, {} : {}", result_wire, left, right, w).ok();
             }
             Expr::BinaryOp(BinaryOpKind::Le, l, r) => {
-                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                writeln!(out, "  {} = comb.icmp ule {}, {} : i64", result_wire, left, right).ok();
+                let w = self.compare_width(l, r);
+                let left = self.emit_expr(ng, out, l, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ule {}, {} : {}", result_wire, left, right, w).ok();
             }
             Expr::BinaryOp(BinaryOpKind::Gt, l, r) => {
-                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                writeln!(out, "  {} = comb.icmp ugt {}, {} : i64", result_wire, left, right).ok();
+                let w = self.compare_width(l, r);
+                let left = self.emit_expr(ng, out, l, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ugt {}, {} : {}", result_wire, left, right, w).ok();
             }
             Expr::BinaryOp(BinaryOpKind::Ge, l, r) => {
-                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                writeln!(out, "  {} = comb.icmp uge {}, {} : i64", result_wire, left, right).ok();
+                let w = self.compare_width(l, r);
+                let left = self.emit_expr(ng, out, l, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp uge {}, {} : {}", result_wire, left, right, w).ok();
             }
             Expr::BinaryOp(BinaryOpKind::Eq, l, r) => {
-                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
-                writeln!(out, "  {} = comb.icmp eq {}, {} : i64", result_wire, left, right).ok();
+                let w = self.compare_width(l, r);
+                let left = self.emit_expr(ng, out, l, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, &w).unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp eq {}, {} : {}", result_wire, left, right, w).ok();
             }
             Expr::BinaryOp(BinaryOpKind::And, l, r) => {
                 let left_wire = ng.fresh_wire("cond_l");

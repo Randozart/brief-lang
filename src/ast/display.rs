@@ -317,7 +317,12 @@ impl fmt::Display for Type {
                 }
                 Ok(())
             }
-            Type::Constrained(ty, range) => write!(f, "{} @/ {:?}", ty, range),
+            // 2026-08-25 (sized scalars): Single-width renders as the
+            // source syntax `Int<8>`; exotic ranges keep the diagnostic form.
+            Type::Constrained(ty, range) => match range {
+                BitRange::Single(w) => write!(f, "{}<{}>", ty, w),
+                other => write!(f, "{} @/ {:?}", ty, other),
+            },
             Type::LayoutPtr(c) => write!(f, "Ptr<Bits @/{}>", c.bytes),
         }
     }

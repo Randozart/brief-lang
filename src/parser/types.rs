@@ -3,7 +3,7 @@
 // Flat code: each function is max 2 levels of nesting.
 
 use super::helpers::Parser;
-use crate::ast::{Dimension, Type};
+use crate::ast::{BitRange, Dimension, Type};
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 
@@ -75,6 +75,34 @@ impl<'a> Parser<'a> {
             Some(Token::LParen) => return self.parse_tuple_type(),
             _ => return self.error_at_current("expected type"),
         };
+        // 2026-08-25 (sized scalars, user decision): `Int<8>` / `UInt<8>` /
+        // `Bool<1>` — angle brackets are compile-time type-level
+        // specialization (delimiter contract, SPEC): here a bit-width
+        // specialization of the primitive. Produces the Constrained type the
+        // hardware lowering already maps to iN. Primitives take no generic
+        // args, so `<` in type position here is unambiguous.
+        let prim_name = base.0;
+        if matches!(prim_name, "Int" | "UInt" | "Bool") && self.check(&Token::Lt) {
+            if let Some(Token::Integer(w)) = self.peek_next() {
+                let w = *w as usize;
+                if w == 0 || w > 64 {
+                    return self.error_at_current("width in Int<N>/UInt<N> must be 1..=64");
+                }
+                if prim_name == "Bool" && w != 1 {
+                    return self.error_at_current("Bool<1> is the only valid Bool width");
+                }
+                self.pos += 2; // consume '<' and the width literal
+                if !self.eat_type_close() {
+                    return self.error_at_current("expected '>' after the width");
+                }
+                let base_ty = match prim_name {
+                    "Int" => Type::int(),
+                    "UInt" => Type::Custom("UInt".into()),
+                    _ => Type::bool_(),
+                };
+                return Ok(Type::Constrained(Box::new(base_ty), BitRange::Single(w)));
+            }
+        }
         // 2026-08-05 (Phase 3): free-form dot-extension type suffixes
         // (`String.c`, `Int.c.sso`) are removed; host/target qualifiers live
         // in configured GLUE bindings and protocol variants (SPEC §8.7).

@@ -79,5 +79,11 @@ def step_wd(s):
 gen("counter", {"counter": 0}, step_counter)
 gen("adder", {"a": 0, "b": 3}, step_adder)
 gen("array", {"buf": (7, 7, 7, 7), "idx": 0}, step_array)
+# sized: Int<8> ticks 120..126 then holds at the width-domain boundary
+def step_sized(s):
+    ok = s["n"] < 126
+    return ok, {"n": s["n"] + 1} if ok else {}
+
 gen("watchdog", {"beat": 0}, step_wd, wd=(lambda s: s["beat"] < 5, 2))
+gen("sized", {"n": 120, "w": 7}, step_sized)
 print("expect files regenerated")
