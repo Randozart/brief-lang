@@ -479,6 +479,10 @@ impl LspServer {
                 format!("'{}' is a reserved keyword and cannot be used as an identifier", keyword),
                 *span,
             ),
+            SyntaxError::ParseErrors(_) => (
+                "multiple parse errors".to_string(),
+                Span::new(0, 0, 0, 0),
+            ),
         };
 
         serde_json::json!({

@@ -665,6 +665,8 @@ impl fmt::Display for FuzzError {
 
 #[derive(Debug, Clone)]
 pub enum SyntaxError {
+    /// 2026-08-23 (F3): multiple parse errors collected during recovery.
+    ParseErrors(Vec<String>),
     UnexpectedToken {
         expected: String,
         found: String,
@@ -705,6 +707,15 @@ pub enum SyntaxError {
 
 impl fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 2026-08-23 (F3): multi-error variant formats all collected errors.
+        if let SyntaxError::ParseErrors(errors) = self {
+            writeln!(f, "{} parse error(s):", errors.len())?;
+            for e in errors {
+                writeln!(f, "  - {}", e)?;
+            }
+            return Ok(());
+        }
+
         let span_str = match self {
             SyntaxError::UnexpectedToken { span, .. } => format!(" at {}", span),
             SyntaxError::UnexpectedEOF { span, .. } => format!(" at {}", span),
@@ -713,6 +724,7 @@ impl fmt::Display for SyntaxError {
             SyntaxError::InvalidType { span, .. } => format!(" at {}", span),
             SyntaxError::StagedFeature { span, .. } => format!(" at {}", span),
             SyntaxError::ReservedKeyword { span, .. } => format!(" at {}", span),
+            _ => String::new(),
         };
 
         match self {
@@ -743,6 +755,7 @@ impl fmt::Display for SyntaxError {
                     feature, span_str
                 )
             }
+            _ => Ok(()),
         }
     }
 }

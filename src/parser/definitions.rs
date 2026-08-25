@@ -585,14 +585,50 @@ impl<'a> Parser<'a> {
     /// parse top-level items until EOF.
     pub fn parse_program(&mut self) -> Result<Vec<TopLevel>, SyntaxError> {
         let mut items = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
         while !self.is_at_end() {
             // 2026-07-14: Eat semicolons between top-level items (e.g. `defn foo() {};`)
             while self.eat(&Token::Semicolon) {}
             if self.is_at_end() {
                 break;
             }
-            let item = self.parse_top_level()?;
-            items.push(item);
+            // 2026-08-23 (F3 error recovery): try parsing a top-level item.
+            // On failure, record the error and skip to the next plausible
+            // top-level boundary (closing `}` at col 0 or EOF) so ALL
+            // issues are reported in one pass instead of cascading.
+            match self.parse_top_level() {
+                Ok(item) => items.push(item),
+                Err(e) => {
+                    let offset = self
+                        .tokens
+                        .get(self.pos.min(self.tokens.len() - 1))
+                        .map(|(_, s)| s.start)
+                        .unwrap_or(0);
+                    // Convert byte offset to line number
+                    let src_text = &self.source[..offset.min(self.source.len())];
+                    let line = src_text.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1;
+                    errors.push(format!("line {line}: {e}"));
+                    // Skip to next `}` at column 0 or EOF
+                    while !self.is_at_end() {
+                        if self.check(&Token::RBrace) {
+                            // Check if this RBrace starts at column 0 (top-level boundary)
+                            if let Some((_, span)) = self.tokens.get(self.pos) {
+                                let span_start = span.start;
+                                // Find the start of this line in source
+                                let line_start = self.source[..span_start.min(self.source.len())]
+                                    .rfind("\n").map(|p| p + 1).unwrap_or(0);
+                                if span_start - line_start == 0 {
+                                    break;
+                                }
+                            }
+                        }
+                        self.advance();
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(SyntaxError::ParseErrors(errors));
         }
         // 2026-08-01 (Phase 4): implicit entry wrapping is owned by the script
         // plugin (script_plugin.rs) — it synthesizes the one-shot opening node.
