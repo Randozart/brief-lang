@@ -31,7 +31,12 @@ def gen(name, vars_init, step_fn, wd=None):
     cnt = wd[1] if wd else 0
     for i in range(CYCLES):
         reset = i <= 1
-        pre_ok, committed = step_fn(state)
+        # Side-effecting models (memory buffers) must not mutate on reset
+        # cycles — hardware holds init through reset, so no write lands.
+        if reset:
+            pre_ok, committed = True, {}
+        else:
+            pre_ok, committed = step_fn(state)
         cond = wd[0](state) if wd else True
         tmo_val = int((not cond) and cnt == 0)
         if reset:
@@ -84,6 +89,24 @@ def step_sized(s):
     ok = s["n"] < 126
     return ok, {"n": s["n"] + 1} if ok else {}
 
+# memfill: seq.firmem macro — latency-0 reads see CYCLE-START state, so
+# `last = buf[w-1]` mirrors the PREVIOUS fill (k+6 progression), exactly as
+# a register file would. Buffer is modeled outside `state` (not a port).
+BUF = [0] * 64
+
+def step_memfill(s):
+    k = s["w"]
+    ok = k < 64
+    if not ok:
+        return False, {}
+    rd = BUF[k - 1] if k > 0 else None   # read BEFORE this edge's write
+    BUF[k] = k + 7
+    committed = {"w": k + 1}
+    if k > 0:
+        committed["last"] = rd
+    return True, committed
+
 gen("watchdog", {"beat": 0}, step_wd, wd=(lambda s: s["beat"] < 5, 2))
 gen("sized", {"n": 120, "w": 7}, step_sized)
+gen("memfill", {"w": 0, "last": 0}, step_memfill)
 print("expect files regenerated")

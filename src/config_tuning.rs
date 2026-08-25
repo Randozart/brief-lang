@@ -60,6 +60,11 @@ pub struct IrLoweringSettings {
     pub accel_probe_tolerance: f64,
     /// Accel probe commit margin: GPU must beat CPU by 1 + margin.
     pub accel_probe_margin: f64,
+    /// CIRCT: state arrays at/above this depth default to the seq.firmem
+    /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
+    pub firmem_min_depth: usize,
+    /// CIRCT: max distinct read sites per mem-lowered array (macro ports).
+    pub firmem_max_ports: usize,
 }
 
 /// x86_64 defaults — also the fallback for unknown target prefixes.
@@ -80,6 +85,8 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_k: 2,
     accel_probe_tolerance: 0.0001,
     accel_probe_margin: 0.05,
+    firmem_min_depth: 64,
+    firmem_max_ports: 4,
 };
 
 /// Per-target-prefix tuning tables, keyed by triple prefix (e.g. "x86_64").
@@ -171,6 +178,14 @@ fn load_ir_lowering() -> IrLoweringSettings {
         arena_min_budget: db
             .field_int("arena_min_budget", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.arena_min_budget as i64) as u32,
+        firmem_min_depth: db
+            .field_int("circt.firmem_min_depth", 0)
+            .map(|v| v as usize)
+            .unwrap_or(DEFAULT_IR_LOWERING.firmem_min_depth),
+        firmem_max_ports: db
+            .field_int("circt.firmem_max_ports", 0)
+            .map(|v| v as usize)
+            .unwrap_or(DEFAULT_IR_LOWERING.firmem_max_ports),
         arena_initial_size: db
             .field_int("arena_initial_size", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.arena_initial_size as i64) as u64,

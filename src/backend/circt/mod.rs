@@ -1,6 +1,7 @@
 // CIRCT Backend — emits MLIR text in HW + Comb + Seq dialects.
 // Invoked via: briev build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
+pub mod mem_policy;
 pub mod normalizer;
 
 use crate::analysis::dependency_graph::DependencyGraph;
@@ -49,6 +50,24 @@ pub struct CirctBackend {
     pub array_groups: HashMap<String, Vec<String>>,
     /// Array var name → element MLIR type (lanes all share it).
     pub array_elem_ty: HashMap<String, String>,
+    /// 2026-08-25 (seq-firmem plan): arrays decided to the MEMORY MACRO —
+    /// var → plan (macro wire name assigned at declaration emission).
+    pub array_mems: HashMap<String, MemPlan>,
+    /// Default-policy decisions surfaced as ONE aggregated note (what/why/
+    /// fix). Explicit pins never land here — they silence by definition.
+    pub notices: std::cell::RefCell<Vec<String>>,
+}
+
+/// A memory-macro-lowered state array.
+#[derive(Clone, Debug)]
+pub struct MemPlan {
+    pub depth: usize,
+    /// Width in bits (element width).
+    pub width: usize,
+    /// The seq.firmem result wire (assigned during module preamble).
+    pub wire: String,
+    /// Macro module name (companion file stem): <var>_<D>x<W>.
+    pub macro_name: String,
  }
 
 /// Per-generation counters for unique MLIR value names.
@@ -104,6 +123,9 @@ struct WdMonitor {
         reg_names: &'a mut HashMap<String, String>,
         pending: &'a mut HashMap<String, String>,
         ob: &'a mut Obligations,
+        /// This txn's pre-guard wire (§3.4 commit gate) — memory-macro
+        /// write ports fold it into their ENABLE. None = trivially true.
+        gate: Option<String>,
     }
 
 impl CirctBackend {
@@ -153,6 +175,8 @@ impl CirctBackend {
             errors: std::cell::RefCell::new(Vec::new()),
             array_groups: HashMap::new(),
             array_elem_ty: HashMap::new(),
+            array_mems: HashMap::new(),
+            notices: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -342,6 +366,74 @@ impl CirctBackend {
         }
     }
 
+    /// Address width for a depth-D macro: ceil(log2(D)), minimum 1 — the
+    /// seq dialect verifier enforces exactly this on port ops.
+    fn addr_width(depth: usize) -> u32 {
+        if depth <= 1 {
+            return 1;
+        }
+        usize::BITS - (depth - 1).leading_zeros()
+    }
+
+    /// 2026-08-25 (seq-firmem plan): reference implementations for every
+    /// memory macro this module instantiates. SeqToSV lowers firmem to an
+    /// EXTERNALLY-generated module (upstream: firtool emits the body); our
+    /// pipeline patches it to hw.module.extern and links these companions
+    /// at verilator/Vivado time. Combinational read (latency 0) matches the
+    /// register-file read semantics; posedge gated write carries the §3.4
+    /// commit gate via W0_en.
+    pub fn memory_companions(&self) -> Vec<(String, String)> {
+        let mut plans: Vec<&MemPlan> = self.array_mems.values().collect();
+        plans.sort_by(|a, b| a.macro_name.cmp(&b.macro_name));
+        plans
+            .into_iter()
+            .map(|p| {
+                let aw = Self::addr_width(p.depth);
+                let sv = format!(
+                    "// brievc seq.firmem reference implementation — {d} x {w} bit, latency-0 read\n\
+                     module {m}(\n\
+                     \x20 input [{awm}:0] R0_addr,\n\
+                     \x20 input R0_en,\n\
+                     \x20 input R0_clk,\n\
+                     \x20 output [{wm}:0] R0_data,\n\
+                     \x20 input [{awm}:0] W0_addr,\n\
+                     \x20 input W0_en,\n\
+                     \x20 input W0_clk,\n\
+                     \x20 input [{wm}:0] W0_data\n\
+                     );\n\
+                     \x20 (* ram_style = \"distributed\" *) reg [{wm}:0] ram [0:{dm}];\n\
+                     \x20 always @(posedge W0_clk) if (W0_en) ram[W0_addr] <= W0_data;\n\
+                     \x20 assign R0_data = ram[R0_addr];\n\
+                     endmodule\n",
+                    m = p.macro_name,
+                    d = p.depth,
+                    w = p.width,
+                    awm = aw - 1,
+                    wm = p.width - 1,
+                    dm = p.depth - 1,
+                );
+                (format!("{}.sv", p.macro_name), sv)
+            })
+            .collect()
+    }
+
+    /// THE aggregated disambiguation note (user-approved form): one message
+    /// listing every array that followed the DEFAULT policy, each with its
+    /// reason. None when every array was explicitly pinned (or none exist).
+    pub fn take_disambiguation_note(&self) -> Option<String> {
+        let lines = self.notices.borrow();
+        if lines.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "note: {} state array(s) follow the default array-lowering policy \
+             — prefix 'mem let' or 'reg let' to disambiguate explicitly \
+             (and silence this note):\n{}",
+            lines.len(),
+            lines.join("\n")
+        ))
+    }
+
     fn emit_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, items: &[TopLevel]) {
         let mut ng = NameGen::default();
 
@@ -424,13 +516,19 @@ impl CirctBackend {
         ordered.sort();
         let ordered: &[String] = &ordered;
         let trg_names: std::collections::HashSet<String> = self.trg_ports.iter().map(|t| t.trg_name.clone()).collect();
-        // 2026-08-25 (Plan 3.6): bounded state arrays flatten to REGISTER
-        // FILES — one scalar register per element (`buf: Int[4]` → ports
-        // buf_0..buf_3). Reads mux over lanes by index; writes decode the
-        // index into per-lane enables; contracts referencing elements go
-        // through the same read path. seq.firmem deferred until this proves
-        // the semantics (additive follow-up). Non-constant dimensions are a
-        // recorded capability error — never a silent drop.
+        // 2026-08-25 (seq-firmem plan): bounded state arrays lower to
+        // REGISTER FILES (per-lane firregs + mux/decode trees) or — past
+        // the policy threshold, unpinned and semantics-compatible — the
+        // seq.firmem MEMORY MACRO (companion .sv supplies the RAM body at
+        // export; see plan §0 findings). The policy engine decides;
+        // default-policy decisions land in `notices` for THE aggregated
+        // note. Non-constant dimensions are a recorded capability error.
+        let array_facts = mem_policy::collect_array_facts(items);
+        let ir_lower = crate::config_tuning::ir_lowering();
+        let mem_policy_cfg = mem_policy::MemPolicy {
+            min_depth: ir_lower.firmem_min_depth,
+            max_ports: ir_lower.firmem_max_ports,
+        };
         let mut lane_inits: HashMap<String, String> = HashMap::new();
         for var_name in ordered {
             if trg_names.contains(var_name) {
@@ -438,27 +536,102 @@ impl CirctBackend {
             }
             let Some(ty) = self.var_types.get(var_name) else { continue };
             if let Type::Vector(elem, dims) = ty {
+                let elem_ty = self.mlir_type(elem);
                 match Self::concrete_dim(dims.first()) {
                     Some(n) if n > 0 => {
-                        let elem_ty = self.mlir_type(elem);
-                        let init_list = self.var_exprs.get(var_name).cloned().flatten();
-                        let mut lanes: Vec<String> = Vec::new();
-                        for j in 0..n {
-                            let lane = format!("{}_{}", var_name, j);
-                            let init = init_list
-                                .as_ref()
-                                .and_then(|e| match e {
-                                    Expr::List(items) => items.get(j),
-                                    _ => None,
-                                })
-                                .map(Self::format_init_expr)
-                                .unwrap_or_else(|| "0".to_string());
-                            lane_inits.insert(lane.clone(), init);
-                            lanes.push(lane.clone());
-                            output_ports.push((lane.clone(), elem_ty.clone()));
+                        let (hint, facts) = array_facts
+                            .iter()
+                            .find(|(v, _, _)| v == var_name)
+                            .map(|(_, h, f)| (*h, f.clone()))
+                            .unwrap_or((
+                                mem_policy::MemHint::None,
+                                mem_policy::ArrayFacts {
+                                    depth: n,
+                                    ..mem_policy::ArrayFacts::default()
+                                },
+                            ));
+                        let decision = match mem_policy::decide_array_lowering(
+                            hint,
+                            &facts,
+                            &mem_policy_cfg,
+                        ) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                self.record_unsupported(&format!(
+                                    "array '{}': {}",
+                                    var_name, e
+                                ));
+                                continue;
+                            }
+                        };
+                        match decision.lowering {
+                            mem_policy::ArrayLowering::FirmMem => {
+                                // Wire name reserved NOW (deterministic
+                                // NameGen order); the seq.firmem op itself
+                                // emits after the module header (macros
+                                // block below).
+                                let width = elem_ty
+                                    .trim_start_matches('i')
+                                    .parse::<usize>()
+                                    .unwrap_or(64);
+                                let wire =
+                                    ng.fresh_wire(&format!("{}_mem", var_name));
+                                // SeqToSV derives the generated-module name
+                                // from the firmem SSA NAME: <name>_<D>x<W>.
+                                // The companion must match it exactly.
+                                let macro_name = format!(
+                                    "{}_{}x{}",
+                                    wire.trim_start_matches('%'),
+                                    n, width
+                                );
+                                self.array_mems.insert(
+                                    var_name.clone(),
+                                    MemPlan {
+                                        depth: n,
+                                        width,
+                                        macro_name,
+                                        wire,
+                                    },
+                                );
+                                self.array_elem_ty
+                                    .insert(var_name.clone(), elem_ty.clone());
+                                if let Some(why) = decision.why {
+                                    self.notices.borrow_mut().push(format!(
+                                        "  {} ({} x {}) -> seq.firmem macro   [why: {}]",
+                                        var_name, n, elem_ty, why
+                                    ));
+                                }
+                            }
+                            mem_policy::ArrayLowering::RegFile => {
+                                let init_list =
+                                    self.var_exprs.get(var_name).cloned().flatten();
+                                let mut lanes: Vec<String> = Vec::new();
+                                for j in 0..n {
+                                    let lane = format!("{}_{}", var_name, j);
+                                    let init = init_list
+                                        .as_ref()
+                                        .and_then(|e| match e {
+                                            Expr::List(items) => items.get(j),
+                                            _ => None,
+                                        })
+                                        .map(Self::format_init_expr)
+                                        .unwrap_or_else(|| "0".to_string());
+                                    lane_inits.insert(lane.clone(), init);
+                                    lanes.push(lane.clone());
+                                    output_ports.push((lane.clone(), elem_ty.clone()));
+                                }
+                                self.array_groups
+                                    .insert(var_name.clone(), lanes);
+                                self.array_elem_ty
+                                    .insert(var_name.clone(), elem_ty.clone());
+                                if let Some(why) = decision.why {
+                                    self.notices.borrow_mut().push(format!(
+                                        "  {} ({} x {}) -> register file      [why: {}]",
+                                        var_name, n, elem_ty, why
+                                    ));
+                                }
+                            }
                         }
-                        self.array_groups.insert(var_name.clone(), lanes);
-                        self.array_elem_ty.insert(var_name.clone(), elem_ty);
                     }
                     Some(_) => {
                         self.record_unsupported(&format!(
@@ -548,6 +721,19 @@ impl CirctBackend {
         writeln!(out, "  %true = hw.constant true").ok();
         writeln!(out, "  %false = hw.constant false").ok();
 
+        // Memory macros (seq-firmem plan): declared up-front; ports attach
+        // at access sites. Sorted by macro name for deterministic emission.
+        let mut mem_plans: Vec<&MemPlan> = self.array_mems.values().collect();
+        mem_plans.sort_by(|a, b| a.macro_name.cmp(&b.macro_name));
+        for plan in &mem_plans {
+            writeln!(
+                out,
+                "  {} = seq.firmem 0, 1, old, undefined : !seq.firmem<{} x {}>",
+                plan.wire, plan.depth, plan.width
+            )
+            .ok();
+        }
+
         // Phase B: transaction bodies (in program order) against live
         // register outputs. Refusal/post verdicts collected for halt/check.
         let mut pending: HashMap<String, String> = HashMap::new();
@@ -560,6 +746,7 @@ impl CirctBackend {
                     reg_names: &mut reg_names,
                     pending: &mut pending,
                     ob: &mut ob,
+                    gate: None,
                 };
                 self.emit_txn_body(&mut ng, out, &txn.body, &mut m);
             }
@@ -764,12 +951,34 @@ impl CirctBackend {
                     BinaryOpKind::Mul => self.emit_binary_comb(ng, out, "comb.mul", l, r, reg_names, result_ty),
                     BinaryOpKind::Div => self.emit_binary_comb(ng, out, "comb.divu", l, r, reg_names, result_ty),
                     BinaryOpKind::Mod => self.emit_binary_comb(ng, out, "comb.mod", l, r, reg_names, result_ty),
-                    BinaryOpKind::Eq => self.emit_binary_comb(ng, out, "comb.icmp eq", l, r, reg_names, "i1"),
-                    BinaryOpKind::Neq => self.emit_binary_comb(ng, out, "comb.icmp ne", l, r, reg_names, "i1"),
-                    BinaryOpKind::Lt => self.emit_binary_comb(ng, out, "comb.icmp ult", l, r, reg_names, "i1"),
-                    BinaryOpKind::Le => self.emit_binary_comb(ng, out, "comb.icmp ule", l, r, reg_names, "i1"),
-                    BinaryOpKind::Gt => self.emit_binary_comb(ng, out, "comb.icmp ugt", l, r, reg_names, "i1"),
-                    BinaryOpKind::Ge => self.emit_binary_comb(ng, out, "comb.icmp uge", l, r, reg_names, "i1"),
+                    // 2026-08-25: comparisons emit OPERANDS at the operand
+                    // register width (result is implicitly i1). The old
+                    // hardcoded "i1" compared i64 registers as 1-bit — latent
+                    // until the first statement-level `when` guard.
+                    BinaryOpKind::Eq => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp eq", l, r, reg_names, &w)
+                    }
+                    BinaryOpKind::Neq => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp ne", l, r, reg_names, &w)
+                    }
+                    BinaryOpKind::Lt => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp ult", l, r, reg_names, &w)
+                    }
+                    BinaryOpKind::Le => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp ule", l, r, reg_names, &w)
+                    }
+                    BinaryOpKind::Gt => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp ugt", l, r, reg_names, &w)
+                    }
+                    BinaryOpKind::Ge => {
+                        let w = self.compare_width(l, r);
+                        self.emit_binary_comb(ng, out, "comb.icmp uge", l, r, reg_names, &w)
+                    }
                     BinaryOpKind::And => self.emit_binary_comb(ng, out, "comb.and", l, r, reg_names, "i1"),
                     BinaryOpKind::Or => self.emit_binary_comb(ng, out, "comb.or", l, r, reg_names, "i1"),
                     BinaryOpKind::BitAnd => self.emit_binary_comb(ng, out, "comb.and", l, r, reg_names, result_ty),
@@ -892,9 +1101,31 @@ impl CirctBackend {
                 Some(w)
             }
             Expr::Index(list, idx) => {
-                // 2026-08-25 (Plan 3.6): array register-file READ — mux tree
-                // over the flattened lanes, selected by the index wire.
+                // 2026-08-25 (seq-firmem plan): MEMORY-MACRO READ — a
+                // latency-0 read port per site; address truncated to
+                // ceil(log2(depth)) (verifier-enforced). Sees cycle-start
+                // state, matching register-file read semantics exactly.
                 if let Expr::Identifier(name) = list.as_ref() {
+                    if let Some(plan) = self.array_mems.get(name).cloned() {
+                        let idx_val = self.emit_expr(ng, out, idx, reg_names, "i64")?;
+                        let aw = Self::addr_width(plan.depth);
+                        let a = ng.fresh_wire("maddr");
+                        writeln!(
+                            out,
+                            "  {} = comb.extract {} from 0 : (i64) -> i{}",
+                            a, idx_val, aw
+                        )
+                        .ok();
+                        let rp = ng.fresh_wire(&format!("{}_rp", name));
+                        writeln!(
+                            out,
+                            // %clock is the fixed input-port name.
+                            "  {} = seq.firmem.read_port {}[{}], clock %clock : !seq.firmem<{} x {}>",
+                            rp, plan.wire, a, plan.depth, plan.width
+                        )
+                        .ok();
+                        return Some(rp);
+                    }
                     let lanes = self.array_groups.get(name).cloned();
                     if let Some(lanes) = lanes {
                         let idx_val = self.emit_expr(ng, out, idx, reg_names, "i64")?;
@@ -1013,7 +1244,8 @@ impl CirctBackend {
             writeln!(out, "  {} = comb.icmp eq {}, %false : i1", f, w).ok();
             m.ob.pre_fails.push(f.clone());
             pre_fail_wire = Some(f);
-            pre_ok_wire = Some(w);
+            pre_ok_wire = Some(w.clone());
+            m.gate = Some(w);
         }
 
         // Vars THIS txn writes = pending keys added during the body
@@ -1099,13 +1331,50 @@ impl CirctBackend {
                 self.emit_expr(ng, out, expr, m.reg_names, "i64");
             }
             Statement::Assign(lhs, expr) => {
-                // 2026-08-25 (Plan 3.6): array element write `buf[i] = v` —
-                // DECODE into per-lane enables: lane j commits v iff i==j,
-                // every other lane holds its current value. All lanes join
-                // the m.pending map so the §3.4 commit gate wraps the whole
-                // register file.
+                // 2026-08-25 (seq-firmem plan): MEMORY-MACRO element write —
+                // the §3.4 commit gate rides the write ENABLE: refusal
+                // (pre_ok false) ⇒ enable low ⇒ macro holds. No pending-map
+                // interaction; nothing combinational to repoint.
                 if let Expr::Index(obj, idx) = lhs {
                     if let Expr::Identifier(name) = obj.as_ref() {
+                        if let Some(plan) = self.array_mems.get(name).cloned() {
+                            let elem_ty = self
+                                .array_elem_ty
+                                .get(name)
+                                .cloned()
+                                .unwrap_or_else(|| "i64".to_string());
+                            let Some(data) =
+                                self.emit_expr(ng, out, expr, m.reg_names, &elem_ty)
+                            else {
+                                return;
+                            };
+                            let Some(idx_val) =
+                                self.emit_expr(ng, out, idx, m.reg_names, "i64")
+                            else {
+                                return;
+                            };
+                            let aw = Self::addr_width(plan.depth);
+                            let a = ng.fresh_wire("maddr");
+                            writeln!(
+                                out,
+                                "  {} = comb.extract {} from 0 : (i64) -> i{}",
+                                a, idx_val, aw
+                            )
+                            .ok();
+                            // Enable = commit gate (None ⇒ trivially true,
+                            // omit — port defaults to constant true).
+                            let enable = match &m.gate {
+                                Some(g) => format!(" enable {}", g),
+                                None => String::new(),
+                            };
+                            writeln!(
+                                out,
+                                "  seq.firmem.write_port {}[{}] = {}, clock %clock{} : !seq.firmem<{} x {}>",
+                                plan.wire, a, data, enable, plan.depth, plan.width
+                            )
+                            .ok();
+                            return;
+                        }
                         let Some(lanes) = self.array_groups.get(name).cloned() else {
                             self.record_unsupported(&format!(
                                 "element write to non-state index target '{}'",
@@ -1705,6 +1974,117 @@ mod tests {
         let count = output.matches("sensor: i64").count();
         assert!(count >= 1, "Trigger should appear as port. Got {} occurrences. Output:\n{}", count, output);
     }
+    fn make_array_let(name: &str, depth: usize, hint: Option<&str>) -> TopLevel {
+        // Top-level typed let (the array surface): Statement::Let with a
+        // Vector type, zero-init literal, optional mem/reg annotation.
+        use crate::ast::{Annotation, Statement as S, TopLevel as T};
+        let mut modifiers = Vec::new();
+        if let Some(h) = hint {
+            modifiers.push(Annotation { name: h.to_string(), value: None });
+        }
+        T::Statement(Box::new(S::Let {
+            name: name.to_string(),
+            names: vec![name.to_string()],
+            ty: Some(Type::Vector(
+                Box::new(Type::int()),
+                vec![crate::ast::Dimension::Anonymous(depth)],
+            )),
+            expr: Some(Expr::List(vec![Expr::Decimal(0); depth])),
+            modifiers,
+        }))
+    }
+
+    #[test]
+    fn test_deep_array_defaults_to_firmem_macro() {
+        // 2026-08-25 (seq-firmem plan): depth >= 64 + zero init +
+        // single writer ⇒ memory macro; default decision lands in the
+        // disambiguation note.
+        let mut backend = CirctBackend::new();
+        let items = vec![
+            make_array_let("buf", 64, None),
+            make_txn(
+                "fill",
+                vec![Statement::Assign(
+                    Expr::Index(
+                        Box::new(Expr::Identifier("buf".into())),
+                        Box::new(Expr::Identifier("w".into())),
+                    ),
+                    Expr::Decimal(1),
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ];
+        let output = backend.generate(&items);
+        assert!(output.contains("seq.firmem "), "no macro in:\n{}", output);
+        assert!(!output.contains("buf_0 "), "lanes leaked for mem array");
+        let note = backend.take_disambiguation_note().unwrap();
+        assert!(note.contains("buf"), "note must name the array: {}", note);
+        assert!(note.contains("depth >= threshold"));
+    }
+
+    #[test]
+    fn test_reg_pin_forces_lanes_and_silences_note() {
+        let mut backend = CirctBackend::new();
+        let items = vec![
+            make_array_let("buf", 64, Some("reg")),
+            make_txn(
+                "fill",
+                vec![Statement::Assign(
+                    Expr::Index(
+                        Box::new(Expr::Identifier("buf".into())),
+                        Box::new(Expr::Identifier("w".into())),
+                    ),
+                    Expr::Decimal(1),
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ];
+        let output = backend.generate(&items);
+        assert!(!output.contains("seq.firmem "), "pin ignored:\n{}", output);
+        assert!(output.contains("buf_63"), "lanes missing");
+        assert!(
+            backend.take_disambiguation_note().is_none(),
+            "explicit pin must silence the note"
+        );
+    }
+
+    #[test]
+    fn test_mem_pin_with_post_ref_is_capability_error() {
+        // Postcondition reads elements — mem pin cannot honor obligations.
+        let mut backend = CirctBackend::new();
+        let items = vec![
+            make_array_let("buf", 64, Some("mem")),
+            make_txn(
+                "fill",
+                vec![Statement::Assign(
+                    Expr::Index(
+                        Box::new(Expr::Identifier("buf".into())),
+                        Box::new(Expr::Decimal(0)),
+                    ),
+                    Expr::Decimal(1),
+                )],
+                Expr::Bool(true),
+                Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Lt,
+                    Box::new(Expr::Index(
+                        Box::new(Expr::Identifier("buf".into())),
+                        Box::new(Expr::Decimal(0)),
+                    )),
+                    Box::new(Expr::Decimal(9)),
+                ),
+            ),
+        ];
+        let _ = backend.generate(&items);
+        let errs = backend.errors.borrow();
+        assert!(
+            errs.iter().any(|e| e.contains("postcondition reads elements")),
+            "expected capability error, got: {:?}",
+            *errs
+        );
+    }
+
     #[test]
     fn test_emitted_module_parses_under_circt_opt() {
         if !circt_tools_available() {

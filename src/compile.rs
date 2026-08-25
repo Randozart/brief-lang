@@ -1237,6 +1237,22 @@ fn codegen(
             if !errs.is_empty() {
                 return Err(errs.join("\n"));
             }
+            // 2026-08-25 (seq-firmem plan): memory macros ship with reference
+            // implementation companions next to the .mlir — SeqToSV lowers
+            // firmem to an EXTERNALLY-generated module, and the harness links
+            // these at verilator/Vivado time.
+            for (fname, content) in b.memory_companions() {
+                let base = opts.file_path.strip_suffix(".bv").unwrap_or(&opts.file_path);
+                let path = format!("{}.{}", base, fname);
+                std::fs::write(&path, &content)
+                    .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+                eprintln!("wrote memory companion: {}", path);
+            }
+            // THE aggregated disambiguation note (one per compile; explicit
+            // pins silence their arrays).
+            if let Some(note) = b.take_disambiguation_note() {
+                eprintln!("{}", note);
+            }
             ".mlir"
         }
         BackendKind::Gpu => {

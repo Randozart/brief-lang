@@ -1,0 +1,16 @@
+// HW validation fixture: seq.firmem memory macro (seq-firmem plan).
+// Depth 64 >= threshold 64 -> default policy lowers buf to a macro; the
+// aggregated note names it. `last` reads the previous slot combinationally
+// (latency-0 read sees cycle-start state): last = w+6 progression while
+// filling, hold at the guard bound. Zero init keeps the mem path eligible.
+let w: Int = 0;
+let last: Int = 0;
+let buf: Int[64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+txn fill [w < 64][w <= 64] {
+  buf[w] = w + 7;
+  when w > 0 {
+    last = buf[w - 1];
+  };
+  w = w + 1;
+}

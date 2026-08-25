@@ -33,9 +33,25 @@ for FIX in tmp_fixtures/hw/*.bv; do
         FAIL=1; rm -rf "$WORK"; continue
     fi
 
-    # Lower seq + export Verilog
+    # Lower seq + patch generated memory macros + re-validate + export.
+    # SeqToSV turns seq.firmem into instances of an EXTERNALLY-generated
+    # module (upstream: firtool emits the body; standalone circt-opt cannot
+    # — see BUGS.md 2026-08-25). We rewrite each generated op to
+    # hw.module.extern and link brievc's companion .sv at lint/sim time.
+    if ! "$CIRCT_OPT" --lower-seq-to-sv "$WORK/top.mlir" -o "$WORK/lowered.mlir" 2>/dev/null; then
+        echo "HW $NAME: FAIL (seq lowering)"
+        FAIL=1; rm -rf "$WORK"; continue
+    fi
+    python3 "$ROOT/tools/patch_generated.py" "$WORK/lowered.mlir" "$WORK/patched.mlir" \
+        || { echo "HW $NAME: FAIL (macro patch)"; FAIL=1; rm -rf "$WORK"; continue; }
+    if ! "$CIRCT_OPT" "$WORK/patched.mlir" > /dev/null 2> "$WORK/opt.err"; then
+        echo "HW $NAME: FAIL (patched re-parse)"
+        head -5 "$WORK/opt.err" | sed 's/^/    /'
+        FAIL=1; rm -rf "$WORK"; continue
+    fi
+
     SV="$WORK/top.sv"
-    "$CIRCT_OPT" --lower-seq-to-sv --export-verilog "$WORK/top.mlir" > "$SV.raw" 2>/dev/null || true
+    "$CIRCT_OPT" --export-verilog "$WORK/patched.mlir" > "$SV.raw" 2>/dev/null || true
     if grep -q "^endmodule$" "$SV.raw"; then
         sed '/^endmodule$/q' "$SV.raw" > "$SV"
     else
@@ -46,9 +62,18 @@ for FIX in tmp_fixtures/hw/*.bv; do
         FAIL=1; rm -rf "$WORK"; continue
     fi
 
+    # Memory companions (brievc-emitted next to the fixture).
+    COMPANIONS=()
+    for C in "${FIX%.bv}".*.sv; do
+        [ -f "$C" ] || continue
+        cp "$C" "$WORK/"
+        COMPANIONS+=("$WORK/$(basename "$C")")
+    done
+
     # Verilator lint
     if command -v verilator >/dev/null 2>&1 && [ -s "$SV" ]; then
         if ! verilator --lint-only -Wno-fatal --top-module top "$SV" \
+             "${COMPANIONS[@]}" \
              --Mdir "$WORK/vl" > "$WORK/vl.log" 2>&1; then
             echo "HW $NAME: FAIL (verilator lint)"
             grep -m3 "%Error" "$WORK/vl.log" | sed 's/^/    /'
@@ -67,7 +92,7 @@ for FIX in tmp_fixtures/hw/*.bv; do
         python3 "$ROOT/tools/hw_sim_tb.py" "$WORK/top.mlir" "$CYCLES" > "$WORK/tb.sv" \
             || { echo "HW $NAME: FAIL (tb gen)"; FAIL=1; rm -rf "$WORK"; continue; }
         if ! verilator --binary --top-module tb -Wno-fatal \
-             --Mdir "$WORK/vlsim" "$WORK/tb.sv" "$SV" > "$WORK/simbuild.log" 2>&1; then
+             --Mdir "$WORK/vlsim" "$WORK/tb.sv" "$SV" "${COMPANIONS[@]}" > "$WORK/simbuild.log" 2>&1; then
             echo "HW $NAME: FAIL (sim build)"
             grep -m3 "%Error" "$WORK/simbuild.log" | sed 's/^/    /'
             FAIL=1; rm -rf "$WORK"; continue

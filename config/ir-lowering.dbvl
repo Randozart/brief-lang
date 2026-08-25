@@ -41,3 +41,11 @@ callable_inline_weight_threshold: 40;
 accel_probe_k: 2;
 accel_probe_tolerance: 0.0001;
 accel_probe_margin: 0.05;
+
+// CIRCT array-lowering policy (seq-firmem plan, 2026-08-25): state arrays
+// at/above circt.firmem_min_depth default to the seq.firmem memory macro;
+// below it, register files. Port budget caps distinct read sites per
+// mem-lowered array. Users pin per-variable with `mem let` / `reg let`.
+circt.firmem_min_depth: 64;
+
+circt.firmem_max_ports: 4;
