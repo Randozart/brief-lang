@@ -53,6 +53,13 @@ TCL
         exit 1
     fi
     echo "[vivado] synthesis OK — utilization in $WORK/util.rpt"
+    # 2026-08-25: optional persistent copy (the EXIT trap wipes $WORK).
+    if [ -n "${VIVADO_REPORT_DIR:-}" ]; then
+        mkdir -p "$VIVADO_REPORT_DIR"
+        cp "$WORK/util.rpt" "$VIVADO_REPORT_DIR/util.rpt"
+        cp "$WORK/vivado.log" "$VIVADO_REPORT_DIR/vivado.log"
+        echo "[vivado] reports preserved in $VIVADO_REPORT_DIR"
+    fi
 fi
 
 echo "vivado-check: PASS"
