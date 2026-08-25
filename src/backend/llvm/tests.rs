@@ -3778,6 +3778,52 @@ fn test_call_with_ptr_arg_emits_inttoptr() {
 }
 
 #[test]
+fn test_call_with_ptr_arg_emits_inttoptr() {
+    let mut backend = LlvmBackend::new();
+    let program = vec![
+        TopLevel::Definition(Definition {
+            name: "callee".to_string(),
+            type_params: vec![],
+            parameters: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
+            outputs: vec![Type::int()],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![Statement::Term(Some(Expr::Decimal(42)))],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+        TopLevel::Definition(Definition {
+            name: "caller".to_string(),
+            type_params: vec![],
+            parameters: vec![("p".to_string(), Type::Ptr(Box::new(Type::int())))],
+            outputs: vec![Type::int()],
+            output_type: None,
+            contract: default_contract(),
+            body: vec![
+                Statement::Term(Some(Expr::Call(
+                    "callee".to_string(),
+                    vec![Expr::Identifier("p".to_string())],
+                    None,
+                ))),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        }),
+    ];
+    let output = backend.generate(&program, None);
+    assert!(output.contains("inttoptr"),
+        "Call with Ptr arg should emit inttoptr before the call.\nGot:\n{}", output);
+}
+
+#[test]
 fn test_struct_param_field_access_works() {
     let mut backend = LlvmBackend::new();
     let program = vec![
