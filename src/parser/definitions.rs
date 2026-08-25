@@ -182,6 +182,25 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            // 2026-08-25 (seq-firmem plan): `mem let` / `reg let` — the
+            // array-lowering pins. Recorded as let-modifier annotations the
+            // CIRCT policy engine reads. Strategy keywords: intent
+            // (memory-macro port limits / register-file obligations), never
+            // acceleration.
+            Some(Token::Mem) | Some(Token::Reg)
+                if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Let)) =>
+            {
+                let hint = if self.check(&Token::Mem) { "mem" } else { "reg" };
+                self.pos += 1; // consume mem/reg
+                let mut stmt = self.parse_statement()?;
+                if let Statement::Let { modifiers, .. } = &mut stmt {
+                    modifiers.push(Annotation {
+                        name: hint.to_string(),
+                        value: None,
+                    });
+                }
+                Ok(TopLevel::Statement(Box::new(stmt)))
+            }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             // 2026-08-09 (Phase 12, SPEC §19.6): `meld` is removed — foreign
@@ -3869,6 +3888,32 @@ mod tests {
         let on = w.on_fire.expect("on_fire must parse");
         assert_eq!(on.handler, "report");
         assert_eq!(on.arg, None);
+    }
+
+    #[test]
+    fn test_mem_reg_let_prefixes_parse() {
+        // 2026-08-25 (seq-firmem plan): `mem let` / `reg let` record
+        // lowering-pin annotations on the let's modifiers.
+        use crate::ast::{Statement, TopLevel};
+        use crate::lexer::tokenize;
+        for (kw, name) in [("mem", "mem"), ("reg", "reg")] {
+            let src = format!("{} let buf: Int[4] = [0, 0, 0, 0];", kw);
+            let tokens = tokenize(&src).unwrap();
+            let mut p = crate::parser::Parser::new(tokens, &src);
+            let items = p.parse_program().unwrap();
+            match &items[0] {
+                TopLevel::Statement(stmt) => match stmt.as_ref() {
+                    Statement::Let { modifiers, .. } => assert!(
+                        modifiers.iter().any(|a| a.name == name),
+                        "expected {} annotation, got {:?}",
+                        name,
+                        modifiers
+                    ),
+                    other => panic!("expected Let, got {:?}", other),
+                },
+                other => panic!("expected Statement, got {:?}", other),
+            }
+        }
     }
 
     #[test]

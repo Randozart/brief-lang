@@ -13,6 +13,22 @@ impl<'a> Parser<'a> {
     pub fn parse_statement(&mut self) -> Result<Statement, SyntaxError> {
         match self.peek() {
             Some(Token::Let) => self.parse_let_statement(),
+            // 2026-08-25 (seq-firmem plan): `mem let` / `reg let` inside
+            // bodies — same lowering pins as the top-level form.
+            Some(Token::Mem) | Some(Token::Reg)
+                if matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::Let)) =>
+            {
+                let hint = if self.check(&Token::Mem) { "mem" } else { "reg" };
+                self.pos += 1; // consume mem/reg
+                let mut stmt = self.parse_let_statement()?;
+                if let Statement::Let { modifiers, .. } = &mut stmt {
+                    modifiers.push(crate::ast::Annotation {
+                        name: hint.to_string(),
+                        value: None,
+                    });
+                }
+                Ok(stmt)
+            }
             // 2026-08-01 (Phase E): `vol let x` — memory-visibility modifier
             // (prefix). The let statement records the vol annotation; the
             // backend emits volatile load/store (reusing the mmio machinery).

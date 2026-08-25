@@ -105,6 +105,13 @@ pub enum Token {
     #[token("vol")]
     Vol,
 
+    /// 2026-08-25 (seq-firmem plan): `mem let buf: Int[64] = ...` — pin a
+    /// state array to the seq.firmem memory-macro lowering. Strategy
+    /// keyword: carries intent (port limits accepted, element obligations
+    /// unavailable), never acceleration.
+    #[token("mem")]
+    Mem,
+
     /// 2026-08-15 (coll plan): `coll` — the native strategy keyword for
     /// declaring collections. Prefix on `obj`/`struct`: compiler-owned Length
     /// semantics (hidden cap/len slots), scaffolded op surface. See
@@ -559,6 +566,7 @@ impl std::fmt::Display for Token {
             Token::Union => write!(f, "union"),
             Token::Coll => write!(f, "coll"),
             Token::Vol => write!(f, "vol"),
+            Token::Mem => write!(f, "mem"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),
             Token::Await => write!(f, "await"),
@@ -697,6 +705,7 @@ mod tests {
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
             "vol", "out", "spec", "pack", "trap", "atomic", "union", "coll", "await", "spawn", "term", "term!", "rollback", "import",
+            "mem",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

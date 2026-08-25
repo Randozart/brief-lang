@@ -183,6 +183,10 @@ impl LanguageVocab {
                 kw("sync", VocabStatus::Canonical, KeywordContext::Modifier),
                 // Modifiers
                 kw("vol", VocabStatus::Canonical, KeywordContext::Modifier),
+                // 2026-08-25 (seq-firmem plan): `mem let` / `reg let` —
+                // array-lowering pins (memory macro vs register file).
+                kw("mem", VocabStatus::Canonical, KeywordContext::Modifier),
+                kw("reg", VocabStatus::Canonical, KeywordContext::Modifier),
                 kw("out", VocabStatus::Canonical, KeywordContext::Modifier),
                 // Storage/layout strategy (2026-08-09, Phase 5): `box` marks a
                 // spawned value as per-instance-heap (not pooled) when the pool
@@ -213,7 +217,9 @@ impl LanguageVocab {
                 // Reserved for future contracts
                 kw("sed", VocabStatus::Reserved, KeywordContext::Reserved),
                 kw("pvt", VocabStatus::Reserved, KeywordContext::Reserved),
-                kw("reg", VocabStatus::Reserved, KeywordContext::Reserved),
+                // 2026-08-25 (seq-firmem plan): `reg` PROMOTED Reserved →
+                // Canonical Modifier — the register-file lowering pin. The
+                // reserved seat was always earmarked for this.
                 // Removed surface (Phase 3 removes from lexer/parser)
                 kw("sig", VocabStatus::Removed, KeywordContext::Declaration),
                 kw("state", VocabStatus::Removed, KeywordContext::Declaration),
@@ -446,7 +452,8 @@ mod tests {
     }
 
     #[test]
-    fn reserved_set_is_exactly_sed_pvt_reg() {
+    fn reserved_set_is_exactly_sed_pvt() {
+        // 2026-08-25: `reg` promoted Reserved → Canonical (lowering pin).
         let vocab = LanguageVocab::canonical();
         let reserved: Vec<&str> = vocab
             .keywords
@@ -454,7 +461,7 @@ mod tests {
             .filter(|k| k.status == VocabStatus::Reserved)
             .map(|k| k.name.as_str())
             .collect();
-        assert_eq!(reserved, vec!["sed", "pvt", "reg"]);
+        assert_eq!(reserved, vec!["sed", "pvt"]);
     }
 
     #[test]
