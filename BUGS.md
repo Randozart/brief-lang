@@ -5216,3 +5216,23 @@ places, proving the tier pays for itself:
 
 **To undo:** restore Phase-A-reads scheme — but that reintroduces
 interpreter divergence at guard bounds; do not.
+
+## CIRCT ExportVerilog rejects hw.module.generated (FIRRTL_Memory) — 2026-08-25 OPEN (toolchain)
+
+**Symptom:** `circt-opt --export-verilog` on IR containing a
+`hw.module.generated @..., @FIRRTLMem(...)` fails with "unknown operation"
+(SharedEmitterState::gatherFiles), then asserts
+(`moduleOp && "Invalid IR"`) on the referencing instance.
+
+**Root cause:** SeqToSV lowers `seq.firmem` to instances of an externally
+generated module; upstream, the SystemVerilog body for FIRRTL_Memory macros
+is emitted by the firtool-side flow. Standalone circt-opt's ExportVerilog in
+this build only prints "// external generated module" for such ops — and its
+file-gathering pre-pass rejects them outright.
+
+**Workaround (ours):** after `--lower-seq-to-sv`, patch the generated op to
+`hw.module.extern` (same ports) and supply the implementation as a brievc-
+emitted companion `.sv`. Re-parse + export + verilator lint all verified.
+
+**Revisit:** toolchain rebuild with firtool-side memory emission, or CIRCT
+upstream change.
