@@ -2051,6 +2051,7 @@ fn resolve_dollar_refs_in_expr(expr: &mut Expr, scope: &Scope) -> Result<(), Str
 fn resolve_dollar_refs_in_stmt(stmt: &mut Statement, scope: &Scope) -> Result<(), String> {
     match stmt {
         Statement::Yield => Ok(()),
+        Statement::Check(_) => Ok(()),
         Statement::Let { expr, .. } => {
             if let Some(e) = expr {
                 resolve_dollar_refs_in_expr(e, scope)?;

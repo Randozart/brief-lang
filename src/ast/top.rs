@@ -293,6 +293,10 @@ pub enum Statement {
     /// backend-foundation carried an identical fix-forward for the same
     /// red-tree gap (9f0b205a) — reconciled to ONE variant here.
     Yield,
+    /// 2026-08-23 (SPEC §10.x): `check <expr>;` — liveness check.
+    /// Compile-time proven/rejected, or runtime assertion for unprovable loops.
+    /// After a successful check, the solver records expr as a known fact.
+    Check(Expr),
     /// endprogram; or endprogram code; — process boundary (replaces term!).
     /// 2026-08-05 (Phase 3): the interpreter signals program termination; true
     /// process-exit codegen is staged (SPEC §11.5).
@@ -392,6 +396,7 @@ impl PartialEq for Statement {
              (Statement::Term(e1), Statement::Term(e2)) => e1 == e2,
             (Statement::Break, Statement::Break) => true,
             (Statement::Yield, Statement::Yield) => true,
+            (Statement::Check(e1), Statement::Check(e2)) => e1 == e2,
              (Statement::EndProgram(e1), Statement::EndProgram(e2)) => e1 == e2,
              (Statement::Guarded(c1, b1), Statement::Guarded(c2, b2)) => c1 == c2 && b1 == b2,
             (Statement::Gate(c1), Statement::Gate(c2)) => c1 == c2,

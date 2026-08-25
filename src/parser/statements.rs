@@ -92,6 +92,14 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Yield)
+                } else if self.check_identifier("check") {
+                    // 2026-08-23 (SPEC §10.x): liveness check — assert expr
+                    // holds at this point. Compile-time proven/rejected, or
+                    // runtime assertion for unprovable loops.
+                    self.pos += 1;
+                    let cond = self.parse_expression()?;
+                    self.expect(Token::Semicolon)?;
+                    Ok(Statement::Check(cond))
                 } else if self.check_identifier("return") {
                     let span = self
                         .peek_with_span()

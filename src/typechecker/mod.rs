@@ -2624,6 +2624,20 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
     match stmt {
         // 2026-08-22 (Phase 8): yield; types as void and terminates nothing.
         Statement::Yield => Ok(()),
+        // 2026-08-23 (SPEC §10.x): check — condition must be Bool.
+        // Compile-time proof/rejection is a future arc; for now, the
+        // typechecker verifies the expression is Bool.
+        Statement::Check(cond) => {
+            let ty = infer_type_only(cond, ctx)?;
+            if !matches!(ty, crate::ast::Type::Custom(ref n) if n == "Bool") {
+                return Err(TypeError::TypeMismatch {
+                    expected: "Bool".to_string(),
+                    found: format!("{}", ty),
+                    context: format!("liveness check '{}'", cond),
+                });
+            }
+            Ok(())
+        }
         Statement::Let { name, names, ty, expr, .. } => {
             // 2026-08-09 (init kind, Phase 2): a `let` declaring an `init`
             // name would shadow the seeded invariant — reject the shadow.
@@ -4520,14 +4534,11 @@ fn resolve_field_type(receiver: &Type, field: &str, ctx: &TypecheckContext) -> O
             .ok()
             .and_then(|i| elems.get(i).cloned());
     }
-    // 2026-08-22 (Phase 7a, SPEC §9.5): an EVENT PORT exposes `.Ready`
-    // (a pending event is observable → Bool) and projects the PAYLOAD's
-    // members directly (`damage.amount` where damage: Event<Damage>).
+    // 2026-08-23 (SPEC sync): EVENT PORT payload projection — `damage.amount`
+    // falls through to the payload type's fields. Readiness uses .^Ready
+    // (reflection), not .Ready (field) — delimiter semantic consistency.
     if let Type::Applied(base, args) = receiver {
         if base == "Event" {
-            if field == "Ready" {
-                return Some(Type::bool_());
-            }
             if let Some(payload) = args.first() {
                 return resolve_field_type(payload, field, ctx);
             }
@@ -4579,6 +4590,19 @@ fn resolve_reflect(
         }
     };
     match target {
+        // 2026-08-23 (SPEC sync): Event port readiness — runtime reflection.
+        "Ready" => {
+            if is_compile_time {
+                return Err(wrong_kind("runtime"));
+            }
+            match receiver {
+                Type::Applied(base, _) if base == "Event" => Ok(Type::bool_()),
+                _ => Err(TypeError::InvalidOperation {
+                    operation: format!("reflection target '.^{}'", target),
+                    type_name: format!("{} does not support .^Ready", receiver),
+                }),
+            }
+        }
         "Length" => {
             if is_compile_time {
                 return Err(wrong_kind("runtime"));
