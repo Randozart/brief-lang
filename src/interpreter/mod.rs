@@ -1396,3 +1396,80 @@ pub fn mark_done(id: u64) {
         }
     });
 }
+
+// ── 2026-08-23 (async Phase A3 restored): scheduler helpers ────────────
+
+/// Collect runnable tasks (Ready/Yielded) in id order for round-robin.
+pub fn collect_runnable() -> Vec<(u64, String, Vec<Value>, Vec<Vec<Statement>>, usize)> {
+    TASK_TABLE.with(|t| {
+        let table_ref = t.borrow();
+        let Some(table) = table_ref.as_ref() else { return Vec::new() };
+        let mut out = Vec::new();
+        let mut ids: Vec<&u64> = table.keys().collect();
+        ids.sort();
+        for id in ids {
+            let entry = &table[id];
+            if entry.status == TaskStatus::Ready || entry.status == TaskStatus::Yielded {
+                out.push((
+                    *id,
+                    entry.fn_name.clone(),
+                    entry.pending_args.clone().unwrap_or_default(),
+                    entry.segments.clone(),
+                    entry.current_segment,
+                ));
+            }
+        }
+        out
+    })
+}
+
+/// Check whether a task has reached Done status.
+pub fn task_is_done(id: u64) -> bool {
+    TASK_TABLE.with(|t| {
+        t.borrow()
+            .as_ref()
+            .and_then(|table| table.get(&id))
+            .map(|e| e.status == TaskStatus::Done)
+            .unwrap_or(false)
+    })
+}
+
+/// Get a completed task's result.
+pub fn get_task_result(id: u64) -> Option<Value> {
+    TASK_TABLE.with(|t| {
+        t.borrow()
+            .as_ref()
+            .and_then(|table| table.get(&id))
+            .and_then(|e| e.result.clone())
+    })
+}
+
+/// Advance a specific task's segment counter; returns true when fully done.
+pub fn advance_segment_status(id: u64) -> bool {
+    TASK_TABLE.with(|t| {
+        let mut table_ref = t.borrow_mut();
+        let Some(table) = table_ref.as_mut() else { return false };
+        if let Some(entry) = table.get_mut(&id) {
+            entry.current_segment += 1;
+            if entry.current_segment >= entry.segments.len() {
+                entry.status = TaskStatus::Done;
+                return true;
+            }
+            entry.status = TaskStatus::Yielded;
+            return false;
+        }
+        false
+    })
+}
+
+/// Store a task's final result.
+pub fn store_task_result(id: u64, result: Value) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                entry.result = Some(result);
+                entry.status = TaskStatus::Done;
+            }
+        }
+    });
+}
