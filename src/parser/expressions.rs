@@ -821,12 +821,22 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a match expression.
-    fn parse_match_expr(&mut self) -> Result<Expr, SyntaxError> {
+    pub(crate) fn parse_match_expr(&mut self) -> Result<Expr, SyntaxError> {
         let expr = self.parse_expression()?;
         self.expect(Token::LBrace)?;
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
-            let pattern = self.parse_pattern()?;
+            // 2026-08-23: | alternatives within one arm — parse first
+            // pattern, then loop on Pipe collecting alternatives.
+            let mut patterns = vec![self.parse_pattern()?];
+            while self.eat(&Token::Pipe) {
+                patterns.push(self.parse_pattern()?);
+            }
+            let pattern = if patterns.len() == 1 {
+                patterns.pop().unwrap()
+            } else {
+                crate::ast::Pattern::Multi(patterns)
+            };
             // 2026-08-06: Guards use `when` (Briev has no `if`; SPEC §10.2/§11).
             // Previously parsed a bare identifier "if" — silently accepting a
             // non-keyword and rejecting the normative `when` guard.

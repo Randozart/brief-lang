@@ -1193,6 +1193,7 @@ pub fn pattern_match(
             };
             val.as_i64().is_some_and(|n| s <= n && n <= e)
         }
+        Pattern::Multi(ps) => ps.iter().any(|sp| pattern_match(sp, val, bindings)),
         Pattern::Tuple(pats) => {
             let items = match val {
                 Value::Product { fields, .. } => fields,

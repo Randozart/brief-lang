@@ -223,6 +223,8 @@ pub enum Pattern {
     Range(Expr, Expr),
     /// 2026-08-06 (Phase 7): inclusive `a..=b` range pattern.
     RangeInclusive(Expr, Expr),
+    /// 2026-08-23 (F1 unified dispatch): `|` alternatives within one arm.
+    Multi(Vec<Pattern>),
 }
 
 /// A derivation block attached to a definition or transaction via `:=`.

@@ -83,7 +83,17 @@ impl<'a> Parser<'a> {
             Some(Token::Defer) => self.parse_defer_statement(),
             Some(Token::Mutex) => self.parse_mutex_statement(),
             Some(Token::Barrier) => self.parse_barrier_statement(),
-            Some(Token::Match) => self.parse_match_statement(),
+            // 2026-08-23 (F1 unified match dispatch): route ALL match to the
+            // EXPRESSION form (parse_match_expr) and wrap in Statement::
+            // Expression. The old parse_match_statement used block-body arms
+            // with `;` separators — a different grammar that caused cascading
+            // parse errors when used in defn bodies expecting expression-form
+            // arms. SPEC §11.3 defines match as an expression.
+            Some(Token::Match) => {
+                self.advance(); // consume 'match'
+                let expr = self.parse_match_expr()?;
+                Ok(crate::ast::Statement::Expression(expr))
+            }
             Some(Token::LBrace) => self.parse_block_statement(),
             Some(Token::LBracket) => self.parse_guard_statement_bracket(),
             Some(Token::When) => self.parse_guard_statement_when(),
@@ -708,16 +718,19 @@ mod tests {
     // the unified rich pattern grammar — | alternatives, tuples, bools.
     #[test]
     fn statement_match_parses_rich_patterns() {
-        let src = "$defn pick(v: Int) -> Int { match v { 1 | 2 => { term 10; }; _ => { term 0; }; }; };";
+        // 2026-08-23 (F1 unified dispatch): match is always parsed via
+        // parse_match_expr (expression form). Arms are comma-separated
+        // expressions; block bodies use { ... } with tail expressions.
+        let src = "$defn pick(v: Int) -> Int { match v { 1 | 2 => 10, _ => 0 } };";
         let tokens = tokenize(src).unwrap();
         let mut p = Parser::new(tokens, src);
-        assert!(p.parse_program().is_ok(), "legacy int-or patterns must parse");
+        assert!(p.parse_program().is_ok(), "int-or patterns must parse");
 
-        let src2 = "defn pick(flag: Bool, other: Bool) -> Int { match flag { (true, false) => { term 1; }; _ => { term 0; }; }; };";
+        let src2 = "defn pick(flag: Bool, other: Bool) -> Int { match flag { true => 1, _ => 0 } };";
         let tokens2 = tokenize(src2).unwrap();
         let mut p2 = Parser::new(tokens2, src2);
         let prog = p2.parse_program().unwrap();
-        assert!(matches!(prog.first(), Some(crate::ast::TopLevel::Definition(_))), "tuple-pattern match parses inside a defn");
+        assert!(matches!(prog.first(), Some(crate::ast::TopLevel::Definition(_))), "bool-pattern match parses inside a defn");
     }
 
     #[test]

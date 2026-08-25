@@ -637,6 +637,13 @@ impl fmt::Display for Pattern {
             }
             Pattern::Range(start, end) => write!(f, "{}..{}", start, end),
             Pattern::RangeInclusive(start, end) => write!(f, "{}..={}", start, end),
+            Pattern::Multi(ps) => {
+                for (i, p) in ps.iter().enumerate() {
+                    if i > 0 { write!(f, " | ")?; }
+                    write!(f, "{}", p)?;
+                }
+                Ok(())
+            }
         }
     }
 }
