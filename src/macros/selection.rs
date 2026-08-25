@@ -440,6 +440,7 @@ fn prop_value_matches(v: &crate::ast::PropertyValue, val: &str) -> bool {
 pub fn stmt_tag(stmt: &Statement) -> &str {
     match stmt {
         Statement::Yield => "yield",
+        Statement::Check(_) => "check",
         Statement::Let { .. } => "let",
         Statement::Assign(_, _) => "assign",
         Statement::ArrowAssign { .. } => "arrow",

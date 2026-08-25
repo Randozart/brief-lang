@@ -272,7 +272,10 @@ impl Reactor {
             Statement::Assign(_, _) | Statement::ArrowAssign { .. }
             | Statement::FreeHint(_) | Statement::KeepHint(_)
             // 2026-08-22 (Phase 8): yield; is a no-op in the eager reference.
-            | Statement::Yield => {
+            | Statement::Yield
+            // 2026-08-23 (SPEC §10.x): check is a runtime assertion handled
+            // in eval, not by the reactor's dirty tracking.
+            | Statement::Check(_) => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }

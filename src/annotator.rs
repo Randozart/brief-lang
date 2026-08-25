@@ -53,6 +53,7 @@ impl Annotator {
         for stmt in body {
             match stmt {
                 Statement::Yield => {}
+                Statement::Check(_) => {}
                 Statement::Expression(expr) => self.collect_calls_from_expr(expr, calls),
                 Statement::Assign(lhs, expr) => {
                     self.collect_calls_from_expr(lhs, calls);
@@ -402,6 +403,7 @@ impl Annotator {
         let spaces = " ".repeat(indent);
         match stmt {
             Statement::Yield => format!("{}yield;\n", spaces),
+            Statement::Check(e) => format!("{}check {};\n", spaces, self.format_expr(e)),
             Statement::Expression(expr) => format!("{}{};\n", spaces, self.format_expr(expr)),
             Statement::Assign(lhs, expr) => {
                 format!(

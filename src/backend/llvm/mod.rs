@@ -488,6 +488,7 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
 fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match stmt {
         Statement::Yield => {}
+        Statement::Check(_) => {}
         Statement::Let { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::Assign(_, expr) => { collect_strings_expr(expr, seen, out); }
         Statement::ArrowAssign { target, value, .. } => {

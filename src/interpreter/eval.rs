@@ -678,13 +678,10 @@ fn eval_field(
                 ),
             })
         }
-        // An EVENT PORT: `.Ready` observes the flag; any other name
-        // projects the current payload's members (SPEC §9.5 `damage.amount`).
+        // An EVENT PORT: any name projects the current payload's members.
+        // Readiness uses .^Ready (reflection), not .Ready (field).
         Value::EventQ(q) => {
             let slot = q.borrow();
-            if name == "Ready" {
-                return Ok(Value::Atom(Atom::Bool(slot.ready)));
-            }
             match &slot.payload {
                 Some(Value::Product { fields, names }) => {
                     match names
@@ -975,6 +972,17 @@ fn eval_reflect(
     let val = eval_expr(recv, heap, scope.bindings, scope.functions)?;
     let ct = matches!(kind, ReflectKind::CompileTime);
     match (name, ct) {
+        // 2026-08-23 (SPEC sync): Event port readiness — runtime reflection.
+        ("Ready", false) => match &val {
+            Value::EventQ(q) => {
+                let slot = q.borrow();
+                Ok(Value::Atom(Atom::Bool(slot.ready)))
+            }
+            other => Err(RuntimeError::TypeError {
+                expected: "an Event port for .^Ready".into(),
+                found: describe_value(other),
+            }),
+        },
         // 2026-08-12 (Iterable protocol): String `Length` = the STORED BYTE
         // count (the [len] header). The UTF8 CHARACTER count is the
         // `CharCount#` intrinsic (a computed scan; SPEC §17.1/§17.3).
@@ -1631,6 +1639,19 @@ pub fn eval_statement(
         // 2026-08-22 (Phase 8): yield; is a no-op in the eager reference
         // scheduler — the concurrent scheduler's future suspension point.
         Statement::Yield => Ok(Value::Void),
+        // 2026-08-23 (SPEC §10.x): check — runtime assertion for unprovable
+        // loops. Failure triggers rollback.
+        Statement::Check(cond) => {
+            let v = eval_expr(cond, heap, bindings, functions)?;
+            let ok = v.is_true();
+            if !ok {
+                Err(RuntimeError::ContractViolation(format!(
+                    "liveness check failed: {}", cond
+                )))
+            } else {
+                Ok(Value::Void)
+            }
+        }
         Statement::Let { name, ty, expr, .. } => {
             if let Some(expr) = expr {
                 let val = eval_expr(expr, heap, bindings, functions)?;

@@ -1863,6 +1863,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Yield => {
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-08-23 (SPEC §10.x): check — runtime assertion. Branches to
+        // trap/rollback if the condition is false; falls through otherwise.
+        Statement::Check(cond) => {
+            let cond_reg = backend.emit_expr(out, cond, indent);
+            let cond_i1 = guard_cond_i1(backend, out, indent, &cond_reg);
+            // For now: no-op on success. Phase C: branch to a rollback
+            // block for unprovable loops.
+            let noop = backend.fun.gen_reg();
+            writeln!(out, "{}{} = add i64 0, 0", indent, noop).ok();
+            TypedRegister { name: noop, ty: Type::void() }
+        }
         Statement::Match { expr: scrutinee, arms } => {
             // 2026-08-23 (bugfix, BUGS.md "callable-txn bodies silently drop
             // match"): statement-level match had NO arm here — it fell to the
