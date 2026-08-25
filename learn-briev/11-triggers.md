@@ -172,7 +172,7 @@ node handle_button[button == true] {
     // No FFI calls, no side effects
     
     [counter > 100] {
-        escape;  // Would escape - skipped by pre-evaluation guard
+        rollback;  // Would rollback - skipped by pre-evaluation guard
     };
     
     &counter = counter + 1;
@@ -248,7 +248,7 @@ txn transfer(amount: Int) [amount > 0][balance == @balance] {
     trg! result: Result<Void, Error> = send_payment(amount);
     
     [result.is_err()] {
-        escape;  // state.processing rolls back to false!
+        rollback;  // state.processing rolls back to false!
     };
     
     &balance = balance - amount;

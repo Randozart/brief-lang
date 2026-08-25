@@ -158,7 +158,7 @@ removes redundant operations. A Latin1→UTF-8→Latin1 round-trip for ASCII dat
 (0–127) collapses to a no-op.
 
 Cast resolution priority:
-1. `meld Source <-> Target` — structural equivalence
+1. `meld Source <-> Target  (legacy: use protocol casts)` — structural equivalence
 2. `op Cast(Target)` on source — direct type-to-type
 3. `CastTo(Fundamental)` → `CastFrom(Fundamental)` — parent/protocol path
 4. Implicit `Cast(Bit<N>)` — raw bytes, always available
