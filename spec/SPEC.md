@@ -901,6 +901,17 @@ obj Enemy(damage: Event<Damage>) -> died: Event<EnemyId> {
 
 Objects use traits and composition rather than parent inheritance.
 
+#### Port semantics
+
+Input ports expose two operations:
+
+- **`port.^Ready`** → Bool — runtime reflection on the port's internal state flag. True when a pending event is observable.
+- **`port.field`** → payload member projection. Falls through to the payload type's declared fields (`damage.amount` where damage is `Event<Damage>`).
+
+Output ports fire via ArrowAssign: `died <- value;` sets the shared slot's Ready flag and stores the payload. Wired consumers observe the same slot (shared `Rc<RefCell<EventSlot>>`). Delivery order is deterministic — scheduler order, no implicit concurrency.
+
+Cells enforce sealing: external references to cell internals fail at compile time; only declared ports are externally visible.
+
 ### 9.6 Cells
 
 A cell is a sealed state machine with an independent convergence membrane.
@@ -1019,6 +1030,22 @@ Type invariants must be proven across construction and every mutating transforma
 - `[condition];` is a convergence gate.
 - `[condition] { ... }` is invalid; use `when` for blocks.
 
+### 10.x Liveness checks
+
+```briev
+check <expr>;
+```
+
+A liveness check asserts that `<expr>` holds at this point in execution. It serves three roles:
+
+1. **Compile-time proof**: if the solver proves `expr` from known facts (contracts, prior checks), the check is eliminated — zero cost.
+2. **Compile-time rejection**: if the solver DISPROVES `expr`, compilation fails with a diagnostic explaining under which conditions the check would be violated.
+3. **Runtime assertion**: for unprovable loops, the check evaluates at that point in execution. Failure triggers rollback (same as escape).
+
+After a successful check, the solver records `expr` as a known fact, strengthening downstream proofs and enabling further optimization.
+
+`check` may appear in any function body (`defn`, `txn`, `node`). In looping contexts, it evaluates every pass through that point. In non-looping defns, it documents and verifies the programmer's assumptions about the input domain.
+
 ### 10.3 Watchdogs
 
 Watchdogs occupy a dedicated grammar slot after a contract.
@@ -1075,6 +1102,28 @@ match value {
   typed sum bindings (`number: Int => …`), literals (integer, string,
   Bool), ranges, and `_`. Alternatives within one arm use `|`; the first
   match wins.
+
+Arm bodies may use block expressions with statements and a tail value:
+
+```briev
+match res {
+    Ok(val) => {
+        let doubled = val * 2;
+        doubled
+    }
+    Err(msg) => { Print#(msg); 0 - 1 }
+};
+```
+
+A trailing expression without `;` is the block's implicit value.
+Zero-payload variant patterns use `Variant()` (with parens) to distinguish
+from variable binding patterns.
+
+In `node` and `txn` bodies, `term expr;` marks the firing checkpoint — the
+reactor evaluates the goal after this point. In `defn` bodies and match-arm
+blocks, a trailing expression WITHOUT `;` is the implicit return value.
+`term` signals "loop iteration complete"; a bare tail expression signals
+"this scope produces this value."
 
 ### 11.4 Iteration
 
@@ -1292,6 +1341,14 @@ let result = await task;
 - `keep task` transfers the handle to the enclosing owner/boundary.
 - Silently dropping or discarding a live handle is an error.
 
+#### Execution model
+
+Spawn **captures** the function and its evaluated arguments but does NOT execute the body. Bodies are split at cancellation points into segments. The first `await` triggers round-robin segment execution of all non-Done tasks until the target reaches Done.
+
+Deterministic interleaving at yield boundaries: tasks execute one segment per scheduling pass, in spawn order. Single-threaded scheduler — no data races, no nondeterministic ordering.
+
+`free task` before any await prevents execution entirely (the body never runs). After await has started execution, free sets a cancellation flag checked at each yield boundary.
+
 **Obj-instance spawn storage classes.** `spawn Obj(...)` allocates the
 instance from the obj's static pool column (the default, provably
 inexhaustible). The storage-strategy markers (§8.1) classify the spawn
@@ -1442,7 +1499,7 @@ Implementations may bind the following syntax families:
 - transfer: `<-`, `~<-`;
 - assignment/update forms such as `+=` where supported.
 
-Concatenation has no dedicated `++`; it resolves through an ordinary operation binding.
+List<T> + List<T> concatenates (both operands must be `Applied("List", [T])` with matching element types); it resolves as an intrinsic binding (`list_concat`). Other collection types resolve through an ordinary operation binding.
 
 Operations are declared **op-as-member**: the operator name is a member name
 on the type (`op Count() -> Int { … }`, `op At(i: Int) -> &T { … }`), disclosed
@@ -1610,7 +1667,8 @@ hand-written `List`, a `HashMap`, a custom collection) it is a compile-time
 error, because that length is member-managed or computed, not intrinsic.
 **Reflection never routes to an operation:** a length that must be computed
 (for example a UTF8 character count) is an intrinsic — `CharCount#` — called
-explicitly, not a reflection target (§17.3).
+explicitly, not a reflection target (§17.3). Character-level String access
+uses `char_at(s, i) -> Char` (stdlib), since raw indexing returns Int.
 
 > **2026-08-15 (`coll`).** A `coll obj`'s `.^Length` is its hidden length
 > slot (O(1) header read); a `coll struct`'s is its fixed constant `N`
@@ -1626,6 +1684,12 @@ explicitly, not a reflection target (§17.3).
 > > `let m: HashMap<K,V> = 0` constructs via `op Init`, `Count#` reads
 > > `op Count`, `<-`/literals route through `op InsertAt`. `.^Length` stays a
 > > compile error on it (no compiler-owned length).
+
+> > **2026-08-23 (`.^Ready` on event ports).** An `Event<T>` port exposes
+> > `.^Ready` → Bool — runtime reflection on the port's internal state flag.
+> > True when a pending event is observable. Payload members project through
+> > plain field access (`damage.amount`), NOT through reflection — `.^Ready`
+> > reflects on the PORT; `.amount` reaches into the PAYLOAD.
 
 > **2026-08-15 (boundary rule).** **Reflection (`.^`) = stored/frozen facts
 > that "observe and never compute"; intrinsics (`X#`) = operations.** A value
@@ -1792,6 +1856,10 @@ supplies no arguments — the coll scaffold's parameterized `get(i)` CopyFrom
 can never read). A drain must therefore be the tilde form: `~<- queue`.
 
 ## 19. Foreign functions, export, and GLUE
+
+Process/environment intrinsics: `Spawn#`, `SpawnWithOutput#`, `SetEnv#`,
+`GetCwd#`, `ChDir#`, and `Barrier#` are compiler-known with C runtime
+backing (`__briev_spawn` etc.).
 
 ### 19.1 Foreign declaration
 
