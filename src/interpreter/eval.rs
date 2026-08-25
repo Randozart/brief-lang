@@ -1708,8 +1708,64 @@ pub fn eval_statement(
         }
         Statement::Assign(lhs, rhs) => {
             let val = eval_expr(rhs, heap, bindings, functions)?;
-            if let Expr::Identifier(name) = lhs {
-                bindings.insert(name.clone(), val);
+            match lhs {
+                Expr::Identifier(name) => {
+                    bindings.insert(name.clone(), val);
+                }
+                // 2026-08-25 (Plan 3.6): element write `buf[i] = v` —
+                // read-modify-write of the bound product (value semantics:
+                // lanes are copied out, mutated, reinserted). Previously a
+                // silent no-op; now it is either a real write or a real
+                // error. The CIRCT backend lowers the same statement to
+                // per-lane gated muxes (register file).
+                Expr::Index(obj, idx) => {
+                    if let Expr::Identifier(name) = obj.as_ref() {
+                        let iv = eval_expr(idx, heap, bindings, functions)?;
+                        let i = match iv {
+                            Value::Atom(Atom::Int(n)) => n,
+                            other => {
+                                return Err(RuntimeError::TypeError {
+                                    expected: "Int index".into(),
+                                    found: format!("{:?}", other),
+                                })
+                            }
+                        };
+                        let cur = bindings.get(name).cloned().ok_or_else(|| {
+                            RuntimeError::UndefinedVariable { name: name.clone() }
+                        })?;
+                        let mut fields = match cur {
+                            Value::Product { fields, .. } => fields,
+                            other => {
+                                return Err(RuntimeError::TypeError {
+                                    expected: format!("indexable value for '{}'", name),
+                                    found: format!("{:?}", other),
+                                })
+                            }
+                        };
+                        let len = fields.len() as i64;
+                        if i < 0 || i >= len {
+                            return Err(RuntimeError::HeapError(format!(
+                                "index {} out of bounds for '{}' ({} elements)",
+                                i, name, len
+                            )));
+                        }
+                        fields[i as usize] = val;
+                        bindings.insert(name.clone(), Value::product(fields));
+                    } else {
+                        return Err(RuntimeError::TypeError {
+                            expected: "identifier[index] assignment target".into(),
+                            found: "compound index target".into(),
+                        });
+                    }
+                }
+                // 2026-08-25: never silent — an unassignable target is a
+                // runtime error naming the shape (was a dropped value).
+                other => {
+                    return Err(RuntimeError::TypeError {
+                        expected: "assignable target".into(),
+                        found: format!("{:?}", other),
+                    })
+                }
             }
             Ok(Value::Void)
         }
@@ -2091,6 +2147,61 @@ mod tests {
         let s = Expr::Quoted(b"abc".to_vec());
         let idx = Expr::Index(Box::new(s), Box::new(Expr::Decimal(1)));
         assert_eq!(eval1(&idx), Value::bits(vec![b'b']));
+    }
+
+    #[test]
+    fn test_element_assign_writes_bound_product() {
+        // 2026-08-25 (Plan 3.6): `buf[i] = v` on a let-bound list — was a
+        // silent no-op, now a real read-modify-write.
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert(
+            "buf".to_string(),
+            Value::product(vec![
+                Value::Atom(Atom::Int(1)),
+                Value::Atom(Atom::Int(2)),
+                Value::Atom(Atom::Int(3)),
+            ]),
+        );
+        let assign = Statement::Assign(
+            Expr::Index(
+                Box::new(Expr::Identifier("buf".to_string())),
+                Box::new(Expr::Decimal(1)),
+            ),
+            Expr::Decimal(42),
+        );
+        eval_statement(&assign, &mut heap, &mut bindings, &HashMap::new()).unwrap();
+        let read = Expr::Index(
+            Box::new(Expr::Identifier("buf".to_string())),
+            Box::new(Expr::Decimal(1)),
+        );
+        assert_eq!(eval_expr(&read, &mut heap, &mut bindings, &HashMap::new()).unwrap(),
+                   Value::Atom(Atom::Int(42)));
+        // other lanes untouched
+        let read0 = Expr::Index(
+            Box::new(Expr::Identifier("buf".to_string())),
+            Box::new(Expr::Decimal(0)),
+        );
+        assert_eq!(eval_expr(&read0, &mut heap, &mut bindings, &HashMap::new()).unwrap(),
+                   Value::Atom(Atom::Int(1)));
+    }
+
+    #[test]
+    fn test_element_assign_out_of_bounds_errors() {
+        let mut heap = VirtualHeap::new();
+        let mut bindings: HashMap<String, Value> = HashMap::new();
+        bindings.insert("buf".to_string(), Value::product(vec![Value::Atom(Atom::Int(7))]));
+        let assign = Statement::Assign(
+            Expr::Index(
+                Box::new(Expr::Identifier("buf".to_string())),
+                Box::new(Expr::Decimal(3)),
+            ),
+            Expr::Decimal(1),
+        );
+        let err = eval_statement(&assign, &mut heap, &mut bindings, &HashMap::new())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("out of bounds"), "got: {err}");
     }
 
     #[test]

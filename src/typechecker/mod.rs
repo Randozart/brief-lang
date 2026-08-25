@@ -1397,6 +1397,38 @@ fn declares_collection_ops(ctx: &TypecheckContext, type_name: &str) -> bool {
 /// TARGET type? `List` and any `coll` type always; a hand-written obj
 /// declaring the collection op surface opts in. A FIXED `coll struct` (`T[N]`)
 /// bounds the literal — an over-length literal is rejected.
+/// 2026-08-25 (Plan 3.6): a fixed single-dimension vector target admits a
+/// list literal when the count EXACTLY matches the declared dimension and
+/// every element checks against the element type. Named dimensions are
+/// const-generic placeholders — not concrete here, so they don't admit.
+fn check_vector_literal(
+    inner: &Type,
+    dims: &[Dimension],
+    elems: &[Expr],
+    ctx: &mut TypecheckContext,
+) -> Result<bool, TypeError> {
+    let Some(dim) = dims.first() else { return Ok(false); };
+    if dims.len() != 1 {
+        return Ok(false);
+    }
+    let n = match dim {
+        // `Int[4]` parses to Anonymous(4); Named dims are const-generic
+        // placeholders — not concrete in a bare let, so they don't admit.
+        Dimension::Anonymous(c) => *c as i64,
+        Dimension::Named(_, _) => return Ok(false),
+    };
+    if elems.len() as i64 != n {
+        return Ok(false);
+    }
+    for e in elems {
+        let t = infer_type_only(e, ctx)?;
+        if !types_compatible(inner, &t, ctx) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn list_literal_accepted_by(target_ty: &Type, elems: &[Expr], ctx: &TypecheckContext) -> bool {
     let target_base = match target_ty {
         Type::Custom(n) => Some(n.as_str()),
@@ -2701,9 +2733,23 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // initializer type — no implicit coercion. Literal Parse-ops
             // (`let f: Float = 5`) remain the one sanctioned path.
             if let Some(declared) = ty {
+                // 2026-08-25 (Plan 3.6): a FIXED single-dimension vector
+                // (`Int[4]`) admits an EXACT-length list literal whose
+                // elements check against the element type — bounded state
+                // arrays construct through the surface they declare with.
+                // To undo: drop the vector_literal arm (literal → List<Int>
+                // mismatch error returns).
+                let vector_literal = match (declared, expr.as_ref()) {
+                    (Type::Vector(inner, dims), Some(Expr::List(elems))) => {
+                        check_vector_literal(inner, dims, elems, ctx)?
+                    }
+                    _ => false,
+                };
                 // 2026-08-22 (Phase 3): structural sums admit their members
                 // (`let v: Int | String = 5`) via types_compatible.
-                let compatible = if types_compatible(declared, &inferred, ctx) {
+                let compatible = if vector_literal {
+                    true
+                } else if types_compatible(declared, &inferred, ctx) {
                     true
                 } else {
                     // 2026-07-31: `let lb: ListBuffer<Int> = ListBuffer {...}`
@@ -6409,6 +6455,45 @@ node probe [xs.^^Element == 0][true] {
 "#;
         let e = check(src);
         assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn fixed_vector_admits_exact_length_literal() {
+        // 2026-08-25 (Plan 3.6): `Int[4]` admits an exact-length list
+        // literal with element-compatible items — bounded state arrays
+        // construct through the surface they declare with.
+        let src = r#"
+let buf: Int[4] = [1, 2, 3, 4];
+node probe [buf.^^Element == 4][true] {
+    term;
+};
+"#
+        .to_string();
+        let e = check(&src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+    #[test]
+    fn fixed_vector_rejects_wrong_length_literal() {
+        // 3 elements for Int[4] — no admission, stays a type error.
+        let src = r#"
+let buf: Int[4] = [1, 2, 3];
+node probe [true][true] {
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected length mismatch to error");
+    }
+    #[test]
+    fn fixed_vector_rejects_incompatible_element_type() {
+        // Bool element against Int[4] element type — no admission.
+        let src = r#"
+let buf: Int[2] = [1, true];
+node probe [true][true] {
+    term;
+};
+"#;
+        let e = check(src);
+        assert!(e.is_err(), "expected element mismatch to error");
     }
     #[test]
     fn method_call_arg_mismatch_errors() {

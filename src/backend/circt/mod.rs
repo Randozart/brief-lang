@@ -43,7 +43,13 @@ pub struct CirctBackend {
     /// error — hardware targets must never silently drop logic. RefCell
     /// because emitters are &self.
     pub errors: std::cell::RefCell<Vec<String>>,
-}
+    /// 2026-08-25 (Plan 3.6): bounded state arrays flattened to register
+    /// files — var name → per-lane register names (`buf` → buf_0..buf_{n-1}).
+    /// Reads mux over lanes; writes decode the index into per-lane enables.
+    pub array_groups: HashMap<String, Vec<String>>,
+    /// Array var name → element MLIR type (lanes all share it).
+    pub array_elem_ty: HashMap<String, String>,
+ }
 
 /// Per-generation counters for unique MLIR value names.
 #[derive(Debug, Default)]
@@ -71,6 +77,25 @@ impl NameGen {
     }
 }
 
+    /// 2026-08-25 (§3.4): per-module obligation wires — refusals feed
+    /// `halt`, post-guard verdicts feed `check`.
+    #[derive(Default)]
+    struct Obligations {
+        pre_fails: Vec<String>,
+        post_oks: Vec<String>,
+    }
+
+    /// 2026-08-25: the mutable wire maps one transaction emits against,
+    /// bundled so emitters stay under the parameter budget (Praetor rule).
+    /// `name` is the txn's own name (wire prefixes); `contract` its pair.
+    struct TxnMaps<'a> {
+        name: String,
+        contract: &'a Contract,
+        reg_names: &'a mut HashMap<String, String>,
+        pending: &'a mut HashMap<String, String>,
+        ob: &'a mut Obligations,
+    }
+
 impl CirctBackend {
     /// 2026-08-23 (Plan 0.2): CIRCT's declared surface — synthesizable
     /// register-level logic: integer arithmetic/logic, guards, FSM bodies.
@@ -91,6 +116,11 @@ impl CirctBackend {
             match_expr: true,
             field_access: true,
             index: true,
+            // 2026-08-25 (Plan 3.6): list literals have an honest form now —
+            // a bounded state array's initializer lowers to per-lane register
+            // inits. List literals OUTSIDE that role still hard-error at
+            // codegen (emit_expr records them), so the gate stays honest.
+            tuple_list_literals: true,
             casts: true,
             let_stmt: true,
             assign_stmt: true,
@@ -111,6 +141,8 @@ impl CirctBackend {
             cell_defs: HashMap::new(),
             type_universe: crate::type_universe::TypeUniverse::new(),
             errors: std::cell::RefCell::new(Vec::new()),
+            array_groups: HashMap::new(),
+            array_elem_ty: HashMap::new(),
         }
     }
 
@@ -336,14 +368,59 @@ impl CirctBackend {
         ordered.sort();
         let ordered: &[String] = &ordered;
         let trg_names: std::collections::HashSet<String> = self.trg_ports.iter().map(|t| t.trg_name.clone()).collect();
+        // 2026-08-25 (Plan 3.6): bounded state arrays flatten to REGISTER
+        // FILES — one scalar register per element (`buf: Int[4]` → ports
+        // buf_0..buf_3). Reads mux over lanes by index; writes decode the
+        // index into per-lane enables; contracts referencing elements go
+        // through the same read path. seq.firmem deferred until this proves
+        // the semantics (additive follow-up). Non-constant dimensions are a
+        // recorded capability error — never a silent drop.
+        let mut lane_inits: HashMap<String, String> = HashMap::new();
         for var_name in ordered {
             if trg_names.contains(var_name) {
                 continue;
             }
-            if let Some(ty) = self.var_types.get(var_name) {
-                let mlir_ty = self.mlir_type(ty);
-                output_ports.push((var_name.clone(), mlir_ty));
+            let Some(ty) = self.var_types.get(var_name) else { continue };
+            if let Type::Vector(elem, dims) = ty {
+                match Self::concrete_dim(dims.first()) {
+                    Some(n) if n > 0 => {
+                        let elem_ty = self.mlir_type(elem);
+                        let init_list = self.var_exprs.get(var_name).cloned().flatten();
+                        let mut lanes: Vec<String> = Vec::new();
+                        for j in 0..n {
+                            let lane = format!("{}_{}", var_name, j);
+                            let init = init_list
+                                .as_ref()
+                                .and_then(|e| match e {
+                                    Expr::List(items) => items.get(j),
+                                    _ => None,
+                                })
+                                .map(Self::format_init_expr)
+                                .unwrap_or_else(|| "0".to_string());
+                            lane_inits.insert(lane.clone(), init);
+                            lanes.push(lane.clone());
+                            output_ports.push((lane.clone(), elem_ty.clone()));
+                        }
+                        self.array_groups.insert(var_name.clone(), lanes);
+                        self.array_elem_ty.insert(var_name.clone(), elem_ty);
+                    }
+                    Some(_) => {
+                        self.record_unsupported(&format!(
+                            "zero-length array '{}'",
+                            var_name
+                        ));
+                    }
+                    None => {
+                        self.record_unsupported(&format!(
+                            "unbounded array '{}' — non-constant dimension",
+                            var_name
+                        ));
+                    }
+                }
+                continue;
             }
+            let mlir_ty = self.mlir_type(ty);
+            output_ports.push((var_name.clone(), mlir_ty));
         }
 
         // 2026-08-23 (circt-opt findings #1+#2): hw.module takes ONE port
@@ -389,7 +466,11 @@ impl CirctBackend {
             let init_val: String = match var_name.as_str() {
                 "halt" => "0".to_string(),
                 "check" => "1".to_string(),
-                _ => self.initial_value(var_name),
+                // Array lanes carry their element init from the list literal.
+                _ => lane_inits
+                    .get(var_name)
+                    .cloned()
+                    .unwrap_or_else(|| self.initial_value(var_name)),
             };
             let c = ng.fresh_const(&format!("{}_init", var_name));
             writeln!(out, "  {} = hw.constant {} : {}", c, init_val, mlir_ty).ok();
@@ -413,22 +494,17 @@ impl CirctBackend {
         // Phase B: transaction bodies (in program order) against live
         // register outputs. Refusal/post verdicts collected for halt/check.
         let mut pending: HashMap<String, String> = HashMap::new();
-        let mut pre_fail_wires: Vec<String> = Vec::new();
-        let mut post_ok_wires: Vec<String> = Vec::new();
+        let mut ob = Obligations::default();
         for item in items {
             if let TopLevel::Transaction(txn) = item {
-                self.emit_txn_body(
-                    &mut ng,
-                    out,
-                    &txn.name,
-                    &txn.body,
-                    &txn.contract,
-                    &mut reg_names,
-                    &mut pending,
-                    clock_wire,
-                    &mut pre_fail_wires,
-                    &mut post_ok_wires,
-                );
+                let mut m = TxnMaps {
+                    name: txn.name.clone(),
+                    contract: &txn.contract,
+                    reg_names: &mut reg_names,
+                    pending: &mut pending,
+                    ob: &mut ob,
+                };
+                self.emit_txn_body(&mut ng, out, &txn.body, &mut m);
             }
         }
 
@@ -460,17 +536,15 @@ impl CirctBackend {
         let halt_src = Self::reduce_tree(
             &mut ng,
             out,
-            "halt_or",
             "comb.or",
-            &pre_fail_wires,
+            &ob.pre_fails,
             "%false",
         );
         let check_src = Self::reduce_tree(
             &mut ng,
             out,
-            "check_and",
             "comb.and",
-            &post_ok_wires,
+            &ob.post_oks,
             "%true",
         );
         for (ob_name, src) in [("halt", halt_src), ("check", check_src)] {
@@ -508,15 +582,30 @@ impl CirctBackend {
     }
 
     fn initial_value(&self, var_name: &str) -> String {
-        if let Some(Some(expr)) = self.var_exprs.get(var_name) {
-            match expr {
-                Expr::Decimal(n) => format!("{}", n),
-                Expr::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
-                Expr::Float(f) => format!("{}", f),
-                _ => "0".to_string(),
-            }
-        } else {
-            "0".to_string()
+        match self.var_exprs.get(var_name) {
+            Some(Some(expr)) => Self::format_init_expr(expr),
+            _ => "0".to_string(),
+        }
+    }
+
+    /// 2026-08-25 (Plan 3.6): scalar initializer formatting shared by
+    /// named vars and array lanes (a lane's init is the matching element
+    /// of the array's list literal).
+    fn format_init_expr(expr: &Expr) -> String {
+        match expr {
+            Expr::Decimal(n) => format!("{}", n),
+            Expr::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+            Expr::Float(f) => format!("{}", f),
+            _ => "0".to_string(),
+        }
+    }
+
+    /// 2026-08-25 (Plan 3.6): a register file needs a COMPILE-TIME element
+    /// count; Named dims are const-generic placeholders (not concrete here).
+    fn concrete_dim(dim: Option<&crate::ast::Dimension>) -> Option<usize> {
+        match dim? {
+            crate::ast::Dimension::Anonymous(c) => Some(*c),
+            crate::ast::Dimension::Named(_, _) => None,
         }
     }
 
@@ -682,6 +771,40 @@ impl CirctBackend {
                 Some(w)
             }
             Expr::Index(list, idx) => {
+                // 2026-08-25 (Plan 3.6): array register-file READ — mux tree
+                // over the flattened lanes, selected by the index wire.
+                if let Expr::Identifier(name) = list.as_ref() {
+                    let lanes = self.array_groups.get(name).cloned();
+                    if let Some(lanes) = lanes {
+                        let idx_val = self.emit_expr(ng, out, idx, reg_names, "i64")?;
+                        let elem_ty = self
+                            .array_elem_ty
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| result_ty.to_string());
+                        // Flatten guarantees ≥1 lane; a 0-length array is
+                        // rejected there.
+                        let last = lanes.last().cloned().unwrap_or_default();
+                        let mut acc = reg_names.get(&last).cloned().unwrap_or_default();
+                        for (j, lane) in lanes.iter().enumerate().rev().skip(1) {
+                            let cj = ng.fresh_const("aidx");
+                            writeln!(out, "  {} = hw.constant {} : i64", cj, j).ok();
+                            let eq = ng.fresh_wire("aeq");
+                            writeln!(out, "  {} = comb.icmp eq {}, {} : i64", eq, idx_val, cj)
+                                .ok();
+                            let lane_val = reg_names.get(lane).cloned().unwrap_or_default();
+                            let m = ng.fresh_wire("amux");
+                            writeln!(
+                                out,
+                                "  {} = comb.mux {}, {}, {} : {}",
+                                m, eq, lane_val, acc, elem_ty
+                            )
+                            .ok();
+                            acc = m;
+                        }
+                        return Some(acc);
+                    }
+                }
                 let list_val = self.emit_expr(ng, out, list, reg_names, result_ty)?;
                 let _idx_val = self.emit_expr(ng, out, idx, reg_names, "i64")?;
                 let w = ng.fresh_wire("idx");
@@ -722,52 +845,37 @@ impl CirctBackend {
         Some(w)
     }
 
-    /// 2026-08-25 (§3.4): balanced binary reduce over obligation wires.
-    /// `unit` is the identity constant (%false for or, %true for and) used
-    /// when no wires exist. Returns the reduced wire (or the unit).
+    /// 2026-08-25 (§3.4): linear reduce over obligation wires — AND/OR are
+    /// associative, so a left chain is equivalent to a balanced tree and
+    /// keeps the emitter loop-flat. `unit` is the identity constant
+    /// (%false for or, %true for and). Returns the reduced wire.
     fn reduce_tree(
         ng: &mut NameGen,
         out: &mut String,
-        tag: &str,
         op: &str,
         wires: &[String],
         unit: &str,
     ) -> String {
-        if wires.is_empty() {
+        let Some(first) = wires.first() else {
             return unit.to_string();
+        };
+        let tag = if op.ends_with("or") { "or_red" } else { "and_red" };
+        let mut acc = first.clone();
+        for w in &wires[1..] {
+            let x = ng.fresh_wire(tag);
+            writeln!(out, "  {} = {} {}, {} : i1", x, op, acc, w).ok();
+            acc = x;
         }
-        let mut level: Vec<String> = wires.to_vec();
-        while level.len() > 1 {
-            let mut next: Vec<String> = Vec::new();
-            for pair in level.chunks(2) {
-                if pair.len() == 1 {
-                    next.push(pair[0].clone());
-                    continue;
-                }
-                let w = ng.fresh_wire(tag);
-                writeln!(out, "  {} = {} {}, {} : i1", w, op, pair[0], pair[1]).ok();
-                next.push(w);
-            }
-            level = next;
-        }
-        level[0].clone()
+        acc
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn emit_txn_body(
         &self,
         ng: &mut NameGen,
         out: &mut String,
-        name: &str,
         body: &[Statement],
-        contract: &Contract,
-        reg_names: &mut HashMap<String, String>,
-        pending: &mut HashMap<String, String>,
-        clock_wire: &str,
-        pre_fails: &mut Vec<String>,
-        post_oks: &mut Vec<String>,
+        m: &mut TxnMaps<'_>,
     ) {
-        let _ = clock_wire;
         // ── §3.4 (2026-08-25): contracts carry semantic load in hardware.
         // Pre-guard is evaluated against live register state and GATES the
         // commit: refusal ⇒ every write this txn would make is replaced by
@@ -777,35 +885,42 @@ impl CirctBackend {
         // To undo: revert to comparator-only emission (guards as dead wires).
         let mut pre_ok_wire: Option<String> = None;
         let mut pre_fail_wire: Option<String> = None;
-        if !matches!(&contract.pre_condition, Expr::Bool(true)) {
-            let w = ng.fresh_wire(&format!("{}_pre", name));
-            self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
-            let f = ng.fresh_wire(&format!("{}_prefail", name));
+        if !matches!(&m.contract.pre_condition, Expr::Bool(true)) {
+            let w = ng.fresh_wire(&format!("{}_pre", m.name));
+            self.emit_contract_condition(out, ng, &m.contract.pre_condition, &w, m.reg_names);
+            let f = ng.fresh_wire(&format!("{}_prefail", m.name));
             writeln!(out, "  {} = comb.icmp eq {}, %false : i1", f, w).ok();
-            pre_fails.push(f.clone());
+            m.ob.pre_fails.push(f.clone());
             pre_fail_wire = Some(f);
             pre_ok_wire = Some(w);
         }
 
-        // Track exactly which vars THIS txn writes so the commit gate wraps
-        // those pendings only. Several txns writing one var arbitrate by
-        // program order (last committed gate wins) — recorded decision,
-        // see docs/architecture/backend-contracts.md.
-        let mut written: Vec<String> = Vec::new();
+        // Vars THIS txn writes = pending keys added during the body
+        // (key-diff against the entry snapshot — no extra tracking param,
+        // sorted for deterministic gate emission). Several txns writing one
+        // var arbitrate by program order (last committed gate wins) —
+        // recorded decision, see docs/architecture/backend-contracts.md.
+        let before: std::collections::HashSet<String> = m.pending.keys().cloned().collect();
         for stmt in body {
-            self.emit_stmt_pending(ng, out, stmt, reg_names, pending, &mut written);
+            self.emit_stmt_pending(ng, out, stmt, m);
         }
+        let mut written: Vec<String> = m.pending
+            .keys()
+            .filter(|k| !before.contains(*k))
+            .cloned()
+            .collect();
+        written.sort();
 
         // Commit gate: guarded txn ⇒ mux(pre_ok, computed_next, current).
         // Current is the register output (cycle-start state), so a refused
         // txn leaves state untouched regardless of mid-body writes.
         if let Some(pre_ok) = &pre_ok_wire {
             for var in written.iter() {
-                let Some(pval) = pending.get(var).cloned() else {
+                let Some(pval) = m.pending.get(var).cloned() else {
                     continue;
                 };
                 let ty = self.mlir_type(self.var_types.get(var).unwrap_or(&Type::int()));
-                let Some(cur) = reg_names.get(var).cloned() else {
+                let Some(cur) = m.reg_names.get(var).cloned() else {
                     continue;
                 };
                 let g = ng.fresh_wire(&format!("{}_commit", var));
@@ -815,7 +930,7 @@ impl CirctBackend {
                     g, pre_ok, pval, cur, ty
                 )
                 .ok();
-                pending.insert(var.clone(), g);
+                m.pending.insert(var.clone(), g);
             }
         }
 
@@ -823,25 +938,25 @@ impl CirctBackend {
         // form: pre_ok ⇒ post (refused txn carries no post obligation —
         // otherwise a halted FSM would flag check forever). Encoded as
         // ¬pre ∨ post = prefail ∨ post_verdict.
-        if !matches!(&contract.post_condition, Expr::Bool(true)) {
-            let mut shadow = reg_names.clone();
+        if !matches!(&m.contract.post_condition, Expr::Bool(true)) {
+            let mut shadow = m.reg_names.clone();
             for var in written.iter() {
-                if let Some(pv) = pending.get(var) {
+                if let Some(pv) = m.pending.get(var) {
                     shadow.insert(var.clone(), pv.clone());
                 }
             }
-            let w = ng.fresh_wire(&format!("{}_post", name));
-            self.emit_contract_condition(out, ng, &contract.post_condition, &w, &shadow);
+            let w = ng.fresh_wire(&format!("{}_post", m.name));
+            self.emit_contract_condition(out, ng, &m.contract.post_condition, &w, &shadow);
             match &pre_fail_wire {
                 // ¬pre ∨ post — the prefail wire IS ¬pre (2026-08-25: sim
                 // parity caught the first cut ORing pre_ok instead, which
                 // flagged check at every refusal).
                 Some(pre_fail) => {
-                    let imp = ng.fresh_wire(&format!("{}_postok", name));
+                    let imp = ng.fresh_wire(&format!("{}_postok", m.name));
                     writeln!(out, "  {} = comb.or {}, {} : i1", imp, pre_fail, w).ok();
-                    post_oks.push(imp);
+                    m.ob.post_oks.push(imp);
                 }
-                None => post_oks.push(w),
+                None => m.ob.post_oks.push(w),
             }
         }
     }
@@ -849,30 +964,78 @@ impl CirctBackend {
     /// 2026-08-23 (Plan 3): assignments compute a value WIRE and repoint the
     /// pending map — reads elsewhere keep seeing pre-update values until the
     /// register consumes the final wire. Guarded bodies mux on their
-    /// condition against the current pending/current wire.
-    /// `written` collects every var assigned by THIS txn (for §3.4 gating).
+    /// condition against the current pending/current wire. Vars written by
+    /// a txn are recovered by the CALLER's pending key-diff (2026-08-25).
     fn emit_stmt_pending(
         &self,
         ng: &mut NameGen,
         out: &mut String,
         stmt: &Statement,
-        reg_names: &mut HashMap<String, String>,
-        pending: &mut HashMap<String, String>,
-        written: &mut Vec<String>,
+        m: &mut TxnMaps<'_>,
     ) {
         match stmt {
             Statement::Expression(expr) => {
-                self.emit_expr(ng, out, expr, reg_names, "i64");
+                self.emit_expr(ng, out, expr, m.reg_names, "i64");
             }
             Statement::Assign(lhs, expr) => {
+                // 2026-08-25 (Plan 3.6): array element write `buf[i] = v` —
+                // DECODE into per-lane enables: lane j commits v iff i==j,
+                // every other lane holds its current value. All lanes join
+                // the m.pending map so the §3.4 commit gate wraps the whole
+                // register file.
+                if let Expr::Index(obj, idx) = lhs {
+                    if let Expr::Identifier(name) = obj.as_ref() {
+                        let Some(lanes) = self.array_groups.get(name).cloned() else {
+                            self.record_unsupported(&format!(
+                                "element write to non-state index target '{}'",
+                                name
+                            ));
+                            return;
+                        };
+                        let elem_ty = self
+                            .array_elem_ty
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| "i64".to_string());
+                        let Some(val) = self.emit_expr(ng, out, expr, m.reg_names, &elem_ty)
+                        else {
+                            return;
+                        };
+                        let Some(idx_val) = self.emit_expr(ng, out, idx, m.reg_names, "i64")
+                        else {
+                            return;
+                        };
+                        for (j, lane) in lanes.iter().enumerate() {
+                            let cj = ng.fresh_const("aidx");
+                            writeln!(out, "  {} = hw.constant {} : i64", cj, j).ok();
+                            let eq = ng.fresh_wire("aeq");
+                            writeln!(out, "  {} = comb.icmp eq {}, {} : i64", eq, idx_val, cj)
+                                .ok();
+                            let current = m.pending
+                                .get(lane)
+                                .cloned()
+                                .or_else(|| m.reg_names.get(lane).cloned())
+                                .unwrap_or_default();
+                            let w = ng.fresh_wire(&format!("{}_lane", lane));
+                            writeln!(
+                                out,
+                                "  {} = comb.mux {}, {}, {} : {}",
+                                w, eq, val, current, elem_ty
+                            )
+                            .ok();
+                            m.pending.insert(lane.clone(), w);
+                        }
+                        return;
+                    }
+                }
                 if let Some(var_name) = lhs.as_var_name() {
                     let mlir_ty =
                         self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::int()));
-                    if let Some(val) = self.emit_expr(ng, out, expr, reg_names, &mlir_ty) {
-                        let current = pending
+                    if let Some(val) = self.emit_expr(ng, out, expr, m.reg_names, &mlir_ty) {
+                        let current = m.pending
                             .get(var_name)
                             .cloned()
-                            .or_else(|| reg_names.get(var_name).cloned());
+                            .or_else(|| m.reg_names.get(var_name).cloned());
                         let target = match current {
                             Some(c) => c,
                             None => {
@@ -886,23 +1049,20 @@ impl CirctBackend {
                                     c, init_val, mlir_ty
                                 )
                                 .ok();
-                                reg_names.insert(var_name.to_string(), c.clone());
+                                m.reg_names.insert(var_name.to_string(), c.clone());
                                 c
                             }
                         };
                         let w = ng.fresh_wire(&format!("{}_next", var_name));
                         writeln!(out, "  {} = comb.mux %true, {}, {} : {}", w, val, target, mlir_ty)
                             .ok();
-                        pending.insert(var_name.to_string(), w);
-                        if !written.iter().any(|v| v == var_name) {
-                            written.push(var_name.to_string());
-                        }
+                        m.pending.insert(var_name.to_string(), w);
                     }
                 }
             }
             Statement::Guarded(condition, statements) => {
                 let cond_ty = "i1";
-                if let Some(cond) = self.emit_expr(ng, out, condition, reg_names, cond_ty) {
+                if let Some(cond) = self.emit_expr(ng, out, condition, m.reg_names, cond_ty) {
                     for inner in statements {
                         if let Statement::Assign(lhs, expr) = inner {
                             if let Some(var_name) = lhs.as_var_name() {
@@ -910,12 +1070,12 @@ impl CirctBackend {
                                     self.var_types.get(var_name).unwrap_or(&Type::int()),
                                 );
                                 if let Some(val) =
-                                    self.emit_expr(ng, out, expr, reg_names, &mlir_ty)
+                                    self.emit_expr(ng, out, expr, m.reg_names, &mlir_ty)
                                 {
-                                    let current = pending
+                                    let current = m.pending
                                         .get(var_name)
                                         .cloned()
-                                        .or_else(|| reg_names.get(var_name).cloned())
+                                        .or_else(|| m.reg_names.get(var_name).cloned())
                                         .unwrap_or_else(|| "%0".to_string());
                                     // enabled write: cond ? new : hold-current
                                     let w =
@@ -926,21 +1086,18 @@ impl CirctBackend {
                                         w, cond, val, current, mlir_ty
                                     )
                                     .ok();
-                                    pending.insert(var_name.to_string(), w);
-                                    if !written.iter().any(|v| v == var_name) {
-                                        written.push(var_name.to_string());
-                                    }
+                                    m.pending.insert(var_name.to_string(), w);
                                 }
                             }
                         } else {
-                            self.emit_stmt_pending(ng, out, inner, reg_names, pending, written);
+                            self.emit_stmt_pending(ng, out, inner, m);
                         }
                     }
                 }
             }
             Statement::SyncBlock(body) | Statement::Block(body) => {
                 for inner in body {
-                    self.emit_stmt_pending(ng, out, inner, reg_names, pending, written);
+                    self.emit_stmt_pending(ng, out, inner, m);
                 }
             }
             other => {

@@ -1,0 +1,9 @@
+// HW validation fixture: bounded state array as a register file (Plan 3.6).
+// buf[i] = i writes lane i; reads mux over lanes. Guard refuses at idx==4.
+let idx: Int = 0;
+let buf: Int[4] = [7, 7, 7, 7];
+
+txn tick [idx < 4][idx <= 4] {
+  buf[idx] = idx;
+  idx = idx + 1;
+}
