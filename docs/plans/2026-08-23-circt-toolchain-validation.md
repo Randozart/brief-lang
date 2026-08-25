@@ -1,12 +1,13 @@
 # CIRCT backend — toolchain-validated hardware emission
 
 **Date:** 2026-08-23
-**Status:** §3.1–3.6 LANDED plus watchdog consumption (2026-08-25):
-parse, export, lint, sim parity, synthesis; bounded arrays lower to
-register files; liveness watchdogs are countdown monitors feeding
-wd_<txn>_tmo (+ halt when required). Remaining: seq.firmem for large
-arrays (additive), sized-scalar source syntax (spec decision, shared
-with known-limitations #2).
+**Status:** COMPLETE for the planned scope (2026-08-25). §3.1–3.6 +
+watchdog consumption + sized-scalar source syntax all landed:
+parse, export, lint, sim parity, synthesis; bounded arrays → register
+files; liveness watchdogs → countdown monitors feeding wd_<txn>_tmo
+(+ halt when required); Int<8>/UInt<8>/Bool<1> width specialization in
+source with domain-checked literal arithmetic. Remaining (additive,
+out of plan): seq.firmem for large arrays.
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first (universe +
 analysis via `BackendContext`; capability matrix). Work confined to
