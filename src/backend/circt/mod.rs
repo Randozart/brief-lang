@@ -85,7 +85,17 @@ impl NameGen {
         post_oks: Vec<String>,
     }
 
-    /// 2026-08-25: the mutable wire maps one transaction emits against,
+    /// 2026-08-25 (§3.4 extension): a liveness-watchdog monitor plan — the
+/// countdown register + timeout port derived from `?[cond]/![cond]
+/// within N cyc` on a transaction contract.
+struct WdMonitor {
+    port: String,
+    cond: Expr,
+    bound: u64,
+    required: bool,
+}
+
+/// 2026-08-25: the mutable wire maps one transaction emits against,
     /// bundled so emitters stay under the parameter budget (Praetor rule).
     /// `name` is the txn's own name (wire prefixes); `contract` its pair.
     struct TxnMaps<'a> {
@@ -353,6 +363,52 @@ impl CirctBackend {
         // committed next values; high when no obligations exist.
         output_ports.push(("check".to_string(), "i1".to_string()));
 
+        // ── §3.4 extension (2026-08-25): liveness watchdogs become cycle
+        // countdown monitors. `![cond] within Ncyc` demands cond observed at
+        // least every N cycles: a counter reloads on cond, saturates at 0,
+        // and its expiry raises the per-watchdog `wd_<txn>_tmo` port — and,
+        // when required (!), also `halt` (an obligation breach). Trigger-
+        // form watchdogs (condition naming a declared trigger), time-unit
+        // bounds (no clock-frequency mapping on this surface) and on-fire
+        // handlers are capability errors, never silent drops.
+        let mut wd_monitors: Vec<WdMonitor> = Vec::new();
+        for item in items {
+            let TopLevel::Transaction(txn) = item else { continue };
+            let Some(wd) = &txn.contract.watchdog else { continue };
+            if let Expr::Identifier(id) = &wd.condition {
+                if self.trg_ports.iter().any(|t| &t.trg_name == id) {
+                    self.record_unsupported(&format!(
+                        "trigger watchdog '@{}' in txn '{}' — event domain",
+                        id, txn.name
+                    ));
+                    continue;
+                }
+            }
+            if wd.on_fire.is_some() {
+                self.record_unsupported(&format!(
+                    "watchdog on-fire handler in txn '{}' — event domain",
+                    txn.name
+                ));
+                continue;
+            }
+            let Some(bound) = wd.cycles_bound else {
+                self.record_unsupported(&format!(
+                    "watchdog in txn '{}' — a time-unit bound needs a clock-frequency \
+                     mapping this surface does not carry; use 'within N cyc'",
+                    txn.name
+                ));
+                continue;
+            };
+            let port = format!("wd_{}_tmo", txn.name);
+            wd_monitors.push(WdMonitor {
+                port: port.clone(),
+                cond: wd.condition.clone(),
+                bound,
+                required: wd.is_required,
+            });
+            output_ports.push((port, "i1".to_string()));
+        }
+
         // 2026-08-23 (robustness): topo_order can DROP declared state —
         // self-dependencies (counter = counter + 1) create cycles that make
         // DependencyGraph::build fail, and the caller's fallback is an EMPTY
@@ -466,6 +522,7 @@ impl CirctBackend {
             let init_val: String = match var_name.as_str() {
                 "halt" => "0".to_string(),
                 "check" => "1".to_string(),
+                p if p.starts_with("wd_") => "0".to_string(),
                 // Array lanes carry their element init from the list literal.
                 _ => lane_inits
                     .get(var_name)
@@ -511,8 +568,11 @@ impl CirctBackend {
         // Phase C: define the forward-referenced next wires. Reset forces
         // the init value; an unwritten var holds its register output.
         for (var_name, mlir_ty) in &output_ports {
-            if var_name == "halt" || var_name == "check" {
-                continue; // obligation outputs driven below
+            if var_name == "halt"
+                || var_name == "check"
+                || var_name.starts_with("wd_")
+            {
+                continue; // obligation/watchdog outputs driven below
             }
             let next_w = next_names.get(var_name).cloned().unwrap_or_default();
             let init_wire = init_wires.get(var_name).cloned().unwrap_or_default();
@@ -525,6 +585,67 @@ impl CirctBackend {
                 out,
                 "  {} = comb.mux %reset, {}, {} : {}",
                 next_w, init_wire, src, mlir_ty
+            )
+            .ok();
+        }
+
+        // ── Watchdog countdown monitors (§3.4 extension, 2026-08-25).
+        // Per monitor: cond wire on live state; counter reloads to the
+        // bound when cond holds, saturates at 0 otherwise; expiry =
+        // ¬cond ∧ cnt==0 drives the tmo port (registered, reset clears)
+        // and, for required (!) watchdogs, ORs into halt.
+        for wd in &wd_monitors {
+            let cw = ng.fresh_wire(&format!("{}_cond", wd.port));
+            self.emit_contract_condition(out, &mut ng, &wd.cond, &cw, &reg_names);
+            let not_cond = ng.fresh_wire(&format!("{}_ncond", wd.port));
+            writeln!(out, "  {} = comb.icmp eq {}, %false : i1", not_cond, cw).ok();
+            let cnt_init = ng.fresh_const(&format!("{}_bnd", wd.port));
+            writeln!(out, "  {} = hw.constant {} : i64", cnt_init, wd.bound).ok();
+            let zero = ng.fresh_const(&format!("{}_z", wd.port));
+            writeln!(out, "  {} = hw.constant 0 : i64", zero).ok();
+            let one = ng.fresh_const(&format!("{}_one", wd.port));
+            writeln!(out, "  {} = hw.constant 1 : i64", one).ok();
+            let cnt = ng.fresh_reg(&format!("{}_cnt", wd.port));
+            let cnt_next = ng.fresh_wire(&format!("{}_cnt_next", wd.port));
+            // emit register FIRST (graph region), define cnt_next below —
+            // consistent with the registers-first architecture.
+            writeln!(
+                out,
+                "  {} = seq.firreg {} clock {} preset {} : i64",
+                cnt, cnt_next, clock_wire, wd.bound
+            )
+            .ok();
+            let sub = ng.fresh_wire(&format!("{}_sub", wd.port));
+            writeln!(out, "  {} = comb.sub {}, {} : i64", sub, cnt, one).ok();
+            let is_zero = ng.fresh_wire(&format!("{}_isz", wd.port));
+            writeln!(out, "  {} = comb.icmp eq {}, {} : i64", is_zero, cnt, zero).ok();
+            let sat = ng.fresh_wire(&format!("{}_sat", wd.port));
+            writeln!(out, "  {} = comb.mux {}, {}, {} : i64", sat, is_zero, zero, sub).ok();
+            writeln!(
+                out,
+                "  {} = comb.mux {}, {}, {} : i64",
+                cnt_next, cw, cnt_init, sat
+            )
+            .ok();
+            let tmo_raw = ng.fresh_wire(&format!("{}_raw", wd.port));
+            writeln!(out, "  {} = comb.and {}, {} : i1", tmo_raw, not_cond, is_zero).ok();
+            if wd.required {
+                ob.pre_fails.push(tmo_raw.clone());
+            }
+            let tmo_reg = ng.fresh_reg(&wd.port);
+            let tmo_next = next_names.get(&wd.port).cloned().unwrap_or_default();
+            writeln!(
+                out,
+                "  {} = seq.firreg {} clock {} preset 0 : i1",
+                tmo_reg, tmo_next, clock_wire
+            )
+            .ok();
+            reg_names.insert(wd.port.clone(), tmo_reg);
+            let init_wire = init_wires.get(&wd.port).cloned().unwrap_or_default();
+            writeln!(
+                out,
+                "  {} = comb.mux %reset, {}, {} : i1",
+                tmo_next, init_wire, tmo_raw
             )
             .ok();
         }

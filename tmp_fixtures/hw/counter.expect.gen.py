@@ -20,13 +20,20 @@ Run from repo root: python3 tmp_fixtures/hw/counter.expect.gen.py
 """
 CYCLES = 270
 
-def gen(name, vars_init, step_fn):
+def gen(name, vars_init, step_fn, wd=None):
+    # wd = (cond_fn, bound): liveness watchdog model. Counter reloads on
+    # cond, saturates at 0; tmo printed value = NOT cond AND cnt==0 taken
+    # on the state BEFORE the edge (same sampling as halt), matching the
+    # registered tmo port. Port order: halt, check, wd_tmo, <vars>.
     lines = []
     state = dict(vars_init)
     halt, check = 0, 1
+    cnt = wd[1] if wd else 0
     for i in range(CYCLES):
         reset = i <= 1
         pre_ok, committed = step_fn(state)
+        cond = wd[0](state) if wd else True
+        tmo_val = int((not cond) and cnt == 0)
         if reset:
             state = dict(vars_init)
             halt, check = 0, 1
@@ -34,8 +41,13 @@ def gen(name, vars_init, step_fn):
             state.update(committed)
             halt = int(not pre_ok)
             check = 1
+            if wd:
+                cnt = wd[1] if cond else max(cnt - 1, 0)
         if i >= 2:
-            vals = [halt, check] + [state[k] for k in sorted(state)]
+            vals = [halt, check, tmo_val] if wd else [halt, check]
+            for k in sorted(state):
+                # arrays flatten to lanes in index order (port order)
+                vals += list(state[k]) if isinstance(state[k], tuple) else [state[k]]
             lines.append(f"{i} " + " ".join(str(v) for v in vals))
     open(f"tmp_fixtures/hw/{name}.expect", "w").write("\n".join(lines) + "\n")
 
@@ -49,6 +61,23 @@ def step_adder(s):
     ok = s["a"] < 87
     return ok, {"a": s["a"] + s["b"]} if ok else {}
 
+# array: buf[idx] = idx under [idx < 4]; lanes init 7, hold+halt at bound
+def step_array(s):
+    ok = s["idx"] < 4
+    if not ok:
+        return False, {}
+    b = list(s["buf"])
+    b[s["idx"]] = s["idx"]
+    return True, {"buf": tuple(b), "idx": s["idx"] + 1}
+
+# watchdog: beat ticks to 6 then holds; ![beat < 5] within 2cyc breaches
+# once the condition has been false for the whole budget.
+def step_wd(s):
+    ok = s["beat"] < 6
+    return ok, {"beat": s["beat"] + 1} if ok else {}
+
 gen("counter", {"counter": 0}, step_counter)
 gen("adder", {"a": 0, "b": 3}, step_adder)
+gen("array", {"buf": (7, 7, 7, 7), "idx": 0}, step_array)
+gen("watchdog", {"beat": 0}, step_wd, wd=(lambda s: s["beat"] < 5, 2))
 print("expect files regenerated")

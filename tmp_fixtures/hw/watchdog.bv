@@ -1,0 +1,10 @@
+// HW validation fixture: required liveness watchdog (Plan 3.4 extension).
+// ![beat < 5] within 2 cyc — condition must be observed every 2 cycles.
+// beat ticks to 6 then the guard holds it; from cycle ~7 the condition is
+// false, so after the 2-cycle budget expires wd_tick_tmo rises AND halt
+// (required watchdog breach = obligation violation).
+let beat: Int = 0;
+
+txn tick [beat < 6][beat <= 6] ![beat < 5] within 2cyc {
+  beat = beat + 1;
+}
