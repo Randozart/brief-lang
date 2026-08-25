@@ -776,12 +776,14 @@ impl CirctBackend {
         // and ANDs into `check`. Trivially-true guards contribute nothing.
         // To undo: revert to comparator-only emission (guards as dead wires).
         let mut pre_ok_wire: Option<String> = None;
+        let mut pre_fail_wire: Option<String> = None;
         if !matches!(&contract.pre_condition, Expr::Bool(true)) {
             let w = ng.fresh_wire(&format!("{}_pre", name));
             self.emit_contract_condition(out, ng, &contract.pre_condition, &w, reg_names);
             let f = ng.fresh_wire(&format!("{}_prefail", name));
             writeln!(out, "  {} = comb.icmp eq {}, %false : i1", f, w).ok();
-            pre_fails.push(f);
+            pre_fails.push(f.clone());
+            pre_fail_wire = Some(f);
             pre_ok_wire = Some(w);
         }
 
@@ -830,10 +832,13 @@ impl CirctBackend {
             }
             let w = ng.fresh_wire(&format!("{}_post", name));
             self.emit_contract_condition(out, ng, &contract.post_condition, &w, &shadow);
-            match &pre_ok_wire {
-                Some(pre_ok) => {
+            match &pre_fail_wire {
+                // ¬pre ∨ post — the prefail wire IS ¬pre (2026-08-25: sim
+                // parity caught the first cut ORing pre_ok instead, which
+                // flagged check at every refusal).
+                Some(pre_fail) => {
                     let imp = ng.fresh_wire(&format!("{}_postok", name));
-                    writeln!(out, "  {} = comb.or {}, {} : i1", imp, pre_ok, w).ok();
+                    writeln!(out, "  {} = comb.or {}, {} : i1", imp, pre_fail, w).ok();
                     post_oks.push(imp);
                 }
                 None => post_oks.push(w),
