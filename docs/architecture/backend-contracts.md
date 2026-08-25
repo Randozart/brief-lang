@@ -221,7 +221,8 @@ contract == tamer behavior.
   generators in `tmp_fixtures/hw/*.expect.gen.py` → optional Vivado);
   synthesis via `tools/vivado_check.sh` on KV260 xck26-sfvc784-2LV-c —
   generated counter FSM synthesizes to 21 LUTs
-  (`VIVADO_SYNTH=1 VIVADO_REPORT_DIR=... tools/hw_harness.sh`).
+  (`VIVADO_SYNTH=1 VIVADO_REPORT_DIR=... tools/hw_harness.sh`). HW corpus:
+  counter, adder, array (register file), watchdog (countdown monitor).
 
 ---
 

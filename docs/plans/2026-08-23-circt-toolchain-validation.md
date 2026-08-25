@@ -1,10 +1,12 @@
 # CIRCT backend — toolchain-validated hardware emission
 
 **Date:** 2026-08-23
-**Status:** §3.1–3.5 LANDED (toolchain-validated: parse, export, lint,
-sim parity, synthesis). Remaining: §3.6 (state arrays / seq memories),
-watchdog metadata consumption, sized-scalar source syntax (spec
-decision, shared with known-limitations #2).
+**Status:** §3.1–3.6 LANDED plus watchdog consumption (2026-08-25):
+parse, export, lint, sim parity, synthesis; bounded arrays lower to
+register files; liveness watchdogs are countdown monitors feeding
+wd_<txn>_tmo (+ halt when required). Remaining: seq.firmem for large
+arrays (additive), sized-scalar source syntax (spec decision, shared
+with known-limitations #2).
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first (universe +
 analysis via `BackendContext`; capability matrix). Work confined to
