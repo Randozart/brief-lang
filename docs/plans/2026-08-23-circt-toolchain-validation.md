@@ -1,7 +1,10 @@
 # CIRCT backend — toolchain-validated hardware emission
 
 **Date:** 2026-08-23
-**Status:** active
+**Status:** §3.1–3.5 LANDED (toolchain-validated: parse, export, lint,
+sim parity, synthesis). Remaining: §3.6 (state arrays / seq memories),
+watchdog metadata consumption, sized-scalar source syntax (spec
+decision, shared with known-limitations #2).
 **Sequencing:** parallel branch; requires Plan 0
 (`2026-08-23-backend-scaffolding-foundation.md`) merged first (universe +
 analysis via `BackendContext`; capability matrix). Work confined to
@@ -54,26 +57,31 @@ capability error naming feature+fix. `unreachable!()` removed. All module/
 cell/value iteration sorted by key (house determinism rule) — cell_defs at
 :135 and any var-map walks.
 
-### 3.4 Contracts as hardware obligations
+### 3.4 Contracts as hardware obligations — LANDED 2026-08-25
 
-Pre/post guards lower to comb.icmp chains feeding seq assertions
-(`seq.assert`, gated on dialect availability in the pinned CIRCT build;
-fallback: dedicated check output port asserted by the FSM). FSM transitions
-must respect watchdog metadata where present; unsupported contract shapes →
-capability error.
+Pre/post guards carry semantic load: pre evaluated on LIVE register
+state gates the commit (refusal ⇒ hold + `halt` port); post is an
+implication (`¬pre ∨ post`) on COMMITTED next values, ANDed into the
+`check` port. Toolchain probes decided the form: pinned build has no
+`seq.assert`; module-level `sv.assert` rejected (non-procedural
+region); procedural form would need an extra i1 event input — ports
+need none. Watchdog metadata: not yet consumed (open). Unsupported
+contract shapes: capability-error path unchanged.
 
-### 3.5 Toolchain-validated tests (replace string matching)
+### 3.5 Toolchain-validated tests — LANDED 2026-08-25 (tiers 1–3 live)
 
-Test pyramid, all probe-gated on the Plan 0.6 install:
-1. **Parse:** every emitted module round-trips through `circt-opt`
-   (mandatory when tool present).
-2. **Translate:** `circt-translate --export-verilog` succeeds.
-3. **Simulate parity:** verilator (installed) runs the Verilog on tiny
-   fixtures — counter, trigger→FSM handshake, comb arithmetic block,
-   contract-guard firing — and observable outputs match the interpreter
-   running the same `.cbv` program. This is the CIRCT benchmark corpus.
-Keep a few cheap structural tests (string-level) for fast feedback, but
-correctness lives in the toolchain tier.
+1. **Parse:** probe-gated `circt-opt` round-trip in `cargo test --lib`.
+2. **Translate+lint:** `hw_harness.sh` — lower-seq-to-sv +
+   export-verilog (via circt-opt; this build's circt-translate lacks
+   --export-verilog) + verilator lint.
+3. **Simulate parity:** LIVE — verilator `--binary`, 270 cycles,
+   per-cycle output diff against locked `.expect` sequences derived
+   from interpreter semantics (`tmp_fixtures/hw/*.expect.gen.py`
+   documents each derivation; Rule 5). Caught two real bugs on landing:
+   implication polarity + an inconsistent fixture pair (BUGS.md
+   2026-08-25).
+4. **Synthesis:** `VIVADO_SYNTH=1 VIVADO_REPORT_DIR=… hw_harness.sh` —
+   generated counter FSM = 21 LUTs on xck26-sfvc784-2LV-c.
 
 ### 3.6 State arrays / bounded collections
 
