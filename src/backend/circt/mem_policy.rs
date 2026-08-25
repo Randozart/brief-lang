@@ -83,63 +83,67 @@ pub fn decide_array_lowering(
     facts: &ArrayFacts,
     policy: &MemPolicy,
 ) -> Result<Decision, String> {
-    // Semantic gates on PINNED choices (the keyword carries intent load).
     if matches!(hint, MemHint::Mem) {
-        if facts.post_refs {
-            return Err(
-                "a postcondition reads elements of this array and it is pinned \
-                 'mem let' — memory macros commit at the clock edge, so no \
-                 combinational would-be value exists for the obligation; use \
-                 'reg let' for element obligations"
-                    .to_string(),
-            );
-        }
-        if facts.writers > 1 {
-            return Err(format!(
-                "{} transactions write this array and it is pinned 'mem let' — \
-                 multi-writer arbitration is register-file semantics; use \
-                 'reg let'",
-                facts.writers
-            ));
-        }
-        if facts.nonzero_init {
-            return Err(
-                "this array has a nonzero initializer and is pinned 'mem let' — \
-                 memory-macro initialization is not supported on this surface; \
-                 use 'reg let', or zero-init"
-                    .to_string(),
-            );
-        }
+        check_mem_pin(facts)?;
     }
-
     match hint {
         MemHint::Reg => Ok(Decision { lowering: ArrayLowering::RegFile, why: None }),
         MemHint::Mem => Ok(Decision { lowering: ArrayLowering::FirmMem, why: None }),
-        MemHint::None => {
-            let eligible = facts.depth >= policy.min_depth
-                && !facts.post_refs
-                && facts.writers <= 1
-                && facts.port_sites <= policy.max_ports
-                && !facts.nonzero_init;
-            let why = if eligible {
-                Some("depth >= threshold")
-            } else if facts.post_refs {
-                Some("a postcondition reads elements")
-            } else if facts.writers > 1 {
-                Some("multiple writing transactions")
-            } else if facts.port_sites > policy.max_ports {
-                Some("port sites above budget")
-            } else if facts.nonzero_init {
-                Some("nonzero initializer")
-            } else {
-                Some("depth < threshold")
-            };
-            Ok(Decision {
-                lowering: if eligible { ArrayLowering::FirmMem } else { ArrayLowering::RegFile },
-                why,
-            })
-        }
+        MemHint::None => Ok(default_decision(facts, policy)),
     }
+}
+
+/// Pinned-'mem' gates: the keyword carries intent load, so impossible
+/// combinations are hard errors naming the fix.
+fn check_mem_pin(facts: &ArrayFacts) -> Result<(), String> {
+    if facts.post_refs {
+        return Err(
+            "a postcondition reads elements of this array and it is pinned \
+             'mem let' — memory macros commit at the clock edge, so no \
+             combinational would-be value exists for the obligation; use \
+             'reg let' for element obligations"
+                .to_string(),
+        );
+    }
+    if facts.writers > 1 {
+        return Err(format!(
+            "{} transactions write this array and it is pinned 'mem let' — \
+             multi-writer arbitration is register-file semantics; use \
+             'reg let'",
+            facts.writers
+        ));
+    }
+    if facts.nonzero_init {
+        return Err(
+            "this array has a nonzero initializer and is pinned 'mem let' — \
+             memory-macro initialization is not supported on this surface; \
+             use 'reg let', or zero-init"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Default policy: macro past the threshold when semantics-compatible;
+/// otherwise register file WITH the reason (drives THE note).
+fn default_decision(facts: &ArrayFacts, policy: &MemPolicy) -> Decision {
+    let reg = |why| Decision { lowering: ArrayLowering::RegFile, why: Some(why) };
+    if facts.depth < policy.min_depth {
+        return reg("depth < threshold");
+    }
+    if facts.post_refs {
+        return reg("a postcondition reads elements");
+    }
+    if facts.writers > 1 {
+        return reg("multiple writing transactions");
+    }
+    if facts.port_sites > policy.max_ports {
+        return reg("port sites above budget");
+    }
+    if facts.nonzero_init {
+        return reg("nonzero initializer");
+    }
+    Decision { lowering: ArrayLowering::FirmMem, why: Some("depth >= threshold") }
 }
 
 /// Walk every `Index(Identifier(name), _)` occurrence in an expression,
@@ -169,10 +173,27 @@ pub fn for_each_index_ref(expr: &Expr, f: &mut impl FnMut(&str)) {
 /// arrays (with hints/inits), who writes them, how many READ sites exist,
 /// whether postconditions reference them.
 pub fn collect_array_facts(items: &[TopLevel]) -> Vec<(String, MemHint, ArrayFacts)> {
-    use std::collections::HashMap;
-    let mut arrays: HashMap<String, (MemHint, ArrayFacts)> = HashMap::new();
+    let mut arrays = collect_array_decls(items);
+    if arrays.is_empty() {
+        return Vec::new();
+    }
+    for item in items {
+        if let TopLevel::Transaction(txn) = item {
+            fold_txn_into_facts(txn, &mut arrays);
+        }
+    }
+    let mut out: Vec<(String, MemHint, ArrayFacts)> = arrays
+        .into_iter()
+        .map(|(name, (hint, facts))| (name, hint, facts))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic order
+    out
+}
 
-    // Declarations.
+type ArrayMap = std::collections::HashMap<String, (MemHint, ArrayFacts)>;
+
+fn collect_array_decls(items: &[TopLevel]) -> ArrayMap {
+    let mut arrays: ArrayMap = std::collections::HashMap::new();
     for item in items {
         let TopLevel::Statement(stmt) = item else { continue };
         let Statement::Let { name, ty: Some(ty), expr, modifiers, .. } = &**stmt else {
@@ -191,7 +212,7 @@ pub fn collect_array_facts(items: &[TopLevel]) -> Vec<(String, MemHint, ArrayFac
             .find_map(|a| MemHint::from_annotation(&a.name))
             .unwrap_or(MemHint::None);
         let nonzero_init = match expr {
-            Some(Expr::List(items)) => items.iter().any(|e| !is_zero_literal(e)),
+            Some(Expr::List(list)) => list.iter().any(|e| !is_zero_literal(e)),
             _ => true, // unknown init ⇒ conservative
         };
         arrays.insert(
@@ -202,62 +223,62 @@ pub fn collect_array_facts(items: &[TopLevel]) -> Vec<(String, MemHint, ArrayFac
             ),
         );
     }
-    if arrays.is_empty() {
-        return Vec::new();
-    }
-
-    // Uses.
-    for item in items {
-        let TopLevel::Transaction(txn) = item else { continue };
-
-        // Writers: distinct array names element-written by this txn.
-        let mut written_arrays: Vec<String> = Vec::new();
-        for stmt in &txn.body {
-            if let Statement::Assign(lhs, _) = stmt {
-                if let Expr::Index(obj, _) = lhs {
-                    if let Expr::Identifier(name) = obj.as_ref() {
-                        if arrays.contains_key(name) && !written_arrays.contains(name) {
-                            written_arrays.push(name.clone());
-                        }
-                    }
-                }
-            }
-        }
-        for name in written_arrays {
-            if let Some((_, facts)) = arrays.get_mut(&name) {
-                facts.writers += 1;
-            }
-        }
-
-        // Post refs: obligation semantics — register-only.
-        for_each_index_ref(&txn.contract.post_condition, &mut |n| {
-            if let Some((_, facts)) = arrays.get_mut(n) {
-                facts.post_refs = true;
-            }
-        });
-
-        // Read sites: pre-condition reads + body rhs/expressions.
-        for_each_index_ref(&txn.contract.pre_condition, &mut |n| {
-            if let Some((_, facts)) = arrays.get_mut(n) {
-                facts.port_sites += 1;
-            }
-        });
-        for stmt in &txn.body {
-            walk_stmt_read_exprs(stmt, &mut |n| {
-                if let Some((_, facts)) = arrays.get_mut(n) {
-                    facts.port_sites += 1;
-                }
-            });
-        }
-    }
-
-    let mut out: Vec<(String, MemHint, ArrayFacts)> = arrays
-        .into_iter()
-        .map(|(name, (hint, facts))| (name, hint, facts))
-        .collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic order
-    out
+    arrays
 }
+
+fn fold_txn_into_facts(txn: &crate::ast::Transaction, arrays: &mut ArrayMap) {
+    fold_writers(txn, arrays);
+    fold_post_refs(txn, arrays);
+    fold_read_sites(txn, arrays);
+}
+
+fn fold_writers(txn: &crate::ast::Transaction, arrays: &mut ArrayMap) {
+    // Distinct array names element-written by this txn.
+    let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for stmt in &txn.body {
+        let Some(name) = element_write_target(stmt) else { continue };
+        if !arrays.contains_key(name) || !written.insert(name.clone()) {
+            continue;
+        }
+        if let Some((_, facts)) = arrays.get_mut(name) {
+            facts.writers += 1;
+        }
+    }
+}
+
+fn fold_post_refs(txn: &crate::ast::Transaction, arrays: &mut ArrayMap) {
+    // Post refs: obligation semantics — register-only.
+    for_each_index_ref(&txn.contract.post_condition, &mut |n| {
+        bump(arrays, n, |f| f.post_refs = true);
+    });
+}
+
+fn fold_read_sites(txn: &crate::ast::Transaction, arrays: &mut ArrayMap) {
+    // Pre-condition reads + body rhs/expressions are PORT SITES.
+    for_each_index_ref(&txn.contract.pre_condition, &mut |n| {
+        bump(arrays, n, |f| f.port_sites += 1);
+    });
+    for stmt in &txn.body {
+        walk_stmt_read_exprs(stmt, &mut |n| bump(arrays, n, |f| f.port_sites += 1));
+    }
+}
+
+fn element_write_target(stmt: &Statement) -> Option<&String> {
+    let Statement::Assign(lhs, _) = stmt else { return None };
+    let Expr::Index(obj, _) = lhs else { return None };
+    match obj.as_ref() {
+        Expr::Identifier(name) => Some(name),
+        _ => None,
+    }
+}
+
+fn bump(arrays: &mut ArrayMap, name: &str, g: fn(&mut ArrayFacts)) {
+    if let Some((_, facts)) = arrays.get_mut(name) {
+        g(facts);
+    }
+}
+
+/// Walk READ expressions of a statement (assignment targets excluded —
 
 /// Walk READ expressions of a statement (assignment targets excluded —
 /// they ride the writer's write port, not a read port).
