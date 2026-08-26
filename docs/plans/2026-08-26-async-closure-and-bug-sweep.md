@@ -84,3 +84,24 @@ compile.rs:1651-1652, update tracker statuses for bugs 1/2/4.
 ## Undo
 
 Each part commits separately; revert that commit only.
+
+## Milestone log — executed 2026-08-26
+
+| Part | Commit | Result |
+|---|---|---|
+| A1+compiled tests | `2f34bfc7` | async-events-compiled.bv → `17`; async-ready-gate.bv → `111`; CLI+clang integration tests; interpreter parity probes both files. Suite 1972 green. |
+| (A1 bonus) SSA guard fix | same commit | emit_expr read top-level fields via phi_field_regs only — a mid-body guard merge in pending_phi_backedge was ignored by every later statement (second when chained off stale pre-guard SSA). Reads prefer the live chain; header phi fallback. |
+| B4 | `84a85852` | warn_undispatched_txns hoisted before dispatch-mode selection; library shim silence kept; +2 unit tests. |
+| B2 | `e614a18e` | record_structural_layout shared helper; Obj/TypeDef backfill sites migrated; recorded deduped warnings. |
+| B1 (part) | this commit | protocol_verify.rs silent Oks → hard errors with what/why/fix. |
+| B3+B5 | this commit | BUGS.md %ac0 tombstone→resolved entry; duplicate compile.rs doc-comment removed; tracker statuses synced; BUGS.md #1/#2 statuses updated. |
+
+**Deferred (B1 remainder):** backend skip-arm gate flip REQUIRES the four
+codec bodies + SPEC §8.7 explicit axiom marker first (flipping alone bricks
+all stdlib imports — Rule 11 prereqs). Tracked as one coherent session in
+planned-features-tracker.md bug #1.
+
+Session diagnostics worth noting: the async-ready-gate example surfaced the
+folded-shape SSA staleness bug precisely because guards interleave assigns to
+the same top-level — ungated twins hid it. Compiled-vs-interpreter parity on
+per-example probes is now the standing acceptance pattern for scheduler work.

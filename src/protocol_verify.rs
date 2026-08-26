@@ -70,20 +70,24 @@ fn verify_single_roundtrip(
 ) -> Result<(), String> {
     let test_literal = generate_test_literal(form)?;
     let test_call = Expr::Call(fn_name.to_string(), vec![test_literal.clone()], None);
-    let parse_val = match interp.eval_expr(&test_call) {
-        Ok(v) => v,
-        Err(_) => return Ok(()),
-    };
-    let produce_fn = find_produce_fn(td);
-    let produce_fn = match produce_fn {
-        Some(f) => f,
-        None => return Ok(()),
-    };
-    let produce_call = Expr::Call(produce_fn, vec![], None);
-    let produce_val = match interp.eval_expr(&produce_call) {
-        Ok(v) => v,
-        Err(_) => return Ok(()),
-    };
+    // 2026-08-26 (bug sweep B1): an eval failure here was a SILENT Ok — a
+    // Parse implementation that crashed on the probe escaped verification
+    // unnoticed. Now it reports which call failed and why.
+    let parse_val = interp.eval_expr(&test_call).map_err(|e| format!(
+        "round-trip: '{}.{}' probe call Parse('{}') failed to evaluate: {}",
+        td.name, fn_name, literal_description(form), e
+    ))?;
+    let produce_fn = find_produce_fn(td).ok_or_else(|| format!(
+        "round-trip: '{}' declares CastFrom but no Produce/producer op — \
+         the inverse direction cannot run; add one",
+        td.name
+    ))?;
+    let produce_call = Expr::Call(produce_fn.clone(), vec![], None);
+    // Same silent-Ok hole for the producer side.
+    let produce_val = interp.eval_expr(&produce_call).map_err(|e| format!(
+        "round-trip: '{}.{}' producer '{}()' failed to evaluate: {}",
+        td.name, fn_name, produce_fn, e
+    ))?;
     let test_desc = literal_description(form);
     let produced_desc = format!("{:?}", produce_val);
     if produced_desc != test_desc {
