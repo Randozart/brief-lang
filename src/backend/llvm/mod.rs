@@ -2623,19 +2623,11 @@ impl LlvmBackend {
                     self.ctx.struct_types.insert(s.name.clone(), fields.clone());
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
-                            let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty, Some(universe))
-                            }).sum();
-                            let rt = crate::type_universe::ResolvedType {
-                                name: s.name.clone(),
-                                base: "Data".to_string(),
-                                bytes,
-                                min_bits: bytes * 8,
-                                max_bits: bytes * 8,
-                                alignment: 8,
-                                properties: std::collections::HashMap::new(),
-                                fields: fields.clone(),
-                            };
+                            // 2026-08-26 (bug sweep B2): shared recorded fallback —
+                            // SPEC §2.1 forbids silent representation defaults.
+                            let rt = crate::backend::register_types::record_structural_layout(
+                                universe, &s.name, "Data", &fields,
+                            );
                             universe.types.insert(s.name.clone(), rt);
                         }
                     }
@@ -2888,19 +2880,11 @@ impl LlvmBackend {
                     }
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&td.name) {
-                            let bytes: u64 = fields.iter().map(|(_, ty)| {
-                                crate::backend::llvm::types::type_size(ty, Some(universe))
-                            }).sum();
-                            let rt = crate::type_universe::ResolvedType {
-                                name: td.name.clone(),
-                                base: "Data".to_string(),
-                                bytes,
-                                min_bits: bytes * 8,
-                                max_bits: bytes * 8,
-                                alignment: 8,
-                                properties: std::collections::HashMap::new(),
-                                fields: fields.clone(),
-                            };
+                            // 2026-08-26 (bug sweep B2): shared recorded fallback —
+                            // SPEC §2.1 forbids silent representation defaults.
+                            let rt = crate::backend::register_types::record_structural_layout(
+                                universe, &td.name, "Data", &fields,
+                            );
                             universe.types.insert(td.name.clone(), rt);
                         }
                     }
