@@ -5268,18 +5268,17 @@ anywhere ("this txn is unreachable — declare it as a node to fire it in
 the tick loop") or (b) define non-reactive firing semantics (run-once at
 init). Decision needed on intended semantics first.
 
-## Qualified enum paths (`Enum::Variant`) parse nowhere — 2026-08-26 OPEN (spec gap)
+## Qualified enum paths (`Enum::Variant`) — 2026-08-26 RESOLVED
 
 SPEC §8.3/§match examples show `Result::Ok(result)` patterns and imply
-qualified construction, but the lexer's `::` token is never handled by the
-parser — neither patterns nor expressions accept qualified variant paths.
-Bare construction works and REQUIRES unique variant names across enums
-(typechecker-enforced), which is the documented v1 contract.
+qualified construction, but the lexer's `::` token was never handled by the
+parser — neither patterns nor expressions accepted qualified variant paths.
 
-**Fix direction:** primary-expression arm `Ident :: Ident ( args )?` →
-desugar to Call("Enum::Variant", …) (function names never contain `::`);
-pattern-side mirror in parse_pattern. Registry keys become
-`"Enum::Variant"` with a bare-name uniqueness fallback.
+**Resolution:** `38943d5c` — parser handles `Enum::Variant(args)` construction
+and `Enum::Variant(subpats)` patterns via `ColonColon` token. Typechecker
+registers both bare and qualified keys; ambiguity detection errors on bare
+names shared by 2+ enums. Interpreter and LLVM backend qualified-key
+registries wired. 1960 tests pass; HW harness green.
 
 **Sweep harness note:** the conformance sweep test referenced by the
 Phase-10 entry lives in the other worktree; re-run there to recount the

@@ -289,9 +289,10 @@ Entry → build_field_index → dispatch on analysis.loop_shapes[name]:
   LoopShape flags:
   1. Pure + const bound + !has_swan_song      → emit_folded_loop_shape (pure O(1) fold)
   2. version-DAG shape                        → emit_version_dag_main (self-deciding)
-  3. counter_only_writes && !has_swan_song    → emit_folded_main (InlineSsa)
-  4. vector groups && carried > regs          → emit_countable_main (VectorPhiGroup label)
-  5. _                                        → emit_countable_main (PerFieldPhi)
+  3. batch_shape present + counter matches     → emit_countable_countdown_main (A007)
+  4. counter_only_writes && !has_swan_song    → emit_folded_main (InlineSsa)
+  5. vector groups && carried > regs          → emit_countable_main (VectorPhiGroup label)
+  6. _                                        → emit_countable_main (PerFieldPhi)
 ```
 
 Phase 2 (2026-07-31) additionally moved the measurement decisions into the

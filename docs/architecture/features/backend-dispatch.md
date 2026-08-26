@@ -156,6 +156,22 @@ fannkuch_redux: 1.14x → 0.99x. See `docs/plans/2026-07-07-fannkuch-straight-li
 needs_state_stores_in_body = !pending_post_hoist.is_empty()
 ```
 
+### A007: Countdown Loop (Batch-Shape Dispatch)
+
+**File:** `loop_engine/counter.rs:emit_countable_countdown_main`
+**Condition:** Periodic post-increment guard (`count % N == 0`) with
+`BatchShape` computed by frontend analysis (`analysis/batch_shape.rs`).
+**Mechanism:** A single tight inner loop iterates `batch_size` times per
+outer tick; the guard fires once per outer iteration (cold path). Replaces
+the removed batch-loop heuristics (`loop_peeling.rs`).
+**Dispatch:** `mod.rs:5147 — analysis.batch_shape.as_ref()`
+**A/B record:** `docs/plans/2026-07-31-fmn-countdown-vs-batch-and-new-benchmarks.md`
+
+The countdown loop removes the version-DAG's modulo + body-split for
+periodic post-increment guards. Its `%fire` conditional blocks LLVM's
+mis-vectorization of cross-indexed matrix bodies (which is why the batch
+regressed `float_math_nonzero`).
+
 ### A006: Direct SSA Loop
 
 **File:** `loop_engine.rs:emit_ssa_main`

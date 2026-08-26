@@ -512,6 +512,24 @@ Normative: `docs/architecture/backend-contracts.md`. Headlines:
   wire-map + annotations-before-types, VM .lair absolute addressing) are
   documented with their failure histories in backend-contracts.md §3–§7.
 
+### Capability matrix (required integration shape)
+
+`src/backend/capabilities.rs` — `BackendCapabilities` struct declares which
+AST constructs a backend's codegen actually emits. `validate_for_backend()`
+walks the AST before codegen and rejects out-of-surface programs with
+house-style diagnostics (what / why / fix).
+
+When adding a new backend or extending an existing one:
+1. Flip the relevant flags in the backend's `capabilities()` declaration.
+2. Add tests for the new constructs.
+3. A flag set beyond real coverage produces silent drops (the bug this
+   module exists to prevent).
+
+LLVM is full-surface (`capabilities()` returns a struct with all flags `true`);
+partial-surface backends (VM, SPIR-V, CIRCT, Webstack) declare only what
+they lower. See `docs/architecture/backend-contracts.md` §3–§7 for emission
+invariants per backend.
+
 ### Frontend constructs are abstract — backends give meaning
 
 | Construct | Universal meaning | LLVM | SPIR-V | CIRCT |
