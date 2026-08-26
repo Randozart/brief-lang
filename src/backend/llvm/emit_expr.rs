@@ -2412,6 +2412,25 @@ impl LlvmBackend {
         name: &str,
         indent: &str,
     ) -> TypedRegister {
+        // 2026-08-26 (async Phase D): payload projection off an event wire —
+        // `d.amount` where d binds Event<P>. Single choke point for every
+        // Field path. The read BLOCKS inside a task segment (unready → the
+        // {0,2} blocked aggregate); outside a task it traps (gate with
+        // .^Ready, SPEC §9.5).
+        if let Expr::Identifier(wname) = recv {
+            let is_wire = self
+                .fun
+                .let_original_types
+                .get(wname)
+                .or_else(|| self.fun.let_binding_types.get(wname))
+                .map(crate::backend::llvm::emit_stmt::is_event_type)
+                .unwrap_or(false);
+            if is_wire {
+                if let Some(id_reg) = self.fun.let_bindings.get(wname).cloned() {
+                    return self.emit_event_payload_read(out, indent, &id_reg, recv, name);
+                }
+            }
+        }
         // 2026-08-12 (Iterable protocol, slice 2 gap 2): a POOLED instance
         // receiver (`c.count` on a top-level `let c: Counter` whose members
         // unpack into `{base}.{member}` columns) must route to the column at
@@ -2550,7 +2569,10 @@ impl LlvmBackend {
         }
         let reg = self.get_local(name)?;
         let base = self.fun.let_binding_types.get(name).and_then(|t| match t {
-            Type::Custom(b) if self.ctx.obj_members.contains_key(b) => {
+            Type::Custom(b)
+                if self.ctx.obj_members.contains_key(b)
+                    || self.ctx.obj_port_wiring.contains_key(b) =>
+            {
                 // 2026-08-15 (coll plan): a GROWABLE `coll obj` (`Ptr<T>`
                 // sequence) is a BOXED heap handle — never a pooled instance.
                 // Its members are the scaffolded op surface, resolved through
@@ -2998,6 +3020,29 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         let _ = v;
+        // 2026-08-26 (async Phase D): `wire.^Ready` — runtime readiness of an
+        // event port (SPEC §9.5). Checked BEFORE emitting the receiver: a
+        // wire binding has no value of its own to evaluate.
+        if target == "Ready" {
+            if let Expr::Identifier(wname) = recv {
+                let is_wire = self
+                    .fun
+                    .let_original_types
+                    .get(wname)
+                    .or_else(|| self.fun.let_binding_types.get(wname))
+                    .map(|t| crate::backend::llvm::emit_stmt::is_event_type(t))
+                    .unwrap_or(false);
+                if is_wire {
+                    if let Some(id_reg) = self.fun.let_bindings.get(wname).cloned() {
+                        let r = self.fun.gen_reg();
+                        writeln!(out, "{indent}{r} = call i32 @briev_event_ready(i64 {id_reg})").ok();
+                        let b = self.fun.gen_reg();
+                        writeln!(out, "{indent}{b} = trunc i32 {r} to i8").ok();
+                        return TypedRegister { name: b, ty: Type::Custom("Bool".to_string()) };
+                    }
+                }
+            }
+        }
         let recv_tmp = self.fun.gen_reg();
         let recv_reg = self.emit_expr_inner(out, &recv_tmp, recv, indent);
         match (target, kind) {
@@ -4101,11 +4146,64 @@ impl LlvmBackend {
         let _ = indent;
         // Argv block: [8 x i64] alloca (params ≤ 6 house gate), each arg
         // adapted to the i64 slot convention defn entry uses.
+        //
+        // 2026-08-26 (async Phase D): an Event<T> parameter receives a WIRE
+        // id. If the argument already IS a wire (an Event-typed identifier,
+        // or an instance port projection), it passes through; anything else
+        // is WRAPPED — a fresh event slot allocated and immediately fired
+        // with the value — the compiled twin of the interpreter's
+        // "plain values wrap as an already-ready event" rule (SPEC §9.5).
+        let param_types: Vec<Type> = self
+            .ctx
+            .task_segments
+            .get(name)
+            .map(|(_, ps)| ps.iter().map(|(_, t)| t.clone()).collect())
+            .unwrap_or_default();
         let argv = self.fun.gen_reg();
         writeln!(out, "{indent}{argv} = alloca [8 x i64], align 8").ok();
         for (i, a) in args.iter().enumerate() {
-            let reg = self.emit_expr(out, a, indent);
-            let val = self.adapt_to_i64(out, indent, &reg);
+            let wants_wire = param_types
+                .get(i)
+                .map(|t| crate::backend::llvm::emit_stmt::is_event_type(t))
+                .unwrap_or(false);
+            let val = if wants_wire {
+                match a {
+                    Expr::Identifier(src) if self
+                        .fun
+                        .let_original_types
+                        .get(src)
+                        .or_else(|| self.fun.let_binding_types.get(src))
+                        .map(|t| crate::backend::llvm::emit_stmt::is_event_type(t))
+                        .unwrap_or(false) =>
+                    {
+                        // Already a wire binding.
+                        let r = self.emit_expr(out, a, indent);
+                        self.adapt_to_i64(out, indent, &r)
+                    }
+                    Expr::Field(inst, _) => {
+                        // Instance port projection: the loaded column value
+                        // IS the wire id. Emitting the field read normally
+                        // requires the receiver NOT to be Event-typed, which
+                        // holds here (the instance isn't a wire).
+                        let r = self.emit_expr(out, a, indent);
+                        self.adapt_to_i64(out, indent, &r)
+                    }
+                    _ => {
+                        // Wrap: fresh slot fired with the value now.
+                        let id = self.fun.gen_reg();
+                        writeln!(out, "{indent}{id} = call i64 @briev_event_alloc()").ok();
+                        let vr = self.emit_expr(out, a, indent);
+                        let payload = self.adapt_to_i64(out, indent, &vr);
+                        writeln!(out,
+                            "{indent}call void @briev_event_fire(i64 {id}, i64 {payload})")
+                        .ok();
+                        id
+                    }
+                }
+            } else {
+                let reg = self.emit_expr(out, a, indent);
+                self.adapt_to_i64(out, indent, &reg)
+            };
             let slot = self.fun.gen_reg();
             writeln!(out,
                 "{indent}{slot} = getelementptr inbounds [8 x i64], ptr {argv}, i32 0, i32 {i}")
@@ -6140,5 +6238,148 @@ impl LlvmBackend {
                 .sum();
         }
         8
+    }
+}
+
+impl crate::backend::llvm::LlvmBackend {
+    /// 2026-08-26 (async Phase D, plan §3): payload projection off an event
+    /// wire — `d.field` where d binds `Event<P>`.
+    ///
+    /// Emits a three-way branch on briev_event_read:
+    ///   ready (1)   → project the member out of the payload slot;
+    ///   blocked (0) → INSIDE a task segment: return the {0,2} BLOCKED
+    ///                 aggregate (the read heads its segment — presplit — so
+    ///                 post-wake re-runs start here). Outside a task: trap.
+    ///   strict (2)  → trap (read with no scheduler and no event).
+    fn emit_event_payload_read(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        id_reg: &str,
+        recv: &Expr,
+        field: &str,
+    ) -> TypedRegister {
+        let slot = self.fun.gen_reg();
+        writeln!(out, "{indent}{slot} = alloca i64, align 8").ok();
+        let r = self.fun.gen_reg();
+        writeln!(out, "{indent}{r} = call i32 @briev_event_read(i64 {id_reg}, ptr {slot})").ok();
+
+        // Payload type from the wire's declared Event<P>.
+        let wire_name = match recv {
+            Expr::Identifier(n) => Some(n.clone()),
+            _ => None,
+        };
+        let wire_ty = wire_name
+            .as_ref()
+            .and_then(|n| self.fun.let_original_types.get(n).cloned())
+            .or_else(|| {
+                wire_name
+                    .as_ref()
+                    .and_then(|n| self.fun.let_binding_types.get(n).cloned())
+            });
+        let payload_ty = wire_ty.and_then(|t| match t {
+            Type::Applied(_, args) => args.first().cloned(),
+            _ => None,
+        });
+
+        let in_segment = self.fun.is_task_segment;
+        let uid = self.fun.txn_counter;
+        self.fun.txn_counter += 1;
+        let ready_lbl = format!("evr.ready{uid}");
+        let blk_lbl = format!("evr.blocked{uid}");
+        let proj_lbl = format!("evr.proj{uid}");
+
+        let is_ready = self.fun.gen_reg();
+        writeln!(out, "{indent}{is_ready} = icmp eq i32 {r}, 1").ok();
+        if in_segment {
+            // Three-way: ready → project; 0 → blocked-ret; anything else
+            // (strict / out-of-range slot) → trap rather than block forever.
+            let strict_lbl = format!("evr.seg.strict{uid}");
+            writeln!(
+                out,
+                "{indent}br i1 {is_ready}, label %{ready_lbl}, label %{strict_lbl}"
+            )
+            .ok();
+            writeln!(out, "{strict_lbl}:").ok();
+            let is_blocked = self.fun.gen_reg();
+            writeln!(out, "  {is_blocked} = icmp eq i32 {r}, 0").ok();
+            writeln!(
+                out,
+                "  br i1 {is_blocked}, label %{blk_lbl}, label %evr.trap{uid}"
+            )
+            .ok();
+            writeln!(out, "evr.trap{uid}:").ok();
+            writeln!(out, "  call void @briev_event_strict_trap()").ok();
+            writeln!(out, "  unreachable").ok();
+            writeln!(out, "{blk_lbl}:").ok();
+            // BLOCKED aggregate: cursor untouched, waiter already registered.
+            let agg0 = self.fun.gen_reg();
+            writeln!(out, "  {agg0} = insertvalue {{i64,i32}} poison, i64 0, 0").ok();
+            let agg1 = self.fun.gen_reg();
+            writeln!(out, "  {agg1} = insertvalue {{i64,i32}} {agg0}, i32 2, 1").ok();
+            writeln!(out, "  ret {{i64,i32}} {agg1}").ok();
+        } else {
+            writeln!(out, "{indent}br i1 {is_ready}, label %{ready_lbl}, label %evr.trap{uid}").ok();
+            writeln!(out, "evr.trap{uid}:").ok();
+            writeln!(out, "  call void @briev_event_strict_trap()").ok();
+            writeln!(out, "  unreachable").ok();
+        }
+        writeln!(out, "{ready_lbl}:").ok();
+
+        // Project the member from the payload slot.
+        let raw = self.fun.gen_reg();
+        writeln!(out, "  {raw} = load i64, ptr {slot}").ok();
+        let product = payload_ty.as_ref().and_then(|pt| match pt {
+            Type::Custom(n) | Type::Applied(n, _) => {
+                self.ctx.struct_types.get(n).cloned().map(|f| (pt.clone(), n.clone(), f))
+            }
+            _ => None,
+        });
+        match product {
+            Some((pty, _, fields)) => {
+                // Product payload: boxed struct handle → GEP the member at
+                // its byte offset (the layout emit_struct_literal wrote).
+                let fp = self.fun.gen_reg();
+                writeln!(out, "  {fp} = inttoptr i64 {raw} to ptr").ok();
+                let mut off: u64 = 0;
+                for (fname, fty) in &fields {
+                    if fname == field {
+                        break;
+                    }
+                    off += crate::backend::llvm::types::type_size(
+                        fty,
+                        self.ctx.type_universe.as_ref(),
+                    );
+                }
+                let gp = self.fun.gen_reg();
+                writeln!(out, "  {gp} = getelementptr i8, ptr {fp}, i64 {off}").ok();
+                let field_ty = fields
+                    .iter()
+                    .find(|(n, _)| n == field)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or_else(Type::int);
+                let llvm_ty = self.llvm_type(&field_ty).to_string();
+                let val = self.fun.gen_reg();
+                writeln!(out, "  {val} = load {llvm_ty}, ptr {gp}").ok();
+                writeln!(out, "  br label %{proj_lbl}").ok();
+                writeln!(out, "{proj_lbl}:").ok();
+                let merged = self.fun.gen_reg();
+                writeln!(
+                    out,
+                    "  {merged} = phi {llvm_ty} [ {val}, %{ready_lbl} ]"
+                )
+                .ok();
+                return TypedRegister { name: merged, ty: field_ty };
+            }
+            _ => {
+                // Scalar payload: the slot value IS the member.
+                let ty = payload_ty.unwrap_or_else(Type::int);
+                writeln!(out, "  br label %{proj_lbl}").ok();
+                writeln!(out, "{proj_lbl}:").ok();
+                let merged = self.fun.gen_reg();
+                writeln!(out, "  {merged} = phi i64 [ {raw}, %{ready_lbl} ]").ok();
+                return TypedRegister { name: merged, ty };
+            }
+        }
     }
 }

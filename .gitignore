@@ -305,3 +305,7 @@ tools/circt-src/
 tools/circt/
 lib/tamer/main
 tmp_fixtures/hw/
+*.ll
+
+# Generated LLVM IR from example builds
+examples/*.ll

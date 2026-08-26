@@ -102,6 +102,9 @@ fn task_type_is_i64_abi(
 ) -> bool {
     match ty {
         Type::Ptr(_) | Type::Bits(_) | Type::Void => true,
+        // 2026-08-26 (async Phase D): an event wire IS an i64 — the slot-id
+        // handle. Legal as a task parameter since compiled ports landed.
+        Type::Applied(base, _) if base == "Event" => true,
         _ => {
             let (cat, _) = graph.type_to_protocol(universe, ty);
             matches!(cat.as_str(), "Int" | "Bit" | "Char" | "UInt")

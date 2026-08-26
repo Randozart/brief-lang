@@ -1227,7 +1227,12 @@ typedef struct {
 typedef BrievSegOut (*BrievSegFn)(long long* argv);
 
 enum { BR_TASK_READY = 0, BR_TASK_YIELDED = 1, BR_TASK_DONE = 2,
-       BR_TASK_CANCELLED = 3 };
+       BR_TASK_CANCELLED = 3, BR_TASK_WAITING = 4 };
+
+/* The task whose segment is executing, or -1 outside any task. Set by
+ * briev_await around each segment call — the compiled twin of the
+ * interpreter's CURRENT_TASK thread-local (Phase D). */
+static long long __briev_current_task = -1;
 
 static struct {
     int status;
@@ -1281,12 +1286,20 @@ long long briev_await(long long target) {
             if (briev_tasks[id].current_segment >= briev_tasks[id].segment_count)
                 continue;
             ran_any = 1;
+            __briev_current_task = id;
             BrievSegOut out = briev_tasks[id].segments[
                 briev_tasks[id].current_segment](briev_tasks[id].args);
-            if (out.finished) {
+            __briev_current_task = -1;
+            if (out.finished == 1) {
                 briev_tasks[id].status = BR_TASK_DONE;
                 briev_tasks[id].result = out.value;
                 if ((long long)id == target) goto done;
+            } else if (out.finished == 2) {
+                /* BLOCKED on an unready port: the cursor does NOT advance —
+                 * the read heads its segment (registration presplit), so the
+                 * post-wake re-run starts AT the read. The waiter is already
+                 * registered; a fire flips status back to READY. */
+                briev_tasks[id].status = BR_TASK_WAITING;
             } else {
                 briev_tasks[id].current_segment++;
                 briev_tasks[id].status = BR_TASK_YIELDED;
@@ -1300,4 +1313,95 @@ long long briev_await(long long target) {
 done:
     if (briev_task_done(target)) return briev_tasks[target].result;
     return target;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   2026-08-26 (async Phase D, docs/plans/2026-08-26-async-phase-d-
+   compiled-ports.md): compiled event ports. A wire is an i64 handle to a
+   one-slot event record; firing stores the payload and wakes blocked
+   tasks. Reads inside a task BLOCK when unready (level-triggered, SPEC
+   §9.5/§12.2) — the segment re-runs from its head after wake, which is
+   exact-once by construction because registration presplits segments so
+   the read heads its own.
+   ════════════════════════════════════════════════════════════════════ */
+
+#define BRIEV_EVENT_MAX 128
+#define BRIEV_EVENT_WAITERS 8
+
+static struct {
+    int ready;
+    long long payload;
+    int waiters[BRIEV_EVENT_WAITERS];
+    int nwaiters;
+} briev_events[BRIEV_EVENT_MAX];
+
+static int briev_event_next = 0;
+
+long long briev_event_alloc(void) {
+    if (briev_event_next >= BRIEV_EVENT_MAX) {
+        fprintf(stderr, "briev: event table exhausted\n");
+        abort();
+    }
+    int id = briev_event_next++;
+    briev_events[id].ready = 0;
+    briev_events[id].payload = 0;
+    briev_events[id].nwaiters = 0;
+    return (long long)id;
+}
+
+static void briev_task_mark_waiting(long long tid) {
+    if (tid < 0 || tid >= briev_task_next) return;
+    if (briev_tasks[tid].status == BR_TASK_READY ||
+        briev_tasks[tid].status == BR_TASK_YIELDED) {
+        briev_tasks[tid].status = BR_TASK_WAITING;
+    }
+}
+
+int briev_event_read(long long slot, long long* out) {
+    if (slot < 0 || slot >= briev_event_next) return -1;
+    if (briev_events[slot].ready) {
+        *out = briev_events[slot].payload;
+        return 1;
+    }
+    /* Unready INSIDE a task: block — register as waiter, mark WAITING.
+     * Outside a task this returns 2 (strict-gate violation); the caller
+     * emitted code traps on it (top-level reads gate on .^Ready). */
+    long long tid = __briev_current_task;
+    if (tid < 0) return 2;
+    if (briev_events[slot].nwaiters < BRIEV_EVENT_WAITERS) {
+        briev_events[slot].waiters[briev_events[slot].nwaiters++] = (int)tid;
+    }
+    briev_task_mark_waiting(tid);
+    return 0;
+}
+
+void briev_event_fire(long long slot, long long payload) {
+    if (slot < 0 || slot >= briev_event_next) return;
+    briev_events[slot].ready = 1;
+    briev_events[slot].payload = payload;
+    /* Drain waiters: every still-WAITING task becomes schedulable again.
+     * Cancelled/Done ids are skipped — a freed task never resurrects. */
+    for (int i = 0; i < briev_events[slot].nwaiters; i++) {
+        long long tid = briev_events[slot].waiters[i];
+        if (tid < 0 || tid >= briev_task_next) continue;
+        if (briev_tasks[tid].status == BR_TASK_WAITING) {
+            briev_tasks[tid].status = BR_TASK_READY;
+        }
+    }
+    briev_events[slot].nwaiters = 0;
+}
+
+int briev_event_ready(long long slot) {
+    if (slot < 0 || slot >= briev_event_next) return 0;
+    return briev_events[slot].ready;
+}
+
+/* Phase D: a port read fired outside any task on an unready wire — the
+ * compiled form of the interpreter's strict top-level error (SPEC §9.5:
+ * gate top-level reads with .^Ready). */
+void briev_event_strict_trap(void) {
+    fprintf(stderr,
+        "briev: read of an unready event port outside a task — "
+        "gate the read with .^Ready\n");
+    abort();
 }
