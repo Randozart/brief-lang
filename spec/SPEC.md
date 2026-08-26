@@ -926,6 +926,14 @@ task schedulable. Wake is level-triggered: slot values are stable once
 written, so re-entry converges. Reads outside any task keep the strict
 error — top-level code gates on `.^Ready`.
 
+The native backend executes this contract identically: a wire is an `i64`
+slot handle into the runtime event table; obj spawning allocates the
+instance's output-port slots in its own pool row and binds input ports
+positional to caller-supplied wires (a wire IS an integer). An `Event<T>`
+parameter fed a plain value wraps it — a fresh slot allocated and fired
+immediately, so the callee observes an already-ready event. Ports-only objs
+(no members) participate as pools whose columns are exactly their ports.
+
 Cells enforce sealing: external references to cell internals fail at compile time; only declared ports are externally visible.
 
 ### 9.6 Cells
@@ -1399,6 +1407,14 @@ repeating iterations.
 If every remaining task is blocked, no producer will ever fire: `await`
 returns the handle unchanged instead of hanging (cooperative scheduler —
 no preemption, no deadlock detection; a blocked cycle is a program error).
+
+The native backend keeps this model byte-for-byte in structure: each task
+lowers to one function per segment taking an argv block (the parameters —
+the only values that cross boundaries), and `await` drives the same
+round-robin over a C task table. A blocked segment returns its blocked
+aggregate; the cursor stays at the read; the post-wake re-run restarts it.
+Event wiring lives in the same runtime table on both paths, so compiled
+and interpreted programs interleave identically at every boundary.
 
 `free task` before any await prevents execution entirely (the body never runs). After await has started execution, free sets a cancellation flag checked at each yield boundary. A freed task never resurrects: a later fire on its port skips it.
 

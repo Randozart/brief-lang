@@ -85,6 +85,38 @@ LLVM `obj_ports` flips TRUE (cells stay false — B2 was interpreter-side).
   level-triggered (SPEC §9.5 unchanged).
 - Float payloads (same i64-ABI gate as Phase C).
 
+## Milestone log — slice 2/3 complete (2026-08-26, commit 340c43c9)
+
+`examples/async-events.bv` compiles + links + runs; wake path verified
+end-to-end with a printable twin (`17` = consume(7) + produce(1)·10 —
+result reachable only if fire woke a blocked consumer through the
+round-robin). Suite 1960 green. Four defects found and fixed:
+
+1. **Empty-slot vacuous truth** — early TypeDef walk guard
+   `!slots.is_empty() && !slots.iter().all(variant)` rejected ports-only
+   objs: on zero slots `all()` is vacuously true. Guard now
+   `(empty || !all_variant)`; the arm appends port columns to
+   struct_types and seeds obj_port_wiring.
+2. **obj_members-only pool gate** — the spawn-pool registration loop in
+   build_field_index skipped bases without members; widened to accept
+   obj_port_wiring bases. Same widening in `instance_prefix_for`
+   (emit_expr.rs), else `bus.evt` fell to the boxed inttoptr path.
+3. **Base-store wiring** — emit_spawn_init stored event-slot ids at the
+   column BASE while reads indexed by row; wiring now goes through
+   emit_instance_column_row so ids land in THIS spawn's row. Duplicate
+   pre-Init wiring block removed (would double-allocate for Init'd objs).
+4. **Fold-path type pin** — the main-fold Let recorded the column-read
+   register type (Int), losing `Event<Damage>`; the spawn-site wrapper
+   then re-wrapped `wire` into PRIVATE slots (alloc+fire per arg) and
+   payload projections derefed address 0. A declared Event<T> pin now
+   wins over reg.ty in loop_engine/counter.rs.
+
+Also flipped LLVM CAPABILITIES.obj_ports = true (capability gate was
+checked before context existed).
+
+Remaining for 3/3: none functional — SPEC §9.5/§12.2 notes landed this
+slice; final sweep/praetor pass stands.
+
 ## Undo
 
 Revert rt.c block + backend arms + capability flip; interpreter untouched.
