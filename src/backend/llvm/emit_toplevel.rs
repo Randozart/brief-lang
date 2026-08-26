@@ -1945,6 +1945,46 @@ impl LlvmBackend {
         args: &[Expr],
         row_reg: &str,
     ) {
+        // 2026-08-26 (async Phase D): port WIRING runs FIRST and INDEPENDENT
+        // of any `op Init` — a ports-only obj (pure event bus) has no Init
+        // member yet must still allocate/wire its event-slot columns.
+        let (ports_in, ports_out) = self
+            .ctx
+            .obj_port_wiring
+            .get(base)
+            .cloned()
+            .unwrap_or_default();
+        if self.ctx.obj_ports_enabled {
+            // 2026-08-26 (async Phase D): pool columns are `[capacity x T]`
+            // ROWED arrays — wiring MUST go through emit_instance_column_row so
+            // the event-slot id lands in THIS spawn's row (row_reg), not
+            // element 0 of the column.
+            for pname in &ports_out {
+                let id = self.fun.gen_reg();
+                writeln!(out, "{indent}{id} = call i64 @briev_event_alloc()").ok();
+                let slot_idx = match self.ctx.field_index_map.get(&format!("{base}.{pname}")) {
+                    Some(&i) => i,
+                    None => continue,
+                };
+                let (row_ptr, _, _) =
+                    self.emit_instance_column_row(out, indent, slot_idx, row_reg);
+                writeln!(out, "{indent}store i64 {id}, ptr {row_ptr}").ok();
+            }
+            for (i, pname) in ports_in.iter().enumerate() {
+                if let Some(a) = args.get(i) {
+                    let tmp = self.fun.gen_reg();
+                    let vr = self.emit_expr_inner(out, &tmp, a, indent);
+                    let val = self.adapt_to_i64(out, indent, &vr);
+                    let slot_idx = match self.ctx.field_index_map.get(&format!("{base}.{pname}")) {
+                        Some(&ix) => ix,
+                        None => continue,
+                    };
+                    let (row_ptr, _, _) =
+                        self.emit_instance_column_row(out, indent, slot_idx, row_reg);
+                    writeln!(out, "{indent}store i64 {val}, ptr {row_ptr}").ok();
+                }
+            }
+        }
         let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
@@ -1972,7 +2012,6 @@ impl LlvmBackend {
         };
         self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.to_string(), row_reg.to_string())) }, indent);
     }
-
     /// 2026-08-09 (Phase 5): emit a `box`/`spill` spawn — the instance is its
     /// own heap allocation (NOT a pooled column row). A per-instance block
     /// sized to the base's member columns is malloc'd, the Init member runs
@@ -5144,6 +5183,13 @@ impl crate::backend::llvm::LlvmBackend {
     pub(super) fn emit_task_runtime(&mut self, out: &mut String) {
         writeln!(out,
             "declare i64 @briev_task_spawn(ptr, i32, i32, ptr)").ok();
+        // 2026-08-26 (async Phase D): event-port runtime surface.
+        writeln!(out, "declare i64 @briev_event_alloc()").ok();
+        writeln!(out, "declare void @briev_event_fire(i64, i64)").ok();
+        writeln!(out,
+            "declare i32 @briev_event_read(i64, ptr)").ok();
+        writeln!(out, "declare i32 @briev_event_ready(i64)").ok();
+        writeln!(out, "declare void @briev_event_strict_trap()").ok();
         writeln!(out,
             "declare i64 @briev_await(i64)").ok();
         writeln!(out,
@@ -5198,20 +5244,23 @@ impl crate::backend::llvm::LlvmBackend {
         self.fun.fn_ret_ty = "i64".to_string();
         self.fun.returns_i64 = true;
         self.fun.terminated = false;
+        self.fun.is_task_segment = true;
         writeln!(out,
             "define internal {{i64,i32}} @__task_{task_name}_seg{k}(ptr %argv) {{").ok();
         writeln!(out, "entry:").ok();
-        for (i, (pname, _pty)) in params.iter().enumerate() {
+        for (i, (pname, pty)) in params.iter().enumerate() {
             let slot = self.fun.gen_reg();
             writeln!(out,
                 "  {slot} = getelementptr inbounds [8 x i64], ptr %argv, i32 0, i32 {i}")
             .ok();
             let val = self.fun.gen_reg();
             writeln!(out, "  {val} = load i64, ptr {slot}").ok();
-            // Same convention as defn entry: every param lives as an i64 reg.
+            // Real declared types — Phase D arms dispatch on Event(_) here;
+            // Int-typed wires and scalars share the i64 representation, so
+            // the LOAD stays uniform either way.
             self.fun.let_bindings.insert(pname.clone(), val);
-            self.fun.let_original_types.insert(pname.clone(), Type::int());
-            self.fun.let_binding_types.insert(pname.clone(), Type::int());
+            self.fun.let_original_types.insert(pname.clone(), pty.clone());
+            self.fun.let_binding_types.insert(pname.clone(), pty.clone());
         }
         let mut last_val: Option<String> = None;
         // 2026-08-27 fix: `term expr;` is intercepted BEFORE the generic

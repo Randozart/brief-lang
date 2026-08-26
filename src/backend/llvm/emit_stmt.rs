@@ -1093,6 +1093,29 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::ArrowAssign { target, value, consume } => {
+            // 2026-08-26 (async Phase D): FIRING an event wire — `w <- v;`
+            // where w binds an Event<_> (the i64 slot id). The compiled twin
+            // of the interpreter's Phase B fire: payload stored + waiters
+            // woken inside briev_event_fire.
+            if let Some(Expr::Identifier(wname)) = target.as_ref().map(|t| t.as_ref()) {
+                let is_wire = backend
+                    .fun
+                    .let_original_types
+                    .get(wname)
+                    .or_else(|| backend.fun.let_binding_types.get(wname))
+                    .map(is_event_type)
+                    .unwrap_or(false);
+                if is_wire {
+                    if let Some(id_reg) = backend.fun.let_bindings.get(wname).cloned() {
+                        let val = backend.emit_expr(out, value, indent);
+                        let boxed = backend.adapt_to_i64(out, indent, &val);
+                        writeln!(out,
+                            "{indent}call void @briev_event_fire(i64 {id_reg}, i64 {boxed})")
+                        .ok();
+                        return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                    }
+                }
+            }
             // 2026-08-01 (Phase 3): the arrow — find the collection by the op
             // binding on each side:
             //   - the TARGET is a stream symbol (#StdOut/#StdErr) → a write;
@@ -2372,4 +2395,13 @@ fn emit_destroy_consumed(
     }
     let reg = backend.emit_expr(out, value, indent);
     emit_destroy_register(backend, out, indent, &reg.name);
+}
+
+/// 2026-08-26 (async Phase D): does this declared type name the event-wire
+/// surface (`Event<T>`)? The typechecker's own resolve_field_type matches
+/// the `Event` base the same way (SPEC §9.5) — a wire is an i64 slot-id
+/// handle at the LLVM level, so this is ABI classification, not layout
+/// lookup.
+pub(crate) fn is_event_type(ty: &Type) -> bool {
+    matches!(ty, Type::Applied(base, _) if base == "Event")
 }

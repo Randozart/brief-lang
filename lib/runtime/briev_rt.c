@@ -1395,3 +1395,13 @@ int briev_event_ready(long long slot) {
     if (slot < 0 || slot >= briev_event_next) return 0;
     return briev_events[slot].ready;
 }
+
+/* Phase D: a port read fired outside any task on an unready wire — the
+ * compiled form of the interpreter's strict top-level error (SPEC §9.5:
+ * gate top-level reads with .^Ready). */
+void briev_event_strict_trap(void) {
+    fprintf(stderr,
+        "briev: read of an unready event port outside a task — "
+        "gate the read with .^Ready\n");
+    abort();
+}

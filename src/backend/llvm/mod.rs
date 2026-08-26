@@ -1001,7 +1001,7 @@ pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities = {
         "the native LLVM target",
         "it compiles Briev to machine code through LLVM",
     );
-    caps.obj_ports = false;
+    caps.obj_ports = true;
     caps.cells = false;
     caps
 };
@@ -2252,7 +2252,7 @@ impl LlvmBackend {
                 // 2026-08-26 (Track B): ENUMS are excluded from struct
                 // registration — all-`__variant_*` slots are variant tags,
                 // not fields; enum values live as boxed-image i64 handles.
-                TopLevel::TypeDef(td) if !td.body.slots.is_empty() && !td.body.slots.iter().all(|s| s.name.starts_with("__variant_")) => {
+                TopLevel::TypeDef(td) if (!td.body.slots.is_empty() || !td.ports_out.is_empty()) && (td.body.slots.is_empty() || !td.body.slots.iter().all(|s| s.name.starts_with("__variant_"))) => {
                     let mut fields: Vec<(String, Type)> = td.body.slots.iter()
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
@@ -2264,6 +2264,25 @@ impl LlvmBackend {
                     if td.coll {
                         fields.push(("cap".to_string(), Type::int()));
                         fields.push(("len".to_string(), Type::int()));
+                    }
+                    // 2026-08-26 (async Phase D): port columns join the layout
+                    // as i64 event-slot-id slots — a ports-only obj (pure event
+                    // bus) registers here even with zero data slots.
+                    let port_ins: Vec<String> =
+                        td.ports_in.iter().map(|(n, _)| n.clone()).collect();
+                    let port_outs: Vec<String> =
+                        td.ports_out.iter().map(|(n, _)| n.clone()).collect();
+                    for pname in &port_ins {
+                        fields.push((pname.clone(), Type::int()));
+                    }
+                    for pname in &port_outs {
+                        fields.push((pname.clone(), Type::int()));
+                    }
+                    if !port_ins.is_empty() || !port_outs.is_empty() {
+                        self.ctx
+                            .obj_port_wiring
+                            .entry(td.name.clone())
+                            .or_insert((port_ins, port_outs));
                     }
                     self.ctx.struct_types.entry(td.name.clone()).or_insert(fields);
                     // 2026-08-13 (obj value ABI): a slotted `obj`/`type` VALUE
@@ -5557,7 +5576,12 @@ impl LlvmBackend {
         pool_bases.sort();
         pool_bases.dedup();
         for base in &pool_bases {
-            if !self.ctx.obj_members.contains_key(base) {
+            // 2026-08-26 (async Phase D): a PORTS-ONLY obj (no members —
+            // e.g. a pure event bus) still gets a pool: its port columns are
+            // the whole instance surface.
+            if !self.ctx.obj_members.contains_key(base)
+                && !self.ctx.obj_port_wiring.contains_key(base)
+            {
                 continue;
             }
             // 2026-08-15 (coll plan): a growable coll (Ptr<T>) is a heap

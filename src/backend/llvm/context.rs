@@ -92,6 +92,14 @@ pub struct CompilerContext {
     /// spawn-targeted defns appear here.
     pub task_segments:
         std::collections::HashMap<String, (Vec<Vec<Statement>>, Vec<(String, Type)>)>,
+    /// 2026-08-26 (async Phase D): per-obj port wiring order — base name →
+    /// (in-port names, out-port names). Populated alongside struct_types so
+    /// spawn can allocate/wire event-slot columns positionally.
+    pub obj_port_wiring: std::collections::HashMap<String, (Vec<String>, Vec<String>)>,
+    /// 2026-08-26 (async Phase D): port-event lowering is an LLVM-surface
+    /// feature; the flag gates the emission arms. Always true on this
+    /// backend (capability `obj_ports` mirrors it).
+    pub obj_ports_enabled: bool,
     /// 2026-08-16 (multi-node internal fold, Direction 3): reactive txn names
     /// whose whole bounded pass runs inside `@txn_<name>` (a noinline countdown
     /// loop) — the reactor dispatch calls the txn once per pass instead of
@@ -406,6 +414,8 @@ impl CompilerContext {
             coll_safe_txns: std::collections::HashSet::new(),
             coll_pregrow: std::collections::HashMap::new(),
             task_segments: std::collections::HashMap::new(),
+            obj_port_wiring: std::collections::HashMap::new(),
+            obj_ports_enabled: true,
             internal_fold_txns: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
@@ -782,6 +792,10 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
 
     // Function-level state flags
     pub terminated: bool,
+    /// 2026-08-26 (async Phase D): true while emitting a `__task_*_seg<k>`
+    /// body — an unready port read may suspend (returns the BLOCKED
+    /// aggregate); anywhere else it traps (top-level reads gate on .^Ready).
+    pub is_task_segment: bool,
     /// 2026-07-27: Name of the transaction/function being compiled.
     /// Used as key for CompilerContext.needs_arena lookup.
     pub txn_name: String,
@@ -1040,6 +1054,7 @@ impl FunctionContext {
             phi_induction_reg: None,
             loop_exit_label: None,
             terminated: false,
+            is_task_segment: false,
             txn_name: String::new(),
             returns_i64: false,
             fn_ret_ty: "void".to_string(),
@@ -1120,6 +1135,7 @@ impl FunctionContext {
         self.boxed_scalar_regs.clear();
         self.task_handle_regs.clear();
         self.task_handle_names.clear();
+        self.is_task_segment = false;
         self.pending_consumes.clear();
         self.let_binding_allocas.clear();
         self.struct_literal_allocas.clear();

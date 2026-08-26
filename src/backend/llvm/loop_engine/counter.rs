@@ -1729,8 +1729,24 @@ impl LlvmBackend {
                     // last_val_temps. Without them h.inc() fell back to the
                     // boxed self (inttoptr the row) and dereferenced address 1.
                     self.fun.let_bindings.insert(name.clone(), reg.name.clone());
-                    self.fun.let_binding_types.insert(name.clone(), reg.ty.clone());
-                    self.fun.let_original_types.insert(name.clone(), reg.ty.clone());
+                    // 2026-08-26 (async Phase D): a declared Event<T> pin wins
+                    // over the column-read register type. A port projection
+                    // (`let wire: Event<P> = bus.evt`) loads an i64 wire id
+                    // whose column row types as Int; without the pin the
+                    // spawn-site wrapper re-wraps the arg into a PRIVATE slot
+                    // and payload projections deref address 0.
+                    if let Statement::Let { ty: Some(dt), .. } = stmt {
+                        if crate::backend::llvm::emit_stmt::is_event_type(dt) {
+                            self.fun.let_binding_types.insert(name.clone(), dt.clone());
+                            self.fun.let_original_types.insert(name.clone(), dt.clone());
+                        } else {
+                            self.fun.let_binding_types.insert(name.clone(), reg.ty.clone());
+                            self.fun.let_original_types.insert(name.clone(), reg.ty.clone());
+                        }
+                    } else {
+                        self.fun.let_binding_types.insert(name.clone(), reg.ty.clone());
+                        self.fun.let_original_types.insert(name.clone(), reg.ty.clone());
+                    }
                 }
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
