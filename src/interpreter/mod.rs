@@ -698,10 +698,22 @@ fn mentions_param_field(stmt: &Statement, params: &[String]) -> bool {
     if params.is_empty() { return false; }
     fn expr_walk(e: &Expr, params: &[String]) -> bool {
         match e {
-            Expr::Field(recv, _) => match recv.as_ref() {
-                Expr::Identifier(name) if params.iter().any(|p| p == name) => true,
-                other => expr_walk(other, params),
-            },
+            Expr::Field(recv, _) => {
+                // Root-identifier rule: a nested port path (`ch.out.amount`)
+                // roots at the parameter, so the read heads its segment too.
+                let mut root = recv.as_ref();
+                loop {
+                    match root {
+                        Expr::Identifier(name) => {
+                            if params.iter().any(|p| p == name) { return true; }
+                            break;
+                        }
+                        Expr::Field(inner, _) | Expr::Index(inner, _) => root = inner,
+                        _ => break,
+                    }
+                }
+                expr_walk(recv, params)
+            }
             _ => false,
         }
     }

@@ -3381,3 +3381,51 @@ fn spec_object_ports_example_runs() {
         panic!("expected instance");
     }
 }
+
+// ── 2026-08-26 (async Phase B): concurrent acceptance example ───────────
+
+#[test]
+fn async_phase_b_example_runs() {
+    // docs/plans/2026-08-26-async-phase-b.md acceptance: the concurrent
+    // program runs — one await interleaves BOTH tasks; the consumer's
+    // blocked read is woken by the producer's port fire.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/async-events.bv"
+    ))
+    .unwrap();
+    let tokens = crate::lexer::tokenize(&src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, &src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    let node_body: Vec<Statement> = items
+        .iter()
+        .find_map(|i| match i {
+            TopLevel::Transaction(t) if t.name == "run" => Some(t.body.clone()),
+            _ => None,
+        })
+        .expect("node run present");
+
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    for stmt in &node_body {
+        let _ = eval_statement(stmt, &mut interp.heap, &mut bindings, &interp.functions);
+    }
+    assert_eq!(
+        bindings.get("v").and_then(|v| v.as_i64()),
+        Some(7),
+        "await(consume) sees the producer's fired payload"
+    );
+    assert_eq!(
+        bindings.get("produced").and_then(|v| v.as_i64()),
+        Some(1),
+        "producer completed through the same scheduler"
+    );
+    // Both tasks reached Done; nothing left schedulable.
+    let snapshot = crate::interpreter::task_table_snapshot().unwrap();
+    assert!(
+        snapshot.values().all(|e| e.status == crate::interpreter::TaskStatus::Done),
+        "every spawned task finished: {snapshot:?}"
+    );
+}

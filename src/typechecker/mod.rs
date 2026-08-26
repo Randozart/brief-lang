@@ -3929,7 +3929,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             if !td.body.op_bindings.is_empty() {
                 all_regular_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
             }
-            if !td.body.slots.is_empty() {
+            // 2026-08-26 (async Phase B): a ports-only obj (empty slot list)
+            // must still register — its OUT ports ARE its instance surface.
+            if !td.body.slots.is_empty() || !td.ports_out.is_empty() {
                 // 2026-08-15 (coll plan §3.3): a `coll obj` appends two hidden
                 // trailing slots (`cap`, `len`) — the typechecker must see them
                 // so member bodies and field access referencing them typecheck.
@@ -3943,6 +3945,19 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     slots.push(crate::ast::top::TypeDefSlot {
                         name: "len".to_string(),
                         ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                }
+                // 2026-08-26 (async Phase B): obj OUT ports resolve as fields
+                // of the instance (`bus.evt` yields the shared EventQ handle)
+                // — same rule cells got at Phase 7a. Inputs do NOT: they are
+                // supplied at construction (SPEC §9.5 sealing). The
+                // interpreter's Instance-field arm already served handles for
+                // every declared port; this closes the typechecker gap.
+                for (oname, oty) in &td.ports_out {
+                    slots.push(crate::ast::top::TypeDefSlot {
+                        name: oname.clone(),
+                        ty: oty.clone(),
                         bit_range: None,
                     });
                 }
