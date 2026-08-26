@@ -917,7 +917,14 @@ Input ports expose two operations:
 - **`port.^Ready`** → Bool — runtime reflection on the port's internal state flag. True when a pending event is observable.
 - **`port.field`** → payload member projection. Falls through to the payload type's declared fields (`damage.amount` where damage is `Event<Damage>`).
 
-Output ports fire via ArrowAssign: `died <- value;` sets the shared slot's Ready flag and stores the payload. Wired consumers observe the same slot (shared `Rc<RefCell<EventSlot>>`). Delivery order is deterministic — scheduler order, no implicit concurrency.
+Output ports fire via ArrowAssign: `died <- value;` sets the shared slot's Ready flag and stores the payload. Wired consumers observe the same slot (shared storage — identity, not copy). Delivery order is deterministic — scheduler order, no implicit concurrency.
+
+**Firing wakes blocked tasks (§12.2).** A task reading a payload member off
+an unready port does not error — it suspends (`Waiting`) and registers as a
+waiter on that slot. Firing drains the waiter list, re-marking each blocked
+task schedulable. Wake is level-triggered: slot values are stable once
+written, so re-entry converges. Reads outside any task keep the strict
+error — top-level code gates on `.^Ready`.
 
 Cells enforce sealing: external references to cell internals fail at compile time; only declared ports are externally visible.
 
@@ -1364,7 +1371,21 @@ Spawn **captures** the function and its evaluated arguments but does NOT execute
 
 Deterministic interleaving at yield boundaries: tasks execute one segment per scheduling pass, in spawn order. Single-threaded scheduler — no data races, no nondeterministic ordering.
 
-`free task` before any await prevents execution entirely (the body never runs). After await has started execution, free sets a cancellation flag checked at each yield boundary.
+**Blocking port reads are suspension points.** A spawned task that reads a
+payload member off an unready event port suspends at that read (status
+`Waiting`); it consumes no further scheduling passes until some task fires
+the awaited slot, which re-marks it schedulable (§9.5). Registration splits
+task bodies so a blocking read heads its own segment — statements before
+the read run exactly once, and the post-wake re-run starts AT the read.
+A read inside a `foreach` body sits behind the whole loop statement: gate
+loop reads with `.^Ready` checks so gated re-entry converges instead of
+repeating iterations.
+
+If every remaining task is blocked, no producer will ever fire: `await`
+returns the handle unchanged instead of hanging (cooperative scheduler —
+no preemption, no deadlock detection; a blocked cycle is a program error).
+
+`free task` before any await prevents execution entirely (the body never runs). After await has started execution, free sets a cancellation flag checked at each yield boundary. A freed task never resurrects: a later fire on its port skips it.
 
 **Obj-instance spawn storage classes.** `spawn Obj(...)` allocates the
 instance from the obj's static pool column (the default, provably
