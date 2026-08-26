@@ -49,3 +49,8 @@ accel_probe_margin: 0.05;
 circt.firmem_min_depth: 64;
 
 circt.firmem_max_ports: 4;
+
+// CIRCT FSM clock frequency (Hz). Converts time-unit watchdog bounds
+// ('within 10ms') to cycle counts; 0 = unset, such watchdogs are
+// capability errors naming this knob.
+circt.clock_hz: 0;

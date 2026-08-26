@@ -126,6 +126,12 @@ struct WdMonitor {
         /// This txn's pre-guard wire (§3.4 commit gate) — memory-macro
         /// write ports fold it into their ENABLE. None = trivially true.
         gate: Option<String>,
+        /// Active `when` conditions (stack — nested guards AND). Every
+        /// state write underneath must respect them; empty = unconditional.
+        /// 2026-08-26: previously ONLY scalar assigns saw the innermost
+        /// condition — element writes were SILENTLY DROPPED and deeper
+        /// statements ran ungated.
+        gates: Vec<String>,
     }
 
 impl CirctBackend {
@@ -366,6 +372,12 @@ impl CirctBackend {
         }
     }
 
+    /// Time-unit watchdog bound → cycles: ceil(hz * ns / 1e9), u128-safe.
+    fn ns_to_cycles(hz: u64, ns: u64) -> u64 {
+        ((hz as u128 * ns as u128 + 999_999_999) / 1_000_000_000)
+            .min(u64::MAX as u128) as u64
+    }
+
     /// Address width for a depth-D macro: ceil(log2(D)), minimum 1 — the
     /// seq dialect verifier enforces exactly this on port ops.
     fn addr_width(depth: usize) -> u32 {
@@ -483,13 +495,31 @@ impl CirctBackend {
                 ));
                 continue;
             }
-            let Some(bound) = wd.cycles_bound else {
-                self.record_unsupported(&format!(
-                    "watchdog in txn '{}' — a time-unit bound needs a clock-frequency \
-                     mapping this surface does not carry; use 'within N cyc'",
-                    txn.name
-                ));
-                continue;
+            let bound = match wd.cycles_bound {
+                Some(b) => b,
+                None => {
+                    // Time-unit bound: convertible iff a clock frequency is
+                    // configured (circt.clock_hz in ir-lowering.dbvl).
+                    let Some(ns) = wd.deadline_ns else {
+                        self.record_unsupported(&format!(
+                            "watchdog in txn '{}' — no time bound parsed",
+                            txn.name
+                        ));
+                        continue;
+                    };
+                    let hz = crate::config_tuning::ir_lowering().clock_hz;
+                    if hz == 0 {
+                        self.record_unsupported(&format!(
+                            "watchdog in txn '{}' — a time-unit bound needs a clock \
+                             frequency mapping this surface does not carry; set \
+                             'circt.clock_hz' in config/ir-lowering.dbvl, or use \
+                             'within N cyc'",
+                            txn.name
+                        ));
+                        continue;
+                    }
+                    Self::ns_to_cycles(hz, ns)
+                }
             };
             let port = format!("wd_{}_tmo", txn.name);
             wd_monitors.push(WdMonitor {
@@ -747,6 +777,7 @@ impl CirctBackend {
                     pending: &mut pending,
                     ob: &mut ob,
                     gate: None,
+                    gates: Vec::new(),
                 };
                 self.emit_txn_body(&mut ng, out, &txn.body, &mut m);
             }
@@ -1361,11 +1392,24 @@ impl CirctBackend {
                                 a, idx_val, aw
                             )
                             .ok();
-                            // Enable = commit gate (None ⇒ trivially true,
-                            // omit — port defaults to constant true).
-                            let enable = match &m.gate {
-                                Some(g) => format!(" enable {}", g),
-                                None => String::new(),
+                            // Enable = §3.4 commit gate AND active when
+                            // gates (refusal or guard-false ⇒ hold). Omit
+                            // when unconditional — port defaults true.
+                            let mut ens: Vec<String> = Vec::new();
+                            if let Some(g) = &m.gate {
+                                ens.push(g.clone());
+                            }
+                            if let Some(w) = Self::when_mask(ng, out, m) {
+                                ens.push(w);
+                            }
+                            let enable = match ens.len() {
+                                0 => String::new(),
+                                1 => format!(" enable {}", ens[0]),
+                                _ => {
+                                    let a =
+                                        Self::reduce_tree(ng, out, "comb.and", &ens, "%true");
+                                    format!(" enable {}", a)
+                                }
                             };
                             writeln!(
                                 out,
@@ -1395,12 +1439,27 @@ impl CirctBackend {
                         else {
                             return;
                         };
+                        // Active `when` gates AND into every lane select.
+                        let wmask = Self::when_mask(ng, out, m);
                         for (j, lane) in lanes.iter().enumerate() {
                             let cj = ng.fresh_const("aidx");
                             writeln!(out, "  {} = hw.constant {} : i64", cj, j).ok();
                             let eq = ng.fresh_wire("aeq");
                             writeln!(out, "  {} = comb.icmp eq {}, {} : i64", eq, idx_val, cj)
                                 .ok();
+                            let sel = match &wmask {
+                                Some(gmask) => {
+                                    let gsel = ng.fresh_wire("asel");
+                                    writeln!(
+                                        out,
+                                        "  {} = comb.and {}, {} : i1",
+                                        gsel, eq, gmask
+                                    )
+                                    .ok();
+                                    gsel
+                                }
+                                None => eq,
+                            };
                             let current = m.pending
                                 .get(lane)
                                 .cloned()
@@ -1410,7 +1469,7 @@ impl CirctBackend {
                             writeln!(
                                 out,
                                 "  {} = comb.mux {}, {}, {} : {}",
-                                w, eq, val, current, elem_ty
+                                w, sel, val, current, elem_ty
                             )
                             .ok();
                             m.pending.insert(lane.clone(), w);
@@ -1443,46 +1502,49 @@ impl CirctBackend {
                                 c
                             }
                         };
-                        let w = ng.fresh_wire(&format!("{}_next", var_name));
-                        writeln!(out, "  {} = comb.mux %true, {}, {} : {}", w, val, target, mlir_ty)
-                            .ok();
-                        m.pending.insert(var_name.to_string(), w);
+                        // Active `when` gates mux the pending value; the
+                        // txn pre-guard still applies later via the §3.4
+                        // commit gate (idempotent separation of concerns).
+                        let masked = match Self::when_mask(ng, out, m) {
+                            Some(gmask) => {
+                                let w = ng.fresh_wire(&format!("{}_when", var_name));
+                                writeln!(
+                                    out,
+                                    "  {} = comb.mux {}, {}, {} : {}",
+                                    w, gmask, val, target, mlir_ty
+                                )
+                                .ok();
+                                w
+                            }
+                            None => {
+                                let w = ng.fresh_wire(&format!("{}_next", var_name));
+                                writeln!(
+                                    out,
+                                    "  {} = comb.mux %true, {}, {} : {}",
+                                    w, val, target, mlir_ty
+                                )
+                                .ok();
+                                w
+                            }
+                        };
+                        m.pending.insert(var_name.to_string(), masked);
                     }
                 }
             }
             Statement::Guarded(condition, statements) => {
-                let cond_ty = "i1";
-                if let Some(cond) = self.emit_expr(ng, out, condition, m.reg_names, cond_ty) {
+                // 2026-08-26 (gate threading): the condition joins the
+                // active gate stack; EVERY inner statement — scalar assign,
+                // array element write, nested when — is emitted through the
+                // normal path and sees the ANDed mask. Previously only
+                // scalar assigns were gated (innermost condition only),
+                // element writes were silently dropped, and other
+                // statements ran ungated.
+                if let Some(cond) = self.emit_expr(ng, out, condition, m.reg_names, "i1") {
+                    m.gates.push(cond);
                     for inner in statements {
-                        if let Statement::Assign(lhs, expr) = inner {
-                            if let Some(var_name) = lhs.as_var_name() {
-                                let mlir_ty = self.mlir_type(
-                                    self.var_types.get(var_name).unwrap_or(&Type::int()),
-                                );
-                                if let Some(val) =
-                                    self.emit_expr(ng, out, expr, m.reg_names, &mlir_ty)
-                                {
-                                    let current = m.pending
-                                        .get(var_name)
-                                        .cloned()
-                                        .or_else(|| m.reg_names.get(var_name).cloned())
-                                        .unwrap_or_else(|| "%0".to_string());
-                                    // enabled write: cond ? new : hold-current
-                                    let w =
-                                        ng.fresh_wire(&format!("{}_when", var_name));
-                                    writeln!(
-                                        out,
-                                        "  {} = comb.mux {}, {}, {} : {}",
-                                        w, cond, val, current, mlir_ty
-                                    )
-                                    .ok();
-                                    m.pending.insert(var_name.to_string(), w);
-                                }
-                            }
-                        } else {
-                            self.emit_stmt_pending(ng, out, inner, m);
-                        }
+                        self.emit_stmt_pending(ng, out, inner, m);
                     }
+                    m.gates.pop();
                 }
             }
             Statement::SyncBlock(body) | Statement::Block(body) => {
@@ -1627,6 +1689,18 @@ impl CirctBackend {
             }
         }
         "i64".to_string()
+    }
+
+    /// AND-reduce of the active `when` gates (None = unconditional).
+    fn when_mask(
+        ng: &mut NameGen,
+        out: &mut String,
+        m: &TxnMaps<'_>,
+    ) -> Option<String> {
+        if m.gates.is_empty() {
+            return None;
+        }
+        Some(Self::reduce_tree(ng, out, "comb.and", &m.gates, "%true"))
     }
 
     /// Width for a comparison: whichever side carries a sized register.
@@ -1992,6 +2066,125 @@ mod tests {
             expr: Some(Expr::List(vec![Expr::Decimal(0); depth])),
             modifiers,
         }))
+    }
+
+    #[test]
+    fn test_guarded_element_write_emits_mem_enable() {
+        // 2026-08-26 (gate threading): `when c { buf[i] = v; }` on a
+        // mem-lowered array — the when-condition ANDs into the write
+        // ENABLE. Previously a SILENT DROP.
+        let items = vec![
+            make_state_decl("w", Type::int()),
+            make_array_let("buf", 64, None),
+            make_txn(
+                "fill",
+                vec![Statement::Guarded(
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Gt,
+                        Box::new(Expr::Identifier("w".into())),
+                        Box::new(Expr::Decimal(2)),
+                    ),
+                    vec![Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("buf".into())),
+                            Box::new(Expr::Identifier("w".into())),
+                        ),
+                        Expr::Decimal(1),
+                    )],
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ];
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&items);
+        assert!(
+            output.contains("seq.firmem.write_port"),
+            "guarded element write vanished:\n{}",
+            output
+        );
+        // Single when-gate rides the ENABLE directly; multiple gates AND.
+        assert!(
+            output.contains("write_port") && output.contains("enable %"),
+            "when-condition must gate the enable:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_guarded_element_write_gates_lane_decode() {
+        // Same statement against a REGISTER-FILE array: the when-mask ANDs
+        // into every lane select; no silent drop, no ungated write.
+        let items = vec![
+            make_state_decl("w", Type::int()),
+            make_array_let("buf", 8, Some("reg")),
+            make_txn(
+                "fill",
+                vec![Statement::Guarded(
+                    Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Gt,
+                        Box::new(Expr::Identifier("w".into())),
+                        Box::new(Expr::Decimal(2)),
+                    ),
+                    vec![Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("buf".into())),
+                            Box::new(Expr::Decimal(3)),
+                        ),
+                        Expr::Decimal(1),
+                    )],
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ];
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&items);
+        assert!(output.contains("buf_3_lane"), "lane decode missing:\n{}", output);
+        assert!(output.contains("comb.and"), "when mask missing:\n{}", output);
+    }
+
+    #[test]
+    fn test_nested_when_conditions_and() {
+        // when a { when b { x = 1; } } ⇒ value muxes on a AND b.
+        let items = vec![
+            make_state_decl("x", Type::int()),
+            make_txn(
+                "t",
+                vec![Statement::Guarded(
+                    Expr::Bool(true),
+                    vec![Statement::Guarded(
+                        Expr::Bool(false),
+                        vec![Statement::Assign(
+                            Expr::Identifier("x".into()),
+                            Expr::Decimal(1),
+                        )],
+                    )],
+                )],
+                Expr::Bool(true),
+                Expr::Bool(true),
+            ),
+        ];
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&items);
+        // two gate wires ANDed somewhere before the mux
+        assert!(
+            output.matches("comb.mux").count() >= 2,
+            "nested gating lost:\n{}",
+            output
+        );
+        assert!(output.contains("comb.and"), "nested conditions must AND");
+    }
+
+    #[test]
+    fn test_ns_to_cycles_conversion() {
+        // 2026-08-26 (watchdog time units): 100 MHz clock —
+        // 10ms = 1_000_000 cycles exactly; sub-cycle deadlines round UP.
+        assert_eq!(CirctBackend::ns_to_cycles(100_000_000, 10_000_000), 1_000_000);
+        assert_eq!(CirctBackend::ns_to_cycles(100_000_000, 1), 1);       // ceil to 1
+        assert_eq!(CirctBackend::ns_to_cycles(1_000_000_000, 500), 500); // exact
+        assert_eq!(CirctBackend::ns_to_cycles(100_000_000, 15), 2);      // ceil 1.5 -> 2
+        assert_eq!(CirctBackend::ns_to_cycles(60_000_000, 1_500_000_000), 90_000_000);
     }
 
     #[test]

@@ -1,0 +1,12 @@
+// HW validation fixture: GUARDED element writes (gate-threading fix).
+// buf[i] = i only when idx >= 3; lanes hold init 7 before that. Register-
+// file path (depth 8 < threshold). Companion mem twin: when_mem.bv.
+let idx: Int = 0;
+reg let buf: Int[8] = [7, 7, 7, 7, 7, 7, 7, 7];
+
+txn tick [idx < 11][idx <= 11] {
+  when idx >= 3 {
+    buf[idx - 3] = idx;
+  };
+  idx = idx + 1;
+}

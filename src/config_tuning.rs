@@ -65,6 +65,10 @@ pub struct IrLoweringSettings {
     pub firmem_min_depth: usize,
     /// CIRCT: max distinct read sites per mem-lowered array (macro ports).
     pub firmem_max_ports: usize,
+    /// CIRCT FSM clock frequency in Hz — converts time-unit watchdog bounds
+    /// (`within 10ms`) to cycle counts. 0 = unset: time-unit watchdogs stay
+    /// capability errors. 2026-08-26.
+    pub clock_hz: u64,
 }
 
 /// x86_64 defaults — also the fallback for unknown target prefixes.
@@ -87,6 +91,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_margin: 0.05,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
+    clock_hz: 0,
 };
 
 /// Per-target-prefix tuning tables, keyed by triple prefix (e.g. "x86_64").
@@ -186,6 +191,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("circt.firmem_max_ports", 0)
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_IR_LOWERING.firmem_max_ports),
+        clock_hz: db
+            .field_int("circt.clock_hz", 0)
+            .map(|v| v as u64)
+            .unwrap_or(DEFAULT_IR_LOWERING.clock_hz),
         arena_initial_size: db
             .field_int("arena_initial_size", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.arena_initial_size as i64) as u64,

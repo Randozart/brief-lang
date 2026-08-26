@@ -106,7 +106,47 @@ def step_memfill(s):
         committed["last"] = rd
     return True, committed
 
+# when_array: guarded element writes on the REGISTER-FILE path — lanes
+# hold init 7 until idx>=3 starts filling buf[idx-3] with idx.
+WBUF = [7] * 8
+
+def step_when_array(s):
+    k = s["idx"]
+    ok = k < 11
+    if not ok:
+        return False, {}
+    committed = {"idx": k + 1}
+    if k >= 3:
+        WBUF[k - 3] = k
+        committed["buf"] = tuple(WBUF[:])
+    return True, committed
+
+# when_mem: guarded READ mirror on the MEMORY-MACRO path; enable carries
+# pre AND when (same observable semantics as the register twin).
+MBUF = [0] * 64
+
+def step_when_mem(s):
+    k = s["idx"]
+    ok = k < 60
+    if not ok:
+        return False, {}
+    rd = MBUF[k - 1] if k >= 1 else None   # cycle-start read
+    MBUF[k] = k                            # write lands this edge
+    committed = {"idx": k + 1}
+    if k >= 1:
+        committed["last"] = rd
+    return True, committed
+
+# arb: two writers, program-order last-wins => buf[0]==2 while accepted
+def step_arb(s):
+    k = s["a"]
+    ok = k < 6
+    return ok, {"a": k + 1, "buf": (2, 0, 0, 0)} if ok else {}
+
+gen("when_array", {"idx": 0, "buf": (7, 7, 7, 7, 7, 7, 7, 7)}, step_when_array)
+gen("arb", {"a": 0, "buf": (0, 0, 0, 0)}, step_arb)
 gen("watchdog", {"beat": 0}, step_wd, wd=(lambda s: s["beat"] < 5, 2))
 gen("sized", {"n": 120, "w": 7}, step_sized)
 gen("memfill", {"w": 0, "last": 0}, step_memfill)
+gen("when_mem", {"idx": 0, "last": 0}, step_when_mem)
 print("expect files regenerated")

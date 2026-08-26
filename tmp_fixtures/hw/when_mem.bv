@@ -1,0 +1,14 @@
+// HW validation fixture: GUARDED element writes on the MEMORY-MACRO path
+// (gate-threading fix) — enable = pre AND when. Zero init keeps it
+// mem-eligible; the aggregated note will name it.
+let idx: Int = 0;
+let last: Int = 0;
+let buf: Int[64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+txn tick [idx < 60][idx <= 60] {
+  buf[idx] = idx;
+  when idx >= 1 {
+    last = buf[idx - 1];
+  };
+  idx = idx + 1;
+}

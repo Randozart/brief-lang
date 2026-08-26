@@ -1,0 +1,15 @@
+// HW validation fixture: MULTI-TXN ARBITRATION (documented decision).
+// Both txns fire every cycle writing buf[0]; program-order last-wins =>
+// buf[0] reads 2 while the guards accept. Register-file path only —
+// 'mem' pins reject multi-writer arrays outright (policy engine).
+let a: Int = 0;
+reg let buf: Int[4] = [0, 0, 0, 0];
+
+txn w1 [a < 6][a <= 6] {
+  buf[0] = 1;
+}
+
+txn w2 [a < 6][a <= 6] {
+  buf[0] = 2;
+  a = a + 1;
+}
