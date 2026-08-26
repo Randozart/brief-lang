@@ -1959,9 +1959,12 @@ mod phase_c_probe_tests {
     }
 
     #[test]
-    fn probe_locals_across_yield() {
-        // Reference-semantics probe: does a `let` from before a yield
-        // survive into the next segment?
+    fn locals_die_at_a_yield_boundary() {
+        // Reference rule (SPEC §12.2, Phase C prerequisite): ONLY parameters
+        // carry across a cancellation point — a `let` before `yield;` is
+        // undefined in later segments. This is what makes segmented-
+        // continuation lowering exactly faithful (plan 2026-08-26-async-
+        // phase-c §Reference).
         let program = parse_program(
             "defn job(n: Int) -> Int { let acc: Int = n * 2; yield; term acc; };",
         );
@@ -1975,8 +1978,11 @@ mod phase_c_probe_tests {
         interp.state.insert("t".to_string(), h);
         let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t".to_string()))));
         match v {
-            Ok(x) => println!("PROBE RESULT: locals survive yield, acc = {:?}", x.as_i64()),
-            Err(e) => println!("PROBE RESULT: locals die at yield ({e})"),
+            Err(RuntimeError::UndefinedVariable { name }) => {
+                assert_eq!(name, "acc", "the pre-yield local is gone");
+            }
+            Ok(x) => panic!("locals must NOT survive yield, got {:?}", x.as_i64()),
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 }

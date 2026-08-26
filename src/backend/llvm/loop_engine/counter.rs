@@ -1705,6 +1705,23 @@ impl LlvmBackend {
                     let reg = self.emit_expr(out, e, "  ");
                     self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
                     self.fun.last_val_types.insert(name.clone(), reg.ty.clone());
+                    // 2026-08-26 (async Phase C): track defn-spawn / handle-
+                    // move bindings so a later `free` cancels through the
+                    // scheduler (the standard emitter's FreeHint arm reads
+                    // this set). Mirrors emit_stmt's Let hook.
+                    match e {
+                        crate::ast::Expr::Spawn { type_name, .. }
+                            if self.ctx.defn_params.contains_key(type_name.as_str()) =>
+                        {
+                            self.fun.task_handle_names.insert(name.clone());
+                        }
+                        crate::ast::Expr::Identifier(src)
+                            if self.fun.task_handle_names.contains(src) =>
+                        {
+                            self.fun.task_handle_names.insert(name.clone());
+                        }
+                        _ => {}
+                    }
                     // 2026-08-07 (instance pools): a spawned handle local
                     // (`let h: Counter = spawn ...`) must bind through
                     // let_bindings/let_binding_types too — the member-call /

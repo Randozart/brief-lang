@@ -1,0 +1,33 @@
+// async-tasks — SPEC §12.2 compiled concurrency smoke (async Phase C).
+//
+// Two tasks spawned; one freed before its first segment runs; the other
+// interleaves through two yield-split segments driven by ONE await. The
+// freed task never prints — cancellation is real in compiled code too.
+//
+// Expected output (deterministic): 1, 1, 15
+
+defn worker(tag: Int, n: Int) -> Int {
+    Print#(tag);
+    yield;
+    Print#(tag);
+    term tag * 10 + n;
+};
+
+defn victim(tag: Int, n: Int) -> Int {
+    Print#(tag);
+    yield;
+    Print#(tag);
+    term tag * 10 + n;
+};
+
+let i: Int = 0;
+
+node run [i < 1][i == 1] {
+    let a = spawn worker(1, 5);
+    let b = spawn victim(2, 7);
+    free b;
+    let ra: Int = await a;
+    Print#(ra);
+    i = i + 1;
+    term;
+};

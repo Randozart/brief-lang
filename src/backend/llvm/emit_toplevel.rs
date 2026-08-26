@@ -5125,3 +5125,140 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
     }
 }
+
+// ═══ 2026-08-26 (async Phase C, plan 2026-08-26-async-phase-c-segmented-
+//     lowering.md): compiled task concurrency — segmented continuations ═══
+//
+// A spawned defn lowers to N segment functions `__task_<fn>_seg<k>` over a
+// shared argv block (params only — locals die at yield, the probed reference
+// rule), plus a private fn-pointer table. Spawn/await/free call into the C
+// scheduler in briev_rt.c, which drives segments round-robin exactly like
+// the interpreter's Await handler.
+//
+// TEMP undo: delete this block + the Await/spawn/FreeHint arms + the rt.c
+// block to return to eager-inline spawns.
+
+impl crate::backend::llvm::LlvmBackend {
+    /// Emit everything the segmented task runtime needs: extern declares,
+    /// per-task segment functions, and the segment-table globals.
+    pub(super) fn emit_task_runtime(&mut self, out: &mut String) {
+        writeln!(out,
+            "declare i64 @briev_task_spawn(ptr, i32, i32, ptr)").ok();
+        writeln!(out,
+            "declare i64 @briev_await(i64)").ok();
+        writeln!(out,
+            "declare void @briev_task_cancel(i64)").ok();
+        writeln!(out).ok();
+
+        let mut names: Vec<String> = self.ctx.task_segments.keys().cloned().collect();
+        names.sort();
+        for name in &names {
+            let (segments, params): (Vec<Vec<Statement>>, Vec<(String, Type)>) =
+                self.ctx.task_segments.get(name).unwrap().clone();
+            let nseg = segments.len();
+            // Segment functions first, then the table referencing them.
+            for (k, seg) in segments.iter().enumerate() {
+                let is_last = k + 1 == nseg;
+                self.emit_task_segment_fn(out, name, k, seg, &params, is_last);
+                writeln!(out).ok();
+            }
+            let seg_names: Vec<String> = (0..nseg)
+                .map(|k| format!("ptr @__task_{name}_seg{k}"))
+                .collect();
+            writeln!(out,
+                "@__task_{name}_segments = private constant [{} x ptr] [{}]",
+                nseg,
+                seg_names.join(", "))
+            .ok();
+            writeln!(out).ok();
+        }
+    }
+
+    /// One segment function: `define {i64,i32} @__task_<fn>_seg<k>(ptr %argv)`.
+    /// Params load from the argv block as i64 slots — the SAME representation
+    /// defn parameters carry after entry adaptation (Ptr arrives as an i64
+    /// address; boxed scalars as i64). Only the FINAL segment (or a
+    /// `term expr;`) reports finished=1.
+    fn emit_task_segment_fn(
+        &mut self,
+        out: &mut String,
+        task_name: &str,
+        k: usize,
+        body: &[Statement],
+        params: &[(String, Type)],
+        is_last: bool,
+    ) {
+        self.fun.pending_cleanup.clear();
+        self.fun.clear_locals();
+        self.fun.reassigned_lets.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.is_static_bound = false;
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.fn_ret_ty = "i64".to_string();
+        self.fun.returns_i64 = true;
+        self.fun.terminated = false;
+        writeln!(out,
+            "define internal {{i64,i32}} @__task_{task_name}_seg{k}(ptr %argv) {{").ok();
+        writeln!(out, "entry:").ok();
+        for (i, (pname, _pty)) in params.iter().enumerate() {
+            let slot = self.fun.gen_reg();
+            writeln!(out,
+                "  {slot} = getelementptr inbounds [8 x i64], ptr %argv, i32 0, i32 {i}")
+            .ok();
+            let val = self.fun.gen_reg();
+            writeln!(out, "  {val} = load i64, ptr {slot}").ok();
+            // Same convention as defn entry: every param lives as an i64 reg.
+            self.fun.let_bindings.insert(pname.clone(), val);
+            self.fun.let_original_types.insert(pname.clone(), Type::int());
+            self.fun.let_binding_types.insert(pname.clone(), Type::int());
+        }
+        let mut last_val: Option<String> = None;
+        // 2026-08-27 fix: `term expr;` is intercepted BEFORE the generic
+        // statement emitter — its defn-style `ret i64` would both bypass this
+        // function's {i64,i32} ABI and strand dead code. Bare `term;` is a
+        // convergence checkpoint (interpreter: Ok(Void), continue).
+        let mut saw_term = false;
+        for s in body {
+            if self.fun.terminated {
+                break;
+            }
+            match s {
+                Statement::Term(Some(e)) => {
+                    let reg = self.emit_expr(out, e, "  ");
+                    let val = self.adapt_to_i64(out, "  ", &reg);
+                    last_val = Some(val);
+                    saw_term = true;
+                    break;
+                }
+                Statement::Term(None) => {}
+                other => {
+                    let reg =
+                        crate::backend::llvm::emit_stmt::emit_statement(self, out, other, "  ");
+                    if self.llvm_type(&reg.ty) == "i64" {
+                        last_val = Some(reg.name.clone());
+                    } else {
+                        last_val = Some(self.adapt_to_i64(out, "  ", &reg));
+                    }
+                }
+            }
+        }
+        let value_reg = match last_val {
+            Some(v) => v,
+            None => {
+                let z = self.fun.gen_reg();
+                writeln!(out, "  {z} = add i64 0, 0").ok();
+                z
+            }
+        };
+        let finished: i32 = if is_last || saw_term || self.fun.terminated { 1 } else { 0 };
+        let agg = self.fun.gen_reg();
+        writeln!(out,
+            "  {agg} = insertvalue {{i64,i32}} poison, i64 {value_reg}, 0").ok();
+        let agg2 = self.fun.gen_reg();
+        writeln!(out,
+            "  {agg2} = insertvalue {{i64,i32}} {agg}, i32 {finished}, 1").ok();
+        writeln!(out, "  ret {{i64,i32}} {agg2}").ok();
+        writeln!(out, "}}").ok();
+    }
+}

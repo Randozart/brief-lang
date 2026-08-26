@@ -264,6 +264,22 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             ));
         }
     }
+    // 2026-08-26 (async Phase C): compiled tasks carry args/results as i64
+    // argv slots — a spawn target outside that ABI must fail at compile time,
+    // never miscompile silently. LLVM-family backends only: the reference
+    // interpreter (and `brievc check`) legitimately support Event<T>
+    // parameters for blocking port reads (async Phase B).
+    if matches!(opts.backend, BackendKind::Llvm | BackendKind::Webstack) {
+        let abi_errors = briev_compiler::analysis::task_segments::collect_task_abi_errors(
+            &items, &universe,
+        );
+        if !abi_errors.is_empty() {
+            return Err(format!(
+                "task ABI errors:\n{}",
+                abi_errors.join("\n")
+            ));
+        }
+    }
     // 2026-08-03: `+` is string concat for #String/#Blob operands — rewrite
     // BinaryOp(Add) → Concat on the typed AST so the backend dispatches the
     // concat emitter (String operands are boxed to i64 before the binary op).

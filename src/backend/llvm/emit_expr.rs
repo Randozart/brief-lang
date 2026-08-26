@@ -145,9 +145,17 @@ impl LlvmBackend {
                 self.fun.pending_consumes.push(reg.name.clone());
                 reg
             }
-            // 2026-08-09 (Phase 10): `await task` — the task handle already
-            // holds the result (deterministic inline execution); await reads it.
-            Expr::Await(inner) => self.emit_expr(out, inner, indent),
+            // 2026-08-26 (async Phase C): await drives the segmented task
+            // through the C scheduler's round-robin and returns its result.
+            // A non-task value passes through unchanged (briev_await returns
+            // out-of-range handles as-is — the deadlock-posture identity).
+            Expr::Await(inner) => {
+                let h = self.emit_expr(out, inner, indent);
+                let hi = self.adapt_to_i64(out, indent, &h);
+                let r = self.fun.gen_reg();
+                writeln!(out, "{indent}{r} = call i64 @briev_await(i64 {hi})").ok();
+                TypedRegister { name: r, ty: Type::int() }
+            }
             Expr::Decimal(n) => {
                 self.emit_int(out, v, *n, indent)
             }
@@ -4087,8 +4095,37 @@ impl LlvmBackend {
         name: &str,
         args: &[Expr],
     ) -> TypedRegister {
-        let v = self.fun.gen_reg();
-        self.emit_user_call(out, &v, name, args, indent)
+        // 2026-08-26 (async Phase C): the task registers with the C scheduler
+        // as a segmented continuation — argv block + segment-table pointer.
+        // The handle is the table index (SPEC §12.2); `await` drives segments.
+        let _ = indent;
+        // Argv block: [8 x i64] alloca (params ≤ 6 house gate), each arg
+        // adapted to the i64 slot convention defn entry uses.
+        let argv = self.fun.gen_reg();
+        writeln!(out, "{indent}{argv} = alloca [8 x i64], align 8").ok();
+        for (i, a) in args.iter().enumerate() {
+            let reg = self.emit_expr(out, a, indent);
+            let val = self.adapt_to_i64(out, indent, &reg);
+            let slot = self.fun.gen_reg();
+            writeln!(out,
+                "{indent}{slot} = getelementptr inbounds [8 x i64], ptr {argv}, i32 0, i32 {i}")
+            .ok();
+            writeln!(out, "{indent}store i64 {val}, ptr {slot}").ok();
+        }
+        let table = format!("@__task_{name}_segments");
+        let nseg = self
+            .ctx
+            .task_segments
+            .get(name)
+            .map(|(segs, _)| segs.len())
+            .unwrap_or(1) as i32;
+        let nargs = args.len() as i32;
+        let h = self.fun.gen_reg();
+        writeln!(out,
+            "{indent}{h} = call i64 @briev_task_spawn(ptr {table}, i32 {nseg}, i32 {nargs}, ptr {argv})")
+        .ok();
+        self.fun.task_handle_regs.insert(h.clone());
+        TypedRegister { name: h, ty: Type::int() }
     }
 
     /// Emit a user function call.

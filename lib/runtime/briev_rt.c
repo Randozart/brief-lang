@@ -1197,3 +1197,107 @@ uint8_t* __briev_getcwd(void) {
 int64_t __briev_chdir(const uint8_t* p) {
     return (int64_t)chdir((const char*)p);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   2026-08-26 (async Phase C, docs/plans/2026-08-26-async-phase-c-
+   segmented-lowering.md): compiled task concurrency — segmented
+   continuations. A task is a fixed record holding its captured args, a
+   segment-function table, and a cursor. ONLY parameters carry across a
+   segment boundary (reference rule, SPEC §12.2) — each segment is a plain
+   function of the argv block, so no stack switching is needed.
+
+   briev_await drives the deterministic round-robin exactly like the
+   reference interpreter's Await handler: one segment per runnable task per
+   pass, spawn-id order, stop when the awaited task reaches DONE; an empty
+   runnable pool with the target unfinished returns the handle unchanged
+   (deadlock posture — no hang).
+
+   TEMP undo: delete this block + the backend's __task_* emission to return
+   to eager-inline spawns.
+   ════════════════════════════════════════════════════════════════════ */
+
+#define BRIEV_TASK_MAX 64
+#define BRIEV_TASK_MAX_ARGS 8
+
+typedef struct {
+    long long value;
+    int finished;
+} BrievSegOut;
+
+typedef BrievSegOut (*BrievSegFn)(long long* argv);
+
+enum { BR_TASK_READY = 0, BR_TASK_YIELDED = 1, BR_TASK_DONE = 2,
+       BR_TASK_CANCELLED = 3 };
+
+static struct {
+    int status;
+    int current_segment;
+    int segment_count;
+    int arg_count;
+    long long args[BRIEV_TASK_MAX_ARGS];
+    long long result;
+    const BrievSegFn* segments;
+} briev_tasks[BRIEV_TASK_MAX];
+
+static int briev_task_next = 0;
+
+long long briev_task_spawn(const BrievSegFn* segments, int nseg, int nargs,
+                           const long long* argv) {
+    if (briev_task_next >= BRIEV_TASK_MAX || nargs > BRIEV_TASK_MAX_ARGS) {
+        /* Out of scheduler capacity: fail loudly rather than corrupt. */
+        fprintf(stderr, "briev: task table exhausted\n");
+        abort();
+    }
+    int id = briev_task_next++;
+    briev_tasks[id].status = BR_TASK_READY;
+    briev_tasks[id].current_segment = 0;
+    briev_tasks[id].segment_count = nseg;
+    briev_tasks[id].arg_count = nargs;
+    briev_tasks[id].result = 0;
+    briev_tasks[id].segments = segments;
+    for (int i = 0; i < nargs; i++) briev_tasks[id].args[i] = argv[i];
+    return (long long)id;
+}
+
+void briev_task_cancel(long long handle) {
+    if (handle < 0 || handle >= briev_task_next) return;
+    int st = briev_tasks[handle].status;
+    if (st != BR_TASK_DONE && st != BR_TASK_CANCELLED) {
+        briev_tasks[handle].status = BR_TASK_CANCELLED;
+    }
+}
+
+static int briev_task_done(long long h) {
+    return h >= 0 && h < briev_task_next &&
+           briev_tasks[h].status == BR_TASK_DONE;
+}
+
+long long briev_await(long long target) {
+    while (!briev_task_done(target)) {
+        int ran_any = 0;
+        for (int id = 0; id < briev_task_next; id++) {
+            int st = briev_tasks[id].status;
+            if (st != BR_TASK_READY && st != BR_TASK_YIELDED) continue;
+            if (briev_tasks[id].current_segment >= briev_tasks[id].segment_count)
+                continue;
+            ran_any = 1;
+            BrievSegOut out = briev_tasks[id].segments[
+                briev_tasks[id].current_segment](briev_tasks[id].args);
+            if (out.finished) {
+                briev_tasks[id].status = BR_TASK_DONE;
+                briev_tasks[id].result = out.value;
+                if ((long long)id == target) goto done;
+            } else {
+                briev_tasks[id].current_segment++;
+                briev_tasks[id].status = BR_TASK_YIELDED;
+            }
+        }
+        /* Empty runnable pool with the target unfinished: deadlock posture
+         * — return the handle instead of hanging (cooperative scheduler,
+         * no preemption). */
+        if (!ran_any) break;
+    }
+done:
+    if (briev_task_done(target)) return briev_tasks[target].result;
+    return target;
+}
