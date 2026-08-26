@@ -114,7 +114,7 @@ Result<Int, Error>;    // Result type
 Curly braces **divvy up code** - they group statements into logical units:
 
 ```briev
-txn increment [true][count == @count + 1] {
+node increment [count < 100][count == 100] {
     count = count + 1;   // Block 1
     term;                  // Block 2
 };
@@ -190,17 +190,17 @@ See `learn-briev/13-projections.md` for the complete reference.
 
 | Context | Example | What it anchors |
 |---------|---------|----------------|
-| Prior state | `@balance` | Anchors to the value at the start of this tick |
+| Goal state | `[balance >= 0]` | The postcondition the reactor proves reachable |
 | String literal | `@"..."` | Anchors the string to a compile-time memory slot |
 | Bit position | `@/0..3` | Anchors a field to an absolute bit offset |
 | Hardware link | `trg timer @ 1kHz` | Anchors a timer to a hardware or OS resource |
 | Memory address | `let led: Bool @ 0x40020000` | Anchors a variable to a physical address |
 
 ```briev
-// Prior-state anchor — @balance = balance BEFORE this txn ran
+// Goal: balance must stay non-negative after withdrawal
 txn withdraw(amount: Int)
     [balance >= amount]
-    [balance == @balance - amount]
+    [balance >= 0]
 {
     balance = balance - amount;
     term;
@@ -357,7 +357,7 @@ Briev has many **full forms** and **abbreviated forms**. The abbreviated ones ar
 Something **will change state**. Transactions are atomic - they either complete fully or roll back.
 
 ```briev
-txn deposit(amount) [amount > 0][balance == @balance + amount] {
+node deposit(amount) [amount > 0][balance <= 1000] {
     balance = balance + amount;
     term;
 };
@@ -419,7 +419,7 @@ A transaction's contract is its **documentation**:
 ```briev
 txn withdraw(amount)
     [amount > 0 && balance >= amount]      // When can this run?
-    [balance == @balance - amount]          // What must be true after?
+    [balance >= 0]                          // What must be true after?
 ```
 
 That precondition says: "You can withdraw if and only if the amount is positive AND you have enough balance." The postcondition says: "After withdrawing, your balance is exactly what it was minus the amount."
@@ -480,7 +480,7 @@ Briev assumes:
 - You might need to exit early AND rollback all changes
 - The compiler **must verify** termination
 
-When a transaction says `[count < 100][count == @count + 1]`, it loops: count goes 99→100→101→102. The postcondition says count must increase by exactly 1, but the transaction only adds 1 each iteration. It loops until it hits exactly +1 from the start value.
+When a node says `[count < 100][count == 100]`, it loops until count reaches exactly 100. The precondition is the loop condition; the goal is the termination state. The compiler proves the goal is reachable.
 
 Thus `term` means "I succeeded, here's my return value." Not "I'm done, get out."
 

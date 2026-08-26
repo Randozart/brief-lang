@@ -242,7 +242,7 @@ import bindings from "std/bindings/system_triggers.dbv";
 When a transaction hits `escape`, all state modifications are **rolled back** to the pre-transaction snapshot:
 
 ```briev
-txn transfer(amount: Int) [amount > 0][balance == @balance] {
+txn transfer(amount: Int) [amount > 0][balance >= 0] {
     state.processing = true;  // Tentative change
     
     trg! result: Result<Void, Error> = send_payment(amount);
