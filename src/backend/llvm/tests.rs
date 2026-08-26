@@ -8330,3 +8330,47 @@ fn test_statement_match_emits_arm_blocks_in_callable_txn() {
     assert!(arm_stores >= 3, "all three arms must store their result:\n{output}");
 }
 
+
+#[test]
+fn test_enum_handle_abi_no_struct_decl() {
+    // 2026-08-26 (Track B): an enum's runtime image is the boxed
+    // {tag, payload} pair behind an i64 handle. The TypeDef must NOT emit a
+    // struct declaration (zero-payload variants made `{ i64, void }` —
+    // invalid IR), and functions taking the enum take the handle width.
+    let src = r#"
+enum Option {
+    Some(Int),
+    None,
+};
+
+defn get(o: Option) -> Int {
+  term match o {
+    Some(v) => v,
+    None => 0 - 1,
+  };
+}
+
+defn make() -> Option {
+  term Some(7);
+}
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    crate::backend::register_types::register_typedefs(&items, &mut universe, 64).unwrap();
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        !ir.contains("%Option = type"),
+        "enum must not declare a struct: {}",
+        &ir[..ir.len().min(2000)]
+    );
+    assert!(
+        ir.contains("define i64 @get(ptr noundef noalias nocapture align 8 %state, i64"),
+        "enum param must be the i64 handle: {}",
+        &ir[..ir.len().min(3000)]
+    );
+    // Construction boxes {tag=0, payload} — the Some arm's malloc image.
+    assert!(ir.contains("call ptr @malloc(i64 16)"), "boxed image missing");
+}

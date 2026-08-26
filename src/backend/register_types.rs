@@ -118,6 +118,31 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
         if td.name == "Bit" {
             return Err("'Bit' is a compiler primitive and cannot be redeclared".to_string());
         }
+        // 2026-08-26 (Track B): ENUM TypeDefs (all slots `__variant_*`) are
+        // tagged sums whose runtime image is the boxed {tag, payload} pair
+        // behind a one-word handle. Register a HANDLE shape: no fields,
+        // one word of storage — variant slots must NOT become struct fields
+        // (they emitted invalid `{ i64, void }` aggregates and wrong
+        // by-value layouts). To undo: remove this branch.
+        if !td.body.slots.is_empty()
+            && td.body.slots.iter().all(|s| s.name.starts_with("__variant_"))
+        {
+            let word = std::mem::size_of::<usize>() as u64;
+            let rt = crate::type_universe::ResolvedType {
+                name: td.name.clone(),
+                base: td.name.clone(),
+                bytes: word,
+                min_bits: 64,
+                max_bits: 64,
+                alignment: word,
+                properties: [("Cast.Int".to_string(), crate::ast::PropertyValue::Int(1))]
+                    .into_iter()
+                    .collect(),
+                fields: Vec::new(),
+            };
+            universe.types.insert(td.name.clone(), rt);
+            continue;
+        }
         // 2026-07-26: Read bits/maxbits/minbits metadata independently.
         // bits <~ N → exact (min=max=N), maxbits <~ N → ceiling (min=0, max=N),
         // minbits <~ N → floor (min=N, max=primordial). Fallback: primordial values.

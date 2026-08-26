@@ -5243,3 +5243,24 @@ emitted companion `.sv`. Re-parse + export + verilator lint all verified.
 
 **Revisit:** toolchain rebuild with firtool-side memory emission, or CIRCT
 upstream change.
+
+## Plain `txn` at top level compiles to an EMPTY program via brievc build — 2026-08-26 OPEN
+
+**Symptom:** a program whose only logic is a plain top-level
+`txn run [...] [...] { ... }` builds clean, exits 0, prints nothing —
+the direct-SSA main loop contains no per-txn dispatch (any_active is
+stored 0 and the loop exits immediately).
+
+**Root cause:** the SSA-loop dispatcher (loop_engine/ssa.rs) and the
+reactor dispatcher (dispatch.rs) both filter `t.is_reactive`; plain
+`txn` parses with is_reactive=false. Only `node` declarations are
+fired in the loop. Nothing warns that a whole txn was skipped.
+
+**Status:** pre-existing, orthogonal to Track B (surfaced while probing
+enum construction end-to-end). Workaround: use `node` for fired logic;
+plain `txn` remains the callable form.
+
+**Fix direction:** either (a) diagnose non-reactive txns that never fire
+anywhere ("this txn is unreachable — declare it as a node to fire it in
+the tick loop") or (b) define non-reactive firing semantics (run-once at
+init). Decision needed on intended semantics first.

@@ -786,6 +786,10 @@ impl LlvmBackend {
             if self.ctx.obj_types.contains(name) {
                 return format!("i{}", self.ctx.int_bits);
             }
+            // 2026-08-26 (Track B): an enum value is the boxed-image handle.
+            if self.ctx.enum_handle_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
+            }
             if self.ctx.struct_types.contains_key(name) {
                 return "ptr".to_string();
             }
@@ -795,6 +799,10 @@ impl LlvmBackend {
         // same obj registry.
         if let Type::Applied(name, _) = ty {
             if self.ctx.obj_types.contains(name) {
+                return format!("i{}", self.ctx.int_bits);
+            }
+            // 2026-08-26 (Track B): an enum value is the boxed-image handle.
+            if self.ctx.enum_handle_types.contains(name) {
                 return format!("i{}", self.ctx.int_bits);
             }
         }

@@ -211,6 +211,10 @@ pub struct CompilerContext {
     /// enums — variant name → (enum name, tag index). Built during the
     /// definition walk; read by construction calls + match dispatch.
     pub variant_ctor: HashMap<String, (String, usize)>,
+    /// 2026-08-26 (Track B): declared enum names — values are boxed
+    /// {tag,payload} images behind an i64 handle; llvm_type resolves them
+    /// to the handle width, never to a struct/pointer ABI.
+    pub enum_handle_types: std::collections::HashSet<String>,
 
     // Optimization
     pub optimize_budget: u64,
@@ -435,6 +439,7 @@ impl CompilerContext {
             cell_trigger_bindings: Vec::new(),
             variant_disc: HashMap::new(),
             variant_ctor: HashMap::new(),
+            enum_handle_types: std::collections::HashSet::new(),
             optimize_budget: 256,
             // 2026-07-31: Phase 3 (§8.2) — arena/stack sizing comes from
             // config/ir-lowering.toml instead of hardcoded literals.

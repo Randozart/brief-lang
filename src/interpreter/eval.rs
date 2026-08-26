@@ -2232,6 +2232,76 @@ mod tests {
     }
 
     #[test]
+    fn test_enum_construct_match_interpret() {
+        // 2026-08-26 (Track B): tuple-variant construction + match through
+        // the interpreter — the reference semantics for backends.
+        let src = r#"
+enum Res {
+    Ok(Int),
+    Err(String),
+};
+
+defn make(i: Int) -> Res {
+  term Ok(i);
+}
+
+defn go() -> Int {
+  let r = make(5);
+  term match r {
+    Ok(v) => v,
+    Err(_) => 0 - 1,
+  };
+}
+"#;
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let mut interp = crate::interpreter::Interpreter::new();
+        interp.load_program(&items);
+        let out = interp.call_function("go", &[]).unwrap();
+        assert_eq!(
+            out,
+            crate::interpreter::Value::int(5),
+            "got {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_enum_unit_variant_construct_interpret() {
+        // Zero-payload variants construct with zero args (SPEC §8.3).
+        let src = r#"
+enum Option {
+    Some(Int),
+    None,
+};
+
+defn get(o: Option) -> Int {
+  term match o {
+    Some(v) => v,
+    None => 0 - 1,
+  };
+}
+
+defn go() -> Int {
+  term get(None()) + get(Some(42));
+}
+"#;
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let mut interp = crate::interpreter::Interpreter::new();
+        interp.load_program(&items);
+        let out = interp.call_function("go", &[]).unwrap();
+        assert_eq!(
+            out,
+            crate::interpreter::Value::int(41),
+            "got {:?}",
+            out
+        );
+    }
+
+    #[test]
     fn test_element_assign_writes_bound_product() {
         // 2026-08-25 (Plan 3.6): `buf[i] = v` on a let-bound list — was a
         // silent no-op, now a real read-modify-write.

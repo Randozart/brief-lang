@@ -2231,7 +2231,10 @@ impl LlvmBackend {
                     }
                     self.ctx.struct_types.entry(s.name.clone()).or_insert(fields);
                 }
-                TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
+                // 2026-08-26 (Track B): ENUMS are excluded from struct
+                // registration — all-`__variant_*` slots are variant tags,
+                // not fields; enum values live as boxed-image i64 handles.
+                TopLevel::TypeDef(td) if !td.body.slots.is_empty() && !td.body.slots.iter().all(|s| s.name.starts_with("__variant_")) => {
                     let mut fields: Vec<(String, Type)> = td.body.slots.iter()
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
@@ -2547,7 +2550,33 @@ impl LlvmBackend {
                 // 2026-07-24: Handle TopLevel::TypeDef with slots as struct types.
                 // This handles `obj` declarations (which parse to TypeDef) and
                 // other type declarations with field slots.
-                TopLevel::TypeDef(td) if !td.body.slots.is_empty() => {
+                // 2026-08-26 (Track B): ENUMS get their own arm — parser
+                // enums are TypeDefs whose slots are all `__variant_<Name>`;
+                // their runtime image is the boxed {tag, payload} pair behind
+                // an i64 handle (Phase 5d), NEVER a struct. Registering them
+                // as structs emitted invalid aggregates (`{ i64, void }` for
+                // zero-payload variants) and wrong by-value layouts.
+                TopLevel::TypeDef(td)
+                    if !td.body.slots.is_empty()
+                        && td.body.slots.iter().all(|s| s.name.starts_with("__variant_")) =>
+                {
+                    let ctor_variants: Vec<&crate::ast::top::TypeDefSlot> = td
+                        .body
+                        .slots
+                        .iter()
+                        .filter(|s| s.name.starts_with("__variant_"))
+                        .collect();
+                    self.ctx.enum_handle_types.insert(td.name.clone());
+                    for (idx, slot) in ctor_variants.iter().enumerate() {
+                        let vname =
+                            slot.name.trim_start_matches("__variant_").to_string();
+                        self.ctx.variant_ctor.insert(vname, (td.name.clone(), idx));
+                    }
+                }
+                TopLevel::TypeDef(td)
+                    if !td.body.slots.is_empty()
+                        && !td.body.slots.iter().all(|s| s.name.starts_with("__variant_")) =>
+                {
                     let mut fields: Vec<(String, Type)> = td.body.slots.iter()
                         .map(|s| (s.name.clone(), s.ty.clone()))
                         .collect();
@@ -2618,6 +2647,9 @@ impl LlvmBackend {
                         .iter()
                         .filter(|s| s.name.starts_with("__variant_"))
                         .collect();
+                    if !ctor_variants.is_empty() {
+                        self.ctx.enum_handle_types.insert(td.name.clone());
+                    }
                     for (idx, slot) in ctor_variants.iter().enumerate() {
                         let vname =
                             slot.name.trim_start_matches("__variant_").to_string();
