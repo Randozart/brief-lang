@@ -206,6 +206,42 @@ impl Interpreter {
                 }
             }
         }
+        // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2): CELLS
+        // construct like objs — same shape registry (spawn's existing port
+        // wiring path applies verbatim) and same `{Cell}::{member}` function
+        // keys method dispatch resolves. Sealing stays compile-time
+        // (typechecker cell_ports); the reference serves any declared field.
+        for item in program {
+            if let TopLevel::Cell(c) = item {
+                let shape = ObjShape {
+                    ports_in: c.ports_in.clone(),
+                    ports_out: c.ports_out.clone(),
+                    fields: c.fields.clone(),
+                };
+                registered_objs.insert(c.name.clone(), shape.clone());
+                self.objs.insert(c.name.clone(), shape);
+                for t in &c.transactions {
+                    let key = format!("{}::{}", c.name, t.name);
+                    let params: Vec<String> =
+                        t.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(key, FunctionDef {
+                        name: t.name.clone(),
+                        parameters: params,
+                        body: t.body.clone(),
+                    });
+                }
+                for d in &c.definitions {
+                    let key = format!("{}::{}", c.name, d.name);
+                    let params: Vec<String> =
+                        d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(key, FunctionDef {
+                        name: d.name.clone(),
+                        parameters: params,
+                        body: d.body.clone(),
+                    });
+                }
+            }
+        }
         // 2026-08-23 (enum construction): variant registry for constructors.
         let mut registered_variants: HashMap<String, String> = HashMap::new();
         for item in program {
@@ -1861,4 +1897,131 @@ pub fn mark_done_with_result(id: u64, result: Value) {
             }
         }
     });
+}
+
+// ── 2026-08-26 (Phase B2): cell runtime ────────────────────────────────
+
+#[cfg(test)]
+mod cell_b2_tests {
+    use super::*;
+
+    fn parse_program(src: &str) -> Vec<TopLevel> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        p.parse_program().unwrap()
+    }
+
+    fn bindings_instance(interp: &Interpreter) -> std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>> {
+        match interp.state.get("src").expect("instance bound") {
+            Value::Instance { fields, .. } => fields.clone(),
+            other => panic!("not an instance: {:?}", std::mem::discriminant(other)),
+        }
+    }
+
+    #[test]
+    fn cell_spawn_wires_ports_and_dispatches_members() {
+        let program = parse_program(
+            "struct Sample { value: Int }; \
+             cell Source() -> evt: Event<Sample> { \
+                 count: Int; \
+                 txn emit(v: Int) -> Bool { count = count + 1; evt <- Sample{value:v}; term true; } \
+             };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        // Cell spawn constructs an instance with a fresh unready OUT port.
+        let h = interp.eval_expr(&Expr::Spawn {
+            type_name: "Source".to_string(),
+            args: vec![],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        interp.state.insert("src".to_string(), h.clone());
+        match &h {
+            Value::Instance { type_name, fields } => {
+                assert_eq!(type_name, "Source");
+                let f = fields.borrow();
+                let unready = matches!(&f["evt"], Value::EventQ(q) if !q.borrow().ready);
+                assert!(unready, "out port starts unready");
+                assert!(f.contains_key("count"), "field defaulted");
+            }
+            other => panic!("expected instance, got {:?}", std::mem::discriminant(other)),
+        }
+        // Member dispatch mutates state and fires the port.
+        let fired = interp.eval_expr(&Expr::MethodCall(
+            Box::new(Expr::Identifier("src".to_string())),
+            "emit".to_string(),
+            vec![Expr::Decimal(42)],
+            None,
+        )).unwrap();
+        assert_eq!(fired.as_i64(), Some(1), "txn returns true (Bool as 1)");
+        let src = bindings_instance(&interp);
+        {
+            let f = src.borrow();
+            assert_eq!(f.get("count").and_then(|v| v.as_i64()), Some(1), "slot write-back");
+            if let Some(Value::EventQ(q)) = f.get("evt") {
+                let slot = q.borrow();
+                assert!(slot.ready, "emit fired the port");
+                match &slot.payload {
+                    Some(Value::Product { fields, names }) => {
+                        let i = names.as_ref().unwrap().iter().position(|n| n == "value");
+                        assert_eq!(i.map(|i| fields[i].as_i64()), Some(Some(42)));
+                    }
+                    other => panic!("payload shape {:?}", other.is_some()),
+                }
+            } else {
+                panic!("out port missing");
+            }
+        }
+    }
+
+    #[test]
+    fn phase_b_consumer_wakes_through_cell_port() {
+        // The B2 acceptance composition: consumer blocks on the CELL's out
+        // port; a producer TASK drives the cell txn whose fire wakes it. One
+        // await interleaves both through the Phase B round-robin.
+        let program = parse_program(
+            "struct Sample { value: Int }; \
+             cell Source() -> evt: Event<Sample> { \
+                 count: Int; \
+                 txn emit(v: Int) -> Bool { count = count + 1; evt <- Sample{value:v}; term true; } \
+             }; \
+             defn consume(d: Sample) -> Int { term d.value; }; \
+             defn produce(s: Source) -> Int { term s.emit(9); };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let h = interp.eval_expr(&Expr::Spawn {
+            type_name: "Source".to_string(),
+            args: vec![],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        interp.state.insert("src".to_string(), h);
+
+        // Wire extraction: src.out yields the SHARED EventQ handle.
+        let wire = interp.eval_expr(&Expr::Field(
+            Box::new(Expr::Identifier("src".to_string())),
+            "evt".to_string(),
+        )).unwrap();
+        interp.state.insert("wire".to_string(), wire);
+
+        for (name, fname, arg) in [("c", "consume", "wire"), ("p", "produce", "src")] {
+            let th = interp.eval_expr(&Expr::Spawn {
+                type_name: fname.to_string(),
+                args: vec![Expr::Identifier(arg.to_string())],
+                storage: crate::ast::SpawnStorage::Pooled,
+            }).unwrap();
+            interp.state.insert(name.to_string(), th);
+        }
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("c".to_string())))).unwrap();
+        assert_eq!(v.as_i64(), Some(9), "cell fire woke the blocked consumer");
+
+        // Both tasks Done; the cell's count ticked exactly once.
+        let snapshot = task_table_snapshot().unwrap();
+        assert!(snapshot.values().all(|e| e.status == TaskStatus::Done));
+        let inst = bindings_instance(&interp);
+        assert_eq!(
+            inst.borrow().get("count").and_then(|v| v.as_i64()),
+            Some(1)
+        );
+    }
 }
