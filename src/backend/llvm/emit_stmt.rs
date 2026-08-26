@@ -287,6 +287,21 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
     match stmt {
         Statement::Let { name, names, ty, expr, modifiers, .. } => {
             let is_vol = modifiers.iter().any(|m| m.name == "vol");
+            // 2026-08-26 (async Phase C): a let bound to a defn spawn (or to
+            // another task handle) carries the handle — `free` cancels it.
+            match expr.as_ref() {
+                Some(crate::ast::Expr::Spawn { type_name, .. })
+                    if backend.ctx.defn_params.contains_key(type_name.as_str()) =>
+                {
+                    backend.fun.task_handle_names.insert(name.clone());
+                }
+                Some(crate::ast::Expr::Identifier(src))
+                    if backend.fun.task_handle_names.contains(src) =>
+                {
+                    backend.fun.task_handle_names.insert(name.clone());
+                }
+                _ => {}
+            }
             let mut via_scaffolded_construction = false;
             let val = match expr {
                 Some(crate::ast::Expr::Identifier(alias))
@@ -1049,6 +1064,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             }
         }
         Statement::FreeHint(name) => {
+            // 2026-08-26 (async Phase C): a freed TASK HANDLE cancels its
+            // scheduler entry — the compiled twin of the interpreter's
+            // runtime cancellation. Ordinary frees keep the Phase 5 path.
+            if backend.fun.task_handle_names.contains(name) {
+                if let Some(h) = backend.fun.let_bindings.get(name).cloned() {
+                    writeln!(out,
+                        "{indent}call void @briev_task_cancel(i64 {h})").ok();
+                    let _ = backend.fun.gen_reg();
+                    return TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() };
+                }
+            }
             // 2026-08-01 (Phase 5): `free x;` — emit the strategy-aware free
             // of x's backing. The field/local must be heap-backed for the free
             // to be meaningful; emit_destroy_consumed no-ops for inline/arena/

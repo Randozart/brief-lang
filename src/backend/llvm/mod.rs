@@ -2104,6 +2104,24 @@ impl LlvmBackend {
         self.ctx.observable_names = analysis.observable_names.clone();
         self.ctx.coll_safe_txns = analysis.coll_safe_txns.clone();
         self.ctx.coll_pregrow = analysis.coll_pregrow.clone();
+        // 2026-08-26 (async Phase C): consume frontend segmentation — spawn
+        // targets lower to segment continuations over the C task table.
+        let defn_param_pairs: HashMap<String, Vec<(String, Type)>> = items
+            .iter()
+            .filter_map(|i| match i {
+                TopLevel::Definition(d) => Some((d.name.clone(), d.parameters.clone())),
+                _ => None,
+            })
+            .collect();
+        self.ctx.task_segments = analysis
+            .task_segments
+            .iter()
+            .filter_map(|(name, segs)| {
+                defn_param_pairs
+                    .get(name)
+                    .map(|params| (name.clone(), (segs.clone(), params.clone())))
+            })
+            .collect();
         // 2026-08-03: Per-export ABI (needs_state) computed once up front by
         // the export ABI analysis — the backend only consumes the decision.
         // 2026-08-04 (compiler-in-Briev, P4): the Briev pass (briev_pass.rs)
@@ -3312,6 +3330,14 @@ impl LlvmBackend {
                 }
                 _ => {}
             }
+        }
+        // 2026-08-26 (async Phase C): segment continuations + fn-pointer
+        // tables for every SPAWN-TARGETED defn, plus the runtime declares.
+        // Emitted after ordinary definitions so the segment bodies reuse the
+        // same statement emitter against a fresh scope.
+        if !self.ctx.task_segments.is_empty() {
+            self.emit_task_runtime(&mut out);
+            writeln!(out).ok();
         }
         // Transactions
         // 2026-08-16 (multi-node internal fold, Direction 3): a counted-loop

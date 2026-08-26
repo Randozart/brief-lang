@@ -86,6 +86,12 @@ pub struct CompilerContext {
     /// construction (let site). Per coll NAME — two local `Q`s in one txn must
     /// not share a guard strip. Frontend-driven (src/analysis/coll_length.rs).
     pub coll_pregrow: std::collections::HashMap<(String, String), i64>,
+    /// 2026-08-26 (async Phase C, plan 2026-08-26-async-phase-c-segmented-
+    /// lowering.md): spawned defns' segment bodies + param types, computed
+    /// once by the frontend pass and consumed by emit_task_runtime. Only
+    /// spawn-targeted defns appear here.
+    pub task_segments:
+        std::collections::HashMap<String, (Vec<Vec<Statement>>, Vec<(String, Type)>)>,
     /// 2026-08-16 (multi-node internal fold, Direction 3): reactive txn names
     /// whose whole bounded pass runs inside `@txn_<name>` (a noinline countdown
     /// loop) — the reactor dispatch calls the txn once per pass instead of
@@ -395,6 +401,7 @@ impl CompilerContext {
             observable_names: std::collections::HashSet::new(),
             coll_safe_txns: std::collections::HashSet::new(),
             coll_pregrow: std::collections::HashMap::new(),
+            task_segments: std::collections::HashMap::new(),
             internal_fold_txns: std::collections::HashSet::new(),
             export_needs_state: HashMap::new(),
             idx_to_field_name: HashMap::new(),
@@ -683,6 +690,15 @@ pub struct FunctionContext {    // SSA register counters — NEVER rewound (prev
     /// already i64 0/1, so it must be passed directly; a native i8 Bool
     /// (literal/let/field) needs a zext first.
     pub boxed_scalar_regs: HashSet<String>,
+    /// 2026-08-26 (async Phase C): registers holding TASK handles (returned
+    /// by a defn spawn, or moved from another task handle binding). `free x;`
+    /// consults this set: task handles cancel through @briev_task_cancel,
+    /// ordinary locals keep the destroy path.
+    pub task_handle_regs: HashSet<String>,
+    /// 2026-08-26 (async Phase C): BINDING names whose value is a task
+    /// handle — populated at the let/assign sites whose RHS spawns a defn
+    /// (or moves another handle). `free x;` cancels iff x is here.
+    pub task_handle_names: HashSet<String>,
     /// 2026-08-01 (Phase 3): registers consumed by an `Expr::Consume` since the
     /// last statement boundary. The backing is destroyed (strategy-aware free)
     /// after the consuming op has used the value — drained by
@@ -999,6 +1015,8 @@ impl FunctionContext {
             let_binding_allocas: HashSet::new(),
             reassigned_lets: HashMap::new(),
             boxed_scalar_regs: HashSet::new(),
+            task_handle_regs: HashSet::new(),
+            task_handle_names: HashSet::new(),
             pending_consumes: Vec::new(),
             struct_literal_allocas: HashMap::new(),
             pending_struct_allocas: Vec::new(),
@@ -1095,6 +1113,8 @@ impl FunctionContext {
         self.let_binding_types.clear();
         self.let_original_types.clear();
         self.boxed_scalar_regs.clear();
+        self.task_handle_regs.clear();
+        self.task_handle_names.clear();
         self.pending_consumes.clear();
         self.let_binding_allocas.clear();
         self.struct_literal_allocas.clear();
