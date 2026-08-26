@@ -1157,6 +1157,12 @@ pub enum RuntimeError {
     /// hardware abort (SPEC §8.8). The reference interpreter reports the abort
     /// like the LLVM `llvm.trap` + `unreachable` sequence.
     Trap,
+    /// 2026-08-26 (async Phase B, docs/plans/2026-08-26-async-phase-b.md):
+    /// a task read an unready event port — the scheduler signal to suspend.
+    /// NEVER a user-facing error: the segment executors catch it, having
+    /// already registered the task as a slot waiter (status `Waiting`). If
+    /// this escapes to the surface, a segment executor forgot its catch arm.
+    TaskBlocked,
 }
 
 impl fmt::Display for RuntimeError {
@@ -1191,6 +1197,9 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::Trap => {
                 write!(f, "trap: the program executed a hardware abort (SPEC §8.8)")
+            }
+            RuntimeError::TaskBlocked => {
+                write!(f, "internal: task blocked on an unready event port but no scheduler caught the suspension")
             }
         }
     }

@@ -128,6 +128,10 @@ pub enum TaskStatus {
     Ready,
     /// Phase A3: partially executed — yielded at a checkpoint, more segments remain.
     Yielded,
+    /// 2026-08-26 (Phase B): blocked reading an unready event port. Invisible
+    /// to `collect_runnable` until a fire on the awaited slot re-marks it
+    /// `Ready` (level-triggered wake, SPEC §12.2).
+    Waiting,
     /// Task ran to completion.
     Done,
     /// `free task` was called before execution — cancelled, never runs.
@@ -496,6 +500,12 @@ pub enum Atom {
 pub struct EventSlot {
     pub ready: bool,
     pub payload: Option<Value>,
+    /// 2026-08-26 (async Phase B): task ids blocked reading this slot's
+    /// payload while unready. Drained (and each waiter re-marked `Ready`)
+    /// when a producer fires the port — SPEC §9.5/§12.2 wake semantics.
+    /// TEMP undo: drop the field + `fire_slot_wake` to return to Phase A
+    /// strict-error reads.
+    pub waiters: Vec<u64>,
 }
 
 /// 2026-08-06 (Slice D): struct literals produce a product carrying its
@@ -611,6 +621,23 @@ thread_local! {
     /// `load_program` wins.
     static OBJ_SHAPES: std::cell::RefCell<Option<HashMap<String, ObjShape>>> =
         const { std::cell::RefCell::new(None) };
+    /// 2026-08-26 (async Phase B): the task id whose segment is executing,
+    /// or `u64::MAX` outside any task. Read deep inside Field-on-EventQ to
+    /// decide block-in-task vs strict-error-at-top-level. Same thread-local
+    /// justification as TASK_TABLE/OBJ_SHAPES.
+    static CURRENT_TASK: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
+}
+
+/// 2026-08-26 (async Phase B): mark which task's segment is running.
+/// `None` restores top-level context (strict unready-read errors).
+pub fn set_current_task(id: Option<u64>) {
+    CURRENT_TASK.with(|c| c.set(id.unwrap_or(u64::MAX)));
+}
+
+/// 2026-08-26 (async Phase B): the running task, if any.
+pub fn current_task_id() -> Option<u64> {
+    let id = CURRENT_TASK.with(|c| c.get());
+    if id == u64::MAX { None } else { Some(id) }
 }
 
 /// Active variant registry for constructor calls (Phase 7b/enum plan).
@@ -620,13 +647,28 @@ pub fn variant_defs() -> Option<HashMap<String, String>> {
 
 /// 2026-08-23 (async Phase A2): register a PENDING task — spawned but not
 /// yet executed. The first `await` triggers `execute_and_consume`.
-pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>, body: Vec<Statement>) {
+/// 2026-08-26 (Phase B): `param_names` drives the port-read pre-split —
+pub fn register_pending_task(
+    id: u64,
+    fn_name: String,
+    args: Vec<Value>,
+    body: Vec<Statement>,
+    param_names: &[String],
+) {
     // 2026-08-23 (Phase A3): split body at yield; checkpoints into segments.
+    // 2026-08-26 (Phase B): ALSO cut before any statement containing a
+    // `<param>.field` read. A blocking read must HEAD its segment so the
+    // post-wake re-run never re-executes side effects that preceded it
+    // (docs/plans/2026-08-26-async-phase-b.md §4). Over-splitting is safe:
+    // finer interleave granularity, statement order preserved exactly.
     let mut segments: Vec<Vec<Statement>> = vec![Vec::new()];
     for stmt in &body {
-        if matches!(stmt, Statement::Yield) {
+        let is_port_read = mentions_param_field(stmt, param_names);
+        if matches!(stmt, Statement::Yield) || (is_port_read && !segments.last().map(|s| s.is_empty()).unwrap_or(false))
+        {
             segments.push(Vec::new());
-        } else {
+        }
+        if !matches!(stmt, Statement::Yield) {
             segments.last_mut().unwrap().push(stmt.clone());
         }
     }
@@ -643,6 +685,59 @@ pub fn register_pending_task(id: u64, fn_name: String, args: Vec<Value>, body: V
             });
         }
     });
+}
+
+/// 2026-08-26 (Phase B): does this statement's expressions contain a field
+/// projection whose receiver identifier names one of `params`? Conservative
+/// syntactic receiver check — FunctionDef carries parameter NAMES only, not
+/// types, so a non-event param of product type yields harmless extra
+/// segment boundaries (same statement order either way). Walks guards,
+/// blocks, and nested bodies; the boundary lands before the OUTERMOST
+/// statement, which is what registration needs.
+fn mentions_param_field(stmt: &Statement, params: &[String]) -> bool {
+    if params.is_empty() { return false; }
+    fn expr_walk(e: &Expr, params: &[String]) -> bool {
+        match e {
+            Expr::Field(recv, _) => match recv.as_ref() {
+                Expr::Identifier(name) if params.iter().any(|p| p == name) => true,
+                other => expr_walk(other, params),
+            },
+            _ => false,
+        }
+    }
+    fn stmt_exprs(stmt: &Statement, params: &[String]) -> bool {
+        match stmt {
+            Statement::Let { expr: Some(e), .. }
+            | Statement::Assign(_, e)
+            | Statement::Expression(e)
+            | Statement::Term(Some(e))
+            | Statement::Rollback(Some(e))
+            | Statement::EndProgram(Some(e))
+            | Statement::Check(e)
+            | Statement::Gate(e) => expr_walk(e, params),
+            Statement::Guarded(cond, body) => {
+                expr_walk(cond, params) || body.iter().any(|s| stmt_exprs(s, params))
+            }
+            Statement::Block(body)
+            | Statement::SyncBlock(body)
+            | Statement::Mutex(body)
+            | Statement::Defer(body) => body.iter().any(|s| stmt_exprs(s, params)),
+            Statement::Barrier { body, .. } => body.iter().any(|s| stmt_exprs(s, params)),
+            Statement::Foreach { list, body, .. } => {
+                expr_walk(list, params) || body.iter().any(|s| stmt_exprs(s, params))
+            }
+            Statement::ArrowAssign { target: Some(t), value, .. } => {
+                expr_walk(t, params) || expr_walk(value, params)
+            }
+            Statement::ArrowAssign { value, .. } => expr_walk(value, params),
+            Statement::Match { expr, arms } => {
+                expr_walk(expr, params)
+                    || arms.iter().any(|a| a.body.iter().any(|s| stmt_exprs(s, params)))
+            }
+            _ => false,
+        }
+    }
+    stmt_exprs(stmt, params)
 }
 
 /// 2026-08-23 (async Phase A2): look up a pending task and return its
@@ -1293,7 +1388,219 @@ mod tests {
         );
     }
 
-    // ── 2026-08-15 (coll grow-on-full): reference value parity ────────
+    // ── 2026-08-26 (async Phase B): port wake / block / cancel ────────
+    // SPEC §12.2: a task reading an unready port suspends; firing the port
+    // re-marks it Ready; `free` cancels so no executor resurrects it.
+
+    /// Fresh unready event slot — the consumer-side wire.
+    fn unready_port() -> Value {
+        Value::EventQ(std::rc::Rc::new(std::cell::RefCell::new(EventSlot {
+            ready: false,
+            payload: None,
+            waiters: Vec::new(),
+        })))
+    }
+
+    fn status_of(id: u64) -> Option<TaskStatus> {
+        task_table_snapshot().and_then(|t| t.get(&id).map(|e| e.status.clone()))
+    }
+
+    fn damage_literal(amount: i64) -> Expr {
+        Expr::StructLiteral {
+            type_name: "Damage".to_string(),
+            fields: vec![("amount".to_string(), Expr::Decimal(amount))],
+        }
+    }
+
+    fn fire_stmt(target: &str, amount: i64) -> Statement {
+        Statement::ArrowAssign {
+            target: Some(Box::new(Expr::Identifier(target.to_string()))),
+            value: Box::new(damage_literal(amount)),
+            consume: false,
+        }
+    }
+
+    #[test]
+    fn blocked_read_suspends_then_fire_wakes() {
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn consume(d: Damage) -> Int { term d.amount; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+        let handle = interp.eval_expr(&Expr::Spawn {
+            type_name: "consume".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let tid = handle.as_i64().unwrap() as u64;
+        interp.state.insert("t".to_string(), handle.clone());
+        let await_t = || Expr::Await(Box::new(Expr::Identifier("t".to_string())));
+
+        // Await #1: the only runnable task blocks on the unready port. The
+        // pool empties → await returns the HANDLE (deadlock posture, no
+        // hang) and the task sits in Waiting.
+        let first = interp.eval_expr(&await_t()).unwrap();
+        assert_eq!(first, handle, "blocked pool returns the handle");
+        assert_eq!(status_of(tid), Some(TaskStatus::Waiting), "block suspends");
+
+        // Top-level fire: wire <- Damage{amount:42}; wakes the waiter.
+        let fired = eval_statement(
+            &fire_stmt("wire", 42),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        );
+        assert!(fired.is_ok());
+        assert_eq!(
+            status_of(tid), Some(TaskStatus::Ready),
+            "fire must wake the blocked task"
+        );
+
+        // Await #2: the SAME segment re-runs from its head — the read now
+        // succeeds — and yields the payload member.
+        let v = interp.eval_expr(&await_t()).unwrap();
+        assert_eq!(v.as_i64(), Some(42), "post-wake read sees the payload");
+        assert_eq!(status_of(tid), Some(TaskStatus::Done));
+    }
+
+    #[test]
+    fn single_await_drives_producer_wake_chain() {
+        // The acceptance shape: one await(consumer) interleaves BOTH tasks —
+        // the consumer blocks, the producer's fire revives it mid-loop. The
+        // result 7 is reachable ONLY if produce executed between consume's
+        // block and its completion.
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn consume(d: Damage) -> Int { term d.amount; }; \
+             defn produce(p: Damage) -> Int { p <- Damage{amount:7}; term 1; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+        for (name, fname) in [("c", "consume"), ("p", "produce")] {
+            let h = interp.eval_expr(&Expr::Spawn {
+                type_name: fname.to_string(),
+                args: vec![Expr::Identifier("wire".to_string())],
+                storage: crate::ast::SpawnStorage::Pooled,
+            }).unwrap();
+            interp.state.insert(name.to_string(), h);
+        }
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("c".to_string())))).unwrap();
+        assert_eq!(v.as_i64(), Some(7), "producer's fire fed the consumer");
+        // Both sides finished; nothing left schedulable.
+        assert!(collect_runnable().is_empty(), "no zombie tasks remain");
+    }
+
+    #[test]
+    fn free_cancels_ready_and_blocked_tasks() {
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn slow(d: Damage) -> Int { yield; term d.amount; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+
+        // (a) free BEFORE any execution: never runs.
+        let h1 = interp.eval_expr(&Expr::Spawn {
+            type_name: "slow".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let t1 = h1.as_i64().unwrap() as u64;
+        interp.state.insert("t1".to_string(), h1);
+        eval_statement(
+            &Statement::FreeHint("t1".to_string()),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+        assert_eq!(status_of(t1), Some(TaskStatus::Cancelled));
+
+        // (b) free AFTER a block: Waiting → Cancelled.
+        let h2 = interp.eval_expr(&Expr::Spawn {
+            type_name: "slow".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let t2 = h2.as_i64().unwrap() as u64;
+        interp.state.insert("t2".to_string(), h2);
+        interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t2".to_string())))).unwrap();
+        assert_eq!(status_of(t2), Some(TaskStatus::Waiting));
+        eval_statement(
+            &Statement::FreeHint("t2".to_string()),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+
+        // Firing the port must NOT resurrect either task.
+        eval_statement(
+            &fire_stmt("wire", 99),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+        assert_eq!(status_of(t1), Some(TaskStatus::Cancelled));
+        assert_eq!(status_of(t2), Some(TaskStatus::Cancelled));
+        assert!(collect_runnable().is_empty(), "freed tasks never schedule");
+
+        // Await of a freed handle returns the handle, not a result. The
+        // binding is gone (freed locals read as errors), so await the raw
+        // task id.
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Decimal(t1 as i64)))).unwrap();
+        assert_ne!(v.as_i64(), Some(99), "a cancelled task has no result");
+    }
+
+    #[test]
+    fn unready_read_outside_task_stays_strict() {
+        // Top-level reads keep the SPEC §9.5 gate: .^Ready first, else error.
+        let mut interp = Interpreter::new();
+        interp.state.insert("wire".to_string(), unready_port());
+        let err = interp.eval_expr(&Expr::Field(
+            Box::new(Expr::Identifier("wire".to_string())),
+            "amount".to_string(),
+        )).unwrap_err();
+        match err {
+            RuntimeError::TypeError { found, .. } => {
+                assert!(found.contains("not Ready"), "{found}");
+            }
+            other => panic!("expected TypeError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn registration_presplits_segments_before_port_reads() {
+        // Plan §4: the blocking read must HEAD its segment so the post-wake
+        // re-run never repeats side effects that preceded it. The fire below
+        // is NOT a param-field read (bare identifier target) → segment 0;
+        // `term d.amount` is → boundary before it.
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn job(d: Damage, o: Damage) -> Int { o <- Damage{amount:1}; term d.amount; };",
+        );
+        let body = program
+            .iter()
+            .filter_map(|i| match i {
+                TopLevel::Definition(def) => Some(def.body.clone()),
+                _ => None,
+            })
+            .next()
+            .expect("job parsed");
+        // The registration mirror is seeded per program — load first.
+        Interpreter::new().load_program(&program);
+        register_pending_task(
+            9_001, "job".to_string(), Vec::new(), body,
+            &["d".to_string(), "o".to_string()],
+        );
+        let (segments, current) = take_task_segments(9_001).expect("registered");
+        assert_eq!(current, 0);
+        assert_eq!(segments.len(), 2, "fire | port-read split");
+        assert!(
+            matches!(segments[0][0], Statement::ArrowAssign { .. }),
+            "segment 0 heads with the side effect"
+        );
+        assert!(
+            matches!(segments[1][0], Statement::Term(Some(_))),
+            "segment 1 HEADS with the blocking read"
+        );
+    }
+
+
 
     #[test]
     fn coll_count_and_capacity_intrinsic_parity() {
@@ -1464,6 +1771,76 @@ pub fn advance_segment_status(id: u64) -> bool {
 
 /// Store a task's final result.
 pub fn store_task_result(id: u64, result: Value) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                entry.result = Some(result);
+                entry.status = TaskStatus::Done;
+            }
+        }
+    });
+}
+
+// ── 2026-08-26 (async Phase B): event wake / block / cancel ────────────
+
+/// 2026-08-26 (Phase B): the current task blocks reading an unready slot —
+/// register it as a waiter and mark `Waiting`. Called from Field-on-EventQ
+/// when `CURRENT_TASK` is set. The segment executor catches the resulting
+/// `TaskBlocked` WITHOUT advancing the segment, so post-wake the same
+/// segment re-runs (its read now succeeds — level-triggered, SPEC §12.2).
+pub fn block_current_task_on_slot(slot: &std::rc::Rc<std::cell::RefCell<EventSlot>>) {
+    let Some(tid) = current_task_id() else { return };
+    slot.borrow_mut().waiters.push(tid);
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&tid) {
+                entry.status = TaskStatus::Waiting;
+            }
+        }
+    });
+}
+
+/// 2026-08-26 (Phase B): a producer fired this slot — drain waiters,
+/// flipping each still-`Waiting` task back to `Ready`. Cancelled/Done ids
+/// are skipped (a freed task never resurrects). Call AFTER releasing the
+/// slot's `borrow_mut` (the fire path holds one).
+pub fn fire_slot_wake(slot: &std::rc::Rc<std::cell::RefCell<EventSlot>>) {
+    let waiters = std::mem::take(&mut slot.borrow_mut().waiters);
+    if waiters.is_empty() { return; }
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            for tid in waiters {
+                if let Some(entry) = table.get_mut(&tid) {
+                    if entry.status == TaskStatus::Waiting {
+                        entry.status = TaskStatus::Ready;
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// 2026-08-26 (Phase B): runtime cancellation. `free t;` removes the local,
+/// but the table entry stayed schedulable — other awaits' round-robins
+/// would run a task nobody can observe. Mark `Cancelled` so every executor
+/// skips it permanently.
+pub fn cancel_task(id: u64) {
+    TASK_TABLE.with(|t| {
+        if let Some(table) = t.borrow_mut().as_mut() {
+            if let Some(entry) = table.get_mut(&id) {
+                if !matches!(entry.status, TaskStatus::Done | TaskStatus::Cancelled) {
+                    entry.status = TaskStatus::Cancelled;
+                }
+            }
+        }
+    });
+}
+
+/// 2026-08-26 (Phase B): store a final result AND transition to Done
+/// atomically. The A3 code stored transiently after every segment pass —
+/// `task_is_done` briefly lied mid-round; with blocked tasks in the pool a
+/// transient Done could skip a not-yet-woken task's turn.
+pub fn mark_done_with_result(id: u64, result: Value) {
     TASK_TABLE.with(|t| {
         if let Some(table) = t.borrow_mut().as_mut() {
             if let Some(entry) = table.get_mut(&id) {

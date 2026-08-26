@@ -185,40 +185,51 @@ pub fn eval_expr(
         // eager model this was pass-through; now it triggers lazy execution
         // of the pending task's body via the task table.
         // 2026-08-23 (async Phase A3): await triggers round-robin scheduling.
+        // 2026-08-26 (async Phase B): segments run through the shared
+        // `run_task_segment` executor (CURRENT_TASK set/clear, TaskBlocked
+        // translation). A blocked task drops out of the runnable pool until
+        // a port fire re-marks it Ready; results are stored ONLY on
+        // completion (the A3 code stored transiently every pass).
         Expr::Await(inner) => {
             let inner_val = eval_expr(inner, heap, bindings, functions)?;
             if let Value::Atom(Atom::Int(raw_id)) = &inner_val {
-                let target_id = *raw_id as u64;
-                if !crate::interpreter::task_is_done(target_id) {
-                    loop {
-                        if crate::interpreter::task_is_done(target_id) { break; }
-                        let runnable = crate::interpreter::collect_runnable();
-                        if runnable.is_empty() { break; }
-                        for (tid, fn_name, arg_vals, segments, current) in &runnable {
-                            if crate::interpreter::task_is_done(*tid) { continue; }
-                            if *current >= segments.len() { continue; }
-                            let defn = match functions.get(fn_name) { Some(d) => d.clone(), None => continue };
-                            let mut cb: HashMap<String, Value> = HashMap::new();
-                            for (i, pname) in defn.parameters.iter().enumerate() {
-                                if let Some(v) = arg_vals.get(i) { cb.insert(pname.clone(), v.clone()); }
-                            }
-                            let mut result = Value::Void;
-                            for stmt in &segments[*current] {
-                                match eval_statement(stmt, heap, &mut cb, functions) {
-                                    Ok(v) => result = v,
-                                    Err(RuntimeError::TermReturn(v)) => { result = v; break; }
-                                    Err(e) => return Err(e),
+                if *raw_id >= 0 {
+                    let target_id = *raw_id as u64;
+                    if !crate::interpreter::task_is_done(target_id) {
+                        'scheduler: loop {
+                            if crate::interpreter::task_is_done(target_id) { break; }
+                            let runnable = crate::interpreter::collect_runnable();
+                            // Empty pool with the target unfinished = deadlock
+                            // posture (every remaining task Waiting): return
+                            // the handle (SPEC §12.2 — cooperative scheduler,
+                            // no preemption, no hang).
+                            if runnable.is_empty() { break; }
+                            for (tid, fn_name, arg_vals, segments, current) in &runnable {
+                                if crate::interpreter::task_is_done(*tid) { continue; }
+                                if *current >= segments.len() { continue; }
+                                match run_task_segment(
+                                    *tid, fn_name, arg_vals, segments, *current, heap, functions,
+                                )? {
+                                    SegmentOutcome::Blocked => {}
+                                    SegmentOutcome::Term(v) => {
+                                        crate::interpreter::mark_done_with_result(*tid, v);
+                                        if *tid == target_id { break 'scheduler; }
+                                    }
+                                    SegmentOutcome::Completed(v) => {
+                                        let finished =
+                                            crate::interpreter::advance_segment_status(*tid);
+                                        if finished {
+                                            crate::interpreter::mark_done_with_result(*tid, v);
+                                            if *tid == target_id { break 'scheduler; }
+                                        }
+                                    }
                                 }
                             }
-                            crate::interpreter::store_task_result(*tid, result);
-                            let done = crate::interpreter::advance_segment_status(*tid);
-                            if *tid == target_id && done { break; }
                         }
-                        if crate::interpreter::task_is_done(target_id) { break; }
                     }
-                }
-                if let Some(result) = crate::interpreter::get_task_result(target_id) {
-                    return Ok(result);
+                    if let Some(result) = crate::interpreter::get_task_result(target_id) {
+                        return Ok(result);
+                    }
                 }
             }
             Ok(inner_val)
@@ -293,6 +304,7 @@ pub fn eval_expr(
                             crate::interpreter::EventSlot {
                                 ready: true,
                                 payload: Some(other),
+                                waiters: Vec::new(),
                             },
                         ))),
                     };
@@ -302,7 +314,11 @@ pub fn eval_expr(
                     fields.insert(
                         oname.clone(),
                         Value::EventQ(std::rc::Rc::new(std::cell::RefCell::new(
-                            crate::interpreter::EventSlot { ready: false, payload: None },
+                            crate::interpreter::EventSlot {
+                                ready: false,
+                                payload: None,
+                                waiters: Vec::new(),
+                            },
                         ))),
                     );
                 }
@@ -362,67 +378,80 @@ fn eval_task_spawn(
         .cloned()
         .ok_or_else(|| RuntimeError::UndefinedFunction(type_name.to_string()))?;
     let task_id = next_task_id();
+    // 2026-08-26 (Phase B): parameter names feed the port-read pre-split —
+    // a blocking read must head its segment (plan §4).
     crate::interpreter::register_pending_task(
-        task_id, type_name.to_string(), arg_vals, defn.body.clone(),
+        task_id, type_name.to_string(), arg_vals, defn.body.clone(), &defn.parameters,
     );
     // Return a task-id marker — await triggers lazy segment-by-segment execution.
     Ok(Value::Atom(Atom::Int(task_id as i64)))
 }
 
-/// 2026-08-23 (async Phase A2): execute a pending task's body and return
-/// its result. Called by `await`.
-fn execute_pending_task(
-    task_id: u64,
+/// 2026-08-26 (async Phase B): outcome of running ONE segment of a task.
+/// - `Completed(v)`: the segment ran off its end — advance the cursor.
+/// - `Term(v)`: `term expr;` fired mid-segment — the task is DONE with `v`.
+/// - `Blocked`: an unready port read suspended the task (already registered
+///   as a slot waiter, status `Waiting`). The cursor does NOT advance; the
+///   post-wake re-run starts from this segment's first statement.
+enum SegmentOutcome {
+    Completed(Value),
+    Term(Value),
+    Blocked,
+}
+
+/// 2026-08-26 (async Phase B): shared single-segment executor — the ONE
+/// place that sets/clears CURRENT_TASK and translates TaskBlocked. Used by
+/// the await round-robin. Replaces the duplicated A2-era
+/// `execute_pending_task` (dead since the round-robin landed).
+fn run_task_segment(
+    tid: u64,
     fn_name: &str,
     arg_vals: &[Value],
+    segments: &[Vec<Statement>],
+    current: usize,
     heap: &mut VirtualHeap,
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
-) -> Result<Value, RuntimeError> {
-    // Phase A3: get segments from the table and execute them in order.
-    // Each segment runs to completion; yield; boundaries separate them.
-    let (segments, current) = crate::interpreter::take_task_segments(task_id)
-        .ok_or_else(|| RuntimeError::UndefinedFunction(fn_name.to_string()))?;
-
-    let defn = functions
-        .get(fn_name)
-        .cloned()
-        .ok_or_else(|| RuntimeError::UndefinedFunction(fn_name.to_string()))?;
-    let mut call_bindings: std::collections::HashMap<String, Value> =
-        std::collections::HashMap::new();
+) -> Result<SegmentOutcome, RuntimeError> {
+    let Some(defn) = functions.get(fn_name) else {
+        return Ok(SegmentOutcome::Term(Value::Void));
+    };
+    let mut cb: HashMap<String, Value> = HashMap::new();
     for (i, pname) in defn.parameters.iter().enumerate() {
         if let Some(v) = arg_vals.get(i) {
-            call_bindings.insert(pname.clone(), v.clone());
+            cb.insert(pname.clone(), v.clone());
         }
     }
-
-    let mut result = Value::Void;
-    for seg_idx in current..segments.len() {
-        crate::interpreter::advance_segment(task_id);
-        for stmt in &segments[seg_idx] {
-            match eval_statement(stmt, heap, &mut call_bindings, functions) {
-                Ok(v) => result = v,
-                Err(RuntimeError::TermReturn(v)) => {
-                    result = v;
-                    // Mark Done on term.
-                    crate::interpreter::mark_done(task_id);
-                    return Ok(result);
-                }
-                Err(e) => return Err(e),
+    crate::interpreter::set_current_task(Some(tid));
+    let mut out = Ok(SegmentOutcome::Completed(Value::Void));
+    for stmt in &segments[current] {
+        match eval_statement(stmt, heap, &mut cb, functions) {
+            Ok(v) => out = Ok(SegmentOutcome::Completed(v)),
+            Err(RuntimeError::TermReturn(v)) => {
+                out = Ok(SegmentOutcome::Term(v));
+                break;
+            }
+            Err(RuntimeError::TaskBlocked) => {
+                out = Ok(SegmentOutcome::Blocked);
+                break;
+            }
+            Err(e) => {
+                out = Err(e);
+                break;
             }
         }
     }
-    crate::interpreter::mark_done(task_id);
-    Ok(result)
+    crate::interpreter::set_current_task(None);
+    out
 }
 
 // 2026-08-23 (async scheduler Phase A1): thread-local task bookkeeping,
 // accessible from deep inside expression evaluation where no &mut Interpreter
 // is in scope. Same pattern as OBJ_SHAPES / VARIANT_DEFS.
-use std::cell::RefCell;
+// 2026-08-26 (Phase B): the dead A1-era TASK_TABLE mirror here is removed —
+// the authoritative table lives in interpreter/mod.rs; duplicates silently
+// diverge.
 use std::cell::Cell;
 thread_local! {
-    static TASK_TABLE: RefCell<Option<HashMap<u64, crate::interpreter::TaskEntry>>> =
-        const { RefCell::new(None) };
     static TASK_ID_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
 
@@ -705,6 +734,15 @@ fn eval_field(
         // An EVENT PORT: any name projects the current payload's members.
         // Readiness uses .^Ready (reflection), not .Ready (field).
         Value::EventQ(q) => {
+            // 2026-08-26 (async Phase B): decide suspension BEFORE taking the
+            // match borrow — block_current_task_on_slot mutates the waiters
+            // list and a held borrow would panic.
+            if q.borrow().payload.is_none()
+                && crate::interpreter::current_task_id().is_some()
+            {
+                crate::interpreter::block_current_task_on_slot(&q);
+                return Err(RuntimeError::TaskBlocked);
+            }
             let slot = q.borrow();
             match &slot.payload {
                 Some(Value::Product { fields, names }) => {
@@ -729,10 +767,15 @@ fn eval_field(
                     expected: format!("a payload with field '{}'", name),
                     found: describe_value(other),
                 }),
-                None => Err(RuntimeError::TypeError {
-                    expected: format!("'{}' on an event port", name),
-                    found: "no pending event — the port is not Ready".into(),
-                }),
+                None => {
+                    // Unready OUTSIDE a task: strict error stands — top-level
+                    // reads gate on .^Ready (SPEC §9.5). TEMP undo: collapse
+                    // this whole pre-check + arm to revert Phase B blocking.
+                    Err(RuntimeError::TypeError {
+                        expected: format!("'{}' on an event port", name),
+                        found: "no pending event — the port is not Ready".into(),
+                    })
+                }
             }
         }
         other => Err(RuntimeError::TypeError {
@@ -1795,7 +1838,15 @@ pub fn eval_statement(
             Ok(Value::Void)
         }
         Statement::FreeHint(name) => {
-            // 2026-08-01 (Phase 5): `free x;` — the local is dead; a later read errors.
+            // 2026-08-26 (async Phase B): a freed TASK HANDLE cancels the
+            // table entry — otherwise other awaits' round-robins would run a
+            // task nobody can observe (SPEC §12.2 cancellation). Non-task
+            // frees keep the Phase 5 behavior: local dies, later read errors.
+            if let Some(Value::Atom(Atom::Int(raw))) = bindings.get(name) {
+                if *raw >= 0 {
+                    crate::interpreter::cancel_task(*raw as u64);
+                }
+            }
             bindings.remove(name);
             Ok(Value::Void)
         }
@@ -1809,16 +1860,22 @@ pub fn eval_statement(
                     // `died <- value;` where the binding holds an EventQ sets
                     // the shared slot (Ready + payload). The handle itself is
                     // never rebound, so every wired consumer observes it.
-                    let fired = match bindings.get(name) {
+                    // 2026-08-26 (Phase B): firing also WAKES tasks blocked on
+                    // this slot (drain waiters → Ready). The wake runs after
+                    // the slot borrow releases — fire_slot_wake mutates it.
+                    let fired_q = match bindings.get(name) {
                         Some(Value::EventQ(q)) => {
-                            let mut slot = q.borrow_mut();
-                            slot.ready = true;
-                            slot.payload = Some(val.clone());
+                            {
+                                let mut slot = q.borrow_mut();
+                                slot.ready = true;
+                                slot.payload = Some(val.clone());
+                            }
+                            crate::interpreter::fire_slot_wake(q);
                             true
                         }
                         _ => false,
                     };
-                    if !fired {
+                    if !fired_q {
                         bindings.insert(name.clone(), val);
                     }
                 }
