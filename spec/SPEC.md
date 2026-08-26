@@ -1380,6 +1380,12 @@ Spawn **captures** the function and its evaluated arguments but does NOT execute
 
 Deterministic interleaving at yield boundaries: tasks execute one segment per scheduling pass, in spawn order. Single-threaded scheduler — no data races, no nondeterministic ordering.
 
+**Only parameters carry across a segment boundary.** A `let` bound before
+`yield;` is not visible in later segments — bind the values a segment needs
+as parameters, or recompute them after the boundary. This is what makes
+compiled and interpreted task semantics identical: every segment lowers to
+a plain function of the task's arguments.
+
 **Blocking port reads are suspension points.** A spawned task that reads a
 payload member off an unready event port suspends at that read (status
 `Waiting`); it consumes no further scheduling passes until some task fires

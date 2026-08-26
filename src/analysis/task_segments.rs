@@ -32,7 +32,8 @@
 //! Undo: inline back into interpreter::register_pending_task; drop the
 //! AnalysisResults field.
 
-use crate::ast::{Expr, Statement, TopLevel};
+use crate::ast::{Expr, Statement, TopLevel, Type};
+
 
 /// Split `body` into segments per the rules above.
 pub fn split_task_body(body: &[Statement], param_names: &[String]) -> Vec<Vec<Statement>> {
@@ -67,15 +68,91 @@ pub fn collect_spawn_targets(items: &[TopLevel]) -> std::collections::HashSet<St
     out
 }
 
-fn stmt_walk(s: &Statement, out: &mut std::collections::HashSet<String>) {
-    for e in stmt_exprs(s) {
-        expr_walk(e, out);
-    }
-    for b in stmt_bodies(s) {
-        for inner in b {
-            stmt_walk(inner, out);
+/// 2026-08-26 (async Phase C): compiled tasks carry args/results as i64
+/// argv slots (the defn entry convention). Reject spawn targets whose
+/// signature leaves that ABI — a float or aggregate slot would miscompile
+/// SILENTLY otherwise. Protocol categories come from the casting graph over
+/// the TypeUniverse (rule 19); Ptr/Bits are compiler constructs handled
+/// directly.
+pub fn collect_task_abi_errors(
+    items: &[TopLevel],
+    universe: &crate::type_universe::TypeUniverse,
+) -> Vec<String> {
+    let graph = crate::casting::graph::CastingGraph::new();
+    let targets = collect_spawn_targets(items);
+    let mut errors = Vec::new();
+    for item in items {
+        if let TopLevel::Definition(d) = item {
+            check_task_signature(d, &targets, &graph, universe, &mut errors);
         }
     }
+    errors.sort();
+    errors.dedup();
+    errors
+}
+
+const TASK_ABI_HINT: &str =
+    "compiled tasks carry arguments/results as i64 slots; \
+     use Int/Bool/Char/Ptr (v1 scope)";
+
+fn task_type_is_i64_abi(
+    graph: &crate::casting::graph::CastingGraph,
+    universe: &crate::type_universe::TypeUniverse,
+    ty: &Type,
+) -> bool {
+    match ty {
+        Type::Ptr(_) | Type::Bits(_) | Type::Void => true,
+        _ => {
+            let (cat, _) = graph.type_to_protocol(universe, ty);
+            matches!(cat.as_str(), "Int" | "Bit" | "Char" | "UInt")
+        }
+    }
+}
+
+fn result_types_of(d: &crate::ast::top::Definition) -> Vec<Type> {
+    if !d.outputs.is_empty() {
+        return d.outputs.clone();
+    }
+    d.output_type
+        .as_ref()
+        .map(|ot| ot.all_types())
+        .unwrap_or_default()
+}
+
+fn check_task_signature(
+    d: &crate::ast::top::Definition,
+    targets: &std::collections::HashSet<String>,
+    graph: &crate::casting::graph::CastingGraph,
+    universe: &crate::type_universe::TypeUniverse,
+    errors: &mut Vec<String>,
+) {
+    if !targets.contains(&d.name) {
+        return;
+    }
+    for (pname, pty) in &d.parameters {
+        if !task_type_is_i64_abi(graph, universe, pty) {
+            errors.push(format!(
+                "task '{}': parameter '{}' has type {} — {TASK_ABI_HINT}",
+                d.name, pname, pty
+            ));
+        }
+    }
+    for rty in result_types_of(d) {
+        if !task_type_is_i64_abi(graph, universe, &rty) {
+            errors.push(format!(
+                "task '{}': result type {} is not i64-ABI — await returns it \
+                 through an i64 slot; {TASK_ABI_HINT}",
+                d.name, rty
+            ));
+        }
+    }
+}
+
+fn stmt_walk(s: &Statement, out: &mut std::collections::HashSet<String>) {
+    stmt_exprs(s).iter().for_each(|e| expr_walk(e, out));
+    // Flatten the body lists first so the walk stays a single loop level.
+    let nested: Vec<&Statement> = stmt_bodies(s).into_iter().flatten().collect();
+    nested.iter().for_each(|inner| stmt_walk(inner, out));
 }
 
 fn expr_walk(e: &Expr, out: &mut std::collections::HashSet<String>) {
