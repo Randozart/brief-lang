@@ -1,7 +1,12 @@
 /// SPIR-V backend — compiles Briev GPU kernels to SPIR-V binary modules.
 ///
-/// 2026-07-15: v1 baseline. Supports `txn [idx < N]` kernels with
-/// GetGlobalId#, GetLocalId#, WorkgroupSize#, Load#, and Store# intrinsics.
+/// 2026-07-15: v1 baseline. 2026-08-23 (plan §2.1–2.2): real statement/
+/// expression lowering + frontend accel-driven kernel selection. 2026-08-26
+/// (plan §2.3): Load#/Store# take ADDRESS EXPRESSIONS rooted in program
+/// state — `Load#(field)` / `Load#(field[i])` / `Store#(field[i], v)` —
+/// lowered to AccessChain over the single StorageBuffer binding; numeric
+/// addresses do not exist in a Vulkan kernel and error naming the fix.
+/// Supported builtins: GetGlobalId#, GetLocalId#, WorkgroupSize#.
 ///
 /// # Entry point
 /// `compile_spirv(program, options) -> Result<Vec<u8>>`
@@ -110,6 +115,27 @@ mod tests {
             ty: Type::Vector(Box::new(Type::int()), vec![Dimension::Anonymous(n as usize)]),
             span: None,
         })
+    }
+
+    /// §2.3 tests: a DIRECT shape for lowering-focused fixtures — the accel
+    /// eligibility model (§2.2) does not classify Load#/Store# bodies yet.
+    fn raw_shape(
+        index_var: &str,
+        kernel_stmts: Vec<Statement>,
+        reads: &[&str],
+        writes: &[&str],
+    ) -> crate::analysis::accel::KernelShape {
+        crate::analysis::accel::KernelShape {
+            index_var: index_var.into(),
+            count_expr: Some(Expr::Decimal(64)),
+            kernel_stmts,
+            host_stmts: vec![],
+            read_buffers: reads.iter().map(|s| s.to_string()).collect(),
+            write_buffers: writes.iter().map(|s| s.to_string()).collect(),
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+        }
     }
 
     /// Canonical accel-shape fixture (Design A): `i` is a real state counter
@@ -368,6 +394,245 @@ mod tests {
         assert!(access_chains >= 3,
             "two reads + one write need >=3 access chains; got {}",
             access_chains);
+    }
+
+    /// §2.3: Load#/Store# address forms — Load#(field[i]), Store#(field[i], v),
+    /// Load#(scalar), Store#(scalar, v) all lower to SSBO AccessChains and the
+    /// binary passes spirv-val.
+    ///
+    /// Shape is CONSTRUCTED directly: this test locks the §2.3 LOWERING.
+    /// Frontend eligibility is §2.2's surface (its own tests) — the accel
+    /// purity model does not yet classify Load#/Store# bodies, which is
+    /// tracked in planned-features-tracker.md under SPIR-V follow-ups.
+    #[test]
+    fn test_load_store_address_forms_pass_spirv_val() {
+        if !std::process::Command::new("spirv-val").arg("--version").output().is_ok() {
+            eprintln!("spirv-val not found — skipping");
+            return;
+        }
+        let load_call = |arg| Expr::Call("Load#".into(), vec![arg], None);
+        let store_call = |addr, val| {
+            Expr::Call("Store#".into(), vec![addr, val], None)
+        };
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "i".into(), ty: Type::int(), span: None }),
+            // Scalar state — Load#/Store#-only surface (no plain Assign to it).
+            TopLevel::StateDecl(StateDecl { name: "total".into(), ty: Type::int(), span: None }),
+            state_decl("a", 256),
+            state_decl("out", 256),
+            TopLevel::Transaction(Transaction {
+                name: "ls".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::BinaryOp(
+                        BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(64)),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("out".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        // out[i] = Load#(a[i]) + 1
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(load_call(Expr::Index(
+                                Box::new(Expr::Identifier("a".into())),
+                                Box::new(Expr::Identifier("i".into())),
+                            ))),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                    // total = Store#(total, Load#(total) + i)  (expression stmt)
+                    Statement::Expression(store_call(
+                        Expr::Identifier("total".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(load_call(Expr::Identifier("total".into()))),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                    )),
+                    Statement::Assign(
+                        Expr::Identifier("i".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("i".into())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        // Direct shape: §2.3 locks the LOWERING; eligibility is §2.2's
+        // separate surface (see this file's selection tests + tracker note).
+        let txn_stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let shape = crate::analysis::accel::KernelShape {
+            index_var: "i".into(),
+            count_expr: Some(Expr::Decimal(64)),
+            kernel_stmts: txn_stmts,
+            host_stmts: vec![],
+            read_buffers: vec!["a".into()],
+            write_buffers: vec!["out".into(), "total".into()],
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+        };
+
+        let mut builder = SpirvBuilder::new();
+        emit_kernel(&mut builder, "ls", &shape, &program).unwrap();
+        // Count inside a scope: module_ref borrows; build() consumes.
+        let chain_count = {
+            let m = builder.module_ref();
+            m.functions.iter()
+                .flat_map(|f| f.blocks.iter())
+                .flat_map(|b| b.instructions.iter())
+                .filter(|inst| inst.class.opcode == spirv::Op::AccessChain)
+                .count()
+        };
+        let binary = builder.build().unwrap();
+        // a[i] load-chain, out[i] store-chain, total member-load chain,
+        // total member-store chain (2 chains each side of the scalar RMW).
+        assert!(chain_count >= 4,
+            "two element forms + scalar load/store need >=4 access chains; got {}",
+            chain_count);
+
+        let dir = std::env::temp_dir().join(format!("briev_spv_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("load_store.spv");
+        std::fs::write(&path, &binary).unwrap();
+        let out = std::process::Command::new("spirv-val")
+            .arg(&path)
+            .output()
+            .expect("spirv-val");
+        assert!(
+            out.status.success(),
+            "spirv-val rejected:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// §2.3 honesty: a non-address first argument is a CAPABILITY ERROR
+    /// naming the valid forms — no numeric-address fallback, no silent drop.
+    #[test]
+    fn test_load_rejects_non_address_expressions() {
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "i".into(), ty: Type::int(), span: None }),
+            TopLevel::StateDecl(StateDecl { name: "total".into(), ty: Type::int(), span: None }),
+            TopLevel::Transaction(Transaction {
+                name: "bad".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![
+                    // total = Store#(total, Load#(5)) — 5 is not an address.
+                    Statement::Assign(
+                        Expr::Identifier("total".into()),
+                        Expr::Call(
+                            "Load#".into(),
+                            vec![Expr::Decimal(5)],
+                            None,
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let mut builder = SpirvBuilder::new();
+        let err = emit_kernel(&mut builder, "bad", &raw_shape("i", stmts, &[], &["total"]), &program)
+            .err()
+            .expect("Load#(5) must be rejected");
+        assert!(err.contains("not an address expression"), "{err}");
+        assert!(err.contains("field"), "{err}"); // names the fix form
+    }
+
+    /// §2.3 width honesty: an explicit byte-count that disagrees with the
+    /// declared field type errors naming both numbers.
+    #[test]
+    fn test_load_width_mismatch_errors() {
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "i".into(), ty: Type::int(), span: None }),
+            state_decl("a", 16),
+            TopLevel::Transaction(Transaction {
+                name: "wbad".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![Statement::Expression(Expr::Call(
+                    "Load#".into(),
+                    vec![
+                        Expr::Index(
+                            Box::new(Expr::Identifier("a".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        // Int elements are 8 bytes; 4 disagrees.
+                        Expr::Decimal(4),
+                    ],
+                    None,
+                ))],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let mut builder = SpirvBuilder::new();
+        let err = emit_kernel(&mut builder, "wbad", &raw_shape("i", stmts, &["a"], &[]), &program)
+            .err()
+            .expect("width mismatch must error");
+        assert!(err.contains("byte-width"), "{err}");
     }
 
     /// Capability honesty + selection: ineligible bodies never become

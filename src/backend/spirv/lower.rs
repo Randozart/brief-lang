@@ -247,10 +247,44 @@ impl<'a> FnLowerer<'a> {
                 let c = self.builder.i64_const(sizes[dim as usize]);
                 Ok((c, Type::int()))
             }
-            "Load#" | "Store#" => self.err(
-                "raw-address Load#/Store# are not meaningful in a Vulkan \
-                 kernel without a memory-model decision — use state fields",
-            ),
+            "Load#" | "Store#" => {
+                // 2026-08-26 (§2.3): raw numeric addresses cannot exist in a
+                // Vulkan kernel (no inttoptr over SSBO memory). The honest
+                // kernel form of LLVM's raw-address Load#/Store# is an
+                // ADDRESS EXPRESSION rooted in the StorageBuffer:
+                //   Load#(field) / Load#(field[i]) / Store#(field[i], v)
+                // lowered to AccessChain + OpLoad/OpStore on the buffer's
+                // typed members. Element widths come from the declared
+                // field type, not the byte-count argument.
+                if name == "Load#" {
+                    let (ptr, elem_ty) = self.emit_addr(args.first().ok_or_else(|| {
+                        "SPIR-V lowering: Load# needs an address expression".to_string()
+                    })?)?;
+                    self.check_width_arg(args.get(1), &elem_ty, "Load#")?;
+                    let tid = self.type_id(&elem_ty)?;
+                    let loaded = self.builder.load(tid, ptr);
+                    Ok((loaded, elem_ty))
+                } else {
+                    let Some(addr_arg) = args.first() else {
+                        return self.err("Store# needs an address expression");
+                    };
+                    let Some(val_expr) = args.get(1) else {
+                        return self.err("Store# needs a value to store");
+                    };
+                    let (ptr, elem_ty) = self.emit_addr(addr_arg)?;
+                    self.check_width_arg(args.get(2), &elem_ty, "Store#")?;
+                    let (val, val_ty) = self.emit_expr(val_expr)?;
+                    if val_ty != elem_ty {
+                        return self.err(format!(
+                            "Store# of {:?} into {:?} storage would silently \
+                             truncate/convert — cast at the source",
+                            val_ty, elem_ty
+                        ));
+                    }
+                    self.builder.store(ptr, val);
+                    Ok((val, val_ty))
+                }
+            }
             other => self.err(format!("unsupported intrinsic '{}'", other)),
         }
     }
@@ -410,6 +444,96 @@ impl<'a> FnLowerer<'a> {
         Ok((chain, elem_ty))
     }
 
+    /// 2026-08-26 (§2.3): AccessChain to a SCALAR field inside the SSBO
+    /// (member index only — no element subscript). Returns (ptr, field ty).
+    fn state_field_scalar_ptr(&mut self, field: &str) -> Result<(Word, Type), String> {
+        let Some(var) = self.ssbo_var else {
+            return self.err("kernel touches state but no state fields were collected");
+        };
+        let Some(pos) = self.state_fields.iter().position(|f| f.name == field) else {
+            return self.err(format!("state field '{}' was not declared", field));
+        };
+        let fty = self.state_fields[pos].ty.clone();
+        if matches!(fty, Type::Vector(_, _)) {
+            return self.err(format!(
+                "field '{}' is indexed state — address it as '{}[i]'",
+                field, field
+            ));
+        }
+        let elem_id = self.type_id(&fty)?;
+        let member_idx = self.builder.u32_const(pos as u32);
+        let ptr_ty = self.builder.ptr_class(StorageClass::StorageBuffer, elem_id);
+        let chain = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(ptr_ty),
+            Some(chain),
+            vec![Operand::IdRef(var), Operand::IdRef(member_idx)],
+        ));
+        Ok((chain, fty))
+    }
+
+    /// 2026-08-26 (§2.3): lower an ADDRESS EXPRESSION to an SSBO pointer.
+    ///
+    /// Valid kernel address forms mirror LLVM's raw-address intent while
+    /// staying inside Vulkan's memory model (every address derives from a
+    /// buffer base; no numeric addresses):
+    /// - `field`      → scalar member pointer (scalar state fields only)
+    /// - `field[i]`   → element pointer into indexed (Vector) state
+    ///
+    /// Anything else is a capability error naming the valid forms.
+    fn emit_addr(&mut self, e: &Expr) -> Result<(Word, Type), String> {
+        match e {
+            Expr::Identifier(name) => self.state_field_scalar_ptr(name),
+            Expr::Index(obj, idx) => {
+                let Some(fname) = FnLowerer::field_name_of(obj) else {
+                    return self.err("only direct state-field indexing forms addresses");
+                };
+                if !self.state_fields.iter().any(|f| f.name == fname) {
+                    return self.err(format!(
+                        "unknown state field '{}' (declare it as indexed state)",
+                        fname
+                    ));
+                }
+                if !matches!(self.state_fields.iter().find(|f| f.name == fname).unwrap().ty,
+                             Type::Vector(_, _))
+                {
+                    return self.err(format!(
+                        "field '{}' is scalar — no '{}'[i]' addressing; use the \
+                         field directly",
+                        fname, fname
+                    ));
+                }
+                let (idx_val, _) = self.emit_expr(idx)?;
+                self.state_field_elem_ptr(fname, idx_val)
+            }
+            other => self.err(format!(
+                "not an address expression ({:?}) — kernel Load#/Store# take \
+                 'field' or 'field[i]' rooted in program state",
+                std::mem::discriminant(other)
+            )),
+        }
+    }
+
+    /// Byte-count argument check: LLVM Load#/Store# accept a byte width;
+    /// over a TYPED buffer the width comes from the declaration. A matching
+    /// count passes (source compatibility); anything else names the fix.
+    fn check_width_arg(&self, arg: Option<&Expr>, elem_ty: &Type, who: &str) -> Result<(), String> {
+        let Some(Expr::Decimal(n)) = arg else {
+            return Ok(()); // omitted — natural width
+        };
+        let want = spirv_type_bytes(elem_ty) as i64;
+        if *n != want {
+            return self.err(format!(
+                "{} byte-width {} does not match the addressed element \
+                 ({} bytes by its declared type) — drop the width argument or \
+                 fix the field type",
+                who, n, want
+            ));
+        }
+        Ok(())
+    }
+
     // ── Small helpers ───────────────────────────────────────────────────
 
     fn type_id(&mut self, ty: &Type) -> Result<Word, String> {
@@ -485,19 +609,18 @@ pub use __collect::collect_state_fields;
 mod __collect {
     use super::*;
 
-    /// Walk a txn body collecting every state-field reference used with an
-    /// index (the SSBO surface). Sorted + deduped by setup_state_buffer.
+    /// Walk program top-levels collecting EVERY declared state field used by
+    /// the kernel surface (2026-08-26 §2.3: scalars join indexed arrays so
+    /// `Load#(scalar)` / `Store#(scalar, v)` have real storage). Sorted +
+    /// deduped by setup_state_buffer.
     pub fn collect_state_fields(items: &[crate::ast::TopLevel]) -> Vec<StateField> {
         let mut fields: Vec<StateField> = Vec::new();
         for item in items {
             if let crate::ast::TopLevel::StateDecl(d) = item {
-                // Only indexed/array state becomes SSBO members.
-                if matches!(d.ty, Type::Vector(_, _)) {
-                    fields.push(StateField {
-                        name: d.name.clone(),
-                        ty: d.ty.clone(),
-                    });
-                }
+                fields.push(StateField {
+                    name: d.name.clone(),
+                    ty: d.ty.clone(),
+                });
             }
         }
         fields.sort_by(|a, b| a.name.cmp(&b.name));
