@@ -961,6 +961,8 @@ impl<'a> Parser<'a> {
         let mut fields: Vec<(String, crate::ast::Type)> = Vec::new();
         let mut metadata = std::collections::HashMap::new();
         let mut members: Vec<crate::ast::TopLevel> = Vec::new();
+        // 2026-08-26 (Phase B2): internal triggers keep their own field.
+        let mut internal_triggers: Vec<Trigger> = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             if self.check(&Token::ExclaimArrow) || self.check(&Token::Spec) {
                 self.parse_metadata_clause(&mut metadata)?;
@@ -983,11 +985,16 @@ impl<'a> Parser<'a> {
                 self.eat(&Token::Semicolon);
                 continue;
             }
-            if self.eat(&Token::Trg) {
-                // internal trigger — reuse the trigger declaration parser via
-                // the top-level path, then keep it in members.
-                let item = self.parse_top_level()?;
-                members.push(item);
+            if self.check(&Token::Trg) {
+                // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2):
+                // internal triggers land in their OWN field — the old path
+                // ate `trg` then re-dispatched through parse_top_level,
+                // which expects the keyword (guaranteed syntax error), so
+                // any cell with a trigger failed to parse at all. Call the
+                // dedicated parser; scheduling semantics stay staged
+                // (SPEC §13: typed ports are the trigger replacement).
+                let t = self.parse_top_level_trg()?;
+                internal_triggers.push(t);
                 self.eat(&Token::Semicolon);
                 continue;
             }
@@ -1020,7 +1027,7 @@ impl<'a> Parser<'a> {
                     _ => None,
                 })
                 .collect(),
-            internal_triggers: vec![],
+            internal_triggers,
             is_persistent: false,
             metadata,
             span: None,
@@ -4603,5 +4610,42 @@ mod phase3_tests {
             }
             other => panic!("expected import, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod cell_b2_tests {
+    use super::*;
+
+    fn parse(src: &str) -> Vec<TopLevel> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        p.parse_program().unwrap()
+    }
+
+    #[test]
+    fn cell_internal_triggers_are_preserved() {
+        // 2026-08-26 (Phase B2): `trg` items inside a cell land in
+        // internal_triggers — the old path pushed them into members, whose
+        // txn/defn filter_maps silently dropped them.
+        let items = parse(
+            "cell Meter(period: Int) -> reading: Event<Int> {\n\
+             \x20   total: Int;\n\
+             \x20   trg tick @ clock;\n\
+             };",
+        );
+        let c = items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::Cell(c) => Some(c),
+                _ => None,
+            })
+            .expect("cell parsed");
+        assert_eq!(c.internal_triggers.len(), 1, "trigger kept");
+        assert_eq!(c.internal_triggers[0].name, "tick");
+        assert!(
+            c.transactions.is_empty() && c.definitions.is_empty(),
+            "trigger must not leak into members"
+        );
     }
 }

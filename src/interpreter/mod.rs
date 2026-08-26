@@ -206,6 +206,42 @@ impl Interpreter {
                 }
             }
         }
+        // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2): CELLS
+        // construct like objs — same shape registry (spawn's existing port
+        // wiring path applies verbatim) and same `{Cell}::{member}` function
+        // keys method dispatch resolves. Sealing stays compile-time
+        // (typechecker cell_ports); the reference serves any declared field.
+        for item in program {
+            if let TopLevel::Cell(c) = item {
+                let shape = ObjShape {
+                    ports_in: c.ports_in.clone(),
+                    ports_out: c.ports_out.clone(),
+                    fields: c.fields.clone(),
+                };
+                registered_objs.insert(c.name.clone(), shape.clone());
+                self.objs.insert(c.name.clone(), shape);
+                for t in &c.transactions {
+                    let key = format!("{}::{}", c.name, t.name);
+                    let params: Vec<String> =
+                        t.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(key, FunctionDef {
+                        name: t.name.clone(),
+                        parameters: params,
+                        body: t.body.clone(),
+                    });
+                }
+                for d in &c.definitions {
+                    let key = format!("{}::{}", c.name, d.name);
+                    let params: Vec<String> =
+                        d.parameters.iter().map(|(n, _)| n.clone()).collect();
+                    self.functions.insert(key, FunctionDef {
+                        name: d.name.clone(),
+                        parameters: params,
+                        body: d.body.clone(),
+                    });
+                }
+            }
+        }
         // 2026-08-23 (enum construction): variant registry for constructors.
         let mut registered_variants: HashMap<String, String> = HashMap::new();
         for item in program {
@@ -655,23 +691,10 @@ pub fn register_pending_task(
     body: Vec<Statement>,
     param_names: &[String],
 ) {
-    // 2026-08-23 (Phase A3): split body at yield; checkpoints into segments.
-    // 2026-08-26 (Phase B): ALSO cut before any statement containing a
-    // `<param>.field` read. A blocking read must HEAD its segment so the
-    // post-wake re-run never re-executes side effects that preceded it
-    // (docs/plans/2026-08-26-async-phase-b.md §4). Over-splitting is safe:
-    // finer interleave granularity, statement order preserved exactly.
-    let mut segments: Vec<Vec<Statement>> = vec![Vec::new()];
-    for stmt in &body {
-        let is_port_read = mentions_param_field(stmt, param_names);
-        if matches!(stmt, Statement::Yield) || (is_port_read && !segments.last().map(|s| s.is_empty()).unwrap_or(false))
-        {
-            segments.push(Vec::new());
-        }
-        if !matches!(stmt, Statement::Yield) {
-            segments.last_mut().unwrap().push(stmt.clone());
-        }
-    }
+    // 2026-08-26 (Phase C): the splitter is SHARED with the LLVM backend's
+    // frontend pass (analysis::task_segments) - one segmentation, both
+    // consumers, parity by construction. Split rules live there.
+    let segments = crate::analysis::task_segments::split_task_body(&body, param_names);
     TASK_TABLE.with(|t| {
         if let Some(table) = t.borrow_mut().as_mut() {
             table.insert(id, TaskEntry {
@@ -685,59 +708,6 @@ pub fn register_pending_task(
             });
         }
     });
-}
-
-/// 2026-08-26 (Phase B): does this statement's expressions contain a field
-/// projection whose receiver identifier names one of `params`? Conservative
-/// syntactic receiver check — FunctionDef carries parameter NAMES only, not
-/// types, so a non-event param of product type yields harmless extra
-/// segment boundaries (same statement order either way). Walks guards,
-/// blocks, and nested bodies; the boundary lands before the OUTERMOST
-/// statement, which is what registration needs.
-fn mentions_param_field(stmt: &Statement, params: &[String]) -> bool {
-    if params.is_empty() { return false; }
-    fn expr_walk(e: &Expr, params: &[String]) -> bool {
-        match e {
-            Expr::Field(recv, _) => match recv.as_ref() {
-                Expr::Identifier(name) if params.iter().any(|p| p == name) => true,
-                other => expr_walk(other, params),
-            },
-            _ => false,
-        }
-    }
-    fn stmt_exprs(stmt: &Statement, params: &[String]) -> bool {
-        match stmt {
-            Statement::Let { expr: Some(e), .. }
-            | Statement::Assign(_, e)
-            | Statement::Expression(e)
-            | Statement::Term(Some(e))
-            | Statement::Rollback(Some(e))
-            | Statement::EndProgram(Some(e))
-            | Statement::Check(e)
-            | Statement::Gate(e) => expr_walk(e, params),
-            Statement::Guarded(cond, body) => {
-                expr_walk(cond, params) || body.iter().any(|s| stmt_exprs(s, params))
-            }
-            Statement::Block(body)
-            | Statement::SyncBlock(body)
-            | Statement::Mutex(body)
-            | Statement::Defer(body) => body.iter().any(|s| stmt_exprs(s, params)),
-            Statement::Barrier { body, .. } => body.iter().any(|s| stmt_exprs(s, params)),
-            Statement::Foreach { list, body, .. } => {
-                expr_walk(list, params) || body.iter().any(|s| stmt_exprs(s, params))
-            }
-            Statement::ArrowAssign { target: Some(t), value, .. } => {
-                expr_walk(t, params) || expr_walk(value, params)
-            }
-            Statement::ArrowAssign { value, .. } => expr_walk(value, params),
-            Statement::Match { expr, arms } => {
-                expr_walk(expr, params)
-                    || arms.iter().any(|a| a.body.iter().any(|s| stmt_exprs(s, params)))
-            }
-            _ => false,
-        }
-    }
-    stmt_exprs(stmt, params)
 }
 
 /// 2026-08-23 (async Phase A2): look up a pending task and return its
@@ -1849,4 +1819,164 @@ pub fn mark_done_with_result(id: u64, result: Value) {
             }
         }
     });
+}
+
+// ── 2026-08-26 (Phase B2): cell runtime ────────────────────────────────
+
+#[cfg(test)]
+mod cell_b2_tests {
+    use super::*;
+
+    fn parse_program(src: &str) -> Vec<TopLevel> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        p.parse_program().unwrap()
+    }
+
+    fn bindings_instance(interp: &Interpreter) -> std::rc::Rc<std::cell::RefCell<HashMap<String, Value>>> {
+        match interp.state.get("src").expect("instance bound") {
+            Value::Instance { fields, .. } => fields.clone(),
+            other => panic!("not an instance: {:?}", std::mem::discriminant(other)),
+        }
+    }
+
+    #[test]
+    fn cell_spawn_wires_ports_and_dispatches_members() {
+        let program = parse_program(
+            "struct Sample { value: Int }; \
+             cell Source() -> evt: Event<Sample> { \
+                 count: Int; \
+                 txn emit(v: Int) -> Bool { count = count + 1; evt <- Sample{value:v}; term true; } \
+             };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        // Cell spawn constructs an instance with a fresh unready OUT port.
+        let h = interp.eval_expr(&Expr::Spawn {
+            type_name: "Source".to_string(),
+            args: vec![],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        interp.state.insert("src".to_string(), h.clone());
+        match &h {
+            Value::Instance { type_name, fields } => {
+                assert_eq!(type_name, "Source");
+                let f = fields.borrow();
+                let unready = matches!(&f["evt"], Value::EventQ(q) if !q.borrow().ready);
+                assert!(unready, "out port starts unready");
+                assert!(f.contains_key("count"), "field defaulted");
+            }
+            other => panic!("expected instance, got {:?}", std::mem::discriminant(other)),
+        }
+        // Member dispatch mutates state and fires the port.
+        let fired = interp.eval_expr(&Expr::MethodCall(
+            Box::new(Expr::Identifier("src".to_string())),
+            "emit".to_string(),
+            vec![Expr::Decimal(42)],
+            None,
+        )).unwrap();
+        assert_eq!(fired.as_i64(), Some(1), "txn returns true (Bool as 1)");
+        let src = bindings_instance(&interp);
+        {
+            let f = src.borrow();
+            assert_eq!(f.get("count").and_then(|v| v.as_i64()), Some(1), "slot write-back");
+            if let Some(Value::EventQ(q)) = f.get("evt") {
+                let slot = q.borrow();
+                assert!(slot.ready, "emit fired the port");
+                match &slot.payload {
+                    Some(Value::Product { fields, names }) => {
+                        let i = names.as_ref().unwrap().iter().position(|n| n == "value");
+                        assert_eq!(i.map(|i| fields[i].as_i64()), Some(Some(42)));
+                    }
+                    other => panic!("payload shape {:?}", other.is_some()),
+                }
+            } else {
+                panic!("out port missing");
+            }
+        }
+    }
+
+    #[test]
+    fn phase_b_consumer_wakes_through_cell_port() {
+        // The B2 acceptance composition: consumer blocks on the CELL's out
+        // port; a producer TASK drives the cell txn whose fire wakes it. One
+        // await interleaves both through the Phase B round-robin.
+        let program = parse_program(
+            "struct Sample { value: Int }; \
+             cell Source() -> evt: Event<Sample> { \
+                 count: Int; \
+                 txn emit(v: Int) -> Bool { count = count + 1; evt <- Sample{value:v}; term true; } \
+             }; \
+             defn consume(d: Sample) -> Int { term d.value; }; \
+             defn produce(s: Source) -> Int { term s.emit(9); };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let h = interp.eval_expr(&Expr::Spawn {
+            type_name: "Source".to_string(),
+            args: vec![],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        interp.state.insert("src".to_string(), h);
+
+        // Wire extraction: src.out yields the SHARED EventQ handle.
+        let wire = interp.eval_expr(&Expr::Field(
+            Box::new(Expr::Identifier("src".to_string())),
+            "evt".to_string(),
+        )).unwrap();
+        interp.state.insert("wire".to_string(), wire);
+
+        for (name, fname, arg) in [("c", "consume", "wire"), ("p", "produce", "src")] {
+            let th = interp.eval_expr(&Expr::Spawn {
+                type_name: fname.to_string(),
+                args: vec![Expr::Identifier(arg.to_string())],
+                storage: crate::ast::SpawnStorage::Pooled,
+            }).unwrap();
+            interp.state.insert(name.to_string(), th);
+        }
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("c".to_string())))).unwrap();
+        assert_eq!(v.as_i64(), Some(9), "cell fire woke the blocked consumer");
+
+        // Both tasks Done; the cell's count ticked exactly once.
+        let snapshot = task_table_snapshot().unwrap();
+        assert!(snapshot.values().all(|e| e.status == TaskStatus::Done));
+        let inst = bindings_instance(&interp);
+        assert_eq!(
+            inst.borrow().get("count").and_then(|v| v.as_i64()),
+            Some(1)
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase_c_probe_tests {
+    use super::*;
+
+    fn parse_program(src: &str) -> Vec<TopLevel> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        p.parse_program().unwrap()
+    }
+
+    #[test]
+    fn probe_locals_across_yield() {
+        // Reference-semantics probe: does a `let` from before a yield
+        // survive into the next segment?
+        let program = parse_program(
+            "defn job(n: Int) -> Int { let acc: Int = n * 2; yield; term acc; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let h = interp.eval_expr(&Expr::Spawn {
+            type_name: "job".to_string(),
+            args: vec![Expr::Decimal(5)],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        interp.state.insert("t".to_string(), h);
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t".to_string()))));
+        match v {
+            Ok(x) => println!("PROBE RESULT: locals survive yield, acc = {:?}", x.as_i64()),
+            Err(e) => println!("PROBE RESULT: locals die at yield ({e})"),
+        }
+    }
 }

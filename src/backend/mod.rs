@@ -96,6 +96,12 @@ pub struct AnalysisResults {
     /// (per-instance-heap) or `spill` (growable buffer). The backend skips the
     /// static `[capacity x T]` column for these.
     pub spawn_storage: std::collections::HashMap<String, crate::ast::SpawnStorage>,
+    /// 2026-08-26 (async Phase C, plan 2026-08-26-async-phase-c-segmented-
+    /// lowering.md): spawned callables' bodies split at cancellation points,
+    /// computed once here and consumed by the LLVM backend's segment-function
+    /// emission. Keyed by defn name; parameters carry across boundaries,
+    /// locals do not (reference-probed rule, SPEC §12.2).
+    pub task_segments: HashMap<String, Vec<Vec<Statement>>>,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -171,6 +177,23 @@ pub fn analyze_program(
     let coll_safe_txns = crate::analysis::coll_length::analyze(items);
     let coll_pregrow = crate::analysis::coll_length::analyze_pregrow(items);
     let (spawn_pools, dependent_pools, _spawn_errors, spawn_storage) = crate::analysis::spawn_pool::analyze(items);
+    // 2026-08-26 (async Phase C): segment every SPAWN-TARGETED defn once.
+    // Non-targeted defns keep their ordinary single-body lowering.
+    let spawn_targets = crate::analysis::task_segments::collect_spawn_targets(items);
+    let task_segments: HashMap<String, Vec<Vec<Statement>>> = items
+        .iter()
+        .filter_map(|item| {
+            let d = match item {
+                TopLevel::Definition(d) => d,
+                _ => return None,
+            };
+            if !spawn_targets.contains(&d.name) {
+                return None;
+            }
+            let params: Vec<String> = d.parameters.iter().map(|(n, _)| n.clone()).collect();
+            Some((d.name.clone(), crate::analysis::task_segments::split_task_body(&d.body, &params)))
+        })
+        .collect();
     let module_metadata = collect_module_metadata(items);
     let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
     AnalysisResults {
@@ -198,6 +221,7 @@ pub fn analyze_program(
         spawn_pools,
         dependent_pools,
         spawn_storage,
+        task_segments,
     }
 }
 

@@ -3929,7 +3929,9 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             if !td.body.op_bindings.is_empty() {
                 all_regular_bindings.insert(td.name.clone(), td.body.op_bindings.clone());
             }
-            if !td.body.slots.is_empty() {
+            // 2026-08-26 (async Phase B): a ports-only obj (empty slot list)
+            // must still register — its OUT ports ARE its instance surface.
+            if !td.body.slots.is_empty() || !td.ports_out.is_empty() {
                 // 2026-08-15 (coll plan §3.3): a `coll obj` appends two hidden
                 // trailing slots (`cap`, `len`) — the typechecker must see them
                 // so member bodies and field access referencing them typecheck.
@@ -3943,6 +3945,19 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     slots.push(crate::ast::top::TypeDefSlot {
                         name: "len".to_string(),
                         ty: crate::ast::Type::int(),
+                        bit_range: None,
+                    });
+                }
+                // 2026-08-26 (async Phase B): obj OUT ports resolve as fields
+                // of the instance (`bus.evt` yields the shared EventQ handle)
+                // — same rule cells got at Phase 7a. Inputs do NOT: they are
+                // supplied at construction (SPEC §9.5 sealing). The
+                // interpreter's Instance-field arm already served handles for
+                // every declared port; this closes the typechecker gap.
+                for (oname, oty) in &td.ports_out {
+                    slots.push(crate::ast::top::TypeDefSlot {
+                        name: oname.clone(),
+                        ty: oty.clone(),
                         bit_range: None,
                     });
                 }
@@ -3985,6 +4000,20 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             }
             if let Some(proto) = &td.protocol {
                 all_type_protocols.insert(td.name.clone(), proto.clone());
+            }
+        }
+        // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2): cell
+        // members join the method-dispatch registry — `instance.txn()`
+        // resolves exactly like an obj member (`{Cell}::{name}`).
+        if let TopLevel::Cell(c) = item {
+            let members: Vec<TopLevel> = c
+                .transactions
+                .iter()
+                .map(|t| TopLevel::Transaction(t.clone()))
+                .chain(c.definitions.iter().map(|d| TopLevel::Definition(d.clone())))
+                .collect();
+            if !members.is_empty() {
+                all_type_members.insert(c.name.clone(), members);
             }
         }
         // 2026-08-01 (D3): a generic `struct ListBuffer<T>` (StaticStruct) has
@@ -4092,6 +4121,67 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
     // bound. Without this, `len = "hello"` inside a member passes silently.
+    // 2026-08-26 (Phase B2): the context builder is SHARED by objs and cells
+    // — one construction path, two callers (DRY; cells are objs plus sealing).
+    let build_member_ctx = |type_name: &str,
+                            self_ty: &Type,
+                            ports_in: &[(String, crate::ast::Type)],
+                            ports_out: &[(String, crate::ast::Type)],
+                            slots: &[crate::ast::top::TypeDefSlot],
+                            member: &TopLevel,
+                            errors: &mut Vec<TypeError>|
+     -> TypecheckContext<'_> {
+        let mut mctx = TypecheckContext::new(universe);
+        mctx.type_parents = all_type_parents.clone();
+        mctx.regular_ops = all_regular_ops.clone();
+        mctx.regular_bindings = all_regular_bindings.clone();
+        mctx.type_slots = all_type_slots.clone();
+        mctx.type_members = all_type_members.clone();
+        mctx.type_params = all_type_params.clone();
+        mctx.fn_param_types = fn_param_types.clone();
+        mctx.type_protocols = all_type_protocols.clone();
+        for (name, ty) in &fn_return_types {
+            mctx.fn_return_types.insert(name.clone(), ty.clone());
+        }
+        for name in &optional_frgns {
+            mctx.optional_frgns.insert(name.clone());
+        }
+        for (name, ty) in &state_bindings {
+            mctx.bindings.insert(name.clone(), ty.clone());
+            mctx.state_keys.insert(name.clone());
+        }
+        mctx.bindings.insert("self".into(), self_ty.clone());
+        // 2026-08-22 (Phase 7a, SPEC §9.5): PORTS bind as members'
+        // own names — `damage.Ready` / `died <- v` resolve through
+        // the ordinary binding paths. Duplicate names vs slots are
+        // a declaration error.
+        for (pname, pty) in ports_in.iter().chain(ports_out.iter()) {
+            if mctx.bindings.contains_key(pname) {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!("port '{}' duplicates a slot name", pname),
+                    type_name: type_name.to_string(),
+                });
+            }
+            mctx.bindings.insert(pname.clone(), pty.clone());
+        }
+        for slot in slots {
+            mctx.bindings.insert(slot.name.clone(), slot.ty.clone());
+            mctx.state_keys.insert(slot.name.clone());
+        }
+        // 2026-08-17 (Error# usage-gate): while a member body is
+        // checked, record its name so an `Error#` inside is deferred to
+        // call-site promotion instead of failing the whole type.
+        // 2026-08-18 (Phase D, PiggyBank): key by `{type}.{member}` —
+        // the bare member name COLLIDES across types (List.Count vs
+        // PiggyBank.Count), so resolving List.Count promoted the jar's
+        // sealed-Count error.
+        mctx.current_owner = Some(format!(
+            "{}.{}",
+            type_name,
+            crate::backend::llvm::emit_expr::member_briev_name(member)
+        ));
+        mctx
+    };
     for item in items.iter() {
         if let TopLevel::TypeDef(td) = item {
             if td.body.members.is_empty() {
@@ -4106,39 +4196,6 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 )
             };
             for member in &td.body.members {
-                let mut mctx = TypecheckContext::new(universe);
-                        mctx.type_parents = all_type_parents.clone();
-                mctx.regular_ops = all_regular_ops.clone();
-                mctx.regular_bindings = all_regular_bindings.clone();
-                mctx.type_slots = all_type_slots.clone();
-                mctx.type_members = all_type_members.clone();
-                mctx.type_params = all_type_params.clone();
-                mctx.fn_param_types = fn_param_types.clone();
-                mctx.type_protocols = all_type_protocols.clone();
-                for (name, ty) in &fn_return_types {
-                    mctx.fn_return_types.insert(name.clone(), ty.clone());
-                }
-                for name in &optional_frgns {
-                    mctx.optional_frgns.insert(name.clone());
-                }
-                for (name, ty) in &state_bindings {
-                    mctx.bindings.insert(name.clone(), ty.clone());
-                    mctx.state_keys.insert(name.clone());
-                }
-                mctx.bindings.insert("self".into(), self_ty.clone());
-                // 2026-08-22 (Phase 7a, SPEC §9.5): PORTS bind as members'
-                // own names — `damage.Ready` / `died <- v` resolve through
-                // the ordinary binding paths. Duplicate names vs slots are
-                // a declaration error.
-                for (pname, pty) in td.ports_in.iter().chain(td.ports_out.iter()) {
-                    if mctx.bindings.contains_key(pname) {
-                        errors.push(TypeError::InvalidOperation {
-                            operation: format!("port '{}' duplicates a slot name", pname),
-                            type_name: td.name.clone(),
-                        });
-                    }
-                    mctx.bindings.insert(pname.clone(), pty.clone());
-                }
                 // 2026-08-15 (coll plan §3.3): a `coll obj`'s hidden `cap`/
                 // `len` slots are bound too — the synthesized member bodies
                 // (`init_empty`/`init`/`push`) reference them as bare names.
@@ -4155,22 +4212,10 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                         bit_range: None,
                     });
                 }
-                for slot in &member_slots {
-                    mctx.bindings.insert(slot.name.clone(), slot.ty.clone());
-                    mctx.state_keys.insert(slot.name.clone());
-                }
-                // 2026-08-17 (Error# usage-gate): while a member body is
-                // checked, record its name so an `Error#` inside is deferred to
-                // call-site promotion instead of failing the whole type.
-                // 2026-08-18 (Phase D, PiggyBank): key by `{type}.{member}` —
-                // the bare member name COLLIDES across types (List.Count vs
-                // PiggyBank.Count), so resolving List.Count promoted the jar's
-                // sealed-Count error.
-                mctx.current_owner = Some(format!(
-                    "{}.{}",
-                    td.name,
-                    crate::backend::llvm::emit_expr::member_briev_name(member)
-                ));
+                let mut mctx = build_member_ctx(
+                    &td.name, &self_ty, &td.ports_in, &td.ports_out,
+                    &member_slots, member, &mut errors,
+                );
                 match member {
                     TopLevel::Transaction(t) => {
                         for (n, ty) in &t.parameters {
@@ -4198,6 +4243,75 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                     // member typechecks exactly like a defn member — self +
                     // slots bound, params + output in scope.
                     TopLevel::TypeDefOperator(d) => {
+                        for (n, ty) in &d.parameters {
+                            mctx.bindings.insert(n.clone(), ty.clone());
+                        }
+                        mctx.current_output_type = d.output_type.as_ref().map(output_type_to_type);
+                        for stmt in &d.body {
+                            if let Err(e) = infer_statement(stmt, &mut mctx) {
+                                errors.push(e);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2): CELL member
+    // bodies typecheck through the SAME shared context builder — before
+    // this, a type error inside a `cell` txn/defn passed silently. Cells
+    // bind their field slots and both port directions exactly like objs;
+    // sealing is enforced at USE sites (cell_ports), not by hiding ports
+    // from the cell's own members.
+    for item in items.iter() {
+        if let TopLevel::Cell(c) = item {
+            let self_ty = if c.type_params.is_empty() {
+                Type::Custom(c.name.clone())
+            } else {
+                Type::Applied(
+                    c.name.clone(),
+                    c.type_params.iter().map(|p| Type::Custom(p.name.clone())).collect(),
+                )
+            };
+            let cell_slots: Vec<crate::ast::top::TypeDefSlot> = c
+                .fields
+                .iter()
+                .map(|(n, ty)| crate::ast::top::TypeDefSlot {
+                    name: n.clone(),
+                    ty: ty.clone(),
+                    bit_range: None,
+                })
+                .collect();
+            let txn_members: Vec<TopLevel> = c
+                .transactions
+                .iter()
+                .map(|t| TopLevel::Transaction(t.clone()))
+                .collect();
+            let defn_members: Vec<TopLevel> = c
+                .definitions
+                .iter()
+                .map(|d| TopLevel::Definition(d.clone()))
+                .collect();
+            for member in txn_members.iter().chain(defn_members.iter()) {
+                let mut mctx = build_member_ctx(
+                    &c.name, &self_ty, &c.ports_in, &c.ports_out,
+                    &cell_slots, member, &mut errors,
+                );
+                match member {
+                    TopLevel::Transaction(t) => {
+                        for (n, ty) in &t.parameters {
+                            mctx.bindings.insert(n.clone(), ty.clone());
+                        }
+                        mctx.current_output_type = t.output_type.as_ref().map(output_type_to_type);
+                        for stmt in &t.body {
+                            if let Err(e) = infer_statement(stmt, &mut mctx) {
+                                errors.push(e);
+                            }
+                        }
+                    }
+                    TopLevel::Definition(d) => {
                         for (n, ty) in &d.parameters {
                             mctx.bindings.insert(n.clone(), ty.clone());
                         }
@@ -7837,4 +7951,52 @@ let r: Int = take(d);
     let errs = check(src).expect_err("bare trait name is not a type; dyn required");
     let _ = errs;
 }
+}
+
+// ── 2026-08-26 (Phase B2): cell member bodies typecheck ────────────────
+
+#[cfg(test)]
+mod cell_b2_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let mut items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&mut items, &universe)
+    }
+
+    #[test]
+    fn cell_member_body_type_errors_are_caught() {
+        // Before Phase B2 a type error inside a cell txn passed silently —
+        // TopLevel::Cell was contract-collected and port-registered only.
+        let bad = r#"
+cell Meter(period: Int) -> reading: Event<Int> {
+    total: Int;
+    defn bump(by: Int) -> Bool {
+        total = "hello";
+        term true;
+    };
+};
+"#;
+        let errs = check(bad).unwrap_err();
+        assert!(
+            errs.iter().any(|e| format!("{e}").contains("type")),
+            "string into Int slot must be caught: {errs:?}"
+        );
+
+        let good = r#"
+cell Meter(period: Int) -> reading: Event<Int> {
+    total: Int;
+    defn bump(by: Int) -> Bool {
+        total = total + by;
+        reading <- total;
+        term true;
+    };
+};
+defn poke(m: Meter) -> Bool { term m.bump(3); };
+"#;
+        check(good).expect("well-formed cell + method call must pass");
+    }
 }

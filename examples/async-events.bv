@@ -1,0 +1,44 @@
+// async-events — SPEC §12.2 Phase B end-to-end (interpreter reference).
+//
+// The concurrent acceptance program: a consumer task blocks reading an
+// unready port; a producer task's fire (`p <- value;`) wakes it mid-await.
+// ONE `await` drives BOTH tasks through the round-robin scheduler — the
+// result 7 is reachable only if produce ran between consume's suspension
+// and its completion.
+//
+// The shared wire is an obj output port (SPEC §9.5): `bus.evt` yields the
+// port's EventQ handle by identity, so both tasks see the same slot.
+
+struct Damage {
+    amount: Int;
+};
+
+obj Bus() -> evt: Event<Damage> {
+};
+
+defn produce(p: Event<Damage>) -> Int {
+    p <- Damage { amount: 7 };
+    term 1;
+};
+
+defn consume(d: Event<Damage>) -> Int {
+    term d.amount;
+};
+
+let i: Int = 0;
+
+node run [i < 1][i == 1] {
+    let bus = spawn Bus();
+    let wire: Event<Damage> = bus.evt;
+
+    let pw = spawn produce(wire);
+    let cc = spawn consume(wire);
+
+    // One await drives both tasks: consume blocks on the unready wire,
+    // produce's fire re-marks it Ready, the loop completes both.
+    let v: Int = await cc;
+    let produced: Int = await pw;
+
+    i = i + 1;
+    term;
+};

@@ -207,9 +207,14 @@ pub fn eval_expr(
                             for (tid, fn_name, arg_vals, segments, current) in &runnable {
                                 if crate::interpreter::task_is_done(*tid) { continue; }
                                 if *current >= segments.len() { continue; }
-                                match run_task_segment(
-                                    *tid, fn_name, arg_vals, segments, *current, heap, functions,
-                                )? {
+                                let job = SegmentJob {
+                                    tid: *tid,
+                                    fn_name,
+                                    args: arg_vals,
+                                    segments,
+                                    current: *current,
+                                };
+                                match run_task_segment(&job, heap, functions)? {
                                     SegmentOutcome::Blocked => {}
                                     SegmentOutcome::Term(v) => {
                                         crate::interpreter::mark_done_with_result(*tid, v);
@@ -399,31 +404,37 @@ enum SegmentOutcome {
     Blocked,
 }
 
+/// One scheduling unit: a task's next segment plus its identity/captured
+/// args, as produced by `collect_runnable`.
+struct SegmentJob<'a> {
+    tid: u64,
+    fn_name: &'a str,
+    args: &'a [Value],
+    segments: &'a [Vec<Statement>],
+    current: usize,
+}
+
 /// 2026-08-26 (async Phase B): shared single-segment executor — the ONE
 /// place that sets/clears CURRENT_TASK and translates TaskBlocked. Used by
 /// the await round-robin. Replaces the duplicated A2-era
 /// `execute_pending_task` (dead since the round-robin landed).
 fn run_task_segment(
-    tid: u64,
-    fn_name: &str,
-    arg_vals: &[Value],
-    segments: &[Vec<Statement>],
-    current: usize,
+    job: &SegmentJob,
     heap: &mut VirtualHeap,
     functions: &HashMap<String, crate::interpreter::FunctionDef>,
 ) -> Result<SegmentOutcome, RuntimeError> {
-    let Some(defn) = functions.get(fn_name) else {
+    let Some(defn) = functions.get(job.fn_name) else {
         return Ok(SegmentOutcome::Term(Value::Void));
     };
     let mut cb: HashMap<String, Value> = HashMap::new();
     for (i, pname) in defn.parameters.iter().enumerate() {
-        if let Some(v) = arg_vals.get(i) {
+        if let Some(v) = job.args.get(i) {
             cb.insert(pname.clone(), v.clone());
         }
     }
-    crate::interpreter::set_current_task(Some(tid));
+    crate::interpreter::set_current_task(Some(job.tid));
     let mut out = Ok(SegmentOutcome::Completed(Value::Void));
-    for stmt in &segments[current] {
+    for stmt in &job.segments[job.current] {
         match eval_statement(stmt, heap, &mut cb, functions) {
             Ok(v) => out = Ok(SegmentOutcome::Completed(v)),
             Err(RuntimeError::TermReturn(v)) => {
@@ -3485,4 +3496,52 @@ fn spec_object_ports_example_runs() {
     } else {
         panic!("expected instance");
     }
+}
+
+// ── 2026-08-26 (async Phase B): concurrent acceptance example ───────────
+
+#[test]
+fn async_phase_b_example_runs() {
+    // docs/plans/2026-08-26-async-phase-b.md acceptance: the concurrent
+    // program runs — one await interleaves BOTH tasks; the consumer's
+    // blocked read is woken by the producer's port fire.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/async-events.bv"
+    ))
+    .unwrap();
+    let tokens = crate::lexer::tokenize(&src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, &src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    let node_body: Vec<Statement> = items
+        .iter()
+        .find_map(|i| match i {
+            TopLevel::Transaction(t) if t.name == "run" => Some(t.body.clone()),
+            _ => None,
+        })
+        .expect("node run present");
+
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    for stmt in &node_body {
+        let _ = eval_statement(stmt, &mut interp.heap, &mut bindings, &interp.functions);
+    }
+    assert_eq!(
+        bindings.get("v").and_then(|v| v.as_i64()),
+        Some(7),
+        "await(consume) sees the producer's fired payload"
+    );
+    assert_eq!(
+        bindings.get("produced").and_then(|v| v.as_i64()),
+        Some(1),
+        "producer completed through the same scheduler"
+    );
+    // Both tasks reached Done; nothing left schedulable.
+    let snapshot = crate::interpreter::task_table_snapshot().unwrap();
+    assert!(
+        snapshot.values().all(|e| e.status == crate::interpreter::TaskStatus::Done),
+        "every spawned task finished: {snapshot:?}"
+    );
 }
