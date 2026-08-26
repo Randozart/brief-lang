@@ -943,6 +943,15 @@ cell Timer(period: Duration) -> tick: Event {
 - Cells and objects share input `(...)` and named output `->` syntax.
 - Multiple outputs form a complete named product on every target.
 
+Cells instantiate and dispatch like objects: `spawn CellName(args)` wires
+input ports to shared event handles, creates fresh unready output slots,
+and defaults internal state; `instance.txn(...)` calls the cell's own
+members. Firing a cell's output port wakes tasks blocked reading it
+(§12.2) — a cell is an ordinary participant in the reference scheduler.
+`trg name @ source;` inside a cell parses into its internal trigger list;
+trigger scheduling semantics are staged (typed ports are their
+replacement).
+
 ### 9.7 Acceleration (`accel`)
 
 `accel` is a keyword that may prefix a `node` or `txn` declaration.
