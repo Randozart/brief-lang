@@ -1388,7 +1388,219 @@ mod tests {
         );
     }
 
-    // ── 2026-08-15 (coll grow-on-full): reference value parity ────────
+    // ── 2026-08-26 (async Phase B): port wake / block / cancel ────────
+    // SPEC §12.2: a task reading an unready port suspends; firing the port
+    // re-marks it Ready; `free` cancels so no executor resurrects it.
+
+    /// Fresh unready event slot — the consumer-side wire.
+    fn unready_port() -> Value {
+        Value::EventQ(std::rc::Rc::new(std::cell::RefCell::new(EventSlot {
+            ready: false,
+            payload: None,
+            waiters: Vec::new(),
+        })))
+    }
+
+    fn status_of(id: u64) -> Option<TaskStatus> {
+        task_table_snapshot().and_then(|t| t.get(&id).map(|e| e.status.clone()))
+    }
+
+    fn damage_literal(amount: i64) -> Expr {
+        Expr::StructLiteral {
+            type_name: "Damage".to_string(),
+            fields: vec![("amount".to_string(), Expr::Decimal(amount))],
+        }
+    }
+
+    fn fire_stmt(target: &str, amount: i64) -> Statement {
+        Statement::ArrowAssign {
+            target: Some(Box::new(Expr::Identifier(target.to_string()))),
+            value: Box::new(damage_literal(amount)),
+            consume: false,
+        }
+    }
+
+    #[test]
+    fn blocked_read_suspends_then_fire_wakes() {
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn consume(d: Damage) -> Int { term d.amount; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+        let handle = interp.eval_expr(&Expr::Spawn {
+            type_name: "consume".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let tid = handle.as_i64().unwrap() as u64;
+        interp.state.insert("t".to_string(), handle.clone());
+        let await_t = || Expr::Await(Box::new(Expr::Identifier("t".to_string())));
+
+        // Await #1: the only runnable task blocks on the unready port. The
+        // pool empties → await returns the HANDLE (deadlock posture, no
+        // hang) and the task sits in Waiting.
+        let first = interp.eval_expr(&await_t()).unwrap();
+        assert_eq!(first, handle, "blocked pool returns the handle");
+        assert_eq!(status_of(tid), Some(TaskStatus::Waiting), "block suspends");
+
+        // Top-level fire: wire <- Damage{amount:42}; wakes the waiter.
+        let fired = eval_statement(
+            &fire_stmt("wire", 42),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        );
+        assert!(fired.is_ok());
+        assert_eq!(
+            status_of(tid), Some(TaskStatus::Ready),
+            "fire must wake the blocked task"
+        );
+
+        // Await #2: the SAME segment re-runs from its head — the read now
+        // succeeds — and yields the payload member.
+        let v = interp.eval_expr(&await_t()).unwrap();
+        assert_eq!(v.as_i64(), Some(42), "post-wake read sees the payload");
+        assert_eq!(status_of(tid), Some(TaskStatus::Done));
+    }
+
+    #[test]
+    fn single_await_drives_producer_wake_chain() {
+        // The acceptance shape: one await(consumer) interleaves BOTH tasks —
+        // the consumer blocks, the producer's fire revives it mid-loop. The
+        // result 7 is reachable ONLY if produce executed between consume's
+        // block and its completion.
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn consume(d: Damage) -> Int { term d.amount; }; \
+             defn produce(p: Damage) -> Int { p <- Damage{amount:7}; term 1; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+        for (name, fname) in [("c", "consume"), ("p", "produce")] {
+            let h = interp.eval_expr(&Expr::Spawn {
+                type_name: fname.to_string(),
+                args: vec![Expr::Identifier("wire".to_string())],
+                storage: crate::ast::SpawnStorage::Pooled,
+            }).unwrap();
+            interp.state.insert(name.to_string(), h);
+        }
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("c".to_string())))).unwrap();
+        assert_eq!(v.as_i64(), Some(7), "producer's fire fed the consumer");
+        // Both sides finished; nothing left schedulable.
+        assert!(collect_runnable().is_empty(), "no zombie tasks remain");
+    }
+
+    #[test]
+    fn free_cancels_ready_and_blocked_tasks() {
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn slow(d: Damage) -> Int { yield; term d.amount; };",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        interp.state.insert("wire".to_string(), unready_port());
+
+        // (a) free BEFORE any execution: never runs.
+        let h1 = interp.eval_expr(&Expr::Spawn {
+            type_name: "slow".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let t1 = h1.as_i64().unwrap() as u64;
+        interp.state.insert("t1".to_string(), h1);
+        eval_statement(
+            &Statement::FreeHint("t1".to_string()),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+        assert_eq!(status_of(t1), Some(TaskStatus::Cancelled));
+
+        // (b) free AFTER a block: Waiting → Cancelled.
+        let h2 = interp.eval_expr(&Expr::Spawn {
+            type_name: "slow".to_string(),
+            args: vec![Expr::Identifier("wire".to_string())],
+            storage: crate::ast::SpawnStorage::Pooled,
+        }).unwrap();
+        let t2 = h2.as_i64().unwrap() as u64;
+        interp.state.insert("t2".to_string(), h2);
+        interp.eval_expr(&Expr::Await(Box::new(Expr::Identifier("t2".to_string())))).unwrap();
+        assert_eq!(status_of(t2), Some(TaskStatus::Waiting));
+        eval_statement(
+            &Statement::FreeHint("t2".to_string()),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+
+        // Firing the port must NOT resurrect either task.
+        eval_statement(
+            &fire_stmt("wire", 99),
+            &mut interp.heap, &mut interp.state, &interp.functions,
+        ).unwrap();
+        assert_eq!(status_of(t1), Some(TaskStatus::Cancelled));
+        assert_eq!(status_of(t2), Some(TaskStatus::Cancelled));
+        assert!(collect_runnable().is_empty(), "freed tasks never schedule");
+
+        // Await of a freed handle returns the handle, not a result. The
+        // binding is gone (freed locals read as errors), so await the raw
+        // task id.
+        let v = interp.eval_expr(&Expr::Await(Box::new(Expr::Decimal(t1 as i64)))).unwrap();
+        assert_ne!(v.as_i64(), Some(99), "a cancelled task has no result");
+    }
+
+    #[test]
+    fn unready_read_outside_task_stays_strict() {
+        // Top-level reads keep the SPEC §9.5 gate: .^Ready first, else error.
+        let mut interp = Interpreter::new();
+        interp.state.insert("wire".to_string(), unready_port());
+        let err = interp.eval_expr(&Expr::Field(
+            Box::new(Expr::Identifier("wire".to_string())),
+            "amount".to_string(),
+        )).unwrap_err();
+        match err {
+            RuntimeError::TypeError { found, .. } => {
+                assert!(found.contains("not Ready"), "{found}");
+            }
+            other => panic!("expected TypeError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn registration_presplits_segments_before_port_reads() {
+        // Plan §4: the blocking read must HEAD its segment so the post-wake
+        // re-run never repeats side effects that preceded it. The fire below
+        // is NOT a param-field read (bare identifier target) → segment 0;
+        // `term d.amount` is → boundary before it.
+        let program = parse_program(
+            "struct Damage { amount: Int }; \
+             defn job(d: Damage, o: Damage) -> Int { o <- Damage{amount:1}; term d.amount; };",
+        );
+        let body = program
+            .iter()
+            .filter_map(|i| match i {
+                TopLevel::Definition(def) => Some(def.body.clone()),
+                _ => None,
+            })
+            .next()
+            .expect("job parsed");
+        // The registration mirror is seeded per program — load first.
+        Interpreter::new().load_program(&program);
+        register_pending_task(
+            9_001, "job".to_string(), Vec::new(), body,
+            &["d".to_string(), "o".to_string()],
+        );
+        let (segments, current) = take_task_segments(9_001).expect("registered");
+        assert_eq!(current, 0);
+        assert_eq!(segments.len(), 2, "fire | port-read split");
+        assert!(
+            matches!(segments[0][0], Statement::ArrowAssign { .. }),
+            "segment 0 heads with the side effect"
+        );
+        assert!(
+            matches!(segments[1][0], Statement::Term(Some(_))),
+            "segment 1 HEADS with the blocking read"
+        );
+    }
+
+
 
     #[test]
     fn coll_count_and_capacity_intrinsic_parity() {
