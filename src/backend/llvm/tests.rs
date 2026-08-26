@@ -2863,6 +2863,109 @@ fn test_natural_death_skipped_for_persistent_txn() {
         "Persistent program without #!exit — natural death creates exit condition");
 }
 
+// ── 2026-08-26 (bug sweep B4): undispatched plain-txn warning ────────────
+// The warning hoisted ahead of dispatch-mode selection must fire for EVERY
+// program mode and stay silent for library/shared-lib export shims.
+fn make_dead_txn_program(with_reactive_node: bool) -> Vec<TopLevel> {
+    let mut items: Vec<TopLevel> = vec![
+        TopLevel::StateDecl(StateDecl {
+            name: "i".to_string(),
+            ty: Type::int(),
+            span: None,
+        }),
+        TopLevel::Constant(Constant {
+            name: "N".to_string(),
+            ty: Type::int(),
+            expr: Expr::Decimal(4),
+        }),
+    ];
+    if with_reactive_node {
+        items.push(TopLevel::Transaction(Transaction {
+            name: "run".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(
+                    BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("N".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                explicit: true,
+                span: None,
+            },
+            body: vec![
+                Statement::Assign(
+                    Expr::Identifier("i".to_string()),
+                    Expr::BinaryOp(
+                        BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("i".to_string())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                ),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            doc: None,
+            span: None,
+        }));
+    }
+    // A plain top-level txn: zero-param, no-output, called by nothing.
+    items.push(TopLevel::Transaction(Transaction {
+        name: "unused_helper".to_string(),
+        is_reactive: false,
+        is_async: false,
+        type_params: vec![],
+        parameters: vec![],
+        output_type: None,
+        outputs: vec![],
+        contract: Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None,
+            explicit: false,
+            span: None,
+        },
+        body: vec![],
+        metadata: HashMap::new(),
+        derivation: None,
+        modifiers: vec![],
+        doc: None,
+        span: None,
+    }));
+    items
+}
+
+#[test]
+fn dead_plain_txn_warns_with_and_without_reactive_node() {
+    for with_node in [true, false] {
+        let program = make_dead_txn_program(with_node);
+        let mut backend = LlvmBackend::new();
+        let _ = backend.generate(&program, None);
+        assert!(
+            backend.warnings().iter().any(|w| w.contains("'unused_helper' is never dispatched")),
+            "with_node={with_node}: plain unreferenced txn must be named in a warning"
+        );
+    }
+}
+
+#[test]
+fn library_mode_silences_undispatched_txn_warning() {
+    let program = make_dead_txn_program(false);
+    let mut backend = LlvmBackend::new().with_library_mode(true);
+    let _ = backend.generate(&program, None);
+    assert!(
+        !backend.warnings().iter().any(|w| w.contains("never dispatched")),
+        "library shim exports plain txns as symbols — silence is correct"
+    );
+}
+
 // ── SLP Hazard Detection Tests ────────────────────────────
 
 fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondition: Option<Expr>) -> Vec<TopLevel> {
