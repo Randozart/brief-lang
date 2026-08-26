@@ -6,7 +6,11 @@
 /// state — `Load#(field)` / `Load#(field[i])` / `Store#(field[i], v)` —
 /// lowered to AccessChain over the single StorageBuffer binding; numeric
 /// addresses do not exist in a Vulkan kernel and error naming the fix.
-/// Supported builtins: GetGlobalId#, GetLocalId#, WorkgroupSize#.
+/// Supported builtins: GetGlobalId#, GetLocalId#, WorkgroupSize#. Scalar
+/// type resolution is UNIVERSE-DRIVEN (§2.4): (protocol, metadata) via the
+/// casting graph's SPIR-V table — Int/UInt signedness included; heap
+/// categories (String/Blob/Char) and non-Vulkan widths error naming the fix.
+/// No type names are matched in the emitter.
 ///
 /// # Entry point
 /// `compile_spirv(program, options) -> Result<Vec<u8>>`
@@ -56,8 +60,10 @@ pub fn compile_spirv(
     program: &[TopLevel],
     entry_name: &str,
     analysis: &crate::backend::AnalysisResults,
+    universe: &crate::type_universe::TypeUniverse,
+    int_bits: u64,
 ) -> Result<Vec<u8>, String> {
-    compile_spirv_builder(program, entry_name, analysis)?.build()
+    compile_spirv_builder(program, entry_name, analysis, universe, int_bits)?.build()
 }
 
 /// 2026-08-23 (§2.2): frontend-driven selection AND module construction
@@ -69,8 +75,12 @@ pub fn compile_spirv_builder(
     program: &[TopLevel],
     entry_name: &str,
     analysis: &crate::backend::AnalysisResults,
+    universe: &crate::type_universe::TypeUniverse,
+    int_bits: u64,
 ) -> Result<SpirvBuilder, String> {
-    let mut builder = SpirvBuilder::new();
+    // 2026-08-26 (§2.4): the NORMALIZED universe drives scalar type
+    // resolution — (protocol, metadata), never type-name matches.
+    let mut builder = SpirvBuilder::new().with_universe(universe, int_bits);
     let mut emitted: Vec<String> = Vec::new();
 
     for item in program {
@@ -107,7 +117,14 @@ pub fn compile_spirv_builder(
 mod tests {
     use super::*;
     use crate::ast::*;
+    use crate::casting::graph::CastingGraph;
     use rspirv::spirv;
+
+    /// §2.4 tests: fresh universe — primordials are auto-seeded by
+    /// TypeUniverse::new(); fixtures declare no user typedefs.
+    fn test_universe() -> crate::type_universe::TypeUniverse {
+        crate::type_universe::TypeUniverse::new()
+    }
 
     fn state_decl(name: &str, n: i64) -> TopLevel {
         TopLevel::StateDecl(StateDecl {
@@ -635,6 +652,230 @@ mod tests {
         assert!(err.contains("byte-width"), "{err}");
     }
 
+    /// §2.4: a user typedef registers through the SHARED registration
+    /// (register_types) and resolves from its #Float base + bits metadata —
+    /// no name matching anywhere in the emitter.
+    #[test]
+    fn test_user_typedef_resolves_from_protocol_and_metadata() {
+        let mut u = test_universe();
+        let typedef = TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+            name: "Temp".into(),
+            type_params: vec![],
+            parent: None,
+            protocol: Some("#Float".into()),
+            traits: vec![],
+            bit_range: None,
+            coll: false,
+            ports_in: vec![],
+            ports_out: vec![],
+            seq: false,
+            body: {
+                let mut md = std::collections::HashMap::new();
+                md.insert("bits".into(), crate::ast::PropertyValue::Int(64));
+                crate::ast::top::TypeDefBody {
+                    slots: vec![],
+                    metadata: md,
+                    projections: vec![],
+                    bindings: vec![],
+                    operators: vec![],
+                    op_bindings: vec![],
+                    constraints: vec![],
+                    members: vec![],
+                    span: None,
+                }
+            },
+            span: None,
+        }));
+        crate::backend::register_types::register_typedefs(
+            &[typedef], &mut u, 64).unwrap();
+
+        // Kernel with one scalar state field of type Temp.
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "i".into(), ty: Type::int(), span: None }),
+            TopLevel::StateDecl(StateDecl { name: "t".into(), ty: Type::Custom("Temp".into()), span: None }),
+            TopLevel::Transaction(Transaction {
+                name: "tk".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                // Scalar state is reached through the §2.3 address surface.
+                body: vec![Statement::Expression(Expr::Call(
+                    "Store#".into(),
+                    vec![
+                        Expr::Identifier("t".into()),
+                        Expr::Call("Load#".into(), vec![Expr::Identifier("t".into())], None),
+                    ],
+                    None,
+                ))],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let mut builder = SpirvBuilder::new().with_universe(&u, 64);
+        emit_kernel(&mut builder, "tk", &raw_shape("i", stmts, &[], &["t"]), &program).unwrap();
+        // The SSBO struct member must be OpTypeFloat 64 — derived from the
+        // Temp typedef's Cast.Float property + bits metadata, not from names.
+        let has_float64 = builder.module_ref().types_global_values.iter().any(|inst| {
+            inst.class.opcode == rspirv::spirv::Op::TypeFloat && inst.operands.first()
+                == Some(&rspirv::dr::Operand::LiteralBit32(64))
+        });
+        assert!(has_float64, "Temp must lower to OpTypeFloat(64)");
+    }
+
+    /// §2.4: Briev Int carries SIGNEDNESS — the emitted OpTypeInt is
+    /// (width=64, signedness=1). UInt is unsigned (signedness=0).
+    #[test]
+    fn test_int_signedness_from_protocol() {
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "i".into(), ty: Type::int(), span: None }),
+            TopLevel::Transaction(Transaction {
+                name: "sk".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![Statement::Assign(
+                    Expr::Identifier("i".into()),
+                    Expr::BinaryOp(
+                        BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                )],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let mut builder = SpirvBuilder::new();
+        emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["i"]), &program).unwrap();
+        let int_64_signed = builder.module_ref().types_global_values.iter().any(|inst| {
+            inst.class.opcode == rspirv::spirv::Op::TypeInt
+                && inst.operands.get(0)
+                    == Some(&rspirv::dr::Operand::LiteralBit32(64))
+                && inst.operands.get(1)
+                    == Some(&rspirv::dr::Operand::LiteralBit32(1))
+        });
+        assert!(int_64_signed, "Briev Int must emit OpTypeInt(64, signed=1)");
+    }
+
+    /// §2.4 capability honesty: a heap-category state field errors naming
+    /// the protocol category and the supported roots.
+    #[test]
+    fn test_heap_category_state_errors() {
+        let program = vec![
+            TopLevel::StateDecl(StateDecl { name: "s".into(), ty: Type::Custom("String".into()), span: None }),
+            TopLevel::Transaction(Transaction {
+                name: "sk".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                },
+                body: vec![Statement::Assign(
+                    Expr::Identifier("s".into()),
+                    Expr::Identifier("s".into()),
+                )],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let mut builder = SpirvBuilder::new();
+        let err = emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["s"]), &program)
+            .err()
+            .expect("String state must be rejected");
+        assert!(err.contains("String"), "{err}");
+        assert!(err.contains("#Int"), "{err}");
+    }
+
+    /// §2.4 width honesty: an integer width outside Vulkan's compute set
+    /// (8/16/32/64) errors naming both the width and the constraint.
+    #[test]
+    fn test_integer_width_out_of_range_errors() {
+        let mut u = test_universe();
+        let typedef = TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+            name: "Odd".into(),
+            type_params: vec![],
+            parent: None,
+            protocol: Some("#Int".into()),
+            traits: vec![],
+            bit_range: None,
+            coll: false,
+            ports_in: vec![],
+            ports_out: vec![],
+            seq: false,
+            body: {
+                let mut md = std::collections::HashMap::new();
+                md.insert("bits".into(), crate::ast::PropertyValue::Int(24));
+                crate::ast::top::TypeDefBody {
+                    slots: vec![],
+                    metadata: md,
+                    projections: vec![],
+                    bindings: vec![],
+                    operators: vec![],
+                    op_bindings: vec![],
+                    constraints: vec![],
+                    members: vec![],
+                    span: None,
+                }
+            },
+            span: None,
+        }));
+        crate::backend::register_types::register_typedefs(&[typedef], &mut u, 64).unwrap();
+        let g = CastingGraph::new();
+        let e = g
+            .resolve_spirv_shape(&u, &Type::Custom("Odd".into()), 64)
+            .expect_err("width 24 must be rejected");
+        assert!(e.contains("24"), "{e}");
+    }
+
     /// Capability honesty + selection: ineligible bodies never become
     /// kernels, and a named entry that doesn't exist errors helpfully.
     #[test]
@@ -642,15 +883,15 @@ mod tests {
         let program = scale_kernel_program();
         let analysis = analyze(&program);
         // Eligible + `!> accel:` metadata → "main" accepts any kernel.
-        compile_spirv(&program, "main", &analysis)
+        compile_spirv(&program, "main", &analysis, &test_universe(), 64)
             .expect("eligible fixture must build under wildcard entry");
 
         // A specific entry name must EXIST among eligible kernels.
-        let err = compile_spirv_builder(&program, "nope", &analysis)
+        let err = compile_spirv_builder(&program, "nope", &analysis, &test_universe(), 64)
             .err()
             .expect("missing named entry must error");
         assert!(err.contains("'nope'"), "{err}");
-        compile_spirv_builder(&program, "scale", &analysis)
+        compile_spirv_builder(&program, "scale", &analysis, &test_universe(), 64)
             .expect("named existing entry compiles");
 
         // Ineligible body (counter never incremented) → not a kernel.
@@ -660,7 +901,7 @@ mod tests {
         }
         let analysis_bad = analyze(&bad);
         assert!(!analysis_bad.accel.get("scale").map_or(false, |e| e.shape.eligible));
-        let err = compile_spirv(&bad, "main", &analysis_bad)
+        let err = compile_spirv(&bad, "main", &analysis_bad, &test_universe(), 64)
             .err()
             .expect("ineligible body must not become a kernel");
         assert!(err.contains("no GPU kernels"), "{err}");

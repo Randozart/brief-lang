@@ -14,6 +14,8 @@ use rspirv::dr::Builder;
 use std::collections::HashMap;
 
 use crate::ast::Type;
+use crate::casting::graph::{CastingGraph, SpirvShape};
+use crate::type_universe::TypeUniverse;
 use rspirv::binary::Assemble;
 use rspirv::spirv::{self, Word, ExecutionModel};
 
@@ -22,6 +24,14 @@ pub struct SpirvBuilder {
     pub builder: Builder,
     /// Dedup map for lowered Briev types (key = canonical debug form).
     type_keys: HashMap<String, Word>,
+    /// 2026-08-26 (§2.4): universe + casting graph drive scalar type
+    /// resolution — (protocol, metadata), never type-name matches. The
+    /// default universe has the primordials seeded; the pipeline injects
+    /// the NORMALIZED universe via with_universe() so user typedefs resolve.
+    universe: TypeUniverse,
+    casting_graph: CastingGraph,
+    /// Target integer width when a type carries no bits metadata.
+    int_bits: u64,
 }
 
 impl SpirvBuilder {
@@ -35,7 +45,18 @@ impl SpirvBuilder {
         SpirvBuilder {
             builder: b,
             type_keys: HashMap::new(),
+            universe: TypeUniverse::new(),
+            casting_graph: CastingGraph::new(),
+            int_bits: 64,
         }
+    }
+
+    /// 2026-08-26 (§2.4): pipeline injects the NORMALIZED universe so user
+    /// typedefs (bits metadata, protocol bases) participate in resolution.
+    pub fn with_universe(mut self, universe: &TypeUniverse, int_bits: u64) -> Self {
+        self.universe = universe.clone();
+        self.int_bits = int_bits;
+        self
     }
 
     /// Finalize module and assemble to SPIR-V binary.
@@ -143,20 +164,29 @@ impl SpirvBuilder {
                 }
                 Ok(cur)
             }
-            Type::Custom(name) => match name.as_str() {
-                "Int" => Ok(self.builder.type_int(64, 0)),
-                "Float" => Ok(self.builder.type_float(32)),
-                "Float64" => Ok(self.builder.type_float(64)),
-                "Bool" => Ok(self.builder.type_bool()),
-                "String" => {
-                    // String is a 24-byte struct (3 × i64) in Briev.
-                    let m0 = self.builder.type_int(64, 0);
-                    let members = vec![m0, m0, m0];
-                    Ok(self.builder.type_struct(members))
+            // 2026-08-26 (§2.4): everything below resolves through the
+            // casting graph from (protocol, metadata). No type names here —
+            // `Float64`, stdlib subtypes, and user typedefs all derive from
+            // their Cast.* protocol properties + bits metadata alike.
+            Type::Custom(_)
+            | Type::Applied(_, _)
+            | Type::HashWord(_)
+            | Type::HashWordVariant(_, _) => {
+                let shape = self
+                    .casting_graph
+                    .resolve_spirv_shape(&self.universe, ty, self.int_bits)?;
+                match shape {
+                    SpirvShape::Int { bits, signed } => {
+                        Ok(self.builder.type_int(bits, if signed { 1 } else { 0 }))
+                    }
+                    SpirvShape::Float { bits } => Ok(self.builder.type_float(bits)),
+                    SpirvShape::Bool => Ok(self.builder.type_bool()),
                 }
-                other => Err(format!("SPIR-V: unsupported type Custom({:?})", other)),
-            },
-            other => Err(format!("SPIR-V: unsupported type {:?}", other)),
+            }
+            other => Err(format!(
+                "SPIR-V: unsupported type {:?} — kernel state is scalar                  #Int/#UInt/#Float/#Bool-rooted storage",
+                other
+            )),
         }
     }
 

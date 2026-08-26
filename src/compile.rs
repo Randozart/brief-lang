@@ -1328,10 +1328,14 @@ fn codegen(
             // accel analysis. "main" = wildcard entry (all eligible kernels);
             // a specific txn name validates presence once §9.7 dispatch
             // metadata lands.
+            // 2026-08-26 (§2.4): the normalized universe feeds scalar type
+            // resolution in the kernel emitter.
             let binary = briev_compiler::backend::spirv::compile_spirv(
                 items,
                 "main",
                 &analysis,
+                universe,
+                opts.int_bits,
             )?;
             let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
             let out_path = out.replace(".ll", ".spv");

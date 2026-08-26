@@ -78,6 +78,39 @@ pub enum LlvmTypeResolver {
     FloatWidth,
 }
 
+// ── SPIR-V Type Resolver ────────────────────────────────────────────────
+
+/// 2026-08-26 (plan 2026-08-23-spirv-kernel-emission §2.4): how a protocol
+/// category maps to a SPIR-V scalar type. SPIR-V differs semantically from
+/// LLVM — Bool is its own OpTypeBool (not an i8), Int carries an explicit
+/// SIGNEDNESS operand, and String/Blob pointers do not exist in a kernel —
+/// so the kernel backend gets its own resolver table instead of deriving
+/// from the LLVM strings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpirvTypeResolver {
+    /// OpTypeInt with width from metadata; bool = signedness operand.
+    /// Briev `Int` is signed; `UInt` is unsigned.
+    IntWidth(bool),
+    /// OpTypeFloat with width from metadata (bits property).
+    FloatWidth,
+    /// Bool is the dedicated OpTypeBool scalar.
+    Fixed(SpirvScalar),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpirvScalar {
+    Bool,
+}
+
+/// A fully-resolved SPIR-V scalar shape: category + width after the universe
+/// metadata ladder. No type names survive this point (rule 19).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpirvShape {
+    Int { bits: u32, signed: bool },
+    Float { bits: u32 },
+    Bool,
+}
+
 // ── Casting Graph ───────────────────────────────────────────────────────
 
 /// Protocol-to-protocol casting graph.
@@ -114,6 +147,12 @@ pub struct CastingGraph {
     /// Used by resolve_llvm_type() to derive LLVM types from protocol + metadata.
     protocol_llvm_types: HashMap<(String, String), LlvmTypeResolver>,
 
+    /// 2026-08-26 (§2.4): protocol (category, variant) → SPIR-V scalar
+    /// resolver. Same design as protocol_llvm_types but SPIR-V-native
+    /// semantics (Bool = OpTypeBool, Int = signedness operand); used by
+    /// resolve_spirv_shape().
+    protocol_spirv_types: HashMap<(String, String), SpirvTypeResolver>,
+
     /// 2026-08-03 (P1.5): proven-inverse variant pairs (category, a, b) —
     /// `b.CastFrom(base)(a.CastTo(base)(x)) == x` was proved symbolically/SMT,
     /// so a cast a → b through the base is a ZERO delta (identity). The
@@ -138,12 +177,20 @@ impl CastingGraph {
             defaults: HashMap::new(),
             cast_from_bit_overrides: HashMap::new(),
             protocol_llvm_types: HashMap::new(),
+            protocol_spirv_types: HashMap::new(),
             inverse_pairs: HashSet::new(),
             variant_cross_ops: HashMap::new(),
         };
         graph.seed_base_lanes();
         graph.seed_defaults();
         graph.seed_protocol_llvm_types();
+        // 2026-08-26 (§2.4): kernel-surface SPIR-V scalars. Deliberately NOT
+        // registered: String/Blob/Char/Data — a compute kernel has no heap,
+        // no strings, no opaque pointers; resolving them errors naming the fix.
+        graph.set_spirv_type("Int", "", SpirvTypeResolver::IntWidth(true));
+        graph.set_spirv_type("UInt", "", SpirvTypeResolver::IntWidth(false));
+        graph.set_spirv_type("Float", "", SpirvTypeResolver::FloatWidth);
+        graph.set_spirv_type("Bool", "", SpirvTypeResolver::Fixed(SpirvScalar::Bool));
         graph
     }
 
@@ -777,6 +824,89 @@ impl CastingGraph {
             return Some((b.to_string(), String::new()));
         }
         None
+    }
+
+    // ── SPIR-V Type Resolution (§2.4) ───────────────────────────────────
+
+    /// Register the SPIR-V resolver for a protocol (category, variant).
+    pub fn set_spirv_type(&mut self, category: &str, variant: &str, r: SpirvTypeResolver) {
+        self.protocol_spirv_types
+            .insert((category.to_string(), variant.to_string()), r);
+    }
+
+    fn get_spirv_type(&self, category: &str, variant: &str) -> Option<&SpirvTypeResolver> {
+        self.protocol_spirv_types.get(&(category.to_string(), variant.to_string()))
+    }
+
+    /// Resolve a Briev type to its SPIR-V scalar shape from
+    /// (protocol, metadata) — the kernel-surface twin of resolve_llvm_type.
+    ///
+    /// Compiler constructs (Bits/Void/Ptr/Vector/Function) are NOT resolved
+    /// here; callers handle them directly before consulting this method.
+    ///
+    /// Width ladder per category:
+    /// - Int/UInt:  !> bits → !> maxbits → !> minbits → default_int_bits
+    /// - Float:     !> bits → !> maxbits → !> minbits → 32
+    ///
+    /// Err carries the protocol CATEGORY and the concrete fix — this is a
+    /// capability error, never a silent fallback.
+    pub fn resolve_spirv_shape(
+        &self,
+        universe: &TypeUniverse,
+        ty: &Type,
+        default_int_bits: u64,
+    ) -> Result<SpirvShape, String> {
+        let (category, variant) = self.type_to_protocol(universe, ty);
+        let resolver = self
+            .get_spirv_type(&category, &variant)
+            .or_else(|| self.get_spirv_type(&category, self.default_variant(&category)))
+            .or_else(|| self.get_spirv_type(&category, ""));
+        let Some(resolver) = resolver else {
+            return Err(format!(
+                "type '{}' lowers to protocol '{}' — GPU kernels support scalar                  state rooted in #Int, #UInt, #Float, or #Bool only (no heap,                  strings, or opaque storage in kernel address space)",
+                ty, category
+            ));
+        };
+        let bits_of = |keys: &[&str]| -> Option<u64> {
+            let key = ty.universe_key().and_then(|k| universe.get(k));
+            keys.iter().find_map(|k| {
+                key.and_then(|rt| rt.properties.get(*k)).and_then(|pv| match pv {
+                    PropertyValue::Int(n) if *n > 0 => Some(*n as u64),
+                    _ => None,
+                })
+            })
+        };
+        Ok(match resolver {
+            SpirvTypeResolver::IntWidth(signed) => {
+                let signed = *signed;
+                let bits = bits_of(&["bits", "maxbits", "minbits"])
+                    .unwrap_or(default_int_bits);
+                // Shader capability integer widths (SPV 1.x, no Int8 short form):
+                // 8 needs the Int8 capability AND storage-only use; kernels are
+                // compute surfaces, so the honest floor is 16.
+                match bits {
+                    8 | 16 | 32 | 64 => SpirvShape::Int { bits: bits as u32, signed },
+                    other => return Err(format!(
+                        "integer width {} is not a Vulkan compute width                          (8/16/32/64) — fix the type's bits metadata",
+                        other
+                    )),
+                }
+            }
+            SpirvTypeResolver::FloatWidth => {
+                let bits = bits_of(&["bits", "maxbits", "minbits"]).unwrap_or(32);
+                // 16-bit floats need the Float16 capability plus the
+                // shader-float16 extension surface; not part of the kernel
+                // surface today. Name it rather than silently widening.
+                match bits {
+                    32 | 64 => SpirvShape::Float { bits: bits as u32 },
+                    other => return Err(format!(
+                        "float width {} is not part of the kernel surface                          (32/64 only today) — declare the state field as                          #Float {{ !> bits: 32 }} or #Float {{ !> bits: 64 }}",
+                        other
+                    )),
+                }
+            }
+            SpirvTypeResolver::Fixed(SpirvScalar::Bool) => SpirvShape::Bool,
+        })
     }
 
     // ── LLVM Type Resolution ──────────────────────────────────────────
