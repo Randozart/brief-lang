@@ -1,0 +1,54 @@
+// async-events-compiled — SPEC §9.5/§12.2 Phase D acceptance (native target).
+//
+// Compiled twin of examples/async-events.bv: the concurrent acceptance
+// program with observable output. A consumer task blocks reading an unready
+// obj output port; a producer task's fire (`p <- value;`) wakes it mid-await.
+// ONE `await` drives BOTH tasks through the round-robin scheduler.
+//
+// acc = consume(7) + produce(1) * 10 = 17 — reachable ONLY if the fire woke
+// the blocked consumer through the scheduler. Deterministic on every run.
+//
+// Build+run parity check (mirrors tests/async_compiled_events_test.rs):
+//   brievc build examples/async-events-compiled.bv --llvm --out <dir>
+//   clang -O3 -flto -march=native -ffast-math -fdata-sections \
+//       -ffunction-sections -Wl,--gc-sections async-events-compiled.ll \
+//       lib/runtime/briev_rt.c -o ae && ./ae   # prints 17
+
+struct Damage {
+    amount: Int;
+};
+
+obj Bus() -> evt: Event<Damage> {
+};
+
+defn produce(p: Event<Damage>) -> Int {
+    p <- Damage { amount: 7 };
+    term 1;
+};
+
+defn consume(d: Event<Damage>) -> Int {
+    term d.amount;
+};
+
+let i: Int = 0;
+let acc: Int = 0;
+
+node run [i < 1][i == 1] {
+    let bus = spawn Bus();
+    let wire: Event<Damage> = bus.evt;
+
+    let pw = spawn produce(wire);
+    let cc = spawn consume(wire);
+
+    // One await drives both tasks: consume blocks on the unready wire,
+    // produce's fire re-marks it Ready, the loop completes both.
+    let v: Int = await cc;
+    acc = acc + v;
+    let produced: Int = await pw;
+    acc = acc + produced * 10;
+
+    i = i + 1;
+    when i == 1 {
+        endprogram println!(acc);
+    };
+};

@@ -527,7 +527,23 @@ impl LlvmBackend {
                             }
                         }
                     }
-                } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
+                } else if let Some(phi_reg_str) = self
+                    .fun
+                    .pending_phi_backedge
+                    .get(name)
+                    .cloned()
+                    .or_else(|| self.fun.phi_field_regs.get(name).cloned())
+                {
+                    // 2026-08-26 (folded-shape correctness): when a guard
+                    // conditionally rewrote a field mid-body, its merge phi is
+                    // registered in pending_phi_backedge ONLY — preferring the
+                    // static header phi here made every LATER statement chain
+                    // off the stale pre-guard value (two-when repro: second
+                    // `acc += …` added to the entry value, first add lost).
+                    // pending_phi_backedge is seeded with the same header regs
+                    // at body start, so preferring it changes nothing before
+                    // any merge and picks up merges afterwards.
+                    let phi_reg_str = &phi_reg_str;
                     let briev_ty = self
                         .ctx
                         .field_index_map
@@ -542,12 +558,12 @@ impl LlvmBackend {
                             .map_or(false, |t| t == "double");
                         if is_native {
                             let dbl_reg = phi_reg_str.clone();
-                            self.fun.reg_float_cache.insert(phi_reg_str, dbl_reg.clone());
+                            self.fun.reg_float_cache.insert(phi_reg_str.clone(), dbl_reg.clone());
                             TypedRegister { name: dbl_reg, ty: Type::float64() }
                         } else {
                             let dbl = self.fun.gen_reg();
                             writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, phi_reg_str).ok();
-                            self.fun.reg_float_cache.insert(phi_reg_str, dbl.clone());
+                            self.fun.reg_float_cache.insert(phi_reg_str.clone(), dbl.clone());
                             TypedRegister { name: dbl, ty: Type::float64() }
                         }
                     } else if briev_ty == Type::float() {
@@ -557,19 +573,19 @@ impl LlvmBackend {
                             .map_or(false, |t| t == "float");
                         if is_native {
                             let fl_reg = phi_reg_str.clone();
-                            self.fun.reg_float_cache.insert(phi_reg_str, fl_reg.clone());
+                            self.fun.reg_float_cache.insert(phi_reg_str.clone(), fl_reg.clone());
                             TypedRegister { name: fl_reg, ty: Type::float() }
                         } else {
                             let tr = self.fun.gen_reg();
                             let fl = self.fun.gen_reg();
                             writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, phi_reg_str).ok();
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                            self.fun.reg_float_cache.insert(phi_reg_str, fl.clone());
+                            self.fun.reg_float_cache.insert(phi_reg_str.clone(), fl.clone());
                             TypedRegister { name: fl, ty: Type::float() }
                         }
                     } else {
                         TypedRegister {
-                            name: phi_reg_str,
+                            name: phi_reg_str.clone(),
                             ty: briev_ty,
                         }
                     }
