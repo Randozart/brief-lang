@@ -135,8 +135,12 @@ pub struct TypecheckContext<'a> {
     trait_defs: HashMap<String, crate::ast::top::TraitDef>,
     /// 2026-08-23 (enum-construction plan): variant_name → enum_name, built
     /// from every TypeDef carrying __variant_* slots. A Call to a variant
-    /// CONSTRUCTS an enum value.
+    /// CONSTRUCTS an enum value. Keys: bare names AND qualified
+    /// `Enum::Variant` paths.
     variant_defs: HashMap<String, String>,
+    /// 2026-08-26 (qualified enum paths): bare names declared by 2+ enums —
+    /// unqualified calls error naming the qualification fix.
+    ambiguous_variants: std::collections::HashSet<String>,
     /// 2026-08-22 (Phase 7a, SPEC §9.6): cell name → its PORT surface.
     /// Sealing: external field access on a cell resolves ONLY through these;
     /// anything else names the ports-only rule.
@@ -175,6 +179,7 @@ impl<'a> TypecheckContext<'a> {
             trait_defs: HashMap::new(),
             cell_ports: HashMap::new(),
             variant_defs: HashMap::new(),
+            ambiguous_variants: std::collections::HashSet::new(),
         }
     }
 
@@ -1621,7 +1626,31 @@ fn infer_call(name: &str, args: &[Expr], ctx: &mut TypecheckContext) -> Result<T
     // AFTER defined-fn resolution in the caller.
     if let Some(enum_name) = ctx.variant_defs.get(name).cloned() {
         if !ctx.defined_fns.contains(name) {
-            return infer_variant_construction(&enum_name, name, args, ctx);
+            // Bare name shared by multiple enums: refuse the guess.
+            if !name.contains("::") && ctx.ambiguous_variants.contains(name) {
+                let mut enums: Vec<String> = ctx
+                    .variant_defs
+                    .iter()
+                    .filter(|(k, _)| {
+                        k.contains("::") && k.ends_with(&name)
+                            && k.len() > name.len() + 2
+                    })
+                    .map(|(_, v)| v.clone())
+                    .collect();
+                enums.sort();
+                enums.dedup();
+                return Err(TypeError::InvalidOperation {
+                    operation: format!(
+                        "constructing '{}' — the name is declared by {}                          enums ({}); qualify it",
+                        name,
+                        enums.len(),
+                        enums.join(", ")
+                    ),
+                    type_name: enum_name,
+                });
+            }
+            let bare = name.rsplit("::").next().unwrap_or(name).to_string();
+            return infer_variant_construction(&enum_name, &bare, args, ctx);
         }
     }
     // Intrinsic call (ends with #): look up signature
@@ -2466,8 +2495,13 @@ fn infer_match(
                 binds.push((name.clone(), (**member).clone()));
             }
             crate::ast::Pattern::EnumVariant(name, subpats) => {
+                // 2026-08-26 (qualified enum paths): the domain lists BARE
+                // variant names; a qualified pattern normalizes to its last
+                // segment for the declaration/uniqueness checks.
+                let bare_name =
+                    name.rsplit("::").next().unwrap_or(name).to_string();
                 if let MatchDomain::Enum(variants) = &domain {
-                    if !variants.contains(name) {
+                    if !variants.contains(&bare_name) {
                         return Err(TypeError::InvalidOperation {
                             operation: format!(
                                 "match arm names variant '{}' which '{}' does not declare \
@@ -2480,11 +2514,11 @@ fn infer_match(
                         });
                     }
                 }
-                if covered.contains(name) {
-                    return Err(unreachable_arm(name, matched_ty.clone()));
+                if covered.contains(&bare_name) {
+                    return Err(unreachable_arm(&bare_name, matched_ty.clone()));
                 }
                 if arm.guard.is_none() {
-                    covered.insert(name.clone());
+                    covered.insert(bare_name);
                 }
                 // 2026-08-23 (enum construction): Binding sub-patterns bind
                 // the variant's PAYLOAD members, typed from the __variant_
@@ -2497,7 +2531,10 @@ fn infer_match(
                 let params_of: Vec<String> =
                     ctx.type_params.get(&base_name).cloned().unwrap_or_default();
                 if let Some(slots) = ctx.type_slots.get(&base_name) {
-                    if let Some(slot) = slots.iter().find(|s| s.name == format!("__variant_{name}")) {
+                    // 2026-08-26 (qualified enum paths): pattern names may be
+                    // qualified (`Res::Ok`) — the SLOT is keyed bare.
+                    let bare_name = name.rsplit("::").next().unwrap_or(name);
+                    if let Some(slot) = slots.iter().find(|s| s.name == format!("__variant_{bare_name}")) {
                         let payload: Vec<Type> = match &slot.ty {
                             Type::Tuple(elems) => elems.clone(),
                             one => vec![one.clone()],
@@ -3880,7 +3917,12 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     let mut all_cell_ports: HashMap<String, Vec<(String, crate::ast::Type)>> =
         HashMap::new();
     // 2026-08-23 (enum construction): variants from enum TypeDefs.
+    // 2026-08-26 (qualified enum paths): BOTH bare ("Ok") and qualified
+    // ("Res::Ok") keys register; a bare name shared by two enums becomes
+    // AMBIGUOUS — unqualified use errors naming the qualification fix.
     let mut all_variant_defs: HashMap<String, String> = HashMap::new();
+    let mut ambiguous_bare_variants: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for item in items.iter() {
         if let TopLevel::Cell(c) = item {
             all_cell_ports.insert(c.name.clone(), c.ports_out.clone());
@@ -3888,7 +3930,16 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         if let TopLevel::TypeDef(td) = item {
             for slot in &td.body.slots {
                 if let Some(vname) = slot.name.strip_prefix("__variant_") {
-                    all_variant_defs.insert(vname.to_string(), td.name.clone());
+                    match all_variant_defs.get(vname) {
+                        Some(prev) if prev != &td.name => {
+                            ambiguous_bare_variants.insert(vname.to_string());
+                        }
+                        _ => {
+                            all_variant_defs.insert(vname.to_string(), td.name.clone());
+                        }
+                    }
+                    all_variant_defs
+                        .insert(format!("{}::{}", td.name, vname), td.name.clone());
                 }
             }
         }
@@ -4117,6 +4168,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_trait_defs: &all_trait_defs,
         all_cell_ports: &all_cell_ports,
         all_variant_defs: &all_variant_defs,
+        ambiguous_bare_variants: &ambiguous_bare_variants,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -4597,6 +4649,9 @@ struct CheckEnv<'a> {
     all_cell_ports: &'a HashMap<String, Vec<(String, crate::ast::Type)>>,
     /// 2026-08-23 (enum construction): variant registry.
     all_variant_defs: &'a HashMap<String, String>,
+    /// Bare variant names declared by MORE THAN ONE enum — unqualified use
+    /// is an error naming the qualification fix.
+    ambiguous_bare_variants: &'a std::collections::HashSet<String>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -4622,6 +4677,7 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.trait_assertions = env.all_trait_assertions.clone();
     ctx.trait_defs = env.all_trait_defs.clone();
     ctx.variant_defs = env.all_variant_defs.clone();
+    ctx.ambiguous_variants = env.ambiguous_bare_variants.clone();
     // 2026-08-22 (Phase 7a): sealing surface + resolvable cell outputs.
     for (cname, outs) in env.all_cell_ports {
         let entry = ctx.cell_ports.entry(cname.clone()).or_default();

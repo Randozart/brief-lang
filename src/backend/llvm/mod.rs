@@ -39,6 +39,143 @@ fn escape_llvm_string(s: &str) -> String {
     out
 }
 
+/// 2026-08-26: every syntactic call name in the program (conservative set —
+/// used only to decide whether a plain txn is referenced anywhere).
+fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<String>) {
+    match e {
+        Expr::Call(name, args, _) => {
+            out.insert(name.clone());
+            for a in args {
+                collect_called_names_expr(a, out);
+            }
+        }
+        Expr::BinaryOp(_, l, r) => {
+            collect_called_names_expr(l, out);
+            collect_called_names_expr(r, out);
+        }
+        Expr::UnaryOp(_, inner) => collect_called_names_expr(inner, out),
+        Expr::Index(obj, idx) => {
+            collect_called_names_expr(obj, out);
+            collect_called_names_expr(idx, out);
+        }
+        Expr::Field(obj, _) => collect_called_names_expr(obj, out),
+        Expr::Cast(inner, _) => collect_called_names_expr(inner, out),
+        Expr::Tuple(exprs) | Expr::List(exprs) => {
+            for x in exprs {
+                collect_called_names_expr(x, out);
+            }
+        }
+        Expr::Match(scrut, arms) => {
+            collect_called_names_expr(scrut, out);
+            for arm in arms {
+                collect_called_names_expr(&arm.body, out);
+                if let Some(g) = &arm.guard {
+                    collect_called_names_expr(g, out);
+                }
+                collect_pattern_calls(&arm.pattern, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_pattern_calls(p: &crate::ast::Pattern, out: &mut std::collections::HashSet<String>) {
+    match p {
+        crate::ast::Pattern::Literal(e) => collect_called_names_expr(e, out),
+        crate::ast::Pattern::EnumVariant(_, subs)
+        | crate::ast::Pattern::Tuple(subs) => {
+            for sp in subs {
+                collect_pattern_calls(sp, out);
+            }
+        }
+        crate::ast::Pattern::Range(a, b) | crate::ast::Pattern::RangeInclusive(a, b) => {
+            collect_called_names_expr(a, out);
+            collect_called_names_expr(b, out);
+        }
+        crate::ast::Pattern::Multi(subs) => {
+            for sp in subs {
+                collect_pattern_calls(sp, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_called_names_stmt(s: &Statement, out: &mut std::collections::HashSet<String>) {
+    match s {
+        Statement::Assign(l, r) => {
+            collect_called_names_expr(l, out);
+            collect_called_names_expr(r, out);
+        }
+        Statement::Expression(e) => collect_called_names_expr(e, out),
+        Statement::Let { expr: Some(e), .. } => collect_called_names_expr(e, out),
+        Statement::Term(Some(e)) => collect_called_names_expr(e, out),
+        Statement::Guarded(cond, body) => {
+            collect_called_names_expr(cond, out);
+            for inner in body {
+                collect_called_names_stmt(inner, out);
+            }
+        }
+        Statement::Block(body) | Statement::SyncBlock(body) => {
+            for inner in body {
+                collect_called_names_stmt(inner, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+impl LlvmBackend {
+    /// Warn once per plain txn that can never execute: non-reactive,
+    /// callable-shaped (no params/outputs), and referenced by no call in the
+    /// program. Fired logic belongs in `node` declarations.
+    pub(crate) fn warn_undispatched_txns(
+        items: &[TopLevel],
+        txns: &[(String, &crate::ast::Transaction)],
+        warnings: &mut Vec<String>,
+    ) {
+        let mut called: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in items {
+            match item {
+                TopLevel::Definition(d) => {
+                    for stmt in &d.body {
+                        collect_called_names_stmt(stmt, &mut called);
+                    }
+                }
+                TopLevel::Transaction(t) => {
+                    for stmt in &t.body {
+                        collect_called_names_stmt(stmt, &mut called);
+                    }
+                    collect_called_names_expr(&t.contract.pre_condition, &mut called);
+                    collect_called_names_expr(&t.contract.post_condition, &mut called);
+                }
+                TopLevel::Constant(c) => collect_called_names_expr(&c.expr, &mut called),
+                _ => {}
+            }
+        }
+        let mut names: Vec<String> = txns
+            .iter()
+            .filter(|(n, t)| {
+                !t.is_reactive
+                    && t.parameters.is_empty()
+                    && t.output_type.is_none()
+                    && t.outputs.is_empty()
+                    && !called.contains(n.as_str())
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+        names.sort();
+        for n in names {
+            warnings.push(format!(
+                "warning: transaction '{}' is never dispatched — plain top-level \
+                 txns do not fire in the tick loop. Declare it as 'node {}' to \
+                 fire it, or call it explicitly.",
+                n, n
+            ));
+        }
+    }
+}
+
 pub(crate) fn float_to_llvm_hex(f: f64) -> String {
     let f32_val = f as f32;
     let bits = f32_val.to_bits();
@@ -2588,7 +2725,13 @@ impl LlvmBackend {
                     for (idx, slot) in ctor_variants.iter().enumerate() {
                         let vname =
                             slot.name.trim_start_matches("__variant_").to_string();
-                        self.ctx.variant_ctor.insert(vname, (td.name.clone(), idx));
+                        self.ctx.variant_ctor.insert(vname.clone(), (td.name.clone(), idx));
+                        // 2026-08-26: qualified `Enum::Variant` paths resolve
+                        // to the same tag index.
+                        self.ctx.variant_ctor.insert(
+                            format!("{}::{}", td.name, vname),
+                            (td.name.clone(), idx),
+                        );
                     }
                 }
                 TopLevel::TypeDef(td)
@@ -2671,7 +2814,12 @@ impl LlvmBackend {
                     for (idx, slot) in ctor_variants.iter().enumerate() {
                         let vname =
                             slot.name.trim_start_matches("__variant_").to_string();
-                        self.ctx.variant_ctor.insert(vname, (td.name.clone(), idx));
+                        self.ctx.variant_ctor.insert(vname.clone(), (td.name.clone(), idx));
+                        // 2026-08-26: qualified path resolves to the same tag.
+                        self.ctx.variant_ctor.insert(
+                            format!("{}::{}", td.name, vname),
+                            (td.name.clone(), idx),
+                        );
                     }
                     // 2026-08-16 (slice-6 deletion): register the coll's
                     // default op BINDINGS in the backend too — compile.rs
@@ -3942,6 +4090,11 @@ impl LlvmBackend {
                 && self.async_txn_names.is_empty()
                 && self.ctx.mmio_fields.is_empty()
             {
+                // 2026-08-26: a plain (non-reactive) txn is NEVER dispatched —
+                // both this path and the reactor fire is_reactive txns only.
+                // A zero-arg, no-output, unreferenced plain txn would make the
+                // whole program a silent no-op; name it and the fix instead.
+                Self::warn_undispatched_txns(items, &txns, &mut self.warnings);
                 // EmitSequentialSsa: Direct phi-based loop — no async, no MMIO.
                 // Inline all txn bodies directly in main() instead of reactor_tick.
                 // Triggers are sampled inline via lazy emit_trg_load, wake path uses

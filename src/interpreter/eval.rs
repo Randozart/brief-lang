@@ -521,7 +521,10 @@ fn eval_call(
                     .map(|v| v.contains_key(name))
                     .unwrap_or(false);
                 if is_variant {
-                    return Ok(Value::sum(name.to_string(), evaluated));
+                    // Qualified calls store the BARE variant — the canonical
+                    // tag inside Sum values (patterns normalize likewise).
+                    let bare = name.rsplit("::").next().unwrap_or(name).to_string();
+                    return Ok(Value::sum(bare, evaluated));
                 }
                 match functions.get(name) {
                 Some(fn_def) => {
@@ -1261,7 +1264,11 @@ pub fn pattern_match(
         }
         Pattern::EnumVariant(name, subpats) => match val {
             Value::Sum { name: cname, payload: fields } => {
-                cname == name
+                // 2026-08-26 (qualified enum paths): compare by LAST segment
+                // so `Res::Ok` patterns match bare-tagged sums and vice versa.
+                let pat_last = name.rsplit("::").next().unwrap_or(name);
+                let val_last = cname.rsplit("::").next().unwrap_or(cname);
+                pat_last == val_last
                     && fields.len() == subpats.len()
                     && subpats
                         .iter()

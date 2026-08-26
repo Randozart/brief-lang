@@ -243,12 +243,19 @@ impl Interpreter {
             }
         }
         // 2026-08-23 (enum construction): variant registry for constructors.
+        // 2026-08-26 (qualified enum paths): BOTH bare and `Enum::Variant`
+        // keys register; construction stores the BARE name in the Sum so
+        // patterns normalize on last segment only.
         let mut registered_variants: HashMap<String, String> = HashMap::new();
         for item in program {
             if let TopLevel::TypeDef(td) = item {
                 for slot in &td.body.slots {
                     if let Some(vname) = slot.name.strip_prefix("__variant_") {
                         registered_variants.insert(vname.to_string(), td.name.clone());
+                        registered_variants.insert(
+                            format!("{}::{}", td.name, vname),
+                            td.name.clone(),
+                        );
                     }
                 }
             }

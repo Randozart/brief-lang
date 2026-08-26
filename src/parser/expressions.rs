@@ -293,6 +293,35 @@ impl<'a> Parser<'a> {
                         return self.error_at_current("only named functions can be called");
                     }
                 }
+            } else if self.check(&Token::ColonColon) {
+                // 2026-08-26 (qualified enum paths): `Enum::Variant` and
+                // `Enum::Variant(args)` — construction via the qualified
+                // path. Desugars to a Call whose name carries the `::`
+                // (function names never contain `::`, so registries
+                // disambiguate cleanly). Bare `Enum::Variant` (no parens)
+                // is the zero-arg call form — SPEC §8.3 unit variants.
+                let Expr::Identifier(enum_name) = &expr else {
+                    return self.error_at_current("expected enum name before '::'");
+                };
+                let enum_name = enum_name.clone();
+                self.pos += 1; // consume '::'
+                let variant = self.expect_identifier()?;
+                let qualified = format!("{}::{}", enum_name, variant);
+                if self.eat(&Token::LParen) {
+                    let mut args = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if !self.eat(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    expr = Expr::Call(qualified, args, None);
+                } else {
+                    expr = Expr::Call(qualified, Vec::new(), None);
+                }
             } else if self.eat(&Token::Dot) {
                 // Field access: a.f — the receiver is PRESERVED.
                 // 2026-08-17 (tuple correctness, plan
@@ -916,6 +945,27 @@ impl<'a> Parser<'a> {
                 if self.eat(&Token::Colon) {
                     let ty = self.parse_type()?;
                     return Ok(crate::ast::Pattern::TypedBinding(name, Box::new(ty)));
+                }
+                // 2026-08-26 (qualified enum paths): `Enum::Variant(subs)` —
+                // the pattern name carries the `::` path; matching
+                // normalizes to the bare variant (last segment).
+                if self.check(&Token::ColonColon) {
+                    self.pos += 1;
+                    let variant = self.expect_identifier()?;
+                    let qualified = format!("{}::{}", name, variant);
+                    let mut fields = Vec::new();
+                    if self.eat(&Token::LParen) {
+                        if !self.check(&Token::RParen) {
+                            loop {
+                                fields.push(self.parse_pattern()?);
+                                if !self.eat(&Token::Comma) {
+                                    break;
+                                }
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                    }
+                    return Ok(crate::ast::Pattern::EnumVariant(qualified, fields));
                 }
                 // Enum variant with fields: Foo(a, b)
                 if self.eat(&Token::LParen) {
