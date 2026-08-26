@@ -5264,3 +5264,20 @@ plain `txn` remains the callable form.
 anywhere ("this txn is unreachable — declare it as a node to fire it in
 the tick loop") or (b) define non-reactive firing semantics (run-once at
 init). Decision needed on intended semantics first.
+
+## Qualified enum paths (`Enum::Variant`) parse nowhere — 2026-08-26 OPEN (spec gap)
+
+SPEC §8.3/§match examples show `Result::Ok(result)` patterns and imply
+qualified construction, but the lexer's `::` token is never handled by the
+parser — neither patterns nor expressions accept qualified variant paths.
+Bare construction works and REQUIRES unique variant names across enums
+(typechecker-enforced), which is the documented v1 contract.
+
+**Fix direction:** primary-expression arm `Ident :: Ident ( args )?` →
+desugar to Call("Enum::Variant", …) (function names never contain `::`);
+pattern-side mirror in parse_pattern. Registry keys become
+`"Enum::Variant"` with a bare-name uniqueness fallback.
+
+**Sweep harness note:** the conformance sweep test referenced by the
+Phase-10 entry lives in the other worktree; re-run there to recount the
+unblocked chains (~40 were gated on construction).

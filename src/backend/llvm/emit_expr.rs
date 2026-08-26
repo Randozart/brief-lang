@@ -4254,12 +4254,12 @@ impl LlvmBackend {
         args: &[Expr],
         indent: &str,
     ) -> TypedRegister {
-        if args.len() > 1 {
-            panic!(
-                "multi-payload variant construction is staged — bind the payload \\
-                 as one value or split the variant"
-            );
-        }
+        // 2026-08-26 (Track B): SPEC §8.3 — multi-payload variants store a
+        // Tuple payload. Wrap 2+ args in one tuple expression; its boxed
+        // handle lands in the payload slot, and EnumVariant binding
+        // sub-patterns extract elements from that image symmetrically.
+        let payload_exprs: Vec<Expr> = args.to_vec();
+        let _ = payload_exprs;
         let raw = self.fun.gen_reg();
         writeln!(out, "{}{} = call ptr @malloc(i64 16)", indent, raw).ok();
         let img = self.fun.gen_reg();
@@ -4278,7 +4278,12 @@ impl LlvmBackend {
         let payload_i64 = if args.is_empty() {
             "0".to_string()
         } else {
-            let preg = self.emit_expr(out, &args[0], indent);
+            let preg = if args.len() == 1 {
+                self.emit_expr(out, &args[0], indent)
+            } else {
+                let tv = self.fun.gen_reg();
+                self.emit_tuple(out, &tv, args, indent)
+            };
             let llvm_ty = self.llvm_type(&preg.ty);
             match llvm_ty.as_str() {
                 "ptr" => {
@@ -4932,21 +4937,29 @@ impl LlvmBackend {
                 self.fun.let_binding_types.insert(name.clone(), (**ty).clone());
                 self.fun.let_original_types.insert(name.clone(), (**ty).clone());
             }
-            // 2026-08-23 (Phase 5d): an ENUM VARIANT arm extracts the
-            // payload (slot 1 of the tagged image) and binds single-payload
-            // Binding sub-patterns to it. Multi-payload sub-patterns stage.
+            // 2026-08-23 (Phase 5d); 2026-08-26 (Track B): an ENUM VARIANT
+            // arm extracts the payload (slot 1 of the tagged image). Single
+            // payload binds directly; MULTI payload stores a Tuple image in
+            // the slot — Binding/Wildcard sub-patterns read elements at
+            // [1..] of that image, symmetric with construction. Non-binding
+            // sub-patterns (literals/nested) remain a staged boundary.
             crate::ast::Pattern::EnumVariant(vname, subpats) => {
-                let staged = subpats.iter().any(|sp| {
-                    !matches!(
+                let nested = subpats.iter().any(|sp| {
+                    matches!(
                         sp,
-                        crate::ast::Pattern::Binding(_)
-                            | crate::ast::Pattern::Wildcard
+                        crate::ast::Pattern::Literal(_)
+                            | crate::ast::Pattern::Tuple(_)
+                            | crate::ast::Pattern::EnumVariant(_, _)
+                            | crate::ast::Pattern::TypedBinding(_, _)
+                            | crate::ast::Pattern::Range(_, _)
+                            | crate::ast::Pattern::RangeInclusive(_, _)
+                            | crate::ast::Pattern::Multi(_)
                     )
-                }) || subpats.len() > 1;
-                if staged {
+                });
+                if nested {
                     panic!(
-                        "enum variant '{vname}' with multi-payload or non-Binding \\
-                         sub-patterns is staged — bind a single value or use `_`"
+                        "enum variant '{vname}' with literal/nested \\
+                         sub-patterns is staged — bind names or use `_`"
                     );
                 }
                 let base = self.fun.gen_reg();
@@ -4960,16 +4973,48 @@ impl LlvmBackend {
                 .ok();
                 let raw = self.fun.gen_reg();
                 writeln!(out, "{}{} = load i64, ptr {}", indent, raw, slot).ok();
-                let bound_ty = Type::int();
-                for sp in subpats {
-                    if let crate::ast::Pattern::Binding(bn) = sp {
-                        self.fun.last_val_temps.insert(bn.clone(), raw.clone());
-                        self.fun.last_val_types.insert(bn.clone(), bound_ty.clone());
-                        self.fun.let_bindings.insert(bn.clone(), raw.clone());
-                        self.fun.let_binding_types.insert(bn.clone(), bound_ty.clone());
-                        self.fun
-                            .let_original_types
-                            .insert(bn.clone(), bound_ty.clone());
+                if subpats.len() <= 1 {
+                    // Single/zero payload: slot 1 IS the value.
+                    let bound_ty = Type::int();
+                    for sp in subpats {
+                        if let crate::ast::Pattern::Binding(bn) = sp {
+                            self.fun.last_val_temps.insert(bn.clone(), raw.clone());
+                            self.fun.last_val_types.insert(bn.clone(), bound_ty.clone());
+                            self.fun.let_bindings.insert(bn.clone(), raw.clone());
+                            self.fun.let_binding_types.insert(bn.clone(), bound_ty.clone());
+                            self.fun
+                                .let_original_types
+                                .insert(bn.clone(), bound_ty.clone());
+                        }
+                    }
+                } else {
+                    // Multi payload: `raw` is a tuple-image handle
+                    // ([count, e0, e1, …]); element j lives at slot j+1.
+                    for (j, sp) in subpats.iter().enumerate() {
+                        let crate::ast::Pattern::Binding(bn) = sp else {
+                            continue; // wildcard — nothing to bind
+                        };
+                        let tbase = self.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = inttoptr i64 {} to ptr",
+                            indent, tbase, raw
+                        )
+                        .ok();
+                        let eslot = self.fun.gen_reg();
+                        writeln!(
+                            out,
+                            "{}{} = getelementptr i64, ptr {}, i64 {}",
+                            indent, eslot, tbase, j + 1
+                        )
+                        .ok();
+                        let ev = self.fun.gen_reg();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, ev, eslot).ok();
+                        self.fun.last_val_temps.insert(bn.clone(), ev.clone());
+                        self.fun.last_val_types.insert(bn.clone(), Type::int());
+                        self.fun.let_bindings.insert(bn.clone(), ev);
+                        self.fun.let_binding_types.insert(bn.clone(), Type::int());
+                        self.fun.let_original_types.insert(bn.clone(), Type::int());
                     }
                 }
             }

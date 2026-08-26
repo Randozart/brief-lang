@@ -2302,6 +2302,41 @@ defn go() -> Int {
     }
 
     #[test]
+    fn test_enum_multi_payload_construct_match_interpret() {
+        // 2026-08-26 (Track B): SPEC §8.3 — multi-payload variants store a
+        // Tuple payload; both bindings extract positionally.
+        let src = r#"
+enum Reg {
+    RegisterOk(String, Int),
+    Failed(Int),
+};
+
+defn describe(r: Reg) -> Int {
+  term match r {
+    RegisterOk(name, count) => count,
+    Failed(code) => 0 - code,
+  };
+}
+
+defn go() -> Int {
+  term describe(RegisterOk("sensor-a", 42)) + describe(Failed(9)) * 100;
+}
+"#;
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let mut interp = crate::interpreter::Interpreter::new();
+        interp.load_program(&items);
+        let out = interp.call_function("go", &[]).unwrap();
+        assert_eq!(
+            out,
+            crate::interpreter::Value::int(42 - 900),
+            "got {:?}",
+            out
+        );
+    }
+
+    #[test]
     fn test_element_assign_writes_bound_product() {
         // 2026-08-25 (Plan 3.6): `buf[i] = v` on a let-bound list — was a
         // silent no-op, now a real read-modify-write.
