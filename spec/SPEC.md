@@ -1128,11 +1128,19 @@ A trailing expression without `;` is the block's implicit value.
 Zero-payload variant patterns use `Variant()` (with parens) to distinguish
 from variable binding patterns.
 
-In `node` and `txn` bodies, `term expr;` marks the firing checkpoint — the
-reactor evaluates the goal after this point. In `defn` bodies and match-arm
-blocks, a trailing expression WITHOUT `;` is the implicit return value.
-`term` signals "loop iteration complete"; a bare tail expression signals
-"this scope produces this value."
+In `node` and `txn` bodies, `term expr;` (or bare `term;`) means **"check
+if this loop is complete."** It is a convergence checkpoint: the reactor
+evaluates the goal (postcondition) at this point. If satisfied, the node
+stops firing; otherwise it fires again on the next reactor cycle. Without
+`term`, the reactor has no point at which to evaluate the goal and decide
+whether to continue or converge — which is why it is mandatory in looping
+bodies.
+
+In `defn` bodies and match-arm blocks, a trailing expression WITHOUT `;`
+is the implicit return value. No convergence check occurs because defns
+and match arms are not loops. The two forms are semantically distinct:
+`term` invokes a completeness evaluation; a bare tail expression produces
+a value.
 
 ### 11.4 Iteration
 
