@@ -4996,6 +4996,13 @@ Load#/Store#, Ptr<Bit<N>>), archived 12 removed-feature showcases.
    saxpy top-level call, test_ffi Result-vs-Bool, gpu-compute Ptr
    literals, vector_test UInt literal, fn-ptr .#Ptr remnants the real-pipeline gate (2026-08-23 update #7, revised)
 
+NOTE: json.bv migration BLOCKED on generic type inference:
+- List<JsonValue> inside recursive enum JsonValue: typechecker cannot
+  unify Array([]) / elems + [frame.value] with recursive generic payloads.
+  All syntax fixes done (char_at, slice parens, comma fields). The
+  uni-to-match rewrite is complete and correct. Remaining issue is
+  typechecker inference for recursive generic enums with list payloads.
+
 NOTE: json.bv migration BLOCKED on three language gaps:
 (a) List<T> + List<T> concatenation via `+` operator not typed for
     generic element types (works for concrete Int/Float but not JsonValue)
