@@ -144,6 +144,12 @@ pub struct CompilerContext {
 
     // FFI & Declarations
     pub triggers: HashMap<String, TriggerDeclaration>,
+
+    /// 2026-08-27 (cbv-HW plan Slice B): @-addressed trigger VALUE reads —
+    /// name -> static address. Reads lower to a volatile load through the
+    /// boxed-pointer ABI (inttoptr of the constant). Writes are rejected by
+    /// the typechecker (pins are inputs).
+    pub trg_addresses: HashMap<String, u64>,
     pub trigger_names: Vec<String>,
     pub frgn_map: HashMap<String, ForeignSignature>,
     pub defn_params: HashMap<String, Vec<Type>>,
@@ -430,6 +436,7 @@ impl CompilerContext {
             mmio_prepopulated: false,
             schema_alias_names: HashSet::new(),
             triggers: HashMap::new(),
+            trg_addresses: HashMap::new(),
             trigger_names: Vec::new(),
             frgn_map: HashMap::new(),
             defn_params: HashMap::new(),

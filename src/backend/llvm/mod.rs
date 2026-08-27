@@ -2548,12 +2548,24 @@ impl LlvmBackend {
                     // The new Trigger struct has name/instance/port/span fields.
                     // 2026-07-15: Support @ *ptr dynamic triggers — map Expr::Deref
                     // to LinkRef::Deref so emit_trg_load emits a load from the pointer.
+                    // 2026-08-27 (Slice B): numeric @-addresses are real MMIO
+                    // pins — keep the value (the old code collapsed every
+                    // non-Deref form to address 0) and register the VALUE-READ
+                    // table so body reads lower to volatile loads.
                     let address = match &trg.instance {
                         Expr::Deref(ptr_expr) => {
                             crate::ast::LinkRef::Deref(ptr_expr.clone())
                         }
+                        Expr::Decimal(n) => crate::ast::LinkRef::Explicit(*n as u64),
                         _ => crate::ast::LinkRef::Explicit(0),
                     };
+                    if let crate::ast::LinkRef::Explicit(a) = &address {
+                        if *a > 0 {
+                            self.ctx
+                                .trg_addresses
+                                .insert(trg.name.clone(), *a);
+                        }
+                    }
                     let trg_decl = crate::ast::TriggerDeclaration {
                         name: trg.name.clone(),
                         ty: crate::ast::Type::string(),

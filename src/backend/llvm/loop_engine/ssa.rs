@@ -588,6 +588,13 @@ impl LlvmBackend {
         writeln!(out, "define void @trg_step(ptr %state) local_unnamed_addr {{").ok();
         for trg_name in trigger_names {
             let trg_name_clone = trg_name.clone();
+            // 2026-08-27 (cbv-HW plan Slice B): a VALUE-PIN trigger (numeric
+            // @-address) is not an event — its body txn never exists and its
+            // value is read directly by bodies (volatile load). Excluding it
+            // from event dispatch removes the dangling @txn_<pin> call.
+            if self.ctx.trg_addresses.contains_key(trg_name_clone.as_str()) {
+                continue;
+            }
             if let Some(trg) = self.ctx.triggers.get(&trg_name_clone) {
                 let trg_name = trg.name.clone();
                 let cond_val = self.emit_expr(out, &Expr::Identifier(trg_name.clone()), "  ");

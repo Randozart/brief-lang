@@ -141,6 +141,9 @@ pub struct TypecheckContext<'a> {
     /// 2026-08-26 (qualified enum paths): bare names declared by 2+ enums —
     /// unqualified calls error naming the qualification fix.
     ambiguous_variants: std::collections::HashSet<String>,
+    /// 2026-08-27 (Slice B): @-addressed trigger names — MMIO INPUT pins,
+    /// readable but never assignable (hardware drives them).
+    trigger_pins: std::collections::HashSet<String>,
     /// 2026-08-22 (Phase 7a, SPEC §9.6): cell name → its PORT surface.
     /// Sealing: external field access on a cell resolves ONLY through these;
     /// anything else names the ports-only rule.
@@ -180,6 +183,7 @@ impl<'a> TypecheckContext<'a> {
             cell_ports: HashMap::new(),
             variant_defs: HashMap::new(),
             ambiguous_variants: std::collections::HashSet::new(),
+            trigger_pins: std::collections::HashSet::new(),
         }
     }
 
@@ -2926,6 +2930,19 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
             // to it is a compile error, not a runtime rebind.
             if let Expr::Identifier(target_name) = lhs {
                 if ctx.init_names.contains(target_name) {
+                    // 2026-08-27 (Slice B): an @-addressed trigger is an MMIO
+                    // INPUT pin — hardware drives it, programs observe it.
+                    if ctx.trigger_pins.contains(target_name.as_str()) {
+                        return Err(TypeError::InvalidOperation {
+                            operation: format!(
+                                "assignment to `{}` — an @-addressed trigger is \
+                                 an input pin driven by hardware; observe it or \
+                                 declare a separate output field",
+                                target_name
+                            ),
+                            type_name: "mmio input pin".into(),
+                        });
+                    }
                     return Err(TypeError::InvalidOperation {
                         operation: format!(
                             "assignment to `{}` — an `init` is seeded once before \
@@ -3705,6 +3722,14 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
                 TopLevel::Constant(c) => {
                     return Some((c.name.clone(), c.ty.clone()));
                 }
+                // 2026-08-27 (cbv-HW plan Slice B): an @-addressed trigger is
+                // an MMIO INPUT pin — its VALUE is a readable Int in txn/defn
+                // bodies on every target (volatile load on embedded, pin wire
+                // on circuits). Registered READ-ONLY (init_names): pins are
+                // driven by hardware; programs only observe them.
+                TopLevel::Trigger(trg) => {
+                    return Some((trg.name.clone(), Type::int()));
+                }
                 // 2026-08-23: `export let` wraps a Constant OR a typed Let
                 // statement — unwrap both so exported constants are visible
                 // to the file's own bodies (posix/io.bv's FD_STDOUT was
@@ -3941,6 +3966,15 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // slots stay unregistered so internal fields cannot resolve externally.
     let mut all_cell_ports: HashMap<String, Vec<(String, crate::ast::Type)>> =
         HashMap::new();
+    // 2026-08-27 (Slice B): @-addressed triggers become read-only MMIO pins.
+    let trigger_pins: std::collections::HashSet<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            TopLevel::Trigger(t) => Some(t.name.clone()),
+            _ => None,
+        })
+        .collect();
+
     // 2026-08-23 (enum construction): variants from enum TypeDefs.
     // 2026-08-26 (qualified enum paths): BOTH bare ("Ok") and qualified
     // ("Res::Ok") keys register; a bare name shared by two enums becomes
@@ -4194,6 +4228,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_cell_ports: &all_cell_ports,
         all_variant_defs: &all_variant_defs,
         ambiguous_bare_variants: &ambiguous_bare_variants,
+        trigger_pins: &trigger_pins,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -4677,6 +4712,8 @@ struct CheckEnv<'a> {
     /// Bare variant names declared by MORE THAN ONE enum — unqualified use
     /// is an error naming the qualification fix.
     ambiguous_bare_variants: &'a std::collections::HashSet<String>,
+    /// 2026-08-27 (Slice B): @-addressed trigger names — read-only pins.
+    trigger_pins: &'a std::collections::HashSet<String>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -4703,6 +4740,7 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.trait_defs = env.all_trait_defs.clone();
     ctx.variant_defs = env.all_variant_defs.clone();
     ctx.ambiguous_variants = env.ambiguous_bare_variants.clone();
+    ctx.trigger_pins = env.trigger_pins.clone();
     // 2026-08-22 (Phase 7a): sealing surface + resolvable cell outputs.
     for (cname, outs) in env.all_cell_ports {
         let entry = ctx.cell_ports.entry(cname.clone()).or_default();
@@ -4724,9 +4762,16 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     // op surface.
     ctx.coll_types = env.all_coll_types.clone();
     // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
+    // 2026-08-27 (Slice B): trigger-name bindings are MMIO INPUT pins —
+    // read-only (init_names), never mutable state. Writes surface the
+    // house input-pin error.
     for (name, ty) in env.state_bindings {
         ctx.bindings.insert(name.clone(), ty.clone());
-        ctx.state_keys.insert(name.clone());
+        if ctx.trigger_pins.contains(name.as_str()) {
+            ctx.init_names.insert(name.clone());
+        } else {
+            ctx.state_keys.insert(name.clone());
+        }
     }
     // 2026-08-09 (init kind, Phase 2): init names are readable everywhere but
     // NOT mutable — bind them, mark them init_names (reassign → error), and
@@ -8080,4 +8125,22 @@ defn poke(m: Meter) -> Bool { term m.bump(3); };
 "#;
         check(good).expect("well-formed cell + method call must pass");
     }
+
+
+    /// 2026-08-27 (Slice B): assigning to an @-addressed trigger is an
+    /// input-pin violation with the house what/fix diagnostic.
+    #[test]
+    fn test_mmio_pin_assignment_is_input_pin_error() {
+        let err = check("trg sensor @ 0x1000;\n\
+                         txn tick [sensor < 9][sensor <= 9] {\n\
+                             sensor = 1;\n\
+                         }\n").expect_err("pin write must fail");
+        let msg = format!("{}", err.first().unwrap());
+        assert!(msg.contains("input pin"), "{msg}");
+        assert!(msg.contains("observe it"), "{msg}");
+    }
+
+
+
+
 }
