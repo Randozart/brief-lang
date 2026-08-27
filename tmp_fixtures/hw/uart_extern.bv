@@ -1,0 +1,14 @@
+// HW fixture (cbv-HW plan Slice A): foreign HDL import linked into the
+// verilator/Vivado build. The blackbox never drives top logic (cell call
+// typing is staged) — the contract proven here is LINKAGE: uart_top.v
+// must compile beside the generated RTL or the harness fails. Ports are
+// the observable surface, same as every other HW fixture.
+extern uart_top(rx: Int) -> byte_out: Int from "uart_top.v";
+
+let done: Int = 0;
+let ticks: Int = 0;
+
+node run [done == 0][done == 1] {
+  ticks = ticks + 1;
+  done = 1;
+};

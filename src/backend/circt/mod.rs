@@ -1601,11 +1601,17 @@ impl CirctBackend {
             // shape defined cells get, so hw.instance sites match
             // byte-for-byte against both kinds of modules.
             writeln!(out, "// extern {} — definition lives in \"{}\"", cell_name, src_path).ok();
+            // Authoritative grammar (HWStructure.td / ModuleImplementation.cpp):
+            // ONE paren list holds ALL ports; inputs print `%name`, outputs
+            // print BARE names; there is no `-> (outputs)` wrapper on
+            // module-likes (that form belongs to hw.instance).
             write!(out, "hw.module.extern @{}(", cell_name).ok();
-            write!(out, "in %clock: !seq.clock, in %reset: i1").ok();
+            let mut port_text: Vec<String> = Vec::new();
+            port_text.push("in %clock: !seq.clock".to_string());
+            port_text.push("in %reset: i1".to_string());
             for (param_name, param_ty) in &cell.parameters {
                 let mlir_ty = self.mlir_type(param_ty);
-                write!(out, ", in %{}: {}", param_name, mlir_ty).ok();
+                port_text.push(format!("in %{}: {}", param_name, mlir_ty));
             }
             let out_names = Self::extract_output_names_llvm(&cell.output_type);
             let out_names: Vec<String> = if out_names.is_empty() {
@@ -1613,15 +1619,13 @@ impl CirctBackend {
             } else {
                 out_names
             };
-            if let Some(first_out) = out_names.first() {
-                let first_in = cell.parameters.first()
-                    .or_else(|| cell.ports_out.first())
+            for (i, out_name) in out_names.iter().enumerate() {
+                let out_ty = cell.ports_out.get(i)
                     .map(|(_, t)| self.mlir_type(t))
                     .unwrap_or_else(|| "i64".to_string());
-                write!(out, ") -> ({}: {})", first_out, first_in).ok();
-            } else {
-                write!(out, ") -> ()").ok();
+                port_text.push(format!("out {}: {}", out_name, out_ty));
             }
+            write!(out, "{});", port_text.join(", ")).ok();
             writeln!(out).ok();
             return;
         }
@@ -2047,8 +2051,8 @@ mod tests {
         // Exactly one blackbox, right shape:
         assert_eq!(output.matches("hw.module.extern").count(), 1,
             "one blackbox expected:\n{output}");
-        assert!(output.contains("hw.module.extern @UartTop(in %clock: !seq.clock, in %reset: i1, in %rx: i64) -> (byte_out: i64)"),
-            "blackbox shape mismatch:\n{output}");
+        assert!(output.contains("hw.module.extern @UartTop(in %clock: !seq.clock, in %reset: i1, in %rx: i64, out byte_out: i64);"),
+            "blackbox shape mismatch (ports inside one paren list, bare output names):\n{output}");
         // Foreign pins are NOT program state — no UartTop$ leak on @top.
         assert!(!output.contains("UartTop$"), "extern cell must not leak program vars:\n{output}");
         assert!(backend.errors.borrow().is_empty(), "{:?}",

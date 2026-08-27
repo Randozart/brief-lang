@@ -19,6 +19,14 @@ for FIX in tmp_fixtures/hw/*.bv; do
     NAME="$(basename "$FIX" .bv)"
     WORK="$(mktemp -d)"
 
+    # Toolchain gate (2026-08-27): binaries were observed MISSING from both
+    # worktrees mid-session (see BUGS.md hazard + plan 2026-08-27 note).
+    # Rebuild with tools/install-circt.sh. Skip loudly, never silently pass.
+    if [ ! -x "$CIRCT_OPT" ]; then
+        echo "HW $NAME: SKIP (circt-opt absent at $CIRCT_OPT — run tools/install-circt.sh)"
+        rm -rf "$WORK"; continue
+    fi
+
     if ! "$BRIEFC" build "$FIX" --backend circt >/dev/null 2>&1; then
         echo "HW $NAME: FAIL (compile)"; FAIL=1; rm -rf "$WORK"; continue
     fi
@@ -62,9 +70,12 @@ for FIX in tmp_fixtures/hw/*.bv; do
         FAIL=1; rm -rf "$WORK"; continue
     fi
 
-    # Memory companions (brievc-emitted next to the fixture).
+    # Companions (brievc-emitted next to the fixture): firmem reference
+    # impls (.sv) and foreign HDL imports (.extern.*.v — original extension
+    # preserved by copy_extern_companions). Both join every verilator and
+    # Vivado compile.
     COMPANIONS=()
-    for C in "${FIX%.bv}".*.sv; do
+    for C in "${FIX%.bv}".*.sv "${FIX%.bv}".*.extern.*.v; do
         [ -f "$C" ] || continue
         cp "$C" "$WORK/"
         COMPANIONS+=("$WORK/$(basename "$C")")
