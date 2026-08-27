@@ -19,9 +19,9 @@ and effort estimates. Updated as work completes.
 ## Small Effort (≤1 session each)
 
 ### 1. Close qualified enum paths bug — BUGS.md
-- **Status:** DONE (code landed `38943d5c`)
-- **Remaining:** Update BUGS.md entry to reflect resolution
-- **Plan:** N/A (bugfix, no plan needed)
+- **Status:** DONE (code landed `38943d5c`, entry updated, stale tracker
+  note removed 2026-08-26)
+- **Remaining:** None
 
 ### 2. Backend scaffolding §0.4 doc truth sweep
 - **Plan:** `docs/plans/2026-08-23-backend-scaffolding-foundation.md`
@@ -103,11 +103,24 @@ and effort estimates. Updated as work completes.
 ## Open Bugs (BUGS.md)
 
 ### Planned fixes (have explicit plans)
-1. Protocol round-trip proofs silently skipped — missing conversion functions in stdlib
-2. Silent representation width/alignment fallbacks — SPEC forbids silent defaults
-3. String-param library exports `%ac0` i64-vs-ptr codegen
-4. Plain `txn` at top level compiles to empty program
-5. Duplicate `BackendKind::Webstack` match arms
+1. Protocol round-trip proofs silently skipped — PARTIAL 2026-08-26: interpreter-side
+   silent Ok paths became hard errors (`src/protocol_verify.rs`). Remaining:
+   backend missing-body skip arm (`protocol_graph.rs`) → hard error REQUIRES
+   the four codec bodies (ascii↔utf8, utf16→utf8, Posit32↔IEEE754) plus an
+   explicit `axiom` cast-edge marker per SPEC §8.7 ("visibly declared trusted
+   foreign/intrinsic axiom"). One coherent session; flipping alone bricks all
+   stdlib imports.
+2. Silent representation width/alignment fallbacks — RESOLVED 2026-08-26
+   (`e614a18e`): backend backfill sites share record_structural_layout with
+   deduped recorded warnings. Enum-handle shape stays explicit+documented
+   (boxed {tag,payload} image — declared representation, not a fallback).
+3. String-param library exports `%ac0` i64-vs-ptr codegen — closed as stale
+   duplicate (fixed 2026-08-18, BUGS.md tombstone points at resolved entry).
+4. Plain `txn` at top level compiles to empty program — RESOLVED 2026-08-26
+   (`84a85852`): warning hoisted ahead of dispatch-mode selection; fires for
+   enum/reactor/SSA modes, silent for library/shared shims.
+5. Duplicate `BackendKind::Webstack` match arms — CLOSED upstream 2026-08-26;
+   cosmetic duplicate doc-comment removed.
 
 ### Pre-existing (no immediate fix planned)
 1. CIRCT ExportVerilog rejects `hw.module.generated` (FIRRTL_Memory)

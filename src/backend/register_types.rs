@@ -299,6 +299,40 @@ pub fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, int_bi
     Ok(())
 }
 
+/// 2026-08-26 (bug sweep B2, SPEC §2.1): the structural layout fallback used
+/// by backend backfill sites (`TopLevel::Obj` and type-agnostic TypeDef
+/// re-registration inside LlvmBackend::generate). Slot-sum bytes, alignment
+/// 8 — the SAME structural defaults static_struct_resolved_ty applies — but
+/// the fallback is RECORDED in universe.warnings: a representation no source
+/// declaration pins is visible to the user, never silent. Deduped per name.
+pub fn record_structural_layout(
+    universe: &mut TypeUniverse,
+    name: &str,
+    base: &str,
+    fields: &[(String, Type)],
+) -> ResolvedType {
+    let bytes: u64 = fields.iter().map(|(_, ty)| {
+        crate::backend::llvm::types::type_size(ty, Some(universe))
+    }).sum();
+    let marker = format!("structural layout fallback for '{name}'");
+    if !universe.warnings.iter().any(|w| w.contains(&marker)) {
+        universe.warnings.push(format!(
+            "warning: {marker} — slot-sum bytes ({bytes}), alignment 8. \
+             Declare !> bytes/alignment on '{name}' to pin its representation."
+        ));
+    }
+    ResolvedType {
+        name: name.to_string(),
+        base: base.to_string(),
+        bytes,
+        min_bits: bytes * 8,
+        max_bits: bytes * 8,
+        alignment: 8,
+        properties: std::collections::HashMap::new(),
+        fields: fields.to_vec(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ast::top::{TypeDef, TypeDefBody, TypeDefSlot};
@@ -452,6 +486,29 @@ mod tests {
         assert_eq!(rt.max_bits, 20);
         assert_eq!(rt.alignment, 1);
         assert_eq!(rt.fields.len(), 2);
+    }
+
+    #[test]
+    fn test_structural_fallback_records_warning_once() {
+        // Bug sweep B2 (SPEC §2.1): an unpinned representation must be
+        // RECORDED, never silent — and deduped across repeated registration.
+        let mut u = TypeUniverse::new();
+        let fields = vec![
+            ("a".to_string(), Type::int()),
+            ("b".to_string(), Type::int()),
+        ];
+        let rt = record_structural_layout(&mut u, "S", "Data", &fields);
+        assert_eq!(rt.bytes, 16);
+        assert_eq!(rt.alignment, 8);
+        assert_eq!(
+            u.warnings.iter().filter(|w| w.contains("'S'")).count(), 1,
+            "one recorded fallback per type name"
+        );
+        let _ = record_structural_layout(&mut u, "S", "Data", &fields);
+        assert_eq!(
+            u.warnings.iter().filter(|w| w.contains("'S'")).count(), 1,
+            "re-registration dedupes"
+        );
     }
 
     #[test]

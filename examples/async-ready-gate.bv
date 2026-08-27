@@ -1,0 +1,57 @@
+// async-ready-gate — SPEC §9.5/§12.2 Phase D acceptance: top-level `^Ready`
+// gating observes the wake transition.
+//
+// Reflection reads are legal anywhere (unlike payload projections, which
+// require an active task or a .^Ready gate). Deterministic ordering makes the
+// transition observable:
+//   - `wire.^Ready` directly after spawn, BEFORE the first await schedules
+//     any segment → false (nothing has fired yet).
+//   - the same reflection after `await cc` completes → true (the producer's
+//     fire flipped the shared slot).
+// acc + produced*100 = 1*1 + 1*10 + 1*100 = 111. Same value on the reference
+// interpreter and the native target (tests/async_compiled_events_test.rs).
+
+struct Damage {
+    amount: Int;
+};
+
+obj Bus() -> evt: Event<Damage> {
+};
+
+defn produce(p: Event<Damage>) -> Int {
+    p <- Damage { amount: 7 };
+    term 1;
+};
+
+defn consume(d: Event<Damage>) -> Int {
+    term d.amount;
+};
+
+let i: Int = 0;
+let acc: Int = 0;
+
+node run [i < 1][i == 1] {
+    let bus = spawn Bus();
+    let wire: Event<Damage> = bus.evt;
+    let pw = spawn produce(wire);
+    let cc = spawn consume(wire);
+
+    // No segment has run yet — the shared slot is still cold.
+    when wire.^Ready == false {
+        acc = acc + 1;
+    };
+
+    let v: Int = await cc;
+
+    // Post-wake: the fire set the slot's Ready flag.
+    when wire.^Ready {
+        acc = acc + 10;
+    };
+
+    let produced: Int = await pw;
+
+    i = i + 1;
+    when i == 1 {
+        endprogram println!(acc + produced * 100);
+    };
+};

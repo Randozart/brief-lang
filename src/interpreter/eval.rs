@@ -3552,3 +3552,101 @@ fn async_phase_b_example_runs() {
         "every spawned task finished: {snapshot:?}"
     );
 }
+
+// ── 2026-08-26 (async Phase D): compiled-twin interpreter parity ────────
+// examples/async-events-compiled.bv is the SAME program with observable
+// output (acc = consume(7) + produce(1)*10 = 17). The reference interpreter
+// must derive the identical wake path on this file that the native target
+// proves via tests/async_compiled_events_test.rs — one semantics, two
+// backends (AGENTS golden rule 5).
+#[test]
+fn async_phase_d_compiled_twin_interpreter_parity() {
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/async-events-compiled.bv"
+    ))
+    .unwrap();
+    let tokens = crate::lexer::tokenize(&src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, &src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    let node_body: Vec<Statement> = items
+        .iter()
+        .find_map(|i| match i {
+            TopLevel::Transaction(t) if t.name == "run" => Some(t.body.clone()),
+            _ => None,
+        })
+        .expect("node run present");
+
+    // Seed the node-local binding map with the evaluated top-level
+    // initializers (`i = 0`, `acc = 0`) — plain `x = ...` assigns bind into
+    // the statement-level map, exactly as the reactor driver's per-firing
+    // frame does.
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    for item in &items {
+        if let TopLevel::Statement(s) = item {
+            if let Statement::Let { name, expr: Some(e), .. } = s.as_ref() {
+                if let Ok(v) = eval_expr(e, &mut interp.heap, &mut bindings, &interp.functions) {
+                    bindings.insert(name.clone(), v);
+                }
+            }
+        }
+    }
+    for stmt in &node_body {
+        let _ = eval_statement(stmt, &mut interp.heap, &mut bindings, &interp.functions);
+    }
+    // acc is a top-level field: the node body's assignments land in
+    // interpreter state, not local bindings. The plain driver adds nothing
+    // further because i==1 makes every later firing fail the precondition.
+    assert_eq!(
+        bindings.get("acc").and_then(|v| v.as_i64()),
+        Some(17),
+        "reference derives 17 identically to the compiled binary"
+    );
+}
+
+// ── 2026-08-26 (async Phase D): `^Ready` gate parity ────────────────────
+// examples/async-ready-gate.bv observes the wake transition through top-level
+// reflection. acc = !before(1) + after(10) = 11 on the reference too.
+#[test]
+fn async_phase_d_ready_gate_interpreter_parity() {
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/async-ready-gate.bv"
+    ))
+    .unwrap();
+    let tokens = crate::lexer::tokenize(&src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, &src);
+    let items = p.parse_program().unwrap();
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.load_program(&items);
+
+    let node_body: Vec<Statement> = items
+        .iter()
+        .find_map(|i| match i {
+            TopLevel::Transaction(t) if t.name == "run" => Some(t.body.clone()),
+            _ => None,
+        })
+        .expect("node run present");
+
+    let mut bindings: HashMap<String, Value> = HashMap::new();
+    for item in &items {
+        if let TopLevel::Statement(s) = item {
+            if let Statement::Let { name, expr: Some(e), .. } = s.as_ref() {
+                if let Ok(v) = eval_expr(e, &mut interp.heap, &mut bindings, &interp.functions) {
+                    bindings.insert(name.clone(), v);
+                }
+            }
+        }
+    }
+    for stmt in &node_body {
+        let _ = eval_statement(stmt, &mut interp.heap, &mut bindings, &interp.functions);
+    }
+    assert_eq!(
+        bindings.get("acc").and_then(|v| v.as_i64()),
+        Some(11),
+        "reference gate sees false→true identically"
+    );
+}

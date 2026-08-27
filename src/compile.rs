@@ -1653,7 +1653,6 @@ fn compile_ll_to_library(ll_path: &str, base: &str, _extra_objects: &[PathBuf]) 
 
 /// Compile LLVM IR (.ll) to WASM binary (.wasm) using llc.
 /// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
-/// 2026-07-26: Phase 5 — Called for BackendKind::Webstack after codegen.
 /// The .ll file must have been emitted with wasm32 target triple.
 /// Uses `llc -march=wasm32 -filetype=obj` to produce a .o, then
 /// `wasm-ld` to link into .wasm. This avoids needing a wasm32 clang.

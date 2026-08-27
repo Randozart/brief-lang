@@ -810,29 +810,34 @@ that made the captured baseline partially untrustworthy.
 
 ---
 
-## Protocol Round-Trip Proofs Silently Skipped — OPEN (compiler gap)
+## Protocol Round-Trip Proofs Silently Skipped — PARTIAL (interpreter side FIXED 2026-08-26)
 
 **Date:** 2026-08-09 (split from the harness-defects entry)
-**Status:** Open
-**Root cause:** `lib/std/protocols.bv` declares `proto ASCII/UTF16/Posit32`
-with `CastTo`/`CastFrom` referencing `ascii_to_utf8`/`utf8_to_ascii`/
-`utf16_to_utf8`/`utf8_to_utf16`/`Posit32_to_IEEE754`/`IEEE754_to_Posit32`, but
-none of those functions are defined in stdlib. The round-trip proof machinery
-(`protocol_graph.rs`) warns "bodies not found" and skips the proof.
-**Fix (planned):** implement the conversion functions in stdlib (`.bv`) or
-declare explicit trusted axioms per SPEC §8.7; the proof must not silently skip.
+**Status:** PARTIAL. 2026-08-26: the interpreter-side silent `Ok(())` paths in
+`src/protocol_verify.rs` (probe eval failure, missing producer) are now hard
+errors with what/why/fix diagnostics.
+**Remaining:** `protocol_graph.rs`'s missing-body skip arm must become a hard
+error — blocked on one coherent prerequisite session: the four codec bodies
+(`ascii_to_utf8`/`utf8_to_ascii`, `utf16_to_utf8`/`utf8_to_utf16`,
+`Posit32_to_IEEE754`/`IEEE754_to_Posit32`) implemented in stdlib `.bv`, plus an
+explicit trusted-axiom cast-edge marker per SPEC §8.7 so edges that ARE axioms
+skip proof by declaration. Flipping the gate alone bricks every stdlib import;
+that is why it waits for its prerequisites (Golden Rule 11 — prereqs first).
+**Fix (planned):** as above; never silently skip.
 
 ---
 
-## Silent Representation Width/Alignment Fallbacks — OPEN (compiler gap)
+## Silent Representation Width/Alignment Fallbacks — RESOLVED 2026-08-26
 
 **Date:** 2026-08-09 (split from the harness-defects entry)
-**Status:** Open
-**Root cause:** the normalizer defaults unresolved max width to 64 and
-alignment to 8 for `Slice`, `List`, `Stack`, `HashMap`, `RingBuffer`, etc.
-SPEC §2.1 forbids silent representation fallback.
-**Fix (planned):** require explicit `!> bits`/alignment resolution for
-non-primordial types, or a declared default, instead of a silent assume.
+**Status:** RESOLVED (`e614a18e`). The normalizer has recorded fallbacks since
+Phase 3 (§8.6); the remaining truly-silent sites — inline `ResolvedType`
+construction in `LlvmBackend::generate` for `TopLevel::Obj` and TypeDef
+backfill — now share `record_structural_layout` (`register_types.rs`), which
+keeps the structural defaults (slot-sum bytes, alignment 8) and records a
+deduped warning naming the representation and its fix (`!> bytes/alignment`).
+The enum-handle shape is a declared representation (boxed {tag,payload}
+image), not a fallback.
 
 ---
 
@@ -4548,16 +4553,16 @@ never hit it (no benchmark uses bounded i64 preconditions).
 **Fix:** always emit typed bounds (`!range !{ i64 0, i64 10 }`), matching the
 typed form used by `emit_range_metadata` for narrower widths.
 
-## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (pre-existing)
+## String-param library exports hit `%ac0` i64-vs-ptr codegen — OPEN (stale duplicate, CLOSED by 2026-08-18 verification)
 
 **Date:** 2026-08-13 (surfaced while fixing `c_driver_needs_state`)
-**Status:** Open. An exported defn with a `String` parameter, built via
-`brievc build --library`, emits `%ac0` typed i64 in the shim while the body
-expects `ptr` (`opt: needs_state.ll: %ac0 defined with type 'i64' but expected
-'ptr'`). Workaround in the dogfood pass: keep the boundary param as `CStr`
-and cast with `cstr_to_briev` in the body. The `--library` shim's String-param
-marshalling needs a fix (String is boxed as i64 at the ABI but the body reads
-a ptr).
+**Status:** CLOSED 2026-08-26 — this entry predates the verify-fixed record at
+`docs/plans/2026-08-18-check-build-pipeline-unification.md` and duplicates the
+RESOLVED entry above. The param-marshalling fix landed in
+`src/backend/llvm/emit_toplevel.rs:2702-2715` (`param_llvm_ty == "ptr"` →
+ptrtoint) with a regression test asserting no `ptrtoint ptr %arg0` for String
+params (`tests.rs:3728`). Kept here as a tombstone pointing at the resolved
+entry; delete in a future BUGS.md sweep.
 
 ## Bare collection literal as a function ARG crashes — KNOWN (string.bv unblock)
 
