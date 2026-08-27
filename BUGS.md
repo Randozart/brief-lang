@@ -5285,6 +5285,9 @@ registers both bare and qualified keys; ambiguity detection errors on bare
 names shared by 2+ enums. Interpreter and LLVM backend qualified-key
 registries wired. 1960 tests pass; HW harness green.
 
-**Sweep harness note:** the conformance sweep test referenced by the
-Phase-10 entry lives in the other worktree; re-run there to recount the
-unblocked chains (~40 were gated on construction).
+**Sweep harness note — RECOUNTED 2026-08-27:** the conformance sweep is a
+first-class `cargo test --lib` gate (see CLOSED entry below); recount shows
+**209 discovered active sources, 0 failures**. The ~40 construction-gated
+chains are fully resolved: result/option/process/string chains migrated
+and green in `lib/std`; json.bv was archived out of the active inventory
+(deep-migration blocker preserved in its entry above).
