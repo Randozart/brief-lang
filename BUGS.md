@@ -5114,7 +5114,6 @@ option.bv migrated to native constructors + exhaustive match. Sweep at
 demo rewrites → (4) coordinate → (5) parser dialect decision.
 
 
-
 **Status:** OPEN — Phase 10 continuation. **Primary blocker identified:
 enum variant CONSTRUCTION does not exist.** Patterns parse
 (`Result::Ok(v) =>`); constructors do not (`term Ok(v)` is a call to an
@@ -5173,7 +5172,6 @@ option.bv migrated to native constructors + exhaustive match. Sweep at
 
 **Unblock order:** (2)+(3) mechanical → (6) per-file as touched → (1)
 demo rewrites → (4) coordinate → (5) parser dialect decision.
-
 
 
 **Status:** OPEN — Phase 10 continuation. **Primary blocker identified:
@@ -5309,3 +5307,15 @@ silently swallowed for every normal `.bv` compile.
 wins over every allow-path). Regression: verify --no-std skips prelude;
 probe then compiles through CIRCT.
 
+## CIRCT instantiated undefined modules for non-cell calls — FIXED 2026-08-27
+
+**Found:** same probe. Qualified enum construction `Http::Ok(7)` in a node
+emitted `hw.instance "Http::Ok" @Http::Ok` — but ONLY `@top` and declared
+cell modules are ever defined, so the .mlir referenced a module nothing
+provides (circt-opt/synthesis fails downstream). Plain fn calls had the
+same hole (`test_circt_call_submodule` codified it).
+
+**Fix:** the call fallthrough now instantiates ONLY callees present in
+`cell_defs`; anything else records the house capability error naming the
+callee and the fix (inline or declare as cell). Test rewritten to lock the
+corrected contract.

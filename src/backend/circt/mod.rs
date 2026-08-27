@@ -1089,8 +1089,22 @@ impl CirctBackend {
                         None
                     }
                     _ => {
-                        // Function calls become submodule instantiations
+                        // 2026-08-27 (undefined-instance fix): ONLY declared
+                        // cells become hw.instantiations — only they get a
+                        // hw.module definition emitted (emit_cell_module).
+                        // Any other callee (plain fn, txn, enum variant
+                        // constructor like Http::Ok) previously instantiated a
+                        // module that was NEVER defined — output circt-opt
+                        // rejects downstream, or worse: unverifiable silence.
+                        // Now: honest capability error naming the callee.
                         let inst_name = name.replace('-', "_");
+                        if !self.cell_defs.contains_key(&inst_name) {
+                            self.record_unsupported(&format!(
+                                "call '{}' — hardware synthesis has no image                                  for this function; only declared cells can be                                  instantiated. Inline the computation or declare                                  it as a cell",
+                                name
+                            ));
+                            return None;
+                        }
                         let result_wire = ng.fresh_wire(&format!("{}_result", inst_name));
                         // 2026-08-23 (Plan 3.2): real hw.instance syntax —
                         // port names must match the cell's declared params.
@@ -1971,10 +1985,13 @@ mod tests {
             "both assignments produce enabled muxes. Got:\n{}", output);
     }
 
+    /// 2026-08-27 (undefined-instance fix): a call whose callee has no cell
+    /// definition RECORDS a capability error instead of instantiating a
+    /// module that nothing defines.
     #[test]
-    fn test_circt_call_submodule() {
+    fn test_circt_call_non_cell_records_error() {
         let mut backend = CirctBackend::new();
-        let output = backend.generate(&[
+        let _ = backend.generate(&[
             make_state_decl("x", Type::int()),
             make_txn("compute", vec![
                 Statement::Assign(
@@ -1983,7 +2000,12 @@ mod tests {
                 ),
             ], Expr::Bool(true), Expr::Bool(true)),
         ]);
-        assert!(output.contains("hw.instance"), "Expr::Call should emit hw.instance. Got:\n{}", output);
+        let errs = backend.errors.borrow();
+        assert!(
+            errs.iter().any(|e| e.contains("'add'")),
+            "non-cell callee must record a capability error. Got: {:?}",
+            errs
+        );
     }
 
     #[test]
