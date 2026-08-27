@@ -348,6 +348,18 @@ impl PluginManager {
             .filter(|entry| {
                 let name = entry.plugin.name();
 
+                // 2026-08-27 (--disable-plugin bug, probed via B1 CIRCT probe):
+                // the DISABLED check must precede the enabled_only override.
+                // With an extension filter active (.bv ⇒ enabled_only =
+                // ["prelude", …]), the old ordering early-returned true for
+                // "prelude" BEFORE consulting the disabled list — so
+                // --no-std/--disable-plugin prelude silently did nothing and
+                // the LLVM stdlib prelude always loaded. Explicit disable
+                // wins over every allow-path.
+                if self.disabled.contains(&name.to_string()) {
+                    return false;
+                }
+
                 // Check enabled_only override
                 if !self.enabled_only.is_empty() {
                     return self.enabled_only.contains(&name.to_string());
@@ -358,11 +370,6 @@ impl PluginManager {
                     if !allowed.contains(&name.to_string()) {
                         return false;
                     }
-                }
-
-                // Check disabled list
-                if self.disabled.contains(&name.to_string()) {
-                    return false;
                 }
 
                 true

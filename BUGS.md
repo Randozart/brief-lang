@@ -5291,3 +5291,21 @@ first-class `cargo test --lib` gate (see CLOSED entry below); recount shows
 chains are fully resolved: result/option/process/string chains migrated
 and green in `lib/std`; json.bv was archived out of the active inventory
 (deep-migration blocker preserved in its entry above).
+
+## Plugin disable flag was a no-op under extension filters — FIXED 2026-08-27
+
+**Found:** the B1 CIRCT probe (`qual_circt.bv`) — `--no-std` was expected
+to skip the stdlib prelude (and with it protocols.bv) so the probe could
+compile; instead every build hit the B1.2 protocol hard error.
+
+**Root cause:** `PluginManager::active_plugins` checked the
+`enabled_only` override BEFORE the disabled list, and
+`filter_for_extension` populates `enabled_only` for `.bv`
+(`["prelude", env, print, entry, script]`). "prelude" early-returned true
+from that branch — the `--disable-plugin prelude` / `--no-std` flag was
+silently swallowed for every normal `.bv` compile.
+
+**Fix:** disabled check moved FIRST in the filter chain (explicit disable
+wins over every allow-path). Regression: verify --no-std skips prelude;
+probe then compiles through CIRCT.
+
