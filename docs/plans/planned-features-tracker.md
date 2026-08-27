@@ -102,9 +102,11 @@ and effort estimates. Updated as work completes.
 
 ### 8. cbv foreign hardware imports + MMIO pins (plan 2026-08-27)
 - **Plan:** `docs/plans/2026-08-27-cbv-foreign-hardware-and-mmio.md`
-- **Status:** ACTIVE — Slice C DONE (`d59d1ecf`), Slice A DONE (`fe5dadb7`:
-  extern blackboxes + companions + capability gates, 1984 green);
-  Slice B (MMIO pins) remaining
+- **Status:** COMPLETE (2026-08-27) — all three slices landed:
+  C `d59d1ecf` (VolatileLoad#/Store#), A `fe5dadb7`+`f0092994` (extern
+  blackboxes + uart_extern fixture), B `cd03cce0`+`a19cbe44` (MMIO pins).
+  Deferred items recorded in-plan: board-symbol .cbv addresses, typed
+  trigger ports, host-sim address remap. 1988 green.
 
 ## New follow-ups surfaced during completion (2026-08-27)
 

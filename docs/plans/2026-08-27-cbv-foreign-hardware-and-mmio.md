@@ -1,7 +1,7 @@
 # Foreign Hardware Imports + MMIO Pins for .cbv
 
 **Date:** 2026-08-27
-**Status:** APPROVED — pending implementation
+**Status:** COMPLETE (2026-08-27) — C/A/B all landed; deferred items recorded per-slice. Revisit CIRCT toolchain install before toolchain-validated coverage resumes (harness skips loudly).
 **Parent set:** `docs/plans/2026-08-23-backend-scaffolding-foundation.md`
 (CIRCT toolchain validation → parallel track)
 **Owner backend surface:** `src/backend/circt/` + parser/normalizer + LLVM
@@ -155,7 +155,7 @@ Debounce(raw)               hw.instance "…" @Debounce(...)       call sites in
 
 ---
 
-## Slice B — COMPLETE (2026-08-27, clone-era commit)
+## Slice B — COMPLETE (2026-08-27, `cd03cce0`; fixture-fix `a19cbe44`)
 
 **Shipped:** trigger-name VALUE bindings (read-only via init_names, house
 input-pin write error), CIRCT address-sorted MMIO input ports driven by a
