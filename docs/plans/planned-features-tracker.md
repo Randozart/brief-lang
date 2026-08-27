@@ -102,8 +102,9 @@ and effort estimates. Updated as work completes.
 
 ### 8. cbv foreign hardware imports + MMIO pins (plan 2026-08-27)
 - **Plan:** `docs/plans/2026-08-27-cbv-foreign-hardware-and-mmio.md`
-- **Status:** ACTIVE — Slice C (VolatileLoad#/VolatileStore#) DONE (`d59d1ecf`);
-  slices A (extern cells) + B (MMIO pins) pending
+- **Status:** ACTIVE — Slice C DONE (`d59d1ecf`), Slice A DONE (`fe5dadb7`:
+  extern blackboxes + companions + capability gates, 1984 green);
+  Slice B (MMIO pins) remaining
 
 ## New follow-ups surfaced during completion (2026-08-27)
 

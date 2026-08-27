@@ -1,3 +1,31 @@
+## WORKING-TREE HAZARD: external process reverted in-flight edits — OBSERVED 2026-08-27
+
+**Symptom (three times this session):** freshly edited files (lexer.rs,
+vocab.rs, capabilities.rs, probe fixtures under tmp_probe/) returned to
+their PRE-EDIT content minutes after a verified green build; file mtimes
+showed the snapshot's ORIGINAL timestamps (e.g. 21:59 from the prior
+evening), not the edit time. Mid-edit edits by this session were silently
+undone while OTHER recently-edited files (parser/definitions.rs,
+backend/circt/mod.rs, ast/top.rs) survived — i.e. selective, not whole-tree.
+
+**Consequences encountered:** a survivor commit landed internally
+inconsistent (parser/circt referenced `Token::Extern`/`extern_cells` while
+lexer/capabilities were pre-edit); a stranded green state was reproducible
+only in a fresh clone.
+
+**Mitigation that worked:** build+commit inside an isolated clone
+(`/tmp/opencode/slice_a`), push the branch back via fetch+ff-only into the
+worktree; absolute paths for every cross-repo operation; tiny commits
+immediately after each verified step.
+
+**Suspected cause:** a bidirectional file-sync/mirror service on
+~/Desktop/Projects (stale-copy push, mtime-preserving). Identity not
+confirmed. IF THIS RECURS: check for sync daemons before assuming editor
+or agent interference, and keep uncommitted windows short.
+
+**Status:** HAZARD OPEN (environmental, not a compiler bug). Session-
+log-only entry; revisit if it recurs.
+
 # Bugs
 
 ## PiggyBank Phase D — arrow dispatch + sealed-op gaps (FIXED 2026-08-18)

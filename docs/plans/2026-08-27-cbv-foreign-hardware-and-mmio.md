@@ -92,7 +92,10 @@ contract stories unchanged.
 
 ---
 
-## Slice A: Extern hardware declarations
+## Slice A — COMPLETE (2026-08-27, `fe5dadb7`; e2e verified from main's
+## binary post-sync `2dfc8d75`)
+
+### Design recap (implemented as specified below)
 
 ### Syntax (final)
 
