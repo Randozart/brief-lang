@@ -41,7 +41,6 @@ pub struct TargetSettings {
 /// Global (target-independent) IR lowering tuning (plan §8.2).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IrLoweringSettings {
-    /// Below this `--optimize-budget`, skip the bump arena (direct malloc).
     pub arena_min_budget: u32,
     /// Initial per-txn bump arena size.
     pub arena_initial_size: u64,
@@ -69,6 +68,54 @@ pub struct IrLoweringSettings {
     /// (`within 10ms`) to cycle counts. 0 = unset: time-unit watchdogs stay
     /// capability errors. 2026-08-26.
     pub clock_hz: u64,
+}
+
+/// Enforcement policy for `axiom`-declared authority (plan 2026-08-26).
+/// Config: config/axioms.dbv `policy` key (allow | warn | deny).
+/// The `.s` strict report always renders the full axiom ledger regardless of
+/// this setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxiomPolicy {
+    /// Accepted; one info line per site in the warnings stream.
+    Allow,
+    /// Accepted; a prominent warning naming every site rides alongside.
+    Warn,
+    /// Any axiom site is a hard error: prove it or remove the shortcut.
+    Deny,
+}
+
+impl AxiomPolicy {
+    /// Parse from a string, defaulting to Allow on unknown values.
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "warn" => AxiomPolicy::Warn,
+            "deny" => AxiomPolicy::Deny,
+            _ => AxiomPolicy::Allow,
+        }
+    }
+}
+
+/// Global axiom-policy and lemma-property vocabulary (plan 2026-08-26).
+#[derive(Debug, Clone)]
+pub struct AxiomSettings {
+    pub policy: AxiomPolicy,
+    /// Closed vocabulary of optimizer-exploitable properties (e.g. "commutative").
+    /// Anything outside this list is rejected at parse validation.
+    pub lemma_properties: Vec<String>,
+}
+
+/// Defaults: allow + empty lemma vocabulary.
+const DEFAULT_AXIOM_SETTINGS: AxiomSettings = AxiomSettings {
+    policy: AxiomPolicy::Allow,
+    lemma_properties: Vec::new(),
+};
+
+/// Cached axiom settings (baked config/axioms.dbvl).
+static AXIOM_SETTINGS: LazyLock<AxiomSettings> = LazyLock::new(load_axioms);
+
+/// Return the global axiom settings.
+pub fn axiom_settings() -> &'static AxiomSettings {
+    &AXIOM_SETTINGS
 }
 
 /// x86_64 defaults — also the fallback for unknown target prefixes.
@@ -219,7 +266,34 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_tolerance),
         accel_probe_margin: db
             .field_float("accel_probe_margin", 0)
-            .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_margin),
+            .unwrap_or(DEFAULT_AXIOM_SETTINGS.policy),
+    }
+}
+
+/// Load axiom settings from config/axioms.dbvl.
+/// Absent keys fall back to the hardcoded defaults (allow, no lemma properties).
+fn load_axioms() -> AxiomSettings {
+    let content = include_str!("../config/axioms.dbvl");
+    let db = match crate::dbriev::config_db::ConfigDb::from_str(content) {
+        Ok(db) => db,
+        Err(e) => panic!("config/axioms.dbvl parse error: {}", e),
+    };
+    let policy = db
+        .field_string("policy", 0)
+        .map(AxiomPolicy::from_str_loose)
+        .unwrap_or(DEFAULT_AXIOM_SETTINGS.policy);
+    let lemma_properties: Vec<String> = db
+        .field_string("lemma_properties", 0)
+        .map(|s| {
+            s.split(|c: char| c == ',' || c == ' ')
+                .filter(|t| !t.is_empty())
+                .map(|t| t.trim().to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    AxiomSettings {
+        policy,
+        lemma_properties,
     }
 }
 

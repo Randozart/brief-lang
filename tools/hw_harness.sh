@@ -108,12 +108,19 @@ for FIX in tmp_fixtures/hw/*.bv; do
     # Vivado compile + optional synthesis
     VIVADO_BIN="${VIVADO_BIN:-/mnt/data/tools/Xilinx/Vivado/2023.1/bin}"
     if [ -x "$VIVADO_BIN/xvlog" ] && [ -s "$SV" ]; then
-        if ! bash "$ROOT/tools/vivado_check.sh" "$SV" > "$WORK/viv.log" 2>&1; then
+        # 2026-08-27 (cbv-HW plan Slice A): pass the OUTPUT DIRECTORY, not
+        # just the top file — companions (firmem reference impls + extern HDL
+        # sources) live next to it and the blackbox references resolve only
+        # when every file compiles together. vivado_check accepts a dir and
+        # xvlogs each *.sv found there.
+        SVDIR="$(cd "$(dirname "$SV")" && pwd)"
+        if ! bash "$ROOT/tools/vivado_check.sh" "$SVDIR" > "$WORK/viv.log" 2>&1; then
             echo "HW $NAME: FAIL (vivado xvlog)"
+            tail -8 "$WORK/viv.log" | sed 's/^/    /'
             FAIL=1; rm -rf "$WORK"; continue
         fi
         if [ "${VIVADO_SYNTH:-0}" = "1" ]; then
-            VIVADO_SYNTH=1 TOP_MODULE=top bash "$ROOT/tools/vivado_check.sh" "$SV" \
+            VIVADO_SYNTH=1 TOP_MODULE=top bash "$ROOT/tools/vivado_check.sh" "$SVDIR" \
                 > /dev/null 2>&1 || { echo "HW $NAME: FAIL (vivado synth)"; FAIL=1; rm -rf "$WORK"; continue; }
         fi
     fi
