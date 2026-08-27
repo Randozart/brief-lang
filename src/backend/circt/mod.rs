@@ -1100,7 +1100,10 @@ impl CirctBackend {
                         let inst_name = name.replace('-', "_");
                         if !self.cell_defs.contains_key(&inst_name) {
                             self.record_unsupported(&format!(
-                                "call '{}' — hardware synthesis has no image                                  for this function; only declared cells can be                                  instantiated. Inline the computation or declare                                  it as a cell",
+                                "call '{}' — hardware synthesis has no image \
+                                 for this function; only declared cells can be \
+                                 instantiated. Inline the computation or \
+                                 declare it as a cell",
                                 name
                             ));
                             return None;
