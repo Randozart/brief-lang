@@ -112,6 +112,13 @@ pub enum Token {
     #[token("mem")]
     Mem,
 
+    /// 2026-08-27 (cbv-HW plan Slice A): `extern Name(ports) -> outs
+    /// from "path";` — a foreign HDL module import. Declares a bodyless
+    /// cell-shaped record whose definition lives in the referenced source;
+    /// the CIRCT target emits it as an `hw.module.extern` blackbox.
+    #[token("extern")]
+    Extern,
+
     /// 2026-08-15 (coll plan): `coll` — the native strategy keyword for
     /// declaring collections. Prefix on `obj`/`struct`: compiler-owned Length
     /// semantics (hidden cap/len slots), scaffolded op surface. See
@@ -566,6 +573,7 @@ impl std::fmt::Display for Token {
             Token::Union => write!(f, "union"),
             Token::Coll => write!(f, "coll"),
             Token::Vol => write!(f, "vol"),
+            Token::Extern => write!(f, "extern"),
             Token::Mem => write!(f, "mem"),
             Token::Out => write!(f, "out"),
             Token::Accel => write!(f, "accel"),

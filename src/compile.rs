@@ -93,6 +93,39 @@ use briev_compiler::pipeline::{
 /// - the sole writer takes no/several params → "transaction '<txn>' takes N
 ///   parameter(s); b-bind requires exactly one".
 
+
+/// 2026-08-27 (cbv-HW plan Slice A): copy every `extern` cell's referenced
+/// HDL source beside the output artifacts so verilator/Vivado link lines
+/// resolve blackbox references without user setup. Missing file -> hard
+/// error naming symbol + path.
+pub fn copy_extern_companions(
+    items: &[briev_compiler::ast::TopLevel],
+    main_file: &str,
+) -> Result<(), String> {
+    let base_dir = std::path::Path::new(main_file)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let base_out = main_file.strip_suffix(".bv").unwrap_or(main_file);
+    for item in items {
+        let briev_compiler::ast::TopLevel::Cell(c) = item else { continue };
+        let Some(rel) = &c.extern_source else { continue };
+        let src_path: std::path::PathBuf = base_dir.to_path_buf().join(rel);
+        if !src_path.exists() {
+            return Err(format!(
+                "extern cell '{}' references '{}' which does not exist — \
+                 create the HDL source or fix the path",
+                c.name, rel
+            ));
+        }
+        let fname = rel.rsplit('/').next().unwrap_or(rel);
+        let dest = format!("{}.extern.{}", base_out, fname);
+        std::fs::copy(&src_path, &dest)
+            .map_err(|e| format!("cannot copy '{}': {}", src_path.display(), e))?;
+        eprintln!("copied extern source: {}", dest);
+    }
+    Ok(())
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -1264,6 +1297,9 @@ fn codegen(
                     .map_err(|e| format!("cannot write '{}': {}", path, e))?;
                 eprintln!("wrote memory companion: {}", path);
             }
+            // 2026-08-27 (cbv-HW plan Slice A): ship foreign HDL sources next
+            // to the .mlir like firmem companions; missing source errors.
+            copy_extern_companions(items, &opts.file_path)?;
             // THE aggregated disambiguation note (one per compile; explicit
             // pins silence their arrays).
             if let Some(note) = b.take_disambiguation_note() {
@@ -1723,6 +1759,36 @@ fn compile_wasm(ll_path: &str, wasm_path: &str, exports: &[String]) -> Result<()
 
 #[cfg(test)]
 mod tests {
+
+    /// 2026-08-27 (Slice A): an extern source that does not exist is a hard
+    /// error naming both symbol and path.
+    #[test]
+    fn test_extern_missing_source_is_hard_error() {
+        use briev_compiler::ast::{TopLevel};
+        use briev_compiler::ast::top::*;
+        let cell = TopLevel::Cell(CellDef {
+            name: "Ghost".into(),
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            fields: vec![],
+            transactions: vec![],
+            definitions: vec![],
+            internal_triggers: vec![],
+            is_persistent: false,
+            metadata: Default::default(),
+            span: None,
+            doc: None,
+            ports_in: vec![],
+            ports_out: vec![],
+            extern_source: Some("/tmp/opencode/definitely-missing-uart.v".into()),
+        });
+        let err = copy_extern_companions(&[cell], "/tmp/opencode/probe-none.bv")
+            .expect_err("missing source must fail");
+        assert!(err.contains("'Ghost'"), "{err}");
+        assert!(err.contains("does not exist"), "{err}");
+    }
+
     use super::*;
     use briev_compiler::pipeline::PreprocessedSource;
 

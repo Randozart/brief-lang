@@ -82,6 +82,9 @@ pub struct BackendCapabilities {
     /// Interpreter-only; sealing + internal-node scheduling have no LLVM
     /// lowering yet.
     pub cells: bool,
+    /// 2026-08-27 (Slice A): can emit `hw.module.extern` blackboxes for
+    /// foreign HDL imports (`extern Cell(...) from "path";").
+    pub extern_cells: bool,
     /// await expressions.
     pub await_expr: bool,
     /// Method-call syntax (receiver.method(args)).
@@ -161,6 +164,7 @@ impl BackendCapabilities {
         spawn: false,
         obj_ports: false,
         cells: false,
+        extern_cells: false,
         await_expr: false,
         method_calls: false,
         reflect: false,
@@ -219,6 +223,9 @@ impl BackendCapabilities {
             spawn: true,
             obj_ports: false,
             cells: false,
+            // Software targets have no RTL linkage — extern imports stay
+            // rejected on the LLVM/full surface too.
+            extern_cells: false,
             await_expr: true,
             method_calls: true,
             reflect: true,
@@ -273,12 +280,29 @@ fn check_toplevel(item: &TopLevel, caps: &BackendCapabilities, errs: &mut Vec<St
     match item {
         // 2026-08-22 (Phase 7c): declaration-surface checks — ports and
         // cells are interpreter-only surfaces for now (SPEC §9.5/§9.6).
-        TopLevel::Cell(c) if !caps.cells => errs.push(format!(
-            "error: {} does not support cells\n  why: {}.\n  fix: run the \
-             program on the reference interpreter, or replace the cell with \
-             an ordinary obj while the cell lowering is staged.",
-            caps.name, caps.nature
-        )),
+        // 2026-08-27 (Slice A): extern imports are PURE port headers — no
+        // body to lower. Backends declaring extern_cells accept them even
+        // while defined cell bodies remain interpreter-staged.
+        TopLevel::Cell(c)
+            if c.extern_source.is_some() && !caps.extern_cells =>
+        {
+            errs.push(format!(
+                "error: {} does not support foreign hardware imports\n  why: \
+                 software binaries have no RTL linkage — the 'extern' cell \
+                 '{}' compiles only for circuit/synthesis targets.\n  fix: \
+                 build for the circt target so the blackbox reaches your \
+                 synthesis flow, or model this device directly in Briev",
+                caps.name, c.name
+            ));
+        }
+        TopLevel::Cell(c) if !caps.cells && c.extern_source.is_none() => {
+            errs.push(format!(
+                "error: {} does not support cells\n  why: {}.\n  fix: run the \
+                 program on the reference interpreter, or replace the cell \
+                 with an ordinary obj while the cell lowering is staged.",
+                caps.name, caps.nature
+            ));
+        }
         TopLevel::TypeDef(td)
             if (!td.ports_in.is_empty() || !td.ports_out.is_empty()) && !caps.obj_ports =>
         {

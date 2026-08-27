@@ -292,14 +292,19 @@ impl CirctBackend {
                 }
                 TopLevel::Cell(cell) => {
                     // 2026-08-27 (Slice A): foreign cells keep their port
-                    // header for instance matching but carry no body.
+                    // header for instance matching but carry no body — and
+                    // contribute NO program-visible variables (their pins
+                    // belong to the blackbox interface, not the top module).
+                    let is_extern = cell.extern_source.is_some();
                     self.cell_defs.insert(cell.name.clone(), cell.clone());
-                    for (field_name, field_ty) in &cell.fields {
-                        self.var_types.insert(format!("{}${}", cell.name, field_name), field_ty.clone());
-                        self.var_exprs.insert(format!("{}${}", cell.name, field_name), Some(Expr::Decimal(0)));
-                    }
-                    for (param_name, param_ty) in &cell.parameters {
-                        self.var_types.insert(format!("{}${}", cell.name, param_name), param_ty.clone());
+                    if !is_extern {
+                        for (field_name, field_ty) in &cell.fields {
+                            self.var_types.insert(format!("{}${}", cell.name, field_name), field_ty.clone());
+                            self.var_exprs.insert(format!("{}${}", cell.name, field_name), Some(Expr::Decimal(0)));
+                        }
+                        for (param_name, param_ty) in &cell.parameters {
+                            self.var_types.insert(format!("{}${}", cell.name, param_name), param_ty.clone());
+                        }
                     }
                 }
                 _ => {}
@@ -2027,6 +2032,29 @@ mod tests {
     /// 2026-08-27 (undefined-instance fix): a call whose callee has no cell
     /// definition RECORDS a capability error instead of instantiating a
     /// module that nothing defines.
+    /// 2026-08-27 (cbv-HW plan Slice A): extern declarations emit an
+    /// hw.module.extern blackbox with implicit clock/reset and declared
+    /// ports — identical shape to defined cells at instantiation sites —
+    /// AND contribute no program-visible top-level ports.
+    #[test]
+    fn test_circt_extern_blackbox_shape() {
+        let mut backend = CirctBackend::new();
+        let src = "extern UartTop(rx: Int) -> byte_out: Int from \"rtl/uart.v\";";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut parser = crate::parser::Parser::new(tokens, src);
+        let items = parser.parse_program().unwrap();
+        let output = backend.generate(&items);
+        // Exactly one blackbox, right shape:
+        assert_eq!(output.matches("hw.module.extern").count(), 1,
+            "one blackbox expected:\n{output}");
+        assert!(output.contains("hw.module.extern @UartTop(in %clock: !seq.clock, in %reset: i1, in %rx: i64) -> (byte_out: i64)"),
+            "blackbox shape mismatch:\n{output}");
+        // Foreign pins are NOT program state — no UartTop$ leak on @top.
+        assert!(!output.contains("UartTop$"), "extern cell must not leak program vars:\n{output}");
+        assert!(backend.errors.borrow().is_empty(), "{:?}",
+            backend.errors.borrow());
+    }
+
     #[test]
     fn test_circt_call_non_cell_records_error() {
         let mut backend = CirctBackend::new();

@@ -152,6 +152,9 @@ impl LanguageVocab {
                 kw("node", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("asm", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("render", VocabStatus::Canonical, KeywordContext::Render),
+                // 2026-08-27 (cbv-HW plan Slice A): foreign HARDWARE imports — the
+                // cell-shaped sibling of frgn (software FFI).
+                kw("extern", VocabStatus::Canonical, KeywordContext::Declaration),
                 kw("frgn", VocabStatus::Canonical, KeywordContext::Foreign),
                 kw("optional", VocabStatus::Canonical, KeywordContext::Foreign),
                 kw("export", VocabStatus::Canonical, KeywordContext::Declaration),
