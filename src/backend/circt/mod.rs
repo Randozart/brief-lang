@@ -18,6 +18,9 @@ pub struct TriggerPort {
     pub trg_name: String,
     /// Whether this trigger has the `#wake` modifier (generates wake_ output).
     pub is_wake: bool,
+    /// 2026-08-27 (Slice B): the @-address for MMIO pins; addressed ports
+    /// emit ADDRESS-SORTED on @top (deterministic bus layout rule).
+    pub address: Option<u64>,
 }
 
 /// CIRCT backend state for MLIR code generation.
@@ -27,7 +30,10 @@ pub struct CirctBackend {
     pub var_types: HashMap<String, Type>,
     pub var_exprs: HashMap<String, Option<Expr>>,
     /// State variables with @ addresses that should become external ports (MMIO).
-    pub mmio_vars: Vec<String>,
+    /// 2026-08-27 (Slice B): the LIVE MMIO pin table — (name, @-address)
+    /// for every Explicit-addressed trigger, consumed address-sorted at
+    /// top-module port emission.
+    pub mmio_vars: Vec<(String, u64)>,
     /// Known function/module names and their argument counts (for submodule instantiation).
     pub fn_arity: HashMap<String, usize>,
     /// Cell definitions encountered during program traversal.
@@ -258,11 +264,44 @@ impl CirctBackend {
                     self.var_exprs.insert(decl.name.clone(), None);
                 }
                 TopLevel::Trigger(trg) => {
+                    // 2026-08-27 (Slice B): @-addressed triggers are MMIO
+                    // INPUT pins. Explicit numerics sort the port list;
+                    // every other address form has no static pin — the
+                    // honest boundary is a capability error.
+                    let address = match &trg.instance {
+                        Expr::Decimal(n) => Some(*n as u64),
+                        Expr::Deref(_) => {
+                            self.record_unsupported(&format!(
+                                "trigger '{}' with a dynamic address — \
+                                 hardware pins are static; dynamic \
+                                 addressing targets the native/embedded \
+                                 build",
+                                trg.name
+                            ));
+                            None
+                        }
+                        _ => {
+                            self.record_unsupported(&format!(
+                                "trigger '{}' — only numeric @-addresses \
+                                 form circuit pins (symbolic sources are an \
+                                 embedded-surface feature)",
+                                trg.name
+                            ));
+                            None
+                        }
+                    };
+                    if let Some(addr) = address {
+                        // mmio_vars is now LIVE: the address-sorted MMIO
+                        // pin surface (name, address) consumed at
+                        // top-port emission. No longer a dead field.
+                        self.mmio_vars.push((trg.name.clone(), addr));
+                    }
                     let port_name = trg.name.clone();
                     self.trg_ports.push(TriggerPort {
                         port_name: port_name.clone(),
                         trg_name: trg.name.clone(),
                         is_wake: false,
+                        address,
                     });
                     self.var_types.insert(port_name, Type::int());
                     self.var_exprs.insert(trg.name.clone(), None);
@@ -311,6 +350,9 @@ impl CirctBackend {
             }
         }
 
+        // 2026-08-27 (Slice B): canonical pin table — address-sorted, so the
+        // live mmio surface reads identically regardless of declaration order.
+        self.mmio_vars.sort();
         let mut out = String::new();
         self.emit_header(&mut out);
         self.emit_module(&mut out, &dep_graph, items);
@@ -465,7 +507,17 @@ impl CirctBackend {
         input_ports.push("in %clock: !seq.clock".to_string());
         input_ports.push("in %reset: i1".to_string());
 
-        for trg in &self.trg_ports {
+        // 2026-08-27 (Slice B): MMIO pins emit ADDRESS-SORTED (deterministic
+        // layout rule — separately compiled partitions agree on bus layout
+        // without communicating); unaddressed triggers keep program order.
+        let mut sorted_trgs: Vec<&TriggerPort> = self.trg_ports.iter().collect();
+        sorted_trgs.sort_by(|a, b| match (a.address, b.address) {
+            (Some(x), Some(y)) => x.cmp(&y).then(a.port_name.cmp(&b.port_name)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.port_name.cmp(&b.port_name),
+        });
+        for trg in &sorted_trgs {
             if let Some(ty) = self.var_types.get(&trg.port_name) {
                 let mlir_ty = self.mlir_type(ty);
                 input_ports.push(format!("in %{}: {}", trg.port_name, mlir_ty));
@@ -2040,6 +2092,54 @@ mod tests {
     /// hw.module.extern blackbox with implicit clock/reset and declared
     /// ports — identical shape to defined cells at instantiation sites —
     /// AND contribute no program-visible top-level ports.
+    /// 2026-08-27 (Slice B): @-addressed MMIO pins emit ADDRESS-SORTED on
+    /// @top regardless of declaration order — the deterministic bus-layout
+    /// rule. Unaddressed triggers keep program order after the pins.
+    #[test]
+    fn test_mmio_pins_emit_address_sorted() {
+        let mut backend = CirctBackend::new();
+        let src = "trg b_pin @ 0x2000;\n\
+                   trg a_pin @ 0x1000;\n\
+                   let done: Int = 0;\n\
+                   txn tick [done == 0][done == 1] {\n\
+                       done = 1;\n\
+                   }\n";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut parser = crate::parser::Parser::new(tokens, src);
+        let items = parser.parse_program().unwrap();
+        let output = backend.generate(&items);
+        let a = output.find("in %a_pin:").expect("a_pin port");
+        let b = output.find("in %b_pin:").expect("b_pin port");
+        assert!(a < b, "0x1000 pin must precede 0x2000 pin:\n{output}");
+        // Pin table is live and carries the addresses.
+        assert_eq!(backend.mmio_vars.len(), 2, "{:?}", backend.mmio_vars);
+        assert_eq!(backend.mmio_vars[0], ("a_pin".to_string(), 0x1000));
+        assert_eq!(backend.mmio_vars[1], ("b_pin".to_string(), 0x2000));
+        assert!(backend.errors.borrow().is_empty(), "{:?}", backend.errors.borrow());
+    }
+
+    /// Slice B boundary: dynamic (@ *ptr) and symbolic trigger addresses
+    /// have no static pin — capability errors naming the rule, never a
+    /// silently-dropped port.
+    #[test]
+    fn test_mmio_dynamic_and_symbolic_addresses_error() {
+        let mut backend = CirctBackend::new();
+        let src = "let p: Int = 0;\n\
+                   trg dyn_pin @ *p;\n\
+                   trg sym_pin @ SERIAL;\n\
+                   txn tick [true][true] {\n\
+                   }\n";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut parser = crate::parser::Parser::new(tokens, src);
+        let items = parser.parse_program().unwrap();
+        let _ = backend.generate(&items);
+        let errs = backend.errors.borrow();
+        assert!(errs.iter().any(|e| e.contains("'dyn_pin'") && e.contains("static")),
+            "dynamic pin must error: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("'sym_pin'")),
+            "symbolic pin must error: {:?}", errs);
+    }
+
     #[test]
     fn test_circt_extern_blackbox_shape() {
         let mut backend = CirctBackend::new();

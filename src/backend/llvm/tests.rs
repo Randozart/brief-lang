@@ -8503,3 +8503,26 @@ defn make() -> Option {
     // Construction boxes {tag=0, payload} — the Some arm's malloc image.
     assert!(ir.contains("call ptr @malloc(i64 16)"), "boxed image missing");
 }
+
+/// 2026-08-27 (Slice B): an @-addressed trigger VALUE read lowers to a
+/// volatile load at the static address (boxed-pointer ABI inttoptr), and
+/// the pin is EXCLUDED from event dispatch (no dangling @txn_<pin> call).
+#[test]
+fn test_mmio_pin_reads_volatile_and_skips_dispatch() {
+    let src = "trg sensor @ 0x1000;\n\
+               let acc: Int = 0;\n\
+               txn tick [acc < 255][acc <= 255] {\n\
+                   acc = sensor + 1;\n\
+               }\n";
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("inttoptr i64 4096 to ptr"),
+        "pin address must materialize:\n{ir}");
+    assert!(ir.contains("load volatile i64, ptr"), "volatile pin read:\n{ir}");
+    assert!(!ir.contains("@txn_sensor"),
+        "value-pin must not event-dispatch to a nonexistent body txn:\n{ir}");
+}

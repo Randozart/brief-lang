@@ -155,6 +155,23 @@ Debounce(raw)               hw.instance "…" @Debounce(...)       call sites in
 
 ---
 
+## Slice B — COMPLETE (2026-08-27, clone-era commit)
+
+**Shipped:** trigger-name VALUE bindings (read-only via init_names, house
+input-pin write error), CIRCT address-sorted MMIO input ports driven by a
+now-LIVE `mmio_vars` table, dynamic/symbolic address capability errors
+(static-pin boundary), LLVM value reads via volatile load at the static
+address through the boxed-pointer ABI, numeric-address capture fixing the
+old Explicit(0) collapse, and value-pin exclusion from event dispatch
+(removes the dangling `@txn_<pin>` call class).
+
+**Deferred (recorded):** board-TOML SYMBOLIC addresses on .cbv (`trg x @
+board.sensor`) — numeric-only v1; typed trigger ports (`trg x: Int @ …`)
+— the trigger grammar has no type position today; host-sim address
+remapping (real addresses fault host processes by design).
+
+## (original design notes)
+
 ## Slice B: MMIO pins on .cbv
 
 ### Syntax (shared with .ebv — no new language)

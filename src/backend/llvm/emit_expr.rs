@@ -225,6 +225,17 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
+                // 2026-08-27 (Slice B): @-addressed trigger VALUE read — an
+                // MMIO input pin: volatile load at the static address through
+                // the boxed-pointer ABI. Writes never reach here (the
+                // typechecker rejects pin assignment).
+                if let Some(&addr) = self.ctx.trg_addresses.get(name.as_str()) {
+                    let p = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+                    let r = self.fun.gen_reg();
+                    writeln!(out, "{}{} = load volatile i64, ptr {}, align 8", indent, r, p).ok();
+                    return TypedRegister { name: r, ty: Type::int() };
+                }
                 // 2026-08-15 (coll grow-on-full): `#Self` in a member body is
                 // the receiver HANDLE (the boxed-self pointer re-boxed to the
                 // target's integer width). The scaffolded push/pop grow guards
