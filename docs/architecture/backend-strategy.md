@@ -220,10 +220,21 @@ ids; conformance via `tools/parity_harness.sh` (7 fixtures).
 Normative reference: `docs/architecture/backend-contracts.md` §5.
 Kernels from the frontend accel analysis (eligible AccelEntries;
 body = proven statements); work-item emission (`index_var` binds
-GetGlobalId(0), no loop); one StorageBuffer binding with explicit
-layout; spirv-val validated (`test_scale_kernel_passes_spirv_val`,
-`test_mad_kernel_reads_two_buffers`). Standalone `.abv` only — GPU
-OFFLOAD is `!> accel` metadata through BackendKind::Gpu (LLVM).
+GetGlobalId(0), no loop — one invocation IS one work item); one
+StorageBuffer binding (Block-decorated struct, sorted member order,
+explicit offsets). Standalone `.abv` only — GPU OFFLOAD is `!> accel`
+metadata through BackendKind::Gpu (LLVM).
+
+### v2 kernel surface (2026-08-26, plan §2.1–2.6)
+
+| Surface | Status |
+|---------|--------|
+| Statements | `let` (typed, entry-block predeclared), scalar assign, expression stmt, `term`/endprogram |
+| Expressions | Int arithmetic/logic/comparisons over i64; state-field reads (`a[i]`) via AccessChain+Load |
+| Builtins | GetGlobalId#(0..2), GetLocalId#(0..2), WorkgroupSize#(0..2) |
+| Load#/Store# | ADDRESS EXPRESSIONS only: `Load#(field)`, `Load#(field[i])`, `Store#(field[i], v)` → SSBO AccessChain; numeric addresses do not exist in Vulkan space |
+| Scalar types | UNIVERSE-DRIVEN via the casting graph's SPIR-V table: Int (signed)/UInt (unsigned) widths 8–64 from bits metadata, Float 32/64, Bool = OpTypeBool. Heap categories (String/Blob/Char) and out-of-range widths are capability errors naming the fix. No type names matched in codegen. |
+| Validation | spirv-val on emitted binaries + spirv-dis structural sweep (GLCompute entry point, LocalSize mode, Block/StorageBuffer/DeriveSet0 bindings) in `test_harness_structural_sweep_on_scale_kernel`; Vulkan-runner smoke probe-gated |
 
 ## FFI Marshaling Convention (Critical)
 

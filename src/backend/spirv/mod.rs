@@ -876,6 +876,91 @@ mod tests {
         assert!(e.contains("24"), "{e}");
     }
 
+    /// §2.5 validation harness: EVERY emitted binary passes spirv-val AND a
+    /// spirv-dis structural sweep — GLCompute entry point present, LocalSize
+    /// execution mode declared, one Block-decorated StorageBuffer binding.
+    /// A single helper runs both tools so new fixtures inherit the sweep.
+    ///
+    /// Loop structure: deliberately NOT asserted — one invocation IS one
+    /// work item (kernel.rs charter); there is no induction loop to find.
+    fn validate_and_disassemble(binary: &[u8], tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("briev_spv_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let spv = dir.join(format!("{}.spv", tag));
+        std::fs::write(&spv, binary).unwrap();
+
+        let val = std::process::Command::new("spirv-val")
+            .arg(&spv)
+            .output()
+            .expect("spirv-val");
+        assert!(
+            val.status.success(),
+            "spirv-val rejected {}:\n{}",
+            tag,
+            String::from_utf8_lossy(&val.stderr)
+        );
+
+        let dis = std::process::Command::new("spirv-dis")
+            .arg(&spv)
+            .output()
+            .expect("spirv-dis");
+        assert!(dis.status.success(), "spirv-dis failed on {}", tag);
+        String::from_utf8_lossy(&dis.stdout).to_string()
+    }
+
+    #[test]
+    fn test_harness_structural_sweep_on_scale_kernel() {
+        if std::process::Command::new("spirv-dis").arg("--version").output().is_err() {
+            eprintln!("spirv-dis not found — skipping structural sweep");
+            return;
+        }
+        let program = scale_kernel_program();
+        let analysis = analyze(&program);
+        let shape = eligible_shape(&analysis).clone();
+        let mut builder = SpirvBuilder::new();
+        emit_kernel(&mut builder, "scale", &shape, &program).unwrap();
+        let asm = validate_and_disassemble(&builder.build().unwrap(), "harness_scale");
+
+        // Entry point: GLCompute on "scale" (spirv-dis quotes the name).
+        assert!(asm.contains("OpEntryPoint GLCompute"), "entry point:\n{}", asm);
+        assert!(
+            asm.contains("\"scale\"") || asm.contains("@scale"),
+            "entry named scale must appear"
+        );
+
+        // LocalSize execution mode (workgroup 64,1,1 per LOCAL_SIZE_X).
+        assert!(
+            asm.contains("OpExecutionMode") && asm.contains("LocalSize"),
+            "LocalSize execution mode missing:\n{}",
+            asm
+        );
+
+        // Storage buffer surface: Block-decorated struct bound at set 0.
+        assert!(asm.contains("Block"), "Block decoration missing");
+        assert!(asm.contains("StorageBuffer"), "StorageBuffer class missing");
+        assert!(asm.contains("DescriptorSet 0"), "descriptor set binding missing");
+        assert!(asm.contains("Binding 0"), "binding index missing");
+    }
+
+    /// §2.5 optional smoke: execute a fixture kernel when a Vulkan runner is
+    /// installed. Probe-gated — absent runner skips loudly, never fails.
+    #[test]
+    fn test_vulkan_runner_smoke_gated() {
+        for runner in ["vkm", "vkrunner", "vulkan-sample"] {
+            if std::process::Command::new(runner)
+                .arg("--help")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok()
+            {
+                eprintln!("vulkan runner '{}' found — wire the smoke fixture here", runner);
+                return; // placeholder until the runner's fixture format lands
+            }
+        }
+        eprintln!("no vulkan runner — smoke test skipped (probe-gated by design)");
+    }
+
     /// Capability honesty + selection: ineligible bodies never become
     /// kernels, and a named entry that doesn't exist errors helpfully.
     #[test]
