@@ -45,23 +45,23 @@ and effort estimates. Updated as work completes.
 
 ## Medium Effort (2–3 sessions each)
 
-### 5. SPIR-V kernel emission §2.3–2.6
-- **Plan:** `docs/plans/2026-08-23-spirv-kernel-emission.md`
-- **Status:** ACTIVE — §2.1 (core lowering) + §2.2 (frontend-driven selection) LANDED
-- **Remaining:**
-  - §2.3: Load#/Store# + intrinsic surface for SPIR-V
-  - §2.4: Universe-driven type resolution for SPIR-V types
-  - §2.5: Validation harness (spirv-val integration)
-  - §2.6: Doc truth sweep
-- **Estimated:** 2–3 sessions
+### 5. ~~SPIR-V kernel emission§~~ — COMPLETE 2026-08-27
+- **Plan:** `docs/plans/2026-08-23-spirv-kernel-emission.md` — ALL sections landed.
+- §2.3 Load#/Store# over SSBO address expressions (`1b26d9bd`);
+- §2.4 universe-driven scalars via casting-graph SPIR-V table, signedness
+  fixed (`7c18fcf6`); §2.5 validation harness + spirv-dis structural sweep,
+  Vulkan smoke probe-gated (`2286f09d`); §2.6 backend-strategy.md v2 table.
+- Follow-up (new surface work, not this plan): accel eligibility model does
+  not yet classify Load#/Store# bodies as kernels — tracked below.
 
-### 6. VM compile-tail parity §1.3/§1.5
-- **Plan:** `docs/plans/2026-08-23-vm-compile-tail-parity.md`
-- **Status:** ACTIVE — §1.1 (arg-drop fix), §1.2 (parity harness), §1.4 (diagnostics), §1.6 (debug reachability) LANDED
-- **Remaining:**
-  - §1.3: Opcode floor — add opcodes on demand per corpus
-  - §1.5: Determinism audit — verify HashMap iteration order doesn't affect VM
-- **Estimated:** 2–3 sessions
+### 6. ~~VM compile-tail parity~~ — COMPLETE 2026-08-27
+- **Plan:** `docs/plans/2026-08-23-vm-compile-tail-parity.md` — ALL sections landed.
+- §1.3 resolved WITHOUT new opcodes: corpus demanded const REFERENCES, not
+  opcodes — top-level Int consts now inline via const_values resolution
+  (`20a6fe24`), unblocking the tamer self-package step; the parity harness
+  passes end-to-end for the first time. Opcode floor verified = corpus demand.
+- §1.5 determinism audit: one real hazard fixed (field_offset_any sorted);
+  all other emission paths were Vec/order-safe (`4d4d8433`).
 
 ### 7. Enum variant construction stdlib migrations
 - **Plan:** `docs/plans/2026-08-23-enum-variant-construction.md`
@@ -99,6 +99,15 @@ and effort estimates. Updated as work completes.
 | String unification & boundary | 2026-08-14 | #String is Iterable<Char>, Abs#/bit-intrinsic migration |
 
 ---
+
+## New follow-ups surfaced during completion (2026-08-27)
+
+1. **Accel eligibility vs Load#/Store#** — `analysis/accel.rs` purity model
+   does not classify bodies containing Load#/Store# intrinsics as eligible
+   kernels; §2.3 lowering is locked by direct-shape tests. Track when GPU
+   offload corpus demands it.
+2. **Vulkan runner smoke fixture** — probe-gated test exists; wire a real
+   fixture once a runner (vkm/vkrunner) is installed.
 
 ## Open Bugs (BUGS.md)
 
