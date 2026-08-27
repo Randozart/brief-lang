@@ -67,6 +67,39 @@ fn intrinsic_call_passes_variable_arguments() {
     assert!(bytes.contains(&(hcall as u8)), "host call must follow");
 }
 
+/// 2026-08-26 (parity plan §1.5): field_offset_any must pick the same
+/// struct regardless of HashMap seed — the fallback iterates sorted by
+/// struct name, so two structs sharing a field name resolve deterministically.
+#[test]
+fn test_field_offset_fallback_is_seed_independent() {
+    use crate::ast::top::{StructDefinition, StructField, Visibility};
+    // Prog with two objects whose `val` fields sit at DIFFERENT offsets:
+    // Aa { first: Int, val: Int } (offset 8) vs Bb { val: Int } (offset 0).
+    let mk = |name: &str, fields: Vec<(&str, i64)>| TopLevel::Obj(StructDefinition {
+        name: name.into(),
+        type_params: vec![],
+        parent: None,
+        fields: fields.into_iter().map(|(n, _)| StructField {
+            name: n.into(),
+            ty: Type::int(),
+            default: None,
+            visibility: Visibility::Public,
+        }).collect(),
+        transactions: vec![],
+        view_html: None,
+        span: None,
+        modifiers: vec![],
+        variants: vec![],
+    });
+    let prog = vec![mk("Aa", vec![("first", 0), ("val", 8)]), mk("Bb", vec![("val", 0)])];
+    let universe = TypeUniverse::new();
+    let mut vm = VmBackend::new();
+    vm.generate(&prog, &universe);
+    // Sorted-by-name iteration: "Aa" < "Bb", so bare `val` resolves to
+    // Aa's offset (8) — the SAME answer under every SipHash seed.
+    assert_eq!(vm.field_offset(None, "val"), 8);
+}
+
 /// Plan 1.1: literal arguments still pass through unchanged.
 #[test]
 fn intrinsic_call_passes_literal_arguments() {

@@ -237,11 +237,19 @@ impl VmBackend {
     }
 
     /// Fallback: find a field by name in any struct.
+    /// 2026-08-26 (parity plan §1.5 determinism audit): iteration over the
+    /// struct_fields HashMap is SORTED BY STRUCT NAME so which duplicate-
+    /// field declaration wins cannot vary with the SipHash seed (~9% perf /
+    /// wrong-offset variance). Struct-internal fields are ordered Vecs.
     fn field_offset_any(&self, field_name: &str) -> u64 {
-        for (_, fields) in self.struct_fields.iter() {
-            for (name, offset) in fields {
-                if name == field_name {
-                    return *offset;
+        let mut names: Vec<&String> = self.struct_fields.keys().collect();
+        names.sort();
+        for sname in names {
+            if let Some(fields) = self.struct_fields.get(sname) {
+                for (name, offset) in fields {
+                    if name == field_name {
+                        return *offset;
+                    }
                 }
             }
         }
