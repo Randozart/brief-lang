@@ -266,7 +266,7 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_tolerance),
         accel_probe_margin: db
             .field_float("accel_probe_margin", 0)
-            .unwrap_or(DEFAULT_AXIOM_SETTINGS.policy),
+            .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_margin),
     }
 }
 

@@ -1,0 +1,16 @@
+// ── Axiom Facility Settings (plan 2026-08-26-axiom-facility.md) ──────
+// Declared-authority enforcement dial. `axiom` marks knowledge taken on
+// authority instead of proof (SPEC §8.7): axiomatic cast edges, authoritative
+// contract posts, op lemmas.
+//
+// policy: allow | warn | deny — how declared axiom sites are treated.
+//   allow: accepted; one info line per site in the warnings stream.
+//   warn:  accepted; a prominent warning naming every site rides alongside.
+//   deny:  any axiom site is a hard error — prove it or remove the shortcut.
+//
+// lemma_properties: closed vocabulary of optimizer-exploitable properties an
+// op binding may declare; anything else is rejected at parse validation.
+
+policy: allow;
+
+lemma_properties: commutative;
