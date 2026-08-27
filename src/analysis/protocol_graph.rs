@@ -152,11 +152,30 @@ pub fn verify_protocol_roundtrip(
             }
         }
         _ => {
-            eprintln!(
-                "warning: round-trip proof skipped for '{}' — {:?}/{:?} bodies not found",
-                pd.name, to_fn, from_fn
-            );
-            Ok(())
+            // 2026-08-27 (bug sweep B1.2): a declared CastTo/CastFrom pair
+            // whose binding bodies are missing is a HARD ERROR — the old
+            // warning+Ok shipped unprovable conversions to every consumer.
+            // The round-trip gate only has teeth when both functions exist.
+            let missing = [
+                find_defn_body(to_fn, items).is_none().then(|| to_fn.clone()),
+                find_defn_body(from_fn, items).is_none().then(|| from_fn.clone()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+            Err(format!(
+                "round-trip proof for protocol '{}': conversion function(s) {} \
+                 have no body\n  why: a CastTo/CastFrom pair must be provable — \
+                 an inverse without an implementation cannot be checked and may \
+                 silently corrupt data\n  fix: define {} in this module (or a \
+                 module it imports), or remove the corresponding CastTo/CastFrom \
+                 binding from 'proto {}'",
+                pd.name,
+                missing,
+                missing,
+                pd.name
+            ))
         }
     }
 }
@@ -273,6 +292,34 @@ mod tests {
     fn test_find_defn_body_not_found() {
         let items: Vec<TopLevel> = vec![];
         assert!(find_defn_body("nonexistent", &items).is_none());
+    }
+
+    /// 2026-08-27 (bug sweep B1.2): a declared CastTo/CastFrom pair whose
+    /// binding bodies are MISSING is a hard error naming the functions —
+    /// the old warning+Ok shipped unprovable conversions silently.
+    #[test]
+    fn test_roundtrip_missing_bodies_is_hard_error() {
+        let to = proto_with_binding("Test", CastDirection::CastTo, "test_to_utf8");
+        let from =
+            proto_with_binding("Test", CastDirection::CastFrom, "utf8_to_test");
+        // The declaring proto carries BOTH edges (the helpers above each
+        // model ONE edge for the pair-proving path; round-trip needs both).
+        let mut pd = match &to {
+            TopLevel::ProtocolDef(p) => p.clone(),
+            other => panic!("expected protocol, got {other:?}"),
+        };
+        if let TopLevel::ProtocolDef(from_pd) = &from {
+            pd.cast_edges.extend(from_pd.cast_edges.iter().cloned());
+        }
+        let items: Vec<TopLevel> = vec![to, from];
+        // Same category on both edges → pair exists → bodies-missing arm.
+        let err = verify_protocol_roundtrip(&pd, &items)
+            .expect_err("missing bodies must fail compilation");
+        assert!(err.contains("test_to_utf8"), "{err}");
+        assert!(err.contains("utf8_to_test"), "{err}");
+        assert!(err.contains("no body"), "{err}");
+        // House style: what/why/fix.
+        assert!(err.contains("why:") && err.contains("fix:"), "{err}");
     }
 
     #[test]
