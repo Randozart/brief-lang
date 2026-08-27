@@ -166,6 +166,9 @@ impl CirctBackend {
             term_endprogram: true,
             match_stmt: true,
             trap_stmt: true,
+            // 2026-08-27 (Slice A): hw.module.extern blackboxes ARE lowerable
+            // here even while defined cell bodies remain staged.
+            extern_cells: true,
             ..crate::backend::capabilities::BackendCapabilities::NONE
         };
 
@@ -288,6 +291,8 @@ impl CirctBackend {
                     }
                 }
                 TopLevel::Cell(cell) => {
+                    // 2026-08-27 (Slice A): foreign cells keep their port
+                    // header for instance matching but carry no body.
                     self.cell_defs.insert(cell.name.clone(), cell.clone());
                     for (field_name, field_ty) in &cell.fields {
                         self.var_types.insert(format!("{}${}", cell.name, field_name), field_ty.clone());
@@ -1584,6 +1589,37 @@ impl CirctBackend {
     fn emit_cell_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, cell: &crate::ast::CellDef) {
         let cell_name = &cell.name;
         let mut ng = NameGen::default();
+
+        if let Some(src_path) = &cell.extern_source {
+            // 2026-08-27 (Slice A): FOREIGN module — an hw.module.extern
+            // blackbox with the SAME implicit clock/reset + declared ports
+            // shape defined cells get, so hw.instance sites match
+            // byte-for-byte against both kinds of modules.
+            writeln!(out, "// extern {} — definition lives in \"{}\"", cell_name, src_path).ok();
+            write!(out, "hw.module.extern @{}(", cell_name).ok();
+            write!(out, "in %clock: !seq.clock, in %reset: i1").ok();
+            for (param_name, param_ty) in &cell.parameters {
+                let mlir_ty = self.mlir_type(param_ty);
+                write!(out, ", in %{}: {}", param_name, mlir_ty).ok();
+            }
+            let out_names = Self::extract_output_names_llvm(&cell.output_type);
+            let out_names: Vec<String> = if out_names.is_empty() {
+                cell.ports_out.iter().map(|(n, _)| n.clone()).collect()
+            } else {
+                out_names
+            };
+            if let Some(first_out) = out_names.first() {
+                let first_in = cell.parameters.first()
+                    .or_else(|| cell.ports_out.first())
+                    .map(|(_, t)| self.mlir_type(t))
+                    .unwrap_or_else(|| "i64".to_string());
+                write!(out, ") -> ({}: {})", first_out, first_in).ok();
+            } else {
+                write!(out, ") -> ()").ok();
+            }
+            writeln!(out).ok();
+            return;
+        }
 
         write!(out, "hw.module @{}(", cell_name).ok();
         write!(out, "in %clock: i1, in %reset: i1").ok();

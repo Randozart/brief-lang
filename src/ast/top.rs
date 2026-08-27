@@ -243,6 +243,12 @@ pub struct CellDef {
     /// obj headers; the ONLY externally visible names (sealing).
     pub ports_in: Vec<(String, crate::ast::types::Type)>,
     pub ports_out: Vec<(String, crate::ast::types::Type)>,
+    /// 2026-08-27 (cbv-HW plan Slice A): set on `extern Name(ports) -> outs
+    /// from "path";` declarations — the cell's DEFINITION lives in the
+    /// referenced HDL source; CIRCT emits an `hw.module.extern` blackbox,
+    /// other targets reject the construct (software binaries have no RTL
+    /// linkage).
+    pub extern_source: Option<String>,
     /// 2026-07-24: Doc comment text.
     pub doc: Option<String>,
 }

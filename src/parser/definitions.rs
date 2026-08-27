@@ -202,6 +202,12 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Statement(Box::new(stmt)))
             }
             Some(Token::Cell) => self.parse_cell().map(TopLevel::Cell),
+            // 2026-08-27 (cbv-HW plan Slice A): `extern Name<T>(ports)
+            // -> outs from "path";` — a FOREIGN hardware module import.
+            // Desugars to a CellDef whose body is empty and whose
+            // extern_source carries the referenced file; CIRCT lowers it to
+            // an hw.module.extern blackbox sharing the exact port pipeline.
+            Some(Token::Extern) => self.parse_extern_cell().map(TopLevel::Cell),
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             // 2026-08-09 (Phase 12, SPEC §19.6): `meld` is removed — foreign
             // shapes adapt through GLUE/Data Briev descriptors, explicit
@@ -915,6 +921,76 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse: cell name { ... }
+    /// 2026-08-27 (cbv-HW plan Slice A): parse
+    ///   extern Name<TypeParams>? (ports_in)? -> ports_out? from "path";
+    /// Semicolon-terminated and BODYLESS — braces would suggest hidden body
+    /// text. Ports use the exact obj/cell header grammar so instance sites
+    /// can't distinguish imported modules from defined ones.
+    fn parse_extern_cell(&mut self) -> Result<CellDef, SyntaxError> {
+        self.pos += 1; // consume 'extern'
+        let name = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
+        let ports_in = if self.eat(&Token::LParen) {
+            let mut ps: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::RParen) && !self.is_at_end() {
+                let pname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let pty = self.parse_type()?;
+                ps.push((pname, pty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            ps
+        } else {
+            Vec::new()
+        };
+        let ports_out = if self.eat(&Token::Arrow) {
+            let mut os: Vec<(String, crate::ast::Type)> = Vec::new();
+            while !self.check(&Token::Semicolon) && !self.is_at_end() {
+                let oname = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let oty = self.parse_type()?;
+                os.push((oname, oty));
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+            os
+        } else {
+            Vec::new()
+        };
+        if !self.eat(&Token::From) {
+            return Err(SyntaxError::UnexpectedToken {
+                expected: "`from \"path\"` after extern header".to_string(),
+                found: self.peek_with_span()
+                    .map(|(t, _)| format!("{}", t)).unwrap_or_else(|| "end of file".into()),
+                span: self.peek_with_span().map(|(_, s)| self.make_span(s.clone()))
+                    .unwrap_or_else(crate::errors::Span::dummy),
+            });
+        }
+        let path_expr = self.expect_string()?;
+        self.eat(&Token::Semicolon);
+        Ok(CellDef {
+            name,
+            type_params,
+            parameters: ports_in.clone(),
+            output_type: None,
+            fields: vec![],
+            transactions: vec![],
+            definitions: vec![],
+            internal_triggers: vec![],
+            is_persistent: false,
+            metadata: std::collections::HashMap::new(),
+            span: None,
+            doc: None,
+            ports_in: ports_in.clone(),
+            ports_out,
+            extern_source: Some(path_expr),
+        })
+    }
+
     fn parse_cell(&mut self) -> Result<CellDef, SyntaxError> {
         // 2026-08-22 (Phase 7b, SPEC §9.6): REAL cell bodies — the token-skip
         // skeleton is gone. Cells share the obj port-header grammar and take
@@ -1008,6 +1084,8 @@ impl<'a> Parser<'a> {
         self.expect(Token::RBrace)?;
         self.eat(&Token::Semicolon);
         Ok(CellDef {
+            // 2026-08-27 (Slice A): plain cells are defined in-file.
+            extern_source: None,
             name,
             type_params,
             parameters: ports_in.clone(),
@@ -2931,6 +3009,34 @@ fn spec_name_to_key(name: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// 2026-08-27 (cbv-HW plan Slice A): extern declarations parse to
+    /// CellDefs carrying extern_source; malformed headers name the fix.
+    #[test]
+    fn test_extern_cell_parses_to_bodyless_record() {
+        let src = "extern UartTop(rx: Int) -> byte_out: Int from \"rtl/uart.v\";\n";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let items = p.parse_program().unwrap();
+        let crate::ast::TopLevel::Cell(c) = &items[0] else {
+            panic!("expected a cell, got {:?}", items[0]);
+        };
+        assert_eq!(c.name, "UartTop");
+        assert_eq!(c.extern_source.as_deref(), Some("rtl/uart.v"));
+        assert!(c.fields.is_empty() && c.transactions.is_empty(),
+            "extern cells have no body");
+        assert_eq!(c.ports_in, vec![("rx".to_string(), crate::ast::Type::int())]);
+        assert_eq!(c.ports_out, vec![("byte_out".to_string(), crate::ast::Type::int())]);
+    }
+
+    #[test]
+    fn test_extern_without_from_errors() {
+        let src = "extern NoFrom(x: Int);\n";
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        let err = p.parse_program().expect_err("missing from must error");
+        assert!(format!("{err}").contains("from"), "{err}");
+    }
+
     use crate::lexer::tokenize;
     use crate::parser::Parser;
     use crate::ast::top::{CastDirection, ProtocolDef};
