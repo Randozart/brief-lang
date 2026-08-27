@@ -297,6 +297,7 @@ contracts.
 
 | Resource | Location |
 |----------|----------|
+| **cbv foreign HW + MMIO (active 2026-08-27)** | `docs/plans/2026-08-27-cbv-foreign-hardware-and-mmio.md` — extern HDL imports + `@addr` MMIO pins on .cbv; Slice C (VolatileLoad#/Store#) DONE |
 | **Backend scaffolding set (active 2026-08-23)** | `docs/plans/2026-08-23-backend-scaffolding-foundation.md` (foundation, first) + parallel: `-vm-compile-tail-parity`, `-spirv-kernel-emission`, `-circt-toolchain-validation`, `-webstack-v2-completion` |
 | **Capability matrix (backend surfaces)** | `src/backend/capabilities.rs` — declare before emitting, reject out-of-surface programs with what/why/fix |
 | **Backend contracts & decision record** | `docs/architecture/backend-contracts.md` — per-backend charters, emission invariants, ABI decisions, known limitations |

@@ -100,6 +100,11 @@ and effort estimates. Updated as work completes.
 
 ---
 
+### 8. cbv foreign hardware imports + MMIO pins (plan 2026-08-27)
+- **Plan:** `docs/plans/2026-08-27-cbv-foreign-hardware-and-mmio.md`
+- **Status:** ACTIVE — Slice C (VolatileLoad#/VolatileStore#) DONE (`d59d1ecf`);
+  slices A (extern cells) + B (MMIO pins) pending
+
 ## New follow-ups surfaced during completion (2026-08-27)
 
 1. **Accel eligibility vs Load#/Store#** — `analysis/accel.rs` purity model

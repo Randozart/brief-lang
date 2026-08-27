@@ -164,6 +164,10 @@ contract == tamer behavior.
   heap categories (String/Blob/Char/Data) and out-of-range widths are
   capability errors naming the category and fix. No type-name matches in
   the emitter.
+- **Typed volatile access**: `VolatileLoad#(Ptr<T>) -> T`,
+  `VolatileStore#(Ptr<T>, T) -> Bool` (2026-08-27) lower through the
+  boxed-pointer ABI; width/alignment from the declared pointee via the
+  casting graph. Raw i64 addresses belong to `Load#`/`Store#`.
 - Canonical host ids mirror the VM table (`GetGlobalId#` etc. lower to
   BuiltIn inputs here).
 - Validation: spirv-val on every emitted binary + spirv-dis structural

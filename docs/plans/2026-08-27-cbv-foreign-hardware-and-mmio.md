@@ -60,8 +60,14 @@ in stdlib `.bv`, not Rust arms.
 
 ---
 
-## Slice C (first — smallest, unblocks B's embedded half):
-## Implement `VolatileLoad#` / `VolatileStore#`
+## Slice C — COMPLETE (2026-08-27, `d59d1ecf`)
+## Implemented `VolatileLoad#` / `VolatileStore#`
+
+**Status:** DONE. Implementation discovery: the snake-case names were not
+merely misnamed — they were DOC-ONLY, with zero functional occurrences
+anywhere; docs previously lied about shipped intrinsics. Functional
+volatility until this slice came only from internal `fun.volatile_read`
+register-array paths.
 
 **Problem:** documented but nonexistent (`docs/architecture/features/ptr.md:14,173,192-193`,
 `target-import.md:24-26` are lies relative to the binary).
