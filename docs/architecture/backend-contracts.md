@@ -150,11 +150,27 @@ contract == tamer behavior.
 - State = ONE Block-decorated StorageBuffer: fields sorted by name,
   explicit MemberOffset layout, ArrayStride on arrays, descriptor set 0
   binding 0. Reads/writes via AccessChain (+Load/Store).
+- **Load#/Store# take ADDRESS EXPRESSIONS** (2026-08-26, plan §2.3):
+  `Load#(field)`, `Load#(field[i])`, `Store#(field[i], v)` lower to
+  SSBO AccessChain + OpLoad/OpStore; scalar state fields join the
+  collected buffer surface. Numeric addresses do not exist in Vulkan
+  address space — a non-address argument is a capability error naming
+  the valid forms, and a byte-width argument must match the declared
+  element size.
+- **Scalar types are universe-driven** (2026-08-26, plan §2.4): the
+  casting graph's SPIR-V table resolves (protocol, metadata) → shape.
+  Briev `Int` emits `OpTypeInt(width, signedness=1)`, `UInt` signedness=0;
+  Bool is OpTypeBool (not an i8). Int widths 8–64, Float widths 32/64;
+  heap categories (String/Blob/Char/Data) and out-of-range widths are
+  capability errors naming the category and fix. No type-name matches in
+  the emitter.
 - Canonical host ids mirror the VM table (`GetGlobalId#` etc. lower to
   BuiltIn inputs here).
-- Validation: `test_scale_kernel_passes_spirv_val` (spirv-val) +
-  structural assertions on the in-memory module. OPEN: Vulkan smoke test
-  needs a runner.
+- Validation: spirv-val on every emitted binary + spirv-dis structural
+  sweep (GLCompute entry point, LocalSize mode, Block decoration,
+  StorageBuffer class, DescriptorSet 0 / Binding 0) via the shared
+  `validate_and_disassemble` helper (`test_harness_structural_sweep_on_scale_kernel`).
+  Vulkan-runner smoke test is probe-gated (skips loudly without a runner).
 
 ---
 

@@ -213,7 +213,13 @@ Charter: finish compilation on any machine with a tamer — one `.bounty`
 archive ships everywhere. Bytecode via `--backend vm`; archives via
 `brievc bounty`. Execution: C-driven `step()` loop over exported Briev
 interpreter; host services in `lib/runtime/briev_rt.c`; canonical host
-ids; conformance via `tools/parity_harness.sh` (7 fixtures).
+ids; conformance via `tools/parity_harness.sh` (8 fixtures).
+
+Emission facts (2026-08-27): top-level Int consts resolve compile-time
+(transitive const-to-const, cycle-rejecting) and INLINE at reference
+sites as PUSH_I64 — the stack machine has no global-load opcode by
+design; unresolvable references are house capability errors. HashMap
+emission paths audited deterministic (sorted fallback iteration).
 
 ## SPIR-V Backend
 

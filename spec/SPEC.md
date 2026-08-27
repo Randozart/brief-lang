@@ -551,7 +551,22 @@ Zero-payload variants (declared without parens) have Void payload and construct 
 Null()
 ```
 
-Multi-payload variants accept positional arguments stored as a Tuple payload. User-defined fns shadow variants — if a `defn` shares a name with a variant, the function wins. Variant names must be unique across all enums for bare construction to be unambiguous. The typechecker binds the enum's type parameters positionally from payload arguments (`Ok(5)` under `Result<T,E>` binds T=Int); remaining params unify against the contextual expected type.
+Multi-payload variants accept positional arguments stored as a Tuple payload. User-defined fns shadow variants — if a `defn` shares a name with a variant, the function wins. The typechecker binds the enum's type parameters positionally from payload arguments (`Ok(5)` under `Result<T,E>` binds T=Int); remaining params unify against the contextual expected type.
+
+#### Qualified variant paths
+
+A variant may always be constructed or matched through its qualified path:
+
+```briev
+let r: Result<Int, String> = Result::Ok(a / b);
+
+term match r {
+    Result::Ok(v) => v,
+    Result::Err(msg) => 0 - 1,
+};
+```
+
+Bare construction is ambiguous when two enums declare the same variant name (`Ok` under both `Http` and `Db`): *declaring* it is legal, but a bare call `Ok(5)` fails compilation naming every declaring enum and the qualification fix. The qualified form always resolves. Patterns accept either form and normalize on the variant's last segment.
 
 ### 8.4 Structural sums
 

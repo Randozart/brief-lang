@@ -287,7 +287,63 @@ defn build_csv(rows: List<List<String>>) -> String {
 };
 ```
 
-## 6. Structs: Pure Data Containers
+## 6. Enums: Closed Sums
+
+`enum` declares a closed nominal sum — a value that is exactly one of a
+fixed set of variants, each optionally carrying a payload:
+
+```briev
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+};
+
+enum Http {
+    Ok(Int),
+    Fail,
+};
+```
+
+Construct a variant by calling it as a function; payloads are positional:
+
+```briev
+let ok: Result<Int, String> = Ok(42);
+let bad: Result<Int, String> = Err("nope");
+```
+
+Read a sum back with an exhaustive `match` — every variant needs an arm,
+and payload bindings name the carried values:
+
+```briev
+defn show(r: Result<Int, String>) -> Int {
+  term match r {
+    Ok(v) => v,
+    Err(msg) => 0 - 1,
+  };
+}
+```
+
+Zero-payload variants (declared without parens) construct with zero
+arguments: `Http::Fail`.
+
+**Qualified paths.** When two enums declare the same variant name, bare
+construction becomes ambiguous — declaring both `Http::Ok(Int)` and
+`Db::Ok(Int)` is legal, but a bare `Ok(5)` fails compilation naming the
+declaring enums. Qualify to disambiguate; qualified construction and
+patterns always resolve:
+
+```briev
+Print#(pick(Http::Ok(5)));
+term match state {
+    Http::Ok(v) => v,
+    Http::Fail => 0 - 1,
+};
+```
+
+A user-defined `defn` sharing a variant's name shadows it — prefer
+qualified paths near same-named functions.
+
+## 7. Structs: Pure Data Containers
 
 `struct` declares pure data with fixed layout, C-compatible, no methods or contracts:
 
