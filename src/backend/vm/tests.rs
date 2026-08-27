@@ -67,6 +67,74 @@ fn intrinsic_call_passes_variable_arguments() {
     assert!(bytes.contains(&(hcall as u8)), "host call must follow");
 }
 
+/// 2026-08-26 (parity plan §1.3): top-level Int consts inline their
+/// compile-time value at reference sites — PUSH_I64 <value>, no trap.
+#[test]
+fn test_const_reference_inlines_value() {
+    let prog: Vec<TopLevel> = vec![
+        TopLevel::Constant(Constant {
+            name: "LIMIT".into(),
+            ty: Type::int(),
+            expr: Expr::Decimal(42),
+        }),
+        TopLevel::Constant(Constant {
+            name: "DERIVED".into(),
+            ty: Type::int(),
+            // const-to-const, declared in reverse order on purpose
+            expr: Expr::BinaryOp(
+                BinaryOpKind::Mul,
+                Box::new(Expr::Identifier("LIMIT".into())),
+                Box::new(Expr::Decimal(2)),
+            ),
+        }),
+        defn(
+            "go",
+            vec![],
+            vec![
+                Statement::Term(Some(Expr::Identifier("DERIVED".into()))),
+            ],
+        ),
+    ];
+    let universe = TypeUniverse::new();
+    let mut vm = VmBackend::new();
+    let bytes = vm.generate(&prog, &universe);
+    assert!(vm.errors.is_empty(), "const refs must resolve: {:?}", vm.errors);
+    // DERIVED = LIMIT*2 = 84 pushed as i64 constant.
+    let has_84 = bytes.windows(9).any(|w| w[0] == super::assembler::OP_PUSH_I64 && i64::from_le_bytes(w[1..9].try_into().unwrap()) == 84);
+    assert!(has_84, "expected PUSH_I64(84) in bytecode");
+}
+
+/// §1.3 honesty: a const CYCLE (a = b; b = a) leaves both unresolvable —
+/// referencing one is the house capability error, not a silent 0+trap.
+#[test]
+fn test_const_cycle_is_capability_error() {
+    let prog: Vec<TopLevel> = vec![
+        TopLevel::Constant(Constant {
+            name: "A".into(),
+            ty: Type::int(),
+            expr: Expr::Identifier("B".into()),
+        }),
+        TopLevel::Constant(Constant {
+            name: "B".into(),
+            ty: Type::int(),
+            expr: Expr::Identifier("A".into()),
+        }),
+        defn(
+            "go",
+            vec![],
+            vec![Statement::Term(Some(Expr::Identifier("A".into())))],
+        ),
+    ];
+    let universe = TypeUniverse::new();
+    let mut vm = VmBackend::new();
+    let _ = vm.generate(&prog, &universe);
+    assert!(
+        vm.errors.iter().any(|e| e.contains("'A'")),
+        "cycle must surface as unresolvable-reference error: {:?}",
+        vm.errors
+    );
+}
+
 /// 2026-08-26 (parity plan §1.5): field_offset_any must pick the same
 /// struct regardless of HashMap seed — the fallback iterates sorted by
 /// struct name, so two structs sharing a field name resolve deterministically.

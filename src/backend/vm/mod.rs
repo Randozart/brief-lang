@@ -86,6 +86,14 @@ pub struct VmBackend {
     pub(crate) next_local_slot: u8,
     pub(crate) host_fn_ids: HashMap<String, u32>,
     pub(crate) fn_indices: HashMap<String, u16>,
+    /// 2026-08-26 (parity plan §1.3): top-level Int consts resolved at
+    /// compile time (const-to-const references included, cycles rejected).
+    /// The VM has no global-load opcode; an immutable const inlines its
+    /// value as PUSH_I64 — same semantic as LLVM's constant global load
+    /// after optimization. Only LITERAL-ROOTED integer exprs resolve;
+    /// anything else stays out of the map and reference sites get the
+    /// house capability error naming the fix.
+    pub(crate) const_values: HashMap<String, i64>,
     pub(crate) label_counter: u32,
     pub(crate) fn_index_counter: u16,
     /// 2026-07-30: Struct field offsets for Field expression compilation.
@@ -110,6 +118,7 @@ impl VmBackend {
             next_local_slot: 0,
             host_fn_ids: HashMap::new(),
             fn_indices: HashMap::new(),
+            const_values: HashMap::new(),
             label_counter: 0,
             fn_index_counter: 0,
             struct_fields: HashMap::new(),
@@ -137,6 +146,7 @@ impl VmBackend {
     pub fn generate(&mut self, items: &[crate::ast::TopLevel], _universe: &crate::type_universe::TypeUniverse) -> Vec<u8> {
         // First pass: collect function names and host function IDs
         self.collect_declarations(items);
+        self.collect_symbol_tables(items);
 
         // Second pass: emit bytecode for each function
         for item in items {
@@ -149,6 +159,117 @@ impl VmBackend {
 
     /// First pass: collect function names and host function declarations.
     fn collect_declarations(&mut self, items: &[crate::ast::TopLevel]) {
+        // 2026-08-26 (parity plan §1.3): resolve top-level Int consts BEFORE
+        // body emission so identifier references inline their values. Two
+        // passes: gather raw exprs, then recursively evaluate (handles
+        // const-to-const references in any declaration order; reference
+        // cycles and non-integer exprs leave the const unresolvable — a
+        // referenced-but-unresolved const hits the record_unsupported path).
+        let mut raw: Vec<(String, crate::ast::Expr)> = Vec::new();
+        for item in items {
+            let inner = match item {
+                crate::ast::TopLevel::Export(e) => &e.inner,
+                other => other,
+            };
+            if let crate::ast::TopLevel::Constant(c) = inner {
+                raw.push((c.name.clone(), c.expr.clone()));
+            }
+        }
+        self.const_values = Self::eval_const_table(&raw);
+    }
+
+    /// Resolve an integer const table from raw exprs: literals, unary minus,
+    /// int BinaryOp/BitShift trees, Cast-to-Int wrappers, and Identifier
+    /// references to OTHER consts (transitive; cycles rejected).
+    fn eval_const_table(raw: &[(String, crate::ast::Expr)]) -> HashMap<String, i64> {
+        use std::collections::HashSet;
+        fn go(
+            name: &str,
+            expr: &crate::ast::Expr,
+            raw_map: &HashMap<String, crate::ast::Expr>,
+            done: &mut HashMap<String, i64>,
+            visiting: &mut HashSet<String>,
+        ) -> Option<i64> {
+            if let Some(v) = done.get(name) {
+                return Some(*v);
+            }
+            if !visiting.insert(name.to_string()) {
+                return None; // cycle
+            }
+            let val = eval_const_expr(expr, raw_map, done, visiting);
+            visiting.remove(name);
+            if let Some(v) = val {
+                done.insert(name.to_string(), v);
+            }
+            val
+        }
+        fn eval_const_expr(
+            e: &crate::ast::Expr,
+            raw_map: &HashMap<String, crate::ast::Expr>,
+            done: &mut HashMap<String, i64>,
+            visiting: &mut HashSet<String>,
+        ) -> Option<i64> {
+            match e {
+                crate::ast::Expr::Decimal(n) => Some(*n),
+                crate::ast::Expr::Identifier(n) => {
+                    let inner = raw_map.get(n)?;
+                    go(n, inner, raw_map, done, visiting)
+                }
+                crate::ast::Expr::UnaryOp(kind, inner) => {
+                    let v = eval_const_expr(inner, raw_map, done, visiting)?;
+                    match kind {
+                        crate::ast::UnaryOpKind::Neg => Some(v.wrapping_neg()),
+                        crate::ast::UnaryOpKind::Not => Some(if v == 0 { 1 } else { 0 }),
+                        crate::ast::UnaryOpKind::BitNot => Some(!v),
+                    }
+                }
+                crate::ast::Expr::BinaryOp(kind, l, r) => {
+                    let lv = eval_const_expr(l, raw_map, done, visiting)?;
+                    let rv = eval_const_expr(r, raw_map, done, visiting)?;
+                    use crate::ast::BinaryOpKind as K;
+                    match kind {
+                        K::Add => lv.checked_add(rv),
+                        K::Sub => lv.checked_sub(rv),
+                        K::Mul => lv.checked_mul(rv),
+                        K::Div => lv.checked_div(rv),
+                        K::Mod => lv.checked_rem(rv),
+                        K::BitAnd => Some(lv & rv),
+                        K::BitOr => Some(lv | rv),
+                        K::BitXor => Some(lv ^ rv),
+                        K::Shl => lv.checked_shl(rv.min(u32::MAX as i64) as u32),
+                        K::Shr => lv.checked_shr(rv.min(u32::MAX as i64) as u32),
+                        K::Eq => Some((lv == rv) as i64),
+                        K::Neq => Some((lv != rv) as i64),
+                        K::Lt => Some((lv < rv) as i64),
+                        K::Le => Some((lv <= rv) as i64),
+                        K::Gt => Some((lv > rv) as i64),
+                        K::Ge => Some((lv >= rv) as i64),
+                        _ => None,
+                    }
+                }
+                crate::ast::Expr::Cast(inner, _) => {
+                    eval_const_expr(inner, raw_map, done, visiting)
+                }
+                _ => None,
+            }
+        }
+
+        let raw_map: HashMap<String, crate::ast::Expr> =
+            raw.iter().cloned().collect();
+        let mut done: HashMap<String, i64> = HashMap::new();
+        let mut visiting: HashSet<String> = HashSet::new();
+        let mut out: HashMap<String, i64> = HashMap::new();
+        for (name, expr) in raw {
+            if let Some(v) = go(name, expr, &raw_map, &mut done, &mut visiting) {
+                out.insert(name.clone(), v);
+            }
+        }
+        out
+    }
+
+    /// Second half of the declaration pass: fn indices, host fns, field offsets.
+    /// 2026-08-26: const resolution was moved ahead of this walk (§1.3).
+    fn collect_symbol_tables(&mut self, items: &[crate::ast::TopLevel]) {
         for item in items {
             // 2026-07-25: Unwrap export wrappers to register exported defns.
             let inner = match item {

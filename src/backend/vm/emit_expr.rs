@@ -47,17 +47,29 @@ impl VmBackend {
                                 self.asm.emit_load_local(*slot);
                             }
                             None => {
-                                // 2026-08-23 (Plan 1.4): unresolvable
-                                // identifier (state field, global, or
-                                // strategy tag) records a compile error —
-                                // the old silent push-0+trap shipped wrong
-                                // values to install time.
-                                self.record_unsupported(
-                                    &format!("reference '{}' (not a local/param)", name),
-                                    &self.current_fn.clone(),
-                                );
-                                self.asm.emit_push_i64(0);
-                                self.asm.emit_trap();
+                                // 2026-08-26 (parity plan §1.3): a top-level
+                                // const reference inlines its compile-time
+                                // value — the corpus (tamer host dispatch)
+                                // compares against HOST_ID_* consts, and an
+                                // integer stack machine has no global load;
+                                // PUSH_I64 of the resolved value IS the
+                                // semantically-correct lowering for an
+                                // immutable Int const.
+                                if let Some(val) = self.const_values.get(name.as_str()) {
+                                    self.asm.emit_push_i64(*val);
+                                } else {
+                                    // 2026-08-23 (Plan 1.4): unresolvable
+                                    // identifier (state field, global, or
+                                    // strategy tag) records a compile error —
+                                    // the old silent push-0+trap shipped wrong
+                                    // values to install time.
+                                    self.record_unsupported(
+                                        &format!("reference '{}' (not a local/param)", name),
+                                        &self.current_fn.clone(),
+                                    );
+                                    self.asm.emit_push_i64(0);
+                                    self.asm.emit_trap();
+                                }
                             }
                         }
                     }
