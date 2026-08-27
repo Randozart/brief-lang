@@ -1906,9 +1906,11 @@ mod tests {
     }
 
     fn make_trigger(name: &str, port: &str) -> TopLevel {
+        // 2026-08-27 (Slice B): test fixtures use NUMERIC @-addresses —
+        // symbolic sources are capability errors on the circuit surface.
         TopLevel::Trigger(Trigger {
             name: name.to_string(),
-            instance: Expr::Identifier("env".to_string()),
+            instance: Expr::Decimal(1),
                         span: None,
         })
     }
