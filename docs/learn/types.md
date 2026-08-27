@@ -319,12 +319,12 @@ all sharing the same machine representation (`i64`/`u64` in the backend):
 | Fixed | `Ptr32` / `Ptr64` / `Ptr128` | Points to N bytes (known layout) |
 | Bits | `Ptr<Bits @/0..63>` | Points to exact bit range |
 
-These pointers **cannot be dereferenced directly** — use `volatile_load#` / `volatile_store#`:
+These pointers **cannot be dereferenced directly** — use `VolatileLoad#` / `VolatileStore#`:
 
 ```briev
 let reg: Ptr<Int> = 0x40011000 as Ptr<Int>;
-let val = volatile_load#(reg);
-volatile_store#(reg, val + 1);
+let val = VolatileLoad#(reg);
+VolatileStore#(reg, val + 1);
 ```
 
 Layout-compatible casts between pointer types are allowed when the pointee

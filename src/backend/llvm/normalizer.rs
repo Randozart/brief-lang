@@ -130,6 +130,8 @@ fn build_supported_ops() -> HashSet<String> {
                    "ToInt#", "ToFloat#", "ToString#", "Concat#", "Length#",
                    "AddressOf#", "SysCall#", "SysConf#",
                    "Load#", "Store#", "Copy#", "Fill#",
+                   // 2026-08-27 (Slice C): typed volatile MMIO access.
+                   "VolatileLoad#", "VolatileStore#",
                    "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#",
                    "AtomicAdd#", "Fence#",
                    "DlOpen#", "DlSym#", "DlClose#",

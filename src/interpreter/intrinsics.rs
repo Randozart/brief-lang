@@ -275,6 +275,23 @@ pub fn execute_intrinsic(
                 .map_err(|_| RuntimeError::HeapError("Store# write failed".into()))?;
             Ok(Value::Void)
         }
+        // 2026-08-27 (Slice C): typed volatile MMIO over the interpreter
+        // heap. Width = one word (the interpreter stores words; element-type
+        // nuance is a backend concern — parity tests compare word values).
+        "VolatileLoad#" => {
+            let addr = arg_as_i64(args, 0)? as u64;
+            let data = heap.read(addr, 8)
+                .ok_or_else(|| RuntimeError::HeapError("VolatileLoad# read failed".into()))?;
+            let val = i64::from_le_bytes(data.try_into().unwrap());
+            Ok(i64_to_bits(val))
+        }
+        "VolatileStore#" => {
+            let addr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            heap.write(addr, &val.to_le_bytes())
+                .map_err(|_| RuntimeError::HeapError("VolatileStore# write failed".into()))?;
+            Ok(Value::Atom(Atom::Bool(true)))
+        }
         "Copy#" => {
             let dst = arg_as_i64(args, 0)? as u64;
             let src = arg_as_i64(args, 1)? as u64;
@@ -775,6 +792,25 @@ mod tests {
         assert!(r.is_true());
         let r = execute_intrinsic("Eq#", &[i64_to_bits(42), i64_to_bits(43)], &mut heap).unwrap();
         assert!(!r.is_true());
+    }
+
+    /// 2026-08-27 (Slice C): VolatileStore#/VolatileLoad# round-trip through
+    /// the virtual heap — the interpreter reference for MMIO semantics.
+    #[test]
+    fn test_volatile_roundtrip() {
+        let mut heap = VirtualHeap::new();
+        let addr = heap.allocate(8);
+        let store = execute_intrinsic("VolatileStore#", &[i64_to_bits(addr as i64), i64_to_bits(0x41)], &mut heap).unwrap();
+        assert!(store.is_true(), "store yields Bool true");
+        let load = execute_intrinsic("VolatileLoad#", &[i64_to_bits(addr as i64)], &mut heap).unwrap();
+        assert_eq!(load.as_i64(), Some(0x41));
+    }
+
+    #[test]
+    fn test_volatile_load_unmapped_errors() {
+        let mut heap = VirtualHeap::new();
+        let r = execute_intrinsic("VolatileLoad#", &[i64_to_bits(0x40010000)], &mut heap);
+        assert!(r.is_err(), "unmapped hardware-style address errors in interp");
     }
 
     #[test]

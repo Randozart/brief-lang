@@ -8285,6 +8285,32 @@ fn test_struct_literal_alloca_deferred_in_loop() {
 
 // ── typed !range metadata (2026-08-13 fix) ────────────────────────────
 
+/// 2026-08-27 (plan 2026-08-27-cbv-foreign-hardware-and-mmio.md Slice C):
+/// VolatileLoad#/VolatileStore# emit VOLATILE accesses whose width comes
+/// from the declared pointee, through the boxed-pointer ABI (i64 word →
+/// inttoptr at the access boundary).
+#[test]
+fn test_volatile_intrinsics_emit_typed_accesses() {
+    let src = "let out_v: Int = 0;\n\
+        defn poke(p: Ptr<Int>, v: Int) -> Int {\n\
+            VolatileStore#(p, v);\n\
+            term VolatileLoad#(p);\n\
+        };\n\
+        node n [out_v == 0][true] {\n\
+            let base = Malloc#(8);\n\
+            out_v = poke(base as Ptr<Int>, 0x41);\n\
+        };\n";
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let tu = crate::type_universe::TypeUniverse::new();
+    let mut backend = LlvmBackend::new().with_type_universe(tu);
+    let ir = backend.generate(&items, None);
+    assert!(ir.contains("store volatile"), "volatile store must be emitted:\n{ir}");
+    assert!(ir.contains("load volatile i64"), "volatile load at pointee width expected:\n{ir}");
+    assert!(ir.contains("inttoptr"), "boxed-address re-materialization expected:\n{ir}");
+}
+
 #[test]
 fn test_range_metadata_bounds_are_typed() {
     // A bounded i64 precondition (`[count < 10]`) emits `!range` on the

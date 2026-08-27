@@ -126,6 +126,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(8)))], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
         "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true, variadic: false }),
         "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
+        // 2026-08-27 (plan 2026-08-27-cbv-foreign-hardware-and-mmio.md Slice C):
+        // typed MMIO access — pointee width comes from the Ptr<T> argument's
+        // element type (NOT a byte-count argument like raw Load#/Store#).
+        // Rule 4 naming: PascalCase + #. VolatileStore# yields Bool (success
+        // by construction on targets that reach it; call sites use it as an
+        // expression statement or bind the result).
+        "VolatileLoad#"  => Some(Signature { name: "VolatileLoad#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: true, variadic: false }),
+        "VolatileStore#" => Some(Signature { name: "VolatileStore#", parameters: vec![], return_kind: ReturnKind::Exact(Type::bool_()), observable: true, variadic: false }),
         "Copy#"    => Some(Signature { name: "Copy#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
         "Fill#"    => Some(Signature { name: "Fill#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false }),
 
@@ -383,6 +391,7 @@ mod tests {
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
             "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
+            "VolatileLoad#", "VolatileStore#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "CharCount#",
             "Get#", "Insert#",

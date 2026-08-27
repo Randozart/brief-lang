@@ -1840,6 +1840,21 @@ fn infer_intrinsic_call(
             }
         }
     }
+    // 2026-08-27 (plan 2026-08-27-cbv-foreign-hardware-and-mmio.md Slice C):
+    // VolatileLoad#/VolatileStore# demand a TYPED pointer as the address —
+    // raw i64 addresses belong to Load#/Store#. Enforced HERE (compile time)
+    // so emitters never face a shape they can't lower honestly.
+    if matches!(sig.name, "VolatileLoad#" | "VolatileStore#") {
+        let first = infer_type_only(&args[0], ctx)?;
+        let is_ptr = matches!(first, crate::ast::Type::Ptr(_));
+        if !is_ptr {
+            return Err(TypeError::TypeMismatch {
+                expected: "Ptr<T> — cast the address first, e.g. 'addr as Ptr<Byte>'".into(),
+                found: format!("{}", first),
+                context: format!("address argument of '{}'", sig.name),
+            });
+        }
+    }
     // 2026-07-15: ReturnKind replaces return_type: Option<Type>
     Ok(match &sig.return_kind {
         ReturnKind::Native("Int") => Type::int(),
@@ -1852,6 +1867,16 @@ fn infer_intrinsic_call(
             if sig.name == "CallPtr#" {
                 if let Some(Ok(Type::Function(_, ret))) = args.first().map(|a| infer_type_only(a, ctx)) {
                     return Ok(*ret);
+                }
+                return Ok(Type::int());
+            }
+            // 2026-08-27 (Slice C): VolatileLoad# returns the POINTEE type,
+            // not the pointer itself.
+            if sig.name == "VolatileLoad#" {
+                if let Some(Ok(ty)) = args.first().map(|a| infer_type_only(a, ctx)) {
+                    if let crate::ast::Type::Ptr(inner) = &ty {
+                        return Ok((**inner).clone());
+                    }
                 }
                 return Ok(Type::int());
             }

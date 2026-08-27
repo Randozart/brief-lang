@@ -21,9 +21,9 @@ const UART1: Int = 0x40011000;  // from board TOML
 const uart_dr: Int  = 0x40011004;
 const uart_sr: Int  = 0x40011008;
 
-// MMIO via volatile_load#/volatile_store#:
-let status: Byte = volatile_load#(uart_sr as Ptr<Byte>);
-volatile_store#(uart_dr as Ptr<Byte>, 0x41);  // 'A'
+// MMIO via VolatileLoad#/VolatileStore#:
+let status: Byte = VolatileLoad#(uart_sr as Ptr<Byte>);
+VolatileStore#(uart_dr as Ptr<Byte>, 0x41);  // 'A'
 ```
 
 ## Board File Format (TOML)

@@ -11,7 +11,7 @@ the address value at runtime and the pointee type `T` at the type level, enablin
 contract-proven safe MMIO and memory access without a borrow checker or GC.
 
 A `Ptr<T>` **cannot be dereferenced directly** — reading or writing through a
-pointer requires the `volatile_load#`/`volatile_store#` intrinsics. This
+pointer requires the `VolatileLoad#`/`VolatileStore#` intrinsics. This
 ensures all memory access is explicit and contract-verified.
 
 ## Type representation
@@ -170,7 +170,7 @@ defn read_device(reg: Ptr<Int>) -> Int
     [reg as Int >= UART0_BASE]
     [reg as Int <  UART_END]
 {
-    term volatile_load#(reg);
+    term VolatileLoad#(reg);
 };
 ```
 
@@ -189,8 +189,8 @@ are plain `i64`.
 
 | Intrinsic | Signature | Description |
 |---|---|---|
-| `volatile_load#` | `(Ptr<T>) -> T` | Volatile read from MMIO register |
-| `volatile_store#` | `(Ptr<T>, T) -> Bool` | Volatile write to MMIO register |
+| `VolatileLoad#` | `(Ptr<T>) -> T` | Volatile read from an address through a typed pointer (pointee drives width; raw i64 addresses use `Load#`) |
+| `VolatileStore#` | `(Ptr<T>, T) -> Bool` | Volatile write through a typed pointer; yields true (implemented 2026-08-27, plan Slice C) |
 | `__memcpy#` | `(Ptr, Ptr, Int) -> Bool` | Copy N bytes (non-overlapping) |
 | `__memcmp#` | `(Ptr, Ptr, Int) -> Int` | Compare N bytes; 0 = equal |
 | `__memset#` | `(Ptr, Int, Int) -> Bool` | Fill N bytes with value |

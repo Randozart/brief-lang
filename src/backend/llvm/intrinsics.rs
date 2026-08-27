@@ -43,6 +43,10 @@ pub fn emit_intrinsic_call(
             let narrowed = narrow_int_result(backend, out, v, indent);
             return BTypedRegister { name: narrowed, ty: Type::int() };
         }
+        // 2026-08-27 (Slice C): typed volatile MMIO access — width from the
+        // Ptr<T> element type; raw-address access stays with Load#/Store#.
+        "VolatileLoad#" => return emit_volatile_load(backend, out, v, args, indent),
+        "VolatileStore#" => return emit_volatile_store(backend, out, v, args, indent),
         "Load#" => return emit_load(backend, out, v, args, indent),
         // 2026-08-23 (gpu.bv): workgroup barrier — CPU lowering is a no-op
         // returning true (single thread trivially reaches the barrier).
@@ -751,6 +755,66 @@ fn emit_store(
     writeln!(out, "{}store i{} {}, ptr {}", indent, bytes * 8, val, ptr).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+
+/// 2026-08-27 (plan 2026-08-27-cbv-foreign-hardware-and-mmio.md Slice C):
+/// `VolatileLoad#(p: Ptr<T>) -> T`. Briev's pointer ABI boxes addresses as
+/// i64 registers (the atomics' convention): re-materialize via
+/// `inttoptr i64 -> ptr` before the access. The DECLARED pointee drives
+/// result type + alignment via the casting graph; shape enforcement lives
+/// in the TYPECHECKER and a non-Ptr declaration degrades to one-word Int.
+fn emit_volatile_load(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let arg = backend.emit_expr(out, &args[0], indent);
+    let inner_ty = match &arg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = backend.llvm_type(&inner_ty);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, ptr,
+        backend.llvm_type(&Type::int()), arg.name).ok();
+    writeln!(out, "{}{} = load volatile {}, ptr {}, align {}", indent, v,
+        llvm_ty, ptr, backend.align_of(&llvm_ty)).ok();
+    BTypedRegister { name: v.to_string(), ty: inner_ty }
+}
+
+/// `VolatileStore#(p: Ptr<T>, val: T) -> Bool`. Value is width-adapted to
+/// the pointee so the store text is always valid IR.
+fn emit_volatile_store(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr_arg = backend.emit_expr(out, &args[0], indent);
+    let addr_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, addr_ptr,
+        backend.llvm_type(&Type::int()), ptr_arg.name).ok();
+    let mut val_reg = backend.emit_expr(out, &args[1], indent);
+    let inner_ty = match &ptr_arg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = backend.llvm_type(&inner_ty);
+    let bits_of = |t: &Type| -> u64 {
+        resolve_arg_bytes(backend, &BTypedRegister { name: String::new(), ty: t.clone() })
+            .unwrap_or(8) * 8
+    };
+    if val_reg.ty != inner_ty {
+        let target_bits = bits_of(&inner_ty);
+        let val_bits = bits_of(&val_reg.ty);
+        if val_bits > target_bits {
+            let trunc = backend.fun.gen_reg();
+            writeln!(out, "{}{} = trunc {} {} to {}", indent, trunc,
+                backend.llvm_type(&val_reg.ty), val_reg.name, llvm_ty).ok();
+            val_reg.name = trunc;
+        } else if val_bits < target_bits {
+            let ext = backend.fun.gen_reg();
+            writeln!(out, "{}{} = zext {} {} to {}", indent, ext,
+                backend.llvm_type(&val_reg.ty), val_reg.name, llvm_ty).ok();
+            val_reg.name = ext;
+        }
+    }
+    writeln!(out, "{}store volatile {} {}, ptr {}, align {}", indent,
+        llvm_ty, val_reg.name, addr_ptr, backend.align_of(&llvm_ty)).ok();
+    writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::bool_() }
 }
 
 fn emit_copy(
