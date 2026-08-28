@@ -23,8 +23,13 @@ immediately after each verified step.
 confirmed. IF THIS RECURS: check for sync daemons before assuming editor
 or agent interference, and keep uncommitted windows short.
 
-**Status:** HAZARD OPEN (environmental, not a compiler bug). Session-
-log-only entry; revisit if it recurs.
+**Status:** RESOLVED-BY-CONVERGENCE 2026-08-27 — main and foundation
+converged to identical content (`e11af56a`), making the mirror
+idempotent; all auxiliary worktrees/branches retired as verified
+ancestors. Single-tree model now (only `briev-lang` +
+`briv-compiler-baseline` per rule 12b). If reverts recur on the single
+tree, re-open this entry and re-apply the §2 playbook (see
+docs/2026-08-27-session-report.md).
 
 # Bugs
 

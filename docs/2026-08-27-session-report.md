@@ -6,20 +6,32 @@ green. This document is the pickup point for the next agent.
 
 ---
 
-## 1. End-state map
+## 1. End-state map (UPDATED after single-tree consolidation)
 
 | Tree | Commit | State |
 |------|--------|-------|
-| `briev-backend-foundation` (branch `backend-foundation`) | `24bf3eef` | **Canonical.** All plans implemented; 1988 tests green; docs current |
-| `briev-lang` (branch `main`) | `a19cbe44` | Synced through `a19cbe44`. The docs commit `24bf3eef` is **ff-blocked**: the axiom agent's uncommitted WIP touches `spec/SPEC.md`, colliding with incoming SPEC §13.1. One `git fetch … && git merge --ff-only` once their tree commits — no other conflicts expected |
-| `/tmp/opencode/slice_a` | disposable | Isolated clone used for Slice A/B source work (see §3). Fully merged into foundation; safe to delete |
-| `/tmp/opencode/backup_tc_pre_ff.rs` | disposable | Stale working-copy backup superseded by `cd03cce0` |
+| `briev-lang` (branch `main`) | `e11af56a` + this doc commit | **THE tree — single source of truth.** All plans implemented; 1991 tests green |
 
-The axiom agent's WIP on main (uncommitted at close): `config/axioms.dbv`
-deletion/rename dance, `docs/plans/2026-08-26-axiom-facility.md` edits,
-`src/config_tuning.rs` changes. THEIR work — do not touch; the half-wired
-loader break they shipped (`bc1dc653`) was already fixed forward in
-`2dfc8d75` (flat `.dbvl` + `accel_probe_margin` fallback).
+**Single-tree consolidation (same day):** the axiom agent's base
+(`f189fc38`) + their in-flight authority fields were rescued and
+completed on main (`60f9d8b9` — Contract.post_authority /
+OperatorDef.trusted_lemmas / CastEdge.trusted_axiom + the 232-site
+initializer sweep they hadn't finished; 1991 green). Foundation was
+merged into main (`e11af56a`, `-X ours` on axiom-sweep files where the
+sync daemon had hunk-flipped) and both trees converged, after which ALL
+auxiliary worktrees/branches were retired as verified ancestors of
+main: `backend-foundation`, `compiler-in-brief`, `feat/accel-gpu`,
+`feat/out-observability`, `bits-strings`, `feat/language-decluttering`,
+`feat/derivation-synthesis`, `feat/data-brief`, `feat/spec-layout-keywords`,
+plus the dead dirs (dogfood, out, accel, spec, `briev-compiler-baseline`
+— its snapshot `0f97c1c7` verified ancestor) and `/tmp/opencode` scratch.
+
+**Kept:** `briev-lang/` (canonical) and `briv-compiler-baseline/` —
+AGENTS rule 12b's persistent A/B baseline worktree, genuinely important
+for compare_baseline.sh regression work.
+
+Every branch named above is a verified ancestor of main: no stale code
+seeped, none was lost that wasn't already in the tree.
 
 ## 2. Session ledger (commit index)
 
@@ -109,6 +121,12 @@ should adopt from the start:
 3. **One structural gotcha:** bash tool cwd resets to
    `briev-lang` between invocations regardless of intent — pass
    `workdir` explicitly on EVERY command that touches a tree.
+4. **Post-convergence note (2026-08-27 evening):** once main and
+   foundation converged to identical content, the mirroring stopped
+   flipping hunks (identical trees = idempotent mirror) — and the aux
+   trees were then retired entirely. If edits mysteriously revert on
+   the SINGLE tree, the §2 playbook applies unchanged; also re-check
+   whether any new worktree/sync service appeared.
 
 ## 4. Known-live gates (do not misread as regressions)
 
@@ -147,10 +165,8 @@ should adopt from the start:
 
 ## 6. First tasks for the next agent
 
-1. `git fetch /home/randozart/Desktop/Projects/briev-backend-foundation
-   backend-foundation && git merge --ff-only FETCH_HEAD` in
-   `briev-lang` once the axiom agent's tree is clean → main converges
-   at `24bf3eef` (plus whatever they added).
+1. ~~ff to main~~ DONE — main converged past `24bf3eef` through
+   `e11af56a` (axiom base + rescued fields included).
 2. Tracker hygiene: items 2/3/7 and bug #1's partial-line still show
    stale "Remaining" text; actual states are DONE/verified-in-sweep
    (superseded by this report — fix if the tracker is still the
