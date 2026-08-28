@@ -272,7 +272,7 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
             _ => { i += 1; }
         }
     }
-    Ok(Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None, explicit: false, post_authority})
+    Ok(Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None, explicit: false, post_authority: false})
 }
 
 fn parse_statedecl(parts: &[SExpr]) -> Result<TopLevel, String> {

@@ -160,6 +160,36 @@ faster than Python's own function call (the `METH_FASTCALL` shim).
 
 ---
 
+## 4b. `extern` — importing foreign HARDWARE (`.cbv`)
+
+Software FFI imports *functions*; the circuit target imports *modules*.
+An `extern` declaration names an HDL file and states the port contract
+the compiler enforces at every instantiation site:
+
+```briev
+// ports declared like a cell; body lives in the referenced file
+extern UartTop(rx: Int) -> byte_out: Int from "rtl/uart.v";
+
+// generic foreign modules work too:
+extern Fifo<T>(width: Int, push: T) -> pop: T from "rtl/fifo.sv";
+```
+
+What happens per target:
+
+| Target | Behavior |
+|--------|----------|
+| `circt` (`.cbv`) | emits an `hw.module.extern` blackbox with implicit `clock`/`reset` + your ports; the referenced file is copied beside the output so verilator/Vivado link it automatically |
+| native/LLVM | hard error — software binaries have no RTL linkage; model the device in Briev or build for the circuit target |
+
+Rules worth knowing:
+
+- The file path resolves relative to the `.cbv` source; a missing file is a
+  compile error naming the path.
+- Call sites cannot distinguish an imported module from a defined `cell` —
+  identical port matching, identical instantiation.
+- Ports are the TYPE-LEVEL CONTRACT: keep them exact, they are what the
+  compiler checks (and what your synthesis constraints wire to).
+
 ## 5. Summary
 
 | Task | Tool |

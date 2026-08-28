@@ -168,6 +168,19 @@ contract == tamer behavior.
   `VolatileStore#(Ptr<T>, T) -> Bool` (2026-08-27) lower through the
   boxed-pointer ABI; width/alignment from the declared pointee via the
   casting graph. Raw i64 addresses belong to `Load#`/`Store#`.
+- **Foreign imports** (2026-08-27, plan 2026-08-27-cbv-foreign-hardware-
+  and-mmio.md Slice A): `extern Name(ports) -> outs from "path";` emits an
+  `hw.module.extern` blackbox whose port list uses the ONE-paren-list
+  grammar (inputs `%`-named, outputs BARE-named — no `-> (outs)` wrapper;
+  that form belongs to `hw.instance`). Implicit `clock`/`reset` injection
+  matches defined cells so instance sites are shape-identical. Referenced
+  HDL copies beside the output (missing file = hard error). Extern cells
+  contribute NO program-visible variables.
+- **MMIO pins** (Slice B): numeric `@`-addressed triggers are top-module
+  INPUT ports emitted ADDRESS-SORTED from the live `mmio_vars` table
+  (deterministic layout rule). Dynamic/symbolic trigger addresses are
+  capability errors (hardware pins are static). Pin assignment is a
+  typechecker-level input-pin error.
 - Canonical host ids mirror the VM table (`GetGlobalId#` etc. lower to
   BuiltIn inputs here).
 - Validation: spirv-val on every emitted binary + spirv-dis structural

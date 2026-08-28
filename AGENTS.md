@@ -305,6 +305,7 @@ contracts.
 | **Language syntax, contracts, coding standards, backend rules** | `docs/architecture/agent-reference.md` |
 | **Full pre-rewrite guidelines** | `AGENTS.md.archive` |
 | **Historical context** | `AGENTS_HISTORY.md`, `AGENTS_HISTORY_2.md` |
+| **Session report (2026-08-27)** | `docs/2026-08-27-session-report.md` — end-state map, working discipline (tree-revert hazard), live gates, deferred index, first tasks |
 | **Session report (2026-07-31)** | `docs/2026-07-31-session-report.md` |
 | **Bug diagnoses** | `BUGS.md` |
 | **Architecture overview** | `docs/architecture/overview.md` |

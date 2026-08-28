@@ -603,6 +603,7 @@ impl fmt::Display for Contract {
     }
 }
 
+
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -1508,6 +1508,25 @@ trg input_ready @ device;
 
 `@` binds a trigger to its source. Trigger source forms are target/profile validated. Typed event ports on `obj`/`cell` declarations are the staged replacement for a typed trigger surface.
 
+### 13.1 Addressed triggers are MMIO input pins (2026-08-27)
+
+A trigger with a numeric address (`trg sensor @ 0x1000;`) is an MMIO INPUT
+pin whose VALUE is a readable `Int` in transaction and definition bodies on
+every target:
+
+- native/embedded (`ll`): the read lowers to a `volatile` load at the
+  static address through the boxed-pointer ABI (`VolatileLoad#` shares the
+  same convention for computed pointers);
+- circuits (`cbv`): the pin becomes an `@top` input port; ports emit
+  ADDRESS-SORTED so separately compiled partitions agree on bus layout.
+
+Pins are driven by hardware — programs only observe them. Assignment to an
+@-addressed trigger is a compile error (declare a separate output `let`
+field, or use `VolatileStore#` over a computed pointer for output
+registers). Dynamic (`@ *ptr`) and symbolic address forms have no static
+pin: on `cbv` they are capability errors; on native surfaces they flow
+through the existing pointer/deref paths.
+
 `trg!` does not exist. Local asynchronous suspension uses ports, nodes, spawned tasks, and `await`.
 
 Event fairness assumptions belong to explicit event-port contracts. There is no global `#assume_event` pragma.
