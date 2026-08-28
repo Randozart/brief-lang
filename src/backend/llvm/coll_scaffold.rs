@@ -360,6 +360,7 @@ fn default_coll_contract() -> Contract {
         post_condition: Expr::Bool(true),
         watchdog: None,
         explicit: false,
+        post_authority: false,
         span: None,
     }
 }

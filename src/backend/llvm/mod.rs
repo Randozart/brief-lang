@@ -2877,6 +2877,8 @@ impl LlvmBackend {
                                     crate::ast::PropertyValue::Identifier(impl_name.to_string()),
                                 ),
                                 impl_name: op.to_string(),
+                                // 2026-08-27 (axiom WIP completion): no lemmas.
+                                trusted_lemmas: vec![],
                                 span: None,
                             });
                         }

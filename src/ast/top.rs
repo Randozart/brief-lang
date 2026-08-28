@@ -201,6 +201,10 @@ pub struct Contract {
     /// A defn/txn with no brackets has a default `[true][true]` — that is NOT
     /// a tautology; only an explicit `[true][true]` is rejected at proof time.
     pub explicit: bool,
+    /// 2026-08-27: Whether the postcondition is taken on authority instead of
+    /// proof (SPEC §10.1). The pre is still proven; the post remains visible
+    /// and usable to callers; only the author's own discharge is skipped.
+    pub post_authority: bool,
 }
 
 impl Contract {
@@ -211,6 +215,7 @@ impl Contract {
             watchdog: None,
             span: None,
             explicit: false,
+            post_authority: false,
         }
     }
 }
@@ -1115,6 +1120,10 @@ pub struct OperatorDef {
     /// Old-style implementation name string (from `op Add ~> "string"`).
     pub impl_name: String,
     pub span: Option<Span>,
+    /// 2026-08-27: Optimizer lemmas declared on this op (SPEC §8.8).
+    /// Each string is a validated member of the configured lemma_properties
+    /// vocabulary (config/axioms.dbv). Empty = no lemmas declared.
+    pub trusted_lemmas: Vec<String>,
 }
 
 /// 2026-07-26: Operator binding: op Name(Proto?): expr;
@@ -1154,6 +1163,11 @@ pub struct CastEdge {
     /// 2026-07-23: Required binding — the transformation function.
     /// e.g., CastTo(#String<UTF8>) = ASCII_to_UTF8(#L);
     pub binding: Option<CastBinding>,
+    /// 2026-08-27: Authority marker (SPEC §8.7). When true, the equivalence
+    /// proof is taken on trust; the binding must still exist but the body
+    /// need not be proven. Recorded as "axiom-discharged" in verification
+    /// output; either direction discharges the round-trip obligation.
+    pub trusted_axiom: bool,
 }
 
 #[derive(Debug, Clone)]

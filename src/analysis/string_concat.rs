@@ -160,7 +160,7 @@ mod tests {
                 watchdog: None,
                 span: None,
                 explicit: false,
-            },
+            post_authority: false},
             body: vec![Statement::Term(Some(Expr::BinaryOp(
                 BinaryOpKind::Add,
                 Box::new(Expr::Identifier("a".to_string())),

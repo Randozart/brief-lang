@@ -249,6 +249,7 @@ fn synthesize(program: &mut Vec<TopLevel>, body: Vec<Statement>) -> Result<(), S
             watchdog: None,
             span: None,
             explicit: true,
+            post_authority: false,
         },
         body,
         metadata: std::collections::HashMap::new(),

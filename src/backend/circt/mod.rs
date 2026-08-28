@@ -1923,7 +1923,7 @@ mod tests {
             parameters: vec![],
             output_type: None,
             outputs: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, explicit: false, span: None, post_authority: false},
             body,
             metadata: HashMap::new(),
             derivation: None,

@@ -717,7 +717,7 @@ mod tests {
                 watchdog: None,
                 span: None,
                 explicit: true,
-            },
+            post_authority: false},
             body,
             metadata: HashMap::new(),
             derivation: None,

@@ -207,7 +207,7 @@ mod tests {
                 watchdog: None,
                 span: None,
                 explicit: false,
-            },
+            post_authority: false},
             body,
             metadata: std::collections::HashMap::new(),
             derivation: None,

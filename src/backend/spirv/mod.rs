@@ -193,7 +193,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Index(
@@ -350,7 +350,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Index(
@@ -455,7 +455,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Index(
@@ -569,7 +569,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     // total = Store#(total, Load#(5)) — 5 is not an address.
                     Statement::Assign(
@@ -621,7 +621,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![Statement::Expression(Expr::Call(
                     "Load#".into(),
                     vec![
@@ -707,7 +707,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 // Scalar state is reached through the §2.3 address surface.
                 body: vec![Statement::Expression(Expr::Call(
                     "Store#".into(),
@@ -759,7 +759,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![Statement::Assign(
                     Expr::Identifier("i".into()),
                     Expr::BinaryOp(
@@ -811,7 +811,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![Statement::Assign(
                     Expr::Identifier("s".into()),
                     Expr::Identifier("s".into()),
