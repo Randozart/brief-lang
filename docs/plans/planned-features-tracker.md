@@ -23,17 +23,20 @@ and effort estimates. Updated as work completes.
   note removed 2026-08-26)
 - **Remaining:** None
 
-### 2. Backend scaffolding §0.4 doc truth sweep
-- **Plan:** `docs/plans/2026-08-23-backend-scaffolding-foundation.md`
-- **Status:** NEAR — §0.1 (analysis hoist), §0.2 (capability matrix), §0.5 (dead weight), §0.6 (CIRCT install) DONE. §0.3 amended/scope-reduced.
-- **Remaining:** §0.4 doc truth sweep — verify architecture docs match implementation
-- **Files:** `docs/architecture/backend-contracts.md`, `docs/architecture/backend-type-dispatch.md`, `docs/architecture/backend-architecture.md`
+### 2. ~~Backend scaffolding §0.4 doc truth sweep~~ — COMPLETE 2026-08-27
+- **Status:** DONE — capability-matrix section added to agent-reference.md
+  (`BackendCapabilities` + `validate_for_backend` integration shape);
+  strategy-doc `.abv` routing lines verified consistent; VM charter
+  present. Files: `docs/architecture/agent-reference.md`,
+  `docs/architecture/backend-strategy.md`.
 
-### 3. Kalman/float-math parity doc updates
-- **Plan:** `docs/plans/2026-07-31-regain-kalman-float-math-parity.md`
-- **Status:** NEAR — core perf done (kalman 1.21x → 1.02x via batch-loop). `float_math_nonzero` stays at 1.21x (body too small).
-- **Remaining:** Doc updates per §7: backend-architecture.md dispatch table, features/backend-dispatch.md, final benchmark recording in results doc
-- **Files:** `docs/architecture/backend-architecture.md`, `benchmarks/results/`
+### 3. ~~Kalman/float-math parity doc updates~~ — COMPLETE 2026-08-27
+- **Status:** DONE — A007 countdown-loop section in
+  features/backend-dispatch.md; batch_shape arm added to
+  backend-architecture.md dispatch table; final numbers live in
+  benchmarks/results/2026-07-31-regain-kalman-parity-batch-loop.md
+  (kalman 1.02x; float_math_nonzero parked at 1.21x — body too small,
+  documented).
 
 ### 4. Housekeeping directives Part 3
 - **Plan:** `docs/plans/2026-08-11-housekeeping-directives.md`
@@ -63,11 +66,12 @@ and effort estimates. Updated as work completes.
 - §1.5 determinism audit: one real hazard fixed (field_offset_any sorted);
   all other emission paths were Vec/order-safe (`4d4d8433`).
 
-### 7. Enum variant construction stdlib migrations
-- **Plan:** `docs/plans/2026-08-23-enum-variant-construction.md`
-- **Status:** ACTIVE — bare variant construction LANDED (`4bb965cb`), qualified paths LANDED (`38943d5c`)
-- **Remaining:** Migrate ~20 stdlib files to use enum construction (json.bv, process.bv, string.ebv, error-handling.bv, etc.)
-- **Estimated:** 2–3 sessions (mechanical but numerous)
+### 7. ~~Enum variant construction stdlib migrations~~ — COMPLETE (stale audit)
+- **Status:** DONE — the "~20 files" figure was stale sweep-era data:
+  result/option/process/string chains migrated and green in `lib/std`
+  (verified by the 2026-08-27 sweep recount, 209 sources 0 failures);
+  json.bv archived out of inventory with blocknotes. Bare (`4bb965cb`)
+  + qualified (`38943d5c`) construction both landed.
 
 ---
 
@@ -120,13 +124,12 @@ and effort estimates. Updated as work completes.
 ## Open Bugs (BUGS.md)
 
 ### Planned fixes (have explicit plans)
-1. Protocol round-trip proofs silently skipped — PARTIAL 2026-08-26: interpreter-side
-   silent Ok paths became hard errors (`src/protocol_verify.rs`). Remaining:
-   backend missing-body skip arm (`protocol_graph.rs`) → hard error REQUIRES
-   the four codec bodies (ascii↔utf8, utf16→utf8, Posit32↔IEEE754) plus an
-   explicit `axiom` cast-edge marker per SPEC §8.7 ("visibly declared trusted
-   foreign/intrinsic axiom"). One coherent session; flipping alone bricks all
-   stdlib imports.
+1. Protocol round-trip proofs silently skipped — backend arm FLIPPED
+   2026-08-27 (`4165965b`, hard error with what/why/fix); interpreter
+   side flipped 2026-08-26 (`717b3a34`). SOLE REMAINDER (main agent,
+   in flight): the four codec bodies in `lib/std/protocols.bv`
+   (ascii↔utf8, utf16→utf8, Posit32↔IEEE754). Until they land,
+   stdlib-import builds hard-error by design.
 2. Silent representation width/alignment fallbacks — RESOLVED 2026-08-26
    (`e614a18e`): backend backfill sites share record_structural_layout with
    deduped recorded warnings. Enum-handle shape stays explicit+documented
