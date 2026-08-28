@@ -151,6 +151,16 @@ Explicitly trusted FFI or protocol axioms are permitted only when:
 - all mechanically checkable obligations are proven;
 - the trust boundary appears in the verification report.
 
+#### Declared authority (`axiom`) — enforcement dial
+
+Every `axiom`-declared site is counted. The strict report renders the full authority ledger regardless of configuration. Outside strict profiles the enforcement dial (`config/axioms.dbv`, `policy`) selects acceptance behavior:
+
+- `allow` — accepted; one info line per site in the warnings stream.
+- `warn` — accepted; a prominent warning naming every site rides alongside.
+- `deny` — any axiom site is a hard error: prove it or remove the shortcut.
+
+The compiler learns nothing hardcoded about individual axioms; the vocabulary of optimizer-exploitable lemma properties is configuration (`lemma_properties`).
+
 #### `.f` — formatted source
 
 `.f` is a strict indentation dialect of the same language.
@@ -686,7 +696,16 @@ let bits = text as Bit;
 let number = text as String as Int;
 ```
 
-Missing proof evidence is an error unless the edge is visibly declared as a trusted foreign/intrinsic axiom.
+Missing proof evidence is an error unless the edge is declared as a trusted axiom. Axioms are declared, not assumed: the `axiom` contextual keyword prefixes the edge declaration, and the trust enters the verification ledger.
+
+```briev
+proto Posit32: #Float {
+    axiom CastTo(#Float<IEEE754>)   = Posit32_to_IEEE754(#Lh);
+    axiom CastFrom(#Float<IEEE754>) = IEEE754_to_Posit32(#Lh);
+};
+```
+
+An axiomatic edge must still name an existing binding (the `as` remains callable); what is taken on authority is the equivalence proof, not the route's existence. A round-trip obligation is discharged when either direction is axiomatic; the discharge is recorded as "axiom-discharged" in verification output. `axiom` is a contextual keyword: recognized only directly before `CastTo(`, `CastFrom(`, `defn`, `txn`, `node`, and `op`; in every other position it is an ordinary identifier.
 
 ### 8.8 `impl`
 
@@ -697,6 +716,14 @@ impl Point<Float> {
     op Add(Point<Float>): add_points(#Lh, #Rh);
 };
 ```
+
+Op bindings may carry optimizer lemmas as a bracketed property list. Each identifier must be a member of the configured lemma-property vocabulary; unknown properties are rejected at parse validation.
+
+```briev
+op Add: func(#Lh, #Rh) [commutative];
+```
+
+A lemma grants the optimizer exactly the declared right (e.g. operand reordering) and nothing else; it never substitutes for a proof of the operation's semantics. The `axiom` prefix before an `op` binding marks the binding itself as authoritative — taken on authority instead of derived — and enters the ledger like every other declared trust site.
 
 Inherent implementations may appear only in the target declaration's module. Explicit trait implementations obey ownership coherence: either the trait or target must be locally owned.
 
@@ -1062,6 +1089,12 @@ defn divide(a: Int, b: Int) -> Int [b != 0][term * b == a] {
 Omitted clauses retain implicit provenance. The compiler must distinguish omission from an explicitly written tautology.
 
 Explicit `[true][true]` is invalid everywhere: it asserts nothing (`true ⇒ true` is trivial), so it is indistinguishable from an omitted contract and records no obligation.
+
+The `axiom` contextual keyword may prefix a callable or transition declaration. Its effect is scoped to the contract: preconditions remain fully proven, while postconditions are taken on authority — discharged by declaration instead of proof. The postcondition stays visible and usable to every caller (range narrowing, bounds extraction consume it unchanged); what is skipped is only the author's own discharge obligation. The explicit-tautology rejection above applies unchanged under authority: `axiom defn f() [true][true];` is still invalid. Every authoritative contract enters the verification ledger.
+
+```briev
+axiom defn codec(x: Int) -> Int [x >= 0][result <= x * 2];
+```
 
 Contracts are **mandatory** (present and non-trivial) on `node`, `txn`, and `asm` declarations: the reactor uses the pre/post pair to prove and classify the transition. `defn` contracts are optional; `cell` declarations do not require a contract.
 

@@ -1,7 +1,27 @@
 # Axiom Facility — Declared Authority for Unprovable-But-True
 
-**Date:** 2026-08-26
-**Status plan:** execute slices c1–c6, one commit each.
+**Date:** 2026-08-26 · **Updated:** 2026-08-27 (session resume)
+**Status plan:** execute slices F1, c2–c6, one commit each.
+
+## Update 2026-08-27 — session resume
+
+The 08-26 session was interrupted twice; work landed as rescue commits
+`bc1dc653` (scaffold) + `2dfc8d75` (owner's mechanical repair). Audit results:
+
+- Landed: plan doc, AxiomPolicy/AxiomSettings/accessor in config_tuning.rs,
+  loader (ConfigDb/.dbvl form), accel_probe_margin fix.
+- **SPEC-first directive (owner)**: SPEC §8.7/§8.8/§10.1 formalization rides
+  FIRST this session, before F1 — spec is the contract, implementation follows.
+- **Config format decision (owner, resolved)**: human-editable config is
+  `.dbv` (schema'd, `parse_document_quoted`); machine-generated tuning tables
+  stay `.dbvl`. House rule now documented. `config/axioms.dbv` replaces the
+  `.dbvl` the repair commit created; loader switches to the
+  `backend/metadata.rs` pattern.
+- **F1 slice (new)**: .dbv flip + loader rewrite + restore `examples/
+  error-handling` (binary collateral-deleted in `bc1dc653`, blob recoverable
+  from `bc1dc653^` via `git cat-file` — additive, Rule 8-safe) + reinstate
+  `arena_min_budget` doc comment (rationale-comment loss) + `axioms_dbv_
+  parses` test.
 
 ## Problem
 
@@ -72,8 +92,11 @@ recorded "axiom-discharged" in output.
 
 ## Slices → commits
 
-- **c1** This doc + `config/axioms.dbvl` + `AxiomPolicy` loader
-  (config_tuning.rs clone of load_ir_lowering).
+- **SPEC** §8.7 (cast-edge axiom grammar), §8.8 (op lemma brackets), §10.1
+  (contract-post authority), §3.2 (enforcement dial + ledger) — FIRST, this
+  session, before any parser work (owner directive: spec is the contract).
+- **F1** `config/axioms.dbv` + `parse_document_quoted` loader + `examples/
+  error-handling` restore + doc-comment repairs + `axioms_dbv_parses` test.
 - **c2** AST: `CastEdge.trusted_axiom: bool`, `Contract.post_authority: bool`,
   `OperatorDef.trusted_lemmas: Vec<String>` (+ OperatorBinding passthrough);
   BEAST serialize/deserialize; display; parser recognition at 5 anchors +
@@ -87,13 +110,8 @@ recorded "axiom-discharged" in output.
   extract_bound_from_postcondition/range consumers.
 - **c5** Class-3: lemma vocab validation against config list; EXPERIMENT DOC
   before any consumer; wire commutation into increment-detection iff held.
-- **c6** SPEC §8.7 rewritten with grammar + semantics per class + future
-  directions paragraph; tracker bug#1 closed; BUGS.md entry rewritten as
-  RESOLVED(PARTIAL→FULL for skip hole); milestone log.
-
-SPEC updates ride the same commit as each core feature (owner directive):
-c2 syntax sketch in §8.7 if visible earlier, full rewrite in c6, lemma
-consumer documented in c5 if landed.
+- **c6** Tracker bug#1 closed; BUGS.md entry rewritten as RESOLVED (skip hole
+  closed); milestone log. (SPEC formalization already landed SPEC-first.)
 
 ## Non-goals
 
