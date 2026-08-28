@@ -1126,7 +1126,7 @@ mod tests {
                 target_category: "String".to_string(),
                 target_variant: "UTF8".to_string(),
                 binding: None,
-            }],
+            trusted_axiom: false}],
             cross_ops: vec![],
             span: None,
         });
@@ -1183,7 +1183,7 @@ mod tests {
                         fn_name: "cstr_to_briev".to_string(),
                         param: "#Lh".to_string(),
                     }),
-                },
+                trusted_axiom: false},
                 crate::ast::top::CastEdge {
                     direction: crate::ast::top::CastDirection::CastFrom,
                     target_category: "String".to_string(),
@@ -1192,7 +1192,7 @@ mod tests {
                         fn_name: "str_to_c".to_string(),
                         param: "#Lh".to_string(),
                     }),
-                },
+                trusted_axiom: false},
             ],
             cross_ops: vec![],
             span: None,
@@ -1229,7 +1229,7 @@ mod tests {
                     fn_name: fn_name.to_string(),
                     param: "#Lh".to_string(),
                 }),
-            }],
+            trusted_axiom: false}],
             cross_ops: vec![],
             span: None,
         };
@@ -1327,7 +1327,7 @@ mod cross_op_tests {
                     fn_name: "str_to_c".to_string(),
                     param: "#Lh".to_string(),
                 }),
-            }],
+            trusted_axiom: false}],
             cross_ops: vec![OperatorDef {
                 op: "Concat".to_string(),
                 params: vec![],
@@ -1340,7 +1340,7 @@ mod cross_op_tests {
                 ])),
                 impl_name: String::new(),
                 span: None,
-            }],
+            trusted_lemmas: vec![]}],
             span: None,
         });
         assert_eq!(graph.get_variant_op("String", "C_String", "Concat"), Some("cstring_concat"));

@@ -124,6 +124,9 @@ fn emit_contract(c: &Contract) -> SExpr {
     let mut children = vec![atom("contract")];
     children.push(list(&[atom("pre"), emit_expr(&c.pre_condition)]));
     children.push(list(&[atom("post"), emit_expr(&c.post_condition)]));
+    if c.post_authority {
+        children.push(atom("post_authority"));
+    }
     SExpr::List(children)
 }
 
@@ -362,6 +365,7 @@ mod tests {
             post_condition: Expr::Bool(true),
             watchdog: None,
             explicit: true,
+            post_authority: false,
             span: None,
         };
         let items = vec![

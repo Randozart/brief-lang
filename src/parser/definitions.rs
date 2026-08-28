@@ -1623,6 +1623,7 @@ impl<'a> Parser<'a> {
             watchdog,
             span: None,
             explicit,
+            post_authority: false,
         })
     }
 
@@ -2910,7 +2911,7 @@ impl<'a> Parser<'a> {
                         None
                     };
                     self.eat(&Token::Semicolon);
-                    cast_edges.push(CastEdge { direction, target_category, target_variant, binding });
+                    cast_edges.push(CastEdge { direction, target_category, target_variant, binding, trusted_axiom: false });
                 } else if item_name == "op" {
                     let op_name = self.expect_identifier()?;
                     self.expect(Token::LParen)?;
@@ -2943,6 +2944,8 @@ impl<'a> Parser<'a> {
                         suf: None,
                         impl_args,
                         impl_name: String::new(),
+                        // 2026-08-27 (axiom WIP completion): no lemmas here.
+                        trusted_lemmas: vec![],
                         span: None,
                     });
                 } else {

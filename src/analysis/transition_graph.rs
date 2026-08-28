@@ -1553,7 +1553,7 @@ mod tests {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: body.clone(),
             span: None,
             metadata: std::collections::HashMap::new(),
@@ -1597,7 +1597,7 @@ mod tests {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: body_a,
             span: None,
             metadata: std::collections::HashMap::new(),
@@ -1635,7 +1635,7 @@ mod tests {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body,
             span: None,
             metadata: std::collections::HashMap::new(),
@@ -1669,7 +1669,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![Statement::Assign(
                     Expr::Identifier("count".to_string()),
                     Expr::BinaryOp(BinaryOpKind::Add,
@@ -1923,7 +1923,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Expression(Expr::Call("PrintLn#".to_string(), vec![], None)),
                     Statement::Term(None),
@@ -1964,7 +1964,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Guarded(
                         Expr::BinaryOp(BinaryOpKind::Eq,
@@ -2023,7 +2023,7 @@ mod tests {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(Expr::Identifier("count".to_string()),
                         Expr::BinaryOp(BinaryOpKind::Add,

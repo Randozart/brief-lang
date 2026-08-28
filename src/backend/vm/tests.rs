@@ -19,6 +19,7 @@ fn defn(name: &str, params: Vec<(String, Type)>, body: Vec<Statement>) -> TopLev
             post_condition: Expr::Bool(true),
             watchdog: None,
             explicit: false,
+            post_authority: false,
             span: None,
         },
         body,

@@ -41,6 +41,7 @@ pub struct TargetSettings {
 /// Global (target-independent) IR lowering tuning (plan §8.2).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IrLoweringSettings {
+    /// Below this `--optimize-budget`, skip the bump arena (direct malloc).
     pub arena_min_budget: u32,
     /// Initial per-txn bump arena size.
     pub arena_initial_size: u64,
@@ -110,7 +111,7 @@ const DEFAULT_AXIOM_SETTINGS: AxiomSettings = AxiomSettings {
     lemma_properties: Vec::new(),
 };
 
-/// Cached axiom settings (baked config/axioms.dbvl).
+/// Cached axiom settings (baked config/axioms.dbv).
 static AXIOM_SETTINGS: LazyLock<AxiomSettings> = LazyLock::new(load_axioms);
 
 /// Return the global axiom settings.
@@ -270,32 +271,72 @@ fn load_ir_lowering() -> IrLoweringSettings {
     }
 }
 
-/// Load axiom settings from config/axioms.dbvl.
-/// Absent keys fall back to the hardcoded defaults (allow, no lemma properties).
+/// Load axiom settings from config/axioms.dbv (structured Data Briev —
+/// human-editable config, house rule 2026-08-27). Parsed with the full v2
+/// parser (quoted mode), same pattern as backend/metadata.rs.
+/// Absent fields fall back to the hardcoded defaults (allow, no lemma
+/// properties). Panics on parse failure — the .dbv is a compile-time invariant.
 fn load_axioms() -> AxiomSettings {
-    let content = include_str!("../config/axioms.dbvl");
-    let db = match crate::dbriev::config_db::ConfigDb::from_str(content) {
-        Ok(db) => db,
-        Err(e) => panic!("config/axioms.dbvl parse error: {}", e),
+    let content = include_str!("../config/axioms.dbv");
+    let doc = crate::dbriev::v2::parse_document_quoted(content)
+        .expect("config/axioms.dbv: parse failed — check .dbv syntax");
+    let mut settings = AxiomSettings {
+        policy: DEFAULT_AXIOM_SETTINGS.policy,
+        lemma_properties: Vec::new(),
     };
-    let policy = db
-        .field_string("policy", 0)
-        .map(AxiomPolicy::from_str_loose)
-        .unwrap_or(DEFAULT_AXIOM_SETTINGS.policy);
-    let lemma_properties: Vec<String> = db
-        .field_string("lemma_properties", 0)
-        .map(|s| {
-            s.split(|c: char| c == ',' || c == ' ')
-                .filter(|t| !t.is_empty())
-                .map(|t| t.trim().to_ascii_lowercase())
-                .collect()
-        })
-        .unwrap_or_default();
-    AxiomSettings {
-        policy,
-        lemma_properties,
+    for group in &doc.data_groups {
+        if group.schema_name.as_deref() != Some("AxiomSettings") {
+            continue;
+        }
+        for entry in &group.entries {
+            let key = match entry.key {
+                Some(ref k) => k.to_ascii_lowercase(),
+                None => continue,
+            };
+            match key.as_str() {
+                "policy" => {
+                    if let Some(crate::dbriev::v2::DataField::Positional(
+                        crate::dbriev::v2::DataValue::String(s),
+                    )) = entry.fields.first()
+                    {
+                        settings.policy = AxiomPolicy::from_str_loose(s);
+                    }
+                }
+                "lemma_properties" => {
+                    if let Some(crate::dbriev::v2::DataField::Positional(v)) = entry.fields.first() {
+                        settings.lemma_properties = lemma_vocab_values(v);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
+    settings
 }
+
+/// Flatten a lemma_properties value into the lowercase vocabulary list.
+/// Accepts one bare token ("commutative"), a comma-separated token
+/// ("commutative, identity"), or a Vec[...] value.
+fn lemma_vocab_values(value: &crate::dbriev::v2::DataValue) -> Vec<String> {
+    let mut out = Vec::new();
+    match value {
+        crate::dbriev::v2::DataValue::List(items) => {
+            for item in items {
+                out.extend(lemma_vocab_values(item));
+            }
+        }
+        crate::dbriev::v2::DataValue::String(s) => {
+            out.extend(
+                s.split(|c: char| c == ',' || c == ' ')
+                    .filter(|t| !t.is_empty())
+                    .map(|t| t.trim().to_ascii_lowercase()),
+            );
+        }
+        _ => {}
+    }
+    out
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -463,5 +504,51 @@ vector_min_width = 4
         // A more specific prefix beats a shorter one (both present).
         let s = target_settings_for("x86_64-foo");
         assert_eq!(s.float_registers, 16);
+}
+
+    // ── Axiom settings (plan 2026-08-26-axiom-facility) ──
+
+    #[test]
+    fn axioms_dbv_parses() {
+        let s = load_axioms();
+        // config/axioms.dbv currently ships policy: allow.
+        assert_eq!(s.policy, AxiomPolicy::Allow);
+        // The baked vocabulary declares commutative.
+        assert!(s.lemma_properties.iter().any(|p| p == "commutative"));
+    }
+
+    #[test]
+    fn axiom_policy_from_str_loose() {
+        assert_eq!(AxiomPolicy::from_str_loose("allow"), AxiomPolicy::Allow);
+        assert_eq!(AxiomPolicy::from_str_loose("Warn"), AxiomPolicy::Warn);
+        assert_eq!(AxiomPolicy::from_str_loose(" deny "), AxiomPolicy::Deny);
+        // Unknown values fall back to allow, never deny.
+        assert_eq!(AxiomPolicy::from_str_loose("sometimes"), AxiomPolicy::Allow);
+        assert_eq!(AxiomPolicy::from_str_loose(""), AxiomPolicy::Allow);
+    }
+
+    #[test]
+    fn lemma_vocab_values_splits_tokens() {
+        use crate::dbriev::v2::DataValue;
+        // Bare token.
+        assert_eq!(
+            lemma_vocab_values(&DataValue::String("commutative".into())),
+            vec!["commutative".to_string()]
+        );
+        // Comma-separated token (bare-token parser preserves spaces).
+        assert_eq!(
+            lemma_vocab_values(&DataValue::String("commutative, identity".into())),
+            vec!["commutative".to_string(), "identity".to_string()]
+        );
+        // Vec[...] value flattens.
+        assert_eq!(
+            lemma_vocab_values(&DataValue::List(vec![
+                DataValue::String("commutative".into()),
+                DataValue::String("IDENTITY".into()),
+            ])),
+            vec!["commutative".to_string(), "identity".to_string()]
+        );
+        // Non-string values contribute nothing.
+        assert!(lemma_vocab_values(&DataValue::Int(7)).is_empty());
     }
 }

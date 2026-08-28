@@ -106,7 +106,7 @@ pub fn arb_contract(max_depth: usize) -> impl Strategy<Value = Contract> {
             watchdog: None,
             explicit: false,
             span: None,
-        }
+        post_authority: false}
     })
 }
 

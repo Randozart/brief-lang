@@ -367,6 +367,7 @@ fn make_wrapper(d: &crate::ast::Definition, entries: &[String]) -> TopLevel {
         watchdog: None,
         span: None,
         explicit: true,
+        post_authority: false,
     };
     TopLevel::Transaction(crate::ast::Transaction {
         name: wrapper_name,

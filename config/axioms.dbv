@@ -1,4 +1,8 @@
-// ── Axiom Facility Settings (plan 2026-08-26-axiom-facility.md) ──────
+// config/axioms.dbv — Axiom Facility settings (plan 2026-08-26-axiom-facility.md)
+// House rule (2026-08-27): human-editable config uses structured .dbv
+// (schema'd, parse_document_quoted); machine-generated tuning tables use
+// flat .dbvl (ConfigDb). This file is human-editable → .dbv.
+//
 // Declared-authority enforcement dial. `axiom` marks knowledge taken on
 // authority instead of proof (SPEC §8.7): axiomatic cast edges, authoritative
 // contract posts, op lemmas.
@@ -7,10 +11,17 @@
 //   allow: accepted; one info line per site in the warnings stream.
 //   warn:  accepted; a prominent warning naming every site rides alongside.
 //   deny:  any axiom site is a hard error — prove it or remove the shortcut.
+// The .s strict report always renders the full ledger regardless of this.
 //
 // lemma_properties: closed vocabulary of optimizer-exploitable properties an
 // op binding may declare; anything else is rejected at parse validation.
 
-policy: allow;
+schema AxiomSettings {
+    policy: String;
+    lemma_properties: Vec[String];
+};
 
-lemma_properties: commutative;
+as AxiomSettings {
+    policy: allow;
+    lemma_properties: commutative;
+};

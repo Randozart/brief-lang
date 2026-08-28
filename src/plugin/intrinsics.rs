@@ -356,7 +356,7 @@ mod tests {
             output_type: None,
             outputs: vec![],
             contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-                watchdog: None, span: None, explicit: false },
+                watchdog: None, span: None, explicit: false, post_authority: false},
             body: vec![],
             metadata: HashMap::new(),
             derivation: None,

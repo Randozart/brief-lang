@@ -172,7 +172,7 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
     let mut params = Vec::new();
     let mut outputs = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        watchdog: None, span: None, explicit: false };
+        watchdog: None, span: None, explicit: false, post_authority: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut i = 2;
@@ -209,7 +209,7 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     let name = tag(parts, 1)?.to_string();
     let mut params = Vec::new();
     let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
-        watchdog: None, span: None, explicit: false };
+        watchdog: None, span: None, explicit: false, post_authority: false };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut is_reactive = false;
@@ -249,6 +249,7 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
     let parts = match expr { SExpr::List(p) => p, _ => return Err("expected list for contract".into()) };
     let mut pre = Expr::Bool(true);
     let mut post = Expr::Bool(true);
+    let mut post_authority = false;
     let mut i = 1;
     while i < parts.len() {
         let key = child_tag(&parts[i])?;
@@ -264,10 +265,14 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
                 post = parse_expr(&sub[1])?;
                 i += 1;
             }
+            "post_authority" => {
+                post_authority = true;
+                i += 1;
+            }
             _ => { i += 1; }
         }
     }
-    Ok(Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None, explicit: false })
+    Ok(Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None, explicit: false, post_authority})
 }
 
 fn parse_statedecl(parts: &[SExpr]) -> Result<TopLevel, String> {

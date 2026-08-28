@@ -285,6 +285,7 @@ mod tests {
             target_category: cat.to_string(),
             target_variant: var.to_string(),
             binding: None,
+            trusted_axiom: false,
         }
     }
 
@@ -351,7 +352,7 @@ mod tests {
                 watchdog: None,
                 span: None,
                 explicit: false,
-            },
+            post_authority: false},
             body: vec![Statement::Term(Some(Expr::BinaryOp(
                 op,
                 Box::new(Expr::Identifier("x".to_string())),
@@ -379,7 +380,7 @@ mod tests {
                     fn_name: fn_name.to_string(),
                     param: "#Lh".to_string(),
                 }),
-            }],
+            trusted_axiom: false}],
             cross_ops: vec![],
             span: None,
         })

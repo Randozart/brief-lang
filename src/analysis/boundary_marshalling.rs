@@ -428,7 +428,7 @@ mod tests {
                         fn_name: "cstr_to_briev".to_string(),
                         param: "#Lh".to_string(),
                     }),
-                },
+                trusted_axiom: false},
                 crate::ast::top::CastEdge {
                     direction: CastDirection::CastFrom,
                     target_category: "String".to_string(),
@@ -437,7 +437,7 @@ mod tests {
                         fn_name: "str_to_c".to_string(),
                         param: "#Lh".to_string(),
                     }),
-                },
+                trusted_axiom: false},
             ],
             cross_ops: vec![],
             span: None,
@@ -489,7 +489,7 @@ mod tests {
                     watchdog: None,
                     span: None,
                     explicit: false,
-                },
+                post_authority: false},
                 body: vec![Statement::Term(Some(Expr::Cast(
                     Box::new(Expr::Identifier("name".to_string())),
                     Type::Custom("String".to_string()),

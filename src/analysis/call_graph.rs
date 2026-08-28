@@ -284,7 +284,7 @@ mod tests {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             is_async: false,
             is_reactive: false,
             type_params: vec![],
