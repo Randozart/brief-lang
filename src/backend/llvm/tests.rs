@@ -48,7 +48,7 @@ fn accel_kernel_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: true,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(
                 Expr::Index(Box::new(Expr::Identifier("a".to_string())), Box::new(Expr::Identifier("i".to_string()))),
@@ -135,7 +135,7 @@ fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(Expr::Identifier("count".to_string()), Expr::Decimal(1)),
             Statement::Term(None),
@@ -163,6 +163,7 @@ fn default_contract() -> Contract {
         watchdog: None,
         explicit: false,
         span: None,
+        post_authority: false,
     }
 }
 
@@ -202,7 +203,7 @@ fn test_init_emits_global_seeding_and_read() {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "x".to_string(),
@@ -268,7 +269,7 @@ fn test_init_bound_loop_folds_against_seeded_global() {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(
                 Expr::Identifier("count".to_string()),
@@ -319,7 +320,7 @@ fn mask_index_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "masked".to_string(),
@@ -382,7 +383,7 @@ fn mask_index_typed_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "m".to_string(),
@@ -467,7 +468,7 @@ fn mask_index_f32_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "m".to_string(),
@@ -517,7 +518,7 @@ fn foreach_range_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "acc".to_string(),
@@ -582,7 +583,7 @@ fn foreach_break_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "acc".to_string(),
@@ -768,7 +769,7 @@ fn multidim_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(
                 Expr::Index(
@@ -849,7 +850,7 @@ fn unpacked_instance_program() -> Vec<TopLevel> {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(Expr::Identifier("data".to_string()),
                         Expr::Index(Box::new(Expr::Identifier("data".to_string())), Box::new(Expr::Decimal(0)))),
@@ -890,7 +891,7 @@ fn unpacked_instance_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(
                 Expr::Index(
@@ -961,7 +962,7 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Identifier("count".to_string()),
@@ -1019,7 +1020,7 @@ fn spawn_countdown_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "h".to_string(),
@@ -1157,7 +1158,7 @@ fn spawn_pool_countdown_program_storage(
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Identifier("count".to_string()),
@@ -1216,7 +1217,7 @@ fn spawn_pool_countdown_program_storage(
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "h".to_string(),
@@ -1390,7 +1391,7 @@ fn test_spawn_only_base_registers_pool() {
                     watchdog: None,
                     explicit: false,
                     span: None,
-                },
+                post_authority: false},
                 body: vec![
                     Statement::Assign(
                         Expr::Identifier("count".to_string()),
@@ -1441,7 +1442,7 @@ fn test_spawn_only_base_registers_pool() {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Let {
                 name: "h".to_string(),
@@ -1520,7 +1521,7 @@ fn match_range_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![Statement::Term(Some(Expr::Match(
             Box::new(Expr::Identifier("n".to_string())),
             vec![
@@ -2004,7 +2005,7 @@ fn test_beginprogram_entry_loop_emits_flag_and_goal_clear() {
             watchdog: None,
             explicit: true,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(
                 Expr::Identifier("i".to_string()),
@@ -2066,7 +2067,7 @@ fn test_no_range_lower_bound_defaults_to_i64_min() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![Statement::Term(None)],
             metadata: HashMap::new(),
             derivation: None,
@@ -2111,7 +2112,7 @@ fn test_binop_no_nuw_nsw() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("x".to_string()), Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Identifier("y".to_string())))),
                 Statement::Term(None),
@@ -2158,7 +2159,7 @@ fn test_range_metadata_suppressed_for_written_field() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(1)),
                 Statement::Term(None),
@@ -2209,7 +2210,7 @@ fn test_range_metadata_kept_for_read_only_field() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![Statement::Term(None)],
             metadata: HashMap::new(),
             derivation: None,
@@ -2664,7 +2665,7 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("ops".to_string()), Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("ops".to_string())), Box::new(Expr::Decimal(1)))),
                 Statement::Term(None),
@@ -2741,7 +2742,7 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![
             Statement::Assign(Expr::Identifier("ops".to_string()), Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("ops".to_string())), Box::new(Expr::Decimal(1)))),
             Statement::Term(None),
@@ -2898,7 +2899,7 @@ fn make_dead_txn_program(with_reactive_node: bool) -> Vec<TopLevel> {
                 watchdog: None,
                 explicit: true,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(
                     Expr::Identifier("i".to_string()),
@@ -2931,7 +2932,7 @@ fn make_dead_txn_program(with_reactive_node: bool) -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![],
         metadata: HashMap::new(),
         derivation: None,
@@ -3001,7 +3002,7 @@ fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondit
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: cross_body,
         metadata: HashMap::new(),
         derivation: None,
@@ -3473,7 +3474,7 @@ fn make_chain_program(
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body,
             metadata: HashMap::new(),
             derivation: None,
@@ -4375,7 +4376,7 @@ fn test_trg_deref_error_flag() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![Statement::Term(None)],
             metadata: HashMap::new(),
             derivation: None,
@@ -4419,7 +4420,7 @@ fn test_trg_deref_warn_default_no_null_check() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![Statement::Term(None)],
             metadata: HashMap::new(),
             derivation: None,
@@ -4747,7 +4748,7 @@ fn test_modulo_partition_drives_rotated_loop() {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(
                     Expr::Identifier("count".to_string()),
@@ -4865,7 +4866,7 @@ fn test_density_consumer_downgrades_dense_txn() {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body,
         metadata: HashMap::new(),
         derivation: None,
@@ -4939,7 +4940,7 @@ fn test_batch_loop_dispatch_post_increment() {
                 Box::new(Expr::Identifier("count".into())),
                 Box::new(Expr::Identifier("total".into()))),
             watchdog: None, explicit: false, span: None,
-        },
+        post_authority: false},
         body,
         metadata: HashMap::new(), derivation: None, modifiers: vec![],
         span: None, doc: None,
@@ -5006,7 +5007,7 @@ fn test_countdown_field_backedge_copies_are_fast() {
                 Box::new(Expr::Identifier("count".into())),
                 Box::new(Expr::Identifier("total".into()))),
             watchdog: None, explicit: false, span: None,
-        },
+        post_authority: false},
         body,
         metadata: HashMap::new(), derivation: None, modifiers: vec![],
         span: None, doc: None,
@@ -5046,7 +5047,7 @@ fn test_batch_loop_rejects_pre_increment() {
                     Box::new(Expr::Identifier("count".into())),
                     Box::new(Expr::Identifier("total".into()))),
                 watchdog: None, explicit: false, span: None,
-            },
+            post_authority: false},
             body: vec![
                 // Guard BEFORE the increment (pre-increment semantics).
                 Statement::Guarded(
@@ -7604,7 +7605,7 @@ fn test_webstack_flush_batch_covers_written_fields() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
                 Statement::Term(None),
@@ -7644,7 +7645,7 @@ fn test_webstack_flush_empty_write_set_is_noop() {
         TopLevel::Transaction(Transaction {
             name: "tick".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![Statement::Term(None)],
             metadata: HashMap::new(), derivation: None, modifiers: vec![], span: None, doc: None,
         }),
@@ -7671,7 +7672,7 @@ fn test_webstack_layout_header_describes_real_buffer() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
                 Statement::Term(None),
@@ -7709,7 +7710,7 @@ fn test_web_state_layout_carries_field_names() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
                 // reference label so the String field stays live (not pruned)
@@ -7755,7 +7756,7 @@ fn test_webstack_ssa_precondition_emits_valid_bool_branch() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
                 Statement::Term(None),
@@ -7789,7 +7790,7 @@ fn test_webstack_int_literal_emits_target_width() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()), Expr::Decimal(1)),
                 Statement::Term(None),
@@ -7825,7 +7826,7 @@ fn test_webstack_state_int_slots_are_target_width() {
         TopLevel::Transaction(Transaction {
             name: "increment".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Let { name: "tmp".into(), ty: None,
                     expr: Some(Expr::Call("Len#".into(), vec![Expr::Identifier("label".into())], None)),
@@ -7864,7 +7865,7 @@ fn test_webstack_folded_loop_is_width_consistent() {
             contract: Contract {
                 pre_condition: Expr::BinaryOp(crate::ast::BinaryOpKind::Lt,
                     Box::new(Expr::Identifier("count".into())), Box::new(Expr::Decimal(100))),
-                post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+                post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(Expr::Identifier("count".into()),
                     Expr::BinaryOp(crate::ast::BinaryOpKind::Add,
@@ -7907,7 +7908,7 @@ fn test_webstack_array_field_store_gep_widens_index() {
         TopLevel::Transaction(Transaction {
             name: "fill".into(), is_reactive: true, is_async: false,
             type_params: vec![], parameters: vec![], output_type: None, outputs: vec![],
-            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None },
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, explicit: false, span: None, post_authority: false},
             body: vec![
                 Statement::Assign(
                     Expr::Index(Box::new(Expr::Identifier("buf".into())),
@@ -8410,7 +8411,7 @@ fn stmt_match_program() -> Vec<TopLevel> {
             watchdog: None,
             explicit: false,
             span: None,
-        },
+        post_authority: false},
         body: vec![Statement::Match {
             expr: Box::new(Expr::Identifier("op".to_string())),
             arms: vec![

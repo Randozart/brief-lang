@@ -825,7 +825,7 @@ mod tests {
                 watchdog: None,
                 explicit: false,
                 span: None,
-            },
+            post_authority: false},
             body: vec![
                 Statement::Assign(
                     Expr::Identifier("escapes".into()),
