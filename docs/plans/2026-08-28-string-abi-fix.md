@@ -53,6 +53,20 @@ All 6 critical bugs trace to **type information loss at the `ptr ↔ i64` boxing
 
 ---
 
+### Session 3b (same day, commits after `269e1eab`) — collection element reads
+
+- **List\<String\> foreach reads** (BUGS.md "String element reads from
+  List\<String\>"): the foreach item unbox inttoptr'd UNCONDITIONALLY when
+  the element type was String, but the At member body may have already
+  recovered the element — double unbox → garbage. Guarded on
+  `at.ty == Type::int()`. Verified: 2 pushes, foreach sum=5, At+concat+eq.
+- **Fixed-size String arrays** (`let a: String[3] = [...]`): no
+  construction path existed (bare Expr::List panic). Vector-typed state
+  fields with list initializers now store elements directly into the
+  `[N x T]` column; the VectorField foreach iterator carries the element
+  type and unboxes boxed handles. Verified: init + foreach sum=6,
+  `a[2] .^Length`=3.
+
 ## Session 2 additions (2026-08-28, commit `47ae4618`) — std/string end-to-end
 
 The Phase 1-4a fixes made string.bv *type-check*, but the module still could
