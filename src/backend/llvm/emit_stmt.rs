@@ -1728,7 +1728,14 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // see a ptr, not the raw handle. `element_ty` is the
                     // DECLARED element type (the At member's return after
                     // substitution), which the load's register type may not be.
-                    if backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty) {
+                    // 2026-08-28 (Bug #5 family): only unbox a BOXED i64 handle
+                    // (at.ty == Int). The At member body may have already
+                    // recovered the element to a ptr (the String-typed register
+                    // path) — inttoptr of a ptr is a double unbox that reads
+                    // garbage lengths downstream.
+                    if (backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty))
+                        && at.ty == Type::int()
+                    {
                         let p = backend.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, at.name).ok();
                         at.name = p;
@@ -1745,7 +1752,10 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let arg = Expr::Identifier(cur_tmp);
                     let out_tmp = backend.fun.gen_reg();
                     let mut item = backend.emit_method_call(out, &out_tmp, list, "Current", &[arg], indent);
-                    if backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty) {
+                    // 2026-08-28: same boxed-only guard as the Tier-2 arm above.
+                    if (backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty))
+                        && item.ty == Type::int()
+                    {
                         let p = backend.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, item.name).ok();
                         item.name = p;

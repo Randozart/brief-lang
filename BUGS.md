@@ -4304,13 +4304,14 @@ the init/push pattern, implement `bytes` via the byte-slice reflection.
 ## String element reads from List<String> return generic T (no string ops)
 
 **Date:** 2026-08-04
-**Status:** Open — blocks the pass's splitter element reads. After the List
-layout fix (this batch), `List<String>` fields register as `inner.data: Ptr<T>`
-(T unsubstituted even for the concrete `List<String>` instantiation). Reading
-`l.inner.data[i]` / `l.get(i)` yields a `T`-typed register; `.^Len` on it
-panics ("Phase-1b boundary"), and `let x: String = l.inner.data[i]` fails
-typecheck (T vs String). `as String` casts codegen a `{ ptr, i64 }` load that
-opt rejects (mismatch with i64 use).
+**Status:** Fixed (2026-08-28) — the foreach item unbox (Tier-2 At arm +
+Tier-1 Current arm in emit_stmt.rs) inttoptr'd the element UNCONDITIONALLY
+when the element type was String — but the At member body may have ALREADY
+recovered the element to a ptr-typed String register. The double unbox read
+the ptr-as-handle → garbage lengths/corruption. Now guarded on
+`at.ty == Type::int()` (boxed handle only). Verified: List<String> push ×2,
+foreach .^Length sum (3+2=5), At(1), concat, content equality — all
+end-to-end.
 **Impact:** a Briev pass cannot read back list elements as Strings for
 comparison/slicing — the needs_state splitter can push but not inspect.
 **Fix direction:** substitute the generic T when resolving `Ptr<T>` pointees
