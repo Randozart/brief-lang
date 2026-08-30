@@ -2489,7 +2489,7 @@ impl LlvmBackend {
         // `@c` global. Mirrors the member-call receiver prefix path.
         if let Expr::Identifier(rname) = recv {
             if let Some((base, row_reg)) = self.instance_prefix_for(rname) {
-                let slot = format!("{}.{}", Self::pool_base(&base), name);
+                let slot = format!("{}.{}", base, name);
                 if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
                     let (row, row_ty, load_ty) =
                         self.emit_instance_column_row(out, indent, idx, &row_reg);
@@ -2499,7 +2499,7 @@ impl LlvmBackend {
                 }
                 // Boxed instance (per-heap block): inttoptr the handle + GEP
                 // the member byte offset.
-                if let Some(offsets) = self.ctx.boxed_offsets.get(Self::pool_base(&base)) {
+                if let Some(offsets) = self.ctx.boxed_offsets.get(base.as_str()) {
                     if let Some((off, mty)) = offsets.get(name) {
                         let ptr = self.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, row_reg).ok();

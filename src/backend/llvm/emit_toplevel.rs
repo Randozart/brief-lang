@@ -606,8 +606,16 @@ impl LlvmBackend {
         for (name, fields) in &sorted {
             // 2026-07-31: skip if the universe already declared this type.
             if emitted.contains(name.as_str()) { continue; }
+            // 2026-08-28 (Phase 3): mono keys ("Stack<Int, 8>") are not valid
+            // LLVM identifiers — mangle non-identifier chars. Nothing
+            // references the mono declaration by name (obj values are boxed
+            // i64 handles, field access is i8-GEP by offset); the sanitized
+            // declaration only keeps the type table complete and legal.
+            let ident: String = name.chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '.' { c } else { '.' })
+                .collect();
             if fields.is_empty() {
-                writeln!(out, "%{} = type {{}}", name).ok();
+                writeln!(out, "%{} = type {{}}", ident).ok();
             } else {
                 // 2026-08-13: packed structs are always declared via the
                 // universe path above; this path stays for plain structs.
@@ -617,7 +625,7 @@ impl LlvmBackend {
                 let field_tys: Vec<String> = fields.iter()
                     .map(|(_, fty)| self.llvm_type(fty))
                     .collect();
-                writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+                writeln!(out, "%{} = type {{ {} }}", ident, field_tys.join(", ")).ok();
             }
         }
     }
@@ -1698,7 +1706,7 @@ impl LlvmBackend {
         for (fname, fty) in fields {
             // Pooled columns are keyed `{base}.{member}` (shared across
             // instances of the base; the ROW differentiates them).
-            let slot = format!("{}.{}", Self::pool_base(&base), fname);
+            let slot = format!("{}.{}", base, fname);
             let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue; };
             let (row_p, _row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx, &row);
             let val = self.fun.gen_reg();
@@ -1822,14 +1830,18 @@ impl LlvmBackend {
         indent: &str,
         init: &(String, String, Expr),
     ) {
-        let (name, base, init_expr) = init;
+        let (name, base_raw, init_expr) = init;
+        // 2026-08-28 (Phase 3): the tuple's base is the MONO key; the pool
+        // slot keys, operator_defs, obj_members, and self_prefix are all
+        // keyed by the BASE — normalize once here.
+        let base = Self::pool_base(base_raw);
         // 2026-08-12 (Iterable protocol, slice 2 gap 1): a StructLiteral
         // (`Counter { count: 5 }`) seeds the pooled instance's SLOTS directly —
         // no `op Init` member needed. The literal's field values are the slot
         // initial values (SPEC §16.3 type-directed construction for plain objs).
         if let crate::ast::Expr::StructLiteral { fields, .. } = init_expr {
             for (mname, value) in fields {
-                let slot = format!("{}.{}", Self::pool_base(&base), mname);
+                let slot = format!("{}.{}", base, mname);
                 let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue };
                 let col_ty = self.ctx.field_types[idx].clone();
                 let base_gep = self.emit_state_gep(out, indent, "si", "%state", idx);
@@ -1851,7 +1863,7 @@ impl LlvmBackend {
             }
             return;
         }
-        let defs = self.ctx.operator_defs.get(Self::pool_base(&base)).cloned().unwrap_or_default();
+        let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
             None => return,
@@ -1860,9 +1872,7 @@ impl LlvmBackend {
             Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
             _ => return,
         };
-        let members = self.ctx.obj_members.get(base).cloned()
-            .or_else(|| self.ctx.obj_members.get(Self::pool_base(&base)).cloned())
-            .unwrap_or_default();
+        let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
         let member = members.iter()
             .find(|m| super::emit_expr::member_briev_name(m) == fn_name)
             .cloned();
@@ -1874,9 +1884,9 @@ impl LlvmBackend {
         let out_tmp = self.fun.gen_reg();
         let recv_reg = crate::backend::llvm::TypedRegister {
             name: "0".to_string(),
-            ty: Type::Custom(base.clone()),
+            ty: Type::Custom(base.to_string()),
         };
-        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.clone(), "0".to_string())) }, indent);
+        self.emit_member_body(out, &out_tmp, super::emit_expr::MemberInvocation { recv_reg: &recv_reg, type_name: base, member: &member, arg_regs: &arg_regs, prefix: Some((base.to_string(), "0".to_string())) }, indent);
     }
 
     /// 2026-08-07 (object instance pools): allocate the DEPENDENT pools'
@@ -2174,8 +2184,14 @@ impl LlvmBackend {
     }
 
     pub(crate) fn unpacked_instance_prefix(&self, name: &str) -> Option<(String, String)> {
+        // 2026-08-28 (Phase 3): obj_instance_inits stores the MONO key
+        // ("Stack<Int,8>") for struct lookups, but the PREFIX is the POOL
+        // name — `{base}.{member}` slot keys, spawn_pools, and obj_members
+        // are all keyed by the BASE. Normalize ONCE here (every prefix
+        // consumer flows through this function); struct-lookup sites that
+        // need the mono key read obj_instance_inits directly.
         self.ctx.obj_instance_inits.get(name)
-            .map(|(base, _)| (base.clone(), "0".to_string()))
+            .map(|(base, _)| (Self::pool_base(base).to_string(), "0".to_string()))
     }
 
     /// 2026-08-07 (instance pools): does a loop body contain an OBSERVABLE

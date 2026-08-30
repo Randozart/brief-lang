@@ -5471,8 +5471,15 @@ impl LlvmBackend {
                         // fallback pass at the end of build_field_index calls
                         // this for every base in spawn_pools/dependent_pools.
                         self.register_pool_columns(&base, &slots);
+                        // 2026-08-28: store the MONO key (e.g. "Stack<Int,8>")
+                        // so downstream struct lookups get substituted fields
+                        // with correct byte offsets (Phase 3 fix).
+                        let mono_key = match &field_ty {
+                            Type::Applied(b, args) => self.ensure_mono(b, args),
+                            _ => base.clone(),
+                        };
                         if let Some(init_expr) = expr {
-                            self.ctx.obj_instance_inits.insert(name.clone(), (base.clone(), init_expr.clone()));
+                            self.ctx.obj_instance_inits.insert(name.clone(), (mono_key, init_expr.clone()));
                         }
                     } else {
                         self.ctx.field_index_map

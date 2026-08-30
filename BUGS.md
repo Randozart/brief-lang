@@ -4200,7 +4200,10 @@ now-borrowed `str_to_c` result (P2 zero-copy) — removed the frees.
 ## String Value Representation Inconsistency (bits model) — compiler-in-Briev blocker
 
 **Date:** 2026-08-04
-**Status:** Open — a systemic backend issue surfaced by the compiler-in-Briev PoC
+**Status:** Mostly fixed (2026-08-28) — identifier resolution inttoptrs
+boxed String/Data params (emit_expr.rs:533); std/string now compiles and
+runs end-to-end (`len("hello")`=5, `"hello"[1:3]`="el"). The remaining
+frgn String-return heap leak is Bug #5.
 (plan 2026-08-04-compiler-in-briev-dogfood-ffi).
 **Symptom:** `inner.data[len] = val` (List.push) emits `store i64 %t7, ptr %t37`
 where `%t7` is a String-literal `ptr` and the slot is `i64` → invalid IR.
@@ -4222,9 +4225,9 @@ in a register is a ptr." Audit the call-arg and store sites against it.
 ## String representation inconsistency — remaining boundary sites
 
 **Date:** 2026-08-04
-**Status:** Open — follow-up to the entry above (fixed: emit_member_body param
-binding ptrtoint's boxed String params; emit_method_call + 4 call sites use the
-i64 ABI).
+**Status:** Fixed (2026-08-28) — `index_elem_ty` gained a
+`Type::Vector(inner, _)` arm (emit_expr.rs:1109); the load path inttoptrs
+element reads. End-to-end verified via the std/string compile.
 **Symptom:** the boundary between "String in a register is a ptr" and "String
 crossing a call/store boundary is an i64 handle" is enforced ad-hoc. A String
 element STORED into a List slot and then LOADED (e.g. `l.get(i)`) — the load
@@ -4243,7 +4246,13 @@ arrays but the generic/`Custom` local-array case is missing).
 ## Generic struct array-field layout is zeroed (Stack<T,N> unusable)
 
 **Date:** 2026-08-04
-**Status:** Open — compiler-in-Briev PoC. Any struct with an inline array field
+**Status:** Fixed (2026-08-28, Phase 3) — `obj_instance_inits` now stores the
+MONO key (`Stack<Int,8>`, mod.rs) so `self_binding`/`lookup_field_offset`
+resolve the substituted fields; `pool_base()` extracts the base name for
+`{base}.{member}` pool-slot keys at every downstream consumer. Verified by
+the full test suite; residual `Custom("String[N]")` element-type resolution
+is tracked by the remaining-boundaries entry above.
+**Symptom:** any struct with an inline array field
 whose element type is the generic parameter (`obj Stack<T, N> { data: T[N]; len:
 Int; }`) codegens `len` and `data[i]` at byte offset 0 (element stride 0).
 Verified: `Stack<Int,8>` + `Malloc#(72) as Stack<Int,8>`; init writes data[0]
