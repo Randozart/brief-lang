@@ -4268,15 +4268,18 @@ member-slot index path use the instantiated element type.
 ## List<T>.init allocates 2 elements but advertises cap 16
 
 **Date:** 2026-08-04
-**Status:** Open — latent overflow in the shipped stdlib (surfaced while
-building the splitter). `txn init` does `inner.data = Malloc#(16) as Ptr<T>`
-(16 BYTES = 2 i64 elements) but `inner.cap = 16` (ELEMENTS). `push`'s precondition
-`[len < inner.cap]` permits 16 pushes into a 2-element buffer → heap overflow.
-The earlier needs_state probes that pushed 3+ elements after init "worked" by
-heap luck, not by contract.
-**Impact:** any List<String> with >2 elements corrupts the heap. Blocks the
+**Status:** Fixed (2026-08-28) — two distinct defects. (1) The sizing
+`Malloc#(cap * elem_size)` was already repaired in the coll scaffold
+(coll_scaffold.rs, 2026-08-16). (2) The LIVE crash was in
+`emit_init_op_construction`'s empty-literal branch: it ran the InitEmpty
+member body against a LOCAL instance block but never stored the block
+handle into the State column — every later read dereferenced garbage
+(segfault on the first push, not an overflow). Now stores the handle like
+the non-empty `Expr::List` branch. Verified: 5 pushes + foreach sum +
+.^Length end-to-end.
+**Impact (historical):** any List<String> with >2 elements corrupts the heap. Blocks the
 pass's line/token lists.
-**Fix direction:** either cap must be bytes-based (`[len*8 < inner.cap]`, `cap
+**Fix direction (historical):** either cap must be bytes-based (`[len*8 < inner.cap]`, `cap
 = 16` bytes) or init must allocate `inner.cap` elements. The generic element
 size (8 for the i64-handle ABI) is the blocker — see the pass's decision to
 avoid List for unbounded collections.

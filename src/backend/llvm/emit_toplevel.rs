@@ -1344,6 +1344,15 @@ impl LlvmBackend {
                     },
                     indent,
                 );
+                // 2026-08-28 (List.init bug): the InitEmpty member body fills
+                // the LOCAL instance block via the boxed self, but the column
+                // store was skipped — the State slot kept garbage and the
+                // first insert dereferenced it (segfault on the first push).
+                // Store the handle like the Expr::List branch below does.
+                let gep = self.fun.gen_reg();
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
+                let field_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+                writeln!(out, "{}store {} {}, ptr {}", indent, field_ty, addr, gep).ok();
                 return true;
             }
             return false;
