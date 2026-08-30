@@ -4335,9 +4335,17 @@ data pointers and vice versa. Variant boundary types (`CStr:
 #String<C_String>`) now marshal through the casting graph (str_to_c /
 cstr_to_briev lanes, base↔default-variant normalization in find_path,
 ExtCallDyn frgn_map symbol resolution, `axiom` keyword for FFI-backed
-pairs). Verified: getenv → CStr → String → .^Length end-to-end. The
-library-mode export-wrapper divergence above may be the same gap on the
-export side — re-probe it now that the import side works.
+pairs). **Export-side re-probe (session 3b): RESOLVED** — the library-mode
+export wrapper now marshals `CStr → String` correctly (`text_len("xy")`
+= 2, was 5). Two further graph fixes landed: (1) `cstr_to_briev`'s
+declared param is now `Ptr<Void>` (the C symbol takes a pointer; the old
+`Int` made the cast lane emit `call @briev_cstr_to_briev(i64 %ptr)`, a
+verifier error); (2) boundary HANDLE admissions are repr-lane-only —
+`cstr as Int` is ptrtoint (never the base's `str_to_int` parse of the C
+bytes), `int as cstr` is inttoptr — via a two-phase BFS in the casting
+graph (phase 1 repr-only for boundary crossings, phase 2 the declared
+content deltas). `c_driver_boundary` (greet:hello / join:foobar /
+ident:3.140000) passes again.
 
 ## String slicing returns the whole string (no substring semantics)
 

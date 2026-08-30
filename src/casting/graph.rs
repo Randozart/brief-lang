@@ -240,6 +240,13 @@ impl CastingGraph {
         // raw storage reinterpretation.
         self.set_lane("Data", "Bit", LaneKind::Bitcast);
         self.set_lane("Bit", "Data", LaneKind::Bitcast);
+        // 2026-08-28 (boundary handle invariant): Data — the universal
+        // parent — IS the i64 handle at any boundary; Int ↔ Data is a
+        // representation identity (Bitcast), giving pointer-representation
+        // variants a repr-only route to Int (CStr → Int = ptrtoint+bitcast,
+        // never the base's content parse).
+        self.set_lane("Int", "Data", LaneKind::Bitcast);
+        self.set_lane("Data", "Int", LaneKind::Bitcast);
 
         // ── Int ⇄ UInt ────────────────────────────────────────────
         self.set_lane("Int", "UInt", LaneKind::Bitcast); // same representation
@@ -479,6 +486,37 @@ impl CastingGraph {
                 .or_default()
                 .insert(op.op.clone(), fn_name);
         }
+
+        // 2026-08-28 (boundary handle invariant): every variant of a
+        // pointer-representation category IS a pointer — Int → variant is
+        // inttoptr, regardless of the content encoding (the content delta
+        // lives in the CastTo/CastFrom edges to the base). The edge hangs
+        // off DATA (the handle parent) so the repr-only BFS route
+        // Int → Data → variant never competes with the base's content
+        // lanes (int_to_str formatting the handle as decimal digits).
+        // NON-DEFAULT variants only: the default variant is the base's own
+        // representation — a raw handle is NOT automatically a base value
+        // (that admission is the content delta's job).
+        // Category-keyed, not type-name-keyed (rule 18).
+        if matches!(pd.category.as_str(), "String" | "Blob")
+            && self
+                .defaults
+                .get(&pd.category)
+                .map(|d| d.as_str() != pd.name.as_str())
+                .unwrap_or(true)
+        {
+            let step = CastStep {
+                lane: LaneKind::IntToPtr,
+                src_category: "Data".to_string(),
+                src_variant: String::new(),
+                dst_category: pd.category.clone(),
+                dst_variant: pd.name.clone(),
+            };
+            self.variant_edges
+                .entry(("Data".to_string(), String::new()))
+                .or_default()
+                .push(step);
+        }
     }
 
     /// Look up a cross-variant op override: (category, variant, op name) →
@@ -589,6 +627,15 @@ impl CastingGraph {
             }]);
         }
 
+        // 2026-08-03 (P1.5): delta collapse — a same-category variant→variant
+        // whose endpoints are a PROVEN inverse pair (b.CastFrom(base)(a.
+        // CastTo(base)(x)) == x) is a zero delta: the sub-types are 1-to-1.
+        // 2026-08-28: checked BEFORE the repr phase — the pair being 1-to-1
+        // means identity beats both the content route and the handle route.
+        if src_cat == dst_cat && self.is_inverse_pair(src_cat, src_var, dst_var) {
+            return Some(vec![]);
+        }
+
         // BFS through variant edges + base lanes
         let path = self.bfs_path(src_cat, src_var, dst_cat, dst_var)?;
 
@@ -654,6 +701,15 @@ impl CastingGraph {
     }
 
     /// BFS through variant edges + base lane fallback for the last hop.
+    /// 2026-08-28: nodes are CANONICALIZED (an empty variant becomes the
+    /// category default when one is declared) so base-lane hops, variant
+    /// edges, and reverse edges meet at the same node key. Representation-
+    /// level lanes (ptrtoint/inttoptr/bitcast/trunc/zext) fire from ANY
+    /// variant of the category — the bits-model handle invariant: a value's
+    /// pointer IS the handle regardless of the content encoding behind it.
+    /// CONTENT lanes (ExtCall/CastFromBitCallback/…) stay gated to the
+    /// base/default — a CStr's NUL-terminated bytes must not be parsed by
+    /// the base's str_to_int (the `cstr as Int` garbage-length bug).
     fn bfs_path(
         &self,
         src_cat: &str,
@@ -661,42 +717,196 @@ impl CastingGraph {
         dst_cat: &str,
         dst_var: &str,
     ) -> Option<Vec<CastStep>> {
-        let start = (src_cat.to_string(), src_var.to_string());
-        let target = (dst_cat.to_string(), dst_var.to_string());
+        fn is_repr_lane(lane: &LaneKind) -> bool {
+            matches!(
+                lane,
+                LaneKind::PtrToInt
+                    | LaneKind::IntToPtr
+                    | LaneKind::Bitcast
+                    | LaneKind::Trunc
+                    | LaneKind::ZExt
+            )
+        }
+        let canon = |cat: &str, var: &str| -> (String, String) {
+            if var.is_empty() {
+                match self.defaults.get(cat) {
+                    Some(d) => (cat.to_string(), d.clone()),
+                    None => (cat.to_string(), String::new()),
+                }
+            } else {
+                (cat.to_string(), var.to_string())
+            }
+        };
+        let start = canon(src_cat, src_var);
+        let target = canon(dst_cat, dst_var);
 
+        // 2026-08-28 (boundary handle invariant), phase gate: repr-only
+        // routes apply when the SOURCE is already the boundary handle — a
+        // non-default variant (CStr's pointer IS the raw C pointer) or a
+        // handle category casting INTO a variant (the C caller hands us a
+        // C pointer as an i64). Content lanes are excluded there: formatting
+        // the handle as decimal digits (int_to_str) and re-wrapping is
+        // semantic garbage at a boundary. Everything else takes the full
+        // BFS (base↔variant deltas, the base's content lanes).
+        let src_at_default = self
+            .defaults
+            .get(&start.0)
+            .map(|d| d == &start.1)
+            .unwrap_or(start.1.is_empty());
+        let src_is_variant = !start.1.is_empty() && !src_at_default;
+        let src_is_handle = matches!(start.0.as_str(), "Int" | "UInt" | "Data" | "Bit");
+        let dst_at_default = self
+            .defaults
+            .get(&target.0)
+            .map(|d| d == &target.1)
+            .unwrap_or(target.1.is_empty());
+        let dst_is_variant = !target.1.is_empty() && !dst_at_default;
+        // Boundary crossings only: a variant's pointer IS the raw handle
+        // (admission OUT), and a handle IS a variant's pointer (admission
+        // IN). Same-category variant→variant stays in phase 2 — the
+        // declared content deltas decide, never a raw handle round-trip.
+        if (src_is_variant && start.0 != target.0) || (src_is_handle && dst_is_variant && start.0 != target.0) {
+            if let Some(p) = self.bfs_repr_only(&start, &target, is_repr_lane, canon) {
+                return Some(p);
+            }
+        }
+
+        self.bfs_full(&start, &target, is_repr_lane, canon)
+    }
+
+    /// Phase 1: representation-lanes-only BFS (see bfs_path's gate).
+    fn bfs_repr_only(
+        &self,
+        start: &(String, String),
+        target: &(String, String),
+        is_repr_lane: fn(&LaneKind) -> bool,
+        canon: impl Fn(&str, &str) -> (String, String),
+    ) -> Option<Vec<CastStep>> {
         let mut visited: HashSet<(String, String)> = HashSet::new();
         let mut queue: VecDeque<((String, String), Vec<CastStep>)> = VecDeque::new();
-
         visited.insert(start.clone());
-        queue.push_back((start, vec![]));
+        queue.push_back((start.clone(), vec![]));
 
         while let Some((current, path)) = queue.pop_front() {
-            // Direct target match (variant→variant within same category)
-            if current == target {
+            if current == *target {
                 return Some(path);
             }
-
-            // Check if we can reach the target via a single base lane
-            if current.1.is_empty() || current.1 == *self.default_variant(&current.0) {
-                if let Some(lane) = self.get_lane(&current.0, dst_cat) {
-                    if dst_var.is_empty() || dst_var == current.1 {
-                        let mut full_path = path.clone();
-                        full_path.push(CastStep {
+            // Direct repr lane to the destination category.
+            if let Some(lane) = self.get_lane(&current.0, &target.0) {
+                if is_repr_lane(lane) && target.1.is_empty() {
+                    let mut full_path = path.clone();
+                    full_path.push(CastStep {
+                        lane: lane.clone(),
+                        src_category: current.0.clone(),
+                        src_variant: current.1.clone(),
+                        dst_category: target.0.clone(),
+                        dst_variant: target.1.clone(),
+                    });
+                    return Some(full_path);
+                }
+            }
+            // Variant edges — repr deltas only (the axiom CastTo/CastFrom
+            // content edges are ExtCallDyn and excluded here).
+            if let Some(edges) = self.variant_edges.get(&current) {
+                for edge in edges {
+                    if !is_repr_lane(&edge.lane) {
+                        continue;
+                    }
+                    let neighbor = canon(&edge.dst_category, &edge.dst_variant);
+                    if visited.insert(neighbor.clone()) {
+                        let mut new_path = path.clone();
+                        new_path.push(edge.clone());
+                        queue.push_back((neighbor, new_path));
+                    }
+                }
+            }
+            if let Some(edges) = self.variant_reverse.get(&current) {
+                for edge in edges {
+                    if !is_repr_lane(&edge.lane) {
+                        continue;
+                    }
+                    let neighbor = canon(&edge.src_category, &edge.src_variant);
+                    if visited.insert(neighbor.clone()) {
+                        let mut new_path = path.clone();
+                        new_path.push(edge.clone());
+                        queue.push_back((neighbor, new_path));
+                    }
+                }
+            }
+            // Repr base lanes as intermediate hops.
+            if let Some(out_lanes) = self.base_lanes.get(&current.0) {
+                for (next_cat, lane) in out_lanes {
+                    if !is_repr_lane(lane) {
+                        continue;
+                    }
+                    let neighbor = canon(next_cat, "");
+                    if visited.insert(neighbor.clone()) {
+                        let mut new_path = path.clone();
+                        new_path.push(CastStep {
                             lane: lane.clone(),
                             src_category: current.0.clone(),
                             src_variant: current.1.clone(),
-                            dst_category: dst_cat.to_string(),
-                            dst_variant: dst_var.to_string(),
+                            dst_category: next_cat.clone(),
+                            dst_variant: String::new(),
                         });
-                        return Some(full_path);
+                        queue.push_back((neighbor, new_path));
                     }
                 }
             }
+        }
+        None
+    }
 
-            // Follow variant edges
+    /// Phase 2: the full BFS — variant edges (content deltas included),
+    /// reverse edges, and base lanes (content gated to the base/default,
+    /// repr from any variant).
+    fn bfs_full(
+        &self,
+        start: &(String, String),
+        target: &(String, String),
+        is_repr_lane: fn(&LaneKind) -> bool,
+        canon: impl Fn(&str, &str) -> (String, String),
+    ) -> Option<Vec<CastStep>> {
+        let mut visited: HashSet<(String, String)> = HashSet::new();
+        let mut queue: VecDeque<((String, String), Vec<CastStep>)> = VecDeque::new();
+        visited.insert(start.clone());
+        queue.push_back((start.clone(), vec![]));
+
+        while let Some((current, path)) = queue.pop_front() {
+            if current == *target {
+                return Some(path);
+            }
+
+            // Direct lane to the destination category. A lane from a base
+            // node lands at the base ≡ the default variant (canonicalized).
+            let at_base = current.1.is_empty() || current.1 == *self.default_variant(&current.0);
+            if let Some(lane) = self.get_lane(&current.0, &target.0) {
+                let lands_at_target = target.1.is_empty()
+                    || target.1 == current.1
+                    || (at_base && target.1 == *self.default_variant(&target.0));
+                if (at_base || is_repr_lane(lane)) && lands_at_target {
+                    let mut full_path = path.clone();
+                    full_path.push(CastStep {
+                        lane: lane.clone(),
+                        src_category: current.0.clone(),
+                        src_variant: current.1.clone(),
+                        dst_category: target.0.clone(),
+                        dst_variant: target.1.clone(),
+                    });
+                    return Some(full_path);
+                }
+            }
+
+            // Follow variant edges. The auto boundary-admission edges
+            // (Data → variant IntToPtr) are phase-1 territory — phase 2
+            // traverses DECLARED content deltas only. Placeholder Bitcast
+            // edges (unbound CastTo) stay traversable.
             if let Some(edges) = self.variant_edges.get(&current) {
                 for edge in edges {
-                    let neighbor = (edge.dst_category.clone(), edge.dst_variant.clone());
+                    if matches!(edge.lane, LaneKind::IntToPtr) {
+                        continue;
+                    }
+                    let neighbor = canon(&edge.dst_category, &edge.dst_variant);
                     if visited.insert(neighbor.clone()) {
                         let mut new_path = path.clone();
                         new_path.push(edge.clone());
@@ -705,14 +915,42 @@ impl CastingGraph {
                 }
             }
 
-            // Follow reverse edges
+            // Follow reverse edges (same admission-edge exclusion).
             if let Some(edges) = self.variant_reverse.get(&current) {
                 for edge in edges {
-                    let neighbor = (edge.src_category.clone(), edge.src_variant.clone());
+                    if matches!(edge.lane, LaneKind::IntToPtr) {
+                        continue;
+                    }
+                    let neighbor = canon(&edge.src_category, &edge.src_variant);
                     if visited.insert(neighbor.clone()) {
                         let mut new_path = path.clone();
                         new_path.push(edge.clone());
                         queue.push_back((neighbor, new_path));
+                    }
+                }
+            }
+
+            // Base lanes as intermediate hops — from the base/default only
+            // (content AND repr alike). The original model: a variant reaches
+            // other categories through its declared delta to the base, then
+            // the base's lanes. No repr chaining here — a raw handle
+            // round-trip between same-category variants would fabricate
+            // paths the declaration set never made (B → A regression).
+            if at_base {
+                if let Some(out_lanes) = self.base_lanes.get(&current.0) {
+                    for (next_cat, lane) in out_lanes {
+                        let neighbor = canon(next_cat, "");
+                        if visited.insert(neighbor.clone()) {
+                            let mut new_path = path.clone();
+                            new_path.push(CastStep {
+                                lane: lane.clone(),
+                                src_category: current.0.clone(),
+                                src_variant: current.1.clone(),
+                                dst_category: next_cat.clone(),
+                                dst_variant: String::new(),
+                            });
+                            queue.push_back((neighbor, new_path));
+                        }
                     }
                 }
             }
@@ -727,10 +965,8 @@ impl CastingGraph {
                 }
             }
         }
-
         None
     }
-
     // ── Type-to-Protocol Resolution ────────────────────────────────────
 
     /// Map a Type to its (protocol_category, variant) for graph lookup.

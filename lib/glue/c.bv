@@ -15,7 +15,12 @@
 // nul-terminated C string into a [len][data] Briev String; `str_to_c` emits a
 // nul-terminated C string from a Briev String. The CastTo/CastFrom pair makes
 // the C_String variant 1-to-1 with the UTF8 base: the delta is one call.
-frgn cstr_to_briev(ptr: Int) -> String : briev_cstr_to_briev from "lib/runtime/briev_rt.c";
+// 2026-08-28: `cstr_to_briev`'s param is Ptr<Void> — the C symbol takes a
+// pointer (`char* briev_cstr_to_briev(const char*)`), and the boundary value
+// register IS a ptr; the old `Int` declaration made the cast lane emit
+// `call ptr @briev_cstr_to_briev(i64 %ptr_val)` — a verifier error. An i64
+// handle caller (`name as Int`) still coerces via the Int→ptr lane.
+frgn cstr_to_briev(p: Ptr<Void>) -> String : briev_cstr_to_briev from "lib/runtime/briev_rt.c";
 frgn str_to_c(handle: String) -> Int : briev_str_to_c from "lib/runtime/briev_rt.c";
 frgn cstring_concat(a: Int, b: Int) -> Int : briev_cstring_concat from "lib/runtime/briev_rt.c";
 

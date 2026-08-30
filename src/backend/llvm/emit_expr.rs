@@ -6105,7 +6105,22 @@ impl LlvmBackend {
         for (i, step) in path.iter().enumerate() {
             let is_last = i == total - 1;
             let dst = if is_last { v.to_string() } else { self.fun.gen_reg() };
-            let dst_ll = if is_last { target_ll.clone() } else { self.llvm_type(&src.ty) };
+            let dst_ll = if is_last {
+                target_ll.clone()
+            } else {
+                // 2026-08-28: the intermediate node's LLVM type derives from
+                // the STEP's destination category — reusing the SOURCE type
+                // made multi-step chains (CStr → Data → Int) type-track
+                // garbage (`ptrtoint ptr %t4` on an i64 register).
+                match step.dst_category.as_str() {
+                    "String" | "Blob" => "ptr".to_string(),
+                    "Bool" => "i8".to_string(),
+                    "Char" => "i32".to_string(),
+                    "Float" => "float".to_string(),
+                    // Int / UInt / Data / Bit — the i64 handle domain.
+                    _ => "i64".to_string(),
+                }
+            };
 
             match &step.lane {
                 crate::casting::graph::LaneKind::Bitcast => {
@@ -6113,7 +6128,15 @@ impl LlvmBackend {
                     // operands. A Bit lane between integer widths of different
                     // size (`Bits<12> as Int`) is a zext/trunc, not a bitcast —
                     // sub-byte packed field reads surface i12 registers.
-                    if cur_ll != dst_ll
+                    // 2026-08-28 (boundary handle invariant): a Bitcast lane
+                    // between a pointer and an integer width is ptrtoint/
+                    // inttoptr — the Data↔Int repr lane crosses ptr-typed
+                    // variant registers (`bitcast ptr to i64` is invalid IR).
+                    if cur_ll == "ptr" && dst_ll.starts_with('i') {
+                        writeln!(out, "{}{} = ptrtoint ptr {} to {}", indent, dst, cur, dst_ll).ok();
+                    } else if cur_ll.starts_with('i') && dst_ll == "ptr" {
+                        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, dst, cur_ll, cur).ok();
+                    } else if cur_ll != dst_ll
                         && cur_ll.starts_with('i')
                         && dst_ll.starts_with('i')
                     {
@@ -6180,12 +6203,24 @@ impl LlvmBackend {
                         indent, dst, cur_ll, cur).ok();
                 }
                 crate::casting::graph::LaneKind::PtrToInt => {
-                    writeln!(out, "{}{} = ptrtoint {} {} to i64",
-                        indent, dst, cur_ll, cur).ok();
+                    // 2026-08-28: identity when the register is already an
+                    // integer (an earlier repr step resolved the pointer).
+                    if cur_ll == "i64" {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, dst, cur).ok();
+                    } else {
+                        writeln!(out, "{}{} = ptrtoint {} {} to i64",
+                            indent, dst, cur_ll, cur).ok();
+                    }
                 }
                 crate::casting::graph::LaneKind::IntToPtr => {
-                    writeln!(out, "{}{} = inttoptr {} {} to ptr",
-                        indent, dst, cur_ll, cur).ok();
+                    // 2026-08-28: identity when the register is already a
+                    // pointer (Int→CStr where the value came from str_to_c).
+                    if cur_ll == "ptr" {
+                        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, cur).ok();
+                    } else {
+                        writeln!(out, "{}{} = inttoptr {} {} to ptr",
+                            indent, dst, cur_ll, cur).ok();
+                    }
                 }
                 crate::casting::graph::LaneKind::ZExt => {
                     writeln!(out, "{}{} = zext {} {} to {}",
