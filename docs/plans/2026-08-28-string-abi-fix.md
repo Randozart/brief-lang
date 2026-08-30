@@ -150,6 +150,26 @@ block ABI (the compiler's own runtime helpers); `CStr`/`CDouble` = the
 plain C ABI; crossing variants emits the graph's delta lanes at the call
 boundary and via explicit casts.
 
+### Session 3b (same day, commit `244e2443`) — export side + repr admissions
+
+The **library-mode export wrapper** probe is RESOLVED: `text_len("xy")`
+= 2 (was 5). Two fixes:
+1. `cstr_to_briev`'s declared param → `Ptr<Void>` (the C symbol takes a
+   pointer; the old `Int` emitted `call @briev_cstr_to_briev(i64 %ptr)`,
+   a verifier error).
+2. **Two-phase casting-graph BFS**: boundary HANDLE admissions are
+   repr-lane-only — `cstr as Int` = ptrtoint (never the base's
+   `str_to_int` parsing the C bytes), `int as cstr` = inttoptr (never
+   `int_to_str` formatting the handle as digits). Phase 1 = repr-only
+   for boundary crossings; phase 2 = declared content deltas. Nodes
+   canonicalize (empty variant ≡ default); P1.5 inverse-pair collapse
+   checked first; auto Data→variant IntToPtr admission edges excluded
+   from phase 2. `emit_cast_steps` gets per-step destination types and
+   ptr↔int-specialized Bitcast.
+
+`c_driver_boundary` (greet:hello / join:foobar / ident:3.140000),
+`c_driver_needs_state`, `c_driver_callback`, `c_driver_cancel` all pass.
+
 ## Deferred
 
 - **Phase 4c (Bug #5):** frgn String-return marshalling leaks the malloc'd
