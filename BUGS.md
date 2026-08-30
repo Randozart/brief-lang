@@ -4227,7 +4227,14 @@ in a register is a ptr." Audit the call-arg and store sites against it.
 **Date:** 2026-08-04
 **Status:** Fixed (2026-08-28) — `index_elem_ty` gained a
 `Type::Vector(inner, _)` arm (emit_expr.rs:1109); the load path inttoptrs
-element reads. End-to-end verified via the std/string compile.
+element reads. End-to-end verified via the std/string compile. Session 2
+completed the remaining gaps: a Vector-typed STATE FIELD with a list
+initializer (`let a: String[3] = [...]`) had no construction path (the
+bare Expr::List panicked) — `emit_init_op_construction` now stores the
+elements directly into the `[N x T]` column at the element's ABI width;
+the foreach VectorField iterator now carries the element type, binds the
+item with it, and unboxes boxed String/Blob handles. Verified:
+`String[3]` init + foreach .^Length sum=6, `a[2] .^Length`=3, end-to-end.
 **Symptom:** the boundary between "String in a register is a ptr" and "String
 crossing a call/store boundary is an i64 handle" is enforced ad-hoc. A String
 element STORED into a List slot and then LOADED (e.g. `l.get(i)`) — the load

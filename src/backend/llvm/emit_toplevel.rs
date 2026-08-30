@@ -1277,8 +1277,38 @@ impl LlvmBackend {
         let briev_ty = match self.ctx.field_briev_types.get(idx) {
             Some(Type::Custom(n)) => n.clone(),
             Some(Type::Applied(n, _)) => n.clone(),
-            _ => return false,
+            _ => String::new(),
         };
+        // 2026-08-28 (fixed-size array init): a Vector-typed field with a
+        // list initializer (`let a: String[3] = ["ab", "c", "def"]`)
+        // constructs by storing the elements DIRECTLY into the `[N x T]`
+        // column — an array type has no op surface (no Init member), and the
+        // bare Expr::List otherwise reaches codegen and panics. String/Blob
+        // element registers are already ptrs and the column element type
+        // (vector_array_llvm_type) is ptr/i64 — store at the column's
+        // element ABI width.
+        if let (Some(crate::ast::Expr::List(elems)), Some(Type::Vector(inner, _))) =
+            (init_expr, self.ctx.field_briev_types.get(idx))
+        {
+            let col_ty = self.ctx.field_types.get(idx).cloned().unwrap_or_else(|| "i64".to_string());
+            // The column's ELEMENT ABI width (vector_array_llvm_type): Ptr
+            // inners hold i64 handles; everything else is its llvm_type.
+            let elem_llvm = match inner.as_ref() {
+                Type::Ptr(_) | Type::PtrConst(_) => "i64".to_string(),
+                t => self.llvm_type(t),
+            };
+            for (i, e) in elems.iter().enumerate() {
+                let col_gep = self.fun.gen_reg();
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", col_gep, idx).ok();
+                let elem_gep = self.fun.gen_reg();
+                writeln!(out, "  {} = getelementptr {}, ptr {}, i64 0, i64 {}", elem_gep, col_ty, col_gep, i).ok();
+                let val_tmp = self.fun.gen_reg();
+                let val = self.emit_expr_inner(out, &val_tmp, e, indent);
+                let store_val = self.ensure_typed_value(out, indent, &elem_llvm, &val.name, Some(val.ty.clone()), self.ctx.type_universe.clone().as_ref());
+                writeln!(out, "  store {} {}, ptr {}", elem_llvm, store_val, elem_gep).ok();
+            }
+            return true;
+        }
         // 2026-08-16 (hashmap redesign): a hand-written collection obj
         // (`obj HashMap<K,V>`) state field constructs through its `op Init`
         // member — verified below via operator_defs["<base>"].

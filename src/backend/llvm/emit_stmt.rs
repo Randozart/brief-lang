@@ -170,7 +170,10 @@ enum IterKind {
     /// the decoded codepoint as Char (SPEC §17.2 `String` → `Char`).
     String { ptr: String, len: String },
     /// A vector state field (`[N x i64]`).
-    VectorField { gep: String, count: String },
+    // 2026-08-28: element_ty — a Vector(String, [N]) state field iterates
+    // String items (boxed handles needing unbox + String-typed binding),
+    // never bare Ints (the Phase-1b boundary panic).
+    VectorField { gep: String, count: String, element_ty: Type },
     /// 2026-08-12 (Iterable protocol, Tier 2): a collection iterated through
     /// its own operator members — `op Count` for the bound, `op At(i)` per
     /// item (SPEC §11.4). The item is the At member's return value.
@@ -1606,12 +1609,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     if is_vector {
                         let fidx = fidx.unwrap();
                         let gep = backend.emit_state_gep(out, indent, "f", "%state", fidx);
-                        let n = backend.ctx.field_briev_types.get(fidx)
-                            .map(|t| backend.vector_element_count(t))
+                        let field_ty = backend.ctx.field_briev_types.get(fidx).cloned();
+                        let element_ty = match &field_ty {
+                            Some(Type::Vector(inner, _)) => (**inner).clone(),
+                            _ => Type::int(),
+                        };
+                        let n = field_ty
+                            .map(|t| backend.vector_element_count(&t))
                             .unwrap_or(0) as i64;
                         let count = backend.fun.gen_reg();
                         writeln!(out, "{}{} = add i64 0, {}", indent, count, n).ok();
-                        IterKind::VectorField { gep, count }
+                        IterKind::VectorField { gep, count, element_ty }
                     } else if let Some(iter) = backend.try_emit_tier_iteration(out, list, indent) {
                         iter
                     } else {
@@ -1785,12 +1793,21 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     writeln!(out, "{}{} = trunc i64 {} to i32", indent, ch, cp).ok();
                     ch
                 }
-                IterKind::VectorField { gep, .. } => {
+                IterKind::VectorField { gep, element_ty, .. } => {
                     let elem_p = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, elem_p, gep, cur).ok();
                     let elem = backend.fun.gen_reg();
                     writeln!(out, "{}{} = load i64, ptr {}", indent, elem, elem_p).ok();
-                    elem
+                    // 2026-08-28: a String/Blob element in the slot is a boxed
+                    // i64 handle — unbox to the [len][bytes] ptr so the item
+                    // register matches its element type.
+                    if backend.is_string_operand(element_ty) || backend.is_blob_operand(element_ty) {
+                        let p = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, elem).ok();
+                        p
+                    } else {
+                        elem
+                    }
                 }
             };
             // Bind the loop variable so the body resolves it like a `let`.
@@ -1800,6 +1817,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let item_ty = match &iter {
                 IterKind::OpCollection { element_ty, .. } => element_ty.clone(),
                 IterKind::Tier1Cursor { element_ty, .. } => element_ty.clone(),
+                IterKind::VectorField { element_ty, .. } => element_ty.clone(),
                 // 2026-08-14 (String unification): a `#String` foreach item is
                 // a Char (the decode lane's codepoint), matching the
                 // typechecker's `foreach_item_type` derivation.
