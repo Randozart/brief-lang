@@ -2873,7 +2873,19 @@ impl<'a> Parser<'a> {
 
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
-                let item_name = self.expect_identifier()?;
+                let mut item_name = self.expect_identifier()?;
+                // 2026-08-28 (axiom facility, SPEC): `axiom` prefixes an edge
+                // or cross-op whose implementation lives across the FFI
+                // boundary (e.g. cstr_to_briev/str_to_c in lib/runtime) — the
+                // round-trip gate cannot prove a foreign body, so the pair is
+                // DECLARED trusted and enters the authority ledger. Without
+                // this, every FFI-backed protocol variant failed the B1.2
+                // hard error with no legal way to declare the trust.
+                let mut is_axiom = false;
+                if item_name == "axiom" {
+                    is_axiom = true;
+                    item_name = self.expect_identifier()?;
+                }
                 if item_name == "CastTo" || item_name == "CastFrom" {
                     let direction = if item_name == "CastTo" {
                         CastDirection::CastTo
@@ -2913,7 +2925,7 @@ impl<'a> Parser<'a> {
                         None
                     };
                     self.eat(&Token::Semicolon);
-                    cast_edges.push(CastEdge { direction, target_category, target_variant, binding, trusted_axiom: false });
+                    cast_edges.push(CastEdge { direction, target_category, target_variant, binding, trusted_axiom: is_axiom });
                 } else if item_name == "op" {
                     let op_name = self.expect_identifier()?;
                     self.expect(Token::LParen)?;
@@ -2946,9 +2958,8 @@ impl<'a> Parser<'a> {
                         suf: None,
                         impl_args,
                         impl_name: String::new(),
-                        // 2026-08-27 (axiom WIP completion): no lemmas here.
                         trusted_lemmas: vec![],
-                        trusted_axiom: false,
+                        trusted_axiom: is_axiom,
                         span: None,
                     });
                 } else {

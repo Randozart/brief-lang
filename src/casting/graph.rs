@@ -552,6 +552,24 @@ impl CastingGraph {
         dst_cat: &str,
         dst_var: &str,
     ) -> Option<Vec<CastStep>> {
+        // 2026-08-28 (Bug #5): the BASE of a category IS its default variant
+        // — `String` (no variant) and `#String<UTF8>` are the same
+        // representation. Normalize the empty variant to the category default
+        // so BFS can land on it (a variant edge targets `#String<UTF8>`, and
+        // without normalization `CStr as String` never reached the goal and
+        // fell through to a raw bitcast — the C string was read as a [len]
+        // block). Only normalize when a variant is actually involved — the
+        // base→base fast path must keep firing for lane lookup (Bit → String
+        // etc.), and only normalize when the category HAS a declared default.
+        let has_variant = !src_var.is_empty() || !dst_var.is_empty();
+        let (src_var, dst_var) = if has_variant {
+            (
+                if src_var.is_empty() { self.defaults.get(src_cat).map(|s| s.as_str()).unwrap_or(src_var) } else { src_var },
+                if dst_var.is_empty() { self.defaults.get(dst_cat).map(|s| s.as_str()).unwrap_or(dst_var) } else { dst_var },
+            )
+        } else {
+            (src_var, dst_var)
+        };
         // Fast path: both are base protocols with no variants
         if src_var.is_empty() && dst_var.is_empty() {
             return self.find_base_path(src_cat, dst_cat);

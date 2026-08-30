@@ -117,6 +117,15 @@ pub fn verify_protocol_roundtrip(
         _ => return Ok(()),
     };
 
+    // 2026-08-28 (axiom facility): a pair DECLARED trusted (`axiom` prefix)
+    // skips the round-trip proof — the implementations live across the FFI
+    // boundary (no Briev body to evaluate) and the trust enters the
+    // authority ledger instead. Provable pairs stay provable; axioms are
+    // declared, never assumed.
+    if to_edge.trusted_axiom || from_edge.trusted_axiom {
+        return Ok(());
+    }
+
     let to_fn = to_edge.binding.as_ref().map(|b| &b.fn_name).unwrap();
     let from_fn = from_edge.binding.as_ref().map(|b| &b.fn_name).unwrap();
 

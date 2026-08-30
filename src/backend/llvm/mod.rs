@@ -3071,6 +3071,13 @@ impl LlvmBackend {
         // a per-process SipHash seed; unsorted iteration produced run-to-run
         // nondeterministic declare ORDER in the IR (Coding Standard 7).
         let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // 2026-08-28: the runtime-support prelude (emit_declares) already
+        // declares these libc symbols with `nounwind` — a frgn import of the
+        // same symbol emitted a SECOND declare with attribute set #6, which
+        // LLVM rejects as a redefinition (getenv via `frgn getenv(...) from "c"`).
+        declared.extend([
+            "time", "atol", "getenv", "malloc", "free", "strlen", "realloc",
+        ].into_iter());
         let mut frgn_sorted: Vec<(&String, &crate::ast::ForeignSignature)> =
             self.ctx.frgn_map.iter().collect();
         frgn_sorted.sort_by_key(|(name, _)| (*name).clone());
@@ -3260,6 +3267,20 @@ impl LlvmBackend {
         // length — not a null-terminated C string). Sub-protocols override via
         // CastFrom(#Bit).
         writeln!(out, "declare ptr @briev_bits_to_str(ptr) #1").ok();
+        // 2026-08-28 (Bug #5, frgn String-return): a `frgn f(...) -> String`
+        // boundary contract is "returns a NUL-terminated C string" — the
+        // compiler converts it to the Briev [len][bytes][\0] form at the
+        // call site via briev_cstr_to_briev. Skipped when a frgn import
+        // already declares the symbol (duplicate declare = redefinition).
+        if !self.ctx.frgn_map.contains_key("briev_cstr_to_briev") {
+            writeln!(out, "declare ptr @briev_cstr_to_briev(ptr) #1").ok();
+        }
+        // 2026-08-28 (Bug #5, frgn String ABI): block → C data pointer for
+        // plain-C frgn params (zero-copy +8; the NUL invariant is guaranteed
+        // by every Briev String allocation).
+        if !self.ctx.frgn_map.contains_key("briev_str_to_c") {
+            writeln!(out, "declare ptr @briev_str_to_c(ptr) nounwind").ok();
+        }
         // 2026-08-01 (B3): UTF8 character count for the #String `Size` prop
         // default (the O(1) byte-length header read is the `Bytes` prop).
         writeln!(out, "declare i64 @briev_char_len(ptr) #1").ok();

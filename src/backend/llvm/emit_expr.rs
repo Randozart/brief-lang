@@ -3854,7 +3854,14 @@ impl LlvmBackend {
                 if ret_type != Type::Void {
                     let ret_llvm = self.llvm_ret_abi_type(&ret_type);
                     if ret_llvm == "ptr" {
-                        writeln!(out, "{}  {} = inttoptr i64 0 to ptr", indent, v).ok();
+                        // 2026-08-28 (Bug #5 family): a String-returning frgn
+                        // that failed dispatch must yield the EMPTY-STRING
+                        // sentinel (@str.0), never null — downstream String
+                        // ops read the [len] header at offset 0, so null
+                        // dereferences at the first .^Length/compare/print.
+                        let si = self.ctx.string_constants.iter()
+                            .position(|s| s.is_empty()).unwrap_or(0);
+                        writeln!(out, "{}  {} = bitcast <{{ i64, [1 x i8] }}>* @str.{} to ptr", indent, v, si).ok();
                     } else if ret_llvm == "float" {
                         writeln!(out, "{}  {} = fadd float 0.0, 0.0", indent, v).ok();
                     } else if ret_llvm == "double" {
@@ -3972,6 +3979,38 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-08-28 (Bug #5, frgn String ABI): marshal a #String-family
+    /// argument to a #String-family parameter of a DIFFERENT variant through
+    /// the casting graph — a Briev String arg into a `CStr` param emits the
+    /// `str_to_c` delta (block → NUL-terminated data pointer, zero-copy),
+    /// the graph being the single source of truth for the transform. A frgn
+    /// signature that talks plain C declares its boundary with the variant
+    /// types (lib/glue/c.bv): `String` in a frgn signature is the Briev
+    /// block ABI (what the compiler's own runtime helpers expect); C-ABI
+    /// sources declare `CStr` params/returns. Returns None when the pair is
+    /// not a same-category cross-variant — the caller's coercion fallbacks
+    /// handle everything else.
+    fn emit_frgn_variant_cast(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        arg: &TypedRegister,
+        param_ty: &Type,
+    ) -> Option<TypedRegister> {
+        let graph = self.ctx.casting_graph.as_ref()?;
+        let universe = self.ctx.type_universe.as_ref()?;
+        let (src_cat, src_var) = graph.type_to_protocol(universe, &arg.ty);
+        let (dst_cat, dst_var) = graph.type_to_protocol(universe, param_ty);
+        if src_cat != dst_cat || src_var == dst_var {
+            return None;
+        }
+        if src_cat != "String" {
+            return None;
+        }
+        let conv = self.fun.gen_reg();
+        self.emit_cast_path(out, &conv, arg, param_ty, indent)
+    }
+
     /// 2026-07-22: Emit a direct foreign function call (Inline path).
     /// Uses the `symbol` parameter (from `as_name` or briev_name) as the
     /// callee, applies meld extension conversion to arguments, and emits
@@ -3989,31 +4028,7 @@ impl LlvmBackend {
             .iter()
             .map(|a| self.emit_expr(out, a, indent))
             .collect();
-        let ext = sig.from.extension();
-        let ext_str = ext.as_deref().unwrap_or("");
-        // 2026-07-16: Apply meld forward on each arg (identity conversion for now)
-        let meld_args: Vec<TypedRegister> = if ext_str.is_empty() {
-            arg_regs
-        } else {
-            arg_regs
-                .iter()
-                .zip(sig.inputs.iter())
-                .map(|(arg, (_, param_ty))| {
-                    let ty_name = match param_ty {
-                        crate::ast::Type::Custom(name) => name.as_str(),
-                        _ => return arg.clone(),
-                    };
-                    // 2026-08-01 (B4): the SSO String→C i8* shim was retired —
-                    // a String IS a ptr to [len][bytes] under the bits model,
-                    // so the arg is already pointer-typed and needs no handle
-                    // extraction.
-                    // 2026-08-09 (Phase 12, SPEC §19.6): the meld lookup was a
-                    // no-op (both branches returned the arg unchanged) — removed.
-                    let _ = ty_name;
-                    arg.clone()
-                })
-                .collect()
-        };
+        let _ext_str = "";
         // 2026-07-24: Convert i64 args to ptr when the frgn param expects Ptr.
         // This handles PyModule_Create2(&moduledef, ...) where &moduledef returns
         // an i64 address but the C function expects a pointer parameter.
@@ -4022,22 +4037,27 @@ impl LlvmBackend {
         // entry), so a ptr-typed frgn param needs `inttoptr i64`. On wasm32
         // `llvm_type(Int)` is i32, so coerce_to_param_type's ("i64","ptr") arm
         // never fires for boxed values — this explicit inttoptr is the fix.
-        let final_args: Vec<TypedRegister> = meld_args
+        // 2026-08-28 (Bug #5): a #String-family arg into a #String-family
+        // param of a DIFFERENT variant marshals through the casting graph
+        // first (String → CStr = str_to_c) — see emit_frgn_variant_cast.
+        let final_args: Vec<TypedRegister> = arg_regs
             .iter()
             .zip(sig.inputs.iter())
             .map(|(arg, (_, param_ty))| {
-                let param_is_ptr = matches!(param_ty, Type::Ptr(_))
-                    || self.is_string_operand(param_ty)
-                    || self.is_blob_operand(param_ty);
-                if param_is_ptr && arg.ty == Type::int() {
-                    let ptr_reg = self.fun.gen_reg();
-                    writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
-                    TypedRegister {
-                        name: ptr_reg,
-                        ty: Type::Ptr(Box::new(Type::int())),
+                match self.emit_frgn_variant_cast(out, indent, arg, param_ty) {
+                    Some(cast) => cast,
+                    None => {
+                        let param_is_ptr = matches!(param_ty, Type::Ptr(_))
+                            || self.is_string_operand(param_ty)
+                            || self.is_blob_operand(param_ty);
+                        if param_is_ptr && arg.ty == Type::int() {
+                            let ptr_reg = self.fun.gen_reg();
+                            writeln!(out, "{}  {} = inttoptr i64 {} to ptr", indent, ptr_reg, arg.name).ok();
+                            TypedRegister { name: ptr_reg, ty: Type::Ptr(Box::new(Type::int())) }
+                        } else {
+                            arg.clone()
+                        }
                     }
-                } else {
-                    arg.clone()
                 }
             })
             .collect();
@@ -4082,6 +4102,12 @@ impl LlvmBackend {
                 arg_strs.join(", ")
             )
             .ok();
+            // 2026-08-28 (Bug #5): the declared result type IS the ABI
+            // contract — a `-> String` frgn returns a Briev block (the
+            // compiler's runtime helpers), a `-> CStr` frgn returns a raw
+            // C string. No implicit conversion here: the caller crosses the
+            // variant boundary with an explicit cast (`v as String`), which
+            // the casting graph resolves to briev_cstr_to_briev.
             TypedRegister {
                 name: v.to_string(),
                 ty: ret_type,
@@ -4161,6 +4187,9 @@ impl LlvmBackend {
         }
 
         // 2026-07-22: Transform return value back to Briev type.
+        // 2026-08-28 (Bug #5): without a protocol chain the declared result
+        // type IS the ABI contract (String = block, CStr = raw C string);
+        // the caller crosses variants with an explicit cast.
         let final_reg = if let Some(ret_path) = return_path {
             crate::glue::bridge::emit_protocol_chain(
                 out, v, std::slice::from_ref(ret_path), &ret_llvm,
@@ -6135,8 +6164,16 @@ impl LlvmBackend {
                 crate::casting::graph::LaneKind::ExtCallDyn(fn_name) => {
                     // 2026-08-03: proto-binding transform (owned function
                     // name), e.g. cstr_to_briev/str_to_c for #String<CString>.
+                    // 2026-08-28 (Bug #5): the binding names the BRIEV-side
+                    // function; a frgn import's LINK SYMBOL is the C name
+                    // (`frgn str_to_c ... : briev_str_to_c`). Resolve through
+                    // frgn_map so the call targets the symbol the declare
+                    // emitted — a plain @str_to_c is an undefined value.
+                    let symbol = self.ctx.frgn_map.get(fn_name.as_str())
+                        .map(|sig| sig.name.clone())
+                        .unwrap_or_else(|| fn_name.clone());
                     writeln!(out, "{}{} = call {} @{}({} {})",
-                        indent, dst, dst_ll, fn_name, cur_ll, cur).ok();
+                        indent, dst, dst_ll, symbol, cur_ll, cur).ok();
                 }
                 crate::casting::graph::LaneKind::ExtractData => {
                     writeln!(out, "{}{} = extractvalue {} {}, 0",
