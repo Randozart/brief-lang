@@ -531,6 +531,21 @@ impl LlvmBackend {
                             let t = self.fun.gen_reg();
                             writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, reg).ok();
                             TypedRegister { name: t, ty: orig_ty }
+                        } else if (self.is_string_operand(&orig_ty)
+                            || self.is_blob_operand(&orig_ty))
+                            && ty == Type::int()
+                        {
+                            // 2026-08-28 (String ABI fix): a boxed String/Data
+                            // txn param is typed Int (the box) but physically
+                            // an i64 handle pointing at [len][bytes]. The
+                            // Char arm above truncates; this arm inttoptrs
+                            // to recover the ptr so downstream String ops
+                            // (length, compare, slice) and adapt_to_i64
+                            // (ptrtoint) work correctly. The round-trip is
+                            // folded by LLVM's optimizer.
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, t, reg).ok();
+                            TypedRegister { name: t, ty: orig_ty }
                         } else {
                             TypedRegister {
                                 name: reg.clone(),
@@ -1094,6 +1109,7 @@ impl LlvmBackend {
                 let index_elem_ty = match &obj_reg.ty {
                     Type::Ptr(inner) => (**inner).clone(),
                     Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
+                    Type::Vector(inner, _) => (**inner).clone(),
                     _ => Type::int(),
                 };
                 // 2026-07-18: SVO List indexing — removed (2026-08-15, coll
@@ -1681,13 +1697,7 @@ impl LlvmBackend {
                 // silently produced the full string (documented in BUGS.md).
                 // The runtime half (briev_str_substr) has always existed; wire
                 // it here. Vector slices stay on the narrowing-pass path.
-                let arr_is_str = self.is_string_operand(&array_reg.ty)
-                    || match array.as_ref() {
-                        Expr::Identifier(nm) => self.is_string_operand(
-                            &self.fun.let_original_types.get(nm).cloned().unwrap_or(Type::int())
-                        ),
-                        _ => false,
-                    };
+                let arr_is_str = self.is_semantic_string(array, &array_reg);
                 if arr_is_str {
                     let sp = self.string_ptr(out, indent, &array_reg);
                     let lo = match start {

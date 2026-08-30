@@ -2879,6 +2879,7 @@ impl LlvmBackend {
                                 impl_name: op.to_string(),
                                 // 2026-08-27 (axiom WIP completion): no lemmas.
                                 trusted_lemmas: vec![],
+                                trusted_axiom: false,
                                 span: None,
                             });
                         }
