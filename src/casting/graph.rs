@@ -1340,6 +1340,7 @@ mod cross_op_tests {
                 ])),
                 impl_name: String::new(),
                 span: None,
+                trusted_axiom: false,
             trusted_lemmas: vec![]}],
             span: None,
         });

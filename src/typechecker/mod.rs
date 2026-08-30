@@ -683,6 +683,7 @@ impl<'a> TypecheckContext<'a> {
                 impl_name: b.name.clone(),
                 // 2026-08-27 (axiom WIP completion): no lemmas.
                 trusted_lemmas: vec![],
+                trusted_axiom: false,
                 span: b.span.clone(),
             })
             .collect();
