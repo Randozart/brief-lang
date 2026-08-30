@@ -100,6 +100,42 @@ not *compile*. Three further defects, each exposed by the previous fix:
 `cargo test --lib`: 1990 green (1 pre-existing failure:
 `test_find_inverse_pairs`, protocol_graph harness, not codegen).
 
+## Session 3 additions (2026-08-28, commit `269e1eab`) — CStr FFI boundary (Bug #5 resolved)
+
+Bug #5 ("frgn String-return heap corruption") and the meld CStr→String
+length symptom share one root: **no carrier for the two FFI string
+conventions**. Briev runtime helpers (briev_rt.c) exchange `[len][bytes]`
+blocks; external C speaks NUL-terminated data pointers. The 2026-08-03
+boundary design already had the answer — variant boundary types
+(`CStr: #String<C_String>` in lib/glue/c.bv) — but three links were
+missing and are now wired:
+
+1. **Casting-graph base/variant normalization** (`find_path`): the base of
+   a category IS its default variant, so `CStr as String` reaches the
+   `C_String → UTF8` edge (cstr_to_briev). Base→base fast path preserved
+   (normalization only fires when a variant is involved — Bit→String
+   regression caught by the lane-coverage test).
+2. **ExtCallDyn link symbols**: the lane's binding names the BRIEV-side
+   function; the emitted call must use the C symbol from `frgn_map`
+   (`str_to_c` → `briev_str_to_c`).
+3. **`axiom` keyword parsed + honored** (SPEC): FFI-backed CastTo/CastFrom
+   pairs cannot be symbolically proven (foreign bodies) — they are
+   DECLARED trusted via `axiom CastTo(...) = f(#Lh);` and skip the
+   round-trip gate. c.bv's C_String pair declares it.
+
+Plus: unsupported-frgn String results yield the empty-string sentinel
+(@str.0) instead of null; libc prelude declares (getenv/time/atol/
+strlen/realloc/malloc/free) are seeded into the frgn declare dedup set
+(duplicate declare = LLVM redefinition error).
+
+**Verified:** `getenv("BRIEV_TEST_VAR")` → CStr → `as String` →
+`.^Length` = 5 and 2 for two env values, end-to-end.
+
+**ABI contract (documented):** in a frgn signature, `String` = Briev
+block ABI (the compiler's own runtime helpers); `CStr`/`CDouble` = the
+plain C ABI; crossing variants emits the graph's delta lanes at the call
+boundary and via explicit casts.
+
 ## Deferred
 
 - **Phase 4c (Bug #5):** frgn String-return marshalling leaks the malloc'd

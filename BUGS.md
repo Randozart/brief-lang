@@ -4321,15 +4321,15 @@ bits-model invariant: element at a boundary IS an i64 handle).
 ## meld CStr→String length reads wrong in a linked library
 
 **Date:** 2026-08-04
-**Status:** Open — probe `let text: String = s` (s: CStr) then `text .^Len`
-returned 5 for a 2-char input "xy" when linked as `brievc build --library`.
-The glue-path meld (boundary.bv echo/greet) passes its test, so the divergence
-is likely in the library-mode export wrapper or the String length-prefix read
-after the meld. Verify against `__glue_release`/`str_to_c` before trusting any
-String length/slice computed from a melded input in the pass.
-**Fix direction:** reproduce with a focused boundary-style export (not a defn
-export), compare the length-prefix write in `briev_cstr_to_briev` vs the
-`.^Len` codegen path.
+**Status:** Fixed (2026-08-28, session 3) — the root was the missing CStr
+boundary marshalling: blocks were passed where C expects NUL-terminated
+data pointers and vice versa. Variant boundary types (`CStr:
+#String<C_String>`) now marshal through the casting graph (str_to_c /
+cstr_to_briev lanes, base↔default-variant normalization in find_path,
+ExtCallDyn frgn_map symbol resolution, `axiom` keyword for FFI-backed
+pairs). Verified: getenv → CStr → String → .^Length end-to-end. The
+library-mode export-wrapper divergence above may be the same gap on the
+export side — re-probe it now that the import side works.
 
 ## String slicing returns the whole string (no substring semantics)
 
