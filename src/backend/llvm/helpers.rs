@@ -1301,6 +1301,17 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#Blob")
     }
 
+    /// 2026-08-28 (String ABI fix, obj params): the base obj name when `ty`
+    /// is a registered struct/obj type (`Custom` or `Applied`) — `None` for
+    /// anything else. Used to gate the boxed-obj-param recovery arm (an i64
+    /// handle of obj type is a heap block, inttoptr recovers the self ptr).
+    pub(super) fn boxed_obj_base(ty: &Type, struct_types: &std::collections::HashMap<String, Vec<(String, Type)>>) -> Option<String> {
+        match ty {
+            Type::Custom(n) | Type::Applied(n, _) if struct_types.contains_key(n) => Some(n.clone()),
+            _ => None,
+        }
+    }
+
     /// 2026-08-04 (compiler-in-Briev): is the receiver of a String operation
     /// semantically a #String, even if its emitted register was boxed to an
     /// i64 handle (String param, frgn result) and is now typed Int/Custom?

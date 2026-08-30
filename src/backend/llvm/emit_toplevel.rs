@@ -43,28 +43,47 @@ impl LlvmBackend {
     /// the nested block and re-introduce the same violation).
     fn collect_reassigned_lets(stmts: &[Statement]) -> std::collections::HashMap<String, Option<Type>> {
         use std::collections::HashMap;
-        fn collect_assigned(s: &Statement, out: &mut HashSet<String>) {
+        // 2026-08-28 (String ABI fix): recurse into EVERY body-carrying
+        // statement form. Previously only top-level lets were pre-declared,
+        // so `when c { let out = ""; out = out + " "; };` demoted `out` at
+        // the ASSIGN SITE (inside guard.then) while the read at guard.end
+        // was not dominated — "Instruction does not dominate all uses".
+        // Nested lets that are assigned anywhere now pre-declare entry
+        // allocas like top-level ones.
+        fn collect_lets(s: &Statement, out: &mut std::collections::HashMap<String, Option<Type>>) {
+            if let Statement::Let { name, ty, .. } = s {
+                out.insert(name.clone(), ty.clone());
+            }
+        }
+        fn walk(s: &Statement, lets: &mut std::collections::HashMap<String, Option<Type>>, assigned: &mut HashSet<String>) {
+            collect_lets(s, lets);
             match s {
-                Statement::Assign(Expr::Identifier(name), _) => { out.insert(name.clone()); }
+                Statement::Assign(Expr::Identifier(name), _) => { assigned.insert(name.clone()); }
                 Statement::ArrowAssign { target: Some(e), .. } => {
-                    if let Expr::Identifier(name) = e.as_ref() { out.insert(name.clone()); }
+                    if let Expr::Identifier(name) = e.as_ref() { assigned.insert(name.clone()); }
                 }
-                Statement::Guarded(_, body) => { for st in body { collect_assigned(st, out); } }
-                Statement::Block(body) => { for st in body { collect_assigned(st, out); } }
-                Statement::Foreach { body, .. } => { for st in body { collect_assigned(st, out); } }
-                Statement::SyncBlock(body) => { for st in body { collect_assigned(st, out); } }
+                Statement::Guarded(_, body) | Statement::Block(body) | Statement::SyncBlock(body)
+                | Statement::Defer(body) | Statement::Mutex(body) => {
+                    for st in body { walk(st, lets, assigned); }
+                }
+                Statement::Foreach { body, .. } => {
+                    for st in body { walk(st, lets, assigned); }
+                }
+                Statement::Barrier { body, .. } => {
+                    for st in body { walk(st, lets, assigned); }
+                }
+                Statement::Match { arms, .. } => {
+                    for arm in arms {
+                        for st in &arm.body { walk(st, lets, assigned); }
+                    }
+                }
                 _ => {}
             }
         }
-        let mut top_lets: HashMap<String, Option<Type>> = HashMap::new();
-        for s in stmts {
-            if let Statement::Let { name, ty, .. } = s {
-                top_lets.insert(name.clone(), ty.clone());
-            }
-        }
+        let mut lets: HashMap<String, Option<Type>> = HashMap::new();
         let mut assigned: HashSet<String> = HashSet::new();
-        for s in stmts { collect_assigned(s, &mut assigned); }
-        top_lets.into_iter().filter(|(n, _)| assigned.contains(n)).collect()
+        for s in stmts { walk(s, &mut lets, &mut assigned); }
+        lets.into_iter().filter(|(n, _)| assigned.contains(n)).collect()
     }
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
@@ -1679,7 +1698,7 @@ impl LlvmBackend {
         for (fname, fty) in fields {
             // Pooled columns are keyed `{base}.{member}` (shared across
             // instances of the base; the ROW differentiates them).
-            let slot = format!("{}.{}", base, fname);
+            let slot = format!("{}.{}", Self::pool_base(&base), fname);
             let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue; };
             let (row_p, _row_ty, load_ty) = self.emit_instance_column_row(out, indent, idx, &row);
             let val = self.fun.gen_reg();
@@ -1810,7 +1829,7 @@ impl LlvmBackend {
         // initial values (SPEC §16.3 type-directed construction for plain objs).
         if let crate::ast::Expr::StructLiteral { fields, .. } = init_expr {
             for (mname, value) in fields {
-                let slot = format!("{}.{}", base, mname);
+                let slot = format!("{}.{}", Self::pool_base(&base), mname);
                 let Some(&idx) = self.ctx.field_index_map.get(&slot) else { continue };
                 let col_ty = self.ctx.field_types[idx].clone();
                 let base_gep = self.emit_state_gep(out, indent, "si", "%state", idx);
@@ -1832,7 +1851,7 @@ impl LlvmBackend {
             }
             return;
         }
-        let defs = self.ctx.operator_defs.get(base).cloned().unwrap_or_default();
+        let defs = self.ctx.operator_defs.get(Self::pool_base(&base)).cloned().unwrap_or_default();
         let init_def = match defs.iter().find(|d| d.op == "Init") {
             Some(d) => d.clone(),
             None => return,
@@ -1841,7 +1860,9 @@ impl LlvmBackend {
             Some(crate::ast::PropertyValue::Identifier(s)) => s.clone(),
             _ => return,
         };
-        let members = self.ctx.obj_members.get(base).cloned().unwrap_or_default();
+        let members = self.ctx.obj_members.get(base).cloned()
+            .or_else(|| self.ctx.obj_members.get(Self::pool_base(&base)).cloned())
+            .unwrap_or_default();
         let member = members.iter()
             .find(|m| super::emit_expr::member_briev_name(m) == fn_name)
             .cloned();
@@ -2146,6 +2167,12 @@ impl LlvmBackend {
     /// 2026-08-07 (object instance pools): `Some(name)` when `name` is an
     /// unpacked obj instance (its Init was recorded) — its member bodies
     /// resolve bare member names against the prefixed top-level slots.
+    /// 2026-08-28: extract the base obj name from a mono key.
+    /// `"Stack<Int,8>"` → `"Stack"`, `"Stack"` → `"Stack"`.
+    pub(crate) fn pool_base(mono_or_base: &str) -> &str {
+        mono_or_base.split('<').next().unwrap_or(mono_or_base)
+    }
+
     pub(crate) fn unpacked_instance_prefix(&self, name: &str) -> Option<(String, String)> {
         self.ctx.obj_instance_inits.get(name)
             .map(|(base, _)| (base.clone(), "0".to_string()))

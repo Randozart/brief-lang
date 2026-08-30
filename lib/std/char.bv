@@ -17,7 +17,7 @@ defn int_to_char(n: Int) [n >= 0 && n <= 0x10FFFF][true] -> Char {
 defn char_to_string(c: Char) [true][CharCount#(term) == 1] -> String {
     let sb: StringBuilder = new_builder();
     sb = append_char(sb, c);
-    term to_string(sb);
+    term sb.buffer;
 };
 
 // Classification

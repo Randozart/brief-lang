@@ -501,6 +501,16 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     let store_val = backend.ensure_typed_value(out, indent, &store_ty, &val.name, Some(val.ty.clone()), backend.ctx.type_universe.clone().as_ref());
                     writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, store_val, slot).ok();
                     backend.fun.let_binding_allocas.insert(slot.clone());
+                    // 2026-08-28 (String ABI fix): the pre-declaration
+                    // (emit_definition) registered a PROVISIONAL Int type —
+                    // the real let knows the declared/inferred type. Update
+                    // both type maps so later reads (and field access on
+                    // boxed obj handles) resolve the true type; the Int
+                    // provisional made `let sb: SB = ...; sb = f(sb);`
+                    // reads lose the obj type permanently.
+                    let bind_ty = ty.clone().unwrap_or_else(|| val.ty.clone());
+                    backend.fun.let_binding_types.insert(name.clone(), bind_ty.clone());
+                    backend.fun.let_original_types.insert(name.clone(), bind_ty);
                     return TypedRegister { name: val.name, ty: val.ty.clone() };
                 }
             }

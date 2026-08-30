@@ -378,7 +378,7 @@ txn to_lower_loop(s: String, sb: StringBuilder, i: Int)
         sb = append_char(sb, int_to_char(b));
     };
     i = i + 1;
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn to_lower_str(s: String) [true][term .^Length == s .^Length] -> String {
@@ -396,7 +396,7 @@ txn to_upper_loop(s: String, sb: StringBuilder, i: Int)
         sb = append_char(sb, int_to_char(b));
     };
     i = i + 1;
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn to_upper_str(s: String) [true][term .^Length == s .^Length] -> String {
@@ -456,7 +456,7 @@ txn capitalize_loop(s: String, sb: StringBuilder, i: Int)
         sb = append_char(sb, int_to_char(b));
     };
     i = i + 1;
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn capitalize(s: String) [true][s .^Length >= 0] -> String {
@@ -480,7 +480,7 @@ txn reverse_loop(s: String, sb: StringBuilder, i: Int)
     let b: Int = byte_at(s, s .^Length - 1 - i);
     sb = append_char(sb, int_to_char(b));
     i = i + 1;
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn reverse_str(s: String) [true][s .^Length >= 0] -> String {
@@ -519,7 +519,7 @@ defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][s .^Length >
     let sb = new_builder();
     sb = append_str(sb, s[0:max_len-3]);
     sb = append_str(sb, "...");
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn ensure_prefix(s: String, prefix: String) [true][s .^Length >= 0] -> String {
@@ -529,7 +529,7 @@ defn ensure_prefix(s: String, prefix: String) [true][s .^Length >= 0] -> String 
     let sb = new_builder();
     sb = append_str(sb, prefix);
     sb = append_str(sb, s);
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn ensure_suffix(s: String, suffix: String) [true][s .^Length >= 0] -> String {
@@ -539,7 +539,7 @@ defn ensure_suffix(s: String, suffix: String) [true][s .^Length >= 0] -> String 
     let sb = new_builder();
     sb = append_str(sb, s);
     sb = append_str(sb, suffix);
-    term to_string(sb);
+    term sb.buffer;
 };
 
 defn remove_prefix(s: String, prefix: String) [true][CharCount#(term) <= CharCount#(s)] -> String {

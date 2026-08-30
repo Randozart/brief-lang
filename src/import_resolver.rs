@@ -1159,33 +1159,52 @@ fn lex_source(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, Stri
     Ok(tokens)
 }
 
-/// Keep only the first occurrence of each named top-level item.
+fn item_key(item: &TopLevel) -> Option<(String, String)> {
+    // 2026-08-28: name-only keys — the typechecker holds ONE signature per
+    // callable name (fn_param_types/fn_return_types are name-keyed), so
+    // same-name defns cannot coexist in one module; keeping both would also
+    // emit duplicate @symbols in LLVM. Combined with last-wins dedup below,
+    // the LOCAL (later) definition shadows the imported one — lexical-scope
+    // semantics. Overloads per se are a language-feature track (would need
+    // call-site signature resolution + backend name mangling).
+    match item {
+        TopLevel::Definition(d) => Some(("def".into(), d.name.clone())),
+        TopLevel::Transaction(t) => Some(("txn".into(), t.name.clone())),
+        TopLevel::StateDecl(s) => Some(("state".into(), s.name.clone())),
+        TopLevel::Trigger(trg) => Some(("trigger".into(), trg.name.clone())),
+        TopLevel::TriggerBinding { name, .. } => Some(("trg_binding".into(), name.clone())),
+        TopLevel::Cell(c) => Some(("cell".into(), c.name.clone())),
+        TopLevel::Constant(c) => Some(("const".into(), c.name.clone())),
+        TopLevel::Signature(s) => Some(("sig".into(), s.name.clone())),
+        TopLevel::ForeignBinding(fb) => Some(("frgn".into(), fb.foreign_name.clone())),
+        TopLevel::Obj(s) => Some(("struct".into(), s.name.clone())),
+        TopLevel::Enum(e) => Some(("enum".into(), e.name.clone())),
+        TopLevel::TypeDef(t) => Some(("typedef".into(), t.name.clone())),
+        TopLevel::Trait(t) => Some(("trait".into(), t.name.clone())),
+        TopLevel::Impl(i) => Some(("impl".into(), i.target.clone())),
+        TopLevel::RenderBlock(r) => Some(("render".into(), r.struct_name.clone())),
+        TopLevel::LinkDependency(l) => Some(("link".into(), l.path.clone())),
+        TopLevel::ResourceDecl(r) => Some(("rsrc".into(), r.name.clone())),
+        _ => None,
+    }
+}
+
+/// Keep the LAST occurrence of each named top-level item — local/recent
+/// definitions shadow imported ones, matching lexical-scope semantics.
+/// Diamond-import dedup still works because identical items from the same
+/// module collapse to one copy regardless of which is "last."
 fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    use std::collections::HashMap;
+    let mut last_indices: HashMap<(String, String), usize> = HashMap::new();
+    for (i, item) in items.iter().enumerate() {
+        if let Some(key) = item_key(item) {
+            last_indices.insert(key, i);
+        }
+    }
     let mut result = Vec::with_capacity(items.len());
-    for item in items {
-        let key = match &item {
-            TopLevel::Definition(d) => Some(("def", &d.name)),
-            TopLevel::Transaction(t) => Some(("txn", &t.name)),
-            TopLevel::StateDecl(s) => Some(("state", &s.name)),
-            TopLevel::Trigger(trg) => Some(("trigger", &trg.name)),
-            TopLevel::TriggerBinding { name, .. } => Some(("trg_binding", name)),
-            TopLevel::Cell(c) => Some(("cell", &c.name)),
-            TopLevel::Constant(c) => Some(("const", &c.name)),
-            TopLevel::Signature(s) => Some(("sig", &s.name)),
-            TopLevel::ForeignBinding(fb) => Some(("frgn", &fb.foreign_name)),
-            TopLevel::Obj(s) => Some(("struct", &s.name)),
-            TopLevel::Enum(e) => Some(("enum", &e.name)),
-            TopLevel::TypeDef(t) => Some(("typedef", &t.name)),
-            TopLevel::Trait(t) => Some(("trait", &t.name)),
-            TopLevel::Impl(i) => Some(("impl", &i.target)),
-            TopLevel::RenderBlock(r) => Some(("render", &r.struct_name)),
-            TopLevel::LinkDependency(l) => Some(("link", &l.path)),
-            TopLevel::ResourceDecl(r) => Some(("rsrc", &r.name)),
-            _ => None,
-        };
-        match key {
-            Some((cat, name)) if seen.insert((cat.to_string(), name.to_string())) => result.push(item),
+    for (i, item) in items.into_iter().enumerate() {
+        match item_key(&item) {
+            Some(key) if last_indices[&key] == i => result.push(item),
             Some(_) => {}
             None => result.push(item),
         }

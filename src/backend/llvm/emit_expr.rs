@@ -546,6 +546,20 @@ impl LlvmBackend {
                             let t = self.fun.gen_reg();
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, t, reg).ok();
                             TypedRegister { name: t, ty: orig_ty }
+                        } else if ty == Type::int()
+                            && Self::boxed_obj_base(&orig_ty, &self.ctx.struct_types)
+                                .is_some_and(|base| !self.ctx.spawn_pools.contains_key(&base))
+                        {
+                            // 2026-08-28 (String ABI fix, obj params): a boxed
+                            // OBJ param (StringBuilder, custom structs) is an
+                            // i64 heap-block handle — inttoptr to recover the
+                            // ptr so field access and member calls on the
+                            // recovered self work. Spawn-pool handles are
+                            // EXCLUDED: a row id is not a heap pointer (mirrors
+                            // the get_local fallback restriction).
+                            let t = self.fun.gen_reg();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, t, reg).ok();
+                            TypedRegister { name: t, ty: orig_ty }
                         } else {
                             TypedRegister {
                                 name: reg.clone(),
@@ -2475,7 +2489,7 @@ impl LlvmBackend {
         // `@c` global. Mirrors the member-call receiver prefix path.
         if let Expr::Identifier(rname) = recv {
             if let Some((base, row_reg)) = self.instance_prefix_for(rname) {
-                let slot = format!("{}.{}", base, name);
+                let slot = format!("{}.{}", Self::pool_base(&base), name);
                 if let Some(&idx) = self.ctx.field_index_map.get(&slot) {
                     let (row, row_ty, load_ty) =
                         self.emit_instance_column_row(out, indent, idx, &row_reg);
@@ -2485,7 +2499,7 @@ impl LlvmBackend {
                 }
                 // Boxed instance (per-heap block): inttoptr the handle + GEP
                 // the member byte offset.
-                if let Some(offsets) = self.ctx.boxed_offsets.get(base.as_str()) {
+                if let Some(offsets) = self.ctx.boxed_offsets.get(Self::pool_base(&base)) {
                     if let Some((off, mty)) = offsets.get(name) {
                         let ptr = self.fun.gen_reg();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, row_reg).ok();
@@ -2877,9 +2891,9 @@ impl LlvmBackend {
             // path. Only a SPAWN-POOL base is always a pooled row (its handle
             // is the row id, never a heap block): if THAT reaches the boxed
             // fallback, the pool prefix failed to resolve (regression).
-            let is_pool_instance = self.ctx.spawn_pools.contains_key(type_name)
+            let is_pool_instance = self.ctx.spawn_pools.contains_key(Self::pool_base(type_name))
                 && self.ctx.instance_slots.iter()
-                    .any(|slot| slot.starts_with(&format!("{}.", type_name)));
+                    .any(|slot| slot.starts_with(&format!("{}.", Self::pool_base(type_name))));
             if is_pool_instance {
                 panic!(
                     "obj instance member call '.{}' on '{}' reached the retired boxed self path \
