@@ -308,6 +308,28 @@ fn simplify_binary(op: &str, left: &SymbolicValue, right: &SymbolicValue) -> Opt
         // Identity and absorption rules for addition
         ("+", SymbolicValue::Literal(0, _), x) => Some(x.clone()),
         ("+", x, SymbolicValue::Literal(0, _)) => Some(x.clone()),
+        ("-", x, SymbolicValue::Literal(0, _)) => Some(x.clone()),
+        // 2026-08-28 (P1.5): additive cancellation — (x+c)−c → x, (x−c)+c → x,
+        // x−x → 0. These make add/sub CastTo/CastFrom pairs provably
+        // 1-to-1 (the P1.5 delta-collapse), which previously required z3
+        // (absent from PATH → always failed).
+        ("-", SymbolicValue::Binary(op, inner, r2), r1) if op == "+" => {
+            match (r1, r2.as_ref()) {
+                (SymbolicValue::Literal(c1, _), SymbolicValue::Literal(c2, _)) if c1 == c2 => {
+                    Some((**inner).clone())
+                }
+                _ => None,
+            }
+        }
+        ("+", SymbolicValue::Binary(op, inner, r2), r1) if op == "-" => {
+            match (r1, r2.as_ref()) {
+                (SymbolicValue::Literal(c1, _), SymbolicValue::Literal(c2, _)) if c1 == c2 => {
+                    Some((**inner).clone())
+                }
+                _ => None,
+            }
+        }
+        ("-", l, r) if symbolic_equals(l, r) => Some(SymbolicValue::int_literal(0)),
 
         // Identity and absorption rules for multiplication
         ("*", SymbolicValue::Literal(1, _), x) => Some(x.clone()),
@@ -477,10 +499,25 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
 /// 2026-07-16: P6 — Evaluate an expression symbolically given explicit input bindings.
 /// Unlike eval_symbolic, this does NOT require a full SymbolicState — just a
 /// HashMap of input bindings. Used by meld validation Layer 4.
+/// 2026-08-28 (P1.5): normalize the op to the canonical "+"/"-"/"*"/"/"/"%"
+/// symbols (matching simplify_binary) and SIMPLIFY at every node — the old
+/// form produced `Binary("Sub", Binary("Add", x, 1), 1)` with no
+/// cancellation, so `prove_composition_inverse` never collapsed (x+1)−1 to x
+/// and the P1.5 delta-collapse never fired for add/sub inverse pairs.
 pub fn eval_symbolic_expr(
     expr: &Expr,
     inputs: &std::collections::HashMap<String, SymbolicValue>,
 ) -> SymbolicValue {
+    fn op_sym(kind: &BinaryOpKind) -> &'static str {
+        match kind {
+            BinaryOpKind::Add => "+",
+            BinaryOpKind::Sub => "-",
+            BinaryOpKind::Mul => "*",
+            BinaryOpKind::Div => "/",
+            BinaryOpKind::Mod => "%",
+            _ => "?",
+        }
+    }
     match expr {
         Expr::Identifier(name) => {
             inputs.get(name).cloned().unwrap_or(SymbolicValue::Unknown)
@@ -489,11 +526,16 @@ pub fn eval_symbolic_expr(
         Expr::BinaryOp(kind, l, r) => {
             let lv = eval_symbolic_expr(l, inputs);
             let rv = eval_symbolic_expr(r, inputs);
-            SymbolicValue::Binary(
-                format!("{:?}", kind),
-                Box::new(lv),
-                Box::new(rv),
-            )
+            let sym = op_sym(kind);
+            if let Some(simplified) = simplify_binary(sym, &lv, &rv) {
+                simplified
+            } else {
+                SymbolicValue::Binary(
+                    sym.to_string(),
+                    Box::new(lv),
+                    Box::new(rv),
+                )
+            }
         }
         Expr::Decimal(n) | Expr::TaggedLiteral(n, _) => SymbolicValue::Literal(*n, "i64".to_string()),
         _ => SymbolicValue::Unknown,

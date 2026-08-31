@@ -5,16 +5,22 @@
 use crate::ast::top::{CastDirection, CastEdge, ProtocolDef, TopLevel};
 use crate::ast::{Contract, Expr, PropertyValue, Statement, Type};
 
-/// Find a defn body by name in the top-level items.
-/// Returns the body expression if it's a single-term defn.
-pub fn find_defn_body<'a>(name: &str, items: &'a [TopLevel]) -> Option<&'a Expr> {
+/// Find a defn body by name in the top-level items, returning the first
+/// parameter's name alongside the body expression.
+/// 2026-08-28 (P1.5): the caller must key the symbolic input by the defn's
+/// ACTUAL parameter name — the bodies reference their declared param (`x`),
+/// not the CastBinding's `#Lh`. Keying by "#Lh" made every identifier resolve
+/// to Unknown, so add/sub inverse pairs were never proven (the SMT fallback
+/// then failed without z3).
+pub fn find_defn_param_body<'a>(name: &str, items: &'a [TopLevel]) -> Option<(String, &'a Expr)> {
     for item in items {
         if let TopLevel::Definition(d) = item {
             if d.name == name {
+                let param = d.parameters.first().map(|(p, _)| p.clone()).unwrap_or_else(|| "#Lh".to_string());
                 for stmt in &d.body {
                     if let Statement::Term(val) = stmt {
                         if let Some(expr) = val {
-                            return Some(expr);
+                            return Some((param, expr));
                         }
                     }
                 }
@@ -25,21 +31,27 @@ pub fn find_defn_body<'a>(name: &str, items: &'a [TopLevel]) -> Option<&'a Expr>
     None
 }
 
+/// Find a defn body by name in the top-level items.
+/// Returns the body expression if it's a single-term defn.
+pub fn find_defn_body<'a>(name: &str, items: &'a [TopLevel]) -> Option<&'a Expr> {
+    find_defn_param_body(name, items).map(|(_, e)| e)
+}
+
 /// 2026-08-03 (P1.5): Prove that `inverse_body(forward_body(x)) == x` via
 /// symbolic evaluation, falling back to SMT (linear ops like `<<1`/`>>1`
 /// prove cleanly). Returns false when the composition is NOT provably
 /// identity — the caller then simply doesn't collapse the pair (the cast is
 /// emitted correctly, just not for free). Never a guess.
-fn prove_composition_inverse(forward_body: &Expr, inverse_body: &Expr) -> bool {
+fn prove_composition_inverse(param: &str, forward_body: &Expr, inverse_body: &Expr) -> bool {
     use crate::symbolic::{eval_symbolic_expr, SymbolicValue};
     let sym_input = {
         let mut m = std::collections::HashMap::new();
-        m.insert("#Lh".to_string(), SymbolicValue::Identifier("__x".into()));
+        m.insert(param.to_string(), SymbolicValue::Identifier("__x".into()));
         m
     };
     let mid = eval_symbolic_expr(forward_body, &sym_input);
     let mut inv_input = std::collections::HashMap::new();
-    inv_input.insert("#Lh".to_string(), mid);
+    inv_input.insert(param.to_string(), mid);
     let output = eval_symbolic_expr(inverse_body, &inv_input);
 
     if symbolic_deep_equals(&output, &SymbolicValue::Identifier("__x".into())) {
@@ -87,10 +99,11 @@ pub fn find_inverse_pairs(items: &[TopLevel]) -> Vec<(String, String, String)> {
             }
             let Some(at_fn) = at.binding.as_ref().map(|x| &x.fn_name) else { continue };
             let Some(bf_fn) = bf.binding.as_ref().map(|x| &x.fn_name) else { continue };
-            let (Some(fwd), Some(inv)) = (find_defn_body(at_fn, items), find_defn_body(bf_fn, items)) else {
+            let (Some((param, fwd)), Some((_, inv))) =
+                (find_defn_param_body(at_fn, items), find_defn_param_body(bf_fn, items)) else {
                 continue;
             };
-            if prove_composition_inverse(fwd, inv) {
+            if prove_composition_inverse(&param, fwd, inv) {
                 pairs.push((a.category.clone(), a.name.clone(), b.name.clone()));
             }
         }
