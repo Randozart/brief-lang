@@ -164,7 +164,7 @@ defn emit_rem_scan(text: String, i: Int, n: Int, buf: Ptr<Int>, pos: Int) -> Int
 
 // ── the export ─────────────────────────────────────────────────────────
 export defn soa_reorder_compute(proj: CStr) -> Int {
-    let text: String = proj;
+    let text: String = cstr_to_briev(proj as Int);
     let total: Int = token_at(section_line(text, "total"), 1) as Int;
     let buf: Ptr<Int> = Malloc#((total + 1) * 8) as Ptr<Int>;
     buf[0] = total;
