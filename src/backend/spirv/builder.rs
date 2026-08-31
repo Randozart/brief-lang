@@ -10,7 +10,7 @@
 /// gone — one id counter, one source of truth.
 /// To undo: restore TypeCache + arena + flush_types (git history).
 
-use rspirv::dr::Builder;
+use rspirv::dr::{Builder, Operand};
 use std::collections::HashMap;
 
 use crate::ast::Type;
@@ -32,6 +32,9 @@ pub struct SpirvBuilder {
     casting_graph: CastingGraph,
     /// Target integer width when a type carries no bits metadata.
     int_bits: u64,
+    /// O2 (plan 2026-08-31-gpu-next): lazily imported GLSL.std.450 set id,
+    /// cached so repeated Fma emissions share one OpExtInstImport.
+    glsl_set: Option<Word>,
 }
 
 impl SpirvBuilder {
@@ -48,6 +51,7 @@ impl SpirvBuilder {
             universe: TypeUniverse::new(),
             casting_graph: CastingGraph::new(),
             int_bits: 64,
+            glsl_set: None,
         }
     }
 
@@ -98,6 +102,37 @@ impl SpirvBuilder {
     /// Allocate a fresh result ID.
     pub fn gen_id(&mut self) -> Word {
         self.builder.id()
+    }
+
+    /// O2 (plan 2026-08-31-gpu-next): emit `GLSL.std.450 Fma(a, b, c)` —
+    /// one rounding instead of FMul+FAdd's two, and immune to whether the
+    /// driver contracts mul+add chains. The OpExtInstImport is emitted
+    /// lazily once and reused (it must precede the function in the module;
+    /// rspirv routes imports to the import section regardless of when the
+    /// call happens). Requires an open function block — kernel lowering
+    /// only ever calls this inside a function body.
+    pub fn glsl_fma(&mut self, result_ty: Word, a: Word, b: Word, c: Word) -> Word {
+        let set = match self.glsl_set {
+            Some(s) => s,
+            None => {
+                let s = self.builder.ext_inst_import("GLSL.std.450");
+                self.glsl_set = Some(s);
+                s
+            }
+        };
+        self.builder
+            .ext_inst(
+                result_ty,
+                None,
+                set,
+                spirv::GLOp::Fma as u32,
+                [
+                    Operand::IdRef(a),
+                    Operand::IdRef(b),
+                    Operand::IdRef(c),
+                ],
+            )
+            .expect("Fma emission inside a function block")
     }
 
     // ── Briev type lowering (typed, internally deduped by rspirv) ───────

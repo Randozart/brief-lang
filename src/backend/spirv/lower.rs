@@ -753,10 +753,51 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
+    /// O2: lower float `mul + addend` (either order) as a single Fma.
+    /// Returns Ok(None) when the shape is not a float mul-add; the caller
+    /// then lowers normally (the speculative ids here are dead code).
+    fn try_emit_float_fma(&mut self, l: &Expr, r: &Expr)
+        -> Result<Option<(Word, Type)>, String>
+    {
+        use crate::ast::BinaryOpKind::Mul;
+        let (mul_operands, addend) = match (l, r) {
+            (Expr::BinaryOp(Mul, a, b), c) => ((a.as_ref(), b.as_ref()), c),
+            (c, Expr::BinaryOp(Mul, a, b)) => ((a.as_ref(), b.as_ref()), c),
+            _ => return Ok(None),
+        };
+        let (aid, aty) = self.emit_expr(mul_operands.0)?;
+        let (bid, bty) = self.emit_expr(mul_operands.1)?;
+        if !(self.builder.is_float_type(&aty)? && self.builder.is_float_type(&bty)?) {
+            return Ok(None);
+        }
+        let (cid, cty) = self.emit_expr(addend)?;
+        if !self.builder.is_float_type(&cty)? {
+            // Mixed float/int add — the generic path owns this error.
+            return Ok(None);
+        }
+        let aid = self.coerce(aid, &aty, &bty)?;
+        let bid = self.coerce(bid, &bty, &aty)?;
+        let cid = self.coerce(cid, &cty, &aty)?;
+        let ty_id = self.type_id(&aty)?;
+        let res = self.builder.glsl_fma(ty_id, aid, bid, cid);
+        Ok(Some((res, aty)))
+    }
+
     fn emit_binop(&mut self, kind: &crate::ast::BinaryOpKind, l: &Expr, r: &Expr)
         -> Result<(Word, Type), String>
     {
         use crate::ast::BinaryOpKind::*;
+        // O2 (plan 2026-08-31-gpu-next): fuse float `a*b + c` into one
+        // GLSL.std.450 Fma BEFORE the generic lowering splits it into FMul +
+        // FAdd. One rounding (better numerics) and no dependence on driver
+        // contraction. Non-matching / non-float shapes fall through
+        // untouched; the speculative sub-lowering leaves only dead ids
+        // behind (side-effect-free, eliminated by the driver).
+        if matches!(kind, Add) {
+            if let Some(fused) = self.try_emit_float_fma(l, r)? {
+                return Ok(fused);
+            }
+        }
         let (lid, lty) = self.emit_expr(l)?;
         let (rid, rty) = self.emit_expr(r)?;
         // 2026-08-31 (plan abv-gpu-by-default): opcode selection is driven by

@@ -551,11 +551,18 @@ mod tests {
             }
             ops
         };
-        // FMul/FAdd presence is the discriminator: a missed float lane would
-        // lower the SAME math as IMul/IAdd. (IAdd may still appear for the
-        // integer counter increment — that is correct.)
-        assert!(ops.contains(&rspirv::spirv::Op::FMul), "FMul in {:?} (no F* opcodes emitted — float lane not taken)", ops);
-        assert!(ops.contains(&rspirv::spirv::Op::FAdd), "FAdd in {:?}", ops);
+        // Fused-multiply-add is the discriminator (O2, plan
+        // 2026-08-31-gpu-next): a float `a*b+c` lowers to ONE GLSL.std.450
+        // Fma ExtInst — no separate FMul/FAdd pair. A missed float lane
+        // would lower the SAME math as IMul/IAdd, and an unfused fallback
+        // would show FMul+FAdd. (IAdd may still appear for the integer
+        // counter increment — that is correct.)
+        assert!(
+            ops.contains(&rspirv::spirv::Op::ExtInst),
+            "ExtInst (Fma) in {ops:?} (no fused float op emitted — float lane not taken)"
+        );
+        assert!(!ops.contains(&rspirv::spirv::Op::FAdd), "unfused FAdd in {ops:?}");
+        assert!(!ops.contains(&rspirv::spirv::Op::FMul), "unfused FMul in {ops:?}");
 
         if !has_val {
             eprintln!("spirv-val not found — binary checks only");
