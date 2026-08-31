@@ -87,6 +87,9 @@ extern BrievDeviceDriver briev_dev_opencl;
 
 static const BrievDeviceDriver* g_driver = NULL;
 static int g_init_done = 0;
+// 2026-08-31: shared with the #included device drivers (single TU) — they
+// read it for BRIEV_ACCEL_VERBOSE diagnostics.
+static int g_verbose = 0;
 static void** g_kernels = NULL;       // per-desc kernel handles
 static uint32_t g_n_kernels = 0;
 static const BrievKernelDesc* g_descs = NULL;
@@ -120,7 +123,8 @@ static const BrievDeviceDriver* select_driver(void) {
 /// available()==1 — the GPU lane was "chosen" and launches no-op'd, and
 /// there was no way to see why. BRIEV_ACCEL_VERBOSE=1 prints the reason.
 int briev_accel_init(const BrievKernelDesc* descs, uint32_t n) {
-    int verbose = getenv("BRIEV_ACCEL_VERBOSE") != NULL;
+    g_verbose = getenv("BRIEV_ACCEL_VERBOSE") != NULL;
+    int verbose = g_verbose;
     if (!g_init_done) {
         g_driver = select_driver();
         if (g_driver != NULL) {

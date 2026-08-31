@@ -29,33 +29,43 @@ pub(crate) struct AccelKernelBlob {
 }
 
 impl super::LlvmBackend {
-    /// Emit + compile a SPIR-V kernel for every `Gpu`/`Probe` accel body.
-    /// 2026-08-31 (plan abv-gpu-by-default): the candidate set AND order come
-    /// from the pre-registered `accel_kernel_idx` (wrappers need the index
-    /// during host emission) — this fn preserves it exactly: a kernel whose
-    /// emission or llc compile fails keeps its slot with an EMPTY blob (the
-    /// runtime rejects empty blobs → clean per-kernel CPU fallback) so later
-    /// wrappers' launch indices stay valid.
+    /// Emit a SPIR-V kernel for every `Gpu`/`Probe` accel body, using the
+    /// STANDALONE SPIR-V backend (src/backend/spirv) — Vulkan-native output
+    /// (GLCompute, GLSL450 memory model, LocalSize 64). 2026-08-31 (plan
+    /// abv-gpu-by-default, item 4): the old path reused the LLVM emitter +
+    /// `llc --mtriple=spirv64`, whose output is OpenCL-flavored SPIR-V
+    /// (`OpCapability Kernel`) that Vulkan devices reject at pipeline
+    /// creation. The candidate set AND order come from the pre-registered
+    /// `accel_kernel_idx`; a kernel whose emission fails keeps its slot with
+    /// an EMPTY blob (runtime CPU fallback per kernel).
     pub(super) fn collect_accel_kernels(
         &mut self,
         _entries: &HashMap<String, AccelEntry>,
+        items: &[crate::ast::TopLevel],
     ) -> Vec<AccelKernelBlob> {
         let mut blobs = Vec::new();
         let mut names: Vec<String> = self.accel_kernel_idx.keys().cloned().collect();
         names.sort();
         for name in &names {
-            let entry = self.accel_entries[name].clone();
-            match self.emit_kernel_module(name, &entry.shape) {
-                Ok(ir) => match compile_to_spirv(&ir) {
-                    Ok(bytes) => blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes }),
-                    Err(e) => {
-                        self.warnings.push(format!(
-                            "warning: accel '{}': SPIR-V compilation failed — {} (staying CPU)",
-                            name, e
-                        ));
-                        blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes: Vec::new() });
-                    }
-                },
+            let shape = self.accel_entries[name].shape.clone();
+            let Some(universe) = self.ctx.type_universe.clone() else {
+                self.warnings.push(format!(
+                    "warning: accel '{}': no TypeUniverse — staying CPU",
+                    name
+                ));
+                blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes: Vec::new() });
+                continue;
+            };
+            let int_bits = self.ctx.int_bits;
+            let mut sb = crate::backend::spirv::SpirvBuilder::new()
+                .with_universe(&universe, int_bits);
+            // Entry is "main" (each offload module is self-contained; the
+            // device drivers look up "main" — kernel.rs's own header note).
+            let emitted =
+                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &shape, items)
+                    .and_then(|_| sb.build());
+            match emitted {
+                Ok(bytes) => blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes }),
                 Err(e) => {
                     self.warnings.push(format!(
                         "warning: accel '{}': kernel emission failed — {} (staying CPU)",
@@ -268,43 +278,35 @@ fn field_entry_ir(
     )
 }
 
-/// Build one kernel's field table (kernel field order, host offsets).
-fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTable {
+/// Build one kernel's field table. 2026-08-31 (plan abv-gpu-by-default):
+/// the SPIR-V kernel's SSBO members are ALL state fields sorted by NAME
+/// (spirv lower::setup_state_buffer), so the descriptor must list exactly
+/// that order — the runtime packs the projection in this order and the
+/// kernel indexes members positionally.
+fn kernel_field_table(
+    backend: &super::LlvmBackend,
+    txn: &str,
+    items: &[crate::ast::TopLevel],
+) -> KernelFieldTable {
     let entry = &backend.accel_entries[txn];
     let shape = &entry.shape;
-    let mut arrays: Vec<&String> = shape.read_buffers.iter().collect();
-    // 2026-08-31 (plan abv-gpu-by-default): read ∪ write with a dedup —
-    // read-write buffers (px[i] read AND written) appear in BOTH lists and
-    // previously produced a duplicated descriptor row (+ its string global).
-    arrays.sort();
-    arrays.dedup();
-    let read_set: std::collections::HashSet<&String> = arrays.iter().copied().collect();
-    for w in &shape.write_buffers {
-        if !read_set.contains(w) {
-            arrays.push(w);
-        }
-    }
-    arrays.sort();
-    let mut scalars: Vec<&String> = shape.scalar_ins.iter().collect();
-    scalars.sort();
-    scalars.dedup();
-    // A buffer in BOTH lists (read-write, e.g. px[i] = px[i] + ...) is a
-    // projection ARRAY once — drop the scalar duplicate.
-    let array_set: std::collections::HashSet<&String> = arrays.iter().copied().collect();
-    scalars.retain(|s| !array_set.contains(*s));
+    // 2026-08-31: the SSBO members are EXACTLY collect_state_fields(items)
+    // name-sorted — field_index_map additionally carries internal fields
+    // (trg epfd, cycle_count) that must NOT appear in the projection, or the
+    // member count/offsets diverge from the kernel's SSBO layout.
+    let names: Vec<String> =
+        crate::backend::spirv::lower::collect_state_fields(items)
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
     let write_set: std::collections::HashSet<&str> =
         shape.write_buffers.iter().map(|s| s.as_str()).collect();
 
     let field_types = &backend.ctx.field_types;
     let mut fields = Vec::new();
-    let mut names = Vec::new();
-    for name in arrays.iter().chain(scalars.iter()) {
-        // 2026-08-31 (plan abv-gpu-by-default): consts referenced by the
-        // kernel materialize as inline module constants in the kernel IR —
-        // they are NOT projection fields, so they take no descriptor slot
-        // (mirrors emit_kernel_module's const branch).
-        let Some(&fidx) = backend.ctx.field_index_map.get(*name) else {
-            continue;
+    for name in &names {
+        let Some(&fidx) = backend.ctx.field_index_map.get(name) else {
+            return KernelFieldTable { fields: Vec::new(), names: Vec::new() };
         };
         fields.push(field_entry_ir(
             host_field_offset(field_types, fidx),
@@ -313,7 +315,6 @@ fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTab
             txn,
             &write_set,
         ));
-        names.push((*name).clone());
     }
     KernelFieldTable { fields, names }
 }
@@ -324,9 +325,10 @@ fn emit_one_kernel_desc(
     backend: &super::LlvmBackend,
     out: &mut String,
     k: &AccelKernelBlob,
+    items: &[crate::ast::TopLevel],
 ) -> String {
     let txn = &k.txn_name;
-    let table = kernel_field_table(backend, txn);
+    let table = kernel_field_table(backend, txn, items);
     for name in &table.names {
         let bytes = format!("{}\0", name);
         out.push_str(&format!(
@@ -357,7 +359,12 @@ fn emit_one_kernel_desc(
         txn
     ));
     format!(
-        "%briev.kernel {{ ptr @str.briev.{}, i32 ptrtoint (ptr @briev_kernel_{} to i32), i32 {}, i32 {}, ptr @briev_kernel_{}_fields }}",
+        // 2026-08-31 (plan abv-gpu-by-default): the blob reference is a full
+        // PTR, matching BrievKernelDesc's `const uint8_t* spirv`. The old
+        // `i32 ptrtoint` both broke PIE linking (R_X86_64_32 against the
+        // blob once it was actually retained) and misaligned the struct
+        // against the C descriptor (ptr,ptr,i32,i32,ptr).
+        "%briev.kernel {{ ptr @str.briev.{}, ptr @briev_kernel_{}, i32 {}, i32 {}, ptr @briev_kernel_{}_fields }}",
         txn,
         txn,
         k.bytes.len(),
@@ -375,6 +382,7 @@ fn emit_one_kernel_desc(
 pub(crate) fn emit_accel_descriptors(
     backend: &super::LlvmBackend,
     kernels: &[AccelKernelBlob],
+    items: &[crate::ast::TopLevel],
 ) -> (String, HashMap<String, u32>) {
     let mut out = String::new();
     let mut idx_of: HashMap<String, u32> = HashMap::new();
@@ -383,13 +391,15 @@ pub(crate) fn emit_accel_descriptors(
     }
     out.push_str("\n; === Accel kernel descriptors ===\n");
     out.push_str("%briev.field = type { ptr, i32, i64, i64, i64, i32 }\n");
-    out.push_str("%briev.kernel = type { ptr, i32, i32, i32, ptr }\n");
+    // 2026-08-31: { name, spirv ptr, size, n_fields, fields } — mirrors the C
+    // BrievKernelDesc exactly (the old i32 blob slot misaligned the struct).
+    out.push_str("%briev.kernel = type { ptr, ptr, i32, i32, ptr }\n");
     out.push_str("@briev_accel_ready = private global i32 0\n");
 
     let mut desc_entries: Vec<String> = Vec::new();
     for (i, k) in kernels.iter().enumerate() {
         idx_of.insert(k.txn_name.clone(), i as u32);
-        desc_entries.push(emit_one_kernel_desc(backend, &mut out, k));
+        desc_entries.push(emit_one_kernel_desc(backend, &mut out, k, items));
     }
     out.push_str(&format!(
         "@briev_accel_descs = private constant [{} x %briev.kernel] [{}]\n",

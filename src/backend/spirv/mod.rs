@@ -23,8 +23,11 @@ pub mod kernel;
 pub mod lower;
 pub mod normalizer;
 
+// 2026-08-31 (plan abv-gpu-by-default): the accel OFFLOAD path (LLVM host)
+// emits its kernels through this backend — re-export for cross-module use.
+pub use builder::SpirvBuilder;
+
 use crate::ast::TopLevel;
-use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::kernel::emit_kernel;
 
 /// 2026-08-23 (Plan 0.2) / 2026-08-31 (plan abv-gpu-by-default): SPIR-V's

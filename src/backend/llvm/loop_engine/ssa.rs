@@ -400,6 +400,24 @@ impl LlvmBackend {
                     writeln!(out, "{}:", next_label).ok();
                     continue;
                 }
+                // 2026-08-31 (plan abv-gpu-by-default): an ACCEL kernel node
+                // dispatches through its wrapper (@txn_<name> — lazy runtime
+                // init + device/verdict gate + one launch of N work-items +
+                // counter fast-forward), never an inlined per-firing body.
+                // Inlining made every kernel CPU-only with the GPU lane dead
+                // in the module. The pre-condition branch above still gates
+                // the call; after the launch the fast-forwarded counter makes
+                // this pre false, so the loop advances exactly like the
+                // internal fold below.
+                if self.accel_kernel_idx.contains_key(name) {
+                    writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+                    if !self.fun.terminated {
+                        self.emit_beginprogram_goal_check(out, txn);
+                        writeln!(out, "  br label %{}", next_label).ok();
+                    }
+                    writeln!(out, "{}:", next_label).ok();
+                    continue;
+                }
                 for stmt in &txn.body {
                     if self.fun.terminated { break; }
                     self.emit_statement(out, stmt, "  ");

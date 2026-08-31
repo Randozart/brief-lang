@@ -1837,14 +1837,25 @@ fn test_accel_descriptors_emit() {
     ));
     let entry = accel_test_entry("a", true);
     backend.accel_entries.insert("force".to_string(), entry);
+    // 2026-08-31: the descriptor's field list = the kernel SSBO's members =
+    // collect_state_fields(items) — the fixture declares its state item.
+    let state_item = crate::ast::TopLevel::StateDecl(crate::ast::top::StateDecl {
+        name: "a".into(),
+        ty: Type::Vector(
+            Box::new(Type::Custom("Float".to_string())),
+            vec![crate::ast::Dimension::Anonymous(16)],
+        ),
+        span: None,
+    });
     let blob = crate::backend::llvm::kernel::AccelKernelBlob {
         txn_name: "force".to_string(),
         bytes: vec![0x03, 0x02, 0x23, 0x07],
     };
-    let (ir, idx_of) = crate::backend::llvm::kernel::emit_accel_descriptors(&backend, &[blob]);
+    let (ir, idx_of) =
+        crate::backend::llvm::kernel::emit_accel_descriptors(&backend, &[blob], &[state_item]);
     assert_eq!(idx_of["force"], 0, "txn → descriptor index");
     assert!(ir.contains("%briev.field = type { ptr, i32, i64, i64, i64, i32 }"), "field type");
-    assert!(ir.contains("%briev.kernel = type { ptr, i32, i32, i32, ptr }"), "kernel type");
+    assert!(ir.contains("%briev.kernel = type { ptr, ptr, i32, i32, ptr }"), "kernel type");
     assert!(ir.contains("@briev_accel_descs"), "descs table");
     assert!(ir.contains("declare i32 @briev_accel_init(ptr, i32)"), "init decl");
     assert!(ir.contains("declare i32 @briev_accel_launch(i32, ptr, i64)"), "launch decl");

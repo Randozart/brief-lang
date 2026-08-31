@@ -127,9 +127,14 @@ impl SpirvBuilder {
             }
             Type::Vector(inner, dims) => {
                 // Fixed-size array (indexed state). Innermost-out so each
-                // ArrayStride covers its tail; stride = element bytes (8).
+                // ArrayStride covers its tail. 2026-08-31 (plan
+                // abv-gpu-by-default): the stride is the ELEMENT's real
+                // storage width from the casting graph — Float32 arrays were
+                // strided as i64, so every element after the first read the
+                // wrong slot.
                 let inner_id = self.lower_type(inner)?;
                 let mut cur = inner_id;
+                let elem_bytes = self.scalar_storage_bytes(inner)?;
                 let mut dim_sizes: Vec<usize> = dims
                     .iter()
                     .map(|d| match d {
@@ -138,7 +143,6 @@ impl SpirvBuilder {
                     })
                     .collect();
                 dim_sizes.reverse();
-                let elem_bytes = 8u32;
                 let mut stride = elem_bytes;
                 for n in dim_sizes {
                     let len = self.u32_const(n as u32);
@@ -274,6 +278,19 @@ impl SpirvBuilder {
             },
             _ => self.float_shape_err(ty),
         }
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): storage byte size of a scalar
+    /// surface type — array strides and SSBO member offsets must match the
+    /// element's REAL width (Float32 → 4), not a fixed 8, or every kernel
+    /// after the first element reads the wrong slot. Widths come from the
+    /// casting-graph shape (rule 19).
+    pub fn scalar_storage_bytes(&mut self, ty: &Type) -> Result<u32, String> {
+        Ok(match self.shape_of(ty)? {
+            SpirvShape::Int { bits, .. } => (bits / 8).max(1),
+            SpirvShape::Float { bits } => (bits / 8).max(1),
+            SpirvShape::Bool => 4,
+        })
     }
 
     /// 2026-08-31 (plan abv-gpu-by-default): the NUMERIC SHAPE of a type for

@@ -234,6 +234,15 @@ impl<'a> FnLowerer<'a> {
                 if let Some((id, ty)) = self.consts.get(name) {
                     return Ok((*id, ty.clone()));
                 }
+                // 2026-08-31 (plan abv-gpu-by-default): state SCALARS resolve
+                // through the SSBO (e.g. the `[i < nb]` bound read inside the
+                // kernel's bounds guard) — AccessChain + Load.
+                if self.state_fields.iter().any(|f| &f.name == name) {
+                    let (ptr, fty) = self.state_field_scalar_ptr(name)?;
+                    let tid = self.type_id(&fty)?;
+                    let loaded = self.builder.load(tid, ptr);
+                    return Ok((loaded, fty));
+                }
                 self.err(format!("unknown identifier '{}' in kernel", name))
             }
             // 2026-08-23 (§2.1 read path): state-field element LOADS —
@@ -257,6 +266,9 @@ impl<'a> FnLowerer<'a> {
             // protocol shapes (rule 19); same-shape casts are a passthrough.
             Expr::Cast(e, target) => {
                 let (val, src_ty) = self.emit_expr(e)?;
+                if std::env::var("BRIEV_SPIRV_DEBUG").is_ok() {
+                    eprintln!("[spirv-debug] cast src_ty={src_ty:?} target={target:?}");
+                }
                 let src_shape = self.builder.shape_of(&src_ty)?;
                 let dst_shape = self.builder.shape_of(target)?;
                 let op = Self::cast_opcode(&src_shape, &dst_shape)?;;
@@ -391,15 +403,25 @@ impl<'a> FnLowerer<'a> {
                     Some(raw),
                     vec![Operand::IdRef(comp)],
                 ));
-                // Widen u32 → i64 (values are small; zero-extension matches
-                // GLSL uint→int64 semantics for invocation ids).
+                // Widen u32 → i64. 2026-08-31 (plan abv-gpu-by-default):
+                // Vulkan's Shader environment only allows OpUConvert to an
+                // UNSIGNED result — zero-extend to u64 then OpBitcast to the
+                // signed i64 the kernel surface uses.
                 let int_res_ty = self.builder.lower_type(&Type::int())?;
-                let wide = self.builder.gen_id();
+                let u64_ty = self.builder.builder.type_int(64, 0);
+                let wide_u = self.builder.gen_id();
                 self.builder.emit(Instruction::new(
                     spirv::Op::UConvert,
+                    Some(u64_ty),
+                    Some(wide_u),
+                    vec![Operand::IdRef(raw)],
+                ));
+                let wide = self.builder.gen_id();
+                self.builder.emit(Instruction::new(
+                    spirv::Op::Bitcast,
                     Some(int_res_ty),
                     Some(wide),
-                    vec![Operand::IdRef(raw)],
+                    vec![Operand::IdRef(wide_u)],
                 ));
                 Ok((wide, Type::int()))
             }
@@ -668,7 +690,25 @@ fn cast_opcode(
                 spirv::Decoration::Offset,
                 [rspirv::dr::Operand::LiteralBit32(offset)],
             );
-            offset += spirv_type_bytes(&f.ty);
+            // 2026-08-31: member sizes use the element's REAL storage width —
+            // arrays are count × elem (matching the ArrayStride layout and the
+            // runtime's pack sizes), scalars are their own width. The old
+            // fixed-8 sizing mis-slotted every Float32 element.
+            let member_bytes = match &f.ty {
+                Type::Vector(inner, dims) => {
+                    let elems: u32 = dims
+                        .iter()
+                        .map(|d| match d {
+                            crate::ast::Dimension::Anonymous(n) => *n as u32,
+                            crate::ast::Dimension::Named(_, n) => *n as u32,
+                        })
+                        .product::<u32>()
+                        .max(1);
+                    self.builder.scalar_storage_bytes(inner)? * elems
+                }
+                other => self.builder.scalar_storage_bytes(other)?,
+            };
+            offset += member_bytes;
         }
         let struct_ptr = self.builder.ptr_class(StorageClass::StorageBuffer, struct_ty);
         let var = self.builder.gen_id();
@@ -797,11 +837,11 @@ fn cast_opcode(
     /// Byte-count argument check: LLVM Load#/Store# accept a byte width;
     /// over a TYPED buffer the width comes from the declaration. A matching
     /// count passes (source compatibility); anything else names the fix.
-    fn check_width_arg(&self, arg: Option<&Expr>, elem_ty: &Type, who: &str) -> Result<(), String> {
+    fn check_width_arg(&mut self, arg: Option<&Expr>, elem_ty: &Type, who: &str) -> Result<(), String> {
         let Some(Expr::Decimal(n)) = arg else {
             return Ok(()); // omitted — natural width
         };
-        let want = spirv_type_bytes(elem_ty) as i64;
+        let want = self.builder.scalar_storage_bytes(elem_ty)? as i64;
         if *n != want {
             return self.err(format!(
                 "{} byte-width {} does not match the addressed element \
@@ -893,14 +933,40 @@ mod __collect {
     /// `Load#(scalar)` / `Store#(scalar, v)` have real storage). Sorted +
     /// deduped by setup_state_buffer.
     pub fn collect_state_fields(items: &[crate::ast::TopLevel]) -> Vec<StateField> {
+        // 2026-08-31 (plan abv-gpu-by-default): module consts for resolving
+        // NAMED array dimensions (`Float[MAXB]` — the AST stores the name
+        // with a 0 count; a 0-length OpTypeArray is invalid SPIR-V).
+        let consts: HashMap<String, usize> = items
+            .iter()
+            .filter_map(|i| match i {
+                crate::ast::TopLevel::Constant(c) => match &c.expr {
+                    Expr::Decimal(n) if *n >= 0 => Some((c.name.clone(), *n as usize)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        let resolve_dims = |dims: &[crate::ast::Dimension]| -> Vec<crate::ast::Dimension> {
+            dims.iter()
+                .map(|d| match d {
+                    crate::ast::Dimension::Named(name, n) if *n == 0 => {
+                        crate::ast::Dimension::Named(name.clone(), *consts.get(name).unwrap_or(&0))
+                    }
+                    other => other.clone(),
+                })
+                .collect()
+        };
         let mut fields: Vec<StateField> = Vec::new();
         for item in items {
             match item {
                 crate::ast::TopLevel::StateDecl(d) => {
-                    fields.push(StateField {
-                        name: d.name.clone(),
-                        ty: d.ty.clone(),
-                    });
+                    let ty = match &d.ty {
+                        Type::Vector(inner, dims) => {
+                            Type::Vector(inner.clone(), resolve_dims(dims))
+                        }
+                        other => other.clone(),
+                    };
+                    fields.push(StateField { name: d.name.clone(), ty });
                 }
                 // 2026-08-31 (plan abv-gpu-by-default): the real parser emits
                 // top-level `let` as Statement(Let) — the same dual form the
@@ -912,7 +978,13 @@ mod __collect {
                 // naming the field).
                 crate::ast::TopLevel::Statement(stmt) => {
                     if let crate::ast::Statement::Let { name, ty: Some(ty), .. } = stmt.as_ref() {
-                        fields.push(StateField { name: name.clone(), ty: ty.clone() });
+                        let ty = match ty {
+                            Type::Vector(inner, dims) => {
+                                Type::Vector(inner.clone(), resolve_dims(dims))
+                            }
+                            other => other.clone(),
+                        };
+                        fields.push(StateField { name: name.clone(), ty });
                     }
                 }
                 _ => {}
@@ -938,22 +1010,5 @@ pub fn collect_locals(body: &[Statement], out: &mut Vec<(String, Type)>) {
             }
             _ => {}
         }
-    }
-}
-
-/// 2026-08-23: byte size of the supported kernel-surface types (i64 scalars
-/// and arrays thereof).
-pub fn spirv_type_bytes(ty: &Type) -> u32 {
-    match ty {
-        Type::Vector(_, dims) => dims
-            .iter()
-            .map(|d| match d {
-                crate::ast::Dimension::Anonymous(n) => *n as u32,
-                crate::ast::Dimension::Named(_, n) => *n as u32,
-            })
-            .product::<u32>()
-            .max(1)
-            * 8,
-        _ => 8,
     }
 }

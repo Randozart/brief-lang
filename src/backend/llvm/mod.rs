@@ -4609,13 +4609,13 @@ impl LlvmBackend {
         // that order — a failed kernel keeps its slot with an EMPTY blob so
         // wrapper launch indices stay valid (the runtime rejects empty blobs
         // and falls back to CPU for that kernel).
-        let kernel_blobs = self.collect_accel_kernels(&analysis.accel);
+        let kernel_blobs = self.collect_accel_kernels(&analysis.accel, items);
         self.has_accel_kernels = !kernel_blobs.is_empty();
         for blob in &kernel_blobs {
             out.push_str(&kernel::embed_spirv_blob(&blob.bytes, &blob.txn_name));
         }
         // Descriptor tables + ABI declares the host dispatch wrappers use.
-        let (desc_ir, idx_of) = kernel::emit_accel_descriptors(self, &kernel_blobs);
+        let (desc_ir, idx_of) = kernel::emit_accel_descriptors(self, &kernel_blobs, items);
         self.accel_kernel_idx = idx_of;
         out.push_str(&desc_ir);
 

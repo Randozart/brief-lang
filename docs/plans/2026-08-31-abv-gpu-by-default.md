@@ -1,11 +1,51 @@
 # .abv GPU-by-default + first end-to-end GPU execution
 
 **Date:** 2026-08-31
-**Status:** B1–B3 + SPIR-V surface LANDED (see "Landed" below). Remaining:
-the .bv accel-offload loop-strategy bypass (item 4) — the reactor's
-multi-node fold still inlines kernel bodies into `main`, so .bv programs
-with `!> accel:` run CPU-only (vectorized, C-competitive) instead of
-dispatching through the (now fully wired) GPU lane.
+**Status:** B1–B3 + SPIR-V surface + dispatch wiring LANDED. Remaining work
+below. 
+
+## Design model (locked, 2026-08-31 — user)
+
+- **`.abv` IS the GPU language.** Native GPU code: every eligible counted
+  loop is a kernel, GPU is the default and only target. Compiles to a
+  spirv-val-valid `.spv` binary. No host, no CPU fallback in the artifact.
+- **`.bv` IS the CPU language** — with *annotated* GPU offload
+  (`!> accel:` policy + optional per-node `accel` keyword) so GPU code can
+  live inside a regular reactive script. Offload is probe-verified: the
+  GPU lane runs only when it beats the vectorized CPU fold on the actual
+  device/workload. `.bv` never silently requires a GPU.
+
+Everything below serves that split: `.abv` gets a first-class runtime
+(its kernels must run standalone); `.bv` gets an offload lane that is
+correct by proof and profitable by measurement.
+
+## Remaining work (in order)
+
+1. **Fold-strategy defer (item 4, the last .bv blocker).** The multi-node
+   fold inlines kernel bodies into `main` — wrappers exist but are dead
+   code LTO removes. Every fold branch that would absorb an accel-kernel
+   node (multi-txn pure fold, single-node counter fold, SSA pipeline,
+   switch-dispatch) must exclude that node and route it through
+   `@txn_<name>` (the wrapper), keeping non-kernel siblings folded.
+   Verification: the .ll contains live `call void @txn_<name>` from the
+   hot loop; nbody output still matches C; probe verdict observable.
+2. **First measured GPU-vs-CPU verdict.** After (1): nbody_newton_accel
+   BODYCOUNT sweep (1024→4096), probe commits, results recorded in
+   `benchmarks/results/`. If the probe commits CPU everywhere, measure
+   WHY (launch overhead vs kernel time) before touching the driver.
+3. **Vulkan driver hardening (by measurement).** Persistent buffers +
+   descriptor sets allocated once; `ceil(n/64)`×64 dispatch (LocalSize is
+   already 64×1×1); proper memory-type search; push constants or UBO for
+   scalars. Each change A/B'd on the probe.
+4. **`.abv` standalone runtime.** A host runner (`brievc run x.abv` or a
+   generated `x_runner.c`) that: loads the `.spv`, maps the SSBO, runs
+   the phase machine (the .abv node graph IS a reactive program), prints
+   observables. Reuses briev_accel_rt; the .abv compile must then emit
+   the schedule/descriptor tables alongside the kernel.
+5. **Performance primitives** (only after 1–4 establish honest numbers):
+   shared-memory scratchpads, workgroup reductions, persistent buffers
+   across launches for iterative kernels (nbody steps re-upload the whole
+   state every dispatch today).
 **Scope:** `.abv` route defaults, kernel-emission blockers, first real GPU
 execution on this machine (2x NVIDIA, Vulkan 1.4, spirv-val/dis, llc 22.1.8
 with spirv64 target — all present locally).
