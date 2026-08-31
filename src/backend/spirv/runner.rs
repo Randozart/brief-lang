@@ -501,3 +501,60 @@ pub fn build_kernels(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod runner_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn scalar_field(name: &str, offset: u64) -> RunnerField {
+        RunnerField {
+            name: name.to_string(),
+            offset,
+            elem_bytes: 8,
+            count: 1,
+            is_array: false,
+            type_is_float: false,
+        }
+    }
+
+    fn lt(lhs: &str, rhs: &str) -> Expr {
+        Expr::BinaryOp(
+            BinaryOpKind::Lt,
+            Box::new(Expr::Identifier(lhs.to_string())),
+            Box::new(Expr::Identifier(rhs.to_string())),
+        )
+    }
+
+    // TEMP: 2026-08-31: regression guard for the multi-const runner
+    // fast-forward repro (handoff §5.5: "N2 resolved as NB"). Verified
+    // non-reproducing end-to-end; these tests pin the correct behavior.
+    // Remove when the runner's const handling gains a real proof pass.
+    #[test]
+    fn multi_const_bounds_resolve_each_const_distinctly() {
+        let fields = vec![scalar_field("i", 0), scalar_field("j", 8)];
+        let mut consts: HashMap<String, Expr> = HashMap::new();
+        consts.insert("NB".to_string(), Expr::Decimal(4096));
+        consts.insert("N2".to_string(), Expr::Decimal(16777216));
+
+        let mut out = String::new();
+        emit_scalar_read(&lt("i", "N2"), &fields, &consts, &mut out).unwrap();
+        assert!(out.contains("16777216"), "N2 misresolved: {out}");
+        assert!(!out.contains("4096"), "N2 resolved as NB: {out}");
+
+        let mut out = String::new();
+        emit_scalar_read(&lt("j", "NB"), &fields, &consts, &mut out).unwrap();
+        assert!(out.contains("4096"), "NB misresolved: {out}");
+        assert!(!out.contains("16777216"), "NB resolved as N2: {out}");
+    }
+
+    #[test]
+    fn unknown_const_is_a_named_error_not_a_wrong_value() {
+        let fields = vec![scalar_field("i", 0)];
+        let consts: HashMap<String, Expr> = HashMap::new();
+        let mut out = String::new();
+        let err = emit_scalar_read(&lt("i", "N2"), &fields, &consts, &mut out)
+            .expect_err("unknown const must error");
+        assert!(err.contains("N2"), "error must name the const: {err}");
+    }
+}
